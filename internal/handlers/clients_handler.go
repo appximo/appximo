@@ -8,13 +8,13 @@ import (
 	"net/http"
 )
 
-func ListClients(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) ListClients(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("[]"))
 }
 
-func CreateClients(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) CreateClients(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -25,11 +25,11 @@ func CreateClients(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(body)
 }
 
-func GetClientsByID(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) GetClientsByID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"id": "placeholder"})
 }
 
-func DeleteClients(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) DeleteClients(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -2,27 +2,37 @@
 
 package handlers
 
-import "github.com/go-chi/chi/v5"
+import (
+	"github.com/go-chi/chi/v5"
+	"github.com/miguelangel/appitools/pkg/db"
+)
 
-func RegisterRoutes(r chi.Router) {
-	r.Get("/api/clients", ListClients)
-	r.Post("/api/clients", CreateClients)
-	r.Get("/api/clients/{id}", GetClientsByID)
-	r.Delete("/api/clients/{id}", DeleteClients)
-	r.Get("/api/dispatches", ListDispatches)
-	r.Post("/api/dispatches", CreateDispatches)
-	r.Get("/api/dispatches/{id}", GetDispatchesByID)
-	r.Delete("/api/dispatches/{id}", DeleteDispatches)
-	r.Get("/api/guides", ListGuides)
-	r.Post("/api/guides", CreateGuides)
-	r.Get("/api/guides/{id}", GetGuidesByID)
-	r.Delete("/api/guides/{id}", DeleteGuides)
-	r.Get("/api/incidents", ListIncidents)
-	r.Post("/api/incidents", CreateIncidents)
-	r.Get("/api/incidents/{id}", GetIncidentsByID)
-	r.Delete("/api/incidents/{id}", DeleteIncidents)
-	r.Get("/api/users", ListUsers)
-	r.Post("/api/users", CreateUsers)
-	r.Get("/api/users/{id}", GetUsersByID)
-	r.Delete("/api/users/{id}", DeleteUsers)
+type Handlers struct {
+	tdb *db.TenantDB
+}
+
+func NewRouter(tdb *db.TenantDB) *chi.Mux {
+	r := chi.NewMux()
+	h := &Handlers{tdb: tdb}
+	r.Get("/api/clients", h.ListClients)
+	r.Post("/api/clients", h.CreateClients)
+	r.Get("/api/clients/{id}", h.GetClientsByID)
+	r.Delete("/api/clients/{id}", h.DeleteClients)
+	r.Get("/api/dispatches", h.ListDispatches)
+	r.Post("/api/dispatches", h.CreateDispatches)
+	r.Get("/api/dispatches/{id}", h.GetDispatchesByID)
+	r.Delete("/api/dispatches/{id}", h.DeleteDispatches)
+	r.Get("/api/guides", h.ListGuides)
+	r.Post("/api/guides", h.CreateGuides)
+	r.Get("/api/guides/{id}", h.GetGuidesByID)
+	r.Delete("/api/guides/{id}", h.DeleteGuides)
+	r.Get("/api/incidents", h.ListIncidents)
+	r.Post("/api/incidents", h.CreateIncidents)
+	r.Get("/api/incidents/{id}", h.GetIncidentsByID)
+	r.Delete("/api/incidents/{id}", h.DeleteIncidents)
+	r.Get("/api/users", h.ListUsers)
+	r.Post("/api/users", h.CreateUsers)
+	r.Get("/api/users/{id}", h.GetUsersByID)
+	r.Delete("/api/users/{id}", h.DeleteUsers)
+	return r
 }

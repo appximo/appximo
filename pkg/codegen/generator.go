@@ -31,7 +31,8 @@ type handlerData struct {
 }
 
 type routerData struct {
-	Resources []ResourceData
+	Resources  []ResourceData
+	ModulePath string
 }
 
 // Generate writes handler files and router.go into outputDir/internal/handlers/.
@@ -40,6 +41,11 @@ func Generate(s *schema.APISchema, outputDir string) ([]string, error) {
 	handlersDir := filepath.Join(outputDir, "internal", "handlers")
 	if err := os.MkdirAll(handlersDir, 0755); err != nil {
 		return nil, fmt.Errorf("create handlers dir: %w", err)
+	}
+
+	modulePath, err := readModulePath(outputDir)
+	if err != nil {
+		return nil, err
 	}
 
 	hTmpl, err := template.New("handler").Parse(handlerTmplSrc)
@@ -79,7 +85,7 @@ func Generate(s *schema.APISchema, outputDir string) ([]string, error) {
 	}
 
 	routerPath := filepath.Join(handlersDir, "router.go")
-	src, err := renderTemplate(rTmpl, routerData{Resources: resources})
+	src, err := renderTemplate(rTmpl, routerData{Resources: resources, ModulePath: modulePath})
 	if err != nil {
 		return nil, fmt.Errorf("render router: %w", err)
 	}
@@ -89,6 +95,19 @@ func Generate(s *schema.APISchema, outputDir string) ([]string, error) {
 	generated = append(generated, filepath.Join("internal", "handlers", "router.go"))
 
 	return generated, nil
+}
+
+func readModulePath(dir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return "", fmt.Errorf("read go.mod: %w", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "module ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "module ")), nil
+		}
+	}
+	return "", fmt.Errorf("module declaration not found in go.mod")
 }
 
 func renderTemplate(tmpl *template.Template, data any) ([]byte, error) {

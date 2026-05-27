@@ -8,13 +8,13 @@ import (
 	"net/http"
 )
 
-func ListGuides(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) ListGuides(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("[]"))
 }
 
-func CreateGuides(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) CreateGuides(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -25,11 +25,11 @@ func CreateGuides(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(body)
 }
 
-func GetGuidesByID(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) GetGuidesByID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"id": "placeholder"})
 }
 
-func DeleteGuides(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) DeleteGuides(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }

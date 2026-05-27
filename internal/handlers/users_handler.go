@@ -8,13 +8,13 @@ import (
 	"net/http"
 )
 
-func ListUsers(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) ListUsers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("[]"))
 }
 
-func CreateUsers(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) CreateUsers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -25,11 +25,11 @@ func CreateUsers(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(body)
 }
 
-func GetUsersByID(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) GetUsersByID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"id": "placeholder"})
 }
 
-func DeleteUsers(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) DeleteUsers(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }

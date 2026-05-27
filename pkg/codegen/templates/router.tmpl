@@ -2,11 +2,21 @@
 
 package handlers
 
-import "github.com/go-chi/chi/v5"
+import (
+"github.com/go-chi/chi/v5"
+"{{.ModulePath}}/pkg/db"
+)
 
-func RegisterRoutes(r chi.Router) {
-{{range .Resources}}r.Get("/api/{{.Name}}", List{{.Title}})
-r.Post("/api/{{.Name}}", Create{{.Title}})
-r.Get("/api/{{.Name}}/{id}", Get{{.Title}}ByID)
-r.Delete("/api/{{.Name}}/{id}", Delete{{.Title}})
-{{end}}}
+type Handlers struct {
+tdb *db.TenantDB
+}
+
+func NewRouter(tdb *db.TenantDB) *chi.Mux {
+r := chi.NewMux()
+h := &Handlers{tdb: tdb}
+{{range .Resources}}r.Get("/api/{{.Name}}", h.List{{.Title}})
+r.Post("/api/{{.Name}}", h.Create{{.Title}})
+r.Get("/api/{{.Name}}/{id}", h.Get{{.Title}}ByID)
+r.Delete("/api/{{.Name}}/{id}", h.Delete{{.Title}})
+{{end}}return r
+}

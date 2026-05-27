@@ -8,13 +8,13 @@ import (
 "net/http"
 )
 
-func List{{.ResourceTitle}}(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) List{{.ResourceTitle}}(w http.ResponseWriter, r *http.Request) {
 w.Header().Set("Content-Type", "application/json")
 w.WriteHeader(http.StatusOK)
 w.Write([]byte("[]"))
 }
 
-func Create{{.ResourceTitle}}(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) Create{{.ResourceTitle}}(w http.ResponseWriter, r *http.Request) {
 w.Header().Set("Content-Type", "application/json")
 var body map[string]any
 if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -25,11 +25,11 @@ w.WriteHeader(http.StatusCreated)
 json.NewEncoder(w).Encode(body)
 }
 
-func Get{{.ResourceTitle}}ByID(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) Get{{.ResourceTitle}}ByID(w http.ResponseWriter, r *http.Request) {
 w.Header().Set("Content-Type", "application/json")
 json.NewEncoder(w).Encode(map[string]string{"id": "placeholder"})
 }
 
-func Delete{{.ResourceTitle}}(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) Delete{{.ResourceTitle}}(w http.ResponseWriter, r *http.Request) {
 w.WriteHeader(http.StatusNoContent)
 }

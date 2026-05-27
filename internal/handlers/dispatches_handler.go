@@ -8,13 +8,13 @@ import (
 	"net/http"
 )
 
-func ListDispatches(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) ListDispatches(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("[]"))
 }
 
-func CreateDispatches(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) CreateDispatches(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -25,11 +25,11 @@ func CreateDispatches(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(body)
 }
 
-func GetDispatchesByID(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) GetDispatchesByID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"id": "placeholder"})
 }
 
-func DeleteDispatches(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) DeleteDispatches(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
