@@ -4,6 +4,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -41,12 +42,31 @@ func (h *Handlers) CreateDispatches(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "empty body", http.StatusBadRequest)
 		return
 	}
+	hookRes, hookErr := h.hr.RunBeforeHook(r.Context(), h.hookConfig("dispatches", "before_create"), body, nil)
+	if hookErr != nil {
+		http.Error(w, hookErr.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !hookRes.Proceed {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(map[string]string{"error": hookRes.Error})
+		return
+	}
+	body = hookRes.Data
 	cols, placeholders, args := pkghandlers.BuildInsertArgs(body)
 	query := fmt.Sprintf("INSERT INTO dispatches (%s) VALUES (%s) RETURNING *", cols, placeholders)
 	result, err := h.tdb.ExecRowsTenant(r.Context(), tc.PGSchema, query, args...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if afterHook := h.hookConfig("dispatches", "after_create"); afterHook != nil {
+		var record map[string]any
+		if len(result) > 0 {
+			record = result[0]
+		}
+		go h.hr.RunAfterHook(context.Background(), afterHook, record, tc.ID)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

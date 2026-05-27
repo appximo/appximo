@@ -11,6 +11,8 @@ import (
 
 	"github.com/miguelangel/appitools/internal/handlers"
 	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/miguelangel/appitools/pkg/extensions"
+	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -81,7 +83,13 @@ func TestHandlers_GuideCRUD(t *testing.T) {
 	}
 
 	tdb := db.NewTenantDB(pool)
-	router := handlers.NewRouter(tdb)
+	hr := extensions.NewHookRunner(extensions.NewJSSandbox())
+	testSchema := &schema.APISchema{
+		Resources: map[string]schema.ResourceSchema{
+			"guides": {Fields: map[string]schema.FieldDef{}},
+		},
+	}
+	router := handlers.NewRouter(tdb, hr, testSchema)
 	srv := httptest.NewServer(tenantHost(router, "test.localhost"))
 	defer srv.Close()
 

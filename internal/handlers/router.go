@@ -5,15 +5,19 @@ package handlers
 import (
 	"github.com/go-chi/chi/v5"
 	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/miguelangel/appitools/pkg/extensions"
+	schemapkg "github.com/miguelangel/appitools/pkg/schema"
 )
 
 type Handlers struct {
-	tdb *db.TenantDB
+	tdb       *db.TenantDB
+	hr        *extensions.HookRunner
+	apiSchema *schemapkg.APISchema
 }
 
-func NewRouter(tdb *db.TenantDB) *chi.Mux {
+func NewRouter(tdb *db.TenantDB, hr *extensions.HookRunner, s *schemapkg.APISchema) *chi.Mux {
 	r := chi.NewMux()
-	h := &Handlers{tdb: tdb}
+	h := &Handlers{tdb: tdb, hr: hr, apiSchema: s}
 	r.Get("/api/clients", h.ListClients)
 	r.Post("/api/clients", h.CreateClients)
 	r.Get("/api/clients/{id}", h.GetClientsByID)
@@ -35,4 +39,19 @@ func NewRouter(tdb *db.TenantDB) *chi.Mux {
 	r.Get("/api/users/{id}", h.GetUsersByID)
 	r.Delete("/api/users/{id}", h.DeleteUsers)
 	return r
+}
+
+// hookConfig looks up a lifecycle hook (e.g. "before_create") for a resource.
+// Returns nil when no hook is configured, so callers can pass it directly to HookRunner.
+func (h *Handlers) hookConfig(resource, lifecycle string) *schemapkg.HookConfig {
+	res, ok := h.apiSchema.Resources[resource]
+	if !ok {
+		return nil
+	}
+	hc, ok := res.Hooks[lifecycle]
+	if !ok {
+		return nil
+	}
+	c := hc
+	return &c
 }

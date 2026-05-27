@@ -10,6 +10,8 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/miguelangel/appitools/pkg/codegen"
 	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/miguelangel/appitools/pkg/extensions"
+	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
 	"github.com/spf13/cobra"
@@ -50,12 +52,20 @@ var serveCmd = &cobra.Command{
 		defer pool.Close()
 
 		tdb := db.NewTenantDB(pool)
+		hr := extensions.NewHookRunner(extensions.NewJSSandbox())
+
+		policyBytes, err := json.Marshal(s.RBAC)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error serializing RBAC policy:", err)
+			os.Exit(1)
+		}
 
 		// Main router with middleware chain.
-		r := codegen.BuildRouter(s, tdb)
+		r := codegen.BuildRouter(s, tdb, hr)
 		r.Use(chimiddleware.RealIP)
 		r.Use(chimiddleware.RequestID)
 		r.Use(tenant.TenantMiddleware)
+		r.Use(rbac.RBACMiddleware(policyBytes))
 		r.Use(chimiddleware.Logger)
 		r.Use(chimiddleware.Recoverer)
 

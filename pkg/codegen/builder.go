@@ -7,12 +7,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/miguelangel/appitools/pkg/extensions"
 	"github.com/miguelangel/appitools/pkg/schema"
 )
 
 // BuildRouter creates an in-memory chi.Mux from a schema without writing any files.
-// Used by `appitools serve`. Handlers are stubs; real DB queries will be wired in later.
-func BuildRouter(s *schema.APISchema, tdb *db.TenantDB) *chi.Mux {
+// Used by `appitools serve`. Route handlers are stubs; use generated code for production.
+func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunner) *chi.Mux {
 	names := make([]string, 0, len(s.Resources))
 	for name := range s.Resources {
 		names = append(names, name)
