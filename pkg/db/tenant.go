@@ -67,26 +67,90 @@ func (tdb *TenantDB) QueryTenant(ctx context.Context, schemaName, query string, 
 }
 
 // ExecTenant executes an INSERT/UPDATE/DELETE within a transaction scoped to schemaName.
-// The transaction is committed on success and rolled back on any error.
-func (tdb *TenantDB) ExecTenant(ctx context.Context, schemaName, query string, args ...any) error {
+// Returns the number of rows affected. The transaction is committed on success.
+func (tdb *TenantDB) ExecTenant(ctx context.Context, schemaName, query string, args ...any) (int64, error) {
 	if err := validateSchemaName(schemaName); err != nil {
-		return err
+		return 0, err
 	}
 
 	tx, err := tdb.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return 0, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
 	setPath := "SET LOCAL search_path TO " + pgx.Identifier{schemaName}.Sanitize() + ", public"
 	if _, err := tx.Exec(ctx, setPath); err != nil {
-		return fmt.Errorf("set search_path: %w", err)
+		return 0, fmt.Errorf("set search_path: %w", err)
 	}
 
-	if _, err := tx.Exec(ctx, query, args...); err != nil {
-		return fmt.Errorf("exec: %w", err)
+	tag, err := tx.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("exec: %w", err)
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit: %w", err)
+	}
+
+	return tag.RowsAffected(), nil
+}
+
+// ExecRowsTenant runs a write query with RETURNING * within a tenant schema,
+// reads all returned rows into memory, and commits the transaction.
+// UUID columns ([16]byte) are converted to hyphenated UUID strings.
+func (tdb *TenantDB) ExecRowsTenant(ctx context.Context, schemaName, query string, args ...any) ([]map[string]any, error) {
+	if err := validateSchemaName(schemaName); err != nil {
+		return nil, err
+	}
+
+	tx, err := tdb.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	setPath := "SET LOCAL search_path TO " + pgx.Identifier{schemaName}.Sanitize() + ", public"
+	if _, err := tx.Exec(ctx, setPath); err != nil {
+		return nil, fmt.Errorf("set search_path: %w", err)
+	}
+
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+
+	descs := rows.FieldDescriptions()
+	result := make([]map[string]any, 0)
+	for rows.Next() {
+		vals, scanErr := rows.Values()
+		if scanErr != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan values: %w", scanErr)
+		}
+		row := make(map[string]any, len(descs))
+		for i, desc := range descs {
+			row[string(desc.Name)] = normalizeDBValue(vals[i])
+		}
+		result = append(result, row)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit: %w", err)
+	}
+
+	return result, nil
+}
+
+// normalizeDBValue converts pgx-specific types to JSON-friendly Go types.
+func normalizeDBValue(v any) any {
+	if uuid, ok := v.([16]byte); ok {
+		return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+			uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:16])
+	}
+	return v
 }

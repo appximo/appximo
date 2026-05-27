@@ -28,6 +28,7 @@ type ResourceData struct {
 type handlerData struct {
 	ResourceName  string
 	ResourceTitle string
+	ModulePath    string
 }
 
 type routerData struct {
@@ -74,6 +75,7 @@ func Generate(s *schema.APISchema, outputDir string) ([]string, error) {
 		src, err := renderTemplate(hTmpl, handlerData{
 			ResourceName:  resName,
 			ResourceTitle: title,
+			ModulePath:    modulePath,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("render handler for %q: %w", resName, err)

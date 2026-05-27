@@ -5,31 +5,93 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
+	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
 func (h *Handlers) ListUsers(w http.ResponseWriter, r *http.Request) {
+	tc := tenant.MustFromCtx(r.Context())
+	rows, err := h.tdb.QueryTenant(r.Context(), tc.PGSchema, "SELECT * FROM users ORDER BY id LIMIT 100")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	result, err := pkghandlers.RowsToMaps(rows)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("[]"))
+	json.NewEncoder(w).Encode(result)
 }
 
 func (h *Handlers) CreateUsers(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+	tc := tenant.MustFromCtx(r.Context())
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if len(body) == 0 {
+		http.Error(w, "empty body", http.StatusBadRequest)
+		return
+	}
+	cols, placeholders, args := pkghandlers.BuildInsertArgs(body)
+	query := fmt.Sprintf("INSERT INTO users (%s) VALUES (%s) RETURNING *", cols, placeholders)
+	result, err := h.tdb.ExecRowsTenant(r.Context(), tc.PGSchema, query, args...)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(body)
+	if len(result) > 0 {
+		json.NewEncoder(w).Encode(result[0])
+	}
 }
 
 func (h *Handlers) GetUsersByID(w http.ResponseWriter, r *http.Request) {
+	tc := tenant.MustFromCtx(r.Context())
+	id := chi.URLParam(r, "id")
+	rows, err := h.tdb.QueryTenant(r.Context(), tc.PGSchema, "SELECT * FROM users WHERE id = $1", id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	result, err := pkghandlers.RowsToMaps(rows)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if len(result) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"id": "placeholder"})
+	json.NewEncoder(w).Encode(result[0])
 }
 
 func (h *Handlers) DeleteUsers(w http.ResponseWriter, r *http.Request) {
+	tc := tenant.MustFromCtx(r.Context())
+	id := chi.URLParam(r, "id")
+	affected, err := h.tdb.ExecTenant(r.Context(), tc.PGSchema, "DELETE FROM users WHERE id = $1", id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if affected == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

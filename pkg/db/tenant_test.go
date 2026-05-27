@@ -97,7 +97,7 @@ func TestQueryTenant_SetLocalDoesNotPersist(t *testing.T) {
 
 	// ExecTenant realiza SET LOCAL search_path, ejecuta la query, y hace COMMIT.
 	// El COMMIT libera la conexión al pool con search_path de vuelta al default.
-	err = tdb.ExecTenant(ctx, "tenant_b", `INSERT INTO items(name) VALUES('inserted via exec')`)
+	_, err = tdb.ExecTenant(ctx, "tenant_b", `INSERT INTO items(name) VALUES('inserted via exec')`)
 	if err != nil {
 		t.Fatalf("ExecTenant: %v", err)
 	}
