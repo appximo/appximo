@@ -1,7 +1,20 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+)
+
+var rootCmd = &cobra.Command{
+	Use:   "appitools",
+	Short: "API engine for Go — generate production APIs from a JSON schema",
+}
 
 func main() {
-	fmt.Println("Appitools v0.1.0 — API engine for Go")
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }
