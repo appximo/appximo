@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/codegen"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/extensions"
@@ -55,6 +56,12 @@ var serveCmd = &cobra.Command{
 		tdb := db.NewTenantDB(pool)
 		hr := extensions.NewHookRunner(extensions.NewJSSandbox())
 
+		jwtSecret := os.Getenv("JWT_SECRET")
+		if jwtSecret == "" {
+			fmt.Fprintln(os.Stderr, "JWT_SECRET environment variable is required")
+			os.Exit(1)
+		}
+
 		policyBytes, err := json.Marshal(s.RBAC)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Error serializing RBAC policy:", err)
@@ -66,6 +73,7 @@ var serveCmd = &cobra.Command{
 		r.Use(chimiddleware.RealIP)
 		r.Use(chimiddleware.RequestID)
 		r.Use(tenant.TenantMiddleware)
+		r.Use(auth.JWTMiddleware(jwtSecret))
 		r.Use(rbac.RBACMiddleware(policyBytes))
 		r.Use(chimiddleware.Logger)
 		r.Use(chimiddleware.Recoverer)

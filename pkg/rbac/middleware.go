@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/miguelangel/appitools/pkg/auth"
 )
 
 type evalResultKey struct{}
@@ -35,10 +37,20 @@ func RBACMiddleware(policyJSON []byte) func(http.Handler) http.Handler {
 			}
 
 			action := actionFromMethod(r.Method)
+
+			// Prefer JWT claims injected by JWTMiddleware; fall back to
+			// explicit headers so integration tests can run without a full JWT stack.
 			evalCtx := EvalContext{
 				Role:             r.Header.Get("X-User-Role"),
 				UserID:           r.Header.Get("X-User-ID"),
 				ExternalClientID: r.Header.Get("X-External-Client-ID"),
+			}
+			if claims := auth.ClaimsFromCtx(r.Context()); claims != nil {
+				evalCtx = EvalContext{
+					Role:             claims.Role,
+					UserID:           claims.UserID,
+					ExternalClientID: claims.ExternalClientID,
+				}
 			}
 
 			result := policy.Evaluate(evalCtx, resource, action)
