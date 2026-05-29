@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
@@ -77,8 +78,14 @@ func (h *Handlers) CreateDispatches(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) GetDispatchesByID(w http.ResponseWriter, r *http.Request) {
 	tc := tenant.MustFromCtx(r.Context())
-	id := chi.URLParam(r, "id")
-	rows, err := h.tdb.QueryTenant(r.Context(), tc.PGSchema, "SELECT * FROM dispatches WHERE id = $1", id)
+	idStr := chi.URLParam(r, "id")
+	if _, err := uuid.Parse(idStr); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid id format"})
+		return
+	}
+	rows, err := h.tdb.QueryTenant(r.Context(), tc.PGSchema, "SELECT * FROM dispatches WHERE id = $1", idStr)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -101,8 +108,14 @@ func (h *Handlers) GetDispatchesByID(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) DeleteDispatches(w http.ResponseWriter, r *http.Request) {
 	tc := tenant.MustFromCtx(r.Context())
-	id := chi.URLParam(r, "id")
-	affected, err := h.tdb.ExecTenant(r.Context(), tc.PGSchema, "DELETE FROM dispatches WHERE id = $1", id)
+	idStr := chi.URLParam(r, "id")
+	if _, err := uuid.Parse(idStr); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid id format"})
+		return
+	}
+	affected, err := h.tdb.ExecTenant(r.Context(), tc.PGSchema, "DELETE FROM dispatches WHERE id = $1", idStr)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

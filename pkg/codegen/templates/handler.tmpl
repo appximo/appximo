@@ -10,6 +10,7 @@ import (
 "net/http"
 
 "github.com/go-chi/chi/v5"
+"github.com/google/uuid"
 pkghandlers "{{.ModulePath}}/pkg/handlers"
 "{{.ModulePath}}/pkg/tenant"
 )
@@ -77,8 +78,14 @@ json.NewEncoder(w).Encode(result[0])
 
 func (h *Handlers) Get{{.ResourceTitle}}ByID(w http.ResponseWriter, r *http.Request) {
 tc := tenant.MustFromCtx(r.Context())
-id := chi.URLParam(r, "id")
-rows, err := h.tdb.QueryTenant(r.Context(), tc.PGSchema, "SELECT * FROM {{.ResourceName}} WHERE id = $1", id)
+idStr := chi.URLParam(r, "id")
+if _, err := uuid.Parse(idStr); err != nil {
+w.Header().Set("Content-Type", "application/json")
+w.WriteHeader(http.StatusBadRequest)
+json.NewEncoder(w).Encode(map[string]string{"error": "invalid id format"})
+return
+}
+rows, err := h.tdb.QueryTenant(r.Context(), tc.PGSchema, "SELECT * FROM {{.ResourceName}} WHERE id = $1", idStr)
 if err != nil {
 http.Error(w, err.Error(), http.StatusInternalServerError)
 return
@@ -101,8 +108,14 @@ json.NewEncoder(w).Encode(result[0])
 
 func (h *Handlers) Delete{{.ResourceTitle}}(w http.ResponseWriter, r *http.Request) {
 tc := tenant.MustFromCtx(r.Context())
-id := chi.URLParam(r, "id")
-affected, err := h.tdb.ExecTenant(r.Context(), tc.PGSchema, "DELETE FROM {{.ResourceName}} WHERE id = $1", id)
+idStr := chi.URLParam(r, "id")
+if _, err := uuid.Parse(idStr); err != nil {
+w.Header().Set("Content-Type", "application/json")
+w.WriteHeader(http.StatusBadRequest)
+json.NewEncoder(w).Encode(map[string]string{"error": "invalid id format"})
+return
+}
+affected, err := h.tdb.ExecTenant(r.Context(), tc.PGSchema, "DELETE FROM {{.ResourceName}} WHERE id = $1", idStr)
 if err != nil {
 http.Error(w, err.Error(), http.StatusInternalServerError)
 return

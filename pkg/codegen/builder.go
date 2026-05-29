@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/extensions"
@@ -108,6 +109,12 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		r.Get("/api/"+name+"/{id}", func(w http.ResponseWriter, req *http.Request) {
 			tc := tenant.MustFromCtx(req.Context())
 			id := chi.URLParam(req, "id")
+			if _, err := uuid.Parse(id); err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid id format"})
+				return
+			}
 			rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema,
 				fmt.Sprintf("SELECT * FROM %s WHERE id = $1", name), id)
 			if err != nil {
@@ -134,6 +141,12 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		r.Delete("/api/"+name+"/{id}", func(w http.ResponseWriter, req *http.Request) {
 			tc := tenant.MustFromCtx(req.Context())
 			id := chi.URLParam(req, "id")
+			if _, err := uuid.Parse(id); err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid id format"})
+				return
+			}
 			affected, err := tdb.ExecTenant(req.Context(), tc.PGSchema,
 				fmt.Sprintf("DELETE FROM %s WHERE id = $1", name), id)
 			if err != nil {

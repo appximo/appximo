@@ -28,7 +28,15 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf("escribir schema.json: %w", err)
 		}
 
-		fmt.Printf("Proyecto %q inicializado. Edita schema.json y corre appitools generate\n", name)
+		goMod := fmt.Sprintf("module %s\n\ngo 1.22\n", name)
+		if err := os.WriteFile(filepath.Join(name, "go.mod"), []byte(goMod), 0644); err != nil {
+			return fmt.Errorf("escribir go.mod: %w", err)
+		}
+
+		fmt.Printf("Proyecto %q inicializado.\n", name)
+		fmt.Println("  → Edita schema.json y corre:")
+		fmt.Println("  → appitools validate schema.json")
+		fmt.Println("  → appitools generate schema.json")
 		return nil
 	},
 }
