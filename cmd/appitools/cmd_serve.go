@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/miguelangel/appitools/pkg/codegen"
 	"github.com/miguelangel/appitools/pkg/db"
@@ -60,8 +61,8 @@ var serveCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		// Main router with middleware chain.
-		r := codegen.BuildRouter(s, tdb, hr)
+		// Outer router: middleware must be registered before routes.
+		r := chi.NewMux()
 		r.Use(chimiddleware.RealIP)
 		r.Use(chimiddleware.RequestID)
 		r.Use(tenant.TenantMiddleware)
@@ -76,6 +77,9 @@ var serveCmd = &cobra.Command{
 				"version": "0.1.0",
 			})
 		})
+
+		// Mount API routes (BuildRouter registers /api/* routes only).
+		r.Mount("/", codegen.BuildRouter(s, tdb, hr))
 
 		addr := fmt.Sprintf(":%d", port)
 		fmt.Printf("Appitools serving on %s — Ctrl+C to stop\n", addr)
