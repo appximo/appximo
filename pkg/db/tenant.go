@@ -146,6 +146,23 @@ func (tdb *TenantDB) ExecRowsTenant(ctx context.Context, schemaName, query strin
 	return result, nil
 }
 
+// QueryScalarTenant runs a query that returns a single int64 value (e.g. COUNT(*))
+// within the tenant schema. Returns 0 if no rows are returned.
+func (tdb *TenantDB) QueryScalarTenant(ctx context.Context, schemaName, query string, args ...any) (int64, error) {
+	rows, err := tdb.QueryTenant(ctx, schemaName, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var n int64
+	if rows.Next() {
+		if err := rows.Scan(&n); err != nil {
+			return 0, fmt.Errorf("scan scalar: %w", err)
+		}
+	}
+	return n, rows.Err()
+}
+
 // normalizeDBValue converts pgx-specific types to JSON-friendly Go types.
 func normalizeDBValue(v any) any {
 	if uuid, ok := v.([16]byte); ok {

@@ -12,10 +12,23 @@ import (
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/extensions"
 	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
+	"github.com/miguelangel/appitools/pkg/query"
 	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
+
+type listResponse struct {
+	Data []map[string]any `json:"data"`
+	Meta paginationMeta   `json:"meta"`
+}
+
+type paginationMeta struct {
+	Page       int   `json:"page"`
+	PerPage    int   `json:"per_page"`
+	Total      int64 `json:"total"`
+	TotalPages int64 `json:"total_pages"`
+}
 
 // BuildRouter creates a chi.Mux with real SQL handlers for every resource in the schema.
 // Used by `appitools serve` — no code generation required.
@@ -37,31 +50,56 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			tc := tenant.MustFromCtx(req.Context())
 			evalResult := rbac.EvalResultFromCtx(req.Context())
 
-			query := fmt.Sprintf("SELECT * FROM %s ORDER BY id LIMIT 100", name)
-			var queryArgs []any
-			if evalResult != nil && evalResult.Condition != nil {
-				query = fmt.Sprintf("SELECT * FROM %s WHERE %s = $1 ORDER BY id LIMIT 100", name, evalResult.Condition.Field)
-				queryArgs = []any{evalResult.Condition.Value}
+			var cond *rbac.WhereCondition
+			if evalResult != nil {
+				cond = evalResult.Condition
 			}
 
-			rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema, query, queryArgs...)
+			qb := query.BuildQuery(name, &res, req.URL.Query(), cond)
+			selectQ, countQ, selectArgs, countArgs := qb.SQL()
+
+			total, err := tdb.QueryScalarTenant(req.Context(), tc.PGSchema, countQ, countArgs...)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema, selectQ, selectArgs...)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 			defer rows.Close()
-			result, err := pkghandlers.RowsToMaps(rows)
+			data, err := pkghandlers.RowsToMaps(rows)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+
 			if evalResult != nil && len(evalResult.AllowedFields) > 0 {
-				for i, rec := range result {
-					result[i] = pkghandlers.FilterFields(rec, evalResult.AllowedFields)
+				for i, rec := range data {
+					data[i] = pkghandlers.FilterFields(rec, evalResult.AllowedFields)
 				}
 			}
+			if data == nil {
+				data = []map[string]any{}
+			}
+
+			totalPages := (total + int64(qb.PerPage()) - 1) / int64(qb.PerPage())
+			if totalPages == 0 {
+				totalPages = 1
+			}
+
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(result)
+			json.NewEncoder(w).Encode(listResponse{
+				Data: data,
+				Meta: paginationMeta{
+					Page:       qb.Page(),
+					PerPage:    qb.PerPage(),
+					Total:      total,
+					TotalPages: totalPages,
+				},
+			})
 		})
 
 		// --- Create ---
@@ -96,8 +134,8 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			body = hookRes.Data
 
 			cols, placeholders, args := pkghandlers.BuildInsertArgs(body)
-			query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", name, cols, placeholders)
-			result, err := tdb.ExecRowsTenant(req.Context(), tc.PGSchema, query, args...)
+			insertQ := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", name, cols, placeholders)
+			result, err := tdb.ExecRowsTenant(req.Context(), tc.PGSchema, insertQ, args...)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
