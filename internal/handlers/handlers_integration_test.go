@@ -248,9 +248,11 @@ func TestHandlers_WhereCondition(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("expected 200, got %d", resp.StatusCode)
 		}
-		var result []map[string]any
-		json.NewDecoder(resp.Body).Decode(&result)
-		return result
+		var page struct {
+			Data []map[string]any `json:"data"`
+		}
+		json.NewDecoder(resp.Body).Decode(&page)
+		return page.Data
 	}
 
 	// user1 should see only GU-U1.
@@ -337,13 +339,15 @@ func TestHandlers_FieldStripping(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var result []map[string]any
-	json.NewDecoder(resp.Body).Decode(&result)
-
-	if len(result) != 1 {
-		t.Fatalf("expected 1 row, got %d", len(result))
+	var page struct {
+		Data []map[string]any `json:"data"`
 	}
-	row := result[0]
+	json.NewDecoder(resp.Body).Decode(&page)
+
+	if len(page.Data) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(page.Data))
+	}
+	row := page.Data[0]
 
 	// Allowed fields must be present.
 	if _, ok := row["code"]; !ok {
@@ -361,5 +365,212 @@ func TestHandlers_FieldStripping(t *testing.T) {
 	}
 	if len(row) != 2 {
 		t.Errorf("expected exactly 2 fields in response, got %d: %v", len(row), row)
+	}
+}
+
+// ── TAREA 2: pagination meta ────────────────────────────────────────────────
+
+func TestHandlers_Pagination(t *testing.T) {
+	ctx := context.Background()
+	connStr, cleanup := startPostgres(t)
+	defer cleanup()
+
+	pool, err := db.NewPool(ctx, connStr)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	_, err = pool.Exec(ctx, `CREATE SCHEMA tenant_pg`)
+	if err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE tenant_pg.items (
+			id   UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+			code TEXT NOT NULL
+		)
+	`)
+	if err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	// Insert 25 records.
+	for i := 0; i < 25; i++ {
+		_, err = pool.Exec(ctx, `INSERT INTO tenant_pg.items (code) VALUES ($1)`, fmt.Sprintf("IT-%03d", i))
+		if err != nil {
+			t.Fatalf("seed item %d: %v", i, err)
+		}
+	}
+
+	tdb := db.NewTenantDB(pool)
+	hr := extensions.NewHookRunner(extensions.NewJSSandbox())
+	testSchema := &schema.APISchema{
+		Resources: map[string]schema.ResourceSchema{
+			"items": {Fields: map[string]schema.FieldDef{"code": {Type: "string"}}},
+		},
+	}
+	router := handlers.NewRouter(tdb, hr, testSchema)
+	srv := httptest.NewServer(tenantHost(router, "pg.localhost"))
+	defer srv.Close()
+
+	type paginatedResp struct {
+		Data []map[string]any `json:"data"`
+		Meta struct {
+			Page       int  `json:"page"`
+			PerPage    int  `json:"per_page"`
+			Total      int  `json:"total"`
+			TotalPages int  `json:"total_pages"`
+			HasNext    bool `json:"has_next"`
+			HasPrev    bool `json:"has_prev"`
+		} `json:"meta"`
+	}
+
+	getPage := func(page, perPage int) paginatedResp {
+		t.Helper()
+		resp, err := srv.Client().Get(fmt.Sprintf("%s/api/items?page=%d&per_page=%d", srv.URL, page, perPage))
+		if err != nil {
+			t.Fatalf("GET items: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+		var r paginatedResp
+		json.NewDecoder(resp.Body).Decode(&r)
+		return r
+	}
+
+	// Page 1: 25 rows, per_page=10 → 10 items, total=25, total_pages=3, has_next=true, has_prev=false
+	p1 := getPage(1, 10)
+	if len(p1.Data) != 10 {
+		t.Errorf("page1: expected 10 items, got %d", len(p1.Data))
+	}
+	if p1.Meta.Total != 25 {
+		t.Errorf("page1: total=%d, want 25", p1.Meta.Total)
+	}
+	if p1.Meta.TotalPages != 3 {
+		t.Errorf("page1: total_pages=%d, want 3", p1.Meta.TotalPages)
+	}
+	if !p1.Meta.HasNext {
+		t.Error("page1: has_next should be true")
+	}
+	if p1.Meta.HasPrev {
+		t.Error("page1: has_prev should be false")
+	}
+
+	// Page 4: beyond last page → empty data, has_next=false
+	p4 := getPage(4, 10)
+	if len(p4.Data) != 0 {
+		t.Errorf("page4: expected 0 items, got %d", len(p4.Data))
+	}
+	if p4.Meta.HasNext {
+		t.Error("page4: has_next should be false")
+	}
+
+	// per_page=200 → silently capped to 100
+	pBig := getPage(1, 200)
+	if pBig.Meta.PerPage != 100 {
+		t.Errorf("per_page=200 should be capped to 100, got %d", pBig.Meta.PerPage)
+	}
+
+	// ?page=abc → 400
+	resp, err := srv.Client().Get(srv.URL + "/api/items?page=abc")
+	if err != nil {
+		t.Fatalf("GET /api/items?page=abc: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("page=abc: expected 400, got %d", resp.StatusCode)
+	}
+}
+
+// ── TAREA 5: ETag / cache headers ──────────────────────────────────────────
+
+func TestHandlers_ETag(t *testing.T) {
+	ctx := context.Background()
+	connStr, cleanup := startPostgres(t)
+	defer cleanup()
+
+	pool, err := db.NewPool(ctx, connStr)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	_, err = pool.Exec(ctx, `CREATE SCHEMA tenant_etag`)
+	if err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE tenant_etag.items (
+			id   UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+			code TEXT NOT NULL
+		)
+	`)
+	if err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	_, err = pool.Exec(ctx, `INSERT INTO tenant_etag.items (code) VALUES ('IT-001')`)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	tdb := db.NewTenantDB(pool)
+	hr := extensions.NewHookRunner(extensions.NewJSSandbox())
+	testSchema := &schema.APISchema{
+		Resources: map[string]schema.ResourceSchema{
+			"items": {Fields: map[string]schema.FieldDef{"code": {Type: "string"}}},
+		},
+	}
+	router := handlers.NewRouter(tdb, hr, testSchema)
+	srv := httptest.NewServer(tenantHost(router, "etag.localhost"))
+	defer srv.Close()
+
+	// First request — must return ETag and Cache-Control.
+	resp, err := srv.Client().Get(srv.URL + "/api/items")
+	if err != nil {
+		t.Fatalf("GET /api/items: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	etag := resp.Header.Get("ETag")
+	if etag == "" {
+		t.Fatal("expected ETag header in response")
+	}
+	if resp.Header.Get("Cache-Control") == "" {
+		t.Error("expected Cache-Control header in response")
+	}
+
+	// Second request with matching If-None-Match → 304, no body.
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/items", nil)
+	req.Header.Set("If-None-Match", etag)
+	resp2, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("conditional GET: %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusNotModified {
+		t.Errorf("expected 304 with matching ETag, got %d", resp2.StatusCode)
+	}
+
+	// Insert another record — ETag must change.
+	_, err = pool.Exec(ctx, `INSERT INTO tenant_etag.items (code) VALUES ('IT-002')`)
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	resp3, err := srv.Client().Get(srv.URL + "/api/items")
+	if err != nil {
+		t.Fatalf("GET after insert: %v", err)
+	}
+	resp3.Body.Close()
+	if resp3.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 after insert, got %d", resp3.StatusCode)
+	}
+	etag2 := resp3.Header.Get("ETag")
+	if etag2 == etag {
+		t.Error("ETag should change after data changes")
 	}
 }

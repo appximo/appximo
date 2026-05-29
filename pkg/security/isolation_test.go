@@ -205,12 +205,17 @@ func TestIsolation_CrossTenant(t *testing.T) {
 	// Tenant2 must see 0 items.
 	req2, _ := http.NewRequest("GET", srv2.URL+"/api/items", nil)
 	req2.Header.Set("Authorization", "Bearer "+tok2)
-	resp2, _ := srv2.Client().Do(req2)
+	resp2, err2 := srv2.Client().Do(req2)
+	if err2 != nil {
+		t.Fatalf("GET tenant2 items: %v", err2)
+	}
 	defer resp2.Body.Close()
-	var items []map[string]any
-	json.NewDecoder(resp2.Body).Decode(&items)
-	if len(items) != 0 {
-		t.Errorf("cross-tenant leak: tenant2 sees %d items from tenant1", len(items))
+	var page struct {
+		Data []map[string]any `json:"data"`
+	}
+	json.NewDecoder(resp2.Body).Decode(&page)
+	if len(page.Data) != 0 {
+		t.Errorf("cross-tenant leak: tenant2 sees %d items from tenant1", len(page.Data))
 	}
 }
 

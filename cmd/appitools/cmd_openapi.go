@@ -16,9 +16,12 @@ var openapiCmd = &cobra.Command{
 
 Examples:
   appitools openapi schema.json > openapi.yaml
+  appitools openapi --base-url https://api.myapp.com schema.json > openapi.yaml
   appitools openapi schema.json | npx @redocly/cli lint /dev/stdin`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		baseURL, _ := cmd.Flags().GetString("base-url")
+
 		s, err := schema.LoadFromFile(args[0])
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Error reading schema:", err)
@@ -31,7 +34,7 @@ Examples:
 			}
 			os.Exit(1)
 		}
-		out, err := codegen.GenerateOpenAPI(s)
+		out, err := codegen.GenerateOpenAPI(s, baseURL)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Error generating OpenAPI spec:", err)
 			os.Exit(1)
@@ -41,5 +44,6 @@ Examples:
 }
 
 func init() {
+	openapiCmd.Flags().String("base-url", "/", "Base URL for the API server (e.g. https://api.myapp.com)")
 	rootCmd.AddCommand(openapiCmd)
 }

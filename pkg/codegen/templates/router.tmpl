@@ -4,6 +4,7 @@ package handlers
 
 import (
 "github.com/go-chi/chi/v5"
+pkghandlers "{{.ModulePath}}/pkg/handlers"
 "{{.ModulePath}}/pkg/db"
 "{{.ModulePath}}/pkg/extensions"
 schemapkg "{{.ModulePath}}/pkg/schema"
@@ -18,11 +19,12 @@ apiSchema *schemapkg.APISchema
 func NewRouter(tdb *db.TenantDB, hr *extensions.HookRunner, s *schemapkg.APISchema) *chi.Mux {
 r := chi.NewMux()
 h := &Handlers{tdb: tdb, hr: hr, apiSchema: s}
-{{range .Resources}}r.Get("/api/{{.Name}}", h.List{{.Title}})
+{{range .Resources}}{{$resName := .Name}}{{$resTitle := .Title}}r.Get("/api/{{.Name}}", pkghandlers.CachedGet(h.List{{.Title}}))
 r.Post("/api/{{.Name}}", h.Create{{.Title}})
-r.Get("/api/{{.Name}}/{id}", h.Get{{.Title}}ByID)
+r.Get("/api/{{.Name}}/{id}", pkghandlers.CachedGet(h.Get{{.Title}}ByID))
 r.Delete("/api/{{.Name}}/{id}", h.Delete{{.Title}})
-{{end}}return r
+{{range .Relations}}r.Get("/api/{{$resName}}/{id}/{{.RelName}}", pkghandlers.CachedGet(h.Get{{$resTitle}}{{.RelTitle}}))
+{{end}}{{end}}return r
 }
 
 // hookConfig looks up a lifecycle hook (e.g. "before_create") for a resource.

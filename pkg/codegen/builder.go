@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -17,18 +20,6 @@ import (
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
-
-type listResponse struct {
-	Data []map[string]any `json:"data"`
-	Meta paginationMeta   `json:"meta"`
-}
-
-type paginationMeta struct {
-	Page       int   `json:"page"`
-	PerPage    int   `json:"per_page"`
-	Total      int64 `json:"total"`
-	TotalPages int64 `json:"total_pages"`
-}
 
 // BuildRouter creates a chi.Mux with real SQL handlers for every resource in the schema.
 // Used by `appitools serve` — no code generation required.
@@ -46,7 +37,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		res := s.Resources[resName]
 
 		// --- List ---
-		r.Get("/api/"+name, func(w http.ResponseWriter, req *http.Request) {
+		r.Get("/api/"+name, pkghandlers.CachedGet(func(w http.ResponseWriter, req *http.Request) {
 			tc := tenant.MustFromCtx(req.Context())
 			evalResult := rbac.EvalResultFromCtx(req.Context())
 
@@ -55,7 +46,14 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				cond = evalResult.Condition
 			}
 
-			qb := query.BuildQuery(name, &res, req.URL.Query(), cond)
+			qb, err := query.BuildQuery(name, &res, req.URL.Query(), cond)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+
 			selectQ, countQ, selectArgs, countArgs := qb.SQL()
 
 			total, err := tdb.QueryScalarTenant(req.Context(), tc.PGSchema, countQ, countArgs...)
@@ -89,18 +87,43 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			if totalPages == 0 {
 				totalPages = 1
 			}
+			hasNext := total > int64(qb.Page()*qb.PerPage())
+			hasPrev := qb.Page() > 1
+
+			// Build pagination links preserving filters/sort from request
+			base := "/api/" + name
+			buildLink := func(p int) string {
+				v := url.Values{}
+				v.Set("page", strconv.Itoa(p))
+				v.Set("per_page", strconv.Itoa(qb.PerPage()))
+				return base + "?" + v.Encode()
+			}
+			links := map[string]any{
+				"self":  buildLink(qb.Page()),
+				"first": buildLink(1),
+				"last":  buildLink(int(totalPages)),
+			}
+			if hasPrev {
+				links["prev"] = buildLink(qb.Page() - 1)
+			}
+			if hasNext {
+				links["next"] = buildLink(qb.Page() + 1)
+			}
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(listResponse{
-				Data: data,
-				Meta: paginationMeta{
-					Page:       qb.Page(),
-					PerPage:    qb.PerPage(),
-					Total:      total,
-					TotalPages: totalPages,
+			json.NewEncoder(w).Encode(map[string]any{
+				"data": data,
+				"meta": map[string]any{
+					"page":        qb.Page(),
+					"per_page":    qb.PerPage(),
+					"total":       total,
+					"total_pages": totalPages,
+					"has_next":    hasNext,
+					"has_prev":    hasPrev,
 				},
+				"links": links,
 			})
-		})
+		}))
 
 		// --- Create ---
 		r.Post("/api/"+name, func(w http.ResponseWriter, req *http.Request) {
@@ -158,7 +181,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		})
 
 		// --- Get by ID ---
-		r.Get("/api/"+name+"/{id}", func(w http.ResponseWriter, req *http.Request) {
+		r.Get("/api/"+name+"/{id}", pkghandlers.CachedGet(func(w http.ResponseWriter, req *http.Request) {
 			tc := tenant.MustFromCtx(req.Context())
 			id := chi.URLParam(req, "id")
 			if _, err := uuid.Parse(id); err != nil {
@@ -192,7 +215,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(record)
-		})
+		}))
 
 		// --- Delete ---
 		r.Delete("/api/"+name+"/{id}", func(w http.ResponseWriter, req *http.Request) {
@@ -218,6 +241,50 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			}
 			w.WriteHeader(http.StatusNoContent)
 		})
+
+		// --- Subresources: GET /api/{resource}/{id}/{relName} ---
+		for fieldName, fd := range res.Fields {
+			if fd.Relation == "" {
+				continue
+			}
+			fn := fieldName       // capture
+			relResource := fd.Relation
+			relRoute := strings.TrimSuffix(fn, "_id")
+
+			r.Get("/api/"+name+"/{id}/"+relRoute, pkghandlers.CachedGet(func(w http.ResponseWriter, req *http.Request) {
+				tc := tenant.MustFromCtx(req.Context())
+				parentID := chi.URLParam(req, "id")
+				if _, err := uuid.Parse(parentID); err != nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusBadRequest)
+					json.NewEncoder(w).Encode(map[string]string{"error": "invalid id format"})
+					return
+				}
+				q := fmt.Sprintf(
+					"SELECT r.* FROM %s r JOIN %s src ON src.%s = r.id WHERE src.id = $1",
+					relResource, name, fn,
+				)
+				rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema, q, parentID)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				defer rows.Close()
+				result, err := pkghandlers.RowsToMaps(rows)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				if len(result) == 0 {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusNotFound)
+					json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(result[0])
+			}))
+		}
 	}
 
 	return r

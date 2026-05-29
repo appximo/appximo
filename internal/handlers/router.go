@@ -6,6 +6,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/extensions"
+	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
 	schemapkg "github.com/miguelangel/appitools/pkg/schema"
 )
 
@@ -18,25 +19,31 @@ type Handlers struct {
 func NewRouter(tdb *db.TenantDB, hr *extensions.HookRunner, s *schemapkg.APISchema) *chi.Mux {
 	r := chi.NewMux()
 	h := &Handlers{tdb: tdb, hr: hr, apiSchema: s}
-	r.Get("/api/clients", h.ListClients)
+	r.Get("/api/clients", pkghandlers.CachedGet(h.ListClients))
 	r.Post("/api/clients", h.CreateClients)
-	r.Get("/api/clients/{id}", h.GetClientsByID)
+	r.Get("/api/clients/{id}", pkghandlers.CachedGet(h.GetClientsByID))
 	r.Delete("/api/clients/{id}", h.DeleteClients)
-	r.Get("/api/dispatches", h.ListDispatches)
+	r.Get("/api/dispatches", pkghandlers.CachedGet(h.ListDispatches))
 	r.Post("/api/dispatches", h.CreateDispatches)
-	r.Get("/api/dispatches/{id}", h.GetDispatchesByID)
+	r.Get("/api/dispatches/{id}", pkghandlers.CachedGet(h.GetDispatchesByID))
 	r.Delete("/api/dispatches/{id}", h.DeleteDispatches)
-	r.Get("/api/guides", h.ListGuides)
+	r.Get("/api/dispatches/{id}/guide", pkghandlers.CachedGet(h.GetDispatchesGuide))
+	r.Get("/api/dispatches/{id}/operator", pkghandlers.CachedGet(h.GetDispatchesOperator))
+	r.Get("/api/guides", pkghandlers.CachedGet(h.ListGuides))
 	r.Post("/api/guides", h.CreateGuides)
-	r.Get("/api/guides/{id}", h.GetGuidesByID)
+	r.Get("/api/guides/{id}", pkghandlers.CachedGet(h.GetGuidesByID))
 	r.Delete("/api/guides/{id}", h.DeleteGuides)
-	r.Get("/api/incidents", h.ListIncidents)
+	r.Get("/api/guides/{id}/client", pkghandlers.CachedGet(h.GetGuidesClient))
+	r.Get("/api/guides/{id}/operator", pkghandlers.CachedGet(h.GetGuidesOperator))
+	r.Get("/api/incidents", pkghandlers.CachedGet(h.ListIncidents))
 	r.Post("/api/incidents", h.CreateIncidents)
-	r.Get("/api/incidents/{id}", h.GetIncidentsByID)
+	r.Get("/api/incidents/{id}", pkghandlers.CachedGet(h.GetIncidentsByID))
 	r.Delete("/api/incidents/{id}", h.DeleteIncidents)
-	r.Get("/api/users", h.ListUsers)
+	r.Get("/api/incidents/{id}/guide", pkghandlers.CachedGet(h.GetIncidentsGuide))
+	r.Get("/api/incidents/{id}/reported_by", pkghandlers.CachedGet(h.GetIncidentsReportedBy))
+	r.Get("/api/users", pkghandlers.CachedGet(h.ListUsers))
 	r.Post("/api/users", h.CreateUsers)
-	r.Get("/api/users/{id}", h.GetUsersByID)
+	r.Get("/api/users/{id}", pkghandlers.CachedGet(h.GetUsersByID))
 	r.Delete("/api/users/{id}", h.DeleteUsers)
 	return r
 }

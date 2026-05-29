@@ -18,10 +18,27 @@ const (
 	MaxPerPage     = 100
 )
 
-var filterParamRe = regexp.MustCompile(`^filter\[([a-z][a-z0-9_]*)\]$`)
+// filterParamRe matches filter[field] or filter[field][op]
+var filterParamRe = regexp.MustCompile(`^filter\[([a-z][a-z0-9_]*)\](?:\[([a-z]+)\])?$`)
+
+// orderParamRe matches order[field]=asc|desc
+var orderParamRe = regexp.MustCompile(`^order\[([a-z][a-z0-9_]*)\]$`)
+
+// operatorsForType lists valid filter operators per schema field type.
+var operatorsForType = map[string]map[string]bool{
+	"string":  {"eq": true, "partial": true},
+	"text":    {"eq": true, "partial": true},
+	"int":     {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true},
+	"int64":   {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true},
+	"float64": {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true},
+	"time":    {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true, "after": true, "before": true},
+	"uuid":    {"eq": true},
+	"bool":    {"eq": true},
+}
 
 type filterClause struct {
 	field string
+	op    string // "eq", "partial", "gte", "lte", "gt", "lt", "after", "before"
 	value string
 }
 
@@ -39,13 +56,13 @@ type QueryBuilder struct {
 }
 
 // BuildQuery parses url.Values and returns a validated QueryBuilder.
-// Unknown filter/sort fields are silently ignored — no SQL injection possible.
+// Returns error for unknown filter fields, type-incompatible operators, or non-integer page/per_page.
 func BuildQuery(
 	resource string,
 	res *schema.ResourceSchema,
 	params url.Values,
 	condition *rbac.WhereCondition,
-) *QueryBuilder {
+) (*QueryBuilder, error) {
 	qb := &QueryBuilder{
 		resource:  resource,
 		res:       res,
@@ -54,46 +71,92 @@ func BuildQuery(
 		condition: condition,
 	}
 
-	if p, err := strconv.Atoi(params.Get("page")); err == nil && p > 0 {
-		qb.page = p
-	}
-	if pp, err := strconv.Atoi(params.Get("per_page")); err == nil && pp > 0 {
-		if pp > MaxPerPage {
-			pp = MaxPerPage
+	if pageStr := params.Get("page"); pageStr != "" {
+		p, err := strconv.Atoi(pageStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid page parameter: must be a positive integer")
 		}
-		qb.perPage = pp
+		if p > 0 {
+			qb.page = p
+		}
 	}
 
-	// filters: filter[field]=value — only schema fields, sorted for determinism
+	if ppStr := params.Get("per_page"); ppStr != "" {
+		pp, err := strconv.Atoi(ppStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid per_page parameter: must be a positive integer")
+		}
+		if pp > 0 {
+			if pp > MaxPerPage {
+				pp = MaxPerPage
+			}
+			qb.perPage = pp
+		}
+	}
+
+	// filters: filter[field]=value or filter[field][op]=value
 	for key, vals := range params {
 		m := filterParamRe.FindStringSubmatch(key)
 		if m == nil || len(vals) == 0 {
 			continue
 		}
 		field := m[1]
-		if _, ok := res.Fields[field]; !ok {
-			continue
+		op := "eq"
+		if m[2] != "" {
+			op = m[2]
 		}
-		qb.filters = append(qb.filters, filterClause{field: field, value: vals[0]})
+
+		fd, ok := res.Fields[field]
+		if !ok {
+			return nil, fmt.Errorf("unknown filter field: %s", field)
+		}
+
+		if err := validateFilterOp(op, fd.Type); err != nil {
+			return nil, fmt.Errorf("filter[%s][%s]: %s", field, op, err.Error())
+		}
+
+		qb.filters = append(qb.filters, filterClause{field: field, op: op, value: vals[0]})
 	}
+	// sort for deterministic SQL output
 	sort.Slice(qb.filters, func(i, j int) bool {
-		return qb.filters[i].field < qb.filters[j].field
+		if qb.filters[i].field != qb.filters[j].field {
+			return qb.filters[i].field < qb.filters[j].field
+		}
+		return qb.filters[i].op < qb.filters[j].op
 	})
 
-	// sort — only schema fields allowed
+	// old sort syntax: ?sort=campo&order=asc|desc
 	if sf := params.Get("sort"); sf != "" {
 		if _, ok := res.Fields[sf]; ok {
 			qb.sortField = sf
+			qb.sortOrder = "ASC"
 			if strings.ToLower(params.Get("order")) == "desc" {
 				qb.sortOrder = "DESC"
-			} else {
-				qb.sortOrder = "ASC"
 			}
 		}
 	}
 
+	// new order syntax: ?order[campo]=asc|desc (overrides old if both present)
+	for key, vals := range params {
+		m := orderParamRe.FindStringSubmatch(key)
+		if m == nil || len(vals) == 0 {
+			continue
+		}
+		field := m[1]
+		if _, ok := res.Fields[field]; !ok {
+			continue // silently ignore unknown order fields
+		}
+		qb.sortField = field
+		if strings.ToLower(vals[0]) == "desc" {
+			qb.sortOrder = "DESC"
+		} else {
+			qb.sortOrder = "ASC"
+		}
+		break // first valid order param wins
+	}
+
 	qb.search = params.Get("search")
-	return qb
+	return qb, nil
 }
 
 // Page returns the current page number (1-based).
@@ -139,8 +202,14 @@ func (qb *QueryBuilder) buildWhere() (clause string, args []any) {
 	}
 
 	for _, f := range qb.filters {
-		parts = append(parts, fmt.Sprintf("%s = $%d", f.field, idx))
-		args = append(args, f.value)
+		switch f.op {
+		case "partial":
+			parts = append(parts, fmt.Sprintf("%s ILIKE $%d", f.field, idx))
+			args = append(args, "%"+f.value+"%")
+		default:
+			parts = append(parts, fmt.Sprintf("%s %s $%d", f.field, filterToSQL(f.op), idx))
+			args = append(args, f.value)
+		}
 		idx++
 	}
 
@@ -148,7 +217,7 @@ func (qb *QueryBuilder) buildWhere() (clause string, args []any) {
 		// collect string fields sorted for deterministic SQL output
 		var strFields []string
 		for name, fd := range qb.res.Fields {
-			if fd.Type == "string" {
+			if fd.Type == "string" || fd.Type == "text" {
 				strFields = append(strFields, name)
 			}
 		}
@@ -169,4 +238,41 @@ func (qb *QueryBuilder) buildWhere() (clause string, args []any) {
 		return "", args
 	}
 	return " WHERE " + strings.Join(parts, " AND "), args
+}
+
+// validateFilterOp checks whether op is valid for the given schema field type.
+func validateFilterOp(op, fieldType string) error {
+	ops, ok := operatorsForType[fieldType]
+	if !ok {
+		// unknown type — allow eq only
+		if op != "eq" {
+			return fmt.Errorf("operator %q not allowed for type %q", op, fieldType)
+		}
+		return nil
+	}
+	if !ops[op] {
+		allowed := make([]string, 0, len(ops))
+		for o := range ops {
+			allowed = append(allowed, o)
+		}
+		sort.Strings(allowed)
+		return fmt.Errorf("operator %q not allowed for type %q (allowed: %s)", op, fieldType, strings.Join(allowed, ", "))
+	}
+	return nil
+}
+
+// filterToSQL maps a filter operator to its SQL comparison symbol.
+func filterToSQL(op string) string {
+	switch op {
+	case "gte":
+		return ">="
+	case "lte":
+		return "<="
+	case "gt", "after":
+		return ">"
+	case "lt", "before":
+		return "<"
+	default:
+		return "="
+	}
 }

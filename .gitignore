@@ -31,3 +31,5 @@ internal/graph/
 # OS
 .DS_Store
 Thumbs.db
+
+benchmark-lab/node_modules/

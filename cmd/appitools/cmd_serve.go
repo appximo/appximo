@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	"log"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/miguelangel/appitools/pkg/auth"
@@ -118,6 +118,12 @@ var serveCmd = &cobra.Command{
 		r.Use(rbac.RBACMiddleware(policyBytes))
 		r.Use(chimiddleware.Logger)
 		r.Use(chimiddleware.Recoverer)
+
+		// pprof endpoints — only when APPITOOLS_ENV=development (never in production)
+		if os.Getenv("APPITOOLS_ENV") == "development" {
+			r.Mount("/debug/pprof", chimiddleware.Profiler())
+			log.Println("WARNING: pprof profiler enabled (APPITOOLS_ENV=development)")
+		}
 
 		r.Get("/health", func(w http.ResponseWriter, req *http.Request) {
 			w.Header().Set("Content-Type", "application/json")

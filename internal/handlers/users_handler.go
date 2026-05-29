@@ -8,10 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
+	querypkg "github.com/miguelangel/appitools/pkg/query"
 	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
@@ -20,31 +24,87 @@ func (h *Handlers) ListUsers(w http.ResponseWriter, r *http.Request) {
 	tc := tenant.MustFromCtx(r.Context())
 	evalResult := rbac.EvalResultFromCtx(r.Context())
 
-	query := "SELECT * FROM users ORDER BY id LIMIT 100"
-	var queryArgs []any
-	if evalResult != nil && evalResult.Condition != nil {
-		query = fmt.Sprintf("SELECT * FROM users WHERE %s = $1 ORDER BY id LIMIT 100", evalResult.Condition.Field)
-		queryArgs = []any{evalResult.Condition.Value}
+	var cond *rbac.WhereCondition
+	if evalResult != nil {
+		cond = evalResult.Condition
 	}
 
-	rows, err := h.tdb.QueryTenant(r.Context(), tc.PGSchema, query, queryArgs...)
+	res := h.apiSchema.Resources["users"]
+	qb, err := querypkg.BuildQuery("users", &res, r.URL.Query(), cond)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	selectQ, countQ, selectArgs, countArgs := qb.SQL()
+
+	total, err := h.tdb.QueryScalarTenant(r.Context(), tc.PGSchema, countQ, countArgs...)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	rows, err := h.tdb.QueryTenant(r.Context(), tc.PGSchema, selectQ, selectArgs...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
-	result, err := pkghandlers.RowsToMaps(rows)
+	data, err := pkghandlers.RowsToMaps(rows)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if evalResult != nil && len(evalResult.AllowedFields) > 0 {
-		for i, rec := range result {
-			result[i] = pkghandlers.FilterFields(rec, evalResult.AllowedFields)
+		for i, rec := range data {
+			data[i] = pkghandlers.FilterFields(rec, evalResult.AllowedFields)
 		}
 	}
+	if data == nil {
+		data = []map[string]any{}
+	}
+
+	totalPages := (total + int64(qb.PerPage()) - 1) / int64(qb.PerPage())
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	hasNext := total > int64(qb.Page()*qb.PerPage())
+	hasPrev := qb.Page() > 1
+
+	base := "/api/users"
+	buildLink := func(p int) string {
+		v := url.Values{}
+		v.Set("page", strconv.Itoa(p))
+		v.Set("per_page", strconv.Itoa(qb.PerPage()))
+		return base + "?" + v.Encode()
+	}
+	links := map[string]any{
+		"self":  buildLink(qb.Page()),
+		"first": buildLink(1),
+		"last":  buildLink(int(totalPages)),
+	}
+	if hasPrev {
+		links["prev"] = buildLink(qb.Page() - 1)
+	}
+	if hasNext {
+		links["next"] = buildLink(qb.Page() + 1)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	json.NewEncoder(w).Encode(map[string]any{
+		"data": data,
+		"meta": map[string]any{
+			"page":        qb.Page(),
+			"per_page":    qb.PerPage(),
+			"total":       total,
+			"total_pages": totalPages,
+			"has_next":    hasNext,
+			"has_prev":    hasPrev,
+		},
+		"links": links,
+	})
 }
 
 func (h *Handlers) CreateUsers(w http.ResponseWriter, r *http.Request) {
@@ -148,3 +208,6 @@ func (h *Handlers) DeleteUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// ensure unused imports don't cause compile errors in resources with no relations
+var _ = strings.TrimSuffix

@@ -20,15 +20,26 @@ var handlerTmplSrc string
 //go:embed templates/router.tmpl
 var routerTmplSrc string
 
+// RelationData describes a foreign-key relation on a resource field.
+type RelationData struct {
+	FieldName   string // e.g. "client_id"
+	RelName     string // e.g. "client"  (route segment: FieldName with _id stripped)
+	RelResource string // e.g. "clients" (target table)
+	RelTitle    string // e.g. "Client"  (PascalCase for method names)
+}
+
+// ResourceData is the per-resource context passed to router.tmpl.
 type ResourceData struct {
-	Name  string
-	Title string
+	Name      string
+	Title     string
+	Relations []RelationData
 }
 
 type handlerData struct {
 	ResourceName  string
 	ResourceTitle string
 	ModulePath    string
+	Relations     []RelationData
 }
 
 type routerData struct {
@@ -69,13 +80,21 @@ func Generate(s *schema.APISchema, outputDir string) ([]string, error) {
 
 	for _, resName := range names {
 		title := toPascalCase(resName)
-		resources = append(resources, ResourceData{Name: resName, Title: title})
+		res := s.Resources[resName]
+		rels := buildRelations(&res)
+
+		resources = append(resources, ResourceData{
+			Name:      resName,
+			Title:     title,
+			Relations: rels,
+		})
 
 		outPath := filepath.Join(handlersDir, resName+"_handler.go")
 		src, err := renderTemplate(hTmpl, handlerData{
 			ResourceName:  resName,
 			ResourceTitle: title,
 			ModulePath:    modulePath,
+			Relations:     rels,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("render handler for %q: %w", resName, err)
@@ -97,6 +116,32 @@ func Generate(s *schema.APISchema, outputDir string) ([]string, error) {
 	generated = append(generated, filepath.Join("internal", "handlers", "router.go"))
 
 	return generated, nil
+}
+
+// buildRelations extracts all RelationData entries from a ResourceSchema.
+func buildRelations(res *schema.ResourceSchema) []RelationData {
+	var rels []RelationData
+	// sort field names for determinism
+	names := make([]string, 0, len(res.Fields))
+	for n := range res.Fields {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	for _, fname := range names {
+		fd := res.Fields[fname]
+		if fd.Relation == "" {
+			continue
+		}
+		relName := strings.TrimSuffix(fname, "_id")
+		rels = append(rels, RelationData{
+			FieldName:   fname,
+			RelName:     relName,
+			RelResource: fd.Relation,
+			RelTitle:    toPascalCase(relName),
+		})
+	}
+	return rels
 }
 
 func readModulePath(dir string) (string, error) {

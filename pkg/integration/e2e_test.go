@@ -224,14 +224,22 @@ func dpList(t *testing.T, srv *httptest.Server, path, token string) []map[string
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, _ := srv.Client().Do(req)
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", path, err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET %s: expected 200, got %d", path, resp.StatusCode)
 	}
-	var out []map[string]any
-	json.NewDecoder(resp.Body).Decode(&out)
-	return out
+	var page struct {
+		Data []map[string]any `json:"data"`
+	}
+	json.NewDecoder(resp.Body).Decode(&page)
+	if page.Data == nil {
+		return []map[string]any{}
+	}
+	return page.Data
 }
 
 func dpStatus(t *testing.T, srv *httptest.Server, method, path, token string, body any) int {
