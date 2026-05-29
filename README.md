@@ -42,15 +42,19 @@ One JSON schema → a fully functional, multi-tenant REST API with RBAC, JS hook
 
 ## Benchmark
 
-| Stack | Req/s (c=200) | P99 latency | RAM idle |
-|---|---|---|---|
-| **Appitools** (Go + chi + pgx) | **~65k** | **~12 ms** | **~35 MB** |
-| NestJS + Prisma + PM2 (4 workers) | ~25k | ~38 ms | ~480 MB |
-| API Platform (PHP 8.3 + FPM) | ~14k | ~65 ms | ~180 MB |
+Real numbers from k6 v0.55.0 on a **$6/mo DigitalOcean Droplet (1 vCPU / 2 GB RAM)**,
+Postgres 16 in Docker, 1 004 pre-loaded rows, 0% error rate across 55 649 requests.
 
-> Droplet $16 (2 vCPU / 4 GB RAM), c=200, PostgreSQL 16 local, simple CRUD endpoint with 1 000 rows pre-loaded.  
-> Bottleneck is always Postgres, not the HTTP layer. Numbers vary by query complexity.  
-> [See full methodology →](docs/benchmarks.md)
+| Scenario | VUs | RPS | P90 | P95 | RAM (appitools) |
+|---|---|---|---|---|---|
+| **GET list — max throughput** | 20 | **~530 req/s** | 115 ms | 144 ms | 19 MB |
+| **GET list — sustained 50 VUs** | 50 | **~303 req/s** | 216 ms | 442 ms | 27 MB |
+| **80% read / 20% write + JS hook** | 10 | **~618 req/s** | 78 ms | 91 ms | 27 MB |
+
+Bottleneck is Postgres in Docker sharing 1 vCPU with other processes — not the HTTP layer.
+On a dedicated $16/mo Droplet (2 vCPU, unix socket Postgres) expect **2–3× higher RPS**.
+
+> [Full methodology, raw k6 output, and bottleneck analysis →](docs/benchmarks.md)
 
 ---
 

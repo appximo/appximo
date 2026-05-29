@@ -1,0 +1,745 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+     execution: local
+        script: benchmark/k6_script.js
+        output: -
+
+     scenarios: (100.00%) 3 scenarios, 70 max VUs, 2m50s max duration (incl. graceful stop):
+              * max_throughput: 20 looping VUs for 30s (exec: listGuides, gracefulStop: 30s)
+              * sustained_load: Up to 50 looping VUs for 1m10s over 3 stages (gracefulRampDown: 30s, exec: listGuides, startTime: 35s, gracefulStop: 30s)
+              * read_write_mix: 10 looping VUs for 30s (exec: readWriteMix, startTime: 1m50s, gracefulStop: 30s)
+
+
+running (0m00.9s), 20/70 VUs, 302 complete and 0 interrupted iterations
+max_throughput   [   3% ] 20 VUs   00.9s/30s
+sustained_load • [   0% ] waiting  34.1s
+read_write_mix • [   0% ] waiting  1m49.1s
+
+running (0m01.9s), 20/70 VUs, 738 complete and 0 interrupted iterations
+max_throughput   [   6% ] 20 VUs   01.9s/30s
+sustained_load • [   0% ] waiting  33.1s
+read_write_mix • [   0% ] waiting  1m48.1s
+
+running (0m03.0s), 20/70 VUs, 1183 complete and 0 interrupted iterations
+max_throughput   [  10% ] 20 VUs   03.0s/30s
+sustained_load • [   0% ] waiting  32.0s
+read_write_mix • [   0% ] waiting  1m47.0s
+
+running (0m03.9s), 20/70 VUs, 1601 complete and 0 interrupted iterations
+max_throughput   [  13% ] 20 VUs   03.9s/30s
+sustained_load • [   0% ] waiting  31.1s
+read_write_mix • [   0% ] waiting  1m46.1s
+
+running (0m04.9s), 20/70 VUs, 2046 complete and 0 interrupted iterations
+max_throughput   [  16% ] 20 VUs   04.9s/30s
+sustained_load • [   0% ] waiting  30.1s
+read_write_mix • [   0% ] waiting  1m45.1s
+
+running (0m05.9s), 20/70 VUs, 2484 complete and 0 interrupted iterations
+max_throughput   [  20% ] 20 VUs   05.9s/30s
+sustained_load • [   0% ] waiting  29.1s
+read_write_mix • [   0% ] waiting  1m44.1s
+
+running (0m06.9s), 20/70 VUs, 2951 complete and 0 interrupted iterations
+max_throughput   [  23% ] 20 VUs   06.9s/30s
+sustained_load • [   0% ] waiting  28.1s
+read_write_mix • [   0% ] waiting  1m43.1s
+
+running (0m07.9s), 20/70 VUs, 3420 complete and 0 interrupted iterations
+max_throughput   [  26% ] 20 VUs   07.9s/30s
+sustained_load • [   0% ] waiting  27.1s
+read_write_mix • [   0% ] waiting  1m42.1s
+
+running (0m08.9s), 20/70 VUs, 3870 complete and 0 interrupted iterations
+max_throughput   [  30% ] 20 VUs   08.9s/30s
+sustained_load • [   0% ] waiting  26.1s
+read_write_mix • [   0% ] waiting  1m41.1s
+
+running (0m09.9s), 20/70 VUs, 4360 complete and 0 interrupted iterations
+max_throughput   [  33% ] 20 VUs   09.9s/30s
+sustained_load • [   0% ] waiting  25.1s
+read_write_mix • [   0% ] waiting  1m40.1s
+
+running (0m10.9s), 20/70 VUs, 4796 complete and 0 interrupted iterations
+max_throughput   [  36% ] 20 VUs   10.9s/30s
+sustained_load • [   0% ] waiting  24.1s
+read_write_mix • [   0% ] waiting  1m39.1s
+
+running (0m11.9s), 20/70 VUs, 5276 complete and 0 interrupted iterations
+max_throughput   [  40% ] 20 VUs   11.9s/30s
+sustained_load • [   0% ] waiting  23.1s
+read_write_mix • [   0% ] waiting  1m38.1s
+
+running (0m12.9s), 20/70 VUs, 5772 complete and 0 interrupted iterations
+max_throughput   [  43% ] 20 VUs   12.9s/30s
+sustained_load • [   0% ] waiting  22.1s
+read_write_mix • [   0% ] waiting  1m37.1s
+
+running (0m13.9s), 20/70 VUs, 6194 complete and 0 interrupted iterations
+max_throughput   [  46% ] 20 VUs   13.9s/30s
+sustained_load • [   0% ] waiting  21.1s
+read_write_mix • [   0% ] waiting  1m36.1s
+
+running (0m14.9s), 20/70 VUs, 6643 complete and 0 interrupted iterations
+max_throughput   [  50% ] 20 VUs   14.9s/30s
+sustained_load • [   0% ] waiting  20.1s
+read_write_mix • [   0% ] waiting  1m35.1s
+
+running (0m15.9s), 20/70 VUs, 7108 complete and 0 interrupted iterations
+max_throughput   [  53% ] 20 VUs   15.9s/30s
+sustained_load • [   0% ] waiting  19.1s
+read_write_mix • [   0% ] waiting  1m34.1s
+
+running (0m16.9s), 20/70 VUs, 7584 complete and 0 interrupted iterations
+max_throughput   [  56% ] 20 VUs   16.9s/30s
+sustained_load • [   0% ] waiting  18.1s
+read_write_mix • [   0% ] waiting  1m33.1s
+
+running (0m17.9s), 20/70 VUs, 8041 complete and 0 interrupted iterations
+max_throughput   [  60% ] 20 VUs   17.9s/30s
+sustained_load • [   0% ] waiting  17.1s
+read_write_mix • [   0% ] waiting  1m32.1s
+
+running (0m18.9s), 20/70 VUs, 8462 complete and 0 interrupted iterations
+max_throughput   [  63% ] 20 VUs   18.9s/30s
+sustained_load • [   0% ] waiting  16.1s
+read_write_mix • [   0% ] waiting  1m31.1s
+
+running (0m19.9s), 20/70 VUs, 8913 complete and 0 interrupted iterations
+max_throughput   [  66% ] 20 VUs   19.9s/30s
+sustained_load • [   0% ] waiting  15.1s
+read_write_mix • [   0% ] waiting  1m30.1s
+
+running (0m20.9s), 20/70 VUs, 9366 complete and 0 interrupted iterations
+max_throughput   [  70% ] 20 VUs   20.9s/30s
+sustained_load • [   0% ] waiting  14.1s
+read_write_mix • [   0% ] waiting  1m29.1s
+
+running (0m21.9s), 20/70 VUs, 9762 complete and 0 interrupted iterations
+max_throughput   [  73% ] 20 VUs   21.9s/30s
+sustained_load • [   0% ] waiting  13.1s
+read_write_mix • [   0% ] waiting  1m28.1s
+
+running (0m22.9s), 20/70 VUs, 10189 complete and 0 interrupted iterations
+max_throughput   [  76% ] 20 VUs   22.9s/30s
+sustained_load • [   0% ] waiting  12.1s
+read_write_mix • [   0% ] waiting  1m27.1s
+
+running (0m23.9s), 20/70 VUs, 10652 complete and 0 interrupted iterations
+max_throughput   [  80% ] 20 VUs   23.9s/30s
+sustained_load • [   0% ] waiting  11.1s
+read_write_mix • [   0% ] waiting  1m26.1s
+
+running (0m24.9s), 20/70 VUs, 11067 complete and 0 interrupted iterations
+max_throughput   [  83% ] 20 VUs   24.9s/30s
+sustained_load • [   0% ] waiting  10.1s
+read_write_mix • [   0% ] waiting  1m25.1s
+
+running (0m25.9s), 20/70 VUs, 11536 complete and 0 interrupted iterations
+max_throughput   [  86% ] 20 VUs   25.9s/30s
+sustained_load • [   0% ] waiting  09.1s
+read_write_mix • [   0% ] waiting  1m24.1s
+
+running (0m26.9s), 20/70 VUs, 11985 complete and 0 interrupted iterations
+max_throughput   [  90% ] 20 VUs   26.9s/30s
+sustained_load • [   0% ] waiting  08.1s
+read_write_mix • [   0% ] waiting  1m23.1s
+
+running (0m27.9s), 20/70 VUs, 12411 complete and 0 interrupted iterations
+max_throughput   [  93% ] 20 VUs   27.9s/30s
+sustained_load • [   0% ] waiting  07.1s
+read_write_mix • [   0% ] waiting  1m22.1s
+
+running (0m28.9s), 20/70 VUs, 12840 complete and 0 interrupted iterations
+max_throughput   [  96% ] 20 VUs   28.9s/30s
+sustained_load • [   0% ] waiting  06.1s
+read_write_mix • [   0% ] waiting  1m21.1s
+
+running (0m29.9s), 20/70 VUs, 13264 complete and 0 interrupted iterations
+max_throughput   [ 100% ] 20 VUs   29.9s/30s
+sustained_load • [   0% ] waiting  05.1s
+read_write_mix • [   0% ] waiting  1m20.1s
+
+running (0m30.9s), 00/70 VUs, 13312 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs   30s
+sustained_load • [   0% ] waiting  04.1s
+read_write_mix • [   0% ] waiting  1m19.1s
+
+running (0m31.9s), 00/70 VUs, 13312 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs   30s
+sustained_load • [   0% ] waiting  03.1s
+read_write_mix • [   0% ] waiting  1m18.1s
+
+running (0m32.9s), 00/70 VUs, 13312 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs   30s
+sustained_load • [   0% ] waiting  02.1s
+read_write_mix • [   0% ] waiting  1m17.1s
+
+running (0m33.9s), 00/70 VUs, 13312 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs   30s
+sustained_load • [   0% ] waiting  01.1s
+read_write_mix • [   0% ] waiting  1m16.1s
+
+running (0m34.9s), 00/70 VUs, 13312 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs   30s
+sustained_load • [   0% ] waiting  00.1s
+read_write_mix • [   0% ] waiting  1m15.1s
+
+running (0m35.9s), 04/70 VUs, 13768 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [   1% ] 04/50 VUs  0m00.9s/1m10.0s
+read_write_mix • [   0% ] waiting    1m14.1s
+
+running (0m36.9s), 07/70 VUs, 14136 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [   3% ] 07/50 VUs  0m01.9s/1m10.0s
+read_write_mix • [   0% ] waiting    1m13.1s
+
+running (0m37.9s), 10/70 VUs, 14565 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [   4% ] 10/50 VUs  0m02.9s/1m10.0s
+read_write_mix • [   0% ] waiting    1m12.1s
+
+running (0m38.9s), 13/70 VUs, 15043 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [   6% ] 13/50 VUs  0m03.9s/1m10.0s
+read_write_mix • [   0% ] waiting    1m11.1s
+
+running (0m39.9s), 17/70 VUs, 15482 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [   7% ] 17/50 VUs  0m04.9s/1m10.0s
+read_write_mix • [   0% ] waiting    1m10.1s
+
+running (0m40.9s), 20/70 VUs, 15911 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [   8% ] 20/50 VUs  0m05.9s/1m10.0s
+read_write_mix • [   0% ] waiting    1m09.1s
+
+running (0m41.9s), 23/70 VUs, 16378 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  10% ] 23/50 VUs  0m06.9s/1m10.0s
+read_write_mix • [   0% ] waiting    1m08.1s
+
+running (0m42.9s), 26/70 VUs, 16824 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  11% ] 26/50 VUs  0m07.9s/1m10.0s
+read_write_mix • [   0% ] waiting    1m07.1s
+
+running (0m43.9s), 30/70 VUs, 17312 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  13% ] 30/50 VUs  0m08.9s/1m10.0s
+read_write_mix • [   0% ] waiting    1m06.1s
+
+running (0m44.9s), 33/70 VUs, 17709 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  14% ] 33/50 VUs  0m09.9s/1m10.0s
+read_write_mix • [   0% ] waiting    1m05.1s
+
+running (0m45.9s), 36/70 VUs, 18046 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  16% ] 36/50 VUs  0m10.9s/1m10.0s
+read_write_mix • [   0% ] waiting    1m04.1s
+
+running (0m46.9s), 39/70 VUs, 18518 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  17% ] 39/50 VUs  0m11.9s/1m10.0s
+read_write_mix • [   0% ] waiting    1m03.1s
+
+running (0m47.9s), 43/70 VUs, 18964 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  18% ] 43/50 VUs  0m12.9s/1m10.0s
+read_write_mix • [   0% ] waiting    1m02.1s
+
+running (0m48.9s), 46/70 VUs, 19419 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  20% ] 46/50 VUs  0m13.9s/1m10.0s
+read_write_mix • [   0% ] waiting    1m01.1s
+
+running (0m49.9s), 49/70 VUs, 19809 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  21% ] 49/50 VUs  0m14.9s/1m10.0s
+read_write_mix • [   0% ] waiting    1m00.1s
+
+running (0m50.9s), 50/70 VUs, 20190 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  23% ] 50/50 VUs  0m15.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m59.1s
+
+running (0m51.9s), 50/70 VUs, 20652 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  24% ] 50/50 VUs  0m16.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m58.1s
+
+running (0m52.9s), 50/70 VUs, 21112 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  26% ] 50/50 VUs  0m17.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m57.1s
+
+running (0m53.9s), 50/70 VUs, 21580 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  27% ] 50/50 VUs  0m18.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m56.1s
+
+running (0m54.9s), 50/70 VUs, 22049 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  28% ] 50/50 VUs  0m19.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m55.1s
+
+running (0m55.9s), 50/70 VUs, 22456 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  30% ] 50/50 VUs  0m20.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m54.1s
+
+running (0m56.9s), 50/70 VUs, 22936 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  31% ] 50/50 VUs  0m21.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m53.1s
+
+running (0m57.9s), 50/70 VUs, 23405 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  33% ] 50/50 VUs  0m22.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m52.1s
+
+running (0m58.9s), 50/70 VUs, 23807 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  34% ] 50/50 VUs  0m23.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m51.1s
+
+running (0m59.9s), 50/70 VUs, 24264 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  36% ] 50/50 VUs  0m24.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m50.1s
+
+running (1m00.9s), 50/70 VUs, 24702 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  37% ] 50/50 VUs  0m25.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m49.1s
+
+running (1m01.9s), 50/70 VUs, 25160 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  38% ] 50/50 VUs  0m26.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m48.1s
+
+running (1m02.9s), 50/70 VUs, 25665 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  40% ] 50/50 VUs  0m27.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m47.1s
+
+running (1m03.9s), 50/70 VUs, 26125 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  41% ] 50/50 VUs  0m28.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m46.1s
+
+running (1m04.9s), 50/70 VUs, 26619 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  43% ] 50/50 VUs  0m29.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m45.1s
+
+running (1m05.9s), 50/70 VUs, 27036 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  44% ] 50/50 VUs  0m30.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m44.1s
+
+running (1m06.9s), 50/70 VUs, 27529 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  46% ] 50/50 VUs  0m31.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m43.1s
+
+running (1m07.9s), 50/70 VUs, 28026 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  47% ] 50/50 VUs  0m32.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m42.1s
+
+running (1m08.9s), 50/70 VUs, 28484 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  48% ] 50/50 VUs  0m33.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m41.1s
+
+running (1m09.9s), 50/70 VUs, 28985 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  50% ] 50/50 VUs  0m34.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m40.1s
+
+running (1m10.9s), 50/70 VUs, 29386 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  51% ] 50/50 VUs  0m35.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m39.1s
+
+running (1m11.9s), 50/70 VUs, 29865 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  53% ] 50/50 VUs  0m36.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m38.1s
+
+running (1m12.9s), 50/70 VUs, 30348 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  54% ] 50/50 VUs  0m37.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m37.1s
+
+running (1m13.9s), 50/70 VUs, 30833 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  56% ] 50/50 VUs  0m38.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m36.1s
+
+running (1m14.9s), 50/70 VUs, 31266 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  57% ] 50/50 VUs  0m39.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m35.1s
+
+running (1m15.9s), 50/70 VUs, 31705 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  58% ] 50/50 VUs  0m40.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m34.1s
+
+running (1m16.9s), 50/70 VUs, 32140 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  60% ] 50/50 VUs  0m41.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m33.1s
+
+running (1m17.9s), 50/70 VUs, 32650 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  61% ] 50/50 VUs  0m42.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m32.1s
+
+running (1m19.0s), 50/70 VUs, 32933 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  63% ] 50/50 VUs  0m43.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m31.0s
+
+running (1m19.9s), 50/70 VUs, 33000 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  64% ] 50/50 VUs  0m44.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m30.1s
+
+running (1m20.9s), 50/70 VUs, 33070 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  66% ] 50/50 VUs  0m45.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m29.1s
+
+running (1m21.9s), 50/70 VUs, 33134 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  67% ] 50/50 VUs  0m46.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m28.1s
+
+running (1m22.9s), 50/70 VUs, 33230 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  68% ] 50/50 VUs  0m47.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m27.1s
+
+running (1m23.9s), 50/70 VUs, 33383 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  70% ] 50/50 VUs  0m48.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m26.1s
+
+running (1m24.9s), 50/70 VUs, 33564 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  71% ] 50/50 VUs  0m49.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m25.1s
+
+running (1m25.9s), 50/70 VUs, 33774 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  73% ] 50/50 VUs  0m50.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m24.1s
+
+running (1m26.9s), 50/70 VUs, 34037 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  74% ] 50/50 VUs  0m51.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m23.1s
+
+running (1m27.9s), 50/70 VUs, 34392 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  76% ] 50/50 VUs  0m52.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m22.1s
+
+running (1m28.9s), 50/70 VUs, 34746 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  77% ] 50/50 VUs  0m53.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m21.1s
+
+running (1m29.9s), 50/70 VUs, 35172 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  78% ] 50/50 VUs  0m54.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m20.1s
+
+running (1m30.9s), 50/70 VUs, 35611 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  80% ] 50/50 VUs  0m55.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m19.1s
+
+running (1m31.9s), 50/70 VUs, 36017 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  81% ] 50/50 VUs  0m56.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m18.1s
+
+running (1m32.9s), 50/70 VUs, 36489 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  83% ] 50/50 VUs  0m57.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m17.1s
+
+running (1m33.9s), 50/70 VUs, 36903 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  84% ] 50/50 VUs  0m58.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m16.1s
+
+running (1m34.9s), 50/70 VUs, 37124 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  86% ] 50/50 VUs  0m59.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m15.1s
+
+running (1m35.9s), 47/70 VUs, 37411 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  87% ] 47/50 VUs  1m00.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m14.1s
+
+running (1m36.9s), 41/70 VUs, 37771 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  88% ] 41/50 VUs  1m01.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m13.1s
+
+running (1m37.9s), 37/70 VUs, 38212 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  90% ] 37/50 VUs  1m02.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m12.1s
+
+running (1m38.9s), 31/70 VUs, 38653 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  91% ] 31/50 VUs  1m03.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m11.1s
+
+running (1m39.9s), 26/70 VUs, 39110 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  93% ] 26/50 VUs  1m04.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m10.1s
+
+running (1m40.9s), 21/70 VUs, 39530 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  94% ] 21/50 VUs  1m05.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m09.1s
+
+running (1m41.9s), 16/70 VUs, 39983 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  96% ] 16/50 VUs  1m06.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m08.1s
+
+running (1m42.9s), 11/70 VUs, 40431 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  97% ] 11/50 VUs  1m07.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m07.1s
+
+running (1m43.9s), 06/70 VUs, 40821 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [  98% ] 06/50 VUs  1m08.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m06.1s
+
+running (1m44.9s), 01/70 VUs, 41246 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load   [ 100% ] 01/50 VUs  1m09.9s/1m10.0s
+read_write_mix • [   0% ] waiting    0m05.1s
+
+running (1m45.9s), 00/70 VUs, 41282 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix • [   0% ] waiting    0m04.1s
+
+running (1m46.9s), 00/70 VUs, 41282 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix • [   0% ] waiting    0m03.1s
+
+running (1m47.9s), 00/70 VUs, 41282 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix • [   0% ] waiting    0m02.1s
+
+running (1m48.9s), 00/70 VUs, 41282 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix • [   0% ] waiting    0m01.1s
+
+running (1m49.9s), 00/70 VUs, 41282 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix • [   0% ] waiting    0m00.1s
+
+running (1m50.9s), 10/70 VUs, 41601 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [   3% ] 10 VUs     00.9s/30s
+
+running (1m51.9s), 10/70 VUs, 42037 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [   6% ] 10 VUs     01.9s/30s
+
+running (1m52.9s), 10/70 VUs, 42486 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  10% ] 10 VUs     02.9s/30s
+
+running (1m53.9s), 10/70 VUs, 42939 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  13% ] 10 VUs     03.9s/30s
+
+running (1m54.9s), 10/70 VUs, 43363 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  16% ] 10 VUs     04.9s/30s
+
+running (1m55.9s), 10/70 VUs, 43829 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  20% ] 10 VUs     05.9s/30s
+
+running (1m56.9s), 10/70 VUs, 44279 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  23% ] 10 VUs     06.9s/30s
+
+running (1m57.9s), 10/70 VUs, 44752 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  26% ] 10 VUs     07.9s/30s
+
+running (1m58.9s), 10/70 VUs, 45224 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  30% ] 10 VUs     08.9s/30s
+
+running (1m59.9s), 10/70 VUs, 45733 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  33% ] 10 VUs     09.9s/30s
+
+running (2m00.9s), 10/70 VUs, 46243 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  36% ] 10 VUs     10.9s/30s
+
+running (2m01.9s), 10/70 VUs, 46750 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  40% ] 10 VUs     11.9s/30s
+
+running (2m02.9s), 10/70 VUs, 47238 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  43% ] 10 VUs     12.9s/30s
+
+running (2m03.9s), 10/70 VUs, 47748 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  46% ] 10 VUs     13.9s/30s
+
+running (2m04.9s), 10/70 VUs, 48260 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  50% ] 10 VUs     14.9s/30s
+
+running (2m05.9s), 10/70 VUs, 48730 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  53% ] 10 VUs     15.9s/30s
+
+running (2m06.9s), 10/70 VUs, 49239 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  56% ] 10 VUs     16.9s/30s
+
+running (2m07.9s), 10/70 VUs, 49747 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  60% ] 10 VUs     17.9s/30s
+
+running (2m08.9s), 10/70 VUs, 50216 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  63% ] 10 VUs     18.9s/30s
+
+running (2m09.9s), 10/70 VUs, 50763 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  66% ] 10 VUs     19.9s/30s
+
+running (2m10.9s), 10/70 VUs, 51295 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  70% ] 10 VUs     20.9s/30s
+
+running (2m11.9s), 10/70 VUs, 51783 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  73% ] 10 VUs     21.9s/30s
+
+running (2m12.9s), 10/70 VUs, 52302 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  76% ] 10 VUs     22.9s/30s
+
+running (2m13.9s), 10/70 VUs, 52780 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  80% ] 10 VUs     23.9s/30s
+
+running (2m14.9s), 10/70 VUs, 53281 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  83% ] 10 VUs     24.9s/30s
+
+running (2m15.9s), 10/70 VUs, 53832 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  86% ] 10 VUs     25.9s/30s
+
+running (2m16.9s), 10/70 VUs, 54339 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  90% ] 10 VUs     26.9s/30s
+
+running (2m17.9s), 10/70 VUs, 54759 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  93% ] 10 VUs     27.9s/30s
+
+running (2m18.9s), 10/70 VUs, 55203 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [  96% ] 10 VUs     28.9s/30s
+
+running (2m19.9s), 10/70 VUs, 55610 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix   [ 100% ] 10 VUs     29.9s/30s
+[32m     ✓ status 200[0m
+[32m     ✓ list 200[0m
+[32m     ✓ create 201[0m
+
+     checks[2m..........................:[0m [36m100.00%[0m [36;2m✓ 55649[0m      [36;2m✗ 0[0m    
+     data_received[2m...................:[0m [36m1.1 GB[0m  [36;2m7.6 MB/s[0m
+     data_sent[2m.......................:[0m [36m6.8 MB[0m  [36;2m48 kB/s[0m
+     http_req_blocked[2m................:[0m avg=[36m13.18µs[0m min=[36m1.36µs[0m  med=[36m3.76µs[0m   max=[36m84.65ms[0m  p(90)=[36m6.51µs[0m   p(95)=[36m8.02µs[0m  
+     http_req_connecting[2m.............:[0m avg=[36m3.66µs[0m  min=[36m0s[0m      med=[36m0s[0m       max=[36m20.5ms[0m   p(90)=[36m0s[0m       p(95)=[36m0s[0m      
+     http_req_duration[2m...............:[0m avg=[36m67.71ms[0m min=[36m1.29ms[0m  med=[36m33.68ms[0m  max=[36m2.51s[0m    p(90)=[36m137.6ms[0m  p(95)=[36m222.32ms[0m
+       { expected_response:true }[2m....:[0m avg=[36m67.71ms[0m min=[36m1.29ms[0m  med=[36m33.68ms[0m  max=[36m2.51s[0m    p(90)=[36m137.6ms[0m  p(95)=[36m222.32ms[0m
+     [32m✓[0m { scenario:max_throughput }[2m...:[0m avg=[36m44.74ms[0m min=[36m1.31ms[0m  med=[36m27.16ms[0m  max=[36m427.75ms[0m p(90)=[36m114.9ms[0m  p(95)=[36m144.06ms[0m
+     [32m✓[0m { scenario:read_write_mix }[2m...:[0m avg=[36m20.67ms[0m min=[36m1.29ms[0m  med=[36m2.15ms[0m   max=[36m250.8ms[0m  p(90)=[36m77.79ms[0m  p(95)=[36m91.4ms[0m  
+     [31m✗[0m { scenario:sustained_load }[2m...:[0m avg=[36m102.8ms[0m min=[36m1.32ms[0m  med=[36m54.96ms[0m  max=[36m2.51s[0m    p(90)=[36m216.04ms[0m p(95)=[36m442.01ms[0m
+   [32m✓[0m http_req_failed[2m.................:[0m [36m0.00%[0m   [36;2m✓ 0[0m          [36;2m✗ 55649[0m
+     http_req_receiving[2m..............:[0m avg=[36m12.79ms[0m min=[36m13.35µs[0m med=[36m366.03µs[0m max=[36m1.25s[0m    p(90)=[36m34.61ms[0m  p(95)=[36m69.87ms[0m 
+     http_req_sending[2m................:[0m avg=[36m51.82µs[0m min=[36m4.16µs[0m  med=[36m11.82µs[0m  max=[36m82.31ms[0m  p(90)=[36m21.35µs[0m  p(95)=[36m30.8µs[0m  
+     http_req_tls_handshaking[2m........:[0m avg=[36m0s[0m      min=[36m0s[0m      med=[36m0s[0m       max=[36m0s[0m       p(90)=[36m0s[0m       p(95)=[36m0s[0m      
+     http_req_waiting[2m................:[0m avg=[36m54.86ms[0m min=[36m1ms[0m     med=[36m26.99ms[0m  max=[36m1.72s[0m    p(90)=[36m109.45ms[0m p(95)=[36m164.68ms[0m
+     http_reqs[2m.......................:[0m [36m55649[0m   [36;2m397.466016/s[0m
+     iteration_duration[2m..............:[0m avg=[36m67.97ms[0m min=[36m1.37ms[0m  med=[36m33.93ms[0m  max=[36m2.51s[0m    p(90)=[36m138.07ms[0m p(95)=[36m222.94ms[0m
+     iterations[2m......................:[0m [36m55649[0m   [36;2m397.466016/s[0m
+     vus[2m.............................:[0m [36m10[0m      [36;2mmin=0[0m        [36;2mmax=50[0m 
+     vus_max[2m.........................:[0m [36m70[0m      [36;2mmin=70[0m       [36;2mmax=70[0m 
+running (2m20.0s), 00/70 VUs, 55649 complete and 0 interrupted iterations
+max_throughput ✓ [ 100% ] 20 VUs     30s
+sustained_load ✓ [ 100% ] 00/50 VUs  1m10s
+read_write_mix ✓ [ 100% ] 10 VUs     30s
+time="2026-05-29T05:16:02Z" level=error msg="thresholds on metrics 'http_req_duration{scenario:sustained_load}' have been crossed"
