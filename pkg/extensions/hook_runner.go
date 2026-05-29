@@ -2,13 +2,9 @@ package extensions
 
 import (
 	"context"
-	"log"
 
 	"github.com/miguelangel/appitools/pkg/schema"
 )
-
-// WebhookDispatcher is a stub for the future async webhook implementation.
-type WebhookDispatcher struct{}
 
 // HookRunner orchestrates JS sandbox and webhook dispatch for lifecycle hooks.
 type HookRunner struct {
@@ -18,7 +14,7 @@ type HookRunner struct {
 
 // NewHookRunner creates a HookRunner backed by the provided sandbox.
 func NewHookRunner(sandbox *JSSandbox) *HookRunner {
-	return &HookRunner{sandbox: sandbox}
+	return &HookRunner{sandbox: sandbox, dispatcher: NewWebhookDispatcher()}
 }
 
 // RunBeforeHook runs the before_create hook synchronously and returns the outcome.
@@ -57,7 +53,7 @@ func (hr *HookRunner) RunAfterHook(
 	}
 	switch hook.Type {
 	case "webhook":
-		log.Printf("WEBHOOK [%s] %s — pendiente implementar", tenantID, hook.URL)
+		hr.dispatcher.Dispatch(ctx, hook, "after_create", record, tenantID)
 	case "js":
 		// JS after_create hooks are not supported — no-op.
 	}

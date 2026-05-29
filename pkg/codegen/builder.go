@@ -9,9 +9,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/extensions"
+	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
+	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
@@ -34,8 +35,16 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		// --- List ---
 		r.Get("/api/"+name, func(w http.ResponseWriter, req *http.Request) {
 			tc := tenant.MustFromCtx(req.Context())
-			rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema,
-				fmt.Sprintf("SELECT * FROM %s ORDER BY id LIMIT 100", name))
+			evalResult := rbac.EvalResultFromCtx(req.Context())
+
+			query := fmt.Sprintf("SELECT * FROM %s ORDER BY id LIMIT 100", name)
+			var queryArgs []any
+			if evalResult != nil && evalResult.Condition != nil {
+				query = fmt.Sprintf("SELECT * FROM %s WHERE %s = $1 ORDER BY id LIMIT 100", name, evalResult.Condition.Field)
+				queryArgs = []any{evalResult.Condition.Value}
+			}
+
+			rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema, query, queryArgs...)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -45,6 +54,11 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
+			}
+			if evalResult != nil && len(evalResult.AllowedFields) > 0 {
+				for i, rec := range result {
+					result[i] = pkghandlers.FilterFields(rec, evalResult.AllowedFields)
+				}
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(result)
@@ -133,8 +147,13 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 				return
 			}
+			record := result[0]
+			evalResult := rbac.EvalResultFromCtx(req.Context())
+			if evalResult != nil && len(evalResult.AllowedFields) > 0 {
+				record = pkghandlers.FilterFields(record, evalResult.AllowedFields)
+			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(result[0])
+			json.NewEncoder(w).Encode(record)
 		})
 
 		// --- Delete ---

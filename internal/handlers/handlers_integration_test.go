@@ -12,6 +12,7 @@ import (
 	"github.com/miguelangel/appitools/internal/handlers"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/extensions"
+	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
 	"github.com/testcontainers/testcontainers-go"
@@ -164,5 +165,201 @@ func TestHandlers_GuideCRUD(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404 after delete, got %d", resp.StatusCode)
+	}
+}
+
+// withRBAC wraps a router with TenantMiddleware + RBACMiddleware and injects the Host header.
+func withRBAC(router http.Handler, host string, policyJSON []byte) http.Handler {
+	withPolicy := rbac.RBACMiddleware(policyJSON)(router)
+	withTenant := tenant.TenantMiddleware(withPolicy)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Host = host
+		withTenant.ServeHTTP(w, r)
+	})
+}
+
+func TestHandlers_WhereCondition(t *testing.T) {
+	ctx := context.Background()
+	connStr, cleanup := startPostgres(t)
+	defer cleanup()
+
+	pool, err := db.NewPool(ctx, connStr)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	_, err = pool.Exec(ctx, `CREATE SCHEMA tenant_wc`)
+	if err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE tenant_wc.guides (
+			id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+			code        TEXT NOT NULL,
+			operator_id UUID,
+			created_at  TIMESTAMPTZ DEFAULT now()
+		)
+	`)
+	if err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	// Deterministic UUIDs for two operators.
+	const user1 = "aaaaaaaa-0000-0000-0000-000000000001"
+	const user2 = "aaaaaaaa-0000-0000-0000-000000000002"
+
+	_, err = pool.Exec(ctx, `INSERT INTO tenant_wc.guides (code, operator_id) VALUES ('GU-U1', $1), ('GU-U2', $2)`, user1, user2)
+	if err != nil {
+		t.Fatalf("seed guides: %v", err)
+	}
+
+	policyJSON := []byte(`{
+		"roles": {
+			"operario": {
+				"resources": "*",
+				"actions": ["read","create"],
+				"conditions": {"field": "operator_id", "op": "eq", "val": "$user_id"}
+			}
+		}
+	}`)
+
+	tdb := db.NewTenantDB(pool)
+	hr := extensions.NewHookRunner(extensions.NewJSSandbox())
+	testSchema := &schema.APISchema{
+		Resources: map[string]schema.ResourceSchema{
+			"guides": {Fields: map[string]schema.FieldDef{}},
+		},
+	}
+	router := handlers.NewRouter(tdb, hr, testSchema)
+	srv := httptest.NewServer(withRBAC(router, "wc.localhost", policyJSON))
+	defer srv.Close()
+
+	get := func(userID string) []map[string]any {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/guides", nil)
+		req.Header.Set("X-User-Role", "operario")
+		req.Header.Set("X-User-ID", userID)
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatalf("GET /api/guides: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", resp.StatusCode)
+		}
+		var result []map[string]any
+		json.NewDecoder(resp.Body).Decode(&result)
+		return result
+	}
+
+	// user1 should see only GU-U1.
+	rows := get(user1)
+	if len(rows) != 1 {
+		t.Fatalf("user1: expected 1 row, got %d", len(rows))
+	}
+	if rows[0]["code"] != "GU-U1" {
+		t.Errorf("user1: expected code GU-U1, got %v", rows[0]["code"])
+	}
+
+	// user2 should see only GU-U2.
+	rows = get(user2)
+	if len(rows) != 1 {
+		t.Fatalf("user2: expected 1 row, got %d", len(rows))
+	}
+	if rows[0]["code"] != "GU-U2" {
+		t.Errorf("user2: expected code GU-U2, got %v", rows[0]["code"])
+	}
+}
+
+func TestHandlers_FieldStripping(t *testing.T) {
+	ctx := context.Background()
+	connStr, cleanup := startPostgres(t)
+	defer cleanup()
+
+	pool, err := db.NewPool(ctx, connStr)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	_, err = pool.Exec(ctx, `CREATE SCHEMA tenant_fs`)
+	if err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE tenant_fs.guides (
+			id         UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+			code       TEXT NOT NULL,
+			status     TEXT NOT NULL DEFAULT 'pending',
+			created_at TIMESTAMPTZ DEFAULT now()
+		)
+	`)
+	if err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	_, err = pool.Exec(ctx, `INSERT INTO tenant_fs.guides (code, status) VALUES ('GU-PUB', 'pending')`)
+	if err != nil {
+		t.Fatalf("seed guides: %v", err)
+	}
+
+	// public role can only see code and status — not id or created_at.
+	policyJSON := []byte(`{
+		"roles": {
+			"public": {
+				"resources": "*",
+				"actions": ["read"],
+				"fields": ["code", "status"]
+			}
+		}
+	}`)
+
+	tdb := db.NewTenantDB(pool)
+	hr := extensions.NewHookRunner(extensions.NewJSSandbox())
+	testSchema := &schema.APISchema{
+		Resources: map[string]schema.ResourceSchema{
+			"guides": {Fields: map[string]schema.FieldDef{}},
+		},
+	}
+	router := handlers.NewRouter(tdb, hr, testSchema)
+	srv := httptest.NewServer(withRBAC(router, "fs.localhost", policyJSON))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/guides", nil)
+	req.Header.Set("X-User-Role", "public")
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/guides: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var result []map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(result))
+	}
+	row := result[0]
+
+	// Allowed fields must be present.
+	if _, ok := row["code"]; !ok {
+		t.Error("expected field 'code' in response")
+	}
+	if _, ok := row["status"]; !ok {
+		t.Error("expected field 'status' in response")
+	}
+	// Stripped fields must be absent.
+	if _, ok := row["id"]; ok {
+		t.Error("field 'id' must be stripped for public role")
+	}
+	if _, ok := row["created_at"]; ok {
+		t.Error("field 'created_at' must be stripped for public role")
+	}
+	if len(row) != 2 {
+		t.Errorf("expected exactly 2 fields in response, got %d: %v", len(row), row)
 	}
 }

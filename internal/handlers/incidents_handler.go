@@ -12,12 +12,22 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
+	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
 func (h *Handlers) ListIncidents(w http.ResponseWriter, r *http.Request) {
 	tc := tenant.MustFromCtx(r.Context())
-	rows, err := h.tdb.QueryTenant(r.Context(), tc.PGSchema, "SELECT * FROM incidents ORDER BY id LIMIT 100")
+	evalResult := rbac.EvalResultFromCtx(r.Context())
+
+	query := "SELECT * FROM incidents ORDER BY id LIMIT 100"
+	var queryArgs []any
+	if evalResult != nil && evalResult.Condition != nil {
+		query = fmt.Sprintf("SELECT * FROM incidents WHERE %s = $1 ORDER BY id LIMIT 100", evalResult.Condition.Field)
+		queryArgs = []any{evalResult.Condition.Value}
+	}
+
+	rows, err := h.tdb.QueryTenant(r.Context(), tc.PGSchema, query, queryArgs...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -27,6 +37,11 @@ func (h *Handlers) ListIncidents(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if evalResult != nil && len(evalResult.AllowedFields) > 0 {
+		for i, rec := range result {
+			result[i] = pkghandlers.FilterFields(rec, evalResult.AllowedFields)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
@@ -102,8 +117,13 @@ func (h *Handlers) GetIncidentsByID(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 		return
 	}
+	record := result[0]
+	evalResult := rbac.EvalResultFromCtx(r.Context())
+	if evalResult != nil && len(evalResult.AllowedFields) > 0 {
+		record = pkghandlers.FilterFields(record, evalResult.AllowedFields)
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result[0])
+	json.NewEncoder(w).Encode(record)
 }
 
 func (h *Handlers) DeleteIncidents(w http.ResponseWriter, r *http.Request) {

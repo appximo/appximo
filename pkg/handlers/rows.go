@@ -47,6 +47,21 @@ func BuildInsertArgs(body map[string]any) (cols, placeholders string, args []any
 	return strings.Join(colList, ", "), strings.Join(phList, ", "), args
 }
 
+// FilterFields returns a copy of record containing only the keys in allowed.
+// If allowed is empty, record is returned unchanged.
+func FilterFields(record map[string]any, allowed []string) map[string]any {
+	if len(allowed) == 0 {
+		return record
+	}
+	out := make(map[string]any, len(allowed))
+	for _, f := range allowed {
+		if v, ok := record[f]; ok {
+			out[f] = v
+		}
+	}
+	return out
+}
+
 // normalizeValue converts pgx-specific types to JSON-friendly Go types.
 func normalizeValue(v any) any {
 	switch val := v.(type) {
