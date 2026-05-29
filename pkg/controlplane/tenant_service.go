@@ -17,21 +17,21 @@ var tenantIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{1,29}$`)
 
 // RegisterRequest carries all data needed to onboard a new tenant.
 type RegisterRequest struct {
-	TenantID    string
-	DisplayName string
-	Email       string
-	Plan        string
-	Schema      *schema.APISchema
+	TenantID    string            `json:"tenant_id"`
+	DisplayName string            `json:"display_name"`
+	Email       string            `json:"email"`
+	Plan        string            `json:"plan"`
+	Schema      *schema.APISchema `json:"schema"`
 }
 
 // Tenant is the created tenant record returned to the caller.
 type Tenant struct {
-	ID          string
-	PGSchema    string
-	DisplayName string
-	Email       string
-	Plan        string
-	CreatedAt   time.Time
+	ID          string    `json:"id"`
+	PGSchema    string    `json:"pg_schema"`
+	DisplayName string    `json:"display_name"`
+	Email       string    `json:"email"`
+	Plan        string    `json:"plan"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // RegisterTenant onboards a new tenant in 10 atomic steps:
@@ -44,7 +44,7 @@ type Tenant struct {
 func RegisterTenant(ctx context.Context, pool *pgxpool.Pool, req RegisterRequest) (*Tenant, error) {
 	// Step 1 — validate tenantID.
 	if !tenantIDRe.MatchString(req.TenantID) {
-		return nil, fmt.Errorf("invalid tenant id %q: must match ^[a-z0-9][a-z0-9-]{1,29}$", req.TenantID)
+		return nil, fmt.Errorf("invalid tenant id %q: must match ^[a-z0-9][a-z0-9-]{1,29}$: %w", req.TenantID, ErrInvalidInput)
 	}
 
 	pgSchema := "tenant_" + req.TenantID
@@ -57,7 +57,7 @@ func RegisterTenant(ctx context.Context, pool *pgxpool.Pool, req RegisterRequest
 		return nil, fmt.Errorf("check tenant existence: %w", err)
 	}
 	if exists {
-		return nil, fmt.Errorf("tenant %q already exists", req.TenantID)
+		return nil, fmt.Errorf("tenant %q already exists: %w", req.TenantID, ErrAlreadyExists)
 	}
 
 	now := time.Now().UTC()

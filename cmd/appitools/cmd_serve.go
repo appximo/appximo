@@ -11,6 +11,7 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/codegen"
+	"github.com/miguelangel/appitools/pkg/controlplane"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/extensions"
 	"github.com/miguelangel/appitools/pkg/rbac"
@@ -61,6 +62,23 @@ var serveCmd = &cobra.Command{
 			fmt.Fprintln(os.Stderr, "JWT_SECRET environment variable is required")
 			os.Exit(1)
 		}
+
+		adminKey := os.Getenv("ADMIN_KEY")
+		if adminKey == "" {
+			fmt.Fprintln(os.Stderr, "ADMIN_KEY environment variable is required")
+			os.Exit(1)
+		}
+		redisURL := os.Getenv("REDIS_URL") // optional — Redis enqueue skipped if empty
+
+		// Control plane (port 9090) — start in background goroutine.
+		cpSvc := controlplane.NewService(pool, redisURL)
+		cpRouter := controlplane.NewControlPlaneRouter(cpSvc, adminKey)
+		go func() {
+			fmt.Println("Control plane serving on :9090")
+			if err := http.ListenAndServe(":9090", cpRouter); err != nil {
+				fmt.Fprintln(os.Stderr, "Control plane error:", err)
+			}
+		}()
 
 		policyBytes, err := json.Marshal(s.RBAC)
 		if err != nil {
