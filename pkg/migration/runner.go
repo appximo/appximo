@@ -10,10 +10,12 @@ import (
 	"github.com/miguelangel/appitools/pkg/schema"
 )
 
-// ApplyTenantMigration creates (or idempotently verifies) all resource tables
-// in pgSchema by executing CREATE TABLE IF NOT EXISTS for each resource.
-// Fully qualified table names (pgSchema.resource) are used throughout — no
-// search_path mutation required.
+// ApplyTenantMigration creates or evolves all resource tables in pgSchema.
+// For each resource it:
+//  1. CREATE TABLE IF NOT EXISTS  — handles new resources
+//  2. ALTER TABLE ADD COLUMN IF NOT EXISTS — handles new fields in existing tables
+//
+// Fully qualified identifiers are used throughout; no search_path mutation required.
 func ApplyTenantMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *schema.APISchema) error {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
@@ -29,9 +31,60 @@ func ApplyTenantMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema stri
 
 	for _, resName := range names {
 		res := s.Resources[resName]
-		ddl := buildCreateTable(pgSchema, resName, res)
-		if _, err := conn.Exec(ctx, ddl); err != nil {
+		if _, err := conn.Exec(ctx, buildCreateTable(pgSchema, resName, res)); err != nil {
 			return fmt.Errorf("create table %s.%s: %w", pgSchema, resName, err)
+		}
+		if err := addMissingColumns(ctx, conn, pgSchema, resName, res); err != nil {
+			return fmt.Errorf("evolve table %s.%s: %w", pgSchema, resName, err)
+		}
+	}
+	return nil
+}
+
+// addMissingColumns issues ALTER TABLE … ADD COLUMN IF NOT EXISTS for every
+// schema field that is absent from the live table. New columns are always
+// nullable — adding NOT NULL to an existing table with rows requires a DEFAULT.
+func addMissingColumns(ctx context.Context, conn *pgxpool.Conn, pgSchema, resName string, res schema.ResourceSchema) error {
+	rows, err := conn.Query(ctx,
+		`SELECT column_name FROM information_schema.columns
+		 WHERE table_schema = $1 AND table_name = $2`,
+		pgSchema, resName,
+	)
+	if err != nil {
+		return fmt.Errorf("query columns: %w", err)
+	}
+	existing := map[string]bool{}
+	for rows.Next() {
+		var col string
+		if err := rows.Scan(&col); err != nil {
+			rows.Close()
+			return err
+		}
+		existing[col] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	keys := make([]string, 0, len(res.Fields))
+	for name, f := range res.Fields {
+		if name != "id" && !f.Auto {
+			keys = append(keys, name)
+		}
+	}
+	sort.Strings(keys)
+
+	for _, name := range keys {
+		if existing[name] {
+			continue
+		}
+		alter := fmt.Sprintf(
+			`ALTER TABLE "%s"."%s" ADD COLUMN IF NOT EXISTS "%s" %s`,
+			pgSchema, resName, name, fieldTypeToPG(res.Fields[name].Type),
+		)
+		if _, err := conn.Exec(ctx, alter); err != nil {
+			return fmt.Errorf("add column %q: %w", name, err)
 		}
 	}
 	return nil

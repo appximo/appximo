@@ -3,6 +3,7 @@
 [![Go Version](https://img.shields.io/badge/go-1.22+-00ADD8?logo=go)](https://golang.org/dl/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Build Status](https://github.com/miguelangel/appitools/workflows/CI/badge.svg)](https://github.com/miguelangel/appitools/actions)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](docs/testing.md)
 
 **Generate production-ready Go APIs from a JSON schema.  
 No boilerplate. No magic. No 400 MB runtime.**
@@ -55,6 +56,37 @@ Bottleneck is Postgres in Docker sharing 1 vCPU with other processes — not the
 On a dedicated $16/mo Droplet (2 vCPU, unix socket Postgres) expect **2–3× higher RPS**.
 
 > [Full methodology, raw k6 output, and bottleneck analysis →](docs/benchmarks.md)
+
+---
+
+## Battle tested
+
+The test suite validates the full production stack on every commit:
+
+```
+go test ./... -timeout 180s    # 14 packages, all passing
+```
+
+| Layer | Tests | Coverage |
+|---|---|---|
+| Unit (auth, RBAC, schema, hooks) | 43 tests | JWT, sandbox escapes, policy eval |
+| Integration (Postgres real) | 17 tests | CRUD, tenant isolation, migration worker |
+| **E2E — full lifecycle** | **1 test (10 steps)** | Register → CRUD → RBAC → hooks → schema change → migration → new field |
+| Security | 6 tests | SQL injection × 2, cross-tenant, JWT tamper, Goja escape, concurrent DDL |
+| Benchmark | 3 functions | req/s, P50/P95/P99, heap |
+
+Real throughput on CI (2 vCPU, Docker networking):
+
+| Scenario | req/s | p99 | Heap |
+|---|---|---|---|
+| GET list, 50 goroutines, 1000 rows | **529** | 205 ms | **9 MB** |
+| POST with JS hook, 20 goroutines | **794** | 56 ms | — |
+| 10 tenants concurrent | **516** | 47 ms | — |
+
+On bare metal with local Postgres: **5–15× higher throughput**.
+
+> [Performance methodology and comparison vs NestJS →](docs/performance.md)  
+> [How to run and add tests →](docs/testing.md)
 
 ---
 

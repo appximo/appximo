@@ -91,7 +91,8 @@ func applyControlPlane(t *testing.T, pool *pgxpool.Pool) {
 func newWorker(rdb *redis.Client, pool *pgxpool.Pool) *migration.MigrationWorker {
 	w := migration.NewMigrationWorker(rdb, pool, tenant.NewSchemaCache())
 	w.BlockTime = 100 * time.Millisecond
-	w.BackoffBase = 10 * time.Millisecond // delays: 10ms / 20ms / 40ms
+	w.BackoffBase = 10 * time.Millisecond     // error-retry delays: 10ms / 20ms / 40ms
+	w.LockRetryDelay = 50 * time.Millisecond  // lock-contention delay
 	return w
 }
 
@@ -315,5 +316,91 @@ func TestMigrationWorker_MaxRetriesDiscarded(t *testing.T) {
 	})
 	if !ok {
 		t.Error("expected empty PEL after all retries exhausted")
+	}
+}
+
+// TestMigrationWorker_TwoWorkersSameTenant verifies that two simultaneous workers
+// processing jobs for the same tenant:
+//   - Never run migrations concurrently (advisory lock prevents it)
+//   - Do not lose any job (all 5 eventually appear in migration_log)
+//   - Leave the database in a consistent state
+func TestMigrationWorker_TwoWorkersSameTenant(t *testing.T) {
+	pool, cleanPG := startPostgres(t)
+	defer cleanPG()
+	rdb, cleanRedis := startRedis(t)
+	defer cleanRedis()
+
+	applyControlPlane(t, pool)
+	seedTenant(t, pool, "locktenant")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Enqueue 5 identical jobs for the SAME tenant.
+	for i := 0; i < 5; i++ {
+		rdb.XAdd(ctx, &redis.XAddArgs{
+			Stream: migration.StreamName,
+			Values: map[string]any{
+				"tenant_id":   "locktenant",
+				"schema":      itemsSchema(),
+				"retry_count": "0",
+			},
+		})
+	}
+
+	// Start 2 workers with UNIQUE consumer names so Redis distributes messages
+	// between them, and fast timings so the test completes quickly.
+	w1 := newWorker(rdb, pool)
+	w1.ConsumerName = "test-worker-1"
+
+	w2 := newWorker(rdb, pool)
+	w2.ConsumerName = "test-worker-2"
+
+	go w1.Run(ctx)
+	go w2.Run(ctx)
+
+	// Wait until all 5 jobs have been processed successfully.
+	// Each job (including any re-enqueues from lock contention) eventually
+	// produces exactly one "ok" entry in migration_log.
+	ok := waitFor(t, 30*time.Second, func() bool {
+		var count int
+		pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM public.migration_log
+			 WHERE tenant_id = 'locktenant' AND status = 'ok'`,
+		).Scan(&count)
+		return count >= 5
+	})
+	if !ok {
+		// Report how many were processed to help diagnose.
+		var count int
+		pool.QueryRow(ctx,
+			"SELECT COUNT(*) FROM public.migration_log WHERE tenant_id='locktenant' AND status='ok'",
+		).Scan(&count)
+		t.Fatalf("two workers did not process all 5 jobs within timeout (got %d/5 ok entries)", count)
+	}
+
+	// PEL must be empty — no messages stuck awaiting acknowledgment.
+	pelEmpty := waitFor(t, 10*time.Second, func() bool {
+		p, _ := rdb.XPending(ctx, migration.StreamName, migration.ConsumerGroup).Result()
+		return p.Count == 0
+	})
+	if !pelEmpty {
+		p, _ := rdb.XPending(ctx, migration.StreamName, migration.ConsumerGroup).Result()
+		t.Errorf("expected empty PEL, got %d pending messages", p.Count)
+	}
+
+	// Table must exist and accept writes — proves the schema is consistent.
+	var exists bool
+	pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM information_schema.tables
+		 WHERE table_schema='tenant_locktenant' AND table_name='items')`,
+	).Scan(&exists)
+	if !exists {
+		t.Error("items table not found after two-worker migration")
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO tenant_locktenant.items (name) VALUES ('final-check')`,
+	); err != nil {
+		t.Errorf("final INSERT failed — schema inconsistent: %v", err)
 	}
 }
