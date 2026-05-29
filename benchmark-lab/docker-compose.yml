@@ -1,0 +1,58 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bench
+      POSTGRES_PASSWORD: bench
+      POSTGRES_DB: benchdb
+    volumes:
+      - ./seed.sql:/docker-entrypoint-initdb.d/seed.sql
+    command: 
+      - "postgres"
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "work_mem=16MB"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.8'
+          memory: 1G
+
+  appitools:
+    build: 
+      context: ../
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: "postgres://bench:bench@postgres:5432/benchdb?sslmode=disable"
+      PORT: "8080"
+      ADMIN_KEY: "secret"
+      JWT_SECRET: "secret"
+    depends_on:
+      - postgres
+    ports:
+      - "8081:8080"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  nestjs:
+    build:
+      context: ./nestjs-baseline
+    environment:
+      DATABASE_URL: "postgresql://bench:bench@postgres:5432/benchdb?schema=public"
+    depends_on:
+      - postgres
+    ports:
+      - "3000:3000"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
