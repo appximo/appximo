@@ -27,17 +27,10 @@ type pgService struct {
 	redis *redis.Client // nil when REDIS_URL is not set
 }
 
-// NewService creates a production Service. redisURL may be empty — in that case
+// NewService creates a production Service. redisClient may be nil — in that case
 // schema updates are written to the DB only and pg_notify handles cache invalidation.
-func NewService(pool *pgxpool.Pool, redisURL string) Service {
-	svc := &pgService{pool: pool}
-	if redisURL != "" {
-		opts, err := redis.ParseURL(redisURL)
-		if err == nil {
-			svc.redis = redis.NewClient(opts)
-		}
-	}
-	return svc
+func NewService(pool *pgxpool.Pool, redisClient *redis.Client) Service {
+	return &pgService{pool: pool, redis: redisClient}
 }
 
 func (s *pgService) Register(ctx context.Context, req RegisterRequest) (*Tenant, error) {

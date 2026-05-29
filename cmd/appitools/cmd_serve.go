@@ -9,11 +9,15 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"log"
+
+	"github.com/redis/go-redis/v9"
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/codegen"
 	"github.com/miguelangel/appitools/pkg/controlplane"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/extensions"
+	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
@@ -68,10 +72,22 @@ var serveCmd = &cobra.Command{
 			fmt.Fprintln(os.Stderr, "ADMIN_KEY environment variable is required")
 			os.Exit(1)
 		}
-		redisURL := os.Getenv("REDIS_URL") // optional — Redis enqueue skipped if empty
+
+		// Redis is optional — enqueueing skipped when not configured.
+		var redisClient *redis.Client
+		if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
+			opts, parseErr := redis.ParseURL(redisURL)
+			if parseErr != nil {
+				fmt.Fprintln(os.Stderr, "Warning: invalid REDIS_URL:", parseErr)
+			} else {
+				redisClient = redis.NewClient(opts)
+			}
+		}
+
+		schemaCache := tenant.NewSchemaCache()
 
 		// Control plane (port 9090) — start in background goroutine.
-		cpSvc := controlplane.NewService(pool, redisURL)
+		cpSvc := controlplane.NewService(pool, redisClient)
 		cpRouter := controlplane.NewControlPlaneRouter(cpSvc, adminKey)
 		go func() {
 			fmt.Println("Control plane serving on :9090")
@@ -79,6 +95,13 @@ var serveCmd = &cobra.Command{
 				fmt.Fprintln(os.Stderr, "Control plane error:", err)
 			}
 		}()
+
+		// Migration worker — only started when Redis is available.
+		if redisClient != nil {
+			worker := migration.NewMigrationWorker(redisClient, pool, schemaCache)
+			go worker.Run(ctx)
+			log.Println("Migration worker started")
+		}
 
 		policyBytes, err := json.Marshal(s.RBAC)
 		if err != nil {

@@ -74,8 +74,9 @@ func buildCreateTable(pgSchema, resName string, res schema.ResourceSchema) strin
 		cols = append(cols, fmt.Sprintf("%s TIMESTAMPTZ DEFAULT now()", name))
 	}
 
+	// Quote both identifiers: schema or table names may contain hyphens.
 	return fmt.Sprintf(
-		"CREATE TABLE IF NOT EXISTS %s.%s (\n  %s\n)",
+		`CREATE TABLE IF NOT EXISTS "%s"."%s" (`+"\n  %s\n)",
 		pgSchema, resName, strings.Join(cols, ",\n  "),
 	)
 }
