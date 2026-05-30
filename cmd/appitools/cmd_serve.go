@@ -18,6 +18,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/extensions"
 	gqlhandler "github.com/miguelangel/appitools/pkg/graphql"
+	appmiddleware "github.com/miguelangel/appitools/pkg/middleware"
 	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/schema"
@@ -118,6 +119,7 @@ var serveCmd = &cobra.Command{
 
 		// Outer router: middleware must be registered before routes.
 		r := chi.NewMux()
+		r.Use(appmiddleware.SecurityHeaders)
 		r.Use(chimiddleware.RealIP)
 		r.Use(chimiddleware.RequestID)
 		r.Use(tenant.TenantMiddleware)

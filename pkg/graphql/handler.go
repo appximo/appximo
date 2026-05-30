@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	gql "github.com/graphql-go/graphql"
@@ -24,12 +26,36 @@ import (
 
 type httpReqKey struct{}
 
+// rbacResultFilterKey is the per-request context key for RBAC field scrubbing.
+type rbacResultFilterKey struct{}
+
+// rbacResultFilter stores per-resolver allowed-field lists so that BuildHandler
+// can strip forbidden fields from the graphql-go result before writing it.
+// graphql-go resolves every requested field (returning nil for missing keys),
+// which would otherwise leak forbidden columns as JSON null.
+type rbacResultFilter struct {
+	mu     sync.Mutex
+	fields map[string][]string // GQL query field name → allowed DB columns
+}
+
+func (f *rbacResultFilter) store(gqlField string, allowed []string) {
+	f.mu.Lock()
+	f.fields[gqlField] = allowed
+	f.mu.Unlock()
+}
+
 // BuildHandler constructs an http.Handler for the /graphql endpoint.
 // Callers must ensure tenant.TenantMiddleware runs before this handler.
 func BuildHandler(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy) http.Handler {
 	gqlSchema := buildGQLSchema(s, tdb, hr, policy)
+	isDev := os.Getenv("APPITOOLS_ENV") == "development"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// FIX 8: cap request body at 1 MB to prevent OOM from oversized payloads.
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
+		filterStore := &rbacResultFilter{fields: make(map[string][]string)}
 		ctx := context.WithValue(r.Context(), httpReqKey{}, r)
+		ctx = context.WithValue(ctx, rbacResultFilterKey{}, filterStore)
 
 		var params struct {
 			Query         string         `json:"query"`
@@ -40,7 +66,19 @@ func BuildHandler(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunn
 			params.Query = r.URL.Query().Get("query")
 			params.OperationName = r.URL.Query().Get("operationName")
 		} else {
-			json.NewDecoder(r.Body).Decode(&params) //nolint:errcheck
+			if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+				// MaxBytesReader sets a specific error when the limit is exceeded.
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				json.NewEncoder(w).Encode(map[string]string{"error": "request body too large"}) //nolint:errcheck
+				return
+			}
+		}
+
+		// FIX 7: block introspection queries outside development to reduce attack surface.
+		if !isDev && isIntrospectionQuery(params.Query) {
+			writeGraphQLError(w, "introspection disabled in production")
+			return
 		}
 
 		result := gql.Do(gql.Params{
@@ -50,10 +88,85 @@ func BuildHandler(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunn
 			OperationName:  params.OperationName,
 			Context:        ctx,
 		})
+		// Strip fields that RBAC disallows. graphql-go resolves every requested
+		// field (returning nil for missing map keys), which would otherwise
+		// serialize as "secret": null even after FilterFields.
+		scrubResultByRBAC(result, filterStore)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(result) //nolint:errcheck
+	})
+}
+
+// scrubResultByRBAC removes forbidden fields from graphql-go's serialized result.
+// graphql-go resolves every requested field against the source map and sets
+// absent keys to nil (→ JSON null). This post-processes the result.Data map
+// to delete those nil entries for fields the resolver already filtered out.
+func scrubResultByRBAC(result *gql.Result, store *rbacResultFilter) {
+	if result == nil || result.Data == nil {
+		return
+	}
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		return
+	}
+	store.mu.Lock()
+	filters := make(map[string][]string, len(store.fields))
+	for k, v := range store.fields {
+		filters[k] = v
+	}
+	store.mu.Unlock()
+
+	for fieldName, allowed := range filters {
+		if val, exists := data[fieldName]; exists {
+			data[fieldName] = applyAllowedFieldsToResult(val, allowed)
+		}
+	}
+}
+
+func applyAllowedFieldsToResult(val any, allowed []string) any {
+	if len(allowed) == 0 {
+		return val
+	}
+	allowedSet := make(map[string]bool, len(allowed)+1)
+	allowedSet["id"] = true
+	for _, f := range allowed {
+		allowedSet[f] = true
+	}
+	scrub := func(m map[string]any) {
+		for k := range m {
+			if !allowedSet[k] {
+				delete(m, k)
+			}
+		}
+	}
+	switch v := val.(type) {
+	case map[string]any:
+		if items, ok := v["data"].([]any); ok {
+			// Connection type (list resolver) — scrub each item.
+			for _, item := range items {
+				if m, ok := item.(map[string]any); ok {
+					scrub(m)
+				}
+			}
+		} else {
+			// Direct object (getByID resolver).
+			scrub(v)
+		}
+	}
+	return val
+}
+
+func isIntrospectionQuery(query string) bool {
+	return strings.Contains(query, "__schema") || strings.Contains(query, "__type")
+}
+
+func writeGraphQLError(w http.ResponseWriter, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+		"errors": []map[string]any{{"message": msg}},
 	})
 }
 
@@ -316,6 +429,9 @@ func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, pol
 		}
 
 		if evalResult != nil && len(evalResult.AllowedFields) > 0 {
+			if fs, ok := p.Context.Value(rbacResultFilterKey{}).(*rbacResultFilter); ok {
+				fs.store(p.Info.FieldName, evalResult.AllowedFields)
+			}
 			for i, rec := range data {
 				data[i] = pkghandlers.FilterFields(rec, evalResult.AllowedFields)
 			}
@@ -367,7 +483,8 @@ func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, pol
 func getByIDResolver(name string, tdb *db.TenantDB, policy *rbac.Policy) gql.FieldResolveFn {
 	return func(p gql.ResolveParams) (any, error) {
 		tc := tenant.MustFromCtx(p.Context)
-		if _, err := checkRBAC(p.Context, policy, name, "read"); err != nil {
+		evalResult, err := checkRBAC(p.Context, policy, name, "read")
+		if err != nil {
 			return nil, err
 		}
 
@@ -389,7 +506,14 @@ func getByIDResolver(name string, tdb *db.TenantDB, policy *rbac.Policy) gql.Fie
 		if len(result) == 0 {
 			return nil, nil
 		}
-		return result[0], nil
+		record := result[0]
+		if evalResult != nil && len(evalResult.AllowedFields) > 0 {
+			if fs, ok := p.Context.Value(rbacResultFilterKey{}).(*rbacResultFilter); ok {
+				fs.store(p.Info.FieldName, evalResult.AllowedFields)
+			}
+			record = pkghandlers.FilterFields(record, evalResult.AllowedFields)
+		}
+		return record, nil
 	}
 }
 
@@ -461,21 +585,14 @@ func deleteResolver(name string, tdb *db.TenantDB, policy *rbac.Policy) gql.Fiel
 // ── RBAC helper ───────────────────────────────────────────────────────────────
 
 func checkRBAC(ctx context.Context, policy *rbac.Policy, resource, action string) (*rbac.EvalResult, error) {
-	r, _ := ctx.Value(httpReqKey{}).(*http.Request)
-
-	evalCtx := rbac.EvalContext{}
-	if r != nil {
-		evalCtx.Role = r.Header.Get("X-User-Role")
-		evalCtx.UserID = r.Header.Get("X-User-ID")
-		evalCtx.ExternalClientID = r.Header.Get("X-External-Client-ID")
+	claims := auth.ClaimsFromCtx(ctx)
+	if claims == nil {
+		return nil, fmt.Errorf("unauthorized")
 	}
-	if claims := auth.ClaimsFromCtx(ctx); claims != nil {
-		evalCtx.Role = claims.Role
-		evalCtx.UserID = claims.UserID
-		evalCtx.ExternalClientID = claims.ExternalClientID
-	}
-	if evalCtx.Role == "" {
-		return nil, fmt.Errorf("missing token")
+	evalCtx := rbac.EvalContext{
+		Role:             claims.Role,
+		UserID:           claims.UserID,
+		ExternalClientID: claims.ExternalClientID,
 	}
 
 	result := policy.Evaluate(evalCtx, resource, action)

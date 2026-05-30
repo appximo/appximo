@@ -16,6 +16,7 @@ const (
 	DefaultPage    = 1
 	DefaultPerPage = 20
 	MaxPerPage     = 100
+	MaxPage        = 10_000
 )
 
 // filterParamRe matches filter[field] or filter[field][op]
@@ -23,6 +24,9 @@ var filterParamRe = regexp.MustCompile(`^filter\[([a-z][a-z0-9_]*)\](?:\[([a-z]+
 
 // orderParamRe matches order[field]=asc|desc
 var orderParamRe = regexp.MustCompile(`^order\[([a-z][a-z0-9_]*)\]$`)
+
+// conditionFieldRe validates RBAC WhereCondition.Field before SQL interpolation.
+var conditionFieldRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // operatorsForType lists valid filter operators per schema field type.
 var operatorsForType = map[string]map[string]bool{
@@ -63,6 +67,10 @@ func BuildQuery(
 	params url.Values,
 	condition *rbac.WhereCondition,
 ) (*QueryBuilder, error) {
+	if condition != nil && !conditionFieldRe.MatchString(condition.Field) {
+		return nil, fmt.Errorf("invalid condition field: %q", condition.Field)
+	}
+
 	qb := &QueryBuilder{
 		resource:  resource,
 		res:       res,
@@ -77,6 +85,9 @@ func BuildQuery(
 			return nil, fmt.Errorf("invalid page parameter: must be a positive integer")
 		}
 		if p > 0 {
+			if p > MaxPage {
+				p = MaxPage
+			}
 			qb.page = p
 		}
 	}
@@ -226,10 +237,11 @@ func (qb *QueryBuilder) buildWhere() (clause string, args []any) {
 		}
 		sort.Strings(strFields)
 
+		escaped := strings.NewReplacer(`%`, `\%`, `_`, `\_`).Replace(qb.search)
 		var searchParts []string
 		for _, name := range strFields {
-			searchParts = append(searchParts, fmt.Sprintf("%s ILIKE $%d", name, idx))
-			args = append(args, "%"+qb.search+"%")
+			searchParts = append(searchParts, fmt.Sprintf("%s ILIKE $%d ESCAPE '\\'", name, idx))
+			args = append(args, "%"+escaped+"%")
 			idx++
 		}
 		if len(searchParts) > 0 {

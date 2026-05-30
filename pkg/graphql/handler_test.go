@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/extensions"
 	gqlhandler "github.com/miguelangel/appitools/pkg/graphql"
@@ -19,6 +20,8 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
+
+const gqlTestSecret = "gql-test-secret-1234"
 
 func startPostgres(t *testing.T) (string, func()) {
 	t.Helper()
@@ -43,25 +46,25 @@ func startPostgres(t *testing.T) (string, func()) {
 	return connStr, func() { ctr.Terminate(ctx) }
 }
 
-func withTenant(handler http.Handler, host string) http.Handler {
-	wrapped := tenant.TenantMiddleware(handler)
+// withFullStack wraps handler with TenantMiddleware → JWTMiddleware and injects the host.
+func withFullStack(handler http.Handler, host, jwtSecret string) http.Handler {
+	h := auth.JWTMiddleware(jwtSecret)(handler)
+	h = tenant.TenantMiddleware(h)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Host = host
-		wrapped.ServeHTTP(w, r)
+		h.ServeHTTP(w, r)
 	})
 }
 
-// gqlDo sends a GraphQL POST request and returns the decoded response map.
-func gqlDo(t *testing.T, srv *httptest.Server, query, role, userID string) map[string]any {
+// gqlDo sends a GraphQL POST request with a Bearer token and returns the decoded response map.
+// The caller is responsible for ensuring the HTTP status is 200; gqlDo fatals if it is not.
+func gqlDo(t *testing.T, srv *httptest.Server, query, token string) map[string]any {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"query": query})
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/graphql", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	if role != "" {
-		req.Header.Set("X-User-Role", role)
-	}
-	if userID != "" {
-		req.Header.Set("X-User-ID", userID)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := srv.Client().Do(req)
 	if err != nil {
@@ -136,15 +139,20 @@ func TestGraphQL(t *testing.T) {
 	tdb := db.NewTenantDB(pool)
 	hr := extensions.NewHookRunner(extensions.NewJSSandbox())
 	handler := gqlhandler.BuildHandler(testSchema, tdb, hr, &policy)
-	srv := httptest.NewServer(withTenant(handler, "gql.localhost"))
+	// host subdomain "gql" must match TenantID in tokens below
+	srv := httptest.NewServer(withFullStack(handler, "gql.localhost", gqlTestSecret))
 	defer srv.Close()
+
+	// Pre-generate tokens; TenantID must match "gql" (subdomain of gql.localhost)
+	adminToken, _ := auth.GenerateToken(auth.Claims{UserID: "u1", Role: "super_admin", TenantID: "gql"}, gqlTestSecret)
+	publicToken, _ := auth.GenerateToken(auth.Claims{UserID: "u2", Role: "public", TenantID: "gql"}, gqlTestSecret)
 
 	// track the ID created in CreateMutation for subsequent subtests
 	var createdID string
 
 	// ── 1. Query empty list ───────────────────────────────────────────────────
 	t.Run("QueryList", func(t *testing.T) {
-		result := gqlDo(t, srv, `{ guides { data { id code } meta { total } } }`, "super_admin", "")
+		result := gqlDo(t, srv, `{ guides { data { id code } meta { total } } }`, adminToken)
 		if msg := firstError(result); msg != "" {
 			t.Fatalf("unexpected error: %s", msg)
 		}
@@ -166,7 +174,7 @@ func TestGraphQL(t *testing.T) {
 			createGuide(input: {code: "G-001", origin: "Bogota", destination: "Medellin"}) {
 				id code status
 			}
-		}`, "super_admin", "")
+		}`, adminToken)
 		if msg := firstError(result); msg != "" {
 			t.Fatalf("unexpected error: %s", msg)
 		}
@@ -186,7 +194,7 @@ func TestGraphQL(t *testing.T) {
 		if createdID == "" {
 			t.Skip("skipped: no guide ID from CreateMutation")
 		}
-		result := gqlDo(t, srv, fmt.Sprintf(`{ guide(id: "%s") { id code } }`, createdID), "super_admin", "")
+		result := gqlDo(t, srv, fmt.Sprintf(`{ guide(id: "%s") { id code } }`, createdID), adminToken)
 		if msg := firstError(result); msg != "" {
 			t.Fatalf("unexpected error: %s", msg)
 		}
@@ -202,12 +210,11 @@ func TestGraphQL(t *testing.T) {
 
 	// ── 4. Query with filter ──────────────────────────────────────────────────
 	t.Run("Filter", func(t *testing.T) {
-		// Add a second guide directly so we can verify filter narrows results.
 		pool.Exec(ctx, `INSERT INTO tenant_gql.guides (code, origin, destination) VALUES ('G-002', 'Cali', 'Bogota')`)
 
 		result := gqlDo(t, srv,
 			`{ guides(filter: { code: { exact: "G-001" } }) { data { code } meta { total } } }`,
-			"super_admin", "")
+			adminToken)
 		if msg := firstError(result); msg != "" {
 			t.Fatalf("unexpected error: %s", msg)
 		}
@@ -230,7 +237,7 @@ func TestGraphQL(t *testing.T) {
 		if createdID == "" {
 			t.Skip("skipped: no guide ID from CreateMutation")
 		}
-		result := gqlDo(t, srv, fmt.Sprintf(`mutation { deleteGuide(id: "%s") }`, createdID), "super_admin", "")
+		result := gqlDo(t, srv, fmt.Sprintf(`mutation { deleteGuide(id: "%s") }`, createdID), adminToken)
 		if msg := firstError(result); msg != "" {
 			t.Fatalf("unexpected error: %s", msg)
 		}
@@ -240,8 +247,7 @@ func TestGraphQL(t *testing.T) {
 			t.Error("expected deleteGuide to return true")
 		}
 
-		// Verify the record is gone
-		result2 := gqlDo(t, srv, fmt.Sprintf(`{ guide(id: "%s") { id } }`, createdID), "super_admin", "")
+		result2 := gqlDo(t, srv, fmt.Sprintf(`{ guide(id: "%s") { id } }`, createdID), adminToken)
 		if msg := firstError(result2); msg != "" {
 			t.Fatalf("unexpected error after delete: %s", msg)
 		}
@@ -251,21 +257,26 @@ func TestGraphQL(t *testing.T) {
 		}
 	})
 
-	// ── 6. Missing token → error "missing token" ──────────────────────────────
+	// ── 6. Missing token → 401 at HTTP level ─────────────────────────────────
 	t.Run("MissingToken", func(t *testing.T) {
-		result := gqlDo(t, srv, `{ guides { data { id } } }`, "", "")
-		msg := firstError(result)
-		if msg != "missing token" {
-			t.Errorf("expected 'missing token' error, got %q", msg)
+		body, _ := json.Marshal(map[string]any{"query": `{ guides { data { id } } }`})
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/graphql", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("expected 401 without token, got %d", resp.StatusCode)
 		}
 	})
 
 	// ── 7. Role without permission → error "forbidden" ────────────────────────
 	t.Run("Forbidden", func(t *testing.T) {
-		// public role can read but not create
 		result := gqlDo(t, srv, `mutation {
 			createGuide(input: {code: "G-FBD", origin: "X", destination: "Y"}) { id }
-		}`, "public", "")
+		}`, publicToken)
 		msg := firstError(result)
 		if msg != "forbidden" {
 			t.Errorf("expected 'forbidden' error, got %q", msg)
