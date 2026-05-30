@@ -386,7 +386,7 @@ func TestHandlers_Pagination(t *testing.T) {
 		t.Fatalf("create schema: %v", err)
 	}
 	_, err = pool.Exec(ctx, `
-		CREATE TABLE tenant_pg.items (
+		CREATE TABLE tenant_pg.guides (
 			id   UUID DEFAULT gen_random_uuid() PRIMARY KEY,
 			code TEXT NOT NULL
 		)
@@ -397,9 +397,9 @@ func TestHandlers_Pagination(t *testing.T) {
 
 	// Insert 25 records.
 	for i := 0; i < 25; i++ {
-		_, err = pool.Exec(ctx, `INSERT INTO tenant_pg.items (code) VALUES ($1)`, fmt.Sprintf("IT-%03d", i))
+		_, err = pool.Exec(ctx, `INSERT INTO tenant_pg.guides (code) VALUES ($1)`, fmt.Sprintf("GU-%03d", i))
 		if err != nil {
-			t.Fatalf("seed item %d: %v", i, err)
+			t.Fatalf("seed guide %d: %v", i, err)
 		}
 	}
 
@@ -407,7 +407,7 @@ func TestHandlers_Pagination(t *testing.T) {
 	hr := extensions.NewHookRunner(extensions.NewJSSandbox())
 	testSchema := &schema.APISchema{
 		Resources: map[string]schema.ResourceSchema{
-			"items": {Fields: map[string]schema.FieldDef{"code": {Type: "string"}}},
+			"guides": {Fields: map[string]schema.FieldDef{"code": {Type: "string"}}},
 		},
 	}
 	router := handlers.NewRouter(tdb, hr, testSchema)
@@ -428,9 +428,9 @@ func TestHandlers_Pagination(t *testing.T) {
 
 	getPage := func(page, perPage int) paginatedResp {
 		t.Helper()
-		resp, err := srv.Client().Get(fmt.Sprintf("%s/api/items?page=%d&per_page=%d", srv.URL, page, perPage))
+		resp, err := srv.Client().Get(fmt.Sprintf("%s/api/guides?page=%d&per_page=%d", srv.URL, page, perPage))
 		if err != nil {
-			t.Fatalf("GET items: %v", err)
+			t.Fatalf("GET guides: %v", err)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
@@ -475,9 +475,9 @@ func TestHandlers_Pagination(t *testing.T) {
 	}
 
 	// ?page=abc → 400
-	resp, err := srv.Client().Get(srv.URL + "/api/items?page=abc")
+	resp, err := srv.Client().Get(srv.URL + "/api/guides?page=abc")
 	if err != nil {
-		t.Fatalf("GET /api/items?page=abc: %v", err)
+		t.Fatalf("GET /api/guides?page=abc: %v", err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
@@ -503,7 +503,7 @@ func TestHandlers_ETag(t *testing.T) {
 		t.Fatalf("create schema: %v", err)
 	}
 	_, err = pool.Exec(ctx, `
-		CREATE TABLE tenant_etag.items (
+		CREATE TABLE tenant_etag.guides (
 			id   UUID DEFAULT gen_random_uuid() PRIMARY KEY,
 			code TEXT NOT NULL
 		)
@@ -511,7 +511,7 @@ func TestHandlers_ETag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create table: %v", err)
 	}
-	_, err = pool.Exec(ctx, `INSERT INTO tenant_etag.items (code) VALUES ('IT-001')`)
+	_, err = pool.Exec(ctx, `INSERT INTO tenant_etag.guides (code) VALUES ('GU-001')`)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -520,7 +520,7 @@ func TestHandlers_ETag(t *testing.T) {
 	hr := extensions.NewHookRunner(extensions.NewJSSandbox())
 	testSchema := &schema.APISchema{
 		Resources: map[string]schema.ResourceSchema{
-			"items": {Fields: map[string]schema.FieldDef{"code": {Type: "string"}}},
+			"guides": {Fields: map[string]schema.FieldDef{"code": {Type: "string"}}},
 		},
 	}
 	router := handlers.NewRouter(tdb, hr, testSchema)
@@ -528,9 +528,9 @@ func TestHandlers_ETag(t *testing.T) {
 	defer srv.Close()
 
 	// First request — must return ETag and Cache-Control.
-	resp, err := srv.Client().Get(srv.URL + "/api/items")
+	resp, err := srv.Client().Get(srv.URL + "/api/guides")
 	if err != nil {
-		t.Fatalf("GET /api/items: %v", err)
+		t.Fatalf("GET /api/guides: %v", err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -545,7 +545,7 @@ func TestHandlers_ETag(t *testing.T) {
 	}
 
 	// Second request with matching If-None-Match → 304, no body.
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/items", nil)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/guides", nil)
 	req.Header.Set("If-None-Match", etag)
 	resp2, err := srv.Client().Do(req)
 	if err != nil {
@@ -557,11 +557,11 @@ func TestHandlers_ETag(t *testing.T) {
 	}
 
 	// Insert another record — ETag must change.
-	_, err = pool.Exec(ctx, `INSERT INTO tenant_etag.items (code) VALUES ('IT-002')`)
+	_, err = pool.Exec(ctx, `INSERT INTO tenant_etag.guides (code) VALUES ('GU-002')`)
 	if err != nil {
 		t.Fatalf("insert: %v", err)
 	}
-	resp3, err := srv.Client().Get(srv.URL + "/api/items")
+	resp3, err := srv.Client().Get(srv.URL + "/api/guides")
 	if err != nil {
 		t.Fatalf("GET after insert: %v", err)
 	}
