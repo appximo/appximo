@@ -26,8 +26,8 @@ var orderParamRe = regexp.MustCompile(`^order\[([a-z][a-z0-9_]*)\]$`)
 
 // operatorsForType lists valid filter operators per schema field type.
 var operatorsForType = map[string]map[string]bool{
-	"string":  {"eq": true, "partial": true},
-	"text":    {"eq": true, "partial": true},
+	"string":  {"eq": true, "partial": true, "start": true},
+	"text":    {"eq": true, "partial": true, "start": true},
 	"int":     {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true},
 	"int64":   {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true},
 	"float64": {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true},
@@ -206,6 +206,9 @@ func (qb *QueryBuilder) buildWhere() (clause string, args []any) {
 		case "partial":
 			parts = append(parts, fmt.Sprintf("%s ILIKE $%d", f.field, idx))
 			args = append(args, "%"+f.value+"%")
+		case "start":
+			parts = append(parts, fmt.Sprintf("%s ILIKE $%d", f.field, idx))
+			args = append(args, f.value+"%")
 		default:
 			parts = append(parts, fmt.Sprintf("%s %s $%d", f.field, filterToSQL(f.op), idx))
 			args = append(args, f.value)

@@ -17,6 +17,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/controlplane"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/extensions"
+	gqlhandler "github.com/miguelangel/appitools/pkg/graphql"
 	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/schema"
@@ -109,6 +110,12 @@ var serveCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		var rbacPolicy rbac.Policy
+		if err := json.Unmarshal(policyBytes, &rbacPolicy); err != nil {
+			fmt.Fprintln(os.Stderr, "Error parsing RBAC policy:", err)
+			os.Exit(1)
+		}
+
 		// Outer router: middleware must be registered before routes.
 		r := chi.NewMux()
 		r.Use(chimiddleware.RealIP)
@@ -132,6 +139,15 @@ var serveCmd = &cobra.Command{
 				"version": "0.1.0",
 			})
 		})
+
+		// GraphQL endpoint (always available).
+		r.Handle("/graphql", gqlhandler.BuildHandler(s, tdb, hr, &rbacPolicy))
+
+		// GraphiQL playground — only in development.
+		if os.Getenv("APPITOOLS_ENV") == "development" {
+			r.Handle("/graphiql", gqlhandler.PlaygroundHandler("/graphql"))
+			log.Println("GraphiQL playground enabled at /graphiql (APPITOOLS_ENV=development)")
+		}
 
 		// Mount API routes (BuildRouter registers /api/* routes only).
 		r.Mount("/", codegen.BuildRouter(s, tdb, hr))
