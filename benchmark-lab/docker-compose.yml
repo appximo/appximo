@@ -7,52 +7,69 @@ services:
       POSTGRES_USER: bench
       POSTGRES_PASSWORD: bench
       POSTGRES_DB: benchdb
+    command: >
+      postgres
+      -c max_connections=300
+      -c shared_buffers=256MB
+      -c work_mem=16MB
     volumes:
       - ./seed.sql:/docker-entrypoint-initdb.d/seed.sql
-    command: 
-      - "postgres"
-      - "-c"
-      - "max_connections=200"
-      - "-c"
-      - "shared_buffers=256MB"
-      - "-c"
-      - "work_mem=16MB"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bench -d benchdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
     deploy:
       resources:
         limits:
-          cpus: '0.8'
-          memory: 1G
-
-  appitools:
-    build: 
-      context: ../
-      dockerfile: Dockerfile
-    environment:
-      DATABASE_URL: "postgres://bench:bench@postgres:5432/benchdb?sslmode=disable"
-      PORT: "8080"
-      ADMIN_KEY: "secret"
-      JWT_SECRET: "secret"
-    depends_on:
-      - postgres
-    ports:
-      - "8081:8080"
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 256M
+          cpus: "0.5"
+          memory: 768M
 
   nestjs:
-    build:
-      context: ./nestjs-baseline
+    build: ./nestjs-baseline
     environment:
-      DATABASE_URL: "postgresql://bench:bench@postgres:5432/benchdb?schema=public"
+      DATABASE_URL: postgresql://bench:bench@postgres/benchdb?connection_limit=25
+      NODE_ENV: production
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     ports:
       - "3000:3000"
+    restart: on-failure
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 256M
+    profiles: ["nestjs"]
+
+  appitools:
+    image: appitools-bench:latest
+    environment:
+      DATABASE_URL: postgresql://bench:bench@postgres/benchdb
+      JWT_SECRET: benchsecret
+      ADMIN_KEY: benchadmin
+      APPITOOLS_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8081:8080"
+    restart: on-failure
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    profiles: ["appitools"]
+
+  k6:
+    image: grafana/k6:latest
+    environment:
+      TARGET_URL: ${TARGET_URL}
+      TENANT_ID: ${TENANT_ID:-tenant_1}
+    volumes:
+      - ./k6-load.js:/scripts/k6-load.js
+    command: run /scripts/k6-load.js
+    profiles: ["k6"]

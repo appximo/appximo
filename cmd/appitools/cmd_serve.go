@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime"
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
@@ -30,6 +31,8 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Levanta el servidor HTTP multi-tenant",
 	Run: func(cmd *cobra.Command, args []string) {
+		log.Printf("GOMAXPROCS=%d NumCPU=%d", runtime.GOMAXPROCS(0), runtime.NumCPU())
+
 		schemaFile, _ := cmd.Flags().GetString("schema")
 		port, _ := cmd.Flags().GetInt("port")
 

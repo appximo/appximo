@@ -14,20 +14,20 @@ export class GuidesController {
     @Query('filter') filter: any,
     @Req() req: any
   ) {
-    const tenantId = req.user.tenantId; // Obtenido del FakeJwtGuard
-    const status = filter?.status;
+    const tenantId = req.tenantId;
+    const status   = filter?.status;
 
     const skip = (Number(page) - 1) * Number(perPage);
     const take = Number(perPage);
 
     const guides = await this.prisma.guides.findMany({
       where: {
-        tenantId: tenantId,
-        status: status,
+        tenantId,
+        ...(status ? { status } : {}),
       },
       skip,
       take,
-      orderBy: { id: 'asc' }
+      orderBy: { createdAt: 'desc' },
     });
 
     return { data: guides };

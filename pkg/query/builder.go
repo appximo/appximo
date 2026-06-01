@@ -22,6 +22,9 @@ const (
 // filterParamRe matches filter[field] or filter[field][op]
 var filterParamRe = regexp.MustCompile(`^filter\[([a-z][a-z0-9_]*)\](?:\[([a-z]+)\])?$`)
 
+// uuidRe validates cursor values passed to ?after and ?before.
+var uuidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
 // orderParamRe matches order[field]=asc|desc
 var orderParamRe = regexp.MustCompile(`^order\[([a-z][a-z0-9_]*)\]$`)
 
@@ -57,6 +60,9 @@ type QueryBuilder struct {
 	sortOrder string
 	search    string
 	condition *rbac.WhereCondition
+	// Keyset (cursor) pagination — when set, OFFSET is skipped and an index range scan is used.
+	afterID  string // ?after=UUID  → WHERE id > UUID ORDER BY id ASC  LIMIT N
+	beforeID string // ?before=UUID → WHERE id < UUID ORDER BY id DESC LIMIT N
 }
 
 // BuildQuery parses url.Values and returns a validated QueryBuilder.
@@ -167,6 +173,20 @@ func BuildQuery(
 	}
 
 	qb.search = params.Get("search")
+
+	// Cursor pagination — mutually exclusive; ?after takes precedence if both given.
+	if after := params.Get("after"); after != "" {
+		if !uuidRe.MatchString(after) {
+			return nil, fmt.Errorf("invalid after cursor: must be a lowercase UUID")
+		}
+		qb.afterID = after
+	} else if before := params.Get("before"); before != "" {
+		if !uuidRe.MatchString(before) {
+			return nil, fmt.Errorf("invalid before cursor: must be a lowercase UUID")
+		}
+		qb.beforeID = before
+	}
+
 	return qb, nil
 }
 
@@ -178,9 +198,30 @@ func (qb *QueryBuilder) PerPage() int { return qb.perPage }
 
 // SQL returns the SELECT and COUNT queries with their respective arg slices.
 // selectArgs contains LIMIT/OFFSET appended after WHERE args; countArgs does not.
+// When afterID or beforeID is set, keyset pagination is used: no OFFSET, one round-trip.
 func (qb *QueryBuilder) SQL() (selectQ, countQ string, selectArgs, countArgs []any) {
 	whereClause, whereArgs := qb.buildWhere()
+	countArgs = whereArgs
 
+	// Keyset pagination — no OFFSET, ORDER BY driven by cursor direction.
+	if qb.afterID != "" || qb.beforeID != "" {
+		var orderClause string
+		if qb.beforeID != "" {
+			orderClause = "ORDER BY id DESC" // reversed; client reverses again to restore order
+		} else {
+			orderClause = "ORDER BY id ASC"
+		}
+		limitIdx := len(whereArgs) + 1
+		selectArgs = make([]any, len(whereArgs)+1)
+		copy(selectArgs, whereArgs)
+		selectArgs[len(whereArgs)] = qb.perPage
+		selectQ = fmt.Sprintf("SELECT * FROM %s%s %s LIMIT $%d",
+			qb.resource, whereClause, orderClause, limitIdx)
+		countQ = fmt.Sprintf("SELECT COUNT(*) FROM %s%s", qb.resource, whereClause)
+		return
+	}
+
+	// Default offset-based pagination.
 	orderClause := "ORDER BY id ASC"
 	if qb.sortField != "" {
 		orderClause = fmt.Sprintf("ORDER BY %s %s", qb.sortField, qb.sortOrder)
@@ -194,7 +235,6 @@ func (qb *QueryBuilder) SQL() (selectQ, countQ string, selectArgs, countArgs []a
 	copy(selectArgs, whereArgs)
 	selectArgs[len(whereArgs)] = qb.perPage
 	selectArgs[len(whereArgs)+1] = offset
-	countArgs = whereArgs
 
 	selectQ = fmt.Sprintf("SELECT * FROM %s%s %s LIMIT $%d OFFSET $%d",
 		qb.resource, whereClause, orderClause, limitIdx, offsetIdx)
@@ -205,6 +245,17 @@ func (qb *QueryBuilder) SQL() (selectQ, countQ string, selectArgs, countArgs []a
 func (qb *QueryBuilder) buildWhere() (clause string, args []any) {
 	var parts []string
 	idx := 1
+
+	// Cursor conditions must come first so parameter indices are stable.
+	if qb.afterID != "" {
+		parts = append(parts, fmt.Sprintf("id > $%d", idx))
+		args = append(args, qb.afterID)
+		idx++
+	} else if qb.beforeID != "" {
+		parts = append(parts, fmt.Sprintf("id < $%d", idx))
+		args = append(args, qb.beforeID)
+		idx++
+	}
 
 	if qb.condition != nil {
 		parts = append(parts, fmt.Sprintf("%s = $%d", qb.condition.Field, idx))

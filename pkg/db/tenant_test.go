@@ -140,3 +140,108 @@ func TestQueryTenant_InvalidSchemaNameRejected(t *testing.T) {
 		}
 	}
 }
+
+// Test 4: QueryDirect usa nombre calificado y devuelve filas del tenant correcto.
+func TestQueryDirect_ReturnsCorrectRows(t *testing.T) {
+	ctx := context.Background()
+	connStr, cleanup := startPostgres(t)
+	defer cleanup()
+
+	pool, err := db.NewPool(ctx, connStr)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	tdb := db.NewTenantDB(pool)
+
+	pool.Exec(ctx, `CREATE SCHEMA tenant_x`)
+	pool.Exec(ctx, `CREATE TABLE tenant_x.items (name text)`)
+	pool.Exec(ctx, `INSERT INTO tenant_x.items VALUES ('direct row')`)
+
+	// El query usa nombre sin calificar — QueryDirect lo califica internamente.
+	rows, err := tdb.QueryDirect(ctx, "tenant_x", "items", "SELECT name FROM items")
+	if err != nil {
+		t.Fatalf("QueryDirect: %v", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, name)
+	}
+
+	if len(names) != 1 || names[0] != "direct row" {
+		t.Errorf("unexpected rows: %v", names)
+	}
+}
+
+// Test 5: SQL injection en pgSchema es rechazado por validateSchemaName.
+func TestQueryDirect_SQLInjectionSchemaRejected(t *testing.T) {
+	ctx := context.Background()
+	tdb := db.NewTenantDB(nil)
+
+	badSchemas := []string{
+		"tenant_x; DROP TABLE users; --",
+		"tenant_X",
+		"tenant-x",
+		"",
+	}
+
+	for _, schema := range badSchemas {
+		_, err := tdb.QueryDirect(ctx, schema, "items", "SELECT 1")
+		if err == nil {
+			t.Errorf("expected error for schema %q, got nil", schema)
+		}
+	}
+}
+
+// Test 6: Dos tenants con QueryDirect ven solo sus propios datos — sin SET LOCAL.
+func TestQueryDirect_TenantIsolation(t *testing.T) {
+	ctx := context.Background()
+	connStr, cleanup := startPostgres(t)
+	defer cleanup()
+
+	pool, err := db.NewPool(ctx, connStr)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	tdb := db.NewTenantDB(pool)
+
+	for _, schema := range []string{"tenant_a2", "tenant_b2"} {
+		pool.Exec(ctx, `CREATE SCHEMA `+schema)
+		pool.Exec(ctx, `CREATE TABLE `+schema+`.items (name text)`)
+		pool.Exec(ctx, `INSERT INTO `+schema+`.items VALUES ('row from `+schema+`')`)
+	}
+
+	queryRows := func(schema string) []string {
+		rows, err := tdb.QueryDirect(ctx, schema, "items", "SELECT name FROM items")
+		if err != nil {
+			t.Fatalf("QueryDirect(%s): %v", schema, err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var n string
+			rows.Scan(&n)
+			out = append(out, n)
+		}
+		return out
+	}
+
+	rowsA := queryRows("tenant_a2")
+	rowsB := queryRows("tenant_b2")
+
+	if len(rowsA) != 1 || rowsA[0] != "row from tenant_a2" {
+		t.Errorf("tenant_a2 rows: %v", rowsA)
+	}
+	if len(rowsB) != 1 || rowsB[0] != "row from tenant_b2" {
+		t.Errorf("tenant_b2 rows: %v", rowsB)
+	}
+}

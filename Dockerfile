@@ -12,4 +12,5 @@ WORKDIR /app
 COPY --from=builder /app/appitools .
 COPY --from=builder /app/testdata/logistics/schema.json ./schema.json
 EXPOSE 8080
-CMD ["./appitools", "serve", "--schema", "schema.json"]
+ENTRYPOINT ["./appitools"]
+CMD ["serve", "--schema", "schema.json"]

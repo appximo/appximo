@@ -302,3 +302,73 @@ func TestBuildQuery_PageZeroFallsToDefault(t *testing.T) {
 		t.Errorf("page=0 should fall back to default %d, got %d", DefaultPage, qb.Page())
 	}
 }
+
+// ── Keyset (cursor) pagination ────────────────────────────────────────────────
+
+func TestBuildQuery_AfterCursor_GeneratesCorrectSQL(t *testing.T) {
+	const cursor = "01234567-89ab-cdef-0123-456789abcdef"
+	params := url.Values{"after": {cursor}, "filter[status]": {"pending"}}
+	qb := mustBuild(t, testResource(), params, nil)
+	selectQ, _, selectArgs, _ := qb.SQL()
+
+	if !strings.Contains(selectQ, "id > $1") {
+		t.Errorf("after cursor must produce 'id > $1': %s", selectQ)
+	}
+	if !strings.Contains(selectQ, "ORDER BY id ASC") {
+		t.Errorf("after cursor must use ORDER BY id ASC: %s", selectQ)
+	}
+	if strings.Contains(selectQ, "OFFSET") {
+		t.Errorf("after cursor must not have OFFSET: %s", selectQ)
+	}
+	if selectArgs[0] != cursor {
+		t.Errorf("first arg must be cursor UUID, got %v", selectArgs[0])
+	}
+}
+
+func TestBuildQuery_BeforeCursor_GeneratesCorrectSQL(t *testing.T) {
+	const cursor = "01234567-89ab-cdef-0123-456789abcdef"
+	params := url.Values{"before": {cursor}}
+	qb := mustBuild(t, testResource(), params, nil)
+	selectQ, _, _, _ := qb.SQL()
+
+	if !strings.Contains(selectQ, "id < $1") {
+		t.Errorf("before cursor must produce 'id < $1': %s", selectQ)
+	}
+	if !strings.Contains(selectQ, "ORDER BY id DESC") {
+		t.Errorf("before cursor must use ORDER BY id DESC: %s", selectQ)
+	}
+	if strings.Contains(selectQ, "OFFSET") {
+		t.Errorf("before cursor must not have OFFSET: %s", selectQ)
+	}
+}
+
+func TestBuildQuery_InvalidCursorRejected(t *testing.T) {
+	bad := []string{
+		"not-a-uuid",
+		"XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX", // uppercase
+		"01234567-89ab-cdef-0123-456789abcde",   // too short
+		"",
+	}
+	for _, v := range bad {
+		if v == "" {
+			continue // empty string is just ignored by the param parser
+		}
+		mustError(t, testResource(), url.Values{"after": {v}})
+		mustError(t, testResource(), url.Values{"before": {v}})
+	}
+}
+
+func TestBuildQuery_AfterTakesPrecedenceOverBefore(t *testing.T) {
+	const after  = "aaaaaaaa-0000-0000-0000-000000000000"
+	const before = "bbbbbbbb-0000-0000-0000-000000000000"
+	params := url.Values{"after": {after}, "before": {before}}
+	qb := mustBuild(t, testResource(), params, nil)
+	selectQ, _, _, _ := qb.SQL()
+
+	if !strings.Contains(selectQ, "id > $1") {
+		t.Errorf("after must take precedence: %s", selectQ)
+	}
+	if strings.Contains(selectQ, "id < $") {
+		t.Errorf("before must be ignored when after is present: %s", selectQ)
+	}
+}

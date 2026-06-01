@@ -413,4 +413,75 @@ A field allowlist for read-restricted roles. When set, the evaluation result inc
     }
   }
 }
+
+---
+
+## Paginación de la API REST
+
+### Offset (default)
+
+```
+GET /api/guides?page=2&per_page=20
+```
+
+| Parámetro | Default | Máximo | Descripción |
+|---|---|---|---|
+| `page` | 1 | 10000 | Página (1-based) |
+| `per_page` | 20 | 100 | Registros por página |
+
+### Cursor / Keyset (recomendado para producción)
+
+Evita la degradación de `OFFSET` en tablas grandes. Usa un index range scan — rendimiento constante sin importar la profundidad de paginación.
+
+```
+GET /api/guides?after=01234567-89ab-cdef-0123-456789abcdef&per_page=20
+GET /api/guides?before=01234567-89ab-cdef-0123-456789abcdef&per_page=20
+```
+
+| Parámetro | SQL generado | Orden |
+|---|---|---|
+| `after=UUID` | `WHERE id > UUID LIMIT N` | `id ASC` |
+| `before=UUID` | `WHERE id < UUID LIMIT N` | `id DESC` (cliente invierte) |
+
+`after` tiene precedencia sobre `before` si ambos se envían.
+
+**Flujo típico:**
+```
+1ª página: GET /api/guides?per_page=20
+           → guarda data[last].id como cursor
+
+Sig. página: GET /api/guides?after={cursor}&per_page=20
+Pág. anterior: GET /api/guides?before={first_id}&per_page=20
+```
+
+### Filtros
+
+```
+GET /api/guides?filter[status][eq]=pending
+GET /api/guides?filter[code][partial]=GD-
+GET /api/guides?filter[weight_kg][gte]=50
+```
+
+| Tipo de campo | Operadores |
+|---|---|
+| `string`, `text` | `eq`, `partial`, `start` |
+| `int`, `int64`, `float64` | `eq`, `gte`, `lte`, `gt`, `lt` |
+| `time` | `eq`, `gte`, `lte`, `gt`, `lt`, `after`, `before` |
+| `uuid`, `bool` | `eq` |
+
+Sin operador explícito → `eq`: `filter[status]=pending`
+
+### Ordenamiento
+
+```
+GET /api/guides?order[created_at]=desc
+```
+
+### Búsqueda full-text
+
+```
+GET /api/guides?search=bogota
+```
+
+Busca en todos los campos `string` y `text` (ILIKE).
 ```

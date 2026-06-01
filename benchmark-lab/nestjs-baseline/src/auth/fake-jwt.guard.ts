@@ -1,17 +1,15 @@
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
-import { Observable } from 'rxjs';
 
 @Injectable()
 export class FakeJwtGuard implements CanActivate {
-  canActivate(
-    context: ExecutionContext,
-  ): boolean | Promise<boolean> | Observable<boolean> {
-    const request = context.switchToHttp().getRequest();
-    const token = request.headers.authorization;
-    if (token) {
-        request.user = { tenantId: 'tenant_acme' };
-        return true;
-    }
-    return false;
+  canActivate(context: ExecutionContext): boolean {
+    const req = context.switchToHttp().getRequest();
+    const auth = req.headers['authorization'];
+    if (!auth) return false;
+
+    req.tenantId = req.headers['x-tenant-id'] || 'tenant_1';
+    req.userId   = 'bench-user-1';
+    req.role     = 'admin';
+    return true;
   }
 }

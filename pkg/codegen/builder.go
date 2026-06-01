@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -54,15 +52,10 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				return
 			}
 
-			selectQ, countQ, selectArgs, countArgs := qb.SQL()
+			selectQ, _, selectArgs, _ := qb.SQL()
 
-			total, err := tdb.QueryScalarTenant(req.Context(), tc.PGSchema, countQ, countArgs...)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema, selectQ, selectArgs...)
+			// QueryDirect: schema-qualified table name — no transaction, no SET LOCAL.
+			rows, err := tdb.QueryDirect(req.Context(), tc.PGSchema, name, selectQ, selectArgs...)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -83,45 +76,18 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				data = []map[string]any{}
 			}
 
-			totalPages := (total + int64(qb.PerPage()) - 1) / int64(qb.PerPage())
-			if totalPages == 0 {
-				totalPages = 1
-			}
-			hasNext := total > int64(qb.Page()*qb.PerPage())
+			hasNext := len(data) == qb.PerPage()
 			hasPrev := qb.Page() > 1
-
-			// Build pagination links preserving filters/sort from request
-			base := "/api/" + name
-			buildLink := func(p int) string {
-				v := url.Values{}
-				v.Set("page", strconv.Itoa(p))
-				v.Set("per_page", strconv.Itoa(qb.PerPage()))
-				return base + "?" + v.Encode()
-			}
-			links := map[string]any{
-				"self":  buildLink(qb.Page()),
-				"first": buildLink(1),
-				"last":  buildLink(int(totalPages)),
-			}
-			if hasPrev {
-				links["prev"] = buildLink(qb.Page() - 1)
-			}
-			if hasNext {
-				links["next"] = buildLink(qb.Page() + 1)
-			}
 
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{
 				"data": data,
 				"meta": map[string]any{
-					"page":        qb.Page(),
-					"per_page":    qb.PerPage(),
-					"total":       total,
-					"total_pages": totalPages,
-					"has_next":    hasNext,
-					"has_prev":    hasPrev,
+					"page":     qb.Page(),
+					"per_page": qb.PerPage(),
+					"has_next": hasNext,
+					"has_prev": hasPrev,
 				},
-				"links": links,
 			})
 		}))
 

@@ -9,6 +9,26 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// qualifyTableNames rewrites FROM/JOIN references to unqualified tableName
+// into schema-qualified form using pgx.Identifier for safe quoting.
+// Example: "SELECT * FROM guides WHERE x=$1" → "SELECT * FROM "tenant_10"."guides" WHERE x=$1"
+func qualifyTableNames(query, schema, table string) string {
+	qualified := pgx.Identifier{schema, table}.Sanitize()
+	re := regexp.MustCompile(`(?i)\b(FROM|JOIN)\s+` + regexp.QuoteMeta(table) + `\b`)
+	return re.ReplaceAllString(query, "${1} "+qualified)
+}
+
+// directRows wraps pgx.Rows and releases the acquired pool connection on Close.
+type directRows struct {
+	pgx.Rows
+	conn *pgxpool.Conn
+}
+
+func (r *directRows) Close() {
+	r.Rows.Close()
+	r.conn.Release()
+}
+
 // TenantDB wraps a pgxpool and enforces per-tenant schema isolation via SET LOCAL search_path.
 type TenantDB struct {
 	pool *pgxpool.Pool
@@ -161,6 +181,34 @@ func (tdb *TenantDB) QueryScalarTenant(ctx context.Context, schemaName, query st
 		}
 	}
 	return n, rows.Err()
+}
+
+// QueryDirect runs a SELECT using a schema-qualified table name — no transaction,
+// no SET LOCAL. One roundtrip instead of four. Use for read-only list/get handlers.
+// tableName must be the unqualified resource name (e.g. "guides"); pgSchema the
+// tenant schema (e.g. "tenant_10"). Both are validated before use.
+func (tdb *TenantDB) QueryDirect(ctx context.Context, pgSchema, tableName, query string, args ...any) (pgx.Rows, error) {
+	if err := validateSchemaName(pgSchema); err != nil {
+		return nil, err
+	}
+	if err := validateSchemaName(tableName); err != nil {
+		return nil, fmt.Errorf("invalid table name %q: %w", tableName, err)
+	}
+
+	qualified := qualifyTableNames(query, pgSchema, tableName)
+
+	conn, err := tdb.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire conn: %w", err)
+	}
+
+	rows, err := conn.Query(ctx, qualified, args...)
+	if err != nil {
+		conn.Release()
+		return nil, fmt.Errorf("query: %w", err)
+	}
+
+	return &directRows{Rows: rows, conn: conn}, nil
 }
 
 // normalizeDBValue converts pgx-specific types to JSON-friendly Go types.
