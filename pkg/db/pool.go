@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -14,8 +15,11 @@ func NewPool(ctx context.Context, connStr string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("parse connection string: %w", err)
 	}
 
-	cfg.MaxConns = 6
-	cfg.MinConns = 4
+	cores := runtime.GOMAXPROCS(0)
+	maxConns := int32(cores*2 + 2)
+	minConns := int32(max(2, int(maxConns)/2))
+	cfg.MaxConns = maxConns
+	cfg.MinConns = minConns
 	cfg.MaxConnLifetime = time.Hour
 	cfg.HealthCheckPeriod = 30 * time.Second
 

@@ -8,14 +8,17 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"runtime/debug"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-
-	"time"
-
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	_ "go.uber.org/automaxprocs"
+
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/cache"
 	"github.com/miguelangel/appitools/pkg/codegen"
@@ -23,8 +26,10 @@ import (
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/extensions"
 	gqlhandler "github.com/miguelangel/appitools/pkg/graphql"
+	"github.com/miguelangel/appitools/pkg/logging"
 	appmiddleware "github.com/miguelangel/appitools/pkg/middleware"
 	"github.com/miguelangel/appitools/pkg/migration"
+	"github.com/miguelangel/appitools/pkg/observability"
 	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
@@ -35,6 +40,22 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Levanta el servidor HTTP multi-tenant",
 	Run: func(cmd *cobra.Command, args []string) {
+		// TAREA 4: GOGC / GOMEMLIMIT from env.
+		if v := os.Getenv("GOGC"); v != "" {
+			if pct, err := strconv.Atoi(v); err == nil {
+				debug.SetGCPercent(pct)
+			}
+		}
+		if v := os.Getenv("GOMEMLIMIT"); v != "" {
+			if bytes, err := parseMemLimit(v); err == nil {
+				debug.SetMemoryLimit(bytes)
+			}
+		}
+
+		// TAREA 3: init structured logger.
+		logging.Init(os.Getenv("APPITOOLS_ENV"))
+
+		// TAREA 1: automaxprocs already applied via blank import; log the result.
 		log.Printf("GOMAXPROCS=%d NumCPU=%d", runtime.GOMAXPROCS(0), runtime.NumCPU())
 
 		schemaFile, _ := cmd.Flags().GetString("schema")
@@ -95,9 +116,18 @@ var serveCmd = &cobra.Command{
 
 		schemaCache := tenant.NewSchemaCache()
 
+		// Stage 1 observability components (created before routers so RequestLogger can use them).
+		hist := observability.NewTenantHistogram()
+		anomaly := observability.NewAnomalyDetector()
+		errStore := observability.NewErrorStore()
+		synthmon := observability.NewSyntheticMonitor(nil) // no synthetic checks by default
+		obsServer := observability.NewObsServer(hist, errStore, anomaly, synthmon)
+
 		// Control plane (port 9090) — start in background goroutine.
 		cpSvc := controlplane.NewService(pool, redisClient)
 		cpRouter := controlplane.NewControlPlaneRouter(cpSvc, adminKey)
+		// Mount debug endpoints on the control plane (admin-protected via obs router's own key check).
+		cpRouter.Mount("/", obsServer.Router(adminKey))
 		go func() {
 			fmt.Println("Control plane serving on :9090")
 			if err := http.ListenAndServe(":9090", cpRouter); err != nil {
@@ -138,7 +168,9 @@ var serveCmd = &cobra.Command{
 		r.Use(responseCache.Middleware)
 		r.Use(auth.JWTMiddleware(jwtSecret))
 		r.Use(rbac.RBACMiddleware(policyBytes))
-		r.Use(chimiddleware.Logger)
+		r.Use(logging.RequestLogger(hist.Record, func(id string, ms float64) {
+			anomaly.Observe(id, ms) //nolint:errcheck — anomaly result not acted upon per-request
+		}))
 		r.Use(chimiddleware.Recoverer)
 
 		// pprof on a separate port — only in development, no auth, never reachable in production
@@ -185,6 +217,24 @@ func init() {
 	serveCmd.Flags().String("schema", "schema.json", "path to schema.json")
 	serveCmd.Flags().Int("port", 8080, "HTTP port to listen on")
 	rootCmd.AddCommand(serveCmd)
+}
+
+// parseMemLimit parses strings like "512MiB", "1GiB", "1073741824" into bytes.
+func parseMemLimit(s string) (int64, error) {
+	units := map[string]int64{
+		"GiB": 1 << 30, "MiB": 1 << 20, "KiB": 1 << 10,
+		"GB": 1e9, "MB": 1e6, "KB": 1e3,
+	}
+	for suffix, mult := range units {
+		if strings.HasSuffix(s, suffix) {
+			n, err := strconv.ParseInt(strings.TrimSuffix(s, suffix), 10, 64)
+			if err != nil {
+				return 0, err
+			}
+			return n * mult, nil
+		}
+	}
+	return strconv.ParseInt(s, 10, 64)
 }
 
 // startCacheInvalidator listens on the Postgres "schema_updated" NOTIFY channel
