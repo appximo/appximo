@@ -45,10 +45,17 @@ func JWTMiddleware(secret string) func(http.Handler) http.Handler {
 				return
 			}
 
-			claims, err := ValidateToken(strings.TrimPrefix(header, prefix), secret)
-			if err != nil {
-				writeJSON401(w, "invalid token")
-				return
+			tokenStr := strings.TrimPrefix(header, prefix)
+
+			claims, ok := GetCachedClaims(tokenStr)
+			if !ok {
+				var err error
+				claims, err = ValidateToken(tokenStr, secret)
+				if err != nil {
+					writeJSON401(w, "invalid token")
+					return
+				}
+				setCachedClaims(tokenStr, claims)
 			}
 
 			// Reject tokens whose TenantID does not match the request tenant.

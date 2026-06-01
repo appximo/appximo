@@ -135,16 +135,21 @@ var serveCmd = &cobra.Command{
 		r.Use(chimiddleware.RealIP)
 		r.Use(chimiddleware.RequestID)
 		r.Use(tenant.TenantMiddleware)
+		r.Use(responseCache.Middleware)
 		r.Use(auth.JWTMiddleware(jwtSecret))
 		r.Use(rbac.RBACMiddleware(policyBytes))
-		r.Use(responseCache.Middleware)
 		r.Use(chimiddleware.Logger)
 		r.Use(chimiddleware.Recoverer)
 
-		// pprof endpoints — only when APPITOOLS_ENV=development (never in production)
+		// pprof on a separate port — only in development, no auth, never reachable in production
 		if os.Getenv("APPITOOLS_ENV") == "development" {
-			r.Mount("/debug/pprof", chimiddleware.Profiler())
-			log.Println("WARNING: pprof profiler enabled (APPITOOLS_ENV=development)")
+			pprofMux := chimiddleware.Profiler()
+			go func() {
+				log.Println("WARNING: pprof profiler enabled on :6060 (APPITOOLS_ENV=development)")
+				if err := http.ListenAndServe(":6060", pprofMux); err != nil {
+					log.Println("pprof server:", err)
+				}
+			}()
 		}
 
 		r.Get("/health", func(w http.ResponseWriter, req *http.Request) {

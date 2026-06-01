@@ -6,11 +6,25 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // tenantRe: starts and ends with alnum, allows hyphens in the middle, 2–30 chars total.
 // This rejects single-char subdomains, trailing hyphens, and uppercase.
 var tenantRe = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{0,28}[a-z0-9]$`)
+
+// validSubdomains caches the result of tenantRe.MatchString per subdomain string.
+// Tenant IDs are finite and immutable: once a subdomain is validated, the result never changes.
+var validSubdomains sync.Map // map[string]bool
+
+func isValidSubdomain(s string) bool {
+	if v, ok := validSubdomains.Load(s); ok {
+		return v.(bool)
+	}
+	result := tenantRe.MatchString(s)
+	validSubdomains.Store(s, result)
+	return result
+}
 
 // TenantMiddleware extracts the tenant from the request's Host subdomain.
 //
@@ -35,7 +49,7 @@ func TenantMiddleware(next http.Handler) http.Handler {
 
 		subdomain := host[:dotIdx]
 
-		if !tenantRe.MatchString(subdomain) {
+		if !isValidSubdomain(subdomain) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": "invalid tenant"})

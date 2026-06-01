@@ -3,9 +3,11 @@ package cache
 import (
 	"bytes"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
@@ -77,15 +79,30 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		key := r.URL.RequestURI() // path + query string
-
-		if item := rc.get(tc.ID, key); item != nil {
-			w.Header().Set("Content-Type", item.contentType)
-			w.Header().Set("X-Cache", "HIT")
-			w.WriteHeader(item.status)
-			w.Write(item.body) //nolint:errcheck
-			return
+		hdr := r.Header.Get("Authorization")
+		tokenStr := ""
+		if strings.HasPrefix(hdr, "Bearer ") {
+			tokenStr = strings.TrimPrefix(hdr, "Bearer ")
 		}
+
+		// Serve from response cache only when this token was recently validated by JWT.
+		// No Authorization header → no short-circuit (JWT will reject protected paths).
+		// Unknown token → no short-circuit (JWT will validate it on the way through).
+		// Known token + cached response → skip JWT HMAC and DB entirely.
+		if tokenStr != "" {
+			if _, ok := auth.GetCachedClaims(tokenStr); ok {
+				key := r.URL.RequestURI()
+				if item := rc.get(tc.ID, key); item != nil {
+					w.Header().Set("Content-Type", item.contentType)
+					w.Header().Set("X-Cache", "HIT")
+					w.WriteHeader(item.status)
+					w.Write(item.body) //nolint:errcheck
+					return
+				}
+			}
+		}
+
+		key := r.URL.RequestURI() // path + query string
 
 		cw := &captureWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(cw, r)

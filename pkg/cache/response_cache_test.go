@@ -7,8 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
+
+const testToken = "test-bearer-token-for-cache-tests"
 
 // withTenant injects a TenantCtx into the request context.
 func withTenant(r *http.Request, id string) *http.Request {
@@ -17,6 +20,14 @@ func withTenant(r *http.Request, id string) *http.Request {
 		PGSchema: "tenant_" + id,
 	})
 	return r.WithContext(ctx)
+}
+
+// withAuth adds a Bearer token header and pre-populates the JWT claims cache
+// so the cache middleware's auth guard lets the request through to cache logic.
+func withAuth(r *http.Request) *http.Request {
+	auth.SetCachedClaims(testToken, &auth.Claims{Role: "super_admin", TenantID: "acme"})
+	r.Header.Set("Authorization", "Bearer "+testToken)
+	return r
 }
 
 // echoJSON returns an HTTP handler that responds with a JSON body at the given status.
@@ -54,15 +65,17 @@ func TestCacheHit(t *testing.T) {
 		w.Write([]byte(`{"data":[]}`)) //nolint:errcheck
 	}))
 
-	req := withTenant(httptest.NewRequest(http.MethodGet, "/api/guides", nil), "acme")
+	makeReq := func() *http.Request {
+		return withAuth(withTenant(httptest.NewRequest(http.MethodGet, "/api/guides", nil), "acme"))
+	}
 
 	// First request — miss
 	rec1 := httptest.NewRecorder()
-	handler.ServeHTTP(rec1, req)
+	handler.ServeHTTP(rec1, makeReq())
 
 	// Second request — should hit cache
 	rec2 := httptest.NewRecorder()
-	handler.ServeHTTP(rec2, withTenant(httptest.NewRequest(http.MethodGet, "/api/guides", nil), "acme"))
+	handler.ServeHTTP(rec2, makeReq())
 
 	if calls != 1 {
 		t.Errorf("inner handler should be called once, got %d", calls)
@@ -197,6 +210,17 @@ func TestCacheNon200NotCached(t *testing.T) {
 }
 
 func TestCacheTenantIsolation(t *testing.T) {
+	const tokenAcme = "test-token-acme"
+	const tokenBeta = "test-token-beta"
+	auth.SetCachedClaims(tokenAcme, &auth.Claims{Role: "super_admin", TenantID: "acme"})
+	auth.SetCachedClaims(tokenBeta, &auth.Claims{Role: "super_admin", TenantID: "beta"})
+
+	makeReq := func(tenantID, token string) *http.Request {
+		r := withTenant(httptest.NewRequest(http.MethodGet, "/api/guides", nil), tenantID)
+		r.Header.Set("Authorization", "Bearer "+token)
+		return r
+	}
+
 	rc := New(5 * time.Second)
 	calls := map[string]int{}
 	handler := rc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -208,14 +232,14 @@ func TestCacheTenantIsolation(t *testing.T) {
 	}))
 
 	// Prime both tenants' caches
-	handler.ServeHTTP(httptest.NewRecorder(), withTenant(httptest.NewRequest(http.MethodGet, "/api/guides", nil), "acme"))
-	handler.ServeHTTP(httptest.NewRecorder(), withTenant(httptest.NewRequest(http.MethodGet, "/api/guides", nil), "beta"))
+	handler.ServeHTTP(httptest.NewRecorder(), makeReq("acme", tokenAcme))
+	handler.ServeHTTP(httptest.NewRecorder(), makeReq("beta", tokenBeta))
 
 	// Second requests — should each hit their own cache
 	recA := httptest.NewRecorder()
 	recB := httptest.NewRecorder()
-	handler.ServeHTTP(recA, withTenant(httptest.NewRequest(http.MethodGet, "/api/guides", nil), "acme"))
-	handler.ServeHTTP(recB, withTenant(httptest.NewRequest(http.MethodGet, "/api/guides", nil), "beta"))
+	handler.ServeHTTP(recA, makeReq("acme", tokenAcme))
+	handler.ServeHTTP(recB, makeReq("beta", tokenBeta))
 
 	if calls["acme"] != 1 || calls["beta"] != 1 {
 		t.Errorf("each tenant should hit handler once; got acme=%d beta=%d", calls["acme"], calls["beta"])
@@ -241,7 +265,7 @@ func TestCacheInvalidate(t *testing.T) {
 	}))
 
 	makeReq := func() *http.Request {
-		return withTenant(httptest.NewRequest(http.MethodGet, "/api/guides", nil), "acme")
+		return withAuth(withTenant(httptest.NewRequest(http.MethodGet, "/api/guides", nil), "acme"))
 	}
 
 	handler.ServeHTTP(httptest.NewRecorder(), makeReq()) // miss, populates cache
@@ -265,17 +289,17 @@ func TestCacheMaxPerTenant(t *testing.T) {
 
 	// Fill up to the limit with 1000 distinct URLs.
 	for i := 0; i < maxPerTenant; i++ {
-		req := withTenant(httptest.NewRequest(http.MethodGet, "/api/guides?page="+strconv.Itoa(i), nil), "acme")
+		req := withAuth(withTenant(httptest.NewRequest(http.MethodGet, "/api/guides?page="+strconv.Itoa(i), nil), "acme"))
 		handler.ServeHTTP(httptest.NewRecorder(), req)
 	}
 	callsAtLimit := calls
 
 	// One more unique URL — should be dropped (over limit)
-	overReq := withTenant(httptest.NewRequest(http.MethodGet, "/api/guides?overflow=true", nil), "acme")
+	overReq := withAuth(withTenant(httptest.NewRequest(http.MethodGet, "/api/guides?overflow=true", nil), "acme"))
 	handler.ServeHTTP(httptest.NewRecorder(), overReq)
 	// Re-request the overflow key — should hit handler again (was not cached)
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, overReq)
+	handler.ServeHTTP(rec, withAuth(withTenant(httptest.NewRequest(http.MethodGet, "/api/guides?overflow=true", nil), "acme")))
 
 	if rec.Header().Get("X-Cache") == "HIT" {
 		t.Error("overflow entry must not be cached when bucket is full")
@@ -293,8 +317,8 @@ func TestCacheQueryStringDistinct(t *testing.T) {
 		w.Write([]byte(`{}`)) //nolint:errcheck
 	}))
 
-	req1 := withTenant(httptest.NewRequest(http.MethodGet, "/api/guides?page=1", nil), "acme")
-	req2 := withTenant(httptest.NewRequest(http.MethodGet, "/api/guides?page=2", nil), "acme")
+	req1 := withAuth(withTenant(httptest.NewRequest(http.MethodGet, "/api/guides?page=1", nil), "acme"))
+	req2 := withAuth(withTenant(httptest.NewRequest(http.MethodGet, "/api/guides?page=2", nil), "acme"))
 
 	handler.ServeHTTP(httptest.NewRecorder(), req1)
 	handler.ServeHTTP(httptest.NewRecorder(), req2)
