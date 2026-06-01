@@ -1,0 +1,57 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "fintech-api",
+  "resources": {
+    "accounts": {
+      "fields": {
+        "owner_id":   {"type":"uuid","required":true},
+        "type":       {"type":"string","enum":["savings","checking","investment"]},
+        "balance":    {"type":"float64"},
+        "currency":   {"type":"string","required":true},
+        "status":     {"type":"string","enum":["active","frozen","closed"]},
+        "created_at": {"type":"time","auto":true}
+      }
+    },
+    "transactions": {
+      "fields": {
+        "account_id": {"type":"uuid","relation":"accounts","required":true},
+        "amount":     {"type":"float64","required":true},
+        "type":       {"type":"string","enum":["credit","debit","transfer"]},
+        "reference":  {"type":"string","unique":true},
+        "status":     {"type":"string","enum":["pending","completed","failed","reversed"]},
+        "created_at": {"type":"time","auto":true}
+      },
+      "hooks": {
+        "before_create": {
+          "type": "js",
+          "script": "if(data.amount<=0){result.proceed=false;result.error='Amount must be positive';} if(data.type==='debit'&&data.amount>1000000){result.proceed=false;result.error='Debit limit exceeded';}"
+        }
+      }
+    },
+    "beneficiaries": {
+      "fields": {
+        "owner_id":       {"type":"uuid","required":true},
+        "name":           {"type":"string","required":true},
+        "account_number": {"type":"string","required":true},
+        "bank_code":      {"type":"string","required":true},
+        "active":         {"type":"bool"}
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "super_admin": {"resources":"*","actions":["*"]},
+      "agent":       {"resources":"*","actions":["read","create","update"]},
+      "customer":    {
+        "resources": ["accounts","transactions","beneficiaries"],
+        "actions":   ["read","create"],
+        "conditions": {"field":"owner_id","op":"eq","val":"$user_id"}
+      },
+      "auditor": {
+        "resources": "*",
+        "actions":   ["read"]
+      }
+    }
+  }
+}

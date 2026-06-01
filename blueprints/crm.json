@@ -1,0 +1,57 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "crm-api",
+  "resources": {
+    "contacts": {
+      "fields": {
+        "name":       {"type":"string","required":true},
+        "email":      {"type":"string","unique":true},
+        "phone":      {"type":"string"},
+        "company":    {"type":"string"},
+        "status":     {"type":"string","enum":["lead","prospect","customer","churned"]},
+        "owner_id":   {"type":"uuid","relation":"users"},
+        "created_at": {"type":"time","auto":true}
+      }
+    },
+    "deals": {
+      "fields": {
+        "contact_id": {"type":"uuid","relation":"contacts","required":true},
+        "title":      {"type":"string","required":true},
+        "stage":      {"type":"string","enum":["discovery","proposal","negotiation","closed_won","closed_lost"]},
+        "value":      {"type":"float64"},
+        "close_date": {"type":"time"},
+        "owner_id":   {"type":"uuid","relation":"users"}
+      }
+    },
+    "activities": {
+      "fields": {
+        "deal_id":      {"type":"uuid","relation":"deals","required":true},
+        "type":         {"type":"string","enum":["call","email","meeting","note"]},
+        "notes":        {"type":"text"},
+        "scheduled_at": {"type":"time"},
+        "completed":    {"type":"bool"}
+      }
+    },
+    "users": {
+      "fields": {
+        "name":   {"type":"string","required":true},
+        "email":  {"type":"string","unique":true,"required":true},
+        "role":   {"type":"string","enum":["admin","manager","sales_rep","viewer"]},
+        "active": {"type":"bool"}
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin":    {"resources":"*","actions":["*"]},
+      "manager":  {"resources":"*","actions":["read","create","update"]},
+      "sales_rep":{
+        "resources":["contacts","deals","activities"],
+        "actions":["read","create","update"],
+        "conditions":{"field":"owner_id","op":"eq","val":"$user_id"}
+      },
+      "viewer":   {"resources":"*","actions":["read"]}
+    }
+  }
+}

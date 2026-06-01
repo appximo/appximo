@@ -1,0 +1,57 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "ecommerce-api",
+  "resources": {
+    "products": {
+      "fields": {
+        "name":        {"type":"string","required":true},
+        "price":       {"type":"float64","required":true},
+        "stock":       {"type":"int","required":true},
+        "sku":         {"type":"string","unique":true},
+        "category_id": {"type":"uuid","relation":"categories"},
+        "active":      {"type":"bool"},
+        "created_at":  {"type":"time","auto":true}
+      },
+      "hooks": {
+        "before_create": {
+          "type": "js",
+          "script": "if(data.price<=0){result.proceed=false;result.error='Price must be positive';}"
+        }
+      }
+    },
+    "categories": {
+      "fields": {
+        "name":      {"type":"string","required":true},
+        "slug":      {"type":"string","unique":true},
+        "parent_id": {"type":"uuid","relation":"categories"}
+      }
+    },
+    "customers": {
+      "fields": {
+        "name":    {"type":"string","required":true},
+        "email":   {"type":"string","unique":true},
+        "phone":   {"type":"string"},
+        "address": {"type":"text"}
+      }
+    },
+    "orders": {
+      "fields": {
+        "customer_id": {"type":"uuid","relation":"customers","required":true},
+        "status":      {"type":"string","enum":["pending","confirmed","shipped","delivered","cancelled"]},
+        "total":       {"type":"float64"},
+        "notes":       {"type":"text"},
+        "created_at":  {"type":"time","auto":true}
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin":    {"resources":"*","actions":["*"]},
+      "vendor":   {"resources":["products","categories","orders"],"actions":["read","create","update"]},
+      "customer": {"resources":["products","categories"],"actions":["read"]},
+      "public":   {"resources":["products"],"actions":["read"],
+                   "fields":["name","price","sku"]}
+    }
+  }
+}

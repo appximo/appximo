@@ -18,13 +18,19 @@ var initCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
+		blueprint, _ := cmd.Flags().GetString("blueprint")
+
+		schemaBytes, err := resolveSchema(blueprint)
+		if err != nil {
+			return err
+		}
 
 		if err := os.MkdirAll(name, 0755); err != nil {
 			return fmt.Errorf("crear directorio %q: %w", name, err)
 		}
 
 		schemaPath := filepath.Join(name, "schema.json")
-		if err := os.WriteFile(schemaPath, starterSchema, 0644); err != nil {
+		if err := os.WriteFile(schemaPath, schemaBytes, 0644); err != nil {
 			return fmt.Errorf("escribir schema.json: %w", err)
 		}
 
@@ -33,7 +39,11 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf("escribir go.mod: %w", err)
 		}
 
-		fmt.Printf("Proyecto %q inicializado.\n", name)
+		if blueprint != "" {
+			fmt.Printf("Proyecto %q inicializado con blueprint %q.\n", name, blueprint)
+		} else {
+			fmt.Printf("Proyecto %q inicializado.\n", name)
+		}
 		fmt.Println("  → Edita schema.json y corre:")
 		fmt.Println("  → appitools validate schema.json")
 		fmt.Println("  → appitools generate schema.json")
@@ -41,6 +51,24 @@ var initCmd = &cobra.Command{
 	},
 }
 
+// resolveSchema returns the bytes to write as schema.json: blueprint file if a
+// name is given, otherwise the embedded starter template.
+func resolveSchema(blueprint string) ([]byte, error) {
+	if blueprint == "" {
+		return starterSchema, nil
+	}
+	path := filepath.Join("blueprints", blueprint+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("blueprint %q not found at %s\n  Run 'appitools blueprints list' to see available blueprints", blueprint, path)
+		}
+		return nil, fmt.Errorf("leer blueprint %q: %w", blueprint, err)
+	}
+	return data, nil
+}
+
 func init() {
+	initCmd.Flags().String("blueprint", "", "nombre del blueprint a usar (ej: fintech, ecommerce, crm)")
 	rootCmd.AddCommand(initCmd)
 }
