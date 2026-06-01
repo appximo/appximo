@@ -10,11 +10,13 @@ without writing a Go handler. Validation, transformation, rejection: all in a JS
 When a `POST /api/guides` request comes in:
 
 1. The handler decodes the JSON body into `data`.
-2. If a `before_create` hook exists, it calls `RunBeforeHook(script, data)`.
+2. If a `before_create` JS hook exists, it calls `RunBeforeHook(script, data)`.
 3. The script runs in an **isolated Goja VM** with a **500 ms timeout**.
 4. If the script sets `result.proceed = false`, the request returns `422 Unprocessable Entity`.
 5. If the script sets `result.data = data` (with modifications), those modifications become the INSERT payload.
-6. After a successful INSERT, if an `after_create` hook exists, it fires asynchronously (does not block the response).
+6. After a successful INSERT, if an `after_create` **webhook** hook exists, it fires asynchronously (does not block the response).
+
+> **Note:** `after_create` with `"type": "js"` is accepted by the validator but is currently a no-op. Only `after_create` with `"type": "webhook"` fires after the INSERT.
 
 ---
 
@@ -75,6 +77,13 @@ These are the **only** functions available in the sandbox. Nothing else.
 
 ## 5 copy-paste examples
 
+All examples assume you have a server running and a token set:
+
+```bash
+export JWT_SECRET="dev-secret"
+export TOKEN=$(appitools token --role super_admin --tenant test --secret "$JWT_SECRET")
+```
+
 ### 1. Validate a required field
 
 Reject the request if a critical field is missing or empty.
@@ -89,13 +98,13 @@ Reject the request if a critical field is missing or empty.
 **Test:**
 ```bash
 curl -X POST http://localhost:8080/api/guides \
-  -H "Host: test.localhost" -H "X-User-Role: super_admin" \
+  -H "Host: test.localhost" -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"origin": "Bogotá", "destination": "Medellín"}'
 # → 422 {"error":"field code is required and cannot be blank"}
 
 curl -X POST http://localhost:8080/api/guides \
-  -H "Host: test.localhost" -H "X-User-Role: super_admin" \
+  -H "Host: test.localhost" -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"code": "GU-001", "origin": "Bogotá", "destination": "Medellín"}'
 # → 201 Created ✓
@@ -117,7 +126,7 @@ Add `iva` and `total` to the record based on `subtotal`, without requiring the c
 **Test:**
 ```bash
 curl -X POST http://localhost:8080/api/invoices \
-  -H "Host: test.localhost" -H "X-User-Role: super_admin" \
+  -H "Host: test.localhost" -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"subtotal": 100000}'
 # → 201 {"subtotal":100000, "iva":19000, "total":119000, ...}
@@ -142,14 +151,14 @@ Block large transactions that exceed a per-operation cap.
 ```bash
 # Under limit → OK
 curl -X POST http://localhost:8080/api/guides \
-  -H "Host: test.localhost" -H "X-User-Role: super_admin" \
+  -H "Host: test.localhost" -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"code":"GU-100","declared_value":100000}'
 # → 201 ✓
 
 # Over limit → 422
 curl -X POST http://localhost:8080/api/guides \
-  -H "Host: test.localhost" -H "X-User-Role: super_admin" \
+  -H "Host: test.localhost" -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"code":"GU-101","declared_value":9999999}'
 # → 422 {"error":"declared_value exceeds maximum of 5000000"}
@@ -171,7 +180,7 @@ Ensure consistency: codes and plate numbers always stored in uppercase.
 **Test:**
 ```bash
 curl -X POST http://localhost:8080/api/vehicles \
-  -H "Host: test.localhost" -H "X-User-Role: super_admin" \
+  -H "Host: test.localhost" -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"plate": "abc-123d"}'
 # → 201 {"plate": "ABC-123D", ...} ✓
@@ -199,14 +208,14 @@ Block backdating — ensure `scheduled_at` is today or in the future.
 ```bash
 # Past date → 422
 curl -X POST http://localhost:8080/api/dispatches \
-  -H "Host: test.localhost" -H "X-User-Role: super_admin" \
+  -H "Host: test.localhost" -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"guide_id":"...","scheduled_at":"2020-01-01T00:00:00Z"}'
 # → 422 {"error":"scheduled_at cannot be in the past"}
 
 # Future date → 201
 curl -X POST http://localhost:8080/api/dispatches \
-  -H "Host: test.localhost" -H "X-User-Role: super_admin" \
+  -H "Host: test.localhost" -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"guide_id":"...","scheduled_at":"2030-12-31T00:00:00Z"}'
 # → 201 ✓
@@ -234,11 +243,13 @@ The sandbox is a strict whitelist. Any attempt to access external resources is s
 
 ## The 500 ms timeout
 
-Every hook runs with a hard 500 ms deadline. If the script exceeds it, the VM is interrupted:
+Every hook runs with a hard 500 ms deadline. If the script exceeds it, the VM is interrupted and the handler returns:
 
 ```
-error: hook timeout: exceeded 500ms
-→ 500 Internal Server Error
+HTTP/1.1 500 Internal Server Error
+Content-Type: text/plain
+
+hook timeout: exceeded 500ms
 ```
 
 **Why 500 ms?** API latency budgets are typically 100–200 ms. A hook that takes 500 ms has an infinite loop or a bug. This prevents one bad hook from blocking all requests.

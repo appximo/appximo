@@ -97,16 +97,16 @@ Node stays single-threaded.
 The test suite validates the full production stack on every commit:
 
 ```
-go test ./... -timeout 180s    # 14 packages, all passing
+go test ./... -timeout 180s    # 22 packages, all passing
 ```
 
 | Layer | Tests | Coverage |
 |---|---|---|
-| Unit (auth, RBAC, schema, hooks) | 43 tests | JWT, sandbox escapes, policy eval |
-| Integration (Postgres real) | 17 tests | CRUD, tenant isolation, migration worker |
-| **E2E — full lifecycle** | **1 test (10 steps)** | Register → CRUD → RBAC → hooks → schema change → migration → new field |
-| Security | 6 tests | SQL injection × 2, cross-tenant, JWT tamper, Goja escape, concurrent DDL |
-| Benchmark | 3 functions | req/s, P50/P95/P99, heap |
+| Unit (auth, RBAC, schema, hooks, query, cache, codegen, middleware) | 91 tests | JWT, sandbox escapes, policy eval, pagination, keyset cursors, field filtering |
+| Integration (Postgres real) | 28 tests | CRUD, tenant isolation, migration worker, control plane, GraphQL |
+| **E2E — full lifecycle** | **1 test** | Register → CRUD → RBAC → hooks → schema change → migration → new field |
+| Security | 14 tests | SQL injection × 2, cross-tenant, JWT tamper, Goja escape, concurrent DDL, large body |
+| Benchmark | 3 scenarios | req/s, P50/P95/P99, heap |
 
 Real throughput on CI (2 vCPU, Docker networking):
 

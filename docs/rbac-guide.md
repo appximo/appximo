@@ -7,11 +7,38 @@ Every API request is evaluated against the policy before reaching the handler.
 
 ## How RBAC works
 
-1. The client sends `X-User-Role: operario` in the request header.
-2. `RBACMiddleware` looks up the `operario` policy in the schema.
-3. It checks: does this role have access to this resource (`/api/guides`) with this action (`DELETE`)?
-4. If **no** → `403 {"error":"forbidden"}`, the handler is never called.
-5. If **yes** → the `EvalResult` (including conditions and field allowlists) is injected into the request context and the handler runs.
+1. The client sends a JWT in `Authorization: Bearer <token>`.
+2. `JWTMiddleware` validates the token and injects `role`, `user_id`, and `tenant_id` claims into the request context.
+3. `RBACMiddleware` reads the role from the JWT claims and looks up the matching policy.
+4. It checks: does this role have access to this resource (`/api/guides`) with this action (`DELETE`)?
+5. If **no** → `403 {"error":"forbidden"}`, the handler is never called.
+6. If **yes** → the `EvalResult` (including conditions and field allowlists) is injected into the request context and the handler runs.
+
+> **Note:** The middleware falls back to `X-User-Role` / `X-User-ID` / `X-External-Client-ID` headers if no JWT is present, but `JWTMiddleware` runs first and returns `401` for any `/api/*` request without a valid token. In practice, every API call needs a JWT.
+
+---
+
+## Set up a test token
+
+Generate a token with `appitools token` and store it in `TOKEN`:
+
+```bash
+# Use the same JWT_SECRET your server was started with
+export TOKEN=$(appitools token \
+  --role super_admin \
+  --tenant acme \
+  --secret "$JWT_SECRET")
+```
+
+For roles that use `$user_id` conditions (like `operario`), pass `--user-id`:
+
+```bash
+export OPERARIO_TOKEN=$(appitools token \
+  --role operario \
+  --tenant acme \
+  --user-id 550e8400-e29b-41d4-a716-446655440001 \
+  --secret "$JWT_SECRET")
+```
 
 ---
 
@@ -19,11 +46,12 @@ Every API request is evaluated against the policy before reaching the handler.
 
 | Header | Required | Example | Resolves |
 |---|---|---|---|
-| `X-User-Role` | yes (if RBAC defined) | `operario` | Selects the policy to evaluate |
-| `X-User-ID` | when role uses `$user_id` | `550e8400-...` | Replaces `$user_id` in conditions |
-| `X-External-Client-ID` | when role uses `$external_client_id` | `cli-acme-001` | Replaces `$external_client_id` in conditions |
+| `Authorization` | yes | `Bearer eyJ...` | JWT with embedded role, user_id, tenant_id |
+| `Host` | yes | `acme.localhost` | Selects the tenant schema |
 
-**No `X-User-Role` → 403.** If your schema has no `rbac` section, all requests pass through.
+The `X-User-ID` and `X-External-Client-ID` headers are only needed if you are not using JWTs and have disabled `JWTMiddleware` in a custom server build.
+
+**No `Authorization` header → 401 `{"error":"missing token"}`.** If your schema has no `rbac` section, RBAC is skipped, but the JWT is still required.
 
 ---
 
@@ -45,7 +73,7 @@ Full access to everything. No conditions, no field restrictions.
 ```bash
 curl -X DELETE http://localhost:8080/api/guides/some-id \
   -H "Host: acme.localhost" \
-  -H "X-User-Role: super_admin"
+  -H "Authorization: Bearer $TOKEN"
 # → 204 No Content ✓
 ```
 
@@ -63,10 +91,13 @@ curl -X DELETE http://localhost:8080/api/guides/some-id \
 Can read and write to any resource, but **cannot delete**.
 
 ```bash
+# Generate a gerente token
+GERENTE_TOKEN=$(appitools token --role gerente --tenant acme --secret "$JWT_SECRET")
+
 # Create → OK
 curl -X POST http://localhost:8080/api/guides \
   -H "Host: acme.localhost" \
-  -H "X-User-Role: gerente" \
+  -H "Authorization: Bearer $GERENTE_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"code":"GU-001","origin":"Bogotá","destination":"Medellín"}'
 # → 201 ✓
@@ -74,7 +105,7 @@ curl -X POST http://localhost:8080/api/guides \
 # Delete → 403
 curl -X DELETE http://localhost:8080/api/guides/some-id \
   -H "Host: acme.localhost" \
-  -H "X-User-Role: gerente"
+  -H "Authorization: Bearer $GERENTE_TOKEN"
 # → 403 {"error":"forbidden"} ✓
 ```
 
@@ -92,14 +123,20 @@ curl -X DELETE http://localhost:8080/api/guides/some-id \
 
 - Only access to guides, dispatches, and incidents (not users or clients).
 - Can read, create, update — **cannot delete**.
-- A row-level condition is injected: `operator_id = <value of X-User-ID>`.
+- A row-level condition is injected: `operator_id = <value of JWT user_id claim>`.
 
 ```bash
+# Generate a token with the operator's user ID
+OPERARIO_TOKEN=$(appitools token \
+  --role operario \
+  --tenant acme \
+  --user-id 550e8400-e29b-41d4-a716-446655440001 \
+  --secret "$JWT_SECRET")
+
 # Create a guide as operario
 curl -X POST http://localhost:8080/api/guides \
   -H "Host: acme.localhost" \
-  -H "X-User-Role: operario" \
-  -H "X-User-ID: 550e8400-e29b-41d4-a716-446655440001" \
+  -H "Authorization: Bearer $OPERARIO_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"code":"GU-002","origin":"Cali","destination":"Bogotá"}'
 # → 201 ✓
@@ -107,13 +144,13 @@ curl -X POST http://localhost:8080/api/guides \
 # Access clients → 403
 curl http://localhost:8080/api/clients \
   -H "Host: acme.localhost" \
-  -H "X-User-Role: operario"
+  -H "Authorization: Bearer $OPERARIO_TOKEN"
 # → 403 {"error":"forbidden"} ✓
 
 # Delete → 403
 curl -X DELETE http://localhost:8080/api/guides/some-id \
   -H "Host: acme.localhost" \
-  -H "X-User-Role: operario"
+  -H "Authorization: Bearer $OPERARIO_TOKEN"
 # → 403 {"error":"forbidden"} ✓
 ```
 
@@ -132,11 +169,12 @@ curl -X DELETE http://localhost:8080/api/guides/some-id \
 An external client (customer). Read-only on guides, with a condition that filters to their own records.
 
 ```bash
+TERCERO_TOKEN=$(appitools token --role tercero --tenant acme --secret "$JWT_SECRET")
+
 curl http://localhost:8080/api/guides \
   -H "Host: acme.localhost" \
-  -H "X-User-Role: tercero" \
-  -H "X-External-Client-ID: client-abc-123"
-# → 200 (list, filtered to client_id = "client-abc-123" in context)
+  -H "Authorization: Bearer $TERCERO_TOKEN"
+# → 200 (list, filtered to client_id = external_client_id in context)
 ```
 
 > **Note:** The condition is stored in the request context — full WHERE clause injection into the SQL query is planned for v0.2. Today, the condition is available to handlers via `rbac.EvalResultFromCtx()`.
@@ -156,9 +194,11 @@ curl http://localhost:8080/api/guides \
 Anonymous access. Read-only, restricted to three fields.
 
 ```bash
+PUBLIC_TOKEN=$(appitools token --role public --tenant acme --secret "$JWT_SECRET")
+
 curl http://localhost:8080/api/guides \
   -H "Host: acme.localhost" \
-  -H "X-User-Role: public"
+  -H "Authorization: Bearer $PUBLIC_TOKEN"
 # → 200 ✓
 # (field filtering applied via AllowedFields in context — full filter in v0.2)
 ```
@@ -173,13 +213,13 @@ The `conditions` field describes a predicate that should narrow the query to rec
 "conditions": { "field": "operator_id", "op": "eq", "val": "$user_id" }
 ```
 
-At request time, `$user_id` is replaced by the value of the `X-User-ID` header:
+At request time, `$user_id` is replaced by the `user_id` claim in the JWT (set via `--user-id` when generating the token):
 
 ```
 EvalResult.Condition = &WhereCondition{
     Field: "operator_id",
     Op:    "eq",
-    Value: "550e8400-e29b-41d4-a716-446655440001",  // from X-User-ID header
+    Value: "550e8400-e29b-41d4-a716-446655440001",  // from JWT user_id claim
 }
 ```
 
@@ -193,10 +233,10 @@ if result != nil && result.Condition != nil {
 
 Supported dynamic variables:
 
-| Variable | Header | Use case |
+| Variable | JWT claim / Header | Use case |
 |---|---|---|
-| `$user_id` | `X-User-ID` | Filter to the authenticated user's own records |
-| `$external_client_id` | `X-External-Client-ID` | Filter to a specific external client's records |
+| `$user_id` | `user_id` claim | Filter to the authenticated user's own records |
+| `$external_client_id` | `external_client_id` claim | Filter to a specific external client's records |
 
 Literal values also work:
 ```json
@@ -226,27 +266,31 @@ Full response filtering (stripping unlisted fields from JSON output) is planned 
 
 | Error | Status | Cause | Fix |
 |---|---|---|---|
+| `{"error":"missing token"}` | 401 | No `Authorization` header | Add `-H "Authorization: Bearer $TOKEN"` |
+| `{"error":"invalid token"}` | 401 | Expired, malformed, or wrong-secret token | Re-run `appitools token` with the correct `--secret` |
+| `{"error":"token tenant mismatch"}` | 401 | Token `tenant_id` doesn't match Host subdomain | Generate token with `--tenant <subdomain>` matching `Host` header |
 | `{"error":"forbidden"}` | 403 | Role not allowed for this resource+action | Check the role's `resources` and `actions` in schema.json |
-| `{"error":"forbidden"}` | 403 | Missing `X-User-Role` header | Add `-H "X-User-Role: your_role"` to your request |
 | `{"error":"forbidden"}` | 403 | Role name typo | Role names are case-sensitive: `"operario"` ≠ `"Operario"` |
 | `{"error":"invalid tenant"}` | 400 | Subdomain too short or invalid chars | Use `acme.localhost`, min 2 chars, `[a-z0-9-]` only |
-| Condition not applied | — | `X-User-ID` header missing | Add `-H "X-User-ID: your-user-uuid"` |
 
 ---
 
 ## Debugging RBAC
 
-**Print the parsed policy** — add a temporary log to `pkg/rbac/middleware.go` while debugging.
-
-**Check the EvalResult** — in your handler, call `rbac.EvalResultFromCtx(r.Context())` and log the result.
-
-**Verify the policy JSON** — after `json.Marshal(s.RBAC)`, print the bytes to confirm the policy reached the middleware correctly:
-
+**Quick token check:**
 ```bash
-# Quick test: does super_admin pass on GET /api/guides?
+# Decode the token payload (no verification)
+echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | python3 -m json.tool
+```
+
+**Verify the policy reaches the server:**
+```bash
 curl -v http://localhost:8080/api/guides \
   -H "Host: test.localhost" \
-  -H "X-User-Role: super_admin" 2>&1 | grep "< HTTP"
+  -H "Authorization: Bearer $TOKEN" 2>&1 | grep "< HTTP"
 # < HTTP/1.1 200 OK  ← good
 # < HTTP/1.1 403 Forbidden  ← check your schema's rbac section
+# < HTTP/1.1 401 Unauthorized  ← token issue, check JWT_SECRET
 ```
+
+**Check the EvalResult** — in your handler, call `rbac.EvalResultFromCtx(r.Context())` and log the result.

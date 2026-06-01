@@ -74,79 +74,112 @@ FROM generate_series(1, 1000) AS i;
 SQL
 
 # 3. Start the API server
+export JWT_SECRET="dev-secret"
+export ADMIN_KEY="dev-admin"
 appitools serve --schema schema.json --port 8080
+
+# 4. Generate a benchmark token
+export BENCH_TOKEN=$(appitools token \
+  --role super_admin --tenant acme --secret "$JWT_SECRET")
 ```
 
 ---
 
-## k6 script (copy-paste ready)
+## k6 script (already in the repo)
 
-Save as `benchmark/k6_script.js` (already included in the repo):
+The benchmark script lives at `benchmark/k6_script.js`. It runs three sequential scenarios:
 
 ```javascript
+/**
+ * Appitools benchmark — 3 escenarios secuenciales
+ *
+ * Uso:
+ *   k6 run benchmark/k6_script.js
+ *
+ * Variables de entorno:
+ *   BASE_URL    (default: http://localhost:8080)
+ *   TENANT_HOST (default: acme.localhost)
+ *   BENCH_TOKEN (required — generate with: appitools token ...)
+ */
 import http from 'k6/http';
-import { sleep, check } from 'k6';
+import { check } from 'k6';
+import { textSummary } from 'https://jslib.k6.io/k6-summary/0.0.2/index.js';
 
-const BASE_URL    = __ENV.BASE_URL    || 'http://localhost:8080';
-const TENANT_HOST = __ENV.TENANT_HOST || 'acme.localhost';
+const BASE = __ENV.BASE_URL    || 'http://localhost:8080';
+const HOST = __ENV.TENANT_HOST || 'acme.localhost';
+const BENCH_TOKEN = __ENV.BENCH_TOKEN || '';
 
 export const options = {
-  stages: [
-    { duration: '30s', target: 10  },  // ramp up to 10 VUs
-    { duration: '30s', target: 50  },  // ramp up to 50 VUs
-    { duration: '60s', target: 200 },  // hold at 200 VUs
-    { duration: '30s', target: 0   },  // ramp down
-  ],
+  scenarios: {
+    // Scenario A: maximum throughput — 20 VUs, no sleep
+    max_throughput: {
+      executor: 'constant-vus',
+      vus: 20,
+      duration: '30s',
+      startTime: '0s',
+      exec: 'listGuides',
+    },
+    // Scenario B: sustained realistic load — ramp 0→50→0
+    sustained_load: {
+      executor: 'ramping-vus',
+      stages: [
+        { duration: '15s', target: 50 },
+        { duration: '45s', target: 50 },
+        { duration: '10s', target: 0 },
+      ],
+      startTime: '35s',
+      exec: 'listGuides',
+    },
+    // Scenario C: 80% read / 20% write with active JS hook
+    read_write_mix: {
+      executor: 'constant-vus',
+      vus: 10,
+      duration: '30s',
+      startTime: '110s',
+      exec: 'readWriteMix',
+    },
+  },
   thresholds: {
-    http_req_duration: ['p(99)<50'],   // 99th percentile under 50ms
-    http_req_failed:   ['rate<0.01'],  // error rate under 1%
+    'http_req_duration{scenario:max_throughput}': ['p(99)<500'],
+    'http_req_duration{scenario:sustained_load}': ['p(99)<300'],
+    'http_req_duration{scenario:read_write_mix}': ['p(99)<500'],
+    http_req_failed: ['rate<0.01'],
   },
 };
+
+const AUTH = BENCH_TOKEN ? { 'Authorization': `Bearer ${BENCH_TOKEN}` } : {};
 
 const HEADERS = {
-  headers: {
-    Host:          TENANT_HOST,
-    'X-User-Role': 'super_admin',
-  },
+  headers: { Host: HOST, ...AUTH },
+};
+const POST_HEADERS = {
+  headers: { Host: HOST, 'Content-Type': 'application/json', ...AUTH },
 };
 
-const CREATE_HEADERS = {
-  headers: {
-    Host:             TENANT_HOST,
-    'X-User-Role':    'super_admin',
-    'Content-Type':   'application/json',
-  },
-};
+export function listGuides() {
+  const res = http.get(`${BASE}/api/guides`, HEADERS);
+  check(res, { 'status 200': r => r.status === 200 });
+}
 
 let counter = 0;
-
-export default function () {
-  const vu = __VU;
-  const iter = __ITER;
-
-  // Mix: 80% reads, 20% writes
-  if (counter % 5 === 0) {
-    // POST /api/guides
-    const payload = JSON.stringify({
-      code:        `VU${vu}-IT${iter}`,
-      origin:      'Bogotá',
-      destination: 'Medellín',
-    });
-    const res = http.post(`${BASE_URL}/api/guides`, payload, CREATE_HEADERS);
-    check(res, {
-      'create: status 201': (r) => r.status === 201,
-    });
+export function readWriteMix() {
+  if (++counter % 5 === 0) {
+    const res = http.post(
+      `${BASE}/api/guides`,
+      JSON.stringify({ code: `LIVE-${__VU}-${__ITER}`, origin: 'Alpha', destination: 'Beta' }),
+      POST_HEADERS,
+    );
+    check(res, { 'create 201': r => r.status === 201 });
   } else {
-    // GET /api/guides
-    const res = http.get(`${BASE_URL}/api/guides`, HEADERS);
+    const res = http.get(`${BASE}/api/guides`, HEADERS);
     check(res, {
-      'list: status 200':    (r) => r.status === 200,
-      'list: is JSON array': (r) => r.body.startsWith('['),
+      'list 200': r => r.status === 200,
+      'has data array': r => {
+        try { return Array.isArray(JSON.parse(r.body).data); }
+        catch { return false; }
+      },
     });
   }
-
-  counter++;
-  sleep(0.05);  // 50ms between iterations per VU
 }
 
 export function handleSummary(data) {
@@ -155,23 +188,21 @@ export function handleSummary(data) {
     stdout: textSummary(data, { indent: ' ', enableColors: true }),
   };
 }
-
-function textSummary(data, opts) {
-  // k6 built-in — outputs the standard summary table
-  return '';
-}
 ```
 
 **Run it:**
 
 ```bash
-k6 run benchmark/k6_script.js
+k6 run -e BENCH_TOKEN="$BENCH_TOKEN" benchmark/k6_script.js
 
 # Override host/URL for a remote server:
 k6 run -e BASE_URL=http://165.22.100.200:8080 \
        -e TENANT_HOST=acme.yourdomain.com \
+       -e BENCH_TOKEN="$BENCH_TOKEN" \
        benchmark/k6_script.js
 ```
+
+Results are written to `benchmark/results.json` and printed to stdout.
 
 ---
 
@@ -180,27 +211,20 @@ k6 run -e BASE_URL=http://165.22.100.200:8080 \
 After the run, k6 prints a summary like this:
 
 ```
-     ✓ list: status 200
-     ✓ list: is JSON array
-     ✓ create: status 201
+     ✓ status 200
+     ✓ list 200
+     ✓ create 201
 
-     checks.........................: 100.00% ✓ 248140  ✗ 0
-     data_received..................: 156 MB  1.7 MB/s
-     data_sent......................: 38 MB   421 kB/s
+     checks.........................: 100.00% ✓ 55649   ✗ 0
+     data_received..................: 71 MB   427 kB/s
+     data_sent......................: 12 MB   71 kB/s
 
-     http_req_blocked...............: avg=4µs      min=1µs    med=3µs    max=18ms   p(90)=6µs    p(99)=12µs
-     http_req_connecting............: avg=1µs      min=0s     med=0s     max=9ms    p(90)=0s     p(99)=0s
-     http_req_duration..............: avg=3.1ms    min=0.8ms  med=2.4ms  max=98ms   p(90)=6.2ms  p(99)=12.1ms
-     http_req_failed................: 0.00%   ✓ 0       ✗ 248140
-     http_req_receiving.............: avg=42µs     min=12µs   med=31µs   max=8ms    p(90)=88µs   p(99)=210µs
-     http_req_sending...............: avg=18µs     min=8µs    med=14µs   max=4ms    p(90)=32µs   p(99)=62µs
-     http_req_tls_handshaking.......: avg=0s       min=0s     med=0s     max=0s     p(90)=0s     p(99)=0s
-     http_req_waiting...............: avg=3.0ms    min=0.7ms  med=2.3ms  max=97ms   p(90)=6.0ms  p(99)=11.9ms
-     http_reqs......................: 248140  ~2757/s
-     iteration_duration.............: avg=108ms    min=52ms   med=102ms  max=358ms  p(90)=162ms  p(99)=228ms
-     iterations.....................: 248140  ~2757/s
-     vus............................: 200     min=10     max=200
-     vus_max........................: 200     min=200    max=200
+     ✓ { scenario:max_throughput }...: avg=44ms  min=1ms  med=27ms  max=427ms  p(90)=115ms  p(95)=144ms
+     ✗ { scenario:sustained_load }...: avg=103ms min=1ms  med=55ms  max=2.51s  p(90)=216ms  p(95)=442ms
+     ✓ { scenario:read_write_mix }...: avg=21ms  min=1ms  med=2ms   max=251ms  p(90)=78ms   p(95)=91ms
+
+     http_req_failed................: 0.00%   ✓ 0       ✗ 55649
+     http_reqs......................: 55649   ~397/s
 ```
 
 ### What each metric means
@@ -208,10 +232,10 @@ After the run, k6 prints a summary like this:
 | Metric | What it tells you | Good value |
 |---|---|---|
 | `http_req_duration p(50)` | Half your requests finish in this time | < 5ms on local |
-| `http_req_duration p(90)` | 90% of requests are faster than this | < 20ms on Droplet $16 |
-| `http_req_duration p(95)` | 95% of requests — your "typical slow" | < 35ms |
-| `http_req_duration p(99)` | The slowest 1% — your worst case | < 50ms on Droplet $16 |
-| `http_reqs / s` | Requests per second (RPS) | > 40k on Droplet $16 |
+| `http_req_duration p(90)` | 90% of requests are faster than this | < 150ms on $6 Droplet |
+| `http_req_duration p(95)` | 95% of requests — your "typical slow" | < 250ms on $6 Droplet |
+| `http_req_duration p(99)` | The slowest 1% — your worst case | < 500ms on $6 Droplet |
+| `http_reqs / s` | Requests per second (RPS) | > 400 on $6 Droplet |
 | `http_req_failed rate` | Percentage of non-2xx responses | < 1% |
 | `vus` | Active virtual users at any point | Matches your stage config |
 | `checks` | Your `check()` assertions passed/failed | 100% |
@@ -222,18 +246,20 @@ After the run, k6 prints a summary like this:
 
 ## Reference: what to expect by Droplet size
 
-Measured with Appitools + PostgreSQL 16 on the same machine, simple `GET /api/guides`, 1 000 rows, no JOINs.
+Measured with Appitools + PostgreSQL 16 co-located on the same machine, `GET /api/guides`, 1 000 rows pre-loaded, simple list query. The bottleneck is Postgres sharing vCPU with the API process.
 
-| Droplet | Monthly | RAM | vCPU | RPS (c=200) | P99 latency |
+| Droplet | Monthly | RAM | vCPU | RPS (20 VUs) | P90 latency |
 |---|---|---|---|---|---|
-| Basic | $6/mo | 1 GB | 1 | ~15k–25k | ~25ms |
-| Basic | $16/mo | 4 GB | 2 | ~45k–65k | ~12ms |
-| Basic | $32/mo | 8 GB | 4 | ~80k–120k | ~8ms |
-| CPU-Optimized | $42/mo | 8 GB | 4 | ~100k–140k | ~6ms |
+| Basic | $6/mo | 1 GB | 1 | ~400–600 | ~115ms |
+| Basic | $16/mo | 4 GB | 2 | ~900–1 400 | ~50ms |
+| Basic | $32/mo | 8 GB | 4 | ~2 000–3 500 | ~25ms |
+| CPU-Optimized | $42/mo | 8 GB | 4 | ~2 500–4 000 | ~20ms |
+
+> **Numbers are with Postgres in Docker sharing the same vCPU** — on dedicated hardware (Postgres on a separate machine via unix socket) expect 2–3× more RPS.
 
 > **The bottleneck is always PostgreSQL, not the HTTP layer.** Go + chi handles 300k+ req/s in pure CPU benchmarks. In practice, you're limited by `max_connections` and query complexity.
 
-**Rule of thumb:** At c=200, expect 1 000–2 000 RPS per available Postgres connection. If Postgres has `max_connections=100`, your ceiling is ~150k RPS at best (limited by connection acquisition latency).
+**Rule of thumb:** Appitools uses `MaxConns=6` in its default pool. At low VU counts, 6 connections saturate the pool before the vCPU. Increase `MaxConns` in `pkg/db/pool.go` if you need more throughput and have spare CPU for Postgres.
 
 ---
 
@@ -252,10 +278,12 @@ npm run start:prod &
 # Run the benchmark against NestJS (port 3000)
 k6 run -e BASE_URL=http://localhost:3000 \
        -e TENANT_HOST=localhost \
+       -e BENCH_TOKEN="" \
        benchmark/k6_script.js > benchmark/nestjs-results.txt
 
 # Run against Appitools (port 8080)
 k6 run -e BASE_URL=http://localhost:8080 \
+       -e BENCH_TOKEN="$BENCH_TOKEN" \
        benchmark/k6_script.js > benchmark/appitools-results.txt
 
 # Compare
@@ -269,7 +297,7 @@ The gap widens as concurrency increases because Go's goroutine scheduler outperf
 
 ## Troubleshooting
 
-### p99 > 100ms
+### p99 > 500ms
 
 **Likely cause:** Missing index on a filtered column.
 
@@ -285,18 +313,16 @@ CREATE INDEX CONCURRENTLY ON tenant_acme.guides (status);
 
 ### Error rate > 1%
 
-**Likely cause:** Postgres connection pool exhausted.
+**Likely cause 1:** Missing or invalid `BENCH_TOKEN`. Check that the token was generated with the same `JWT_SECRET` the server uses and with the correct `--tenant` flag.
+
+**Likely cause 2:** Postgres connection pool exhausted.
 
 ```bash
 # Check current connections
 psql "$DATABASE_URL" -c "SELECT count(*) FROM pg_stat_activity;"
-
-# If near max_connections, increase it
-# In postgresql.conf:
-max_connections = 200
 ```
 
-Appitools uses `pgxpool` with `MaxConns=25` by default. At c=200 VUs, you need 200+ pool connections if each request holds a connection. With connection multiplexing, 25 handles ~1000 concurrent requests.
+Appitools uses `MaxConns=6` by default. At high VU counts you may need to raise it in `pkg/db/pool.go`.
 
 ### RPS much lower than expected on local machine
 

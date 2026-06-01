@@ -2,18 +2,20 @@
  * Appitools benchmark — 3 escenarios secuenciales
  *
  * Uso:
- *   k6 run benchmark/k6_script.js
+ *   k6 run -e BENCH_TOKEN="$BENCH_TOKEN" benchmark/k6_script.js
  *
  * Variables de entorno:
  *   BASE_URL    (default: http://localhost:8080)
  *   TENANT_HOST (default: acme.localhost)
+ *   BENCH_TOKEN (required — genera con: appitools token --role super_admin --tenant acme --secret "$JWT_SECRET")
  */
 import http from 'k6/http';
 import { check } from 'k6';
 import { textSummary } from 'https://jslib.k6.io/k6-summary/0.0.2/index.js';
 
-const BASE = __ENV.BASE_URL    || 'http://localhost:8080';
-const HOST = __ENV.TENANT_HOST || 'acme.localhost';
+const BASE        = __ENV.BASE_URL    || 'http://localhost:8080';
+const HOST        = __ENV.TENANT_HOST || 'acme.localhost';
+const BENCH_TOKEN = __ENV.BENCH_TOKEN || '';
 
 export const options = {
   scenarios: {
@@ -53,11 +55,13 @@ export const options = {
   },
 };
 
+const AUTH = BENCH_TOKEN ? { 'Authorization': `Bearer ${BENCH_TOKEN}` } : {};
+
 const HEADERS = {
-  headers: { Host: HOST, 'X-User-Role': 'super_admin' },
+  headers: { Host: HOST, ...AUTH },
 };
 const POST_HEADERS = {
-  headers: { Host: HOST, 'X-User-Role': 'super_admin', 'Content-Type': 'application/json' },
+  headers: { Host: HOST, 'Content-Type': 'application/json', ...AUTH },
 };
 
 export function listGuides() {
@@ -78,7 +82,13 @@ export function readWriteMix() {
   } else {
     // 80% reads
     const res = http.get(`${BASE}/api/guides`, HEADERS);
-    check(res, { 'list 200': r => r.status === 200 });
+    check(res, {
+      'list 200': r => r.status === 200,
+      'has data array': r => {
+        try { return Array.isArray(JSON.parse(r.body).data); }
+        catch { return false; }
+      },
+    });
   }
 }
 

@@ -15,8 +15,8 @@ No prior Go experience is required to run the server. You do need Go to generate
 
 Check your versions:
 ```bash
-go version   # go version go1.25.0 linux/amd64
-docker --version  # Docker version 29.3.0
+go version   # go version go1.22.0 linux/amd64
+docker --version  # Docker version 24.0.0
 ```
 
 ---
@@ -50,12 +50,16 @@ go build -o appitools ./cmd/appitools
 
 ```bash
 appitools init my-api
+# Proyecto "my-api" inicializado.
+#   → Edita schema.json y corre:
+#   → appitools validate schema.json
+#   → appitools generate schema.json
 cd my-api
 ls
-# schema.json
+# go.mod  schema.json
 ```
 
-`appitools init` creates a directory with a starter `schema.json`. Open it — you'll see a simple example with one resource. We'll expand it below.
+`appitools init` creates a directory with a starter `schema.json` and a minimal `go.mod`. Open `schema.json` — you'll see a simple example with one resource. We'll expand it below.
 
 ---
 
@@ -194,6 +198,8 @@ Two hook types are supported:
 The `script` field contains JavaScript that runs in a sandboxed Goja VM.
 Available variables: `data` (the request body), `user` (caller context), `result` (the outcome object).
 
+JS hooks are supported for `before_create` only. A JS `after_create` hook is accepted by the validator but is currently a no-op.
+
 ```json
 "hooks": {
   "before_create": {
@@ -218,8 +224,6 @@ Sends an HTTP POST to `url` after the record is created. Uses the `hmac_secret_e
   }
 }
 ```
-
-> **Note:** Webhooks in `before_create` always proceed without blocking. Webhook dispatching is in the roadmap.
 
 ---
 
@@ -258,16 +262,14 @@ The `rbac` section defines who can do what. See [docs/rbac-guide.md](rbac-guide.
 
 ## The 5 CLI commands
 
-### `appitools init [name]`
+### `appitools init <name>`
 
-Scaffolds a new project directory with a starter `schema.json`.
+Scaffolds a new project directory with a starter `schema.json` and `go.mod`.
 
 ```bash
 appitools init logistics-api
-# Creates: logistics-api/schema.json
+# Creates: logistics-api/schema.json  logistics-api/go.mod
 ```
-
-If `name` is omitted, it defaults to the current directory name.
 
 ---
 
@@ -308,19 +310,60 @@ Generated files are formatted with `gofmt`. **Do not edit them** — re-run `gen
 
 Starts the multi-tenant HTTP server with an in-memory router (no generated files required).
 
+**Required environment variables:**
+
+| Variable | Example | Purpose |
+|---|---|---|
+| `DATABASE_URL` | `postgres://user:pass@localhost:5432/mydb?sslmode=disable` | PostgreSQL connection string |
+| `JWT_SECRET` | `change-in-production` | HS256 signing key for JWT tokens |
+| `ADMIN_KEY` | `change-in-production` | Bearer key for the control-plane API (port 9090) |
+
 ```bash
-export DATABASE_URL="postgres://user:pass@localhost:5432/mydb?sslmode=disable"
+export DATABASE_URL="postgres://appuser:secret@localhost:5432/mydb?sslmode=disable"
+export JWT_SECRET="dev-secret-change-in-prod"
+export ADMIN_KEY="dev-admin-key-change-in-prod"
 appitools serve --schema schema.json --port 8080
 # Appitools serving on :8080 — Ctrl+C to stop
 ```
 
+**Optional:**
+
+| Variable | Effect |
+|---|---|
+| `REDIS_URL` | Enables the migration worker (Redis Streams queue) |
+| `APPITOOLS_ENV=development` | Enables pprof on `:6060` and GraphiQL at `/graphiql` |
+
 Middleware chain (in order):
-1. `RealIP` — trust X-Forwarded-For from proxies
-2. `RequestID` — add X-Request-ID to every request
-3. `TenantMiddleware` — extract tenant from subdomain
-4. `RBACMiddleware` — enforce role policy
-5. `Logger` — structured request log
-6. `Recoverer` — catch panics
+1. `SecurityHeaders` — HSTS, X-Content-Type-Options, etc.
+2. `Compress` — gzip for `application/json` responses
+3. `RealIP` — trust X-Forwarded-For from proxies
+4. `RequestID` — add X-Request-ID to every request
+5. `TenantMiddleware` — extract tenant from subdomain
+6. `ResponseCache` — 5-second in-memory cache, invalidated by Postgres NOTIFY
+7. `JWTMiddleware` — validate Bearer token; 401 on missing or invalid token
+8. `RBACMiddleware` — enforce role policy; 403 if denied
+9. `Logger` — structured request log
+10. `Recoverer` — catch panics
+
+---
+
+### `appitools token`
+
+Generates a signed JWT for local testing. Use this token in `Authorization: Bearer` headers.
+
+```bash
+export TOKEN=$(appitools token \
+  --role super_admin \
+  --tenant test \
+  --secret "$JWT_SECRET")
+```
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--role` | `super_admin` | Role embedded in the JWT claims |
+| `--tenant` | _(empty)_ | Tenant ID — must match the request subdomain |
+| `--secret` | _(required)_ | Must match your server's `JWT_SECRET` |
+| `--user-id` | _(empty)_ | Resolves `$user_id` in RBAC conditions |
 
 ---
 
@@ -378,12 +421,16 @@ SQL
 
 ## Test your API with curl
 
-Start the server:
+Set up your server and a test token:
 ```bash
-appitools serve --schema schema.json --port 8080
+export JWT_SECRET="dev-secret-change-in-prod"
+export ADMIN_KEY="dev-admin-key-change-in-prod"
+appitools serve --schema schema.json --port 8080 &
+
+export TOKEN=$(appitools token --role super_admin --tenant test --secret "$JWT_SECRET")
 ```
 
-Every request needs a `Host` header that includes the tenant subdomain:
+Every request needs a `Host` header that includes the tenant subdomain and an `Authorization: Bearer` header:
 - `Host: test.localhost` → tenant `test` → schema `tenant_test`
 
 ### List records
@@ -391,8 +438,8 @@ Every request needs a `Host` header that includes the tenant subdomain:
 ```bash
 curl http://localhost:8080/api/guides \
   -H "Host: test.localhost" \
-  -H "X-User-Role: super_admin"
-# → []
+  -H "Authorization: Bearer $TOKEN"
+# → {"data":[],"links":{"first":"...","last":"...","self":"..."},"meta":{"has_next":false,"has_prev":false,"page":1,"per_page":20,"total":0,"total_pages":1}}
 ```
 
 ### Create a record
@@ -400,7 +447,7 @@ curl http://localhost:8080/api/guides \
 ```bash
 curl -X POST http://localhost:8080/api/guides \
   -H "Host: test.localhost" \
-  -H "X-User-Role: super_admin" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "code": "GU-001",
@@ -417,7 +464,7 @@ curl -X POST http://localhost:8080/api/guides \
 ```bash
 curl http://localhost:8080/api/guides/550e8400-e29b-41d4-a716-446655440000 \
   -H "Host: test.localhost" \
-  -H "X-User-Role: super_admin"
+  -H "Authorization: Bearer $TOKEN"
 # → 200 OK  or  404 {"error":"not found"}
 ```
 
@@ -426,7 +473,7 @@ curl http://localhost:8080/api/guides/550e8400-e29b-41d4-a716-446655440000 \
 ```bash
 curl -X DELETE http://localhost:8080/api/guides/550e8400-e29b-41d4-a716-446655440000 \
   -H "Host: test.localhost" \
-  -H "X-User-Role: super_admin"
+  -H "Authorization: Bearer $TOKEN"
 # → 204 No Content
 ```
 
@@ -441,21 +488,25 @@ curl http://localhost:8080/health
 
 ## RBAC: controlling access with headers
 
-Send these headers with every request:
+JWT claims carry the role. The `appitools token` command embeds them:
 
-| Header | Example | Purpose |
+| Flag | Effect | JWT claim |
 |---|---|---|
-| `X-User-Role` | `operario` | Which role policy to evaluate |
-| `X-User-ID` | `550e8400-...` | Resolves `$user_id` in conditions |
-| `X-External-Client-ID` | `cli-acme-001` | Resolves `$external_client_id` in conditions |
+| `--role operario` | Role evaluated by RBAC | `role` |
+| `--user-id <uuid>` | Resolves `$user_id` in conditions | `user_id` |
 
-**No header → 403 Forbidden** (if any RBAC roles are defined in the schema).
+**No `Authorization` header → 401 `{"error":"missing token"}`** (JWT middleware fires before RBAC).
+
+**Wrong role → 403 `{"error":"forbidden"}`** (RBAC middleware).
 
 ```bash
+# Generate a token for operario role (cannot DELETE)
+OPERARIO_TOKEN=$(appitools token --role operario --tenant test --secret "$JWT_SECRET")
+
 # This will 403 because operario cannot DELETE
 curl -X DELETE http://localhost:8080/api/guides/some-id \
   -H "Host: test.localhost" \
-  -H "X-User-Role: operario"
+  -H "Authorization: Bearer $OPERARIO_TOKEN"
 # → 403 {"error":"forbidden"}
 ```
 
