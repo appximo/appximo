@@ -10,6 +10,12 @@ type TenantCtx struct {
 
 type contextKey struct{}
 
+// WithContext returns a new context carrying tc.
+// Used by TenantMiddleware and in tests.
+func WithContext(ctx context.Context, tc *TenantCtx) context.Context {
+	return context.WithValue(ctx, contextKey{}, tc)
+}
+
 // FromCtx returns the TenantCtx from ctx, or nil if none was set.
 func FromCtx(ctx context.Context) *TenantCtx {
 	tc, _ := ctx.Value(contextKey{}).(*TenantCtx)

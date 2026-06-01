@@ -12,8 +12,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/miguelangel/appitools/pkg/cache"
 	"github.com/miguelangel/appitools/pkg/codegen"
 	"github.com/miguelangel/appitools/pkg/controlplane"
 	"github.com/miguelangel/appitools/pkg/db"
@@ -120,14 +124,20 @@ var serveCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		// Response cache: 5-second TTL, invalidated by pg_notify schema_updated.
+		responseCache := cache.New(5 * time.Second)
+		go startCacheInvalidator(ctx, pool, responseCache)
+
 		// Outer router: middleware must be registered before routes.
 		r := chi.NewMux()
 		r.Use(appmiddleware.SecurityHeaders)
+		r.Use(chimiddleware.Compress(5, "application/json", "application/graphql+json"))
 		r.Use(chimiddleware.RealIP)
 		r.Use(chimiddleware.RequestID)
 		r.Use(tenant.TenantMiddleware)
 		r.Use(auth.JWTMiddleware(jwtSecret))
 		r.Use(rbac.RBACMiddleware(policyBytes))
+		r.Use(responseCache.Middleware)
 		r.Use(chimiddleware.Logger)
 		r.Use(chimiddleware.Recoverer)
 
@@ -170,4 +180,35 @@ func init() {
 	serveCmd.Flags().String("schema", "schema.json", "path to schema.json")
 	serveCmd.Flags().Int("port", 8080, "HTTP port to listen on")
 	rootCmd.AddCommand(serveCmd)
+}
+
+// startCacheInvalidator listens on the Postgres "schema_updated" NOTIFY channel
+// and calls rc.Invalidate with the payload (tenant ID) on each notification.
+// Runs until ctx is cancelled; logs and returns on connection errors.
+func startCacheInvalidator(ctx context.Context, pool *pgxpool.Pool, rc *cache.ResponseCache) {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		log.Printf("cache invalidator: acquire conn: %v", err)
+		return
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, "LISTEN schema_updated"); err != nil {
+		log.Printf("cache invalidator: LISTEN failed: %v", err)
+		return
+	}
+	log.Println("cache invalidator: listening on schema_updated")
+
+	for {
+		n, err := conn.Conn().WaitForNotification(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return // normal shutdown
+			}
+			log.Printf("cache invalidator: notification error: %v", err)
+			return
+		}
+		rc.Invalidate(n.Payload)
+		log.Printf("cache invalidator: invalidated tenant %q (pg_notify)", n.Payload)
+	}
 }
