@@ -59,6 +59,39 @@ On a dedicated $16/mo Droplet (2 vCPU, unix socket Postgres) expect **2–3× hi
 
 ---
 
+## Real Performance — Scientific Benchmark
+
+Methodology: k6 constant-arrival-rate (open model),
+1 shared vCPU, 1.9 GB RAM, PostgreSQL 16.
+Appitools: JWT HS256 + RBAC + multi-tenant schema isolation.
+NestJS baseline: header check only, no RBAC, no multi-tenancy.
+
+| Load | Appitools p95 | NestJS p95 |
+|------|--------------|------------|
+| 50 RPS  | **4ms**   | 242ms |
+| 100 RPS | **161ms** | 707ms |
+| 150 RPS | **3ms**   | 5ms   |
+| 200 RPS | **6ms**   | 7ms   |
+| 220 RPS | **7ms**   | 19ms  |
+| 240 RPS | **168ms** | 309ms |
+
+**p50 steady state: 2–3ms on both.**
+**Error rate: 0% on both up to 240 RPS.**
+
+Go wins 5 of 6 load points — with real JWT validation, RBAC enforcement,
+and per-tenant schema isolation that NestJS didn't implement.
+
+Key insight: NestJS pays 242–707ms JIT warmup at low load. Go binary is
+AOT-compiled — first request is as fast as the millionth.
+
+RAM idle: ~1 MB (Go) vs ~42 MB (Node).
+Expected on 2 vCPU: Go separates further as goroutines use both cores;
+Node stays single-threaded.
+
+> [See full methodology →](benchmark-lab/BENCHMARK_REPORT.md)
+
+---
+
 ## Battle tested
 
 The test suite validates the full production stack on every commit:
