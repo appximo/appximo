@@ -165,12 +165,13 @@ var serveCmd = &cobra.Command{
 		r.Use(chimiddleware.RealIP)
 		r.Use(chimiddleware.RequestID)
 		r.Use(tenant.TenantMiddleware)
+		// RequestLogger BEFORE cache: every request (including cache hits) is logged and measured.
+		r.Use(logging.RequestLogger(hist.Record, func(id string, ms float64) {
+			anomaly.Observe(id, ms) //nolint:errcheck
+		}))
 		r.Use(responseCache.Middleware)
 		r.Use(auth.JWTMiddleware(jwtSecret))
 		r.Use(rbac.RBACMiddleware(policyBytes))
-		r.Use(logging.RequestLogger(hist.Record, func(id string, ms float64) {
-			anomaly.Observe(id, ms) //nolint:errcheck — anomaly result not acted upon per-request
-		}))
 		r.Use(chimiddleware.Recoverer)
 
 		// pprof on a separate port — only in development, no auth, never reachable in production
