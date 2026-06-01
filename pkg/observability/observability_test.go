@@ -27,11 +27,11 @@ func TestTenantHistogram_RecordAndSnapshot(t *testing.T) {
 	if snap.Count != 100 {
 		t.Fatalf("count: got %d want 100", snap.Count)
 	}
-	if snap.P50 < 45 || snap.P50 > 55 {
-		t.Fatalf("p50=%v out of expected range [45,55]", snap.P50)
+	if snap.P50Us < 45 || snap.P50Us > 55 {
+		t.Fatalf("p50=%v out of expected range [45,55]", snap.P50Us)
 	}
-	if snap.P99 < 95 {
-		t.Fatalf("p99=%v should be >= 95", snap.P99)
+	if snap.P99Us < 95 {
+		t.Fatalf("p99=%v should be >= 95", snap.P99Us)
 	}
 }
 
@@ -43,11 +43,11 @@ func TestTenantHistogram_TenantIsolation(t *testing.T) {
 	snapA := th.Snapshot("a")
 	snapB := th.Snapshot("b")
 
-	if snapA.P99 > 20 {
-		t.Fatalf("tenant a should have small latencies, got p99=%v", snapA.P99)
+	if snapA.P99Us > 20 {
+		t.Fatalf("tenant a should have small latencies, got p99=%v", snapA.P99Us)
 	}
-	if snapB.P99 < 500 {
-		t.Fatalf("tenant b should have large latencies, got p99=%v", snapB.P99)
+	if snapB.P99Us < 500 {
+		t.Fatalf("tenant b should have large latencies, got p99=%v", snapB.P99Us)
 	}
 }
 

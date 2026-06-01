@@ -166,8 +166,8 @@ var serveCmd = &cobra.Command{
 		r.Use(chimiddleware.RequestID)
 		r.Use(tenant.TenantMiddleware)
 		// RequestLogger BEFORE cache: every request (including cache hits) is logged and measured.
-		r.Use(logging.RequestLogger(hist.Record, func(id string, ms float64) {
-			anomaly.Observe(id, ms) //nolint:errcheck
+		r.Use(logging.RequestLogger(hist.Record, func(id string, us float64) {
+			anomaly.Observe(id, us) //nolint:errcheck
 		}))
 		r.Use(responseCache.Middleware)
 		r.Use(auth.JWTMiddleware(jwtSecret))

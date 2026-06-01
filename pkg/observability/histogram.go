@@ -18,31 +18,32 @@ func NewTenantHistogram() *TenantHistogram {
 	}
 }
 
-// Record adds a latency sample (in milliseconds) for a given tenant.
-func (th *TenantHistogram) Record(tenantID string, durationMs int64) {
+// Record adds a latency sample (in microseconds) for a given tenant.
+func (th *TenantHistogram) Record(tenantID string, durationUs int64) {
 	th.mu.RLock()
 	h, ok := th.hist[tenantID]
 	th.mu.RUnlock()
 	if !ok {
 		th.mu.Lock()
 		if _, exists := th.hist[tenantID]; !exists {
-			th.hist[tenantID] = hdrhistogram.New(1, 10_000, 3)
+			// Range: 1µs – 10s (10_000_000 µs), 3 significant figures.
+			th.hist[tenantID] = hdrhistogram.New(1, 10_000_000, 3)
 		}
 		h = th.hist[tenantID]
 		th.mu.Unlock()
 	}
-	h.RecordValue(durationMs) //nolint:errcheck
+	h.RecordValue(durationUs) //nolint:errcheck
 }
 
 // PercentileSnapshot holds a point-in-time latency summary for one tenant.
 type PercentileSnapshot struct {
 	TenantID string  `json:"tenant_id"`
-	P50      float64 `json:"p50_ms"`
-	P95      float64 `json:"p95_ms"`
-	P99      float64 `json:"p99_ms"`
-	P999     float64 `json:"p999_ms"`
+	P50Us    float64 `json:"p50_us"`
+	P95Us    float64 `json:"p95_us"`
+	P99Us    float64 `json:"p99_us"`
+	P999Us   float64 `json:"p999_us"`
 	Count    int64   `json:"count"`
-	Mean     float64 `json:"mean_ms"`
+	Mean     float64 `json:"mean_us"`
 }
 
 // Snapshot returns the current percentile summary for a tenant, or nil if no data.
@@ -55,10 +56,10 @@ func (th *TenantHistogram) Snapshot(tenantID string) *PercentileSnapshot {
 	}
 	return &PercentileSnapshot{
 		TenantID: tenantID,
-		P50:      float64(h.ValueAtQuantile(50)),
-		P95:      float64(h.ValueAtQuantile(95)),
-		P99:      float64(h.ValueAtQuantile(99)),
-		P999:     float64(h.ValueAtQuantile(99.9)),
+		P50Us:    float64(h.ValueAtQuantile(50)),
+		P95Us:    float64(h.ValueAtQuantile(95)),
+		P99Us:    float64(h.ValueAtQuantile(99)),
+		P999Us:   float64(h.ValueAtQuantile(99.9)),
 		Count:    h.TotalCount(),
 		Mean:     h.Mean(),
 	}

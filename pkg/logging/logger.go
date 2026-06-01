@@ -26,35 +26,36 @@ func Init(env string) {
 }
 
 // RequestLogger returns a chi-compatible middleware that logs each request with zerolog.
-// record and observe are optional callbacks wired to observability components.
+// record receives duration in microseconds; observe receives duration in microseconds as float64.
+// Both are optional (nil-safe).
 func RequestLogger(
-	record func(tenantID string, durationMs int64),
-	observe func(tenantID string, ms float64),
+	record func(tenantID string, durationUs int64),
+	observe func(tenantID string, us float64),
 ) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			ww := chimiddleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			next.ServeHTTP(ww, r)
+			elapsed := time.Since(start)
 			tc := tenant.FromCtx(r.Context())
 			tenantID := ""
 			if tc != nil {
 				tenantID = tc.ID
 			}
-			durationMs := time.Since(start).Milliseconds()
 			Log.Info().
 				Str("tenant_id", tenantID).
 				Str("method", r.Method).
 				Str("path", r.URL.Path).
 				Int("status", ww.Status()).
-				Int64("duration_ms", durationMs).
+				Int64("duration_ms", elapsed.Milliseconds()).
 				Str("request_id", chimiddleware.GetReqID(r.Context())).
 				Msg("request")
 			if record != nil {
-				record(tenantID, durationMs)
+				record(tenantID, elapsed.Microseconds())
 			}
 			if observe != nil {
-				observe(tenantID, float64(durationMs))
+				observe(tenantID, float64(elapsed.Microseconds()))
 			}
 		})
 	}
