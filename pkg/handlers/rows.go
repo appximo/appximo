@@ -1,12 +1,36 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/jackc/pgx/v5"
 )
+
+var bufPool = sync.Pool{
+	New: func() any {
+		return bytes.NewBuffer(make([]byte, 0, 4096))
+	},
+}
+
+// WriteJSON encodes v to JSON and writes it to w using a pooled buffer,
+// avoiding per-request buffer allocations for the JSON encoder.
+// Callers must set Content-Type and status code before calling.
+func WriteJSON(w http.ResponseWriter, v any) error {
+	buf := bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufPool.Put(buf)
+	if err := json.NewEncoder(buf).Encode(v); err != nil {
+		return err
+	}
+	_, err := w.Write(buf.Bytes())
+	return err
+}
 
 // RowsToMaps converts pgx.Rows to a slice of string-keyed maps.
 // UUID columns ([16]byte) are converted to hyphenated UUID strings.

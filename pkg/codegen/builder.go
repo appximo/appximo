@@ -80,7 +80,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			hasPrev := qb.Page() > 1
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{
+			pkghandlers.WriteJSON(w, map[string]any{ //nolint:errcheck
 				"data": data,
 				"meta": map[string]any{
 					"page":     qb.Page(),
@@ -142,7 +142,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			if len(result) > 0 {
-				json.NewEncoder(w).Encode(result[0])
+				pkghandlers.WriteJSON(w, result[0]) //nolint:errcheck
 			}
 		})
 
@@ -180,7 +180,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				record = pkghandlers.FilterFields(record, evalResult.AllowedFields)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(record)
+			pkghandlers.WriteJSON(w, record) //nolint:errcheck
 		}))
 
 		// --- Delete ---
@@ -248,7 +248,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					return
 				}
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(result[0])
+				pkghandlers.WriteJSON(w, result[0]) //nolint:errcheck
 			}))
 		}
 	}
