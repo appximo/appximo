@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/miguelangel/appitools/pkg/tenant"
 	"github.com/rs/zerolog"
@@ -54,15 +55,32 @@ func Init(env string) {
 	}
 }
 
+// RequestTap carries the per-request facts a downstream consumer (Prometheus
+// metrics, the per-tenant ring buffer) needs, so RequestLogger stays the single
+// measurement point. Route is the chi route pattern (e.g. "/api/{entity}"),
+// preferred over the raw Path for bounded metric/label cardinality.
+type RequestTap struct {
+	TenantID  string
+	Method    string
+	Path      string
+	Route     string
+	Status    int
+	StartUS   int64 // request start, unix microseconds
+	DurationUS int64
+	FromCache bool
+}
+
 // RequestLogger returns a chi-compatible middleware that logs each request with zerolog.
 // The Authorization header is intentionally NOT logged — only method, path, status,
 // duration, tenant_id, and request_id are recorded.
 // record receives duration in microseconds and a fromCache flag (true = served from
 // the response cache, detected via the X-Cache: HIT header set by the cache middleware).
-// observe receives duration in microseconds as float64. Both are optional (nil-safe).
+// observe receives duration in microseconds as float64. tap receives a fully-populated
+// RequestTap. All three callbacks are optional (nil-safe).
 func RequestLogger(
 	record func(tenantID string, durationUs int64, fromCache bool),
 	observe func(tenantID string, us float64),
+	tap func(RequestTap),
 ) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -91,6 +109,26 @@ func RequestLogger(
 			}
 			if observe != nil {
 				observe(tenantID, float64(elapsed.Microseconds()))
+			}
+			if tap != nil {
+				// RoutePattern is populated only after routing completes; reading it
+				// post-ServeHTTP yields the matched template, falling back to the path.
+				route := r.URL.Path
+				if rc := chi.RouteContext(r.Context()); rc != nil {
+					if p := rc.RoutePattern(); p != "" {
+						route = p
+					}
+				}
+				tap(RequestTap{
+					TenantID:   tenantID,
+					Method:     r.Method,
+					Path:       r.URL.Path,
+					Route:      route,
+					Status:     ww.Status(),
+					StartUS:    start.UnixMicro(),
+					DurationUS: elapsed.Microseconds(),
+					FromCache:  fromCache,
+				})
 			}
 		})
 	}

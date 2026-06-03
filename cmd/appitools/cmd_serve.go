@@ -126,6 +126,9 @@ var serveCmd = &cobra.Command{
 		hist := observability.NewTenantHistogram()
 		anomaly := observability.NewAnomalyDetector()
 		errStore := observability.NewErrorStore()
+		// Stage 2: Prometheus metrics + per-tenant ring buffer of recent requests.
+		metrics := observability.NewMetrics()
+		rings := observability.NewRings()
 
 		// Synthetic monitor: JWT signed at startup (24h), never hardcoded.
 		syntheticToken, syntheticErr := auth.GenerateToken(auth.Claims{
@@ -156,7 +159,7 @@ var serveCmd = &cobra.Command{
 		}
 		synthmon := observability.NewSyntheticMonitor(synthChecks)
 		synthmon.Start(ctx, 60*time.Second)
-		obsServer := observability.NewObsServer(hist, errStore, anomaly, synthmon)
+		obsServer := observability.NewObsServer(hist, errStore, anomaly, synthmon, rings)
 
 		// Control plane (port 9090) — start in background goroutine.
 		cpSvc := controlplane.NewService(pool, redisClient)
@@ -204,16 +207,38 @@ var serveCmd = &cobra.Command{
 		r.Use(chimiddleware.RequestID)
 		r.Use(tenant.TenantMiddleware)
 		// RequestLogger BEFORE cache: every request (including cache hits) is logged and measured.
-		r.Use(logging.RequestLogger(hist.Record, func(id string, us float64) {
-			if isAnomaly, zScore := anomaly.Observe(id, us); isAnomaly {
-				anomaly.IncrCounter(id)
-				logging.Log.Warn().
-					Str("tenant_id", id).
-					Float64("z_score", zScore).
-					Int64("latency_us", int64(us)).
-					Msg("anomaly detected")
-			}
-		}))
+		r.Use(logging.RequestLogger(
+			hist.Record,
+			func(id string, us float64) {
+				if isAnomaly, zScore := anomaly.Observe(id, us); isAnomaly {
+					anomaly.IncrCounter(id)
+					logging.Log.Warn().
+						Str("tenant_id", id).
+						Float64("z_score", zScore).
+						Int64("latency_us", int64(us)).
+						Msg("anomaly detected")
+				}
+			},
+			func(t logging.RequestTap) {
+				// Feed Prometheus + the per-tenant ring with application traffic only.
+				// Skip requests with no tenant and infra/admin endpoints (which, when hit
+				// over the raw IP, would otherwise be tagged with a phantom tenant derived
+				// from the first IP octet and pollute per-tenant series).
+				if t.TenantID == "" || isInfraPath(t.Path) {
+					return
+				}
+				metrics.ObserveRequest(t.TenantID, t.Method, t.Route,
+					strconv.Itoa(t.Status), float64(t.DurationUS)/1e6)
+				rings.Record(t.TenantID, observability.Sample{
+					Start:   t.StartUS,
+					DurUS:   int32(t.DurationUS),
+					QueryUS: 0, // DB query time not yet threaded through the middleware
+					Route:   rings.RouteID(t.Route),
+					Status:  uint16(t.Status),
+				})
+				metrics.SetActiveTenants(rings.Count())
+			},
+		))
 		r.Use(responseCache.Middleware)
 		r.Use(auth.JWTMiddleware(jwtSecret, func(tenantID, reason string) {
 			errStore.Record(tenantID, fmt.Errorf("jwt: %s", reason))
@@ -231,6 +256,14 @@ var serveCmd = &cobra.Command{
 				}
 			}()
 		}
+
+		// Prometheus metrics — admin-key gated (same gate as /debug/tenant), JWT-exempt
+		// via skipJWT. Never exposed without the X-Admin-Key header in production.
+		r.Handle("/metrics", observability.AdminAuth(adminKey, metrics.Handler()))
+
+		// Debug endpoints on the public listener too (admin-key gated, JWT-exempt).
+		// The control plane (:9090) also exposes these, but it is not publicly reachable.
+		r.Mount("/debug", obsServer.DebugRouter(adminKey))
 
 		// Liveness — never touches Postgres.
 		r.Get("/healthz", ss.HealthzHandler)
@@ -282,6 +315,20 @@ func init() {
 	serveCmd.Flags().String("schema", "schema.json", "path to schema.json")
 	serveCmd.Flags().Int("port", 8080, "HTTP port to listen on")
 	rootCmd.AddCommand(serveCmd)
+}
+
+// isInfraPath reports whether p is an internal infrastructure/admin endpoint that
+// must not be counted as tenant application traffic in metrics or the ring buffer.
+func isInfraPath(p string) bool {
+	switch {
+	case strings.HasPrefix(p, "/metrics"),
+		strings.HasPrefix(p, "/debug"),
+		strings.HasPrefix(p, "/health"),
+		strings.HasPrefix(p, "/readyz"):
+		return true
+	default:
+		return false
+	}
 }
 
 // parseMemLimit parses strings like "512MiB", "1GiB", "1073741824" into bytes.

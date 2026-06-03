@@ -1,0 +1,184 @@
+package observability
+
+import (
+	"sync"
+)
+
+// ringSize is the number of recent requests retained per tenant.
+const ringSize = 256
+
+// Sample is a fixed-size record of a single request. All fields are value types
+// so a Sample never escapes to the heap and TenantRing.Record stays allocation-free.
+//
+//	Start   request start time, unix microseconds
+//	DurUS   total request duration, microseconds
+//	QueryUS time spent in DB queries, microseconds (0 when unmeasured)
+//	Route   interned route-pattern id (resolve via Rings.RouteName)
+//	Status  HTTP status code
+type Sample struct {
+	Start   int64
+	DurUS   int32
+	QueryUS int32
+	Route   uint16
+	Status  uint16
+}
+
+// TenantRing is a fixed circular buffer of the last ringSize samples for one tenant.
+//
+// A mutex — not lock-free atomics — guards the buffer on purpose: once head laps
+// the array, two writers separated by ringSize records target the SAME physical
+// slot, so an atomic head only serializes index allocation, not the 24-byte Sample
+// copy. Those concurrent same-slot writes are a genuine data race (caught by -race).
+// The lock keeps Record allocation-free (a single array assignment, no slices).
+type TenantRing struct {
+	mu   sync.Mutex
+	buf  [ringSize]Sample
+	head uint32 // total number of samples ever recorded
+}
+
+// Record stores s in the next slot, overwriting the oldest sample once the buffer
+// is full. Allocation-free.
+func (r *TenantRing) Record(s Sample) {
+	r.mu.Lock()
+	r.buf[r.head%ringSize] = s
+	r.head++
+	r.mu.Unlock()
+}
+
+// Snapshot returns a copy of the retained samples ordered most-recent first.
+// Returns a non-nil empty slice (not nil) when nothing has been recorded, so it
+// marshals to a JSON [] rather than null.
+func (r *TenantRing) Snapshot() []Sample {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	h := r.head
+	n := h
+	if n > ringSize {
+		n = ringSize
+	}
+	out := make([]Sample, 0, n)
+	// Walk backwards from the most recently written slot (h-1) to the oldest.
+	for i := uint32(0); i < n; i++ {
+		out = append(out, r.buf[(h-1-i)%ringSize])
+	}
+	return out
+}
+
+// Rings holds one TenantRing per tenant plus a route-pattern interner that maps
+// variable-length route strings to compact uint16 ids stored in each Sample.
+type Rings struct {
+	mu sync.RWMutex
+	m  map[string]*TenantRing
+
+	routeMu  sync.RWMutex
+	routeIDs map[string]uint16
+	routes   []string // index = id; routes[0] reserved for "unknown"
+}
+
+// NewRings returns an empty registry ready for use.
+func NewRings() *Rings {
+	return &Rings{
+		m:        make(map[string]*TenantRing),
+		routeIDs: make(map[string]uint16),
+		routes:   []string{""}, // id 0 == unknown/empty route
+	}
+}
+
+// RouteID returns a stable uint16 id for route, interning it on first sight.
+// Reads are lock-free-ish (RLock); only the first occurrence of a route takes
+// the write lock. Ids saturate at the uint16 max to avoid overflow wraparound.
+func (rs *Rings) RouteID(route string) uint16 {
+	if route == "" {
+		return 0
+	}
+	rs.routeMu.RLock()
+	id, ok := rs.routeIDs[route]
+	rs.routeMu.RUnlock()
+	if ok {
+		return id
+	}
+	rs.routeMu.Lock()
+	defer rs.routeMu.Unlock()
+	if id, ok := rs.routeIDs[route]; ok { // re-check after acquiring write lock
+		return id
+	}
+	if len(rs.routes) >= 1<<16 {
+		return 0 // interner full; degrade to unknown rather than overflow
+	}
+	id = uint16(len(rs.routes))
+	rs.routes = append(rs.routes, route)
+	rs.routeIDs[route] = id
+	return id
+}
+
+// RouteName resolves an interned id back to its route string.
+func (rs *Rings) RouteName(id uint16) string {
+	rs.routeMu.RLock()
+	defer rs.routeMu.RUnlock()
+	if int(id) < len(rs.routes) {
+		return rs.routes[id]
+	}
+	return ""
+}
+
+// Record appends a sample to the given tenant's ring, creating the ring on first use.
+func (rs *Rings) Record(tenantID string, s Sample) {
+	rs.mu.RLock()
+	tr := rs.m[tenantID]
+	rs.mu.RUnlock()
+	if tr == nil {
+		rs.mu.Lock()
+		if tr = rs.m[tenantID]; tr == nil {
+			tr = &TenantRing{}
+			rs.m[tenantID] = tr
+		}
+		rs.mu.Unlock()
+	}
+	tr.Record(s)
+}
+
+// Count returns the number of distinct tenants that have recorded at least one request.
+func (rs *Rings) Count() int {
+	rs.mu.RLock()
+	defer rs.mu.RUnlock()
+	return len(rs.m)
+}
+
+// Snapshot returns the tenant's retained samples (most-recent first), or an empty
+// slice when the tenant has no recorded requests.
+func (rs *Rings) Snapshot(tenantID string) []Sample {
+	rs.mu.RLock()
+	tr := rs.m[tenantID]
+	rs.mu.RUnlock()
+	if tr == nil {
+		return []Sample{}
+	}
+	return tr.Snapshot()
+}
+
+// RecentRequest is the JSON-friendly projection of a Sample with its route id
+// resolved back to a human-readable pattern.
+type RecentRequest struct {
+	StartUS int64  `json:"start_us"`
+	DurUS   int32  `json:"dur_us"`
+	QueryUS int32  `json:"query_us"`
+	Route   string `json:"route"`
+	Status  uint16 `json:"status"`
+}
+
+// Recent returns the tenant's recent requests as RecentRequest values, ordered
+// most-recent first, with route ids resolved to strings.
+func (rs *Rings) Recent(tenantID string) []RecentRequest {
+	samples := rs.Snapshot(tenantID)
+	out := make([]RecentRequest, 0, len(samples))
+	for _, s := range samples {
+		out = append(out, RecentRequest{
+			StartUS: s.Start,
+			DurUS:   s.DurUS,
+			QueryUS: s.QueryUS,
+			Route:   rs.RouteName(s.Route),
+			Status:  s.Status,
+		})
+	}
+	return out
+}
