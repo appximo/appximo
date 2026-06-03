@@ -23,7 +23,23 @@ var skipJWT = []string{"/health", "/graphiql"}
 
 // JWTMiddleware validates Bearer tokens on all routes except those in skipJWT.
 // 401 is returned for missing or invalid tokens on enforced routes.
-func JWTMiddleware(secret string) func(http.Handler) http.Handler {
+// Optional onError callback (tenantID, reason) is called on every 401 so callers
+// can forward auth failures to an error store without importing auth from observability.
+func JWTMiddleware(secret string, onError ...func(tenantID, reason string)) func(http.Handler) http.Handler {
+	var recordErr func(tenantID, reason string)
+	if len(onError) > 0 {
+		recordErr = onError[0]
+	}
+	reject := func(w http.ResponseWriter, r *http.Request, reason string) {
+		if recordErr != nil {
+			tenantID := ""
+			if tc := tenant.FromCtx(r.Context()); tc != nil {
+				tenantID = tc.ID
+			}
+			recordErr(tenantID, reason)
+		}
+		writeJSON401(w, reason)
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			for _, p := range skipJWT {
@@ -35,13 +51,13 @@ func JWTMiddleware(secret string) func(http.Handler) http.Handler {
 
 			header := r.Header.Get("Authorization")
 			if header == "" {
-				writeJSON401(w, "missing token")
+				reject(w, r, "missing token")
 				return
 			}
 
 			const prefix = "Bearer "
 			if !strings.HasPrefix(header, prefix) {
-				writeJSON401(w, "invalid token")
+				reject(w, r, "invalid token")
 				return
 			}
 
@@ -52,7 +68,7 @@ func JWTMiddleware(secret string) func(http.Handler) http.Handler {
 				var err error
 				claims, err = ValidateToken(tokenStr, secret)
 				if err != nil {
-					writeJSON401(w, "invalid token")
+					reject(w, r, "invalid token: "+err.Error())
 					return
 				}
 				setCachedClaims(tokenStr, claims)
@@ -61,7 +77,7 @@ func JWTMiddleware(secret string) func(http.Handler) http.Handler {
 			// Reject tokens whose TenantID does not match the request tenant.
 			// TenantMiddleware must run before JWTMiddleware for this check to fire.
 			if tc := tenant.FromCtx(r.Context()); tc != nil && claims.TenantID != "" && claims.TenantID != tc.ID {
-				writeJSON401(w, "token tenant mismatch")
+				reject(w, r, "token tenant mismatch")
 				return
 			}
 

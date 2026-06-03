@@ -126,7 +126,36 @@ var serveCmd = &cobra.Command{
 		hist := observability.NewTenantHistogram()
 		anomaly := observability.NewAnomalyDetector()
 		errStore := observability.NewErrorStore()
-		synthmon := observability.NewSyntheticMonitor(nil) // no synthetic checks by default
+
+		// Synthetic monitor: JWT signed at startup (24h), never hardcoded.
+		syntheticToken, syntheticErr := auth.GenerateToken(auth.Claims{
+			UserID:   "synthetic-monitor",
+			Role:     "super_admin",
+			TenantID: "acme",
+		}, jwtSecret)
+		if syntheticErr != nil {
+			fmt.Fprintln(os.Stderr, "Warning: could not generate synthetic token:", syntheticErr)
+		}
+		synthChecks := []observability.Check{
+			{
+				Name:     "health",
+				URL:      "http://localhost:8080/health",
+				Method:   "GET",
+				Expected: 200,
+			},
+			{
+				Name:   "guides-api",
+				URL:    "http://localhost:8080/api/guides",
+				Method: "GET",
+				Headers: map[string]string{
+					"Host":          "acme.localhost",
+					"Authorization": "Bearer " + syntheticToken,
+				},
+				Expected: 200,
+			},
+		}
+		synthmon := observability.NewSyntheticMonitor(synthChecks)
+		synthmon.Start(ctx, 60*time.Second)
 		obsServer := observability.NewObsServer(hist, errStore, anomaly, synthmon)
 
 		// Control plane (port 9090) — start in background goroutine.
@@ -176,10 +205,19 @@ var serveCmd = &cobra.Command{
 		r.Use(tenant.TenantMiddleware)
 		// RequestLogger BEFORE cache: every request (including cache hits) is logged and measured.
 		r.Use(logging.RequestLogger(hist.Record, func(id string, us float64) {
-			anomaly.Observe(id, us) //nolint:errcheck
+			if isAnomaly, zScore := anomaly.Observe(id, us); isAnomaly {
+				anomaly.IncrCounter(id)
+				logging.Log.Warn().
+					Str("tenant_id", id).
+					Float64("z_score", zScore).
+					Int64("latency_us", int64(us)).
+					Msg("anomaly detected")
+			}
 		}))
 		r.Use(responseCache.Middleware)
-		r.Use(auth.JWTMiddleware(jwtSecret))
+		r.Use(auth.JWTMiddleware(jwtSecret, func(tenantID, reason string) {
+			errStore.Record(tenantID, fmt.Errorf("jwt: %s", reason))
+		}))
 		r.Use(rbac.RBACMiddleware(policyBytes))
 		r.Use(chimiddleware.Recoverer)
 

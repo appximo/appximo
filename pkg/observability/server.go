@@ -45,11 +45,14 @@ func (s *ObsServer) Router(adminKey string) *chi.Mux {
 
 func (s *ObsServer) handleTenant(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	snap := s.hist.Snapshot(id)
+	snap := s.hist.FullSnapshot(id)
+	errs := s.errors.TopN(id, 10)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-		"tenant_id": id,
-		"latency":   snap,
+		"tenant_id":     id,
+		"latency":       snap,
+		"errors":        errs,
+		"anomaly_count": s.anomaly.GetCount(id),
 	})
 }
 

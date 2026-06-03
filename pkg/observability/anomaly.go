@@ -3,11 +3,12 @@ package observability
 import (
 	"math"
 	"sync"
+	"sync/atomic"
 )
 
 const (
-	ewmaAlpha   = 0.05
-	zThreshold  = 3.0
+	ewmaAlpha  = 0.05
+	zThreshold = 3.0
 )
 
 type ewmaState struct {
@@ -18,8 +19,9 @@ type ewmaState struct {
 // AnomalyDetector flags requests whose latency is statistically anomalous
 // using an exponentially-weighted moving average of mean and variance.
 type AnomalyDetector struct {
-	mu     sync.RWMutex
-	states map[string]*ewmaState
+	mu       sync.RWMutex
+	states   map[string]*ewmaState
+	counters sync.Map // tenantID → *atomic.Int64
 }
 
 func NewAnomalyDetector() *AnomalyDetector {
@@ -28,7 +30,7 @@ func NewAnomalyDetector() *AnomalyDetector {
 	}
 }
 
-// Observe updates the EWMA model for tenantID with a new latency sample (ms).
+// Observe updates the EWMA model for tenantID with a new latency sample (µs).
 // Returns (true, z-score) when the sample is anomalous, (false, 0) otherwise.
 func (d *AnomalyDetector) Observe(tenantID string, ms float64) (bool, float64) {
 	d.mu.Lock()
@@ -51,4 +53,19 @@ func (d *AnomalyDetector) Observe(tenantID string, ms float64) (bool, float64) {
 	}
 	z := math.Abs(diff) / math.Sqrt(s.varc)
 	return z > zThreshold, z
+}
+
+// IncrCounter increments the anomaly count for tenantID by one.
+func (d *AnomalyDetector) IncrCounter(tenantID string) {
+	v, _ := d.counters.LoadOrStore(tenantID, &atomic.Int64{})
+	v.(*atomic.Int64).Add(1)
+}
+
+// GetCount returns the total anomaly count for tenantID since startup.
+func (d *AnomalyDetector) GetCount(tenantID string) int64 {
+	v, ok := d.counters.Load(tenantID)
+	if !ok {
+		return 0
+	}
+	return v.(*atomic.Int64).Load()
 }

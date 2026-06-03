@@ -57,10 +57,11 @@ func Init(env string) {
 // RequestLogger returns a chi-compatible middleware that logs each request with zerolog.
 // The Authorization header is intentionally NOT logged — only method, path, status,
 // duration, tenant_id, and request_id are recorded.
-// record receives duration in microseconds; observe receives duration in microseconds as float64.
-// Both are optional (nil-safe).
+// record receives duration in microseconds and a fromCache flag (true = served from
+// the response cache, detected via the X-Cache: HIT header set by the cache middleware).
+// observe receives duration in microseconds as float64. Both are optional (nil-safe).
 func RequestLogger(
-	record func(tenantID string, durationUs int64),
+	record func(tenantID string, durationUs int64, fromCache bool),
 	observe func(tenantID string, us float64),
 ) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -83,8 +84,10 @@ func RequestLogger(
 				Int64("duration_ms", elapsed.Milliseconds()).
 				Str("request_id", chimiddleware.GetReqID(r.Context())).
 				Msg("request")
+			// X-Cache: HIT is written by the response cache middleware on cache hits.
+			fromCache := ww.Header().Get("X-Cache") == "HIT"
 			if record != nil {
-				record(tenantID, elapsed.Microseconds())
+				record(tenantID, elapsed.Microseconds(), fromCache)
 			}
 			if observe != nil {
 				observe(tenantID, float64(elapsed.Microseconds()))
