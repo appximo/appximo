@@ -144,6 +144,18 @@ func (rs *Rings) Count() int {
 	return len(rs.m)
 }
 
+// TenantIDs returns the IDs of every tenant that has recorded at least one request.
+// Used by the SLO engine to sweep all active tenants each tick.
+func (rs *Rings) TenantIDs() []string {
+	rs.mu.RLock()
+	defer rs.mu.RUnlock()
+	ids := make([]string, 0, len(rs.m))
+	for id := range rs.m {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // Snapshot returns the tenant's retained samples (most-recent first), or an empty
 // slice when the tenant has no recorded requests.
 func (rs *Rings) Snapshot(tenantID string) []Sample {

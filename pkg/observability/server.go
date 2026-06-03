@@ -14,6 +14,7 @@ type ObsServer struct {
 	anomaly  *AnomalyDetector
 	synthmon *SyntheticMonitor
 	rings    *Rings
+	slo      *SLOEngine
 }
 
 func NewObsServer(
@@ -22,8 +23,9 @@ func NewObsServer(
 	anomaly *AnomalyDetector,
 	synthmon *SyntheticMonitor,
 	rings *Rings,
+	slo *SLOEngine,
 ) *ObsServer {
-	return &ObsServer{hist: hist, errors: errors, anomaly: anomaly, synthmon: synthmon, rings: rings}
+	return &ObsServer{hist: hist, errors: errors, anomaly: anomaly, synthmon: synthmon, rings: rings, slo: slo}
 }
 
 // AdminAuth wraps next so it is reachable only with a matching X-Admin-Key header.
@@ -67,14 +69,18 @@ func (s *ObsServer) handleTenant(w http.ResponseWriter, r *http.Request) {
 	if s.rings != nil {
 		recent = s.rings.Recent(id)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+	payload := map[string]any{
 		"tenant_id":       id,
 		"latency":         snap,
 		"errors":          errs,
 		"anomaly_count":   s.anomaly.GetCount(id),
 		"recent_requests": recent,
-	})
+	}
+	if s.slo != nil {
+		payload["slo"] = s.slo.Snapshot(id)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(payload) //nolint:errcheck
 }
 
 func (s *ObsServer) handleSynthetic(w http.ResponseWriter, r *http.Request) {
