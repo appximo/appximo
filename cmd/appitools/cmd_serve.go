@@ -131,7 +131,7 @@ var serveCmd = &cobra.Command{
 		syntheticToken, syntheticErr := auth.GenerateToken(auth.Claims{
 			UserID:   "synthetic-monitor",
 			Role:     "super_admin",
-			TenantID: "acme",
+			TenantID: "10",
 		}, jwtSecret)
 		if syntheticErr != nil {
 			fmt.Fprintln(os.Stderr, "Warning: could not generate synthetic token:", syntheticErr)
@@ -148,7 +148,7 @@ var serveCmd = &cobra.Command{
 				URL:    "http://localhost:8080/api/guides",
 				Method: "GET",
 				Headers: map[string]string{
-					"Host":          "acme.localhost",
+					"Host":          "10.localhost",
 					"Authorization": "Bearer " + syntheticToken,
 				},
 				Expected: 200,

@@ -77,7 +77,12 @@ func (sm *SyntheticMonitor) run(ctx context.Context, c Check) {
 		return
 	}
 	for k, v := range c.Headers {
-		req.Header.Set(k, v)
+		if k == "Host" {
+			// Go's http.Client ignores Host in req.Header; must set req.Host directly.
+			req.Host = v
+		} else {
+			req.Header.Set(k, v)
+		}
 	}
 	r := &CheckResult{Name: c.Name, LastCheck: time.Now()}
 
