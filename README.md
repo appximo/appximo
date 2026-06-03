@@ -43,52 +43,32 @@ One JSON schema → a fully functional, multi-tenant REST API with RBAC, JS hook
 
 ## Benchmark
 
-Real numbers from k6 v0.55.0 on a **$6/mo DigitalOcean Droplet (1 vCPU / 2 GB RAM)**,
-Postgres 16 in Docker, 1 004 pre-loaded rows, 0% error rate across 55 649 requests.
+Methodology: k6 v0.55.0 `constant-arrival-rate` (open model), **k6 on a separate machine**
+(fair benchmark — no shared CPU). Hardware: DigitalOcean 2 vCPU / 2 GB / $16 mo,
+Postgres 16 in Docker, 10 000 pre-loaded rows. Both servers on the same Droplet.
 
-| Scenario | VUs | RPS | P90 | P95 | RAM (appitools) |
-|---|---|---|---|---|---|
-| **GET list — max throughput** | 20 | **~530 req/s** | 115 ms | 144 ms | 19 MB |
-| **GET list — sustained 50 VUs** | 50 | **~303 req/s** | 216 ms | 442 ms | 27 MB |
-| **80% read / 20% write + JS hook** | 10 | **~618 req/s** | 78 ms | 91 ms | 27 MB |
+**Appitools:** JWT HS256 + RBAC + per-tenant schema isolation (`SET LOCAL search_path`).  
+**NestJS baseline:** header-only auth, single shared table, Prisma ORM.
 
-Bottleneck is Postgres in Docker sharing 1 vCPU with other processes — not the HTTP layer.
-On a dedicated $16/mo Droplet (2 vCPU, unix socket Postgres) expect **2–3× higher RPS**.
+| Load | Appitools p50 | Appitools p95 | Appitools p99 | NestJS p50 | NestJS p95 | NestJS p99 |
+|------|:---:|:---:|:---:|:---:|:---:|:---:|
+| 500 RPS  | **2ms** | **2ms**  | **4ms**  | 4ms   | 21ms   | 64ms   |
+| 1000 RPS | **2ms** | **7ms**  | **69ms** | 29ms  | 114ms  | 159ms  |
+| 2000 RPS | **2ms** | **48ms** | **84ms** | 808ms | 1236ms | 1509ms |
 
-> [Full methodology, raw k6 output, and bottleneck analysis →](docs/benchmarks.md)
+**Error rate: 0% on both at all load points.**
 
----
+At 2 000 RPS, Appitools p50 stays at 2 ms. NestJS p50 hits 808 ms — Node.js event loop
+saturates while Go goroutines keep serving. NestJS cannot sustain 2 000 RPS
+(achieved only 1 092 actual RPS); Appitools delivers the full 1 997.
 
-## Real Performance — Scientific Benchmark
+| Resource | Appitools @ 2000 RPS | NestJS @ saturation |
+|---|---|---|
+| RAM | **36 MB** | 49 MB (idle, saturated before 2k) |
+| CPU (app process) | **37%** of 1 core | 100%+ |
+| Errors | **0%** | 0% |
 
-Methodology: k6 constant-arrival-rate (open model),
-1 shared vCPU, 1.9 GB RAM, PostgreSQL 16.
-Appitools: JWT HS256 + RBAC + multi-tenant schema isolation.
-NestJS baseline: header check only, no RBAC, no multi-tenancy.
-
-| Load | Appitools p95 | NestJS p95 |
-|------|--------------|------------|
-| 50 RPS  | **4ms**   | 242ms |
-| 100 RPS | **161ms** | 707ms |
-| 150 RPS | **3ms**   | 5ms   |
-| 200 RPS | **6ms**   | 7ms   |
-| 220 RPS | **7ms**   | 19ms  |
-| 240 RPS | **168ms** | 309ms |
-
-**p50 steady state: 2–3ms on both.**
-**Error rate: 0% on both up to 240 RPS.**
-
-Go wins 5 of 6 load points — with real JWT validation, RBAC enforcement,
-and per-tenant schema isolation that NestJS didn't implement.
-
-Key insight: NestJS pays 242–707ms JIT warmup at low load. Go binary is
-AOT-compiled — first request is as fast as the millionth.
-
-RAM idle: ~1 MB (Go) vs ~42 MB (Node).
-Expected on 2 vCPU: Go separates further as goroutines use both cores;
-Node stays single-threaded.
-
-> [See full methodology →](benchmark-lab/BENCHMARK_REPORT.md)
+> [Full methodology and raw k6 output →](benchmark-lab/BENCHMARK_REPORT.md)
 
 ---
 

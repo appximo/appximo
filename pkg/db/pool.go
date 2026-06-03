@@ -3,7 +3,9 @@ package db
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,6 +19,11 @@ func NewPool(ctx context.Context, connStr string) (*pgxpool.Pool, error) {
 
 	cores := runtime.GOMAXPROCS(0)
 	maxConns := int32(cores*2 + 2)
+	if v := os.Getenv("DB_MAX_CONNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxConns = int32(n)
+		}
+	}
 	minConns := int32(max(2, int(maxConns)/2))
 	cfg.MaxConns = maxConns
 	cfg.MinConns = minConns
