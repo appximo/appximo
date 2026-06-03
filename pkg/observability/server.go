@@ -3,6 +3,7 @@ package observability
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -15,6 +16,7 @@ type ObsServer struct {
 	synthmon *SyntheticMonitor
 	rings    *Rings
 	slo      *SLOEngine
+	store    *ObsStore
 }
 
 func NewObsServer(
@@ -24,8 +26,9 @@ func NewObsServer(
 	synthmon *SyntheticMonitor,
 	rings *Rings,
 	slo *SLOEngine,
+	store *ObsStore,
 ) *ObsServer {
-	return &ObsServer{hist: hist, errors: errors, anomaly: anomaly, synthmon: synthmon, rings: rings, slo: slo}
+	return &ObsServer{hist: hist, errors: errors, anomaly: anomaly, synthmon: synthmon, rings: rings, slo: slo, store: store}
 }
 
 // AdminAuth wraps next so it is reachable only with a matching X-Admin-Key header.
@@ -79,8 +82,41 @@ func (s *ObsServer) handleTenant(w http.ResponseWriter, r *http.Request) {
 	if s.slo != nil {
 		payload["slo"] = s.slo.Snapshot(id)
 	}
+	// ?history=<hours> adds persisted snapshots; absent → current behavior unchanged.
+	if h := r.URL.Query().Get("history"); h != "" && s.store != nil {
+		if hours, err := strconv.Atoi(h); err == nil && hours > 0 {
+			payload["history"] = s.historyPoints(id, hours)
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(payload) //nolint:errcheck
+}
+
+// HistoryPoint is the trimmed per-snapshot projection returned under "history".
+type HistoryPoint struct {
+	TS        int64  `json:"ts"`
+	P50US     int64  `json:"p50_us"`
+	P95US     int64  `json:"p95_us"`
+	SLOStatus string `json:"slo_status"`
+}
+
+// historyPoints loads persisted snapshots for the tenant and projects them for the API.
+// On a store error it returns an empty slice rather than failing the whole response.
+func (s *ObsServer) historyPoints(id string, hours int) []HistoryPoint {
+	snaps, err := s.store.History(id, hours)
+	if err != nil {
+		return []HistoryPoint{}
+	}
+	pts := make([]HistoryPoint, 0, len(snaps))
+	for _, snap := range snaps {
+		pts = append(pts, HistoryPoint{
+			TS:        snap.TS,
+			P50US:     snap.P50US,
+			P95US:     snap.P95US,
+			SLOStatus: snap.SLOStatus,
+		})
+	}
+	return pts
 }
 
 func (s *ObsServer) handleSynthetic(w http.ResponseWriter, r *http.Request) {

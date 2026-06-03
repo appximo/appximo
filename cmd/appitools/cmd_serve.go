@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -36,6 +37,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/shutdown"
 	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/miguelangel/appitools/scripts"
 	"github.com/spf13/cobra"
 )
 
@@ -134,6 +136,19 @@ var serveCmd = &cobra.Command{
 		sloEngine := observability.NewSLOEngine(rings, hist, alerter)
 		go sloEngine.Run(ctx)
 
+		// Stage 4: persist observability snapshots to SQLite (survives restarts).
+		// Empty OBS_DB_PATH falls back to /tmp/obs.db. Open failure is non-fatal.
+		var obsStore *observability.ObsStore
+		if st, openErr := observability.OpenStore(os.Getenv("OBS_DB_PATH")); openErr != nil {
+			log.Printf("WARNING: observability store disabled: %v", openErr)
+		} else {
+			obsStore = st
+			if pruneErr := obsStore.Prune(); pruneErr != nil {
+				log.Printf("WARNING: obs store prune at startup: %v", pruneErr)
+			}
+			go flushObsSnapshots(ctx, obsStore, rings, hist, sloEngine)
+		}
+
 		// Synthetic monitor: JWT signed at startup (24h), never hardcoded.
 		syntheticToken, syntheticErr := auth.GenerateToken(auth.Claims{
 			UserID:   "synthetic-monitor",
@@ -163,7 +178,7 @@ var serveCmd = &cobra.Command{
 		}
 		synthmon := observability.NewSyntheticMonitor(synthChecks)
 		synthmon.Start(ctx, 60*time.Second)
-		obsServer := observability.NewObsServer(hist, errStore, anomaly, synthmon, rings, sloEngine)
+		obsServer := observability.NewObsServer(hist, errStore, anomaly, synthmon, rings, sloEngine, obsStore)
 
 		// Control plane (port 9090) — start in background goroutine.
 		cpSvc := controlplane.NewService(pool, redisClient)
@@ -269,6 +284,11 @@ var serveCmd = &cobra.Command{
 		// The control plane (:9090) also exposes these, but it is not publicly reachable.
 		r.Mount("/debug", obsServer.DebugRouter(adminKey))
 
+		// Admin backup endpoint — admin-key gated, JWT-exempt. Runs pg_dump for the
+		// requested tenant regardless of whether it is loaded in cache.
+		r.Method(http.MethodPost, "/admin/backup",
+			observability.AdminAuth(adminKey, backupHandler(pool)))
+
 		// Liveness — never touches Postgres.
 		r.Get("/healthz", ss.HealthzHandler)
 		// Readiness — returns 503 during drain/shutdown.
@@ -306,8 +326,14 @@ var serveCmd = &cobra.Command{
 		fmt.Printf("Appitools serving on %s — Ctrl+C to stop\n", addr)
 
 		// Run blocks until the server is shut down, executing the mandated sequence:
-		//   ready=0 → sleep 5s (LB drain) → Shutdown(10s) → pool.Close()
-		if err := ss.Run(ctx, srv, 5*time.Second, pool.Close); err != nil {
+		//   ready=0 → sleep 5s (LB drain) → Shutdown(10s) → cleanup (pool + obs store)
+		cleanup := func() {
+			pool.Close()
+			if obsStore != nil {
+				obsStore.Close() //nolint:errcheck
+			}
+		}
+		if err := ss.Run(ctx, srv, 5*time.Second, cleanup); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -327,11 +353,84 @@ func isInfraPath(p string) bool {
 	switch {
 	case strings.HasPrefix(p, "/metrics"),
 		strings.HasPrefix(p, "/debug"),
+		strings.HasPrefix(p, "/admin"),
 		strings.HasPrefix(p, "/health"),
 		strings.HasPrefix(p, "/readyz"):
 		return true
 	default:
 		return false
+	}
+}
+
+// flushObsSnapshots persists a per-tenant observability snapshot every 60s until ctx
+// is cancelled, combining histogram latency with SLO burn-rate state.
+func flushObsSnapshots(
+	ctx context.Context,
+	store *observability.ObsStore,
+	rings *observability.Rings,
+	hist *observability.TenantHistogram,
+	slo *observability.SLOEngine,
+) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			now := time.Now().Unix()
+			for _, tid := range rings.TenantIDs() {
+				var p50, p95 int64
+				if fs := hist.FullSnapshot(tid); fs != nil && fs.Uncached != nil {
+					p50 = int64(fs.Uncached.P50Us)
+					p95 = int64(fs.Uncached.P95Us)
+				}
+				s := slo.Snapshot(tid)
+				if err := store.Flush(tid, observability.Snapshot{
+					TenantID:   tid,
+					TS:         now,
+					P50US:      p50,
+					P95US:      p95,
+					ErrorRatio: s.ErrorRatio5m,
+					BurnRate:   s.BurnRate5m,
+					SLOStatus:  s.Status,
+				}); err != nil {
+					log.Printf("obs store flush tenant %s: %v", tid, err)
+				}
+			}
+		}
+	}
+}
+
+// backupHandler returns the POST /admin/backup handler. It requires a ?tenant= param,
+// runs pg_dump for that schema, and returns the result as JSON. A missing pg_dump
+// binary yields 503 so operators get a clear, actionable signal.
+func backupHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	outputDir := os.Getenv("BACKUP_DIR")
+	if outputDir == "" {
+		outputDir = "/tmp/appitools-backups"
+	}
+	return func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		tenant := req.URL.Query().Get("tenant")
+		if tenant == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "tenant query parameter is required"}) //nolint:errcheck
+			return
+		}
+
+		results, err := scripts.Backup(req.Context(), pool, tenant, outputDir)
+		if errors.Is(err, scripts.ErrPgDumpNotFound) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{"error": "pg_dump is not available on this host"}) //nolint:errcheck
+			return
+		}
+		if err != nil || len(results) == 0 {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("backup failed: %v", err)}) //nolint:errcheck
+			return
+		}
+		json.NewEncoder(w).Encode(results[0]) //nolint:errcheck
 	}
 }
 
