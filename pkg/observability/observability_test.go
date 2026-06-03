@@ -2,6 +2,7 @@ package observability
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -238,5 +239,70 @@ func TestErrorStore_TopN(t *testing.T) {
 	// TopN for unknown tenant returns nil.
 	if es.TopN("ghost", 5) != nil {
 		t.Fatal("TopN for unknown tenant should return nil")
+	}
+}
+
+func TestErrorStore_TopN_IncludesStack(t *testing.T) {
+	es := NewErrorStore()
+	es.Record("acme", errors.New("stack test error"))
+
+	top := es.TopN("acme", 1)
+	if len(top) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(top))
+	}
+	stack, ok := top[0]["stack"].([]Frame)
+	if !ok {
+		t.Fatalf("stack field missing or wrong type: %T", top[0]["stack"])
+	}
+	if len(stack) == 0 {
+		t.Fatal("stack should not be empty")
+	}
+}
+
+func TestRecord_StackTraceIsReadable(t *testing.T) {
+	es := NewErrorStore()
+
+	triggerError := func() error {
+		return errors.New("test stack trace")
+	}
+	es.Record("acme", triggerError())
+
+	top := es.TopN("acme", 1)
+	if len(top) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(top))
+	}
+
+	stack, ok := top[0]["stack"].([]Frame)
+	if !ok {
+		t.Fatalf("stack field missing or wrong type: %T", top[0]["stack"])
+	}
+	if len(stack) == 0 {
+		t.Fatal("stack must not be empty")
+	}
+
+	// Must include the test function somewhere in the stack.
+	found := false
+	for _, f := range stack {
+		if strings.Contains(f.Function, "TestRecord") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("stack must include the calling test function; got: %v", stack)
+	}
+
+	// Must not expose runtime.goexit or similar.
+	for _, f := range stack {
+		if strings.Contains(f.Function, "runtime.goexit") {
+			t.Errorf("stack must not include runtime.goexit: %v", f)
+		}
+	}
+
+	// File paths must be relative, not absolute.
+	for _, f := range stack {
+		if strings.HasPrefix(f.File, "/") {
+			t.Errorf("file path must be relative, got: %s", f.File)
+		}
 	}
 }
