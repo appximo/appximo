@@ -59,17 +59,26 @@ func NewWebhookDispatcherOpts(opts ...func(*WebhookDispatcher)) *WebhookDispatch
 // newSSRFSafeClient builds an http.Client whose dialer rejects private/loopback/
 // link-local addresses and whose redirect policy refuses all redirects.
 func newSSRFSafeClient() *http.Client {
+	return NewSSRFSafeClient(10 * time.Second)
+}
+
+// NewSSRFSafeClient returns an http.Client whose dialer rejects private, loopback,
+// and link-local addresses and whose redirect policy refuses all redirects. The
+// given timeout bounds the dial, TLS handshake, response-header wait, and the whole
+// request. Exported so other outbound senders (e.g. the SLO Slack alerter) reuse the
+// exact same egress guard instead of duplicating it.
+func NewSSRFSafeClient(timeout time.Duration) *http.Client {
 	dialer := &net.Dialer{
-		Timeout:   10 * time.Second,
+		Timeout:   timeout,
 		KeepAlive: 30 * time.Second,
 		Control:   ssrfDialerControl,
 	}
 	return &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout: timeout,
 		Transport: &http.Transport{
 			DialContext:           dialer.DialContext,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: 10 * time.Second,
+			TLSHandshakeTimeout:   timeout,
+			ResponseHeaderTimeout: timeout,
 		},
 		// Never follow redirects — a 3xx to an internal IP would bypass the SSRF guard.
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {

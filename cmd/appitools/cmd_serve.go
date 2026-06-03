@@ -129,6 +129,10 @@ var serveCmd = &cobra.Command{
 		// Stage 2: Prometheus metrics + per-tenant ring buffer of recent requests.
 		metrics := observability.NewMetrics()
 		rings := observability.NewRings()
+		// Stage 3: SLO burn-rate engine + alerter (Slack if SLACK_WEBHOOK_URL set, else noop).
+		alerter := observability.NewSlackAlerterFromEnv()
+		sloEngine := observability.NewSLOEngine(rings, hist, alerter)
+		go sloEngine.Run(ctx)
 
 		// Synthetic monitor: JWT signed at startup (24h), never hardcoded.
 		syntheticToken, syntheticErr := auth.GenerateToken(auth.Claims{
@@ -159,7 +163,7 @@ var serveCmd = &cobra.Command{
 		}
 		synthmon := observability.NewSyntheticMonitor(synthChecks)
 		synthmon.Start(ctx, 60*time.Second)
-		obsServer := observability.NewObsServer(hist, errStore, anomaly, synthmon, rings)
+		obsServer := observability.NewObsServer(hist, errStore, anomaly, synthmon, rings, sloEngine)
 
 		// Control plane (port 9090) — start in background goroutine.
 		cpSvc := controlplane.NewService(pool, redisClient)
