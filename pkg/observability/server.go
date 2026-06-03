@@ -13,6 +13,7 @@ type ObsServer struct {
 	errors   *ErrorStore
 	anomaly  *AnomalyDetector
 	synthmon *SyntheticMonitor
+	rings    *Rings
 }
 
 func NewObsServer(
@@ -20,26 +21,41 @@ func NewObsServer(
 	errors *ErrorStore,
 	anomaly *AnomalyDetector,
 	synthmon *SyntheticMonitor,
+	rings *Rings,
 ) *ObsServer {
-	return &ObsServer{hist: hist, errors: errors, anomaly: anomaly, synthmon: synthmon}
+	return &ObsServer{hist: hist, errors: errors, anomaly: anomaly, synthmon: synthmon, rings: rings}
 }
 
-// Router returns a chi.Mux with admin-protected debug routes.
-// Mount at "/" on an existing router to expose /debug/... paths.
-func (s *ObsServer) Router(adminKey string) *chi.Mux {
+// AdminAuth wraps next so it is reachable only with a matching X-Admin-Key header.
+// This is the single gate shared by the /debug/* endpoints and /metrics.
+func AdminAuth(adminKey string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Header.Get("X-Admin-Key") != adminKey {
+			w.Header().Set("Content-Type", "application/json")
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, req)
+	})
+}
+
+// DebugRouter returns an admin-gated sub-router serving /tenant/{id} and /synthetic.
+// Mount it at "/debug" on any router (the main :8080 server or the control plane).
+func (s *ObsServer) DebugRouter(adminKey string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if req.Header.Get("X-Admin-Key") != adminKey {
-				w.Header().Set("Content-Type", "application/json")
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-				return
-			}
-			next.ServeHTTP(w, req)
-		})
+		return AdminAuth(adminKey, next)
 	})
-	r.Get("/debug/tenant/{id}", s.handleTenant)
-	r.Get("/debug/synthetic", s.handleSynthetic)
+	r.Get("/tenant/{id}", s.handleTenant)
+	r.Get("/synthetic", s.handleSynthetic)
+	return r
+}
+
+// Router returns a chi.Mux exposing the /debug/... paths, admin-protected.
+// Mount at "/" on an existing router (used by the control plane on :9090).
+func (s *ObsServer) Router(adminKey string) *chi.Mux {
+	r := chi.NewRouter()
+	r.Mount("/debug", s.DebugRouter(adminKey))
 	return r
 }
 
@@ -47,12 +63,17 @@ func (s *ObsServer) handleTenant(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	snap := s.hist.FullSnapshot(id)
 	errs := s.errors.TopN(id, 10)
+	recent := []RecentRequest{}
+	if s.rings != nil {
+		recent = s.rings.Recent(id)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-		"tenant_id":     id,
-		"latency":       snap,
-		"errors":        errs,
-		"anomaly_count": s.anomaly.GetCount(id),
+		"tenant_id":       id,
+		"latency":         snap,
+		"errors":          errs,
+		"anomaly_count":   s.anomaly.GetCount(id),
+		"recent_requests": recent,
 	})
 }
 

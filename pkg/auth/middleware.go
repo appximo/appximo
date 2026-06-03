@@ -19,7 +19,9 @@ func ClaimsFromCtx(ctx context.Context) *Claims {
 }
 
 // skipJWT lists path prefixes that bypass JWT enforcement.
-var skipJWT = []string{"/health", "/graphiql"}
+// /metrics and /debug carry their own admin-key gate (observability.AdminAuth), so
+// JWT is not enforced on them — they must never require a tenant Bearer token.
+var skipJWT = []string{"/health", "/graphiql", "/metrics", "/debug"}
 
 // JWTMiddleware validates Bearer tokens on all routes except those in skipJWT.
 // 401 is returned for missing or invalid tokens on enforced routes.
