@@ -8,14 +8,25 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/miguelangel/appitools/pkg/extensions"
 	"github.com/miguelangel/appitools/pkg/schema"
 )
+
+// testDispatcher returns a dispatcher without SSRF/HTTPS enforcement for tests
+// that use httptest servers (which are HTTP on loopback by design).
+func testDispatcher() *extensions.WebhookDispatcher {
+	return extensions.NewWebhookDispatcherOpts(
+		extensions.WithInsecureTransport(&http.Client{Timeout: 10e9}),
+	)
+}
 
 func expectedHMAC(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
@@ -49,7 +60,7 @@ func TestWebhookDispatcher_SignatureAndEvent(t *testing.T) {
 	}
 
 	payload := map[string]any{"id": "guide-001", "code": "GU-001", "status": "pending"}
-	d := extensions.NewWebhookDispatcher()
+	d := testDispatcher()
 	d.Dispatch(context.Background(), hook, "after_create", payload, "tenant_test")
 
 	wantBody, _ := json.Marshal(payload)
@@ -79,7 +90,7 @@ func TestWebhookDispatcher_RetriesOnFailure(t *testing.T) {
 	defer srv.Close()
 
 	hook := &schema.HookConfig{Type: "webhook", URL: srv.URL, HMACSecretEnv: ""}
-	d := extensions.NewWebhookDispatcher()
+	d := testDispatcher()
 	d.Dispatch(context.Background(), hook, "after_create", map[string]any{"id": "x"}, "t")
 
 	if attempts != 3 {
@@ -88,26 +99,111 @@ func TestWebhookDispatcher_RetriesOnFailure(t *testing.T) {
 }
 
 func TestWebhookDispatcher_ContextCancelStops(t *testing.T) {
-	hook := &schema.HookConfig{
-		Type:          "webhook",
-		URL:           "http://127.0.0.1:19999", // nothing listening
-		HMACSecretEnv: "",
-	}
-	// Cancel after the first attempt so we don't wait through all retry delays.
-	attempts := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer srv.Close()
 
-	hook.URL = srv.URL
+	hook := &schema.HookConfig{Type: "webhook", URL: srv.URL, HMACSecretEnv: ""}
 	ctx, cancel := context.WithCancel(context.Background())
-	d := extensions.NewWebhookDispatcher()
-	go func() {
-		// Cancel mid-flight so retries stop.
-		cancel()
-	}()
+	d := testDispatcher()
+	go func() { cancel() }()
 	d.Dispatch(ctx, hook, "after_create", map[string]any{"id": "x"}, "t")
 	// No panic, no block — test passes.
+}
+
+// --- SSRF Guard unit tests ---
+
+func TestCheckSSRF_BlocksLoopback(t *testing.T) {
+	ips := []string{"127.0.0.1", "127.0.0.2", "::1"}
+	for _, raw := range ips {
+		ip := net.ParseIP(raw)
+		if err := extensions.CheckSSRF(ip); err == nil {
+			t.Errorf("loopback IP %s must be blocked, got nil", raw)
+		}
+	}
+}
+
+func TestCheckSSRF_BlocksPrivate(t *testing.T) {
+	ips := []string{"10.0.0.1", "172.16.0.1", "192.168.1.100", "fc00::1"}
+	for _, raw := range ips {
+		ip := net.ParseIP(raw)
+		if err := extensions.CheckSSRF(ip); err == nil {
+			t.Errorf("private IP %s must be blocked, got nil", raw)
+		}
+	}
+}
+
+func TestCheckSSRF_BlocksLinkLocal(t *testing.T) {
+	// 169.254.169.254 is the AWS/GCP instance metadata IP.
+	ips := []string{"169.254.169.254", "169.254.0.1", "fe80::1"}
+	for _, raw := range ips {
+		ip := net.ParseIP(raw)
+		if err := extensions.CheckSSRF(ip); err == nil {
+			t.Errorf("link-local IP %s must be blocked, got nil", raw)
+		}
+	}
+}
+
+func TestCheckSSRF_AllowsPublicIPs(t *testing.T) {
+	ips := []string{"8.8.8.8", "1.1.1.1", "104.21.0.1", "2606:4700::1"}
+	for _, raw := range ips {
+		ip := net.ParseIP(raw)
+		if err := extensions.CheckSSRF(ip); err != nil {
+			t.Errorf("public IP %s should be allowed, got: %v", raw, err)
+		}
+	}
+}
+
+func TestDispatcher_RejectsHTTPURLsInProduction(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Should never be called.
+		t.Error("handler was called; HTTPS enforcement failed")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// Production dispatcher — enforceHTTPS=true by default.
+	d := extensions.NewWebhookDispatcher()
+	hook := &schema.HookConfig{
+		Type: "webhook",
+		URL:  srv.URL, // http:// URL
+	}
+	// Dispatch must return immediately after logging the rejection.
+	d.Dispatch(context.Background(), hook, "test", map[string]any{}, "tenant")
+}
+
+func TestDispatcher_BlocksLoopbackViaSSRFDialer(t *testing.T) {
+	// The production dispatcher must not connect to 127.0.0.1 (loopback).
+	d := extensions.NewWebhookDispatcher()
+	hook := &schema.HookConfig{
+		Type: "webhook",
+		URL:  "https://127.0.0.1/evil",
+	}
+	// Cancel quickly so we don't wait through all retry backoffs.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	// Dispatch should fail at dial time (SSRF guard) and log the error. No panic.
+	d.Dispatch(ctx, hook, "test", map[string]any{}, "tenant")
+}
+
+func TestCheckSSRF_ErrorContainsBlockReason(t *testing.T) {
+	tests := []struct {
+		ip     string
+		reason string
+	}{
+		{"127.0.0.1", "loopback"},
+		{"10.0.0.1", "private"},
+		{"169.254.169.254", "link-local"},
+	}
+	for _, tt := range tests {
+		err := extensions.CheckSSRF(net.ParseIP(tt.ip))
+		if err == nil {
+			t.Errorf("%s: expected error", tt.ip)
+			continue
+		}
+		if !strings.Contains(err.Error(), tt.reason) {
+			t.Errorf("%s: expected %q in error %q", tt.ip, tt.reason, err.Error())
+		}
+	}
 }

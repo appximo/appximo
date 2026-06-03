@@ -1,5 +1,60 @@
 # Performance — Appitools
 
+## Profile-Guided Optimisation (PGO)
+
+Go 1.20+ supports PGO: the compiler uses a real CPU profile to inline hot
+functions more aggressively, removing 2–7% overhead with zero code changes.
+
+### Prerequisites
+
+- The server must run in **development mode** (`APPITOOLS_ENV=development`)
+  so that pprof is exposed on port 6060.
+- The server should be **under representative load** during profiling.
+
+### Step 1 — Verify pprof is reachable
+
+```bash
+curl -s http://localhost:6060/debug/pprof/ | head -5
+```
+
+Expected: list of available profiles (goroutine, heap, profile …).
+**Security**: pprof is only started when `APPITOOLS_ENV=development`. Never expose port 6060 in production.
+
+### Step 2 — Collect a 30 s CPU profile while under load
+
+```bash
+# Terminal 1: start server under load
+APPITOOLS_ENV=development go run ./cmd/appitools serve
+# Terminal 2: generate load
+hey -z 35s -c 50 http://localhost:8080/api/guides
+# Terminal 3: collect profile (from project root)
+make collect-profile
+# Equivalent to:
+# curl "http://localhost:6060/debug/pprof/profile?seconds=30" -o default.pgo
+```
+
+### Step 3 — Build with PGO
+
+```bash
+make build-pgo
+# go build -pgo=default.pgo -o appitools ./cmd/appitools/
+```
+
+The resulting binary `./appitools` has inlining decisions optimised for the
+observed hot paths (typically 2–5% latency improvement on the critical path).
+
+---
+
+## Circuit Breaker Hot-Path Benchmark
+
+```
+BenchmarkCBHotPath    13,683,525    96.65 ns/op    0 B/op    0 allocs/op
+```
+
+`IsOpen()` — a mutex-guarded state read — costs **96 ns** and **0 allocations** per call.
+
+---
+
 ## Benchmark methodology
 
 Results were collected using Go's `testing.B` framework against a real PostgreSQL 16

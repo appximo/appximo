@@ -2,9 +2,13 @@ package extensions_test
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/dop251/goja"
 	"github.com/miguelangel/appitools/pkg/extensions"
 )
 
@@ -25,7 +29,6 @@ func TestRunHook_IVACalculation(t *testing.T) {
 	if !result.Proceed {
 		t.Fatalf("expected Proceed=true, got false (Error: %s)", result.Error)
 	}
-	// 105 * 0.19 = 19.95 — non-integer, so Goja exports as float64
 	ivaRaw, ok := result.Data["iva"]
 	if !ok {
 		t.Fatal("expected 'iva' field in result.Data")
@@ -66,7 +69,31 @@ func TestRunHook_ScriptRejects(t *testing.T) {
 	}
 }
 
-// Test 3: infinite loop must be interrupted after 500 ms.
+// Test 3: infinite loop must be interrupted by the 80ms watchdog.
+// The error must be *goja.InterruptedError and arrive in <100ms.
+func TestRunHook_WatchdogInterruptsInUnder100ms(t *testing.T) {
+	sb := newSandbox()
+
+	start := time.Now()
+	result, err := sb.RunHook(context.Background(), `while(true){}`, nil, nil)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatalf("expected error from infinite loop, got result: %+v", result)
+	}
+	var ie *goja.InterruptedError
+	if !errors.As(err, &ie) {
+		t.Fatalf("expected *goja.InterruptedError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Errorf("expected 'timeout' in error, got: %v", err)
+	}
+	if elapsed >= 100*time.Millisecond {
+		t.Errorf("watchdog took %v, expected <100ms", elapsed)
+	}
+}
+
+// Test 3b: legacy timeout test — alias for watchdog test.
 func TestRunHook_Timeout(t *testing.T) {
 	sb := newSandbox()
 
@@ -87,7 +114,6 @@ func TestRunHook_SyntaxError(t *testing.T) {
 	result, err := sb.RunHook(context.Background(),
 		`this is not valid javascript {{{`, nil, nil)
 
-	// Syntax errors surface as HookResult{Proceed:false}, not as err.
 	if err != nil {
 		t.Fatalf("unexpected error (wanted HookResult): %v", err)
 	}
@@ -119,7 +145,6 @@ func TestRunHook_ModifiesDataTotal(t *testing.T) {
 	if !ok {
 		t.Fatal("expected 'total' key in result.Data")
 	}
-	// 50 * 3 = 150 — integer-valued, Goja may export as int64 or float64
 	var total float64
 	switch v := totalRaw.(type) {
 	case float64:
@@ -132,4 +157,37 @@ func TestRunHook_ModifiesDataTotal(t *testing.T) {
 	if total != 150.0 {
 		t.Errorf("expected total=150, got %v", total)
 	}
+}
+
+// Test 6: semaphore does not block a concurrent goroutine serving a fast hook
+// while a slow (interrupted) hook holds a slot.
+func TestRunHook_SemaphoreDoesNotBlockConcurrentRequests(t *testing.T) {
+	sb := newSandbox()
+
+	var wg sync.WaitGroup
+	slowDone := make(chan struct{})
+
+	// Start a slow hook (infinite loop, will be interrupted by watchdog).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer close(slowDone)
+		sb.RunHook(context.Background(), `while(true){}`, nil, nil) //nolint:errcheck
+	}()
+
+	// Give the slow hook time to acquire its semaphore slot.
+	time.Sleep(5 * time.Millisecond)
+
+	// A fast hook must still complete concurrently.
+	result, err := sb.RunHook(context.Background(),
+		`result.proceed = true; result.data = data;`, nil, nil)
+	if err != nil {
+		t.Fatalf("concurrent fast hook failed: %v", err)
+	}
+	if !result.Proceed {
+		t.Error("expected Proceed=true from fast hook")
+	}
+
+	wg.Wait() // slow hook was interrupted by watchdog
+	<-slowDone
 }

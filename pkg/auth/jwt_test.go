@@ -141,6 +141,31 @@ func TestJWTMiddleware_InvalidToken(t *testing.T) {
 	}
 }
 
+// TestJWT_TamperedSignatureRejected verifies that altering the signature portion
+// of a valid token is detected and rejected. golang-jwt/jwt uses hmac.Equal
+// (constant-time comparison) internally — this test validates the end-to-end
+// rejection behaviour rather than the library internals.
+func TestJWT_TamperedSignatureRejected(t *testing.T) {
+	c := auth.Claims{UserID: "u1", TenantID: "t1", Role: "admin"}
+	token, err := auth.GenerateToken(c, testSecret)
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+
+	// Split header.payload.signature and replace the signature with garbage.
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 JWT parts, got %d", len(parts))
+	}
+	parts[2] = "dGFtcGVyZWQ" // base64url("tampered")
+	tampered := strings.Join(parts, ".")
+
+	_, err = auth.ValidateToken(tampered, testSecret)
+	if err == nil {
+		t.Fatal("tampered signature must be rejected; got nil error")
+	}
+}
+
 func TestJWTMiddleware_HealthPassthrough(t *testing.T) {
 	healthHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -19,11 +20,17 @@ var (
 // JSSandbox executes untrusted JS hook scripts in a time-limited Goja VM.
 type JSSandbox struct {
 	timeout time.Duration
+	// sem limits concurrent VM executions to GOMAXPROCS*2 to prevent N tenants
+	// saturating all CPU cores with hook execution.
+	sem chan struct{}
 }
 
-// NewJSSandbox returns a sandbox with the default 500 ms timeout.
+// NewJSSandbox returns a sandbox with 80 ms watchdog and GOMAXPROCS*2 concurrency limit.
 func NewJSSandbox() *JSSandbox {
-	return &JSSandbox{timeout: 500 * time.Millisecond}
+	return &JSSandbox{
+		timeout: 500 * time.Millisecond,
+		sem:     make(chan struct{}, runtime.GOMAXPROCS(0)*2),
+	}
 }
 
 // HookResult is the outcome of a hook script execution.
@@ -33,10 +40,16 @@ type HookResult struct {
 	Error   string
 }
 
-// RunHook executes script inside a fresh Goja VM.
+type runResult struct {
+	hook *HookResult
+	err  error
+}
+
+// RunHook executes script inside a fresh Goja VM with an 80 ms watchdog interrupt.
 // payload is the mutable request data; userCtx carries role/user_id/tenant_id.
 // The script may read and modify `data`, and must set `result.proceed` to
 // false (with `result.error`) to abort the operation.
+// Returns (*goja.InterruptedError, nil) if the watchdog fires.
 func (s *JSSandbox) RunHook(
 	ctx context.Context,
 	script string,
@@ -46,6 +59,14 @@ func (s *JSSandbox) RunHook(
 	if payload == nil {
 		payload = make(map[string]any)
 	}
+
+	// Acquire concurrency slot — prevents hook storms from saturating CPU cores.
+	select {
+	case s.sem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-s.sem }()
 
 	vm := goja.New()
 
@@ -65,25 +86,36 @@ func (s *JSSandbox) RunHook(
 	vm.Set("isValidEmail", func(addr string) bool { return emailRe.MatchString(addr) })
 	vm.Set("isValidNIT", func(nit string) bool { return nitRe.MatchString(nit) })
 
-	done := make(chan *HookResult, 1)
+	done := make(chan runResult, 1)
+
+	// 80 ms watchdog: fires vm.Interrupt before the goroutine is scheduled away.
+	wdog := time.AfterFunc(80*time.Millisecond, func() {
+		vm.Interrupt("hook timeout")
+	})
+
 	go func() {
 		_, err := vm.RunString(script)
 		if err != nil {
-			done <- &HookResult{Proceed: false, Error: err.Error()}
+			var ie *goja.InterruptedError
+			if errors.As(err, &ie) {
+				done <- runResult{err: ie}
+				return
+			}
+			done <- runResult{hook: &HookResult{Proceed: false, Error: err.Error()}}
 			return
 		}
 
 		raw := vm.Get("result").Export()
 		m, ok := raw.(map[string]any)
 		if !ok {
-			done <- &HookResult{Proceed: false, Error: "result is not an object"}
+			done <- runResult{hook: &HookResult{Proceed: false, Error: "result is not an object"}}
 			return
 		}
 
 		proceed, _ := m["proceed"].(bool)
 		data, _ := m["data"].(map[string]any)
 		if data == nil {
-			data = payload // fall back to the original map (JS may have mutated it)
+			data = payload
 		}
 
 		errVal := ""
@@ -91,17 +123,25 @@ func (s *JSSandbox) RunHook(
 			errVal = fmt.Sprint(m["error"])
 		}
 
-		done <- &HookResult{Proceed: proceed, Data: data, Error: errVal}
+		done <- runResult{hook: &HookResult{Proceed: proceed, Data: data, Error: errVal}}
 	}()
 
 	select {
-	case res := <-done:
-		return res, nil
-	case <-time.After(s.timeout):
+	case r := <-done:
+		wdog.Stop()
+		if r.err != nil {
+			return nil, r.err
+		}
+		return r.hook, nil
+	case <-time.After(s.timeout): // hard fallback in case interrupt is delayed
 		vm.Interrupt("execution timeout")
+		<-done // drain so goroutine is not leaked
+		wdog.Stop()
 		return nil, errors.New("hook timeout: exceeded 500ms")
 	case <-ctx.Done():
 		vm.Interrupt("context cancelled")
+		<-done
+		wdog.Stop()
 		return nil, ctx.Err()
 	}
 }

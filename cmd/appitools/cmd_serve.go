@@ -7,10 +7,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -32,6 +34,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/observability"
 	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/miguelangel/appitools/pkg/shutdown"
 	"github.com/miguelangel/appitools/pkg/tenant"
 	"github.com/spf13/cobra"
 )
@@ -80,13 +83,16 @@ var serveCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		ctx := context.Background()
+		// Signal-aware context: cancelled on SIGINT or SIGTERM.
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+
 		pool, err := db.NewPool(ctx, connStr)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Error conectando a la DB:", err)
 			os.Exit(1)
 		}
-		defer pool.Close()
+		// Pool is closed in the shutdown sequence — not deferred here.
 
 		tdb := db.NewTenantDB(pool)
 		hr := extensions.NewHookRunner(extensions.NewJSSandbox())
@@ -158,6 +164,9 @@ var serveCmd = &cobra.Command{
 		responseCache := cache.New(5 * time.Second)
 		go startCacheInvalidator(ctx, pool, responseCache)
 
+		// Graceful-shutdown state: controls /readyz and the shutdown sequence.
+		ss := shutdown.New()
+
 		// Outer router: middleware must be registered before routes.
 		r := chi.NewMux()
 		r.Use(appmiddleware.SecurityHeaders)
@@ -174,7 +183,7 @@ var serveCmd = &cobra.Command{
 		r.Use(rbac.RBACMiddleware(policyBytes))
 		r.Use(chimiddleware.Recoverer)
 
-		// pprof on a separate port — only in development, no auth, never reachable in production
+		// pprof on a separate port — only in development, no auth, never reachable in production.
 		if os.Getenv("APPITOOLS_ENV") == "development" {
 			pprofMux := chimiddleware.Profiler()
 			go func() {
@@ -185,32 +194,49 @@ var serveCmd = &cobra.Command{
 			}()
 		}
 
+		// Liveness — never touches Postgres.
+		r.Get("/healthz", ss.HealthzHandler)
+		// Readiness — returns 503 during drain/shutdown.
+		r.Get("/readyz", ss.ReadyzHandler)
+		// Legacy health endpoint (kept for backward compat).
 		r.Get("/health", func(w http.ResponseWriter, req *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{
+			json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
 				"status":  "ok",
 				"version": "0.1.0",
 			})
 		})
 
-		// GraphQL endpoint (always available).
-		r.Handle("/graphql", gqlhandler.BuildHandler(s, tdb, hr, &rbacPolicy))
+		// GraphQL endpoint — strict CSP (JSON only, no HTML rendering).
+		r.With(appmiddleware.StrictCSP).Handle("/graphql", gqlhandler.BuildHandler(s, tdb, hr, &rbacPolicy))
 
-		// GraphiQL playground — only in development.
+		// GraphiQL playground — only in development, permissive CSP for IDE assets.
 		if os.Getenv("APPITOOLS_ENV") == "development" {
-			r.Handle("/graphiql", gqlhandler.PlaygroundHandler("/graphql"))
+			r.With(appmiddleware.PermissiveCSP).Handle("/graphiql", gqlhandler.PlaygroundHandler("/graphql"))
 			log.Println("GraphiQL playground enabled at /graphiql (APPITOOLS_ENV=development)")
 		}
 
-		// Mount API routes (BuildRouter registers /api/* routes only).
-		r.Mount("/", codegen.BuildRouter(s, tdb, hr))
+		// Mount API routes with strict CSP — /api/* serves JSON exclusively.
+		r.Group(func(sub chi.Router) {
+			sub.Use(appmiddleware.StrictCSP)
+			sub.Mount("/", codegen.BuildRouter(s, tdb, hr))
+		})
 
 		addr := fmt.Sprintf(":%d", port)
+		srv := &http.Server{
+			Addr:    addr,
+			Handler: r,
+		}
+
 		fmt.Printf("Appitools serving on %s — Ctrl+C to stop\n", addr)
-		if err := http.ListenAndServe(addr, r); err != nil {
+
+		// Run blocks until the server is shut down, executing the mandated sequence:
+		//   ready=0 → sleep 5s (LB drain) → Shutdown(10s) → pool.Close()
+		if err := ss.Run(ctx, srv, 5*time.Second, pool.Close); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		log.Println("server shut down cleanly")
 	},
 }
 
