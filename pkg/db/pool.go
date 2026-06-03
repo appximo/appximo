@@ -3,8 +3,8 @@ package db
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
-	"runtime"
 	"strconv"
 	"time"
 
@@ -17,8 +17,11 @@ func NewPool(ctx context.Context, connStr string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("parse connection string: %w", err)
 	}
 
-	cores := runtime.GOMAXPROCS(0)
-	maxConns := int32(cores*2 + 2)
+	// 2vCPU + colocated Postgres: fórmula cores*2+1=5, margen conservador → 10.
+	// A bigger pool just adds idle connections (RAM + PG backends) without
+	// throughput once the cores are saturated; raise DB_MAX_CONNS only when the
+	// DB lives on a separate, larger box.
+	maxConns := int32(10)
 	if v := os.Getenv("DB_MAX_CONNS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			maxConns = int32(n)
@@ -29,6 +32,7 @@ func NewPool(ctx context.Context, connStr string) (*pgxpool.Pool, error) {
 	cfg.MinConns = minConns
 	cfg.MaxConnLifetime = time.Hour
 	cfg.HealthCheckPeriod = 30 * time.Second
+	log.Printf("db pool: MAX_CONNS=%d MIN_CONNS=%d", maxConns, minConns)
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

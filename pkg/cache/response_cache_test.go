@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -206,6 +208,79 @@ func TestCacheNon200NotCached(t *testing.T) {
 	}
 	if rec.Header().Get("X-Cache") == "HIT" {
 		t.Error("X-Cache must not be HIT for a non-200 response")
+	}
+}
+
+// TestCacheStampedeSingleflight verifies that a burst of concurrent requests
+// for the same (tenant, key) arriving on an expired/empty cache collapses into
+// exactly ONE backend call. Without singleflight all N goroutines would hit
+// Postgres simultaneously (the stampede that produced a 3.2s uncached p95).
+func TestCacheStampedeSingleflight(t *testing.T) {
+	const token = "test-token-stampede"
+	auth.SetCachedClaims(token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
+
+	rc := New(5 * time.Second)
+
+	var backendHits int64
+	started := make(chan struct{}) // closed by the (single) leader when it enters
+	release := make(chan struct{}) // unblocks the leader once all waiters parked
+	var once sync.Once
+
+	handler := rc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&backendHits, 1)
+		once.Do(func() { close(started) })
+		<-release // hold the flight open so concurrent callers must wait on it
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"data":[1,2,3]}`)) //nolint:errcheck
+	}))
+
+	const n = 10
+	var wg sync.WaitGroup
+	recs := make([]*httptest.ResponseRecorder, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		recs[i] = httptest.NewRecorder()
+		go func(idx int) {
+			defer wg.Done()
+			r := withTenant(httptest.NewRequest(http.MethodGet, "/api/guides?filter[status]=delivered", nil), "acme")
+			r.Header.Set("Authorization", "Bearer "+token)
+			handler.ServeHTTP(recs[idx], r)
+		}(i)
+	}
+
+	<-started                         // leader is inside the handler
+	time.Sleep(50 * time.Millisecond) // give the other 9 time to park in singleflight
+	close(release)                    // let the leader finish
+	wg.Wait()
+
+	if got := atomic.LoadInt64(&backendHits); got != 1 {
+		t.Fatalf("expected exactly 1 Postgres hit under stampede, got %d", got)
+	}
+
+	// Every caller must have received the shared 200 response intact.
+	for i, rec := range recs {
+		if rec.Code != http.StatusOK {
+			t.Errorf("caller %d: expected 200, got %d", i, rec.Code)
+		}
+		if rec.Body.String() != `{"data":[1,2,3]}` {
+			t.Errorf("caller %d: body mismatch: %q", i, rec.Body.String())
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+			t.Errorf("caller %d: Content-Type mismatch: %q", i, ct)
+		}
+	}
+
+	// And the result must now be cached: a follow-up request is a HIT with no new backend call.
+	rec := httptest.NewRecorder()
+	r := withTenant(httptest.NewRequest(http.MethodGet, "/api/guides?filter[status]=delivered", nil), "acme")
+	r.Header.Set("Authorization", "Bearer "+token)
+	handler.ServeHTTP(rec, r)
+	if rec.Header().Get("X-Cache") != "HIT" {
+		t.Errorf("post-stampede request should be a cache HIT, got X-Cache=%q", rec.Header().Get("X-Cache"))
+	}
+	if got := atomic.LoadInt64(&backendHits); got != 1 {
+		t.Errorf("cached follow-up must not hit backend; total hits=%d", got)
 	}
 }
 
