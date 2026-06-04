@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"os"
@@ -22,6 +23,23 @@ var sensitiveFieldRe = regexp.MustCompile(
 	`("(?:token|password|secret|authorization)"\s*:\s*)"[^"]*"`,
 )
 
+// sensitiveNames are the field names sensitiveFieldRe can match. A log line that
+// contains none of them as a substring cannot match the regex, so we skip the
+// scan-and-allocate entirely. This is the common case — request logs deliberately
+// omit the Authorization header — and the per-line regex showed up on the hot path.
+var sensitiveNames = [][]byte{
+	[]byte("token"), []byte("password"), []byte("secret"), []byte("authorization"),
+}
+
+func mightContainSensitive(p []byte) bool {
+	for _, n := range sensitiveNames {
+		if bytes.Contains(p, n) {
+			return true
+		}
+	}
+	return false
+}
+
 // RedactWriter wraps an io.Writer and scrubs sensitive JSON field values before
 // they reach the underlying writer. Applied to every structured log line.
 type RedactWriter struct {
@@ -34,8 +52,14 @@ func NewRedactWriter(w io.Writer) RedactWriter {
 }
 
 func (r RedactWriter) Write(p []byte) (int, error) {
-	redacted := sensitiveFieldRe.ReplaceAll(p, []byte(`$1"[REDACTED]"`))
-	if _, err := r.w.Write(redacted); err != nil {
+	out := p
+	// Only pay for the regex (a full scan plus an allocation) when a sensitive
+	// field name is actually present. ReplaceAll always allocates, even on no
+	// match, so gating it removes that cost from every clean log line.
+	if mightContainSensitive(p) {
+		out = sensitiveFieldRe.ReplaceAll(p, []byte(`$1"[REDACTED]"`))
+	}
+	if _, err := r.w.Write(out); err != nil {
 		return 0, err
 	}
 	return len(p), nil // report original length so zerolog does not treat it as a short write

@@ -33,6 +33,7 @@ type cacheItem struct {
 	etag        string
 	plain       []byte
 	gzipped     []byte
+	gzipLen     string // strconv.Itoa(len(gzipped)), precomputed once for the Content-Length header
 	expiresAt   time.Time
 }
 
@@ -180,6 +181,9 @@ func (rc *ResponseCache) buildItem(status int, header http.Header, plain []byte)
 	}
 	if status == http.StatusOK && len(plain) > 0 {
 		item.gzipped = gzipBytes(plain)
+		if item.gzipped != nil {
+			item.gzipLen = strconv.Itoa(len(item.gzipped))
+		}
 	}
 	return item
 }
@@ -203,7 +207,7 @@ func writeItem(w http.ResponseWriter, r *http.Request, item *cacheItem, hit bool
 	if item.gzipped != nil && acceptsGzip(r) {
 		h.Set("Content-Encoding", "gzip")
 		h.Add("Vary", "Accept-Encoding")
-		h.Set("Content-Length", strconv.Itoa(len(item.gzipped)))
+		h.Set("Content-Length", item.gzipLen)
 		w.WriteHeader(item.status)
 		w.Write(item.gzipped) //nolint:errcheck
 		return

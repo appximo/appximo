@@ -2,6 +2,7 @@ package logging_test
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 
@@ -81,5 +82,29 @@ func TestRedactWriter_ReportsOriginalLength(t *testing.T) {
 	}
 	if n != len(input) {
 		t.Errorf("Write must report original len=%d, got %d", len(input), n)
+	}
+}
+
+// io.Discard-backed benchmarks isolate RedactWriter's own cost. A typical request
+// log line carries no sensitive field, so it must take the fast path (no regex,
+// no allocation); a line that does carry one still gets redacted.
+var benchCleanLine = []byte(`{"level":"info","tenant_id":"10","method":"GET","path":"/api/guides","status":200,"duration_ms":1,"request_id":"abc123","message":"request"}` + "\n")
+var benchSensitiveLine = []byte(`{"level":"info","msg":"auth","token":"eyJhbGciOiJIUzI1Niis.payload.sig","status":200}` + "\n")
+
+func BenchmarkRedactWriter_CleanLine(b *testing.B) {
+	rw := logging.NewRedactWriter(io.Discard)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rw.Write(benchCleanLine) //nolint:errcheck
+	}
+}
+
+func BenchmarkRedactWriter_SensitiveLine(b *testing.B) {
+	rw := logging.NewRedactWriter(io.Discard)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rw.Write(benchSensitiveLine) //nolint:errcheck
 	}
 }
