@@ -16,13 +16,16 @@ type ObsServer struct {
 	synthmon   *SyntheticMonitor
 	rings      *Rings
 	slo        *SLOEngine
-	store      *ObsStore
-	tracesHTML []byte // embedded trace-explorer UI (set via SetTracesHTML)
+	store         *ObsStore
+	tracesHandler http.Handler // serves /debug/traces; performs its own auth
 }
 
-// SetTracesHTML installs the embedded HTML served at /debug/traces. Kept out of
-// the constructor so the page can be go:embed'd in package main and injected here.
-func (s *ObsServer) SetTracesHTML(b []byte) { s.tracesHTML = b }
+// SetTracesHandler installs the handler served at /debug/traces. It is injected
+// from package main (where the HTML is go:embed'd and the admin key lives) so the
+// route applies ITS OWN auth — query param (?key=) OR X-Admin-Key header — which
+// is intentionally looser than the header-only gate on the JSON debug APIs, so
+// the page can be opened directly in a browser.
+func (s *ObsServer) SetTracesHandler(h http.Handler) { s.tracesHandler = h }
 
 func NewObsServer(
 	hist *TenantHistogram,
@@ -53,24 +56,28 @@ func AdminAuth(adminKey string, next http.Handler) http.Handler {
 // Mount it at "/debug" on any router (the main :8080 server or the control plane).
 func (s *ObsServer) DebugRouter(adminKey string) http.Handler {
 	r := chi.NewRouter()
-	r.Use(func(next http.Handler) http.Handler {
-		return AdminAuth(adminKey, next)
+	// JSON debug APIs: header-only admin gate (X-Admin-Key). Never query param.
+	r.Group(func(gr chi.Router) {
+		gr.Use(func(next http.Handler) http.Handler {
+			return AdminAuth(adminKey, next)
+		})
+		gr.Get("/tenant/{id}", s.handleTenant)
+		gr.Get("/synthetic", s.handleSynthetic)
 	})
-	r.Get("/tenant/{id}", s.handleTenant)
-	r.Get("/synthetic", s.handleSynthetic)
-	r.Get("/traces", s.handleTracesUI)
+	// HTML trace explorer: NOT in the header-only group. The injected handler does
+	// its own auth (?key= OR X-Admin-Key) so it opens directly in a browser.
+	r.Get("/traces", s.serveTraces)
 	return r
 }
 
-// handleTracesUI serves the embedded trace-explorer HTML (admin-gated by the
-// surrounding DebugRouter). Returns 404 when no UI was injected.
-func (s *ObsServer) handleTracesUI(w http.ResponseWriter, _ *http.Request) {
-	if len(s.tracesHTML) == 0 {
+// serveTraces delegates to the injected /debug/traces handler (which performs its
+// own query-param-or-header auth). Returns 404 when no handler was injected.
+func (s *ObsServer) serveTraces(w http.ResponseWriter, r *http.Request) {
+	if s.tracesHandler == nil {
 		http.Error(w, "traces UI not available", http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(s.tracesHTML) //nolint:errcheck
+	s.tracesHandler.ServeHTTP(w, r)
 }
 
 // Router returns a chi.Mux exposing the /debug/... paths, admin-protected.

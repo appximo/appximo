@@ -140,7 +140,10 @@ function setAuto(){
 }
 
 renderLegend();
-$("key").value = localStorage.getItem("appitools_admin_key")||"";
+// Read the admin key from the URL (?key=...) so the page opens directly in a
+// browser; fall back to the last value used. It feeds every internal fetch.
+const urlKey = new URLSearchParams(location.search).get("key") || "";
+$("key").value = urlKey || localStorage.getItem("appitools_admin_key") || "";
 $("tenant").value = new URLSearchParams(location.search).get("tenant")||localStorage.getItem("appitools_tenant")||"10";
 $("load").onclick = load;
 $("mode").onchange = load;

@@ -197,7 +197,21 @@ var serveCmd = &cobra.Command{
 		synthmon := observability.NewSyntheticMonitor(synthChecks)
 		synthmon.Start(ctx, 60*time.Second)
 		obsServer := observability.NewObsServer(hist, errStore, anomaly, synthmon, rings, sloEngine, obsStore)
-		obsServer.SetTracesHTML(debugTracesHTML) // /debug/traces visual
+		// /debug/traces visual: accept auth via ?key= OR X-Admin-Key — ONLY for this
+		// HTML route, so it opens directly in a browser. The JSON debug APIs remain
+		// header-only (handled by the DebugRouter's admin group).
+		obsServer.SetTracesHandler(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			key := req.URL.Query().Get("key")
+			if key == "" {
+				key = req.Header.Get("X-Admin-Key")
+			}
+			if key != adminKey {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write(debugTracesHTML) //nolint:errcheck
+		}))
 
 		// Control plane (port 9090) — start in background goroutine.
 		cpSvc := controlplane.NewService(pool, redisClient)
