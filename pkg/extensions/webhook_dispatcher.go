@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -17,6 +18,14 @@ import (
 
 	"github.com/miguelangel/appitools/pkg/schema"
 )
+
+// maxWebhookRespBytes bounds how much of a webhook endpoint's response body the
+// dispatcher will read. Only the status code matters, so the body is drained (up
+// to this limit) into io.Discard purely to allow keep-alive connection reuse —
+// never buffering an unbounded or malicious response into memory. This is the
+// MaxBytesReader-equivalent for an outbound HTTP consumer (OWASP API10: unsafe
+// consumption of upstream APIs).
+const maxWebhookRespBytes = 64 << 10 // 64 KB
 
 // WebhookDispatcher sends signed HTTP POST notifications to webhook endpoints.
 type WebhookDispatcher struct {
@@ -129,6 +138,9 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, hook *schema.HookConfi
 			log.Printf("WEBHOOK [%s] attempt %d/%d error: %v", tenantID, attempt+1, maxAttempts, err)
 			continue
 		}
+		// Bounded drain: read at most maxWebhookRespBytes so the connection can be
+		// reused, without ever buffering an unbounded/malicious response body.
+		io.Copy(io.Discard, io.LimitReader(resp.Body, maxWebhookRespBytes)) //nolint:errcheck
 		resp.Body.Close()
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {

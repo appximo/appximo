@@ -88,8 +88,8 @@ func TestRunHook_WatchdogInterruptsInUnder100ms(t *testing.T) {
 	if !strings.Contains(err.Error(), "timeout") {
 		t.Errorf("expected 'timeout' in error, got: %v", err)
 	}
-	if elapsed >= 100*time.Millisecond {
-		t.Errorf("watchdog took %v, expected <100ms", elapsed)
+	if elapsed >= watchdogBudget {
+		t.Errorf("watchdog took %v, expected <%v", elapsed, watchdogBudget)
 	}
 }
 

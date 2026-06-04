@@ -207,3 +207,28 @@ func TestCheckSSRF_ErrorContainsBlockReason(t *testing.T) {
 		}
 	}
 }
+
+// A webhook endpoint returning a large body must be handled without buffering it
+// all into memory: the dispatcher drains at most maxWebhookRespBytes and treats a
+// 2xx as success, returning promptly. (OWASP API10 bounded consumption.)
+func TestWebhookDispatcher_BoundsResponseBody(t *testing.T) {
+	const big = 5 << 20 // 5 MB
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write(bytes.Repeat([]byte("A"), big)) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	hook := &schema.HookConfig{Type: "webhook", URL: srv.URL}
+	d := testDispatcher()
+	done := make(chan struct{})
+	go func() {
+		d.Dispatch(context.Background(), hook, "after_create", map[string]any{"id": "x"}, "t")
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Dispatch did not return promptly for a large response body")
+	}
+}

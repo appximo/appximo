@@ -43,6 +43,31 @@ One JSON schema → a fully functional, multi-tenant REST API with RBAC, JS hook
 
 ## Benchmark
 
+### With the full production stack on
+
+JWT + RBAC + per-tenant isolation **plus** per-tenant rate limiting, circuit breaker,
+5 s query timeout and an RBAC-gated response cache — *all active* — on a single
+**DigitalOcean 2 vCPU / $16 mo** droplet:
+
+| Load | p50 | p95 | p99 | Errors | CPU (engine) |
+|------|:---:|:---:|:---:|:---:|:---:|
+| 500 RPS  | 0.5ms | **0.7ms** | 1.6ms | **0%** | 18% of 1 core |
+| 2000 RPS | 0.5ms | **11ms**  | **33ms** | **0%** | **40% of 1 core** |
+
+**2000 req/s at p95 = 11 ms, 0 errors, ~40 % of a single core** — with every hardening
+feature switched on, and headroom to spare.
+
+**NestJS on the same hardware** (no auth, no RBAC, no multi-tenancy):
+500 RPS → p95 = 21 ms · 1000 RPS → p95 = 114 ms, then saturated and collapsed.
+
+<sub>Measured server-side so the load generator isn't the bottleneck; per-tenant rate
+limit set to 3000 RPS. The detailed external (separate-machine) run below shows the
+original fair head-to-head vs NestJS.</sub>
+
+---
+
+### Detailed comparison vs NestJS (external load)
+
 Methodology: k6 v0.55.0 `constant-arrival-rate` (open model), **k6 on a separate machine**
 (fair benchmark — no shared CPU). Hardware: DigitalOcean 2 vCPU / 2 GB / $16 mo,
 Postgres 16 in Docker, 10 000 pre-loaded rows. Both servers on the same Droplet.

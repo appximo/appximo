@@ -1,7 +1,6 @@
 package codegen
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -136,7 +135,10 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				if len(result) > 0 {
 					record = result[0]
 				}
-				go hr.RunAfterHook(context.Background(), &afterHook, record, tc.ID)
+				// Bounded async dispatch: returns immediately, never blocks the
+				// 201 on webhook latency, and caps in-flight dispatches so a
+				// create storm cannot spawn unbounded goroutines.
+				hr.FireAfterHook(&afterHook, record, tc.ID)
 			}
 
 			w.Header().Set("Content-Type", "application/json")
