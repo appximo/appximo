@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,6 +43,11 @@ import (
 	"github.com/miguelangel/appitools/scripts"
 	"github.com/spf13/cobra"
 )
+
+// debugTracesHTML is the embedded trace-explorer UI served at /debug/traces.
+//
+//go:embed static/debug_traces.html
+var debugTracesHTML []byte
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -190,6 +197,7 @@ var serveCmd = &cobra.Command{
 		synthmon := observability.NewSyntheticMonitor(synthChecks)
 		synthmon.Start(ctx, 60*time.Second)
 		obsServer := observability.NewObsServer(hist, errStore, anomaly, synthmon, rings, sloEngine, obsStore)
+		obsServer.SetTracesHTML(debugTracesHTML) // /debug/traces visual
 
 		// Control plane (port 9090) — start in background goroutine.
 		cpSvc := controlplane.NewService(pool, redisClient)
@@ -291,14 +299,51 @@ var serveCmd = &cobra.Command{
 				}
 				metrics.ObserveRequest(t.TenantID, t.Method, t.Route,
 					strconv.Itoa(t.Status), float64(t.DurationUS)/1e6)
-				rings.Record(t.TenantID, observability.Sample{
+
+				// Decode the 16-hex trace id into 8 raw bytes and copy the span
+				// breakdown into the fixed-size Sample (value copies, no alloc).
+				var traceID [8]byte
+				if b, err := hex.DecodeString(t.TraceID); err == nil && len(b) >= 8 {
+					copy(traceID[:], b[:8])
+				}
+				var spans [8]observability.Span
+				n := len(t.Spans)
+				if n > 8 {
+					n = 8
+				}
+				copy(spans[:], t.Spans[:n])
+
+				sample := observability.Sample{
 					Start:   t.StartUS,
 					DurUS:   int32(t.DurationUS),
 					QueryUS: 0, // DB query time not yet threaded through the middleware
 					Route:   rings.RouteID(t.Route),
 					Status:  uint16(t.Status),
-				})
+					TraceID: traceID,
+					Spans:   spans,
+					NSpans:  uint8(n),
+				}
+				rings.Record(t.TenantID, sample)
 				metrics.SetActiveTenants(rings.Count())
+
+				// Persist slow traces (>50ms) asynchronously so the request path
+				// never blocks on SQLite.
+				if obsStore != nil && sample.DurUS > observability.SlowTraceThresholdUS {
+					tv := observability.TraceView{
+						TraceID: t.TraceID,
+						TS:      t.StartUS,
+						Route:   t.Route,
+						TotalUS: sample.DurUS,
+						Status:  uint16(t.Status),
+						Spans:   append([]observability.Span(nil), t.Spans...),
+					}
+					tenantID := t.TenantID
+					go func() {
+						if err := obsStore.SaveSlowTrace(tenantID, tv); err != nil {
+							log.Printf("save slow trace [%s]: %v", tenantID, err)
+						}
+					}()
+				}
 			},
 		))
 		r.Use(responseCache.Middleware)

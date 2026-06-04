@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/miguelangel/appitools/pkg/observability"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
@@ -86,6 +87,9 @@ func JWTMiddleware(secret string, onError ...func(tenantID, reason string)) func
 				return
 			}
 
+			if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {
+				t.Mark("jwt")
+			}
 			ctx := context.WithValue(r.Context(), claimsKey{}, claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

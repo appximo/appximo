@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/miguelangel/appitools/pkg/observability"
 )
 
 type evalResultKey struct{}
@@ -61,6 +62,9 @@ func RBACMiddleware(policyJSON []byte) func(http.Handler) http.Handler {
 				return
 			}
 
+			if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {
+				t.Mark("rbac")
+			}
 			ctx := context.WithValue(r.Context(), evalResultKey{}, result)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

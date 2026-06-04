@@ -2,6 +2,7 @@ package observability
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -14,6 +15,10 @@ const defaultObsDBPath = "/tmp/obs.db"
 
 // retentionDays bounds how long snapshots are kept; Prune drops anything older.
 const retentionDays = 7
+
+// SlowTraceThresholdUS is the per-request duration above which a trace is
+// persisted to slow_traces (Phase 1: a fixed 50ms, not a per-tenant p95).
+const SlowTraceThresholdUS = 50_000
 
 // Snapshot is one persisted point-in-time observation for a tenant.
 type Snapshot struct {
@@ -58,6 +63,17 @@ func OpenStore(path string) (*ObsStore, error) {
 			PRIMARY KEY (tenant_id, ts)
 		);
 		CREATE INDEX IF NOT EXISTS idx_tenant_ts ON obs_snapshots(tenant_id, ts DESC);
+
+		CREATE TABLE IF NOT EXISTS slow_traces (
+			trace_id   TEXT    NOT NULL,
+			tenant_id  TEXT    NOT NULL,
+			ts         INTEGER NOT NULL,   -- request start, unix microseconds
+			route      TEXT,
+			total_us   INTEGER,
+			spans_json TEXT,               -- JSON array of {name, dur_us}
+			PRIMARY KEY (trace_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_slow_tenant_ts ON slow_traces(tenant_id, ts DESC);
 	`); err != nil {
 		db.Close() //nolint:errcheck
 		return nil, fmt.Errorf("init obs schema: %w", err)
@@ -106,11 +122,67 @@ func (s *ObsStore) History(tenantID string, hours int) ([]Snapshot, error) {
 	return out, rows.Err()
 }
 
-// Prune deletes snapshots older than the retention window.
+// SaveSlowTrace persists a single slow request's trace (id, route, total, span
+// breakdown). tv.TS is the request start in unix microseconds, consistent with
+// the ring's Sample.Start. Designed to be called asynchronously from the request
+// path so it never blocks the response.
+func (s *ObsStore) SaveSlowTrace(tenantID string, tv TraceView) error {
+	spansJSON, err := json.Marshal(tv.Spans)
+	if err != nil {
+		return fmt.Errorf("marshal spans: %w", err)
+	}
+	_, err = s.db.Exec(
+		`INSERT OR REPLACE INTO slow_traces (trace_id, tenant_id, ts, route, total_us, spans_json)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+		tv.TraceID, tenantID, tv.TS, tv.Route, tv.TotalUS, string(spansJSON),
+	)
+	if err != nil {
+		return fmt.Errorf("save slow trace: %w", err)
+	}
+	return nil
+}
+
+// SlowTraces returns the tenant's persisted slow traces from the last `hours`,
+// newest first (capped at 200), with spans decoded back into TraceViews.
+func (s *ObsStore) SlowTraces(tenantID string, hours int) ([]TraceView, error) {
+	cutoff := (time.Now().Unix() - int64(hours)*3600) * 1_000_000 // µs, matches ts unit
+	rows, err := s.db.Query(
+		`SELECT trace_id, ts, route, total_us, spans_json
+			FROM slow_traces
+			WHERE tenant_id = ? AND ts > ?
+			ORDER BY ts DESC
+			LIMIT 200`,
+		tenantID, cutoff,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query slow traces: %w", err)
+	}
+	defer rows.Close()
+
+	out := []TraceView{}
+	for rows.Next() {
+		var tv TraceView
+		var spansJSON string
+		if err := rows.Scan(&tv.TraceID, &tv.TS, &tv.Route, &tv.TotalUS, &spansJSON); err != nil {
+			return nil, fmt.Errorf("scan slow trace: %w", err)
+		}
+		if spansJSON != "" {
+			_ = json.Unmarshal([]byte(spansJSON), &tv.Spans)
+		}
+		out = append(out, tv)
+	}
+	return out, rows.Err()
+}
+
+// Prune deletes snapshots and slow traces older than the retention window.
 func (s *ObsStore) Prune() error {
-	cutoff := time.Now().Unix() - int64(retentionDays)*86400
-	if _, err := s.db.Exec(`DELETE FROM obs_snapshots WHERE ts < ?`, cutoff); err != nil {
+	cutoffSec := time.Now().Unix() - int64(retentionDays)*86400
+	if _, err := s.db.Exec(`DELETE FROM obs_snapshots WHERE ts < ?`, cutoffSec); err != nil {
 		return fmt.Errorf("prune snapshots: %w", err)
+	}
+	// slow_traces.ts is in microseconds.
+	if _, err := s.db.Exec(`DELETE FROM slow_traces WHERE ts < ?`, cutoffSec*1_000_000); err != nil {
+		return fmt.Errorf("prune slow traces: %w", err)
 	}
 	return nil
 }

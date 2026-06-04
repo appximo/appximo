@@ -12,11 +12,20 @@ import (
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/extensions"
 	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
+	"github.com/miguelangel/appitools/pkg/observability"
 	"github.com/miguelangel/appitools/pkg/query"
 	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
+
+// markSpan records a named stage on the request's SpanTracker, if present. The
+// nil-check keeps it a no-op for requests/tests that run without a tracker.
+func markSpan(req *http.Request, name string) {
+	if t := observability.SpanTrackerFromCtx(req.Context()); t != nil {
+		t.Mark(name)
+	}
+}
 
 // BuildRouter creates a chi.Mux with real SQL handlers for every resource in the schema.
 // Used by `appitools serve` — no code generation required.
@@ -65,6 +74,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				pkghandlers.WriteDBError(w, err)
 				return
 			}
+			markSpan(req, "query")
 
 			if evalResult != nil && len(evalResult.AllowedFields) > 0 {
 				for i, rec := range data {
@@ -88,6 +98,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					"has_prev": hasPrev,
 				},
 			})
+			markSpan(req, "serialize")
 		}))
 
 		// --- Create ---
@@ -120,6 +131,9 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				return
 			}
 			body = hookRes.Data
+			if beforeHook != nil {
+				markSpan(req, "hook")
+			}
 
 			cols, placeholders, args := pkghandlers.BuildInsertArgs(body)
 			insertQ := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", name, cols, placeholders)
@@ -128,6 +142,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				pkghandlers.WriteDBError(w, err)
 				return
 			}
+			markSpan(req, "insert")
 
 			if hc, ok := res.Hooks["after_create"]; ok {
 				afterHook := hc
@@ -146,6 +161,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			if len(result) > 0 {
 				pkghandlers.WriteJSON(w, result[0]) //nolint:errcheck
 			}
+			markSpan(req, "serialize")
 		})
 
 		// --- Get by ID ---
@@ -170,6 +186,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				pkghandlers.WriteDBError(w, err)
 				return
 			}
+			markSpan(req, "query")
 			if len(result) == 0 {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
@@ -183,6 +200,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			}
 			w.Header().Set("Content-Type", "application/json")
 			pkghandlers.WriteJSON(w, record) //nolint:errcheck
+			markSpan(req, "serialize")
 		}))
 
 		// --- Delete ---

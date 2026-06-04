@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/miguelangel/appitools/pkg/observability"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
@@ -149,6 +150,9 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 				}
 				key := r.URL.RequestURI()
 				if item := rc.get(tc.ID, key); item != nil {
+					if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {
+						t.Mark("cache_hit")
+					}
 					writeItem(w, r, item, true) // HIT
 					return
 				}
@@ -158,6 +162,9 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 				// because the token was already validated — the same trust model
 				// as the HIT path above.
 				item := rc.refresh(r, tc.ID, key, next)
+				if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {
+					t.Mark("cache_miss")
+				}
 				writeItem(w, r, item, false)
 				return
 			}
@@ -173,6 +180,9 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 		// next request — now token-validated — gets the gzip-free HIT path.
 		cw := &captureWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(cw, r)
+		if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {
+			t.Mark("cache_miss")
+		}
 
 		if cw.status == http.StatusOK && cw.buf.Len() > 0 {
 			// Only store if the now-validated role is cacheable. JWT has run
@@ -253,6 +263,9 @@ func writeItem(w http.ResponseWriter, r *http.Request, item *cacheItem, hit bool
 		h.Set("Content-Length", item.gzipLen)
 		w.WriteHeader(item.status)
 		w.Write(item.gzipped) //nolint:errcheck
+		if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {
+			t.Mark("gzip")
+		}
 		return
 	}
 

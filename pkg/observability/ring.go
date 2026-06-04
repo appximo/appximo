@@ -15,12 +15,20 @@ const ringSize = 256
 //	QueryUS time spent in DB queries, microseconds (0 when unmeasured)
 //	Route   interned route-pattern id (resolve via Rings.RouteName)
 //	Status  HTTP status code
+//	TraceID first 8 bytes of the request trace id (16 hex chars decoded)
+//	Spans   per-stage durations captured by the request's SpanTracker
+//	NSpans  number of valid entries in Spans
+//
+// Spans/TraceID are value types too, so Record stays allocation-free.
 type Sample struct {
 	Start   int64
 	DurUS   int32
 	QueryUS int32
 	Route   uint16
 	Status  uint16
+	TraceID [8]byte
+	Spans   [maxSpans]Span
+	NSpans  uint8
 }
 
 // TenantRing is a fixed circular buffer of the last ringSize samples for one tenant.
@@ -176,6 +184,46 @@ type RecentRequest struct {
 	QueryUS int32  `json:"query_us"`
 	Route   string `json:"route"`
 	Status  uint16 `json:"status"`
+}
+
+// TraceView is the JSON projection of a Sample's trace: id, route, total, and the
+// per-stage span breakdown. Served under /debug/tenant/{id} → "recent_traces".
+type TraceView struct {
+	TraceID string `json:"trace_id"`
+	TS      int64  `json:"ts"` // request start, unix microseconds
+	Route   string `json:"route"`
+	TotalUS int32  `json:"total_us"`
+	Status  uint16 `json:"status"`
+	Spans   []Span `json:"spans"`
+}
+
+// RecentTraces returns up to n of the tenant's most recent requests projected as
+// TraceViews (trace id resolved to hex, route resolved to string, spans copied
+// out of the fixed array).
+func (rs *Rings) RecentTraces(tenantID string, n int) []TraceView {
+	samples := rs.Snapshot(tenantID)
+	if n > len(samples) {
+		n = len(samples)
+	}
+	out := make([]TraceView, 0, n)
+	for i := 0; i < n; i++ {
+		s := samples[i]
+		ns := int(s.NSpans)
+		if ns > maxSpans {
+			ns = maxSpans
+		}
+		spans := make([]Span, ns)
+		copy(spans, s.Spans[:ns])
+		out = append(out, TraceView{
+			TraceID: traceIDString(s.TraceID),
+			TS:      s.Start,
+			Route:   rs.RouteName(s.Route),
+			TotalUS: s.DurUS,
+			Status:  s.Status,
+			Spans:   spans,
+		})
+	}
+	return out
 }
 
 // Recent returns the tenant's recent requests as RecentRequest values, ordered

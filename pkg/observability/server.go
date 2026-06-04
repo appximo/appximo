@@ -10,14 +10,19 @@ import (
 
 // ObsServer exposes internal observability data over HTTP.
 type ObsServer struct {
-	hist     *TenantHistogram
-	errors   *ErrorStore
-	anomaly  *AnomalyDetector
-	synthmon *SyntheticMonitor
-	rings    *Rings
-	slo      *SLOEngine
-	store    *ObsStore
+	hist       *TenantHistogram
+	errors     *ErrorStore
+	anomaly    *AnomalyDetector
+	synthmon   *SyntheticMonitor
+	rings      *Rings
+	slo        *SLOEngine
+	store      *ObsStore
+	tracesHTML []byte // embedded trace-explorer UI (set via SetTracesHTML)
 }
+
+// SetTracesHTML installs the embedded HTML served at /debug/traces. Kept out of
+// the constructor so the page can be go:embed'd in package main and injected here.
+func (s *ObsServer) SetTracesHTML(b []byte) { s.tracesHTML = b }
 
 func NewObsServer(
 	hist *TenantHistogram,
@@ -53,7 +58,19 @@ func (s *ObsServer) DebugRouter(adminKey string) http.Handler {
 	})
 	r.Get("/tenant/{id}", s.handleTenant)
 	r.Get("/synthetic", s.handleSynthetic)
+	r.Get("/traces", s.handleTracesUI)
 	return r
+}
+
+// handleTracesUI serves the embedded trace-explorer HTML (admin-gated by the
+// surrounding DebugRouter). Returns 404 when no UI was injected.
+func (s *ObsServer) handleTracesUI(w http.ResponseWriter, _ *http.Request) {
+	if len(s.tracesHTML) == 0 {
+		http.Error(w, "traces UI not available", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(s.tracesHTML) //nolint:errcheck
 }
 
 // Router returns a chi.Mux exposing the /debug/... paths, admin-protected.
@@ -72,12 +89,17 @@ func (s *ObsServer) handleTenant(w http.ResponseWriter, r *http.Request) {
 	if s.rings != nil {
 		recent = s.rings.Recent(id)
 	}
+	recentTraces := []TraceView{}
+	if s.rings != nil {
+		recentTraces = s.rings.RecentTraces(id, 10)
+	}
 	payload := map[string]any{
 		"tenant_id":       id,
 		"latency":         snap,
 		"errors":          errs,
 		"anomaly_count":   s.anomaly.GetCount(id),
 		"recent_requests": recent,
+		"recent_traces":   recentTraces,
 	}
 	if s.slo != nil {
 		payload["slo"] = s.slo.Snapshot(id)
@@ -87,6 +109,14 @@ func (s *ObsServer) handleTenant(w http.ResponseWriter, r *http.Request) {
 		if hours, err := strconv.Atoi(h); err == nil && hours > 0 {
 			payload["history"] = s.historyPoints(id, hours)
 		}
+	}
+	// ?traces=slow adds the tenant's persisted slow traces from the last 24h.
+	if r.URL.Query().Get("traces") == "slow" && s.store != nil {
+		traces, err := s.store.SlowTraces(id, 24)
+		if err != nil {
+			traces = []TraceView{}
+		}
+		payload["slow_traces"] = traces
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(payload) //nolint:errcheck

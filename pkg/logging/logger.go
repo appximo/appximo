@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/miguelangel/appitools/pkg/observability"
 	"github.com/miguelangel/appitools/pkg/tenant"
 	"github.com/rs/zerolog"
 )
@@ -84,14 +85,16 @@ func Init(env string) {
 // measurement point. Route is the chi route pattern (e.g. "/api/{entity}"),
 // preferred over the raw Path for bounded metric/label cardinality.
 type RequestTap struct {
-	TenantID  string
-	Method    string
-	Path      string
-	Route     string
-	Status    int
-	StartUS   int64 // request start, unix microseconds
+	TenantID   string
+	Method     string
+	Path       string
+	Route      string
+	Status     int
+	StartUS    int64 // request start, unix microseconds
 	DurationUS int64
-	FromCache bool
+	FromCache  bool
+	TraceID    string             // 16-hex request trace id (also in X-Trace-ID)
+	Spans      []observability.Span // per-stage breakdown from the SpanTracker
 }
 
 // RequestLogger returns a chi-compatible middleware that logs each request with zerolog.
@@ -109,9 +112,28 @@ func RequestLogger(
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
+
+			// In-process tracing: a trace id + span tracker ride the context so
+			// every downstream middleware/handler can Mark() its stage and emit
+			// logs already tagged with trace_id. The id is also echoed to the
+			// client via X-Trace-ID for correlation.
+			traceID := observability.NewTraceID()
+			ctx := observability.WithTraceID(r.Context(), traceID)
+			ctx = observability.WithSpanTracker(ctx)
+			ctx = Log.With().Str("trace_id", traceID).Logger().WithContext(ctx)
+			r = r.WithContext(ctx)
+
 			ww := chimiddleware.NewWrapResponseWriter(w, r.ProtoMajor)
+			ww.Header().Set("X-Trace-ID", traceID)
 			next.ServeHTTP(ww, r)
 			elapsed := time.Since(start)
+
+			// Close the trace: the tail since the last Mark becomes a "done" span.
+			var spans []observability.Span
+			if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {
+				spans = t.Finish()
+			}
+
 			tc := tenant.FromCtx(r.Context())
 			tenantID := ""
 			if tc != nil {
@@ -119,6 +141,7 @@ func RequestLogger(
 			}
 			// Authorization header is deliberately excluded from the log event.
 			Log.Info().
+				Str("trace_id", traceID).
 				Str("tenant_id", tenantID).
 				Str("method", r.Method).
 				Str("path", r.URL.Path).
@@ -152,6 +175,8 @@ func RequestLogger(
 					StartUS:    start.UnixMicro(),
 					DurationUS: elapsed.Microseconds(),
 					FromCache:  fromCache,
+					TraceID:    traceID,
+					Spans:      spans,
 				})
 			}
 		})

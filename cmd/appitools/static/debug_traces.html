@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Appitools — Trace Explorer</title>
+<style>
+  :root{--bg:#0f1115;--panel:#171a21;--line:#262b36;--fg:#e6e9ef;--muted:#8b93a7;}
+  *{box-sizing:border-box}
+  body{margin:0;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--bg);color:var(--fg)}
+  header{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.3px}
+  input,select,button{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit}
+  button{cursor:pointer}
+  button:hover{border-color:#3a86ff}
+  label{color:var(--muted);display:flex;gap:6px;align-items:center}
+  .spacer{flex:1}
+  #status{color:var(--muted);font-size:12px}
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+  th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  tr.trace{cursor:pointer}
+  tr.trace:hover{background:#1c2029}
+  .tid{color:#9ad0ff}
+  .total{text-align:right;font-variant-numeric:tabular-nums}
+  .st-2{color:#5fd28a}.st-4{color:#ffcc66}.st-5{color:#ff6b6b}
+  .bar{display:flex;height:16px;width:100%;border-radius:4px;overflow:hidden;background:#0a0c10;border:1px solid var(--line)}
+  .seg{height:100%;min-width:1px}
+  .seg.hot{outline:2px solid #ff3b3b;outline-offset:-2px}
+  .detail{background:#10131a}
+  .detail td{padding:0}
+  .spanrow{display:flex;align-items:center;gap:10px;padding:4px 10px;border-bottom:1px solid #1b1f29}
+  .swatch{width:11px;height:11px;border-radius:2px;flex:none}
+  .sname{width:120px}.sus{width:110px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+  .spct{width:60px;text-align:right;color:var(--muted)}
+  .sbar{flex:1;height:8px;background:#0a0c10;border-radius:3px;overflow:hidden}
+  .sbar > div{height:100%}
+  .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--muted);padding:8px 18px;border-bottom:1px solid var(--line)}
+  .legend span{display:flex;gap:5px;align-items:center}
+  .empty{padding:40px;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>⛓ Trace Explorer</h1>
+  <label>tenant <input id="tenant" size="8" value="10"></label>
+  <label>admin key <input id="key" size="14" type="password" placeholder="X-Admin-Key"></label>
+  <label>source
+    <select id="mode">
+      <option value="recent">recent (ring)</option>
+      <option value="slow">slow (SQLite, 24h)</option>
+    </select>
+  </label>
+  <button id="load">Load</button>
+  <label><input type="checkbox" id="auto"> auto 5s</label>
+  <span class="spacer"></span>
+  <span id="status">idle</span>
+</header>
+<div class="legend" id="legend"></div>
+<table>
+  <thead><tr><th style="width:150px">trace_id</th><th>route</th><th style="width:70px">status</th><th class="total" style="width:90px">total</th><th style="width:45%">breakdown</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<div id="empty" class="empty">Enter tenant + admin key and press Load.</div>
+
+<script>
+const COLORS = {
+  jwt:"#3a86ff", rbac:"#5fd28a", cache_hit:"#8a93a7", cache_miss:"#6b7280",
+  cache:"#8a93a7", query:"#ff6b6b", serialize:"#ffa94d", gzip:"#b197fc",
+  hook:"#22d3ee", insert:"#c08457", done:"#3a4150"
+};
+const color = n => COLORS[n] || "#64748b";
+const $ = id => document.getElementById(id);
+let timer = null;
+
+function statusText(s){ return s>=500?"st-5":s>=400?"st-4":"st-2"; }
+
+function renderLegend(){
+  $("legend").innerHTML = Object.keys(COLORS).filter(k=>k!=="cache")
+    .map(k=>`<span><i class="swatch" style="background:${COLORS[k]}"></i>${k}</span>`).join("");
+}
+
+function render(traces){
+  const rows = $("rows"); rows.innerHTML = "";
+  if(!traces || !traces.length){ $("empty").style.display="block"; $("empty").textContent="No traces yet."; return; }
+  $("empty").style.display="none";
+  traces.forEach((t,i)=>{
+    const total = t.total_us || (t.spans||[]).reduce((a,s)=>a+s.dur_us,0) || 1;
+    const tr = document.createElement("tr"); tr.className="trace";
+    const bar = (t.spans||[]).map(s=>{
+      const pct=(s.dur_us/total*100);
+      const hot = pct>80 ? " hot":"";
+      return `<div class="seg${hot}" style="width:${pct}%;background:${color(s.name)}" title="${s.name}: ${s.dur_us}µs (${pct.toFixed(1)}%)"></div>`;
+    }).join("");
+    tr.innerHTML =
+      `<td class="tid">${t.trace_id||"-"}</td>`+
+      `<td>${t.route||"-"}</td>`+
+      `<td class="${statusText(t.status)}">${t.status||""}</td>`+
+      `<td class="total">${(total/1000).toFixed(2)} ms</td>`+
+      `<td><div class="bar">${bar}</div></td>`;
+    const detail = document.createElement("tr"); detail.className="detail"; detail.style.display="none";
+    const cell = document.createElement("td"); cell.colSpan=5;
+    cell.innerHTML = (t.spans||[]).map(s=>{
+      const pct=(s.dur_us/total*100);
+      return `<div class="spanrow">`+
+        `<i class="swatch" style="background:${color(s.name)}"></i>`+
+        `<span class="sname">${s.name}</span>`+
+        `<span class="sus">${s.dur_us} µs</span>`+
+        `<span class="spct" ${pct>80?'style="color:#ff6b6b"':''}>${pct.toFixed(1)}%</span>`+
+        `<div class="sbar"><div style="width:${pct}%;background:${color(s.name)}"></div></div>`+
+        `</div>`;
+    }).join("") || '<div class="spanrow">no spans</div>';
+    detail.appendChild(cell);
+    tr.onclick = ()=>{ detail.style.display = detail.style.display==="none"?"":"none"; };
+    rows.appendChild(tr); rows.appendChild(detail);
+  });
+}
+
+async function load(){
+  const tenant=$("tenant").value.trim(), key=$("key").value, mode=$("mode").value;
+  if(!tenant){ $("status").textContent="enter a tenant"; return; }
+  localStorage.setItem("appitools_admin_key", key);
+  localStorage.setItem("appitools_tenant", tenant);
+  const url = `/debug/tenant/${encodeURIComponent(tenant)}`+(mode==="slow"?"?traces=slow":"");
+  $("status").textContent="loading…";
+  try{
+    const res = await fetch(url,{headers:{"X-Admin-Key":key}});
+    if(res.status===401){ $("status").textContent="401 — wrong admin key"; return; }
+    if(!res.ok){ $("status").textContent="HTTP "+res.status; return; }
+    const data = await res.json();
+    const traces = mode==="slow" ? data.slow_traces : data.recent_traces;
+    render(traces);
+    $("status").textContent = `${(traces||[]).length} ${mode} trace(s) · ${new Date().toLocaleTimeString()}`;
+  }catch(e){ $("status").textContent="error: "+e.message; }
+}
+
+function setAuto(){
+  if(timer){clearInterval(timer);timer=null;}
+  if($("auto").checked){ timer=setInterval(load,5000); }
+}
+
+renderLegend();
+$("key").value = localStorage.getItem("appitools_admin_key")||"";
+$("tenant").value = new URLSearchParams(location.search).get("tenant")||localStorage.getItem("appitools_tenant")||"10";
+$("load").onclick = load;
+$("mode").onchange = load;
+$("auto").onchange = setAuto;
+[ "tenant","key" ].forEach(id=>$(id).addEventListener("keydown",e=>{if(e.key==="Enter")load();}));
+if($("key").value) load();
+</script>
+</body>
+</html>
