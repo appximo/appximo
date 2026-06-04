@@ -141,6 +141,34 @@ func TestJWTMiddleware_InvalidToken(t *testing.T) {
 	}
 }
 
+// Infra liveness/readiness/admin probes must bypass JWT. Regression for the
+// /readyz omission that left the graceful-drain readiness endpoint behind JWT
+// (always 401), breaking the load-balancer drain handshake.
+func TestJWTMiddleware_InfraPathsSkipAuth(t *testing.T) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mw := auth.JWTMiddleware(testSecret)(ok)
+
+	skipped := []string{"/healthz", "/health", "/readyz", "/metrics", "/debug/tenant/10", "/admin/backup"}
+	for _, p := range skipped {
+		req := httptest.NewRequest(http.MethodGet, p, nil) // no token
+		rr := httptest.NewRecorder()
+		mw.ServeHTTP(rr, req)
+		if rr.Code == http.StatusUnauthorized {
+			t.Errorf("%s must bypass JWT, got 401", p)
+		}
+	}
+
+	// A real API path with no token is still rejected.
+	req := httptest.NewRequest(http.MethodGet, "/api/guides", nil)
+	rr := httptest.NewRecorder()
+	mw.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("/api/guides without token should be 401, got %d", rr.Code)
+	}
+}
+
 // TestJWT_TamperedSignatureRejected verifies that altering the signature portion
 // of a valid token is detected and rejected. golang-jwt/jwt uses hmac.Equal
 // (constant-time comparison) internally — this test validates the end-to-end
