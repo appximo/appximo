@@ -20,6 +20,29 @@ const retentionDays = 7
 // persisted to slow_traces (Phase 1: a fixed 50ms, not a per-tenant p95).
 const SlowTraceThresholdUS = 50_000
 
+// PersistErrors, when true, persists every error trace (status >= 400) regardless
+// of latency, so a fast 401/403/422/500 is still captured for debugging.
+const PersistErrors = true
+
+// ShouldPersistTrace reports whether a request's trace should be written to
+// slow_traces. A trace is persisted when it is either slow (DurUS above the
+// threshold) or — when PersistErrors — an error response (Status >= 400).
+//
+// (A third heuristic, "any span with dur_us == 0", was considered for detecting a
+// prematurely-cut pipeline but rejected: sub-microsecond stages such as the RBAC
+// map lookup legitimately round to 0µs, so it would persist almost every request.
+// "How far the pipeline got" is instead conveyed by which spans are present —
+// error paths now mark their own stage.)
+func ShouldPersistTrace(s Sample) bool {
+	if s.DurUS > SlowTraceThresholdUS {
+		return true
+	}
+	if PersistErrors && s.Status >= 400 {
+		return true
+	}
+	return false
+}
+
 // Snapshot is one persisted point-in-time observation for a tenant.
 type Snapshot struct {
 	TenantID   string  `json:"tenant_id"`
@@ -70,6 +93,7 @@ func OpenStore(path string) (*ObsStore, error) {
 			ts         INTEGER NOT NULL,   -- request start, unix microseconds
 			route      TEXT,
 			total_us   INTEGER,
+			status     INTEGER NOT NULL DEFAULT 0, -- HTTP status (so errors are visible/colored)
 			spans_json TEXT,               -- JSON array of {name, dur_us}
 			PRIMARY KEY (trace_id)
 		);
@@ -78,6 +102,9 @@ func OpenStore(path string) (*ObsStore, error) {
 		db.Close() //nolint:errcheck
 		return nil, fmt.Errorf("init obs schema: %w", err)
 	}
+	// Migrate slow_traces tables created before the status column existed. The
+	// ALTER errors with "duplicate column name" once applied, which we ignore.
+	_, _ = db.Exec(`ALTER TABLE slow_traces ADD COLUMN status INTEGER NOT NULL DEFAULT 0`)
 	return &ObsStore{db: db}, nil
 }
 
@@ -132,9 +159,9 @@ func (s *ObsStore) SaveSlowTrace(tenantID string, tv TraceView) error {
 		return fmt.Errorf("marshal spans: %w", err)
 	}
 	_, err = s.db.Exec(
-		`INSERT OR REPLACE INTO slow_traces (trace_id, tenant_id, ts, route, total_us, spans_json)
-			VALUES (?, ?, ?, ?, ?, ?)`,
-		tv.TraceID, tenantID, tv.TS, tv.Route, tv.TotalUS, string(spansJSON),
+		`INSERT OR REPLACE INTO slow_traces (trace_id, tenant_id, ts, route, total_us, status, spans_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		tv.TraceID, tenantID, tv.TS, tv.Route, tv.TotalUS, tv.Status, string(spansJSON),
 	)
 	if err != nil {
 		return fmt.Errorf("save slow trace: %w", err)
@@ -147,7 +174,7 @@ func (s *ObsStore) SaveSlowTrace(tenantID string, tv TraceView) error {
 func (s *ObsStore) SlowTraces(tenantID string, hours int) ([]TraceView, error) {
 	cutoff := (time.Now().Unix() - int64(hours)*3600) * 1_000_000 // µs, matches ts unit
 	rows, err := s.db.Query(
-		`SELECT trace_id, ts, route, total_us, spans_json
+		`SELECT trace_id, ts, route, total_us, status, spans_json
 			FROM slow_traces
 			WHERE tenant_id = ? AND ts > ?
 			ORDER BY ts DESC
@@ -163,9 +190,11 @@ func (s *ObsStore) SlowTraces(tenantID string, hours int) ([]TraceView, error) {
 	for rows.Next() {
 		var tv TraceView
 		var spansJSON string
-		if err := rows.Scan(&tv.TraceID, &tv.TS, &tv.Route, &tv.TotalUS, &spansJSON); err != nil {
+		var status int
+		if err := rows.Scan(&tv.TraceID, &tv.TS, &tv.Route, &tv.TotalUS, &status, &spansJSON); err != nil {
 			return nil, fmt.Errorf("scan slow trace: %w", err)
 		}
+		tv.Status = uint16(status)
 		if spansJSON != "" {
 			_ = json.Unmarshal([]byte(spansJSON), &tv.Spans)
 		}

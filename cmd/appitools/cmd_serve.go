@@ -340,9 +340,9 @@ var serveCmd = &cobra.Command{
 				rings.Record(t.TenantID, sample)
 				metrics.SetActiveTenants(rings.Count())
 
-				// Persist slow traces (>50ms) asynchronously so the request path
-				// never blocks on SQLite.
-				if obsStore != nil && sample.DurUS > observability.SlowTraceThresholdUS {
+				// Persist slow OR error traces (>50ms, or status >= 400)
+				// asynchronously so the request path never blocks on SQLite.
+				if obsStore != nil && observability.ShouldPersistTrace(sample) {
 					tv := observability.TraceView{
 						TraceID: t.TraceID,
 						TS:      t.StartUS,

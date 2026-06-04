@@ -65,6 +65,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// QueryDirect: schema-qualified table name — no transaction, no SET LOCAL.
 			rows, err := tdb.QueryDirect(req.Context(), tc.PGSchema, name, selectQ, selectArgs...)
 			if err != nil {
+				markSpan(req, "query") // mark the attempted query so 5xx traces show it
 				pkghandlers.WriteDBError(w, err)
 				return
 			}
@@ -125,6 +126,9 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				return
 			}
 			if !hookRes.Proceed {
+				// The before_create hook rejected: mark it so the persisted 422
+				// trace shows the pipeline reached the hook.
+				markSpan(req, "hook")
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnprocessableEntity)
 				json.NewEncoder(w).Encode(map[string]string{"error": hookRes.Error})

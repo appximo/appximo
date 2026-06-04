@@ -87,7 +87,7 @@ func buildTracedStack(pool *db.TenantDB, rings *observability.Rings, store *obse
 			Status: uint16(tp.Status), TraceID: traceID, Spans: spans, NSpans: uint8(n),
 		}
 		rings.Record(tp.TenantID, sample)
-		if store != nil && sample.DurUS > observability.SlowTraceThresholdUS {
+		if store != nil && observability.ShouldPersistTrace(sample) {
 			_ = store.SaveSlowTrace(tp.TenantID, observability.TraceView{
 				TraceID: tp.TraceID, TS: tp.StartUS, Route: tp.Route,
 				TotalUS: sample.DurUS, Status: uint16(tp.Status),
@@ -143,9 +143,15 @@ INSERT INTO tenant_acmetest.guides (code, status) VALUES ('A','pending'), ('B','
 	s := &schema.APISchema{
 		Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "tracing",
 		Resources: map[string]schema.ResourceSchema{
-			"guides": {Fields: map[string]schema.FieldDef{
-				"code": {Type: "string"}, "status": {Type: "string"},
-			}},
+			"guides": {
+				Fields: map[string]schema.FieldDef{
+					"code": {Type: "string"}, "status": {Type: "string"},
+				},
+				Hooks: map[string]schema.HookConfig{
+					// Rejects when the body carries reject:true → 422 (for the error-persist test).
+					"before_create": {Type: "js", Script: `if (data.reject) { result.proceed = false; result.error = "rejected by test"; }`},
+				},
+			},
 		},
 		RBAC: schema.RBACPolicy{Roles: map[string]schema.RolePolicy{
 			"super_admin": {Resources: json.RawMessage(`"*"`), Actions: []string{"*"}},
@@ -243,5 +249,53 @@ INSERT INTO tenant_acmetest.guides (code, status) VALUES ('A','pending'), ('B','
 	// 5. The fast request was NOT persisted.
 	if _, bad := bySlow[tidFast]; bad {
 		t.Errorf("fast request %s must not be in slow_traces", tidFast)
+	}
+
+	persisted := func(tid string) bool {
+		return eventually(2*time.Second, func() bool {
+			s, _ := store.SlowTraces(tenantID, 24)
+			for _, tv := range s {
+				if tv.TraceID == tid {
+					return true
+				}
+			}
+			return false
+		})
+	}
+
+	// 6. A 401 (bad token) is persisted even though it is fast (PersistErrors).
+	req401, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/guides?per_page=5", nil)
+	req401.Header.Set("Authorization", "Bearer not.a.valid.token")
+	resp401, err := srv.Client().Do(req401)
+	if err != nil {
+		t.Fatalf("GET 401: %v", err)
+	}
+	tid401 := resp401.Header.Get("X-Trace-ID")
+	st401 := resp401.StatusCode
+	resp401.Body.Close()
+	if st401 != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", st401)
+	}
+	if !persisted(tid401) {
+		t.Errorf("401 trace %s should be persisted (PersistErrors)", tid401)
+	}
+
+	// 7. A 422 (before_create hook reject) is persisted even though it is fast.
+	body, _ := json.Marshal(map[string]any{"code": "X", "reject": true})
+	req422, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/guides", bytes.NewReader(body))
+	req422.Header.Set("Authorization", "Bearer "+token)
+	req422.Header.Set("Content-Type", "application/json")
+	resp422, err := srv.Client().Do(req422)
+	if err != nil {
+		t.Fatalf("POST 422: %v", err)
+	}
+	tid422 := resp422.Header.Get("X-Trace-ID")
+	st422 := resp422.StatusCode
+	resp422.Body.Close()
+	if st422 != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d", st422)
+	}
+	if !persisted(tid422) {
+		t.Errorf("422 trace %s should be persisted (PersistErrors)", tid422)
 	}
 }
