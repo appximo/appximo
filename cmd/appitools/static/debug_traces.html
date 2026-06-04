@@ -39,6 +39,14 @@
   .spct{width:60px;text-align:right;color:var(--muted)}
   .sbar{flex:1;height:8px;background:#0a0c10;border-radius:3px;overflow:hidden}
   .sbar > div{height:100%}
+  .esec{border-top:1px solid #1b1f29;padding:8px 12px}
+  .esec:first-child{border-top:none}
+  .ehdr{color:var(--muted);font-size:10px;letter-spacing:1px;margin-bottom:6px}
+  .ebody{font-size:12px}
+  .ebody.err{color:#ff8a8a;white-space:pre-wrap;word-break:break-word}
+  .frame{display:flex;gap:10px;padding:2px 0;align-items:baseline}
+  .floc{color:#9ad0ff;min-width:330px}
+  .ffn{color:var(--muted)}
   .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--muted);padding:8px 18px;border-bottom:1px solid var(--line)}
   .legend span{display:flex;gap:5px;align-items:center}
   .empty{padding:40px;text-align:center;color:var(--muted)}
@@ -78,6 +86,8 @@ const $ = id => document.getElementById(id);
 let timer = null;
 
 function statusText(s){ return s>=500?"st-5":s>=400?"st-4":s>=300?"st-3":"st-2"; }
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function shortFn(fn){ if(!fn) return ""; const i=fn.lastIndexOf("/"); return i>=0?fn.slice(i+1):fn; }
 
 function renderLegend(){
   $("legend").innerHTML = Object.keys(COLORS).filter(k=>k!=="cache")
@@ -104,16 +114,37 @@ function render(traces){
       `<td><div class="bar">${bar}</div></td>`;
     const detail = document.createElement("tr"); detail.className="detail"; detail.style.display="none";
     const cell = document.createElement("td"); cell.colSpan=5;
-    cell.innerHTML = (t.spans||[]).map(s=>{
+
+    const spansHTML = (t.spans||[]).map(s=>{
       const pct=(s.dur_us/total*100);
       return `<div class="spanrow">`+
         `<i class="swatch" style="background:${color(s.name)}"></i>`+
-        `<span class="sname">${s.name}</span>`+
+        `<span class="sname">${esc(s.name)}</span>`+
         `<span class="sus">${s.dur_us} µs</span>`+
         `<span class="spct" ${pct>80?'style="color:#ff6b6b"':''}>${pct.toFixed(1)}%</span>`+
         `<div class="sbar"><div style="width:${pct}%;background:${color(s.name)}"></div></div>`+
         `</div>`;
     }).join("") || '<div class="spanrow">no spans</div>';
+
+    // REQUEST
+    const reqBits = ['tenant: '+esc($("tenant").value.trim()), esc(((t.method||'')+' '+(t.route||'-')).trim())];
+    if(t.role)    reqBits.push('role: '+esc(t.role));
+    if(t.user_id) reqBits.push('user: '+esc(t.user_id));
+    let html = `<div class="esec"><div class="ehdr">REQUEST</div><div class="ebody">${reqBits.join('  ·  ')}</div></div>`;
+    // ERROR (any 4xx/5xx with a message)
+    if(t.error_msg){
+      html += `<div class="esec"><div class="ehdr">ERROR</div><div class="ebody err">${esc(t.error_msg)}</div></div>`;
+    }
+    // STACK TRACE (500s only — present when t.stack is non-empty)
+    if(t.stack && t.stack.length){
+      const frames = t.stack.map(f=>
+        `<div class="frame"><span class="floc">${esc(f.file)}:${f.line}</span><span class="ffn">→ ${esc(shortFn(f.function))}()</span></div>`
+      ).join("");
+      html += `<div class="esec"><div class="ehdr">STACK TRACE</div><div class="ebody">${frames}</div></div>`;
+    }
+    // SPANS
+    html += `<div class="esec"><div class="ehdr">SPANS</div><div class="ebody">${spansHTML}</div></div>`;
+    cell.innerHTML = html;
     detail.appendChild(cell);
     tr.onclick = ()=>{ detail.style.display = detail.style.display==="none"?"":"none"; };
     rows.appendChild(tr); rows.appendChild(detail);

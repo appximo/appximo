@@ -57,9 +57,10 @@ func RBACMiddleware(policyJSON []byte) func(http.Handler) http.Handler {
 			result := policy.Evaluate(evalCtx, resource, action)
 			if !result.Allowed {
 				// Mark the rbac stage so a persisted 403 trace shows it reached
-				// (and was stopped at) RBAC.
+				// (and was stopped at) RBAC (no stack — 403 is a client error).
 				if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {
 					t.Mark("rbac")
+					t.RecordError("rbac: forbidden")
 				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusForbidden)

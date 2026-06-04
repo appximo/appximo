@@ -93,8 +93,10 @@ type RequestTap struct {
 	StartUS    int64 // request start, unix microseconds
 	DurationUS int64
 	FromCache  bool
-	TraceID    string             // 16-hex request trace id (also in X-Trace-ID)
+	TraceID    string               // 16-hex request trace id (also in X-Trace-ID)
 	Spans      []observability.Span // per-stage breakdown from the SpanTracker
+	ErrMsg     string               // error message for an errored request ("" otherwise)
+	Capture    *observability.ErrorCapture // symbolized stack for a 500 (nil otherwise)
 }
 
 // RequestLogger returns a chi-compatible middleware that logs each request with zerolog.
@@ -130,8 +132,14 @@ func RequestLogger(
 
 			// Close the trace: the tail since the last Mark becomes a "done" span.
 			var spans []observability.Span
+			var errMsg string
+			var capture *observability.ErrorCapture
 			if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {
 				spans = t.Finish()
+				if t.HasError {
+					errMsg = t.ErrMsg
+					capture = t.Capture
+				}
 			}
 
 			tc := tenant.FromCtx(r.Context())
@@ -177,6 +185,8 @@ func RequestLogger(
 					FromCache:  fromCache,
 					TraceID:    traceID,
 					Spans:      spans,
+					ErrMsg:     errMsg,
+					Capture:    capture,
 				})
 			}
 		})

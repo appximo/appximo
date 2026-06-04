@@ -328,14 +328,16 @@ var serveCmd = &cobra.Command{
 				copy(spans[:], t.Spans[:n])
 
 				sample := observability.Sample{
-					Start:   t.StartUS,
-					DurUS:   int32(t.DurationUS),
-					QueryUS: 0, // DB query time not yet threaded through the middleware
-					Route:   rings.RouteID(t.Route),
-					Status:  uint16(t.Status),
-					TraceID: traceID,
-					Spans:   spans,
-					NSpans:  uint8(n),
+					Start:        t.StartUS,
+					DurUS:        int32(t.DurationUS),
+					QueryUS:      0, // DB query time not yet threaded through the middleware
+					Route:        rings.RouteID(t.Route),
+					Status:       uint16(t.Status),
+					TraceID:      traceID,
+					Spans:        spans,
+					NSpans:       uint8(n),
+					ErrMsg:       t.ErrMsg,
+					ErrorCapture: t.Capture, // nil unless a 500 captured a stack
 				}
 				rings.Record(t.TenantID, sample)
 				metrics.SetActiveTenants(rings.Count())
@@ -350,6 +352,13 @@ var serveCmd = &cobra.Command{
 						TotalUS: sample.DurUS,
 						Status:  uint16(t.Status),
 						Spans:   append([]observability.Span(nil), t.Spans...),
+						ErrMsg:  t.ErrMsg,
+					}
+					if t.Capture != nil {
+						tv.Stack = t.Capture.Stack
+						if tv.ErrMsg == "" {
+							tv.ErrMsg = t.Capture.ErrMsg
+						}
 					}
 					tenantID := t.TenantID
 					go func() {

@@ -7,6 +7,16 @@ import (
 	"github.com/miguelangel/appitools/pkg/db"
 )
 
+// IsServerError reports whether err would be answered as HTTP 500 by WriteDBError
+// (i.e. it is not a missing-tenant / bad-input / unavailable error). Used to decide
+// whether to capture a stack trace — client/availability errors are not bugs.
+func IsServerError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return !db.IsMissingTenant(err) && !db.IsBadInput(err) && !db.IsUnavailable(err)
+}
+
 // WriteDBError maps a database error to an HTTP response without leaking internal
 // details (raw SQL, schema names) to the client:
 //   - missing tenant schema/relation (42P01/3F000) → 400 "invalid tenant"

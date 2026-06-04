@@ -29,6 +29,11 @@ type Sample struct {
 	TraceID [8]byte
 	Spans   [maxSpans]Span
 	NSpans  uint8
+	// ErrMsg is the error message for an errored request ("" otherwise).
+	// ErrorCapture carries the symbolized stack for a 500 (nil otherwise) — a
+	// pointer, so non-error samples cost only 8 bytes and Record stays alloc-free.
+	ErrMsg       string
+	ErrorCapture *ErrorCapture
 }
 
 // TenantRing is a fixed circular buffer of the last ringSize samples for one tenant.
@@ -189,12 +194,19 @@ type RecentRequest struct {
 // TraceView is the JSON projection of a Sample's trace: id, route, total, and the
 // per-stage span breakdown. Served under /debug/tenant/{id} → "recent_traces".
 type TraceView struct {
-	TraceID string `json:"trace_id"`
-	TS      int64  `json:"ts"` // request start, unix microseconds
-	Route   string `json:"route"`
-	TotalUS int32  `json:"total_us"`
-	Status  uint16 `json:"status"`
-	Spans   []Span `json:"spans"`
+	TraceID string  `json:"trace_id"`
+	TS      int64   `json:"ts"` // request start, unix microseconds
+	Route   string  `json:"route"`
+	TotalUS int32   `json:"total_us"`
+	Status  uint16  `json:"status"`
+	Spans   []Span  `json:"spans"`
+	ErrMsg  string  `json:"error_msg,omitempty"` // set for error responses
+	Stack   []Frame `json:"stack,omitempty"`     // set only for 500s
+	// Request context for the error panel — populated for recent_traces from the
+	// in-memory ErrorCapture (slow_traces persists only error_msg + stack).
+	Method string `json:"method,omitempty"`
+	UserID string `json:"user_id,omitempty"`
+	Role   string `json:"role,omitempty"`
 }
 
 // RecentTraces returns up to n of the tenant's most recent requests projected as
@@ -214,14 +226,25 @@ func (rs *Rings) RecentTraces(tenantID string, n int) []TraceView {
 		}
 		spans := make([]Span, ns)
 		copy(spans, s.Spans[:ns])
-		out = append(out, TraceView{
+		tv := TraceView{
 			TraceID: traceIDString(s.TraceID),
 			TS:      s.Start,
 			Route:   rs.RouteName(s.Route),
 			TotalUS: s.DurUS,
 			Status:  s.Status,
 			Spans:   spans,
-		})
+			ErrMsg:  s.ErrMsg,
+		}
+		if s.ErrorCapture != nil {
+			tv.Stack = s.ErrorCapture.Stack
+			tv.Method = s.ErrorCapture.Method
+			tv.UserID = s.ErrorCapture.UserID
+			tv.Role = s.ErrorCapture.Role
+			if tv.ErrMsg == "" {
+				tv.ErrMsg = s.ErrorCapture.ErrMsg
+			}
+		}
+		out = append(out, tv)
 	}
 	return out
 }

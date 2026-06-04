@@ -94,6 +94,8 @@ func OpenStore(path string) (*ObsStore, error) {
 			route      TEXT,
 			total_us   INTEGER,
 			status     INTEGER NOT NULL DEFAULT 0, -- HTTP status (so errors are visible/colored)
+			err_msg    TEXT,               -- error message for 4xx/5xx ("" otherwise)
+			stack_json TEXT,               -- JSON array of StackFrame, 500s only
 			spans_json TEXT,               -- JSON array of {name, dur_us}
 			PRIMARY KEY (trace_id)
 		);
@@ -102,9 +104,11 @@ func OpenStore(path string) (*ObsStore, error) {
 		db.Close() //nolint:errcheck
 		return nil, fmt.Errorf("init obs schema: %w", err)
 	}
-	// Migrate slow_traces tables created before the status column existed. The
-	// ALTER errors with "duplicate column name" once applied, which we ignore.
+	// Migrate slow_traces tables created before these columns existed. Each ALTER
+	// errors with "duplicate column name" once applied, which we ignore.
 	_, _ = db.Exec(`ALTER TABLE slow_traces ADD COLUMN status INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE slow_traces ADD COLUMN err_msg TEXT`)
+	_, _ = db.Exec(`ALTER TABLE slow_traces ADD COLUMN stack_json TEXT`)
 	return &ObsStore{db: db}, nil
 }
 
@@ -158,10 +162,19 @@ func (s *ObsStore) SaveSlowTrace(tenantID string, tv TraceView) error {
 	if err != nil {
 		return fmt.Errorf("marshal spans: %w", err)
 	}
+	// stack_json is stored only when there is a stack (500s); "" otherwise.
+	stackJSON := ""
+	if len(tv.Stack) > 0 {
+		b, mErr := json.Marshal(tv.Stack)
+		if mErr != nil {
+			return fmt.Errorf("marshal stack: %w", mErr)
+		}
+		stackJSON = string(b)
+	}
 	_, err = s.db.Exec(
-		`INSERT OR REPLACE INTO slow_traces (trace_id, tenant_id, ts, route, total_us, status, spans_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		tv.TraceID, tenantID, tv.TS, tv.Route, tv.TotalUS, tv.Status, string(spansJSON),
+		`INSERT OR REPLACE INTO slow_traces (trace_id, tenant_id, ts, route, total_us, status, err_msg, stack_json, spans_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tv.TraceID, tenantID, tv.TS, tv.Route, tv.TotalUS, tv.Status, tv.ErrMsg, stackJSON, string(spansJSON),
 	)
 	if err != nil {
 		return fmt.Errorf("save slow trace: %w", err)
@@ -174,7 +187,7 @@ func (s *ObsStore) SaveSlowTrace(tenantID string, tv TraceView) error {
 func (s *ObsStore) SlowTraces(tenantID string, hours int) ([]TraceView, error) {
 	cutoff := (time.Now().Unix() - int64(hours)*3600) * 1_000_000 // µs, matches ts unit
 	rows, err := s.db.Query(
-		`SELECT trace_id, ts, route, total_us, status, spans_json
+		`SELECT trace_id, ts, route, total_us, status, err_msg, stack_json, spans_json
 			FROM slow_traces
 			WHERE tenant_id = ? AND ts > ?
 			ORDER BY ts DESC
@@ -189,14 +202,18 @@ func (s *ObsStore) SlowTraces(tenantID string, hours int) ([]TraceView, error) {
 	out := []TraceView{}
 	for rows.Next() {
 		var tv TraceView
-		var spansJSON string
+		var errMsg, stackJSON, spansJSON sql.NullString
 		var status int
-		if err := rows.Scan(&tv.TraceID, &tv.TS, &tv.Route, &tv.TotalUS, &status, &spansJSON); err != nil {
+		if err := rows.Scan(&tv.TraceID, &tv.TS, &tv.Route, &tv.TotalUS, &status, &errMsg, &stackJSON, &spansJSON); err != nil {
 			return nil, fmt.Errorf("scan slow trace: %w", err)
 		}
 		tv.Status = uint16(status)
-		if spansJSON != "" {
-			_ = json.Unmarshal([]byte(spansJSON), &tv.Spans)
+		tv.ErrMsg = errMsg.String
+		if spansJSON.String != "" {
+			_ = json.Unmarshal([]byte(spansJSON.String), &tv.Spans)
+		}
+		if stackJSON.String != "" {
+			_ = json.Unmarshal([]byte(stackJSON.String), &tv.Stack)
 		}
 		out = append(out, tv)
 	}

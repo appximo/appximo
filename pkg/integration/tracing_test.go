@@ -85,14 +85,23 @@ func buildTracedStack(pool *db.TenantDB, rings *observability.Rings, store *obse
 		sample := observability.Sample{
 			Start: tp.StartUS, DurUS: int32(tp.DurationUS), Route: rings.RouteID(tp.Route),
 			Status: uint16(tp.Status), TraceID: traceID, Spans: spans, NSpans: uint8(n),
+			ErrMsg: tp.ErrMsg, ErrorCapture: tp.Capture,
 		}
 		rings.Record(tp.TenantID, sample)
 		if store != nil && observability.ShouldPersistTrace(sample) {
-			_ = store.SaveSlowTrace(tp.TenantID, observability.TraceView{
+			tv := observability.TraceView{
 				TraceID: tp.TraceID, TS: tp.StartUS, Route: tp.Route,
 				TotalUS: sample.DurUS, Status: uint16(tp.Status),
-				Spans: append([]observability.Span(nil), tp.Spans...),
-			})
+				Spans:  append([]observability.Span(nil), tp.Spans...),
+				ErrMsg: tp.ErrMsg,
+			}
+			if tp.Capture != nil {
+				tv.Stack = tp.Capture.Stack
+				if tv.ErrMsg == "" {
+					tv.ErrMsg = tp.Capture.ErrMsg
+				}
+			}
+			_ = store.SaveSlowTrace(tp.TenantID, tv)
 		}
 	}
 
@@ -297,5 +306,53 @@ INSERT INTO tenant_acmetest.guides (code, status) VALUES ('A','pending'), ('B','
 	}
 	if !persisted(tid422) {
 		t.Errorf("422 trace %s should be persisted (PersistErrors)", tid422)
+	}
+
+	// 8. A real 500 (DB error: INSERT references a non-existent column) must be
+	// persisted WITH a stack trace.
+	body500, _ := json.Marshal(map[string]any{"code": "E500", "status": "pending", "no_such_column": "x"})
+	req500, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/guides", bytes.NewReader(body500))
+	req500.Header.Set("Authorization", "Bearer "+token)
+	req500.Header.Set("Content-Type", "application/json")
+	resp500, err := srv.Client().Do(req500)
+	if err != nil {
+		t.Fatalf("POST 500: %v", err)
+	}
+	tid500 := resp500.Header.Get("X-Trace-ID")
+	st500 := resp500.StatusCode
+	resp500.Body.Close()
+	if st500 != http.StatusInternalServerError {
+		t.Fatalf("expected 500 (unknown column), got %d", st500)
+	}
+
+	var tv500 observability.TraceView
+	if !eventually(2*time.Second, func() bool {
+		s, _ := store.SlowTraces(tenantID, 24)
+		for _, tv := range s {
+			if tv.TraceID == tid500 {
+				tv500 = tv
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("500 trace %s was not persisted", tid500)
+	}
+	if tv500.Status != 500 {
+		t.Errorf("persisted 500 status = %d", tv500.Status)
+	}
+	if len(tv500.Stack) == 0 {
+		t.Errorf("500 trace must carry a stack; got none")
+	}
+	if tv500.ErrMsg == "" {
+		t.Errorf("500 trace must carry an error message")
+	}
+
+	// The 401 and 422 traces must have NO stack (client errors, not bugs).
+	s2, _ := store.SlowTraces(tenantID, 24)
+	for _, tv := range s2 {
+		if (tv.TraceID == tid401 || tv.TraceID == tid422) && len(tv.Stack) != 0 {
+			t.Errorf("4xx trace %s must not have a stack, got %d frames", tv.TraceID, len(tv.Stack))
+		}
 	}
 }

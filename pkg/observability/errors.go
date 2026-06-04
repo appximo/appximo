@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"hash/fnv"
@@ -10,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
 // Frame is a single symbolized stack frame.
@@ -186,4 +189,152 @@ func trimGoPath(path string) string {
 		}
 	}
 	return path
+}
+
+// ── Per-request error capture for 500s, linked to trace_id ──────────────────
+
+// ErrorCapture is a snapshot of a server error (HTTP 500) linked to the request's
+// trace, so the stack trace can be shown next to the timeline. For client errors
+// (4xx) the Stack is empty — those are not server bugs and never pay for
+// runtime.Callers. UserID/Role/Route/Method are filled by the caller (the
+// handler) because observability must not import auth (auth imports observability).
+type ErrorCapture struct {
+	TraceID   string  `json:"trace_id"`
+	TenantID  string  `json:"tenant_id"`
+	Route     string  `json:"route"`
+	Method    string  `json:"method"`
+	ErrMsg    string  `json:"error_msg"`
+	Stack     []Frame `json:"stack"`
+	UserID    string  `json:"user_id"`
+	Role      string  `json:"role"`
+	Timestamp int64   `json:"ts"`
+}
+
+// captureSymCache caches symbolized frames per fingerprint (message + call site).
+// The Nth occurrence of the same 500 reuses the frames — no re-symbolization, no
+// allocation.
+var captureSymCache sync.Map // uint64 → []Frame
+
+// CaptureError snapshots the current goroutine's stack for a server error (500)
+// and links it to the request's trace_id and tenant (from ctx). It symbolizes the
+// stack at most once per call site; repeat occurrences reuse the cached frames
+// with ZERO allocations.
+//
+// The hit path captures only 3 PCs into a stack-local array used solely for the
+// fingerprint (so nothing escapes to the heap); the expensive full-stack capture +
+// symbolization lives in captureAndSymbolize, called only on a cache miss, so its
+// unavoidable PC-slice escape never taxes the common (repeat) path.
+//
+// Returned BY VALUE so a caller that discards it allocates nothing. NEVER call on
+// the happy path — even a hit pays for runtime.Callers.
+func CaptureError(ctx context.Context, err error) ErrorCapture {
+	msg := err.Error()
+
+	// Cheap fingerprint capture: 3 PCs, read-only (no escape → stays on stack).
+	var fppcs [3]uintptr
+	nfp := runtime.Callers(2, fppcs[:]) // 0=Callers, 1=CaptureError → caller chain
+	fp := captureFingerprint(msg, fppcs[:nfp])
+
+	frames, ok := loadCaptureFrames(fp)
+	if !ok {
+		frames = storeCaptureFrames(fp, captureAndSymbolize())
+	}
+
+	return ErrorCapture{
+		TraceID:   TraceIDFromCtx(ctx),
+		TenantID:  tenantIDFromCtx(ctx),
+		ErrMsg:    msg,
+		Stack:     frames,
+		Timestamp: time.Now().UnixMilli(),
+	}
+}
+
+func loadCaptureFrames(fp uint64) ([]Frame, bool) {
+	if v, ok := captureSymCache.Load(fp); ok {
+		return v.([]Frame), true
+	}
+	return nil, false
+}
+
+// storeCaptureFrames caches frames for fp, returning the winner if another
+// goroutine symbolized the same call site concurrently (idempotent).
+func storeCaptureFrames(fp uint64, frames []Frame) []Frame {
+	actual, _ := captureSymCache.LoadOrStore(fp, frames)
+	return actual.([]Frame)
+}
+
+// captureAndSymbolize captures and symbolizes the current stack. Isolated in its
+// own function so the [32]uintptr buffer (which escapes via CallersFrames) lives
+// only here — on the miss path — and never forces an allocation on the hit path.
+func captureAndSymbolize() []Frame {
+	var pcs [32]uintptr
+	// skip 0=Callers, 1=captureAndSymbolize, 2=CaptureError → frame[0] is the
+	// handler that called CaptureError; infra frames are filtered out below.
+	n := runtime.Callers(3, pcs[:])
+	return symbolizeCapture(pcs[:n])
+}
+
+// captureFingerprint is an allocation-free FNV-64a over the message and the top-3
+// PCs (the call site), so the same error from the same site dedups to one symbolize.
+func captureFingerprint(msg string, pcs []uintptr) uint64 {
+	const offset = uint64(14695981039346656037)
+	const prime = uint64(1099511628211)
+	h := offset
+	for i := 0; i < len(msg); i++ {
+		h ^= uint64(msg[i])
+		h *= prime
+	}
+	top := pcs
+	if len(top) > 3 {
+		top = top[:3]
+	}
+	for _, pc := range top {
+		v := uint64(pc)
+		for j := 0; j < 8; j++ {
+			h ^= (v >> (8 * j)) & 0xff
+			h *= prime
+		}
+	}
+	return h
+}
+
+// symbolizeCapture resolves PCs to frames, dropping runtime/net-http/chi and
+// observability's own frames (noise when locating a bug) and capping at 10.
+func symbolizeCapture(pcs []uintptr) []Frame {
+	cf := runtime.CallersFrames(pcs)
+	var result []Frame
+	for {
+		f, more := cf.Next()
+		if f.Function != "" && !isInfraFrame(f.Function) {
+			result = append(result, Frame{
+				Function: f.Function,
+				File:     trimGoPath(f.File),
+				Line:     f.Line,
+			})
+		}
+		if !more || len(result) >= 10 {
+			break
+		}
+	}
+	return result
+}
+
+// isInfraFrame reports whether fn is a runtime/net-http/chi/observability frame —
+// stack noise that hides the application code that actually triggered the error.
+func isInfraFrame(fn string) bool {
+	switch {
+	case strings.HasPrefix(fn, "runtime."),
+		strings.Contains(fn, "net/http."),
+		strings.Contains(fn, "go-chi/chi"),
+		strings.Contains(fn, "/pkg/observability."):
+		return true
+	}
+	return false
+}
+
+func tenantIDFromCtx(ctx context.Context) string {
+	if tc := tenant.FromCtx(ctx); tc != nil {
+		return tc.ID
+	}
+	return ""
 }

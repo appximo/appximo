@@ -25,6 +25,11 @@ type SpanTracker struct {
 	spans [maxSpans]Span
 	count int
 	last  time.Time
+	// HasError/ErrMsg are set on ANY error response (4xx/5xx) via RecordError.
+	// Capture is set only for 500s (carries the symbolized stack) via SetCapture.
+	HasError bool
+	ErrMsg   string
+	Capture  *ErrorCapture
 }
 
 // NewSpanTracker starts a tracker whose clock begins now.
@@ -50,6 +55,23 @@ func (t *SpanTracker) Mark(name string) {
 func (t *SpanTracker) Finish() []Span {
 	t.Mark("done")
 	return t.spans[:t.count]
+}
+
+// RecordError marks the request as errored and stores the error message. Cheap
+// (no stack): used for client errors (401/403/422) and as the message for 500s.
+func (t *SpanTracker) RecordError(msg string) {
+	t.HasError = true
+	t.ErrMsg = msg
+}
+
+// SetCapture attaches a symbolized error capture (the stack) to the request — used
+// only for server errors (500). Implies HasError.
+func (t *SpanTracker) SetCapture(c *ErrorCapture) {
+	t.HasError = true
+	t.Capture = c
+	if t.ErrMsg == "" && c != nil {
+		t.ErrMsg = c.ErrMsg
+	}
 }
 
 // TotalUS returns the sum of all recorded span durations.

@@ -38,9 +38,11 @@ func JWTMiddleware(secret string, onError ...func(tenantID, reason string)) func
 	}
 	reject := func(w http.ResponseWriter, r *http.Request, reason string) {
 		// Record that the request reached (and was stopped at) the jwt stage, so a
-		// persisted 401 trace shows the pipeline cut here.
+		// persisted 401 trace shows the pipeline cut here (with the reason — no stack,
+		// a 401 is a client error, not a server bug).
 		if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {
 			t.Mark("jwt")
+			t.RecordError("jwt: " + reason)
 		}
 		if recordErr != nil {
 			tenantID := ""
