@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test & fix gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      # ---------------------------------------------------------------------
+      # Fix gates — each fails CI if its security/resilience fix regresses.
+      # The db, security and integration suites use testcontainers, which needs
+      # the Docker daemon that GitHub-hosted ubuntu runners provide by default.
+      # ---------------------------------------------------------------------
+      - name: 'Gate · RBAC cache isolation (FIX 1 — no cross-role cache leak)'
+        run: go test ./pkg/cache/... -race -count=1
+
+      - name: 'Gate · rate limiter + circuit breaker (FIX 2/3)'
+        run: go test ./pkg/resilience/... -race -count=1
+
+      - name: 'Gate · DB query timeout + circuit breaker (FIX 2)'
+        run: go test ./pkg/db/... -race -count=1
+
+      - name: 'Gate · tenant isolation (security)'
+        run: go test ./pkg/security/... -race -count=1
+
+      - name: 'Gate · wiring smoke — fixes mounted in the router'
+        run: go test -run TestWiring ./... -count=1
+
+      - name: Full test suite (race)
+        run: go test ./... -race -count=1
+
+  govulncheck:
+    name: vet + govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: govulncheck
+        run: govulncheck ./...

@@ -61,3 +61,12 @@ func TestExec_NilBreakerPassthrough(t *testing.T) {
 		t.Errorf("pass-through failed: res=%v err=%v", res, err)
 	}
 }
+
+// TestWiring_TenantDBHasBreaker is a CI guard: it fails if NewTenantDB stops
+// installing the circuit breaker (FIX 2). A refactor that returns a bare
+// TenantDB would silently reintroduce the "DB outage hangs the pool" bug.
+func TestWiring_TenantDBHasBreaker(t *testing.T) {
+	if NewTenantDB(nil).breaker == nil {
+		t.Fatal("WIRING REGRESSION: NewTenantDB no longer installs a circuit breaker (FIX 2 disconnected)")
+	}
+}

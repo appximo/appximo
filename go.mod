@@ -2,6 +2,11 @@ module github.com/miguelangel/appitools
 
 go 1.25.0
 
+// Build with a patched toolchain: go1.25.0 ships stdlib advisories that
+// govulncheck flags (x509/net fixes land in point releases). go1.25.11 clears
+// all reachable stdlib vulnerabilities so the govulncheck CI gate stays green.
+toolchain go1.25.11
+
 require (
 	github.com/HdrHistogram/hdrhistogram-go v1.2.0
 	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c
