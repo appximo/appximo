@@ -97,10 +97,17 @@ func Validate(s *APISchema) []ValidationError {
 						Message: "webhook hook requires a non-empty url",
 					})
 				}
+			case "wasm":
+				if hook.WasmModule == "" {
+					errs = append(errs, ValidationError{
+						Field:   hookPrefix + ".wasm_module",
+						Message: "wasm hook requires a non-empty wasm_module",
+					})
+				}
 			default:
 				errs = append(errs, ValidationError{
 					Field:   hookPrefix + ".type",
-					Message: fmt.Sprintf("unknown hook type %q: must be \"js\" or \"webhook\"", hook.Type),
+					Message: fmt.Sprintf("unknown hook type %q: must be \"js\", \"webhook\", or \"wasm\"", hook.Type),
 				})
 			}
 		}

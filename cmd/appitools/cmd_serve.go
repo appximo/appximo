@@ -98,7 +98,17 @@ var serveCmd = &cobra.Command{
 		// Pool is closed in the shutdown sequence — not deferred here.
 
 		tdb := db.NewTenantDB(pool)
-		hr := extensions.NewHookRunner(extensions.NewJSSandbox())
+		// HookRunner with Capa 3 (WASM) enabled when the runtime initializes; falls
+		// back to JS+webhook only on error so a WASM problem never blocks startup.
+		sandbox := extensions.NewJSSandbox()
+		var hr *extensions.HookRunner
+		if wasmRunner, werr := extensions.NewWasmRunner(ctx); werr != nil {
+			log.Printf("WARNING: WASM runtime (Capa 3) disabled: %v", werr)
+			hr = extensions.NewHookRunner(sandbox)
+		} else {
+			hr = extensions.NewHookRunnerWithWasm(sandbox, extensions.NewWebhookDispatcher(), wasmRunner)
+			log.Println("WASM runtime (Capa 3) enabled")
+		}
 
 		jwtSecret := os.Getenv("JWT_SECRET")
 		if jwtSecret == "" {

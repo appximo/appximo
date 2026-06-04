@@ -2,6 +2,7 @@ package extensions
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 
 	"github.com/miguelangel/appitools/pkg/schema"
@@ -15,10 +16,14 @@ import (
 // traffic; excess dispatches are dropped (and logged) rather than queued.
 const defaultAfterHookConcurrency = 256
 
-// HookRunner orchestrates JS sandbox and webhook dispatch for lifecycle hooks.
+// HookRunner orchestrates JS sandbox, WASM runtime, and webhook dispatch for
+// lifecycle hooks.
 type HookRunner struct {
 	sandbox    *JSSandbox
 	dispatcher *WebhookDispatcher
+	// wasm runs Capa 3 (WASM) hooks. nil when the WASM runtime is not configured;
+	// a wasm-typed hook then fails closed (Proceed=false).
+	wasm *WasmRunner
 	// afterSem bounds concurrent async after-hook dispatches. A token is taken in
 	// FireAfterHook (the caller's goroutine) before the dispatch goroutine is
 	// spawned, so a full buffer means the dispatch is dropped immediately instead
@@ -27,11 +32,26 @@ type HookRunner struct {
 }
 
 // NewHookRunner creates a HookRunner backed by the provided sandbox and a
-// production (SSRF-safe, HTTPS-only) webhook dispatcher.
+// production (SSRF-safe, HTTPS-only) webhook dispatcher. No WASM runtime.
 func NewHookRunner(sandbox *JSSandbox) *HookRunner {
 	return &HookRunner{
 		sandbox:    sandbox,
 		dispatcher: NewWebhookDispatcher(),
+		afterSem:   make(chan struct{}, defaultAfterHookConcurrency),
+	}
+}
+
+// NewHookRunnerWithWasm creates a HookRunner with a WASM runtime (Capa 3) wired
+// in alongside the JS sandbox and webhook dispatcher. A nil dispatcher falls
+// back to the production dispatcher.
+func NewHookRunnerWithWasm(sandbox *JSSandbox, dispatcher *WebhookDispatcher, wasm *WasmRunner) *HookRunner {
+	if dispatcher == nil {
+		dispatcher = NewWebhookDispatcher()
+	}
+	return &HookRunner{
+		sandbox:    sandbox,
+		dispatcher: dispatcher,
+		wasm:       wasm,
 		afterSem:   make(chan struct{}, defaultAfterHookConcurrency),
 	}
 }
@@ -66,12 +86,49 @@ func (hr *HookRunner) RunBeforeHook(
 	switch hook.Type {
 	case "js":
 		return hr.sandbox.RunHook(ctx, hook.Script, payload, userCtx)
+	case "wasm":
+		return hr.runWasmBeforeHook(ctx, hook, payload, userCtx)
 	case "webhook":
 		// before_create webhooks are fire-and-forget notifications; they never block the request.
 		return &HookResult{Proceed: true, Data: payload}, nil
 	default:
 		return &HookResult{Proceed: true, Data: payload}, nil
 	}
+}
+
+// runWasmBeforeHook executes a Capa 3 (WASM) before_create hook. The payload is
+// passed to the module as JSON bytes; the module returns the (possibly
+// transformed) payload as JSON, which becomes HookResult.Data. Any error fails
+// closed (Proceed=false) so a broken module never silently lets a write through.
+func (hr *HookRunner) runWasmBeforeHook(
+	ctx context.Context,
+	hook *schema.HookConfig,
+	payload map[string]any,
+	userCtx map[string]any,
+) (*HookResult, error) {
+	if hr.wasm == nil {
+		return &HookResult{Proceed: false, Error: "wasm runtime not configured"}, nil
+	}
+	in, err := json.Marshal(payload)
+	if err != nil {
+		return &HookResult{Proceed: false, Error: "wasm hook: marshal payload: " + err.Error()}, nil
+	}
+	tenantID, _ := userCtx["tenant_id"].(string)
+	out, err := hr.wasm.ExecuteNamed(ctx, tenantID, hook.WasmModule, hook.WasmFn, in)
+	if err != nil {
+		return &HookResult{Proceed: false, Error: "wasm hook: " + err.Error()}, nil
+	}
+	data := payload
+	if len(out) > 0 {
+		var decoded map[string]any
+		if err := json.Unmarshal(out, &decoded); err != nil {
+			return &HookResult{Proceed: false, Error: "wasm hook: output is not a JSON object: " + err.Error()}, nil
+		}
+		if decoded != nil {
+			data = decoded
+		}
+	}
+	return &HookResult{Proceed: true, Data: data}, nil
 }
 
 // FireAfterHook dispatches the after_create hook on a bounded background

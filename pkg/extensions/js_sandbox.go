@@ -85,6 +85,11 @@ func (s *JSSandbox) RunHook(
 	vm.Set("formatMoney", func(v float64) string { return fmt.Sprintf("%.2f", v) })
 	vm.Set("isValidEmail", func(addr string) bool { return emailRe.MatchString(addr) })
 	vm.Set("isValidNIT", func(nit string) bool { return nitRe.MatchString(nit) })
+	// DIAN (Colombia) helpers — real algorithms, not regex.
+	//   validateNIT(nit)      → bool, verifies the NIT's check digit (mod-11).
+	//   calculateCUFE(fields) → hex SHA-384 over the ordered DIAN field set.
+	vm.Set("validateNIT", validateNIT)
+	vm.Set("calculateCUFE", calculateCUFE)
 
 	done := make(chan runResult, 1)
 
