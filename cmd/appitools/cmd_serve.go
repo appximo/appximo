@@ -34,6 +34,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/observability"
 	"github.com/miguelangel/appitools/pkg/rbac"
+	"github.com/miguelangel/appitools/pkg/resilience"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/shutdown"
 	"github.com/miguelangel/appitools/pkg/tenant"
@@ -213,7 +214,36 @@ var serveCmd = &cobra.Command{
 
 		// Response cache: 5-second TTL, invalidated by pg_notify schema_updated.
 		responseCache := cache.New(5 * time.Second)
+		// Only cache roles whose responses are identical for every user: no
+		// row-level conditions and no field restrictions. Roles like operario
+		// (conditions) or public (fields) bypass the cache so RBAC runs on every
+		// request — otherwise a HIT would serve one user's rows to another.
+		responseCache.SetRoleCacheGate(func(role string) bool {
+			rp, ok := rbacPolicy.Roles[role]
+			if !ok {
+				return false // unknown role → never cache (fail safe)
+			}
+			return rp.Conditions == nil && len(rp.FieldsAllow) == 0
+		})
 		go startCacheInvalidator(ctx, pool, responseCache)
+
+		// Per-tenant token-bucket rate limiter. Each tenant has an independent
+		// bucket, so a saturated tenant cannot starve another. Configurable via
+		// RATE_LIMIT_RPS (default 1000) and RATE_LIMIT_BURST (default 100).
+		rlRPS := 1000.0
+		if v := os.Getenv("RATE_LIMIT_RPS"); v != "" {
+			if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+				rlRPS = f
+			}
+		}
+		rlBurst := 100
+		if v := os.Getenv("RATE_LIMIT_BURST"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				rlBurst = n
+			}
+		}
+		tenantLimiter := resilience.NewConfiguredLimiter(resilience.RateLimitConfig{RPS: rlRPS, Burst: rlBurst})
+		log.Printf("rate limiter: %.0f RPS / %d burst per tenant", rlRPS, rlBurst)
 
 		// Graceful-shutdown state: controls /readyz and the shutdown sequence.
 		ss := shutdown.New()
@@ -225,6 +255,9 @@ var serveCmd = &cobra.Command{
 		r.Use(chimiddleware.RealIP)
 		r.Use(chimiddleware.RequestID)
 		r.Use(tenant.TenantMiddleware)
+		// Rate limit per tenant, after the tenant is resolved but before any work
+		// (cache lookup, DB) so an over-limit tenant is shed early with 429.
+		r.Use(resilience.RateLimit(tenantLimiter))
 		// RequestLogger BEFORE cache: every request (including cache hits) is logged and measured.
 		r.Use(logging.RequestLogger(
 			hist.Record,

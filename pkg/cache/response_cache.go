@@ -50,6 +50,30 @@ type ResponseCache struct {
 	// the window between TTL expiry and the next write hits Postgres at once
 	// (the "cache stampede" measured as a 3.2s uncached p95 under 2000 RPS).
 	sf singleflight.Group
+
+	// roleCacheable reports whether a role's responses may be shared through the
+	// cache. Roles with row-level conditions or field restrictions produce
+	// per-user/per-role responses, so caching them would let one user receive
+	// another's data on a HIT (the RBAC-bypass-via-cache vulnerability). nil
+	// means "cache everything" — the default used by tests with no RBAC policy.
+	roleCacheable func(role string) bool
+}
+
+// SetRoleCacheGate installs a predicate that decides, per role, whether the
+// response cache may store and serve that role's responses. Roles that fail the
+// gate bypass the cache entirely so their RBAC conditions run on every request.
+func (rc *ResponseCache) SetRoleCacheGate(fn func(role string) bool) {
+	rc.roleCacheable = fn
+}
+
+// cacheable reports whether responses for role may be cached. With no gate set,
+// every role is cacheable (test default). With a gate, an unknown/empty role is
+// treated as NOT cacheable, which fails safe.
+func (rc *ResponseCache) cacheable(role string) bool {
+	if rc.roleCacheable == nil {
+		return true
+	}
+	return rc.roleCacheable(role)
 }
 
 // New returns a ResponseCache with the given TTL and starts a background
@@ -113,7 +137,16 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 		// Unknown token → no short-circuit (JWT will validate it on the way through).
 		// Known token + cached response → skip JWT HMAC, DB, AND gzip entirely.
 		if tokenStr != "" {
-			if _, ok := auth.GetCachedClaims(tokenStr); ok {
+			if claims, ok := auth.GetCachedClaims(tokenStr); ok {
+				// Roles with row-level conditions or field restrictions must
+				// never be served from or stored in the cache: the cache key is
+				// (tenant, URI) and a HIT short-circuits before RBAC runs, so a
+				// shared entry would leak one user's rows to another. Bypass the
+				// cache entirely and let the full RBAC chain run every time.
+				if !rc.cacheable(claims.Role) {
+					next.ServeHTTP(w, r)
+					return
+				}
 				key := r.URL.RequestURI()
 				if item := rc.get(tc.ID, key); item != nil {
 					writeItem(w, r, item, true) // HIT
@@ -142,8 +175,18 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 		next.ServeHTTP(cw, r)
 
 		if cw.status == http.StatusOK && cw.buf.Len() > 0 {
-			plain := append([]byte(nil), cw.buf.Bytes()...)
-			rc.set(tc.ID, key, rc.buildItem(cw.status, cw.Header(), plain))
+			// Only store if the now-validated role is cacheable. JWT has run
+			// inside next, so a 200 means the token is in the claims cache; a
+			// condition/field-restricted role (or an unknown/empty role) must
+			// not have its response cached.
+			role := ""
+			if claims, ok := auth.GetCachedClaims(tokenStr); ok {
+				role = claims.Role
+			}
+			if rc.cacheable(role) {
+				plain := append([]byte(nil), cw.buf.Bytes()...)
+				rc.set(tc.ID, key, rc.buildItem(cw.status, cw.Header(), plain))
+			}
 		}
 	})
 }

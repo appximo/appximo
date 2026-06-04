@@ -31,6 +31,13 @@ func RateLimitMiddleware(tl *TenantLimiter, tier Tier) func(http.Handler) http.H
 	}
 }
 
+// RateLimit enforces a configured TenantLimiter's per-tenant policy. It is the
+// tier-less entry point used by the server: the limiter already carries its
+// RPS/Burst config, so the tier argument is irrelevant and passed as TierPro.
+func RateLimit(tl *TenantLimiter) func(http.Handler) http.Handler {
+	return RateLimitMiddleware(tl, TierPro)
+}
+
 // CircuitBreakerMiddleware wraps a handler with a gobreaker circuit breaker.
 // When the circuit is open it returns 503 with Retry-After: 8.
 // Failures are counted when the handler writes a 5xx response.

@@ -42,19 +42,19 @@ func (h *Handlers) ListGuides(w http.ResponseWriter, r *http.Request) {
 
 	total, err := h.tdb.QueryScalarTenant(r.Context(), tc.PGSchema, countQ, countArgs...)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 
 	rows, err := h.tdb.QueryTenant(r.Context(), tc.PGSchema, selectQ, selectArgs...)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	defer rows.Close()
 	data, err := pkghandlers.RowsToMaps(rows)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	if evalResult != nil && len(evalResult.AllowedFields) > 0 {
@@ -134,7 +134,7 @@ func (h *Handlers) CreateGuides(w http.ResponseWriter, r *http.Request) {
 	query := fmt.Sprintf("INSERT INTO guides (%s) VALUES (%s) RETURNING *", cols, placeholders)
 	result, err := h.tdb.ExecRowsTenant(r.Context(), tc.PGSchema, query, args...)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	if afterHook := h.hookConfig("guides", "after_create"); afterHook != nil {
@@ -162,13 +162,13 @@ func (h *Handlers) GetGuidesByID(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.tdb.QueryTenant(r.Context(), tc.PGSchema, "SELECT * FROM guides WHERE id = $1", idStr)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	defer rows.Close()
 	result, err := pkghandlers.RowsToMaps(rows)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	if len(result) == 0 {
@@ -197,7 +197,7 @@ func (h *Handlers) DeleteGuides(w http.ResponseWriter, r *http.Request) {
 	}
 	affected, err := h.tdb.ExecTenant(r.Context(), tc.PGSchema, "DELETE FROM guides WHERE id = $1", idStr)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	if affected == 0 {
@@ -222,13 +222,13 @@ func (h *Handlers) GetGuidesClient(w http.ResponseWriter, r *http.Request) {
 		"SELECT r.* FROM clients r JOIN guides src ON src.client_id = r.id WHERE src.id = $1",
 		idStr)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	defer rows.Close()
 	result, err := pkghandlers.RowsToMaps(rows)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	if len(result) == 0 {
@@ -254,13 +254,13 @@ func (h *Handlers) GetGuidesOperator(w http.ResponseWriter, r *http.Request) {
 		"SELECT r.* FROM users r JOIN guides src ON src.operator_id = r.id WHERE src.id = $1",
 		idStr)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	defer rows.Close()
 	result, err := pkghandlers.RowsToMaps(rows)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	if len(result) == 0 {

@@ -42,19 +42,19 @@ func (h *Handlers) ListClients(w http.ResponseWriter, r *http.Request) {
 
 	total, err := h.tdb.QueryScalarTenant(r.Context(), tc.PGSchema, countQ, countArgs...)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 
 	rows, err := h.tdb.QueryTenant(r.Context(), tc.PGSchema, selectQ, selectArgs...)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	defer rows.Close()
 	data, err := pkghandlers.RowsToMaps(rows)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	if evalResult != nil && len(evalResult.AllowedFields) > 0 {
@@ -134,7 +134,7 @@ func (h *Handlers) CreateClients(w http.ResponseWriter, r *http.Request) {
 	query := fmt.Sprintf("INSERT INTO clients (%s) VALUES (%s) RETURNING *", cols, placeholders)
 	result, err := h.tdb.ExecRowsTenant(r.Context(), tc.PGSchema, query, args...)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	if afterHook := h.hookConfig("clients", "after_create"); afterHook != nil {
@@ -162,13 +162,13 @@ func (h *Handlers) GetClientsByID(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.tdb.QueryTenant(r.Context(), tc.PGSchema, "SELECT * FROM clients WHERE id = $1", idStr)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	defer rows.Close()
 	result, err := pkghandlers.RowsToMaps(rows)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	if len(result) == 0 {
@@ -197,7 +197,7 @@ func (h *Handlers) DeleteClients(w http.ResponseWriter, r *http.Request) {
 	}
 	affected, err := h.tdb.ExecTenant(r.Context(), tc.PGSchema, "DELETE FROM clients WHERE id = $1", idStr)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDBError(w, err)
 		return
 	}
 	if affected == 0 {

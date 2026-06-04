@@ -2,12 +2,55 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/sony/gobreaker"
+
+	"github.com/miguelangel/appitools/pkg/resilience"
 )
+
+// queryTimeout bounds every database operation. A paused/unreachable Postgres
+// would otherwise block the request (and eventually the whole connection pool)
+// indefinitely; with the deadline the query is cancelled and the request fails
+// fast instead of hanging.
+const queryTimeout = 5 * time.Second
+
+// ErrUnavailable is returned when the database cannot serve the query: the
+// queryTimeout elapsed or the circuit breaker is open. Handlers map it to 503.
+var ErrUnavailable = errors.New("database unavailable")
+
+// IsUnavailable reports whether err signals an unreachable database.
+func IsUnavailable(err error) bool { return errors.Is(err, ErrUnavailable) }
+
+// IsMissingTenant reports whether err is a "schema/relation does not exist"
+// Postgres error (SQLSTATE 42P01 undefined_table or 3F000 invalid_schema_name).
+// In this schema-per-tenant design that means the tenant is not provisioned, so
+// handlers answer 400 "invalid tenant" rather than leaking a 500 SQL error.
+func IsMissingTenant(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "42P01" || pgErr.Code == "3F000"
+	}
+	return false
+}
+
+// IsBadInput reports whether err is a client-supplied value that Postgres could
+// not parse for a column type (SQLSTATE 22P02 invalid_text_representation, e.g.
+// a non-UUID user_id substituted into a UUID condition, or a bad filter value).
+// These are caller errors, so handlers answer 400 instead of leaking a 500.
+func IsBadInput(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "22P02"
+	}
+	return false
+}
 
 // qualifyTableNames rewrites FROM/JOIN references to unqualified tableName
 // into schema-qualified form using pgx.Identifier for safe quoting.
@@ -19,23 +62,53 @@ func qualifyTableNames(query, schema, table string) string {
 }
 
 // directRows wraps pgx.Rows and releases the acquired pool connection on Close.
+// cancel ends the per-query timeout context, which must outlive the caller's row
+// iteration, so it is called here rather than when the query method returns.
 type directRows struct {
 	pgx.Rows
-	conn *pgxpool.Conn
+	conn   *pgxpool.Conn
+	cancel context.CancelFunc
 }
 
 func (r *directRows) Close() {
 	r.Rows.Close()
 	r.conn.Release()
+	if r.cancel != nil {
+		r.cancel()
+	}
 }
 
 // TenantDB wraps a pgxpool and enforces per-tenant schema isolation via SET LOCAL search_path.
 type TenantDB struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	breaker *gobreaker.CircuitBreaker
 }
 
 func NewTenantDB(pool *pgxpool.Pool) *TenantDB {
-	return &TenantDB{pool: pool}
+	return &TenantDB{pool: pool, breaker: resilience.NewQueryBreaker("tenant-db")}
+}
+
+// exec runs fn through the circuit breaker (if configured). When the breaker is
+// open it returns immediately without touching the pool.
+func (tdb *TenantDB) exec(fn func() (any, error)) (any, error) {
+	if tdb.breaker == nil {
+		return fn()
+	}
+	return tdb.breaker.Execute(fn)
+}
+
+// classify maps timeout and breaker errors to ErrUnavailable so handlers can
+// answer 503; other errors pass through unchanged.
+func classify(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, gobreaker.ErrOpenState) ||
+		errors.Is(err, gobreaker.ErrTooManyRequests) {
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	return err
 }
 
 var schemaNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
@@ -51,12 +124,16 @@ func validateSchemaName(name string) error {
 // ensuring the connection is always returned to the pool when the caller is done.
 type tenantRows struct {
 	pgx.Rows
-	tx pgx.Tx
+	tx     pgx.Tx
+	cancel context.CancelFunc
 }
 
 func (r *tenantRows) Close() {
 	r.Rows.Close()
 	r.tx.Rollback(context.Background())
+	if r.cancel != nil {
+		r.cancel()
+	}
 }
 
 // QueryTenant executes a SELECT within a transaction scoped to schemaName.
@@ -66,24 +143,29 @@ func (tdb *TenantDB) QueryTenant(ctx context.Context, schemaName, query string, 
 		return nil, err
 	}
 
-	tx, err := tdb.pool.Begin(ctx)
+	cctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	res, err := tdb.exec(func() (any, error) {
+		tx, err := tdb.pool.Begin(cctx)
+		if err != nil {
+			return nil, fmt.Errorf("begin tx: %w", err)
+		}
+		setPath := "SET LOCAL search_path TO " + pgx.Identifier{schemaName}.Sanitize() + ", public"
+		if _, err := tx.Exec(cctx, setPath); err != nil {
+			tx.Rollback(cctx)
+			return nil, fmt.Errorf("set search_path: %w", err)
+		}
+		rows, err := tx.Query(cctx, query, args...)
+		if err != nil {
+			tx.Rollback(cctx)
+			return nil, fmt.Errorf("query: %w", err)
+		}
+		return &tenantRows{Rows: rows, tx: tx, cancel: cancel}, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("begin tx: %w", err)
+		cancel()
+		return nil, classify(err)
 	}
-
-	setPath := "SET LOCAL search_path TO " + pgx.Identifier{schemaName}.Sanitize() + ", public"
-	if _, err := tx.Exec(ctx, setPath); err != nil {
-		tx.Rollback(ctx)
-		return nil, fmt.Errorf("set search_path: %w", err)
-	}
-
-	rows, err := tx.Query(ctx, query, args...)
-	if err != nil {
-		tx.Rollback(ctx)
-		return nil, fmt.Errorf("query: %w", err)
-	}
-
-	return &tenantRows{Rows: rows, tx: tx}, nil
+	return res.(*tenantRows), nil
 }
 
 // ExecTenant executes an INSERT/UPDATE/DELETE within a transaction scoped to schemaName.
@@ -93,27 +175,32 @@ func (tdb *TenantDB) ExecTenant(ctx context.Context, schemaName, query string, a
 		return 0, err
 	}
 
-	tx, err := tdb.pool.Begin(ctx)
+	cctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+	res, err := tdb.exec(func() (any, error) {
+		tx, err := tdb.pool.Begin(cctx)
+		if err != nil {
+			return int64(0), fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback(cctx)
+
+		setPath := "SET LOCAL search_path TO " + pgx.Identifier{schemaName}.Sanitize() + ", public"
+		if _, err := tx.Exec(cctx, setPath); err != nil {
+			return int64(0), fmt.Errorf("set search_path: %w", err)
+		}
+		tag, err := tx.Exec(cctx, query, args...)
+		if err != nil {
+			return int64(0), fmt.Errorf("exec: %w", err)
+		}
+		if err := tx.Commit(cctx); err != nil {
+			return int64(0), fmt.Errorf("commit: %w", err)
+		}
+		return tag.RowsAffected(), nil
+	})
 	if err != nil {
-		return 0, fmt.Errorf("begin tx: %w", err)
+		return 0, classify(err)
 	}
-	defer tx.Rollback(ctx)
-
-	setPath := "SET LOCAL search_path TO " + pgx.Identifier{schemaName}.Sanitize() + ", public"
-	if _, err := tx.Exec(ctx, setPath); err != nil {
-		return 0, fmt.Errorf("set search_path: %w", err)
-	}
-
-	tag, err := tx.Exec(ctx, query, args...)
-	if err != nil {
-		return 0, fmt.Errorf("exec: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("commit: %w", err)
-	}
-
-	return tag.RowsAffected(), nil
+	return res.(int64), nil
 }
 
 // ExecRowsTenant runs a write query with RETURNING * within a tenant schema,
@@ -124,46 +211,52 @@ func (tdb *TenantDB) ExecRowsTenant(ctx context.Context, schemaName, query strin
 		return nil, err
 	}
 
-	tx, err := tdb.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	setPath := "SET LOCAL search_path TO " + pgx.Identifier{schemaName}.Sanitize() + ", public"
-	if _, err := tx.Exec(ctx, setPath); err != nil {
-		return nil, fmt.Errorf("set search_path: %w", err)
-	}
-
-	rows, err := tx.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query: %w", err)
-	}
-
-	descs := rows.FieldDescriptions()
-	result := make([]map[string]any, 0)
-	for rows.Next() {
-		vals, scanErr := rows.Values()
-		if scanErr != nil {
-			rows.Close()
-			return nil, fmt.Errorf("scan values: %w", scanErr)
+	cctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+	res, err := tdb.exec(func() (any, error) {
+		tx, err := tdb.pool.Begin(cctx)
+		if err != nil {
+			return nil, fmt.Errorf("begin tx: %w", err)
 		}
-		row := make(map[string]any, len(descs))
-		for i, desc := range descs {
-			row[string(desc.Name)] = normalizeDBValue(vals[i])
+		defer tx.Rollback(cctx)
+
+		setPath := "SET LOCAL search_path TO " + pgx.Identifier{schemaName}.Sanitize() + ", public"
+		if _, err := tx.Exec(cctx, setPath); err != nil {
+			return nil, fmt.Errorf("set search_path: %w", err)
 		}
-		result = append(result, row)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit: %w", err)
-	}
+		rows, err := tx.Query(cctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("query: %w", err)
+		}
 
-	return result, nil
+		descs := rows.FieldDescriptions()
+		result := make([]map[string]any, 0)
+		for rows.Next() {
+			vals, scanErr := rows.Values()
+			if scanErr != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan values: %w", scanErr)
+			}
+			row := make(map[string]any, len(descs))
+			for i, desc := range descs {
+				row[string(desc.Name)] = normalizeDBValue(vals[i])
+			}
+			result = append(result, row)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(cctx); err != nil {
+			return nil, fmt.Errorf("commit: %w", err)
+		}
+		return result, nil
+	})
+	if err != nil {
+		return nil, classify(err)
+	}
+	return res.([]map[string]any), nil
 }
 
 // QueryScalarTenant runs a query that returns a single int64 value (e.g. COUNT(*))
@@ -197,18 +290,24 @@ func (tdb *TenantDB) QueryDirect(ctx context.Context, pgSchema, tableName, query
 
 	qualified := qualifyTableNames(query, pgSchema, tableName)
 
-	conn, err := tdb.pool.Acquire(ctx)
+	cctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	res, err := tdb.exec(func() (any, error) {
+		conn, err := tdb.pool.Acquire(cctx)
+		if err != nil {
+			return nil, fmt.Errorf("acquire conn: %w", err)
+		}
+		rows, err := conn.Query(cctx, qualified, args...)
+		if err != nil {
+			conn.Release()
+			return nil, fmt.Errorf("query: %w", err)
+		}
+		return &directRows{Rows: rows, conn: conn, cancel: cancel}, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("acquire conn: %w", err)
+		cancel()
+		return nil, classify(err)
 	}
-
-	rows, err := conn.Query(ctx, qualified, args...)
-	if err != nil {
-		conn.Release()
-		return nil, fmt.Errorf("query: %w", err)
-	}
-
-	return &directRows{Rows: rows, conn: conn}, nil
+	return res.(*directRows), nil
 }
 
 // normalizeDBValue converts pgx-specific types to JSON-friendly Go types.

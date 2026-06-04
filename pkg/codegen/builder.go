@@ -57,13 +57,13 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// QueryDirect: schema-qualified table name — no transaction, no SET LOCAL.
 			rows, err := tdb.QueryDirect(req.Context(), tc.PGSchema, name, selectQ, selectArgs...)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				pkghandlers.WriteDBError(w, err)
 				return
 			}
 			defer rows.Close()
 			data, err := pkghandlers.RowsToMaps(rows)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				pkghandlers.WriteDBError(w, err)
 				return
 			}
 
@@ -126,7 +126,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			insertQ := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", name, cols, placeholders)
 			result, err := tdb.ExecRowsTenant(req.Context(), tc.PGSchema, insertQ, args...)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				pkghandlers.WriteDBError(w, err)
 				return
 			}
 
@@ -159,13 +159,13 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema,
 				fmt.Sprintf("SELECT * FROM %s WHERE id = $1", name), id)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				pkghandlers.WriteDBError(w, err)
 				return
 			}
 			defer rows.Close()
 			result, err := pkghandlers.RowsToMaps(rows)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				pkghandlers.WriteDBError(w, err)
 				return
 			}
 			if len(result) == 0 {
@@ -196,7 +196,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			affected, err := tdb.ExecTenant(req.Context(), tc.PGSchema,
 				fmt.Sprintf("DELETE FROM %s WHERE id = $1", name), id)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				pkghandlers.WriteDBError(w, err)
 				return
 			}
 			if affected == 0 {
@@ -232,13 +232,13 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				)
 				rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema, q, parentID)
 				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
+					pkghandlers.WriteDBError(w, err)
 					return
 				}
 				defer rows.Close()
 				result, err := pkghandlers.RowsToMaps(rows)
 				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
+					pkghandlers.WriteDBError(w, err)
 					return
 				}
 				if len(result) == 0 {
