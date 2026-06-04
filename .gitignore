@@ -33,3 +33,6 @@ internal/graph/
 Thumbs.db
 
 benchmark-lab/node_modules/
+# Claude Code runtime artifacts
+.claude/scheduled_tasks.lock
+.claude/scheduled_tasks/
