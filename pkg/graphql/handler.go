@@ -14,6 +14,9 @@ import (
 
 	"github.com/google/uuid"
 	gql "github.com/graphql-go/graphql"
+	"github.com/graphql-go/graphql/language/ast"
+	"github.com/graphql-go/graphql/language/parser"
+	"github.com/graphql-go/graphql/language/source"
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/extensions"
@@ -75,9 +78,12 @@ func BuildHandler(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunn
 			}
 		}
 
-		// FIX 7: block introspection queries outside development to reduce attack surface.
-		if !isDev && isIntrospectionQuery(params.Query) {
-			writeGraphQLError(w, "introspection disabled in production")
+		// Analyze the query (single AST parse) for: introspection (blocked outside
+		// dev), runaway complexity / alias amplification (1 rate-limited request must
+		// not fan out into thousands of concurrent resolvers + DB queries), and
+		// state-changing operations over GET. Reject with a safe message.
+		if reason, ok := analyzeQuery(params.Query, r.Method == http.MethodGet, isDev); !ok {
+			writeGraphQLError(w, reason)
 			return
 		}
 
@@ -158,8 +164,92 @@ func applyAllowedFieldsToResult(val any, allowed []string) any {
 	return val
 }
 
-func isIntrospectionQuery(query string) bool {
-	return strings.Contains(query, "__schema") || strings.Contains(query, "__type")
+// Query guard limits. Legitimate queries are tiny; these bound a single request's
+// fan-out so it cannot turn one rate-limited HTTP request into thousands of
+// concurrent resolvers/DB queries (graphql-go resolves sibling fields in parallel).
+const (
+	maxRootSelections  = 50   // top-level fields/aliases per operation
+	maxTotalSelections = 2000 // total selections across the whole document
+)
+
+// analyzeQuery parses the GraphQL query once and enforces three policies, returning
+// a client-safe rejection reason (or ok=true to proceed):
+//   - introspection (__schema/__type, not __typename) is blocked outside development;
+//   - root/total selection counts are bounded (alias-amplification DoS guard);
+//   - mutations are rejected on GET (state changes must use POST).
+//
+// A syntactically invalid query is allowed through so gql.Do returns the precise
+// parser error to the client (matching prior behaviour).
+func analyzeQuery(queryStr string, isGet, isDev bool) (string, bool) {
+	if queryStr == "" {
+		return "", true
+	}
+	doc, err := parser.Parse(parser.ParseParams{
+		Source: source.NewSource(&source.Source{Body: []byte(queryStr), Name: "GraphQL"}),
+	})
+	if err != nil {
+		return "", true
+	}
+
+	total := 0
+	introspection := false
+	// Detect introspection by FIELD NAME anywhere in the document. The "__" prefix is
+	// reserved, so __schema/__type can only be introspection (and __typename, which we
+	// deliberately allow). Walking every selection — not just operation roots — closes
+	// the fragment-spread bypass (`query{...f} fragment f on Query{__schema{…}}`).
+	var walk func(ss *ast.SelectionSet)
+	walk = func(ss *ast.SelectionSet) {
+		if ss == nil {
+			return
+		}
+		for _, sel := range ss.Selections {
+			total++
+			if f, ok := sel.(*ast.Field); ok && f.Name != nil &&
+				(f.Name.Value == "__schema" || f.Name.Value == "__type") {
+				introspection = true
+			}
+			walk(sel.GetSelectionSet())
+		}
+	}
+
+	for _, def := range doc.Definitions {
+		switch d := def.(type) {
+		case *ast.OperationDefinition:
+			if isGet && d.Operation == "mutation" {
+				return "mutations must use POST", false
+			}
+			if d.SelectionSet != nil && len(d.SelectionSet.Selections) > maxRootSelections {
+				return "query too complex", false
+			}
+			walk(d.SelectionSet)
+		case *ast.FragmentDefinition:
+			walk(d.SelectionSet)
+		}
+	}
+	if total > maxTotalSelections {
+		return "query too complex", false
+	}
+	if introspection && !isDev {
+		return "introspection disabled in production", false
+	}
+	return "", true
+}
+
+// safeDBErr maps a database-layer error to a client-safe GraphQL error so internal
+// details (schema/table/column names, raw SQL, SQLSTATE) are never serialized into
+// the GraphQL errors array. Mirrors the REST WriteDBError masking. Always returns a
+// generic message — never the original error.
+func safeDBErr(err error) error {
+	switch {
+	case db.IsMissingTenant(err):
+		return fmt.Errorf("invalid tenant")
+	case db.IsBadInput(err):
+		return fmt.Errorf("invalid request")
+	case db.IsUnavailable(err):
+		return fmt.Errorf("service unavailable")
+	default:
+		return fmt.Errorf("internal error")
+	}
 }
 
 func writeGraphQLError(w http.ResponseWriter, msg string) {
@@ -415,17 +505,17 @@ func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, pol
 
 		total, err := tdb.QueryScalarTenant(p.Context, tc.PGSchema, countQ, countArgs...)
 		if err != nil {
-			return nil, err
+			return nil, safeDBErr(err)
 		}
 
 		rows, err := tdb.QueryTenant(p.Context, tc.PGSchema, selectQ, selectArgs...)
 		if err != nil {
-			return nil, err
+			return nil, safeDBErr(err)
 		}
 		defer rows.Close()
 		data, err := pkghandlers.RowsToMaps(rows)
 		if err != nil {
-			return nil, err
+			return nil, safeDBErr(err)
 		}
 
 		if evalResult != nil && len(evalResult.AllowedFields) > 0 {
@@ -493,15 +583,25 @@ func getByIDResolver(name string, tdb *db.TenantDB, policy *rbac.Policy) gql.Fie
 			return nil, fmt.Errorf("invalid id format")
 		}
 
-		rows, err := tdb.QueryTenant(p.Context, tc.PGSchema,
-			"SELECT * FROM "+name+" WHERE id = $1", idStr)
+		// Enforce the row-level RBAC condition (BOLA guard) — a restricted role
+		// must not read another principal's row by guessing its id. Mirrors the
+		// REST get-by-id path.
+		q := "SELECT * FROM " + name + " WHERE id = $1"
+		qargs := []any{idStr}
+		if evalResult != nil {
+			q, qargs, err = query.AppendRowCondition(q, qargs, evalResult.Condition)
+			if err != nil {
+				return nil, err
+			}
+		}
+		rows, err := tdb.QueryTenant(p.Context, tc.PGSchema, q, qargs...)
 		if err != nil {
-			return nil, err
+			return nil, safeDBErr(err)
 		}
 		defer rows.Close()
 		result, err := pkghandlers.RowsToMaps(rows)
 		if err != nil {
-			return nil, err
+			return nil, safeDBErr(err)
 		}
 		if len(result) == 0 {
 			return nil, nil
@@ -546,7 +646,7 @@ func createResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, h
 		q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", name, cols, placeholders)
 		result, err := tdb.ExecRowsTenant(p.Context, tc.PGSchema, q, args...)
 		if err != nil {
-			return nil, err
+			return nil, safeDBErr(err)
 		}
 
 		if afterHook := hookCfg(name, "after_create", res); afterHook != nil {
@@ -570,7 +670,8 @@ func createResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, h
 func deleteResolver(name string, tdb *db.TenantDB, policy *rbac.Policy) gql.FieldResolveFn {
 	return func(p gql.ResolveParams) (any, error) {
 		tc := tenant.MustFromCtx(p.Context)
-		if _, err := checkRBAC(p.Context, policy, name, "delete"); err != nil {
+		evalResult, err := checkRBAC(p.Context, policy, name, "delete")
+		if err != nil {
 			return false, err
 		}
 
@@ -579,10 +680,19 @@ func deleteResolver(name string, tdb *db.TenantDB, policy *rbac.Policy) gql.Fiel
 			return false, fmt.Errorf("invalid id format")
 		}
 
-		affected, err := tdb.ExecTenant(p.Context, tc.PGSchema,
-			"DELETE FROM "+name+" WHERE id = $1", idStr)
+		// Enforce the row-level RBAC condition (BOLA guard) — a restricted role
+		// must not delete another principal's row by guessing its id.
+		q := "DELETE FROM " + name + " WHERE id = $1"
+		qargs := []any{idStr}
+		if evalResult != nil {
+			q, qargs, err = query.AppendRowCondition(q, qargs, evalResult.Condition)
+			if err != nil {
+				return false, err
+			}
+		}
+		affected, err := tdb.ExecTenant(p.Context, tc.PGSchema, q, qargs...)
 		if err != nil {
-			return false, err
+			return false, safeDBErr(err)
 		}
 		return affected > 0, nil
 	}

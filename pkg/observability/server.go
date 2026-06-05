@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -47,7 +48,7 @@ func NewObsServer(
 // This is the single gate shared by the /debug/* endpoints and /metrics.
 func AdminAuth(adminKey string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Header.Get("X-Admin-Key") != adminKey {
+		if subtle.ConstantTimeCompare([]byte(req.Header.Get("X-Admin-Key")), []byte(adminKey)) != 1 {
 			w.Header().Set("Content-Type", "application/json")
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return

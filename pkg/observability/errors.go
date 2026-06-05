@@ -106,6 +106,12 @@ func (es *ErrorStore) Record(tenantID string, err error) {
 	if g == nil {
 		es.mu.Lock()
 		if groups[fp] == nil {
+			if len(groups) >= maxErrGroupsPerTenant {
+				// Per-tenant group cap reached: drop rather than grow without
+				// bound and pay another symbolize(). See limits.go.
+				es.mu.Unlock()
+				return
+			}
 			groups[fp] = &ErrGroup{
 				Message:   msg,
 				FirstSeen: time.Now().UnixMilli(),

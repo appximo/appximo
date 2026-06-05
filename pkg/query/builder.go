@@ -242,6 +242,25 @@ func (qb *QueryBuilder) SQL() (selectQ, countQ string, selectArgs, countArgs []a
 	return
 }
 
+// AppendRowCondition appends a row-level RBAC WhereCondition to a single-row SQL
+// statement that is already parameterized at $1..$len(args) (e.g. a GET-by-id or
+// DELETE filtered on id). The condition field is validated as a bare identifier
+// (the value is always a bound parameter); an invalid field returns an error so
+// the caller fails closed. This is the one canonical implementation used by both
+// the REST and GraphQL get-by-id/delete paths so they enforce the SAME row-level
+// RBAC the list path applies via buildWhere.
+func AppendRowCondition(sql string, args []any, cond *rbac.WhereCondition) (string, []any, error) {
+	if cond == nil {
+		return sql, args, nil
+	}
+	if !conditionFieldRe.MatchString(cond.Field) {
+		return sql, args, fmt.Errorf("invalid rbac condition field: %q", cond.Field)
+	}
+	sql += fmt.Sprintf(" AND %s = $%d", cond.Field, len(args)+1)
+	args = append(args, cond.Value)
+	return sql, args, nil
+}
+
 func (qb *QueryBuilder) buildWhere() (clause string, args []any) {
 	var parts []string
 	idx := 1
