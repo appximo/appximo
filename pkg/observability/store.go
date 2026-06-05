@@ -249,7 +249,18 @@ func (s *ObsStore) SlowTraces(tenantID string, hours int) ([]TraceView, error) {
 	return out, rows.Err()
 }
 
-// Prune deletes snapshots and slow traces older than the retention window.
+// maxSlowTraceRows bounds the slow_traces table independently of the time window.
+// Every request with status >= 400 (incl. 401 floods) or > the slow threshold gets
+// a row, so a sustained error flood could grow the table without bound WITHIN the
+// 7-day window. Past this many rows the oldest are dropped, keeping the on-disk
+// size bounded (~tens of MB) regardless of flood volume. Var only so tests can
+// shrink it; never mutated at runtime.
+var maxSlowTraceRows = 50_000
+
+// Prune enforces retention: it deletes snapshots and slow traces older than the
+// retention window, AND caps slow_traces at maxSlowTraceRows (oldest dropped). It
+// must be called periodically, not only at startup — otherwise a long-running
+// server never reclaims space.
 func (s *ObsStore) Prune() error {
 	cutoffSec := time.Now().Unix() - int64(retentionDays)*86400
 	if _, err := s.db.Exec(`DELETE FROM obs_snapshots WHERE ts < ?`, cutoffSec); err != nil {
@@ -258,6 +269,14 @@ func (s *ObsStore) Prune() error {
 	// slow_traces.ts is in microseconds.
 	if _, err := s.db.Exec(`DELETE FROM slow_traces WHERE ts < ?`, cutoffSec*1_000_000); err != nil {
 		return fmt.Errorf("prune slow traces: %w", err)
+	}
+	// Hard row cap: drop everything older than the newest maxSlowTraceRows. Bounds
+	// disk under an error flood that stays within the time window.
+	if _, err := s.db.Exec(
+		`DELETE FROM slow_traces WHERE ts < (
+			SELECT MIN(ts) FROM (SELECT ts FROM slow_traces ORDER BY ts DESC LIMIT ?)
+		)`, maxSlowTraceRows); err != nil {
+		return fmt.Errorf("cap slow traces: %w", err)
 	}
 	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,6 +26,10 @@ const (
 	// wasmHostModule is the import module name under which the host functions
 	// (appitools_log, appitools_now) are exported to guests.
 	wasmHostModule = "appitools"
+	// wasmMaxLogBytes caps a single appitools_log message. A guest controls the
+	// (ptr,len) it passes, so without this it could log up to its full 16 MiB of
+	// linear memory per call and flood the log/disk.
+	wasmMaxLogBytes = 4096
 )
 
 // wasmTenantKey carries the tenant ID through the context into host functions.
@@ -41,6 +46,10 @@ type WasmRunner struct {
 	compiled     sync.Map // cacheKey(string) -> wazero.CompiledModule
 	modules      sync.Map // moduleName(string) -> []byte (pre-loaded module bytes)
 	compileCount int64    // number of real compilations (cache misses); read in tests
+	// sem bounds concurrent Execute calls. Each instance gets its own 16 MiB linear
+	// memory, so without a cap N concurrent guests = N × 16 MiB. Mirrors the JS
+	// sandbox's limit (GOMAXPROCS×2).
+	sem chan struct{}
 }
 
 // NewWasmRunner builds a runner with a 16 MiB per-module memory cap and registers
@@ -52,7 +61,7 @@ func NewWasmRunner(ctx context.Context) (*WasmRunner, error) {
 		// Abort a running guest when the Execute context is cancelled/expired.
 		WithCloseOnContextDone(true),
 	)
-	wr := &WasmRunner{runtime: rt}
+	wr := &WasmRunner{runtime: rt, sem: make(chan struct{}, runtime.GOMAXPROCS(0)*2)}
 	if err := wr.registerHostFunctions(ctx); err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("wasm host functions: %w", err)
@@ -67,6 +76,9 @@ func (wr *WasmRunner) registerHostFunctions(ctx context.Context) error {
 		// appitools_log(ptr, len): read a UTF-8 string from guest memory → zerolog.
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, ptr, length uint32) {
+			if length > wasmMaxLogBytes {
+				length = wasmMaxLogBytes // bound the message a guest can emit
+			}
 			if buf, ok := m.Memory().Read(ptr, length); ok {
 				tid, _ := ctx.Value(wasmTenantKey{}).(string)
 				zlog.Info().Str("tenant", tid).Str("source", "wasm").Msg(string(buf))
@@ -133,6 +145,17 @@ func (wr *WasmRunner) Execute(ctx context.Context, tenantID string, wasmBytes []
 		defer cancel()
 	}
 	ctx = context.WithValue(ctx, wasmTenantKey{}, tenantID)
+
+	// Bound concurrency: each instance allocates up to 16 MiB, so cap how many run
+	// at once (nil sem only for a zero-value runner — never via NewWasmRunner).
+	if wr.sem != nil {
+		select {
+		case wr.sem <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		defer func() { <-wr.sem }()
+	}
 
 	compiled, err := wr.getOrCompile(ctx, wr.cacheKey(tenantID, wasmBytes), wasmBytes)
 	if err != nil {
