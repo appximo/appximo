@@ -30,11 +30,14 @@ func GenerateToken(c Claims, secret string) (string, error) {
 // Returns an error if the token is expired, malformed, or signed with a different secret.
 func ValidateToken(tokenStr, secret string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+		// Pin to HS256 (the only method GenerateToken emits). This rejects alg=none,
+		// RSA/ECDSA confusion, AND other HMAC families — no token should validate
+		// under a method we never issue.
+		if t.Method != jwt.SigningMethodHS256 {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return []byte(secret), nil
-	})
+	}, jwt.WithExpirationRequired()) // every token MUST carry an exp; no immortal tokens
 	if err != nil {
 		return nil, err
 	}

@@ -16,6 +16,16 @@ package observability
 // runtime.
 var maxTrackedTenants = 4096
 
+// maxErrGroupsPerTenant bounds the number of distinct error groups retained for a
+// single tenant. maxTrackedTenants caps how many TENANTS the error store tracks,
+// but within one tenant the group map is keyed by an error fingerprint that
+// includes the (often variable) error message — e.g. a malformed-JWT error embeds
+// a byte offset. An attacker rotating malformed tokens at one subdomain could
+// otherwise grow that tenant's group map without bound AND force a stack
+// symbolization per new fingerprint (memory + CPU DoS). Past this cap, new error
+// groups for that tenant are dropped. Var only so tests can shrink it.
+var maxErrGroupsPerTenant = 512
+
 // metricsOverflowTenant is the tenant_id label applied to requests once the
 // metrics cardinality cap is reached, so attacker-rotated tenants collapse into
 // one bounded series instead of minting one series each.

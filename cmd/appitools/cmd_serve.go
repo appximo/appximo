@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
@@ -208,7 +209,7 @@ var serveCmd = &cobra.Command{
 			if key == "" {
 				key = req.Header.Get("X-Admin-Key")
 			}
-			if key != adminKey {
+			if subtle.ConstantTimeCompare([]byte(key), []byte(adminKey)) != 1 {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -221,9 +222,19 @@ var serveCmd = &cobra.Command{
 		cpRouter := controlplane.NewControlPlaneRouter(cpSvc, adminKey)
 		// Mount debug endpoints on the control plane (admin-protected via obs router's own key check).
 		cpRouter.Mount("/", obsServer.Router(adminKey))
+		// Same timeouts as the data plane (:8080) — a bare ListenAndServe has none,
+		// leaving the control plane open to Slowloris.
+		cpSrv := &http.Server{
+			Addr:              ":9090",
+			Handler:           cpRouter,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       20 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       120 * time.Second,
+		}
 		go func() {
 			fmt.Println("Control plane serving on :9090")
-			if err := http.ListenAndServe(":9090", cpRouter); err != nil {
+			if err := cpSrv.ListenAndServe(); err != nil {
 				fmt.Fprintln(os.Stderr, "Control plane error:", err)
 			}
 		}()
@@ -261,6 +272,7 @@ var serveCmd = &cobra.Command{
 			return rp.Conditions == nil && len(rp.FieldsAllow) == 0
 		})
 		go startCacheInvalidator(ctx, pool, responseCache)
+		auth.StartClaimsCacheGC(ctx)
 
 		// Per-tenant token-bucket rate limiter. Each tenant has an independent
 		// bucket, so a saturated tenant cannot starve another. Configurable via
@@ -407,9 +419,12 @@ var serveCmd = &cobra.Command{
 		// pprof on a separate port — only in development, no auth, never reachable in production.
 		if os.Getenv("APPITOOLS_ENV") == "development" {
 			pprofMux := chimiddleware.Profiler()
+			// ReadHeaderTimeout guards against Slowloris; no WriteTimeout so long
+			// `profile?seconds=N` captures still work. Dev-only, never in prod.
+			pprofSrv := &http.Server{Addr: ":6060", Handler: pprofMux, ReadHeaderTimeout: 10 * time.Second}
 			go func() {
 				log.Println("WARNING: pprof profiler enabled on :6060 (APPITOOLS_ENV=development)")
-				if err := http.ListenAndServe(":6060", pprofMux); err != nil {
+				if err := pprofSrv.ListenAndServe(); err != nil {
 					log.Println("pprof server:", err)
 				}
 			}()

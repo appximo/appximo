@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -8,6 +9,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/miguelangel/appitools/pkg/schema"
 )
+
+// maxControlPlaneBody caps control-plane request bodies. Schemas are bounded
+// documents; without a limit an admin request could stream an arbitrarily large
+// body (OWASP API4).
+const maxControlPlaneBody = 1 << 20 // 1 MiB
 
 // NewControlPlaneRouter builds the chi.Mux for the control plane API (port 9090).
 // adminKey is compared against the X-Admin-Key request header on all routes except /health.
@@ -36,7 +42,7 @@ func NewControlPlaneRouter(svc Service, adminKey string) *chi.Mux {
 func adminKeyMiddleware(key string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Header.Get("X-Admin-Key") != key {
+			if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Admin-Key")), []byte(key)) != 1 {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 				return
 			}
@@ -49,9 +55,26 @@ func adminKeyMiddleware(key string) func(http.Handler) http.Handler {
 
 func handleCreateTenant(svc Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxControlPlaneBody)
 		var req RegisterRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+			return
+		}
+		// Require and validate the schema BEFORE provisioning. Without this,
+		// RegisterTenant dereferences req.Schema (nil → panic) and would feed an
+		// unvalidated schema into CREATE TABLE DDL. schema.Validate enforces the
+		// resource/field name allowlist.
+		if req.Schema == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "schema is required"})
+			return
+		}
+		if errs := schema.Validate(req.Schema); len(errs) > 0 {
+			msgs := make([]string, len(errs))
+			for i, e := range errs {
+				msgs[i] = e.Error()
+			}
+			writeJSON(w, http.StatusBadRequest, map[string]any{"errors": msgs})
 			return
 		}
 
@@ -90,6 +113,7 @@ func handleGetTenant(svc Service) http.HandlerFunc {
 func handleUpdateSchema(svc Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
+		r.Body = http.MaxBytesReader(w, r.Body, maxControlPlaneBody)
 
 		var body struct {
 			Schema *schema.APISchema `json:"schema"`

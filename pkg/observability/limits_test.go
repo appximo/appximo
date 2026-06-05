@@ -63,6 +63,26 @@ func TestMetrics_TenantCardinalityBounded(t *testing.T) {
 	}
 }
 
+// TestErrorStore_GroupCapPerTenant verifies that the per-tenant error-group map is
+// bounded. A single tenant rotating error messages (e.g. malformed-JWT errors that
+// embed a variable byte offset) must not grow one tenant's group map without bound.
+func TestErrorStore_GroupCapPerTenant(t *testing.T) {
+	old := maxErrGroupsPerTenant
+	maxErrGroupsPerTenant = 8
+	defer func() { maxErrGroupsPerTenant = old }()
+
+	es := NewErrorStore()
+	for i := 0; i < 500; i++ {
+		es.Record("t1", fmt.Errorf("distinct error %d", i)) // distinct message ⇒ distinct fingerprint
+	}
+	es.mu.RLock()
+	n := len(es.groups["t1"])
+	es.mu.RUnlock()
+	if n > 8 {
+		t.Fatalf("per-tenant error-group map grew past cap: got %d, cap 8", n)
+	}
+}
+
 // TestHistogram_CapBoundsTenants verifies the latency histogram store is bounded
 // and that Record does not panic when a tenant is dropped at the cap.
 func TestHistogram_CapBoundsTenants(t *testing.T) {

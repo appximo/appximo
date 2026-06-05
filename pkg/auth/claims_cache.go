@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"sync"
@@ -48,6 +49,33 @@ func setCachedClaims(token string, c *Claims) {
 		claims:    c,
 		expiresAt: time.Now().Add(ttl),
 	})
+}
+
+// StartClaimsCacheGC periodically evicts expired entries. Lookups already delete
+// entries lazily on access, but a token that is never presented again would
+// otherwise linger until process exit; over a long uptime with token rotation that
+// is an unbounded (if slow) leak. Only validated tokens are ever cached, so this is
+// not attacker-floodable — the sweep just keeps the footprint tidy. Runs until ctx
+// is cancelled.
+func StartClaimsCacheGC(ctx context.Context) {
+	go func() {
+		t := time.NewTicker(5 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				now := time.Now()
+				claimsCache.Range(func(k, v any) bool {
+					if cc, ok := v.(*cachedClaims); ok && now.After(cc.expiresAt) {
+						claimsCache.Delete(k)
+					}
+					return true
+				})
+			}
+		}
+	}()
 }
 
 // tokenCacheKey returns the first 16 hex chars of SHA-256(token) — 64 bits,
