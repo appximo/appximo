@@ -70,8 +70,13 @@ func (es *ErrorStore) Record(tenantID string, err error) {
 	h.Write([]byte(fmt.Sprintf("%T", err)))
 	truncLen := min(100, len(msg))
 	h.Write([]byte(msg[:truncLen]))
+	// uintptr is not a fixed-size type, so binary.Write rejected it and the PCs
+	// never entered the fingerprint — distinct call sites collapsed into one group.
+	// Widen to uint64 and write the bytes directly (no reflection, no alloc).
+	var pcBuf [8]byte
 	for _, pc := range captured[:min(8, len(captured))] {
-		_ = binary.Write(h, binary.LittleEndian, pc)
+		binary.LittleEndian.PutUint64(pcBuf[:], uint64(pc))
+		h.Write(pcBuf[:])
 	}
 	fp := h.Sum64()
 
@@ -82,6 +87,12 @@ func (es *ErrorStore) Record(tenantID string, err error) {
 	if groups == nil {
 		es.mu.Lock()
 		if es.groups[tenantID] == nil {
+			if len(es.groups) >= maxTrackedTenants {
+				// Cap reached: drop this error for an unseen tenant rather than
+				// grow the per-tenant map without bound. See limits.go.
+				es.mu.Unlock()
+				return
+			}
 			es.groups[tenantID] = make(map[uint64]*ErrGroup)
 		}
 		groups = es.groups[tenantID]

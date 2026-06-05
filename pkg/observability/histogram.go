@@ -25,21 +25,29 @@ func NewTenantHistogram() *TenantHistogram {
 // fromCache distinguishes cache hits (sub-ms) from full DB-backed responses.
 func (th *TenantHistogram) Record(tenantID string, durationUs int64, fromCache bool) {
 	th.mu.Lock()
+	defer th.mu.Unlock()
+	m := th.uncached
 	if fromCache {
-		th.ensureHist(th.cached, tenantID)
-		th.cached[tenantID].RecordValue(durationUs) //nolint:errcheck
-	} else {
-		th.ensureHist(th.uncached, tenantID)
-		th.uncached[tenantID].RecordValue(durationUs) //nolint:errcheck
+		m = th.cached
 	}
-	th.mu.Unlock()
+	// ensureHist may decline to allocate once the tenant cap is reached, so guard
+	// against a nil histogram before recording (see limits.go).
+	if h := th.ensureHist(m, tenantID); h != nil {
+		h.RecordValue(durationUs) //nolint:errcheck
+	}
 }
 
-func (th *TenantHistogram) ensureHist(m map[string]*hdrhistogram.Histogram, id string) {
-	if _, ok := m[id]; !ok {
-		// Range: 1µs – 10s (10_000_000µs), 3 significant figures.
-		m[id] = hdrhistogram.New(1, 10_000_000, 3)
+func (th *TenantHistogram) ensureHist(m map[string]*hdrhistogram.Histogram, id string) *hdrhistogram.Histogram {
+	if h, ok := m[id]; ok {
+		return h
 	}
+	if len(m) >= maxTrackedTenants {
+		return nil // cap reached: do not track another tenant's latency
+	}
+	// Range: 1µs – 10s (10_000_000µs), 3 significant figures.
+	h := hdrhistogram.New(1, 10_000_000, 3)
+	m[id] = h
+	return h
 }
 
 // PercentileSnapshot holds a point-in-time latency summary for one bucket.

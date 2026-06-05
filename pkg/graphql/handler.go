@@ -539,6 +539,9 @@ func createResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, h
 		}
 		body := hookRes.Data
 
+		// Column identifiers are quoted by BuildInsertArgs (injection-safe). We do
+		// not whitelist against res.Fields — the schema can evolve at runtime, so
+		// the DB is the source of truth (mirrors the REST create path).
 		cols, placeholders, args := pkghandlers.BuildInsertArgs(body)
 		q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", name, cols, placeholders)
 		result, err := tdb.ExecRowsTenant(p.Context, tc.PGSchema, q, args...)
@@ -551,7 +554,10 @@ func createResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, h
 			if len(result) > 0 {
 				record = result[0]
 			}
-			go hr.RunAfterHook(context.Background(), afterHook, record, tc.ID)
+			// Bounded async dispatch — same as the REST path. A previous version
+			// spawned an unbounded `go RunAfterHook` per mutation, which a create
+			// storm could turn into unbounded in-flight goroutines.
+			hr.FireAfterHook(afterHook, record, tc.ID)
 		}
 
 		if len(result) > 0 {

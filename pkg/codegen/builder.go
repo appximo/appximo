@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -19,6 +20,11 @@ import (
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
+
+// maxRequestBodyBytes caps the size of a write request body. Without it a client
+// could stream an arbitrarily large JSON document and force unbounded allocation
+// (OWASP API4). Matches the GraphQL handler's 1 MiB limit.
+const maxRequestBodyBytes = 1 << 20 // 1 MiB
 
 // markSpan records a named stage on the request's SpanTracker, if present. The
 // nil-check keeps it a no-op for requests/tests that run without a tracker.
@@ -55,6 +61,30 @@ func writeDBErr(w http.ResponseWriter, req *http.Request, err error) {
 		capture500(req, err)
 	}
 	pkghandlers.WriteDBError(w, err)
+}
+
+// rbacCondFieldRe validates an RBAC condition's Field as a bare SQL identifier
+// before it is interpolated into a WHERE clause (the value is always a bound
+// parameter). Condition fields come from trusted policy config, but validating
+// matches the list path (query.BuildQuery) and is defence-in-depth.
+var rbacCondFieldRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// applyRowCondition appends a row-level RBAC WhereCondition to a single-row query
+// already parameterised at $1 (the row id), so GET-by-id and DELETE enforce the
+// same row-level filter the list endpoint does. Without it, a role restricted to
+// its own rows (e.g. user_id = $user_id) could read or delete ANY row by guessing
+// its id — a BOLA. Returns ok=false if the policy's field is not a valid
+// identifier, so the caller fails closed rather than emit unfiltered SQL.
+func applyRowCondition(query string, args []any, cond *rbac.WhereCondition) (string, []any, bool) {
+	if cond == nil {
+		return query, args, true
+	}
+	if !rbacCondFieldRe.MatchString(cond.Field) {
+		return query, args, false
+	}
+	query += fmt.Sprintf(" AND %s = $%d", cond.Field, len(args)+1)
+	args = append(args, cond.Value)
+	return query, args, true
 }
 
 // BuildRouter creates a chi.Mux with real SQL handlers for every resource in the schema.
@@ -135,6 +165,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		// --- Create ---
 		r.Post("/api/"+name, func(w http.ResponseWriter, req *http.Request) {
 			tc := tenant.MustFromCtx(req.Context())
+			req.Body = http.MaxBytesReader(w, req.Body, maxRequestBodyBytes)
 			var body map[string]any
 			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -174,6 +205,13 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				markSpan(req, "hook")
 			}
 
+			// NOTE: column identifiers are quoted by BuildInsertArgs so a client
+			// key cannot break out of the identifier position (SQL injection). We do
+			// NOT whitelist keys against res.Fields here: the schema can evolve at
+			// runtime (a migration adds a column without rebuilding this router), so
+			// the DB is the source of truth — an unknown column simply errors at the
+			// DB. Residual mass-assignment (e.g. client-set id) is low-impact for the
+			// current schema (no privilege/tenant columns) and tracked separately.
 			cols, placeholders, args := pkghandlers.BuildInsertArgs(body)
 			insertQ := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", name, cols, placeholders)
 			result, err := tdb.ExecRowsTenant(req.Context(), tc.PGSchema, insertQ, args...)
@@ -213,8 +251,19 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				json.NewEncoder(w).Encode(map[string]string{"error": "invalid id format"})
 				return
 			}
-			rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema,
-				fmt.Sprintf("SELECT * FROM %s WHERE id = $1", name), id)
+			// Enforce the row-level RBAC condition (if any) so a restricted role
+			// cannot read another principal's row by guessing its id.
+			evalResult := rbac.EvalResultFromCtx(req.Context())
+			q := fmt.Sprintf("SELECT * FROM %s WHERE id = $1", name)
+			args := []any{id}
+			if evalResult != nil {
+				var ok bool
+				if q, args, ok = applyRowCondition(q, args, evalResult.Condition); !ok {
+					writeDBErr(w, req, fmt.Errorf("invalid rbac condition field"))
+					return
+				}
+			}
+			rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema, q, args...)
 			if err != nil {
 				writeDBErr(w, req, err)
 				return
@@ -233,7 +282,6 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				return
 			}
 			record := result[0]
-			evalResult := rbac.EvalResultFromCtx(req.Context())
 			if evalResult != nil && len(evalResult.AllowedFields) > 0 {
 				record = pkghandlers.FilterFields(record, evalResult.AllowedFields)
 			}
@@ -252,8 +300,19 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				json.NewEncoder(w).Encode(map[string]string{"error": "invalid id format"})
 				return
 			}
-			affected, err := tdb.ExecTenant(req.Context(), tc.PGSchema,
-				fmt.Sprintf("DELETE FROM %s WHERE id = $1", name), id)
+			// Enforce the row-level RBAC condition (if any) so a restricted role
+			// cannot delete another principal's row by guessing its id.
+			evalResult := rbac.EvalResultFromCtx(req.Context())
+			q := fmt.Sprintf("DELETE FROM %s WHERE id = $1", name)
+			args := []any{id}
+			if evalResult != nil {
+				var ok bool
+				if q, args, ok = applyRowCondition(q, args, evalResult.Condition); !ok {
+					writeDBErr(w, req, fmt.Errorf("invalid rbac condition field"))
+					return
+				}
+			}
+			affected, err := tdb.ExecTenant(req.Context(), tc.PGSchema, q, args...)
 			if err != nil {
 				writeDBErr(w, req, err)
 				return

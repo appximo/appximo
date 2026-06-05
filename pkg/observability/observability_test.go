@@ -161,11 +161,13 @@ func TestErrorStore_RecordAndCount(t *testing.T) {
 	es := NewErrorStore()
 	err := errors.New("connection timeout")
 
-	es.Record("acme", err)
-	es.Record("acme", err)
-	es.Record("acme", err)
+	// Repeated occurrences of the same error from the same call site (the real
+	// production pattern: one fixed Record sink) must dedup into one group with an
+	// incrementing count — not a new group per occurrence.
+	for i := 0; i < 3; i++ {
+		es.Record("acme", err)
+	}
 
-	// Verify dedup: same error recorded once in groups.
 	es.mu.RLock()
 	groups := es.groups["acme"]
 	es.mu.RUnlock()
@@ -176,6 +178,26 @@ func TestErrorStore_RecordAndCount(t *testing.T) {
 		if g.Count.Load() != 3 {
 			t.Fatalf("count: got %d want 3", g.Count.Load())
 		}
+	}
+}
+
+// TestErrorStore_FingerprintSeparatesCallSites verifies that the fingerprint
+// includes call-site PCs (its documented purpose). The same error message
+// recorded from two distinct call sites produces two groups. This regressed
+// silently before: binary.Write rejected uintptr, so the PCs never entered the
+// hash and every same-message error collapsed into a single group.
+func TestErrorStore_FingerprintSeparatesCallSites(t *testing.T) {
+	es := NewErrorStore()
+	err := errors.New("connection timeout")
+
+	es.Record("acme", err) // call site A
+	es.Record("acme", err) // call site B (different line ⇒ different PCs)
+
+	es.mu.RLock()
+	groups := es.groups["acme"]
+	es.mu.RUnlock()
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups for 2 distinct call sites, got %d", len(groups))
 	}
 }
 

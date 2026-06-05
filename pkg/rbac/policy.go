@@ -1,6 +1,9 @@
 package rbac
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"sync"
+)
 
 // Policy holds all role definitions for a tenant.
 type Policy struct {
@@ -41,19 +44,48 @@ func (p *Policy) Allows(role, resource, action string) bool {
 	return false
 }
 
-// resourceAllowed parses the json.RawMessage which may be "*" or []string.
-func resourceAllowed(raw json.RawMessage, resource string) bool {
+// parsedResources is the compiled form of a role's Resources field: either a
+// wildcard or an O(1)-lookup set. Computed once per distinct raw value.
+type parsedResources struct {
+	wildcard bool
+	set      map[string]struct{}
+}
+
+// resourceParseCache memoizes the parse of each role's Resources json.RawMessage.
+// Keyed by the raw bytes (server-supplied policy config, a small fixed set), it
+// removes a json.Unmarshal — and a linear scan — from every /api request, which
+// the profile showed on the RBAC hot path. The key space is bounded by the number
+// of roles, so the cache cannot grow unbounded.
+var resourceParseCache sync.Map // string(raw) → *parsedResources
+
+func parseResources(raw json.RawMessage) *parsedResources {
+	pr := &parsedResources{}
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
-		return s == "*"
+		pr.wildcard = s == "*"
+		return pr
 	}
+	pr.set = make(map[string]struct{})
 	var arr []string
 	if json.Unmarshal(raw, &arr) == nil {
 		for _, r := range arr {
-			if r == resource {
-				return true
-			}
+			pr.set[r] = struct{}{}
 		}
 	}
-	return false
+	return pr
+}
+
+// resourceAllowed reports whether the (compiled) Resources value grants resource.
+// The raw value may be "*" or a []string; parsing is memoized in resourceParseCache.
+func resourceAllowed(raw json.RawMessage, resource string) bool {
+	v, ok := resourceParseCache.Load(string(raw))
+	if !ok {
+		v, _ = resourceParseCache.LoadOrStore(string(raw), parseResources(raw))
+	}
+	pr := v.(*parsedResources)
+	if pr.wildcard {
+		return true
+	}
+	_, found := pr.set[resource]
+	return found
 }

@@ -293,6 +293,12 @@ var serveCmd = &cobra.Command{
 		// Rate limit per tenant, after the tenant is resolved but before any work
 		// (cache lookup, DB) so an over-limit tenant is shed early with 429.
 		r.Use(resilience.RateLimit(tenantLimiter))
+		// tracePersistSem bounds in-flight slow/error-trace persistence goroutines.
+		// Without it, an error storm spawns one goroutine per request, each writing
+		// to SQLite — unbounded goroutines plus write contention. When the backlog
+		// is full the trace is dropped rather than queued.
+		tracePersistSem := make(chan struct{}, 64)
+
 		// RequestLogger BEFORE cache: every request (including cache hits) is logged and measured.
 		r.Use(logging.RequestLogger(
 			hist.Record,
@@ -373,14 +379,21 @@ var serveCmd = &cobra.Command{
 					}
 					tenantID := t.TenantID
 					ip, ua := t.IP, t.UserAgent
-					go func() {
-						// Parse UA + geo-resolve country off the request path.
-						tv.Browser, tv.OS = observability.ParseUserAgent(ua)
-						tv.Country = geo.Country(ip)
-						if err := obsStore.SaveSlowTrace(tenantID, tv); err != nil {
-							log.Printf("save slow trace [%s]: %v", tenantID, err)
-						}
-					}()
+					select {
+					case tracePersistSem <- struct{}{}:
+						go func() {
+							defer func() { <-tracePersistSem }()
+							// Parse UA + geo-resolve country off the request path.
+							tv.Browser, tv.OS = observability.ParseUserAgent(ua)
+							tv.Country = geo.Country(ip)
+							if err := obsStore.SaveSlowTrace(tenantID, tv); err != nil {
+								log.Printf("save slow trace [%s]: %v", tenantID, err)
+							}
+						}()
+					default:
+						// Persistence backlog full — drop rather than spawn an
+						// unbounded goroutine or overwhelm SQLite.
+					}
 				}
 			},
 		))
@@ -447,6 +460,15 @@ var serveCmd = &cobra.Command{
 		srv := &http.Server{
 			Addr:    addr,
 			Handler: r,
+			// Without these a slow client can hold connections open indefinitely
+			// (Slowloris) and exhaust the server. ReadHeaderTimeout is the primary
+			// Slowloris defense; WriteTimeout (> the 5s DB query timeout, with
+			// serialization headroom) bounds slow readers; IdleTimeout reaps idle
+			// keep-alive connections.
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       20 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       120 * time.Second,
 		}
 
 		fmt.Printf("Appitools serving on %s — Ctrl+C to stop\n", addr)

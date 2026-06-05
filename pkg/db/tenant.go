@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -52,13 +53,23 @@ func IsBadInput(err error) bool {
 	return false
 }
 
+// qualifyReCache memoizes the per-table FROM/JOIN regexp. The table name is a
+// validated resource name (a small, fixed set per schema — never client-supplied),
+// so this cache is bounded. It removes a regexp.MustCompile from every QueryDirect
+// call, which is the list-API hot path (compilation, not matching, dominated it).
+var qualifyReCache sync.Map // table string → *regexp.Regexp
+
 // qualifyTableNames rewrites FROM/JOIN references to unqualified tableName
 // into schema-qualified form using pgx.Identifier for safe quoting.
 // Example: "SELECT * FROM guides WHERE x=$1" → "SELECT * FROM "tenant_10"."guides" WHERE x=$1"
 func qualifyTableNames(query, schema, table string) string {
 	qualified := pgx.Identifier{schema, table}.Sanitize()
-	re := regexp.MustCompile(`(?i)\b(FROM|JOIN)\s+` + regexp.QuoteMeta(table) + `\b`)
-	return re.ReplaceAllString(query, "${1} "+qualified)
+	re, ok := qualifyReCache.Load(table)
+	if !ok {
+		compiled := regexp.MustCompile(`(?i)\b(FROM|JOIN)\s+` + regexp.QuoteMeta(table) + `\b`)
+		re, _ = qualifyReCache.LoadOrStore(table, compiled)
+	}
+	return re.(*regexp.Regexp).ReplaceAllString(query, "${1} "+qualified)
 }
 
 // directRows wraps pgx.Rows and releases the acquired pool connection on Close.
