@@ -26,24 +26,36 @@ type RateLimitConfig struct {
 	Burst int     // bucket capacity for short spikes
 }
 
+// defaultMaxLimiters bounds how many distinct tenant buckets are retained. The
+// tenant id derives from the client-controlled Host subdomain and the limiter runs
+// BEFORE authentication, so without a cap an attacker rotating the subdomain could
+// (a) grow this map without bound and (b) mint a fresh full bucket per fake tenant,
+// bypassing the limit entirely. Real deployments have far fewer tenants than this.
+const defaultMaxLimiters = 10_000
+
 // TenantLimiter provides per-tenant token-bucket rate limiting.
 // Each tenant gets an independent limiter keyed by tenantID.
 // With a nil cfg the burst size equals the tier rate (1-second burst capacity);
 // with cfg set, every tenant uses cfg.RPS / cfg.Burst and the tier is ignored.
+//
+// Past maxLimiters distinct tenants, additional (unknown) tenants share a single
+// overflow bucket: memory stays bounded and the rate limit still applies.
 type TenantLimiter struct {
-	mu       sync.RWMutex
-	limiters map[string]*rate.Limiter
-	cfg      *RateLimitConfig
+	mu          sync.RWMutex
+	limiters    map[string]*rate.Limiter
+	cfg         *RateLimitConfig
+	maxLimiters int
+	overflow    *rate.Limiter // shared bucket used once the cap is reached
 }
 
 // NewTenantLimiter creates an empty tier-based TenantLimiter.
 func NewTenantLimiter() *TenantLimiter {
-	return &TenantLimiter{limiters: make(map[string]*rate.Limiter)}
+	return &TenantLimiter{limiters: make(map[string]*rate.Limiter), maxLimiters: defaultMaxLimiters}
 }
 
 // NewConfiguredLimiter creates a TenantLimiter that applies cfg to every tenant.
 func NewConfiguredLimiter(cfg RateLimitConfig) *TenantLimiter {
-	return &TenantLimiter{limiters: make(map[string]*rate.Limiter), cfg: &cfg}
+	return &TenantLimiter{limiters: make(map[string]*rate.Limiter), cfg: &cfg, maxLimiters: defaultMaxLimiters}
 }
 
 // Allow reports whether tenantID may send another request under tier constraints.
@@ -73,8 +85,18 @@ func (tl *TenantLimiter) Allow(tenantID string, tier Tier) bool {
 		lim = rate.NewLimiter(r, burst)
 		tl.mu.Lock()
 		// Double-checked: another goroutine may have written while we held the read lock.
+		cap := tl.maxLimiters
+		if cap <= 0 {
+			cap = defaultMaxLimiters // tolerate a zero-value/directly-constructed limiter
+		}
 		if existing, found := tl.limiters[tenantID]; found {
 			lim = existing
+		} else if len(tl.limiters) >= cap {
+			// Capacity reached: share one overflow bucket instead of growing the map.
+			if tl.overflow == nil {
+				tl.overflow = rate.NewLimiter(r, burst)
+			}
+			lim = tl.overflow
 		} else {
 			tl.limiters[tenantID] = lim
 		}

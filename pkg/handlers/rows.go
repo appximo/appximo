@@ -52,7 +52,9 @@ func RowsToMaps(rows pgx.Rows) ([]map[string]any, error) {
 }
 
 // BuildInsertArgs builds the column list, placeholder list ($1,$2…), and args slice
-// from a JSON-decoded body map. Keys are sorted for deterministic output.
+// from a JSON-decoded body map. Keys are sorted for deterministic output and each
+// column identifier is quoted with pgx.Identifier.Sanitize so a key can never break
+// out of the identifier position (defence-in-depth alongside ValidateWritableColumns).
 func BuildInsertArgs(body map[string]any) (cols, placeholders string, args []any) {
 	keys := make([]string, 0, len(body))
 	for k := range body {
@@ -64,7 +66,7 @@ func BuildInsertArgs(body map[string]any) (cols, placeholders string, args []any
 	phList := make([]string, len(keys))
 	args = make([]any, len(keys))
 	for i, k := range keys {
-		colList[i] = k
+		colList[i] = pgx.Identifier{k}.Sanitize()
 		phList[i] = fmt.Sprintf("$%d", i+1)
 		args[i] = body[k]
 	}

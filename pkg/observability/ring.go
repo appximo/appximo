@@ -146,6 +146,12 @@ func (rs *Rings) Record(tenantID string, s Sample) {
 	if tr == nil {
 		rs.mu.Lock()
 		if tr = rs.m[tenantID]; tr == nil {
+			if len(rs.m) >= maxTrackedTenants {
+				// Cap reached: drop rather than allocate another [256]Sample ring
+				// for a (possibly attacker-rotated) tenant. See limits.go.
+				rs.mu.Unlock()
+				return
+			}
 			tr = &TenantRing{}
 			rs.m[tenantID] = tr
 		}

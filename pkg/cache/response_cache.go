@@ -139,6 +139,17 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 		// Known token + cached response → skip JWT HMAC, DB, AND gzip entirely.
 		if tokenStr != "" {
 			if claims, ok := auth.GetCachedClaims(tokenStr); ok {
+				// The cache runs BEFORE JWTMiddleware and a HIT short-circuits it,
+				// so the cache must replicate JWT's tenant cross-check itself.
+				// Otherwise a validated token for tenant A, replayed against
+				// Host=b.<domain> (tc.ID="b"), would be served tenant B's cached
+				// entry — a cross-tenant data leak. A mismatched (or empty/cross-
+				// tenant) token falls through to the full JWT+RBAC chain, which
+				// rejects it.
+				if claims.TenantID != tc.ID {
+					next.ServeHTTP(w, r)
+					return
+				}
 				// Roles with row-level conditions or field restrictions must
 				// never be served from or stored in the cache: the cache key is
 				// (tenant, URI) and a HIT short-circuits before RBAC runs, so a

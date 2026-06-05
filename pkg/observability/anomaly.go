@@ -36,6 +36,12 @@ func (d *AnomalyDetector) Observe(tenantID string, ms float64) (bool, float64) {
 	d.mu.Lock()
 	s, ok := d.states[tenantID]
 	if !ok {
+		if len(d.states) >= maxTrackedTenants {
+			// Cap reached: do not model another (possibly attacker-rotated)
+			// tenant. See limits.go.
+			d.mu.Unlock()
+			return false, 0
+		}
 		s = &ewmaState{}
 		d.states[tenantID] = s
 	}
@@ -47,11 +53,15 @@ func (d *AnomalyDetector) Observe(tenantID string, ms float64) (bool, float64) {
 	diff := ms - s.mean
 	s.mean = ewmaAlpha*ms + (1-ewmaAlpha)*s.mean
 	s.varc = ewmaAlpha*diff*diff + (1-ewmaAlpha)*s.varc
+	// Snapshot varc under the lock: another goroutine may update this same
+	// *ewmaState concurrently, so the post-unlock math must read the local copy,
+	// not s.varc (a data race the -race detector flags under concurrent load).
+	varc := s.varc
 	d.mu.Unlock()
-	if s.varc <= 0 {
+	if varc <= 0 {
 		return false, 0
 	}
-	z := math.Abs(diff) / math.Sqrt(s.varc)
+	z := math.Abs(diff) / math.Sqrt(varc)
 	return z > zThreshold, z
 }
 

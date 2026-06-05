@@ -34,18 +34,6 @@ func TraceIDFromCtx(ctx context.Context) string {
 	return ""
 }
 
-// traceIDBytes decodes a 16-hex trace id into its 8 raw bytes (for compact
-// storage in a Sample). A malformed/short id yields the zero array.
-func traceIDBytes(id string) [8]byte {
-	var out [8]byte
-	if len(id) >= 16 {
-		if dec, err := hex.DecodeString(id[:16]); err == nil {
-			copy(out[:], dec)
-		}
-	}
-	return out
-}
-
 // traceIDString re-encodes the 8 raw bytes back into the 16-hex trace id.
 func traceIDString(b [8]byte) string {
 	return hex.EncodeToString(b[:])

@@ -334,9 +334,7 @@ func oaFieldType(fd schema.FieldDef) map[string]any {
 
 func oaSortEnum(res *schema.ResourceSchema) []string {
 	enum := []string{"id"}
-	for _, name := range sortedFieldKeys(res) {
-		enum = append(enum, name)
-	}
+	enum = append(enum, sortedFieldKeys(res)...)
 	return enum
 }
 
