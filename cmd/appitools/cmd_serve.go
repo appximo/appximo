@@ -561,6 +561,12 @@ func flushObsSnapshots(
 					log.Printf("obs store flush tenant %s: %v", tid, err)
 				}
 			}
+			// Enforce retention on every tick (cheap indexed DELETEs): the 7-day
+			// window AND the slow_traces row cap. Without this the table only ever
+			// pruned at startup, growing unbounded on a long-running server.
+			if err := store.Prune(); err != nil {
+				log.Printf("obs store prune: %v", err)
+			}
 		}
 	}
 }
