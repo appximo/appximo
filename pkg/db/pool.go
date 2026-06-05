@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -32,6 +33,17 @@ func NewPool(ctx context.Context, connStr string) (*pgxpool.Pool, error) {
 	cfg.MinConns = minConns
 	cfg.MaxConnLifetime = time.Hour
 	cfg.HealthCheckPeriod = 30 * time.Second
+
+	// DescribeExec instead of the default CacheStatement: the schema is DYNAMIC (a
+	// control-plane deploy runs ALTER TABLE ADD COLUMN under live traffic). A cached
+	// prepared plan for "SELECT *" is invalidated by the DDL, so the first query
+	// after a change fails with "cached plan must not change result type".
+	// DescribeExec describes every statement fresh against the server (so it never
+	// holds a stale plan AND gets the correct parameter type OIDs — e.g. json for
+	// public.tenants.json_schema, which QueryExecModeExec would mis-encode as bytea).
+	// pgx pipelines describe+execute, so the overhead is minimal and only hits
+	// cache-miss queries (the response cache absorbs most reads).
+	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeDescribeExec
 	log.Printf("db pool: MAX_CONNS=%d MIN_CONNS=%d", maxConns, minConns)
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)

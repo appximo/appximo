@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/schema"
 )
 
@@ -67,6 +68,15 @@ func (s *pgService) UpdateSchema(ctx context.Context, id string, apiSchema *sche
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("tenant %q: %w", id, ErrNotFound)
+	}
+
+	// Apply the DDL synchronously (CREATE TABLE / ADD COLUMN IF NOT EXISTS — all
+	// idempotent) so a schema change actually takes effect even when the async Redis
+	// migration worker is not running. When Redis IS configured the worker also picks
+	// it up; re-running the same idempotent DDL is harmless. This is what makes
+	// "edit a field → deploy → the API reflects it" work without a worker.
+	if err := migration.ApplyTenantMigration(ctx, s.pool, "tenant_"+id, apiSchema); err != nil {
+		return fmt.Errorf("apply migration: %w", err)
 	}
 
 	// Enqueue async migration to Redis Stream (best-effort — don't fail the request).
