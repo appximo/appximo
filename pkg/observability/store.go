@@ -101,6 +101,9 @@ func OpenStore(path string) (*ObsStore, error) {
 			browser    TEXT,               -- parsed browser
 			os         TEXT,               -- parsed OS
 			country    TEXT,               -- ISO country code (GeoLite2)
+			method     TEXT,               -- HTTP method (for curl reconstruction)
+			full_url   TEXT,               -- scheme://host/path?query
+			headers_json TEXT,             -- filtered request headers (map)
 			spans_json TEXT,               -- JSON array of {name, dur_us}
 			PRIMARY KEY (trace_id)
 		);
@@ -114,6 +117,7 @@ func OpenStore(path string) (*ObsStore, error) {
 	for _, col := range []string{
 		`status INTEGER NOT NULL DEFAULT 0`, `err_msg TEXT`, `stack_json TEXT`,
 		`ip TEXT`, `user_agent TEXT`, `browser TEXT`, `os TEXT`, `country TEXT`,
+		`method TEXT`, `full_url TEXT`, `headers_json TEXT`,
 	} {
 		_, _ = db.Exec(`ALTER TABLE slow_traces ADD COLUMN ` + col)
 	}
@@ -179,12 +183,19 @@ func (s *ObsStore) SaveSlowTrace(tenantID string, tv TraceView) error {
 		}
 		stackJSON = string(b)
 	}
+	headersJSON := ""
+	if len(tv.Headers) > 0 {
+		if b, mErr := json.Marshal(tv.Headers); mErr == nil {
+			headersJSON = string(b)
+		}
+	}
 	_, err = s.db.Exec(
 		`INSERT OR REPLACE INTO slow_traces
-			(trace_id, tenant_id, ts, route, total_us, status, err_msg, stack_json, ip, user_agent, browser, os, country, spans_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(trace_id, tenant_id, ts, route, total_us, status, err_msg, stack_json,
+			 ip, user_agent, browser, os, country, method, full_url, headers_json, spans_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tv.TraceID, tenantID, tv.TS, tv.Route, tv.TotalUS, tv.Status, tv.ErrMsg, stackJSON,
-		tv.IP, tv.UserAgent, tv.Browser, tv.OS, tv.Country, string(spansJSON),
+		tv.IP, tv.UserAgent, tv.Browser, tv.OS, tv.Country, tv.Method, tv.FullURL, headersJSON, string(spansJSON),
 	)
 	if err != nil {
 		return fmt.Errorf("save slow trace: %w", err)
@@ -198,7 +209,7 @@ func (s *ObsStore) SlowTraces(tenantID string, hours int) ([]TraceView, error) {
 	cutoff := (time.Now().Unix() - int64(hours)*3600) * 1_000_000 // µs, matches ts unit
 	rows, err := s.db.Query(
 		`SELECT trace_id, ts, route, total_us, status, err_msg, stack_json,
-			ip, user_agent, browser, os, country, spans_json
+			ip, user_agent, browser, os, country, method, full_url, headers_json, spans_json
 			FROM slow_traces
 			WHERE tenant_id = ? AND ts > ?
 			ORDER BY ts DESC
@@ -214,20 +225,24 @@ func (s *ObsStore) SlowTraces(tenantID string, hours int) ([]TraceView, error) {
 	for rows.Next() {
 		var tv TraceView
 		var errMsg, stackJSON, spansJSON sql.NullString
-		var ip, ua, browser, os, country sql.NullString
+		var ip, ua, browser, os, country, method, fullURL, headersJSON sql.NullString
 		var status int
 		if err := rows.Scan(&tv.TraceID, &tv.TS, &tv.Route, &tv.TotalUS, &status, &errMsg, &stackJSON,
-			&ip, &ua, &browser, &os, &country, &spansJSON); err != nil {
+			&ip, &ua, &browser, &os, &country, &method, &fullURL, &headersJSON, &spansJSON); err != nil {
 			return nil, fmt.Errorf("scan slow trace: %w", err)
 		}
 		tv.Status = uint16(status)
 		tv.ErrMsg = errMsg.String
 		tv.IP, tv.UserAgent, tv.Browser, tv.OS, tv.Country = ip.String, ua.String, browser.String, os.String, country.String
+		tv.Method, tv.FullURL = method.String, fullURL.String
 		if spansJSON.String != "" {
 			_ = json.Unmarshal([]byte(spansJSON.String), &tv.Spans)
 		}
 		if stackJSON.String != "" {
 			_ = json.Unmarshal([]byte(stackJSON.String), &tv.Stack)
+		}
+		if headersJSON.String != "" {
+			_ = json.Unmarshal([]byte(headersJSON.String), &tv.Headers)
 		}
 		out = append(out, tv)
 	}

@@ -48,6 +48,10 @@
   .frame{display:flex;gap:10px;padding:2px 0;align-items:baseline}
   .floc{color:#9ad0ff;min-width:330px}
   .ffn{color:var(--muted)}
+  .curlbox{position:relative;background:#0a0c10;border:1px solid var(--line);border-radius:6px;padding:10px;margin-top:4px}
+  .curl{margin:0;white-space:pre-wrap;word-break:break-all;color:#cdd3df;font-size:12px;line-height:1.5}
+  .copybtn{position:absolute;top:8px;right:8px;background:var(--panel);border:1px solid var(--line);border-radius:5px;color:var(--fg);padding:3px 10px;font:inherit;font-size:11px;cursor:pointer}
+  .copybtn:hover{border-color:#3a86ff}
   .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--muted);padding:8px 18px;border-bottom:1px solid var(--line)}
   .legend span{display:flex;gap:5px;align-items:center}
   .empty{padding:40px;text-align:center;color:var(--muted)}
@@ -92,6 +96,22 @@ function shortFn(fn){ if(!fn) return ""; const i=fn.lastIndexOf("/"); return i>=
 // ts is unix MICROseconds (Sample.Start / slow_traces.ts) → /1000 = ms for Date.
 function fmtTime(ts){ if(!ts) return "-"; const d=new Date(ts/1000); try{ return d.toLocaleString('es-CO',{dateStyle:'short',timeStyle:'medium'}); }catch(e){ return d.toLocaleString(); } }
 function codeToFlag(cc){ if(!cc||cc.length!==2) return ""; return cc.toUpperCase().replace(/./g,c=>String.fromCodePoint(127397+c.charCodeAt(0))); }
+// Rebuild a runnable curl from the captured method + filtered headers + URL (+ body if present).
+function buildCurl(t){
+  const m = t.method || 'GET';
+  let cmd = 'curl \\\n  -X '+m+' \\\n';
+  const h = t.headers || {};
+  for(const k of Object.keys(h).sort()){
+    const safe = String(h[k]).replace(/'/g, "'\\''"); // shell-escape single quotes
+    cmd += "  -H '"+k+": "+safe+"' \\\n";
+  }
+  if(t.body_snip && ['POST','PUT','PATCH'].includes(m)){
+    const sb = String(t.body_snip).replace(/'/g, "'\\''");
+    cmd += "  -d '"+sb+"' \\\n";
+  }
+  cmd += "  '"+(t.full_url||'')+"'";
+  return cmd;
+}
 
 function renderLegend(){
   $("legend").innerHTML = Object.keys(COLORS).filter(k=>k!=="cache")
@@ -145,6 +165,11 @@ function render(traces){
       if(t.country) cl.push('Country: '+codeToFlag(t.country)+' '+esc(t.country));
       html += `<div class="esec"><div class="ehdr">CLIENT</div><div class="ebody">${cl.join('  ·  ')}</div></div>`;
     }
+    // HTTP REQUEST — reproducible curl (shown when we captured the full URL)
+    if(t.full_url){
+      html += `<div class="esec"><div class="ehdr">HTTP REQUEST</div>`+
+        `<div class="curlbox"><button class="copybtn">Copy</button><pre class="curl">${esc(buildCurl(t))}</pre></div></div>`;
+    }
     // ERROR (any 4xx/5xx with a message)
     if(t.error_msg){
       html += `<div class="esec"><div class="ehdr">ERROR</div><div class="ebody err">${esc(t.error_msg)}</div></div>`;
@@ -159,6 +184,17 @@ function render(traces){
     // SPANS
     html += `<div class="esec"><div class="ehdr">SPANS</div><div class="ebody">${spansHTML}</div></div>`;
     cell.innerHTML = html;
+    const cb = cell.querySelector('.copybtn');
+    if(cb){
+      cb.onclick = (ev)=>{
+        ev.stopPropagation();
+        const pre = cell.querySelector('.curl');
+        navigator.clipboard.writeText(pre.textContent).then(()=>{
+          cb.textContent = '✓ Copied!';
+          setTimeout(()=>{ cb.textContent = 'Copy'; }, 2000);
+        }).catch(()=>{ cb.textContent = 'copy failed'; });
+      };
+    }
     detail.appendChild(cell);
     tr.onclick = ()=>{ detail.style.display = detail.style.display==="none"?"":"none"; };
     rows.appendChild(tr); rows.appendChild(detail);

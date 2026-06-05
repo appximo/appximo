@@ -360,10 +360,13 @@ var serveCmd = &cobra.Command{
 						ErrMsg:    t.ErrMsg,
 						IP:        t.IP,
 						UserAgent: t.UserAgent,
+						Method:    t.Method,
+						FullURL:   t.FullURL,
+						Headers:   t.Headers,
 					}
 					if t.Capture != nil {
 						tv.Stack = t.Capture.Stack
-						tv.Method, tv.UserID, tv.Role = t.Capture.Method, t.Capture.UserID, t.Capture.Role
+						tv.UserID, tv.Role = t.Capture.UserID, t.Capture.Role
 						if tv.ErrMsg == "" {
 							tv.ErrMsg = t.Capture.ErrMsg
 						}

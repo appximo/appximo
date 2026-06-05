@@ -32,6 +32,37 @@ func TestSaveSlowTrace_ClientContext(t *testing.T) {
 	}
 }
 
+// method + full_url + filtered headers round-trip through SQLite (for the
+// reproducible-curl UI).
+func TestSaveSlowTrace_CurlContext(t *testing.T) {
+	st := openTempStore(t)
+	if err := st.SaveSlowTrace("10", observability.TraceView{
+		TraceID: "cur1cur1cur1cur1", TS: time.Now().UnixMicro(), Route: "POST /api/guides",
+		TotalUS: 9000, Status: 422, ErrMsg: "code required",
+		Method: "POST", FullURL: "http://10.localhost/api/guides?dry=1",
+		Headers: map[string]string{
+			"Host": "10.localhost", "Authorization": "[Filtered]", "Content-Type": "application/json",
+		},
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := st.SlowTraces("10", 24)
+	if err != nil || len(got) == 0 {
+		t.Fatalf("SlowTraces: %v (n=%d)", err, len(got))
+	}
+	tv := got[0]
+	if tv.Method != "POST" {
+		t.Errorf("method = %q", tv.Method)
+	}
+	if tv.FullURL != "http://10.localhost/api/guides?dry=1" {
+		t.Errorf("full_url = %q (query string must survive)", tv.FullURL)
+	}
+	if tv.Headers["Host"] != "10.localhost" || tv.Headers["Authorization"] != "[Filtered]" ||
+		tv.Headers["Content-Type"] != "application/json" {
+		t.Errorf("headers not preserved: %+v", tv.Headers)
+	}
+}
+
 // Re-opening the store at the same path re-runs the idempotent ALTER migrations
 // without error, and existing rows survive.
 func TestOpenStore_Idempotent(t *testing.T) {

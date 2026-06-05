@@ -217,6 +217,10 @@ type TraceView struct {
 	Browser   string `json:"browser,omitempty"`
 	OS        string `json:"os,omitempty"`
 	Country   string `json:"country,omitempty"`
+	// Reproducible-request context (persisted traces only): filtered headers +
+	// full URL. Method (above) completes the curl reconstruction.
+	Headers map[string]string `json:"headers,omitempty"`
+	FullURL string            `json:"full_url,omitempty"`
 }
 
 // RecentTraces returns up to n of the tenant's most recent requests projected as

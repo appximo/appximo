@@ -119,6 +119,18 @@ type RequestTap struct {
 	Capture    *observability.ErrorCapture // symbolized stack for a 500 (nil otherwise)
 	IP         string                      // client IP (X-Real-IP / X-Forwarded-For / RemoteAddr)
 	UserAgent  string                      // raw User-Agent header
+	Headers    map[string]string           // filtered request headers (persisted traces only)
+	FullURL    string                      // scheme://host/path?query (persisted traces only)
+}
+
+// requestFullURL reconstructs the request URL: scheme (from X-Forwarded-Proto,
+// else http) + host + path + query.
+func requestFullURL(r *http.Request) string {
+	scheme := "http"
+	if p := r.Header.Get("X-Forwarded-Proto"); p != "" {
+		scheme = p
+	}
+	return scheme + "://" + r.Host + r.URL.RequestURI()
 }
 
 // RequestLogger returns a chi-compatible middleware that logs each request with zerolog.
@@ -196,6 +208,18 @@ func RequestLogger(
 						route = p
 					}
 				}
+				// Headers + full URL are captured ONLY for traces that will be
+				// persisted (errors or slow), using the exact persistence predicate.
+				// The 200-OK hot path never iterates r.Header.
+				var reqHeaders map[string]string
+				var fullURL string
+				if observability.ShouldPersistTrace(observability.Sample{
+					DurUS:  int32(elapsed.Microseconds()),
+					Status: uint16(ww.Status()),
+				}) {
+					reqHeaders = observability.FilterHeaders(r.Header)
+					fullURL = requestFullURL(r)
+				}
 				tap(RequestTap{
 					TenantID:   tenantID,
 					Method:     r.Method,
@@ -211,6 +235,8 @@ func RequestLogger(
 					Capture:    capture,
 					IP:         clientIP(r),
 					UserAgent:  r.Header.Get("User-Agent"),
+					Headers:    reqHeaders,
+					FullURL:    fullURL,
 				})
 			}
 		})
