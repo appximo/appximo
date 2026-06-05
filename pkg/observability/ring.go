@@ -34,6 +34,10 @@ type Sample struct {
 	// pointer, so non-error samples cost only 8 bytes and Record stays alloc-free.
 	ErrMsg       string
 	ErrorCapture *ErrorCapture
+	// Client context (raw): browser/OS are parsed and country geo-resolved lazily
+	// in the projection, so the hot path only stores two strings.
+	IP        string
+	UserAgent string
 }
 
 // TenantRing is a fixed circular buffer of the last ringSize samples for one tenant.
@@ -207,6 +211,12 @@ type TraceView struct {
 	Method string `json:"method,omitempty"`
 	UserID string `json:"user_id,omitempty"`
 	Role   string `json:"role,omitempty"`
+	// Client context — IP, parsed browser/OS, and geo country.
+	IP        string `json:"ip,omitempty"`
+	UserAgent string `json:"user_agent,omitempty"`
+	Browser   string `json:"browser,omitempty"`
+	OS        string `json:"os,omitempty"`
+	Country   string `json:"country,omitempty"`
 }
 
 // RecentTraces returns up to n of the tenant's most recent requests projected as
@@ -227,13 +237,15 @@ func (rs *Rings) RecentTraces(tenantID string, n int) []TraceView {
 		spans := make([]Span, ns)
 		copy(spans, s.Spans[:ns])
 		tv := TraceView{
-			TraceID: traceIDString(s.TraceID),
-			TS:      s.Start,
-			Route:   rs.RouteName(s.Route),
-			TotalUS: s.DurUS,
-			Status:  s.Status,
-			Spans:   spans,
-			ErrMsg:  s.ErrMsg,
+			TraceID:   traceIDString(s.TraceID),
+			TS:        s.Start,
+			Route:     rs.RouteName(s.Route),
+			TotalUS:   s.DurUS,
+			Status:    s.Status,
+			Spans:     spans,
+			ErrMsg:    s.ErrMsg,
+			IP:        s.IP,
+			UserAgent: s.UserAgent,
 		}
 		if s.ErrorCapture != nil {
 			tv.Stack = s.ErrorCapture.Stack

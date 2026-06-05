@@ -1,11 +1,62 @@
 package observability_test
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/miguelangel/appitools/pkg/observability"
 )
+
+// Client context (ip/user_agent/browser/os/country) round-trips through SQLite.
+func TestSaveSlowTrace_ClientContext(t *testing.T) {
+	st := openTempStore(t)
+	if err := st.SaveSlowTrace("10", observability.TraceView{
+		TraceID: "c1c1c1c1c1c1c1c1", TS: time.Now().UnixMicro(), Route: "POST /api/guides",
+		TotalUS: 13000, Status: 500, ErrMsg: "boom",
+		IP: "190.85.0.1", UserAgent: "Mozilla/5.0 (Windows NT 10.0) Chrome/148",
+		Browser: "Chrome", OS: "Windows 10", Country: "CO",
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := st.SlowTraces("10", 24)
+	if err != nil || len(got) == 0 {
+		t.Fatalf("SlowTraces: %v (n=%d)", err, len(got))
+	}
+	tv := got[0]
+	if tv.IP != "190.85.0.1" || tv.Browser != "Chrome" || tv.OS != "Windows 10" || tv.Country != "CO" {
+		t.Errorf("client context not preserved: %+v", tv)
+	}
+	if tv.UserAgent != "Mozilla/5.0 (Windows NT 10.0) Chrome/148" {
+		t.Errorf("user_agent = %q", tv.UserAgent)
+	}
+}
+
+// Re-opening the store at the same path re-runs the idempotent ALTER migrations
+// without error, and existing rows survive.
+func TestOpenStore_Idempotent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "obs.db")
+	st1, err := observability.OpenStore(path)
+	if err != nil {
+		t.Fatalf("open 1: %v", err)
+	}
+	if err := st1.SaveSlowTrace("10", observability.TraceView{
+		TraceID: "abcabcabcabcabca", TS: time.Now().UnixMicro(), Route: "r", TotalUS: 60000, Status: 200,
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	st1.Close()
+
+	st2, err := observability.OpenStore(path) // re-runs ADD COLUMN migrations
+	if err != nil {
+		t.Fatalf("open 2 (idempotent migration) failed: %v", err)
+	}
+	defer st2.Close()
+	got, _ := st2.SlowTraces("10", 24)
+	if len(got) != 1 || got[0].TraceID != "abcabcabcabcabca" {
+		t.Fatalf("row did not survive reopen: %+v", got)
+	}
+}
 
 // stack_json is persisted only for 500s; 4xx errors store err_msg but no stack.
 func TestSaveSlowTrace_StackOnlyFor500(t *testing.T) {

@@ -96,6 +96,11 @@ func OpenStore(path string) (*ObsStore, error) {
 			status     INTEGER NOT NULL DEFAULT 0, -- HTTP status (so errors are visible/colored)
 			err_msg    TEXT,               -- error message for 4xx/5xx ("" otherwise)
 			stack_json TEXT,               -- JSON array of StackFrame, 500s only
+			ip         TEXT,               -- client IP
+			user_agent TEXT,               -- raw User-Agent
+			browser    TEXT,               -- parsed browser
+			os         TEXT,               -- parsed OS
+			country    TEXT,               -- ISO country code (GeoLite2)
 			spans_json TEXT,               -- JSON array of {name, dur_us}
 			PRIMARY KEY (trace_id)
 		);
@@ -105,10 +110,13 @@ func OpenStore(path string) (*ObsStore, error) {
 		return nil, fmt.Errorf("init obs schema: %w", err)
 	}
 	// Migrate slow_traces tables created before these columns existed. Each ALTER
-	// errors with "duplicate column name" once applied, which we ignore.
-	_, _ = db.Exec(`ALTER TABLE slow_traces ADD COLUMN status INTEGER NOT NULL DEFAULT 0`)
-	_, _ = db.Exec(`ALTER TABLE slow_traces ADD COLUMN err_msg TEXT`)
-	_, _ = db.Exec(`ALTER TABLE slow_traces ADD COLUMN stack_json TEXT`)
+	// errors with "duplicate column name" once applied, which we ignore (idempotent).
+	for _, col := range []string{
+		`status INTEGER NOT NULL DEFAULT 0`, `err_msg TEXT`, `stack_json TEXT`,
+		`ip TEXT`, `user_agent TEXT`, `browser TEXT`, `os TEXT`, `country TEXT`,
+	} {
+		_, _ = db.Exec(`ALTER TABLE slow_traces ADD COLUMN ` + col)
+	}
 	return &ObsStore{db: db}, nil
 }
 
@@ -172,9 +180,11 @@ func (s *ObsStore) SaveSlowTrace(tenantID string, tv TraceView) error {
 		stackJSON = string(b)
 	}
 	_, err = s.db.Exec(
-		`INSERT OR REPLACE INTO slow_traces (trace_id, tenant_id, ts, route, total_us, status, err_msg, stack_json, spans_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tv.TraceID, tenantID, tv.TS, tv.Route, tv.TotalUS, tv.Status, tv.ErrMsg, stackJSON, string(spansJSON),
+		`INSERT OR REPLACE INTO slow_traces
+			(trace_id, tenant_id, ts, route, total_us, status, err_msg, stack_json, ip, user_agent, browser, os, country, spans_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tv.TraceID, tenantID, tv.TS, tv.Route, tv.TotalUS, tv.Status, tv.ErrMsg, stackJSON,
+		tv.IP, tv.UserAgent, tv.Browser, tv.OS, tv.Country, string(spansJSON),
 	)
 	if err != nil {
 		return fmt.Errorf("save slow trace: %w", err)
@@ -187,7 +197,8 @@ func (s *ObsStore) SaveSlowTrace(tenantID string, tv TraceView) error {
 func (s *ObsStore) SlowTraces(tenantID string, hours int) ([]TraceView, error) {
 	cutoff := (time.Now().Unix() - int64(hours)*3600) * 1_000_000 // µs, matches ts unit
 	rows, err := s.db.Query(
-		`SELECT trace_id, ts, route, total_us, status, err_msg, stack_json, spans_json
+		`SELECT trace_id, ts, route, total_us, status, err_msg, stack_json,
+			ip, user_agent, browser, os, country, spans_json
 			FROM slow_traces
 			WHERE tenant_id = ? AND ts > ?
 			ORDER BY ts DESC
@@ -203,12 +214,15 @@ func (s *ObsStore) SlowTraces(tenantID string, hours int) ([]TraceView, error) {
 	for rows.Next() {
 		var tv TraceView
 		var errMsg, stackJSON, spansJSON sql.NullString
+		var ip, ua, browser, os, country sql.NullString
 		var status int
-		if err := rows.Scan(&tv.TraceID, &tv.TS, &tv.Route, &tv.TotalUS, &status, &errMsg, &stackJSON, &spansJSON); err != nil {
+		if err := rows.Scan(&tv.TraceID, &tv.TS, &tv.Route, &tv.TotalUS, &status, &errMsg, &stackJSON,
+			&ip, &ua, &browser, &os, &country, &spansJSON); err != nil {
 			return nil, fmt.Errorf("scan slow trace: %w", err)
 		}
 		tv.Status = uint16(status)
 		tv.ErrMsg = errMsg.String
+		tv.IP, tv.UserAgent, tv.Browser, tv.OS, tv.Country = ip.String, ua.String, browser.String, os.String, country.String
 		if spansJSON.String != "" {
 			_ = json.Unmarshal([]byte(spansJSON.String), &tv.Spans)
 		}

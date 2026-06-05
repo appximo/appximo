@@ -18,7 +18,11 @@ type ObsServer struct {
 	slo        *SLOEngine
 	store         *ObsStore
 	tracesHandler http.Handler // serves /debug/traces; performs its own auth
+	geo           *GeoLookup   // country lookup for enriching recent_traces
 }
+
+// SetGeo installs the GeoLite2 lookup used to enrich recent_traces with country.
+func (s *ObsServer) SetGeo(g *GeoLookup) { s.geo = g }
 
 // SetTracesHandler installs the handler served at /debug/traces. It is injected
 // from package main (where the HTML is go:embed'd and the admin key lives) so the
@@ -99,6 +103,14 @@ func (s *ObsServer) handleTenant(w http.ResponseWriter, r *http.Request) {
 	recentTraces := []TraceView{}
 	if s.rings != nil {
 		recentTraces = s.rings.RecentTraces(id, 10)
+		// Enrich on-demand (admin query): parse the UA and geo-resolve the country,
+		// so the hot path only had to store the raw IP + UA.
+		for i := range recentTraces {
+			recentTraces[i].Browser, recentTraces[i].OS = ParseUserAgent(recentTraces[i].UserAgent)
+			if s.geo != nil {
+				recentTraces[i].Country = s.geo.Country(recentTraces[i].IP)
+			}
+		}
 	}
 	payload := map[string]any{
 		"tenant_id":       id,

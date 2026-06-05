@@ -22,6 +22,7 @@
   tr.trace{cursor:pointer}
   tr.trace:hover{background:#1c2029}
   .tid{color:#9ad0ff}
+  .when{color:var(--muted);font-size:11px;white-space:nowrap}
   .total{text-align:right;font-variant-numeric:tabular-nums}
   .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-weight:600;font-size:11px}
   .st-2{background:#0f3d24;color:#7fe0a3}      /* 2xx green */
@@ -70,7 +71,7 @@
 </header>
 <div class="legend" id="legend"></div>
 <table>
-  <thead><tr><th style="width:150px">trace_id</th><th>route</th><th style="width:70px">status</th><th class="total" style="width:90px">total</th><th style="width:45%">breakdown</th></tr></thead>
+  <thead><tr><th style="width:150px">trace_id</th><th style="width:160px">when</th><th>route</th><th style="width:70px">status</th><th class="total" style="width:90px">total</th><th style="width:40%">breakdown</th></tr></thead>
   <tbody id="rows"></tbody>
 </table>
 <div id="empty" class="empty">Enter tenant + admin key and press Load.</div>
@@ -88,6 +89,9 @@ let timer = null;
 function statusText(s){ return s>=500?"st-5":s>=400?"st-4":s>=300?"st-3":"st-2"; }
 function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function shortFn(fn){ if(!fn) return ""; const i=fn.lastIndexOf("/"); return i>=0?fn.slice(i+1):fn; }
+// ts is unix MICROseconds (Sample.Start / slow_traces.ts) → /1000 = ms for Date.
+function fmtTime(ts){ if(!ts) return "-"; const d=new Date(ts/1000); try{ return d.toLocaleString('es-CO',{dateStyle:'short',timeStyle:'medium'}); }catch(e){ return d.toLocaleString(); } }
+function codeToFlag(cc){ if(!cc||cc.length!==2) return ""; return cc.toUpperCase().replace(/./g,c=>String.fromCodePoint(127397+c.charCodeAt(0))); }
 
 function renderLegend(){
   $("legend").innerHTML = Object.keys(COLORS).filter(k=>k!=="cache")
@@ -108,12 +112,13 @@ function render(traces){
     }).join("");
     tr.innerHTML =
       `<td class="tid">${t.trace_id||"-"}</td>`+
-      `<td>${t.route||"-"}</td>`+
+      `<td class="when">${fmtTime(t.ts)}</td>`+
+      `<td>${esc(t.route||"-")}</td>`+
       `<td><span class="badge ${statusText(t.status)}">${t.status||"·"}</span></td>`+
       `<td class="total">${(total/1000).toFixed(2)} ms</td>`+
       `<td><div class="bar">${bar}</div></td>`;
     const detail = document.createElement("tr"); detail.className="detail"; detail.style.display="none";
-    const cell = document.createElement("td"); cell.colSpan=5;
+    const cell = document.createElement("td"); cell.colSpan=6;
 
     const spansHTML = (t.spans||[]).map(s=>{
       const pct=(s.dur_us/total*100);
@@ -131,6 +136,15 @@ function render(traces){
     if(t.role)    reqBits.push('role: '+esc(t.role));
     if(t.user_id) reqBits.push('user: '+esc(t.user_id));
     let html = `<div class="esec"><div class="ehdr">REQUEST</div><div class="ebody">${reqBits.join('  ·  ')}</div></div>`;
+    // CLIENT (IP / browser / OS / country) — shown when any field is present
+    if(t.ip || t.browser || t.os || t.country){
+      const cl = [];
+      if(t.ip)      cl.push('IP: '+esc(t.ip));
+      if(t.browser) cl.push('Browser: '+esc(t.browser));
+      if(t.os)      cl.push('OS: '+esc(t.os));
+      if(t.country) cl.push('Country: '+codeToFlag(t.country)+' '+esc(t.country));
+      html += `<div class="esec"><div class="ehdr">CLIENT</div><div class="ebody">${cl.join('  ·  ')}</div></div>`;
+    }
     // ERROR (any 4xx/5xx with a message)
     if(t.error_msg){
       html += `<div class="esec"><div class="ehdr">ERROR</div><div class="ebody err">${esc(t.error_msg)}</div></div>`;

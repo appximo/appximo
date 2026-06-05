@@ -3,9 +3,11 @@ package logging
 import (
 	"bytes"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -14,6 +16,24 @@ import (
 	"github.com/miguelangel/appitools/pkg/tenant"
 	"github.com/rs/zerolog"
 )
+
+// clientIP extracts the client IP: X-Real-IP, then the first X-Forwarded-For
+// entry, then the host part of RemoteAddr.
+func clientIP(r *http.Request) string {
+	if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		return ip
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.IndexByte(xff, ','); i >= 0 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
 
 // Log is the package-level structured logger. Call Init before using.
 var Log zerolog.Logger
@@ -95,8 +115,10 @@ type RequestTap struct {
 	FromCache  bool
 	TraceID    string               // 16-hex request trace id (also in X-Trace-ID)
 	Spans      []observability.Span // per-stage breakdown from the SpanTracker
-	ErrMsg     string               // error message for an errored request ("" otherwise)
+	ErrMsg     string                      // error message for an errored request ("" otherwise)
 	Capture    *observability.ErrorCapture // symbolized stack for a 500 (nil otherwise)
+	IP         string                      // client IP (X-Real-IP / X-Forwarded-For / RemoteAddr)
+	UserAgent  string                      // raw User-Agent header
 }
 
 // RequestLogger returns a chi-compatible middleware that logs each request with zerolog.
@@ -187,6 +209,8 @@ func RequestLogger(
 					Spans:      spans,
 					ErrMsg:     errMsg,
 					Capture:    capture,
+					IP:         clientIP(r),
+					UserAgent:  r.Header.Get("User-Agent"),
 				})
 			}
 		})

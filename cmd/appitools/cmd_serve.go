@@ -196,7 +196,10 @@ var serveCmd = &cobra.Command{
 		}
 		synthmon := observability.NewSyntheticMonitor(synthChecks)
 		synthmon.Start(ctx, 60*time.Second)
+		// GeoLite2 country lookup (embedded mmdb, ~1µs, graceful if absent).
+		geo := observability.DefaultGeoLookup()
 		obsServer := observability.NewObsServer(hist, errStore, anomaly, synthmon, rings, sloEngine, obsStore)
+		obsServer.SetGeo(geo)
 		// /debug/traces visual: accept auth via ?key= OR X-Admin-Key — ONLY for this
 		// HTML route, so it opens directly in a browser. The JSON debug APIs remain
 		// header-only (handled by the DebugRouter's admin group).
@@ -338,6 +341,8 @@ var serveCmd = &cobra.Command{
 					NSpans:       uint8(n),
 					ErrMsg:       t.ErrMsg,
 					ErrorCapture: t.Capture, // nil unless a 500 captured a stack
+					IP:           t.IP,
+					UserAgent:    t.UserAgent,
 				}
 				rings.Record(t.TenantID, sample)
 				metrics.SetActiveTenants(rings.Count())
@@ -346,22 +351,29 @@ var serveCmd = &cobra.Command{
 				// asynchronously so the request path never blocks on SQLite.
 				if obsStore != nil && observability.ShouldPersistTrace(sample) {
 					tv := observability.TraceView{
-						TraceID: t.TraceID,
-						TS:      t.StartUS,
-						Route:   t.Route,
-						TotalUS: sample.DurUS,
-						Status:  uint16(t.Status),
-						Spans:   append([]observability.Span(nil), t.Spans...),
-						ErrMsg:  t.ErrMsg,
+						TraceID:   t.TraceID,
+						TS:        t.StartUS,
+						Route:     t.Route,
+						TotalUS:   sample.DurUS,
+						Status:    uint16(t.Status),
+						Spans:     append([]observability.Span(nil), t.Spans...),
+						ErrMsg:    t.ErrMsg,
+						IP:        t.IP,
+						UserAgent: t.UserAgent,
 					}
 					if t.Capture != nil {
 						tv.Stack = t.Capture.Stack
+						tv.Method, tv.UserID, tv.Role = t.Capture.Method, t.Capture.UserID, t.Capture.Role
 						if tv.ErrMsg == "" {
 							tv.ErrMsg = t.Capture.ErrMsg
 						}
 					}
 					tenantID := t.TenantID
+					ip, ua := t.IP, t.UserAgent
 					go func() {
+						// Parse UA + geo-resolve country off the request path.
+						tv.Browser, tv.OS = observability.ParseUserAgent(ua)
+						tv.Country = geo.Country(ip)
 						if err := obsStore.SaveSlowTrace(tenantID, tv); err != nil {
 							log.Printf("save slow trace [%s]: %v", tenantID, err)
 						}
