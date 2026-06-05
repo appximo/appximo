@@ -299,7 +299,13 @@ var serveCmd = &cobra.Command{
 		r := chi.NewMux()
 		r.Use(appmiddleware.SecurityHeaders)
 		r.Use(chimiddleware.Compress(5, "application/json", "application/graphql+json"))
-		r.Use(chimiddleware.RealIP)
+		// NOTE: chimiddleware.RealIP intentionally omitted. It overwrites
+		// r.RemoteAddr from the spoofable X-Forwarded-For / X-Real-IP headers
+		// (GHSA-3fxj-6jh8-hvhx). The only consumer of RemoteAddr is logging.clientIP,
+		// which already reads those headers itself for the (best-effort) trace IP, so
+		// RealIP added nothing but a spoofable RemoteAddr. Without it, RemoteAddr is
+		// the real TCP peer. If a trusted reverse proxy is ever put in front, restore
+		// a proxy-aware extraction here instead of RealIP.
 		r.Use(chimiddleware.RequestID)
 		r.Use(tenant.TenantMiddleware)
 		// Rate limit per tenant, after the tenant is resolved but before any work
