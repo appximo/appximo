@@ -1,0 +1,34 @@
+# Keep the Docker build context small. The image build only needs the Go source
+# (cmd/, pkg/, internal/, go.mod, go.sum) plus testdata/logistics/schema.json
+# (baked in by the Dockerfile). Everything below is excluded.
+
+# VCS / CI
+.git
+.github
+
+# Compiled binaries & build artifacts (the image builds its own binary)
+/appitools
+appitools_audit
+*.pre_*
+*.bundle
+appitools-rollback/
+coverage.out
+*.out
+*.test
+
+# The visual UI ships from the separate appitools-ui repo — not part of this build
+appitools-ui/
+**/node_modules/
+package-lock.json
+
+# Docs (not needed to compile the binary)
+*.md
+!README.md
+context-docs/
+benchmarks/
+docs/
+
+# Local env / secrets (never send to the build)
+.env
+.env.*
+!.env.example

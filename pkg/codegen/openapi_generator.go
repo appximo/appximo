@@ -272,16 +272,17 @@ func buildOAComponents(s *schema.APISchema) map[string]any {
 				"error": map[string]any{"type": "string"},
 			},
 		},
+		// Matches the actual list response: page/per_page/has_next/has_prev. No
+		// total/total_pages — COUNT(*) was removed from the list handler for
+		// performance, so the response never carries row totals.
 		"PaginationMeta": map[string]any{
 			"type":     "object",
-			"required": []string{"page", "per_page", "total", "total_pages", "has_next", "has_prev"},
+			"required": []string{"page", "per_page", "has_next", "has_prev"},
 			"properties": map[string]any{
-				"page":        map[string]any{"type": "integer"},
-				"per_page":    map[string]any{"type": "integer"},
-				"total":       map[string]any{"type": "integer"},
-				"total_pages": map[string]any{"type": "integer"},
-				"has_next":    map[string]any{"type": "boolean"},
-				"has_prev":    map[string]any{"type": "boolean"},
+				"page":     map[string]any{"type": "integer"},
+				"per_page": map[string]any{"type": "integer"},
+				"has_next": map[string]any{"type": "boolean"},
+				"has_prev": map[string]any{"type": "boolean"},
 			},
 		},
 		"PaginationLinks": map[string]any{

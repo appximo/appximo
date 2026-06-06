@@ -18,7 +18,7 @@ Bre-B-ready webhooks) built in from day one.
 
 A single JSON schema becomes a multi-tenant REST + GraphQL API — with JWT auth,
 RBAC, per-tenant Postgres isolation, hooks, and observability — compiled into one
-~46 MB static binary that idles at ~24 MB RAM.
+~46 MB static binary that uses ~24 MB RAM at cold start (~50 MB under sustained load).
 
 ## Quick Start (self-hosted, 5 minutes)
 
@@ -57,7 +57,7 @@ the control plane — see [Deployment](#deployment).
 
 **Multi-tenancy**
 - Schema-per-tenant isolation (`SET LOCAL search_path`), not Row Level Security
-- 100+ tenants on a single Postgres instance
+- Multiple isolated tenants on a single Postgres instance (schema-per-tenant isolation)
 - Real-time schema cache invalidation via `pg_notify`
 
 **Security**
@@ -92,7 +92,7 @@ multi-tenancy + rate limiting + circuit breaker **all active**:
 
 <sub>*rate limited by design</sub>
 
-RAM idle: **24 MB** · CPU at 2000 RPS: **40% of one core**
+RAM: **~24 MB cold start, ~50 MB under sustained load** · CPU at 2000 RPS: **40% of one core**
 
 **vs NestJS** on the same hardware (no auth, no RBAC, no multi-tenancy — a deliberately
 favorable baseline for NestJS): it saturated and collapsed at **1092 RPS** real
