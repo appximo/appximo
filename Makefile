@@ -21,6 +21,9 @@ collect-profile:
 
 # build-pgo: compile with the profile collected by collect-profile.
 # Requires default.pgo to exist (run collect-profile first).
+# -trimpath strips local paths; -ldflags="-s -w" drops the symbol table + DWARF
+# (~30% smaller binary). The runtime pclntab is kept, so runtime.CallersFrames —
+# and therefore the error trace explorer's symbolized stacks — still work.
 build-pgo: default.pgo
-	go build -pgo=default.pgo -o appitools ./cmd/appitools/
+	go build -pgo=default.pgo -trimpath -ldflags="-s -w" -o appitools ./cmd/appitools/
 	@echo "PGO binary written to ./appitools"
