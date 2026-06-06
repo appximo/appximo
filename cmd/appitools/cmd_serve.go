@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -449,6 +450,14 @@ var serveCmd = &cobra.Command{
 		r.Method(http.MethodPost, "/admin/backup",
 			observability.AdminAuth(adminKey, backupHandler(pool)))
 
+		// Admin schema reload — admin-key gated, JWT-exempt. The manual ADR-014
+		// workaround: evict the tenant's response cache (so the next request
+		// re-queries Postgres) and warm-reload its schema from public.tenants.
+		// It does NOT hot-swap the compiled GraphQL/REST (deferred to Phase 2);
+		// new resources/types still require a restart.
+		r.Method(http.MethodPost, "/admin/tenants/{id}/reload",
+			observability.AdminAuth(adminKey, reloadHandler(cpSvc, responseCache, schemaCache)))
+
 		// Liveness — never touches Postgres.
 		r.Get("/healthz", ss.HealthzHandler)
 		// Readiness — returns 503 during drain/shutdown.
@@ -607,6 +616,91 @@ func backupHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		json.NewEncoder(w).Encode(results[0]) //nolint:errcheck
 	}
+}
+
+// reloadHandler returns the POST /admin/tenants/{id}/reload handler — the manual
+// ADR-014 workaround. For the tenant in the {id} path param it:
+//  1. verifies the tenant exists in public.tenants (404 if not);
+//  2. evicts that tenant's response-cache entries so the NEXT request re-queries
+//     Postgres — REST (SELECT *) then reflects new columns immediately, with no 5s
+//     TTL wait and no process restart; and
+//  3. warm-loads + validates the tenant's stored schema from public.tenants into
+//     the in-memory SchemaCache.
+//
+// It deliberately does NOT regenerate the compiled GraphQL schema or REST routes:
+// those are built once at startup from a fixed schema, and hot-swapping them under
+// load is deferred to Phase 2 (ADR-014). Adding a *resource* or GraphQL *type*
+// therefore still requires a restart; this endpoint covers column-level changes and
+// warms the schema cache without one. It never touches other tenants and never
+// interrupts in-flight requests — Invalidate only drops cached copies, and Set
+// replaces a map entry. DB errors are logged internally and never echoed into the
+// response body.
+func reloadHandler(svc controlplane.Service, rc *cache.ResponseCache, sc *tenant.SchemaCache) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		start := time.Now()
+		w.Header().Set("Content-Type", "application/json")
+
+		id := chi.URLParam(req, "id")
+		if id == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "tenant id is required"}) //nolint:errcheck
+			return
+		}
+
+		// 1. Tenant must exist in public.tenants.
+		if _, err := svc.GetByID(req.Context(), id); err != nil {
+			if errors.Is(err, controlplane.ErrNotFound) {
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(map[string]any{"ok": false, "tenant_id": id, "error": "tenant not found"}) //nolint:errcheck
+				return
+			}
+			logging.Log.Error().Str("tenant_id", id).Err(err).Msg("admin reload: tenant lookup failed")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]any{"ok": false, "tenant_id": id, "error": "reload failed"}) //nolint:errcheck
+			return
+		}
+
+		// 2. Evict cached responses so the next request re-queries the DB.
+		rc.Invalidate(id)
+
+		// 3. Warm-reload + validate the schema from the DB.
+		apiSchema, err := svc.GetSchema(req.Context(), id)
+		if err != nil {
+			logging.Log.Error().Str("tenant_id", id).Err(err).Msg("admin reload: schema reload failed")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]any{"ok": false, "tenant_id": id, "error": "reload failed"}) //nolint:errcheck
+			return
+		}
+		// A nil schema means the tenant exists but has no schema set yet — not an
+		// error; the cache eviction above still stands. Only store a real schema.
+		if apiSchema != nil {
+			sc.Set(id, apiSchema)
+		}
+
+		reloadedAt := time.Now().UTC().Format(time.RFC3339)
+		logging.Log.Info().
+			Str("tenant_id", id).
+			Str("remote_ip", remoteIP(req)).
+			Int64("latency_ms", time.Since(start).Milliseconds()).
+			Msg("admin reload: tenant reloaded")
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+			"ok":          true,
+			"tenant_id":   id,
+			"reloaded_at": reloadedAt,
+		})
+	}
+}
+
+// remoteIP returns the client IP without the port. X-Forwarded-For / X-Real-IP are
+// intentionally ignored (spoofable, dropped in a prior commit) and these admin
+// endpoints are localhost-only in prod, so the peer address is the right source.
+func remoteIP(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 // parseMemLimit parses strings like "512MiB", "1GiB", "1073741824" into bytes.

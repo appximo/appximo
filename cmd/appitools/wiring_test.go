@@ -23,6 +23,11 @@ func TestWiring_RBACCacheGateMounted(t *testing.T) {
 	requireWired(t, "cmd_serve.go", "SetRoleCacheGate(", "RBAC response-cache role gate (FIX 1)")
 }
 
+func TestWiring_AdminReloadMounted(t *testing.T) {
+	requireWired(t, "cmd_serve.go", `"/admin/tenants/{id}/reload"`, "ADR-014 manual schema reload endpoint")
+	requireWired(t, "cmd_serve.go", "reloadHandler(cpSvc, responseCache, schemaCache)", "ADR-014 reload handler wiring")
+}
+
 // requireWired fails unless needle appears on a non-comment line of file.
 func requireWired(t *testing.T, file, needle, what string) {
 	t.Helper()
