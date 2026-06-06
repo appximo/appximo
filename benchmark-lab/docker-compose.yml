@@ -48,8 +48,10 @@ services:
     image: appitools-bench:latest
     environment:
       DATABASE_URL: postgresql://bench:bench@postgres/benchdb
-      JWT_SECRET: benchsecret
-      ADMIN_KEY: benchadmin
+      # Set these in your shell or a local .env before running the benchmark stack.
+      # Never commit real secret values (the previous literals were revoked).
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET for the benchmark stack}
+      ADMIN_KEY: ${ADMIN_KEY:?set ADMIN_KEY for the benchmark stack}
       APPITOOLS_ENV: production
     depends_on:
       postgres:

@@ -51,6 +51,8 @@ func buildOAPaths(s *schema.APISchema) map[string]any {
 		}
 		paths["/api/"+name+"/{id}"] = map[string]any{
 			"get":    oaGetOp(name, title),
+			"put":    oaReplaceOp(name, title),
+			"patch":  oaUpdateOp(name, title),
 			"delete": oaDeleteOp(name, title),
 		}
 		// subresource paths
@@ -173,6 +175,60 @@ func oaGetOp(name, title string) map[string]any {
 	}
 }
 
+// oaReplaceOp documents PUT /api/{resource}/{id} — full replacement. It consumes
+// the same Input schema as create (all required fields enforced); omitted optional
+// fields are reset to null on the server.
+func oaReplaceOp(name, title string) map[string]any {
+	return map[string]any{
+		"operationId": "replace" + title,
+		"summary":     "Replace " + name,
+		"description": "Full replacement: all required fields must be present; omitted optional fields are set to null.",
+		"tags":        []string{name},
+		"parameters":  []any{oaPathIDParam()},
+		"requestBody": map[string]any{
+			"required": true,
+			"content":  oaJSONContent(oaSchemaRef(title + "Input")),
+		},
+		"responses": map[string]any{
+			"200": oaSuccessResp(oaSchemaRef(title)),
+			"400": oaRespRef("Error400"),
+			"401": oaRespRef("Error401"),
+			"403": oaRespRef("Error403"),
+			"404": oaRespRef("Error404"),
+			"409": oaRespRef("Error409"),
+			"413": oaRespRef("Error413"),
+			"422": oaRespRef("Error422"),
+		},
+	}
+}
+
+// oaUpdateOp documents PATCH /api/{resource}/{id} — partial update. It consumes the
+// PatchInput schema (every field optional); only the fields present in the body are
+// modified.
+func oaUpdateOp(name, title string) map[string]any {
+	return map[string]any{
+		"operationId": "update" + title,
+		"summary":     "Partially update " + name,
+		"description": "Partial update: only the fields present in the body are modified; the rest are left unchanged.",
+		"tags":        []string{name},
+		"parameters":  []any{oaPathIDParam()},
+		"requestBody": map[string]any{
+			"required": true,
+			"content":  oaJSONContent(oaSchemaRef(title + "PatchInput")),
+		},
+		"responses": map[string]any{
+			"200": oaSuccessResp(oaSchemaRef(title)),
+			"400": oaRespRef("Error400"),
+			"401": oaRespRef("Error401"),
+			"403": oaRespRef("Error403"),
+			"404": oaRespRef("Error404"),
+			"409": oaRespRef("Error409"),
+			"413": oaRespRef("Error413"),
+			"422": oaRespRef("Error422"),
+		},
+	}
+}
+
 func oaDeleteOp(name, title string) map[string]any {
 	return map[string]any{
 		"operationId": "delete" + title,
@@ -245,6 +301,11 @@ func buildOAComponents(s *schema.APISchema) map[string]any {
 		title := toPascalCase(name)
 		schemas[title] = oaResourceSchema(&res, true)
 		schemas[title+"Input"] = oaResourceSchema(&res, false)
+		// PatchInput mirrors Input but with every field optional (no required list),
+		// matching PATCH semantics (only supplied fields are updated).
+		patchInput := oaResourceSchema(&res, false)
+		delete(patchInput, "required")
+		schemas[title+"PatchInput"] = patchInput
 		schemas[title+"ListResponse"] = map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -272,7 +333,9 @@ func buildOAComponents(s *schema.APISchema) map[string]any {
 			"Error401": oaErrResp("Authentication required — include a valid Bearer token"),
 			"Error403": oaErrResp("Insufficient permissions for this action"),
 			"Error404": oaErrResp("Resource not found"),
-			"Error422": oaErrResp("before_create hook rejected the request"),
+			"Error409": oaErrResp("Conflict — a unique constraint would be violated"),
+			"Error413": oaErrResp("Request body too large (1 MiB limit)"),
+			"Error422": oaErrResp("Validation failed, or a before_create/before_update hook rejected the request"),
 		},
 	}
 }

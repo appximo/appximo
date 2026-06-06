@@ -1,0 +1,67 @@
+# Appitools — self-hosted (BYOC) stack.
+#
+#   cp .env.example .env   # then edit the secrets
+#   docker compose up      # starts engine + postgres (data plane on :8080)
+#
+# The visual UI is published from the separate `appitools-ui` repository and is
+# therefore behind the optional "ui" profile (its image is not on a public
+# registry yet). Enable it with:  docker compose --profile ui up
+#
+# First-run note: the database starts empty. The engine serves the baked example
+# schema, and /healthz is live immediately, but tenant tables are created when you
+# register a tenant through the control plane on :9090 (see README → Deployment).
+
+services:
+  engine:
+    image: appitools/engine:latest
+    build: .
+    environment:
+      DATABASE_URL: postgres://appitools:${DB_PASSWORD:-changeme}@db:5432/appitools?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}
+      ADMIN_KEY: ${ADMIN_KEY:?ADMIN_KEY is required}
+      GOMAXPROCS: "2"
+    ports:
+      - "8080:8080" # data plane: REST + GraphQL (public)
+      - "9090:9090" # control plane: tenant/schema admin (keep private in prod)
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ui:
+    image: appitools/ui:latest
+    # opt-in: `docker compose --profile ui up`. The UI image is NOT on a public
+    # registry yet — build it from the appitools-ui repo (or point this at your own
+    # image) before enabling the profile.
+    profiles: ["ui"]
+    environment:
+      NEXT_PUBLIC_API_URL: http://engine:9090
+      # Dev default so a plain `docker compose up` never fails on this profiled
+      # service (compose interpolates the whole file before applying profiles, so
+      # a required `:?` here would break the default up). SET A STRONG VALUE before
+      # running the UI in anything but local dev.
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-changeme}
+      NEXTAUTH_URL: http://localhost:3100
+    ports:
+      - "3100:3100"
+    depends_on:
+      - engine
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: appitools
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      POSTGRES_DB: appitools
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appitools"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
