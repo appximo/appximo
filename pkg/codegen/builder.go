@@ -3,13 +3,16 @@ package codegen
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/extensions"
@@ -20,6 +23,21 @@ import (
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
+
+// CacheInvalidator drops a tenant's cached GET responses. *cache.ResponseCache
+// implements it. BuildRouter calls it after a successful PUT/PATCH so a follow-up
+// read reflects the write immediately instead of waiting out the response-cache
+// TTL. May be nil (e.g. in tests or when no cache is wired).
+type CacheInvalidator interface {
+	Invalidate(tenantID string)
+}
+
+// writeJSONErr writes {"error": msg} with the given status and JSON content type.
+func writeJSONErr(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg}) //nolint:errcheck
+}
 
 // maxRequestBodyBytes caps the size of a write request body. Without it a client
 // could stream an arbitrarily large JSON document and force unbounded allocation
@@ -88,8 +106,9 @@ func applyRowCondition(query string, args []any, cond *rbac.WhereCondition) (str
 }
 
 // BuildRouter creates a chi.Mux with real SQL handlers for every resource in the schema.
-// Used by `appitools serve` — no code generation required.
-func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunner) *chi.Mux {
+// Used by `appitools serve` — no code generation required. inv (nil-able) is the
+// response-cache invalidator called after a successful PUT/PATCH.
+func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunner, inv CacheInvalidator) *chi.Mux {
 	names := make([]string, 0, len(s.Resources))
 	for name := range s.Resources {
 		names = append(names, name)
@@ -326,12 +345,199 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			w.WriteHeader(http.StatusNoContent)
 		})
 
+		// --- Update (PUT = full replace, PATCH = partial) ---
+		// RBAC action="update" is enforced by RBACMiddleware before the handler runs
+		// (actionFromMethod maps PUT/PATCH → "update"), exactly like create/delete.
+		// The handler only consumes the row-level Condition and field-level
+		// AllowedFields from the evaluation result.
+		updateHandler := func(put bool) http.HandlerFunc {
+			return func(w http.ResponseWriter, req *http.Request) {
+				tc := tenant.MustFromCtx(req.Context())
+				id := chi.URLParam(req, "id")
+				if _, err := uuid.Parse(id); err != nil {
+					writeJSONErr(w, http.StatusBadRequest, "invalid id format")
+					return
+				}
+				evalResult := rbac.EvalResultFromCtx(req.Context())
+
+				// Parse body (1 MiB cap → 413; malformed → 400).
+				req.Body = http.MaxBytesReader(w, req.Body, maxRequestBodyBytes)
+				var body map[string]any
+				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+					if strings.Contains(err.Error(), "request body too large") {
+						writeJSONErr(w, http.StatusRequestEntityTooLarge, "request body too large")
+						return
+					}
+					writeJSONErr(w, http.StatusBadRequest, "invalid JSON body")
+					return
+				}
+				if len(body) == 0 {
+					writeJSONErr(w, http.StatusBadRequest, "empty body")
+					return
+				}
+
+				// Field-level RBAC: when the role has an allowlist, only those columns
+				// may be written; others are dropped silently (not an error).
+				writable := func(string) bool { return true }
+				if evalResult != nil && len(evalResult.AllowedFields) > 0 {
+					allow := make(map[string]struct{}, len(evalResult.AllowedFields))
+					for _, f := range evalResult.AllowedFields {
+						allow[f] = struct{}{}
+					}
+					writable = func(f string) bool { _, ok := allow[f]; return ok }
+				}
+
+				// Validate against the schema and collect the columns to set.
+				sets, status, msg := collectUpdate(&res, body, put, writable)
+				if status != 0 {
+					markSpan(req, "validate")
+					writeJSONErr(w, status, msg)
+					return
+				}
+
+				// Confirm the row exists AND passes the row-level RBAC condition.
+				// A non-owned row yields zero rows → 404 (never 403): this matches the
+				// GET-by-id/DELETE pattern and the S33/S34 BOLA fixes that deliberately
+				// avoid revealing the existence of another principal's row.
+				selQ := fmt.Sprintf("SELECT 1 FROM %s WHERE id = $1", name)
+				selArgs := []any{id}
+				if evalResult != nil {
+					var ok bool
+					if selQ, selArgs, ok = applyRowCondition(selQ, selArgs, evalResult.Condition); !ok {
+						writeDBErr(w, req, fmt.Errorf("invalid rbac condition field"))
+						return
+					}
+				}
+				existRows, err := tdb.QueryTenant(req.Context(), tc.PGSchema, selQ, selArgs...)
+				if err != nil {
+					writeDBErr(w, req, err)
+					return
+				}
+				exists := existRows.Next()
+				existRows.Close()
+				if rerr := existRows.Err(); rerr != nil {
+					writeDBErr(w, req, rerr)
+					return
+				}
+				if !exists {
+					writeJSONErr(w, http.StatusNotFound, "not found")
+					return
+				}
+				markSpan(req, "query")
+
+				// before_update hook (Goja/WASM/webhook), same contract as before_create.
+				var beforeHook *schema.HookConfig
+				if hc, ok := res.Hooks["before_update"]; ok {
+					c := hc
+					beforeHook = &c
+				}
+				hookRes, hookErr := hr.RunBeforeHook(req.Context(), beforeHook, body, nil)
+				if hookErr != nil {
+					capture500(req, hookErr)
+					writeJSONErr(w, http.StatusInternalServerError, "internal error")
+					return
+				}
+				if !hookRes.Proceed {
+					markSpan(req, "hook")
+					if t := observability.SpanTrackerFromCtx(req.Context()); t != nil {
+						t.RecordError(hookRes.Error)
+					}
+					writeJSONErr(w, http.StatusUnprocessableEntity, hookRes.Error)
+					return
+				}
+				if beforeHook != nil {
+					markSpan(req, "hook")
+					// Adopt the hook's transformed values, but only for columns we
+					// already decided to write — the hook cannot inject id/auto columns.
+					for col := range sets {
+						if nv, present := hookRes.Data[col]; present {
+							sets[col] = nv
+						}
+					}
+				}
+
+				// Build UPDATE: every column name via pgx.Identifier.Sanitize(), every
+				// value as a bound parameter. updated_at is forced to NOW() — but only
+				// when the resource actually declares an auto updated_at column (most
+				// logistics resources do not), otherwise the column does not exist.
+				cols := make([]string, 0, len(sets))
+				for c := range sets {
+					cols = append(cols, c)
+				}
+				sort.Strings(cols) // deterministic SQL
+				setClauses := make([]string, 0, len(cols)+1)
+				args := make([]any, 0, len(cols)+2)
+				argIdx := 1
+				for _, c := range cols {
+					setClauses = append(setClauses, fmt.Sprintf("%s = $%d", pgx.Identifier{c}.Sanitize(), argIdx))
+					args = append(args, sets[c])
+					argIdx++
+				}
+				if fd, ok := res.Fields["updated_at"]; ok && fd.Auto {
+					setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", argIdx))
+					args = append(args, time.Now().UTC())
+					argIdx++
+				}
+				if len(setClauses) == 0 {
+					writeJSONErr(w, http.StatusUnprocessableEntity, "no writable fields in request")
+					return
+				}
+
+				q := fmt.Sprintf("UPDATE %s SET %s WHERE id = $%d", name, strings.Join(setClauses, ", "), argIdx)
+				args = append(args, id)
+				if evalResult != nil {
+					var ok bool
+					if q, args, ok = applyRowCondition(q, args, evalResult.Condition); !ok {
+						writeDBErr(w, req, fmt.Errorf("invalid rbac condition field"))
+						return
+					}
+				}
+				q += " RETURNING *"
+
+				result, err := tdb.ExecRowsTenant(req.Context(), tc.PGSchema, q, args...)
+				if err != nil {
+					if field, ok := db.UniqueViolationField(err); ok {
+						writeJSONErr(w, http.StatusConflict, fmt.Sprintf("field %q: value already exists", field))
+						return
+					}
+					writeDBErr(w, req, err)
+					return
+				}
+				markSpan(req, "update")
+				if len(result) == 0 {
+					// Row vanished between the existence check and the UPDATE (race).
+					writeJSONErr(w, http.StatusNotFound, "not found")
+					return
+				}
+				record := result[0]
+
+				// Drop this tenant's cached GETs so the next read is fresh (no TTL wait).
+				if inv != nil {
+					inv.Invalidate(tc.ID)
+				}
+
+				if hc, ok := res.Hooks["after_update"]; ok {
+					afterHook := hc
+					hr.FireAfterHook(&afterHook, record, tc.ID)
+				}
+
+				if evalResult != nil && len(evalResult.AllowedFields) > 0 {
+					record = pkghandlers.FilterFields(record, evalResult.AllowedFields)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				pkghandlers.WriteJSON(w, record) //nolint:errcheck
+				markSpan(req, "serialize")
+			}
+		}
+		r.Put("/api/"+name+"/{id}", updateHandler(true))
+		r.Patch("/api/"+name+"/{id}", updateHandler(false))
+
 		// --- Subresources: GET /api/{resource}/{id}/{relName} ---
 		for fieldName, fd := range res.Fields {
 			if fd.Relation == "" {
 				continue
 			}
-			fn := fieldName       // capture
+			fn := fieldName // capture
 			relResource := fd.Relation
 			relRoute := strings.TrimSuffix(fn, "_id")
 
@@ -372,4 +578,129 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 	}
 
 	return r
+}
+
+// collectUpdate validates body against the resource schema for an update and
+// returns the columns→values to write (excluding the auto updated_at, which the
+// handler forces to NOW()). On a validation failure it returns a non-zero HTTP
+// status (always 422 here) and a client-safe message.
+//
+//   - PUT (put=true): every non-auto required field must be present and non-null;
+//     optional fields absent from the body are written as NULL (full replacement).
+//   - PATCH (put=false): only fields present in the body are written; the rest are
+//     left untouched in the DB.
+//
+// Both reject "id" and any auto-managed field appearing in the body, reject unknown
+// fields, type-check values, and validate enums. Fields the role may not write
+// (per writable) are silently dropped from the result.
+func collectUpdate(res *schema.ResourceSchema, body map[string]any, put bool, writable func(string) bool) (map[string]any, int, string) {
+	// Reject id / unknown / auto-managed keys, then type-check each present value.
+	for k, v := range body {
+		if k == "id" {
+			return nil, http.StatusUnprocessableEntity, `field "id" cannot be set`
+		}
+		fd, known := res.Fields[k]
+		if !known {
+			return nil, http.StatusUnprocessableEntity, fmt.Sprintf("unknown field: %q", k)
+		}
+		if fd.Auto {
+			return nil, http.StatusUnprocessableEntity, fmt.Sprintf("field %q is set automatically and cannot be written", k)
+		}
+		if v == nil {
+			if fd.Required {
+				return nil, http.StatusUnprocessableEntity, fmt.Sprintf("field %q is required and cannot be null", k)
+			}
+			continue // null on an optional field → NULL in DB
+		}
+		if msg, ok := validateFieldValue(k, fd, v); !ok {
+			return nil, http.StatusUnprocessableEntity, msg
+		}
+	}
+
+	// PUT requires every non-auto required field to be present and non-null.
+	if put {
+		for name, fd := range res.Fields {
+			if fd.Auto || !fd.Required {
+				continue
+			}
+			if v, present := body[name]; !present || v == nil {
+				return nil, http.StatusUnprocessableEntity, fmt.Sprintf("missing required field: %q", name)
+			}
+		}
+	}
+
+	sets := make(map[string]any)
+	if put {
+		// Full replacement: write every non-auto field — body value or NULL.
+		for name, fd := range res.Fields {
+			if fd.Auto || !writable(name) {
+				continue
+			}
+			sets[name] = body[name] // absent key → nil → NULL
+		}
+	} else {
+		// Partial: only the validated keys present in the body.
+		for name, v := range body {
+			if !writable(name) {
+				continue
+			}
+			sets[name] = v
+		}
+	}
+	return sets, 0, ""
+}
+
+// validateFieldValue checks a single decoded JSON value against a field definition.
+// JSON decoding yields float64 for all numbers, so integer fields require an
+// integral float64. Returns a client-safe message and false on mismatch.
+func validateFieldValue(name string, fd schema.FieldDef, v any) (string, bool) {
+	if len(fd.Enum) > 0 {
+		s, ok := v.(string)
+		if !ok {
+			return fmt.Sprintf("field %q must be one of the allowed values", name), false
+		}
+		for _, e := range fd.Enum {
+			if e == s {
+				return "", true
+			}
+		}
+		return fmt.Sprintf("field %q: invalid enum value", name), false
+	}
+
+	switch fd.Type {
+	case "string", "text":
+		if _, ok := v.(string); !ok {
+			return fmt.Sprintf("field %q must be a string", name), false
+		}
+	case "uuid":
+		s, ok := v.(string)
+		if !ok {
+			return fmt.Sprintf("field %q must be a uuid", name), false
+		}
+		if _, err := uuid.Parse(s); err != nil {
+			return fmt.Sprintf("field %q must be a uuid", name), false
+		}
+	case "int", "int64":
+		f, ok := v.(float64)
+		if !ok || f != math.Trunc(f) {
+			return fmt.Sprintf("field %q must be an integer", name), false
+		}
+	case "float64":
+		if _, ok := v.(float64); !ok {
+			return fmt.Sprintf("field %q must be a number", name), false
+		}
+	case "bool":
+		if _, ok := v.(bool); !ok {
+			return fmt.Sprintf("field %q must be a boolean", name), false
+		}
+	case "time":
+		if _, ok := v.(string); !ok {
+			return fmt.Sprintf("field %q must be a timestamp string", name), false
+		}
+		// The exact timestamp format is validated by Postgres on write; accepting any
+		// string here keeps the handler lenient (documented deviation).
+	case "json":
+		// Any JSON value is acceptable for a json column.
+	}
+	return "", true
 }

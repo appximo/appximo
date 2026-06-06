@@ -159,7 +159,7 @@ func buildDP(s *schema.APISchema, pool *pgxpool.Pool, host string) http.Handler 
 	r.Use(tenant.TenantMiddleware)
 	r.Use(auth.JWTMiddleware(jwtSecret))
 	r.Use(rbacpkg.RBACMiddleware(policyJSON))
-	r.Mount("/", codegen.BuildRouter(s, tdb, hr))
+	r.Mount("/", codegen.BuildRouter(s, tdb, hr, nil))
 
 	// Inject Host header so TenantMiddleware extracts the tenant.
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

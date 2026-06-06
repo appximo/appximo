@@ -483,7 +483,7 @@ var serveCmd = &cobra.Command{
 		// Mount API routes with strict CSP — /api/* serves JSON exclusively.
 		r.Group(func(sub chi.Router) {
 			sub.Use(appmiddleware.StrictCSP)
-			sub.Mount("/", codegen.BuildRouter(s, tdb, hr))
+			sub.Mount("/", codegen.BuildRouter(s, tdb, hr, responseCache))
 		})
 
 		addr := fmt.Sprintf(":%d", port)

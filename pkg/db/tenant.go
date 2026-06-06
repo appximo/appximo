@@ -53,6 +53,25 @@ func IsBadInput(err error) bool {
 	return false
 }
 
+// uniqueViolationDetailRe extracts the offending column from a Postgres
+// unique_violation Detail line: "Key (email)=(x@y.z) already exists." → "email".
+var uniqueViolationDetailRe = regexp.MustCompile(`Key \(([^)]+)\)=`)
+
+// UniqueViolationField reports whether err is a Postgres unique_violation
+// (SQLSTATE 23505) and, if so, returns the offending column name parsed from the
+// error Detail (falling back to the constraint name). Handlers map this to 409
+// without leaking raw SQL. ok is false for any other error.
+func UniqueViolationField(err error) (field string, ok bool) {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		return "", false
+	}
+	if m := uniqueViolationDetailRe.FindStringSubmatch(pgErr.Detail); len(m) == 2 {
+		return m[1], true
+	}
+	return pgErr.ConstraintName, true
+}
+
 // qualifyReCache memoizes the per-table FROM/JOIN regexp. The table name is a
 // validated resource name (a small, fixed set per schema — never client-supplied),
 // so this cache is bounded. It removes a regexp.MustCompile from every QueryDirect
