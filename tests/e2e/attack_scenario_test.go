@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -47,17 +48,17 @@ func TestAttackScenario(t *testing.T) {
 		WithHeader("Authorization", "Bearer "+mintExpiredJWT(t, tenantID, "super_admin")).
 		Expect().Status(http.StatusUnauthorized)
 
-	// ── Oversized body (1.1 MB) → 400 (NOT 413) ─────────────────────────────────
-	// DOCUMENTED BUG (confirmed by the S33/S34 audit and re-verified in
-	// pkg/codegen/builder.go: the POST/create handler decodes the body and reports
-	// the MaxBytesReader overflow via http.Error(..., StatusBadRequest), so it
-	// returns 400. The PUT/PATCH handlers DO distinguish and return 413. We assert
-	// the real 400 here and do NOT change engine code in this session.
-	bigBody := make([]byte, 1_100_000)
+	// ── Oversized body (> 1 MiB) → 413 ──────────────────────────────────────────
+	// The POST/create handler now distinguishes a MaxBytesReader overflow from
+	// malformed JSON and returns 413 (Request Entity Too Large), matching the
+	// PUT/PATCH handlers and the OpenAPI contract (Error413). The payload is a VALID
+	// JSON object whose string value exceeds the 1 MiB cap, so the decoder reaches
+	// the size limit (rather than failing on the first byte, which would be a 400).
+	big := strings.Repeat("x", (1<<20)+512)
 	e.POST("/api/guides").
 		WithHeader("Authorization", admin).
-		WithBytes(bigBody).
-		Expect().Status(http.StatusBadRequest)
+		WithJSON(map[string]any{"code": big}).
+		Expect().Status(http.StatusRequestEntityTooLarge)
 
 	// ── Cross-tenant token → 401 ────────────────────────────────────────────────
 	// A token whose tenant_id is a DIFFERENT tenant, sent at atktenant's Host. The

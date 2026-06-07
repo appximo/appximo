@@ -142,9 +142,11 @@ RAM < 100MB    bajo carga (verificación post-k6, no gate automático aún)
    dian_schema.json con hook before_create que las invoca. SpanTracker capturó
    6 spans reales [jwt rbac hook insert serialize done] vía un tap propio
    (BuildObservableServer DESCARTA RequestTap.Spans → buildSpanServer local).
-⚠️ POST body >1MB → 400 (NO 413): el handler create decodifica y reporta el
-   overflow de MaxBytesReader con http.Error(StatusBadRequest). PUT/PATCH SÍ
-   distinguen (413). Bug documentado, NO corregido en S38. Aserción = 400.
+✅ POST body >1MB → 413 (CORREGIDO post-S38): el handler create ahora distingue
+   el overflow de MaxBytesReader (→413) del JSON malformado (→400), igual que
+   PUT/PATCH y el contrato OpenAPI (Error413). Aserción E2E usa un JSON VÁLIDO
+   con string >1MiB ({"code":"xxx..."}) — un body de bytes 0x00 daría 400 por
+   carácter inválido, no por tamaño. Aserción = 413.
 ⚠️ Cross-tenant (token tenant A → Host tenant B) → 401 "token tenant mismatch"
    (NO 403). JWTMiddleware corre tras TenantMiddleware y compara claims.TenantID.
 ⚠️ Webhooks: BuildObservableServer arma un HookRunner SIN dispatcher → el escenario

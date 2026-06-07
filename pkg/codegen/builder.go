@@ -184,14 +184,21 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		// --- Create ---
 		r.Post("/api/"+name, func(w http.ResponseWriter, req *http.Request) {
 			tc := tenant.MustFromCtx(req.Context())
+			// Parse body (1 MiB cap → 413; malformed → 400). Mirrors the PUT/PATCH
+			// handlers and the OpenAPI contract (Error413), which already document a
+			// 413 for an oversized create body.
 			req.Body = http.MaxBytesReader(w, req.Body, maxRequestBodyBytes)
 			var body map[string]any
 			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				if strings.Contains(err.Error(), "request body too large") {
+					writeJSONErr(w, http.StatusRequestEntityTooLarge, "request body too large")
+					return
+				}
+				writeJSONErr(w, http.StatusBadRequest, "invalid JSON body")
 				return
 			}
 			if len(body) == 0 {
-				http.Error(w, "empty body", http.StatusBadRequest)
+				writeJSONErr(w, http.StatusBadRequest, "empty body")
 				return
 			}
 
