@@ -125,9 +125,36 @@ RAM < 100MB    bajo carga (verificación post-k6, no gate automático aún)
 | Sesión | Deliverable | Estado |
 |---|---|---|
 | **S37** | Folder structure + Makefile + observability tests + k6 CI | ✅ hecho (2026-06-07) |
-| S38 | E2E escenarios 1-4 (httpexpect + testcontainers) | pendiente |
+| **S38** | E2E escenarios 1-4 (httpexpect + testcontainers) | ✅ hecho (2026-06-07) |
 | S39 | Resilience (toxiproxy) + benchmark-action gh-pages | pendiente |
 | S40 | ZAP nightly workflow + fuzzing CI + gotestfmt reporting | pendiente |
+
+### Hallazgos S38 (leer antes de S39)
+
+```
+✅ 4/4 escenarios E2E PASS (-race) vs Postgres real (un contenedor compartido por
+   TestMain en tests/e2e/). httpexpect/v2 v2.17.0 + el Host se fija con
+   e.Builder(req.WithHost("<tenant>.localhost")) — Config NO tiene campo `Builders`.
+   testify queda // indirect (lo arrastra httpexpect.NewRequireReporter), no lo
+   importamos directo.
+✅ DIAN real (no mocks): validateNIT (mod-11) + calculateCUFE (SHA-384, 96 hex)
+   son funciones built-in del JSSandbox → fixture nuevo tests/fixtures/schemas/
+   dian_schema.json con hook before_create que las invoca. SpanTracker capturó
+   6 spans reales [jwt rbac hook insert serialize done] vía un tap propio
+   (BuildObservableServer DESCARTA RequestTap.Spans → buildSpanServer local).
+⚠️ POST body >1MB → 400 (NO 413): el handler create decodifica y reporta el
+   overflow de MaxBytesReader con http.Error(StatusBadRequest). PUT/PATCH SÍ
+   distinguen (413). Bug documentado, NO corregido en S38. Aserción = 400.
+⚠️ Cross-tenant (token tenant A → Host tenant B) → 401 "token tenant mismatch"
+   (NO 403). JWTMiddleware corre tras TenantMiddleware y compara claims.TenantID.
+⚠️ Webhooks: BuildObservableServer arma un HookRunner SIN dispatcher → el escenario
+   webhook usa buildWebhookServer local + dispatcher insecure-transport para llegar
+   al receptor loopback. SSRF se asegura directo contra NewSSRFSafeClient (bloquea
+   loopback + 169.254.169.254). HMAC = "sha256="+hex(HMAC-SHA256(body, secret)),
+   header X-Appitools-Signature, evento X-Appitools-Event.
+ℹ️ deals.status enum = [pending,won,lost] (el brief decía "closed"): el motor
+   valida enums en PATCH (collectUpdate→validateFieldValue) → se usó "won".
+```
 
 ### Hallazgos S37 (leer antes de S38)
 

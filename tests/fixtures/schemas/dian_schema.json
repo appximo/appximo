@@ -1,0 +1,50 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "dian-test",
+  "resources": {
+    "users": {
+      "fields": {
+        "name":       { "type": "string", "required": true },
+        "email":      { "type": "string", "unique": true, "required": true },
+        "role":       { "type": "string", "default": "operario", "enum": ["super_admin", "gerente", "operario"] },
+        "created_at": { "type": "time",   "auto": true }
+      }
+    },
+    "clients": {
+      "fields": {
+        "name":       { "type": "string", "required": true },
+        "nit":        { "type": "string", "unique": true, "required": true },
+        "city":       { "type": "string" },
+        "created_at": { "type": "time",   "auto": true }
+      },
+      "hooks": {
+        "before_create": {
+          "type": "js",
+          "script": "if (!validateNIT(data.nit)) { result.proceed = false; result.error = 'invalid NIT: check digit (mod-11) does not match'; }"
+        }
+      }
+    },
+    "invoices": {
+      "fields": {
+        "nit":        { "type": "string",  "required": true },
+        "amount":     { "type": "float64" },
+        "cufe":       { "type": "string" },
+        "created_at": { "type": "time",    "auto": true }
+      },
+      "hooks": {
+        "before_create": {
+          "type": "js",
+          "script": "if (!validateNIT(data.nit)) { result.proceed = false; result.error = 'invalid NIT on invoice'; } else { data.cufe = calculateCUFE(data); }"
+        }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "super_admin": { "resources": "*", "actions": ["*"] },
+      "gerente":     { "resources": "*", "actions": ["read", "create", "update"] },
+      "operario":    { "resources": ["clients", "invoices"], "actions": ["read"] }
+    }
+  }
+}

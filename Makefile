@@ -27,9 +27,11 @@ test:
 test-integration:
 	go test -tags integration -race -count=1 ./tests/integration/...
 
-# test-e2e: full client scenarios (S38+).
+# test-e2e: full client scenarios (S38+). Pretty-prints with gotestfmt when present,
+# otherwise falls back to cat (raw `go test -v` output).
 test-e2e:
-	go test -tags e2e -race -count=1 ./tests/e2e/...
+	go test ./tests/e2e/... -race -count=1 -tags e2e -timeout 300s -v 2>&1 | \
+	$(if $(shell command -v gotestfmt 2>/dev/null),gotestfmt,cat)
 
 # test-perf: k6 SLO gate. Exits 99 if p95>=15ms or error_rate>=1%.
 # Requires a running server + BENCH_TOKEN (mint with `appitools token`).
