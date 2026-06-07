@@ -41,3 +41,6 @@ benchmark-lab/node_modules/
 # Claude Code runtime artifacts
 .claude/scheduled_tasks.lock
 .claude/scheduled_tasks/
+
+# k6 perf run artifact
+tests/performance/last-run.json

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "crm-test",
+  "resources": {
+    "users": {
+      "fields": {
+        "name":       { "type": "string", "required": true },
+        "email":      { "type": "string", "unique": true, "required": true },
+        "role":       { "type": "string", "default": "operario", "enum": ["gerente", "operario"] },
+        "created_at": { "type": "time",   "auto": true }
+      }
+    },
+    "clients": {
+      "fields": {
+        "name":       { "type": "string", "required": true },
+        "nit":        { "type": "string", "unique": true },
+        "email":      { "type": "string" },
+        "city":       { "type": "string" },
+        "created_at": { "type": "time",   "auto": true }
+      }
+    },
+    "contacts": {
+      "fields": {
+        "client_id":  { "type": "uuid",   "relation": "clients", "required": true },
+        "name":       { "type": "string", "required": true },
+        "email":      { "type": "string" },
+        "phone":      { "type": "string" },
+        "created_at": { "type": "time",   "auto": true }
+      }
+    },
+    "deals": {
+      "fields": {
+        "client_id":  { "type": "uuid",    "relation": "clients", "required": true },
+        "title":      { "type": "string",  "required": true },
+        "status":     { "type": "string",  "enum": ["pending", "won", "lost"], "default": "pending" },
+        "amount":     { "type": "float64" },
+        "owner_id":   { "type": "uuid",    "relation": "users" },
+        "created_at": { "type": "time",    "auto": true }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "gerente": {
+        "resources": "*",
+        "actions": ["*"]
+      },
+      "operario": {
+        "resources": ["clients", "contacts", "deals"],
+        "actions": ["read"]
+      }
+    }
+  }
+}

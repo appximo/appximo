@@ -69,6 +69,14 @@ func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.reg, promhttp.HandlerOpts{})
 }
 
+// Gatherer exposes the dedicated registry as a prometheus.Gatherer. It enables
+// end-to-end metric assertions (prometheus/testutil.GatherAndCompare) against
+// exactly this Metrics' series, without reaching for the global default registry.
+// Like Handler(), it carries no auth of its own.
+func (m *Metrics) Gatherer() prometheus.Gatherer {
+	return m.reg
+}
+
 // ObserveRequest records one served request: increments the counter and observes
 // the duration histogram. path should be the chi route pattern (e.g. "/api/{entity}")
 // rather than the raw URL path, to keep label cardinality bounded.

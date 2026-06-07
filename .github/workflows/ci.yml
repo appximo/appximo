@@ -55,6 +55,11 @@ jobs:
       - name: Full test suite (race)
         run: go test ./... -race -count=1
 
+      # S37 integration suite is behind the `integration` build tag (real Postgres
+      # via testcontainers) so it stays out of the unit lane. Run it explicitly.
+      - name: 'Integration · observability metrics (tags integration)'
+        run: go test -tags integration -race -count=1 ./tests/integration/...
+
   govulncheck:
     name: vet + govulncheck
     runs-on: ubuntu-latest
@@ -74,3 +79,87 @@ jobs:
 
       - name: govulncheck
         run: govulncheck ./...
+
+  perf:
+    name: k6 SLO gate
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: appitools
+          POSTGRES_PASSWORD: appitools
+          POSTGRES_DB: appitools
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U appitools"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://appitools:appitools@localhost:5432/appitools?sslmode=disable
+      JWT_SECRET: ci-perf-jwt-secret
+      ADMIN_KEY: ci-perf-admin-key
+      # Prod-hardware target is 2000 RPS / p95<15ms (PRIMER). Shared CI runners are
+      # not prod hardware, so drive a runner-safe rate while still enforcing the SLO
+      # thresholds (p95<15ms, errors<1%) baked into the k6 script. See
+      # tests/performance/README.md.
+      RATE: "500"
+      DURATION: 20s
+      TENANT_ID: ciperf
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build appitools
+        run: go build -o appitools ./cmd/appitools
+
+      - name: Install k6 + psql client
+        run: |
+          curl -sSL https://github.com/grafana/k6/releases/download/v0.55.0/k6-v0.55.0-linux-amd64.tar.gz \
+            | tar -xz
+          sudo mv k6-v0.55.0-linux-amd64/k6 /usr/local/bin/k6
+          k6 version
+          command -v psql >/dev/null || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Provision tenant schema + seed
+        run: |
+          set -euo pipefail
+          # The tenant pg schema is created by control-plane Register in prod;
+          # ApplyTenantMigration (the `migrate` CLI) only does CREATE TABLE, so the
+          # schema must exist first.
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS tenant_'"$TENANT_ID"';'
+          ./appitools migrate --tenant "$TENANT_ID" --schema tests/fixtures/schemas/logistics_schema.json
+          # Seed 500 guides so the filtered query returns real rows.
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO tenant_${TENANT_ID}.guides (code, status, origin, destination) \
+             SELECT 'GU-'||g, (ARRAY['pending','in_transit','delivered','returned'])[1+(g%4)], 'BOG', 'MED' \
+             FROM generate_series(1,500) g;"
+
+      - name: Run k6 SLO gate
+        run: |
+          set -uo pipefail
+          ./appitools serve --schema tests/fixtures/schemas/logistics_schema.json --port 8080 > serve.log 2>&1 &
+          SERVER_PID=$!
+          # Wait for liveness.
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/healthz >/dev/null; then break; fi
+            sleep 1
+          done
+          TOKEN=$(./appitools token --tenant "$TENANT_ID" --role super_admin --secret "$JWT_SECRET")
+          set +e
+          BENCH_TOKEN="$TOKEN" k6 run \
+            -e RATE="$RATE" -e DURATION="$DURATION" -e TENANT_ID="$TENANT_ID" \
+            tests/performance/sustained_2krps.js
+          RC=$?
+          set -e
+          kill "$SERVER_PID" 2>/dev/null || true
+          if [ "$RC" -ne 0 ]; then
+            echo "::group::server log"; tail -n 100 serve.log; echo "::endgroup::"
+          fi
+          exit $RC

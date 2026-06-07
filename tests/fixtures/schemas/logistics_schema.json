@@ -1,0 +1,86 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "logistics-test",
+  "resources": {
+    "users": {
+      "fields": {
+        "name":       { "type": "string", "required": true },
+        "email":      { "type": "string", "unique": true, "required": true },
+        "role":       { "type": "string", "default": "operario", "enum": ["super_admin", "gerente", "operario"] },
+        "created_at": { "type": "time",   "auto": true }
+      }
+    },
+    "clients": {
+      "fields": {
+        "name":  { "type": "string", "required": true },
+        "nit":   { "type": "string", "unique": true },
+        "email": { "type": "string" },
+        "type":  { "type": "string", "enum": ["empresa", "persona"] }
+      }
+    },
+    "guides": {
+      "fields": {
+        "code":           { "type": "string",  "unique": true, "required": true },
+        "status":         { "type": "string",  "enum": ["pending", "in_transit", "delivered", "returned"] },
+        "origin":         { "type": "string",  "required": true },
+        "destination":    { "type": "string",  "required": true },
+        "weight_kg":      { "type": "float64" },
+        "declared_value": { "type": "float64" },
+        "client_id":      { "type": "uuid",    "relation": "clients" },
+        "operator_id":    { "type": "uuid",    "relation": "users" },
+        "created_at":     { "type": "time",    "auto": true },
+        "updated_at":     { "type": "time",    "auto": true }
+      },
+      "hooks": {
+        "before_create": {
+          "type": "js",
+          "script": "if (!data.code) { result.proceed = false; result.error = 'code required'; }"
+        }
+      },
+      "indexes": [
+        { "fields": ["status", "created_at"] },
+        { "fields": ["client_id"] }
+      ]
+    },
+    "dispatches": {
+      "fields": {
+        "guide_id":      { "type": "uuid", "relation": "guides", "required": true },
+        "operator_id":   { "type": "uuid", "relation": "users" },
+        "dispatched_at": { "type": "time", "auto": true },
+        "notes":         { "type": "text" }
+      }
+    },
+    "incidents": {
+      "fields": {
+        "guide_id":    { "type": "uuid",   "relation": "guides", "required": true },
+        "reported_by": { "type": "uuid",   "relation": "users" },
+        "type":        { "type": "string", "enum": ["lost", "damaged", "delayed", "other"], "required": true },
+        "description": { "type": "text" },
+        "created_at":  { "type": "time",   "auto": true }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "super_admin": {
+        "resources": "*",
+        "actions": ["*"]
+      },
+      "gerente": {
+        "resources": "*",
+        "actions": ["read", "create", "update"]
+      },
+      "operario": {
+        "resources": ["guides", "dispatches", "incidents"],
+        "actions": ["read", "create", "update"],
+        "conditions": { "field": "operator_id", "op": "eq", "val": "$user_id" }
+      },
+      "public": {
+        "resources": ["guides"],
+        "actions": ["read"],
+        "fields": ["code", "status", "updated_at"]
+      }
+    }
+  }
+}

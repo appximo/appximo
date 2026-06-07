@@ -1,0 +1,196 @@
+# APPITOOLS — TESTING PLAN
+> Archivo de contexto para todas las sesiones de testing (S37–S40+).
+> Leer junto a PRIMER.md al inicio de cada sesión de testing.
+> Última actualización: 2026-06-06 · Pre S37
+
+---
+
+## DECISIÓN DE STACK — VERIFICADO CONTRA FUENTES PRIMARIAS
+
+| Capa | Herramienta | Por qué |
+|---|---|---|
+| Unit | `testing` + `testify/require` | Estándar de facto Go, fail-fast inline (testify se agrega en S38; S37 usa `testing` plano) |
+| Integration DB real | `testcontainers-go` **v0.42.0** (real en go.mod, no v0.39.x) | Postgres real con snapshot/restore, activo 2025 |
+| E2E HTTP in-process | `httpexpect/v2` v2.17.0 | API fluida, httptest.NewServer o Binder directo (se agrega en S38, aún no es dep) |
+| Performance + SLO gate | `k6` + `xk6-dashboard` | exit code 99 si threshold falla, HTML autocontenido |
+| Regresión histórica | `benchmark-action` + `benchstat` | chart gh-pages, alert-threshold 130%, Mann-Whitney |
+| Security DAST | `zaproxy/action-api-scan` + `nuclei` | OpenAPI → OWASP API Top 10, nightly |
+| Fuzzing CI | Go nativo `testing.F` | Desde Go 1.18, 30s en PR, scheduled long-run |
+| Resiliencia/Chaos | `Shopify/toxiproxy` | <100µs overhead sin toxics, HTTP API :8474 |
+| Observabilidad métricas | `prometheus/testutil.CollectAndCompare` | End-to-end metric assertion oficial |
+| Observabilidad alertas | `promtool test rules` | Mock series temporales, verifica firing/not-firing |
+| Observabilidad trazas | SpanTracker propio (`pkg/observability/span.go`) | El motor NO usa OTel → `tracetest.SpanRecorder` no aplica |
+| Scenarios giteables | `hurl` (opcional) | Plain text, --report-html, post-deploy smoke |
+
+**NO usar:** godog/BDD (4% adopción, overhead innecesario), Pact/contract testing
+(solo útil con consumers externos independientes), httptest out-of-process salvo
+tests de startup/shutdown/signals/k6.
+
+---
+
+## ESTRUCTURA DE CARPETAS
+
+```
+tests/
+├── integration/           # //go:build integration — DB real via testcontainers
+│   └── observability_test.go    ← S37 ✅/❌
+├── e2e/                   # //go:build e2e — escenarios cliente completos
+│   ├── crm_scenario_test.go     ← S38
+│   ├── dian_scenario_test.go    ← S38
+│   ├── webhook_scenario_test.go ← S38
+│   └── attack_scenario_test.go  ← S38
+├── performance/           # k6 scripts con thresholds versionados
+│   ├── sustained_2krps.js       ← S37 ✅/❌
+│   └── README.md
+├── security/              # nuclei + ZAP (nightly, no en cada PR)
+│   └── .gitkeep
+├── resilience/            # //go:build resilience — toxiproxy scenarios
+│   └── circuit_breaker_test.go  ← S39
+├── fixtures/              # datos de prueba reutilizables
+│   └── schemas/
+│       ├── crm_schema.json
+│       └── logistics_schema.json
+├── helpers/               # utilidades compartidas entre suites
+│   └── server.go          # //go:build integration || e2e
+└── observability/
+    └── promtool/
+        └── slo_test.yml   ← S37 (si reglas SLO existen como YAML)
+
+Makefile (raíz del repo):
+  make test             → unit -race -short (<3s)
+  make test-integration → integration + DB real (testcontainers)
+  make test-e2e         → escenarios cliente completos
+  make test-perf        → k6 SLO gate (exit 99 si falla p95>15ms)
+  make test-security    → nuclei + ZAP (manual/nightly)
+  make test-all         → test + test-integration + test-perf
+  make bench            → go benchmark + benchstat
+```
+
+---
+
+## LOS 5 ESCENARIOS E2E (S38)
+
+### Escenario 1 — Agencia CRM (httpexpect + testcontainers)
+Entidades: Client, Contact, Deal
+- Crear client con nombre
+- Agregar contact vinculado al client
+- Crear deal con status=pending
+- Filtrar deals por status (eq) → solo los pending
+- RBAC: rol gerente puede todo, rol operario solo lee
+- Verificar: `testutil` confirma requests_total incrementado
+
+### Escenario 2 — Fintech DIAN/CUFE (httpexpect + Goja real)
+Entidades: Invoice, Client (con NIT)
+- Crear client con NIT válido (800197268-4) → 201
+- Crear client con NIT inválido → hook JS before_create rechaza → 422
+- Crear invoice con calculateCUFE → verificar hash SHA-384
+- Verificar span hook.before_create en pkg/observability/span.go SpanTracker propio
+  (el motor NO usa OTel → tracetest.SpanRecorder no aplica; adaptar aserción en S38)
+
+### Escenario 3 — Webhook ERP (httpexpect + httptest mock receptor)
+- Crear registro → webhook debe dispararse
+- Mock receptor verifica HMAC-SHA256 correcto
+- Receptor falla 2 veces → retry con backoff → éxito en 3er intento
+- SSRF: intentar webhook a http://169.254.169.254 → bloqueado
+
+### Escenario 4 — Ataques simulados (httpexpect payloads adversariales)
+- SQLi en filtro: `?filter[code][eq]='; DROP TABLE guides; --` → 200/0 rows tabla viva
+- JWT alg:none → 401
+- JWT expirado → 401
+- Body 1.1MB → 413
+- Cross-tenant: token de tenant A contra endpoint de tenant B → 403
+- Verificar: appitools_requests_total{status=401/403/413} se incrementa
+  (security_blocked_total NO existe en el motor)
+
+### Escenario 5 — Carga sostenida (k6, no httpexpect)
+- constant-arrival-rate 2000 RPS, 60s
+- JWT + RBAC + multi-tenancy activos
+- Thresholds: p95<15ms, error_rate<1%
+- abortOnFail: true → exit code 99
+
+---
+
+## SLOs ENFORCED (CÓDIGO, NO ASPIRACIONES)
+
+```
+p95 < 15ms     bajo 2000 RPS sostenido (k6 threshold, abortOnFail)
+error_rate < 1% (k6 threshold, abortOnFail)
+RAM < 100MB    bajo carga (verificación post-k6, no gate automático aún)
+```
+
+---
+
+## PLAN DE SESIONES
+
+| Sesión | Deliverable | Estado |
+|---|---|---|
+| **S37** | Folder structure + Makefile + observability tests + k6 CI | ✅ hecho (2026-06-07) |
+| S38 | E2E escenarios 1-4 (httpexpect + testcontainers) | pendiente |
+| S39 | Resilience (toxiproxy) + benchmark-action gh-pages | pendiente |
+| S40 | ZAP nightly workflow + fuzzing CI + gotestfmt reporting | pendiente |
+
+### Hallazgos S37 (leer antes de S38)
+
+```
+✅ Métricas reales (grepeadas): appitools_requests_total{tenant_id,method,path,status},
+   appitools_request_duration_seconds{tenant_id,method,path}, appitools_active_tenants,
+   appitools_migration_duration_seconds{tenant_id,status}. El `path` de listas es el
+   patrón estático "/api/guides" (las rutas /{id} sí llevan param). Se añadió
+   Metrics.Gatherer() para testutil.GatherAndCompare.
+⚠️ NO existe `security_blocked_total` (Escenario 4): aseverar sobre
+   appitools_requests_total{status=401/403/413} o el ErrorStore (/debug/tenant/{id}).
+⚠️ NO hay OTel → tracetest.SpanRecorder (Escenario 2) no aplica. El proyecto usa su
+   propio SpanTracker (pkg/observability/span.go). Reemplazar esa aserción en S38.
+⚠️ SLOs son un motor Go (slo.go), no reglas YAML → promtool N/A (ver
+   tests/observability/promtool/README.md).
+⚠️ `make test` (-short) aún NO es hermético: pkg/{db,graphql,migration,controlplane},
+   internal/handlers y pkg/benchmark usan testcontainers sin guard testing.Short().
+   Lo nuevo se aísla con build tags (integration/e2e). Follow-up: añadir guards.
+ℹ️ httpexpect/v2 y testify NO son deps todavía (se agregan en S38). El repo usa
+   `testing` plano + t.Fatalf; los tests S37 siguen esa convención.
+```
+
+---
+
+## CÓMO ABRIR CADA SESIÓN DE TESTING
+
+```
+Nueva sesión Claude Code → chat nuevo (no continuar el anterior)
+
+Mensaje de apertura:
+@context-docs/PRIMER.md @context-docs/TESTING_PLAN.md
+
+[Leer los archivos referenciados. Luego leer los archivos
+ específicos que necesitas para esta tarea. Brief abajo:]
+
+[brief corto de la sesión]
+```
+
+Para S37 específicamente, agregar después:
+```
+@cmd_serve.go @k6-stress.js
+```
+
+Para S38:
+```
+@tests/helpers/server.go @tests/fixtures/ @tests/integration/observability_test.go
+```
+
+---
+
+## REGLAS DE CALIDAD PARA TESTS
+
+```
+✅ Cada test usa evidencia ejecutada — nunca solo leer código y asumir
+✅ Build tags correctos: //go:build integration || e2e || resilience
+✅ Tests de observabilidad usan nombres reales de métricas (del grep)
+✅ k6 thresholds son alcanzables con el hardware real de prod
+✅ Fixtures son datos colombianos reales (NITs reales, estados reales)
+✅ Cada sesión termina con commit limpio + PRIMER actualizado
+
+❌ Inventar nombres de métricas
+❌ Thresholds irreales (p95<1ms no va a pasar)
+❌ Tests que pasan haciendo mock de todo (sin valor real)
+❌ BDD/godog (overhead sin beneficio para este stack)
+❌ Contract testing Pact (no hay consumers externos independientes)
+```
