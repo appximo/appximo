@@ -126,8 +126,43 @@ RAM < 100MB    bajo carga (verificación post-k6, no gate automático aún)
 |---|---|---|
 | **S37** | Folder structure + Makefile + observability tests + k6 CI | ✅ hecho (2026-06-07) |
 | **S38** | E2E escenarios 1-4 (httpexpect + testcontainers) | ✅ hecho (2026-06-07) |
-| S39 | Resilience (toxiproxy) + benchmark-action gh-pages | pendiente |
-| S40 | ZAP nightly workflow + fuzzing CI + gotestfmt reporting | pendiente |
+| **S39** | Resilience (toxiproxy) + benchmark-action gh-pages + CI reporting | ✅ hecho (2026-06-07) |
+| S40 | fuzzing CI (long-run) + benchstat regression + hardening ZAP target | pendiente |
+
+### Hallazgos S39 (leer antes de S40)
+
+```
+✅ Circuit breaker REAL y FUNCIONAL (no era inspección de código): db.NewTenantDB
+   cablea resilience.NewQueryBreaker; QueryDirect/ExecRowsTenant/QueryTenant todos
+   pasan por exec()→breaker con context.WithTimeout(5s). toxiproxy in-process
+   (server NewServer+Listen + client.CreateProxy) inyecta 6s downstream → queries
+   timeout 5s → fallan → tras 15 requests concurrentes el breaker ABRE → 503
+   INMEDIATO (<2s, no espera 5s) → quitar toxic + esperar ventana 8s → 200. PASS -race.
+⚠️ Config REAL del breaker (pkg/resilience/circuitbreaker.go) ≠ PRIMER viejo:
+   ReadyToTrip = Requests≥10 Y TotalFailures/Requests≥0.6; Timeout (open→half-open)
+   = 8s (NO 30s); MaxRequests half-open = 2. PRIMER corregido. NO es bug — funciona.
+✅ Graceful shutdown probado bajo carga vía shutdown.State.Run (el MISMO path que
+   cmd_serve.go dispara con el ctx cancelado por SIGTERM): in-flight completan 200,
+   cierra en ~200ms (<15s), nuevos requests→connection refused, load bad=0.
+   Test in-process (no subprocess) — Run() es fiel al SIGTERM real.
+✅ toxiproxy v2.12.0: server in-process = toxiproxy.NewServer(NewMetricsContainer(
+   prometheus.NewRegistry()), zerolog.Nop()) + go server.Listen(addr); client =
+   toxiproxy/v2/client.NewClient(addr); proxy.AddToxic("latency","latency",
+   "downstream",1.0, client.Attributes{"latency":6000,"jitter":0}). Helpers ahora
+   compilan bajo tag `resilience` (server.go: integration||e2e||resilience).
+⚠️ Benchmarks: VARIANZA MEDIDA con -count=10 (anti-patrón del brief): JWTValidation
+   ~10µs ±5% y RBACCheck ~72ns ±5% son ESTABLES; GETListHandler (HTTP loopback)
+   95µs mediana pero un run saltó a 257µs (~2.7x) por GC/scheduler. ∴ benchmark.yml
+   SOLO gatea JWT+RBAC (fail-on-alert, threshold 150%); GETList queda en el paquete
+   para profiling local pero NO en el gate. `go test ./...-bench=.` del brief se
+   acotó a ./tests/performance/... (evita los benchmarks testcontainers de pkg/benchmark).
+ℹ️ ZAP api-scan es ACTIVO (-a manda payloads de ataque) → NUNCA contra prod. La
+   security.yml genera el OpenAPI con `appitools openapi --base-url <TARGET>` y exige
+   un target staging (rechaza PROD-VPS). Nightly + manual. .zap/rules.tsv creado.
+ℹ️ gotestfmt en ci.yml: el step "Full test suite" ahora hace `go test ./... -json |
+   gotestfmt` con `set -o pipefail` (sin pipefail el fallo de un test se perdería en
+   el exit de gotestfmt) + archiva el JSON crudo como artifact.
+```
 
 ### Hallazgos S38 (leer antes de S39)
 

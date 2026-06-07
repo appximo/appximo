@@ -33,6 +33,11 @@ test-e2e:
 	go test ./tests/e2e/... -race -count=1 -tags e2e -timeout 300s -v 2>&1 | \
 	$(if $(shell command -v gotestfmt 2>/dev/null),gotestfmt,cat)
 
+# test-resilience: chaos/resilience suite (toxiproxy latency → circuit breaker,
+# graceful shutdown under load). Real Postgres via testcontainers (needs Docker).
+test-resilience:
+	go test ./tests/resilience/... -race -count=1 -tags resilience -timeout 120s -v
+
 # test-perf: k6 SLO gate. Exits 99 if p95>=15ms or error_rate>=1%.
 # Requires a running server + BENCH_TOKEN (mint with `appitools token`).
 # Override RATE/DURATION/TARGET_URL/TENANT_ID via env. See tests/performance/README.md.

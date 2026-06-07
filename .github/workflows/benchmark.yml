@@ -1,0 +1,51 @@
+name: Benchmark
+
+# Tracks per-request engine overhead over time (benchmark-action → gh-pages chart
+# at /dev/bench) and fails the build on a regression.
+#
+# Scope + threshold are deliberate (see context-docs/TESTING_PLAN.md "Hallazgos S39"):
+# we gate ONLY the low-variance, Docker-free CPU benchmarks — BenchmarkJWTValidation
+# and BenchmarkRBACCheck. Measured with -count=10 locally these vary < ~20%.
+# BenchmarkGETListHandler (full HTTP loopback) is in the same package for local
+# profiling but is NOT gated: its loopback + GC variance spiked to ~2.7x the median
+# in one of ten runs, which would flake a fail-on-alert gate. The DB-backed
+# throughput benchmarks in pkg/benchmark (testcontainers) are likewise out of scope.
+# alert-threshold 150% sits comfortably above the measured noise while still
+# catching a real regression.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write # benchmark-action pushes results to the gh-pages branch
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run benchmarks (deterministic CPU hot paths only)
+        run: |
+          go test ./tests/performance/... \
+            -bench='BenchmarkJWTValidation|BenchmarkRBACCheck' \
+            -benchmem -benchtime=2s -run='^$' | tee output.txt
+
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: go
+          output-file-path: output.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: '150%'
+          comment-on-alert: true
+          fail-on-alert: true
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench

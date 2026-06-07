@@ -1,12 +1,12 @@
-//go:build integration || e2e
+//go:build integration || e2e || resilience
 
-// Package helpers contains shared test infrastructure for the integration and
-// e2e suites: a real Postgres (testcontainers), control-plane migration + tenant
-// registration, JWT minting, and a data-plane server wired with the SAME
+// Package helpers contains shared test infrastructure for the integration, e2e,
+// and resilience suites: a real Postgres (testcontainers), control-plane migration
+// + tenant registration, JWT minting, and a data-plane server wired with the SAME
 // observability tap as cmd_serve.go so metric assertions exercise the real path.
 //
-// It is compiled only under the `integration` or `e2e` build tags, so it never
-// touches `go test ./... -short` (the unit lane).
+// It is compiled only under the `integration`, `e2e`, or `resilience` build tags,
+// so it never touches `go test ./... -short` (the unit lane).
 package helpers
 
 import (

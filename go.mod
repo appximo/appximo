@@ -9,6 +9,7 @@ toolchain go1.25.11
 
 require (
 	github.com/HdrHistogram/hdrhistogram-go v1.2.0
+	github.com/Shopify/toxiproxy/v2 v2.12.0
 	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c
 	github.com/gavv/httpexpect/v2 v2.17.0
 	github.com/go-chi/chi/v5 v5.3.0
@@ -65,6 +66,7 @@ require (
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e // indirect
+	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/hpcloud/tail v1.0.0 // indirect
 	github.com/imkira/go-interpol v1.1.0 // indirect
@@ -97,6 +99,7 @@ require (
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/rs/xid v1.6.0 // indirect
 	github.com/sanity-io/litter v1.5.5 // indirect
 	github.com/sergi/go-diff v1.0.0 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.3 // indirect

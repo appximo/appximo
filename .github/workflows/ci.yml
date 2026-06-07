@@ -32,6 +32,10 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      # Readable, grouped test output in CI logs. gotestfmt consumes `go test -json`.
+      - name: Install gotestfmt
+        run: go install github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt@latest
+
       # ---------------------------------------------------------------------
       # Fix gates — each fails CI if its security/resilience fix regresses.
       # The db, security and integration suites use testcontainers, which needs
@@ -52,8 +56,21 @@ jobs:
       - name: 'Gate · wiring smoke — fixes mounted in the router'
         run: go test -run TestWiring ./... -count=1
 
-      - name: Full test suite (race)
-        run: go test ./... -race -count=1
+      # Full suite, formatted with gotestfmt. pipefail keeps a test failure fatal
+      # even though the output is piped (the pipe's exit status would otherwise be
+      # gotestfmt's). Raw JSON is archived so a failure is still inspectable.
+      - name: Full test suite (race, formatted)
+        run: |
+          set -euo pipefail
+          go test ./... -race -count=1 -json 2>&1 | tee gotest.json | gotestfmt
+
+      - name: Upload raw test JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gotest-json
+          path: gotest.json
+          if-no-files-found: ignore
 
       # S37 integration suite is behind the `integration` build tag (real Postgres
       # via testcontainers) so it stays out of the unit lane. Run it explicitly.
