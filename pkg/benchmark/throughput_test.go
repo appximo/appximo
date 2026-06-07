@@ -38,9 +38,9 @@ import (
 
 var (
 	benchPool   *pgxpool.Pool
-	benchSrv    *httptest.Server       // single-tenant data plane
-	benchToken  string                 // super_admin JWT
-	benchSrvMap [10]*httptest.Server   // 10-tenant servers for multi-tenant benchmark
+	benchSrv    *httptest.Server     // single-tenant data plane
+	benchToken  string               // super_admin JWT
+	benchSrvMap [10]*httptest.Server // 10-tenant servers for multi-tenant benchmark
 	benchTokens [10]string
 	benchOnce   sync.Once
 )
@@ -163,6 +163,9 @@ func TestMain(m *testing.M) {
 // BenchmarkListHandler_NoContention measures concurrent GET /api/guides
 // against a 1000-row table with 50 parallel goroutines.
 func BenchmarkListHandler_NoContention(b *testing.B) {
+	if testing.Short() {
+		b.Skip("benchmark needs Docker (testcontainers); skipped in -short")
+	}
 	benchOnce.Do(setupBench)
 
 	b.SetParallelism(50)
@@ -200,6 +203,9 @@ func BenchmarkListHandler_NoContention(b *testing.B) {
 // BenchmarkCreateHandler_WithHook measures POST /api/guides with an active
 // JS before_create hook (Goja sandbox overhead).
 func BenchmarkCreateHandler_WithHook(b *testing.B) {
+	if testing.Short() {
+		b.Skip("benchmark needs Docker (testcontainers); skipped in -short")
+	}
 	benchOnce.Do(setupBench)
 
 	b.SetParallelism(20)
@@ -239,6 +245,9 @@ func BenchmarkCreateHandler_WithHook(b *testing.B) {
 // BenchmarkMultiTenant_10Tenants measures throughput with 10 concurrent
 // tenants, verifying that SET LOCAL search_path does not introduce contention.
 func BenchmarkMultiTenant_10Tenants(b *testing.B) {
+	if testing.Short() {
+		b.Skip("benchmark needs Docker (testcontainers); skipped in -short")
+	}
 	benchOnce.Do(setupBench)
 
 	b.SetParallelism(10)

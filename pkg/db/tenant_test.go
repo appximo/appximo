@@ -13,6 +13,9 @@ import (
 
 func startPostgres(t *testing.T) (string, func()) {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("integration test: needs Docker (testcontainers); skipped in -short")
+	}
 	ctx := context.Background()
 
 	ctr, err := postgres.Run(ctx,

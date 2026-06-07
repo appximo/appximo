@@ -18,6 +18,9 @@ import (
 
 func startPostgres(t *testing.T) (*pgxpool.Pool, func()) {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("integration test: needs Docker (testcontainers); skipped in -short")
+	}
 	ctx := context.Background()
 
 	ctr, err := tcpostgres.Run(ctx,
@@ -183,11 +186,11 @@ func TestRegisterTenant_InvalidID(t *testing.T) {
 	applyControlPlane(t, pool)
 
 	cases := []string{
-		"A",          // uppercase
-		"x",          // single char (regex requires ≥2)
-		"-start",     // starts with hyphen
-		"has space",  // contains space
-		"UPPERCASE",  // all uppercase
+		"A",         // uppercase
+		"x",         // single char (regex requires ≥2)
+		"-start",    // starts with hyphen
+		"has space", // contains space
+		"UPPERCASE", // all uppercase
 	}
 
 	for _, id := range cases {

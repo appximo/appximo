@@ -1,0 +1,53 @@
+name: Fuzzing
+
+# Short fuzz run on every PR (30s per target) over the parser/validator surfaces
+# that take untrusted input. `go test -fuzz` refuses to fuzz across multiple
+# packages, so each target runs as its own matrix leg. A new crasher fails the PR
+# and the action uploads the failing corpus entry as an artifact for repro.
+#
+# Targets already exist in-repo (PRIMER "Fuzzing: ... 0 crashers"):
+#   pkg/auth        FuzzValidateToken   — JWT parsing/validation
+#   pkg/query       FuzzBuildQuery      — filter/sort/pagination query builder
+#   pkg/schema      FuzzValidateSchema  — schema validator
+#   pkg/extensions  FuzzJSSandbox       — Goja JS hook sandbox
+# FuzzWasmRunner is intentionally excluded (the WASM toolchain makes it slow/flaky
+# in a 30s PR gate; it runs locally + in the scheduled long-run).
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: ./pkg/auth
+            target: FuzzValidateToken
+          - package: ./pkg/query
+            target: FuzzBuildQuery
+          - package: ./pkg/schema
+            target: FuzzValidateSchema
+          - package: ./pkg/extensions
+            target: FuzzJSSandbox
+    name: fuzz ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Fuzz ${{ matrix.target }} (30s)
+        uses: jidicula/go-fuzz-action@v1.1.0
+        with:
+          packages: ${{ matrix.package }}
+          fuzz-regexp: ${{ matrix.target }}
+          fuzz-time: 30s
+          fuzz-minimize-time: 10s

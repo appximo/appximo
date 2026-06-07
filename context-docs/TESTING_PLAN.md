@@ -127,7 +127,46 @@ RAM < 100MB    bajo carga (verificación post-k6, no gate automático aún)
 | **S37** | Folder structure + Makefile + observability tests + k6 CI | ✅ hecho (2026-06-07) |
 | **S38** | E2E escenarios 1-4 (httpexpect + testcontainers) | ✅ hecho (2026-06-07) |
 | **S39** | Resilience (toxiproxy) + benchmark-action gh-pages + CI reporting | ✅ hecho (2026-06-07) |
-| S40 | fuzzing CI (long-run) + benchstat regression + hardening ZAP target | pendiente |
+| **S40** | Pre-launch verification: Short() guards + fuzzing CI + compose dry-run | ✅ hecho (2026-06-07) |
+
+### Hallazgos S40 (pre-launch verification)
+
+```
+✅ testing.Short() guard agregado a 8 test files con testcontainers (los 6 del brief
+   — db, graphql, migration, controlplane, internal/handlers, benchmark — MÁS
+   pkg/integration/e2e_test.go y pkg/security/isolation_test.go, que también
+   levantaban Docker en el lane -short). Guard puesto en el helper startPostgres/
+   startPG/startRedis (cubre todos los tests del archivo de un solo edit).
+   pkg/benchmark NO levantaba Docker en -short (benchOnce.Do(setupBench) solo corre
+   con -bench) — se le puso b.Skip igual para coherencia con -bench -short.
+✅ make test (cache caliente, SIN -count=1) = 6.8s, CERO contenedores nuevos. OJO:
+   el comando literal del brief `go test ./... -race -count=1 -short` NO baja de
+   ~80s porque -count=1 desactiva la cache de test y hay un piso ~1s/paquete × 60
+   paquetes con -race — eso es overhead de compilación/-race, NO Docker. El objetivo
+   real (lane -short sin Docker) se cumple; el "<10s" se logra con la cache (make test).
+🐞 FIX real expuesto al instalar gotestfmt: `make test-e2e` pasaba salida `-v`
+   (humana) a gotestfmt, que EXIGE `-json` → panic ("Did you use -json?"). Antes
+   "funcionaba" solo porque gotestfmt no estaba instalado (caía a `cat`). Arreglado:
+   usa `-json` cuando gotestfmt está presente, `-v` plano si no. Y `SHELL := bash`
+   en el Makefile (dash no soporta `set -o pipefail`). ci.yml ya usaba -json (no afectado).
+✅ fuzzing.yml: matrix de 4 targets (auth/query/schema/extensions) 30s/PR vía
+   jidicula/go-fuzz-action. `go test -fuzz` NO cruza paquetes → un leg por target.
+   Los 5 fuzz targets ya existían (FuzzWasmRunner excluido del PR gate por lento).
+   Smoke local 5s c/u = 0 crashers.
+✅ docker compose dry-run desde clone limpio: build (Go en Docker, scratch) +
+   db healthy + engine → /health {"status":"ok"} /healthz 200 /readyz 200. El :8080
+   literal choca con un appitools-verif preexistente en ESTA box (remap host a 18080
+   para verificar; NO es bug del Quick Start). Nota compose: `ports` en override se
+   MERGEAN (no reemplazan) sin tag !override → editar el clone directo.
+✅ make test-all redefinido = test + test-integration + test-e2e + test-resilience
+   (turnkey, solo Docker; respalda cada claim del Show HN). test-perf queda aparte
+   (necesita server + token). Corrida completa: exit 0, ~41s, 0 fallos.
+✅ govulncheck ./... = 0 vulnerabilidades (deps nuevas S38/S39 limpias).
+ℹ️ CI en GitHub NO verificable desde este entorno (repo privado, sin gh CLI ni token,
+   remote SSH). Se reprodujo el job `test` localmente paso a paso (build, vet, install
+   gotestfmt, 5 gates, full suite -json|gotestfmt pipefail exit 0, integration) — verde.
+   El dueño debe confirmar el check verde en la pestaña Actions.
+```
 
 ### Hallazgos S39 (leer antes de S40)
 

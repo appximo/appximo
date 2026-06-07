@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/redis/go-redis/v9"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -23,6 +23,9 @@ import (
 
 func startPostgres(t *testing.T) (*pgxpool.Pool, func()) {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("integration test: needs Docker (testcontainers); skipped in -short")
+	}
 	ctx := context.Background()
 	ctr, err := tcpostgres.Run(ctx, "postgres:16-alpine",
 		tcpostgres.WithDatabase("testdb"),
@@ -53,6 +56,9 @@ func startPostgres(t *testing.T) (*pgxpool.Pool, func()) {
 
 func startRedis(t *testing.T) (*redis.Client, func()) {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("integration test: needs Docker (testcontainers); skipped in -short")
+	}
 	ctx := context.Background()
 	rc, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
@@ -91,8 +97,8 @@ func applyControlPlane(t *testing.T, pool *pgxpool.Pool) {
 func newWorker(rdb *redis.Client, pool *pgxpool.Pool) *migration.MigrationWorker {
 	w := migration.NewMigrationWorker(rdb, pool, tenant.NewSchemaCache())
 	w.BlockTime = 100 * time.Millisecond
-	w.BackoffBase = 10 * time.Millisecond     // error-retry delays: 10ms / 20ms / 40ms
-	w.LockRetryDelay = 50 * time.Millisecond  // lock-contention delay
+	w.BackoffBase = 10 * time.Millisecond    // error-retry delays: 10ms / 20ms / 40ms
+	w.LockRetryDelay = 50 * time.Millisecond // lock-contention delay
 	return w
 }
 

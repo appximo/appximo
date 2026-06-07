@@ -15,7 +15,6 @@ import (
 	chi "github.com/go-chi/chi/v5"
 	jwtlib "github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/codegen"
 	"github.com/miguelangel/appitools/pkg/controlplane"
@@ -25,6 +24,7 @@ import (
 	rbacpkg "github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/redis/go-redis/v9"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -95,6 +95,9 @@ func e2eSchema() *schema.APISchema {
 
 func startPG(t *testing.T) (*pgxpool.Pool, func()) {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("integration test: needs Docker (testcontainers); skipped in -short")
+	}
 	ctx := context.Background()
 	ctr, err := tcpostgres.Run(ctx, "postgres:16-alpine",
 		tcpostgres.WithDatabase("testdb"),

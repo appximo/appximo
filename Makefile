@@ -1,5 +1,9 @@
+# Recipes use bash (not the default /bin/sh → dash) so `set -o pipefail` works in
+# the gotestfmt-piped targets.
+SHELL := bash
+
 .PHONY: build lint run build-pgo collect-profile \
-	test test-integration test-e2e test-perf test-security test-all bench
+	test test-integration test-e2e test-resilience test-perf test-security test-all bench
 
 build:
 	go build ./...
@@ -27,11 +31,15 @@ test:
 test-integration:
 	go test -tags integration -race -count=1 ./tests/integration/...
 
-# test-e2e: full client scenarios (S38+). Pretty-prints with gotestfmt when present,
-# otherwise falls back to cat (raw `go test -v` output).
+# test-e2e: full client scenarios (S38+). Pretty-prints with gotestfmt when present
+# (which needs `-json` input), otherwise plain `go test -v`. pipefail keeps a test
+# failure fatal through the gotestfmt pipe.
 test-e2e:
-	go test ./tests/e2e/... -race -count=1 -tags e2e -timeout 300s -v 2>&1 | \
-	$(if $(shell command -v gotestfmt 2>/dev/null),gotestfmt,cat)
+	@if command -v gotestfmt >/dev/null 2>&1; then \
+		set -o pipefail; go test ./tests/e2e/... -race -count=1 -tags e2e -timeout 300s -json 2>&1 | gotestfmt; \
+	else \
+		go test ./tests/e2e/... -race -count=1 -tags e2e -timeout 300s -v; \
+	fi
 
 # test-resilience: chaos/resilience suite (toxiproxy latency → circuit breaker,
 # graceful shutdown under load). Real Postgres via testcontainers (needs Docker).
@@ -49,8 +57,11 @@ test-security:
 	@echo "test-security: nuclei + ZAP DAST is scheduled for S40 (nightly), not yet wired."
 	@echo "See context-docs/TESTING_PLAN.md and tests/security/."
 
-# test-all: unit + integration + perf (matches TESTING_PLAN).
-test-all: test test-integration test-perf
+# test-all: the turnkey, Docker-only suites that back every claim in the README /
+# Show HN post — unit + integration + E2E scenarios + resilience (toxiproxy circuit
+# breaker, graceful shutdown). test-perf is intentionally NOT included: the k6 SLO
+# gate needs a separately-running server + token, so it is a standalone target.
+test-all: test test-integration test-e2e test-resilience
 
 # bench: Go benchmarks. For A/B regression, save two runs and compare with benchstat:
 #   go test -bench=. -benchmem -run='^$$' ./... | tee new.txt
