@@ -13,6 +13,10 @@ permissions:
 # CI runners are ephemeral, so the reaper's cleanup is unnecessary — disable it.
 env:
   TESTCONTAINERS_RYUK_DISABLED: "true"
+  # Run bundled JS actions (checkout, setup-go, upload-artifact) on Node 24 so the
+  # deprecated-Node-20 warning does not clutter the logs. Set workflow-wide so it
+  # applies to every job (it cascades into each job's env).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   test:

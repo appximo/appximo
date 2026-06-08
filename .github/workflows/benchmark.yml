@@ -23,6 +23,10 @@ permissions:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
+    # Run bundled JS actions (checkout, setup-go, benchmark-action) on Node 24 so
+    # the deprecated-Node-20 warning does not clutter the logs.
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
       - uses: actions/checkout@v4
 
