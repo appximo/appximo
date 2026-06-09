@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"log"
 	"net/http"
 	"os"
@@ -8,12 +9,22 @@ import (
 	"github.com/miguelangel/appitools/tools/devhub/api"
 )
 
+// benchSchema is the SQLite DDL for the statistics store. Embedded here (db/ is a
+// subdirectory of the main package) because the api package can't go:embed a
+// sibling directory.
+//
+//go:embed db/schema.sql
+var benchSchema string
+
 func main() {
 	repoDir := os.Getenv("APPITOOLS_DIR")
 	if repoDir == "" {
 		repoDir = "/root/appitools"
 	}
 	api.StartMetricsScraper()
+	if err := api.InitBenchDB(repoDir, benchSchema); err != nil {
+		log.Printf("WARNING: bench DB init failed (bench endpoints disabled): %v", err)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/run", api.RunHandler(repoDir))
 	mux.HandleFunc("/api/metrics/live", api.MetricsLiveHandler)
@@ -22,6 +33,14 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok","service":"devhub"}`))
 	})
+
+	// Statistical benchmark engine (S42).
+	mux.HandleFunc("POST /api/bench/import", api.BenchImportHandler)
+	mux.HandleFunc("GET /api/bench/runs", api.BenchRunsHandler)
+	mux.HandleFunc("GET /api/bench/runs/{id}/histogram", api.BenchRunHistogramHandler)
+	mux.HandleFunc("POST /api/bench/compare", api.BenchCompareHandler)
+	mux.HandleFunc("GET /api/bench/comparisons", api.BenchComparisonsHandler)
+
 	mux.Handle("/", getUIHandler())
 	log.Printf("DevHub :3099 — repo: %s", repoDir)
 	log.Fatal(http.ListenAndServe(":3099", cors(mux)))
