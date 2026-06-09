@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -244,7 +245,8 @@ func rejectOutliers(x []float64) []float64 {
 	return out
 }
 
-// CompareResult is the outcome of CompareRuns, mirroring the comparisons table.
+// CompareResult is the outcome of CompareRuns, mirroring the comparisons table
+// (plus min_effect_ms, which is reported for transparency but not persisted).
 type CompareResult struct {
 	RunA        int64   `json:"run_a"`
 	RunB        int64   `json:"run_b"`
@@ -252,17 +254,62 @@ type CompareResult struct {
 	PValue      float64 `json:"p_value"`
 	CILowerMs   float64 `json:"ci_lower_ms"`
 	CIUpperMs   float64 `json:"ci_upper_ms"`
+	MinEffectMs float64 `json:"min_effect_ms"`
 	Significant bool    `json:"significant"`
 	Direction   string  `json:"direction"`
 	DeltaPct    float64 `json:"delta_pct"`
 }
 
-// CompareRuns loads both runs' datapoints, rejects IQR outliers from each, runs
-// Mann-Whitney U and the bootstrap median-difference CI, computes the p95 delta
-// percentage, and classifies the result. The comparison is persisted.
+// classify computes the statistical verdict for two already-loaded latency
+// samples (no DB). It rejects IQR outliers from each, runs Mann-Whitney U and the
+// bootstrap median-difference CI, computes the p95 delta %, and classifies the
+// result requiring BOTH statistical and practical significance.
 //
-// Direction: p<0.05 and median(B)<median(A) → improvement; p<0.05 and
-// median(B)>median(A) → regression; p>=0.05 → no_change.
+// Statistical significance alone (p<0.05) is not enough: at large n Mann-Whitney
+// detects µs-scale host noise as a "regression" (see the S42 1-vCPU artifact). A
+// real change must also move the median by more than minEffect — the larger of
+// 0.5ms (absolute floor for sub-ms latencies) or 3% of median(A).
+func classify(a, b []float64) CompareResult {
+	a = rejectOutliers(a)
+	b = rejectOutliers(b)
+
+	u, p := stats.MannWhitneyU(a, b)
+	lo, hi := stats.BootstrapMedianDiffCI(a, b)
+
+	p95a := stats.Percentile(a, 95)
+	p95b := stats.Percentile(b, 95)
+	deltaPct := 0.0
+	if p95a != 0 {
+		deltaPct = (p95b - p95a) / p95a * 100
+	}
+
+	medA := stats.Median(a)
+	medB := stats.Median(b)
+	minEffect := math.Max(0.5, 0.03*medA)
+	practicallySignificant := math.Abs(medB-medA) > minEffect
+
+	significant := p < 0.05 && practicallySignificant
+	direction := "no_change"
+	if significant {
+		if medB < medA {
+			direction = "improvement"
+		} else if medB > medA {
+			direction = "regression"
+		}
+	}
+
+	return CompareResult{
+		U: u, PValue: p,
+		CILowerMs: lo, CIUpperMs: hi,
+		MinEffectMs: minEffect,
+		Significant: significant,
+		Direction:   direction,
+		DeltaPct:    deltaPct,
+	}
+}
+
+// CompareRuns loads both runs' datapoints, classifies the comparison (see
+// classify) and persists it. Returns the verdict.
 func CompareRuns(runA, runB int64) (*CompareResult, error) {
 	if benchDB == nil {
 		return nil, errors.New("bench DB not initialized")
@@ -279,52 +326,22 @@ func CompareRuns(runA, runB int64) (*CompareResult, error) {
 		return nil, fmt.Errorf("run has no datapoints (run_a=%d:%d points, run_b=%d:%d points)", runA, len(a), runB, len(b))
 	}
 
-	a = rejectOutliers(a)
-	b = rejectOutliers(b)
-
-	u, p := stats.MannWhitneyU(a, b)
-	lo, hi := stats.BootstrapMedianDiffCI(a, b)
-
-	p95a := stats.Percentile(a, 95)
-	p95b := stats.Percentile(b, 95)
-	deltaPct := 0.0
-	if p95a != 0 {
-		deltaPct = (p95b - p95a) / p95a * 100
-	}
-
-	medA := stats.Median(a)
-	medB := stats.Median(b)
-	significant := p < 0.05
-	direction := "no_change"
-	if significant {
-		if medB < medA {
-			direction = "improvement"
-		} else if medB > medA {
-			direction = "regression"
-		}
-	}
-
-	res := &CompareResult{
-		RunA: runA, RunB: runB,
-		U: u, PValue: p,
-		CILowerMs: lo, CIUpperMs: hi,
-		Significant: significant,
-		Direction:   direction,
-		DeltaPct:    deltaPct,
-	}
+	res := classify(a, b)
+	res.RunA = runA
+	res.RunB = runB
 
 	sigInt := 0
-	if significant {
+	if res.Significant {
 		sigInt = 1
 	}
 	if _, err := benchDB.Exec(
 		`INSERT INTO comparisons
 		   (run_a_id, run_b_id, u_statistic, p_value, ci_lower_ms, ci_upper_ms, significant, direction, delta_pct)
 		 VALUES (?,?,?,?,?,?,?,?,?)`,
-		runA, runB, u, p, lo, hi, sigInt, direction, deltaPct); err != nil {
+		runA, runB, res.U, res.PValue, res.CILowerMs, res.CIUpperMs, sigInt, res.Direction, res.DeltaPct); err != nil {
 		return nil, err
 	}
-	return res, nil
+	return &res, nil
 }
 
 // ── HTTP handlers ────────────────────────────────────────────────────────────
