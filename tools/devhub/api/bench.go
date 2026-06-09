@@ -11,7 +11,9 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -462,6 +464,90 @@ func BenchRunHistogramHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"run_id": id, "bucket_width_ms": 1, "buckets": buckets})
 }
 
+// RunStats is the five-number boxplot summary of a run plus the tail percentiles
+// and IQR-outlier count. Computed in Go (SQLite has no native percentile) and
+// cached: a run's datapoints are immutable, so the summary never changes.
+type RunStats struct {
+	RunID       int64   `json:"run_id"`
+	Min         float64 `json:"min"`
+	Q1          float64 `json:"q1"`
+	Median      float64 `json:"median"`
+	Q3          float64 `json:"q3"`
+	Max         float64 `json:"max"`
+	P95         float64 `json:"p95"`
+	P99         float64 `json:"p99"`
+	N           int     `json:"n"`
+	OutliersIQR int     `json:"outliers_iqr"`
+}
+
+// statsCache memoizes RunStats by run_id. Two concurrent first-requests for the
+// same run may both compute (harmless: identical result, last write wins) — a
+// run's datapoints never change, so no invalidation is needed.
+var (
+	statsCache   = map[int64]*RunStats{}
+	statsCacheMu sync.Mutex
+)
+
+// runStats loads a run's datapoints and computes (or returns the cached)
+// quartile summary.
+func runStats(runID int64) (*RunStats, error) {
+	statsCacheMu.Lock()
+	cached, ok := statsCache[runID]
+	statsCacheMu.Unlock()
+	if ok {
+		return cached, nil
+	}
+
+	x, err := loadDatapoints(runID)
+	if err != nil {
+		return nil, err
+	}
+	if len(x) == 0 {
+		return nil, fmt.Errorf("run %d has no datapoints", runID)
+	}
+	min, max := x[0], x[0]
+	for _, v := range x {
+		if v < min {
+			min = v
+		}
+		if v > max {
+			max = v
+		}
+	}
+	s := &RunStats{
+		RunID:       runID,
+		Min:         min,
+		Q1:          stats.Percentile(x, 25),
+		Median:      stats.Percentile(x, 50),
+		Q3:          stats.Percentile(x, 75),
+		Max:         max,
+		P95:         stats.Percentile(x, 95),
+		P99:         stats.Percentile(x, 99),
+		N:           len(x),
+		OutliersIQR: len(stats.IQROutliers(x)),
+	}
+	statsCacheMu.Lock()
+	statsCache[runID] = s
+	statsCacheMu.Unlock()
+	return s, nil
+}
+
+// BenchRunStatsHandler — GET /api/bench/runs/{id}/stats
+// Quartile/boxplot summary for one run (cached). Never ships raw datapoints.
+func BenchRunStatsHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid run id")
+		return
+	}
+	s, err := runStats(id)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s)
+}
+
 // BenchCompareHandler — POST /api/bench/compare  body: {"run_a":1,"run_b":2}
 func BenchCompareHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -522,4 +608,84 @@ func BenchComparisonsHandler(w http.ResponseWriter, r *http.Request) {
 		out = append(out, x)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// Validation patterns for BenchProtocolHandler. These bound user input that is
+// passed to a shell-invoked script, so they are deliberately strict allowlists:
+// a label is alnum/underscore/dash only, a duration is "<digits>s".
+var (
+	protocolLabelRe    = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,40}$`)
+	protocolDurationRe = regexp.MustCompile(`^[0-9]{1,3}s$`)
+)
+
+// BenchProtocolHandler — POST /api/bench/protocol
+// body: {"runs":3,"label":"ui-test","rate":50,"duration":"15s"}
+//
+// Runs scripts/bench-protocol.sh and streams its stdout/stderr as SSE, ending
+// with an `event: done` carrying the exit code.
+//
+// SECURITY: every field is validated against a strict allowlist before use, and
+// the validated values are passed as SEPARATE argv elements to exec.Command —
+// never concatenated into a shell string. There is no path to `sh -c` here, so
+// even if a regex were loosened the values still cannot break out into the shell.
+func BenchProtocolHandler(repoDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Runs     int    `json:"runs"`
+			Label    string `json:"label"`
+			Rate     int    `json:"rate"`
+			Duration string `json:"duration"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if !protocolLabelRe.MatchString(req.Label) {
+			writeErr(w, http.StatusBadRequest, "label must match ^[a-zA-Z0-9_-]{1,40}$")
+			return
+		}
+		if req.Runs < 1 || req.Runs > 20 {
+			writeErr(w, http.StatusBadRequest, "runs must be an integer in [1,20]")
+			return
+		}
+		if req.Rate < 10 || req.Rate > 1000 {
+			writeErr(w, http.StatusBadRequest, "rate must be an integer in [10,1000]")
+			return
+		}
+		if !protocolDurationRe.MatchString(req.Duration) {
+			writeErr(w, http.StatusBadRequest, "duration must match ^[0-9]{1,3}s$ (e.g. 15s)")
+			return
+		}
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming not supported", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		sw := &sseWriter{w: w, flusher: flusher}
+		fmt.Fprintf(w, "event: start\ndata: {\"label\":%q,\"runs\":%d,\"rate\":%d,\"duration\":%q}\n\n",
+			req.Label, req.Runs, req.Rate, req.Duration)
+		flusher.Flush()
+
+		// Validated values ONLY, each as its own argv element. exec.Command does
+		// not invoke a shell, so the script receives them verbatim as $1..$4.
+		cmd := exec.CommandContext(r.Context(), "bash", "scripts/bench-protocol.sh",
+			strconv.Itoa(req.Runs), req.Label, strconv.Itoa(req.Rate), req.Duration)
+		cmd.Dir = repoDir
+		cmd.Stdout = sw
+		cmd.Stderr = sw
+		exitCode := 0
+		if err := cmd.Run(); err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			} else {
+				exitCode = 1
+			}
+		}
+		fmt.Fprintf(w, "event: done\ndata: {\"exit\":%d}\n\n", exitCode)
+		flusher.Flush()
+	}
 }

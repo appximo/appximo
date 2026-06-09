@@ -1,11 +1,12 @@
 import { createSignal, Show } from 'solid-js'
 import TestRunner from './panels/TestRunner'
 import LiveMetrics from './panels/LiveMetrics'
+import BenchmarkLab from './panels/BenchmarkLab'
 
 const TABS = [
   { id: 'runner',  label: '▶  Test Runner' },
   { id: 'metrics', label: '📊 Live Metrics' },
-  { id: 'bench',   label: '⚡ Benchmark Lab', wip: true },
+  { id: 'bench',   label: '⚡ Benchmark Lab' },
   { id: 'coverage',label: '🗺  Coverage',      wip: true },
 ]
 
@@ -33,6 +34,7 @@ export default function App() {
       <main class="flex-1 overflow-auto p-4">
         <Show when={tab() === 'runner'}><TestRunner /></Show>
         <Show when={tab() === 'metrics'}><LiveMetrics /></Show>
+        <Show when={tab() === 'bench'}><BenchmarkLab /></Show>
       </main>
     </div>
   )
