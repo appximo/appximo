@@ -286,3 +286,119 @@ func TestGraphQL(t *testing.T) {
 		}
 	})
 }
+
+// TestGraphQLValidation proves the S44 declarative validator runs on GraphQL
+// create mutations with the SAME compiled rules as REST, surfacing violations
+// in GraphQL form: errors[0].message == "validation_failed" and
+// extensions.fields == [{field,rule,message}...] (all violations, one response).
+// NOTE: the engine has no update mutation (REST PUT/PATCH only), so create is
+// the only GraphQL write path the validator applies to.
+func TestGraphQLValidation(t *testing.T) {
+	ctx := context.Background()
+	connStr, cleanup := startPostgres(t)
+	defer cleanup()
+
+	pool, err := db.NewPool(ctx, connStr)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	if _, err := pool.Exec(ctx, `CREATE SCHEMA tenant_gqlval`); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE tenant_gqlval.items (
+			id     UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+			code   TEXT NOT NULL,
+			status TEXT,
+			amount DOUBLE PRECISION,
+			qty    INTEGER
+		)
+	`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	fmin := func(f float64) *float64 { return &f }
+	testSchema := &schema.APISchema{
+		Resources: map[string]schema.ResourceSchema{
+			"items": {Fields: map[string]schema.FieldDef{
+				"code":   {Type: "string", Required: true, Pattern: "^[A-Z]{3}-[0-9]+$"},
+				"status": {Type: "string", Enum: []string{"pending", "active"}},
+				"amount": {Type: "float64", Min: fmin(0)},
+				"qty":    {Type: "int", Min: fmin(1)}, // exercises the Int→float64 arg normalization
+			}},
+		},
+	}
+
+	var policy rbac.Policy
+	json.Unmarshal([]byte(`{"roles":{"super_admin":{"resources":"*","actions":["*"]}}}`), &policy)
+
+	tdb := db.NewTenantDB(pool)
+	hr := extensions.NewHookRunner(extensions.NewJSSandbox())
+	handler := gqlhandler.BuildHandler(testSchema, tdb, hr, &policy)
+	srv := httptest.NewServer(withFullStack(handler, "gqlval.localhost", gqlTestSecret))
+	defer srv.Close()
+
+	adminToken, _ := auth.GenerateToken(auth.Claims{UserID: "u1", Role: "super_admin", TenantID: "gqlval"}, gqlTestSecret)
+
+	t.Run("InvalidMutation", func(t *testing.T) {
+		result := gqlDo(t, srv, `mutation {
+			createItem(input: {code: "bad code", status: "archived", amount: -5.5, qty: 0}) { id }
+		}`, adminToken)
+		errs, _ := result["errors"].([]any)
+		if len(errs) == 0 {
+			t.Fatalf("expected a validation error, got %v", result)
+		}
+		first, _ := errs[0].(map[string]any)
+		if first["message"] != "validation_failed" {
+			t.Fatalf("expected message validation_failed, got %v", first["message"])
+		}
+		ext, _ := first["extensions"].(map[string]any)
+		fields, _ := ext["fields"].([]any)
+		got := map[string]string{} // field → rule
+		for _, f := range fields {
+			fo, _ := f.(map[string]any)
+			field, _ := fo["field"].(string)
+			rule, _ := fo["rule"].(string)
+			got[field] = rule
+			if msg, _ := fo["message"].(string); msg == "" {
+				t.Errorf("field %s: empty message", field)
+			}
+		}
+		want := map[string]string{"code": "pattern", "status": "enum", "amount": "min", "qty": "min"}
+		for f, r := range want {
+			if got[f] != r {
+				t.Errorf("expected %s/%s among extensions.fields, got %v", f, r, got)
+			}
+		}
+		if len(fields) != len(want) {
+			t.Errorf("all violations must be reported at once: want %d, got %d (%v)", len(want), len(fields), got)
+		}
+		if result["data"] != nil {
+			if d, _ := result["data"].(map[string]any); d["createItem"] != nil {
+				t.Errorf("no row must be created on validation failure, got %v", d["createItem"])
+			}
+		}
+	})
+
+	t.Run("ValidMutation", func(t *testing.T) {
+		result := gqlDo(t, srv, `mutation {
+			createItem(input: {code: "ABC-123", status: "active", amount: 99.5, qty: 3}) { id code qty }
+		}`, adminToken)
+		if msg := firstError(result); msg != "" {
+			t.Fatalf("unexpected error: %s", msg)
+		}
+		data := result["data"].(map[string]any)
+		created := data["createItem"].(map[string]any)
+		if created["code"] != "ABC-123" {
+			t.Errorf("expected code ABC-123, got %v", created["code"])
+		}
+		if created["id"] == nil || created["id"] == "" {
+			t.Error("expected non-empty id")
+		}
+		if qty, _ := created["qty"].(float64); qty != 3 {
+			t.Errorf("expected qty 3 round-tripped, got %v", created["qty"])
+		}
+	})
+}

@@ -235,6 +235,21 @@ func analyzeQuery(queryStr string, isGet, isDev bool) (string, bool) {
 	return "", true
 }
 
+// validationError carries declarative-validation violations (S44) into the
+// GraphQL errors array. It implements gqlerrors.ExtendedError, so the response
+// mirrors REST's 422 contract in GraphQL form:
+//
+//	{"errors":[{"message":"validation_failed","extensions":{"fields":[{field,rule,message}...]}}]}
+type validationError struct {
+	fields []schema.FieldRuleError
+}
+
+func (e *validationError) Error() string { return "validation_failed" }
+
+func (e *validationError) Extensions() map[string]any {
+	return map[string]any{"fields": e.fields}
+}
+
 // safeDBErr maps a database-layer error to a client-safe GraphQL error so internal
 // details (schema/table/column names, raw SQL, SQLSTATE) are never serialized into
 // the GraphQL errors array. Mirrors the REST WriteDBError masking. Always returns a
@@ -453,13 +468,16 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 		name := name
 		res := s.Resources[name]
 		resCopy := res
+		// Same compiled validator as REST (S44): built once at schema build time
+		// (= schema load), never per request.
+		rv := schema.CompileRules(&resCopy)
 		title := toPascalCase(singular(name)) // createGuide, deleteGuide
 		mutationFields["create"+title] = &gql.Field{
 			Type: gql.NewNonNull(objectTypes[name]),
 			Args: gql.FieldConfigArgument{
 				"input": &gql.ArgumentConfig{Type: gql.NewNonNull(inputTypes[name])},
 			},
-			Resolve: createResolver(name, &resCopy, tdb, hr, policy),
+			Resolve: createResolver(name, &resCopy, rv, tdb, hr, policy),
 		}
 		mutationFields["delete"+title] = &gql.Field{
 			Type: gql.NewNonNull(gql.Boolean),
@@ -617,7 +635,7 @@ func getByIDResolver(name string, tdb *db.TenantDB, policy *rbac.Policy) gql.Fie
 	}
 }
 
-func createResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy) gql.FieldResolveFn {
+func createResolver(name string, res *schema.ResourceSchema, rv *schema.ResourceValidator, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy) gql.FieldResolveFn {
 	return func(p gql.ResolveParams) (any, error) {
 		tc := tenant.MustFromCtx(p.Context)
 		if _, err := checkRBAC(p.Context, policy, name, "create"); err != nil {
@@ -627,6 +645,28 @@ func createResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, h
 		input, _ := p.Args["input"].(map[string]any)
 		if len(input) == 0 {
 			return nil, fmt.Errorf("empty input")
+		}
+
+		// Declarative validation (S44): same precompiled validator and rule
+		// semantics as REST POST, BEFORE the before_create hook. graphql-go
+		// coerces Int args to Go int while the validator (like REST's JSON
+		// decoding) expects float64 — validate a normalized shallow copy so the
+		// original input keeps its types for the INSERT.
+		norm := make(map[string]any, len(input))
+		for k, v := range input {
+			switch n := v.(type) {
+			case int:
+				norm[k] = float64(n)
+			case int32:
+				norm[k] = float64(n)
+			case int64:
+				norm[k] = float64(n)
+			default:
+				norm[k] = v
+			}
+		}
+		if verrs := rv.ValidateWrite(norm, true); len(verrs) > 0 {
+			return nil, &validationError{fields: verrs}
 		}
 
 		hc := hookCfg(name, "before_create", res)
