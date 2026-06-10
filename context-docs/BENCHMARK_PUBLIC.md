@@ -32,9 +32,9 @@ Measured from an **external load generator over a real network**, against a $16/
 |---|---|---|
 | **SUT** (system under test) | DigitalOcean droplet (`DO-Regular`), PROD-VPS | 2 vCPU, 1963 MB RAM, Ubuntu 22.04, $16/mo |
 | **Load generator** | Separate DigitalOcean droplet ("the 105") | 1 vCPU (shared), same region |
-| Network between them | public DO network | RTT min/avg/max = **1.18 / 2.58 / 4.98 ms** (ping ×10) |
+| Network between them | public DO network | RTT floor **~1.2 ms** (ping min 1.18 ms); the ping avg/max (2.58 / 4.98 ms) include scheduling spikes of the shared-CPU loader VPS, not steady-state path latency |
 
-The loader is **never** co-located with the SUT (a loader competing with the SUT for CPU corrupts both sides of the measurement). The ~1.2 ms RTT floor is included in every latency number for **both** stacks.
+The loader is **never** co-located with the SUT (a loader competing with the SUT for CPU corrupts both sides of the measurement). The ~1.2 ms RTT **floor** is included in every latency number for **both** stacks — which is why Appitools' external p50 (1.53 ms) sits just above it: under sustained keep-alive traffic most round trips ride near the floor, while one-shot pings sample the loader's jitter.
 
 ### 2.2 Software versions
 
@@ -45,7 +45,7 @@ The loader is **never** co-located with the SUT (a loader competing with the SUT
 | Node runtime | **v22.22.3** (LTS), `NODE_ENV=production`, compiled `dist/` (tsc, no ts-node) |
 | Process manager | pm2 **7.0.1**, `exec_mode: cluster`, **instances = 2** (= nproc) |
 | PostgreSQL | **16.14** (alpine, Docker), `max_connections=300 shared_buffers=256MB work_mem=16MB`, **CPU-capped to 0.5 vCPU** (see §5) |
-| k6 | **v0.55.0**, `constant-arrival-rate` (open model) |
+| k6 | **v0.55.0**, `constant-arrival-rate` (open model), `discardResponseBodies: true` — required for the 1-vCPU loader to sustain 2000 RPS; response bodies are fully downloaded over the wire (latency timing unaffected) but not copied into the JS runtime |
 
 ### 2.3 Dataset & request
 
@@ -93,7 +93,7 @@ Per level and stack (`scripts/bench-protocol.sh` via `benchmark-lab/run-pub-benc
 
 **Saturation criterion (pre-registered):** a level is saturated when the median of its runs has p95 > 100 ms or error rate > 1%, or when the SUT cannot keep the arrival schedule (k6 VU exhaustion / incomplete request count at a rate the loader demonstrably sustains elsewhere).
 
-**Run validity rule (pre-registered, symmetric):** the loader is a 1-vCPU shared VPS with intermittent CPU steal. A run only enters group statistics if k6 kept its schedule: `dropped_iterations == 0` **and** `rps_actual ≥ 0.99 × target`. Runs failing this are **kept in the CSV** re-labeled `…-invalid` (36 of 96 runs; the rule was applied identically to both stacks — it excluded 28 Appitools-window runs and 8 NestJS-window runs). NestJS runs at 750/1000 RPS that missed schedule due to **server** backpressure are *not* excluded — that is the saturation finding itself.
+**Run validity rule (pre-registered, symmetric):** the loader is a 1-vCPU shared VPS with intermittent CPU steal. A run only enters group statistics if k6 kept its schedule: `dropped_iterations == 0` **and** `rps_actual ≥ 0.99 × target`. Runs failing this are **kept in the CSV** re-labeled `…-invalid` (39 of 109 runs; the rule was applied identically to both stacks — it excluded 31 Appitools-window runs and 8 NestJS-window runs). NestJS runs at 750/1000 RPS that missed schedule due to **server** backpressure are *not* excluded — that is the saturation finding itself.
 
 Verification before measuring: both stacks returned identical row sets; both rejected missing/forged/`alg=none` tokens (401); Appitools validation rules verified live (422 multi-field on invalid POST).
 
@@ -174,7 +174,7 @@ PostgreSQL pressure during this window (cgroup throttling deltas, 0.5-CPU cap): 
 ## 5. Limitations — read before quoting
 
 1. **The loader is the weakest instrument.** A 1-vCPU shared VPS with 0–19% CPU steal. We mitigated with the schedule-fidelity validity rule (§2.5), per-level re-runs, and ABBA windows — but levels ≥1500 RPS carry loader noise in their externally-measured tails, and 2500 RPS was not reliably drivable at all. Server-side histograms (§4.3) bound the engine's actual latency.
-2. **Network between droplets** adds ~1.2–2.6 ms to every measurement, for both stacks. Appitools' external p50 (~1.5 ms) is essentially the network floor.
+2. **Network between droplets** adds the ~1.2 ms RTT floor to every measurement, for both stacks (see §2.1 on why the ping *average* reads higher). Appitools' external p50 (~1.5 ms) is essentially that network floor.
 3. **PostgreSQL is CPU-capped at 0.5 vCPU** (Docker limit, historical setup of this droplet). Identical for both stacks. Measured impact: during NestJS's collapse window the PG cgroup accumulated only +39 throttled periods (+1.7 s) — the bottleneck was Node CPU, not the DB cap. Still, an uncapped-PG re-run is a welcome reproduction.
 4. **NestJS is intentionally un-tuned beyond the basics** (production build, pm2 cluster ×2, Prisma pool 10×2, real JWT). No response cache, no Fastify adapter, no read replicas, no `@nestjs/cache-manager`. If you can make this baseline faster *with the same trust model*, **send a PR to `benchmark-lab/`** — we will run it and publish.
 5. **Single node, single tenant under load, read-only workload.** This measures the filtered-list read path (the most common API-gateway shape), not writes, not mixed workloads, not horizontal scaling.
@@ -213,4 +213,4 @@ The ladder driver enforces the warmup/cooldown protocol and the saturation gate;
 
 ## 7. Raw data
 
-[`benchmarks/data/s46-pub-runs.csv`](../benchmarks/data/s46-pub-runs.csv) — **all 96 runs** of the session (run_id, label, timestamps, target RPS, n, p50/p95/p99, error rate, intra-run CV), including every excluded run (`…-invalid` labels = schedule-fidelity failures of the loader, §2.5). Nothing was deleted; exclusions are label-marked, not removed.
+[`benchmarks/data/s46-pub-runs.csv`](../benchmarks/data/s46-pub-runs.csv) — **all 109 runs** of the session (run_id, label, timestamps, target RPS, n, p50/p95/p99, error rate, intra-run CV), including every excluded run (`…-invalid` labels = schedule-fidelity failures of the loader, §2.5). Nothing was deleted; exclusions are label-marked, not removed.
