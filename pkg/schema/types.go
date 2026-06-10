@@ -17,20 +17,34 @@ type APISchema struct {
 
 // ResourceSchema defines a single entity (table) with its fields, hooks, and indexes.
 type ResourceSchema struct {
-	Fields  map[string]FieldDef    `json:"fields"`
-	Hooks   map[string]HookConfig  `json:"hooks,omitempty"`
-	Indexes []IndexDef             `json:"indexes,omitempty"`
+	Fields  map[string]FieldDef   `json:"fields"`
+	Hooks   map[string]HookConfig `json:"hooks,omitempty"`
+	Indexes []IndexDef            `json:"indexes,omitempty"`
 }
 
 // FieldDef describes one field within a resource.
+//
+// The declarative validation keys (min/max, minLength/maxLength, pattern,
+// format) are ALL optional — a schema that declares none of them behaves
+// exactly as before. They are compiled into a ResourceValidator at schema load
+// (see rules.go); the request path never compiles anything.
 type FieldDef struct {
-	Type     string   `json:"type"`               // string, int, int64, float64, bool, uuid, time
+	Type     string   `json:"type"` // string, int, int64, float64, bool, uuid, time
 	Required bool     `json:"required,omitempty"`
 	Unique   bool     `json:"unique,omitempty"`
-	Auto     bool     `json:"auto,omitempty"`     // for created_at / updated_at
+	Auto     bool     `json:"auto,omitempty"` // for created_at / updated_at
 	Enum     []string `json:"enum,omitempty"`
 	Relation string   `json:"relation,omitempty"` // name of the related resource
 	Default  any      `json:"default,omitempty"`
+
+	// Declarative validation rules (S44). Pointer types distinguish "absent"
+	// from a legitimate zero (min: 0, minLength: 0).
+	Min       *float64 `json:"min,omitempty"`       // numeric types: value >= Min
+	Max       *float64 `json:"max,omitempty"`       // numeric types: value <= Max
+	MinLength *int     `json:"minLength,omitempty"` // string/text: rune count >= MinLength
+	MaxLength *int     `json:"maxLength,omitempty"` // string/text: rune count <= MaxLength
+	Pattern   string   `json:"pattern,omitempty"`   // string/text: RE2 regex, len <= MaxPatternLength
+	Format    string   `json:"format,omitempty"`    // string/text: email | uuid | url | date
 }
 
 // HookConfig defines a lifecycle hook on a resource (before_create, after_create, etc.).

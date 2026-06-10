@@ -21,12 +21,12 @@
     },
     "guides": {
       "fields": {
-        "code":           { "type": "string",  "unique": true, "required": true },
+        "code":           { "type": "string",  "unique": true, "required": true, "pattern": "^[A-Z0-9-]{5,40}$", "maxLength": 40 },
         "status":         { "type": "string",  "enum": ["pending", "in_transit", "delivered", "returned"] },
-        "origin":         { "type": "string",  "required": true },
-        "destination":    { "type": "string",  "required": true },
-        "weight_kg":      { "type": "float64" },
-        "declared_value": { "type": "float64" },
+        "origin":         { "type": "string",  "required": true, "minLength": 2, "maxLength": 120 },
+        "destination":    { "type": "string",  "required": true, "minLength": 2, "maxLength": 120 },
+        "weight_kg":      { "type": "float64", "min": 0, "max": 10000 },
+        "declared_value": { "type": "float64", "min": 0, "max": 999999999 },
         "client_id":      { "type": "uuid",    "relation": "clients" },
         "operator_id":    { "type": "uuid",    "relation": "users" },
         "created_at":     { "type": "time",    "auto": true },

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "validation-e2e",
+  "resources": {
+    "members": {
+      "fields": {
+        "email":      { "type": "string", "required": true, "format": "email", "maxLength": 254 },
+        "status":     { "type": "string", "enum": ["pending", "active", "done"] },
+        "amount":     { "type": "float64", "min": 0, "max": 999999999 },
+        "nit":        { "type": "string", "pattern": "^[0-9]{9,10}$" },
+        "code":       { "type": "string", "minLength": 3, "maxLength": 20 },
+        "homepage":   { "type": "string", "format": "url" },
+        "created_at": { "type": "time", "auto": true }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "super_admin": {
+        "resources": "*",
+        "actions": ["*"]
+      }
+    }
+  }
+}

@@ -77,6 +77,8 @@ func Validate(s *APISchema) []ValidationError {
 					Message: "enum must not be empty",
 				})
 			}
+
+			errs = append(errs, validateFieldRules(fieldPrefix, field)...)
 		}
 
 		for hookName, hook := range res.Hooks {
@@ -110,6 +112,100 @@ func Validate(s *APISchema) []ValidationError {
 					Message: fmt.Sprintf("unknown hook type %q: must be \"js\", \"webhook\", or \"wasm\"", hook.Type),
 				})
 			}
+		}
+	}
+
+	return errs
+}
+
+// numericTypes are the field types min/max apply to.
+var numericTypes = map[string]bool{"int": true, "int64": true, "float64": true}
+
+// stringTypes are the field types minLength/maxLength/pattern/format apply to.
+var stringTypes = map[string]bool{"string": true, "text": true}
+
+// validateFieldRules checks the DEFINITION of the declarative validation keys
+// (S44) so a bad rule is rejected cleanly at schema load — never a panic at
+// compile time nor a surprise at request time. All keys are optional; a field
+// declaring none of them produces no errors here.
+func validateFieldRules(fieldPrefix string, field FieldDef) []ValidationError {
+	var errs []ValidationError
+
+	if field.Pattern != "" {
+		switch {
+		case !stringTypes[field.Type]:
+			errs = append(errs, ValidationError{
+				Field:   fieldPrefix + ".pattern",
+				Message: fmt.Sprintf("pattern only applies to string/text fields, not %q", field.Type),
+			})
+		case len(field.Pattern) > MaxPatternLength:
+			errs = append(errs, ValidationError{
+				Field:   fieldPrefix + ".pattern",
+				Message: fmt.Sprintf("pattern is %d chars; max is %d", len(field.Pattern), MaxPatternLength),
+			})
+		default:
+			if _, err := regexp.Compile(field.Pattern); err != nil {
+				errs = append(errs, ValidationError{
+					Field:   fieldPrefix + ".pattern",
+					Message: fmt.Sprintf("invalid pattern: %v", err),
+				})
+			}
+		}
+	}
+
+	if field.MinLength != nil || field.MaxLength != nil {
+		if !stringTypes[field.Type] {
+			errs = append(errs, ValidationError{
+				Field:   fieldPrefix,
+				Message: fmt.Sprintf("minLength/maxLength only apply to string/text fields, not %q", field.Type),
+			})
+		}
+		if field.MinLength != nil && *field.MinLength < 0 {
+			errs = append(errs, ValidationError{
+				Field:   fieldPrefix + ".minLength",
+				Message: "minLength must be >= 0",
+			})
+		}
+		if field.MaxLength != nil && *field.MaxLength < 0 {
+			errs = append(errs, ValidationError{
+				Field:   fieldPrefix + ".maxLength",
+				Message: "maxLength must be >= 0",
+			})
+		}
+		if field.MinLength != nil && field.MaxLength != nil && *field.MinLength > *field.MaxLength {
+			errs = append(errs, ValidationError{
+				Field:   fieldPrefix,
+				Message: "minLength must be <= maxLength",
+			})
+		}
+	}
+
+	if field.Min != nil || field.Max != nil {
+		if !numericTypes[field.Type] {
+			errs = append(errs, ValidationError{
+				Field:   fieldPrefix,
+				Message: fmt.Sprintf("min/max only apply to numeric fields (int, int64, float64), not %q", field.Type),
+			})
+		}
+		if field.Min != nil && field.Max != nil && *field.Min > *field.Max {
+			errs = append(errs, ValidationError{
+				Field:   fieldPrefix,
+				Message: "min must be <= max",
+			})
+		}
+	}
+
+	if field.Format != "" {
+		if !stringTypes[field.Type] {
+			errs = append(errs, ValidationError{
+				Field:   fieldPrefix + ".format",
+				Message: fmt.Sprintf("format only applies to string/text fields, not %q", field.Type),
+			})
+		} else if !validFormats[field.Format] {
+			errs = append(errs, ValidationError{
+				Field:   fieldPrefix + ".format",
+				Message: fmt.Sprintf("unknown format %q: must be one of email, uuid, url, date", field.Format),
+			})
 		}
 	}
 

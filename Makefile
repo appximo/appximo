@@ -155,7 +155,7 @@ devhub-build:
 	go build -trimpath -ldflags="-s -w" -o devhub ./tools/devhub/
 
 # Protocolo de benchmark científico: N runs + warmup + cooldown + import a SQLite
-# Uso: make bench-protocol RUNS=10 LABEL=baseline-s42 [RATE=500] [DURATION=30s]
+# Uso: make bench-protocol RUNS=10 LABEL=baseline-s42 [RATE=500] [DURATION=30s] [SCRIPT=tests/performance/sustained_writes.js]
 bench-protocol:
 	@test -n "$(LABEL)" || (echo "Uso: make bench-protocol RUNS=10 LABEL=nombre" && exit 1)
-	bash scripts/bench-protocol.sh $(or $(RUNS),10) $(LABEL) $(or $(RATE),500) $(or $(DURATION),30s)
+	bash scripts/bench-protocol.sh $(or $(RUNS),10) $(LABEL) $(or $(RATE),500) $(or $(DURATION),30s) $(or $(SCRIPT),tests/performance/sustained_2krps.js)

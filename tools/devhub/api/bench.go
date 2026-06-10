@@ -456,14 +456,14 @@ func CompareGroups(labelA, labelB string) (*GroupCompareResult, error) {
 		NA: len(pooledA), NB: len(pooledB),
 		CVBetweenRunsA: stats.CV(p50A),
 		CVBetweenRunsB: stats.CV(p50B),
-		U:           res.U,
-		PValue:      res.PValue,
-		CILowerMs:   res.CILowerMs,
-		CIUpperMs:   res.CIUpperMs,
-		MinEffectMs: res.MinEffectMs,
-		Significant: res.Significant,
-		Direction:   res.Direction,
-		DeltaPct:    res.DeltaPct,
+		U:              res.U,
+		PValue:         res.PValue,
+		CILowerMs:      res.CILowerMs,
+		CIUpperMs:      res.CIUpperMs,
+		MinEffectMs:    res.MinEffectMs,
+		Significant:    res.Significant,
+		Direction:      res.Direction,
+		DeltaPct:       res.DeltaPct,
 	}, nil
 }
 
@@ -762,8 +762,20 @@ var (
 	protocolDurationRe = regexp.MustCompile(`^[0-9]{1,3}s$`)
 )
 
+// protocolScripts is the EXACT allowlist for the optional "script" field: the
+// two known k6 benchmark scripts, mapped to their repo-relative paths. Anything
+// else — including any path-looking value — is rejected with 400; arbitrary
+// paths must never reach the protocol script's argv.
+var protocolScripts = map[string]string{
+	"":                    "tests/performance/sustained_2krps.js", // default: read bench
+	"sustained_2krps.js":  "tests/performance/sustained_2krps.js",
+	"sustained_writes.js": "tests/performance/sustained_writes.js",
+}
+
 // BenchProtocolHandler — POST /api/bench/protocol
-// body: {"runs":3,"label":"ui-test","rate":50,"duration":"15s"}
+// body: {"runs":3,"label":"ui-test","rate":50,"duration":"15s","script":"sustained_writes.js"}
+// script is optional (default sustained_2krps.js) and must be one of the
+// protocolScripts allowlist keys — never a path.
 //
 // Runs scripts/bench-protocol.sh and streams its stdout/stderr as SSE, ending
 // with an `event: done` carrying the exit code.
@@ -779,6 +791,7 @@ func BenchProtocolHandler(repoDir string) http.HandlerFunc {
 			Label    string `json:"label"`
 			Rate     int    `json:"rate"`
 			Duration string `json:"duration"`
+			Script   string `json:"script"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid JSON body")
@@ -800,6 +813,11 @@ func BenchProtocolHandler(repoDir string) http.HandlerFunc {
 			writeErr(w, http.StatusBadRequest, "duration must match ^[0-9]{1,3}s$ (e.g. 15s)")
 			return
 		}
+		scriptPath, ok := protocolScripts[req.Script]
+		if !ok {
+			writeErr(w, http.StatusBadRequest, "script must be one of: sustained_2krps.js, sustained_writes.js")
+			return
+		}
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -810,14 +828,15 @@ func BenchProtocolHandler(repoDir string) http.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		sw := &sseWriter{w: w, flusher: flusher}
-		fmt.Fprintf(w, "event: start\ndata: {\"label\":%q,\"runs\":%d,\"rate\":%d,\"duration\":%q}\n\n",
-			req.Label, req.Runs, req.Rate, req.Duration)
+		fmt.Fprintf(w, "event: start\ndata: {\"label\":%q,\"runs\":%d,\"rate\":%d,\"duration\":%q,\"script\":%q}\n\n",
+			req.Label, req.Runs, req.Rate, req.Duration, scriptPath)
 		flusher.Flush()
 
 		// Validated values ONLY, each as its own argv element. exec.Command does
-		// not invoke a shell, so the script receives them verbatim as $1..$4.
+		// not invoke a shell, so the script receives them verbatim as $1..$5.
+		// scriptPath comes from the protocolScripts allowlist, never from input.
 		cmd := exec.CommandContext(r.Context(), "bash", "scripts/bench-protocol.sh",
-			strconv.Itoa(req.Runs), req.Label, strconv.Itoa(req.Rate), req.Duration)
+			strconv.Itoa(req.Runs), req.Label, strconv.Itoa(req.Rate), req.Duration, scriptPath)
 		cmd.Dir = repoDir
 		cmd.Stdout = sw
 		cmd.Stderr = sw

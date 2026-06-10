@@ -10,7 +10,9 @@
 #   6. print a summary table: run_id, p50, p95, p99, cv
 #   7. if mean CV > 15%, warn that the benchmark bench is unstable
 #
-# Usage: bash scripts/bench-protocol.sh <RUNS> <LABEL> [RATE] [DURATION]
+# Usage: bash scripts/bench-protocol.sh <RUNS> <LABEL> [RATE] [DURATION] [SCRIPT]
+#   SCRIPT: k6 script path (default tests/performance/sustained_2krps.js;
+#           e.g. tests/performance/sustained_writes.js for the write path)
 # Env overrides: DEVHUB_URL TARGET_URL TENANT_ID ENDPOINT BENCH_TOKEN K6_SCRIPT
 #                APPITOOLS_SECRETS WARMUP_DURATION
 #
@@ -21,10 +23,11 @@
 # are reproducible and same-system comparisons land on no_change as they should.
 set -euo pipefail
 
-RUNS="${1:?Uso: bench-protocol.sh <RUNS> <LABEL> [RATE] [DURATION]}"
-LABEL="${2:?LABEL requerido — Uso: bench-protocol.sh <RUNS> <LABEL> [RATE] [DURATION]}"
+RUNS="${1:?Uso: bench-protocol.sh <RUNS> <LABEL> [RATE] [DURATION] [SCRIPT]}"
+LABEL="${2:?LABEL requerido — Uso: bench-protocol.sh <RUNS> <LABEL> [RATE] [DURATION] [SCRIPT]}"
 RATE="${3:-500}"
 DURATION="${4:-30s}"
+SCRIPT_ARG="${5:-}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -33,7 +36,12 @@ DEVHUB_URL="${DEVHUB_URL:-http://localhost:3099}"
 TARGET_URL="${TARGET_URL:-http://localhost:8080}"
 TENANT="${TENANT_ID:-acme}"
 ENDPOINT="${ENDPOINT:-/api/guides?filter[status][eq]=pending&per_page=20}"
-K6_SCRIPT="${K6_SCRIPT:-tests/performance/sustained_2krps.js}"
+# 5th positional arg wins over the K6_SCRIPT env var; default is the read bench.
+K6_SCRIPT="${SCRIPT_ARG:-${K6_SCRIPT:-tests/performance/sustained_2krps.js}}"
+if [ ! -f "$K6_SCRIPT" ]; then
+  echo "ERROR: k6 script no existe: $K6_SCRIPT" >&2
+  exit 1
+fi
 SECRETS="${APPITOOLS_SECRETS:-/root/.appitools-secrets-dev}"
 # A single warmup of the measurement length isn't enough to reach steady state on
 # a small / shared host (the Postgres buffer cache and the pgx pool keep warming
@@ -71,6 +79,7 @@ run_k6() {
 }
 
 echo "▶ bench-protocol  RUNS=$RUNS  LABEL=$LABEL  RATE=$RATE  DURATION=$DURATION"
+echo "  script=$K6_SCRIPT"
 echo "  target=$TARGET_URL  endpoint=$ENDPOINT  devhub=$DEVHUB_URL"
 echo "  [1] cooldown inicial 10s…"
 sleep 10

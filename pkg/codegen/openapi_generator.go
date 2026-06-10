@@ -370,7 +370,9 @@ func oaResourceSchema(res *schema.ResourceSchema, includeAuto bool) map[string]a
 	return out
 }
 
-// oaFieldType maps a FieldDef to an OpenAPI type schema object.
+// oaFieldType maps a FieldDef to an OpenAPI type schema object, including the
+// declarative validation rules (S44): pattern, min/maxLength, minimum/maximum
+// and format translate to their exact OpenAPI equivalents.
 func oaFieldType(fd schema.FieldDef) map[string]any {
 	switch fd.Type {
 	case "string", "text":
@@ -378,13 +380,32 @@ func oaFieldType(fd schema.FieldDef) map[string]any {
 		if len(fd.Enum) > 0 {
 			m["enum"] = fd.Enum
 		}
+		if fd.MinLength != nil {
+			m["minLength"] = *fd.MinLength
+		}
+		if fd.MaxLength != nil {
+			m["maxLength"] = *fd.MaxLength
+		}
+		if fd.Pattern != "" {
+			m["pattern"] = fd.Pattern
+		}
+		switch fd.Format {
+		case "email":
+			m["format"] = "email"
+		case "uuid":
+			m["format"] = "uuid"
+		case "url":
+			m["format"] = "uri" // OpenAPI's registered name for URLs
+		case "date":
+			m["format"] = "date"
+		}
 		return m
 	case "int":
-		return map[string]any{"type": "integer", "format": "int32"}
+		return oaNumericBounds(map[string]any{"type": "integer", "format": "int32"}, fd)
 	case "int64":
-		return map[string]any{"type": "integer", "format": "int64"}
+		return oaNumericBounds(map[string]any{"type": "integer", "format": "int64"}, fd)
 	case "float64":
-		return map[string]any{"type": "number", "format": "double"}
+		return oaNumericBounds(map[string]any{"type": "number", "format": "double"}, fd)
 	case "bool":
 		return map[string]any{"type": "boolean"}
 	case "uuid":
@@ -394,6 +415,18 @@ func oaFieldType(fd schema.FieldDef) map[string]any {
 	default:
 		return map[string]any{"type": "string"}
 	}
+}
+
+// oaNumericBounds copies the min/max validation rules onto a numeric OpenAPI
+// schema as minimum/maximum.
+func oaNumericBounds(m map[string]any, fd schema.FieldDef) map[string]any {
+	if fd.Min != nil {
+		m["minimum"] = *fd.Min
+	}
+	if fd.Max != nil {
+		m["maximum"] = *fd.Max
+	}
+	return m
 }
 
 func oaSortEnum(res *schema.ResourceSchema) []string {

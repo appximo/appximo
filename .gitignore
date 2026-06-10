@@ -44,6 +44,7 @@ benchmark-lab/node_modules/
 
 # k6 perf run artifact
 tests/performance/last-run.json
+tests/performance/last-write-run.json
 
 # DevHub local dev artifacts (S41/S42): the statistics store is a runtime DB
 # regenerated from tools/devhub/db/schema.sql; the dev engine + devhub binaries

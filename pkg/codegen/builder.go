@@ -39,6 +39,16 @@ func writeJSONErr(w http.ResponseWriter, status int, msg string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg}) //nolint:errcheck
 }
 
+// writeValidationErrs writes the declarative-validation 422 response, reporting
+// EVERY violated field/rule in one pass (never just the first):
+//
+//	{"error":"validation_failed","fields":[{"field":"email","rule":"format","message":"must be a valid email"}]}
+func writeValidationErrs(w http.ResponseWriter, errs []schema.FieldRuleError) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	json.NewEncoder(w).Encode(map[string]any{"error": "validation_failed", "fields": errs}) //nolint:errcheck
+}
+
 // maxRequestBodyBytes caps the size of a write request body. Without it a client
 // could stream an arbitrarily large JSON document and force unbounded allocation
 // (OWASP API4). Matches the GraphQL handler's 1 MiB limit.
@@ -120,6 +130,10 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 	for _, resName := range names {
 		name := resName
 		res := s.Resources[resName]
+		// Declarative validation is compiled ONCE here — BuildRouter runs at
+		// schema load/reload, never per request. The handlers below only execute
+		// the precompiled closures (S44 requirement #1).
+		rv := schema.CompileRules(&res)
 
 		// --- List ---
 		r.Get("/api/"+name, pkghandlers.CachedGet(func(w http.ResponseWriter, req *http.Request) {
@@ -199,6 +213,14 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			}
 			if len(body) == 0 {
 				writeJSONErr(w, http.StatusBadRequest, "empty body")
+				return
+			}
+
+			// Declarative validation: BEFORE the before_create hook and the
+			// INSERT. Create requires every required non-auto field (S44 #2).
+			if verrs := rv.ValidateWrite(body, true); len(verrs) > 0 {
+				markSpan(req, "validate")
+				writeValidationErrs(w, verrs)
 				return
 			}
 
@@ -380,6 +402,15 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				}
 				if len(body) == 0 {
 					writeJSONErr(w, http.StatusBadRequest, "empty body")
+					return
+				}
+
+				// Declarative validation: BEFORE the before_update hook and the
+				// UPDATE. PUT (full replace) enforces required fields; PATCH only
+				// validates the fields present in the body (S44 #4).
+				if verrs := rv.ValidateWrite(body, put); len(verrs) > 0 {
+					markSpan(req, "validate")
+					writeValidationErrs(w, verrs)
 					return
 				}
 
