@@ -23,6 +23,10 @@ const TENANT   = __ENV.TENANT_ID || '10';
 const TOKEN    = __ENV.BENCH_TOKEN || '';
 const ENDPOINT = __ENV.ENDPOINT ||
   '/api/guides?filter[status]=pending&sort=created_at&order=desc&per_page=20';
+// NO_CACHE=1 sends Cache-Control: no-cache, which the Appitools response
+// cache honors as a full bypass (pkg/cache/response_cache.go): every request
+// reaches Postgres. Used for the cache-disabled headline variant (§4.4).
+const NO_CACHE = __ENV.NO_CACHE === '1';
 
 export const options = {
   // The load generator is a 1-vCPU box: every byte of response body k6 copies
@@ -53,12 +57,12 @@ export function setup() {
 
 export default function () {
   // status >= 400 is tracked by the built-in http_req_failed metric.
-  http.get(`${TARGET}${ENDPOINT}`, {
-    headers: {
-      Authorization: `Bearer ${TOKEN}`,
-      Host:          `${TENANT}.localhost`,
-    },
-  });
+  const headers = {
+    Authorization: `Bearer ${TOKEN}`,
+    Host:          `${TENANT}.localhost`,
+  };
+  if (NO_CACHE) headers['Cache-Control'] = 'no-cache';
+  http.get(`${TARGET}${ENDPOINT}`, { headers });
 }
 
 export function handleSummary(data) {

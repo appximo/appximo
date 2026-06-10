@@ -14,6 +14,7 @@ Measured from an **external load generator over a real network**, against a $16/
 | Appitools server-side @ 2000 RPS | **99.98% of 114,771 requests < 5 ms, mean 0.079 ms** | Prometheus histogram delta across a dedicated 2-run window |
 | NestJS @ **500 RPS** (its highest sustained level) | p50 **7.40 ms** (CI95 [6.42, 9.92]), p95 38.7 ms | 10 schedule-clean runs × 30 s |
 | Head-to-head @ 500 RPS | Appitools p50 **1.53 ms** vs NestJS **7.40 ms** → **~4.8× faster**; pooled-median delta CI95 **[+5.54, +5.60] ms**, Mann-Whitney **U=0, p≈0** | 10 vs 10 runs, ABBA windows |
+| Head-to-head @ 500 RPS, **response cache disabled** | Appitools p50 **2.76 ms** (CI95 [2.65, 2.86]) — **still ~2.7× faster** than NestJS; delta CI95 **[+4.36, +4.42] ms**, p≈0 | 10 clean runs, every request verified to hit Postgres (§4.4) |
 | Saturation point | NestJS **collapses between 500 and 750 RPS** (p50 238–420 ms, p99 up to 27.6 s at 750). Appitools **did not saturate** at any level our loader can reliably drive (≤2000 RPS) | Ladder, §3 |
 | Run-to-run stability | between-run CV of p50: Appitools **2.9%**, NestJS **22.8%** | compare-groups |
 
@@ -73,7 +74,7 @@ Both stacks return the 20 newest `pending` rows for tenant 10. (NestJS hardcodes
 | Tenant isolation | Host subdomain → per-tenant schema | verified `tenant_id` JWT claim → `WHERE tenant_id=` |
 | Validation rules | S44 rules compiled & loaded (write-path only; zero read cost measured in S44) | n/a |
 | Rate limiter / observability | active (3000 RPS limit — never triggered; Prometheus histograms) | none |
-| **Response cache** | **built-in in-memory cache (validated-token GETs, write-invalidated) — ON, it ships enabled** | none |
+| **Response cache** | **built-in in-memory cache (validated-token GETs, write-invalidated) — ON, it ships enabled** (cache-disabled variant measured in §4.4) | none |
 | DB access | pgx pool (max 10 conns) | Prisma, `connection_limit=10` × 2 workers = 20 conns |
 | Pagination | keyset | OFFSET (page 1 ⇒ skip 0, equal cost here) |
 | Response | `{data, meta}` | `{data}` (smaller payload) |
@@ -154,6 +155,22 @@ The 60 ms external p95 is therefore queueing in the network path and the 1-vCPU 
 
 ---
 
+### 4.4 Appitools with the response cache disabled
+
+The biggest declared asymmetry (§2.4) is the built-in response cache. To isolate it, we re-ran the full 500 RPS headline protocol (10 schedule-clean runs of 30 s, same validity rule, label `pub-appitools-500-nocache`) sending **`Cache-Control: no-cache`** on every request — which the engine honors as a complete cache bypass.
+
+**Bypass verified before measuring**, not assumed: the engine's `/debug/tenant/10` traces show three distinct span signatures — `no-cache` requests carry a `query` span (Postgres) and **no cache span at all**; plain first requests show `cache_miss` + `query`; plain repeats show `cache_hit` and no query. A k6 probe with the header confirmed 10/10 sampled traces hitting Postgres.
+
+| @ 500 RPS, 10 clean runs | Appitools (cache ON) | **Appitools (cache OFF)** | NestJS |
+|---|---|---|---|
+| p50 median (CI95) | 1.528 ms [1.499, 1.547] | **2.756 ms [2.647, 2.859]** | 7.401 ms [6.421, 9.922] |
+| per-run p95 median (CI95) | 2.69 ms [2.50, 3.64] | **7.20 ms [5.58, 9.50]** | 38.74 ms [31.93, 58.88] |
+| between-run CV of p50 | 2.9% | **4.9%** | 22.8% |
+
+`compare-groups` (cache OFF vs NestJS): pooled n = 131,142 vs 134,132, **p ≈ 0**, median delta CI95 **[+4.36, +4.42] ms**, pooled p95 delta +502% — **Appitools with no cache, full RBAC, and every request hitting Postgres is still ~2.7× faster at the median and ~5.4× at p95 than the NestJS baseline.** The cache accounts for roughly 1.2 ms of the 5.9 ms gap; the rest is the engine.
+
+PostgreSQL pressure during this window (cgroup throttling deltas, 0.5-CPU cap): the uncached window accumulated **+480 throttled periods / +19.7 s** over ~8 minutes (~2.5 s/min) — about **6× more PG throttling per minute than the NestJS headline window** (+43 / +1.79 s over ~4.5 min ≈ 0.4 s/min). Two honest implications: (a) the uncached Appitools numbers carry a PG-cap headwind that an uncapped DB would relax, and (b) NestJS's collapse is *not* DB starvation — it saturates Node CPU before it can pressure Postgres this hard.
+
 ## 5. Limitations — read before quoting
 
 1. **The loader is the weakest instrument.** A 1-vCPU shared VPS with 0–19% CPU steal. We mitigated with the schedule-fidelity validity rule (§2.5), per-level re-runs, and ABBA windows — but levels ≥1500 RPS carry loader noise in their externally-measured tails, and 2500 RPS was not reliably drivable at all. Server-side histograms (§4.3) bound the engine's actual latency.
@@ -161,7 +178,7 @@ The 60 ms external p95 is therefore queueing in the network path and the 1-vCPU 
 3. **PostgreSQL is CPU-capped at 0.5 vCPU** (Docker limit, historical setup of this droplet). Identical for both stacks. Measured impact: during NestJS's collapse window the PG cgroup accumulated only +39 throttled periods (+1.7 s) — the bottleneck was Node CPU, not the DB cap. Still, an uncapped-PG re-run is a welcome reproduction.
 4. **NestJS is intentionally un-tuned beyond the basics** (production build, pm2 cluster ×2, Prisma pool 10×2, real JWT). No response cache, no Fastify adapter, no read replicas, no `@nestjs/cache-manager`. If you can make this baseline faster *with the same trust model*, **send a PR to `benchmark-lab/`** — we will run it and publish.
 5. **Single node, single tenant under load, read-only workload.** This measures the filtered-list read path (the most common API-gateway shape), not writes, not mixed workloads, not horizontal scaling.
-6. **Appitools' response cache absorbs most repeated reads** (§2.4/§4.3). That is the shipped product, but a workload with low cache hit rates (high-cardinality queries) would show smaller gaps. The S44 session measured the uncached write path at +0.08–0.13 ms p50 for validation; uncached read benchmarks are future work.
+6. **Appitools' response cache absorbs most repeated reads** (§2.4/§4.3). That is the shipped product, but a workload with low cache hit rates (high-cardinality queries) would show smaller gaps — measured directly in §4.4: with the cache fully bypassed the median gap narrows from 4.8× to **2.7×** (still decisive, and the uncached run carries the PG-cap headwind described there).
 7. The two stacks ran in **separate time windows** (by design — they share 2 vCPUs). ABBA ordering and between-run CV reporting are the drift controls.
 
 ---
