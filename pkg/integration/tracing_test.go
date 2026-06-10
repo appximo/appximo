@@ -119,7 +119,7 @@ func buildTracedStack(pool *db.TenantDB, rings *observability.Rings, store *obse
 	inner.Use(rc.Middleware)
 	inner.Use(auth.JWTMiddleware(jwtSecret))
 	inner.Use(rbacpkg.RBACMiddleware(policyJSON))
-	inner.Mount("/", codegen.BuildRouter(s, pool, hr, nil))
+	inner.Mount("/", codegen.BuildRouter(s, pool, hr, nil, nil))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		req.Host = tenantID + ".localhost"

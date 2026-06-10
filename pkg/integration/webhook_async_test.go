@@ -88,7 +88,7 @@ CREATE TABLE tenant_acmetest.guides (
 	inner.Use(tenant.TenantMiddleware)
 	inner.Use(auth.JWTMiddleware(jwtSecret))
 	inner.Use(rbacpkg.RBACMiddleware(policyJSON))
-	inner.Mount("/", codegen.BuildRouter(s, tdb, hr, nil))
+	inner.Mount("/", codegen.BuildRouter(s, tdb, hr, nil, nil))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		req.Host = tenantID + ".localhost"
 		inner.ServeHTTP(w, req)

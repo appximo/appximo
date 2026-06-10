@@ -58,7 +58,7 @@ func buildGQLSrv(t *testing.T, pool *pgxpool.Pool, tenantID, pgSchema string, s 
 
 	tdb := db.NewTenantDB(pool)
 	hr := extensions.NewHookRunner(extensions.NewJSSandbox())
-	h := gqlhandler.BuildHandler(s, tdb, hr, &policy)
+	h := gqlhandler.BuildHandler(s, tdb, hr, &policy, nil)
 	h = auth.JWTMiddleware(authTestSecret)(h)
 	h = tenant.TenantMiddleware(h)
 
@@ -230,7 +230,7 @@ func TestSecurity_Introspection_DisabledInProd(t *testing.T) {
 	json.Unmarshal(policyJSON, &policy)
 
 	// nil tdb/hr are safe here: handler exits before any resolver fires.
-	h := gqlhandler.BuildHandler(s, nil, nil, &policy)
+	h := gqlhandler.BuildHandler(s, nil, nil, &policy, nil)
 	h = auth.JWTMiddleware(authTestSecret)(h)
 	h = tenant.TenantMiddleware(h)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -266,7 +266,7 @@ func TestSecurity_LargeBody_Returns413(t *testing.T) {
 	var policy rbacpkg.Policy
 	json.Unmarshal(policyJSON, &policy)
 
-	h := gqlhandler.BuildHandler(s, nil, nil, &policy)
+	h := gqlhandler.BuildHandler(s, nil, nil, &policy, nil)
 	h = auth.JWTMiddleware(authTestSecret)(h)
 	h = tenant.TenantMiddleware(h)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

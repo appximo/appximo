@@ -76,3 +76,8 @@ func (sr *statusRecorder) WriteHeader(code int) {
 	sr.status = code
 	sr.ResponseWriter.WriteHeader(code)
 }
+
+// Unwrap lets http.ResponseController reach the underlying writer's Flush and
+// deadline controls through this wrapper (Go 1.20 convention) — without it a
+// streaming handler (e.g. SSE) inside this middleware cannot flush.
+func (sr *statusRecorder) Unwrap() http.ResponseWriter { return sr.ResponseWriter }

@@ -146,7 +146,7 @@ func buildServer(s *schema.APISchema, pool *pgxpool.Pool, host string) *httptest
 	r.Use(tenant.TenantMiddleware)
 	r.Use(auth.JWTMiddleware(benchSecret))
 	r.Use(rbacpkg.RBACMiddleware(policyJSON))
-	r.Mount("/", codegen.BuildRouter(s, tdb, hr, nil))
+	r.Mount("/", codegen.BuildRouter(s, tdb, hr, nil, nil))
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		req.Host = host + ".localhost"

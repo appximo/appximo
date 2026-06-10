@@ -306,7 +306,7 @@ func TestPATCHInvalidatesCache(t *testing.T) {
 	root.Use(rc.Middleware) // before JWT, exactly like cmd_serve
 	root.Use(auth.JWTMiddleware(jwtSecret))
 	root.Use(rbacpkg.RBACMiddleware(policyJSON))
-	root.Mount("/", codegen.BuildRouter(s, tdb, hr, rc))
+	root.Mount("/", codegen.BuildRouter(s, tdb, hr, rc, nil))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		req.Host = tenantID + ".localhost"
 		root.ServeHTTP(w, req)

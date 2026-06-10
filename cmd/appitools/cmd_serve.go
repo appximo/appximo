@@ -31,6 +31,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/codegen"
 	"github.com/miguelangel/appitools/pkg/controlplane"
 	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/miguelangel/appitools/pkg/events"
 	"github.com/miguelangel/appitools/pkg/extensions"
 	gqlhandler "github.com/miguelangel/appitools/pkg/graphql"
 	"github.com/miguelangel/appitools/pkg/logging"
@@ -259,6 +260,16 @@ var serveCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		// SSE events hub (S45): in-process pub/sub behind GET /api/{r}/events.
+		// Per-tenant subscriber cap via APPITOOLS_MAX_SSE_PER_TENANT (default 1000).
+		maxSSE := 0
+		if v := os.Getenv("APPITOOLS_MAX_SSE_PER_TENANT"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				maxSSE = n
+			}
+		}
+		eventsHub := events.NewHub(maxSSE)
+
 		// Response cache: 5-second TTL, invalidated by pg_notify schema_updated.
 		responseCache := cache.New(5 * time.Second)
 		// Only cache roles whose responses are identical for every user: no
@@ -472,7 +483,7 @@ var serveCmd = &cobra.Command{
 		})
 
 		// GraphQL endpoint — strict CSP (JSON only, no HTML rendering).
-		r.With(appmiddleware.StrictCSP).Handle("/graphql", gqlhandler.BuildHandler(s, tdb, hr, &rbacPolicy))
+		r.With(appmiddleware.StrictCSP).Handle("/graphql", gqlhandler.BuildHandler(s, tdb, hr, &rbacPolicy, eventsHub))
 
 		// GraphiQL playground — only in development, permissive CSP for IDE assets.
 		if os.Getenv("APPITOOLS_ENV") == "development" {
@@ -483,7 +494,7 @@ var serveCmd = &cobra.Command{
 		// Mount API routes with strict CSP — /api/* serves JSON exclusively.
 		r.Group(func(sub chi.Router) {
 			sub.Use(appmiddleware.StrictCSP)
-			sub.Mount("/", codegen.BuildRouter(s, tdb, hr, responseCache))
+			sub.Mount("/", codegen.BuildRouter(s, tdb, hr, responseCache, eventsHub))
 		})
 
 		addr := fmt.Sprintf(":%d", port)

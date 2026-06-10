@@ -288,7 +288,7 @@ func buildSpanServer(t *testing.T, s *schema.APISchema, pool *pgxpool.Pool) (*ht
 	r.Use(auth.JWTMiddleware(helpers.JWTSecret))
 	r.Use(rbac.RBACMiddleware(policyJSON))
 	r.Use(chimiddleware.Recoverer)
-	r.Mount("/", codegen.BuildRouter(s, tdb, hr, nil))
+	r.Mount("/", codegen.BuildRouter(s, tdb, hr, nil, nil))
 
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
@@ -317,7 +317,7 @@ func buildWebhookServer(t *testing.T, s *schema.APISchema, pool *pgxpool.Pool, d
 	r.Use(auth.JWTMiddleware(helpers.JWTSecret))
 	r.Use(rbac.RBACMiddleware(policyJSON))
 	r.Use(chimiddleware.Recoverer)
-	r.Mount("/", codegen.BuildRouter(s, tdb, hr, nil))
+	r.Mount("/", codegen.BuildRouter(s, tdb, hr, nil, nil))
 
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)

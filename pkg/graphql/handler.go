@@ -19,6 +19,7 @@ import (
 	"github.com/graphql-go/graphql/language/source"
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/miguelangel/appitools/pkg/events"
 	"github.com/miguelangel/appitools/pkg/extensions"
 	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
 	"github.com/miguelangel/appitools/pkg/query"
@@ -49,8 +50,8 @@ func (f *rbacResultFilter) store(gqlField string, allowed []string) {
 
 // BuildHandler constructs an http.Handler for the /graphql endpoint.
 // Callers must ensure tenant.TenantMiddleware runs before this handler.
-func BuildHandler(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy) http.Handler {
-	gqlSchema := buildGQLSchema(s, tdb, hr, policy)
+func BuildHandler(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy, hub *events.Hub) http.Handler {
+	gqlSchema := buildGQLSchema(s, tdb, hr, policy, hub)
 	isDev := os.Getenv("APPITOOLS_ENV") == "development"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// FIX 8: cap request body at 1 MB to prevent OOM from oversized payloads.
@@ -298,7 +299,7 @@ ReactDOM.render(
 
 // ── schema builder ────────────────────────────────────────────────────────────
 
-func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy) gql.Schema {
+func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy, hub *events.Hub) gql.Schema {
 	// Shared scalar/enum/input types — created once per schema instance.
 	orderDir := gql.NewEnum(gql.EnumConfig{
 		Name: "OrderDirection",
@@ -477,14 +478,14 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 			Args: gql.FieldConfigArgument{
 				"input": &gql.ArgumentConfig{Type: gql.NewNonNull(inputTypes[name])},
 			},
-			Resolve: createResolver(name, &resCopy, rv, tdb, hr, policy),
+			Resolve: createResolver(name, &resCopy, rv, tdb, hr, policy, hub),
 		}
 		mutationFields["delete"+title] = &gql.Field{
 			Type: gql.NewNonNull(gql.Boolean),
 			Args: gql.FieldConfigArgument{
 				"id": &gql.ArgumentConfig{Type: gql.NewNonNull(gql.ID)},
 			},
-			Resolve: deleteResolver(name, tdb, policy),
+			Resolve: deleteResolver(name, tdb, policy, hub),
 		}
 	}
 
@@ -635,7 +636,7 @@ func getByIDResolver(name string, tdb *db.TenantDB, policy *rbac.Policy) gql.Fie
 	}
 }
 
-func createResolver(name string, res *schema.ResourceSchema, rv *schema.ResourceValidator, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy) gql.FieldResolveFn {
+func createResolver(name string, res *schema.ResourceSchema, rv *schema.ResourceValidator, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy, hub *events.Hub) gql.FieldResolveFn {
 	return func(p gql.ResolveParams) (any, error) {
 		tc := tenant.MustFromCtx(p.Context)
 		if _, err := checkRBAC(p.Context, policy, name, "create"); err != nil {
@@ -689,6 +690,11 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 			return nil, safeDBErr(err)
 		}
 
+		// SSE broadcast (S45): same post-commit point as the REST create path.
+		if len(result) > 0 {
+			gqlPublish(hub, tc.ID, name, "create", result[0], "")
+		}
+
 		if afterHook := hookCfg(name, "after_create", res); afterHook != nil {
 			var record map[string]any
 			if len(result) > 0 {
@@ -707,7 +713,7 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 	}
 }
 
-func deleteResolver(name string, tdb *db.TenantDB, policy *rbac.Policy) gql.FieldResolveFn {
+func deleteResolver(name string, tdb *db.TenantDB, policy *rbac.Policy, hub *events.Hub) gql.FieldResolveFn {
 	return func(p gql.ResolveParams) (any, error) {
 		tc := tenant.MustFromCtx(p.Context)
 		evalResult, err := checkRBAC(p.Context, policy, name, "delete")
@@ -734,8 +740,27 @@ func deleteResolver(name string, tdb *db.TenantDB, policy *rbac.Policy) gql.Fiel
 		if err != nil {
 			return false, safeDBErr(err)
 		}
+		if affected > 0 {
+			// SSE broadcast (S45): row is gone → id with null record.
+			gqlPublish(hub, tc.ID, name, "delete", nil, idStr)
+		}
 		return affected > 0, nil
 	}
+}
+
+// gqlPublish mirrors codegen's publishEvent for the GraphQL write resolvers:
+// nil-hub no-op, non-blocking, id taken from the record when present.
+func gqlPublish(hub *events.Hub, tenantID, resource, typ string, record map[string]any, fallbackID string) {
+	if hub == nil {
+		return
+	}
+	id := fallbackID
+	if record != nil {
+		if s, ok := record["id"].(string); ok {
+			id = s
+		}
+	}
+	hub.Publish(tenantID, events.Event{Type: typ, Resource: resource, ID: id, Record: record})
 }
 
 // ── RBAC helper ───────────────────────────────────────────────────────────────

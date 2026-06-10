@@ -94,7 +94,7 @@ func buildDataPlane(s *schema.APISchema, pool *pgxpool.Pool, secret, host string
 	r.Use(tenant.TenantMiddleware)
 	r.Use(auth.JWTMiddleware(secret))
 	r.Use(rbacpkg.RBACMiddleware(policyJSON))
-	r.Mount("/", codegen.BuildRouter(s, tdb, hr, nil))
+	r.Mount("/", codegen.BuildRouter(s, tdb, hr, nil, nil))
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		req.Host = host

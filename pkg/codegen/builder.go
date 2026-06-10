@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/miguelangel/appitools/pkg/events"
 	"github.com/miguelangel/appitools/pkg/extensions"
 	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
 	"github.com/miguelangel/appitools/pkg/observability"
@@ -117,8 +118,10 @@ func applyRowCondition(query string, args []any, cond *rbac.WhereCondition) (str
 
 // BuildRouter creates a chi.Mux with real SQL handlers for every resource in the schema.
 // Used by `appitools serve` — no code generation required. inv (nil-able) is the
-// response-cache invalidator called after a successful PUT/PATCH.
-func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunner, inv CacheInvalidator) *chi.Mux {
+// response-cache invalidator called after a successful PUT/PATCH. hub (nil-able)
+// is the SSE pub/sub hub (S45): when nil, /api/{resource}/events returns 503 and
+// post-commit publishes are no-ops.
+func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunner, inv CacheInvalidator, hub *events.Hub) *chi.Mux {
 	names := make([]string, 0, len(s.Resources))
 	for name := range s.Resources {
 		names = append(names, name)
@@ -269,6 +272,13 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			}
 			markSpan(req, "insert")
 
+			// SSE broadcast (S45): same post-commit point as the after_* webhook
+			// dispatch below, but unconditional (subscriptions are not gated on a
+			// hook being configured). Non-blocking; no-op with zero subscribers.
+			if len(result) > 0 {
+				publishEvent(hub, tc.ID, name, "create", result[0], "")
+			}
+
 			if hc, ok := res.Hooks["after_create"]; ok {
 				afterHook := hc
 				var record map[string]any
@@ -371,8 +381,18 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 				return
 			}
+			// SSE broadcast (S45). The deleted row is gone (no RETURNING on
+			// purpose) so the event carries the id with a null record.
+			publishEvent(hub, tc.ID, name, "delete", nil, id)
 			w.WriteHeader(http.StatusNoContent)
 		})
+
+		// --- Events: GET /api/{resource}/events — SSE change stream (S45) ---
+		// The static "events" segment wins over the {id} wildcard in chi, and it
+		// is deliberately NOT wrapped in CachedGet (a stream is never cacheable).
+		// JWT + RBAC run in the middleware chain exactly like the list endpoint
+		// (read permission on the resource = permission to subscribe).
+		r.Get("/api/"+name+"/events", sseHandler(name, hub))
 
 		// --- Update (PUT = full replace, PATCH = partial) ---
 		// RBAC action="update" is enforced by RBACMiddleware before the handler runs
@@ -549,6 +569,10 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				}
 				record := result[0]
 
+				// SSE broadcast (S45): post-commit, with the UNfiltered record —
+				// each subscriber gets its own RBAC field filtering at delivery.
+				publishEvent(hub, tc.ID, name, "update", record, "")
+
 				// Drop this tenant's cached GETs so the next read is fresh (no TTL wait).
 				if inv != nil {
 					inv.Invalidate(tc.ID)
@@ -616,6 +640,121 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 	}
 
 	return r
+}
+
+// sseHeartbeatInterval is the comment-ping cadence that keeps intermediary
+// proxies from reaping an idle SSE connection.
+const sseHeartbeatInterval = 25 * time.Second
+
+// publishEvent broadcasts a post-commit change to the tenant's SSE subscribers.
+// nil hub (tests, callers without SSE wiring) is a no-op. Publish never blocks
+// the request path: with zero subscribers it is one RLock + two map lookups,
+// and per-subscriber sends are non-blocking (slow subscribers are closed).
+func publishEvent(hub *events.Hub, tenantID, resource, typ string, record map[string]any, fallbackID string) {
+	if hub == nil {
+		return
+	}
+	id := fallbackID
+	if record != nil {
+		if s, ok := record["id"].(string); ok {
+			id = s
+		}
+	}
+	hub.Publish(tenantID, events.Event{Type: typ, Resource: resource, ID: id, Record: record})
+}
+
+// sseHandler returns the GET /api/{resource}/events handler: a Server-Sent
+// Events stream of the resource's post-commit changes for the request's tenant.
+//
+//	event: create|update|delete
+//	data: {"resource":"guides","id":"...","record":{...}}   (record null on delete)
+//
+// Per-subscriber RBAC is captured at subscribe time and applied at delivery:
+// the field allowlist (same FilterFields as GET — a role never sees a field in
+// an event it cannot see in a GET) and the row-level eq condition (same row
+// scoping as the list endpoint). Delivery is at-most-once, no replay /
+// Last-Event-ID (documented S45 limitation); slow clients are closed with a
+// final error event rather than silently gapped (ADR-015).
+func sseHandler(name string, hub *events.Hub) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		if hub == nil {
+			writeJSONErr(w, http.StatusServiceUnavailable, "events not enabled")
+			return
+		}
+		tc := tenant.MustFromCtx(req.Context())
+		evalResult := rbac.EvalResultFromCtx(req.Context())
+		var allowed []string
+		condField := ""
+		var condValue any
+		if evalResult != nil {
+			allowed = evalResult.AllowedFields
+			if evalResult.Condition != nil {
+				condField = evalResult.Condition.Field
+				condValue = evalResult.Condition.Value
+			}
+		}
+
+		sub, err := hub.Subscribe(tc.ID, name, allowed, condField, condValue)
+		if err != nil {
+			// Per-tenant cap (APPITOOLS_MAX_SSE_PER_TENANT) reached.
+			w.Header().Set("Retry-After", "10")
+			writeJSONErr(w, http.StatusTooManyRequests, "subscriber limit reached")
+			return
+		}
+		defer hub.Unsubscribe(sub)
+
+		// An SSE response outlives the server-wide read/write timeouts
+		// (cmd_serve sets WriteTimeout=30s); clear both for THIS connection
+		// only. Errors are non-fatal (recorders/H2 may not support deadlines).
+		rc := http.NewResponseController(w)
+		rc.SetWriteDeadline(time.Time{}) //nolint:errcheck
+		rc.SetReadDeadline(time.Time{})  //nolint:errcheck
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no") // nginx: do not buffer the stream
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, ": connected\n\n")
+		if err := rc.Flush(); err != nil {
+			return // writer does not support streaming
+		}
+
+		heartbeat := time.NewTicker(sseHeartbeatInterval)
+		defer heartbeat.Stop()
+
+		for {
+			select {
+			case <-req.Context().Done():
+				// Client went away (or server draining): Unsubscribe via defer.
+				return
+			case <-sub.Slow:
+				// Slow-client policy: close with an explicit error event — never
+				// silently gap the stream (the client reconnects and resyncs).
+				fmt.Fprint(w, "event: error\ndata: {\"error\":\"subscriber too slow, closing\"}\n\n")
+				rc.Flush() //nolint:errcheck
+				return
+			case <-heartbeat.C:
+				fmt.Fprint(w, ": ping\n\n")
+				if err := rc.Flush(); err != nil {
+					return
+				}
+			case ev := <-sub.C:
+				record := ev.Record
+				if record != nil && len(sub.AllowedFields) > 0 {
+					record = pkghandlers.FilterFields(record, sub.AllowedFields)
+				}
+				payload, merr := json.Marshal(map[string]any{"resource": ev.Resource, "id": ev.ID, "record": record})
+				if merr != nil {
+					continue
+				}
+				fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, payload)
+				if err := rc.Flush(); err != nil {
+					return
+				}
+			}
+		}
+	}
 }
 
 // collectUpdate validates body against the resource schema for an update and

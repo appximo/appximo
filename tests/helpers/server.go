@@ -33,6 +33,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/codegen"
 	"github.com/miguelangel/appitools/pkg/controlplane"
 	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/miguelangel/appitools/pkg/events"
 	"github.com/miguelangel/appitools/pkg/extensions"
 	"github.com/miguelangel/appitools/pkg/logging"
 	"github.com/miguelangel/appitools/pkg/observability"
@@ -188,7 +189,7 @@ func BuildObservableServer(t *testing.T, s *schema.APISchema, pool *pgxpool.Pool
 	r.Use(auth.JWTMiddleware(JWTSecret))
 	r.Use(rbac.RBACMiddleware(policyJSON))
 	r.Use(chimiddleware.Recoverer)
-	r.Mount("/", codegen.BuildRouter(s, tdb, hr, nil))
+	r.Mount("/", codegen.BuildRouter(s, tdb, hr, nil, events.NewHub(0)))
 
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)

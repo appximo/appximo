@@ -111,6 +111,16 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// SSE event streams (GET /api/{resource}/events, S45) are infinite
+		// responses: they must never be buffered by captureWriter, stored, nor
+		// singleflight-collapsed (refresh would merge N subscribers into one
+		// stream). Without this bypass the subscriber gets ": connected" + EOF
+		// — and the truncated preamble would be CACHED. A resource literally
+		// named "events" only loses list-caching here, never correctness.
+		if strings.HasSuffix(r.URL.Path, "/events") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if r.Header.Get("Cache-Control") == "no-cache" {
 			next.ServeHTTP(w, r)
 			return
