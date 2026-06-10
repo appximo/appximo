@@ -37,6 +37,7 @@ func main() {
 	// Statistical benchmark engine (S42).
 	mux.HandleFunc("POST /api/bench/import", api.BenchImportHandler)
 	mux.HandleFunc("GET /api/bench/runs", api.BenchRunsHandler)
+	mux.HandleFunc("GET /api/bench/export", api.BenchExportHandler)
 	mux.HandleFunc("GET /api/bench/runs/{id}/histogram", api.BenchRunHistogramHandler)
 	mux.HandleFunc("GET /api/bench/runs/{id}/stats", api.BenchRunStatsHandler)
 	mux.HandleFunc("POST /api/bench/compare", api.BenchCompareHandler)

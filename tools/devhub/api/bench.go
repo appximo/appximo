@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -549,6 +550,57 @@ func BenchRunsHandler(w http.ResponseWriter, r *http.Request) {
 		out = append(out, x)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// BenchExportHandler — GET /api/bench/export?prefix=pub-
+// Streams every run whose label starts with the prefix as CSV (raw evidence
+// for published benchmarks; error_rate included because the saturation
+// criterion depends on it).
+func BenchExportHandler(w http.ResponseWriter, r *http.Request) {
+	if benchDB == nil {
+		writeErr(w, http.StatusServiceUnavailable, "bench DB not initialized")
+		return
+	}
+	prefix := r.URL.Query().Get("prefix")
+	if prefix == "" {
+		writeErr(w, http.StatusBadRequest, "prefix query param is required")
+		return
+	}
+	rows, err := benchDB.Query(
+		`SELECT id, label, created_at, target_rps, duration_s, n_requests,
+		        p50_ms, p95_ms, p99_ms, error_rate, cv
+		   FROM benchmark_runs
+		  WHERE label LIKE ? ESCAPE '\'
+		  ORDER BY id`,
+		strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(prefix)+"%")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close() //nolint:errcheck
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	cw := csv.NewWriter(w)
+	cw.Write([]string{"run_id", "label", "created_at", "target_rps", "duration_s", //nolint:errcheck
+		"n", "p50_ms", "p95_ms", "p99_ms", "error_rate", "cv"})
+	f := func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
+	for rows.Next() {
+		var (
+			id                  int64
+			label, createdAt    string
+			rps, durS, n        int
+			p50, p95, p99       float64
+			errRate, cv         float64
+		)
+		if err := rows.Scan(&id, &label, &createdAt, &rps, &durS, &n,
+			&p50, &p95, &p99, &errRate, &cv); err != nil {
+			return // headers already sent; truncate rather than corrupt the CSV
+		}
+		cw.Write([]string{strconv.FormatInt(id, 10), label, createdAt, //nolint:errcheck
+			strconv.Itoa(rps), strconv.Itoa(durS), strconv.Itoa(n),
+			f(p50), f(p95), f(p99), f(errRate), f(cv)})
+	}
+	cw.Flush()
 }
 
 // BenchRunHistogramHandler — GET /api/bench/runs/{id}/histogram

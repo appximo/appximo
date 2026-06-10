@@ -14,12 +14,16 @@ CREATE TABLE IF NOT EXISTS guides (
 
 TRUNCATE TABLE guides RESTART IDENTITY;
 
+-- Status keyed off (i/10) — NOT i — so it does not correlate with the tenant
+-- residue MOD(i, 10). With CASE MOD(i, 4) every tenant only ever saw 2 of the
+-- 4 statuses (e.g. tenant_10 had zero 'pending' rows), which broke parity with
+-- the Appitools per-tenant seed (25k rows per status per tenant).
 INSERT INTO guides (tenant_id, title, content, status, created_at)
 SELECT
     'tenant_' || (1 + MOD(g.i, 10))::text,
     'Guide Title ' || g.i,
     'Here is some content for guide ' || g.i,
-    CASE MOD(g.i, 4)
+    CASE MOD(g.i / 10, 4)
         WHEN 0 THEN 'pending'
         WHEN 1 THEN 'in_transit'
         WHEN 2 THEN 'delivered'

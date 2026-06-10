@@ -1,9 +1,9 @@
 import { Controller, Get, Query, UseGuards, Req } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
-import { FakeJwtGuard } from '../auth/fake-jwt.guard';
+import { JwtGuard } from '../auth/jwt.guard';
 
 @Controller('api/guides')
-@UseGuards(FakeJwtGuard)
+@UseGuards(JwtGuard)
 export class GuidesController {
   constructor(private prisma: PrismaService) {}
 

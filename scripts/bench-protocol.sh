@@ -47,6 +47,9 @@ SECRETS="${APPITOOLS_SECRETS:-/root/.appitools-secrets-dev}"
 # a small / shared host (the Postgres buffer cache and the pgx pool keep warming
 # across the first runs, biasing run-1 slow). Warm longer than we measure.
 WARMUP_DURATION="${WARMUP_DURATION:-45s}"
+# Seconds to idle between measurement runs (S42 protocol used 15; the S46
+# public benchmark uses 20).
+COOLDOWN_S="${COOLDOWN_S:-15}"
 
 # Duration in whole seconds for the stored row (e.g. "30s" -> 30).
 DURATION_S="$(grep -oE '^[0-9]+' <<<"$DURATION" || true)"
@@ -94,8 +97,8 @@ for i in $(seq 1 "$RUNS"); do
   # Cooldown BETWEEN runs only (spec: "cooldown 15s entre cada uno"). A cooldown
   # before run 1 would let the box cool right after warmup and bias run 1 slow.
   if [ "$i" -gt 1 ]; then
-    echo "  [3] cooldown 15s entre runs…"
-    sleep 15
+    echo "  [3] cooldown ${COOLDOWN_S}s entre runs…"
+    sleep "$COOLDOWN_S"
   fi
   out="/tmp/bench-$i.json"
   echo "      run $i/$RUNS → $out"
