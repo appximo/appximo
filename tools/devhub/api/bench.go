@@ -247,6 +247,55 @@ func rejectOutliers(x []float64) []float64 {
 	return out
 }
 
+// runIDsForLabel returns the run ids in a label "group". The protocol stores its
+// runs as "<label>#<i>", so a run matches the group base when its label equals
+// base or starts with base+"#". The match is done in Go (not SQL LIKE) so labels
+// containing the LIKE wildcards _ or % cannot mis-match.
+func runIDsForLabel(base string) ([]int64, error) {
+	rows, err := benchDB.Query(`SELECT id, label FROM benchmark_runs ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close() //nolint:errcheck
+	prefix := base + "#"
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		var label string
+		if err := rows.Scan(&id, &label); err != nil {
+			return nil, err
+		}
+		if label == base || strings.HasPrefix(label, prefix) {
+			ids = append(ids, id)
+		}
+	}
+	return ids, rows.Err()
+}
+
+// pooledGroup loads every run in a label group, rejects each run's IQR outliers
+// independently, and pools the survivors into one sample. It also returns each
+// run's raw p50 (the same value stored in benchmark_runs.p50_ms, so the caller
+// can compute the between-run CV) and the number of non-empty runs.
+func pooledGroup(base string) (pooled, p50s []float64, nRuns int, err error) {
+	ids, err := runIDsForLabel(base)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	for _, id := range ids {
+		x, err := loadDatapoints(id)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		if len(x) == 0 {
+			continue
+		}
+		p50s = append(p50s, stats.Percentile(x, 50))
+		pooled = append(pooled, rejectOutliers(x)...)
+		nRuns++
+	}
+	return pooled, p50s, nRuns, nil
+}
+
 // CompareResult is the outcome of CompareRuns, mirroring the comparisons table
 // (plus min_effect_ms, which is reported for transparency but not persisted).
 type CompareResult struct {
@@ -263,18 +312,26 @@ type CompareResult struct {
 }
 
 // classify computes the statistical verdict for two already-loaded latency
-// samples (no DB). It rejects IQR outliers from each, runs Mann-Whitney U and the
-// bootstrap median-difference CI, computes the p95 delta %, and classifies the
-// result requiring BOTH statistical and practical significance.
+// samples (no DB), rejecting each sample's IQR outliers first. It is the
+// per-run-rejection wrapper around verdictOf used by CompareRuns.
+func classify(a, b []float64) CompareResult {
+	return verdictOf(rejectOutliers(a), rejectOutliers(b))
+}
+
+// verdictOf runs Mann-Whitney U and the bootstrap median-difference CI on two
+// latency samples that have ALREADY had their outliers handled, computes the p95
+// delta %, and classifies the result requiring BOTH statistical and practical
+// significance.
 //
 // Statistical significance alone (p<0.05) is not enough: at large n Mann-Whitney
 // detects µs-scale host noise as a "regression" (see the S42 1-vCPU artifact). A
 // real change must also move the median by more than minEffect — the larger of
 // 0.5ms (absolute floor for sub-ms latencies) or 3% of median(A).
-func classify(a, b []float64) CompareResult {
-	a = rejectOutliers(a)
-	b = rejectOutliers(b)
-
+//
+// It does NOT reject outliers itself: classify rejects per run before calling
+// here, and CompareGroups rejects per run before pooling — re-rejecting a pooled
+// distribution would discard legitimate points from the slower runs.
+func verdictOf(a, b []float64) CompareResult {
 	u, p := stats.MannWhitneyU(a, b)
 	lo, hi := stats.BootstrapMedianDiffCI(a, b)
 
@@ -344,6 +401,70 @@ func CompareRuns(runA, runB int64) (*CompareResult, error) {
 		return nil, err
 	}
 	return &res, nil
+}
+
+// GroupCompareResult is the verdict for a label-vs-label comparison. It carries
+// the same statistical fields as CompareResult plus group metadata: how many
+// runs each label pooled, the pooled datapoint counts, and each group's
+// between-run CV (the run-to-run reproducibility of the p50). This is the
+// defensible "N runs vs M runs" comparison, as opposed to single run vs run.
+type GroupCompareResult struct {
+	LabelA         string  `json:"label_a"`
+	LabelB         string  `json:"label_b"`
+	NRunsA         int     `json:"n_runs_a"`
+	NRunsB         int     `json:"n_runs_b"`
+	NA             int     `json:"n_a"` // pooled datapoints after per-run IQR rejection
+	NB             int     `json:"n_b"`
+	CVBetweenRunsA float64 `json:"cv_between_runs_a"`
+	CVBetweenRunsB float64 `json:"cv_between_runs_b"`
+	U              float64 `json:"u"`
+	PValue         float64 `json:"p_value"`
+	CILowerMs      float64 `json:"ci_lower_ms"`
+	CIUpperMs      float64 `json:"ci_upper_ms"`
+	MinEffectMs    float64 `json:"min_effect_ms"`
+	Significant    bool    `json:"significant"`
+	Direction      string  `json:"direction"`
+	DeltaPct       float64 `json:"delta_pct"`
+}
+
+// CompareGroups pools every run of label A and label B (IQR-rejecting each run
+// first) and runs the same verdict (Mann-Whitney + bootstrap CI + practical
+// min-effect) on the two pools. Comparing a label against itself yields no_change
+// (identical pools → zero median shift). Not persisted: the comparisons table is
+// keyed on single run ids.
+func CompareGroups(labelA, labelB string) (*GroupCompareResult, error) {
+	if benchDB == nil {
+		return nil, errors.New("bench DB not initialized")
+	}
+	pooledA, p50A, nRunsA, err := pooledGroup(labelA)
+	if err != nil {
+		return nil, err
+	}
+	pooledB, p50B, nRunsB, err := pooledGroup(labelB)
+	if err != nil {
+		return nil, err
+	}
+	if len(pooledA) == 0 || len(pooledB) == 0 {
+		return nil, fmt.Errorf("empty group (label_a=%q: %d runs/%d points, label_b=%q: %d runs/%d points)",
+			labelA, nRunsA, len(pooledA), labelB, nRunsB, len(pooledB))
+	}
+
+	res := verdictOf(pooledA, pooledB)
+	return &GroupCompareResult{
+		LabelA: labelA, LabelB: labelB,
+		NRunsA: nRunsA, NRunsB: nRunsB,
+		NA: len(pooledA), NB: len(pooledB),
+		CVBetweenRunsA: stats.CV(p50A),
+		CVBetweenRunsB: stats.CV(p50B),
+		U:           res.U,
+		PValue:      res.PValue,
+		CILowerMs:   res.CILowerMs,
+		CIUpperMs:   res.CIUpperMs,
+		MinEffectMs: res.MinEffectMs,
+		Significant: res.Significant,
+		Direction:   res.Direction,
+		DeltaPct:    res.DeltaPct,
+	}, nil
 }
 
 // ── HTTP handlers ────────────────────────────────────────────────────────────
@@ -563,6 +684,29 @@ func BenchCompareHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := CompareRuns(req.RunA, req.RunB)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// BenchCompareGroupsHandler — POST /api/bench/compare-groups
+// body: {"label_a":"baseline-x","label_b":"candidato-y"}
+func BenchCompareGroupsHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		LabelA string `json:"label_a"`
+		LabelB string `json:"label_b"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.LabelA == "" || req.LabelB == "" {
+		writeErr(w, http.StatusBadRequest, "label_a and label_b are required")
+		return
+	}
+	res, err := CompareGroups(req.LabelA, req.LabelB)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return

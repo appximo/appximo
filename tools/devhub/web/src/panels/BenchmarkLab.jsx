@@ -44,6 +44,10 @@ export default function BenchmarkLab() {
   const [cmpErr, setCmpErr] = createSignal(null)
   const [statsAB, setStatsAB] = createSignal(null) // [statsA, statsB] for the n/outlier captions
 
+  const [mode, setMode] = createSignal('runs')      // 'runs' = run-vs-run · 'groups' = label-vs-label
+  const [groupA, setGroupA] = createSignal('')
+  const [groupB, setGroupB] = createSignal('')
+
   const [form, setForm] = createSignal({ label: 'ui-run', runs: 3, rate: 50, duration: '15s' })
   const [protoLines, setProtoLines] = createSignal([])
   const [protoRunning, setProtoRunning] = createSignal(false)
@@ -53,6 +57,9 @@ export default function BenchmarkLab() {
 
   const runById = (id) => runs().find((r) => String(r.id) === String(id))
   const labelOf = (id) => { const r = runById(id); return r ? `${r.label} (#${r.id})` : `#${id}` }
+  // Group base label = the part before "#" (the protocol stores runs as "<label>#<i>"),
+  // matching runIDsForLabel on the backend.
+  const groupLabels = () => [...new Set(runs().map((r) => String(r.label).split('#')[0]))].sort()
 
   onMount(() => {
     histChart = echarts.init(histRef)
@@ -76,6 +83,11 @@ export default function BenchmarkLab() {
       if (data.length >= 2) {
         if (!bId()) setBId(String(data[0].id))
         if (!aId()) setAId(String(data[1].id))
+      }
+      const bases = [...new Set(data.map((r) => String(r.label).split('#')[0]))].sort()
+      if (bases.length) {
+        if (!groupA()) setGroupA(bases[0])
+        if (!groupB()) setGroupB(bases[1] ?? bases[0])
       }
       renderTrend(data)
     } catch (e) {
@@ -136,6 +148,37 @@ export default function BenchmarkLab() {
       await renderComparison(a, b)
     } catch (e) {
       setVerdict(null); setStatsAB(null); setCmpErr('Comparación falló: ' + e.message)
+    } finally {
+      setComparing(false)
+    }
+  }
+
+  // Switching mode clears the verdict so a runs-verdict never renders under the
+  // group layout (and vice-versa). The per-run hist/box charts stay mounted
+  // (hidden via CSS in group mode) so they keep their ECharts instance; resize
+  // them when they become visible again.
+  const switchMode = (m) => {
+    if (m === mode()) return
+    setMode(m)
+    setVerdict(null); setStatsAB(null); setCmpErr(null)
+    if (m === 'runs') queueMicrotask(() => { histChart?.resize(); boxChart?.resize() })
+  }
+
+  const compareGroups = async () => {
+    setCmpErr(null)
+    const la = groupA(), lb = groupB()
+    if (!la || !lb) { setCmpErr('Seleccioná dos grupos.'); return }
+    setComparing(true)
+    try {
+      const resp = await fetch('/api/bench/compare-groups', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label_a: la, label_b: lb }),
+      })
+      if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || ('HTTP ' + resp.status)) }
+      setVerdict(await resp.json())
+      setStatsAB(null) // group mode has no per-run boxplot captions
+    } catch (e) {
+      setVerdict(null); setCmpErr('Comparación de grupos falló: ' + e.message)
     } finally {
       setComparing(false)
     }
@@ -219,18 +262,26 @@ export default function BenchmarkLab() {
   }
 
   // ── verdict prose ──────────────────────────────────────────────────────────
+  const isGroupResult = (v) => v && v.label_a !== undefined
   const verdictText = () => {
     const v = verdict()
     if (!v) return ''
-    const a = runById(v.run_a), b = runById(v.run_b)
-    const nA = a?.n_requests ?? '—', nB = b?.n_requests ?? '—'
+    let nA, nB, suffix = ''
+    if (isGroupResult(v)) {
+      nA = v.n_a; nB = v.n_b
+      suffix = ` · grupos A=${v.label_a} (${v.n_runs_a} runs) vs B=${v.label_b} (${v.n_runs_b} runs)`
+    } else {
+      nA = runById(v.run_a)?.n_requests ?? '—'
+      nB = runById(v.run_b)?.n_requests ?? '—'
+    }
     const ci = `IC95% del delta de medianas [${fmtMs(v.ci_lower_ms)}, ${fmtMs(v.ci_upper_ms)}]ms`
     const stat = `p=${fmtP(v.p_value)}, ${ci}, n_A=${nA}, n_B=${nB}`
-    if (v.direction === 'improvement') return `B es ${fmtPct(Math.abs(v.delta_pct))}% más rápido que A en p95 (${stat})`
-    if (v.direction === 'regression') return `B es ${fmtPct(Math.abs(v.delta_pct))}% más lento que A en p95 (${stat})`
-    // no_change — distinguish the two reasons.
-    if (v.p_value >= 0.05) return `Sin diferencia estadísticamente significativa (${stat})`
-    return `Diferencia estadísticamente detectable pero por debajo del umbral práctico de ${fmtMs(v.min_effect_ms)}ms (${stat})`
+    let core
+    if (v.direction === 'improvement') core = `B es ${fmtPct(Math.abs(v.delta_pct))}% más rápido que A en p95 (${stat})`
+    else if (v.direction === 'regression') core = `B es ${fmtPct(Math.abs(v.delta_pct))}% más lento que A en p95 (${stat})`
+    else if (v.p_value >= 0.05) core = `Sin diferencia estadísticamente significativa (${stat})` // no_change: not significant
+    else core = `Diferencia estadísticamente detectable pero por debajo del umbral práctico de ${fmtMs(v.min_effect_ms)}ms (${stat})` // no_change: below min_effect
+    return core + suffix
   }
 
   // ── protocol launcher (SSE over POST via fetch ReadableStream) ───────────────
@@ -293,17 +344,43 @@ export default function BenchmarkLab() {
     <div class="space-y-6">
       {/* ── 2a. comparison selector + verdict ── */}
       <section class="space-y-3">
-        <div class="text-xs text-slate-600 uppercase tracking-widest">Comparador estadístico</div>
-        <div class="flex flex-wrap items-end gap-3">
-          <RunSelect label="Run A · baseline" value={aId()} onChange={setAId} runs={runs()} accent="text-blue-400" />
-          <RunSelect label="Run B · candidato" value={bId()} onChange={setBId} runs={runs()} accent="text-green-400" />
-          <button
-            onClick={compare} disabled={comparing()}
-            class="px-4 py-2 rounded text-sm border border-slate-700 bg-slate-800 text-slate-200
-                   hover:border-slate-500 disabled:opacity-50 disabled:cursor-not-allowed">
-            <Show when={comparing()} fallback="Comparar">⏳ Comparando…</Show>
-          </button>
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div class="text-xs text-slate-600 uppercase tracking-widest">Comparador estadístico</div>
+          <div class="inline-flex rounded border border-slate-700 overflow-hidden text-xs">
+            <button onClick={() => switchMode('runs')}
+              class={`px-3 py-1.5 ${mode() === 'runs' ? 'bg-slate-700 text-slate-100' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
+              Comparar runs individuales
+            </button>
+            <button onClick={() => switchMode('groups')}
+              class={`px-3 py-1.5 border-l border-slate-700 ${mode() === 'groups' ? 'bg-slate-700 text-slate-100' : 'bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
+              Comparar grupos por label
+            </button>
+          </div>
         </div>
+
+        <Show
+          when={mode() === 'runs'}
+          fallback={
+            <div class="flex flex-wrap items-end gap-3">
+              <GroupSelect label="Grupo A · baseline" value={groupA()} onChange={setGroupA} labels={groupLabels()} accent="text-blue-400" />
+              <GroupSelect label="Grupo B · candidato" value={groupB()} onChange={setGroupB} labels={groupLabels()} accent="text-green-400" />
+              <button onClick={compareGroups} disabled={comparing()}
+                class="px-4 py-2 rounded text-sm border border-slate-700 bg-slate-800 text-slate-200
+                       hover:border-slate-500 disabled:opacity-50 disabled:cursor-not-allowed">
+                <Show when={comparing()} fallback="Comparar grupos">⏳ Comparando…</Show>
+              </button>
+            </div>
+          }>
+          <div class="flex flex-wrap items-end gap-3">
+            <RunSelect label="Run A · baseline" value={aId()} onChange={setAId} runs={runs()} accent="text-blue-400" />
+            <RunSelect label="Run B · candidato" value={bId()} onChange={setBId} runs={runs()} accent="text-green-400" />
+            <button onClick={compare} disabled={comparing()}
+              class="px-4 py-2 rounded text-sm border border-slate-700 bg-slate-800 text-slate-200
+                     hover:border-slate-500 disabled:opacity-50 disabled:cursor-not-allowed">
+              <Show when={comparing()} fallback="Comparar">⏳ Comparando…</Show>
+            </button>
+          </div>
+        </Show>
         <Show when={cmpErr()}>
           <div class="px-3 py-2 rounded text-sm badge-fail">{cmpErr()}</div>
         </Show>
@@ -318,21 +395,33 @@ export default function BenchmarkLab() {
               <Metric label="Δ p95" val={`${v().delta_pct >= 0 ? '+' : ''}${fmtPct(v().delta_pct)}%`} />
               <Metric label="min_effect" val={`${fmtMs(v().min_effect_ms)} ms`} />
             </div>
+            <Show when={isGroupResult(v())}>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-500 border-t border-slate-800 pt-3">
+                <div>
+                  <span class="text-blue-400">A · {v().label_a}</span> · {v().n_runs_a} runs · {v().n_a} pts ·
+                  CV entre-runs <span class={v().cv_between_runs_a > 0.05 ? 'text-red-400' : 'text-slate-300'}>{fmtPct(v().cv_between_runs_a * 100)}%</span>
+                </div>
+                <div>
+                  <span class="text-green-400">B · {v().label_b}</span> · {v().n_runs_b} runs · {v().n_b} pts ·
+                  CV entre-runs <span class={v().cv_between_runs_b > 0.05 ? 'text-red-400' : 'text-slate-300'}>{fmtPct(v().cv_between_runs_b * 100)}%</span>
+                </div>
+              </div>
+            </Show>
             <div class="text-sm text-slate-300 leading-relaxed">{verdictText()}</div>
           </div>
         </Show>
       </section>
 
-      {/* ── 2b. overlaid distributions ── */}
-      <section class="space-y-2">
+      {/* ── 2b. overlaid distributions (per-run only; kept mounted, hidden in group mode) ── */}
+      <section class="space-y-2" classList={{ hidden: mode() === 'groups' }}>
         <div class="text-xs text-slate-600">
           Distribuciones superpuestas — <span class="text-blue-400">A</span> vs <span class="text-green-400">B</span> (latencia ms × count)
         </div>
         <div ref={histRef} class="w-full h-56 bg-slate-900 rounded border border-slate-800" />
       </section>
 
-      {/* ── 2c. boxplots ── */}
-      <section class="space-y-2">
+      {/* ── 2c. boxplots (per-run only; kept mounted, hidden in group mode) ── */}
+      <section class="space-y-2" classList={{ hidden: mode() === 'groups' }}>
         <div class="text-xs text-slate-600">Boxplots (min · Q1 · mediana · Q3 · max)</div>
         <div ref={boxRef} class="w-full h-56 bg-slate-900 rounded border border-slate-800" />
         <Show when={statsAB()}>
@@ -411,6 +500,20 @@ function RunSelect(props) {
         <For each={props.runs}>{(r) => (
           <option value={String(r.id)}>{`#${r.id} ${r.label} · ${fmtDate(r.created_at)} · p95 ${fmtMs(r.p95_ms)}ms`}</option>
         )}</For>
+      </select>
+    </label>
+  )
+}
+
+function GroupSelect(props) {
+  return (
+    <label class="flex flex-col gap-1">
+      <span class={`text-xs ${props.accent}`}>{props.label}</span>
+      <select
+        value={props.value} onChange={(e) => props.onChange(e.currentTarget.value)}
+        class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-200 min-w-64">
+        <option value="">— elegir grupo —</option>
+        <For each={props.labels}>{(l) => <option value={l}>{l}</option>}</For>
       </select>
     </label>
   )

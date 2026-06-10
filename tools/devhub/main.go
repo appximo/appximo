@@ -40,6 +40,7 @@ func main() {
 	mux.HandleFunc("GET /api/bench/runs/{id}/histogram", api.BenchRunHistogramHandler)
 	mux.HandleFunc("GET /api/bench/runs/{id}/stats", api.BenchRunStatsHandler)
 	mux.HandleFunc("POST /api/bench/compare", api.BenchCompareHandler)
+	mux.HandleFunc("POST /api/bench/compare-groups", api.BenchCompareGroupsHandler)
 	mux.HandleFunc("GET /api/bench/comparisons", api.BenchComparisonsHandler)
 	mux.HandleFunc("POST /api/bench/protocol", api.BenchProtocolHandler(repoDir))
 

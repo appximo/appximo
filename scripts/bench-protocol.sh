@@ -100,7 +100,7 @@ done
 echo ""
 echo "── Resumen ─────────────────────────────────────────────"
 python3 - "$RESULTS" <<'PY'
-import json, sys
+import json, sys, math
 rows = []
 for line in open(sys.argv[1]):
     line = line.strip()
@@ -120,19 +120,36 @@ if not rows:
     sys.exit(0)
 
 print(f"  {'run_id':>6}  {'n':>7}  {'p50':>8}  {'p95':>8}  {'p99':>8}  {'cv%':>6}")
-cvs = []
+intra = []
+p50s = []
 for d in rows:
     cv = d.get("cv", 0.0) or 0.0
-    cvs.append(cv)
+    intra.append(cv)
+    p50s.append(d.get("p50_ms", 0.0) or 0.0)
     print(f"  {d['run_id']:>6}  {d.get('n_requests',0):>7}  "
           f"{d.get('p50_ms',0):>8.3f}  {d.get('p95_ms',0):>8.3f}  "
           f"{d.get('p99_ms',0):>8.3f}  {cv*100:>6.1f}")
 
-mean_cv = sum(cvs) / len(cvs)
-print(f"  CV promedio: {mean_cv*100:.1f}%  (runs: {len(rows)})")
-if mean_cv > 0.15:
-    print("  ⚠️  WARNING: CV promedio > 15% — benchmark INESTABLE; "
-          "los resultados pueden no ser reproducibles (ruido del host?).")
+# Intra-run CV: spread of the RAW latencies within a run. Always high under a
+# heavy tail (p99 >> p50) — it does NOT measure protocol reproducibility, so it
+# is reported for context only and does not gate the WARNING.
+mean_intra = sum(intra) / len(intra)
+print(f"  CV intra-run promedio: {mean_intra*100:.1f}%  (normal, cola pesada)")
+
+# Between-run CV: spread of the per-run p50 medians ACROSS the N runs. THIS is
+# the reproducibility signal — if the runs agree on their central tendency it is
+# low. Sample stddev (n-1). Threshold 5%. Needs >=2 runs.
+if len(p50s) >= 2:
+    m = sum(p50s) / len(p50s)
+    var = sum((x - m) ** 2 for x in p50s) / (len(p50s) - 1)
+    cv_between = (math.sqrt(var) / m) if m else 0.0
+    verdict = "REPRODUCIBLE" if cv_between <= 0.05 else "INESTABLE"
+    print(f"  CV entre-runs (p50): {cv_between*100:.1f}% — {verdict}  (runs: {len(rows)})")
+    if cv_between > 0.05:
+        print("  ⚠️  WARNING: CV entre-runs (p50) > 5% — los runs no concuerdan en su "
+              "mediana; benchmark poco reproducible (ruido del host?).")
+else:
+    print(f"  CV entre-runs (p50): n/a (se necesita >=2 runs; hay {len(rows)})")
 PY
 echo "────────────────────────────────────────────────────────"
 echo "✓ protocolo completo. Comparar con: "
