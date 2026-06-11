@@ -75,7 +75,9 @@ func remoteLoop(s *RegisteredServer, rs *remoteScrape) {
 		defer closer.Close() //nolint:errcheck
 	}
 	client := &http.Client{Timeout: 4 * time.Second}
-	adminKey := s.AdminKey()
+	// Resolved ONCE per scrape session (not per 5s tick), so the audit trail
+	// gets one 'metrics_scrape' entry per watch session.
+	adminKey := adminKeyFor(s, "metrics_scrape")
 
 	scrapeOnce := func() {
 		sample := MetricSample{TS: time.Now().Unix()}

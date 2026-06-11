@@ -26,6 +26,7 @@ type RegisteredServer struct {
 	AdminKeyEnv  string
 	IsProduction bool
 	BenchTenant  string
+	SecretsPath  string
 	StartScript  string
 	BinaryPath   string
 	LogPath      string
@@ -73,7 +74,7 @@ func scanServer(row interface{ Scan(...any) error }) (*RegisteredServer, error) 
 	var prod int
 	var adminEnv, hostKey sql.NullString
 	if err := row.Scan(&s.ID, &s.Name, &s.Host, &s.Port, &s.User, &s.KeyPath,
-		&s.EnginePort, &adminEnv, &prod, &s.BenchTenant, &hostKey,
+		&s.EnginePort, &adminEnv, &prod, &s.BenchTenant, &s.SecretsPath, &hostKey,
 		&s.StartScript, &s.BinaryPath, &s.LogPath, &s.CreatedAt); err != nil {
 		return nil, err
 	}
@@ -90,7 +91,7 @@ func scanServer(row interface{ Scan(...any) error }) (*RegisteredServer, error) 
 }
 
 const serverCols = `id, name, host, port, ssh_user, key_path, engine_port,
-	admin_key_env, is_production, bench_tenant, host_key, start_script, binary_path, log_path, created_at`
+	admin_key_env, is_production, bench_tenant, secrets_path, host_key, start_script, binary_path, log_path, created_at`
 
 // LoadServer fetches one registered server by id.
 func LoadServer(id int64) (*RegisteredServer, error) {
@@ -117,6 +118,7 @@ func serverJSON(s *RegisteredServer) map[string]any {
 		"admin_key_env": s.AdminKeyEnv,
 		"is_production": s.IsProduction,
 		"bench_tenant":  s.BenchTenant,
+		"secrets_path":  s.SecretsPath,
 		"has_host_key":  s.HostKey != "",
 		"is_local":      s.Local(),
 		"start_script":  s.StartScript,
@@ -166,6 +168,7 @@ func ServersCreateHandler(w http.ResponseWriter, r *http.Request) {
 		AdminKeyEnv  string `json:"admin_key_env"`
 		IsProduction bool   `json:"is_production"`
 		BenchTenant  string `json:"bench_tenant"`
+		SecretsPath  string `json:"secrets_path"`
 		StartScript  string `json:"start_script"`
 		BinaryPath   string `json:"binary_path"`
 		LogPath      string `json:"log_path"`
@@ -185,6 +188,9 @@ func ServersCreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.BenchTenant == "" {
 		req.BenchTenant = "acme"
+	}
+	if req.SecretsPath == "" {
+		req.SecretsPath = "/root/.appitools-secrets"
 	}
 	if req.StartScript == "" {
 		req.StartScript = "/tmp/start_prod.sh"
@@ -221,8 +227,9 @@ func ServersCreateHandler(w http.ResponseWriter, r *http.Request) {
 	case !absPathRe.MatchString(req.KeyPath):
 		writeErr(w, http.StatusBadRequest, "key_path must be an absolute path")
 		return
-	case !absPathRe.MatchString(req.StartScript) || !absPathRe.MatchString(req.BinaryPath) || !absPathRe.MatchString(req.LogPath):
-		writeErr(w, http.StatusBadRequest, "start_script, binary_path and log_path must be absolute paths")
+	case !absPathRe.MatchString(req.StartScript) || !absPathRe.MatchString(req.BinaryPath) ||
+		!absPathRe.MatchString(req.LogPath) || !absPathRe.MatchString(req.SecretsPath):
+		writeErr(w, http.StatusBadRequest, "start_script, binary_path, log_path and secrets_path must be absolute paths")
 		return
 	}
 	if fi, err := os.Stat(req.KeyPath); err != nil || fi.IsDir() {
@@ -235,10 +242,10 @@ func ServersCreateHandler(w http.ResponseWriter, r *http.Request) {
 		prod = 1
 	}
 	res, err := benchDB.Exec(`INSERT INTO servers
-		(name, host, port, ssh_user, key_path, engine_port, admin_key_env, is_production, bench_tenant, start_script, binary_path, log_path)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		(name, host, port, ssh_user, key_path, engine_port, admin_key_env, is_production, bench_tenant, secrets_path, start_script, binary_path, log_path)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		req.Name, req.Host, req.Port, req.SSHUser, req.KeyPath, req.EnginePort,
-		req.AdminKeyEnv, prod, req.BenchTenant, req.StartScript, req.BinaryPath, req.LogPath)
+		req.AdminKeyEnv, prod, req.BenchTenant, req.SecretsPath, req.StartScript, req.BinaryPath, req.LogPath)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			writeErr(w, http.StatusConflict, "a server with that name already exists")
@@ -273,6 +280,13 @@ func ServersDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sshx.Close(id)
+	// A deleted server's secrets die with it.
+	if secretStore != nil {
+		if err := secretStore.Delete(strconv.FormatInt(id, 10)); err != nil {
+			writeErr(w, http.StatusInternalServerError, "server deleted but secrets cleanup failed: "+err.Error())
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": id})
 }
 

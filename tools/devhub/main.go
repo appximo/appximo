@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/miguelangel/appitools/tools/devhub/api"
+	"github.com/miguelangel/appitools/tools/devhub/secrets"
 )
 
 // benchSchema is the SQLite DDL for the statistics store. Embedded here (db/ is a
@@ -25,6 +26,13 @@ func main() {
 	if err := api.InitBenchDB(repoDir, benchSchema); err != nil {
 		log.Printf("WARNING: bench DB init failed (bench endpoints disabled): %v", err)
 	}
+	// Encrypted secrets store (S47b): age identity + ciphertext live under
+	// /root/.devhub on this box only.
+	if store, err := secrets.Open("/root/.devhub"); err != nil {
+		log.Printf("WARNING: secrets store init failed (admin keys fall back to env vars): %v", err)
+	} else {
+		api.InitSecrets(store)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/run", api.RunHandler(repoDir))
 	mux.HandleFunc("/api/metrics/live", api.MetricsLiveRouter)
@@ -35,6 +43,14 @@ func main() {
 	mux.HandleFunc("POST /api/servers", api.ServersCreateHandler)
 	mux.HandleFunc("DELETE /api/servers/{id}", api.ServersDeleteHandler)
 	mux.HandleFunc("POST /api/servers/{id}/test", api.ServersTestHandler)
+
+	// Encrypted secrets store (S47b). Existence and audit only — values never
+	// travel through the API.
+	mux.HandleFunc("POST /api/servers/{id}/fetch-admin-key", api.ServerFetchAdminKeyHandler)
+	mux.HandleFunc("PUT /api/servers/{id}/admin-key", api.ServerSetAdminKeyHandler)
+	mux.HandleFunc("DELETE /api/servers/{id}/admin-key", api.ServerDeleteAdminKeyHandler)
+	mux.HandleFunc("GET /api/servers/{id}/secret-status", api.ServerSecretStatusHandler)
+	mux.HandleFunc("GET /api/audit/secrets", api.SecretAuditHandler)
 	mux.HandleFunc("POST /api/deploy", api.DeployHandler(repoDir))
 	mux.HandleFunc("GET /api/deploys", api.DeploysListHandler)
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {

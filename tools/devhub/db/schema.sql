@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS servers (
     is_production INTEGER DEFAULT 0,
     bench_tenant  TEXT DEFAULT 'acme',       -- tenant the bench token is minted for
     host_key      TEXT,                      -- TOFU, first connect
+    secrets_path  TEXT DEFAULT '/root/.appitools-secrets', -- remote file fetch-admin-key reads
     start_script  TEXT DEFAULT '/tmp/start_prod.sh',
     binary_path   TEXT DEFAULT '/root/appitools/appitools',
     log_path      TEXT DEFAULT '/tmp/appitools.log',
@@ -84,6 +85,17 @@ CREATE TABLE IF NOT EXISTS deploys (
 );
 
 CREATE INDEX IF NOT EXISTS idx_deploys_server ON deploys(server_id);
+
+-- S47b: audit trail of secret USAGE (operation + when). Values never land here
+-- — they live age-encrypted in /root/.devhub/secrets.age, outside SQLite.
+CREATE TABLE IF NOT EXISTS secret_access (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id  INTEGER NOT NULL,
+    operation  TEXT NOT NULL,     -- 'metrics_scrape', 'fetch_from_server', 'manual_set', 'rotate', ...
+    ts         DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_secret_access_server ON secret_access(server_id);
 
 INSERT OR IGNORE INTO baselines (name, rps, notes) VALUES
 ('nestjs-v10-no-auth', 1092, 'NestJS colapsó a 1092 RPS en benchmark S34. Sin JWT/RBAC/multi-tenant.'),
