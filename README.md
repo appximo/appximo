@@ -54,8 +54,9 @@ docker compose up -d          # multi-arch image (amd64+arm64), ~22 MB pull
 curl localhost:8080/health    # {"status":"ok",...}
 ```
 
-On our test box, `up -d` to healthy takes **~9 s** plus the image pull. First
-request in four copy-paste commands (verified on a clean machine, virgin DB):
+On our test box, `up -d` to healthy takes **~9 s** plus the image pull. The image
+boots with **exactly the schema shown above**, so your first request is four
+copy-paste commands against it (verified on a clean machine, virgin DB):
 
 ```bash
 set -a; source .env; set +a
@@ -65,22 +66,22 @@ curl -X POST http://localhost:9090/tenants \
   -H "X-Admin-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
   -d "{\"tenant_id\":\"acme\",\"display_name\":\"Acme\",\"email\":\"a@acme.com\",\"plan\":\"free\",\"schema\":$(docker compose exec engine cat /etc/appitools/schema.json)}"
 
-# 2. mint a JWT (helper ships inside the image)
-TOKEN=$(docker compose exec engine appitools token --secret "$JWT_SECRET" --tenant acme --role super_admin 2>/dev/null | tail -1)
+# 2. mint a JWT for the "admin" role the schema defines (helper ships in the image)
+TOKEN=$(docker compose exec engine appitools token --secret "$JWT_SECRET" --tenant acme --role admin 2>/dev/null | tail -1)
 
-# 3. write
-curl -X POST http://localhost:8080/api/guides \
+# 3. write a task
+curl -X POST http://localhost:8080/api/tasks \
   -H "Authorization: Bearer $TOKEN" -H "Host: acme.localhost" -H "Content-Type: application/json" \
-  -d '{"code":"TRK-001","status":"pending","origin":"BOG","destination":"MDE"}'
+  -d '{"title":"ship the launch","status":"open"}'
 
-# 4. read back, filtered (curl -g: brackets need globbing off)
-curl -g "http://localhost:8080/api/guides?filter[status][eq]=pending&per_page=20" \
+# 4. read it back, filtered (curl -g: brackets need globbing off)
+curl -g "http://localhost:8080/api/tasks?filter[status][eq]=open&per_page=20" \
   -H "Authorization: Bearer $TOKEN" -H "Host: acme.localhost"
 ```
 
-The engine boots with a bundled example schema; mount yours over
-`/etc/appitools/schema.json` (or `--schema yours.json` on the binary). Tenants
-are addressed by Host subdomain: `acme.localhost` → Postgres schema `tenant_acme`.
+To serve **your own** model, mount your schema over `/etc/appitools/schema.json`
+(or `--schema yours.json` on the binary). Tenants are addressed by Host
+subdomain: `acme.localhost` → Postgres schema `tenant_acme`.
 
 ## Where it sits
 

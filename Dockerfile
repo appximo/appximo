@@ -33,9 +33,11 @@ RUN apk add --no-cache ca-certificates \
     && addgroup -S appitools && adduser -S -G appitools appitools
 
 COPY --from=builder /out/appitools /usr/local/bin/appitools
-# An example schema so `serve` starts out of the box. Mount your own schema over
-# this path (or pass a different --schema) for your project.
-COPY --from=builder /app/testdata/logistics/schema.json /etc/appitools/schema.json
+# The quickstart schema baked in so `serve` starts out of the box — it is the
+# EXACT schema shown in the README hook (todo-api/tasks), so the reader follows
+# one coherent example end to end. Mount your own schema over this path (or
+# pass a different --schema) for your project.
+COPY --from=builder /app/examples/quickstart/schema.json /etc/appitools/schema.json
 
 USER appitools
 

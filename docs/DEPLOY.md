@@ -21,8 +21,9 @@ docker compose up -d        # pulls the image + postgres
 curl localhost:8080/health  # {"status":"ok",...}
 ```
 
-First API call in four commands (the engine boots with a bundled `logistics`
-example schema; `acme` here is your first tenant):
+First API call in four commands (the engine boots with the bundled quickstart
+schema — `todo-api`, one `tasks` resource, the same one the README shows;
+`acme` here is your first tenant):
 
 ```bash
 # 0. load your .env values into the shell
@@ -33,17 +34,17 @@ curl -X POST http://localhost:9090/tenants \
   -H "X-Admin-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
   -d "{\"tenant_id\":\"acme\",\"display_name\":\"Acme\",\"email\":\"a@acme.com\",\"plan\":\"free\",\"schema\":$(docker compose exec engine cat /etc/appitools/schema.json)}"
 
-# 2. mint a JWT for that tenant (the helper ships inside the image)
-TOKEN=$(docker compose exec engine appitools token --secret "$JWT_SECRET" --tenant acme --role super_admin 2>/dev/null | tail -1)
+# 2. mint a JWT for the "admin" role the schema defines (helper ships in the image)
+TOKEN=$(docker compose exec engine appitools token --secret "$JWT_SECRET" --tenant acme --role admin 2>/dev/null | tail -1)
 
 # 3. create a record
-curl -X POST http://localhost:8080/api/guides \
+curl -X POST http://localhost:8080/api/tasks \
   -H "Authorization: Bearer $TOKEN" -H "Host: acme.localhost" \
   -H "Content-Type: application/json" \
-  -d '{"code":"TRK-001","status":"pending","origin":"BOG","destination":"MDE"}'
+  -d '{"title":"ship the launch","status":"open"}'
 
 # 4. read it back — note curl's -g: the filter brackets need globbing off
-curl -g "http://localhost:8080/api/guides?filter[status][eq]=pending&per_page=20" \
+curl -g "http://localhost:8080/api/tasks?filter[status][eq]=open&per_page=20" \
   -H "Authorization: Bearer $TOKEN" -H "Host: acme.localhost"
 ```
 
