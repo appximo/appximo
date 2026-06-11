@@ -27,8 +27,16 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/run", api.RunHandler(repoDir))
-	mux.HandleFunc("/api/metrics/live", api.MetricsLiveHandler)
+	mux.HandleFunc("/api/metrics/live", api.MetricsLiveRouter)
 	mux.HandleFunc("/api/metrics/snapshot", api.MetricsSnapshotHandler)
+
+	// Server registry + remote ops (S47).
+	mux.HandleFunc("GET /api/servers", api.ServersListHandler)
+	mux.HandleFunc("POST /api/servers", api.ServersCreateHandler)
+	mux.HandleFunc("DELETE /api/servers/{id}", api.ServersDeleteHandler)
+	mux.HandleFunc("POST /api/servers/{id}/test", api.ServersTestHandler)
+	mux.HandleFunc("POST /api/deploy", api.DeployHandler(repoDir))
+	mux.HandleFunc("GET /api/deploys", api.DeploysListHandler)
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok","service":"devhub"}`))

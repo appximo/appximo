@@ -1,4 +1,4 @@
-import { createSignal, onMount, onCleanup } from 'solid-js'
+import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, MarkLineComponent } from 'echarts/components'
@@ -27,13 +27,18 @@ const CHART_THEME = {
 export default function LiveMetrics() {
   const [samples, setSamples] = createSignal([])
   const [connected, setConnected] = createSignal(false)
+  const [servers, setServers] = createSignal([])
+  const [serverId, setServerId] = createSignal('')
   let p95Ref, reqRef, es, p95Chart, reqChart
 
-  onMount(() => {
-    p95Chart = echarts.init(p95Ref)
-    reqChart  = echarts.init(reqRef)
-
-    es = new EventSource('/api/metrics/live')
+  // (Re)connect the SSE stream for the selected server. Remote servers are
+  // scraped on demand server-side: the scrape starts with this subscription
+  // and stops when the last watcher closes.
+  const connect = (id) => {
+    es?.close()
+    setSamples([])
+    setConnected(false)
+    es = new EventSource(id ? `/api/metrics/live?server=${id}` : '/api/metrics/live')
     es.onopen = () => setConnected(true)
     es.onmessage = (e) => {
       const data = JSON.parse(e.data)
@@ -67,11 +72,27 @@ export default function LiveMetrics() {
       })
     }
     es.onerror = () => setConnected(false)
+  }
+
+  onMount(async () => {
+    p95Chart = echarts.init(p95Ref)
+    reqChart  = echarts.init(reqRef)
+
+    try {
+      const ss = await fetch('/api/servers').then((r) => r.json())
+      setServers(ss)
+      // Default: the local box (105-dev) when registered, else the local ring.
+      const local = ss.find((s) => s.is_local)
+      if (local) setServerId(String(local.id))
+    } catch { /* empty registry → local ring */ }
+    connect(serverId())
 
     const onResize = () => { p95Chart?.resize(); reqChart?.resize() }
     window.addEventListener('resize', onResize)
     onCleanup(() => window.removeEventListener('resize', onResize))
   })
+
+  const pickServer = (id) => { setServerId(id); connect(id) }
 
   onCleanup(() => { es?.close(); p95Chart?.dispose(); reqChart?.dispose() })
 
@@ -79,9 +100,19 @@ export default function LiveMetrics() {
 
   return (
     <div class="space-y-4">
-      <div class="flex items-center gap-2 text-xs text-slate-500">
-        <span class={`w-2 h-2 rounded-full ${connected() ? 'bg-green-500' : 'bg-red-500'}`} />
-        {connected() ? 'SSE activo — scrape cada 5s' : 'Sin conexión'}
+      <div class="flex items-center gap-3 text-xs text-slate-500 flex-wrap">
+        <Show when={servers().length > 0}>
+          <select value={serverId()} onChange={(e) => pickServer(e.currentTarget.value)}
+            class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200">
+            <For each={servers()}>{(s) => (
+              <option value={String(s.id)}>{s.name} · {s.host}{s.is_production ? ' · PROD' : ''}</option>
+            )}</For>
+          </select>
+        </Show>
+        <span class="flex items-center gap-2">
+          <span class={`w-2 h-2 rounded-full ${connected() ? 'bg-green-500' : 'bg-red-500'}`} />
+          {connected() ? 'SSE activo — scrape cada 5s' : 'Sin conexión'}
+        </span>
       </div>
       {last() && (
         <div class="grid grid-cols-4 gap-3">

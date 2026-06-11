@@ -2,11 +2,13 @@ import { createSignal, Show } from 'solid-js'
 import TestRunner from './panels/TestRunner'
 import LiveMetrics from './panels/LiveMetrics'
 import BenchmarkLab from './panels/BenchmarkLab'
+import Deploy from './panels/Deploy'
 
 const TABS = [
   { id: 'runner',  label: '▶  Test Runner' },
   { id: 'metrics', label: '📊 Live Metrics' },
   { id: 'bench',   label: '⚡ Benchmark Lab' },
+  { id: 'deploy',  label: '🚀 Deploy' },
   { id: 'coverage',label: '🗺  Coverage',      wip: true },
 ]
 
@@ -35,6 +37,7 @@ export default function App() {
         <Show when={tab() === 'runner'}><TestRunner /></Show>
         <Show when={tab() === 'metrics'}><LiveMetrics /></Show>
         <Show when={tab() === 'bench'}><BenchmarkLab /></Show>
+        <Show when={tab() === 'deploy'}><Deploy /></Show>
       </main>
     </div>
   )

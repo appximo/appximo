@@ -18,7 +18,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/miguelangel/appitools/tools/devhub/sshx"
 	"github.com/miguelangel/appitools/tools/devhub/stats"
 
 	_ "modernc.org/sqlite" // CGO-free SQLite driver, registered as "sqlite"
@@ -824,10 +826,40 @@ var protocolScripts = map[string]string{
 	"sustained_writes.js": "tests/performance/sustained_writes.js",
 }
 
+// mintRemoteBenchToken mints a bench JWT ON the target server with a fixed
+// command (the JWT secret never leaves that box; only the short-lived token
+// comes back, straight into the protocol child's env — never logged).
+func mintRemoteBenchToken(s *RegisteredServer, tenant string) (string, error) {
+	if !benchTenantRe.MatchString(tenant) {
+		return "", fmt.Errorf("invalid tenant %q", tenant)
+	}
+	cmd := `source /root/.appitools-secrets 2>/dev/null || source /root/.appitools-secrets-dev; ` +
+		`cd /root/appitools && BIN=./appitools; [ -x "$BIN" ] || BIN=./appitools-dev; ` +
+		`"$BIN" token --tenant ` + tenant + ` --secret "$JWT_SECRET" --role super_admin 2>/dev/null | tail -1`
+	res, err := sshx.Run(&s.Server, cmd, 20*time.Second)
+	if err != nil {
+		return "", err
+	}
+	token := strings.TrimSpace(res.Stdout)
+	if res.ExitCode != 0 || token == "" {
+		return "", fmt.Errorf("token mint on %s failed (exit %d)", s.Name, res.ExitCode)
+	}
+	return token, nil
+}
+
+var benchTenantRe = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
+
 // BenchProtocolHandler — POST /api/bench/protocol
-// body: {"runs":3,"label":"ui-test","rate":50,"duration":"15s","script":"sustained_writes.js"}
+// body: {"runs":3,"label":"ui-test","rate":50,"duration":"15s",
+//        "script":"sustained_writes.js","server_id":2}
 // script is optional (default sustained_2krps.js) and must be one of the
 // protocolScripts allowlist keys — never a path.
+//
+// server_id is optional: when set, the run targets that registered server's
+// engine (TARGET_URL) and the label is prefixed "{server_name}--" so groups
+// from different servers stay distinguishable yet comparable. k6 ALWAYS runs
+// on this box — the loader never competes for CPU with the system under test
+// (S46 methodology).
 //
 // Runs scripts/bench-protocol.sh and streams its stdout/stderr as SSE, ending
 // with an `event: done` carrying the exit code.
@@ -844,6 +876,7 @@ func BenchProtocolHandler(repoDir string) http.HandlerFunc {
 			Rate     int    `json:"rate"`
 			Duration string `json:"duration"`
 			Script   string `json:"script"`
+			ServerID int64  `json:"server_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid JSON body")
@@ -871,6 +904,33 @@ func BenchProtocolHandler(repoDir string) http.HandlerFunc {
 			return
 		}
 
+		// Optional remote target: resolve the registered server, point the
+		// (always-local) loader at its engine and namespace the label.
+		label := req.Label
+		extraEnv := []string(nil)
+		if req.ServerID > 0 {
+			srv, err := LoadServer(req.ServerID)
+			if err != nil {
+				writeErr(w, http.StatusNotFound, err.Error())
+				return
+			}
+			label = srv.Name + "--" + req.Label
+			// TENANT_ID drives both the k6 Host header and (local case) the
+			// protocol script's own token mint — each server's data lives in
+			// its own tenant (the 58 uses tenant_10, the dev box tenant_acme).
+			extraEnv = append(extraEnv,
+				"TARGET_URL="+srv.EngineURL(),
+				"TENANT_ID="+srv.BenchTenant)
+			if !srv.Local() {
+				token, err := mintRemoteBenchToken(srv, srv.BenchTenant)
+				if err != nil {
+					writeErr(w, http.StatusBadGateway, "could not mint bench token on "+srv.Name+": "+err.Error())
+					return
+				}
+				extraEnv = append(extraEnv, "BENCH_TOKEN="+token)
+			}
+		}
+
 		flusher, ok := w.(http.Flusher)
 		if !ok {
 			http.Error(w, "streaming not supported", http.StatusInternalServerError)
@@ -881,15 +941,19 @@ func BenchProtocolHandler(repoDir string) http.HandlerFunc {
 		w.Header().Set("Connection", "keep-alive")
 		sw := &sseWriter{w: w, flusher: flusher}
 		fmt.Fprintf(w, "event: start\ndata: {\"label\":%q,\"runs\":%d,\"rate\":%d,\"duration\":%q,\"script\":%q}\n\n",
-			req.Label, req.Runs, req.Rate, req.Duration, scriptPath)
+			label, req.Runs, req.Rate, req.Duration, scriptPath)
 		flusher.Flush()
 
 		// Validated values ONLY, each as its own argv element. exec.Command does
 		// not invoke a shell, so the script receives them verbatim as $1..$5.
-		// scriptPath comes from the protocolScripts allowlist, never from input.
+		// scriptPath comes from the protocolScripts allowlist; the label prefix
+		// is a registered (name-validated) server name, never raw input.
 		cmd := exec.CommandContext(r.Context(), "bash", "scripts/bench-protocol.sh",
-			strconv.Itoa(req.Runs), req.Label, strconv.Itoa(req.Rate), req.Duration, scriptPath)
+			strconv.Itoa(req.Runs), label, strconv.Itoa(req.Rate), req.Duration, scriptPath)
 		cmd.Dir = repoDir
+		if len(extraEnv) > 0 {
+			cmd.Env = append(os.Environ(), extraEnv...)
+		}
 		cmd.Stdout = sw
 		cmd.Stderr = sw
 		exitCode := 0

@@ -54,3 +54,7 @@ tools/devhub/db/*.db-shm
 tools/devhub/db/*.db-wal
 /appitools-dev
 /devhub
+
+# devhub UI build output (placeholder index.html stays committed for go:embed)
+tools/devhub/web/dist/assets/
+tools/devhub/web/node_modules/

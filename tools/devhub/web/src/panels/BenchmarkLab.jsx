@@ -51,6 +51,8 @@ export default function BenchmarkLab() {
   const [form, setForm] = createSignal({ label: 'ui-run', runs: 3, rate: 50, duration: '15s' })
   const [protoLines, setProtoLines] = createSignal([])
   const [protoRunning, setProtoRunning] = createSignal(false)
+  const [servers, setServers] = createSignal([])
+  const [benchServerId, setBenchServerId] = createSignal('') // '' = localhost (sin registry)
 
   let histRef, boxRef, trendRef, termRef
   let histChart, boxChart, trendChart
@@ -66,6 +68,11 @@ export default function BenchmarkLab() {
     boxChart = echarts.init(boxRef)
     trendChart = echarts.init(trendRef)
     loadRuns()
+    fetch('/api/servers').then((r) => r.json()).then((ss) => {
+      setServers(ss)
+      const local = ss.find((s) => s.is_local)
+      if (local) setBenchServerId(String(local.id))
+    }).catch(() => { /* registry vacío → target localhost */ })
     const onResize = () => { histChart?.resize(); boxChart?.resize(); trendChart?.resize() }
     window.addEventListener('resize', onResize)
     onCleanup(() => window.removeEventListener('resize', onResize))
@@ -293,12 +300,15 @@ export default function BenchmarkLab() {
   const runProtocol = async () => {
     if (protoRunning()) return
     const f = form()
-    setProtoLines([`$ bench-protocol runs=${f.runs} label=${f.label} rate=${f.rate} duration=${f.duration}`])
+    const srv = servers().find((s) => String(s.id) === String(benchServerId()))
+    setProtoLines([`$ bench-protocol runs=${f.runs} label=${f.label} rate=${f.rate} duration=${f.duration}${srv ? ` server=${srv.name}` : ''}`])
     setProtoRunning(true)
     try {
+      const body = { runs: Number(f.runs), label: f.label, rate: Number(f.rate), duration: f.duration }
+      if (benchServerId()) body.server_id = Number(benchServerId())
       const resp = await fetch('/api/bench/protocol', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ runs: Number(f.runs), label: f.label, rate: Number(f.rate), duration: f.duration }),
+        body: JSON.stringify(body),
       })
       // Validation rejections come back as JSON, not SSE.
       if (!resp.ok) {
@@ -448,6 +458,16 @@ export default function BenchmarkLab() {
       <section class="space-y-3">
         <div class="text-xs text-slate-600 uppercase tracking-widest">Lanzar protocolo</div>
         <div class="flex flex-wrap items-end gap-3">
+          <Show when={servers().length > 0}>
+            <Field label="server (target — k6 corre siempre acá)">
+              <select value={benchServerId()} onChange={(e) => setBenchServerId(e.currentTarget.value)}
+                class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200">
+                <For each={servers()}>{(s) => (
+                  <option value={String(s.id)}>{s.name} · {s.host}{s.is_production ? ' · PROD' : ''}</option>
+                )}</For>
+              </select>
+            </Field>
+          </Show>
           <Field label="label">
             <input type="text" value={form().label} onInput={(e) => setForm({ ...form(), label: e.currentTarget.value })}
               class="w-40 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200" />
