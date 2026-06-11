@@ -1,0 +1,28 @@
+# Appitools DevHub — systemd unit (S47c).
+# Install:  cp tools/devhub/devhub.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now devhub
+# The binary comes from `make devhub-build` (writes /root/appitools/devhub).
+[Unit]
+Description=Appitools DevHub (dev tooling, :3099)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/appitools
+# Explicit PATH: the panel's make-runner shells out to go/gotestsum (/root/go/bin,
+# /usr/local/go/bin) and the bench protocol to k6/python3/curl (/usr/local/bin,
+# /usr/bin) — a bare systemd PATH was how the runner kept losing Go.
+Environment=PATH=/usr/local/go/bin:/root/go/bin:/usr/local/bin:/usr/bin:/bin
+Environment=APPITOOLS_DIR=/root/appitools
+# systemd does not set HOME for system services; without it go cannot derive
+# GOPATH/GOMODCACHE ("module cache not found") and the panel's make-runner dies.
+Environment=HOME=/root
+# NOT EnvironmentFile=: /root/.appitools-secrets-dev uses `export VAR=` lines
+# (start_dev.sh sources it), which systemd's EnvironmentFile silently skips.
+# set -a + source loads the same file with identical semantics.
+ExecStart=/bin/bash -c 'set -a; source /root/.appitools-secrets-dev; set +a; exec /root/appitools/devhub'
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

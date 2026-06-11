@@ -147,6 +147,11 @@ dev-setup:
 	echo "fs.inotify.max_user_watches=524288" | tee /etc/sysctl.d/99-inotify.conf
 	sysctl -p /etc/sysctl.d/99-inotify.conf
 
+# El devhub "de verdad" corre como servicio systemd (tools/devhub/devhub.service
+# → systemctl {status,restart} devhub; binario /root/appitools/devhub vía
+# devhub-build). Este target queda SOLO para desarrollar el devhub mismo
+# (-tags dev: sin UI embebida, Vite aparte) — pará el servicio antes o el
+# puerto :3099 va a estar tomado.
 devhub-run:
 	APPITOOLS_DIR=$(shell pwd) go run -tags dev ./tools/devhub/
 
