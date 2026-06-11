@@ -1,4 +1,5 @@
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
+import InfoTip from '../components/InfoTip'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, MarkLineComponent } from 'echarts/components'
@@ -113,17 +114,32 @@ export default function LiveMetrics() {
           <span class={`w-2 h-2 rounded-full ${connected() ? 'bg-green-500' : 'bg-red-500'}`} />
           {connected() ? 'SSE activo — scrape cada 5s' : 'Sin conexión'}
         </span>
+        <InfoTip label="Qué miden estas métricas">
+          Métricas <b>server-side</b>: el motor se mide a sí mismo (histograma Prometheus
+          interno). No incluyen latencia de red. Cubren <b>todo</b> lo que el motor procesó
+          (benchmarks, tests, tráfico sintético) — no un experimento aislado. Para comparar
+          versiones o servers usá el Benchmark Lab.
+        </InfoTip>
       </div>
       {last() && (
         <div class="grid grid-cols-4 gap-3">
           {[
-            { label: 'p95',            val: `${last().p95_ms?.toFixed(1) ?? '—'} ms`, ok: (last().p95_ms ?? 0) < 15 },
-            { label: 'requests_total', val: last().requests_total?.toFixed(0) ?? '—',  ok: true },
+            {
+              label: 'p95', val: `${last().p95_ms?.toFixed(1) ?? '—'} ms`, ok: (last().p95_ms ?? 0) < 15,
+              tip: <>p95 de <b>todos</b> los requests recientes del motor. Si acá corre tráfico
+                experimental pesado (writes, E2E), este número sube sin que el motor sea más lento.</>,
+            },
+            {
+              label: 'requests_total', val: last().requests_total?.toFixed(0) ?? '—', ok: true,
+              tip: <>Acumulado desde el último arranque del proceso. Un deploy lo resetea a 0.</>,
+            },
             { label: 'active_tenants', val: last().active_tenants?.toFixed(0) ?? '—',  ok: true },
             { label: 'motor',          val: last().motor_up ? 'UP' : 'DOWN',            ok: last().motor_up },
           ].map(kpi => (
             <div class="bg-slate-900 rounded p-3 border border-slate-800">
-              <div class="text-xs text-slate-600 mb-1">{kpi.label}</div>
+              <div class="text-xs text-slate-600 mb-1">
+                {kpi.label}{kpi.tip && <> <InfoTip label={`Qué mide ${kpi.label}`}>{kpi.tip}</InfoTip></>}
+              </div>
               <div class={`text-lg font-bold ${kpi.ok ? 'text-green-400' : 'text-red-400'}`}>{kpi.val}</div>
             </div>
           ))}

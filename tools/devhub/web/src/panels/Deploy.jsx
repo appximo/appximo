@@ -1,4 +1,5 @@
 import { createSignal, onMount, Show, For } from 'solid-js'
+import InfoTip from '../components/InfoTip'
 
 // Deploy panel (S47): runs the PRIMER deploy protocol against a registered
 // server as an SSE pipeline (build → push → swap/SIGTERM → start → smoke) and
@@ -103,7 +104,13 @@ export default function Deploy() {
   return (
     <div class="space-y-6">
       <section class="space-y-3">
-        <div class="text-xs text-slate-600 uppercase tracking-widest">Deploy — protocolo PRIMER</div>
+        <div class="text-xs text-slate-600 uppercase tracking-widest">
+          Deploy — protocolo PRIMER{' '}
+          <InfoTip label="Qué hace el pipeline">
+            Pipeline: build local (105) → SFTP → SIGTERM → start → smoke. El motor
+            destino se reinicia: requests_total vuelve a 0 y hay ~5-10s de DOWN.
+          </InfoTip>
+        </div>
         <div class="flex flex-wrap items-end gap-3">
           <label class="flex flex-col gap-1">
             <span class="text-xs text-slate-600">server</span>

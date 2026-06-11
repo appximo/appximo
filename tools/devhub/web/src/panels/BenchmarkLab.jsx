@@ -1,4 +1,5 @@
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
+import InfoTip from '../components/InfoTip'
 import * as echarts from 'echarts/core'
 import { BarChart, BoxplotChart, LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, MarkLineComponent, LegendComponent } from 'echarts/components'
@@ -29,6 +30,14 @@ const GREEN_FILL = 'rgba(52,211,153,0.5)'
 
 const DIR_COLOR = { improvement: 'text-green-400', regression: 'text-red-400', no_change: 'text-slate-400' }
 const DIR_LABEL = { improvement: 'IMPROVEMENT', regression: 'REGRESSION', no_change: 'NO CHANGE' }
+
+// Server of a run/group label: the "{server}--" prefix the remote protocol
+// adds (S47); labels without it predate the registry and ran on the 105.
+// Mirrors serverOfLabel on the backend.
+const serverOf = (label) => {
+  const i = String(label ?? '').indexOf('--')
+  return i > 0 ? String(label).slice(0, i) : '105-dev'
+}
 
 const fmtMs = (x) => (x ?? 0).toFixed(2)
 const fmtPct = (x) => (x ?? 0).toFixed(1)
@@ -270,6 +279,22 @@ export default function BenchmarkLab() {
 
   // ── verdict prose ──────────────────────────────────────────────────────────
   const isGroupResult = (v) => v && v.label_a !== undefined
+
+  // Servers behind the current verdict; non-null only when they differ →
+  // triggers the cross-server context banner.
+  const crossServers = () => {
+    const cur = verdict()
+    if (!cur) return null
+    let sa, sb
+    if (isGroupResult(cur)) {
+      sa = cur.server_a ?? serverOf(cur.label_a)
+      sb = cur.server_b ?? serverOf(cur.label_b)
+    } else {
+      sa = runById(cur.run_a)?.server ?? serverOf(runById(cur.run_a)?.label)
+      sb = runById(cur.run_b)?.server ?? serverOf(runById(cur.run_b)?.label)
+    }
+    return sa !== sb ? { a: sa, b: sb } : null
+  }
   const verdictText = () => {
     const v = verdict()
     if (!v) return ''
@@ -394,10 +419,25 @@ export default function BenchmarkLab() {
         <Show when={cmpErr()}>
           <div class="px-3 py-2 rounded text-sm badge-fail">{cmpErr()}</div>
         </Show>
+        <Show when={v() && crossServers()}>
+          <div class="px-3 py-2.5 rounded border border-amber-700/60 bg-amber-500/10 text-xs text-amber-300 leading-relaxed">
+            ⚠ Comparación entre servidores distintos ({crossServers().a} vs {crossServers().b}).
+            El loader (k6) corre en el 105: medir el 105 es loopback (sin red) y medir otro
+            server incluye el viaje de red (~1-3ms entre droplets). La diferencia refleja
+            motor + red, no solo el motor.
+          </div>
+        </Show>
         <Show when={v()}>
           <div class="rounded border border-slate-800 bg-slate-900 p-4 space-y-3">
-            <div class={`text-2xl font-bold ${DIR_COLOR[v().direction] ?? 'text-slate-400'}`}>
-              {DIR_LABEL[v().direction] ?? v().direction}
+            <div class="flex items-center gap-2">
+              <span class={`text-2xl font-bold ${DIR_COLOR[v().direction] ?? 'text-slate-400'}`}>
+                {DIR_LABEL[v().direction] ?? v().direction}
+              </span>
+              <InfoTip label="Cómo leer el veredicto">
+                REGRESSION/IMPROVEMENT = diferencia estadísticamente real <b>y</b> mayor al
+                umbral práctico (0.5ms). El engine detecta <b>que</b> hay diferencia;
+                interpretar <b>por qué</b> (código, red, host) es trabajo humano.
+              </InfoTip>
             </div>
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
               <Metric label="p-value" val={fmtP(v().p_value)} ok={v().p_value < 0.05} />
@@ -459,7 +499,12 @@ export default function BenchmarkLab() {
         <div class="text-xs text-slate-600 uppercase tracking-widest">Lanzar protocolo</div>
         <div class="flex flex-wrap items-end gap-3">
           <Show when={servers().length > 0}>
-            <Field label="server (target — k6 corre siempre acá)">
+            <Field label={<>server target <InfoTip label="Cómo afecta el server al número">
+              k6 dispara siempre desde el 105 (loader externo). Contra el 105: loopback.
+              Contra un server remoto: incluye la red. Los números absolutos entre servers
+              no son directamente comparables; las comparaciones pre/post <b>dentro</b> del
+              mismo server sí.
+            </InfoTip></>}>
               <select value={benchServerId()} onChange={(e) => setBenchServerId(e.currentTarget.value)}
                 class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200">
                 <For each={servers()}>{(s) => (
@@ -510,15 +555,21 @@ export default function BenchmarkLab() {
 }
 
 function RunSelect(props) {
+  const selected = () => props.runs.find((r) => String(r.id) === String(props.value))
   return (
     <label class="flex flex-col gap-1">
-      <span class={`text-xs ${props.accent}`}>{props.label}</span>
+      <span class={`text-xs ${props.accent} flex items-center gap-2`}>
+        {props.label}
+        <Show when={selected()}>
+          <span class="text-slate-500 normal-case">{selected().server ?? serverOf(selected().label)}</span>
+        </Show>
+      </span>
       <select
         value={props.value} onChange={(e) => props.onChange(e.currentTarget.value)}
         class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-200 min-w-64">
         <option value="">— elegir run —</option>
         <For each={props.runs}>{(r) => (
-          <option value={String(r.id)}>{`#${r.id} ${r.label} · ${fmtDate(r.created_at)} · p95 ${fmtMs(r.p95_ms)}ms`}</option>
+          <option value={String(r.id)}>{`#${r.id} [${r.server ?? serverOf(r.label)}] ${r.label} · ${fmtDate(r.created_at)} · p95 ${fmtMs(r.p95_ms)}ms`}</option>
         )}</For>
       </select>
     </label>
@@ -528,12 +579,17 @@ function RunSelect(props) {
 function GroupSelect(props) {
   return (
     <label class="flex flex-col gap-1">
-      <span class={`text-xs ${props.accent}`}>{props.label}</span>
+      <span class={`text-xs ${props.accent} flex items-center gap-2`}>
+        {props.label}
+        <Show when={props.value}>
+          <span class="text-slate-500 normal-case">{serverOf(props.value)}</span>
+        </Show>
+      </span>
       <select
         value={props.value} onChange={(e) => props.onChange(e.currentTarget.value)}
         class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-200 min-w-64">
         <option value="">— elegir grupo —</option>
-        <For each={props.labels}>{(l) => <option value={l}>{l}</option>}</For>
+        <For each={props.labels}>{(l) => <option value={l}>{`[${serverOf(l)}] ${l}`}</option>}</For>
       </select>
     </label>
   )

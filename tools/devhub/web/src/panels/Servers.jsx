@@ -1,4 +1,5 @@
 import { createSignal, onMount, Show, For } from 'solid-js'
+import InfoTip from '../components/InfoTip'
 
 // Servers panel (S47b): registry view + per-server admin-key management.
 // The API only ever exposes EXISTENCE of a secret (secret-status) and its
@@ -99,6 +100,10 @@ export default function Servers() {
                     : 'border-yellow-800 text-yellow-400 bg-yellow-500/10'}`}>
                     admin key: {st().admin_key_present ? `✓ configurada (${st().source})` : '✗ falta'}
                   </span>
+                  <InfoTip label="Para qué se usa la admin key">
+                    La key se usa solo para leer /metrics del server. Si las métricas
+                    aparecen en 0 con motor UP, probablemente fue rotada: mirá la auditoría.
+                  </InfoTip>
                 </Show>
               </div>
 

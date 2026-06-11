@@ -1,4 +1,5 @@
 import { createSignal, onCleanup, For, Show } from 'solid-js'
+import InfoTip from '../components/InfoTip'
 
 const TARGETS = [
   { id: 'test',             label: 'Unit',        desc: '-race -short' },
@@ -80,6 +81,13 @@ export default function TestRunner() {
       </div>
       <Show when={history().length > 0}>
         <div class="space-y-1">
+          <div class="text-xs text-slate-600">
+            Historial{' '}
+            <InfoTip label="Dónde corren los tests">
+              Los tests corren en el server del DevHub (105), no en el server
+              seleccionado en otros paneles.
+            </InfoTip>
+          </div>
           <For each={history()}>{(r) => (
             <div class="flex items-center gap-3 text-xs px-2 py-1 rounded bg-slate-900">
               <span class={r.code === 0 ? 'text-green-400' : 'text-red-400'}>{r.code === 0 ? '✓' : '✗'}</span>

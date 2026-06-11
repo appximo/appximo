@@ -414,6 +414,8 @@ func CompareRuns(runA, runB int64) (*CompareResult, error) {
 type GroupCompareResult struct {
 	LabelA         string  `json:"label_a"`
 	LabelB         string  `json:"label_b"`
+	ServerA        string  `json:"server_a"` // parsed from the "{server}--" label prefix
+	ServerB        string  `json:"server_b"`
 	NRunsA         int     `json:"n_runs_a"`
 	NRunsB         int     `json:"n_runs_b"`
 	NA             int     `json:"n_a"` // pooled datapoints after per-run IQR rejection
@@ -455,6 +457,7 @@ func CompareGroups(labelA, labelB string) (*GroupCompareResult, error) {
 	res := verdictOf(pooledA, pooledB)
 	return &GroupCompareResult{
 		LabelA: labelA, LabelB: labelB,
+		ServerA: serverOfLabel(labelA), ServerB: serverOfLabel(labelB),
 		NRunsA: nRunsA, NRunsB: nRunsB,
 		NA: len(pooledA), NB: len(pooledB),
 		CVBetweenRunsA: stats.CV(p50A),
@@ -516,6 +519,16 @@ func BenchImportHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sum)
 }
 
+// serverOfLabel extracts the "{server}--" prefix the remote protocol puts on
+// labels (S47). Labels without the prefix predate the registry — they all ran
+// against this box, so they report as "105-dev".
+func serverOfLabel(label string) string {
+	if i := strings.Index(label, "--"); i > 0 {
+		return label[:i]
+	}
+	return "105-dev"
+}
+
 // BenchRunsHandler — GET /api/bench/runs → list benchmark_runs (no datapoints).
 func BenchRunsHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := benchDB.Query(
@@ -532,6 +545,7 @@ func BenchRunsHandler(w http.ResponseWriter, r *http.Request) {
 		ID        int64   `json:"id"`
 		CreatedAt string  `json:"created_at"`
 		Label     string  `json:"label"`
+		Server    string  `json:"server"` // parsed from the "{server}--" label prefix
 		TargetRPS int     `json:"target_rps"`
 		DurationS int     `json:"duration_s"`
 		N         int     `json:"n_requests"`
@@ -549,6 +563,7 @@ func BenchRunsHandler(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		x.Server = serverOfLabel(x.Label)
 		out = append(out, x)
 	}
 	writeJSON(w, http.StatusOK, out)
