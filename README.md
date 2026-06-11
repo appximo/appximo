@@ -1,189 +1,201 @@
 # Appitools
 
-> **Production-ready APIs, fast.**
-> REST + GraphQL + OpenAPI, natively compiled in Go, on any server you choose.
+> **A JSON schema in. A production multi-tenant REST + GraphQL + OpenAPI server out.**
+> One ~45 MB static Go binary, on your own server. Apache 2.0.
 
-[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://golang.org/dl/)
+[![CI](https://github.com/miguel09acosta/appitools/actions/workflows/ci.yml/badge.svg)](https://github.com/miguel09acosta/appitools/actions/workflows/ci.yml)
+[![Docker](https://img.shields.io/docker/v/neodevtrix/appitools-engine?label=docker&color=2496ED&logo=docker)](https://hub.docker.com/r/neodevtrix/appitools-engine)
+[![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go)](go.mod)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-24%2F24%20passing-brightgreen)](#testing)
 
-## What is Appitools?
+You don't write handlers, models, or migrations. You write this:
 
-Define your data model → Appitools serves a native Go API that runs anywhere.
-No Node.js. No ORM overhead. No DevOps complexity.
+```json
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "todo-api",
+  "resources": {
+    "tasks": {
+      "fields": {
+        "title":  { "type": "string", "required": true },
+        "status": { "type": "string", "enum": ["open", "done"] },
+        "due":    { "type": "time" }
+      }
+    }
+  },
+  "rbac": { "roles": { "admin": { "resources": "*", "actions": ["*"] } } }
+}
+```
 
-Built for software agencies and fintechs in Latin America that need to ship
-production APIs fast, with compliance features (DIAN CUFE/CUNE, NIT validation,
-Bre-B-ready webhooks) built in from day one.
+and the engine serves — per isolated tenant, from one process:
 
-A single JSON schema becomes a multi-tenant REST + GraphQL API — with JWT auth,
-RBAC, per-tenant Postgres isolation, hooks, and observability — compiled into one
-~46 MB static binary that uses ~24 MB RAM at cold start (~50 MB under sustained load).
+- `GET/POST/PUT/PATCH/DELETE /api/tasks` with typed filters, sort, keyset pagination
+- a GraphQL endpoint with the same data (`{ tasks { data { id title } } }`)
+- an OpenAPI 3.0 spec (`appitools openapi schema.json`)
+- declarative validation (`422` listing **every** invalid field at once)
+- live updates over SSE (`GET /api/tasks/events`)
+- JWT auth + RBAC enforced on every request — no policy, no access (deny by default)
 
-## Quick Start (self-hosted, ~20 seconds)
+It's a code generator without the generated code: the schema is compiled at boot,
+not scaffolded into files you then maintain.
 
-No Go toolchain, no compile — the multi-arch image (amd64 + arm64) is on Docker
-Hub:
+## Quick start (~30 s with the image pull)
+
+> ⚠ The `curl` URLs work once this repo is public. From a clone, the two files
+> are at the repo root — skip the downloads.
 
 ```bash
 mkdir appitools && cd appitools
 curl -O https://raw.githubusercontent.com/miguel09acosta/appitools/main/docker-compose.yml
 curl -O https://raw.githubusercontent.com/miguel09acosta/appitools/main/.env.example
 cp .env.example .env          # set JWT_SECRET (≥32 chars), ADMIN_KEY, DB_PASSWORD
-docker compose up -d          # pulls neodevtrix/appitools-engine + Postgres
+docker compose up -d          # multi-arch image (amd64+arm64), ~22 MB pull
+curl localhost:8080/health    # {"status":"ok",...}
 ```
 
-(From a clone of this repo: skip the curls, the files are at the root. To build
-from source instead of pulling: `docker build -t neodevtrix/appitools-engine:latest .`)
-
-The data plane is live at `http://localhost:8080` (REST + GraphQL) and the control
-plane at `http://localhost:9090` (tenant/schema admin — keep it private). Health
-check:
+On our test box, `up -d` to healthy takes **~9 s** plus the image pull. First
+request in four copy-paste commands (verified on a clean machine, virgin DB):
 
 ```bash
-curl http://localhost:8080/healthz      # {"status":"alive"}
+set -a; source .env; set +a
+
+# 1. register a tenant (its isolated Postgres schema + tables are created now)
+curl -X POST http://localhost:9090/tenants \
+  -H "X-Admin-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  -d "{\"tenant_id\":\"acme\",\"display_name\":\"Acme\",\"email\":\"a@acme.com\",\"plan\":\"free\",\"schema\":$(docker compose exec engine cat /etc/appitools/schema.json)}"
+
+# 2. mint a JWT (helper ships inside the image)
+TOKEN=$(docker compose exec engine appitools token --secret "$JWT_SECRET" --tenant acme --role super_admin 2>/dev/null | tail -1)
+
+# 3. write
+curl -X POST http://localhost:8080/api/guides \
+  -H "Authorization: Bearer $TOKEN" -H "Host: acme.localhost" -H "Content-Type: application/json" \
+  -d '{"code":"TRK-001","status":"pending","origin":"BOG","destination":"MDE"}'
+
+# 4. read back, filtered (curl -g: brackets need globbing off)
+curl -g "http://localhost:8080/api/guides?filter[status][eq]=pending&per_page=20" \
+  -H "Authorization: Bearer $TOKEN" -H "Host: acme.localhost"
 ```
 
-The engine boots with the bundled `logistics` example schema. To serve your own
-model, mount your schema over `/etc/appitools/schema.json` (or run the binary with
-`--schema yourschema.json`). To create live tenant tables, register a tenant through
-the control plane — see [Deployment](#deployment). For **production** (VPS +
-domain + automatic TLS + tenant subdomains) follow [docs/DEPLOY.md](docs/DEPLOY.md).
+The engine boots with a bundled example schema; mount yours over
+`/etc/appitools/schema.json` (or `--schema yours.json` on the binary). Tenants
+are addressed by Host subdomain: `acme.localhost` → Postgres schema `tenant_acme`.
 
-> The optional visual schema editor (ReactFlow canvas + dashboards) ships from the
-> separate [`appitools-ui`] repo and is wired into compose under an opt-in profile:
-> `docker compose --profile ui up` → http://localhost:3100.
+## Where it sits
 
-## Features
+Honest comparison — these are different tools that overlap on "I need an API":
 
-**API generation**
-- REST endpoints: `GET` (list), `GET` by id, `POST`, `PUT`, `PATCH`, `DELETE`
-- GraphQL: queries, mutations, filters, sorting, pagination (with depth/complexity limits)
-- OpenAPI 3.0 spec auto-generated (`appitools openapi schema.json`)
-- Keyset pagination (production-ready, no `OFFSET`): `?after=<uuid>` / `?before=<uuid>`
-- Filters per field type: `eq` (all), `partial` / `start` (ILIKE, for string/text), `gt` `gte` `lt` `lte` (numbers & time), `after` / `before` (time)
+| | **Appitools** | NestJS / Express / Rails | Supabase | PocketBase |
+|---|---|---|---|---|
+| You write | a JSON schema | application code | SQL + RLS policies + client code | collections config + Go/JS hooks |
+| API surface | REST + GraphQL + OpenAPI, generated | whatever you build | PostgREST + client SDKs | REST + realtime |
+| Multi-tenancy | first-class: schema-per-tenant isolation, subdomain routing | you build it | you build it (RLS) | one DB per app |
+| Database | your PostgreSQL | any | bundled Postgres (its platform) | embedded SQLite |
+| Runtime | one static Go binary, ~24 MB RSS idle | Node/Ruby + deps | a service fleet (or their cloud) | one Go binary |
+| Custom logic | sandboxed JS (Goja) + WASM (Wazero), watchdog-timed | unlimited (it's your code) | edge functions, triggers | Go/JS hooks |
 
-**Multi-tenancy**
-- Schema-per-tenant isolation (`SET LOCAL search_path`), not Row Level Security
-- Multiple isolated tenants on a single Postgres instance (schema-per-tenant isolation)
-- Real-time schema cache invalidation via `pg_notify`
+What they do **better**: frameworks give you unlimited logic — Appitools' escape
+hatches are sandboxed hooks, not a general backend. Supabase has auth providers,
+storage, realtime channels and a massive ecosystem. PocketBase is even simpler to
+run (no Postgres needed). Appitools' lane is: **several isolated tenants on one
+cheap box, talking to a Postgres you control, with the API contract generated
+and enforced from a schema file.**
 
-**Security**
-- JWT HS256, constant-time validation, `exp` enforced
-- RBAC with JSON policies: per-role, per-resource, per-field, dynamic row conditions
-- SSRF-safe webhook delivery
-- OWASP API Top 10 hardening (body limits, masked DB errors, no cross-tenant leakage)
+## Performance
 
-**Extensibility**
-- Webhooks: HMAC-signed, async, bounded dispatch with retries + backoff
-- JS sandbox (Goja): custom validation, watchdog timeout, no CGO
-- WASM (Wazero): heavy computation, language-agnostic, no CGO
-- Built-in: DIAN CUFE/CUNE (SHA-384), NIT mod-11 validation
+On a $16/mo 2-vCPU droplet with JWT + RBAC + multi-tenancy + validation + rate
+limiting all active, measured from an external load generator over a real network:
+**2,000 req/s sustained, p50 1.58 ms (CI95 [1.52, 1.62]), 0 errors in 600k requests** —
+server-side, 99.98% of requests completed in under 5 ms. Head-to-head against a
+deliberately lean NestJS+Prisma baseline on the same box: **~4.8× faster at the
+median** (with Appitools' default response cache), **~2.7× with the cache fully
+bypassed**; the NestJS baseline saturates between 500 and 750 req/s.
 
-**Resilience & observability**
-- Circuit breaker (gobreaker), per-tenant rate limiting
-- Graceful shutdown with request draining
-- Query timeouts, `MaxBytesReader`, slowloris timeouts
-- Prometheus `/metrics`, per-tenant `/debug/tenant/{id}`, SLO burn-rate alerting
+Full methodology — including every limitation, the cache asymmetry, statistical
+treatment (Mann-Whitney, bootstrap CIs), and raw per-run data — in
+[**BENCHMARK_PUBLIC.md**](context-docs/BENCHMARK_PUBLIC.md). Reproduce it:
+[`benchmark-lab/`](benchmark-lab/) + `make bench-protocol`. PRs that make the
+baseline faster are welcome; we'll publish updated numbers.
 
-## Benchmarks
+## What's in the box (all verified by the test suite)
 
-Measured on a DigitalOcean **2 vCPU / 4 GB / $16/month** droplet — with JWT + RBAC +
-multi-tenancy + rate limiting + circuit breaker **all active**:
+- **CRUD**: list/get/create/replace/patch/delete per resource; typed filters
+  (`eq` everywhere; `partial`/`start` on strings; `gt/gte/lt/lte` on numbers and
+  time; `after`/`before` on time), single-field sort (`?sort=created_at&order=desc`),
+  keyset pagination (`?after=<uuid>`, no OFFSET)
+- **Declarative validation**: required/enum/type rules compiled from the schema;
+  one `422` lists every failing field
+- **Multi-tenancy**: schema-per-tenant Postgres isolation (`SET LOCAL search_path`),
+  subdomain → tenant routing, per-tenant rate limiting, live schema reload via `pg_notify`
+- **RBAC**: JSON policies — per role, per resource, per action, per field, plus
+  dynamic row conditions (`operator_id = $user_id`); deny by default
+- **Real-time**: per-resource SSE streams with RBAC applied at delivery
+- **Webhooks**: HMAC-SHA256-signed, async, retries with backoff, SSRF-guarded
+- **Extensions**: JS sandbox (Goja, watchdog-interrupted) and WASM (Wazero, no CGO).
+  Example shipped: Colombian tax-compliance functions (DIAN CUFE SHA-384, NIT mod-11)
+- **GraphQL**: queries + create/delete mutations, complexity/depth limits,
+  introspection off in production
+- **Ops**: Prometheus `/metrics`, per-request trace ring with stage breakdown,
+  SLO burn-rate alerts (Slack), graceful drain on SIGTERM, circuit breaker
+  (verified open/recover with toxiproxy), zero-downtime additive migrations
+- **Security hardening**: HS256-pinned JWT (alg-confusion rejected), sanitized
+  identifiers everywhere, masked DB errors, 1 MB body cap, fuzzed parsers
+  (0 crashers), per-tenant cache isolation
 
-| RPS   | p50    | p95    | p99    | Errors |
-|-------|--------|--------|--------|--------|
-| 500   | 0.5ms  | 0.72ms | 1.6ms  | 0      |
-| 1000  | 0.45ms | 1.32ms | 4.9ms  | 0      |
-| 2000  | 0.46ms | 10.6ms | 33ms   | 0      |
-| 3000  | 0.91ms | 96ms   | 153ms  | 0.6%*  |
+## Production deploy
 
-<sub>*rate limited by design</sub>
+`docker-compose.prod.yml` + Caddy: automatic Let's Encrypt TLS, tenant
+subdomains, engine and Postgres on the internal network only. The walkthrough
+(DNS, subdomain certificates, operations) is in [docs/DEPLOY.md](docs/DEPLOY.md).
 
-RAM: **~24 MB cold start, ~50 MB under sustained load** · CPU at 2000 RPS: **40% of one core**
+## Status — what's real and what's missing
 
-**vs NestJS** on the same hardware (no auth, no RBAC, no multi-tenancy — a deliberately
-favorable baseline for NestJS): it saturated and collapsed at **1092 RPS** real
-throughput. The fact that NestJS ran *without* the security and isolation Appitools
-runs *with* makes the gap conservative, not inflated.
+**Production-ready and test-backed** (`make test-all`: unit + integration + E2E +
+resilience against real Postgres in Docker): everything in the feature list above.
+It serves our own production workload today.
 
-Reproduce these numbers: see [benchmarks/README.md](benchmarks/README.md).
+**Known limits, honestly:**
+
+- **No declarative relations** between resources yet — fields can hold foreign
+  UUIDs, but the schema has no `ref`/join semantics.
+- **No CORS middleware**: browser SPAs must be served same-origin (workaround in
+  [docs/DEPLOY.md](docs/DEPLOY.md#cors--current-status-important-for-spas)); native
+  support is next on the engine roadmap.
+- **GraphQL has no update mutation** (create/delete only — use REST `PUT`/`PATCH`).
+- Field `default` values are not applied on insert yet.
+- **Single node.** No HA/clustering story; scale is vertical (the benchmark shows
+  how far one cheap box goes).
+- Observability is Prometheus + an internal trace ring — **no OTLP export**.
+- The visual schema editor exists but isn't published yet; today the schema is a
+  file you write by hand (it's ~20 lines — see above).
+- No hosted/SaaS version. Self-hosted only, by design, for now.
 
 ## Configuration
-
-The server is configured by **environment variables**; the schema file and HTTP port
-are **CLI flags** on `appitools serve`.
 
 | Setting | Kind | Required | Description |
 |---------|------|----------|-------------|
 | `DATABASE_URL` | env | **yes** | PostgreSQL connection string |
-| `JWT_SECRET` | env | **yes** | HS256 signing secret (use ≥ 32 chars) |
+| `JWT_SECRET` | env | **yes** | HS256 signing secret (≥ 32 chars) |
 | `ADMIN_KEY` | env | **yes** | `X-Admin-Key` for `/metrics`, `/debug`, `/admin`, control plane |
-| `REDIS_URL` | env | no | Enables the async migration worker (optional; DDL is applied synchronously without it) |
-| `DB_MAX_CONNS` | env | no | Max DB connections (default: `cores*2+2`, capped sensibly) |
-| `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | env | no | Per-tenant token bucket (default 1000 / 100) |
-| `GOMAXPROCS` | env | no | OS threads (auto-detected via automaxprocs) |
-| `OBS_DB_PATH` | env | no | SQLite path for observability persistence (default `/tmp/obs.db`) |
-| `SLACK_WEBHOOK_URL` | env | no | SLO burn-rate alerts (noop if unset) |
-| `--schema` | flag | **yes** | Path to the JSON schema file |
-| `--port` | flag | no | Data-plane HTTP port (default `8080`) |
+| `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | env | no | per-tenant token bucket (default 1000/100) |
+| `DB_MAX_CONNS`, `GOMAXPROCS`, `OBS_DB_PATH`, `SLACK_WEBHOOK_URL`, `REDIS_URL` | env | no | see [docs/DEPLOY.md](docs/DEPLOY.md) |
+| `--schema` | flag | **yes** | path to the JSON schema |
+| `--port` | flag | no | data-plane port (default 8080) |
 
-> The control plane listens on a fixed port **9090**. Keep it private (firewall /
-> localhost only); it is not meant to be internet-exposed.
-
-## Deployment
-
-**Self-hosted with Docker (recommended)** — dev stack on localhost:
-
-```bash
-docker compose -f docker-compose.yml up -d
-```
-
-**Production** — VPS + domain + automatic TLS (Caddy/Let's Encrypt), tenant
-subdomains, engine and Postgres on the internal network only:
-
-```bash
-docker compose -f docker-compose.prod.yml up -d
-```
-
-The full walkthrough (DNS, subdomain certificates, operations, CORS status) is
-in [docs/DEPLOY.md](docs/DEPLOY.md).
-
-**Binary**
-
-```bash
-go build -o appitools ./cmd/appitools
-export DATABASE_URL="postgres://user:pass@localhost:5432/db?sslmode=disable"
-export JWT_SECRET="your-32-char-minimum-secret" ADMIN_KEY="your-admin-key"
-./appitools serve --schema schema.json --port 8080
-```
-
-**Register a tenant** (creates the per-tenant Postgres schema + tables) through the
-control plane on `:9090`:
-
-```bash
-curl -X POST http://localhost:9090/tenants \
-  -H "X-Admin-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
-  -d '{"tenant_id":"acme","display_name":"Acme","email":"a@acme.com","plan":"free","schema":<your schema JSON>}'
-```
-
-(On the compose stacks the control-plane tables are seeded automatically on the
-first boot of the Postgres volume.) Tenants are then addressed by the `Host`
-subdomain (`acme.localhost` → `tenant_acme`). Mint a token with
-`appitools token --secret "$JWT_SECRET" --tenant acme --role super_admin`. The
-verified copy-paste sequence — tenant → token → first write → first filtered
-read — is in [docs/DEPLOY.md](docs/DEPLOY.md).
+The control plane (tenant admin) listens on **9090** — keep it off the internet.
 
 ## Testing
 
 ```bash
-go test ./... -race            # 24/24 packages
-go vet ./...
-docker build -t appitools .
+make test        # unit, -race, no Docker needed (~7 s warm)
+make test-all    # + integration + E2E + resilience (real Postgres, toxiproxy)
 ```
 
-## License
+## License & contributing
 
-Apache 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache 2.0 — [LICENSE](LICENSE) · [NOTICE](NOTICE). Issues and PRs welcome,
+especially: benchmark-baseline improvements, DNS modules for the Caddy wildcard
+setup, and schema features you're missing.
 
-[`appitools-ui`]: https://github.com/miguelangel/appitools-ui
+*Show HN thread: (link pending launch)*
