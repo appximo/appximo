@@ -19,6 +19,10 @@
   does NOT exist
 - [Deploy guide](docs/DEPLOY.md): laptop quickstart and production VPS
   setup (Caddy, automatic TLS, tenant subdomains, CORS workaround)
+- [Explore guide](docs/EXPLORE.md): the observable surface of a running
+  instance — health probes, metrics, trace explorer, per-tenant debug,
+  SSE, control plane, laptop access via SSH tunnels
+
 - [Public benchmark](context-docs/BENCHMARK_PUBLIC.md): full methodology
   vs NestJS — 2000 RPS sustained, p50 1.58 ms, statistical treatment,
   every limitation declared, raw per-run data

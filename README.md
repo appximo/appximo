@@ -139,7 +139,9 @@ baseline faster are welcome; we'll publish updated numbers.
   introspection off in production
 - **Ops**: Prometheus `/metrics`, per-request trace ring with stage breakdown,
   SLO burn-rate alerts (Slack), graceful drain on SIGTERM, circuit breaker
-  (verified open/recover with toxiproxy), zero-downtime additive migrations
+  (verified open/recover with toxiproxy), zero-downtime additive migrations —
+  the full observable surface (trace explorer, per-tenant debug, health
+  probes) is mapped in [docs/EXPLORE.md](docs/EXPLORE.md)
 - **Security hardening**: HS256-pinned JWT (alg-confusion rejected), sanitized
   identifiers everywhere, masked DB errors, 1 MB body cap, fuzzed parsers
   (0 crashers), per-tenant cache isolation

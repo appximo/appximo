@@ -241,8 +241,9 @@ re-derive those commands — they are verified verbatim.
 Facts agents most often get wrong:
 
 - **Tenant = Host header.** Every data-plane request needs
-  `Host: acme.localhost` (or a real subdomain). Wrong/missing Host →
-  401, not a helpful error.
+  `Host: acme.localhost` (or a real subdomain). Host of a different
+  tenant → 401 `token tenant mismatch`; Host with no subdomain (bare
+  IP/`localhost`) → 500 with empty body.
 - **JWT**: HS256 only, `exp` required, `role` claim must match a schema
   role. Mint dev tokens with
   `appitools token --secret "$JWT_SECRET" --tenant acme --role admin`.
