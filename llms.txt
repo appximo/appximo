@@ -1,0 +1,35 @@
+# Appitools
+
+> Appitools is an Apache-2.0 Go engine that compiles a JSON schema into a
+> production multi-tenant REST + GraphQL + OpenAPI server at boot. One
+> static binary (~24 MB RSS idle) on your own server, PostgreSQL with
+> schema-per-tenant isolation, JWT + RBAC deny-by-default, declarative
+> validation, SSE change streams. You don't write handlers, models, or
+> migrations — you write a ~20-line schema file.
+
+## Docs
+
+- [README](README.md): what it is, verified quick start (Docker image →
+  first API call in 4 commands), feature list, honest comparison table
+  and known limits
+- [AGENTS.md](AGENTS.md): for AI agents — exact build/test commands, repo
+  conventions and boundaries, plus the integration guide: complete
+  verified schema syntax (field types, validation rules, RBAC) and exact
+  API syntax (filters, sort, keyset pagination, GraphQL) including what
+  does NOT exist
+- [Deploy guide](docs/DEPLOY.md): laptop quickstart and production VPS
+  setup (Caddy, automatic TLS, tenant subdomains, CORS workaround)
+- [Public benchmark](context-docs/BENCHMARK_PUBLIC.md): full methodology
+  vs NestJS — 2000 RPS sustained, p50 1.58 ms, statistical treatment,
+  every limitation declared, raw per-run data
+
+## Examples
+
+- [Quickstart schema](examples/quickstart/schema.json): the canonical
+  todo-api schema the Docker image boots with — copy this to start
+
+## Meta
+
+- [Contributing](CONTRIBUTING.md): commit conventions, test
+  prerequisites, PR checklist
+- [License](LICENSE): Apache 2.0
