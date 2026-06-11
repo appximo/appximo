@@ -1,0 +1,81 @@
+name: Docker Publish
+
+# Publishes neodevtrix/appitools-engine to Docker Hub — but ONLY for commits whose CI run
+# (same SHA) finished green: this workflow triggers on the completion of "CI"
+# (workflow_run) instead of directly on push, so an image of a red commit can
+# never be published. CI itself runs on pushes to main and on v* tags.
+#
+# Requires two repo secrets (Settings → Secrets and variables → Actions):
+#   DOCKERHUB_USERNAME   Docker Hub account that owns the appitools namespace
+#   DOCKERHUB_TOKEN      access token with Read & Write scope
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: neodevtrix/appitools-engine
+
+jobs:
+  publish:
+    name: Build & push (amd64 + arm64)
+    runs-on: ubuntu-latest
+    # Green CI + a push event (not a PR) + main or a version tag. For tag runs,
+    # workflow_run.head_branch carries the TAG name (e.g. "v1.2.0").
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      (github.event.workflow_run.head_branch == 'main' ||
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The exact commit CI validated — never the default branch tip, which
+          # may have moved since.
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Compute image tags
+        id: meta
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_REF: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          SHORT="${HEAD_SHA:0:7}"
+          TAGS="$IMAGE:$SHORT"
+          VERSION="$SHORT"
+          if [ "$HEAD_REF" = "main" ]; then
+            TAGS="$TAGS,$IMAGE:latest"
+          else
+            TAGS="$TAGS,$IMAGE:$HEAD_REF"   # v* tag → versioned image
+            VERSION="$HEAD_REF"
+          fi
+          echo "tags=$TAGS"       >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing: $TAGS"
+
+      # arm64 build runs under QEMU emulation (devs on Apple Silicon).
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            REVISION=${{ github.event.workflow_run.head_sha }}
+          # Layer cache shared across runs — the Go module download layer makes
+          # warm builds dramatically faster.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

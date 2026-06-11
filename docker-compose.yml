@@ -1,7 +1,12 @@
-# Appitools — self-hosted (BYOC) stack.
+# Appitools — local / dev quickstart (laptop, Docker Desktop on Win/Mac/Linux).
 #
 #   cp .env.example .env   # then edit the secrets
-#   docker compose up      # starts engine + postgres (data plane on :8080)
+#   docker compose up -d   # pulls the published image + postgres, ~20s
+#
+# Uses the pre-built multi-arch image from Docker Hub — no Go toolchain, no
+# compile. To build from source instead: docker build -t neodevtrix/appitools-engine:latest .
+# For PRODUCTION (a VPS with a domain, automatic TLS, tenant subdomains) use
+# docker-compose.prod.yml — see docs/DEPLOY.md.
 #
 # The visual UI is published from the separate `appitools-ui` repository and is
 # therefore behind the optional "ui" profile (its image is not on a public
@@ -13,8 +18,7 @@
 
 services:
   engine:
-    image: appitools/engine:latest
-    build: .
+    image: neodevtrix/appitools-engine:latest
     environment:
       DATABASE_URL: postgres://appitools:${DB_PASSWORD:-changeme}@db:5432/appitools?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}
@@ -56,6 +60,14 @@ services:
       POSTGRES_DB: appitools
     volumes:
       - pgdata:/var/lib/postgresql/data
+    configs:
+      # Control-plane DDL applied automatically on the FIRST init of the pgdata
+      # volume (postgres runs /docker-entrypoint-initdb.d/*.sql once). Without
+      # it, registering a tenant on :9090 fails — fresh databases have no
+      # public.tenants. Pre-existing volumes: apply it manually once with
+      #   docker compose exec -T db psql -U appitools -d appitools < migrations/001_control_plane.sql
+      - source: control_plane_init
+        target: /docker-entrypoint-initdb.d/001_control_plane.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U appitools"]
       interval: 5s
@@ -65,3 +77,51 @@ services:
 
 volumes:
   pgdata:
+
+configs:
+  # Inline copy of migrations/001_control_plane.sql so the quickstart needs only
+  # this file + .env (no clone). Keep both in sync if the control plane changes
+  # (it is additive/idempotent: CREATE IF NOT EXISTS).
+  control_plane_init:
+    content: |
+      CREATE TABLE IF NOT EXISTS public.tenants (
+          id           TEXT        PRIMARY KEY,
+          pg_schema    TEXT        NOT NULL UNIQUE,
+          display_name TEXT        NOT NULL,
+          email        TEXT        NOT NULL,
+          plan         TEXT        NOT NULL DEFAULT 'free',
+          json_schema  JSONB,
+          created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.tenant_policies (
+          tenant_id  TEXT        PRIMARY KEY REFERENCES public.tenants(id) ON DELETE CASCADE,
+          policy     JSONB       NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.migration_log (
+          id          BIGSERIAL   PRIMARY KEY,
+          tenant_id   TEXT        NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+          status      TEXT        NOT NULL CHECK (status IN ('pending', 'running', 'ok', 'failed')),
+          changes     TEXT,
+          error       TEXT,
+          started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+          finished_at TIMESTAMPTZ
+      );
+
+      CREATE OR REPLACE FUNCTION public.notify_schema_updated()
+      RETURNS TRIGGER LANGUAGE plpgsql AS $$$$
+      BEGIN
+          PERFORM pg_notify('schema_updated', NEW.id);
+          RETURN NEW;
+      END;
+      $$$$;
+
+      DROP TRIGGER IF EXISTS schema_updated_trigger ON public.tenants;
+
+      CREATE TRIGGER schema_updated_trigger
+          AFTER UPDATE OF json_schema ON public.tenants
+          FOR EACH ROW
+          EXECUTE FUNCTION public.notify_schema_updated();

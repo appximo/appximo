@@ -3,6 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+    # Version tags run the full suite too: docker-publish.yml triggers off this
+    # workflow's completion (workflow_run), so a tag only publishes if its CI
+    # run — same SHA — is green.
+    tags: ["v*"]
   pull_request:
 
 permissions:

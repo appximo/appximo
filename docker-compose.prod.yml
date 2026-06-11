@@ -1,0 +1,119 @@
+# Appitools — PRODUCTION stack: a VPS + a domain pointing at it.
+#
+#   cp .env.example .env       # set DOMAIN, ACME_EMAIL and real secrets
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Caddy terminates TLS (automatic Let's Encrypt via HTTP challenge — the only
+# requirement is that DNS for $DOMAIN resolves to this box and ports 80/443 are
+# reachable). The engine and Postgres publish NO host ports: they are reachable
+# only on the internal compose network, through Caddy.
+#
+# Tenant subdomains (acme.your-domain.com → tenant_acme) are routed by the Host
+# header, which Caddy's reverse_proxy passes through by default — see
+# deploy/Caddyfile for the two ways to issue their certificates.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN is required (e.g. api.example.com)}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required (Let's Encrypt expiry notices)}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # certificates — persist or you re-issue on every boot
+      - caddy_config:/config
+    depends_on:
+      - engine
+    restart: unless-stopped
+
+  engine:
+    image: neodevtrix/appitools-engine:latest
+    # No ports: — internal network only, fronted by Caddy. The control plane
+    # (:9090) is NOT exposed either; reach it from the VPS itself with
+    #   docker compose -f docker-compose.prod.yml exec engine wget -q -O- http://127.0.0.1:9090/...
+    # or an SSH tunnel. Never publish 9090 to the internet.
+    environment:
+      DATABASE_URL: postgres://appitools:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/appitools?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}
+      ADMIN_KEY: ${ADMIN_KEY:?ADMIN_KEY is required}
+      GOMAXPROCS: "2"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    # No ports: — only the engine talks to it.
+    environment:
+      POSTGRES_USER: appitools
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      POSTGRES_DB: appitools
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    configs:
+      # Control-plane DDL, applied once on the first init of the pgdata volume.
+      # See the inline `configs:` block at the bottom of this file.
+      - source: control_plane_init
+        target: /docker-entrypoint-initdb.d/001_control_plane.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appitools"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+
+configs:
+  # Inline copy of migrations/001_control_plane.sql so this file works standalone
+  # (no clone). Keep in sync if the control plane changes (additive/idempotent).
+  control_plane_init:
+    content: |
+      CREATE TABLE IF NOT EXISTS public.tenants (
+          id           TEXT        PRIMARY KEY,
+          pg_schema    TEXT        NOT NULL UNIQUE,
+          display_name TEXT        NOT NULL,
+          email        TEXT        NOT NULL,
+          plan         TEXT        NOT NULL DEFAULT 'free',
+          json_schema  JSONB,
+          created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.tenant_policies (
+          tenant_id  TEXT        PRIMARY KEY REFERENCES public.tenants(id) ON DELETE CASCADE,
+          policy     JSONB       NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.migration_log (
+          id          BIGSERIAL   PRIMARY KEY,
+          tenant_id   TEXT        NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+          status      TEXT        NOT NULL CHECK (status IN ('pending', 'running', 'ok', 'failed')),
+          changes     TEXT,
+          error       TEXT,
+          started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+          finished_at TIMESTAMPTZ
+      );
+
+      CREATE OR REPLACE FUNCTION public.notify_schema_updated()
+      RETURNS TRIGGER LANGUAGE plpgsql AS $$$$
+      BEGIN
+          PERFORM pg_notify('schema_updated', NEW.id);
+          RETURN NEW;
+      END;
+      $$$$;
+
+      DROP TRIGGER IF EXISTS schema_updated_trigger ON public.tenants;
+
+      CREATE TRIGGER schema_updated_trigger
+          AFTER UPDATE OF json_schema ON public.tenants
+          FOR EACH ROW
+          EXECUTE FUNCTION public.notify_schema_updated();

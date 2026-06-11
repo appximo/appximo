@@ -1,0 +1,18 @@
+# OPTIONAL — only needed for wildcard tenant subdomains (*.your-domain.com),
+# which require the ACME DNS challenge and therefore a Caddy build with your
+# DNS provider's module compiled in. The default stack uses stock caddy:2-alpine
+# and does NOT need this file.
+#
+# Build (DigitalOcean DNS example — swap the module for your provider, see
+# https://github.com/caddy-dns):
+#
+#   docker build -f deploy/Dockerfile.caddy -t caddy-do:2 deploy/
+#
+# then in docker-compose.prod.yml set  caddy: image: caddy-do:2  and add
+# DO_API_TOKEN to your .env (a DigitalOcean token with DNS write scope).
+
+FROM caddy:2-builder-alpine AS builder
+RUN xcaddy build --with github.com/caddy-dns/digitalocean
+
+FROM caddy:2-alpine
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy

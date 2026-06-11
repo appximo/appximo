@@ -1,0 +1,41 @@
+# Appitools production Caddyfile (mounted by docker-compose.prod.yml).
+# Parameterized by env: DOMAIN and ACME_EMAIL come from your .env.
+#
+# reverse_proxy passes the original Host header through BY DEFAULT — Appitools'
+# tenant routing (acme.your-domain.com → tenant_acme) depends on that. Do not
+# add a `header_up Host ...` override.
+
+{
+	email {$ACME_EMAIL}
+}
+
+# ── Mode 1 (default): single domain, zero extra config ──────────────────────
+# Serves the API on https://$DOMAIN with an automatic Let's Encrypt certificate
+# (HTTP challenge: DNS must point here and port 80 must be reachable).
+{$DOMAIN} {
+	reverse_proxy engine:8080
+}
+
+# ── Tenant subdomains — choose ONE of the two options below ─────────────────
+#
+# Option A (works with this stock Caddy image): list each tenant subdomain
+# explicitly. Caddy issues one certificate per name via the same HTTP
+# challenge. Add a line per tenant and `docker compose ... exec caddy caddy
+# reload --config /etc/caddy/Caddyfile` (or restart the caddy service).
+#
+# acme.{$DOMAIN}, beta.{$DOMAIN} {
+# 	reverse_proxy engine:8080
+# }
+#
+# Option B (wildcard *.{$DOMAIN} — any tenant, no per-tenant config): requires
+# the ACME DNS challenge, which needs a Caddy build that includes your DNS
+# provider's module (the stock caddy:2-alpine image has none). Build it with
+# deploy/Dockerfile.caddy, point the caddy service's `image:` at your build,
+# and use:
+#
+# *.{$DOMAIN} {
+# 	tls {
+# 		dns digitalocean {$DO_API_TOKEN}
+# 	}
+# 	reverse_proxy engine:8080
+# }

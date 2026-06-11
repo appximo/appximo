@@ -20,14 +20,21 @@ A single JSON schema becomes a multi-tenant REST + GraphQL API — with JWT auth
 RBAC, per-tenant Postgres isolation, hooks, and observability — compiled into one
 ~46 MB static binary that uses ~24 MB RAM at cold start (~50 MB under sustained load).
 
-## Quick Start (self-hosted, 5 minutes)
+## Quick Start (self-hosted, ~20 seconds)
+
+No Go toolchain, no compile — the multi-arch image (amd64 + arm64) is on Docker
+Hub:
 
 ```bash
-git clone https://github.com/miguelangel/appitools
-cd appitools
-cp .env.example .env          # set JWT_SECRET, ADMIN_KEY, DB_PASSWORD
-docker compose up             # builds the engine, starts Postgres
+mkdir appitools && cd appitools
+curl -O https://raw.githubusercontent.com/miguel09acosta/appitools/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/miguel09acosta/appitools/main/.env.example
+cp .env.example .env          # set JWT_SECRET (≥32 chars), ADMIN_KEY, DB_PASSWORD
+docker compose up -d          # pulls neodevtrix/appitools-engine + Postgres
 ```
+
+(From a clone of this repo: skip the curls, the files are at the root. To build
+from source instead of pulling: `docker build -t neodevtrix/appitools-engine:latest .`)
 
 The data plane is live at `http://localhost:8080` (REST + GraphQL) and the control
 plane at `http://localhost:9090` (tenant/schema admin — keep it private). Health
@@ -40,7 +47,8 @@ curl http://localhost:8080/healthz      # {"status":"alive"}
 The engine boots with the bundled `logistics` example schema. To serve your own
 model, mount your schema over `/etc/appitools/schema.json` (or run the binary with
 `--schema yourschema.json`). To create live tenant tables, register a tenant through
-the control plane — see [Deployment](#deployment).
+the control plane — see [Deployment](#deployment). For **production** (VPS +
+domain + automatic TLS + tenant subdomains) follow [docs/DEPLOY.md](docs/DEPLOY.md).
 
 > The optional visual schema editor (ReactFlow canvas + dashboards) ships from the
 > separate [`appitools-ui`] repo and is wired into compose under an opt-in profile:
@@ -125,11 +133,21 @@ are **CLI flags** on `appitools serve`.
 
 ## Deployment
 
-**Self-hosted with Docker (recommended)**
+**Self-hosted with Docker (recommended)** — dev stack on localhost:
 
 ```bash
 docker compose -f docker-compose.yml up -d
 ```
+
+**Production** — VPS + domain + automatic TLS (Caddy/Let's Encrypt), tenant
+subdomains, engine and Postgres on the internal network only:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+```
+
+The full walkthrough (DNS, subdomain certificates, operations, CORS status) is
+in [docs/DEPLOY.md](docs/DEPLOY.md).
 
 **Binary**
 
@@ -149,8 +167,12 @@ curl -X POST http://localhost:9090/tenants \
   -d '{"tenant_id":"acme","display_name":"Acme","email":"a@acme.com","plan":"free","schema":<your schema JSON>}'
 ```
 
-Tenants are then addressed by the `Host` subdomain (`acme.localhost` →
-`tenant_acme`). Mint a token with `appitools token --secret "$JWT_SECRET" --tenant acme --role super_admin`.
+(On the compose stacks the control-plane tables are seeded automatically on the
+first boot of the Postgres volume.) Tenants are then addressed by the `Host`
+subdomain (`acme.localhost` → `tenant_acme`). Mint a token with
+`appitools token --secret "$JWT_SECRET" --tenant acme --role super_admin`. The
+verified copy-paste sequence — tenant → token → first write → first filtered
+read — is in [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Testing
 
