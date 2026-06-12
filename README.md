@@ -27,7 +27,12 @@ You don't write handlers, models, or migrations. You write this:
       }
     }
   },
-  "rbac": { "roles": { "admin": { "resources": "*", "actions": ["*"] } } }
+  "rbac": {
+    "roles": {
+      "admin":  { "resources": "*", "actions": ["*"] },
+      "viewer": { "resources": ["tasks"], "actions": ["read"], "fields": ["id", "title", "status"] }
+    }
+  }
 }
 ```
 
@@ -38,7 +43,8 @@ and the engine serves — per isolated tenant, from one process:
 - an OpenAPI 3.0 spec (`appitools openapi schema.json`)
 - declarative validation (`422` listing **every** invalid field at once)
 - live updates over SSE (`GET /api/tasks/events`)
-- JWT auth + RBAC enforced on every request — no policy, no access (deny by default)
+- JWT auth + RBAC enforced on every request, deny by default — that `viewer`
+  role really is read-only and never sees the `due` field
 
 It's a code generator without the generated code: the schema is compiled at boot,
 not scaffolded into files you then maintain.

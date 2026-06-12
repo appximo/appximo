@@ -159,7 +159,12 @@ without them). A complete, working example:
       }
     }
   },
-  "rbac": { "roles": { "admin": { "resources": "*", "actions": ["*"] } } }
+  "rbac": {
+    "roles": {
+      "admin":  { "resources": "*", "actions": ["*"] },
+      "viewer": { "resources": ["tasks"], "actions": ["read"], "fields": ["id", "title", "status"] }
+    }
+  }
 }
 ```
 
