@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,9 +42,13 @@ func (m *mockCPService) GetSchema(ctx context.Context, id string) (*schema.APISc
 // X-Admin-Key gate and a chi route with the {id} URL param, so the test covers the
 // real auth + param-extraction path, not just the bare handler.
 func reloadTestRouter(svc controlplane.Service, rc *cache.ResponseCache, sc *tenant.SchemaCache, adminKey string) http.Handler {
+	return reloadTestRouterWithBoot(svc, rc, sc, adminKey, &schema.APISchema{})
+}
+
+func reloadTestRouterWithBoot(svc controlplane.Service, rc *cache.ResponseCache, sc *tenant.SchemaCache, adminKey string, boot *schema.APISchema) http.Handler {
 	r := chi.NewRouter()
 	r.Method(http.MethodPost, "/admin/tenants/{id}/reload",
-		observability.AdminAuth(adminKey, reloadHandler(svc, rc, sc)))
+		observability.AdminAuth(adminKey, reloadHandler(svc, rc, sc, boot)))
 	return r
 }
 
@@ -90,6 +95,71 @@ func TestAdminReloadTenant(t *testing.T) {
 		// Warm reload populated the schema cache with the fresh DB schema.
 		if got, ok := sc.Get("10"); !ok || got != fresh {
 			t.Fatalf("schema cache not warmed with fresh schema: got=%v ok=%v", got, ok)
+		}
+	})
+
+	t.Run("stored-schema hooks differ from boot → 200 with warning", func(t *testing.T) {
+		sc := tenant.NewSchemaCache()
+		rc := cache.New(time.Second)
+		boot := &schema.APISchema{Resources: map[string]schema.ResourceSchema{
+			"tasks": {Fields: map[string]schema.FieldDef{"title": {Type: "string"}}},
+		}}
+		stored := &schema.APISchema{Resources: map[string]schema.ResourceSchema{
+			"tasks": {
+				Fields: map[string]schema.FieldDef{"title": {Type: "string"}},
+				Hooks: map[string]schema.HookConfig{
+					"after_create": {Type: "webhook", URL: "https://x.example", HMACSecretEnv: "HOOK_SECRET"},
+				},
+			},
+		}}
+		svc := &mockCPService{
+			getByID:   okTenant("10"),
+			getSchema: func(context.Context, string) (*schema.APISchema, error) { return stored, nil },
+		}
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/admin/tenants/10/reload", nil)
+		req.Header.Set("X-Admin-Key", adminKey)
+		reloadTestRouterWithBoot(svc, rc, sc, adminKey, boot).ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+		}
+		var body struct {
+			OK       bool     `json:"ok"`
+			Warnings []string `json:"warnings"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if !body.OK || len(body.Warnings) != 1 ||
+			!strings.Contains(body.Warnings[0], "tasks") ||
+			!strings.Contains(body.Warnings[0], "restart") {
+			t.Fatalf("expected hook-drift warning naming tasks + restart, got: %s", rec.Body.String())
+		}
+	})
+
+	t.Run("identical hooks → no warning key", func(t *testing.T) {
+		sc := tenant.NewSchemaCache()
+		rc := cache.New(time.Second)
+		same := &schema.APISchema{Resources: map[string]schema.ResourceSchema{
+			"tasks": {Fields: map[string]schema.FieldDef{"title": {Type: "string"}}},
+		}}
+		svc := &mockCPService{
+			getByID:   okTenant("10"),
+			getSchema: func(context.Context, string) (*schema.APISchema, error) { return same, nil },
+		}
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/admin/tenants/10/reload", nil)
+		req.Header.Set("X-Admin-Key", adminKey)
+		reloadTestRouterWithBoot(svc, rc, sc, adminKey, same).ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rec.Code)
+		}
+		if strings.Contains(rec.Body.String(), "warnings") {
+			t.Fatalf("no warning expected for identical hooks, got: %s", rec.Body.String())
 		}
 	})
 
@@ -185,16 +255,18 @@ func TestAdminReloadTenant(t *testing.T) {
 			return rec
 		}
 
-		get()              // MISS — populates cache (calls=1)
-		hit := get()       // HIT — served from cache (calls stays 1)
+		get()        // MISS — populates cache (calls=1)
+		hit := get() // HIT — served from cache (calls stays 1)
 		if calls != 1 || hit.Header().Get("X-Cache") != "HIT" {
 			t.Fatalf("precondition failed: calls=%d x-cache=%q", calls, hit.Header().Get("X-Cache"))
 		}
 
 		// Reload the tenant.
 		svc := &mockCPService{
-			getByID:   okTenant("10"),
-			getSchema: func(context.Context, string) (*schema.APISchema, error) { return &schema.APISchema{Name: "logistics"}, nil },
+			getByID: okTenant("10"),
+			getSchema: func(context.Context, string) (*schema.APISchema, error) {
+				return &schema.APISchema{Name: "logistics"}, nil
+			},
 		}
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/admin/tenants/10/reload", nil)

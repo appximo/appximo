@@ -260,9 +260,10 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// key cannot break out of the identifier position (SQL injection). We do
 			// NOT whitelist keys against res.Fields here: the schema can evolve at
 			// runtime (a migration adds a column without rebuilding this router), so
-			// the DB is the source of truth — an unknown column simply errors at the
-			// DB. Residual mass-assignment (e.g. client-set id) is low-impact for the
-			// current schema (no privilege/tenant columns) and tracked separately.
+			// the DB is the source of truth — an unknown column errors at the DB and
+			// WriteDBError maps that 42703 to a 422 unknown_field (S44 shape), never
+			// a 500. Residual mass-assignment (e.g. client-set id) is low-impact for
+			// the current schema (no privilege/tenant columns) and tracked separately.
 			cols, placeholders, args := pkghandlers.BuildInsertArgs(body)
 			insertQ := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", name, cols, placeholders)
 			result, err := tdb.ExecRowsTenant(req.Context(), tc.PGSchema, insertQ, args...)

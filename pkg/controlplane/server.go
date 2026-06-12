@@ -53,11 +53,50 @@ func adminKeyMiddleware(key string) func(http.Handler) http.Handler {
 
 // ── handlers ──────────────────────────────────────────────────────────────────
 
+// parseAndValidateSchema runs the full schema gate on raw JSON: required,
+// unknown-key strictness (CheckUnknownKeys — typos must error, not silently
+// no-op), then the semantic validator. Returns the parsed schema, or the
+// error strings for the 400 response.
+func parseAndValidateSchema(raw json.RawMessage) (*schema.APISchema, []string) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, []string{"schema is required"}
+	}
+	if errs := schema.CheckUnknownKeys(raw); len(errs) > 0 {
+		msgs := make([]string, len(errs))
+		for i, e := range errs {
+			msgs[i] = e.Error()
+		}
+		return nil, msgs
+	}
+	var s schema.APISchema
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return nil, []string{"schema is not valid JSON: " + err.Error()}
+	}
+	if errs := schema.Validate(&s); len(errs) > 0 {
+		msgs := make([]string, len(errs))
+		for i, e := range errs {
+			msgs[i] = e.Error()
+		}
+		return nil, msgs
+	}
+	return &s, nil
+}
+
 func handleCreateTenant(svc Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxControlPlaneBody)
-		var req RegisterRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// The schema is decoded as RAW JSON first: unknown-key validation
+		// (CheckUnknownKeys) must see the bytes before unmarshalling drops
+		// unrecognized keys — a typo like "webhooks" has to be an error, not
+		// a silently ignored block.
+		var raw struct {
+			TenantID    string          `json:"tenant_id"`
+			DisplayName string          `json:"display_name"`
+			Email       string          `json:"email"`
+			Plan        string          `json:"plan"`
+			Schema      json.RawMessage `json:"schema"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 			return
 		}
@@ -65,17 +104,17 @@ func handleCreateTenant(svc Service) http.HandlerFunc {
 		// RegisterTenant dereferences req.Schema (nil → panic) and would feed an
 		// unvalidated schema into CREATE TABLE DDL. schema.Validate enforces the
 		// resource/field name allowlist.
-		if req.Schema == nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "schema is required"})
+		parsed, errs := parseAndValidateSchema(raw.Schema)
+		if len(errs) > 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"errors": errs})
 			return
 		}
-		if errs := schema.Validate(req.Schema); len(errs) > 0 {
-			msgs := make([]string, len(errs))
-			for i, e := range errs {
-				msgs[i] = e.Error()
-			}
-			writeJSON(w, http.StatusBadRequest, map[string]any{"errors": msgs})
-			return
+		req := RegisterRequest{
+			TenantID:    raw.TenantID,
+			DisplayName: raw.DisplayName,
+			Email:       raw.Email,
+			Plan:        raw.Plan,
+			Schema:      parsed,
 		}
 
 		tenant, err := svc.Register(r.Context(), req)
@@ -116,27 +155,19 @@ func handleUpdateSchema(svc Service) http.HandlerFunc {
 		r.Body = http.MaxBytesReader(w, r.Body, maxControlPlaneBody)
 
 		var body struct {
-			Schema *schema.APISchema `json:"schema"`
+			Schema json.RawMessage `json:"schema"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 			return
 		}
-		if body.Schema == nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "schema is required"})
+		parsed, errs := parseAndValidateSchema(body.Schema)
+		if len(errs) > 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"errors": errs})
 			return
 		}
 
-		if errs := schema.Validate(body.Schema); len(errs) > 0 {
-			msgs := make([]string, len(errs))
-			for i, e := range errs {
-				msgs[i] = e.Error()
-			}
-			writeJSON(w, http.StatusBadRequest, map[string]any{"errors": msgs})
-			return
-		}
-
-		if err := svc.UpdateSchema(r.Context(), id, body.Schema); err != nil {
+		if err := svc.UpdateSchema(r.Context(), id, parsed); err != nil {
 			if errors.Is(err, ErrNotFound) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 				return

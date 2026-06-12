@@ -165,7 +165,10 @@ without them). A complete, working example:
 
 Naming rules (enforced at load): resource names `^[a-z][a-z0-9-]*$`,
 field names `^[a-z][a-z0-9_]*$`. An `id` UUID primary key is implicit —
-don't declare it.
+don't declare it. The validator is **strict about keys**: any key
+outside the documented surface — at any level — rejects the schema with
+an error listing the valid keys for that level, so typos never become
+silently dead config.
 
 ### Field types — the complete set
 
@@ -232,6 +235,50 @@ a row condition reads as 404 (not 403).
 `$user_id` resolving to the JWT subject. The JWT `role` claim selects
 the policy.
 
+### Hooks (lifecycle extensions)
+
+Declared per resource under `hooks`. Events are exactly
+`before_create | after_create | before_update | after_update` — there
+are **no delete hooks**, and any other event name is rejected at
+validation. Three hook types (all fields below verified against
+`pkg/schema/types.go`):
+
+```json
+"hooks": {
+  "before_create": {
+    "type": "js",
+    "script": "if (!data.title) { result.proceed = false; result.error = 'title required'; }"
+  },
+  "after_create": {
+    "type": "webhook",
+    "url": "https://erp.example.com/webhooks/task-created",
+    "hmac_secret_env": "WEBHOOK_SECRET_TASKS"
+  }
+}
+```
+
+- `js` — Goja sandbox, watchdog-interrupted (80 ms soft / 500 ms hard).
+  `data` is the record; setting `result.proceed = false` +
+  `result.error` rejects the write with 422. Built-ins available:
+  `validateNIT`, `calculateCUFE`, `isValidEmail`, `formatMoney`.
+- `webhook` — async signed POST: headers `X-Appitools-Event` and
+  `X-Appitools-Signature: sha256=<hmac>`; 3 retries with backoff.
+  **`hmac_secret_env` is the NAME of an env var holding the secret**,
+  not the secret itself (a `"secret"` key does not exist). Constraints
+  that are easy to trip on: the dispatcher is **HTTPS-only and
+  SSRF-guarded in every environment** — `http://` URLs and
+  loopback/private/link-local IPs are refused (logged, never delivered),
+  so a local/LAN receiver will never get called; test against a public
+  HTTPS endpoint.
+- `wasm` — `wasm_module` (pre-loaded module name) + `wasm_fn` (default
+  `transform`), Wazero, 16 MiB limit.
+
+**Hooks are compiled at boot from the `--schema` file** (same as routes
+and GraphQL types). Declaring or changing hooks through the control
+plane (`PUT /tenants/{id}/schema` + reload) does NOT wire them — the
+reload response says so in a `warnings` field; a process restart is
+required.
+
 ## Running it and making the first call
 
 Fastest path is the published Docker image — the four copy-paste
@@ -286,6 +333,16 @@ REST). Introspection is disabled in production; GraphiQL only runs with
 
 ## Does not exist — do not invent
 
+- Field type `number` → schema rejected; use `int`, `int64` or
+  `float64` (the full type set is the table above — nothing else).
+- Unknown schema keys → schema rejected listing the valid keys (e.g.
+  `webhooks` instead of `hooks`, `secret` instead of `hmac_secret_env`).
+  Nothing is silently ignored anymore.
+- Writing a field the resource doesn't have → 422
+  `{"error":"validation_failed","fields":[{"field":"…","rule":"unknown_field"}]}`
+  (not a 500, not silently dropped).
+- Hook events other than the four listed (no `on_create`, no
+  `before_delete`/`after_delete`).
 - Filter ops `neq`, `in`, `like`, `is_null` → 400.
 - Multi-field sort or `sort=field:desc` → silently ignored.
 - Total-count in list responses (`count=true` is not a thing).

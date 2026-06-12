@@ -72,6 +72,29 @@ func UniqueViolationField(err error) (field string, ok bool) {
 	return pgErr.ConstraintName, true
 }
 
+// undefinedColumnMsgRe extracts the column from a Postgres undefined_column
+// message: `column "priority" of relation "tasks" does not exist` → "priority".
+var undefinedColumnMsgRe = regexp.MustCompile(`column "([^"]+)"`)
+
+// UndefinedColumnField reports whether err is a Postgres undefined_column
+// (SQLSTATE 42703) and, if so, returns the column name parsed from the message.
+// On the write path this means the client sent a field that neither the schema
+// nor the live table knows: handlers map it to 422 unknown_field instead of a
+// masked 500. The DB stays the source of truth for the writable column set
+// (the schema can grow columns at runtime — see the no-whitelist NOTE in
+// codegen.BuildRouter), so this classification happens on the error, never as
+// a pre-write whitelist.
+func UndefinedColumnField(err error) (field string, ok bool) {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "42703" {
+		return "", false
+	}
+	if m := undefinedColumnMsgRe.FindStringSubmatch(pgErr.Message); len(m) == 2 {
+		return m[1], true
+	}
+	return "", true
+}
+
 // qualifyReCache memoizes the per-table FROM/JOIN regexp. The table name is a
 // validated resource name (a small, fixed set per schema — never client-supplied),
 // so this cache is bounded. It removes a regexp.MustCompile from every QueryDirect

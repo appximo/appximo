@@ -13,8 +13,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"reflect"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -459,7 +461,7 @@ var serveCmd = &cobra.Command{
 		// It does NOT hot-swap the compiled GraphQL/REST (deferred to Phase 2);
 		// new resources/types still require a restart.
 		r.Method(http.MethodPost, "/admin/tenants/{id}/reload",
-			observability.AdminAuth(adminKey, reloadHandler(cpSvc, responseCache, schemaCache)))
+			observability.AdminAuth(adminKey, reloadHandler(cpSvc, responseCache, schemaCache, s)))
 
 		// Liveness — never touches Postgres.
 		r.Get("/healthz", ss.HealthzHandler)
@@ -638,7 +640,7 @@ func backupHandler(pool *pgxpool.Pool) http.HandlerFunc {
 // interrupts in-flight requests — Invalidate only drops cached copies, and Set
 // replaces a map entry. DB errors are logged internally and never echoed into the
 // response body.
-func reloadHandler(svc controlplane.Service, rc *cache.ResponseCache, sc *tenant.SchemaCache) http.HandlerFunc {
+func reloadHandler(svc controlplane.Service, rc *cache.ResponseCache, sc *tenant.SchemaCache, bootSchema *schema.APISchema) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		start := time.Now()
 		w.Header().Set("Content-Type", "application/json")
@@ -680,6 +682,16 @@ func reloadHandler(svc controlplane.Service, rc *cache.ResponseCache, sc *tenant
 			sc.Set(id, apiSchema)
 		}
 
+		// Hooks (like routes and GraphQL types) are compiled at BOOT from the
+		// --schema file — this reload does NOT rewire them (ADR-014). If the
+		// stored schema's hooks differ from what the process is running, say so
+		// loudly: a webhook declared via PUT that never fires is undebuggable
+		// without this warning.
+		var hookDrift []string
+		if apiSchema != nil {
+			hookDrift = hooksDiffering(bootSchema, apiSchema)
+		}
+
 		reloadedAt := time.Now().UTC().Format(time.RFC3339)
 		logging.Log.Info().
 			Str("tenant_id", id).
@@ -687,13 +699,49 @@ func reloadHandler(svc controlplane.Service, rc *cache.ResponseCache, sc *tenant
 			Int64("latency_ms", time.Since(start).Milliseconds()).
 			Msg("admin reload: tenant reloaded")
 
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+		resp := map[string]any{
 			"ok":          true,
 			"tenant_id":   id,
 			"reloaded_at": reloadedAt,
-		})
+		}
+		if len(hookDrift) > 0 {
+			warning := fmt.Sprintf(
+				"hooks changed for %s but hooks are compiled at boot — a process restart is required for hook changes to take effect",
+				strings.Join(hookDrift, ", "))
+			resp["warnings"] = []string{warning}
+			logging.Log.Warn().
+				Str("tenant_id", id).
+				Strs("resources", hookDrift).
+				Msg("admin reload: stored-schema hooks differ from boot-compiled hooks; restart required")
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp) //nolint:errcheck
 	}
+}
+
+// hooksDiffering returns the resource names whose hook set in the stored
+// (tenant) schema differs from the boot-compiled one — including resources the
+// boot schema doesn't know at all but that declare hooks. Sorted for stable
+// output.
+func hooksDiffering(boot, stored *schema.APISchema) []string {
+	if boot == nil {
+		return nil
+	}
+	var out []string
+	for name, res := range stored.Resources {
+		bootRes, known := boot.Resources[name]
+		switch {
+		case !known:
+			if len(res.Hooks) > 0 {
+				out = append(out, name)
+			}
+		case !reflect.DeepEqual(res.Hooks, bootRes.Hooks):
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // remoteIP returns the client IP without the port. X-Forwarded-For / X-Real-IP are

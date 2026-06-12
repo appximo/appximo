@@ -59,8 +59,19 @@ export function setup() {
   return { seed: Date.now() };
 }
 
-export default function (data) {
-  const payload = {
+// RESOURCE selects which schema this bench writes against: 'guides' (the
+// logistics fixture, default — S44 baseline) or 'tasks' (the quickstart
+// todo-api). Same script either way so pre/post comparisons stay symmetric.
+const RESOURCE = __ENV.RESOURCE || 'guides';
+
+function buildPayload(data) {
+  if (RESOURCE === 'tasks') {
+    return {
+      title:  `bench ${data.seed}-${__VU}-${__ITER}`,
+      status: __ITER % 2 === 0 ? 'open' : 'done',
+    };
+  }
+  return {
     code:           `S44-${data.seed}-${__VU}-${__ITER}`,
     status:         STATUSES[__ITER % STATUSES.length],
     origin:         `Bodega ${__ITER % 50}`,
@@ -68,7 +79,11 @@ export default function (data) {
     weight_kg:      0.5 + (__ITER % 200) * 0.25,
     declared_value: 10000 + ((__ITER * 37 + __VU) % 5000) * 100,
   };
-  const res = http.post(`${TARGET}/api/guides`, JSON.stringify(payload), {
+}
+
+export default function (data) {
+  const payload = buildPayload(data);
+  const res = http.post(`${TARGET}/api/${RESOURCE}`, JSON.stringify(payload), {
     headers: {
       Authorization:  `Bearer ${TOKEN}`,
       Host:           `${TENANT}.localhost`,
@@ -85,7 +100,7 @@ export function handleSummary(data) {
   };
   const errRate = data.metrics?.http_req_failed?.values?.rate ?? null;
   const summary = {
-    scenario:    'sustained_writes (POST /api/guides)',
+    scenario:    `sustained_writes (POST /api/${RESOURCE})`,
     target_rate: RATE,
     duration:    DURATION,
     rps_actual:  Math.round(data.metrics?.http_reqs?.values?.rate ?? 0),
