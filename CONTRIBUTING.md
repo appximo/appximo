@@ -95,6 +95,42 @@ chore: upgrade pgx to v5.9.2
 
 ---
 
+## Acceptance smoke (against a running instance)
+
+`scripts/acceptance-test.sh` is the end-to-end acceptance smoke — the
+clean-droplet manual test session, codified. It exercises health, CRUD,
+declarative validation (422), filters/sort/keyset, GraphQL, auth/RBAC
+(deny-by-default and, if the boot schema declares a `viewer` role, the
+read-only + field-allowlist path), multi-tenant isolation (API, SSE and
+physical Postgres schemas), observability, hot column reload and strict
+schema-key validation. It is version-aware: on an older binary the
+newer-engine checks downgrade to `INFO` instead of failing.
+
+Against the docker compose quickstart (the default):
+
+```bash
+cd <dir with docker-compose.yml + .env>
+bash scripts/acceptance-test.sh
+```
+
+Against any other running instance (native binary, remote host):
+
+```bash
+JWT_SECRET=… ADMIN_KEY=… \
+BASE=http://host:8080 ADMIN=http://host:9090 \
+APPITOOLS_CLI=./appitools SCHEMA_FILE=examples/quickstart/schema.json \
+TENANT_A=smoke1 TENANT_B=smoke2 \
+bash scripts/acceptance-test.sh
+```
+
+Notes: it needs the quickstart `todo-api` schema (a `tasks` resource);
+it is idempotent (tenants may already exist, titles are unique per run)
+and restores the stored schema at the end — but it does create/write
+data in the two smoke tenants, so don't point it at tenants you care
+about. Exit code = number of failures.
+
+---
+
 ## Releases (maintainers)
 
 A release is cut by pushing a version tag — nothing else:
