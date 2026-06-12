@@ -5,7 +5,7 @@ Three ways to run it. Pick by goal:
 | Goal | Path | TLS | Performance |
 |------|------|-----|-------------|
 | **Try it** in ~9 s | [`docker compose up`](#level-1--quick-try-docker-compose) | none (localhost) | dev/eval only |
-| **Production, simple** | [`docker-compose.prod.yml` + Caddy](#level-2--production-simple-composeprod--caddy) | automatic (Let's Encrypt) | very good |
+| **Production, simple** | [`docker-compose.prod.yml` + Caddy](#level-2--production-simple-composeprod--caddy) | automatic (Let's Encrypt) | very good — its extra layers [measured at sub-ms](#measured-overhead-of-each-layer) |
 | **Production, max throughput** | [native binary + dockerized Postgres + reverse proxy](#level-3--maximum-performance-native-binary--dockerized-postgres) | Caddy or nginx | the benchmark config |
 
 Levels 1 and 2 use the published multi-arch image
@@ -83,10 +83,14 @@ services:
 What you need: a VPS (1 vCPU / 1GB is enough to start — the engine idles at
 ~24MB), a domain, and an `A` record pointing at the VPS. Ports 80/443 open.
 
-> **Performance trade-off, stated honestly:** this path adds Docker networking
-> and a TLS proxy hop. It trades some peak RPS for automatic HTTPS and a
-> one-command deploy — for most workloads that is the right trade. For maximum
-> throughput (the configuration the published benchmark measured), see
+> **Performance trade-off, measured:** this path adds Docker bridge networking
+> and a TLS proxy hop in front of the engine. We measured both layers
+> individually on the benchmark hardware
+> ([details below](#measured-overhead-of-each-layer)): the Docker bridge costs
+> **~0.05 ms** at the median and the proxy hop **~0.5 ms** — what this path
+> adds that we did *not* measure is TLS encryption itself. For most workloads
+> that is a non-issue; for the configuration the published benchmark numbers
+> come from, see
 > [Level 3](#level-3--maximum-performance-native-binary--dockerized-postgres).
 
 ```bash
@@ -166,8 +170,12 @@ internet ──443──▶ Caddy or nginx (TLS, keepalive to upstream)
 ```
 
 - **The engine runs native** because it is what receives the thousands of
-  requests per second — every network layer in front of it (Docker bridge,
-  userland proxying) costs real latency at that rate.
+  requests per second. Measured honestly, the cost of the container layer is
+  smaller than folk wisdom suggests — **~54 µs p50 at 500 RPS** for the
+  bridge NAT ([numbers below](#measured-overhead-of-each-layer)) — so the
+  native choice is less about that hop and more about what it removes at
+  rates we *couldn't* measure per-layer: one fewer moving part between the
+  NIC and the engine when you push toward the 2,000 RPS ceiling.
 - **Postgres runs in Docker** because its traffic pattern doesn't care: the
   engine talks to it over a small pool (~10) of persistent connections, not
   high-throughput connection churn. A native Postgres install adds setup and
@@ -344,8 +352,47 @@ These are the conditions under which we measured 2,000 RPS sustained with
 p50 1.58 ms and 0 errors (see
 [BENCHMARK_PUBLIC.md §2](../context-docs/BENCHMARK_PUBLIC.md) for the full
 methodology — the benchmark hit the binary directly; the TLS proxy in front
-adds a small, declared cost). The trade against Level 2: you manage a systemd
-unit and (with nginx) certificates yourself, instead of `docker compose up`.
+adds the measured ~0.5 ms hop below, plus the unmeasured cost of TLS
+itself). The trade against Level 2: you manage a systemd unit and (with
+nginx) certificates yourself, instead of `docker compose up`.
+
+---
+
+## Measured overhead of each layer
+
+The claims above are measurements, not folklore. On the same 2-vCPU droplet
+the public benchmark used, same engine binary, same env, same PostgreSQL and
+dataset in every variant — the only thing that changes per row is the layer
+under test. Load: 500 RPS × 30 s × 10 runs per configuration, external
+loader on a separate box, warmup discarded, 20 s cooldowns
+(`scripts/bench-protocol.sh`); verdicts from pooled Mann-Whitney + bootstrap
+CI with a 0.5 ms practical-significance threshold (the S42 engine behind
+[BENCHMARK_PUBLIC.md](../context-docs/BENCHMARK_PUBLIC.md)).
+
+Baseline (native binary, direct): p50 **1.30 ms** / p95 1.66 ms across the
+10 runs (medians of per-run values; the ~1.2 ms network RTT floor between
+loader and SUT is included, as in the public benchmark).
+
+| Layer added vs native binary | Δ p50 | Δ p95 | Verdict |
+|---|---|---|---|
+| **Docker bridge networking** (same binary in a container, published port) | **+0.05 ms** — CI95 [+0.053, +0.056], p≈0 | +0.06 ms | Statistically detectable, practically negligible (≪ 0.5 ms threshold). Containerizing the engine costs ~54 µs per request at this rate. |
+| **Caddy reverse proxy in front** (HTTP, upstream keepalive per the snippet above) | **+0.48 ms** — CI95 [+0.479, +0.482], p≈0 | +1.02 ms | Real but sub-millisecond, just under the 0.5 ms practical bar. This is the proxy hop **without TLS** — encryption adds its own (keepalive-amortized) cost on top. |
+
+Honest readings of those numbers:
+
+- **The container itself is nearly free at this rate.** The "native binary"
+  recommendation buys ~54 µs at 500 RPS — its real value is removing a
+  variable when you push toward the multi-thousand-RPS ceiling, where we
+  did not measure per-layer.
+- **The proxy hop is the bigger of the two costs** (~10× the bridge), and
+  it roughly doubles the p95. Still sub-millisecond with keepalive — the
+  config shown above is the one measured.
+- Host networking (`network_mode: host`) and the TLS-termination delta were
+  **not measured** in this pass; no numbers are claimed for them.
+- Raw data: [`benchmarks/data/deploy-overhead-runs.csv`](../benchmarks/data/deploy-overhead-runs.csv)
+  — all 30 runs, including 2 where the loader missed its k6 schedule
+  (`dropped > 0`, inflated tails); nothing was deleted, and both verdict
+  methods (pooled MWU, median-of-run-medians) are robust to them.
 
 ---
 
