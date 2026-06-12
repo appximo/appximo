@@ -26,7 +26,7 @@ convenience behind the same `X-Admin-Key` gate — they answer
 |---|---|---|---|
 | `GET /healthz` | none | `{"status":"alive"}` | **liveness** probe — never touches Postgres |
 | `GET /readyz` | none | `{"status":"ready"}`, **503 during drain/shutdown** | **readiness** — take the node out of rotation |
-| `GET /health` | none | `{"status":"ok","version":"0.1.0"}` | legacy/manual check (the compose healthcheck uses it) |
+| `GET /health` | none | `{"status":"ok","version":"v0.1.0"}` | legacy/manual check (the compose healthcheck uses it); `version` is the build version — the release tag for [GitHub Releases](https://github.com/miguel09acosta/appitools/releases) binaries and published images, `"dev"` for a plain local `go build` |
 
 The distinction matters on deploys: on SIGTERM the engine flips `/readyz`
 to 503, drains in-flight requests, then exits — a load balancer watching

@@ -1,0 +1,98 @@
+# Appitools — Postgres-ONLY stack, for the native-binary deploy (Level 3 in
+# docs/DEPLOY.md): the engine binary runs directly on the host for maximum
+# throughput, while Postgres runs containerized with a persistent volume.
+# That hybrid is deliberate — the engine is what receives thousands of req/s
+# (every network layer in front of it counts), but it talks to Postgres over
+# a small pool of ~10 persistent connections, where Docker's overhead is
+# negligible. A native Postgres install buys you setup pain, not performance.
+#
+#   docker compose -f docker-compose.db.yml up -d
+#   DATABASE_URL='postgres://appitools:<DB_PASSWORD>@localhost:5432/appitools?sslmode=disable'
+#
+# The published port binds to 127.0.0.1 only — nothing but this host (i.e.
+# the engine binary next to it) can reach Postgres.
+
+services:
+  db:
+    image: postgres:16-alpine
+    # The settings the public benchmark ran with (BENCHMARK_PUBLIC.md §1.x —
+    # PostgreSQL 16, max_connections=300 shared_buffers=256MB work_mem=16MB).
+    # Generous for the engine's default pool (DB_MAX_CONNS=10); raise
+    # shared_buffers toward 25% of RAM on a dedicated DB box.
+    command:
+      - postgres
+      - -c
+      - max_connections=300
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - work_mem=16MB
+    environment:
+      POSTGRES_USER: appitools
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      POSTGRES_DB: appitools
+    ports:
+      - "127.0.0.1:5432:5432" # localhost only — the native binary connects here
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    configs:
+      # Control-plane DDL, applied once on the first init of the pgdata volume
+      # (without it, registering a tenant on :9090 fails — fresh databases have
+      # no public.tenants). Same inline copy as the other compose files; keep
+      # all three in sync if the control plane changes (additive/idempotent).
+      - source: control_plane_init
+        target: /docker-entrypoint-initdb.d/001_control_plane.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appitools"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+
+configs:
+  control_plane_init:
+    content: |
+      CREATE TABLE IF NOT EXISTS public.tenants (
+          id           TEXT        PRIMARY KEY,
+          pg_schema    TEXT        NOT NULL UNIQUE,
+          display_name TEXT        NOT NULL,
+          email        TEXT        NOT NULL,
+          plan         TEXT        NOT NULL DEFAULT 'free',
+          json_schema  JSONB,
+          created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.tenant_policies (
+          tenant_id  TEXT        PRIMARY KEY REFERENCES public.tenants(id) ON DELETE CASCADE,
+          policy     JSONB       NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.migration_log (
+          id          BIGSERIAL   PRIMARY KEY,
+          tenant_id   TEXT        NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+          status      TEXT        NOT NULL CHECK (status IN ('pending', 'running', 'ok', 'failed')),
+          changes     TEXT,
+          error       TEXT,
+          started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+          finished_at TIMESTAMPTZ
+      );
+
+      CREATE OR REPLACE FUNCTION public.notify_schema_updated()
+      RETURNS TRIGGER LANGUAGE plpgsql AS $$$$
+      BEGIN
+          PERFORM pg_notify('schema_updated', NEW.id);
+          RETURN NEW;
+      END;
+      $$$$;
+
+      DROP TRIGGER IF EXISTS schema_updated_trigger ON public.tenants;
+
+      CREATE TRIGGER schema_updated_trigger
+          AFTER UPDATE OF json_schema ON public.tenants
+          FOR EACH ROW
+          EXECUTE FUNCTION public.notify_schema_updated();

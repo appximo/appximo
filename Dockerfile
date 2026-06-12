@@ -15,7 +15,13 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/appitools ./cmd/appitools
+# VERSION/REVISION land in `appitools version` and /health via -X (CI injects
+# the tag/SHA; local builds report "dev").
+ARG VERSION=dev
+ARG REVISION=unknown
+RUN CGO_ENABLED=0 go build -trimpath \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.revision=${REVISION}" \
+    -o /out/appitools ./cmd/appitools
 
 FROM alpine:3.21
 

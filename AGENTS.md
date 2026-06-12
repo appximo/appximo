@@ -47,7 +47,9 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   subcommands** (no `serve`). Use the package path:
   `go run ./cmd/appitools serve …`.
 - Other subcommands: `validate <schema>`, `token` (mint a dev JWT),
-  `openapi`, `graphql` (SDL), `generate`, `migrate`, `backup`, `init`.
+  `openapi`, `graphql` (SDL), `generate`, `migrate`, `backup`, `init`,
+  `version` (prints the ldflags-injected build version; "dev" on a plain
+  local build — releases and published images carry their tag).
 - `tools/devhub/` is a local dev dashboard (systemd service on :3099).
   It is **not part of the engine** — never ship engine features there.
   `make devhub-run` is only for developing the devhub itself (stop the

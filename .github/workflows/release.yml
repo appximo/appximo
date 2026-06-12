@@ -1,0 +1,92 @@
+name: Release
+
+# Publishes pre-built binaries to GitHub Releases — but ONLY for tags whose CI
+# run (same SHA) finished green: like docker-publish.yml, this triggers on the
+# completion of "CI" (workflow_run) instead of directly on the tag push, so a
+# release of a red commit can never be published.
+#
+# To cut a release:
+#   git tag v0.1.0 && git push --tags
+# CI runs the full suite on the tag; when it passes, this workflow builds the
+# binaries and attaches them (plus checksums.txt) to a GitHub Release for the
+# tag. Nothing else to click.
+#
+# All targets are cross-compiled from one Linux runner: the binary is fully
+# static (CGO_ENABLED=0 — wazero and modernc.org/sqlite are pure Go), so
+# GOOS/GOARCH is all it takes; no per-arch runners or QEMU needed, and the
+# checksums file covers every asset in one place.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write # create the release + upload assets
+
+jobs:
+  release:
+    name: Build binaries & publish release
+    runs-on: ubuntu-latest
+    # Green CI + a push event + a v* tag. For tag runs, workflow_run.head_branch
+    # carries the TAG name (e.g. "v0.1.0") — same convention docker-publish uses.
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The exact commit CI validated — never the default branch tip.
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build matrix (static cross-compile)
+        env:
+          VERSION: ${{ github.event.workflow_run.head_branch }}
+          REVISION: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Same flags as the Docker image build (Dockerfile), plus the version
+          # stamp: `appitools version` on a downloaded binary reports its tag.
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            os="${target%/*}" arch="${target#*/}"
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
+              go build -trimpath \
+                -ldflags="-s -w -X main.version=${VERSION} -X main.revision=${REVISION}" \
+                -o "dist/appitools-${VERSION}-${os}-${arch}" \
+                ./cmd/appitools
+          done
+          ls -lh dist/
+
+      - name: Smoke-test the native binary
+        env:
+          VERSION: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          OUT="$("dist/appitools-${VERSION}-linux-amd64" version)"
+          echo "$OUT"
+          echo "$OUT" | grep -F "$VERSION"
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          gh release create "$VERSION" dist/* \
+            --verify-tag \
+            --title "appitools $VERSION" \
+            --generate-notes

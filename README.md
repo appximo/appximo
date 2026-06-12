@@ -7,6 +7,9 @@
 [![Docker](https://img.shields.io/docker/v/neodevtrix/appitools-engine?label=docker&color=2496ED&logo=docker)](https://hub.docker.com/r/neodevtrix/appitools-engine)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go)](go.mod)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
+<!-- Activate after the first tagged release (git tag v0.1.0 && git push --tags):
+[![Release](https://img.shields.io/github/v/release/miguel09acosta/appitools?label=release)](https://github.com/miguel09acosta/appitools/releases)
+-->
 
 You don't write handlers, models, or migrations. You write this:
 
@@ -148,9 +151,13 @@ baseline faster are welcome; we'll publish updated numbers.
 
 ## Production deploy
 
-`docker-compose.prod.yml` + Caddy: automatic Let's Encrypt TLS, tenant
-subdomains, engine and Postgres on the internal network only. The walkthrough
-(DNS, subdomain certificates, operations) is in [docs/DEPLOY.md](docs/DEPLOY.md).
+Three paths, walked through in [docs/DEPLOY.md](docs/DEPLOY.md):
+
+| Goal | Path |
+|---|---|
+| **Try it** in ~9 s | `docker compose up` — the [quick start](#quick-start-30-s-with-the-image-pull) above |
+| **Production, simple** | `docker-compose.prod.yml` + Caddy: automatic Let's Encrypt TLS, tenant subdomains, engine and Postgres on the internal network only |
+| **Production, max throughput** | native binary (from [GitHub Releases](https://github.com/miguel09acosta/appitools/releases), SHA256-checksummed) + dockerized Postgres + reverse proxy with upstream keepalive — the configuration the benchmark measured |
 
 ## Status — what's real and what's missing
 

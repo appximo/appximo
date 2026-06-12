@@ -95,6 +95,23 @@ chore: upgrade pgx to v5.9.2
 
 ---
 
+## Releases (maintainers)
+
+A release is cut by pushing a version tag — nothing else:
+
+```bash
+git tag v0.1.0 && git push --tags
+```
+
+CI runs the full suite on the tag; only if it finishes green does
+`.github/workflows/release.yml` build the static binaries (linux/darwin ×
+amd64/arm64, version stamped via ldflags — `appitools version` reports the
+tag) and attach them with `checksums.txt` to a GitHub Release. The Docker
+image for the tag is published the same way (`docker-publish.yml`, also gated
+on green CI). A red tag publishes nothing.
+
+---
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the [Apache 2.0 License](LICENSE).

@@ -6,11 +6,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Inyectadas en build con
+//   -ldflags "-X main.version=v0.1.0 -X main.revision=<sha>"
+// (release.yml y el Dockerfile lo hacen; un build local plano reporta "dev").
+var (
+	version  = "dev"
+	revision = "unknown"
+)
+
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Imprime la versión de Appitools",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Appitools v0.1.0")
+		fmt.Printf("appitools %s (commit %s)\n", version, revision)
 	},
 }
 

@@ -478,7 +478,7 @@ var serveCmd = &cobra.Command{
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
 				"status":  "ok",
-				"version": "0.1.0",
+				"version": version,
 			})
 		})
 
