@@ -116,14 +116,40 @@ func DeployHandler(repoDir string) http.HandlerFunc {
 		// 1 — HEAD already resolved; tree clean.
 		deployEmit(sw, "git", "HEAD "+sha+" — working tree clean")
 
-		// 2 — build locally (never on the target box). CGO_ENABLED=0 keeps the
-		// binary fully static — same flags as the Dockerfile and release.yml, so
-		// a deploy-built binary runs anywhere those do (alpine/scratch included).
-		deployEmit(sw, "build", "CGO_ENABLED=0 go build -trimpath -ldflags=\"-s -w\" -o /tmp/appitools-deploy ./cmd/appitools/")
-		build := exec.CommandContext(r.Context(), goBin(), "build", "-trimpath", "-ldflags=-s -w",
-			"-o", "/tmp/appitools-deploy", "./cmd/appitools/")
+		// Deployer-staleness guard — the trap that bit us once: a fix to this
+		// very pipeline was committed, but the RUNNING devhub predated it and
+		// silently kept building with the old flags. If this binary is older
+		// than the last commit touching tools/devhub, warn loudly.
+		if exe, eerr := os.Executable(); eerr == nil {
+			if fi, serr := os.Stat(exe); serr == nil {
+				out, gerr := exec.CommandContext(r.Context(),
+					"git", "-C", repoDir, "log", "-1", "--format=%ct", "--", "tools/devhub").Output()
+				if gerr == nil {
+					if ts, perr := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64); perr == nil &&
+						fi.ModTime().Unix() < ts {
+						deployEmit(sw, "git",
+							"⚠ deployer binary is OLDER than the last commit to tools/devhub — "+
+								"rebuild + restart devhub (make devhub-build && systemctl restart devhub) "+
+								"or this pipeline may run stale logic")
+					}
+				}
+			}
+		}
+
+		// 2 — build locally (never on the target box) via the CANONICAL build
+		// script (scripts/build-engine.sh — single source of truth shared with
+		// the Dockerfile and release.yml: CGO_ENABLED=0 static + version stamp).
+		// version = short SHA of the deployed HEAD, so /health on the target
+		// reports exactly what is running.
+		shortSHA := sha
+		if len(shortSHA) > 7 {
+			shortSHA = shortSHA[:7]
+		}
+		deployEmit(sw, "build", "scripts/build-engine.sh /tmp/appitools-deploy "+shortSHA+" "+sha)
+		build := exec.CommandContext(r.Context(), "sh", "scripts/build-engine.sh",
+			"/tmp/appitools-deploy", shortSHA, sha)
 		build.Dir = repoDir
-		build.Env = append(os.Environ(), "CGO_ENABLED=0")
+		build.Env = append(os.Environ(), "GO="+goBin())
 		if out, err := build.CombinedOutput(); err != nil {
 			fail("build", strings.TrimSpace(string(out)))
 			return

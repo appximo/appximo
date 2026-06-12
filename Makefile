@@ -2,11 +2,17 @@
 # the gotestfmt-piped targets.
 SHELL := bash
 
-.PHONY: build lint run build-pgo collect-profile \
+.PHONY: build engine lint run build-pgo collect-profile \
 	test test-integration test-e2e test-resilience test-perf test-security test-all bench
 
 build:
 	go build ./...
+
+# engine: the CANONICAL engine binary build (static, version-stamped from git).
+# Same script the Dockerfile, release.yml and the devhub deploy pipeline use —
+# never hand-write `go build` for a deployable engine binary.
+engine:
+	./scripts/build-engine.sh appitools
 
 lint:
 	golangci-lint run ./...

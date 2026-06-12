@@ -52,15 +52,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          # Same flags as the Docker image build (Dockerfile), plus the version
-          # stamp: `appitools version` on a downloaded binary reports its tag.
+          # scripts/build-engine.sh is the ONE canonical engine build (same
+          # flags as the Docker image and the deploy pipeline); the version
+          # stamp makes `appitools version` on a downloaded binary report its tag.
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
             os="${target%/*}" arch="${target#*/}"
-            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
-              go build -trimpath \
-                -ldflags="-s -w -X main.version=${VERSION} -X main.revision=${REVISION}" \
-                -o "dist/appitools-${VERSION}-${os}-${arch}" \
-                ./cmd/appitools
+            GOOS="$os" GOARCH="$arch" \
+              ./scripts/build-engine.sh "dist/appitools-${VERSION}-${os}-${arch}" "$VERSION" "$REVISION"
           done
           ls -lh dist/
 

@@ -16,12 +16,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 # VERSION/REVISION land in `appitools version` and /health via -X (CI injects
-# the tag/SHA; local builds report "dev").
+# the tag/SHA; local builds report "dev" — no .git in the build context).
+# The build command itself lives in scripts/build-engine.sh — the ONE
+# canonical engine build, shared with release.yml and the deploy pipeline.
 ARG VERSION=dev
 ARG REVISION=unknown
-RUN CGO_ENABLED=0 go build -trimpath \
-    -ldflags="-s -w -X main.version=${VERSION} -X main.revision=${REVISION}" \
-    -o /out/appitools ./cmd/appitools
+RUN ./scripts/build-engine.sh /out/appitools "${VERSION}" "${REVISION}"
 
 FROM alpine:3.21
 
