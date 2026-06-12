@@ -3,10 +3,12 @@ package controlplane
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/schema"
@@ -34,6 +36,16 @@ type Tenant struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// orphanSchemaErr is the conflict returned when the tenant's Postgres schema
+// already exists without a registered tenant. Wraps ErrAlreadyExists so the
+// HTTP handler answers 409 with this actionable message.
+func orphanSchemaErr(pgSchema, tenantID string) error {
+	return fmt.Errorf(
+		"postgres schema %q already exists but no tenant %q is registered (orphan from a previous install?): "+
+			"drop it to discard its data (DROP SCHEMA %q CASCADE) or choose another tenant_id: %w",
+		pgSchema, tenantID, pgSchema, ErrAlreadyExists)
+}
+
 // RegisterTenant onboards a new tenant in 10 atomic steps:
 //  1. Validate tenantID format.
 //  2. Verify no duplicate in public.tenants.
@@ -58,6 +70,23 @@ func RegisterTenant(ctx context.Context, pool *pgxpool.Pool, req RegisterRequest
 	}
 	if exists {
 		return nil, fmt.Errorf("tenant %q already exists: %w", req.TenantID, ErrAlreadyExists)
+	}
+
+	// Step 2b — orphan physical schema: tenant_<id> exists in Postgres but no
+	// public.tenants row points at it (leftover of a previous install or a
+	// half-failed registration). REFUSE rather than adopt: silently reusing
+	// the schema would resurrect tables and rows the operator believes
+	// deleted — a brand-new tenant must never be born holding old data. The
+	// operator gets both remedies in the error. (Without this check the
+	// CREATE SCHEMA below failed with 42P06 and surfaced as a 500.)
+	var orphan bool
+	if err := pool.QueryRow(ctx,
+		"SELECT EXISTS(SELECT 1 FROM information_schema.schemata WHERE schema_name = $1)", pgSchema,
+	).Scan(&orphan); err != nil {
+		return nil, fmt.Errorf("check orphan schema: %w", err)
+	}
+	if orphan {
+		return nil, orphanSchemaErr(pgSchema, req.TenantID)
 	}
 
 	now := time.Now().UTC()
@@ -91,7 +120,14 @@ func RegisterTenant(ctx context.Context, pool *pgxpool.Pool, req RegisterRequest
 
 	// Step 5 — CREATE SCHEMA.
 	// pgx.Identifier.Sanitize() quotes the name, preventing SQL injection.
+	// 42P06 (duplicate_schema) is classified to the same orphan conflict as
+	// Step 2b: it can still happen in the race window between that check and
+	// this statement — a 409 in every variant, never a 500.
 	if _, err = tx.Exec(ctx, fmt.Sprintf("CREATE SCHEMA %q", pgSchema)); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "42P06" {
+			return nil, orphanSchemaErr(pgSchema, req.TenantID)
+		}
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
 

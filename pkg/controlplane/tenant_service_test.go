@@ -2,6 +2,7 @@ package controlplane_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -285,4 +286,54 @@ func containsAny(s string, subs ...string) bool {
 		}
 	}
 	return false
+}
+
+// TestRegisterTenant_OrphanSchema reproduces the clean-droplet finding (FIX 10):
+// a Postgres schema tenant_<id> left behind by a previous install (no row in
+// public.tenants) made registration blow up with a 500. The contract now is an
+// explicit conflict (ErrAlreadyExists → HTTP 409) with both remedies in the
+// message — never adoption: a new tenant must not be born holding old data.
+func TestRegisterTenant_OrphanSchema(t *testing.T) {
+	pool, cleanup := startPostgres(t)
+	defer cleanup()
+	applyControlPlane(t, pool)
+
+	// The orphan: physical schema with leftover data, no control-plane row.
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `CREATE SCHEMA tenant_ghost`); err != nil {
+		t.Fatalf("create orphan schema: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `CREATE TABLE tenant_ghost.tasks (id int); INSERT INTO tenant_ghost.tasks VALUES (1)`); err != nil {
+		t.Fatalf("seed orphan data: %v", err)
+	}
+
+	_, err := controlplane.RegisterTenant(ctx, pool, controlplane.RegisterRequest{
+		TenantID:    "ghost",
+		DisplayName: "Ghost",
+		Email:       "g@ghost.com",
+		Plan:        "free",
+		Schema:      minimalSchema(),
+	})
+	if err == nil {
+		t.Fatal("expected orphan-schema conflict, got nil")
+	}
+	if !errors.Is(err, controlplane.ErrAlreadyExists) {
+		t.Errorf("must wrap ErrAlreadyExists (HTTP 409), got: %v", err)
+	}
+	for _, want := range []string{"orphan", "DROP SCHEMA", "tenant_ghost"} {
+		if !containsAny(err.Error(), want) {
+			t.Errorf("error must mention %q, got: %v", want, err)
+		}
+	}
+
+	// Refusal means: no tenant row created, and the orphan data UNTOUCHED.
+	var rows int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM tenant_ghost.tasks").Scan(&rows); err != nil || rows != 1 {
+		t.Errorf("orphan data must be untouched, rows=%d err=%v", rows, err)
+	}
+	var exists bool
+	pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM public.tenants WHERE id='ghost')").Scan(&exists)
+	if exists {
+		t.Error("no tenant row should exist after the refusal")
+	}
 }
