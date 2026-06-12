@@ -516,8 +516,8 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 
 				// Build UPDATE: every column name via pgx.Identifier.Sanitize(), every
 				// value as a bound parameter. updated_at is forced to NOW() — but only
-				// when the resource actually declares an auto updated_at column (most
-				// logistics resources do not), otherwise the column does not exist.
+				// when the resource actually declares an auto updated_at column,
+				// otherwise the column does not exist.
 				cols := make([]string, 0, len(sets))
 				for c := range sets {
 					cols = append(cols, c)
@@ -667,7 +667,7 @@ func publishEvent(hub *events.Hub, tenantID, resource, typ string, record map[st
 // Events stream of the resource's post-commit changes for the request's tenant.
 //
 //	event: create|update|delete
-//	data: {"resource":"guides","id":"...","record":{...}}   (record null on delete)
+//	data: {"resource":"tasks","id":"...","record":{...}}   (record null on delete)
 //
 // Per-subscriber RBAC is captured at subscribe time and applied at delivery:
 // the field allowlist (same FilterFields as GET — a role never sees a field in

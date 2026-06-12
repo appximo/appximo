@@ -131,7 +131,9 @@ baseline faster are welcome; we'll publish updated numbers.
 - **Declarative validation**: required/enum/type rules compiled from the schema;
   one `422` lists every failing field
 - **Multi-tenancy**: schema-per-tenant Postgres isolation (`SET LOCAL search_path`),
-  subdomain → tenant routing, per-tenant rate limiting, live schema reload via `pg_notify`
+  subdomain → tenant routing, per-tenant rate limiting, live schema reload via
+  `pg_notify` — column-level only: **adding a new resource requires a process
+  restart** (routes and GraphQL types are compiled at boot)
 - **RBAC**: JSON policies — per role, per resource, per action, per field, plus
   dynamic row conditions (`operator_id = $user_id`); deny by default
 - **Real-time**: per-resource SSE streams with RBAC applied at delivery

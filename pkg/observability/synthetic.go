@@ -28,11 +28,23 @@ type CheckResult struct {
 	failures  int64
 }
 
+// DynamicCheck resolves its probe lazily on every tick. Resolve returns the
+// Check to run, or nil plus a human-readable reason — reported as status
+// "pending" instead of a failing probe. This exists for canaries whose target
+// only makes sense once external state exists (e.g. an API canary on a fresh
+// install, before any tenant is registered: probing would just spam 4xx for
+// a route nobody created).
+type DynamicCheck struct {
+	Name    string
+	Resolve func(ctx context.Context) (*Check, string)
+}
+
 // SyntheticMonitor periodically probes a list of HTTP endpoints.
 type SyntheticMonitor struct {
-	checks  []Check
-	results sync.Map
-	client  *http.Client
+	checks   []Check
+	dynamics []DynamicCheck
+	results  sync.Map
+	client   *http.Client
 }
 
 func NewSyntheticMonitor(checks []Check) *SyntheticMonitor {
@@ -40,6 +52,11 @@ func NewSyntheticMonitor(checks []Check) *SyntheticMonitor {
 		checks: checks,
 		client: &http.Client{Timeout: 5 * time.Second},
 	}
+}
+
+// AddDynamic registers a lazily-resolved check. Must be called before Start.
+func (sm *SyntheticMonitor) AddDynamic(d DynamicCheck) {
+	sm.dynamics = append(sm.dynamics, d)
 }
 
 // Start launches the probe loop. Runs until ctx is cancelled.
@@ -52,6 +69,9 @@ func (sm *SyntheticMonitor) Start(ctx context.Context, interval time.Duration) {
 			case <-t.C:
 				for _, c := range sm.checks {
 					go sm.run(ctx, c)
+				}
+				for _, d := range sm.dynamics {
+					go sm.runDynamic(ctx, d)
 				}
 			case <-ctx.Done():
 				return
@@ -68,6 +88,24 @@ func (sm *SyntheticMonitor) Results() map[string]*CheckResult {
 		return true
 	})
 	return out
+}
+
+// runDynamic resolves a DynamicCheck and probes it, or records a "pending"
+// result. Pending ticks carry the previous uptime stats forward unchanged —
+// "nothing to probe yet" is neither an up nor a down.
+func (sm *SyntheticMonitor) runDynamic(ctx context.Context, d DynamicCheck) {
+	c, reason := d.Resolve(ctx)
+	if c == nil {
+		r := &CheckResult{Name: d.Name, Status: "pending", LastCheck: time.Now(), LastError: reason}
+		if prev, ok := sm.results.Load(d.Name); ok {
+			old := prev.(*CheckResult)
+			r.total, r.failures, r.Uptime = old.total, old.failures, old.Uptime
+		}
+		sm.results.Store(d.Name, r)
+		return
+	}
+	c.Name = d.Name
+	sm.run(ctx, *c)
 }
 
 func (sm *SyntheticMonitor) run(ctx context.Context, c Check) {

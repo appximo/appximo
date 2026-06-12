@@ -170,35 +170,27 @@ var serveCmd = &cobra.Command{
 			go flushObsSnapshots(ctx, obsStore, rings, hist, sloEngine)
 		}
 
-		// Synthetic monitor: JWT signed at startup (24h), never hardcoded.
-		syntheticToken, syntheticErr := auth.GenerateToken(auth.Claims{
-			UserID:   "synthetic-monitor",
-			Role:     "super_admin",
-			TenantID: "10",
-		}, jwtSecret)
-		if syntheticErr != nil {
-			fmt.Fprintln(os.Stderr, "Warning: could not generate synthetic token:", syntheticErr)
-		}
-		synthChecks := []observability.Check{
+		// Synthetic monitor (60s self-check): /health liveness + an API canary
+		// DERIVED from the loaded schema — first resource, a role that can read
+		// it, and the first registered tenant (lazily; "pending" until one
+		// exists) — never a hardcoded resource/tenant. Overrides:
+		// APPITOOLS_SYNTHETIC_TENANT / _RESOURCE; APPITOOLS_SYNTHETIC=off
+		// disables the monitor entirely. URLs honor --port.
+		synthmon := observability.NewSyntheticMonitor([]observability.Check{
 			{
 				Name:     "health",
-				URL:      "http://localhost:8080/health",
+				URL:      fmt.Sprintf("http://localhost:%d/health", port),
 				Method:   "GET",
 				Expected: 200,
 			},
-			{
-				Name:   "guides-api",
-				URL:    "http://localhost:8080/api/guides",
-				Method: "GET",
-				Headers: map[string]string{
-					"Host":          "10.localhost",
-					"Authorization": "Bearer " + syntheticToken,
-				},
-				Expected: 200,
-			},
+		})
+		if os.Getenv("APPITOOLS_SYNTHETIC") != "off" {
+			synthmon.AddDynamic(observability.DynamicCheck{
+				Name:    "api-canary",
+				Resolve: canaryResolver(pool, s, jwtSecret, port),
+			})
+			synthmon.Start(ctx, 60*time.Second)
 		}
-		synthmon := observability.NewSyntheticMonitor(synthChecks)
-		synthmon.Start(ctx, 60*time.Second)
 		// GeoLite2 country lookup (embedded mmdb, ~1µs, graceful if absent).
 		geo := observability.DefaultGeoLookup()
 		obsServer := observability.NewObsServer(hist, errStore, anomaly, synthmon, rings, sloEngine, obsStore)

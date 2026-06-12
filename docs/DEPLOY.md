@@ -396,6 +396,27 @@ Honest readings of those numbers:
 
 ---
 
+## Hardening checklist (any level)
+
+- **Control plane `:9090` — never the internet.** Localhost / internal
+  network / SSH tunnel only. Its safety model is *unreachable*, not
+  unguessable.
+- **Never expose the Docker daemon API (`2375`/`2376`).** If you enable
+  remote Docker access, port 2375 is **unauthenticated root** on the host
+  (2376 is only safe with mutual TLS configured). The compose paths here
+  never need it — keep both ports firewalled, and audit old firewall rules:
+  an ALLOW rule with no process behind it is a standing invitation, not
+  harmless.
+- **Default-deny inbound firewall.** What should be reachable from outside:
+  80/443 (the proxy) and your SSH port. Not 8080 (unless intentionally
+  serving plain HTTP), not 9090, not 5432.
+- **Strong `ADMIN_KEY` / `JWT_SECRET`** (≥32 chars, `openssl rand -hex 32`)
+  — they gate the entire admin surface and token forgery respectively.
+- **Keep secrets out of git and shell history**: `.env` is gitignored;
+  `set -a; source .env; set +a` instead of pasting keys into commands.
+
+---
+
 ### CORS — current status (important for SPAs)
 
 The engine currently ships **no CORS middleware**: it never emits

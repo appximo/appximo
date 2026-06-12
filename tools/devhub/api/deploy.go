@@ -116,11 +116,14 @@ func DeployHandler(repoDir string) http.HandlerFunc {
 		// 1 — HEAD already resolved; tree clean.
 		deployEmit(sw, "git", "HEAD "+sha+" — working tree clean")
 
-		// 2 — build locally (never on the target box).
-		deployEmit(sw, "build", "go build -trimpath -ldflags=\"-s -w\" -o /tmp/appitools-deploy ./cmd/appitools/")
+		// 2 — build locally (never on the target box). CGO_ENABLED=0 keeps the
+		// binary fully static — same flags as the Dockerfile and release.yml, so
+		// a deploy-built binary runs anywhere those do (alpine/scratch included).
+		deployEmit(sw, "build", "CGO_ENABLED=0 go build -trimpath -ldflags=\"-s -w\" -o /tmp/appitools-deploy ./cmd/appitools/")
 		build := exec.CommandContext(r.Context(), goBin(), "build", "-trimpath", "-ldflags=-s -w",
 			"-o", "/tmp/appitools-deploy", "./cmd/appitools/")
 		build.Dir = repoDir
+		build.Env = append(os.Environ(), "CGO_ENABLED=0")
 		if out, err := build.CombinedOutput(); err != nil {
 			fail("build", strings.TrimSpace(string(out)))
 			return

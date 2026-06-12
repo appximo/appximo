@@ -115,10 +115,14 @@ Two opt-in query params: `?history=<hours>` appends persisted snapshots
 `?traces=slow` appends persisted slow/error traces (>50 ms or status ≥ 400).
 
 `GET /debug/synthetic` (same gate) reports the built-in monitor — a
-60-second loop hitting `/health` and a canary API route with a real JWT:
-`{"health":{"status":"up","latency_ms":2,"uptime_pct":100}, …}`. On a
-fresh install the API canary can read `"down"` until its tenant exists —
-that's the check working, not the engine failing.
+60-second loop hitting `/health` and an API canary with a real JWT:
+`{"health":{"status":"up","latency_ms":2,"uptime_pct":100}, …}`. The
+canary derives from **your** loaded schema (first resource, a role that
+can read it) and probes the first registered tenant; on a fresh install
+it reports `"pending"` — `"no tenant registered yet"` — until one
+exists, instead of failing. Overrides: `APPITOOLS_SYNTHETIC_TENANT` /
+`APPITOOLS_SYNTHETIC_RESOURCE`; disable the monitor entirely with
+`APPITOOLS_SYNTHETIC=off`.
 
 ## The generated APIs
 

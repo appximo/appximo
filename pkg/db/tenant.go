@@ -80,7 +80,7 @@ var qualifyReCache sync.Map // table string → *regexp.Regexp
 
 // qualifyTableNames rewrites FROM/JOIN references to unqualified tableName
 // into schema-qualified form using pgx.Identifier for safe quoting.
-// Example: "SELECT * FROM guides WHERE x=$1" → "SELECT * FROM "tenant_10"."guides" WHERE x=$1"
+// Example: "SELECT * FROM tasks WHERE x=$1" → "SELECT * FROM "tenant_acme"."tasks" WHERE x=$1"
 func qualifyTableNames(query, schema, table string) string {
 	qualified := pgx.Identifier{schema, table}.Sanitize()
 	re, ok := qualifyReCache.Load(table)
@@ -308,8 +308,8 @@ func (tdb *TenantDB) QueryScalarTenant(ctx context.Context, schemaName, query st
 
 // QueryDirect runs a SELECT using a schema-qualified table name — no transaction,
 // no SET LOCAL. One roundtrip instead of four. Use for read-only list/get handlers.
-// tableName must be the unqualified resource name (e.g. "guides"); pgSchema the
-// tenant schema (e.g. "tenant_10"). Both are validated before use.
+// tableName must be the unqualified resource name (e.g. "tasks"); pgSchema the
+// tenant schema (e.g. "tenant_acme"). Both are validated before use.
 func (tdb *TenantDB) QueryDirect(ctx context.Context, pgSchema, tableName, query string, args ...any) (pgx.Rows, error) {
 	if err := validateSchemaName(pgSchema); err != nil {
 		return nil, err
