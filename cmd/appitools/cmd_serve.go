@@ -91,6 +91,12 @@ var serveCmd = &cobra.Command{
 			}
 			os.Exit(1)
 		}
+		// `indexes` parses (forward compatibility) but no executor materializes
+		// DB indexes yet — say so at boot instead of blessing a dead key.
+		if idx := schema.IndexedResources(s); len(idx) > 0 {
+			log.Printf("WARNING: indexes on %s are parsed but not yet applied — DB index creation is coming in a future release",
+				strings.Join(idx, ", "))
+		}
 
 		connStr := os.Getenv("DATABASE_URL")
 		if connStr == "" {

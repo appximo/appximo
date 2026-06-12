@@ -123,6 +123,22 @@ var ValidHookEvents = map[string]bool{
 	"after_update":  true,
 }
 
+// IndexedResources returns (sorted) the resources that declare `indexes`.
+// The key is valid and parses (forward compatibility) but NO executor
+// materializes DB indexes yet — callers use this to warn instead of letting
+// a blessed-but-dead key pass in silence (same contract as the hooks-at-boot
+// reload warning).
+func IndexedResources(s *APISchema) []string {
+	var out []string
+	for name, res := range s.Resources {
+		if len(res.Indexes) > 0 {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func joinPath(base, key string) string {
 	if base == "$" {
 		return key

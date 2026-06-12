@@ -357,7 +357,11 @@ REST). Introspection is disabled in production; GraphiQL only runs with
   ([workaround](docs/DEPLOY.md#cors--current-status-important-for-spas)).
 - GraphQL `update` mutation.
 - `default` values applied on insert, and `indexes` materialized as DB
-  indexes — both keys parse but neither acts yet.
+  indexes — both keys parse but neither acts yet. A schema declaring
+  `indexes` is accepted with
+  `"warnings":["indexes … are parsed but not yet applied …"]` in the
+  register/PUT response (and a boot log line), so the dead key is never
+  blessed in silence.
 - `workflows` schema block — parsed for forward compatibility, no executor.
 - OTLP/OpenTelemetry export (observability is Prometheus `/metrics` + an
   internal trace ring).

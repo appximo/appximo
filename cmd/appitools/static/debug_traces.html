@@ -60,7 +60,7 @@
 <body>
 <header>
   <h1>⛓ Trace Explorer</h1>
-  <label>tenant <input id="tenant" size="8" value="10"></label>
+  <label>tenant <input id="tenant" size="8" placeholder="acme"></label>
   <label>admin key <input id="key" size="14" type="password" placeholder="X-Admin-Key"></label>
   <label>source
     <select id="mode">
@@ -229,7 +229,7 @@ renderLegend();
 // browser; fall back to the last value used. It feeds every internal fetch.
 const urlKey = new URLSearchParams(location.search).get("key") || "";
 $("key").value = urlKey || localStorage.getItem("appitools_admin_key") || "";
-$("tenant").value = new URLSearchParams(location.search).get("tenant")||localStorage.getItem("appitools_tenant")||"10";
+$("tenant").value = new URLSearchParams(location.search).get("tenant")||localStorage.getItem("appitools_tenant")||"";
 $("load").onclick = load;
 $("mode").onchange = load;
 $("auto").onchange = setAuto;

@@ -4,7 +4,9 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/miguelangel/appitools/pkg/schema"
@@ -82,6 +84,19 @@ func parseAndValidateSchema(raw json.RawMessage) (*schema.APISchema, []string) {
 	return &s, nil
 }
 
+// schemaWarnings returns non-fatal notices for a VALID schema — keys that
+// parse (forward compatibility) but do not act yet. Silence here would bless
+// dead config; an error would break schemas that must stay loadable when the
+// feature ships (same reasoning as the hooks-compiled-at-boot reload warning).
+func schemaWarnings(s *schema.APISchema) []string {
+	if idx := schema.IndexedResources(s); len(idx) > 0 {
+		return []string{fmt.Sprintf(
+			"indexes on %s are parsed but not yet applied — DB index creation is coming in a future release",
+			strings.Join(idx, ", "))}
+	}
+	return nil
+}
+
 func handleCreateTenant(svc Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxControlPlaneBody)
@@ -127,6 +142,14 @@ func handleCreateTenant(svc Service) http.HandlerFunc {
 			default:
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 			}
+			return
+		}
+		if warns := schemaWarnings(parsed); len(warns) > 0 {
+			writeJSON(w, http.StatusCreated, map[string]any{
+				"id": tenant.ID, "pg_schema": tenant.PGSchema, "display_name": tenant.DisplayName,
+				"email": tenant.Email, "plan": tenant.Plan, "created_at": tenant.CreatedAt,
+				"warnings": warns,
+			})
 			return
 		}
 		writeJSON(w, http.StatusCreated, tenant)
@@ -175,7 +198,11 @@ func handleUpdateSchema(svc Service) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "migration_queued"})
+		resp := map[string]any{"status": "migration_queued"}
+		if warns := schemaWarnings(parsed); len(warns) > 0 {
+			resp["warnings"] = warns
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
