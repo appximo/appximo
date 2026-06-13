@@ -170,6 +170,41 @@ func DeployHandler(repoDir string) http.HandlerFunc {
 		// pgrep -x (never -f: -f self-matches the SSH shell — PRIMER gotcha).
 		base := filepath.Base(srv.BinaryPath)
 		dir := filepath.Dir(srv.BinaryPath)
+
+		// BACKUP the live binary BEFORE the swap. Overwriting the running
+		// binary without first copying it to the rollback dir is the exact gap
+		// that left deploy #6 (sha 507f846) on prod with no rollback. Copy
+		// <binary> -> <dir>-rollback/<base>.<YYYYMMDD-HHMMSS> with cp -p, VERIFY
+		// the copy landed (by byte size), and ABORT before the mv if a live
+		// binary existed but the backup did NOT land — a deploy without a
+		// rollback must never complete silently. A clean server with no live
+		// binary (first deploy) skips the backup without failing.
+		backupDir := dir + "-rollback"
+		deployEmit(sw, "backup", "respaldando binario vivo -> "+backupDir+"/"+base+".<YYYYMMDD-HHMMSS>")
+		bres, err := sshx.Run(&srv.Server, backupRemoteCmd(srv.BinaryPath), 30*time.Second)
+		if err != nil {
+			fail("backup", err.Error())
+			return
+		}
+		if bres.ExitCode != 0 {
+			fail("backup", "backup failed — ABORTING before swap so no deploy completes without a rollback: "+
+				strings.TrimSpace(bres.Stdout+" "+bres.Stderr))
+			return
+		}
+		for _, l := range strings.Split(strings.TrimSpace(bres.Stdout), "\n") {
+			switch l = strings.TrimSpace(l); {
+			case l == "":
+			case l == "NO_PREVIOUS":
+				deployEmit(sw, "backup", "no previous binary, skipping backup (first deploy to this server)")
+			case strings.HasPrefix(l, "BACKED_UP "):
+				deployEmit(sw, "backup", "✓ rollback guardado: "+strings.TrimPrefix(l, "BACKED_UP "))
+			case strings.HasPrefix(l, "PRUNED "):
+				deployEmit(sw, "backup", "retención (>10 auto): borrado "+strings.TrimPrefix(l, "PRUNED "))
+			default:
+				deployEmit(sw, "backup", l)
+			}
+		}
+
 		swap := "cd " + dir + " && mv " + base + ".new " + base + " && " +
 			"OLD=$(pgrep -x " + base + " || true); " +
 			"if [ -n \"$OLD\" ]; then kill -TERM $OLD; " +
@@ -214,6 +249,42 @@ func DeployHandler(repoDir string) http.HandlerFunc {
 		fmt.Fprintf(sw.w, "event: done\ndata: {\"status\":\"success\",\"sha\":%q}\n\n", sha)
 		sw.flusher.Flush()
 	}
+}
+
+// backupRemoteCmd builds the remote shell that, before a swap, copies the
+// LIVE engine binary to its sibling rollback dir (<dir>-rollback) as
+// <base>.<YYYYMMDD-HHMMSS>, verifies the copy by byte size, and prunes
+// AUTOMATIC timestamped backups beyond the newest 10. The retention glob
+// (<base>.[0-9]*-[0-9]*) only ever matches timestamped names, so manual
+// pre_* backups are never touched. The paths come from the server record
+// (validated at registration), not from request input. Output contract,
+// one token per line, parsed by the caller:
+//
+//	NO_PREVIOUS          no live binary — first deploy, nothing to back up
+//	BACKED_UP <path> …   the rollback copy that was created
+//	PRUNED <name>        an over-retention backup that was removed
+//
+// Any failure to copy/verify exits non-zero → the caller ABORTS the deploy
+// before the mv, so a deploy never completes without a rollback.
+func backupRemoteCmd(binaryPath string) string {
+	base := filepath.Base(binaryPath)
+	rbDir := filepath.Dir(binaryPath) + "-rollback"
+	lines := []string{
+		"SRC='" + binaryPath + "'",
+		"RBDIR='" + rbDir + "'",
+		"BASE='" + base + "'",
+		`if [ ! -f "$SRC" ]; then echo NO_PREVIOUS; exit 0; fi`,
+		`mkdir -p "$RBDIR" || { echo MKDIR_FAILED; exit 1; }`,
+		`TS=$(date +%Y%m%d-%H%M%S)`,
+		`DEST="$RBDIR/$BASE.$TS"`,
+		`cp -p "$SRC" "$DEST" || { echo CP_FAILED; exit 1; }`,
+		`SZS=$(stat -c%s "$SRC" 2>/dev/null); SZD=$(stat -c%s "$DEST" 2>/dev/null)`,
+		`if [ ! -f "$DEST" ] || [ -z "$SZD" ] || [ "$SZS" != "$SZD" ]; then echo "VERIFY_FAILED src=$SZS dest=$SZD"; rm -f "$DEST"; exit 1; fi`,
+		`echo "BACKED_UP $DEST ($SZD bytes)"`,
+		`for f in $(ls -1 "$RBDIR/$BASE".[0-9]*-[0-9]* 2>/dev/null | sort -r | tail -n +11); do rm -f "$f" && echo "PRUNED $(basename "$f")"; done`,
+		`exit 0`,
+	}
+	return strings.Join(lines, "; ")
 }
 
 // gitState returns HEAD's sha and the tracked-files porcelain status (empty =

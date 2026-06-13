@@ -2,11 +2,11 @@ import { createSignal, onMount, Show, For } from 'solid-js'
 import InfoTip from '../components/InfoTip'
 
 // Deploy panel (S47): runs the PRIMER deploy protocol against a registered
-// server as an SSE pipeline (build → push → swap/SIGTERM → start → smoke) and
-// shows the deploy history. Production servers demand re-typing the server
-// name (GitHub delete-repo style) before the button arms.
+// server as an SSE pipeline (build → push → backup → swap/SIGTERM → start →
+// smoke) and shows the deploy history. Production servers demand re-typing the
+// server name (GitHub delete-repo style) before the button arms.
 
-const STEP_ICON = { git: '⎇', build: '🔨', push: '⬆', swap: '🔁', start: '▶', smoke: '🔥', record: '📝' }
+const STEP_ICON = { git: '⎇', build: '🔨', push: '⬆', backup: '💾', swap: '🔁', start: '▶', smoke: '🔥', record: '📝' }
 const STATUS_BADGE = {
   success: 'text-green-400 border-green-800 bg-green-500/10',
   failed: 'text-red-400 border-red-800 bg-red-500/10',
@@ -107,8 +107,9 @@ export default function Deploy() {
         <div class="text-xs text-slate-600 uppercase tracking-widest">
           Deploy — protocolo PRIMER{' '}
           <InfoTip label="Qué hace el pipeline">
-            Pipeline: build local (105) → SFTP → SIGTERM → start → smoke. El motor
-            destino se reinicia: requests_total vuelve a 0 y hay ~5-10s de DOWN.
+            Pipeline: build local (105) → SFTP → backup pre-swap (rollback) →
+            SIGTERM → start → smoke. El motor destino se reinicia: requests_total
+            vuelve a 0 y hay ~5-10s de DOWN.
           </InfoTip>
         </div>
         <div class="flex flex-wrap items-end gap-3">
