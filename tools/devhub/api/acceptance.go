@@ -124,7 +124,7 @@ func AcceptanceRunHandler(repoDir string) http.HandlerFunc {
 		if _, err := os.Stat(appitoolsCLI); err != nil {
 			appitoolsCLI = "/tmp/appitools-deploy"
 			if _, err2 := os.Stat(appitoolsCLI); err2 != nil {
-				abort("no se encontró el binario appitools para CLI (appitools token). Hacé: go build -o appitools ./cmd/appitools")
+				abort("no se encontró el binario appitools para CLI (appitools token). Hacé: scripts/build-engine.sh appitools")
 				return
 			}
 		}

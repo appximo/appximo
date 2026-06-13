@@ -40,6 +40,11 @@ go test ./internal/handlers/... -v -timeout 120s
 
 # Build only (fast sanity check)
 go build ./...
+
+# Engine binary for deploy — ALWAYS use the canonical script:
+# scripts/build-engine.sh <output> [version] [revision]
+# Direct `go build` omits the version ldflags. The deploy smoke check
+# asserts version == deployed SHA; a versionless binary fails that check.
 ```
 
 Tests that spin up containers:
@@ -92,6 +97,7 @@ chore: upgrade pgx to v5.9.2
 - [ ] No new linter warnings (`golangci-lint run`)
 - [ ] Schema changes validated with `appitools validate`
 - [ ] If template changed: `appitools generate testdata/logistics/schema.json` regenerated
+- [ ] Engine binary built via `scripts/build-engine.sh` (not `go build`), if deploying
 
 ---
 

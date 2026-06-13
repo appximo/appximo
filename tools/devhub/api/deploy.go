@@ -145,6 +145,14 @@ func DeployHandler(repoDir string) http.HandlerFunc {
 		if len(shortSHA) > 7 {
 			shortSHA = shortSHA[:7]
 		}
+		// Guard: smoke asserts version==SHA, so a binary built without the
+		// version ldflags always fails the smoke. Catch the missing script
+		// here with a clear message rather than a cryptic sh error later.
+		buildScript := filepath.Join(repoDir, "scripts", "build-engine.sh")
+		if fi, serr := os.Stat(buildScript); serr != nil || fi.Mode()&0o111 == 0 {
+			fail("build", "scripts/build-engine.sh not found or not executable — canonical build required (smoke asserts version==SHA; direct go build embeds no version stamp)")
+			return
+		}
 		deployEmit(sw, "build", "scripts/build-engine.sh /tmp/appitools-deploy "+shortSHA+" "+sha)
 		build := exec.CommandContext(r.Context(), "sh", "scripts/build-engine.sh",
 			"/tmp/appitools-deploy", shortSHA, sha)
