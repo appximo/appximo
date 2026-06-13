@@ -147,8 +147,8 @@ baseline faster are welcome; we'll publish updated numbers.
 - **Extensions**: JS sandbox (Goja, watchdog-interrupted) with built-in helpers —
   including Colombian DIAN tax compliance (CUFE SHA-384, NIT mod-11) — plus a WASM
   runtime (Wazero, no CGO)
-- **GraphQL**: queries + create/delete mutations, complexity/depth limits,
-  introspection off in production
+- **GraphQL**: queries + create/delete mutations, selection-count limits
+  (alias-amplification guard), introspection off in production
 - **Ops**: Prometheus `/metrics`, per-request trace ring with stage breakdown,
   SLO burn-rate alerts (Slack), graceful drain on SIGTERM, circuit breaker
   (verified open/recover with toxiproxy), zero-downtime additive migrations —

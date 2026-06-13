@@ -48,6 +48,7 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   `go run ./cmd/appitools serve …`.
 - Other subcommands: `validate <schema>`, `token` (mint a dev JWT),
   `openapi`, `graphql` (SDL), `generate`, `migrate`, `backup`, `init`,
+  `blueprints list` (lists schema files in a local `blueprints/` dir),
   `version` (prints the ldflags-injected build version; "dev" on a plain
   local build — releases and published images carry their tag).
 - `tools/devhub/` is a local dev dashboard (systemd service on :3099).
@@ -303,6 +304,12 @@ Facts agents most often get wrong:
   `appitools token --secret "$JWT_SECRET" --tenant acme --role admin`.
 - **Two ports**: data plane `:8080`; control plane `:9090` (tenant
   registration via `X-Admin-Key`) — internal only, never proxied.
+- **Health probes (all unauthenticated)**: `/healthz` (liveness, never
+  touches Postgres), `/readyz` (readiness — flips to **503** while
+  draining on SIGTERM), `/health` (returns `{"status":"ok","version":…}`
+  with the build version). By contrast `/metrics` and `/debug/*` are
+  admin-gated — the deep observability surface is mapped in
+  [docs/EXPLORE.md](docs/EXPLORE.md).
 - `/metrics` and `/debug/*` require `X-Admin-Key` even though the routes
   exist on the public listener.
 - curl needs `-g` for filter brackets: `curl -g '...?filter[status][eq]=open'`.
@@ -317,6 +324,13 @@ subroutes.
 - **Filters**: `?filter[field]=v` (implies `eq`) or
   `?filter[field][op]=v` with ops from the type table above. Unknown
   field or type-incompatible op → 400.
+- **Search**: `?search=term` runs a case-insensitive substring match
+  (`ILIKE %term%`, `%`/`_` escaped) across **only** the resource's
+  `string` and `text` fields, OR-ed together and AND-ed with any
+  filters. It does **not** touch `int`/`int64`/`float64`/`time`/`uuid`/
+  `bool`/`json` fields, and it is a no-op (ignored) on a resource with no
+  string/text fields. It is a plain `ILIKE`, not a ranked/full-text
+  search engine.
 - **Sort**: `?sort=field&order=asc|desc` — **one field only**. The
   alternative `?order[field]=desc` also works and wins when both are
   sent. Anything else (`sort=field:desc`, multi-field) is **silently
@@ -333,8 +347,13 @@ mutations only (e.g. `createTask`, `deleteTask`) — **no update
 mutation**; use REST PUT/PATCH. GraphQL always answers **HTTP 200**:
 check the `errors` array in the body, never the status code. Validation
 failures arrive as `errors[].extensions.fields` (same rule engine as
-REST). Introspection is disabled in production; GraphiQL only runs with
-`APPITOOLS_ENV=development`.
+REST). Introspection is disabled in production (the `__schema`/`__type`
+fields are rejected outside development; `__typename` is allowed);
+GraphiQL only runs with `APPITOOLS_ENV=development`. The query analyzer
+also bounds document size as an alias-amplification guard: at most **50
+root selections** per operation and **2000 total selections** across the
+whole document — over either limit the request is rejected (there is no
+separate nesting-depth counter).
 
 ## Does not exist — do not invent
 

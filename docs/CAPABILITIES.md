@@ -50,7 +50,7 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 ## Queries
 
 - Typed URL filters — `filter[field][op]=v`; ops are constrained per field type ([table](../AGENTS.md#field-types--the-complete-set)).
-- Full-text search — `?search=` runs `ILIKE` across all string/text fields (wildcards escaped).
+- Substring text search — `?search=` runs `ILIKE` across the resource's string/text fields (not a ranked full-text engine).
 - Single-field sort — `?sort=field&order=asc|desc`, or `?order[field]=desc` (which wins if both are sent).
 - Keyset pagination — `?after=<uuid>` / `?before=<uuid>`, `per_page` default 20 / max 100, no OFFSET.
 - In-memory response cache — validated-token GETs served from RAM; `PUT`/`PATCH` and reload evict it.
