@@ -4,14 +4,16 @@ import LiveMetrics from './panels/LiveMetrics'
 import BenchmarkLab from './panels/BenchmarkLab'
 import Deploy from './panels/Deploy'
 import Servers from './panels/Servers'
+import Acceptance from './panels/Acceptance'
 
 const TABS = [
-  { id: 'runner',  label: '▶  Test Runner' },
-  { id: 'metrics', label: '📊 Live Metrics' },
-  { id: 'bench',   label: '⚡ Benchmark Lab' },
-  { id: 'deploy',  label: '🚀 Deploy' },
-  { id: 'servers', label: '🖥  Servers' },
-  { id: 'coverage',label: '🗺  Coverage',      wip: true },
+  { id: 'runner',     label: '▶  Test Runner' },
+  { id: 'metrics',    label: '📊 Live Metrics' },
+  { id: 'bench',      label: '⚡ Benchmark Lab' },
+  { id: 'deploy',     label: '🚀 Deploy' },
+  { id: 'acceptance', label: '✅ Acceptance' },
+  { id: 'servers',    label: '🖥  Servers' },
+  { id: 'coverage',   label: '🗺  Coverage',   wip: true },
 ]
 
 export default function App() {
@@ -40,6 +42,7 @@ export default function App() {
         <Show when={tab() === 'metrics'}><LiveMetrics /></Show>
         <Show when={tab() === 'bench'}><BenchmarkLab /></Show>
         <Show when={tab() === 'deploy'}><Deploy /></Show>
+        <Show when={tab() === 'acceptance'}><Acceptance /></Show>
         <Show when={tab() === 'servers'}><Servers /></Show>
       </main>
     </div>

@@ -53,6 +53,7 @@ func main() {
 	mux.HandleFunc("GET /api/audit/secrets", api.SecretAuditHandler)
 	mux.HandleFunc("POST /api/deploy", api.DeployHandler(repoDir))
 	mux.HandleFunc("GET /api/deploys", api.DeploysListHandler)
+	mux.HandleFunc("GET /api/acceptance-run", api.AcceptanceRunHandler(repoDir))
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok","service":"devhub"}`))
