@@ -11,10 +11,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// NotifyChannel is the Postgres LISTEN/NOTIFY channel the engine signals after a
+// successful Enqueue and that the worker (cmd/appitools-worker) LISTENs on. The
+// NOTIFY is only a wake-up HINT: the worker still polls public.outbox, which is
+// the durable source of truth, because a notification emitted while the worker is
+// down is lost forever (NOTIFY is ephemeral, not queued). Keep this constant the
+// single source of truth shared by engine and worker so the two never drift.
+const NotifyChannel = "outbox_notify"
 
 // EnsureTable creates public.outbox idempotently. Safe to call at every boot.
 func EnsureTable(ctx context.Context, pool *pgxpool.Pool) error {
@@ -53,6 +62,21 @@ func Enqueue(ctx context.Context, tx pgx.Tx, tenantID, topic string, payload any
 		tenantID, topic, string(b),
 	).Scan(&id); err != nil {
 		return 0, fmt.Errorf("outbox: insert: %w", err)
+	}
+
+	// Wake the worker. pg_notify is transactional in Postgres: the signal is
+	// delivered only if (and when) this tx commits, so a rolled-back business
+	// write never wakes a worker for a row that doesn't exist — the same
+	// atomicity guarantee as the INSERT above, for free.
+	//
+	// The payload is the row id ONLY. NOTIFY caps payloads at 8000 bytes, and the
+	// worker SELECTs the full row itself, so a large business payload never rides
+	// the notification channel. The id is also all the worker needs: it drains
+	// every pending row on each wake regardless of which id triggered it.
+	if _, err := tx.Exec(ctx,
+		`SELECT pg_notify($1, $2)`, NotifyChannel, strconv.FormatInt(id, 10),
+	); err != nil {
+		return 0, fmt.Errorf("outbox: notify: %w", err)
 	}
 	return id, nil
 }

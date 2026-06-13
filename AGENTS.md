@@ -116,6 +116,13 @@ One line per layer — navigate the code for the rest:
 - `pkg/extensions` — hooks: Goja JS sandbox, Wazero WASM, webhook dispatcher.
 - `pkg/events` — SSE hub, post-commit fan-out.
 - `pkg/migration` — idempotent DDL (`CREATE TABLE / ADD COLUMN IF NOT EXISTS`).
+- `pkg/outbox` — transactional outbox (ADR-016 §Class 2): `Enqueue` writes a job
+  in the caller's tx and emits `pg_notify(outbox_notify, <id>)` on commit.
+- `pkg/worker` — the outbox consumer behind the SEPARATE `cmd/appitools-worker`
+  binary (not a goroutine in the engine): LISTEN/NOTIFY wake-up + poll fallback,
+  `SELECT … FOR UPDATE SKIP LOCKED`, at-least-once (Processors must be idempotent).
+  Run it with `DATABASE_URL=… go run ./cmd/appitools-worker`; the end-to-end proof
+  is `scripts/worker-e2e.sh`.
 
 Request flow: tenant (Host) → rate limit → response cache → JWT → RBAC →
 handler (`pkg/codegen`) → query build / validation → hooks → pgx →

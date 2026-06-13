@@ -2,11 +2,14 @@ package outbox_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
@@ -189,6 +192,91 @@ func TestEnqueue_TenantIsolation(t *testing.T) {
 		if !strings.Contains(payload, fmt.Sprintf("%q", tid)) {
 			t.Errorf("tenant %q: payload does not contain own id: %s", tid, payload)
 		}
+	}
+}
+
+// TestEnqueue_EmitsNotify verifies the engine-side half of the async loop: a
+// committed Enqueue delivers a NOTIFY on outbox.NotifyChannel carrying the new
+// row id (NOT the full payload — that would risk the 8000-byte cap). NOTIFY is
+// transactional, so the signal only fires on commit.
+func TestEnqueue_EmitsNotify(t *testing.T) {
+	t.Parallel()
+	pool := startPostgres(t)
+	ctx := context.Background()
+
+	// A dedicated connection LISTENs on the channel.
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire listen conn: %v", err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "LISTEN "+outbox.NotifyChannel); err != nil {
+		t.Fatalf("LISTEN: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	id, err := outbox.Enqueue(ctx, tx, "tenant-n", "notify.test", map[string]any{"k": "v"})
+	if err != nil {
+		tx.Rollback(ctx) //nolint:errcheck
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	n, err := conn.Conn().WaitForNotification(waitCtx)
+	if err != nil {
+		t.Fatalf("WaitForNotification: %v (no NOTIFY emitted on commit?)", err)
+	}
+	if n.Channel != outbox.NotifyChannel {
+		t.Errorf("notify channel = %q, want %q", n.Channel, outbox.NotifyChannel)
+	}
+	if n.Payload != strconv.FormatInt(id, 10) {
+		t.Errorf("notify payload = %q, want the row id %d (id only, not the payload)", n.Payload, id)
+	}
+}
+
+// TestEnqueue_RollbackNoNotify verifies NOTIFY is transactional: a rolled-back
+// Enqueue delivers NO notification, so a worker is never woken for a row that
+// doesn't exist — the same atomicity guarantee as the row INSERT.
+func TestEnqueue_RollbackNoNotify(t *testing.T) {
+	t.Parallel()
+	pool := startPostgres(t)
+	ctx := context.Background()
+
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire listen conn: %v", err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, "LISTEN "+outbox.NotifyChannel); err != nil {
+		t.Fatalf("LISTEN: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	if _, err := outbox.Enqueue(ctx, tx, "tenant-r", "notify.rollback", map[string]any{"k": "v"}); err != nil {
+		tx.Rollback(ctx) //nolint:errcheck
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+
+	// No notification should arrive within the window.
+	waitCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	if _, err := conn.Conn().WaitForNotification(waitCtx); err == nil {
+		t.Fatal("received a NOTIFY after rollback; want none (transactional NOTIFY violated)")
+	} else if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want DeadlineExceeded (no notify), got %v", err)
 	}
 }
 
