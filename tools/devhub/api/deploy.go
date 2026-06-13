@@ -236,13 +236,13 @@ func DeployHandler(repoDir string) http.HandlerFunc {
 		}
 		deployEmit(sw, "start", "✓ "+strings.TrimSpace(res.Stdout))
 
-		// 6 — smoke through the tunnel: /health + /readyz must both go 200.
-		deployEmit(sw, "smoke", "GET /health + /readyz vía tunnel…")
-		if err := smokeCheck(srv, 20); err != nil {
+		// 6 — smoke: /health version-match + /readyz must both be 200.
+		deployEmit(sw, "smoke", "GET /health (version "+shortSHA+") + /readyz vía tunnel…")
+		if err := smokeCheck(srv, 20, shortSHA); err != nil {
 			fail("smoke", err.Error())
 			return
 		}
-		deployEmit(sw, "smoke", "✓ /health 200 · /readyz 200")
+		deployEmit(sw, "smoke", "✓ /health 200 · /readyz 200 · version "+shortSHA+" confirmed")
 
 		status = "success"
 		deployEmit(sw, "record", "deploy registrado (id "+strconv.FormatInt(deployID, 10)+", sha "+sha[:12]+")")
@@ -306,10 +306,11 @@ func gitState(repoDir string) (sha, dirty string, err error) {
 	return sha, strings.TrimSpace(string(out)), nil
 }
 
-// smokeCheck polls /health and /readyz on the freshly-started engine until
-// both answer 200 or attempts run out (1s apart — the engine needs a moment
-// to bind and warm its pool).
-func smokeCheck(srv *RegisteredServer, attempts int) error {
+// smokeCheck polls /health (asserting version == wantVersion) and /readyz on
+// the freshly-started engine until both answer 200 and the version matches, or
+// attempts run out. Delegates to smokeCheckAddr so the version-checking logic
+// is testable without an SSH tunnel.
+func smokeCheck(srv *RegisteredServer, attempts int, wantVersion string) error {
 	addr, closer, err := sshx.ForwardAddr(&srv.Server, srv.EnginePort)
 	if err != nil {
 		return fmt.Errorf("tunnel: %w", err)
@@ -317,22 +318,63 @@ func smokeCheck(srv *RegisteredServer, attempts int) error {
 	if closer != nil {
 		defer closer.Close() //nolint:errcheck
 	}
-	client := &http.Client{Timeout: 3 * time.Second}
-	check := func(path string) bool {
-		resp, err := client.Get("http://" + addr + path)
-		if err != nil {
-			return false
-		}
-		defer resp.Body.Close() //nolint:errcheck
-		return resp.StatusCode == http.StatusOK
+	return smokeCheckAddr(addr, attempts, wantVersion, time.Second)
+}
+
+// smokeCheckAddr is the testable core of smokeCheck. On each attempt it:
+//  1. GETs /health — must be 200 with a JSON body where "version" == wantVersion.
+//     Non-200 or connection errors are retried; a 200 with the wrong version is
+//     a hard failure (the swap step already waited for the old process to die,
+//     so the wrong version means the deployed binary wasn't built with the
+//     expected SHA).
+//  2. GETs /readyz — must be 200 (engine done warming its pool).
+//
+// retryInterval is the sleep between retriable attempts (time.Second in
+// production, 0 in tests).
+func smokeCheckAddr(addr string, attempts int, wantVersion string, retryInterval time.Duration) error {
+	type healthResp struct {
+		Version string `json:"version"`
 	}
+	client := &http.Client{Timeout: 3 * time.Second}
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		if check("/health") && check("/readyz") {
-			return nil
+		resp, err := client.Get("http://" + addr + "/health")
+		if err != nil {
+			lastErr = fmt.Errorf("engine not healthy yet")
+			time.Sleep(retryInterval)
+			continue
 		}
-		lastErr = fmt.Errorf("engine not healthy yet")
-		time.Sleep(time.Second)
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close() //nolint:errcheck
+			lastErr = fmt.Errorf("engine not healthy yet")
+			time.Sleep(retryInterval)
+			continue
+		}
+		var h healthResp
+		if decErr := json.NewDecoder(resp.Body).Decode(&h); decErr != nil {
+			resp.Body.Close() //nolint:errcheck
+			lastErr = fmt.Errorf("could not parse /health body: %v", decErr)
+			time.Sleep(retryInterval)
+			continue
+		}
+		resp.Body.Close() //nolint:errcheck
+		if h.Version != wantVersion {
+			return fmt.Errorf("version mismatch: got %q want %q", h.Version, wantVersion)
+		}
+		r2, err := client.Get("http://" + addr + "/readyz")
+		if err != nil {
+			lastErr = fmt.Errorf("readyz failed: %v", err)
+			time.Sleep(retryInterval)
+			continue
+		}
+		ok := r2.StatusCode == http.StatusOK
+		r2.Body.Close() //nolint:errcheck
+		if !ok {
+			lastErr = fmt.Errorf("readyz not ready yet")
+			time.Sleep(retryInterval)
+			continue
+		}
+		return nil
 	}
 	return fmt.Errorf("smoke FAILED after %d attempts: %v", attempts, lastErr)
 }
