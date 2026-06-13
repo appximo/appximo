@@ -144,8 +144,9 @@ baseline faster are welcome; we'll publish updated numbers.
   dynamic row conditions (`operator_id = $user_id`); deny by default
 - **Real-time**: per-resource SSE streams with RBAC applied at delivery
 - **Webhooks**: HMAC-SHA256-signed, async, retries with backoff, SSRF-guarded
-- **Extensions**: JS sandbox (Goja, watchdog-interrupted) and WASM (Wazero, no CGO).
-  Example shipped: Colombian tax-compliance functions (DIAN CUFE SHA-384, NIT mod-11)
+- **Extensions**: JS sandbox (Goja, watchdog-interrupted) with built-in helpers —
+  including Colombian DIAN tax compliance (CUFE SHA-384, NIT mod-11) — plus a WASM
+  runtime (Wazero, no CGO)
 - **GraphQL**: queries + create/delete mutations, complexity/depth limits,
   introspection off in production
 - **Ops**: Prometheus `/metrics`, per-request trace ring with stage breakdown,
@@ -156,6 +157,8 @@ baseline faster are welcome; we'll publish updated numbers.
 - **Security hardening**: HS256-pinned JWT (alg-confusion rejected), sanitized
   identifiers everywhere, masked DB errors, 1 MB body cap, fuzzed parsers
   (0 crashers), per-tenant cache isolation
+
+Full capability inventory (and the honest not-yet list): [docs/CAPABILITIES.md](docs/CAPABILITIES.md).
 
 ## Production deploy
 
