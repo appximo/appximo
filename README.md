@@ -179,7 +179,10 @@ It serves our own production workload today.
 **Known limits, honestly:**
 
 - **No declarative relations** between resources yet — fields can hold foreign
-  UUIDs, but the schema has no `ref`/join semantics.
+  UUIDs, but the schema has no `ref`/join semantics. The design
+  (`json_agg` + `LATERAL`, one round-trip, five non-negotiable conditions) is
+  accepted in [docs/adr/ADR-019](docs/adr/ADR-019-declarative-relations.md);
+  implementation is pending.
 - **No CORS middleware**: browser SPAs must be served same-origin (workaround in
   [docs/DEPLOY.md](docs/DEPLOY.md#cors--current-status-important-for-spas)); native
   support is next on the engine roadmap.
