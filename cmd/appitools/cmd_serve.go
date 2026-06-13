@@ -28,6 +28,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	_ "go.uber.org/automaxprocs"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/cache"
 	"github.com/miguelangel/appitools/pkg/codegen"
@@ -40,6 +41,7 @@ import (
 	appmiddleware "github.com/miguelangel/appitools/pkg/middleware"
 	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/observability"
+	"github.com/miguelangel/appitools/pkg/outbox"
 	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/resilience"
 	"github.com/miguelangel/appitools/pkg/schema"
@@ -114,6 +116,13 @@ var serveCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		// Pool is closed in the shutdown sequence — not deferred here.
+
+		// Outbox: create public.outbox once at boot (idempotent DDL).
+		if err := outbox.EnsureTable(ctx, pool); err != nil {
+			fmt.Fprintln(os.Stderr, "Error creating outbox table:", err)
+			os.Exit(1)
+		}
+		log.Println("outbox: public.outbox table ready")
 
 		tdb := db.NewTenantDB(pool)
 		// HookRunner with Capa 3 (WASM) enabled when the runtime initializes; falls
@@ -494,6 +503,12 @@ var serveCmd = &cobra.Command{
 		// Mount API routes with strict CSP — /api/* serves JSON exclusively.
 		r.Group(func(sub chi.Router) {
 			sub.Use(appmiddleware.StrictCSP)
+			// POST /api/_echo — isolated echo endpoint that validates ctx.Enqueue
+			// (ADR-016 transactional outbox). Runs through the full middleware chain
+			// (tenant → rate-limit → JWT → RBAC) exactly like generated routes.
+			// MÍNIMO del modelo ADR-016: handler recibe tenant + tx inline; el
+			// registro de rutas custom completo (app.Register) queda pendiente.
+			sub.Post("/api/_echo", echoHandler(pool))
 			sub.Mount("/", codegen.BuildRouter(s, tdb, hr, responseCache, eventsHub))
 		})
 
@@ -758,6 +773,69 @@ func remoteIP(r *http.Request) string {
 		return host
 	}
 	return r.RemoteAddr
+}
+
+// echoHandler is the POST /api/_echo handler. It demonstrates the ADR-016
+// transactional outbox: receives a body, opens a tx scoped to the tenant
+// search_path, calls outbox.Enqueue inside that tx, commits, and returns the
+// event id. If the tx rolls back (e.g. a future hook error), the outbox row
+// never exists. Goes through the full middleware chain — no JWT → 401.
+func echoHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tc := tenant.MustFromCtx(r.Context())
+
+		var body struct {
+			Msg string `json:"msg"`
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid body"}) //nolint:errcheck
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "begin tx"}) //nolint:errcheck
+			return
+		}
+		defer tx.Rollback(ctx) //nolint:errcheck
+
+		// Scope the transaction to the tenant schema — same pattern as TenantDB.
+		if _, err := tx.Exec(ctx,
+			"SET LOCAL search_path TO "+pgx.Identifier{tc.PGSchema}.Sanitize()+", public",
+		); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "set search_path"}) //nolint:errcheck
+			return
+		}
+
+		eventID, err := outbox.Enqueue(ctx, tx, tc.ID, "echo.test", map[string]any{"msg": body.Msg})
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "enqueue"}) //nolint:errcheck
+			return
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "commit"}) //nolint:errcheck
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{"event_id": eventID}) //nolint:errcheck
+	}
 }
 
 // parseMemLimit parses strings like "512MiB", "1GiB", "1073741824" into bytes.
