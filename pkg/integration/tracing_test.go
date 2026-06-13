@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -157,8 +158,13 @@ INSERT INTO tenant_acmetest.guides (code, status) VALUES ('A','pending'), ('B','
 					"code": {Type: "string"}, "status": {Type: "string"},
 				},
 				Hooks: map[string]schema.HookConfig{
-					// Rejects when the body carries reject:true → 422 (for the error-persist test).
-					"before_create": {Type: "js", Script: `if (data.reject) { result.proceed = false; result.error = "rejected by test"; }`},
+					// reject:true → clean 422 (error-persist test). boom:true → infinite
+					// loop: the 80ms watchdog interrupts it, which is the one JS outcome
+					// that surfaces as a hook EXECUTION error → a genuine 500 with a
+					// captured stack (a thrown JS exception maps to Proceed:false → 422
+					// by design, and an unknown column is a 422 too since FIX 7 — the
+					// 500-persistence test below needs a real engine-side failure).
+					"before_create": {Type: "js", Script: `if (data.reject) { result.proceed = false; result.error = "rejected by test"; } if (data.boom) { while (true) {} }`},
 				},
 			},
 		},
@@ -308,9 +314,33 @@ INSERT INTO tenant_acmetest.guides (code, status) VALUES ('A','pending'), ('B','
 		t.Errorf("422 trace %s should be persisted (PersistErrors)", tid422)
 	}
 
-	// 8. A real 500 (DB error: INSERT references a non-existent column) must be
-	// persisted WITH a stack trace.
-	body500, _ := json.Marshal(map[string]any{"code": "E500", "status": "pending", "no_such_column": "x"})
+	// 8a. An unknown column on a write is a CLIENT error since FIX 7: 422 with
+	// rule unknown_field (SQLSTATE 42703 classified in WriteDBError), never a
+	// masked 500 — and therefore persisted without a stack.
+	bodyUnk, _ := json.Marshal(map[string]any{"code": "EUNK", "status": "pending", "no_such_column": "x"})
+	reqUnk, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/guides", bytes.NewReader(bodyUnk))
+	reqUnk.Header.Set("Authorization", "Bearer "+token)
+	reqUnk.Header.Set("Content-Type", "application/json")
+	respUnk, err := srv.Client().Do(reqUnk)
+	if err != nil {
+		t.Fatalf("POST unknown column: %v", err)
+	}
+	tidUnk := respUnk.Header.Get("X-Trace-ID")
+	unkBody, _ := io.ReadAll(respUnk.Body)
+	respUnk.Body.Close()
+	if respUnk.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("unknown column must be 422 unknown_field (FIX 7), got %d: %s", respUnk.StatusCode, unkBody)
+	}
+	if !bytes.Contains(unkBody, []byte("unknown_field")) {
+		t.Errorf("422 body must carry rule unknown_field, got: %s", unkBody)
+	}
+	if !persisted(tidUnk) {
+		t.Errorf("422 unknown-field trace %s should be persisted (status >= 400)", tidUnk)
+	}
+
+	// 8b. A real 500 (the before_create hook THROWS) must be persisted WITH a
+	// stack trace.
+	body500, _ := json.Marshal(map[string]any{"code": "E500", "status": "pending", "boom": true})
 	req500, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/guides", bytes.NewReader(body500))
 	req500.Header.Set("Authorization", "Bearer "+token)
 	req500.Header.Set("Content-Type", "application/json")
@@ -322,7 +352,7 @@ INSERT INTO tenant_acmetest.guides (code, status) VALUES ('A','pending'), ('B','
 	st500 := resp500.StatusCode
 	resp500.Body.Close()
 	if st500 != http.StatusInternalServerError {
-		t.Fatalf("expected 500 (unknown column), got %d", st500)
+		t.Fatalf("expected 500 (hook throws), got %d", st500)
 	}
 
 	var tv500 observability.TraceView
@@ -351,7 +381,7 @@ INSERT INTO tenant_acmetest.guides (code, status) VALUES ('A','pending'), ('B','
 	// The 401 and 422 traces must have NO stack (client errors, not bugs).
 	s2, _ := store.SlowTraces(tenantID, 24)
 	for _, tv := range s2 {
-		if (tv.TraceID == tid401 || tv.TraceID == tid422) && len(tv.Stack) != 0 {
+		if (tv.TraceID == tid401 || tv.TraceID == tid422 || tv.TraceID == tidUnk) && len(tv.Stack) != 0 {
 			t.Errorf("4xx trace %s must not have a stack, got %d frames", tv.TraceID, len(tv.Stack))
 		}
 	}
