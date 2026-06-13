@@ -1,0 +1,24 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "emit-api",
+  "resources": {
+    "tasks": {
+      "fields": {
+        "title":  { "type": "string", "required": true, "unique": true, "maxLength": 200 },
+        "status": { "type": "string", "enum": ["open", "done"] }
+      },
+      "events": ["create", "update", "delete"]
+    },
+    "notes": {
+      "fields": {
+        "body": { "type": "string", "required": true }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": { "resources": "*", "actions": ["*"] }
+    }
+  }
+}

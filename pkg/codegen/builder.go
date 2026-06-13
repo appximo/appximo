@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -19,11 +20,29 @@ import (
 	"github.com/miguelangel/appitools/pkg/extensions"
 	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
 	"github.com/miguelangel/appitools/pkg/observability"
+	"github.com/miguelangel/appitools/pkg/outbox"
 	"github.com/miguelangel/appitools/pkg/query"
 	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
+
+// enqueueCRUDEvent writes a transactional outbox event for a generated CRUD
+// write (CRUD-EMIT-V1), on the SAME tx as the write so the two are atomic. The
+// topic is "{resource}.{created|updated|deleted}" and the payload is lean — id +
+// identity only (the consumer SELECTs the row if it needs more, keeping the
+// outbox small). action is the present-tense form ("create"|"update"|"delete").
+func enqueueCRUDEvent(ctx context.Context, tx pgx.Tx, tenantID, resource, action string, id any) error {
+	topic := schema.EmitTopic(resource, action)
+	payload := map[string]any{
+		"id":        id,
+		"tenant_id": tenantID,
+		"resource":  resource,
+		"action":    strings.TrimPrefix(topic, resource+"."), // past-tense suffix
+	}
+	_, err := outbox.Enqueue(ctx, tx, tenantID, topic, payload)
+	return err
+}
 
 // CacheInvalidator drops a tenant's cached GET responses. *cache.ResponseCache
 // implements it. BuildRouter calls it after a successful PUT/PATCH so a follow-up
@@ -137,6 +156,13 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		// schema load/reload, never per request. The handlers below only execute
 		// the precompiled closures (S44 requirement #1).
 		rv := schema.CompileRules(&res)
+
+		// Opt-in outbox emission (CRUD-EMIT-V1), decided ONCE at boot. A resource
+		// that declares no events leaves these false, so its write handlers take
+		// the unchanged ExecRowsTenant/ExecTenant path — zero added overhead.
+		emitCreate := res.EmitsOn("create")
+		emitUpdate := res.EmitsOn("update")
+		emitDelete := res.EmitsOn("delete")
 
 		// --- List ---
 		r.Get("/api/"+name, pkghandlers.CachedGet(func(w http.ResponseWriter, req *http.Request) {
@@ -266,7 +292,20 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// the current schema (no privilege/tenant columns) and tracked separately.
 			cols, placeholders, args := pkghandlers.BuildInsertArgs(body)
 			insertQ := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", name, cols, placeholders)
-			result, err := tdb.ExecRowsTenant(req.Context(), tc.PGSchema, insertQ, args...)
+			var result []map[string]any
+			var err error
+			if emitCreate {
+				// Same-tx emission: the INSERT and its outbox event commit together.
+				result, err = tdb.ExecRowsTenantEmit(req.Context(), tc.PGSchema, insertQ,
+					func(ectx context.Context, tx pgx.Tx, rows []map[string]any) error {
+						if len(rows) == 0 {
+							return nil
+						}
+						return enqueueCRUDEvent(ectx, tx, tc.ID, name, "create", rows[0]["id"])
+					}, args...)
+			} else {
+				result, err = tdb.ExecRowsTenant(req.Context(), tc.PGSchema, insertQ, args...)
+			}
 			if err != nil {
 				writeDBErr(w, req, err)
 				return
@@ -371,7 +410,20 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					return
 				}
 			}
-			affected, err := tdb.ExecTenant(req.Context(), tc.PGSchema, q, args...)
+			var affected int64
+			var err error
+			if emitDelete {
+				// Same-tx emission, but only when a row was actually deleted.
+				affected, err = tdb.ExecTenantEmit(req.Context(), tc.PGSchema, q,
+					func(ectx context.Context, tx pgx.Tx, aff int64) error {
+						if aff == 0 {
+							return nil
+						}
+						return enqueueCRUDEvent(ectx, tx, tc.ID, name, "delete", id)
+					}, args...)
+			} else {
+				affected, err = tdb.ExecTenant(req.Context(), tc.PGSchema, q, args...)
+			}
 			if err != nil {
 				writeDBErr(w, req, err)
 				return
@@ -553,7 +605,19 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				}
 				q += " RETURNING *"
 
-				result, err := tdb.ExecRowsTenant(req.Context(), tc.PGSchema, q, args...)
+				var result []map[string]any
+				if emitUpdate {
+					// Same-tx emission: the UPDATE and its outbox event commit together.
+					result, err = tdb.ExecRowsTenantEmit(req.Context(), tc.PGSchema, q,
+						func(ectx context.Context, tx pgx.Tx, rows []map[string]any) error {
+							if len(rows) == 0 {
+								return nil
+							}
+							return enqueueCRUDEvent(ectx, tx, tc.ID, name, "update", rows[0]["id"])
+						}, args...)
+				} else {
+					result, err = tdb.ExecRowsTenant(req.Context(), tc.PGSchema, q, args...)
+				}
 				if err != nil {
 					if field, ok := db.UniqueViolationField(err); ok {
 						writeJSONErr(w, http.StatusConflict, fmt.Sprintf("field %q: value already exists", field))

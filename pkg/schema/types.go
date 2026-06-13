@@ -20,6 +20,45 @@ type ResourceSchema struct {
 	Fields  map[string]FieldDef   `json:"fields"`
 	Hooks   map[string]HookConfig `json:"hooks,omitempty"`
 	Indexes []IndexDef            `json:"indexes,omitempty"`
+
+	// Events is the opt-in list of write actions that emit a transactional
+	// outbox event (CRUD-EMIT-V1). Valid values: "create", "update", "delete"
+	// (present-tense, matching the RBAC action vocabulary). For a declared
+	// action the engine writes a row to public.outbox IN THE SAME TRANSACTION as
+	// the CRUD write, with topic "{resource}.{created|updated|deleted}". A
+	// resource that omits this key emits nothing and pays zero overhead. See
+	// EmitActions / EmitTopic.
+	Events []string `json:"events,omitempty"`
+}
+
+// validEmitActions is the closed set of write actions a resource may opt into
+// for outbox emission. They mirror the RBAC action names (present tense); the
+// emitted topic uses the past-tense form (see emitTopicSuffix).
+var validEmitActions = map[string]bool{"create": true, "update": true, "delete": true}
+
+// emitTopicSuffix maps an opt-in action to its topic suffix (past tense), e.g.
+// "create" → "created" so the topic reads "tasks.created".
+var emitTopicSuffix = map[string]string{"create": "created", "update": "updated", "delete": "deleted"}
+
+// EmitsOn reports whether the resource opted into emitting an event for action
+// ("create" | "update" | "delete"). Computed from ResourceSchema.Events.
+func (r ResourceSchema) EmitsOn(action string) bool {
+	for _, a := range r.Events {
+		if a == action {
+			return true
+		}
+	}
+	return false
+}
+
+// EmitTopic returns the outbox topic for (resource, action), e.g.
+// EmitTopic("tasks","create") == "tasks.created". Empty if action is unknown.
+func EmitTopic(resource, action string) string {
+	suffix, ok := emitTopicSuffix[action]
+	if !ok {
+		return ""
+	}
+	return resource + "." + suffix
 }
 
 // FieldDef describes one field within a resource.

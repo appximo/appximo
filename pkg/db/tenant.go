@@ -312,6 +312,119 @@ func (tdb *TenantDB) ExecRowsTenant(ctx context.Context, schemaName, query strin
 	return res.([]map[string]any), nil
 }
 
+// ExecRowsTenantEmit is ExecRowsTenant plus a same-transaction emit step
+// (CRUD-EMIT-V1): after the write's RETURNING rows are read and BEFORE commit,
+// it calls emit(ctx, tx, rows) on the SAME pgx.Tx. If emit returns an error the
+// transaction rolls back, so the business write and its emitted event are
+// atomic — either both commit or neither does. emit may be nil (then this is
+// exactly ExecRowsTenant). db stays decoupled from pkg/outbox: the caller
+// supplies a closure that enqueues using the handed-in tx.
+func (tdb *TenantDB) ExecRowsTenantEmit(ctx context.Context, schemaName, query string, emit func(ctx context.Context, tx pgx.Tx, rows []map[string]any) error, args ...any) ([]map[string]any, error) {
+	if err := validateSchemaName(schemaName); err != nil {
+		return nil, err
+	}
+
+	cctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+	res, err := tdb.exec(func() (any, error) {
+		tx, err := tdb.pool.Begin(cctx)
+		if err != nil {
+			return nil, fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback(cctx)
+
+		setPath := "SET LOCAL search_path TO " + pgx.Identifier{schemaName}.Sanitize() + ", public"
+		if _, err := tx.Exec(cctx, setPath); err != nil {
+			return nil, fmt.Errorf("set search_path: %w", err)
+		}
+
+		rows, err := tx.Query(cctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("query: %w", err)
+		}
+		descs := rows.FieldDescriptions()
+		result := make([]map[string]any, 0)
+		for rows.Next() {
+			vals, scanErr := rows.Values()
+			if scanErr != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan values: %w", scanErr)
+			}
+			row := make(map[string]any, len(descs))
+			for i, desc := range descs {
+				row[string(desc.Name)] = normalizeDBValue(vals[i])
+			}
+			result = append(result, row)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+
+		// Same-tx emission: a failure here rolls the whole write back.
+		if emit != nil {
+			if err := emit(cctx, tx, result); err != nil {
+				return nil, fmt.Errorf("emit: %w", err)
+			}
+		}
+
+		if err := tx.Commit(cctx); err != nil {
+			return nil, fmt.Errorf("commit: %w", err)
+		}
+		return result, nil
+	})
+	if err != nil {
+		return nil, classify(err)
+	}
+	return res.([]map[string]any), nil
+}
+
+// ExecTenantEmit is ExecTenant plus a same-transaction emit step (CRUD-EMIT-V1).
+// After the write executes and BEFORE commit it calls emit(ctx, tx, affected) on
+// the SAME tx — the affected-row count lets the caller skip emission when nothing
+// changed (e.g. a DELETE that matched no row). An emit error rolls the write back.
+// emit may be nil (then this is exactly ExecTenant).
+func (tdb *TenantDB) ExecTenantEmit(ctx context.Context, schemaName, query string, emit func(ctx context.Context, tx pgx.Tx, affected int64) error, args ...any) (int64, error) {
+	if err := validateSchemaName(schemaName); err != nil {
+		return 0, err
+	}
+
+	cctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+	res, err := tdb.exec(func() (any, error) {
+		tx, err := tdb.pool.Begin(cctx)
+		if err != nil {
+			return int64(0), fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback(cctx)
+
+		setPath := "SET LOCAL search_path TO " + pgx.Identifier{schemaName}.Sanitize() + ", public"
+		if _, err := tx.Exec(cctx, setPath); err != nil {
+			return int64(0), fmt.Errorf("set search_path: %w", err)
+		}
+		tag, err := tx.Exec(cctx, query, args...)
+		if err != nil {
+			return int64(0), fmt.Errorf("exec: %w", err)
+		}
+		affected := tag.RowsAffected()
+
+		if emit != nil {
+			if err := emit(cctx, tx, affected); err != nil {
+				return int64(0), fmt.Errorf("emit: %w", err)
+			}
+		}
+
+		if err := tx.Commit(cctx); err != nil {
+			return int64(0), fmt.Errorf("commit: %w", err)
+		}
+		return affected, nil
+	})
+	if err != nil {
+		return 0, classify(err)
+	}
+	return res.(int64), nil
+}
+
 // QueryScalarTenant runs a query that returns a single int64 value (e.g. COUNT(*))
 // within the tenant schema. Returns 0 if no rows are returned.
 func (tdb *TenantDB) QueryScalarTenant(ctx context.Context, schemaName, query string, args ...any) (int64, error) {

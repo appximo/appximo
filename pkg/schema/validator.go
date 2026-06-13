@@ -81,6 +81,27 @@ func Validate(s *APISchema) []ValidationError {
 			errs = append(errs, validateFieldRules(fieldPrefix, field)...)
 		}
 
+		// events: opt-in outbox emission (CRUD-EMIT-V1). Each value must be a
+		// known write action; an unknown value would silently never emit, so it
+		// is rejected at load — same "no dead config" contract as the rest.
+		seenEvents := make(map[string]bool, len(res.Events))
+		for _, action := range res.Events {
+			if !validEmitActions[action] {
+				errs = append(errs, ValidationError{
+					Field:   resPrefix + ".events",
+					Message: fmt.Sprintf("unknown event action %q: must be one of create, update, delete", action),
+				})
+				continue
+			}
+			if seenEvents[action] {
+				errs = append(errs, ValidationError{
+					Field:   resPrefix + ".events",
+					Message: fmt.Sprintf("duplicate event action %q", action),
+				})
+			}
+			seenEvents[action] = true
+		}
+
 		for hookName, hook := range res.Hooks {
 			hookPrefix := resPrefix + ".hooks." + hookName
 

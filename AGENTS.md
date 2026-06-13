@@ -292,6 +292,38 @@ plane (`PUT /tenants/{id}/schema` + reload) does NOT wire them — the
 reload response says so in a `warnings` field; a process restart is
 required.
 
+### Events (opt-in outbox emission)
+
+A resource may opt into emitting a **transactional outbox event** on each
+generated CRUD write by declaring an `events` array at the resource level
+(sibling of `fields`/`hooks`):
+
+```json
+"tasks": {
+  "fields": { "title": { "type": "string", "required": true } },
+  "events": ["create", "update", "delete"]
+}
+```
+
+- Values are exactly `create | update | delete` (present tense, the RBAC
+  action vocabulary). Any other value rejects the schema at load. A
+  resource that omits `events` emits nothing and pays **zero overhead** on
+  the write path.
+- The event is written to `public.outbox` **in the same transaction** as
+  the CRUD write (`pkg/outbox`): if the write rolls back (e.g. a unique
+  violation), the event never exists — and vice-versa. The engine fires
+  `pg_notify(outbox_notify, <id>)` on commit; the separate
+  `cmd/appitools-worker` consumes it (`SELECT … FOR UPDATE SKIP LOCKED`,
+  at-least-once, idempotent).
+- **Topic** is `{resource}.{created|updated|deleted}` — e.g. a POST to
+  `tasks` emits `tasks.created`, PUT/PATCH `tasks.updated`, DELETE
+  `tasks.deleted`. (PUT and PATCH both map to `updated`.)
+- **Payload** is lean — `{"id", "tenant_id", "resource", "action"}` (the
+  affected row's id + identity, never the full row). A consumer that needs
+  more does its own `SELECT`; for a delete the row is already gone, so the
+  id is all the event carries.
+- A delete that matches no row (404) emits nothing.
+
 ## Running it and making the first call
 
 Fastest path is the published Docker image — the four copy-paste
