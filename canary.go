@@ -1,4 +1,4 @@
-package main
+package appitools
 
 import (
 	"context"
@@ -17,14 +17,12 @@ import (
 )
 
 // canaryResolver builds the synthetic monitor's API canary from the LOADED
-// schema instead of hardcoded values: the probed resource is the first
-// resource (sorted) unless APPITOOLS_SYNTHETIC_RESOURCE overrides it, the
-// role is the first schema role that can read it, and the tenant is
-// APPITOOLS_SYNTHETIC_TENANT or — lazily — the first registered tenant in
-// public.tenants. Until a tenant exists (fresh install) the canary reports
-// "pending" rather than probing a route nobody created; once found, the
-// tenant is cached and the JWT re-minted at half of its 24h life so the
-// canary survives long-running processes.
+// schema instead of hardcoded values: the probed resource is the first resource
+// (sorted) unless APPITOOLS_SYNTHETIC_RESOURCE overrides it, the role is the
+// first schema role that can read it, and the tenant is APPITOOLS_SYNTHETIC_TENANT
+// or — lazily — the first registered tenant in public.tenants. Until a tenant
+// exists the canary reports "pending"; once found, the tenant is cached and the
+// JWT re-minted at half its 24h life so the canary survives long-running processes.
 func canaryResolver(pool *pgxpool.Pool, s *schema.APISchema, jwtSecret string, port int) func(context.Context) (*observability.Check, string) {
 	resource := os.Getenv("APPITOOLS_SYNTHETIC_RESOURCE")
 	if resource == "" {
@@ -83,8 +81,7 @@ func canaryResolver(pool *pgxpool.Pool, s *schema.APISchema, jwtSecret string, p
 	}
 }
 
-// firstResourceName returns the alphabetically first resource of the schema —
-// a deterministic pick over Go's random map order.
+// firstResourceName returns the alphabetically first resource of the schema.
 func firstResourceName(s *schema.APISchema) string {
 	names := make([]string, 0, len(s.Resources))
 	for n := range s.Resources {
@@ -97,8 +94,7 @@ func firstResourceName(s *schema.APISchema) string {
 	return names[0]
 }
 
-// canaryRole returns the alphabetically first role whose policy can read
-// resource, or "" if none can.
+// canaryRole returns the alphabetically first role whose policy can read resource.
 func canaryRole(s *schema.APISchema, resource string) string {
 	names := make([]string, 0, len(s.RBAC.Roles))
 	for n := range s.RBAC.Roles {
@@ -113,9 +109,7 @@ func canaryRole(s *schema.APISchema, resource string) string {
 	return ""
 }
 
-// roleGrantsRead reports whether the policy allows action read (or *) on the
-// resource. RolePolicy.Resources is raw JSON: either the string "*" or a list
-// of resource names.
+// roleGrantsRead reports whether the policy allows read (or *) on resource.
 func roleGrantsRead(rp schema.RolePolicy, resource string) bool {
 	action := false
 	for _, a := range rp.Actions {
