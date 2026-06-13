@@ -13,7 +13,16 @@ const STATUS_BADGE = {
   running: 'text-yellow-400 border-yellow-800 bg-yellow-500/10',
 }
 
-const fmtDate = (s) => { const d = new Date(s); return Number.isNaN(+d) ? s : d.toLocaleString() }
+// SQLite CURRENT_TIMESTAMP returns "YYYY-MM-DD HH:MM:SS" with no timezone marker.
+// Without an explicit 'Z', ECMAScript date parsing of non-ISO strings is
+// implementation-defined — Chrome and Node.js may treat the space-separated
+// format as local time instead of UTC, producing a timezone-offset gap between
+// columns. Replace the space with 'T' and append 'Z' to force UTC parsing.
+const fmtDate = (s) => {
+  if (!s) return '—'
+  const d = new Date(s.includes('T') ? s : s.replace(' ', 'T') + 'Z')
+  return Number.isNaN(+d) ? s : d.toLocaleString()
+}
 
 export default function Deploy() {
   const [servers, setServers] = createSignal([])
