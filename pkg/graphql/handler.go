@@ -563,7 +563,7 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 			Args: gql.FieldConfigArgument{
 				"id": &gql.ArgumentConfig{Type: gql.NewNonNull(gql.ID)},
 			},
-			Resolve: deleteResolver(name, tdb, policy, hub),
+			Resolve: deleteResolver(name, &resCopy, tdb, policy, hub),
 		}
 	}
 
@@ -965,7 +965,11 @@ func updateResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 	}
 }
 
-func deleteResolver(name string, tdb *db.TenantDB, policy *rbac.Policy, hub *events.Hub) gql.FieldResolveFn {
+func deleteResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, policy *rbac.Policy, hub *events.Hub) gql.FieldResolveFn {
+	// Decided once at schema build (boot), like the REST delete path — never per
+	// request. emitDelete gates same-tx outbox emission; tbl is the quoted table.
+	emitDelete := res.EmitsOn("delete")
+	tbl := pgx.Identifier{name}.Sanitize()
 	return func(p gql.ResolveParams) (any, error) {
 		tc := tenant.MustFromCtx(p.Context)
 		evalResult, err := checkRBAC(p.Context, policy, name, "delete")
@@ -978,17 +982,15 @@ func deleteResolver(name string, tdb *db.TenantDB, policy *rbac.Policy, hub *eve
 			return false, fmt.Errorf("invalid id format")
 		}
 
-		// Enforce the row-level RBAC condition (BOLA guard) — a restricted role
-		// must not delete another principal's row by guessing its id.
-		q := "DELETE FROM " + pgx.Identifier{name}.Sanitize() + " WHERE id = $1"
-		qargs := []any{idStr}
+		// Shared delete core: the SAME codegen.RunDelete the REST DELETE handler
+		// uses (DELETE + row-level RBAC condition + same-tx {resource}.deleted
+		// emission when opted in), so REST and GraphQL delete emit identically —
+		// completing REST/GraphQL write consistency across create/update/delete.
+		var cond *rbac.WhereCondition
 		if evalResult != nil {
-			q, qargs, err = query.AppendRowCondition(q, qargs, evalResult.Condition)
-			if err != nil {
-				return false, err
-			}
+			cond = evalResult.Condition
 		}
-		affected, err := tdb.ExecTenant(p.Context, tc.PGSchema, q, qargs...)
+		affected, err := codegen.RunDelete(p.Context, tdb, tbl, name, tc.ID, tc.PGSchema, idStr, cond, emitDelete)
 		if err != nil {
 			return false, safeDBErr(err)
 		}

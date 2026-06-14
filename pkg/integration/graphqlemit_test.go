@@ -22,10 +22,11 @@ import (
 	"github.com/miguelangel/appitools/pkg/worker"
 )
 
-// emitSchema (BUGS-2) exercises the REST/GraphQL create-emission consistency fix:
-//   - "notes" opts into events:["create"] (and is unique-keyed so a duplicate
-//     create fails at the DB, proving same-tx atomicity of the emission);
-//   - "memos" declares NO events — the no-opt-in gate: create must never emit.
+// emitSchema (BUGS-2/BUGS-3) exercises the REST/GraphQL write-emission consistency
+// fixes:
+//   - "notes" opts into events:["create","delete"] (and is unique-keyed so a
+//     duplicate create fails at the DB, proving same-tx atomicity of the emission);
+//   - "memos" declares NO events — the no-opt-in gate: create/delete must never emit.
 func emitSchema() *schema.APISchema {
 	return &schema.APISchema{
 		Schema:  "https://appitools.dev/schema/v1",
@@ -36,7 +37,7 @@ func emitSchema() *schema.APISchema {
 				Fields: map[string]schema.FieldDef{
 					"body": {Type: "string", Required: true, Unique: true},
 				},
-				Events: []string{"create"},
+				Events: []string{"create", "delete"},
 			},
 			"memos": {
 				Fields: map[string]schema.FieldDef{
@@ -265,6 +266,183 @@ func TestGraphQLCreateEmitsOutbox(t *testing.T) {
 		}
 		if !found {
 			t.Fatalf("worker did not consume the GraphQL-emitted notes.created for id %s (saw %d rows)", id, len(seen))
+		}
+	})
+}
+
+// TestGraphQLDeleteEmitsOutbox is the BUGS-3 regression suite (twin of BUGS-2): the
+// GraphQL deleteX resolver must emit the {resource}.deleted outbox event for an
+// opt-in resource — IDENTICALLY to REST DELETE — and never emit for a no-opt-in
+// resource or a delete that matched no row, always inside the write transaction.
+// With create (BUGS-2) and update (SCHEMA-CLOSE-V1) already consistent, this
+// completes REST==GraphQL emission across all three write operations.
+func TestGraphQLDeleteEmitsOutbox(t *testing.T) {
+	rest, gql, tdb, pool, tok, done := setupEmit(t)
+	defer done()
+	super := tok("super_admin", superID)
+
+	newNote := func(body string) string {
+		t.Helper()
+		got := dpDo(t, rest, "POST", "/api/notes", super, map[string]any{"body": body}, http.StatusCreated)
+		return got["id"].(string)
+	}
+	gqlDeleteNote := func(t *testing.T, id string) (bool, []any) {
+		t.Helper()
+		data, errs := gqlDo(t, gql, super, `mutation { deleteNote(id: "`+id+`") }`)
+		if len(errs) > 0 {
+			return false, errs
+		}
+		ok, _ := data["deleteNote"].(bool)
+		return ok, nil
+	}
+
+	t.Run("opt-in: GraphQL delete emits notes.deleted with the lean payload", func(t *testing.T) {
+		id := newNote("del-1")
+		before := countOutbox(t, tdb, "notes.deleted")
+		ok, errs := gqlDeleteNote(t, id)
+		if len(errs) > 0 {
+			t.Fatalf("graphql errors: %v", errs)
+		}
+		if !ok {
+			t.Fatalf("deleteNote returned false")
+		}
+		if after := countOutbox(t, tdb, "notes.deleted"); after != before+1 {
+			t.Fatalf("GraphQL delete must emit notes.deleted: before=%d after=%d", before, after)
+		}
+		topic, payload := lastOutboxPayload(t, tdb, "notes.deleted")
+		if topic != "notes.deleted" {
+			t.Errorf("topic: got %q", topic)
+		}
+		if payload["tenant_id"] != tenantID {
+			t.Errorf("payload tenant_id: want %q, got %v", tenantID, payload["tenant_id"]) // isolation
+		}
+		if payload["resource"] != "notes" {
+			t.Errorf("payload resource: got %v", payload["resource"])
+		}
+		if payload["action"] != "deleted" {
+			t.Errorf("payload action: want deleted, got %v", payload["action"])
+		}
+		if payload["id"] != id {
+			t.Errorf("payload id: want %q, got %v", id, payload["id"])
+		}
+		// The row is actually gone — delete + event committed together.
+		_ = dpDo(t, rest, "GET", "/api/notes/"+id, super, nil, http.StatusNotFound)
+	})
+
+	t.Run("GraphQL delete == REST DELETE in emission (topic + payload)", func(t *testing.T) {
+		idR := newNote("del-rest")
+		idG := newNote("del-gql")
+
+		// REST DELETE → capture its emitted payload (DELETE returns 204, no body).
+		restBefore := countOutbox(t, tdb, "notes.deleted")
+		_ = dpDo(t, rest, "DELETE", "/api/notes/"+idR, super, nil, http.StatusNoContent)
+		if countOutbox(t, tdb, "notes.deleted") != restBefore+1 {
+			t.Fatalf("REST DELETE did not emit notes.deleted")
+		}
+		restTopic, restPayload := lastOutboxPayload(t, tdb, "notes.deleted")
+
+		// GraphQL delete → capture its emitted payload.
+		gqlBefore := countOutbox(t, tdb, "notes.deleted")
+		ok, errs := gqlDeleteNote(t, idG)
+		if len(errs) > 0 || !ok {
+			t.Fatalf("GraphQL delete failed: ok=%v errs=%v", ok, errs)
+		}
+		if countOutbox(t, tdb, "notes.deleted") != gqlBefore+1 {
+			t.Fatalf("GraphQL delete did not emit notes.deleted")
+		}
+		gqlTopic, gqlPayload := lastOutboxPayload(t, tdb, "notes.deleted")
+
+		if restTopic != gqlTopic {
+			t.Errorf("topic differs: rest=%q gql=%q", restTopic, gqlTopic)
+		}
+		for _, k := range []string{"tenant_id", "resource", "action"} {
+			if restPayload[k] != gqlPayload[k] {
+				t.Errorf("payload[%q] differs: rest=%v gql=%v", k, restPayload[k], gqlPayload[k])
+			}
+		}
+		if restPayload["id"] != idR {
+			t.Errorf("REST payload id %v != deleted row id %v", restPayload["id"], idR)
+		}
+		if gqlPayload["id"] != idG {
+			t.Errorf("GraphQL payload id %v != deleted row id %v", gqlPayload["id"], idG)
+		}
+	})
+
+	t.Run("no-opt-in: GraphQL delete on memos emits nothing (gate)", func(t *testing.T) {
+		got := dpDo(t, rest, "POST", "/api/memos", super, map[string]any{"body": "m1"}, http.StatusCreated)
+		mid := got["id"].(string)
+		before := countOutbox(t, tdb, "memos.deleted")
+		data, errs := gqlDo(t, gql, super, `mutation { deleteMemo(id: "`+mid+`") }`)
+		if len(errs) > 0 {
+			t.Fatalf("graphql errors: %v", errs)
+		}
+		if ok, _ := data["deleteMemo"].(bool); !ok {
+			t.Fatalf("deleteMemo returned false")
+		}
+		if after := countOutbox(t, tdb, "memos.deleted"); after != before {
+			t.Errorf("a resource without events:[delete] must not emit: before=%d after=%d", before, after)
+		}
+	})
+
+	t.Run("no-match delete emits nothing (same-tx atomicity is structural)", func(t *testing.T) {
+		// A never-created id: the DELETE matches 0 rows, so the emit closure returns
+		// early and no notes.deleted is written — the delete-path "no write → no
+		// event" gate. A true post-write rollback is not separately triggerable for
+		// delete in this FK-less engine; the same-tx guarantee is identical to the
+		// create path proven in BUGS-2 (RunDelete reuses the same ExecTenantEmit
+		// mechanism — the event and the delete commit together or not at all).
+		missing := "00000000-0000-0000-0000-0000000000ff"
+		before := countOutbox(t, tdb, "notes.deleted")
+		ok, errs := gqlDeleteNote(t, missing)
+		if len(errs) > 0 {
+			t.Fatalf("graphql errors: %v", errs)
+		}
+		if ok {
+			t.Fatalf("deleteNote on a missing id must return false")
+		}
+		if after := countOutbox(t, tdb, "notes.deleted"); after != before {
+			t.Errorf("a no-match delete must not emit: before=%d after=%d", before, after)
+		}
+	})
+
+	t.Run("worker consumes the GraphQL-emitted delete event (e2e, same path as REST)", func(t *testing.T) {
+		noop := worker.ProcessorFunc(func(context.Context, worker.Row) error { return nil })
+		if _, err := worker.Drain(context.Background(), pool, noop, 100, 5, nil); err != nil {
+			t.Fatalf("pre-drain: %v", err)
+		}
+		id := newNote("del-worker") // emits notes.created…
+		ok, errs := gqlDeleteNote(t, id)
+		if len(errs) > 0 || !ok {
+			t.Fatalf("GraphQL delete failed: ok=%v errs=%v", ok, errs)
+		}
+		// …then the EXISTING worker drains the notes.deleted via the same path it
+		// uses for REST-emitted rows (the producing surface is invisible to it).
+		var seen []worker.Row
+		res, err := worker.Drain(context.Background(), pool, worker.ProcessorFunc(func(_ context.Context, row worker.Row) error {
+			seen = append(seen, row)
+			return nil
+		}), 100, 5, nil)
+		if err != nil {
+			t.Fatalf("drain: %v", err)
+		}
+		if res.Processed < 1 {
+			t.Fatalf("worker processed nothing: %+v", res)
+		}
+		found := false
+		for _, row := range seen {
+			if row.Topic != "notes.deleted" || row.TenantID != tenantID {
+				continue
+			}
+			var p map[string]any
+			if err := json.Unmarshal(row.Payload, &p); err != nil {
+				t.Fatalf("worker saw a non-JSON payload: %v", err)
+			}
+			if p["id"] == id {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("worker did not consume the GraphQL-emitted notes.deleted for id %s (saw %d rows)", id, len(seen))
 		}
 	})
 }

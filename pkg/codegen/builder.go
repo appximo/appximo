@@ -498,29 +498,16 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// Enforce the row-level RBAC condition (if any) so a restricted role
 			// cannot delete another principal's row by guessing its id.
 			evalResult := rbac.EvalResultFromCtx(req.Context())
-			q := fmt.Sprintf("DELETE FROM %s WHERE id = $1", tbl)
-			args := []any{id}
+			var cond *rbac.WhereCondition
 			if evalResult != nil {
-				var ok bool
-				if q, args, ok = applyRowCondition(q, args, evalResult.Condition); !ok {
-					writeDBErr(w, req, fmt.Errorf("invalid rbac condition field"))
-					return
-				}
+				cond = evalResult.Condition
 			}
-			var affected int64
-			var err error
-			if emitDelete {
-				// Same-tx emission, but only when a row was actually deleted.
-				affected, err = tdb.ExecTenantEmit(req.Context(), tc.PGSchema, q,
-					func(ectx context.Context, tx pgx.Tx, aff int64) error {
-						if aff == 0 {
-							return nil
-						}
-						return enqueueCRUDEvent(ectx, tx, tc.ID, name, "delete", id)
-					}, args...)
-			} else {
-				affected, err = tdb.ExecTenant(req.Context(), tc.PGSchema, q, args...)
-			}
+			// Shared delete core (RunDelete): runs the DELETE and, when the resource
+			// opted into events:["delete"], enqueues the {resource}.deleted event in
+			// the SAME tx (only if a row was actually deleted). The GraphQL delete
+			// mutation calls the same RunDelete, so REST and GraphQL delete emit
+			// identically; no opt-in → plain ExecTenant, zero added overhead.
+			affected, err := RunDelete(req.Context(), tdb, tbl, name, tc.ID, tc.PGSchema, id, cond, emitDelete)
 			if err != nil {
 				writeDBErr(w, req, err)
 				return
@@ -959,6 +946,36 @@ func RunUpdate(ctx context.Context, tdb *db.TenantDB, res *schema.ResourceSchema
 			}, args...)
 	}
 	return tdb.ExecRowsTenant(ctx, pgSchema, q, args...)
+}
+
+// RunDelete executes the DELETE for the row id (with the role's row-level RBAC
+// condition appended — BOLA defence, so a restricted role cannot delete a row it
+// cannot see), emitting the outbox event in the SAME transaction when emitDelete is
+// set — exactly as RunInsert/RunUpdate do for create/update. It returns the
+// affected-row count (0 → 404 / row-condition exclusion → no event). This is the
+// ONE delete core shared by the REST DELETE handler and the GraphQL delete
+// mutation, so both surfaces enqueue an IDENTICAL {resource}.deleted event (same
+// topic, same lean {id,tenant_id,resource,action} payload) atomically with the
+// delete. A resource that did not opt into events:["delete"] takes the plain
+// ExecTenant path — no emission, zero added overhead (the no-opt-in gate).
+func RunDelete(ctx context.Context, tdb *db.TenantDB, tbl, name, tenantID, pgSchema, id string, cond *rbac.WhereCondition, emitDelete bool) (int64, error) {
+	q := fmt.Sprintf("DELETE FROM %s WHERE id = $1", tbl)
+	args := []any{id}
+	q, args, err := query.AppendRowCondition(q, args, cond)
+	if err != nil {
+		return 0, err
+	}
+	if emitDelete {
+		// Same-tx emission, but only when a row was actually deleted (affected > 0).
+		return tdb.ExecTenantEmit(ctx, pgSchema, q,
+			func(ectx context.Context, tx pgx.Tx, affected int64) error {
+				if affected == 0 {
+					return nil
+				}
+				return enqueueCRUDEvent(ectx, tx, tenantID, name, "delete", id)
+			}, args...)
+	}
+	return tdb.ExecTenant(ctx, pgSchema, q, args...)
 }
 
 // CollectUpdate validates body against the resource schema for an update and
