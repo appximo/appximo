@@ -44,6 +44,45 @@ func enqueueCRUDEvent(ctx context.Context, tx pgx.Tx, tenantID, resource, action
 	return err
 }
 
+// policyFromSchema rebuilds an *rbac.Policy from the schema's RBAC block so the
+// generated handlers can evaluate read access to RELATION TARGET resources at
+// request time (the middleware only evaluates the route's own resource). Built
+// once at boot in BuildRouter, never per request.
+func policyFromSchema(s *schema.APISchema) *rbac.Policy {
+	b, _ := json.Marshal(s.RBAC)
+	var p rbac.Policy
+	_ = json.Unmarshal(b, &p) //nolint:errcheck
+	return &p
+}
+
+// makeRelationRBAC binds the request's identity to policy.Evaluate so the include
+// compiler can decide, per relation target, whether the role may read it (else a
+// 403), its field allowlist (scopes the embedded json_build_object), and its
+// row-level condition (injected into the embed WHERE). RBAC-at-compilation, not
+// a post-hoc filter — the SQL never selects a child the role may not see.
+func makeRelationRBAC(policy *rbac.Policy, req *http.Request) query.RelationRBAC {
+	var ev rbac.EvalContext
+	if c := auth.ClaimsFromCtx(req.Context()); c != nil {
+		ev = rbac.EvalContext{Role: c.Role, UserID: c.UserID, ExternalClientID: c.ExternalClientID}
+	}
+	return func(resource string) (bool, []string, *rbac.WhereCondition) {
+		r := policy.Evaluate(ev, resource, "read")
+		return r.Allowed, r.AllowedFields, r.Condition
+	}
+}
+
+// writeIncludeList writes the {"data":[...],"meta":{...}} envelope for a
+// list-with-embeds response. data is the raw JSON array built by Postgres — it is
+// written verbatim, never re-marshalled (the low-overhead direct-bytes path).
+func writeIncludeList(w http.ResponseWriter, data []byte, page, perPage, n int) {
+	if len(data) == 0 {
+		data = []byte("[]")
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"data":%s,"meta":{"page":%d,"per_page":%d,"has_next":%t,"has_prev":%t}}`,
+		data, page, perPage, n == perPage, page > 1)
+}
+
 // CacheInvalidator drops a tenant's cached GET responses. *cache.ResponseCache
 // implements it. BuildRouter calls it after a successful PUT/PATCH so a follow-up
 // read reflects the write immediately instead of waiting out the response-cache
@@ -149,6 +188,11 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 
 	r := chi.NewMux()
 
+	// RELATIONS-V1: policy for evaluating read access to relation TARGET resources
+	// at request time. Built once here (boot), so the per-request closure is just
+	// a bound Evaluate call. nil-safe: a schema with no relations never uses it.
+	policy := policyFromSchema(s)
+
 	for _, resName := range names {
 		name := resName
 		res := s.Resources[resName]
@@ -179,6 +223,30 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
 				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+
+			// RELATIONS-V1: opt-in nested embedding. WITHOUT ?include= this branch
+			// is skipped entirely and the SQL below is byte-identical to before (the
+			// no-regression gate). WITH it, one json_agg+LATERAL query serves the
+			// whole nested tree in a single round-trip (no N+1), RBAC-compiled.
+			if include := req.URL.Query().Get("include"); query.HasInclude(include) {
+				baseSelect, _, baseArgs, _ := qb.SQL()
+				of, od := qb.EffectiveOrder()
+				incSQL, incArgs, ierr := query.BuildListInclude(name, include, baseSelect, baseArgs, of, od, s, schema.DefaultMaxIncludeDepth, makeRelationRBAC(policy, req))
+				if ierr != nil {
+					writeJSONErr(w, ierr.Status, ierr.Msg)
+					return
+				}
+				data, n, qerr := tdb.IncludeListJSON(req.Context(), tc.PGSchema, incSQL, incArgs...)
+				if qerr != nil {
+					markSpan(req, "query")
+					writeDBErr(w, req, qerr)
+					return
+				}
+				markSpan(req, "query")
+				writeIncludeList(w, data, qb.Page(), qb.PerPage(), int(n))
+				markSpan(req, "serialize")
 				return
 			}
 
@@ -361,6 +429,32 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					return
 				}
 			}
+
+			// RELATIONS-V1: get-by-id with embeds. Opt-in; without ?include= the
+			// path below is unchanged. The base select (q/args, row-cond applied)
+			// is wrapped so the embed cannot resurrect a row the base WHERE excluded.
+			if include := req.URL.Query().Get("include"); query.HasInclude(include) {
+				incSQL, incArgs, ierr := query.BuildGetInclude(name, include, q, args, s, schema.DefaultMaxIncludeDepth, makeRelationRBAC(policy, req))
+				if ierr != nil {
+					writeJSONErr(w, ierr.Status, ierr.Msg)
+					return
+				}
+				data, found, qerr := tdb.IncludeOneJSON(req.Context(), tc.PGSchema, incSQL, incArgs...)
+				if qerr != nil {
+					writeDBErr(w, req, qerr)
+					return
+				}
+				markSpan(req, "query")
+				if !found {
+					writeJSONErr(w, http.StatusNotFound, "not found")
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Write(data) //nolint:errcheck
+				markSpan(req, "serialize")
+				return
+			}
+
 			rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema, q, args...)
 			if err != nil {
 				writeDBErr(w, req, err)

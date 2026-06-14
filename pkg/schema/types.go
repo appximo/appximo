@@ -21,6 +21,13 @@ type ResourceSchema struct {
 	Hooks   map[string]HookConfig `json:"hooks,omitempty"`
 	Indexes []IndexDef            `json:"indexes,omitempty"`
 
+	// Relations is the opt-in set of declarative relations (RELATIONS-V1,
+	// ADR-019) keyed by the embed name exposed to clients (the key used in
+	// ?include=<name> and the GraphQL nested field). A resource that omits this
+	// key serves exactly as before and pays zero overhead on the read path —
+	// relations are served ONLY when explicitly requested via ?include=.
+	Relations map[string]RelationDef `json:"relations,omitempty"`
+
 	// Events is the opt-in list of write actions that emit a transactional
 	// outbox event (CRUD-EMIT-V1). Valid values: "create", "update", "delete"
 	// (present-tense, matching the RBAC action vocabulary). For a declared
@@ -84,6 +91,47 @@ type FieldDef struct {
 	MaxLength *int     `json:"maxLength,omitempty"` // string/text: rune count <= MaxLength
 	Pattern   string   `json:"pattern,omitempty"`   // string/text: RE2 regex, len <= MaxPatternLength
 	Format    string   `json:"format,omitempty"`    // string/text: email | uuid | url | date
+}
+
+// RelationDef declares one relation between resources (RELATIONS-V1, ADR-019),
+// served nested in a single round-trip via json_agg + LATERAL when a client
+// opts in with ?include=. Declaration is EXPLICIT (no FK-catalog inference): the
+// relation compiles once at boot from the shared schema, never per request.
+//
+//	has_many     — parent → many children: FK lives on the TARGET (child) table,
+//	               matched against the parent's id (child.<FK> = parent.id).
+//	belongs_to   — child → its parent: FK lives on THIS (source) table, matched
+//	               against the target's id (target.id = source.<FK>).
+//	many_to_many — both sides via a junction table: Through holds FK (this side's
+//	               id) and TargetFK (the target's id).
+type RelationDef struct {
+	Type     string `json:"type"`                // has_many | belongs_to | many_to_many
+	Target   string `json:"target"`              // related resource name
+	FK       string `json:"fk"`                  // foreign-key column (see Type for which table)
+	Through  string `json:"through,omitempty"`   // junction table (many_to_many only)
+	TargetFK string `json:"target_fk,omitempty"` // target's FK column in Through (many_to_many only)
+	Limit    int    `json:"limit,omitempty"`     // top-N children per parent (0 → DefaultEmbedLimit)
+}
+
+// Relation type constants and embed defaults (ADR-019 §4).
+const (
+	RelationHasMany    = "has_many"
+	RelationBelongsTo  = "belongs_to"
+	RelationManyToMany = "many_to_many"
+
+	// DefaultEmbedLimit bounds children per parent in an embed when a relation
+	// declares no Limit — a paginated embed that caps fan-out (DoS guard).
+	DefaultEmbedLimit = 50
+	// DefaultMaxIncludeDepth is the maximum nesting depth of ?include= (e.g.
+	// "lines.product" is depth 2). Requests beyond it are rejected with 400.
+	DefaultMaxIncludeDepth = 2
+)
+
+// validRelationTypes is the closed set accepted for RelationDef.Type.
+var validRelationTypes = map[string]bool{
+	RelationHasMany:    true,
+	RelationBelongsTo:  true,
+	RelationManyToMany: true,
 }
 
 // HookConfig defines a lifecycle hook on a resource (before_create, after_create, etc.).

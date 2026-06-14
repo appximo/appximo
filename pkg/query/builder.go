@@ -190,6 +190,24 @@ func BuildQuery(
 	return qb, nil
 }
 
+// EffectiveOrder returns the column and direction (ASC|DESC) that SQL() orders
+// the base rows by — so the include path (RELATIONS-V1) can re-impose the SAME
+// order on its json_agg of wrapped rows. It mirrors SQL()'s ORDER BY logic:
+// keyset cursors order by id (DESC for ?before), an explicit ?sort wins
+// otherwise, and the default is id ASC.
+func (qb *QueryBuilder) EffectiveOrder() (field, dir string) {
+	switch {
+	case qb.beforeID != "":
+		return "id", "DESC"
+	case qb.afterID != "":
+		return "id", "ASC"
+	case qb.sortField != "":
+		return qb.sortField, qb.sortOrder
+	default:
+		return "id", "ASC"
+	}
+}
+
 // Page returns the current page number (1-based).
 func (qb *QueryBuilder) Page() int { return qb.page }
 

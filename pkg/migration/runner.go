@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 
@@ -38,7 +39,98 @@ func ApplyTenantMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema stri
 			return fmt.Errorf("evolve table %s.%s: %w", pgSchema, resName, err)
 		}
 	}
+
+	// RELATIONS-V1 (ADR-019 §3): every declared relation's FK column gets an
+	// index, so the embed's correlated subquery is an index lookup, not a per-
+	// parent sequential scan (N+1 at the storage layer). This is also the first
+	// concrete use of index DDL from the schema (the `indexes` debt). Run AFTER
+	// all tables exist (a junction `through` table may itself be a resource).
+	if err := ensureRelationIndexes(ctx, conn, pgSchema, s); err != nil {
+		return fmt.Errorf("relation indexes %s: %w", pgSchema, err)
+	}
 	return nil
+}
+
+// fkIndexTarget names one (table, column) pair to index for a declared relation.
+type fkIndexTarget struct{ table, column string }
+
+// relationIndexTargets returns the (table, column) pairs that must be indexed for
+// resName's declared relations:
+//
+//	has_many     → FK on the TARGET (child) table     (child.<fk> = parent.id)
+//	belongs_to   → FK on THIS (source) table          (target.id  = source.<fk>)
+//	many_to_many → both FK columns on the THROUGH table
+func relationIndexTargets(resName string, res schema.ResourceSchema) []fkIndexTarget {
+	var out []fkIndexTarget
+	for _, rel := range res.Relations {
+		switch rel.Type {
+		case schema.RelationHasMany:
+			out = append(out, fkIndexTarget{rel.Target, rel.FK})
+		case schema.RelationBelongsTo:
+			out = append(out, fkIndexTarget{resName, rel.FK})
+		case schema.RelationManyToMany:
+			out = append(out, fkIndexTarget{rel.Through, rel.FK})
+			out = append(out, fkIndexTarget{rel.Through, rel.TargetFK})
+		}
+	}
+	return out
+}
+
+// ensureRelationIndexes creates a btree index on every relation FK column, once,
+// idempotently. The column's existence is verified against information_schema
+// first (an FK on a runtime-evolved or junction table that the schema did not
+// create is reported as a WARNING, never a hard failure — same "warn, don't die"
+// contract as the `indexes` key). Indexes are created NON-concurrently: at tenant
+// registration the table is new/empty so the build is instant and effectively
+// lock-free; adding a relation to an existing large table is a separate, manual
+// CREATE INDEX CONCURRENTLY migration (documented).
+func ensureRelationIndexes(ctx context.Context, conn *pgxpool.Conn, pgSchema string, s *schema.APISchema) error {
+	names := make([]string, 0, len(s.Resources))
+	for n := range s.Resources {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	seen := make(map[string]bool)
+	for _, resName := range names {
+		for _, t := range relationIndexTargets(resName, s.Resources[resName]) {
+			key := t.table + "." + t.column
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+
+			exists, err := columnExists(ctx, conn, pgSchema, t.table, t.column)
+			if err != nil {
+				return fmt.Errorf("check column %s.%s: %w", t.table, t.column, err)
+			}
+			if !exists {
+				log.Printf("WARNING: relation FK %q.%q.%q not found in information_schema — index skipped (no such table/column yet)",
+					pgSchema, t.table, t.column)
+				continue
+			}
+			idxName := fmt.Sprintf("idx_%s_%s", t.table, t.column)
+			ddl := fmt.Sprintf(`CREATE INDEX IF NOT EXISTS "%s" ON "%s"."%s" ("%s")`,
+				idxName, pgSchema, t.table, t.column)
+			if _, err := conn.Exec(ctx, ddl); err != nil {
+				return fmt.Errorf("create index on %s.%s: %w", t.table, t.column, err)
+			}
+		}
+	}
+	return nil
+}
+
+// columnExists reports whether pgSchema.table has a column named col.
+func columnExists(ctx context.Context, conn *pgxpool.Conn, pgSchema, table, col string) (bool, error) {
+	var n int
+	err := conn.QueryRow(ctx,
+		`SELECT count(*) FROM information_schema.columns
+		 WHERE table_schema = $1 AND table_name = $2 AND column_name = $3`,
+		pgSchema, table, col).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // addMissingColumns issues ALTER TABLE … ADD COLUMN IF NOT EXISTS for every

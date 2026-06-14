@@ -17,6 +17,10 @@ func (e ValidationError) Error() string {
 var (
 	resourceNameRe = regexp.MustCompile(`^[a-z][a-z0-9\-]*$`)
 	fieldNameRe    = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	// throughNameRe validates a many_to_many junction TABLE name — it may be a
+	// declared resource (hyphenated) or a bare snake_case join table
+	// (order_products), so both separators are allowed.
+	throughNameRe = regexp.MustCompile(`^[a-z][a-z0-9_\-]*$`)
 
 	validFieldTypes = map[string]bool{
 		"string":  true,
@@ -102,6 +106,8 @@ func Validate(s *APISchema) []ValidationError {
 			seenEvents[action] = true
 		}
 
+		errs = append(errs, validateRelations(resPrefix, resName, res, s)...)
+
 		for hookName, hook := range res.Hooks {
 			hookPrefix := resPrefix + ".hooks." + hookName
 
@@ -136,6 +142,89 @@ func Validate(s *APISchema) []ValidationError {
 		}
 	}
 
+	return errs
+}
+
+// validateRelations checks the DEFINITION of every declared relation (RELATIONS-V1,
+// ADR-019): a structural-only check that is exhaustive about shape so a typo never
+// becomes silent dead config. The EXISTENCE of FK columns is checked separately
+// against information_schema at tenant migration (a warning, since columns can be
+// added to the live table at runtime — the DB stays the source of truth).
+func validateRelations(resPrefix, resName string, res ResourceSchema, s *APISchema) []ValidationError {
+	var errs []ValidationError
+	for relName, rel := range res.Relations {
+		relPrefix := resPrefix + ".relations." + relName
+
+		// The embed name is exposed in ?include= and as a GraphQL field, and it
+		// keys json_build_object — it must be a valid identifier and not shadow a
+		// field of the same resource (that would make the embed ambiguous).
+		if !fieldNameRe.MatchString(relName) {
+			errs = append(errs, ValidationError{
+				Field:   relPrefix,
+				Message: fmt.Sprintf("invalid relation name %q: must match ^[a-z][a-z0-9_]*$", relName),
+			})
+		}
+		if _, clash := res.Fields[relName]; clash {
+			errs = append(errs, ValidationError{
+				Field:   relPrefix,
+				Message: fmt.Sprintf("relation name %q collides with a field of the same name", relName),
+			})
+		}
+
+		if !validRelationTypes[rel.Type] {
+			errs = append(errs, ValidationError{
+				Field:   relPrefix + ".type",
+				Message: fmt.Sprintf("unknown relation type %q: must be one of has_many, belongs_to, many_to_many", rel.Type),
+			})
+		}
+		if _, ok := s.Resources[rel.Target]; !ok {
+			errs = append(errs, ValidationError{
+				Field:   relPrefix + ".target",
+				Message: fmt.Sprintf("relation target %q references unknown resource", rel.Target),
+			})
+		}
+		if rel.FK == "" || !fieldNameRe.MatchString(rel.FK) {
+			errs = append(errs, ValidationError{
+				Field:   relPrefix + ".fk",
+				Message: fmt.Sprintf("relation fk %q must be a valid field name (^[a-z][a-z0-9_]*$)", rel.FK),
+			})
+		}
+		if rel.Limit < 0 {
+			errs = append(errs, ValidationError{
+				Field:   relPrefix + ".limit",
+				Message: "relation limit must be >= 0",
+			})
+		}
+
+		// through / target_fk belong to many_to_many ONLY.
+		if rel.Type == RelationManyToMany {
+			if rel.Through == "" || !throughNameRe.MatchString(rel.Through) {
+				errs = append(errs, ValidationError{
+					Field:   relPrefix + ".through",
+					Message: "many_to_many requires a valid through (junction table) name",
+				})
+			}
+			if rel.TargetFK == "" || !fieldNameRe.MatchString(rel.TargetFK) {
+				errs = append(errs, ValidationError{
+					Field:   relPrefix + ".target_fk",
+					Message: "many_to_many requires a valid target_fk column name",
+				})
+			}
+		} else {
+			if rel.Through != "" {
+				errs = append(errs, ValidationError{
+					Field:   relPrefix + ".through",
+					Message: fmt.Sprintf("through only applies to many_to_many, not %q", rel.Type),
+				})
+			}
+			if rel.TargetFK != "" {
+				errs = append(errs, ValidationError{
+					Field:   relPrefix + ".target_fk",
+					Message: fmt.Sprintf("target_fk only applies to many_to_many, not %q", rel.Type),
+				})
+			}
+		}
+	}
 	return errs
 }
 

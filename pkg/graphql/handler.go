@@ -422,6 +422,27 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 		})
 	}
 
+	// RELATIONS-V1: nested relation fields on each object type, typed to the
+	// target object type (a list for has_many/many_to_many, a single object for
+	// belongs_to). The default resolver reads the nested map that the list /
+	// get-by-id resolver populates from the json_agg+LATERAL query when the
+	// relation is actually selected — no dataloader, no per-field DB query.
+	for _, name := range names {
+		res := s.Resources[name]
+		for _, relName := range sortedRelationNames(&res) {
+			rel := res.Relations[relName]
+			target, ok := objectTypes[rel.Target]
+			if !ok {
+				continue
+			}
+			var ftype gql.Output = target
+			if rel.Type == schema.RelationHasMany || rel.Type == schema.RelationManyToMany {
+				ftype = gql.NewList(target)
+			}
+			objectTypes[name].AddFieldConfig(relName, &gql.Field{Type: ftype})
+		}
+	}
+
 	// Connection types (built after object types exist)
 	connectionTypes := make(map[string]*gql.Object, len(names))
 	for _, name := range names {
@@ -451,14 +472,14 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 				"filter":   &gql.ArgumentConfig{Type: filterTypes[name]},
 				"order":    &gql.ArgumentConfig{Type: orderTypes[name]},
 			},
-			Resolve: listResolver(name, &resCopy, tdb, policy),
+			Resolve: listResolver(name, &resCopy, tdb, policy, s),
 		}
 		queryFields[singular(name)] = &gql.Field{ // by ID: guide(id: ID!)
 			Type: objectTypes[name],
 			Args: gql.FieldConfigArgument{
 				"id": &gql.ArgumentConfig{Type: gql.NewNonNull(gql.ID)},
 			},
-			Resolve: getByIDResolver(name, tdb, policy),
+			Resolve: getByIDResolver(name, tdb, policy, s),
 		}
 		_ = title // title used for type names above; suppress unused warning
 	}
@@ -501,7 +522,7 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 
 // ── resolvers ─────────────────────────────────────────────────────────────────
 
-func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, policy *rbac.Policy) gql.FieldResolveFn {
+func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, policy *rbac.Policy, s *schema.APISchema) gql.FieldResolveFn {
 	return func(p gql.ResolveParams) (any, error) {
 		tc := tenant.MustFromCtx(p.Context)
 		evalResult, err := checkRBAC(p.Context, policy, name, "read")
@@ -527,22 +548,45 @@ func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, pol
 			return nil, safeDBErr(err)
 		}
 
-		rows, err := tdb.QueryTenant(p.Context, tc.PGSchema, selectQ, selectArgs...)
-		if err != nil {
-			return nil, safeDBErr(err)
-		}
-		defer rows.Close()
-		data, err := pkghandlers.RowsToMaps(rows)
-		if err != nil {
-			return nil, safeDBErr(err)
-		}
-
+		// Register the base field allowlist so the result scrubber drops any
+		// forbidden top-level field (shared by both data paths below).
 		if evalResult != nil && len(evalResult.AllowedFields) > 0 {
 			if fs, ok := p.Context.Value(rbacResultFilterKey{}).(*rbacResultFilter); ok {
 				fs.store(p.Info.FieldName, evalResult.AllowedFields)
 			}
-			for i, rec := range data {
-				data[i] = pkghandlers.FilterFields(rec, evalResult.AllowedFields)
+		}
+
+		var data []map[string]any
+		// RELATIONS-V1: when the selection set requests nested relation fields,
+		// fetch the whole tree with the SAME json_agg+LATERAL query as REST
+		// ?include= (one query, no N+1, RBAC-compiled). Otherwise the unchanged
+		// flat select runs.
+		if includePaths := listIncludePaths(p.Info, name, s); len(includePaths) > 0 {
+			of, od := qb.EffectiveOrder()
+			incSQL, incArgs, ierr := query.BuildListInclude(name, joinPaths(includePaths), selectQ, selectArgs, of, od, s, schema.DefaultMaxIncludeDepth, makeRelRBAC(p.Context, policy))
+			if ierr != nil {
+				return nil, fmt.Errorf("%s", ierr.Msg)
+			}
+			dataBytes, _, derr := tdb.IncludeListJSON(p.Context, tc.PGSchema, incSQL, incArgs...)
+			if derr != nil {
+				return nil, safeDBErr(derr)
+			}
+			if data, err = unmarshalList(dataBytes); err != nil {
+				return nil, safeDBErr(err)
+			}
+		} else {
+			rows, rerr := tdb.QueryTenant(p.Context, tc.PGSchema, selectQ, selectArgs...)
+			if rerr != nil {
+				return nil, safeDBErr(rerr)
+			}
+			defer rows.Close()
+			if data, err = pkghandlers.RowsToMaps(rows); err != nil {
+				return nil, safeDBErr(err)
+			}
+			if evalResult != nil && len(evalResult.AllowedFields) > 0 {
+				for i, rec := range data {
+					data[i] = pkghandlers.FilterFields(rec, evalResult.AllowedFields)
+				}
 			}
 		}
 		if data == nil {
@@ -589,7 +633,7 @@ func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, pol
 	}
 }
 
-func getByIDResolver(name string, tdb *db.TenantDB, policy *rbac.Policy) gql.FieldResolveFn {
+func getByIDResolver(name string, tdb *db.TenantDB, policy *rbac.Policy, s *schema.APISchema) gql.FieldResolveFn {
 	return func(p gql.ResolveParams) (any, error) {
 		tc := tenant.MustFromCtx(p.Context)
 		evalResult, err := checkRBAC(p.Context, policy, name, "read")
@@ -613,6 +657,33 @@ func getByIDResolver(name string, tdb *db.TenantDB, policy *rbac.Policy) gql.Fie
 				return nil, err
 			}
 		}
+
+		// RELATIONS-V1: nested selection → one json_agg+LATERAL query (the embed
+		// cannot resurrect a row the base WHERE + row-cond excluded).
+		if includePaths := objectIncludePaths(p.Info, name, s); len(includePaths) > 0 {
+			if evalResult != nil && len(evalResult.AllowedFields) > 0 {
+				if fs, ok := p.Context.Value(rbacResultFilterKey{}).(*rbacResultFilter); ok {
+					fs.store(p.Info.FieldName, evalResult.AllowedFields)
+				}
+			}
+			incSQL, incArgs, ierr := query.BuildGetInclude(name, joinPaths(includePaths), q, qargs, s, schema.DefaultMaxIncludeDepth, makeRelRBAC(p.Context, policy))
+			if ierr != nil {
+				return nil, fmt.Errorf("%s", ierr.Msg)
+			}
+			dataBytes, found, derr := tdb.IncludeOneJSON(p.Context, tc.PGSchema, incSQL, incArgs...)
+			if derr != nil {
+				return nil, safeDBErr(derr)
+			}
+			if !found {
+				return nil, nil
+			}
+			var rec map[string]any
+			if err := json.Unmarshal(dataBytes, &rec); err != nil {
+				return nil, safeDBErr(err)
+			}
+			return rec, nil
+		}
+
 		rows, err := tdb.QueryTenant(p.Context, tc.PGSchema, q, qargs...)
 		if err != nil {
 			return nil, safeDBErr(err)
@@ -923,6 +994,15 @@ func sortedNames(s *schema.APISchema) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func sortedRelationNames(res *schema.ResourceSchema) []string {
+	keys := make([]string, 0, len(res.Relations))
+	for k := range res.Relations {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func sortedFieldNames(res *schema.ResourceSchema) []string {

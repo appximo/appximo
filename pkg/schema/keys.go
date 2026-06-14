@@ -57,7 +57,13 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 	for resName, rawRes := range object("resources", top["resources"]) {
 		resPath := "resources." + resName
 		res := object(resPath, rawRes)
-		addUnknown(resPath, res, "fields", "hooks", "indexes", "events")
+		addUnknown(resPath, res, "fields", "hooks", "indexes", "events", "relations")
+
+		for relName, rawRel := range object(resPath+".relations", res["relations"]) {
+			relPath := resPath + ".relations." + relName
+			addUnknown(relPath, object(relPath, rawRel),
+				"type", "target", "fk", "through", "target_fk", "limit")
+		}
 
 		for fieldName, rawField := range object(resPath+".fields", res["fields"]) {
 			addUnknown(resPath+".fields."+fieldName, object(resPath+".fields."+fieldName, rawField),

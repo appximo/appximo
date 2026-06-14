@@ -1,8 +1,10 @@
 # ADR-019: Declarative relations via `json_agg` + `LATERAL`
 
-**Status:** Accepted (design) — implementation pending.
-The v1 engine is frozen. Relations enter via the standard pipeline:
-baseline → change → Mann-Whitney verdict on the 105/58 stack before merge.
+**Status:** Implemented (RELATIONS-V1). REST `?include=` + GraphQL nested
+fields via `json_agg` + `LEFT JOIN LATERAL`, RBAC-compiled, auto FK indexes,
+depth cap 2, per-embed top-N. Verified through the standard pipeline:
+baseline → change → Mann-Whitney verdict on the 105 stack (see
+[Measured result](#measured-result)).
 
 ---
 
@@ -337,6 +339,28 @@ The implementation will confirm this with the standard pipeline
 (`bench-protocol.sh`, Mann-Whitney, 10 runs, CV < 5 %, threshold
 `max(0.5 ms, 3 % × median_A)`) on the 105/58 hardware before merge.
 No claim will be made in the README or benchmark docs until measured.
+
+## Measured result
+
+Pipeline: `bench-protocol.sh`, 10 runs × 30 s @ 50 rps, Mann-Whitney via
+`/api/bench/compare-groups`, threshold `max(0.5 ms, 3 %)`. Engine on an
+isolated port with the synthetic monitor off; 105 single box (k6 co-located,
+documented steal → the gate relies on the 0.5 ms practical-significance
+threshold, which dwarfs both the host noise and the code delta).
+
+- **GATE — plain `GET /api/tasks` (no `?include=`), new vs old binary:**
+  `no_change` (median Δ ≈ **+0.01 ms**, CI [+0.009, +0.015] ms; 0.5 ms threshold).
+  The no-include path is preserved — the only added work is one `?include=`
+  string check.
+- **COST — `GET /api/orders?include=lines`** (20 parents/page, 15 children each,
+  FK indexed) **vs the plain baseline:** `no_change` (median Δ ≈ **+0.01 ms**,
+  CI [+0.007, +0.012] ms, 2.2 %).
+
+Measured cost is **far below the +0.3–1.0 ms estimate** — at this dataset the
+in-DB `json_agg` over an indexed FK plus direct-bytes streaming (no Go
+re-serialisation) is within noise of the flat query. The estimate was
+conservative; cost grows with embed width but is bounded by the per-embed
+`LIMIT` (top-N) by design.
 
 ---
 

@@ -261,9 +261,57 @@ once**: `{"error":"validation_failed","fields":[{"field":"title","rule":"require
 ```
 
 generates one read-only route — `GET /api/orders/{id}/customer` (field
-name minus `_id`) — returning the referenced record. That is **all**
-`relation` does: no FK constraint, no joins in list queries, no nested
-writes, no cascade.
+name minus `_id`) — returning the referenced record. That is **all** the
+field-level `relation` does: no FK constraint, no joins in list queries, no
+nested writes, no cascade.
+
+### Declarative relations + nested embeds (`relations`, ADR-019)
+
+For first-class nested reads, declare a `relations` block per resource
+(sibling of `fields`). A relation is served **nested in one round-trip**
+(`json_agg` + `LEFT JOIN LATERAL`, built in Postgres, streamed straight to
+the client — no N+1) and ONLY when the caller opts in with `?include=`:
+
+```json
+"orders": {
+  "fields": { "status": { "type": "string" }, "customer_id": { "type": "uuid" } },
+  "relations": {
+    "lines":    { "type": "has_many",     "target": "lines",    "fk": "order_id" },
+    "customer": { "type": "belongs_to",   "target": "customers","fk": "customer_id" }
+  }
+},
+"products": {
+  "relations": {
+    "orders": { "type": "many_to_many", "target": "orders",
+                "through": "order_products", "fk": "product_id", "target_fk": "order_id" }
+  }
+}
+```
+
+- `type` ∈ `has_many | belongs_to | many_to_many`.
+  - `has_many` — FK lives on the **target** (child) table (`child.<fk> = parent.id`).
+  - `belongs_to` — FK lives on **this** (source) table (`target.id = source.<fk>`).
+  - `many_to_many` — `through` (junction table) + `fk` (this side's id in it) +
+    `target_fk` (the target's id in it).
+- `limit` (optional, default **50**) bounds children per parent (top-N embed,
+  a fan-out / DoS guard).
+- **Request it** with `?include=lines,customer`; nest with a dot:
+  `?include=lines.product` (max depth **2** — deeper → `400`).
+- **Opt-in & free when unused:** WITHOUT `?include=` the SQL is byte-identical
+  to before — the plain list/get path is unchanged (measured `no_change`).
+  Serving a `has_many` embed of ~15 children measured **+0.01 ms** p50.
+- **RBAC is compiled into the SQL:** a relation is embedded only if the role may
+  `read` the target; the target's field allowlist scopes the embedded object and
+  its row-level condition is injected into the embed `WHERE`. Asking to `include`
+  a target the role cannot read → `403`. There is no path that returns a child
+  the role may not see.
+- **Auto FK index:** every declared relation's FK column gets a btree index at
+  tenant registration (the embed is an index lookup, never a per-parent seq scan).
+- **GraphQL:** the same relations are nested fields on the generated types
+  (`{ orders { data { id lines { id qty } customer { name } } } }`), backed by the
+  SAME single LATERAL query — no dataloader needed.
+- Names are strict-validated at load (unknown `type`/`target`, missing
+  `through`/`target_fk` for m2m, etc. all reject the schema).
 
 ### RBAC
 
@@ -472,17 +520,22 @@ is local-disk only.
 - Filter ops `neq`, `in`, `like`, `is_null` → 400.
 - Multi-field sort or `sort=field:desc` → silently ignored.
 - Total-count in list responses (`count=true` is not a thing).
-- Declarative joins / FK constraints (`relation` only adds the
-  subresource route).
+- FK **constraints** / cascades. (Declarative relations DO exist — nested
+  `?include=` embeds via `json_agg`+LATERAL, see
+  [Declarative relations](#declarative-relations--nested-embeds-relations-adr-019)
+  — but they create no FK constraint and no `ON DELETE` cascade; the field-level
+  `relation` still only adds the read-only subresource route.)
 - CORS headers — browser SPAs must be served same-origin
   ([workaround](docs/DEPLOY.md#cors--current-status-important-for-spas)).
 - GraphQL `update` mutation.
-- `default` values applied on insert, and `indexes` materialized as DB
-  indexes — both keys parse but neither acts yet. A schema declaring
-  `indexes` is accepted with
+- `default` values applied on insert, and the user-declared `indexes` key
+  materialized as DB indexes — both keys parse but neither acts yet. A schema
+  declaring `indexes` is accepted with
   `"warnings":["indexes … are parsed but not yet applied …"]` in the
   register/PUT response (and a boot log line), so the dead key is never
-  blessed in silence.
+  blessed in silence. (Relation FK columns ARE auto-indexed — see
+  [Declarative relations](#declarative-relations--nested-embeds-relations-adr-019)
+  — but arbitrary `indexes` still are not.)
 - `workflows` schema block — parsed for forward compatibility, no executor.
 - OTLP/OpenTelemetry export (observability is Prometheus `/metrics` + an
   internal trace ring).

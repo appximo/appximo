@@ -442,6 +442,46 @@ func (tdb *TenantDB) QueryScalarTenant(ctx context.Context, schemaName, query st
 	return n, rows.Err()
 }
 
+// IncludeListJSON runs a RELATIONS-V1 list-with-embeds query (built by
+// query.BuildListInclude) inside the tenant search_path and scans its single row
+// of (data text, n bigint): data is the JSON array of nested rows (the engine
+// writes it straight to the client, no Go round-trip), n the row count for
+// has_next. The query references multiple tables unqualified — the tenant
+// search_path (set by QueryTenant) resolves them, so this path supports embeds
+// across the tenant's tables without per-table qualification.
+func (tdb *TenantDB) IncludeListJSON(ctx context.Context, pgSchema, query string, args ...any) (data []byte, n int64, err error) {
+	rows, err := tdb.QueryTenant(ctx, pgSchema, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		if err := rows.Scan(&data, &n); err != nil {
+			return nil, 0, fmt.Errorf("scan include list: %w", err)
+		}
+	}
+	return data, n, rows.Err()
+}
+
+// IncludeOneJSON runs a RELATIONS-V1 get-by-id-with-embeds query (built by
+// query.BuildGetInclude) and scans its single JSON object column. found is false
+// when no row matched (→ 404), so an embed never resurrects a row the base WHERE
+// (including the row-level RBAC condition) excluded.
+func (tdb *TenantDB) IncludeOneJSON(ctx context.Context, pgSchema, query string, args ...any) (data []byte, found bool, err error) {
+	rows, err := tdb.QueryTenant(ctx, pgSchema, query, args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		if err := rows.Scan(&data); err != nil {
+			return nil, false, fmt.Errorf("scan include row: %w", err)
+		}
+		found = true
+	}
+	return data, found, rows.Err()
+}
+
 // QueryDirect runs a SELECT using a schema-qualified table name — no transaction,
 // no SET LOCAL. One roundtrip instead of four. Use for read-only list/get handlers.
 // tableName must be the unqualified resource name (e.g. "tasks"); pgSchema the
