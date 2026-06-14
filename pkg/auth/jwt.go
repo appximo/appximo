@@ -26,6 +26,20 @@ func GenerateToken(c Claims, secret string) (string, error) {
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, c).SignedString([]byte(secret))
 }
 
+// GenerateTokenWithTTL signs a HS256 JWT that expires in ttl. Unlike
+// GenerateToken (fixed 24h), it lets a caller mint a SHORT-LIVED token — e.g.
+// the outbox worker minting a 60s service token per write-back operation, so no
+// long-lived credential exists to leak (ADR-016 §Class 2 write-back). It sets
+// iat/exp but PRESERVES any RegisteredClaims the caller pre-filled (e.g.
+// Subject "service:worker" for audit), and emits the exact same Claims shape
+// ValidateToken accepts — there is only ONE claims contract.
+func GenerateTokenWithTTL(c Claims, secret string, ttl time.Duration) (string, error) {
+	now := time.Now()
+	c.RegisteredClaims.IssuedAt = jwt.NewNumericDate(now)
+	c.RegisteredClaims.ExpiresAt = jwt.NewNumericDate(now.Add(ttl))
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, c).SignedString([]byte(secret))
+}
+
 // ValidateToken parses and validates a signed JWT string.
 // Returns an error if the token is expired, malformed, or signed with a different secret.
 func ValidateToken(tokenStr, secret string) (*Claims, error) {

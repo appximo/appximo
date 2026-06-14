@@ -4,11 +4,15 @@
 // connections (never the engine's pool), LISTENs on outbox.NotifyChannel as a
 // wake-up hint, and polls the table — the durable source of truth — as a fallback.
 //
-// Scope (WORKER-V1): the only Processor wired here is the echo consumer, which
-// handles the echo.test topic that the engine's POST /api/_echo emits. It logs the
-// event and marks it sent — the minimal end-to-end proof that the async Class 2
-// loop lives. Real consumers (XLSX, email, write-back with a service JWT) and the
-// CRUD hookup are later bricks (ADR-016).
+// Scope: by default the Processor is the echo consumer, which logs the event and
+// marks it sent — the minimal end-to-end proof that the async Class 2 loop lives.
+//
+// SERVICE-JWT-V1: setting APPITOOLS_WORKER_WRITEBACK=on swaps in the write-back
+// demo consumer, which mints a SHORT-LIVED, SCOPED service JWT and PATCHes the
+// created row's status back through the engine API — proving authenticated
+// write-back (event → mint JWT → engine API → RBAC accepts the scoped role). It
+// is a demo, not real business logic; real consumers (XLSX, email) are later
+// bricks (ADR-016).
 package main
 
 import (
@@ -45,7 +49,14 @@ func main() {
 		return pgx.Connect(ctx, dsn)
 	}
 
-	w := worker.New(connect, echoProcessor{log: logging.Log}, worker.Config{}, logging.Log)
+	// Default consumer: echo (log + ack). With APPITOOLS_WORKER_WRITEBACK=on,
+	// swap in the authenticated write-back demo (SERVICE-JWT-V1).
+	var proc worker.Processor = echoProcessor{log: logging.Log}
+	if os.Getenv("APPITOOLS_WORKER_WRITEBACK") == "on" {
+		proc = newWritebackProcessor()
+	}
+
+	w := worker.New(connect, proc, worker.Config{}, logging.Log)
 
 	logging.Log.Info().Msg("appitools-worker starting")
 	if err := w.Run(ctx); err != nil && ctx.Err() == nil {
@@ -71,4 +82,38 @@ func (p echoProcessor) Process(_ context.Context, row worker.Row) error {
 		RawJSON("payload", row.Payload).
 		Msg("worker: processed outbox event")
 	return nil
+}
+
+// newWritebackProcessor builds the SERVICE-JWT-V1 demo consumer from env:
+//
+//	JWT_SECRET                  (required) — shared with the engine, signs the service JWT
+//	APPITOOLS_ENGINE_URL        engine data-plane URL   (default http://localhost:8080)
+//	APPITOOLS_TENANT_DOMAIN     Host suffix per tenant  (default localhost → acme.localhost)
+//	APPITOOLS_WORKER_ROLE       scoped service role     (default service_worker)
+//
+// The role MUST be a minimally-scoped role in the schema RBAC — never admin.
+func newWritebackProcessor() worker.Processor {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		logging.Log.Fatal().Msg("APPITOOLS_WORKER_WRITEBACK=on requires JWT_SECRET (shared with the engine)")
+	}
+	engineURL := envOr("APPITOOLS_ENGINE_URL", "http://localhost:8080")
+	tenantDomain := envOr("APPITOOLS_TENANT_DOMAIN", "localhost")
+	role := envOr("APPITOOLS_WORKER_ROLE", "service_worker")
+
+	client := worker.NewEngineClient(engineURL, tenantDomain, secret, role, worker.DefaultServiceTokenTTL)
+	logging.Log.Info().
+		Str("engine_url", engineURL).
+		Str("tenant_domain", tenantDomain).
+		Str("role", role).
+		Dur("token_ttl", worker.DefaultServiceTokenTTL).
+		Msg("worker: write-back demo enabled (authenticated PATCH via engine API)")
+	return worker.NewWritebackProcessor(client, "done", logging.Log)
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }

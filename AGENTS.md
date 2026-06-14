@@ -122,7 +122,13 @@ One line per layer — navigate the code for the rest:
   binary (not a goroutine in the engine): LISTEN/NOTIFY wake-up + poll fallback,
   `SELECT … FOR UPDATE SKIP LOCKED`, at-least-once (Processors must be idempotent).
   Run it with `DATABASE_URL=… go run ./cmd/appitools-worker`; the end-to-end proof
-  is `scripts/worker-e2e.sh`.
+  is `scripts/worker-e2e.sh`. A consumer that writes results BACK does so through
+  the engine HTTP API (`worker.EngineClient`), never the tenant DB directly, so the
+  write inherits the engine's validation + RBAC. It mints a fresh, SHORT-LIVED
+  (60s), SCOPED service JWT per operation (`auth.GenerateTokenWithTTL`, shared
+  `JWT_SECRET`) carrying the event's `tenant_id` and a **scoped service role** —
+  never admin. `APPITOOLS_WORKER_WRITEBACK=on` enables the demo consumer (PATCHes
+  the created row's status); off by default (echo).
 
 Request flow: tenant (Host) → rate limit → response cache → JWT → RBAC →
 handler (`pkg/codegen`) → query build / validation → hooks → pgx →

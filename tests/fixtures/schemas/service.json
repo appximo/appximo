@@ -1,0 +1,20 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "service-writeback-api",
+  "resources": {
+    "tasks": {
+      "fields": {
+        "title":  { "type": "string", "required": true, "maxLength": 200 },
+        "status": { "type": "string", "enum": ["open", "done"] }
+      },
+      "events": ["create"]
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": { "resources": "*", "actions": ["*"] },
+      "service_worker": { "resources": ["tasks"], "actions": ["update"], "fields": ["status"] }
+    }
+  }
+}
