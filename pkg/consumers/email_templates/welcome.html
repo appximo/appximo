@@ -1,0 +1,9 @@
+<!DOCTYPE html>
+<html>
+  <body style="font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color: #1a1a1a;">
+    <h2>Welcome{{if .name}}, {{.name}}{{end}}!</h2>
+    <p>Your account is ready.</p>
+    {{if .link}}<p>Get started: <a href="{{.link}}">{{.link}}</a></p>{{end}}
+    <p>Glad to have you on board.</p>
+  </body>
+</html>

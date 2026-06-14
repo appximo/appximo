@@ -137,11 +137,20 @@ One line per layer — navigate the code for the rest:
   `{status, result}` back via the engine API. A corrupt/invalid file is a PERMANENT
   failure (job → `failed`, event acked — worker never crashes); a transient engine
   error keeps the row pending for retry. Idempotent: a job already terminal is
-  skipped. Select consumers via `APPITOOLS_WORKER_MODE=echo|writeback|xlsx`
-  (default echo). The `file_ref` is resolved through `pkg/files`: set
-  `APPITOOLS_FILES_DIR` and the consumer treats `file_ref` as a VFS `file_id`,
-  streaming the content-addressed blob via `VFS.Get`; unset, it reads `file_ref`
-  as a local path (back-compat).
+  skipped. The `file_ref` is resolved through `pkg/files`: set `APPITOOLS_FILES_DIR`
+  and the consumer treats `file_ref` as a VFS `file_id`, streaming the
+  content-addressed blob via `VFS.Get`; unset, it reads `file_ref` as a local path
+  (back-compat). The second consumer is the EMAIL consumer (`EmailProcessor`): on an
+  `email.send` event it renders an `html/template` (stdlib, auto-escaped; built-ins
+  `verification`/`welcome`) and sends via an EXTERNAL SMTP provider (`SMTPSender`,
+  net/smtp + STARTTLS, env-configured — Brevo/Resend/Mailgun/SES) with no engine
+  write-back. At-least-once ⇒ a rare double-send is accepted for transactional mail
+  (documented), mitigated by a deterministic Message-ID per outbox row. Select
+  consumers via `APPITOOLS_WORKER_MODE=echo|writeback|xlsx|email` (default echo). A
+  single-mode worker ACKS topics it doesn't own, so DON'T run two different modes
+  against one outbox (silent event loss under SKIP LOCKED) — for multiple event
+  types compose a `consumers.Router` (topic → Processor) in one dispatching worker
+  and scale that (ADR-016 library model).
 - `pkg/files` — content-addressable file store (FILES-V1), INSIDE the binary (no
   MinIO/sidecar; ~0 RAM at rest — it is streamed disk I/O). Blobs are keyed by
   SHA-256 at `<root>/<tenant>/<aa>/<bb>/<sha>` (dedup free within a tenant; the

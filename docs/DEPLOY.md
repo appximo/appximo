@@ -373,18 +373,60 @@ request hot path, and it survives engine restarts.
 safe out of the box). Switch modes in `.env`:
 
 ```bash
-APPITOOLS_WORKER_MODE=xlsx   # echo (default) | writeback | xlsx
+APPITOOLS_WORKER_MODE=xlsx   # echo (default) | writeback | xlsx | email
 ```
 
 | Env var | Default | Meaning |
 |---|---|---|
 | `DATABASE_URL` | — | the SAME Postgres as the engine (the outbox lives in `public`) |
-| `JWT_SECRET` | — | **must equal the engine's** — the worker mints a short-lived, scoped service JWT to write results back through the engine API |
-| `APPITOOLS_WORKER_MODE` | `echo` | `echo` (log+ack) · `writeback` (demo status PATCH) · `xlsx` (FileJob consumer) |
+| `JWT_SECRET` | — | **must equal the engine's** — the worker mints a short-lived, scoped service JWT to write results back through the engine API (writeback/xlsx; email needs no JWT) |
+| `APPITOOLS_WORKER_MODE` | `echo` | `echo` (log+ack) · `writeback` (demo status PATCH) · `xlsx` (FileJob consumer) · `email` (transactional email) |
 | `APPITOOLS_ENGINE_URL` | `http://engine:8080` | engine data-plane URL the worker calls for write-back |
 | `APPITOOLS_WORKER_ROLE` | `service_worker` | scoped RBAC role the worker assumes — **never admin**; must exist in your schema (writeback/xlsx only) |
 | `APPITOOLS_TENANT_DOMAIN` | `localhost` | internal Host-header suffix (`{tenant}.{suffix}`); the engine reads the **subdomain**, so `localhost` is correct even in prod — it is not a DNS name |
 | `APPITOOLS_FILES_DIR` | `/var/lib/appitools/files` | CAS root for `xlsx` mode — the SAME volume the engine mounts |
+
+**Email mode (`email`) — external SMTP.** The email consumer sends transactional
+mail (verification, welcome, reset) asynchronously: a handler enqueues an
+`email.send` outbox event in its transaction, the user gets their HTTP response
+immediately, and the worker renders an HTML template and sends it via an
+**external SMTP provider** — Brevo, Resend, Mailgun, SES… (self-hosting SMTP is
+not supported; deliverability/SPF/DKIM is the provider's job). It writes nothing
+back to the engine, so it needs **no `JWT_SECRET`** — only:
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `SMTP_HOST` | — | provider host, e.g. `smtp-relay.brevo.com` |
+| `SMTP_PORT` | `587` | STARTTLS submission port |
+| `SMTP_FROM` | — | header/envelope From, e.g. `My App <no-reply@myapp.com>` |
+| `SMTP_USER` / `SMTP_PASS` | — | provider credentials (omit for an open/test relay) |
+| `APPITOOLS_EMAIL_TOPIC` | `email.send` | outbox topic the consumer drains |
+
+The event payload is `{"to","template","subject?","data":{…}}`; `data` fills the
+template variables (`html/template`, auto-escaped). Built-in demo templates:
+`verification`, `welcome`. Idempotency: delivery is at-least-once, so a worker
+crash between the provider's `250 OK` and the outbox `COMMIT` resends on
+redelivery — for transactional email a rare duplicate is the accepted trade-off
+(vs. dropping the mail), and every message carries a **deterministic Message-ID**
+(from the outbox row id) so a provider can dedupe.
+
+```yaml
+# An email worker (compose). Coexisting with an xlsx worker? Read the next section.
+  worker-email:
+    image: neodevtrix/appitools-engine:latest
+    command: ["worker"]
+    environment:
+      DATABASE_URL: postgres://appitools:${DB_PASSWORD}@db:5432/appitools?sslmode=disable
+      APPITOOLS_WORKER_MODE: email
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM: ${SMTP_FROM}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+    depends_on:
+      db: { condition: service_healthy }
+    restart: unless-stopped
+```
 
 **Shared file volume (xlsx mode).** The XLSX consumer resolves a job's `file_ref`
 to a blob via the content-addressable store (`pkg/files`). The compose files mount
@@ -401,6 +443,32 @@ with:
 ```bash
 docker compose up -d --scale worker=3
 ```
+
+**Multiple event types — one dispatching worker, not many single-mode workers.**
+A single-mode worker (`xlsx`, `email`, …) **acks (and thus drops) topics it does
+not own**. Because every worker drains the SAME outbox under `SKIP LOCKED`,
+running an `xlsx` worker *and* an `email` worker against one database is unsafe:
+whichever claims a row first acks it, so the other consumer never sees its events
+— silent loss. Two correct patterns:
+
+- **Single event type:** run ONE mode (e.g. only `xlsx`), scaled to N replicas.
+  Safe because that worker is the sole consumer of the outbox.
+- **Multiple event types (recommended):** run ONE *dispatching* worker that
+  handles all of them, scaled to N identical replicas. Compose the consumers
+  behind a `consumers.Router` (topic → consumer) in a small custom `main.go`
+  (the ADR-016 library model — import `appitools`/`pkg/consumers`, build your own
+  worker binary):
+
+  ```go
+  router := consumers.NewRouter(log).
+      Handle("email.send", emailProc).
+      HandlePrefix("filejobs.", xlsxProc)
+  w := worker.New(connect, router, worker.Config{}, log)
+  ```
+
+  Every row reaches its real consumer; `SKIP LOCKED` still spreads rows across the
+  N replicas with no double-processing. (A future per-worker topic-claim filter
+  would let specialized workers coexist and scale independently; not yet built.)
 
 **Native (Level 3).** Run the worker as a second systemd unit alongside the
 engine — same binary set, built `CGO_ENABLED=0` (`scripts/build-worker.sh`, or

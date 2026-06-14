@@ -61,8 +61,14 @@ func main() {
 		return pgx.Connect(ctx, dsn)
 	}
 
-	// Pick the consumer. APPITOOLS_WORKER_MODE = echo (default) | writeback | xlsx.
-	// The legacy APPITOOLS_WORKER_WRITEBACK=on still maps to "writeback".
+	// Pick the consumer. APPITOOLS_WORKER_MODE = echo (default) | writeback | xlsx
+	// | email. The legacy APPITOOLS_WORKER_WRITEBACK=on still maps to "writeback".
+	//
+	// One mode = one consumer for the WHOLE worker; a mode acks the topics it does
+	// not own. Running two DIFFERENT single-mode workers against the SAME outbox is
+	// unsafe (each acks/drops the other's events under SKIP LOCKED) — to handle more
+	// than one event type, compose a consumers.Router in a custom worker main.go
+	// (ADR-016 library model) and run N identical Router workers. See docs/DEPLOY.md.
 	mode := os.Getenv("APPITOOLS_WORKER_MODE")
 	if mode == "" && os.Getenv("APPITOOLS_WORKER_WRITEBACK") == "on" {
 		mode = "writeback"
@@ -73,6 +79,8 @@ func main() {
 		proc = newWritebackProcessor()
 	case "xlsx":
 		proc = newXLSXProcessor(ctx, dsn)
+	case "email":
+		proc = newEmailProcessor()
 	default:
 		proc = echoProcessor{log: logging.Log}
 	}
@@ -181,6 +189,41 @@ func newXLSXProcessor(ctx context.Context, dsn string) worker.Processor {
 		Str("file_source", source).
 		Msg("worker: xlsx consumer enabled (streaming parse + authenticated write-back)")
 	return proc
+}
+
+// newEmailProcessor builds the EMAIL-CONSUMER-V1 transactional-email consumer.
+// It needs NO engine client (an email is not written back) — only an external
+// SMTP provider, configured entirely by env:
+//
+//	SMTP_HOST   (required)  e.g. smtp-relay.brevo.com
+//	SMTP_PORT   (required)  e.g. 587
+//	SMTP_FROM   (required)  e.g. "My App <no-reply@myapp.com>"
+//	SMTP_USER / SMTP_PASS   provider credentials (omit for an open/test relay)
+//	APPITOOLS_EMAIL_TOPIC   outbox topic to consume (default email.send)
+//
+// Provider-agnostic: STARTTLS + AUTH PLAIN is the common denominator, so Brevo,
+// Resend, Mailgun, SES… all work by changing only these vars.
+func newEmailProcessor() worker.Processor {
+	cfg := consumers.SMTPConfig{
+		Host:     os.Getenv("SMTP_HOST"),
+		Port:     envOr("SMTP_PORT", "587"),
+		Username: os.Getenv("SMTP_USER"),
+		Password: os.Getenv("SMTP_PASS"),
+		From:     os.Getenv("SMTP_FROM"),
+	}
+	sender, err := consumers.NewSMTPSender(cfg)
+	if err != nil {
+		logging.Log.Fatal().Err(err).Msg("APPITOOLS_WORKER_MODE=email requires SMTP_HOST, SMTP_PORT and SMTP_FROM")
+	}
+	topic := envOr("APPITOOLS_EMAIL_TOPIC", consumers.DefaultEmailTopic)
+	logging.Log.Info().
+		Str("smtp_host", cfg.Host).
+		Str("smtp_port", cfg.Port).
+		Str("from", cfg.From).
+		Bool("auth", cfg.Username != "").
+		Str("topic", topic).
+		Msg("worker: email consumer enabled (external SMTP, templated)")
+	return consumers.NewEmailProcessor(sender, logging.Log).WithTopic(topic)
 }
 
 func envOr(key, def string) string {

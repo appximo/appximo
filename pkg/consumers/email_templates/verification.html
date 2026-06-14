@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html>
+  <body style="font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color: #1a1a1a;">
+    <h2>Confirm your email</h2>
+    <p>Hi {{.name}},</p>
+    <p>Use this code to verify your account:</p>
+    <p style="font-size: 24px; font-weight: bold; letter-spacing: 2px;">{{.code}}</p>
+    {{if .link}}<p>Or click <a href="{{.link}}">here</a> to verify directly.</p>{{end}}
+    <p>If you didn’t request this, you can ignore this email.</p>
+  </body>
+</html>
