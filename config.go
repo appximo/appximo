@@ -34,6 +34,12 @@ type Config struct {
 	// Empty falls back to the APPITOOLS_ENV environment variable.
 	Env string
 
+	// FilesDir is the root directory of the content-addressable file store
+	// (FILES-V1). Empty falls back to APPITOOLS_FILES_DIR, then to
+	// /var/lib/appitools/files. The directory is created lazily on the first
+	// upload, so an engine that never serves /api/files touches no disk.
+	FilesDir string
+
 	// Version is reported by /health and the synthetic monitor. Empty reports
 	// "dev"; the cmd binary passes its ldflags-injected build version.
 	Version string

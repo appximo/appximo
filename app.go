@@ -31,6 +31,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/events"
 	"github.com/miguelangel/appitools/pkg/extensions"
+	"github.com/miguelangel/appitools/pkg/files"
 	gqlhandler "github.com/miguelangel/appitools/pkg/graphql"
 	"github.com/miguelangel/appitools/pkg/logging"
 	appmiddleware "github.com/miguelangel/appitools/pkg/middleware"
@@ -84,6 +85,9 @@ type App struct {
 	cpSvc controlplane.Service
 	cpSrv *http.Server
 	ss    *shutdown.State
+
+	files         files.VFS // content-addressable file store (FILES-V1)
+	filesMaxBytes int64     // per-upload body cap
 
 	routes  []Route
 	started bool
@@ -162,6 +166,24 @@ func New(cfg Config) (*App, error) {
 	log.Println("outbox: public.outbox table ready")
 
 	app.tdb = db.NewTenantDB(pool)
+
+	// Content-addressable file store (FILES-V1). The blob root is created lazily
+	// on the first upload, so an engine that never serves /api/files pays nothing.
+	filesDir := cfg.FilesDir
+	if filesDir == "" {
+		filesDir = os.Getenv("APPITOOLS_FILES_DIR")
+	}
+	if filesDir == "" {
+		filesDir = "/var/lib/appitools/files"
+	}
+	app.files = files.NewLocal(filesDir, files.NewPGStore(pool))
+	app.filesMaxBytes = files.DefaultMaxUploadBytes
+	if v := os.Getenv("APPITOOLS_FILES_MAX_BYTES"); v != "" {
+		if n, perr := strconv.ParseInt(v, 10, 64); perr == nil && n > 0 {
+			app.filesMaxBytes = n
+		}
+	}
+	log.Printf("files: content-addressable store at %s (max upload %d bytes)", filesDir, app.filesMaxBytes)
 
 	// HookRunner with Capa 3 (WASM) when the runtime initializes; JS+webhook only on error.
 	sandbox := extensions.NewJSSandbox()
@@ -547,6 +569,17 @@ func (a *App) buildRouter() *chi.Mux {
 		// chain established above — no duplicated middleware.
 		for _, rt := range a.routes {
 			sub.Method(rt.Method, rt.Path, a.customHandler(rt))
+		}
+		// File store routes (FILES-V1): upload/download flow through the IDENTICAL
+		// chain (tenant → JWT → RBAC for the "files" resource) — no duplicated
+		// middleware. Download is bypassed by the response cache (see cache
+		// Middleware) so a binary blob is never buffered/cached in RAM. Skipped if a
+		// schema resource is literally named "files" (the generated routes win).
+		if _, taken := a.schema.Resources["files"]; taken {
+			log.Println("WARNING: schema declares a \"files\" resource — engine file-store routes (/api/files) are disabled for this schema")
+		} else if a.files != nil {
+			sub.Post("/api/files", files.UploadHandler(a.files, a.filesMaxBytes))
+			sub.Get("/api/files/{id}", files.DownloadHandler(a.files))
 		}
 		sub.Mount("/", codegen.BuildRouter(a.schema, a.tdb, a.hr, a.responseCache, a.eventsHub))
 	})

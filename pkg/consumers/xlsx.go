@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -31,14 +33,28 @@ import (
 // skipped, so a redelivery never double-processes.
 type XLSXProcessor struct {
 	client      *worker.EngineClient
-	resource    string // schema resource holding the jobs, e.g. "filejobs"
-	statusField string // default "status"
-	resultField string // default "result"
-	fileField   string // default "file_ref"
+	resource    string     // schema resource holding the jobs, e.g. "filejobs"
+	statusField string     // default "status"
+	resultField string     // default "result"
+	fileField   string     // default "file_ref"
+	open        FileOpener // resolves file_ref → a readable stream
 	log         zerolog.Logger
 }
 
-// NewXLSXProcessor builds the consumer. resource defaults to "filejobs".
+// FileOpener resolves a job's file_ref to a readable stream for the tenant. The
+// default opens file_ref as a local path; the VFS-backed opener (pkg/files) treats
+// file_ref as a VFS file_id and streams the content-addressed blob — wiring the
+// consumer to the real file store (FILES-V1) without coupling pkg/consumers to
+// pkg/files. The caller closes the returned reader.
+type FileOpener func(ctx context.Context, tenant, fileRef string) (io.ReadCloser, error)
+
+// localPathOpener is the default: file_ref is a path on the worker's filesystem.
+func localPathOpener(_ context.Context, _ string, fileRef string) (io.ReadCloser, error) {
+	return os.Open(fileRef) //nolint:gosec // fileRef is operator/engine-provided, not raw client input
+}
+
+// NewXLSXProcessor builds the consumer. resource defaults to "filejobs". The file
+// source defaults to the local filesystem; use WithFileOpener to read from the VFS.
 func NewXLSXProcessor(client *worker.EngineClient, resource string, log zerolog.Logger) *XLSXProcessor {
 	if resource == "" {
 		resource = "filejobs"
@@ -49,8 +65,18 @@ func NewXLSXProcessor(client *worker.EngineClient, resource string, log zerolog.
 		statusField: "status",
 		resultField: "result",
 		fileField:   "file_ref",
+		open:        localPathOpener,
 		log:         log,
 	}
+}
+
+// WithFileOpener swaps the file source (e.g. the VFS). A nil opener is ignored so
+// the default local-path source remains. Returns p for chaining.
+func (p *XLSXProcessor) WithFileOpener(o FileOpener) *XLSXProcessor {
+	if o != nil {
+		p.open = o
+	}
+	return p
 }
 
 // crudEvent is the lean payload the generated CRUD path emits (CRUD-EMIT-V1).
@@ -104,7 +130,18 @@ func (p *XLSXProcessor) Process(ctx context.Context, row worker.Row) error {
 		return p.writeback(ctx, row.TenantID, ev.ID, "failed",
 			mustJSON(map[string]string{"error": "job has no file_ref"}))
 	}
-	result, perr := ProcessXLSX(job.FileRef)
+	// Resolve the file_ref to a stream (local path or VFS blob). An open error is
+	// PERMANENT too — an unresolvable file_ref won't resolve on a later retry —
+	// so it records "failed" and acks, exactly like a corrupt file.
+	rc, oerr := p.open(ctx, row.TenantID, job.FileRef)
+	if oerr != nil {
+		p.log.Warn().Int64("id", row.ID).Str("job", ev.ID).Err(oerr).
+			Msg("consumers: opening file_ref failed → marking job failed")
+		return p.writeback(ctx, row.TenantID, ev.ID, "failed",
+			mustJSON(map[string]string{"error": oerr.Error()}))
+	}
+	result, perr := ProcessXLSXReader(rc)
+	_ = rc.Close()
 	if perr != nil {
 		p.log.Warn().Int64("id", row.ID).Str("job", ev.ID).Err(perr).
 			Msg("consumers: xlsx processing failed → marking job failed")
@@ -164,13 +201,31 @@ func (p *XLSXProcessor) writeback(ctx context.Context, tenant, id, status, resul
 // (tipo, monto) and returns a descriptive error on a corrupt/empty/missing-column
 // file so the caller can record a "failed" job rather than crash.
 func ProcessXLSX(path string) (XLSXResult, error) {
-	var res XLSXResult
 	f, err := excelize.OpenFile(path)
 	if err != nil {
-		return res, fmt.Errorf("open xlsx: %w", err)
+		return XLSXResult{}, fmt.Errorf("open xlsx: %w", err)
 	}
 	defer f.Close() //nolint:errcheck
+	return aggregateSheet(f)
+}
 
+// ProcessXLSXReader is ProcessXLSX over a stream rather than a path — the form the
+// VFS uses (VFS.Get returns a reader). excelize.OpenReader buffers the zip archive
+// (an .xlsx is a zip, so random access is inherent), but the per-row aggregation
+// still STREAMS via the f.Rows iterator, never GetRows.
+func ProcessXLSXReader(r io.Reader) (XLSXResult, error) {
+	f, err := excelize.OpenReader(r)
+	if err != nil {
+		return XLSXResult{}, fmt.Errorf("open xlsx: %w", err)
+	}
+	defer f.Close() //nolint:errcheck
+	return aggregateSheet(f)
+}
+
+// aggregateSheet computes the demo aggregate over the first sheet of f using the
+// streaming row iterator. Shared by the path and reader entry points.
+func aggregateSheet(f *excelize.File) (XLSXResult, error) {
+	var res XLSXResult
 	sheet := f.GetSheetName(0)
 	if sheet == "" {
 		return res, errors.New("xlsx has no sheets")

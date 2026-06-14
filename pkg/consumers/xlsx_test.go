@@ -4,10 +4,41 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/xuri/excelize/v2"
 )
+
+// TestProcessXLSXReader_Valid exercises the streaming reader entry point (the form
+// the VFS uses: VFS.Get returns a reader). Same aggregate, fed from an io.Reader.
+func TestProcessXLSXReader_Valid(t *testing.T) {
+	path := writeXLSX(t, [][]any{
+		{"tipo", "monto"},
+		{"ingreso", 100},
+		{"egreso", 25},
+	})
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close() //nolint:errcheck
+	res, err := ProcessXLSXReader(f)
+	if err != nil {
+		t.Fatalf("ProcessXLSXReader: %v", err)
+	}
+	if res.Rows != 2 || res.Total != 125 || res.ByType["ingreso"] != 100 || res.ByType["egreso"] != 25 {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+// TestProcessXLSXReader_Corrupt confirms a bad stream errors (worker → failed) and
+// never panics.
+func TestProcessXLSXReader_Corrupt(t *testing.T) {
+	if _, err := ProcessXLSXReader(strings.NewReader("not an xlsx")); err == nil {
+		t.Fatal("expected error from corrupt reader")
+	}
+}
 
 // writeXLSX writes rows (row 0 = header) to a temp .xlsx and returns its path.
 func writeXLSX(t *testing.T, rows [][]any) string {

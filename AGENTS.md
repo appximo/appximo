@@ -138,8 +138,23 @@ One line per layer — navigate the code for the rest:
   failure (job → `failed`, event acked — worker never crashes); a transient engine
   error keeps the row pending for retry. Idempotent: a job already terminal is
   skipped. Select consumers via `APPITOOLS_WORKER_MODE=echo|writeback|xlsx`
-  (default echo). NOTE: the `file_ref` is read as a local path for now — the real
-  file source (VFS/S3) plugs in when `pkg/files` exists.
+  (default echo). The `file_ref` is resolved through `pkg/files`: set
+  `APPITOOLS_FILES_DIR` and the consumer treats `file_ref` as a VFS `file_id`,
+  streaming the content-addressed blob via `VFS.Get`; unset, it reads `file_ref`
+  as a local path (back-compat).
+- `pkg/files` — content-addressable file store (FILES-V1), INSIDE the binary (no
+  MinIO/sidecar; ~0 RAM at rest — it is streamed disk I/O). Blobs are keyed by
+  SHA-256 at `<root>/<tenant>/<aa>/<bb>/<sha>` (dedup free within a tenant; the
+  tenant prefix gives physical isolation); metadata lives in a per-tenant
+  `tenant_<id>.files` table (idempotent `EnsureTable`). The `VFS` interface has a
+  `Local` backend (this is it) and a documented `S3` contract for next session
+  (presigned URL + 302 — the engine authorizes but never proxies the bytes).
+  `Put` streams with `io.CopyBuffer` (64 KiB, NEVER `io.ReadAll`), hashing as it
+  goes, atomic-renames into the CAS, and cleans the temp on an interrupted upload;
+  `original_name` is metadata ONLY and never builds a path (path-traversal inert).
+  Engine routes `POST /api/files` + `GET /api/files/{id}` flow through the shared
+  chain; the download bypasses the response cache (a blob is never buffered/cached
+  in RAM — same bypass as SSE).
 
 Request flow: tenant (Host) → rate limit → response cache → JWT → RBAC →
 handler (`pkg/codegen`) → query build / validation → hooks → pgx →
@@ -410,6 +425,28 @@ also bounds document size as an alias-amplification guard: at most **50
 root selections** per operation and **2000 total selections** across the
 whole document — over either limit the request is rejected (there is no
 separate nesting-depth counter).
+
+## File store (FILES-V1)
+
+The engine ships a content-addressable file store on two routes (no schema
+declaration needed — they exist whenever no resource is literally named `files`):
+
+- `POST /api/files` — multipart upload (form field `file`). Streamed to disk in
+  64 KiB chunks (never buffered whole), de-duplicated by content hash. Returns
+  `201 {"file_id","sha256","size"}`. Body capped by `APPITOOLS_FILES_MAX_BYTES`
+  (default 256 MiB) → `413` on overflow. RBAC action is `create` on the `files`
+  resource.
+- `GET /api/files/{id}` — streams the blob back with its `Content-Type` and
+  `Content-Disposition`. RBAC action is `read` on `files`. `404` if the id is
+  unknown to the tenant (ids are tenant-scoped — no cross-tenant handle).
+
+Both inherit the normal chain (tenant Host → JWT → RBAC), so a role needs the
+`files` resource in its policy (`"resources": ["files", …]` or `"*"`). Blobs live
+under `APPITOOLS_FILES_DIR` (default `/var/lib/appitools/files`), created lazily
+on first upload. Use a `file_id` as a filejob's `file_ref` to feed the async XLSX
+consumer (`APPITOOLS_FILES_DIR` must be set on the worker, pointing at the same
+root). An S3 backend (presigned URL + 302) is the next increment; today the store
+is local-disk only.
 
 ## Does not exist — do not invent
 

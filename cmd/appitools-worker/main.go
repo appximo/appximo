@@ -17,6 +17,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -25,6 +26,8 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/miguelangel/appitools/pkg/consumers"
+	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/miguelangel/appitools/pkg/files"
 	"github.com/miguelangel/appitools/pkg/logging"
 	"github.com/miguelangel/appitools/pkg/worker"
 )
@@ -61,7 +64,7 @@ func main() {
 	case "writeback":
 		proc = newWritebackProcessor()
 	case "xlsx":
-		proc = newXLSXProcessor()
+		proc = newXLSXProcessor(ctx, dsn)
 	default:
 		proc = echoProcessor{log: logging.Log}
 	}
@@ -128,9 +131,14 @@ func newWritebackProcessor() worker.Processor {
 //
 // The service role (APPITOOLS_WORKER_ROLE, default service_worker) must have
 // read+update on that resource — read to fetch the job's file_ref, update to
-// write {status, result}. The file_ref is a local path for now; the real file
-// source (VFS/S3) plugs in when pkg/files exists.
-func newXLSXProcessor() worker.Processor {
+// write {status, result}.
+//
+// File source (FILES-V1): when APPITOOLS_FILES_DIR is set, file_ref is a VFS
+// file_id and the consumer streams the content-addressed blob via VFS.Get (the
+// worker opens a dedicated pool for the per-tenant metadata lookup, sharing the
+// SAME blob root as the engine on this host). Without it, file_ref is read as a
+// local path (back-compat).
+func newXLSXProcessor(ctx context.Context, dsn string) worker.Processor {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
 		logging.Log.Fatal().Msg("APPITOOLS_WORKER_MODE=xlsx requires JWT_SECRET (shared with the engine)")
@@ -141,13 +149,30 @@ func newXLSXProcessor() worker.Processor {
 	resource := envOr("APPITOOLS_WORKER_RESOURCE", "filejobs")
 
 	client := worker.NewEngineClient(engineURL, tenantDomain, secret, role, worker.DefaultServiceTokenTTL)
+	proc := consumers.NewXLSXProcessor(client, resource, logging.Log)
+
+	source := "local-path"
+	if filesDir := os.Getenv("APPITOOLS_FILES_DIR"); filesDir != "" {
+		pool, err := db.NewPool(ctx, dsn)
+		if err != nil {
+			logging.Log.Fatal().Err(err).Msg("worker: open pool for VFS metadata")
+		}
+		vfs := files.NewLocal(filesDir, files.NewPGStore(pool))
+		proc = proc.WithFileOpener(func(ctx context.Context, tenant, fileRef string) (io.ReadCloser, error) {
+			rc, _, err := vfs.Get(ctx, tenant, fileRef)
+			return rc, err
+		})
+		source = "vfs:" + filesDir
+	}
+
 	logging.Log.Info().
 		Str("engine_url", engineURL).
 		Str("tenant_domain", tenantDomain).
 		Str("role", role).
 		Str("resource", resource).
+		Str("file_source", source).
 		Msg("worker: xlsx consumer enabled (streaming parse + authenticated write-back)")
-	return consumers.NewXLSXProcessor(client, resource, logging.Log)
+	return proc
 }
 
 func envOr(key, def string) string {
