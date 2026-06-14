@@ -10,6 +10,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/miguelangel/appitools/pkg/outbox"
 )
 
 // Sentinel errors the handlers map to HTTP status codes. Login NEVER distinguishes
@@ -24,6 +25,7 @@ var (
 	ErrTooManyAttempts    = errors.New("userauth: too many login attempts")
 	ErrInvalidToken       = errors.New("userauth: invalid or expired token")
 	ErrTenantMismatch     = errors.New("userauth: token tenant mismatch")
+	ErrEmailNotVerified   = errors.New("userauth: email not verified")
 )
 
 // Config configures a Service. JWTSecret and SignupRole are the levers a deployer
@@ -48,13 +50,29 @@ type Config struct {
 	// (defaults 5 / 5) — online brute-force defence on top of the tenant limiter.
 	LoginAttemptsPerMinute int
 	LoginBurst             int
+
+	// EmailTopic is the outbox topic the reset/verify flows enqueue email events
+	// to (default "email.send"). It MUST match the email worker's
+	// APPITOOLS_EMAIL_TOPIC so the consumer picks the events up.
+	EmailTopic string
+	// BaseURL optionally overrides the origin used to build email links
+	// (e.g. "https://acme.example.com"). Empty ⇒ the link origin is derived from
+	// the request Host, which is the multi-tenant-correct default (the link points
+	// back at the tenant subdomain the request arrived on).
+	BaseURL string
+	// RequireVerified, when true, blocks login for a user whose email_verified is
+	// false (→ 403). Default false: AUTH-CORE's login flow is unchanged unless an
+	// app opts in to mandatory verification.
+	RequireVerified bool
 }
 
-// Service implements the password identity core: signup, login, refresh.
+// Service implements the password identity core: signup, login, refresh, plus
+// the AUTH-EMAIL-V1 reset + verification flows.
 type Service struct {
-	store   *Store
-	cfg     Config
-	limiter *loginLimiter
+	store        *Store
+	cfg          Config
+	limiter      *loginLimiter // login throttle, per (tenant,email)
+	emailLimiter *loginLimiter // reset/verify REQUEST throttle (anti email-spam)
 	// dummyHash equalizes login timing for an unknown email: we run a verify
 	// against it so "no such user" costs the same as "wrong password", denying a
 	// timing oracle for email enumeration.
@@ -70,12 +88,18 @@ func NewService(store *Store, cfg Config) *Service {
 	if cfg.TokenTTL <= 0 {
 		cfg.TokenTTL = 24 * time.Hour
 	}
+	if cfg.EmailTopic == "" {
+		cfg.EmailTopic = "email.send"
+	}
 	dummy, _ := HashPassword("appitools-anti-enumeration-timing-equalizer")
 	return &Service{
-		store:     store,
-		cfg:       cfg,
-		limiter:   newLoginLimiter(cfg.LoginAttemptsPerMinute, cfg.LoginBurst),
-		dummyHash: dummy,
+		store:   store,
+		cfg:     cfg,
+		limiter: newLoginLimiter(cfg.LoginAttemptsPerMinute, cfg.LoginBurst),
+		// Reset/verify email requests are far rarer than logins and each one sends
+		// an email — throttle tighter (3/min) to blunt email-spam / amplification.
+		emailLimiter: newLoginLimiter(3, 3),
+		dummyHash:    dummy,
 	}
 }
 
@@ -154,6 +178,12 @@ func (s *Service) Login(ctx context.Context, tenantID, email, password string) (
 	if err != nil || !ok {
 		return AuthResult{}, ErrInvalidCredentials
 	}
+	// Optional mandatory verification (opt-in via RequireVerified). This is checked
+	// AFTER the password verifies, so it only ever reveals "verified or not" to
+	// someone who already holds the correct password — never an enumeration vector.
+	if s.cfg.RequireVerified && !user.EmailVerified {
+		return AuthResult{}, ErrEmailNotVerified
+	}
 	token, err := s.mint(user, tenantID)
 	if err != nil {
 		return AuthResult{}, err
@@ -191,6 +221,167 @@ func (s *Service) mint(user User, tenantID string) (string, error) {
 		},
 	}
 	return auth.GenerateTokenWithTTL(c, s.cfg.JWTSecret, s.cfg.TokenTTL)
+}
+
+// --- AUTH-EMAIL-V1: password reset + email verification ---------------------
+//
+// Both flows enqueue an "email.send" event to the transactional outbox IN THE
+// SAME TX as the token row, so the email and the token are atomic. The email is
+// delivered ASYNC by the email consumer (cmd/appitools-worker, mode=email) — the
+// request returns immediately. If no email worker is running, the event waits
+// durably in the outbox and goes out when one starts (the user already saw "if
+// that email exists, we sent a link"). The plain token rides the email link;
+// only its SHA-256 hash is stored.
+
+// RequestVerify issues an email-verification link for email, IF a user with that
+// email exists and is not already verified. It is uniform regardless of existence
+// (anti-enumeration): it ALWAYS returns nil to the caller (a real send happens
+// only when the user exists), so a client cannot probe which emails are
+// registered. Throttled per (tenant, email) to blunt email-spam.
+func (s *Service) RequestVerify(ctx context.Context, tenantID, email, linkBase string) error {
+	email = normalizeEmail(email)
+	if !s.emailLimiter.allow(tenantID, email) {
+		return ErrTooManyAttempts
+	}
+	user, err := s.store.GetByEmail(ctx, tenantID, email)
+	if errors.Is(err, ErrUserNotFound) {
+		return nil // uniform response; no email, no leak
+	}
+	if err != nil {
+		return err
+	}
+	if user.EmailVerified {
+		return nil // already verified — nothing to send, same uniform response
+	}
+	return s.issueEmailToken(ctx, tenantID, user, tokenVerify, verifyTTL, linkBase)
+}
+
+// ConfirmVerify consumes a verification token and marks the user's email
+// verified. The token is single-use and consumed atomically with the flag flip.
+func (s *Service) ConfirmVerify(ctx context.Context, tenantID, plainToken string) error {
+	if plainToken == "" {
+		return ErrInvalidToken
+	}
+	if err := s.store.ensureTokens(ctx, tenantID); err != nil {
+		return err
+	}
+	tx, err := s.store.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.Background()) //nolint:errcheck
+	userID, err := s.store.consumeToken(ctx, tx, tenantID, tokenVerify, hashToken(plainToken))
+	if errors.Is(err, errTokenInvalid) {
+		return ErrInvalidToken
+	}
+	if err != nil {
+		return err
+	}
+	if err := s.store.setEmailVerifiedTx(ctx, tx, tenantID, userID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// RequestReset issues a password-reset link for email IF a user exists. Uniform
+// regardless of existence (anti-enumeration): always returns nil. Throttled.
+func (s *Service) RequestReset(ctx context.Context, tenantID, email, linkBase string) error {
+	email = normalizeEmail(email)
+	if !s.emailLimiter.allow(tenantID, email) {
+		return ErrTooManyAttempts
+	}
+	user, err := s.store.GetByEmail(ctx, tenantID, email)
+	if errors.Is(err, ErrUserNotFound) {
+		return nil // uniform response; no email, no leak
+	}
+	if err != nil {
+		return err
+	}
+	return s.issueEmailToken(ctx, tenantID, user, tokenReset, resetTTL, linkBase)
+}
+
+// ConfirmReset consumes a reset token and sets the user's new password. The token
+// is consumed atomically with the password update, and ALL other still-pending
+// reset tokens for that user are invalidated in the same tx (a completed reset
+// kills every outstanding reset link). The new password must meet the minimum
+// length.
+func (s *Service) ConfirmReset(ctx context.Context, tenantID, plainToken, newPassword string) error {
+	if plainToken == "" {
+		return ErrInvalidToken
+	}
+	if len([]rune(newPassword)) < s.cfg.MinPasswordLength {
+		return ErrWeakPassword
+	}
+	hash, err := HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+	if err := s.store.ensureTokens(ctx, tenantID); err != nil {
+		return err
+	}
+	tx, err := s.store.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.Background()) //nolint:errcheck
+	userID, err := s.store.consumeToken(ctx, tx, tenantID, tokenReset, hashToken(plainToken))
+	if errors.Is(err, errTokenInvalid) {
+		return ErrInvalidToken
+	}
+	if err != nil {
+		return err
+	}
+	if err := s.store.setPasswordTx(ctx, tx, tenantID, userID, hash); err != nil {
+		return err
+	}
+	// Invalidate any OTHER outstanding reset tokens for this user.
+	if err := s.store.invalidateUserTokensTx(ctx, tx, tenantID, userID, tokenReset); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// issueEmailToken creates a single-use token and enqueues its email — both in ONE
+// transaction so the token and the email event commit together or not at all.
+func (s *Service) issueEmailToken(ctx context.Context, tenantID string, user User, ttype string, ttl time.Duration, linkBase string) error {
+	if err := s.store.ensureTokens(ctx, tenantID); err != nil {
+		return err
+	}
+	plain, err := newPlainToken()
+	if err != nil {
+		return err
+	}
+	tmpl, path := emailTemplateAndPath(ttype)
+	link := strings.TrimRight(linkBase, "/") + path + plain
+
+	tx, err := s.store.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.Background()) //nolint:errcheck
+
+	if err := s.store.insertTokenTx(ctx, tx, tenantID, user.ID, ttype, hashToken(plain), time.Now().Add(ttl)); err != nil {
+		return err
+	}
+	ev := map[string]any{
+		"to":       user.Email,
+		"template": tmpl,
+		"data":     map[string]any{"name": user.Email, "link": link},
+	}
+	if _, err := outbox.Enqueue(ctx, tx, tenantID, s.cfg.EmailTopic, ev); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// emailTemplateAndPath maps a token type to its email template name and the URL
+// path (with trailing "?token=") the link points at. verify reuses the built-in
+// "verification" template; reset uses the new "reset" template.
+func emailTemplateAndPath(ttype string) (template, path string) {
+	if ttype == tokenReset {
+		return "reset", "/auth/reset?token="
+	}
+	return "verification", "/auth/verify?token="
 }
 
 func normalizeEmail(email string) string { return strings.ToLower(strings.TrimSpace(email)) }

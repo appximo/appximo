@@ -150,7 +150,9 @@ baseline faster are welcome; we'll publish updated numbers.
   multi-tenant-aware — users live in the tenant's own schema, so **email is unique
   per tenant, not globally** (the same email is a distinct account in two tenants).
   argon2id hashing, anti-enumeration, per-identity login throttling; the issued
-  JWT is the same one the engine validates. Public signup is opt-in + role-gated
+  JWT is the same one the engine validates. Public signup is opt-in + role-gated.
+  **Password reset + email verification** via single-use tokens, delivered async
+  through the outbox + email worker (the email never blocks the request)
 - **Real-time**: per-resource SSE streams with RBAC applied at delivery
 - **Webhooks**: HMAC-SHA256-signed, async, retries with backoff, SSRF-guarded
 - **Extensions**: JS sandbox (Goja, watchdog-interrupted) with built-in helpers —
@@ -208,6 +210,8 @@ It serves our own production workload today.
 | `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | env | no | per-tenant token bucket (default 1000/100) |
 | `APPITOOLS_AUTH_SIGNUP_ROLE` | env | no | role assigned to public signup; **set it to enable `POST /auth/signup`** (empty = signup disabled). Must be a schema role |
 | `APPITOOLS_AUTH_MIN_PASSWORD` | env | no | minimum signup password length (default 8) |
+| `APPITOOLS_AUTH_REQUIRE_VERIFIED` | env | no | block login until the user's email is verified (default off) |
+| `APPITOOLS_AUTH_BASE_URL` | env | no | origin for reset/verify email links (else derived from the request Host) |
 | `DB_MAX_CONNS`, `GOMAXPROCS`, `OBS_DB_PATH`, `SLACK_WEBHOOK_URL`, `REDIS_URL` | env | no | see [docs/DEPLOY.md](docs/DEPLOY.md) |
 | `--schema` | flag | **yes** | path to the JSON schema |
 | `--port` | flag | no | data-plane port (default 8080) |

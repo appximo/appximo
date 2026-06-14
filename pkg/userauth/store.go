@@ -48,8 +48,9 @@ type User struct {
 // schema-per-tenant isolation pkg/files uses for blob metadata. The table DDL is
 // run once per tenant per process (lazy, cached in `ensured`).
 type Store struct {
-	pool    *pgxpool.Pool
-	ensured sync.Map // tenant id → struct{}
+	pool          *pgxpool.Pool
+	ensured       sync.Map // tenant id → struct{}: auth_users DDL run once
+	ensuredTokens sync.Map // tenant id → struct{}: auth_tokens DDL run once
 }
 
 // NewStore builds a Store over the engine pool.

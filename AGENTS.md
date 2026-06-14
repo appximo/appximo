@@ -607,9 +607,45 @@ self-service accounts):
 - `APPITOOLS_AUTH_MIN_PASSWORD` (or `Config.AuthMinPasswordLength`) — minimum
   signup password length (default 8).
 
-**Not in this core (Fase 1 follow-ups):** OAuth2 (Google/GitHub/Microsoft),
-email verification + password reset (built on the email consumer), and MFA. The
-`email_verified` column is already present (default `false`) for the verify flow.
+### Password reset + email verification (AUTH-EMAIL-V1)
+
+Built ON the email consumer (`pkg/consumers`, `APPITOOLS_WORKER_MODE=email`) via the
+transactional outbox — the first auth↔email integration. A request endpoint writes
+a single-use token AND enqueues an `email.send` event **in one transaction** (token
+and email are atomic); the email is delivered **async** by the worker, so the
+request returns immediately. If no email worker is running the event waits durably
+in the outbox and goes out when one starts.
+
+- `POST /auth/reset/request` — `{ "email" }`. **Uniform** `200 {"message":"if that
+  email is registered, a link has been sent"}` whether or not the email exists
+  (anti-enumeration; a real email is enqueued only for a real user). Throttled per
+  (tenant, email).
+- `POST /auth/reset/confirm` — `{ "token", "new_password" }`. Consumes the token
+  (single-use, ≤1 h old) and sets the new argon2id hash; **all other outstanding
+  reset tokens for that user are invalidated** in the same tx. Invalid/expired/used
+  token → `400`; a too-short password → `422`.
+- `POST /auth/verify/request` — `{ "email" }`. Same uniform anti-enum response;
+  enqueues a verification email for an existing, not-yet-verified user.
+- `GET /auth/verify?token=…` (clickable email link) **or** `POST /auth/verify`
+  `{ "token" }` — consumes the token (single-use, ≤24 h) and flips
+  `email_verified` true. Invalid → `400`.
+
+Tokens live in `tenant_<id>.auth_tokens` (per-tenant, isolated — a token of one
+tenant is useless in another). Only the token's **SHA-256 hash** is stored; the
+plain token rides the email link. The link origin is the request's tenant Host by
+default (multi-tenant-correct), or `APPITOOLS_AUTH_BASE_URL` if set.
+
+**Config (AUTH-EMAIL-V1):**
+
+- `APPITOOLS_AUTH_REQUIRE_VERIFIED` (`true`/`1`/`on`) — block login for an
+  unverified email (`403`). Default off (login unchanged).
+- `APPITOOLS_AUTH_BASE_URL` — override the email-link origin (else derived from the
+  request Host).
+- `APPITOOLS_EMAIL_TOPIC` — outbox topic for the email events (default `email.send`);
+  **must match the email worker's** `APPITOOLS_EMAIL_TOPIC`. Run the deliverer with
+  `APPITOOLS_WORKER_MODE=email` (templates `verification` + `reset` ship built-in).
+
+**Not in this core (Fase 1 follow-ups):** OAuth2 (Google/GitHub/Microsoft) and MFA.
 
 ## Does not exist — do not invent
 

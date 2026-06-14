@@ -27,7 +27,143 @@ func (s *Service) Router() http.Handler {
 	r.Post("/signup", s.handleSignup)
 	r.Post("/login", s.handleLogin)
 	r.Post("/refresh", s.handleRefresh)
+	// AUTH-EMAIL-V1: email verification + password reset. The *_request endpoints
+	// enqueue an email (async via the outbox); confirm endpoints consume the
+	// single-use token. /verify accepts GET (the clickable email link) or POST.
+	r.Post("/verify/request", s.handleVerifyRequest)
+	r.Get("/verify", s.handleVerifyConfirm)
+	r.Post("/verify", s.handleVerifyConfirm)
+	r.Post("/reset/request", s.handleResetRequest)
+	r.Post("/reset/confirm", s.handleResetConfirm)
 	return r
+}
+
+// uniformEmailResponse is the SAME body returned by /verify/request and
+// /reset/request whether or not the email exists — the anti-enumeration contract.
+var uniformEmailResponse = map[string]string{"message": "if that email is registered, a link has been sent"}
+
+type emailRequest struct {
+	Email string `json:"email"`
+}
+
+type resetConfirmRequest struct {
+	Token       string `json:"token"`
+	NewPassword string `json:"new_password"`
+}
+
+type tokenRequest struct {
+	Token string `json:"token,omitempty"`
+}
+
+// linkBaseFor resolves the origin used to build email links. The Service's
+// configured BaseURL wins (for deployments whose public URL differs from the
+// internal Host); otherwise it is derived from the request, which keeps the link
+// on the SAME tenant subdomain the request arrived on (multi-tenant-correct).
+func (s *Service) linkBaseFor(r *http.Request) string {
+	if s.cfg.BaseURL != "" {
+		return strings.TrimRight(s.cfg.BaseURL, "/")
+	}
+	scheme := "http"
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	} else if r.TLS != nil {
+		scheme = "https"
+	}
+	host := r.Host
+	if xf := r.Header.Get("X-Forwarded-Host"); xf != "" {
+		host = xf
+	}
+	return scheme + "://" + host
+}
+
+func (s *Service) handleVerifyRequest(w http.ResponseWriter, r *http.Request) {
+	tc := tenant.FromCtx(r.Context())
+	if tc == nil {
+		writeAuthErr(w, http.StatusBadRequest, "invalid tenant")
+		return
+	}
+	var req emailRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	err := s.RequestVerify(r.Context(), tc.ID, req.Email, s.linkBaseFor(r))
+	switch {
+	case err == nil:
+		writeAuthJSON(w, http.StatusOK, uniformEmailResponse)
+	case errors.Is(err, ErrTooManyAttempts):
+		w.Header().Set("Retry-After", "60")
+		writeAuthErr(w, http.StatusTooManyRequests, "too many requests, try again later")
+	default:
+		writeAuthErr(w, http.StatusInternalServerError, "request failed")
+	}
+}
+
+func (s *Service) handleResetRequest(w http.ResponseWriter, r *http.Request) {
+	tc := tenant.FromCtx(r.Context())
+	if tc == nil {
+		writeAuthErr(w, http.StatusBadRequest, "invalid tenant")
+		return
+	}
+	var req emailRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	err := s.RequestReset(r.Context(), tc.ID, req.Email, s.linkBaseFor(r))
+	switch {
+	case err == nil:
+		writeAuthJSON(w, http.StatusOK, uniformEmailResponse)
+	case errors.Is(err, ErrTooManyAttempts):
+		w.Header().Set("Retry-After", "60")
+		writeAuthErr(w, http.StatusTooManyRequests, "too many requests, try again later")
+	default:
+		writeAuthErr(w, http.StatusInternalServerError, "request failed")
+	}
+}
+
+func (s *Service) handleVerifyConfirm(w http.ResponseWriter, r *http.Request) {
+	tc := tenant.FromCtx(r.Context())
+	if tc == nil {
+		writeAuthErr(w, http.StatusBadRequest, "invalid tenant")
+		return
+	}
+	token := r.URL.Query().Get("token")
+	if token == "" && r.Method == http.MethodPost {
+		var req tokenRequest
+		_ = decodeBodyAllowEmpty(w, r, &req)
+		token = req.Token
+	}
+	err := s.ConfirmVerify(r.Context(), tc.ID, token)
+	switch {
+	case err == nil:
+		writeAuthJSON(w, http.StatusOK, map[string]string{"message": "email verified"})
+	case errors.Is(err, ErrInvalidToken):
+		writeAuthErr(w, http.StatusBadRequest, "invalid or expired token")
+	default:
+		writeAuthErr(w, http.StatusInternalServerError, "verification failed")
+	}
+}
+
+func (s *Service) handleResetConfirm(w http.ResponseWriter, r *http.Request) {
+	tc := tenant.FromCtx(r.Context())
+	if tc == nil {
+		writeAuthErr(w, http.StatusBadRequest, "invalid tenant")
+		return
+	}
+	var req resetConfirmRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	err := s.ConfirmReset(r.Context(), tc.ID, req.Token, req.NewPassword)
+	switch {
+	case err == nil:
+		writeAuthJSON(w, http.StatusOK, map[string]string{"message": "password updated"})
+	case errors.Is(err, ErrWeakPassword):
+		writeAuthErr(w, http.StatusUnprocessableEntity, "password too short")
+	case errors.Is(err, ErrInvalidToken):
+		writeAuthErr(w, http.StatusBadRequest, "invalid or expired token")
+	default:
+		writeAuthErr(w, http.StatusInternalServerError, "reset failed")
+	}
 }
 
 type signupRequest struct {

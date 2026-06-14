@@ -24,6 +24,7 @@ var builtinTemplates embed.FS
 var defaultSubjects = map[string]string{
 	"verification": "Confirm your email",
 	"welcome":      "Welcome",
+	"reset":        "Reset your password",
 }
 
 // templateSet is a parsed, render-ready set of email templates keyed by name

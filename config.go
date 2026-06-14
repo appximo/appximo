@@ -59,4 +59,14 @@ type Config struct {
 	// AuthMinPasswordLength is the minimum accepted signup password length.
 	// 0 falls back to APPITOOLS_AUTH_MIN_PASSWORD, then to 8.
 	AuthMinPasswordLength int
+
+	// AuthRequireVerified, when true, blocks login for a user whose email is not
+	// yet verified (→ 403). Empty falls back to APPITOOLS_AUTH_REQUIRE_VERIFIED
+	// ("true"/"1"/"on"). Default false (login works without verification).
+	AuthRequireVerified bool
+	// AuthBaseURL optionally overrides the origin used to build password-reset /
+	// email-verification links. Empty falls back to APPITOOLS_AUTH_BASE_URL; if
+	// still empty the link origin is derived from the request Host (the
+	// multi-tenant-correct default). The link path is appended by the engine.
+	AuthBaseURL string
 }

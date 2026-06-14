@@ -18,6 +18,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/miguelangel/appitools/pkg/outbox"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
@@ -53,6 +54,13 @@ func TestMain(m *testing.M) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "userauth test: pool:", err)
+		_ = ctr.Terminate(ctx)
+		os.Exit(1)
+	}
+	// AUTH-EMAIL-V1: the reset/verify flows enqueue to public.outbox.
+	if err := outbox.EnsureTable(ctx, pool); err != nil {
+		fmt.Fprintln(os.Stderr, "userauth test: ensure outbox:", err)
+		pool.Close()
 		_ = ctr.Terminate(ctx)
 		os.Exit(1)
 	}

@@ -336,16 +336,31 @@ func New(cfg Config) (*App, error) {
 			}
 		}
 	}
+	// AUTH-EMAIL-V1: password reset + email verification. The reset/verify flows
+	// enqueue an "email.send" event to the outbox (delivered async by the email
+	// worker, APPITOOLS_WORKER_MODE=email) — the topic must match the worker's
+	// APPITOOLS_EMAIL_TOPIC. RequireVerified gates login on a verified email;
+	// BaseURL overrides the email-link origin (else derived from the request Host).
+	requireVerified := cfg.AuthRequireVerified || envTruthy(os.Getenv("APPITOOLS_AUTH_REQUIRE_VERIFIED"))
+	baseURL := cfg.AuthBaseURL
+	if baseURL == "" {
+		baseURL = os.Getenv("APPITOOLS_AUTH_BASE_URL")
+	}
+	emailTopic := os.Getenv("APPITOOLS_EMAIL_TOPIC") // empty → NewService defaults to "email.send"
 	app.authSvc = userauth.NewService(userauth.NewStore(pool), userauth.Config{
 		JWTSecret:         cfg.JWTSecret,
 		SignupRole:        signupRole,
 		MinPasswordLength: minPw,
+		EmailTopic:        emailTopic,
+		BaseURL:           baseURL,
+		RequireVerified:   requireVerified,
 	})
 	if signupRole != "" {
 		log.Printf("auth: password identity enabled (public signup → role %q)", signupRole)
 	} else {
 		log.Println("auth: password identity enabled (public signup DISABLED — set APPITOOLS_AUTH_SIGNUP_ROLE to enable)")
 	}
+	log.Printf("auth: reset/verify email flows enabled (require_verified=%t, email topic via outbox)", requireVerified)
 
 	// engineRefs for custom-route Ctx helpers: compile validators once.
 	validators := make(map[string]*schema.ResourceValidator, len(s.Resources))
@@ -634,6 +649,17 @@ func (a *App) buildRouter() *chi.Mux {
 func mustMarshal(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+// envTruthy reports whether an env-var string means "on" (true/1/on/yes,
+// case-insensitive). Empty or anything else is false.
+func envTruthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "true", "1", "on", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 // ── relocated engine helpers (moved verbatim from cmd/appitools) ────────────
