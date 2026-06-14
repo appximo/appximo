@@ -25,7 +25,11 @@ func ClaimsFromCtx(ctx context.Context) *Claims {
 // /health (covers /healthz) and /readyz are infra liveness/readiness probes: they
 // MUST be reachable without a token, otherwise the load balancer polling /readyz
 // during graceful drain only ever sees 401 and the drain handshake never works.
-var skipJWT = []string{"/health", "/readyz", "/graphiql", "/metrics", "/debug", "/admin"}
+// "/auth/" is the password identity core (AUTH-CORE-V1): signup/login/refresh
+// happen BEFORE a token exists, so they are unauthenticated (but tenant-aware via
+// Host). The trailing slash keeps the prefix exact — it never matches an /api/
+// resource (those live under /api/) nor a hypothetical "/authors".
+var skipJWT = []string{"/health", "/readyz", "/graphiql", "/metrics", "/debug", "/admin", "/auth/"}
 
 // JWTMiddleware validates Bearer tokens on all routes except those in skipJWT.
 // 401 is returned for missing or invalid tokens on enforced routes.

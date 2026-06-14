@@ -43,6 +43,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/shutdown"
 	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/miguelangel/appitools/pkg/userauth"
 	"github.com/miguelangel/appitools/scripts"
 )
 
@@ -88,6 +89,8 @@ type App struct {
 
 	files         files.VFS // content-addressable file store (FILES-V1)
 	filesMaxBytes int64     // per-upload body cap
+
+	authSvc *userauth.Service // password identity core (AUTH-CORE-V1)
 
 	routes  []Route
 	started bool
@@ -307,6 +310,42 @@ func New(cfg Config) (*App, error) {
 	log.Printf("rate limiter: %.0f RPS / %d burst per tenant", rlRPS, rlBurst)
 
 	app.ss = shutdown.New()
+
+	// Auth-as-product core (AUTH-CORE-V1): per-tenant password identity. Users
+	// live in tenant_<id>.auth_users — email is UNIQUE per schema, not global, so
+	// the same email is a distinct user in two tenants (the structural advantage
+	// over Supabase's globally-unique email). The signup role + min password
+	// length come from Config or env; an UNSET signup role disables public signup
+	// (safe by default). A configured role MUST exist in the schema RBAC, else
+	// boot fails — a typo never becomes a silent "everyone signs up as <unknown>".
+	signupRole := cfg.AuthSignupRole
+	if signupRole == "" {
+		signupRole = os.Getenv("APPITOOLS_AUTH_SIGNUP_ROLE")
+	}
+	if signupRole != "" {
+		if _, ok := rbacPolicy.Roles[signupRole]; !ok {
+			pool.Close()
+			return nil, fmt.Errorf("appitools: AuthSignupRole %q is not a role declared in the schema RBAC", signupRole)
+		}
+	}
+	minPw := cfg.AuthMinPasswordLength
+	if minPw <= 0 {
+		if v := os.Getenv("APPITOOLS_AUTH_MIN_PASSWORD"); v != "" {
+			if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
+				minPw = n
+			}
+		}
+	}
+	app.authSvc = userauth.NewService(userauth.NewStore(pool), userauth.Config{
+		JWTSecret:         cfg.JWTSecret,
+		SignupRole:        signupRole,
+		MinPasswordLength: minPw,
+	})
+	if signupRole != "" {
+		log.Printf("auth: password identity enabled (public signup → role %q)", signupRole)
+	} else {
+		log.Println("auth: password identity enabled (public signup DISABLED — set APPITOOLS_AUTH_SIGNUP_ROLE to enable)")
+	}
 
 	// engineRefs for custom-route Ctx helpers: compile validators once.
 	validators := make(map[string]*schema.ResourceValidator, len(s.Resources))
@@ -549,6 +588,16 @@ func (a *App) buildRouter() *chi.Mux {
 			"version": a.version,
 		})
 	})
+
+	// Password identity core (AUTH-CORE-V1): /auth/signup, /auth/login,
+	// /auth/refresh. These flow through the SAME chain (tenant → rate limit →
+	// JWT[skipped for /auth/] → RBAC[passes through, not /api/]) — no duplicated
+	// middleware. They are unauthenticated (the JWT skip list covers "/auth/")
+	// but tenant-aware (Host subdomain), so a login authenticates against ONE
+	// tenant's users only.
+	if a.authSvc != nil {
+		r.With(appmiddleware.StrictCSP).Mount("/auth", a.authSvc.Router())
+	}
 
 	r.With(appmiddleware.StrictCSP).Handle("/graphql",
 		gqlhandler.BuildHandler(a.schema, a.tdb, a.hr, a.rbacPolicy, a.eventsHub))

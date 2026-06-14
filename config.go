@@ -49,4 +49,14 @@ type Config struct {
 	// not mounted (the JSON debug APIs are unaffected). Optional engine wiring,
 	// not part of the day-to-day user surface.
 	DebugTracesHTML []byte
+
+	// AuthSignupRole is the RBAC role assigned to every PUBLIC signup
+	// (POST /auth/signup), the auth-as-product core (AUTH-CORE-V1). Empty
+	// DISABLES public signup (safe by default — no accidental self-service
+	// accounts). It must name a role declared in the schema's RBAC; New rejects
+	// an unknown role at boot. Empty falls back to APPITOOLS_AUTH_SIGNUP_ROLE.
+	AuthSignupRole string
+	// AuthMinPasswordLength is the minimum accepted signup password length.
+	// 0 falls back to APPITOOLS_AUTH_MIN_PASSWORD, then to 8.
+	AuthMinPasswordLength int
 }

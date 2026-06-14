@@ -146,6 +146,11 @@ baseline faster are welcome; we'll publish updated numbers.
   restart** (routes and GraphQL types are compiled at boot)
 - **RBAC**: JSON policies — per role, per resource, per action, per field, plus
   dynamic row conditions (`operator_id = $user_id`); deny by default
+- **Auth (password identity)**: in-engine signup/login/refresh (`POST /auth/*`),
+  multi-tenant-aware — users live in the tenant's own schema, so **email is unique
+  per tenant, not globally** (the same email is a distinct account in two tenants).
+  argon2id hashing, anti-enumeration, per-identity login throttling; the issued
+  JWT is the same one the engine validates. Public signup is opt-in + role-gated
 - **Real-time**: per-resource SSE streams with RBAC applied at delivery
 - **Webhooks**: HMAC-SHA256-signed, async, retries with backoff, SSRF-guarded
 - **Extensions**: JS sandbox (Goja, watchdog-interrupted) with built-in helpers —
@@ -201,6 +206,8 @@ It serves our own production workload today.
 | `JWT_SECRET` | env | **yes** | HS256 signing secret (≥ 32 chars) |
 | `ADMIN_KEY` | env | **yes** | `X-Admin-Key` for `/metrics`, `/debug`, `/admin`, control plane |
 | `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | env | no | per-tenant token bucket (default 1000/100) |
+| `APPITOOLS_AUTH_SIGNUP_ROLE` | env | no | role assigned to public signup; **set it to enable `POST /auth/signup`** (empty = signup disabled). Must be a schema role |
+| `APPITOOLS_AUTH_MIN_PASSWORD` | env | no | minimum signup password length (default 8) |
 | `DB_MAX_CONNS`, `GOMAXPROCS`, `OBS_DB_PATH`, `SLACK_WEBHOOK_URL`, `REDIS_URL` | env | no | see [docs/DEPLOY.md](docs/DEPLOY.md) |
 | `--schema` | flag | **yes** | path to the JSON schema |
 | `--port` | flag | no | data-plane port (default 8080) |

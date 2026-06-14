@@ -554,6 +554,63 @@ consumer (`APPITOOLS_FILES_DIR` must be set on the worker, pointing at the same
 root). An S3 backend (presigned URL + 302) is the next increment; today the store
 is local-disk only.
 
+## Authentication — password identity core (AUTH-CORE-V1)
+
+The engine ships a **multi-tenant-aware password identity** core: signup, login
+and token refresh, served on three unauthenticated-but-tenant-aware routes (no
+schema declaration needed). It is auth-as-product, not a parallel token path —
+**the JWT a login issues is byte-identical in shape to the one the engine already
+validates** (same `user_id`/`role`/`tenant_id` claims, HS256, same `JWT_SECRET`).
+Identity answers WHO you are; the schema RBAC still governs WHAT you may do.
+
+- `POST /auth/signup` — `{ "email", "password" }` in the tenant's context (Host
+  subdomain). Creates a user in the tenant's own schema, returns the user (never
+  the hash) **and** a JWT (auto-login). `201`. Duplicate email **within the
+  tenant** → `409`; the SAME email in another tenant is a different user and
+  succeeds (the advantage — see below). A client-supplied `role` is **ignored**
+  (a public endpoint never lets a caller pick its own role).
+- `POST /auth/login` — `{ "email", "password" }` → `200 {user, token}`. Wrong
+  password and unknown email return the **identical** `401 {"error":"invalid
+  credentials"}` (anti-enumeration; the unknown-email path still runs an argon2
+  verify so timing does not leak existence either). Throttled per (tenant, email)
+  → `429` on brute-force.
+- `POST /auth/refresh` — re-mints a fresh token from a still-valid one (token in
+  the `Authorization: Bearer` header or `{"token"}` body). Tenant-checked (no
+  cross-tenant refresh). Stateless: a deleted user's token stays valid until its
+  `exp` (standard stateless-JWT trade-off).
+
+**Per-tenant users, email unique PER SCHEMA.** Users live in
+`tenant_<id>.auth_users` (the table name carries an underscore, which a resource
+name cannot, so it never collides with a schema resource). Email is `UNIQUE` on
+`lower(email)` **within the tenant's schema**, not globally — so the same email
+is a distinct account in tenant A and tenant B. This is the structural advantage
+over Supabase, whose Auth cannot do multi-tenancy because its `email` is globally
+unique. The table is created idempotently on first use, inside the tenant schema,
+exactly like the rest of the tenant's data.
+
+**Security.** Passwords are hashed with **argon2id** (pure Go, no CGO; m=19 MiB,
+t=2, p=1 — the OWASP minimum, ~50–60 ms per signup/login on a 1-vCPU VPS). That
+cost is intentional and paid ONLY on signup/login — never on the request hot
+path (which validates an already-minted JWT). The hash is never returned or
+logged. Login is rate-limited per identity (anti-brute-force) on top of the
+per-tenant request limiter.
+
+**Config.** Public signup is **disabled by default** (safe — no accidental
+self-service accounts):
+
+- `APPITOOLS_AUTH_SIGNUP_ROLE` (or `Config.AuthSignupRole`) — the role assigned
+  to every public signup. **Setting it ENABLES public signup; leaving it empty
+  keeps signup disabled** (`POST /auth/signup` → `403`). The role must be one the
+  schema's RBAC declares, or the engine refuses to boot (a typo never becomes a
+  silent misconfiguration). Login and refresh work regardless (they operate on
+  already-created users).
+- `APPITOOLS_AUTH_MIN_PASSWORD` (or `Config.AuthMinPasswordLength`) — minimum
+  signup password length (default 8).
+
+**Not in this core (Fase 1 follow-ups):** OAuth2 (Google/GitHub/Microsoft),
+email verification + password reset (built on the email consumer), and MFA. The
+`email_verified` column is already present (default `false`) for the verify flow.
+
 ## Does not exist — do not invent
 
 - Field type `number` → schema rejected; use `int`, `int64` or
