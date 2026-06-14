@@ -358,6 +358,81 @@ nginx) certificates yourself, instead of `docker compose up`.
 
 ---
 
+## Background worker (Class-2 outbox consumer)
+
+The engine writes durable jobs to `public.outbox` (a resource opts in with
+`"events": [...]`, or a custom handler calls `ctx.Enqueue`). A **separate
+process** — the worker — drains that table and runs each event through a consumer.
+It is shipped in the **same image** as the engine (run via the `worker`
+entrypoint keyword), but it is a distinct service: it never touches the engine's
+request hot path, and it survives engine restarts.
+
+**Compose (Levels 1 & 2): it's already wired.** Both `docker-compose.yml` and
+`docker-compose.prod.yml` define a `worker` service that comes up with
+`docker compose up -d`. It defaults to `echo` mode (log + ack — no engine calls,
+safe out of the box). Switch modes in `.env`:
+
+```bash
+APPITOOLS_WORKER_MODE=xlsx   # echo (default) | writeback | xlsx
+```
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `DATABASE_URL` | — | the SAME Postgres as the engine (the outbox lives in `public`) |
+| `JWT_SECRET` | — | **must equal the engine's** — the worker mints a short-lived, scoped service JWT to write results back through the engine API |
+| `APPITOOLS_WORKER_MODE` | `echo` | `echo` (log+ack) · `writeback` (demo status PATCH) · `xlsx` (FileJob consumer) |
+| `APPITOOLS_ENGINE_URL` | `http://engine:8080` | engine data-plane URL the worker calls for write-back |
+| `APPITOOLS_WORKER_ROLE` | `service_worker` | scoped RBAC role the worker assumes — **never admin**; must exist in your schema (writeback/xlsx only) |
+| `APPITOOLS_TENANT_DOMAIN` | `localhost` | internal Host-header suffix (`{tenant}.{suffix}`); the engine reads the **subdomain**, so `localhost` is correct even in prod — it is not a DNS name |
+| `APPITOOLS_FILES_DIR` | `/var/lib/appitools/files` | CAS root for `xlsx` mode — the SAME volume the engine mounts |
+
+**Shared file volume (xlsx mode).** The XLSX consumer resolves a job's `file_ref`
+to a blob via the content-addressable store (`pkg/files`). The compose files mount
+the **same** named volume `files_data` on both `engine` and `worker` at
+`/var/lib/appitools/files`, so the worker's `VFS.Get` reads exactly what the
+engine's `VFS.Put` wrote. Do **not** give them separate volumes — they must share
+one CAS.
+
+**Horizontal scaling — free.** The worker claims rows with
+`SELECT … FOR UPDATE SKIP LOCKED`, so N workers claim **disjoint** rows and never
+double-process (delivery is at-least-once; consumers are idempotent). Scale out
+with:
+
+```bash
+docker compose up -d --scale worker=3
+```
+
+**Native (Level 3).** Run the worker as a second systemd unit alongside the
+engine — same binary set, built `CGO_ENABLED=0` (`scripts/build-worker.sh`, or
+`make worker`):
+
+```ini
+# /etc/systemd/system/appitools-worker.service
+[Unit]
+Description=Appitools outbox worker
+After=network-online.target docker.service appitools.service
+
+[Service]
+User=appitools
+Group=appitools
+EnvironmentFile=/etc/appitools/engine.env      # same DATABASE_URL + JWT_SECRET
+Environment=APPITOOLS_WORKER_MODE=echo
+Environment=APPITOOLS_ENGINE_URL=http://127.0.0.1:8080
+ExecStart=/usr/local/bin/appitools-worker
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+On SIGTERM (`systemctl stop`) the worker finishes its current batch, closes its
+DB connections, and exits cleanly. It reconnects on its own (capped backoff) if
+Postgres blips, so `Restart=on-failure` is a backstop, not the primary recovery.
+
+---
+
 ## Measured overhead of each layer
 
 The claims above are measurements, not folklore. On the same 2-vCPU droplet

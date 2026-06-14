@@ -24,12 +24,49 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}
       ADMIN_KEY: ${ADMIN_KEY:?ADMIN_KEY is required}
       GOMAXPROCS: "2"
+      # Content-addressable file store (FILES-V1). Shared with the worker via the
+      # files_data volume so the worker's VFS.Get sees what the engine's VFS.Put wrote.
+      APPITOOLS_FILES_DIR: /var/lib/appitools/files
     ports:
       - "8080:8080" # data plane: REST + GraphQL (public)
       - "9090:9090" # control plane: tenant/schema admin (keep private in prod)
+    volumes:
+      - files_data:/var/lib/appitools/files
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Class-2 outbox consumer (ADR-016) — a SEPARATE process from the engine, SAME
+  # image (run via the `worker` entrypoint keyword). It drains public.outbox with
+  # SELECT … FOR UPDATE SKIP LOCKED, so you can scale it horizontally (set
+  # `deploy.replicas` or `docker compose up --scale worker=N`) and the N workers
+  # claim disjoint rows — never double-processing (proven in WORKER-V1).
+  worker:
+    image: neodevtrix/appitools-engine:latest
+    command: ["worker"]
+    environment:
+      DATABASE_URL: postgres://appitools:${DB_PASSWORD:-changeme}@db:5432/appitools?sslmode=disable
+      # MUST equal the engine's JWT_SECRET — the worker mints a short-lived,
+      # scoped service JWT to write results back through the engine API.
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}
+      # echo (default, logs+acks) | writeback (demo PATCH) | xlsx (FileJob consumer).
+      APPITOOLS_WORKER_MODE: ${APPITOOLS_WORKER_MODE:-echo}
+      APPITOOLS_ENGINE_URL: http://engine:8080
+      # Internal Host-header suffix for the engine API call ({tenant}.{suffix});
+      # the engine reads the tenant from the SUBDOMAIN, so "localhost" is correct
+      # even in prod — it is NOT a DNS name (see DEPLOY.md).
+      APPITOOLS_TENANT_DOMAIN: ${APPITOOLS_TENANT_DOMAIN:-localhost}
+      APPITOOLS_WORKER_ROLE: ${APPITOOLS_WORKER_ROLE:-service_worker}
+      # Same CAS root as the engine (xlsx mode resolves file_ref via VFS.Get).
+      APPITOOLS_FILES_DIR: /var/lib/appitools/files
+    volumes:
+      - files_data:/var/lib/appitools/files
+    depends_on:
+      db:
+        condition: service_healthy
+      engine:
+        condition: service_started
     restart: unless-stopped
 
   ui:
@@ -77,6 +114,7 @@ services:
 
 volumes:
   pgdata:
+  files_data: # content-addressable file store, shared by engine + worker
 
 configs:
   # Inline copy of migrations/001_control_plane.sql so the quickstart needs only

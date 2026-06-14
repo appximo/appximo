@@ -2,7 +2,7 @@
 # the gotestfmt-piped targets.
 SHELL := bash
 
-.PHONY: build engine lint run build-pgo collect-profile \
+.PHONY: build engine worker lint run build-pgo collect-profile \
 	test test-integration test-e2e test-resilience test-perf test-security test-all bench
 
 build:
@@ -13,6 +13,12 @@ build:
 # never hand-write `go build` for a deployable engine binary.
 engine:
 	./scripts/build-engine.sh appitools
+
+# worker: the CANONICAL worker binary build (cmd/appitools-worker, ADR-016
+# §Class 2). Same static/version-stamped flags as `engine`; ships in the same
+# Docker image (run it with the `worker` entrypoint keyword).
+worker:
+	./scripts/build-worker.sh appitools-worker
 
 lint:
 	golangci-lint run ./...

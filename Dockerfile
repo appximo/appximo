@@ -1,14 +1,19 @@
 # syntax=docker/dockerfile:1
 #
-# Multi-stage build → small Alpine runtime (~60MB total; the static binary is
-# ~45MB of it). The binary is fully static (CGO_ENABLED=0): wazero (WASM) and
-# modernc.org/sqlite are pure Go, so no C toolchain or libc is needed — Alpine
-# is chosen over scratch for three operational wins:
+# Multi-stage build → small Alpine runtime. The binaries are fully static
+# (CGO_ENABLED=0): wazero (WASM) and modernc.org/sqlite are pure Go, so no C
+# toolchain or libc is needed — Alpine is chosen over scratch for three
+# operational wins:
 #   * a real /tmp           → the SQLite observability store works out of the box
 #   * busybox wget          → Docker HEALTHCHECK against /healthz
 #   * a shell               → `docker exec` for the `appitools token` helper
 # pg_dump-based backups (POST /admin/backup) still need postgresql16-client:
 # add `RUN apk add --no-cache postgresql16-client` if you want them in-image.
+#
+# ONE image, two roles: it ships BOTH the engine and the Class-2 outbox worker
+# (cmd/appitools-worker). The entrypoint runs the engine by default; pass the
+# `worker` keyword (compose `command: ["worker"]`) to run the worker instead — no
+# second image, no duplicated base layers.
 
 FROM golang:1.25-alpine AS builder
 WORKDIR /app
@@ -22,6 +27,8 @@ COPY . .
 ARG VERSION=dev
 ARG REVISION=unknown
 RUN ./scripts/build-engine.sh /out/appitools "${VERSION}" "${REVISION}"
+# The worker ships in the SAME image — same canonical flags (build-worker.sh).
+RUN ./scripts/build-worker.sh /out/appitools-worker "${VERSION}" "${REVISION}"
 
 FROM alpine:3.21
 
@@ -39,20 +46,35 @@ RUN apk add --no-cache ca-certificates \
     && addgroup -S appitools && adduser -S -G appitools appitools
 
 COPY --from=builder /out/appitools /usr/local/bin/appitools
+COPY --from=builder /out/appitools-worker /usr/local/bin/appitools-worker
+COPY deploy/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # The quickstart schema baked in so `serve` starts out of the box — it is the
 # EXACT schema shown in the README hook (todo-api/tasks), so the reader follows
 # one coherent example end to end. Mount your own schema over this path (or
 # pass a different --schema) for your project.
 COPY --from=builder /app/examples/quickstart/schema.json /etc/appitools/schema.json
 
+# Content-addressable file store root (FILES-V1), owned by the runtime user so
+# both the engine (VFS.Put) and the worker (VFS.Get) can write/read it. Creating
+# it here means a named volume mounted at this path inherits the appitools
+# ownership on first init (Docker seeds an empty named volume from the image dir),
+# so the non-root user can write without a chown sidecar. APPITOOLS_FILES_DIR
+# defaults to exactly this path; mount the SAME volume on engine + worker so they
+# share one CAS.
+RUN mkdir -p /var/lib/appitools/files && chown -R appitools:appitools /var/lib/appitools
+
 USER appitools
 
 # 8080 = data plane (public REST + GraphQL). 9090 = control plane (private/admin).
 EXPOSE 8080 9090
 
-# busybox wget ships with Alpine; /healthz is the liveness endpoint.
+# busybox wget ships with Alpine; /healthz is the liveness endpoint. (The worker
+# has no HTTP port; this probe is a no-op for a container started as `worker` —
+# override/disable it in the worker compose service.)
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
 
-ENTRYPOINT ["appitools"]
+# The dispatcher runs the engine by default and the worker on the `worker`
+# keyword; every other arg is prefixed with `appitools` exactly as before.
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["serve", "--schema", "/etc/appitools/schema.json", "--port", "8080"]

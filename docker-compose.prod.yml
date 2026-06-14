@@ -40,9 +40,42 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}
       ADMIN_KEY: ${ADMIN_KEY:?ADMIN_KEY is required}
       GOMAXPROCS: "2"
+      # Content-addressable file store (FILES-V1); shared with the worker.
+      APPITOOLS_FILES_DIR: /var/lib/appitools/files
+    volumes:
+      - files_data:/var/lib/appitools/files
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Class-2 outbox consumer (ADR-016) — SAME image, `worker` entrypoint keyword,
+  # SEPARATE process. Drains public.outbox with FOR UPDATE SKIP LOCKED, so it
+  # scales horizontally (docker compose -f docker-compose.prod.yml up --scale
+  # worker=N): N workers claim disjoint rows, never double-processing. No host
+  # ports — internal network only.
+  worker:
+    image: neodevtrix/appitools-engine:latest
+    command: ["worker"]
+    environment:
+      DATABASE_URL: postgres://appitools:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/appitools?sslmode=disable
+      # MUST match the engine's JWT_SECRET (the worker mints scoped service JWTs).
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}
+      # echo (default) | writeback | xlsx — see docs/DEPLOY.md → Background worker.
+      APPITOOLS_WORKER_MODE: ${APPITOOLS_WORKER_MODE:-echo}
+      APPITOOLS_ENGINE_URL: http://engine:8080
+      # Internal Host-header suffix ({tenant}.{suffix}); the engine reads the
+      # SUBDOMAIN, so "localhost" is correct even in prod (not a DNS name).
+      APPITOOLS_TENANT_DOMAIN: ${APPITOOLS_TENANT_DOMAIN:-localhost}
+      APPITOOLS_WORKER_ROLE: ${APPITOOLS_WORKER_ROLE:-service_worker}
+      APPITOOLS_FILES_DIR: /var/lib/appitools/files
+    volumes:
+      - files_data:/var/lib/appitools/files
+    depends_on:
+      db:
+        condition: service_healthy
+      engine:
+        condition: service_started
     restart: unless-stopped
 
   db:
@@ -68,6 +101,7 @@ services:
 
 volumes:
   pgdata:
+  files_data: # content-addressable file store, shared by engine + worker
   caddy_data:
   caddy_config:
 

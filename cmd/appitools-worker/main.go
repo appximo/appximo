@@ -32,6 +32,14 @@ import (
 	"github.com/miguelangel/appitools/pkg/worker"
 )
 
+// version / revision are stamped at build time by scripts/build-worker.sh via
+// -ldflags -X (release tag or short SHA; "dev"/"unknown" on a plain local build),
+// mirroring the engine so a deployed worker is traceable to its build.
+var (
+	version  = "dev"
+	revision = "unknown"
+)
+
 func main() {
 	logging.Init(os.Getenv("APPITOOLS_ENV"))
 
@@ -71,7 +79,7 @@ func main() {
 
 	w := worker.New(connect, proc, worker.Config{}, logging.Log)
 
-	logging.Log.Info().Msg("appitools-worker starting")
+	logging.Log.Info().Str("version", version).Str("revision", revision).Msg("appitools-worker starting")
 	if err := w.Run(ctx); err != nil && ctx.Err() == nil {
 		logging.Log.Fatal().Err(err).Msg("appitools-worker exited with error")
 	}
