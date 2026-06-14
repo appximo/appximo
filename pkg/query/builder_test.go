@@ -59,11 +59,11 @@ func TestBuildQuery_Defaults(t *testing.T) {
 
 	selectQ, countQ, selectArgs, countArgs := qb.SQL()
 
-	want := "SELECT * FROM orders ORDER BY id ASC LIMIT $1 OFFSET $2"
+	want := `SELECT * FROM "orders" ORDER BY id ASC LIMIT $1 OFFSET $2`
 	if selectQ != want {
 		t.Errorf("selectQ:\n  got  %q\n  want %q", selectQ, want)
 	}
-	if countQ != "SELECT COUNT(*) FROM orders" {
+	if countQ != `SELECT COUNT(*) FROM "orders"` {
 		t.Errorf("countQ: got %q", countQ)
 	}
 	if len(selectArgs) != 2 || selectArgs[0] != DefaultPerPage || selectArgs[1] != 0 {

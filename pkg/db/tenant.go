@@ -101,14 +101,19 @@ func UndefinedColumnField(err error) (field string, ok bool) {
 // call, which is the list-API hot path (compilation, not matching, dominated it).
 var qualifyReCache sync.Map // table string → *regexp.Regexp
 
-// qualifyTableNames rewrites FROM/JOIN references to unqualified tableName
-// into schema-qualified form using pgx.Identifier for safe quoting.
-// Example: "SELECT * FROM tasks WHERE x=$1" → "SELECT * FROM "tenant_acme"."tasks" WHERE x=$1"
+// qualifyTableNames rewrites FROM/JOIN references to the unqualified tableName
+// into schema-qualified form using pgx.Identifier for safe quoting. It accepts
+// the table name either bare (FROM tasks) or already double-quoted (FROM "tasks")
+// — the query builder now emits the quoted form for consistent identifier quoting
+// (BUG1), while older callers still pass bare names; both qualify identically.
+// Example: `SELECT * FROM "tasks" WHERE x=$1` → `SELECT * FROM "tenant_acme"."tasks" WHERE x=$1`
 func qualifyTableNames(query, schema, table string) string {
 	qualified := pgx.Identifier{schema, table}.Sanitize()
 	re, ok := qualifyReCache.Load(table)
 	if !ok {
-		compiled := regexp.MustCompile(`(?i)\b(FROM|JOIN)\s+` + regexp.QuoteMeta(table) + `\b`)
+		qt := regexp.QuoteMeta(table)
+		// Match `FROM "tasks"` (quoted) OR `FROM tasks` (bare, word-bounded).
+		compiled := regexp.MustCompile(`(?i)(FROM|JOIN)\s+(?:"` + qt + `"|` + qt + `\b)`)
 		re, _ = qualifyReCache.LoadOrStore(table, compiled)
 	}
 	return re.(*regexp.Regexp).ReplaceAllString(query, "${1} "+qualified)
@@ -169,6 +174,21 @@ var schemaNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 func validateSchemaName(name string) error {
 	if !schemaNameRe.MatchString(name) {
 		return fmt.Errorf("invalid schema name %q: must match ^[a-z][a-z0-9_]*$", name)
+	}
+	return nil
+}
+
+// tableNameRe matches a resource/table identifier. Unlike a Postgres schema name,
+// a resource name may contain hyphens (resourceNameRe at schema load is
+// ^[a-z][a-z0-9-]*$), so a separate, hyphen-tolerant validator is used for the
+// table argument of QueryDirect — otherwise a valid hyphenated resource (e.g. a
+// many-to-many junction "order-products") is wrongly rejected. The name is still
+// safely quoted via pgx.Identifier downstream; this is defence-in-depth.
+var tableNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+
+func validateTableName(name string) error {
+	if !tableNameRe.MatchString(name) {
+		return fmt.Errorf("invalid table name %q: must match ^[a-z][a-z0-9_-]*$", name)
 	}
 	return nil
 }
@@ -490,8 +510,8 @@ func (tdb *TenantDB) QueryDirect(ctx context.Context, pgSchema, tableName, query
 	if err := validateSchemaName(pgSchema); err != nil {
 		return nil, err
 	}
-	if err := validateSchemaName(tableName); err != nil {
-		return nil, fmt.Errorf("invalid table name %q: %w", tableName, err)
+	if err := validateTableName(tableName); err != nil {
+		return nil, err
 	}
 
 	qualified := qualifyTableNames(query, pgSchema, tableName)

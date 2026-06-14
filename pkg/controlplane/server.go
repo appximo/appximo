@@ -4,9 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/miguelangel/appitools/pkg/schema"
@@ -84,16 +82,11 @@ func parseAndValidateSchema(raw json.RawMessage) (*schema.APISchema, []string) {
 	return &s, nil
 }
 
-// schemaWarnings returns non-fatal notices for a VALID schema — keys that
-// parse (forward compatibility) but do not act yet. Silence here would bless
-// dead config; an error would break schemas that must stay loadable when the
-// feature ships (same reasoning as the hooks-compiled-at-boot reload warning).
-func schemaWarnings(s *schema.APISchema) []string {
-	if idx := schema.IndexedResources(s); len(idx) > 0 {
-		return []string{fmt.Sprintf(
-			"indexes on %s are parsed but not yet applied — DB index creation is coming in a future release",
-			strings.Join(idx, ", "))}
-	}
+// schemaWarnings returns non-fatal notices for a VALID schema — keys that parse
+// (forward compatibility) but do not act yet. `indexes` are now materialized at
+// migration (BUGS-V1) so they no longer warn; the hook is kept (returns nil) so
+// a future parsed-but-dead key can warn here without re-wiring the responses.
+func schemaWarnings(_ *schema.APISchema) []string {
 	return nil
 }
 

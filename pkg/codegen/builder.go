@@ -208,6 +208,13 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		emitUpdate := res.EmitsOn("update")
 		emitDelete := res.EmitsOn("delete")
 
+		// Quoted table identifier, computed ONCE at boot (BUG1 — consistent
+		// quoting). The search_path write/get paths (create/get/delete/update/
+		// subresource) interpolate this so a hyphenated resource name resolves;
+		// the list path keeps passing the bare `name` to QueryDirect, which
+		// qualifies it. Zero per-request cost (closures capture tbl).
+		tbl := pgx.Identifier{name}.Sanitize()
+
 		// --- List ---
 		r.Get("/api/"+name, pkghandlers.CachedGet(func(w http.ResponseWriter, req *http.Request) {
 			tc := tenant.MustFromCtx(req.Context())
@@ -359,7 +366,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// a 500. Residual mass-assignment (e.g. client-set id) is low-impact for
 			// the current schema (no privilege/tenant columns) and tracked separately.
 			cols, placeholders, args := pkghandlers.BuildInsertArgs(body)
-			insertQ := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", name, cols, placeholders)
+			insertQ := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", tbl, cols, placeholders)
 			var result []map[string]any
 			var err error
 			if emitCreate {
@@ -420,7 +427,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// Enforce the row-level RBAC condition (if any) so a restricted role
 			// cannot read another principal's row by guessing its id.
 			evalResult := rbac.EvalResultFromCtx(req.Context())
-			q := fmt.Sprintf("SELECT * FROM %s WHERE id = $1", name)
+			q := fmt.Sprintf("SELECT * FROM %s WHERE id = $1", tbl)
 			args := []any{id}
 			if evalResult != nil {
 				var ok bool
@@ -495,7 +502,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// Enforce the row-level RBAC condition (if any) so a restricted role
 			// cannot delete another principal's row by guessing its id.
 			evalResult := rbac.EvalResultFromCtx(req.Context())
-			q := fmt.Sprintf("DELETE FROM %s WHERE id = $1", name)
+			q := fmt.Sprintf("DELETE FROM %s WHERE id = $1", tbl)
 			args := []any{id}
 			if evalResult != nil {
 				var ok bool
@@ -604,7 +611,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				// A non-owned row yields zero rows → 404 (never 403): this matches the
 				// GET-by-id/DELETE pattern and the S33/S34 BOLA fixes that deliberately
 				// avoid revealing the existence of another principal's row.
-				selQ := fmt.Sprintf("SELECT 1 FROM %s WHERE id = $1", name)
+				selQ := fmt.Sprintf("SELECT 1 FROM %s WHERE id = $1", tbl)
 				selArgs := []any{id}
 				if evalResult != nil {
 					var ok bool
@@ -688,7 +695,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					return
 				}
 
-				q := fmt.Sprintf("UPDATE %s SET %s WHERE id = $%d", name, strings.Join(setClauses, ", "), argIdx)
+				q := fmt.Sprintf("UPDATE %s SET %s WHERE id = $%d", tbl, strings.Join(setClauses, ", "), argIdx)
 				args = append(args, id)
 				if evalResult != nil {
 					var ok bool
@@ -773,7 +780,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				}
 				q := fmt.Sprintf(
 					"SELECT r.* FROM %s r JOIN %s src ON src.%s = r.id WHERE src.id = $1",
-					relResource, name, fn,
+					pgx.Identifier{relResource}.Sanitize(), tbl, pgx.Identifier{fn}.Sanitize(),
 				)
 				rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema, q, parentID)
 				if err != nil {

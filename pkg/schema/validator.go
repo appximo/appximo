@@ -107,6 +107,7 @@ func Validate(s *APISchema) []ValidationError {
 		}
 
 		errs = append(errs, validateRelations(resPrefix, resName, res, s)...)
+		errs = append(errs, validateIndexes(resPrefix, res)...)
 
 		for hookName, hook := range res.Hooks {
 			hookPrefix := resPrefix + ".hooks." + hookName
@@ -221,6 +222,34 @@ func validateRelations(resPrefix, resName string, res ResourceSchema, s *APISche
 				errs = append(errs, ValidationError{
 					Field:   relPrefix + ".target_fk",
 					Message: fmt.Sprintf("target_fk only applies to many_to_many, not %q", rel.Type),
+				})
+			}
+		}
+	}
+	return errs
+}
+
+// validateIndexes checks each declared index DEFINITION (BUGS-V1): at least one
+// field, and every referenced field a valid identifier. Column EXISTENCE is
+// checked against information_schema at tenant migration (a warning, since
+// columns can be added to the live table at runtime — the DB stays the source of
+// truth, same pattern as relation FK indexes).
+func validateIndexes(resPrefix string, res ResourceSchema) []ValidationError {
+	var errs []ValidationError
+	for i, idx := range res.Indexes {
+		idxPrefix := fmt.Sprintf("%s.indexes[%d]", resPrefix, i)
+		if len(idx.Fields) == 0 {
+			errs = append(errs, ValidationError{
+				Field:   idxPrefix + ".fields",
+				Message: "index must list at least one field",
+			})
+			continue
+		}
+		for _, f := range idx.Fields {
+			if !fieldNameRe.MatchString(f) {
+				errs = append(errs, ValidationError{
+					Field:   idxPrefix + ".fields",
+					Message: fmt.Sprintf("invalid index field %q: must match ^[a-z][a-z0-9_]*$", f),
 				})
 			}
 		}

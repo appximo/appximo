@@ -145,9 +145,12 @@ type HookConfig struct {
 	Timeout       string `json:"timeout,omitempty"`         // execution budget, e.g. "500ms" (default "500ms")
 }
 
-// IndexDef specifies a composite index on one or more fields.
+// IndexDef specifies an index on one or more fields (a composite index when more
+// than one). Applied at tenant migration as CREATE [UNIQUE] INDEX IF NOT EXISTS
+// over the listed columns (BUGS-V1 — previously parsed but not applied).
 type IndexDef struct {
 	Fields []string `json:"fields"`
+	Unique bool     `json:"unique,omitempty"`
 }
 
 // RBACPolicy holds all role definitions for a resource set.

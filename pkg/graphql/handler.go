@@ -17,6 +17,7 @@ import (
 	"github.com/graphql-go/graphql/language/ast"
 	"github.com/graphql-go/graphql/language/parser"
 	"github.com/graphql-go/graphql/language/source"
+	"github.com/jackc/pgx/v5"
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/events"
@@ -390,10 +391,17 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 				inputFields[fname] = &gql.InputObjectFieldConfig{Type: t}
 			}
 		}
-		inputTypes[name] = gql.NewInputObject(gql.InputObjectConfig{
-			Name:   title + "Input",
-			Fields: inputFields,
-		})
+		// graphql-go PANICS on an input object with zero fields, so a type is
+		// created ONLY when it has at least one field (BUG2). A resource whose
+		// columns are all uuid (no orderable/filterable fields) or all auto (no
+		// writable input) simply omits that input — the corresponding arg/mutation
+		// is skipped below rather than emitting an invalid empty SDL type.
+		if len(inputFields) > 0 {
+			inputTypes[name] = gql.NewInputObject(gql.InputObjectConfig{
+				Name:   title + "Input",
+				Fields: inputFields,
+			})
+		}
 
 		// Filter input type
 		filterFields := gql.InputObjectConfigFieldMap{}
@@ -403,10 +411,12 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 				filterFields[fname] = &gql.InputObjectFieldConfig{Type: ft}
 			}
 		}
-		filterTypes[name] = gql.NewInputObject(gql.InputObjectConfig{
-			Name:   title + "Filter",
-			Fields: filterFields,
-		})
+		if len(filterFields) > 0 {
+			filterTypes[name] = gql.NewInputObject(gql.InputObjectConfig{
+				Name:   title + "Filter",
+				Fields: filterFields,
+			})
+		}
 
 		// Order input type
 		orderFields := gql.InputObjectConfigFieldMap{}
@@ -416,10 +426,12 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 				orderFields[fname] = &gql.InputObjectFieldConfig{Type: orderDir}
 			}
 		}
-		orderTypes[name] = gql.NewInputObject(gql.InputObjectConfig{
-			Name:   title + "Order",
-			Fields: orderFields,
-		})
+		if len(orderFields) > 0 {
+			orderTypes[name] = gql.NewInputObject(gql.InputObjectConfig{
+				Name:   title + "Order",
+				Fields: orderFields,
+			})
+		}
 	}
 
 	// RELATIONS-V1: nested relation fields on each object type, typed to the
@@ -464,14 +476,21 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 		res := s.Resources[name]
 		resCopy := res
 		title := toPascalCase(singular(name))
+		listArgs := gql.FieldConfigArgument{
+			"page":     &gql.ArgumentConfig{Type: gql.Int},
+			"per_page": &gql.ArgumentConfig{Type: gql.Int},
+		}
+		// Only expose filter/order args for resources that actually have
+		// filterable/orderable fields (BUG2 — no empty input type to reference).
+		if ft := filterTypes[name]; ft != nil {
+			listArgs["filter"] = &gql.ArgumentConfig{Type: ft}
+		}
+		if ot := orderTypes[name]; ot != nil {
+			listArgs["order"] = &gql.ArgumentConfig{Type: ot}
+		}
 		queryFields[name] = &gql.Field{ // list: guides(...)
-			Type: gql.NewNonNull(connectionTypes[name]),
-			Args: gql.FieldConfigArgument{
-				"page":     &gql.ArgumentConfig{Type: gql.Int},
-				"per_page": &gql.ArgumentConfig{Type: gql.Int},
-				"filter":   &gql.ArgumentConfig{Type: filterTypes[name]},
-				"order":    &gql.ArgumentConfig{Type: orderTypes[name]},
-			},
+			Type:    gql.NewNonNull(connectionTypes[name]),
+			Args:    listArgs,
 			Resolve: listResolver(name, &resCopy, tdb, policy, s),
 		}
 		queryFields[singular(name)] = &gql.Field{ // by ID: guide(id: ID!)
@@ -494,12 +513,17 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 		// (= schema load), never per request.
 		rv := schema.CompileRules(&resCopy)
 		title := toPascalCase(singular(name)) // createGuide, deleteGuide
-		mutationFields["create"+title] = &gql.Field{
-			Type: gql.NewNonNull(objectTypes[name]),
-			Args: gql.FieldConfigArgument{
-				"input": &gql.ArgumentConfig{Type: gql.NewNonNull(inputTypes[name])},
-			},
-			Resolve: createResolver(name, &resCopy, rv, tdb, hr, policy, hub),
+		// createX exists only when the resource has writable (non-auto) fields —
+		// otherwise there is no input type to reference (BUG2). deleteX always
+		// exists (it needs only an id).
+		if inputTypes[name] != nil {
+			mutationFields["create"+title] = &gql.Field{
+				Type: gql.NewNonNull(objectTypes[name]),
+				Args: gql.FieldConfigArgument{
+					"input": &gql.ArgumentConfig{Type: gql.NewNonNull(inputTypes[name])},
+				},
+				Resolve: createResolver(name, &resCopy, rv, tdb, hr, policy, hub),
+			}
 		}
 		mutationFields["delete"+title] = &gql.Field{
 			Type: gql.NewNonNull(gql.Boolean),
@@ -649,7 +673,7 @@ func getByIDResolver(name string, tdb *db.TenantDB, policy *rbac.Policy, s *sche
 		// Enforce the row-level RBAC condition (BOLA guard) — a restricted role
 		// must not read another principal's row by guessing its id. Mirrors the
 		// REST get-by-id path.
-		q := "SELECT * FROM " + name + " WHERE id = $1"
+		q := "SELECT * FROM " + pgx.Identifier{name}.Sanitize() + " WHERE id = $1"
 		qargs := []any{idStr}
 		if evalResult != nil {
 			q, qargs, err = query.AppendRowCondition(q, qargs, evalResult.Condition)
@@ -755,7 +779,7 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		// not whitelist against res.Fields — the schema can evolve at runtime, so
 		// the DB is the source of truth (mirrors the REST create path).
 		cols, placeholders, args := pkghandlers.BuildInsertArgs(body)
-		q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", name, cols, placeholders)
+		q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", pgx.Identifier{name}.Sanitize(), cols, placeholders)
 		result, err := tdb.ExecRowsTenant(p.Context, tc.PGSchema, q, args...)
 		if err != nil {
 			return nil, safeDBErr(err)
@@ -799,7 +823,7 @@ func deleteResolver(name string, tdb *db.TenantDB, policy *rbac.Policy, hub *eve
 
 		// Enforce the row-level RBAC condition (BOLA guard) — a restricted role
 		// must not delete another principal's row by guessing its id.
-		q := "DELETE FROM " + name + " WHERE id = $1"
+		q := "DELETE FROM " + pgx.Identifier{name}.Sanitize() + " WHERE id = $1"
 		qargs := []any{idStr}
 		if evalResult != nil {
 			q, qargs, err = query.AppendRowCondition(q, qargs, evalResult.Condition)

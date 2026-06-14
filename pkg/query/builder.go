@@ -221,6 +221,12 @@ func (qb *QueryBuilder) SQL() (selectQ, countQ string, selectArgs, countArgs []a
 	whereClause, whereArgs := qb.buildWhere()
 	countArgs = whereArgs
 
+	// Table identifier is ALWAYS quoted (consistent quoting — BUG1). The tenant
+	// list path (db.QueryDirect) re-qualifies a quoted-or-unquoted table name;
+	// the search_path paths (GraphQL, include, ctx.Query) need the quotes so a
+	// hyphenated resource name (e.g. "order-products") resolves.
+	tbl := quoteIdent(qb.resource)
+
 	// Keyset pagination — no OFFSET, ORDER BY driven by cursor direction.
 	if qb.afterID != "" || qb.beforeID != "" {
 		var orderClause string
@@ -234,8 +240,8 @@ func (qb *QueryBuilder) SQL() (selectQ, countQ string, selectArgs, countArgs []a
 		copy(selectArgs, whereArgs)
 		selectArgs[len(whereArgs)] = qb.perPage
 		selectQ = fmt.Sprintf("SELECT * FROM %s%s %s LIMIT $%d",
-			qb.resource, whereClause, orderClause, limitIdx)
-		countQ = fmt.Sprintf("SELECT COUNT(*) FROM %s%s", qb.resource, whereClause)
+			tbl, whereClause, orderClause, limitIdx)
+		countQ = fmt.Sprintf("SELECT COUNT(*) FROM %s%s", tbl, whereClause)
 		return
 	}
 
@@ -255,8 +261,8 @@ func (qb *QueryBuilder) SQL() (selectQ, countQ string, selectArgs, countArgs []a
 	selectArgs[len(whereArgs)+1] = offset
 
 	selectQ = fmt.Sprintf("SELECT * FROM %s%s %s LIMIT $%d OFFSET $%d",
-		qb.resource, whereClause, orderClause, limitIdx, offsetIdx)
-	countQ = fmt.Sprintf("SELECT COUNT(*) FROM %s%s", qb.resource, whereClause)
+		tbl, whereClause, orderClause, limitIdx, offsetIdx)
+	countQ = fmt.Sprintf("SELECT COUNT(*) FROM %s%s", tbl, whereClause)
 	return
 }
 

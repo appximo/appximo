@@ -413,6 +413,35 @@ generated CRUD write by declaring an `events` array at the resource level
   id is all the event carries.
 - A delete that matches no row (404) emits nothing.
 
+### Indexes
+
+Declare an `indexes` array per resource (sibling of `fields`). Each entry is one
+index over one or more columns (composite when more than one), optionally
+`unique`:
+
+```json
+"tasks": {
+  "fields": { "status": { "type": "string" }, "owner_id": { "type": "uuid" } },
+  "indexes": [
+    { "fields": ["status"] },
+    { "fields": ["owner_id", "status"] },
+    { "fields": ["status"], "unique": true }
+  ]
+}
+```
+
+- Materialized at tenant registration as `CREATE [UNIQUE] INDEX IF NOT EXISTS`
+  over the listed columns (idempotent). The index name is derived from the table
+  and columns (`idx_<table>_<cols>` / `uniq_<table>_<cols>`).
+- Every referenced column's existence is checked against `information_schema`
+  first; an index naming a column that does not exist (yet) is **logged and
+  skipped**, never a hard failure (columns can be added to the live table at
+  runtime — same contract as relation FK indexes).
+- Validated at load: at least one field per index, each a valid field name.
+- Relation FK columns are auto-indexed separately (see
+  [Declarative relations](#declarative-relations--nested-embeds-relations-adr-019));
+  you do not need to declare those by hand.
+
 ## Running it and making the first call
 
 Fastest path is the published Docker image — the four copy-paste
@@ -528,14 +557,9 @@ is local-disk only.
 - CORS headers — browser SPAs must be served same-origin
   ([workaround](docs/DEPLOY.md#cors--current-status-important-for-spas)).
 - GraphQL `update` mutation.
-- `default` values applied on insert, and the user-declared `indexes` key
-  materialized as DB indexes — both keys parse but neither acts yet. A schema
-  declaring `indexes` is accepted with
-  `"warnings":["indexes … are parsed but not yet applied …"]` in the
-  register/PUT response (and a boot log line), so the dead key is never
-  blessed in silence. (Relation FK columns ARE auto-indexed — see
-  [Declarative relations](#declarative-relations--nested-embeds-relations-adr-019)
-  — but arbitrary `indexes` still are not.)
+- `default` values applied on insert — the key parses but does not act yet
+  (no warning; tracked for a future release). (The user-declared `indexes` key
+  IS now applied — see [Indexes](#indexes).)
 - `workflows` schema block — parsed for forward compatibility, no executor.
 - OTLP/OpenTelemetry export (observability is Prometheus `/metrics` + an
   internal trace ring).

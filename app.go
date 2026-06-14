@@ -142,11 +142,6 @@ func New(cfg Config) (*App, error) {
 		}
 		return nil, fmt.Errorf("appitools: invalid schema:\n  %s", strings.Join(msgs, "\n  "))
 	}
-	if idx := schema.IndexedResources(s); len(idx) > 0 {
-		log.Printf("WARNING: indexes on %s are parsed but not yet applied — DB index creation is coming in a future release",
-			strings.Join(idx, ", "))
-	}
-
 	app := &App{cfg: cfg, version: cfg.Version, schema: s}
 	if app.version == "" {
 		app.version = defaultVersion

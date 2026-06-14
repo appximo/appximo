@@ -48,6 +48,66 @@ func ApplyTenantMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema stri
 	if err := ensureRelationIndexes(ctx, conn, pgSchema, s); err != nil {
 		return fmt.Errorf("relation indexes %s: %w", pgSchema, err)
 	}
+
+	// User-declared `indexes` (BUGS-V1): the schema's explicit index blocks are
+	// now materialized as real DB indexes (previously parsed with a warning).
+	if err := ensureDeclaredIndexes(ctx, conn, pgSchema, s); err != nil {
+		return fmt.Errorf("declared indexes %s: %w", pgSchema, err)
+	}
+	return nil
+}
+
+// ensureDeclaredIndexes materializes every resource's user-declared `indexes`
+// as CREATE [UNIQUE] INDEX IF NOT EXISTS over the listed columns (composite when
+// more than one). Idempotent. Each column's existence is verified against
+// information_schema first; an index naming a column that does not exist (yet) is
+// a WARNING and skipped — never a hard failure (same "warn, don't die" contract
+// as relation FK indexes; columns can be added to the live table at runtime).
+func ensureDeclaredIndexes(ctx context.Context, conn *pgxpool.Conn, pgSchema string, s *schema.APISchema) error {
+	names := make([]string, 0, len(s.Resources))
+	for n := range s.Resources {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	for _, resName := range names {
+		for _, idx := range s.Resources[resName].Indexes {
+			if len(idx.Fields) == 0 {
+				continue
+			}
+			missing := false
+			for _, col := range idx.Fields {
+				exists, err := columnExists(ctx, conn, pgSchema, resName, col)
+				if err != nil {
+					return fmt.Errorf("check column %s.%s: %w", resName, col, err)
+				}
+				if !exists {
+					log.Printf("WARNING: declared index column %q.%q.%q not found in information_schema — index skipped",
+						pgSchema, resName, col)
+					missing = true
+					break
+				}
+			}
+			if missing {
+				continue
+			}
+
+			quotedCols := make([]string, len(idx.Fields))
+			for i, col := range idx.Fields {
+				quotedCols[i] = fmt.Sprintf(`"%s"`, col)
+			}
+			prefix, unique := "idx", ""
+			if idx.Unique {
+				prefix, unique = "uniq", " UNIQUE"
+			}
+			idxName := prefix + "_" + resName + "_" + strings.Join(idx.Fields, "_")
+			ddl := fmt.Sprintf(`CREATE%s INDEX IF NOT EXISTS "%s" ON "%s"."%s" (%s)`,
+				unique, idxName, pgSchema, resName, strings.Join(quotedCols, ", "))
+			if _, err := conn.Exec(ctx, ddl); err != nil {
+				return fmt.Errorf("create index %s on %s: %w", idxName, resName, err)
+			}
+		}
+	}
 	return nil
 }
 

@@ -65,6 +65,17 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 				"type", "target", "fk", "through", "target_fk", "limit")
 		}
 
+		// indexes: array of {fields, unique}. Strict-key each entry so a typo
+		// (e.g. "field" instead of "fields", or "uniqe") is rejected, not silently
+		// dropped — same contract as every other level.
+		var idxArr []json.RawMessage
+		if res["indexes"] != nil && json.Unmarshal(res["indexes"], &idxArr) == nil {
+			for i, rawIdx := range idxArr {
+				idxPath := fmt.Sprintf("%s.indexes[%d]", resPath, i)
+				addUnknown(idxPath, object(idxPath, rawIdx), "fields", "unique")
+			}
+		}
+
 		for fieldName, rawField := range object(resPath+".fields", res["fields"]) {
 			addUnknown(resPath+".fields."+fieldName, object(resPath+".fields."+fieldName, rawField),
 				"type", "required", "unique", "auto", "enum", "relation", "default",
@@ -127,22 +138,6 @@ var ValidHookEvents = map[string]bool{
 	"after_create":  true,
 	"before_update": true,
 	"after_update":  true,
-}
-
-// IndexedResources returns (sorted) the resources that declare `indexes`.
-// The key is valid and parses (forward compatibility) but NO executor
-// materializes DB indexes yet — callers use this to warn instead of letting
-// a blessed-but-dead key pass in silence (same contract as the hooks-at-boot
-// reload warning).
-func IndexedResources(s *APISchema) []string {
-	var out []string
-	for name, res := range s.Resources {
-		if len(res.Indexes) > 0 {
-			out = append(out, name)
-		}
-	}
-	sort.Strings(out)
-	return out
 }
 
 func joinPath(base, key string) string {
