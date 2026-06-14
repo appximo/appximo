@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
 
+	"github.com/miguelangel/appitools/pkg/consumers"
 	"github.com/miguelangel/appitools/pkg/logging"
 	"github.com/miguelangel/appitools/pkg/worker"
 )
@@ -49,11 +50,20 @@ func main() {
 		return pgx.Connect(ctx, dsn)
 	}
 
-	// Default consumer: echo (log + ack). With APPITOOLS_WORKER_WRITEBACK=on,
-	// swap in the authenticated write-back demo (SERVICE-JWT-V1).
-	var proc worker.Processor = echoProcessor{log: logging.Log}
-	if os.Getenv("APPITOOLS_WORKER_WRITEBACK") == "on" {
+	// Pick the consumer. APPITOOLS_WORKER_MODE = echo (default) | writeback | xlsx.
+	// The legacy APPITOOLS_WORKER_WRITEBACK=on still maps to "writeback".
+	mode := os.Getenv("APPITOOLS_WORKER_MODE")
+	if mode == "" && os.Getenv("APPITOOLS_WORKER_WRITEBACK") == "on" {
+		mode = "writeback"
+	}
+	var proc worker.Processor
+	switch mode {
+	case "writeback":
 		proc = newWritebackProcessor()
+	case "xlsx":
+		proc = newXLSXProcessor()
+	default:
+		proc = echoProcessor{log: logging.Log}
 	}
 
 	w := worker.New(connect, proc, worker.Config{}, logging.Log)
@@ -109,6 +119,35 @@ func newWritebackProcessor() worker.Processor {
 		Dur("token_ttl", worker.DefaultServiceTokenTTL).
 		Msg("worker: write-back demo enabled (authenticated PATCH via engine API)")
 	return worker.NewWritebackProcessor(client, "done", logging.Log)
+}
+
+// newXLSXProcessor builds the XLSX-CONSUMER-V1 real consumer (FileJob pattern).
+// Same engine-client env as the write-back demo, plus:
+//
+//	APPITOOLS_WORKER_RESOURCE   the jobs resource (default filejobs)
+//
+// The service role (APPITOOLS_WORKER_ROLE, default service_worker) must have
+// read+update on that resource — read to fetch the job's file_ref, update to
+// write {status, result}. The file_ref is a local path for now; the real file
+// source (VFS/S3) plugs in when pkg/files exists.
+func newXLSXProcessor() worker.Processor {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		logging.Log.Fatal().Msg("APPITOOLS_WORKER_MODE=xlsx requires JWT_SECRET (shared with the engine)")
+	}
+	engineURL := envOr("APPITOOLS_ENGINE_URL", "http://localhost:8080")
+	tenantDomain := envOr("APPITOOLS_TENANT_DOMAIN", "localhost")
+	role := envOr("APPITOOLS_WORKER_ROLE", "service_worker")
+	resource := envOr("APPITOOLS_WORKER_RESOURCE", "filejobs")
+
+	client := worker.NewEngineClient(engineURL, tenantDomain, secret, role, worker.DefaultServiceTokenTTL)
+	logging.Log.Info().
+		Str("engine_url", engineURL).
+		Str("tenant_domain", tenantDomain).
+		Str("role", role).
+		Str("resource", resource).
+		Msg("worker: xlsx consumer enabled (streaming parse + authenticated write-back)")
+	return consumers.NewXLSXProcessor(client, resource, logging.Log)
 }
 
 func envOr(key, def string) string {

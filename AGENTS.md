@@ -129,6 +129,17 @@ One line per layer — navigate the code for the rest:
   `JWT_SECRET`) carrying the event's `tenant_id` and a **scoped service role** —
   never admin. `APPITOOLS_WORKER_WRITEBACK=on` enables the demo consumer (PATCHes
   the created row's status); off by default (echo).
+- `pkg/consumers` — real business-logic Processors (kept OUT of `pkg/worker` so the
+  core loop stays dependency-light; e.g. excelize lives only here). The first is
+  the XLSX consumer (`XLSXProcessor`, FileJob pattern): on `{resource}.created` it
+  fetches the job, STREAMS the referenced XLSX (excelize `f.Rows` iterator — never
+  `GetRows`, never the whole file in RAM), computes an aggregate, and writes
+  `{status, result}` back via the engine API. A corrupt/invalid file is a PERMANENT
+  failure (job → `failed`, event acked — worker never crashes); a transient engine
+  error keeps the row pending for retry. Idempotent: a job already terminal is
+  skipped. Select consumers via `APPITOOLS_WORKER_MODE=echo|writeback|xlsx`
+  (default echo). NOTE: the `file_ref` is read as a local path for now — the real
+  file source (VFS/S3) plugs in when `pkg/files` exists.
 
 Request flow: tenant (Host) → rate limit → response cache → JWT → RBAC →
 handler (`pkg/codegen`) → query build / validation → hooks → pgx →

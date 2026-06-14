@@ -1,0 +1,25 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "filejob-api",
+  "resources": {
+    "filejobs": {
+      "fields": {
+        "status":   { "type": "string", "required": true, "enum": ["pending", "processing", "completed", "failed"] },
+        "file_ref": { "type": "string", "required": true, "maxLength": 1024 },
+        "result":   { "type": "text" }
+      },
+      "events": ["create"]
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": { "resources": "*", "actions": ["*"] },
+      "service_worker": {
+        "resources": ["filejobs"],
+        "actions": ["read", "update"],
+        "fields": ["id", "status", "file_ref", "result"]
+      }
+    }
+  }
+}
