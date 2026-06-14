@@ -765,6 +765,11 @@ func getByIDResolver(name string, tdb *db.TenantDB, policy *rbac.Policy, s *sche
 }
 
 func createResolver(name string, res *schema.ResourceSchema, rv *schema.ResourceValidator, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy, hub *events.Hub) gql.FieldResolveFn {
+	// Decided once at schema build (boot), like the REST create path — never per
+	// request (AGENTS: compile at schema load, not the hot path). emitCreate gates
+	// same-tx outbox emission; tbl is the quoted table identifier.
+	emitCreate := res.EmitsOn("create")
+	tbl := pgx.Identifier{name}.Sanitize()
 	return func(p gql.ResolveParams) (any, error) {
 		tc := tenant.MustFromCtx(p.Context)
 		if _, err := checkRBAC(p.Context, policy, name, "create"); err != nil {
@@ -814,12 +819,13 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		}
 		body := hookRes.Data
 
-		// Column identifiers are quoted by BuildInsertArgs (injection-safe). We do
-		// not whitelist against res.Fields — the schema can evolve at runtime, so
-		// the DB is the source of truth (mirrors the REST create path).
-		cols, placeholders, args := pkghandlers.BuildInsertArgs(body)
-		q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", pgx.Identifier{name}.Sanitize(), cols, placeholders)
-		result, err := tdb.ExecRowsTenant(p.Context, tc.PGSchema, q, args...)
+		// Shared create core: the SAME codegen.RunInsert the REST POST handler uses,
+		// so a resource with events:["create"] emits an IDENTICAL {resource}.created
+		// event (same topic + lean payload) atomically with the insert — closing the
+		// REST/GraphQL create inconsistency. Identifiers are quoted by BuildInsertArgs
+		// (injection-safe); the DB stays the source of truth for the writable column
+		// set (no res.Fields whitelist), mirroring REST.
+		result, err := codegen.RunInsert(p.Context, tdb, tbl, name, tc.ID, tc.PGSchema, body, emitCreate)
 		if err != nil {
 			return nil, safeDBErr(err)
 		}

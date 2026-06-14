@@ -516,7 +516,12 @@ subroutes.
 REST update core — same declarative validation, field-level RBAC allowlist,
 row-level condition, and outbox emission (a resource with `events:["update"]`
 emits `…​.updated` from the mutation, identically to REST PATCH). Its `input`
-type has every non-auto field optional. GraphQL always answers **HTTP 200**:
+type has every non-auto field optional. `create<Singular>` likewise shares the
+REST create core (`codegen.RunInsert`): a resource with `events:["create"]` emits
+`<resource>.created` from the mutation, byte-for-byte identical to REST POST (same
+topic + lean payload, same tx). (`delete<Singular>` does **not** yet emit an outbox
+event even when the resource declares `events:["delete"]` — REST DELETE does; use
+REST for delete-event consistency until a shared delete core lands.) GraphQL always answers **HTTP 200**:
 check the `errors` array in the body, never the status code. Validation
 failures arrive as `errors[].extensions.fields` (same rule engine as
 REST). Introspection is disabled in production (the `__schema`/`__type`

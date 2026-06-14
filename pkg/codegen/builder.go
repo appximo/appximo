@@ -371,22 +371,12 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// WriteDBError maps that 42703 to a 422 unknown_field (S44 shape), never
 			// a 500. Residual mass-assignment (e.g. client-set id) is low-impact for
 			// the current schema (no privilege/tenant columns) and tracked separately.
-			cols, placeholders, args := pkghandlers.BuildInsertArgs(body)
-			insertQ := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", tbl, cols, placeholders)
-			var result []map[string]any
-			var err error
-			if emitCreate {
-				// Same-tx emission: the INSERT and its outbox event commit together.
-				result, err = tdb.ExecRowsTenantEmit(req.Context(), tc.PGSchema, insertQ,
-					func(ectx context.Context, tx pgx.Tx, rows []map[string]any) error {
-						if len(rows) == 0 {
-							return nil
-						}
-						return enqueueCRUDEvent(ectx, tx, tc.ID, name, "create", rows[0]["id"])
-					}, args...)
-			} else {
-				result, err = tdb.ExecRowsTenant(req.Context(), tc.PGSchema, insertQ, args...)
-			}
+			// Shared create core (RunInsert): builds the INSERT and, when the
+			// resource opted into events:["create"], enqueues the {resource}.created
+			// event in the SAME tx. The GraphQL create mutation calls the same
+			// RunInsert, so REST and GraphQL create emit identically; no opt-in →
+			// plain ExecRowsTenant, zero added overhead.
+			result, err := RunInsert(req.Context(), tdb, tbl, name, tc.ID, tc.PGSchema, body, emitCreate)
 			if err != nil {
 				writeDBErr(w, req, err)
 				return
@@ -892,6 +882,30 @@ func sseHandler(name string, hub *events.Hub) http.HandlerFunc {
 // ErrNoWritableUpdate means an update resolved to zero writable columns (e.g.
 // the role's allowlist dropped every field in the body). Callers map it to 422.
 var ErrNoWritableUpdate = fmt.Errorf("no writable fields in request")
+
+// RunInsert builds and executes the INSERT … RETURNING * for an already-validated
+// body (after any before_create hook), emitting the outbox event in the SAME
+// transaction when emitCreate is set — exactly as RunUpdate does for updates. It is
+// the ONE create core shared by the REST POST handler and the GraphQL create
+// mutation, so both surfaces enqueue an IDENTICAL {resource}.created event (same
+// topic, same lean {id,tenant_id,resource,action} payload) atomically with the
+// insert. A resource that did not opt into events:["create"] takes the plain
+// ExecRowsTenant path — no emission, zero added overhead (the no-opt-in gate).
+func RunInsert(ctx context.Context, tdb *db.TenantDB, tbl, name, tenantID, pgSchema string, body map[string]any, emitCreate bool) ([]map[string]any, error) {
+	cols, placeholders, args := pkghandlers.BuildInsertArgs(body)
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", tbl, cols, placeholders)
+	if emitCreate {
+		// Same-tx emission: a failed insert rolls back the event (atomic).
+		return tdb.ExecRowsTenantEmit(ctx, pgSchema, q,
+			func(ectx context.Context, tx pgx.Tx, rows []map[string]any) error {
+				if len(rows) == 0 {
+					return nil
+				}
+				return enqueueCRUDEvent(ectx, tx, tenantID, name, "create", rows[0]["id"])
+			}, args...)
+	}
+	return tdb.ExecRowsTenant(ctx, pgSchema, q, args...)
+}
 
 // RunUpdate builds and executes the partial/full UPDATE for the already-validated
 // column set `sets` (from CollectUpdate, after any before_update hook adjustment),
