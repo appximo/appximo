@@ -135,7 +135,11 @@ baseline faster are welcome; we'll publish updated numbers.
   time; `after`/`before` on time), single-field sort (`?sort=created_at&order=desc`),
   keyset pagination (`?after=<uuid>`, no OFFSET)
 - **Declarative validation**: required/enum/type rules compiled from the schema;
-  one `422` lists every failing field
+  one `422` lists every failing field; field `default` values applied on insert
+  (literals + `"now"` for time)
+- **Declarative relations**: `has_many` / `belongs_to` / `many_to_many` served
+  nested in one round-trip (`json_agg` + `LATERAL`, no N+1) on opt-in `?include=`,
+  RBAC compiled into the SQL; FK columns auto-indexed
 - **Multi-tenancy**: schema-per-tenant Postgres isolation (`SET LOCAL search_path`),
   subdomain → tenant routing, per-tenant rate limiting, live schema reload via
   `pg_notify` — column-level only: **adding a new resource requires a process
@@ -147,8 +151,9 @@ baseline faster are welcome; we'll publish updated numbers.
 - **Extensions**: JS sandbox (Goja, watchdog-interrupted) with built-in helpers —
   including Colombian DIAN tax compliance (CUFE SHA-384, NIT mod-11) — plus a WASM
   runtime (Wazero, no CGO)
-- **GraphQL**: queries + create/delete mutations, selection-count limits
-  (alias-amplification guard), introspection off in production
+- **GraphQL**: queries (with nested relation embeds) + create/update/delete
+  mutations, selection-count limits (alias-amplification guard), introspection
+  off in production
 - **Ops**: Prometheus `/metrics`, per-request trace ring with stage breakdown,
   SLO burn-rate alerts (Slack), graceful drain on SIGTERM, circuit breaker
   (verified open/recover with toxiproxy), zero-downtime additive migrations —
@@ -178,16 +183,9 @@ It serves our own production workload today.
 
 **Known limits, honestly:**
 
-- **No declarative relations** between resources yet — fields can hold foreign
-  UUIDs, but the schema has no `ref`/join semantics. The design
-  (`json_agg` + `LATERAL`, one round-trip, five non-negotiable conditions) is
-  accepted in [docs/adr/ADR-019](docs/adr/ADR-019-declarative-relations.md);
-  implementation is pending.
 - **No CORS middleware**: browser SPAs must be served same-origin (workaround in
   [docs/DEPLOY.md](docs/DEPLOY.md#cors--current-status-important-for-spas)); native
   support is next on the engine roadmap.
-- **GraphQL has no update mutation** (create/delete only — use REST `PUT`/`PATCH`).
-- Field `default` values are not applied on insert yet.
 - **Single node.** No HA/clustering story; scale is vertical (the benchmark shows
   how far one cheap box goes).
 - Observability is Prometheus + an internal trace ring — **no OTLP export**.

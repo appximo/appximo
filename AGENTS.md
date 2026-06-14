@@ -109,7 +109,8 @@ One line per layer — navigate the code for the rest:
   schema at boot. (`internal/handlers/` + the `generate` subcommand are
   the older write-files generator, kept for template tests.)
 - `pkg/query` — URL params → validated SQL: filters, sort, keyset pagination.
-- `pkg/graphql` — schema → GraphQL types and resolvers (queries + create/delete).
+- `pkg/graphql` — schema → GraphQL types and resolvers (queries + create/update/delete;
+  update + relation embeds reuse the shared codegen update/include cores).
 - `pkg/rbac` — JSON policies; row conditions appended via `query.AppendRowCondition`
   (shared by REST and GraphQL — fix authorization bugs there, once).
 - `pkg/tenant` — Host-subdomain resolution + per-tenant schema cache.
@@ -243,6 +244,16 @@ silently dead config.
 - `auto: true` — engine-managed `TIMESTAMPTZ DEFAULT now()` (for
   `created_at` / `updated_at`); exempt from the required check.
 - `enum: ["a", "b"]` — string values only; writes outside the set → 422.
+- `default: <value>` — applied **on create** (POST / GraphQL `create…`) when the
+  field is OMITTED (a present key, even explicit `null`, is left as sent — like
+  SQL `DEFAULT`). Literal of the field's type (`string`/`int`/`int64`/`float64`/
+  `bool`/`uuid`/`json`); on a `time` field the value `"now"` is the one dynamic
+  default (resolved to the insert moment), any other string is a literal
+  timestamp. Type-checked at load (a default of the wrong type rejects the
+  schema; `enum` defaults must be a member; `auto` fields may not declare one).
+  Precedence with `required`: a required field **with** a default is satisfied by
+  it when omitted; a required field **without** one still returns 422. Defaults
+  are create-only — `PUT` (full replace) writes an omitted optional field as NULL.
 - `relation: "<resource>"` — see [Relations](#relations).
 - Validation rules (all optional, compiled at load; a bad rule rejects
   the schema with a clear error):
@@ -499,9 +510,13 @@ subroutes.
 
 ## GraphQL
 
-`POST /graphql`. Queries plus `create<Singular>` / `delete<Singular>`
-mutations only (e.g. `createTask`, `deleteTask`) — **no update
-mutation**; use REST PUT/PATCH. GraphQL always answers **HTTP 200**:
+`POST /graphql`. Queries plus `create<Singular>` / `update<Singular>` /
+`delete<Singular>` mutations (e.g. `createTask`, `updateTask`, `deleteTask`).
+`update<Singular>(id, input)` is a PARTIAL update (PATCH semantics) sharing the
+REST update core — same declarative validation, field-level RBAC allowlist,
+row-level condition, and outbox emission (a resource with `events:["update"]`
+emits `…​.updated` from the mutation, identically to REST PATCH). Its `input`
+type has every non-auto field optional. GraphQL always answers **HTTP 200**:
 check the `errors` array in the body, never the status code. Validation
 failures arrive as `errors[].extensions.fields` (same rule engine as
 REST). Introspection is disabled in production (the `__schema`/`__type`
@@ -556,10 +571,6 @@ is local-disk only.
   `relation` still only adds the read-only subresource route.)
 - CORS headers — browser SPAs must be served same-origin
   ([workaround](docs/DEPLOY.md#cors--current-status-important-for-spas)).
-- GraphQL `update` mutation.
-- `default` values applied on insert — the key parses but does not act yet
-  (no warning; tracked for a future release). (The user-declared `indexes` key
-  IS now applied — see [Indexes](#indexes).)
 - `workflows` schema block — parsed for forward compatibility, no executor.
 - OTLP/OpenTelemetry export (observability is Prometheus `/metrics` + an
   internal trace ring).

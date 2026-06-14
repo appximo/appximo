@@ -320,6 +320,12 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				return
 			}
 
+			// Schema defaults (SCHEMA-CLOSE-V1): fill omitted fields that declare a
+			// default BEFORE validation, so a required field with a default is
+			// satisfied by it. No-op (one length check) for a resource with no
+			// defaults — the create gate.
+			rv.ApplyDefaults(body)
+
 			// Declarative validation: BEFORE the before_create hook and the
 			// INSERT. Create requires every required non-auto field (S44 #2).
 			if verrs := rv.ValidateWrite(body, true); len(verrs) > 0 {
@@ -600,7 +606,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				}
 
 				// Validate against the schema and collect the columns to set.
-				sets, status, msg := collectUpdate(&res, body, put, writable)
+				sets, status, msg := CollectUpdate(&res, body, put, writable)
 				if status != 0 {
 					markSpan(req, "validate")
 					writeJSONErr(w, status, msg)
@@ -668,58 +674,18 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					}
 				}
 
-				// Build UPDATE: every column name via pgx.Identifier.Sanitize(), every
-				// value as a bound parameter. updated_at is forced to NOW() — but only
-				// when the resource actually declares an auto updated_at column,
-				// otherwise the column does not exist.
-				cols := make([]string, 0, len(sets))
-				for c := range sets {
-					cols = append(cols, c)
-				}
-				sort.Strings(cols) // deterministic SQL
-				setClauses := make([]string, 0, len(cols)+1)
-				args := make([]any, 0, len(cols)+2)
-				argIdx := 1
-				for _, c := range cols {
-					setClauses = append(setClauses, fmt.Sprintf("%s = $%d", pgx.Identifier{c}.Sanitize(), argIdx))
-					args = append(args, sets[c])
-					argIdx++
-				}
-				if fd, ok := res.Fields["updated_at"]; ok && fd.Auto {
-					setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", argIdx))
-					args = append(args, time.Now().UTC())
-					argIdx++
-				}
-				if len(setClauses) == 0 {
-					writeJSONErr(w, http.StatusUnprocessableEntity, "no writable fields in request")
-					return
-				}
-
-				q := fmt.Sprintf("UPDATE %s SET %s WHERE id = $%d", tbl, strings.Join(setClauses, ", "), argIdx)
-				args = append(args, id)
+				// Build + run the UPDATE via the shared core (SET clauses, auto
+				// updated_at, row-level RBAC condition, same-tx event emission).
+				var cond *rbac.WhereCondition
 				if evalResult != nil {
-					var ok bool
-					if q, args, ok = applyRowCondition(q, args, evalResult.Condition); !ok {
-						writeDBErr(w, req, fmt.Errorf("invalid rbac condition field"))
+					cond = evalResult.Condition
+				}
+				result, err := RunUpdate(req.Context(), tdb, &res, tbl, name, tc.ID, tc.PGSchema, id, sets, cond, emitUpdate)
+				if err != nil {
+					if err == ErrNoWritableUpdate {
+						writeJSONErr(w, http.StatusUnprocessableEntity, "no writable fields in request")
 						return
 					}
-				}
-				q += " RETURNING *"
-
-				var result []map[string]any
-				if emitUpdate {
-					// Same-tx emission: the UPDATE and its outbox event commit together.
-					result, err = tdb.ExecRowsTenantEmit(req.Context(), tc.PGSchema, q,
-						func(ectx context.Context, tx pgx.Tx, rows []map[string]any) error {
-							if len(rows) == 0 {
-								return nil
-							}
-							return enqueueCRUDEvent(ectx, tx, tc.ID, name, "update", rows[0]["id"])
-						}, args...)
-				} else {
-					result, err = tdb.ExecRowsTenant(req.Context(), tc.PGSchema, q, args...)
-				}
-				if err != nil {
 					if field, ok := db.UniqueViolationField(err); ok {
 						writeJSONErr(w, http.StatusConflict, fmt.Sprintf("field %q: value already exists", field))
 						return
@@ -923,9 +889,67 @@ func sseHandler(name string, hub *events.Hub) http.HandlerFunc {
 	}
 }
 
-// collectUpdate validates body against the resource schema for an update and
-// returns the columns→values to write (excluding the auto updated_at, which the
-// handler forces to NOW()). On a validation failure it returns a non-zero HTTP
+// ErrNoWritableUpdate means an update resolved to zero writable columns (e.g.
+// the role's allowlist dropped every field in the body). Callers map it to 422.
+var ErrNoWritableUpdate = fmt.Errorf("no writable fields in request")
+
+// RunUpdate builds and executes the partial/full UPDATE for the already-validated
+// column set `sets` (from CollectUpdate, after any before_update hook adjustment),
+// forcing updated_at=NOW() when the resource declares an auto updated_at column,
+// appending the role's row-level RBAC condition (so a restricted role cannot
+// touch a row it cannot see — BOLA defence), and emitting the outbox event in the
+// SAME transaction when emitUpdate is set. It returns the RETURNING * rows (empty
+// when no row matched → 404 / row-condition exclusion). This is the ONE update
+// core shared by the REST PATCH/PUT handler and the GraphQL update mutation, so
+// both surfaces enforce identical RBAC, identifier safety, and event emission.
+func RunUpdate(ctx context.Context, tdb *db.TenantDB, res *schema.ResourceSchema,
+	tbl, name, tenantID, pgSchema, id string, sets map[string]any,
+	cond *rbac.WhereCondition, emitUpdate bool) ([]map[string]any, error) {
+	cols := make([]string, 0, len(sets))
+	for c := range sets {
+		cols = append(cols, c)
+	}
+	sort.Strings(cols) // deterministic SQL
+	setClauses := make([]string, 0, len(cols)+1)
+	args := make([]any, 0, len(cols)+2)
+	argIdx := 1
+	for _, c := range cols {
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", pgx.Identifier{c}.Sanitize(), argIdx))
+		args = append(args, sets[c])
+		argIdx++
+	}
+	if fd, ok := res.Fields["updated_at"]; ok && fd.Auto {
+		setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", argIdx))
+		args = append(args, time.Now().UTC())
+		argIdx++
+	}
+	if len(setClauses) == 0 {
+		return nil, ErrNoWritableUpdate
+	}
+
+	q := fmt.Sprintf("UPDATE %s SET %s WHERE id = $%d", tbl, strings.Join(setClauses, ", "), argIdx)
+	args = append(args, id)
+	q, args, err := query.AppendRowCondition(q, args, cond)
+	if err != nil {
+		return nil, err
+	}
+	q += " RETURNING *"
+
+	if emitUpdate {
+		return tdb.ExecRowsTenantEmit(ctx, pgSchema, q,
+			func(ectx context.Context, tx pgx.Tx, rows []map[string]any) error {
+				if len(rows) == 0 {
+					return nil
+				}
+				return enqueueCRUDEvent(ectx, tx, tenantID, name, "update", rows[0]["id"])
+			}, args...)
+	}
+	return tdb.ExecRowsTenant(ctx, pgSchema, q, args...)
+}
+
+// CollectUpdate validates body against the resource schema for an update and
+// returns the columns→values to write (excluding the auto updated_at, which
+// RunUpdate forces to NOW()). On a validation failure it returns a non-zero HTTP
 // status (always 422 here) and a client-safe message.
 //
 //   - PUT (put=true): every non-auto required field must be present and non-null;
@@ -936,7 +960,7 @@ func sseHandler(name string, hub *events.Hub) http.HandlerFunc {
 // Both reject "id" and any auto-managed field appearing in the body, reject unknown
 // fields, type-check values, and validate enums. Fields the role may not write
 // (per writable) are silently dropped from the result.
-func collectUpdate(res *schema.ResourceSchema, body map[string]any, put bool, writable func(string) bool) (map[string]any, int, string) {
+func CollectUpdate(res *schema.ResourceSchema, body map[string]any, put bool, writable func(string) bool) (map[string]any, int, string) {
 	// Reject id / unknown / auto-managed keys, then type-check each present value.
 	for k, v := range body {
 		if k == "id" {

@@ -19,6 +19,7 @@ import (
 	"github.com/graphql-go/graphql/language/source"
 	"github.com/jackc/pgx/v5"
 	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/miguelangel/appitools/pkg/codegen"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/events"
 	"github.com/miguelangel/appitools/pkg/extensions"
@@ -360,6 +361,7 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 	// Build per-resource types.
 	objectTypes := make(map[string]*gql.Object, len(names))
 	inputTypes := make(map[string]*gql.InputObject, len(names))
+	updateInputTypes := make(map[string]*gql.InputObject, len(names))
 	filterTypes := make(map[string]*gql.InputObject, len(names))
 	orderTypes := make(map[string]*gql.InputObject, len(names))
 
@@ -400,6 +402,24 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 			inputTypes[name] = gql.NewInputObject(gql.InputObjectConfig{
 				Name:   title + "Input",
 				Fields: inputFields,
+			})
+		}
+
+		// Update input type (SCHEMA-CLOSE-V1): same non-auto fields as create but
+		// ALL optional — an update mutation is a partial update (PATCH semantics),
+		// so `required` does not apply.
+		updateInputFields := gql.InputObjectConfigFieldMap{}
+		for _, fname := range sortedFieldNames(&res) {
+			fd := res.Fields[fname]
+			if fd.Auto {
+				continue
+			}
+			updateInputFields[fname] = &gql.InputObjectFieldConfig{Type: scalarInput(fd)}
+		}
+		if len(updateInputFields) > 0 {
+			updateInputTypes[name] = gql.NewInputObject(gql.InputObjectConfig{
+				Name:   title + "UpdateInput",
+				Fields: updateInputFields,
 			})
 		}
 
@@ -523,6 +543,19 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 					"input": &gql.ArgumentConfig{Type: gql.NewNonNull(inputTypes[name])},
 				},
 				Resolve: createResolver(name, &resCopy, rv, tdb, hr, policy, hub),
+			}
+		}
+		// updateX(id, input): partial update (PATCH semantics) — exists only when
+		// the resource has writable (non-auto) fields. Shares the REST update core
+		// (codegen.RunUpdate) so RBAC, identifier safety, and event emission match.
+		if updateInputTypes[name] != nil {
+			mutationFields["update"+title] = &gql.Field{
+				Type: gql.NewNonNull(objectTypes[name]),
+				Args: gql.FieldConfigArgument{
+					"id":    &gql.ArgumentConfig{Type: gql.NewNonNull(gql.ID)},
+					"input": &gql.ArgumentConfig{Type: gql.NewNonNull(updateInputTypes[name])},
+				},
+				Resolve: updateResolver(name, &resCopy, rv, tdb, hr, policy, hub),
 			}
 		}
 		mutationFields["delete"+title] = &gql.Field{
@@ -739,6 +772,12 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		}
 
 		input, _ := p.Args["input"].(map[string]any)
+		if input == nil {
+			input = map[string]any{}
+		}
+		// Schema defaults (SCHEMA-CLOSE-V1): fill omitted fields with declared
+		// defaults BEFORE the empty/required checks — same as the REST create path.
+		rv.ApplyDefaults(input)
 		if len(input) == 0 {
 			return nil, fmt.Errorf("empty input")
 		}
@@ -805,6 +844,118 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 			return result[0], nil
 		}
 		return nil, nil
+	}
+}
+
+// updateResolver implements the updateX mutation (SCHEMA-CLOSE-V1) with the same
+// semantics as the REST PATCH path: partial update of the provided fields,
+// declarative validation, field-level RBAC allowlist, row-level RBAC condition,
+// before/after_update hooks, SSE broadcast, and same-tx outbox emission when the
+// resource opts into events:["update"]. It reuses the engine's shared update core
+// (codegen.CollectUpdate + codegen.RunUpdate) so REST and GraphQL never diverge.
+func updateResolver(name string, res *schema.ResourceSchema, rv *schema.ResourceValidator, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy, hub *events.Hub) gql.FieldResolveFn {
+	return func(p gql.ResolveParams) (any, error) {
+		tc := tenant.MustFromCtx(p.Context)
+		evalResult, err := checkRBAC(p.Context, policy, name, "update")
+		if err != nil {
+			return nil, err
+		}
+
+		idStr, _ := p.Args["id"].(string)
+		if _, err := uuid.Parse(idStr); err != nil {
+			return nil, fmt.Errorf("invalid id format")
+		}
+		input, _ := p.Args["input"].(map[string]any)
+		if len(input) == 0 {
+			return nil, fmt.Errorf("empty input")
+		}
+
+		// graphql-go coerces Int args to Go int; the validator and CollectUpdate
+		// (like REST's JSON decoding) expect float64 — normalize a copy.
+		norm := make(map[string]any, len(input))
+		for k, v := range input {
+			switch n := v.(type) {
+			case int:
+				norm[k] = float64(n)
+			case int32:
+				norm[k] = float64(n)
+			case int64:
+				norm[k] = float64(n)
+			default:
+				norm[k] = v
+			}
+		}
+
+		// Partial (PATCH) validation: only the fields present are checked.
+		if verrs := rv.ValidateWrite(norm, false); len(verrs) > 0 {
+			return nil, &validationError{fields: verrs}
+		}
+
+		// Field-level RBAC allowlist — only writable columns survive.
+		writable := func(string) bool { return true }
+		if evalResult != nil && len(evalResult.AllowedFields) > 0 {
+			allow := make(map[string]struct{}, len(evalResult.AllowedFields))
+			for _, f := range evalResult.AllowedFields {
+				allow[f] = struct{}{}
+			}
+			writable = func(f string) bool { _, ok := allow[f]; return ok }
+		}
+		sets, status, msg := codegen.CollectUpdate(res, norm, false, writable)
+		if status != 0 {
+			return nil, fmt.Errorf("%s", msg)
+		}
+
+		// before_update hook (same contract as REST / GraphQL create).
+		hc := hookCfg(name, "before_update", res)
+		hookRes, herr := hr.RunBeforeHook(p.Context, hc, input, nil)
+		if herr != nil {
+			return nil, herr
+		}
+		if !hookRes.Proceed {
+			return nil, fmt.Errorf("%s", hookRes.Error)
+		}
+		if hc != nil {
+			for col := range sets {
+				if nv, ok := hookRes.Data[col]; ok {
+					sets[col] = nv
+				}
+			}
+		}
+
+		var cond *rbac.WhereCondition
+		if evalResult != nil {
+			cond = evalResult.Condition
+		}
+		rows, err := codegen.RunUpdate(p.Context, tdb, res, pgx.Identifier{name}.Sanitize(),
+			name, tc.ID, tc.PGSchema, idStr, sets, cond, res.EmitsOn("update"))
+		if err != nil {
+			if err == codegen.ErrNoWritableUpdate {
+				return nil, fmt.Errorf("no writable fields in request")
+			}
+			if field, ok := db.UniqueViolationField(err); ok {
+				return nil, fmt.Errorf("field %q: value already exists", field)
+			}
+			return nil, safeDBErr(err)
+		}
+		if len(rows) == 0 {
+			return nil, fmt.Errorf("not found")
+		}
+		record := rows[0]
+
+		// SSE broadcast (post-commit, unfiltered — delivery applies per-sub RBAC).
+		gqlPublish(hub, tc.ID, name, "update", record, "")
+
+		if ah := hookCfg(name, "after_update", res); ah != nil {
+			hr.FireAfterHook(ah, record, tc.ID)
+		}
+
+		if evalResult != nil && len(evalResult.AllowedFields) > 0 {
+			if fs, ok := p.Context.Value(rbacResultFilterKey{}).(*rbacResultFilter); ok {
+				fs.store(p.Info.FieldName, evalResult.AllowedFields)
+			}
+			record = pkghandlers.FilterFields(record, evalResult.AllowedFields)
+		}
+		return record, nil
 	}
 }
 

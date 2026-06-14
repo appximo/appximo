@@ -48,6 +48,15 @@ type ruleFn func(v any) *FieldRuleError
 type ResourceValidator struct {
 	required []string // non-auto required field names, sorted
 	rules    map[string][]ruleFn
+	defaults map[string]defaultSpec // field → default to fill on create (SCHEMA-CLOSE-V1)
+}
+
+// defaultSpec is a precompiled field default. literal carries a fixed value
+// (type-checked at load); dynamicNow marks the one supported dynamic default —
+// "now" on a time field, resolved to the insert moment.
+type defaultSpec struct {
+	literal    any
+	dynamicNow bool
 }
 
 // CompileRules builds the ResourceValidator for one resource. It never
@@ -145,8 +154,50 @@ func CompileRules(res *ResourceSchema) *ResourceValidator {
 		if len(rules) > 0 {
 			rv.rules[name] = rules
 		}
+
+		// Default to fill on create when the field is omitted (SCHEMA-CLOSE-V1).
+		// auto fields manage their own value, so they never carry a default.
+		if fd.Default != nil && !fd.Auto {
+			if rv.defaults == nil {
+				rv.defaults = make(map[string]defaultSpec)
+			}
+			if fd.Type == "time" && isNowDefault(fd.Default) {
+				rv.defaults[name] = defaultSpec{dynamicNow: true}
+			} else {
+				rv.defaults[name] = defaultSpec{literal: fd.Default}
+			}
+		}
 	}
 	return rv
+}
+
+// isNowDefault reports whether a time field's default is the dynamic sentinel
+// "now" (case-insensitive) rather than a literal timestamp string.
+func isNowDefault(v any) bool {
+	s, ok := v.(string)
+	return ok && strings.EqualFold(s, "now")
+}
+
+// ApplyDefaults fills, in place, any field that declares a default and is ABSENT
+// from body (a present key — even an explicit null — is left as the caller set
+// it, matching SQL DEFAULT, which applies only when a column is omitted). Called
+// on CREATE only, BEFORE required-field validation, so a required field with a
+// default is satisfied by the default while a required field without one still
+// 422s. A resource with no defaults pays a single length check (the create gate).
+func (rv *ResourceValidator) ApplyDefaults(body map[string]any) {
+	if len(rv.defaults) == 0 {
+		return
+	}
+	for name, ds := range rv.defaults {
+		if _, present := body[name]; present {
+			continue
+		}
+		if ds.dynamicNow {
+			body[name] = time.Now().UTC()
+		} else {
+			body[name] = ds.literal
+		}
+	}
 }
 
 // ValidateWrite checks a decoded JSON body against the precompiled rules and

@@ -3,6 +3,8 @@ package schema
 import (
 	"fmt"
 	"regexp"
+
+	"github.com/google/uuid"
 )
 
 type ValidationError struct {
@@ -83,6 +85,7 @@ func Validate(s *APISchema) []ValidationError {
 			}
 
 			errs = append(errs, validateFieldRules(fieldPrefix, field)...)
+			errs = append(errs, validateDefault(fieldPrefix, field)...)
 		}
 
 		// events: opt-in outbox emission (CRUD-EMIT-V1). Each value must be a
@@ -255,6 +258,70 @@ func validateIndexes(resPrefix string, res ResourceSchema) []ValidationError {
 		}
 	}
 	return errs
+}
+
+// validateDefault checks that a field's `default` value is type-compatible with
+// the field (SCHEMA-CLOSE-V1) so a bad default is rejected at load, never a
+// surprise at insert. JSON numbers decode to float64, so integer fields require
+// an integral float64. Dynamic "now" is accepted on time fields only. Defaults
+// on auto fields are rejected (auto manages its own value).
+func validateDefault(fieldPrefix string, fd FieldDef) []ValidationError {
+	if fd.Default == nil {
+		return nil
+	}
+	dp := fieldPrefix + ".default"
+	if fd.Auto {
+		return []ValidationError{{Field: dp, Message: "default cannot be set on an auto field"}}
+	}
+	// Enum (string-valued): the default must be a declared member.
+	if len(fd.Enum) > 0 {
+		s, ok := fd.Default.(string)
+		if !ok {
+			return []ValidationError{{Field: dp, Message: "default must be a string matching one of the enum values"}}
+		}
+		for _, e := range fd.Enum {
+			if e == s {
+				return nil
+			}
+		}
+		return []ValidationError{{Field: dp, Message: fmt.Sprintf("default %q is not one of the enum values", s)}}
+	}
+
+	bad := func(msg string) []ValidationError { return []ValidationError{{Field: dp, Message: msg}} }
+	switch fd.Type {
+	case "string", "text":
+		if _, ok := fd.Default.(string); !ok {
+			return bad("default must be a string")
+		}
+	case "int", "int64":
+		f, ok := fd.Default.(float64)
+		if !ok || f != float64(int64(f)) {
+			return bad("default must be an integer")
+		}
+	case "float64":
+		if _, ok := fd.Default.(float64); !ok {
+			return bad("default must be a number")
+		}
+	case "bool":
+		if _, ok := fd.Default.(bool); !ok {
+			return bad("default must be a boolean")
+		}
+	case "uuid":
+		s, ok := fd.Default.(string)
+		if !ok {
+			return bad("default must be a uuid string")
+		}
+		if _, err := uuid.Parse(s); err != nil {
+			return bad("default must be a valid uuid string")
+		}
+	case "time":
+		if _, ok := fd.Default.(string); !ok {
+			return bad(`default must be a string (an RFC3339 timestamp, or "now" for the insert moment)`)
+		}
+	case "json":
+		// Any JSON value is acceptable for a json column.
+	}
+	return nil
 }
 
 // numericTypes are the field types min/max apply to.
