@@ -645,7 +645,60 @@ default (multi-tenant-correct), or `APPITOOLS_AUTH_BASE_URL` if set.
   **must match the email worker's** `APPITOOLS_EMAIL_TOPIC`. Run the deliverer with
   `APPITOOLS_WORKER_MODE=email` (templates `verification` + `reset` ship built-in).
 
-**Not in this core (Fase 1 follow-ups):** OAuth2 (Google/GitHub/Microsoft) and MFA.
+### Social login — OAuth2 (AUTH-OAUTH-V1)
+
+Sign-in with **Google, GitHub, Microsoft**, multi-tenant-aware. A social login
+yields the SAME engine JWT a password login does (one token contract); the
+provider answers WHO you are, the schema RBAC still governs WHAT you may do.
+Implemented with the standard authorization-code flow over `net/http` — **no new
+dependency** (no goth/x-oauth2), CGO-free.
+
+- `GET /auth/oauth` — lists the configured providers (`{"providers":["google",…]}`)
+  so a frontend knows which buttons to show.
+- `GET /auth/oauth/{provider}` — starts the flow: `302` to the provider with a
+  **signed state** and minimal scopes (email + basic profile). The tenant is taken
+  from the request Host here and **sealed into the state**.
+- `GET /auth/oauth/{provider}/callback` — the provider redirects back here with
+  `code` + `state`. The engine validates the state, exchanges the code, reads the
+  provider's `{provider_user_id, email}`, resolves the user, and returns
+  `200 {user, token}` (or `302` to `APPITOOLS_OAUTH_SUCCESS_REDIRECT#token=…` if set).
+
+**Tenant lives in the SIGNED STATE, never the Host.** The callback's Host is the
+fixed callback domain (one registered redirect URI per provider), not the tenant
+subdomain — so the tenant CANNOT come from the Host. The state is a short-lived
+(10 min) HS256-signed token (engine `JWT_SECRET`) carrying `{tenant, provider,
+nonce}`; the signature is the **anti-CSRF** guard (an attacker cannot forge a valid
+state) and the tamper-proof tenant carrier.
+
+**Identity linking** (table `tenant_<id>.auth_identities`, `UNIQUE(provider,
+provider_user_id)` per schema):
+
+- The stable key is **`provider_user_id`** (not the email, which can change).
+- Returning identity → logs in to its user.
+- A NEW identity whose email already belongs to a user → the identity is **linked**
+  to that user (no duplicate; one person, one account, several sign-in methods).
+- A brand-new email → a user is **created** with NO password (`password_hash=''`,
+  so it cannot password-login until a reset) and `email_verified=true` (the provider
+  verified it) — **only if** auto-provisioning has a role.
+- The SAME social account in tenant A and tenant B is two DISTINCT users (the
+  per-schema-unique-email advantage holds for social login too).
+
+**Config (a provider with no client id is simply NOT offered — never a boot error):**
+
+- `APPITOOLS_OAUTH_{GOOGLE,GITHUB,MICROSOFT}_CLIENT_ID` / `…_CLIENT_SECRET` — per
+  provider credentials. Register the redirect URI
+  `{callback}/auth/oauth/{provider}/callback` with each provider.
+- `APPITOOLS_OAUTH_CALLBACK_URL` — the FIXED public origin the providers redirect
+  back to (e.g. `https://auth.example.com`). Empty ⇒ derived from the request
+  (fine in dev/single-domain; set it for multi-tenant prod).
+- `APPITOOLS_OAUTH_DEFAULT_ROLE` — role for a user auto-created on first social
+  login; empty falls back to `APPITOOLS_AUTH_SIGNUP_ROLE`. If BOTH are empty, a
+  brand-new social email is rejected (`403`) while existing users still link/login.
+  A set role must exist in the schema RBAC (else boot fails).
+- `APPITOOLS_OAUTH_SUCCESS_REDIRECT` — optional; `302` to `<url>#token=<jwt>` for a
+  browser SPA instead of returning JSON.
+
+**Not in this core (Fase 1 follow-up):** MFA.
 
 ## Does not exist — do not invent
 

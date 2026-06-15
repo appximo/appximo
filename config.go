@@ -69,4 +69,19 @@ type Config struct {
 	// still empty the link origin is derived from the request Host (the
 	// multi-tenant-correct default). The link path is appended by the engine.
 	AuthBaseURL string
+
+	// OAuthCallbackURL is the FIXED public origin OAuth providers redirect back to
+	// (AUTH-OAUTH-V1), e.g. "https://auth.example.com" — it must be the redirect
+	// URI registered with each provider. Empty falls back to
+	// APPITOOLS_OAUTH_CALLBACK_URL; if still empty it is derived from the request.
+	OAuthCallbackURL string
+	// OAuthDefaultRole is the role assigned to a user auto-created on first social
+	// login. Empty falls back to APPITOOLS_OAUTH_DEFAULT_ROLE then to
+	// AuthSignupRole; if all empty, a brand-new social email is rejected (existing
+	// users still link/login). A configured role must exist in the schema RBAC.
+	OAuthDefaultRole string
+	// OAuthSuccessRedirect, when set, makes the OAuth callback 302 to
+	// "<url>#token=<jwt>" instead of returning JSON. Empty falls back to
+	// APPITOOLS_OAUTH_SUCCESS_REDIRECT.
+	OAuthSuccessRedirect string
 }

@@ -347,13 +347,46 @@ func New(cfg Config) (*App, error) {
 		baseURL = os.Getenv("APPITOOLS_AUTH_BASE_URL")
 	}
 	emailTopic := os.Getenv("APPITOOLS_EMAIL_TOPIC") // empty → NewService defaults to "email.send"
+
+	// AUTH-OAUTH-V1: social login providers from env. A provider is offered ONLY
+	// when its client id is set, so leaving these unset disables OAuth with no boot
+	// error. The default role (for users auto-created on first social login) must
+	// exist in the RBAC if set; it falls back to the signup role.
+	oauthProviders := map[string]userauth.OAuthProviderConfig{
+		"google":    {ClientID: os.Getenv("APPITOOLS_OAUTH_GOOGLE_CLIENT_ID"), ClientSecret: os.Getenv("APPITOOLS_OAUTH_GOOGLE_CLIENT_SECRET")},
+		"github":    {ClientID: os.Getenv("APPITOOLS_OAUTH_GITHUB_CLIENT_ID"), ClientSecret: os.Getenv("APPITOOLS_OAUTH_GITHUB_CLIENT_SECRET")},
+		"microsoft": {ClientID: os.Getenv("APPITOOLS_OAUTH_MICROSOFT_CLIENT_ID"), ClientSecret: os.Getenv("APPITOOLS_OAUTH_MICROSOFT_CLIENT_SECRET")},
+	}
+	oauthCallbackURL := cfg.OAuthCallbackURL
+	if oauthCallbackURL == "" {
+		oauthCallbackURL = os.Getenv("APPITOOLS_OAUTH_CALLBACK_URL")
+	}
+	oauthDefaultRole := cfg.OAuthDefaultRole
+	if oauthDefaultRole == "" {
+		oauthDefaultRole = os.Getenv("APPITOOLS_OAUTH_DEFAULT_ROLE")
+	}
+	if oauthDefaultRole != "" {
+		if _, ok := rbacPolicy.Roles[oauthDefaultRole]; !ok {
+			pool.Close()
+			return nil, fmt.Errorf("appitools: OAuthDefaultRole %q is not a role declared in the schema RBAC", oauthDefaultRole)
+		}
+	}
+	oauthSuccessRedirect := cfg.OAuthSuccessRedirect
+	if oauthSuccessRedirect == "" {
+		oauthSuccessRedirect = os.Getenv("APPITOOLS_OAUTH_SUCCESS_REDIRECT")
+	}
+
 	app.authSvc = userauth.NewService(userauth.NewStore(pool), userauth.Config{
-		JWTSecret:         cfg.JWTSecret,
-		SignupRole:        signupRole,
-		MinPasswordLength: minPw,
-		EmailTopic:        emailTopic,
-		BaseURL:           baseURL,
-		RequireVerified:   requireVerified,
+		JWTSecret:            cfg.JWTSecret,
+		SignupRole:           signupRole,
+		MinPasswordLength:    minPw,
+		EmailTopic:           emailTopic,
+		BaseURL:              baseURL,
+		RequireVerified:      requireVerified,
+		OAuthProviders:       oauthProviders,
+		OAuthCallbackURL:     oauthCallbackURL,
+		OAuthDefaultRole:     oauthDefaultRole,
+		OAuthSuccessRedirect: oauthSuccessRedirect,
 	})
 	if signupRole != "" {
 		log.Printf("auth: password identity enabled (public signup → role %q)", signupRole)
@@ -361,6 +394,15 @@ func New(cfg Config) (*App, error) {
 		log.Println("auth: password identity enabled (public signup DISABLED — set APPITOOLS_AUTH_SIGNUP_ROLE to enable)")
 	}
 	log.Printf("auth: reset/verify email flows enabled (require_verified=%t, email topic via outbox)", requireVerified)
+	if app.authSvc.OAuthEnabled() {
+		var enabled []string
+		for _, n := range []string{"google", "github", "microsoft"} {
+			if app.authSvc.OAuthProviderConfigured(n) {
+				enabled = append(enabled, n)
+			}
+		}
+		log.Printf("auth: OAuth social login enabled (providers: %s)", strings.Join(enabled, ", "))
+	}
 
 	// engineRefs for custom-route Ctx helpers: compile validators once.
 	validators := make(map[string]*schema.ResourceValidator, len(s.Resources))

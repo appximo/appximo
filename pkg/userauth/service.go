@@ -3,6 +3,7 @@ package userauth
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/mail"
 	"strings"
 	"time"
@@ -64,6 +65,29 @@ type Config struct {
 	// false (→ 403). Default false: AUTH-CORE's login flow is unchanged unless an
 	// app opts in to mandatory verification.
 	RequireVerified bool
+
+	// --- AUTH-OAUTH-V1: social login ---
+	// OAuthProviders maps a provider name ("google"/"github"/"microsoft") to its
+	// client credentials. A provider with an empty ClientID is NOT offered (an
+	// unconfigured provider never fails the boot). Empty map ⇒ OAuth fully off.
+	OAuthProviders map[string]OAuthProviderConfig
+	// OAuthCallbackURL is the FIXED public origin the provider redirects back to
+	// (e.g. "https://auth.example.com"). It must be the redirect URI registered
+	// with each provider. Empty ⇒ derived from the request (dev/single-domain).
+	OAuthCallbackURL string
+	// OAuthDefaultRole is the role assigned to a user auto-created on first social
+	// login. Empty falls back to SignupRole; if BOTH are empty, a brand-new social
+	// email is rejected (existing users still link/login) — auto-provision is
+	// opt-in, like signup.
+	OAuthDefaultRole string
+	// OAuthSuccessRedirect, when set, makes the callback 302 to "<url>#token=<jwt>"
+	// instead of returning JSON (convenient for a browser SPA). Empty ⇒ JSON.
+	OAuthSuccessRedirect string
+
+	// test hooks (same-package only): override provider endpoints + HTTP client so
+	// tests never reach a real provider.
+	oauthEndpoints  map[string]oauthEndpoints
+	oauthHTTPClient *http.Client
 }
 
 // Service implements the password identity core: signup, login, refresh, plus
@@ -73,6 +97,7 @@ type Service struct {
 	cfg          Config
 	limiter      *loginLimiter // login throttle, per (tenant,email)
 	emailLimiter *loginLimiter // reset/verify REQUEST throttle (anti email-spam)
+	oauth        *oauthManager // social login (AUTH-OAUTH-V1); nil when no provider configured
 	// dummyHash equalizes login timing for an unknown email: we run a verify
 	// against it so "no such user" costs the same as "wrong password", denying a
 	// timing oracle for email enumeration.
@@ -99,6 +124,7 @@ func NewService(store *Store, cfg Config) *Service {
 		// Reset/verify email requests are far rarer than logins and each one sends
 		// an email — throttle tighter (3/min) to blunt email-spam / amplification.
 		emailLimiter: newLoginLimiter(3, 3),
+		oauth:        newOAuthManager(cfg),
 		dummyHash:    dummy,
 	}
 }

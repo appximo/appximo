@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -35,7 +36,112 @@ func (s *Service) Router() http.Handler {
 	r.Post("/verify", s.handleVerifyConfirm)
 	r.Post("/reset/request", s.handleResetRequest)
 	r.Post("/reset/confirm", s.handleResetConfirm)
+	// AUTH-OAUTH-V1: social login. /oauth lists configured providers; /oauth/{p}
+	// starts the flow (302 to the provider); /oauth/{p}/callback completes it. The
+	// callback derives the tenant from the SIGNED STATE, never from the Host.
+	r.Get("/oauth", s.handleOAuthProviders)
+	r.Get("/oauth/{provider}", s.handleOAuthStart)
+	r.Get("/oauth/{provider}/callback", s.handleOAuthCallback)
 	return r
+}
+
+// oauthCallbackURI builds the redirect_uri for a provider. It MUST be byte-identical
+// at initiate and at the token exchange (OAuth requires the match). The configured
+// fixed callback origin wins (production multi-tenant: one registered URI per
+// provider, tenant carried in state); otherwise it is derived from the request,
+// which is consistent in dev because the provider redirects back to exactly the
+// URI we sent.
+func (s *Service) oauthCallbackURI(r *http.Request, provider string) string {
+	base := ""
+	if s.oauth != nil {
+		base = s.oauth.callbackURL
+	}
+	if base == "" {
+		scheme := "http"
+		if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+			scheme = proto
+		} else if r.TLS != nil {
+			scheme = "https"
+		}
+		host := r.Host
+		if xf := r.Header.Get("X-Forwarded-Host"); xf != "" {
+			host = xf
+		}
+		base = scheme + "://" + host
+	}
+	return strings.TrimRight(base, "/") + "/auth/oauth/" + provider + "/callback"
+}
+
+func (s *Service) handleOAuthProviders(w http.ResponseWriter, r *http.Request) {
+	names := []string{}
+	if s.oauth != nil {
+		for _, n := range []string{"google", "github", "microsoft"} {
+			if s.oauth.providers[n] != nil {
+				names = append(names, n)
+			}
+		}
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{"providers": names})
+}
+
+func (s *Service) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
+	provider := chi.URLParam(r, "provider")
+	// The tenant for the flow comes from the Host at INITIATE (it is then sealed
+	// into the signed state and travels through the provider round-trip).
+	tc := tenant.FromCtx(r.Context())
+	if tc == nil {
+		writeAuthErr(w, http.StatusBadRequest, "invalid tenant")
+		return
+	}
+	if !s.OAuthProviderConfigured(provider) {
+		writeAuthErr(w, http.StatusNotFound, "oauth provider not configured")
+		return
+	}
+	authURL, err := s.OAuthAuthCodeURL(tc.ID, provider, s.oauthCallbackURI(r, provider))
+	if err != nil {
+		writeAuthErr(w, http.StatusInternalServerError, "oauth start failed")
+		return
+	}
+	http.Redirect(w, r, authURL, http.StatusFound)
+}
+
+func (s *Service) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	provider := chi.URLParam(r, "provider")
+	if errParam := r.URL.Query().Get("error"); errParam != "" {
+		// The user denied consent, or the provider returned an error.
+		writeAuthErr(w, http.StatusBadRequest, "oauth authorization failed")
+		return
+	}
+	code := r.URL.Query().Get("code")
+	state := r.URL.Query().Get("state")
+	res, err := s.OAuthCallback(r.Context(), provider, code, state, s.oauthCallbackURI(r, provider))
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrOAuthDisabled):
+			writeAuthErr(w, http.StatusNotFound, "oauth provider not configured")
+		case errors.Is(err, ErrOAuthState):
+			writeAuthErr(w, http.StatusBadRequest, "invalid or expired oauth state")
+		case errors.Is(err, ErrOAuthNoEmail):
+			writeAuthErr(w, http.StatusUnprocessableEntity, "provider returned no email")
+		case errors.Is(err, ErrOAuthNoAutoUser):
+			writeAuthErr(w, http.StatusForbidden, "registration is disabled")
+		case errors.Is(err, ErrOAuthExchange):
+			writeAuthErr(w, http.StatusBadGateway, "oauth exchange failed")
+		default:
+			writeAuthErr(w, http.StatusInternalServerError, "oauth login failed")
+		}
+		return
+	}
+	// Success: redirect to the SPA with the token in the fragment, or return JSON.
+	if redir := s.OAuthSuccessRedirect(); redir != "" {
+		sep := "#"
+		if strings.Contains(redir, "#") {
+			sep = "&"
+		}
+		http.Redirect(w, r, redir+sep+"token="+url.QueryEscape(res.Token), http.StatusFound)
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, res)
 }
 
 // uniformEmailResponse is the SAME body returned by /verify/request and
