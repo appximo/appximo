@@ -57,4 +57,10 @@ export const api = {
   // data navigation (read-only browse)
   listResources: (tid) => request("GET", `/admin/tenants/${encodeURIComponent(tid)}/resources`),
   listData: (tid, resource, qs) => request("GET", `/admin/tenants/${encodeURIComponent(tid)}/data/${encodeURIComponent(resource)}${qs ? "?" + qs : ""}`),
+  // observability (read-only): one round-trip returns latency, SLO, anomalies,
+  // recent + persisted-slow traces; `params` adds ?history=<hours> & ?traces=slow.
+  observability: (tid, params) => {
+    const qs = params ? new URLSearchParams(params).toString() : ""
+    return request("GET", `/admin/observability/tenants/${encodeURIComponent(tid)}${qs ? "?" + qs : ""}`)
+  },
 }

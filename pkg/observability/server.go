@@ -130,6 +130,7 @@ func (s *ObsServer) handleTenant(w http.ResponseWriter, r *http.Request) {
 		"latency":         snap,
 		"errors":          errs,
 		"anomaly_count":   s.anomaly.GetCount(id),
+		"anomalies":       s.anomaly.RecentAnomalies(id, 20),
 		"recent_requests": recent,
 		"recent_traces":   recentTraces,
 	}
@@ -155,11 +156,16 @@ func (s *ObsServer) handleTenant(w http.ResponseWriter, r *http.Request) {
 }
 
 // HistoryPoint is the trimmed per-snapshot projection returned under "history".
+// BurnRate/ErrorRatio come straight from the persisted snapshot so the panel can
+// plot the SLO burn-rate over time (with the multi-window thresholds overlaid)
+// without a second query.
 type HistoryPoint struct {
-	TS        int64  `json:"ts"`
-	P50US     int64  `json:"p50_us"`
-	P95US     int64  `json:"p95_us"`
-	SLOStatus string `json:"slo_status"`
+	TS         int64   `json:"ts"`
+	P50US      int64   `json:"p50_us"`
+	P95US      int64   `json:"p95_us"`
+	BurnRate   float64 `json:"burn_rate"`
+	ErrorRatio float64 `json:"error_ratio"`
+	SLOStatus  string  `json:"slo_status"`
 }
 
 // historyPoints loads persisted snapshots for the tenant and projects them for the API.
@@ -172,10 +178,12 @@ func (s *ObsServer) historyPoints(id string, hours int) []HistoryPoint {
 	pts := make([]HistoryPoint, 0, len(snaps))
 	for _, snap := range snaps {
 		pts = append(pts, HistoryPoint{
-			TS:        snap.TS,
-			P50US:     snap.P50US,
-			P95US:     snap.P95US,
-			SLOStatus: snap.SLOStatus,
+			TS:         snap.TS,
+			P50US:      snap.P50US,
+			P95US:      snap.P95US,
+			BurnRate:   snap.BurnRate,
+			ErrorRatio: snap.ErrorRatio,
+			SLOStatus:  snap.SLOStatus,
 		})
 	}
 	return pts

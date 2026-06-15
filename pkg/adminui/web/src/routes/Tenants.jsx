@@ -50,26 +50,31 @@ export function Tenants() {
     {
       accessorKey: "display_name",
       header: "Tenant",
+      size: 180,
       cell: (c) => <span class="cell-id" title={c.row.original.id}>{c.getValue() || c.row.original.id}</span>,
     },
-    { accessorKey: "id", header: "ID", cell: (c) => <span class="secondary">{c.getValue()}</span> },
+    { accessorKey: "id", header: "ID", size: 250, cell: (c) => <span class="secondary">{c.getValue()}</span> },
     {
       accessorKey: "suspended",
       header: "Status",
+      size: 110,
       cell: (c) => <StatusBadge kind={c.getValue() ? "warn" : "ok"} okLabel="Active" warnLabel="Suspended" />,
     },
-    { accessorKey: "plan", header: "Plan", cell: (c) => <span class="secondary">{c.getValue() || "—"}</span> },
+    { accessorKey: "plan", header: "Plan", size: 100, cell: (c) => <span class="secondary">{c.getValue() || "—"}</span> },
     {
       accessorKey: "resource_count", header: "Resources",
+      size: 90,
       meta: { align: "right" },
       cell: (c) => <span class="num">{c.getValue() ?? 0}</span>,
     },
     {
       accessorKey: "created_at", header: "Created",
+      size: 130,
       cell: (c) => <span class="secondary">{fmtDate(c.getValue())}</span>,
     },
     {
       id: "actions", header: "",
+      size: 140,
       cell: (c) => {
         const t = c.row.original
         return (

@@ -88,18 +88,28 @@ export function Data() {
     const def = currentDef()
     if (!def) return []
     const fields = orderedFields(def)
+    const fieldSize = (f) => {
+      if (NUMERIC.has(f.type)) return 100
+      if (f.type === "bool") return 80
+      if (f.type === "time") return 165
+      if (f.type === "uuid") return 185
+      return 165 // string / text / json
+    }
     const cols = fields.map((f) => ({
       accessorKey: f.name,
       header: f.name,
+      size: fieldSize(f),
       meta: NUMERIC.has(f.type) ? { align: "right" } : undefined,
       cell: (c) => renderCell(c.getValue(), f.type),
     }))
     cols.push({
       accessorKey: "id", header: "id",
+      size: 120,
       cell: (c) => <span class="muted" style={{ "font-family": "ui-monospace, monospace", "font-size": "11px" }} title={c.getValue()}>{shortId(c.getValue())}</span>,
     })
     cols.push({
       id: "_open", header: "",
+      size: 70,
       cell: (c) => <div class="cell-actions"><Button size="sm" variant="ghost" onClick={() => setDetail(c.row.original)}>View</Button></div>,
     })
     return cols

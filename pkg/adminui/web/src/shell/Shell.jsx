@@ -18,8 +18,8 @@ const NAV = [
   {
     label: "Insight",
     items: [
-      // Observability is ADMIN-UI-V2 (ECharts / trace waterfall / live SSE).
-      { href: "/observability", title: "Observability", icon: "◔", enabled: false },
+      // Observability (ADMIN-UI-V2): metrics charts, trace waterfall, anomalies.
+      { href: "/observability", title: "Observability", icon: "◔", enabled: true },
     ],
   },
 ]

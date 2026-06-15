@@ -87,12 +87,12 @@ table.dt thead th.sortable { cursor: pointer; }
 table.dt tbody td {
   padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border);
   color: var(--color-text-primary);
-  /* Dense table: every cell is ONE line, clipped with an ellipsis. This keeps each
-     row a fixed height so the virtualizer's offsets always match the real height
-     (no overlap from variable/long content); full values live in the detail panel.
-     max-width:0 + table-layout:fixed makes the ellipsis kick in. */
+  /* Dense table: every cell is ONE line, clipped with an ellipsis. Row height
+     is fixed by the virtualizer (each <tr> is display:table;height:Npx;overflow:hidden),
+     so the truncation is handled at the row level. We still set overflow+ellipsis on
+     cells so long text clips gracefully within the allocated column width. */
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  vertical-align: middle; max-width: 0;
+  vertical-align: middle;
 }
 table.dt tbody tr { transition: background var(--motion-fast) ease; }
 table.dt tbody tr:hover { background: var(--color-surface-hover); } /* hover-highlight, NOT zebra */
@@ -101,9 +101,10 @@ table.dt tbody tr:last-child td { border-bottom: none; }
 .cell-actions { text-align: right; white-space: nowrap; }
 
 /* Dialog (Ark UI) */
-.backdrop { position: fixed; inset: 0; background: oklch(0 0 0 / 0.45); animation: fade var(--motion-base) ease; }
+.backdrop { position: fixed; inset: 0; z-index: 30; background: oklch(0 0 0 / 0.45); animation: fade var(--motion-base) ease; }
 .dialog {
   position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 31;
   width: min(440px, calc(100vw - 32px)); background: var(--color-surface);
   border: 1px solid var(--color-border); border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg); padding: var(--space-5);
@@ -142,3 +143,58 @@ table.dt tbody tr:last-child td { border-bottom: none; }
 
 .empty { padding: var(--space-8); text-align: center; color: var(--color-text-muted); }
 .errbar { background: var(--color-status-crit-bg); color: var(--color-status-crit-fg); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); font-size: var(--text-sm); margin-bottom: var(--space-4); }
+
+/* ── Observability (ADMIN-UI-V2) ─────────────────────────────────────────── */
+
+/* Segmented control (tabs + sub-toggles) — one channel of selection, clear active. */
+.seg { display: inline-flex; gap: 2px; padding: 3px; background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.seg-btn {
+  border: none; background: transparent; color: var(--color-text-secondary);
+  font-size: var(--text-sm); font-weight: var(--weight-medium);
+  padding: var(--space-1) var(--space-3); border-radius: var(--radius-sm);
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+.seg-btn:hover { color: var(--color-text-primary); }
+.seg-btn.active { background: var(--color-surface); color: var(--color-action); box-shadow: var(--shadow-sm); }
+
+.obs-toolbar { margin-bottom: var(--space-4); }
+.obs-toolbar select { height: 30px; padding: 0 var(--space-2); font-size: var(--text-sm); }
+
+/* Stat cards — tabular figures, dense, data-ink high (no decorative chrome). */
+.statgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--space-3); }
+.stat { padding: var(--space-3) var(--space-4); display: flex; flex-direction: column; gap: 4px; }
+.stat-label { font-size: 11px; letter-spacing: 0.03em; text-transform: uppercase; color: var(--color-text-muted); }
+.stat-value { font-size: var(--text-xl); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.stat-value .unit { font-size: var(--text-sm); font-weight: var(--weight-normal); color: var(--color-text-muted); }
+.stat-sub { font-size: 11px; }
+
+/* Chart cards. */
+.chart-card { padding: var(--space-4); }
+.chart-head { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-2); }
+.chart-head h3 { font-size: var(--text-md); }
+.chart-head .muted { font-size: var(--text-xs); }
+.chart { min-height: 120px; }
+.chart-empty { padding: var(--space-6); text-align: center; font-size: var(--text-sm); max-width: 540px; margin: 0 auto; }
+
+/* Trace waterfall. */
+.trace-detail { padding: var(--space-4); }
+.wf { display: grid; grid-template-columns: 1fr 200px; gap: var(--space-4); align-items: start; }
+.wf-bars { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.wf-row {
+  display: grid; grid-template-columns: 110px 1fr 84px; align-items: center; gap: var(--space-3);
+  border: none; background: transparent; padding: 3px var(--space-2); border-radius: var(--radius-sm);
+  text-align: left; width: 100%;
+}
+.wf-row:hover { background: var(--color-surface-hover); }
+.wf-row.active { background: color-mix(in oklch, var(--color-action) 12%, transparent); }
+.wf-name { font-size: var(--text-xs); color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wf-track { position: relative; height: 16px; background: var(--color-surface-2); border-radius: var(--radius-sm); overflow: hidden; }
+.wf-bar { position: absolute; top: 2px; height: 12px; min-width: 2px; background: var(--color-action); border-radius: 2px; }
+.wf-bar.err { background: var(--color-status-crit-fg); }
+.wf-dur { font-size: var(--text-xs); color: var(--color-text-secondary); }
+.wf-detail { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+.wf-detail-name { font-weight: var(--weight-semibold); font-size: var(--text-sm); margin-bottom: var(--space-1); }
+
+.stack { margin-top: var(--space-3); font-size: var(--text-xs); }
+.stack summary { cursor: pointer; }
+.stack-frame { padding: 2px 0; display: flex; gap: var(--space-2); flex-wrap: wrap; }

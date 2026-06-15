@@ -584,7 +584,7 @@ func (a *App) buildRouter() *chi.Mux {
 		a.hist.Record,
 		func(id string, us float64) {
 			if isAnomaly, zScore := a.anomaly.Observe(id, us); isAnomaly {
-				a.anomaly.IncrCounter(id)
+				a.anomaly.RecordAnomaly(id, us, zScore)
 				logging.Log.Warn().
 					Str("tenant_id", id).
 					Float64("z_score", zScore).

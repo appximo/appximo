@@ -1,10 +1,13 @@
-import { Show } from "solid-js"
+import { Show, lazy } from "solid-js"
 import { HashRouter, Route, Navigate } from "@solidjs/router"
 import { Shell } from "./shell/Shell"
 import { Login } from "./routes/Login"
 import { Tenants } from "./routes/Tenants"
 import { Users } from "./routes/Users"
 import { Data } from "./routes/Data"
+// Observability pulls in ECharts — lazy-load it so the charting bundle ships in its
+// own chunk, fetched only when the panel is opened (the rest of the SPA stays light).
+const Observability = lazy(() => import("./routes/Observability").then((m) => ({ default: m.Observability })))
 import { isAuthed } from "./lib/auth"
 import { Toaster } from "./components/ui"
 
@@ -32,7 +35,7 @@ export default function App() {
       <Route path="/tenants" component={Tenants} />
       <Route path="/users" component={Users} />
       <Route path="/data" component={Data} />
-      {/* /observability is ADMIN-UI-V2. */}
+      <Route path="/observability" component={Observability} />
       <Route path="*" component={() => <Navigate href="/tenants" />} />
     </HashRouter>
   )

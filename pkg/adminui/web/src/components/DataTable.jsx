@@ -2,15 +2,8 @@ import { createSignal, createMemo, For, Show } from "solid-js"
 import {
   createSolidTable, flexRender, getCoreRowModel, getSortedRowModel,
 } from "@tanstack/solid-table"
-import { createVirtualizer } from "@tanstack/solid-virtual"
 
-// DataTable — the reusable table every screen builds on. TanStack Table (headless
-// sorting) + TanStack Virtual (windowed rows) from day one, so a list of thousands
-// of rows scrolls at 60fps. Sticky header, sortable columns, hover-highlight (NOT
-// zebra), first column = a human identifier, actions at the row end.
-//
-// No skeleton: the backend is local (~ms), so rows render directly; a skeleton
-// would flash. An explicit empty state shows when there are zero rows.
+// Virtualización removida — re-agregar con TanStack Virtual cuando un recurso tenga >1000 filas
 export function DataTable(props) {
   const [sorting, setSorting] = createSignal([])
 
@@ -22,23 +15,16 @@ export function DataTable(props) {
       onSortingChange: setSorting,
       getCoreRowModel: getCoreRowModel(),
       getSortedRowModel: getSortedRowModel(),
+      defaultColumn: { size: 150, minSize: 50, maxSize: 800 },
     })
   )
 
-  let scrollEl
-  const rows = createMemo(() => table().getRowModel().rows)
-  const virtualizer = createMemo(() =>
-    createVirtualizer({
-      get count() { return rows().length },
-      getScrollElement: () => scrollEl,
-      estimateSize: () => 45,
-      overscan: 12,
-    })
-  )
+  const totalSize = createMemo(() => table().getTotalSize())
+  const colPct = (col) => `${(col.getSize() / totalSize()) * 100}%`
 
   return (
-    <div class="tablewrap" ref={scrollEl} style={{ "max-height": props.maxHeight || "calc(100vh - 220px)" }}>
-      <table class="dt">
+    <div class="tablewrap" style={{ "max-height": props.maxHeight || "calc(100vh - 220px)", "overflow-y": "auto" }}>
+      <table class="dt" style={{ "table-layout": "fixed", width: "100%" }}>
         <thead>
           <For each={table().getHeaderGroups()}>{(hg) => (
             <tr>
@@ -47,7 +33,10 @@ export function DataTable(props) {
                 return (
                   <th
                     class={canSort ? "sortable" : ""}
-                    style={header.column.columnDef.meta?.align === "right" ? { "text-align": "right" } : undefined}
+                    style={{
+                      width: colPct(header.column),
+                      "text-align": header.column.columnDef.meta?.align === "right" ? "right" : "left",
+                    }}
                     onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
                     aria-sort={header.column.getIsSorted() === "asc" ? "ascending" : header.column.getIsSorted() === "desc" ? "descending" : "none"}
                   >
@@ -61,32 +50,22 @@ export function DataTable(props) {
             </tr>
           )}</For>
         </thead>
-        <tbody style={{ height: `${virtualizer().getTotalSize()}px`, position: "relative", display: "block" }}>
-          <Show when={rows().length > 0} fallback={
+        <tbody>
+          <Show when={table().getRowModel().rows.length > 0} fallback={
             <tr><td colspan={props.columns.length}><div class="empty">{props.emptyMessage || "Nothing here yet."}</div></td></tr>
           }>
-            <For each={virtualizer().getVirtualItems()}>{(vrow) => {
-              const row = rows()[vrow.index]
-              return (
-                <tr
-                  style={{
-                    position: "absolute", top: 0, left: 0, width: "100%",
-                    display: "table", "table-layout": "fixed",
-                    // Pin the row to EXACTLY the virtualizer's slot height so the
-                    // translateY offsets never disagree with the rendered height
-                    // (the cause of overlapping rows with variable content).
-                    height: `${vrow.size}px`, overflow: "hidden",
-                    transform: `translateY(${vrow.start}px)`,
-                  }}
-                >
-                  <For each={row.getVisibleCells()}>{(cell) => (
-                    <td style={cell.column.columnDef.meta?.align === "right" ? { "text-align": "right" } : undefined}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  )}</For>
-                </tr>
-              )
-            }}</For>
+            <For each={table().getRowModel().rows}>{(row) => (
+              <tr>
+                <For each={row.getVisibleCells()}>{(cell) => (
+                  <td style={{
+                    width: colPct(cell.column),
+                    "text-align": cell.column.columnDef.meta?.align === "right" ? "right" : undefined,
+                  }}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </td>
+                )}</For>
+              </tr>
+            )}</For>
           </Show>
         </tbody>
       </table>

@@ -163,8 +163,9 @@ baseline faster are welcome; we'll publish updated numbers.
   tenant isolation (not a second permission system); the `X-Admin-Key` still works
   for machine callers. Bootstrap with `appitools admin create`. A **SolidJS UI is
   embedded in the binary and served at `/admin`** — login + MFA, tenant management,
-  per-tenant user management, and read-only data navigation (built with
-  `make admin-ui` before `go build`)
+  per-tenant user management, read-only data navigation, and an **observability
+  dashboard** (ECharts latency + SLO burn-rate charts, a trace-span waterfall, and
+  the z-score anomaly + error views) (built with `make admin-ui` before `go build`)
 - **Real-time**: per-resource SSE streams with RBAC applied at delivery
 - **Webhooks**: HMAC-SHA256-signed, async, retries with backoff, SSRF-guarded
 - **Extensions**: JS sandbox (Goja, watchdog-interrupted) with built-in helpers —

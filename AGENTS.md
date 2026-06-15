@@ -801,7 +801,15 @@ off the CRUD/JWT hot path — measured `no_change`):
   serves the SAME data as `/debug/tenant/{id}` — a platform super-admin sees ANY
   tenant, a tenant admin (valid tenant JWT, matching tenant, admin-grade role)
   sees ONLY its own; everyone else 403. The store already filters by `tenant_id`,
-  so no cross-tenant leak.
+  so no cross-tenant leak. Payload: `latency` (cached/uncached percentile split),
+  `slo` (multi-window burn rate + status), `anomaly_count` + **`anomalies`** (the
+  recent z-score anomaly events — `{ts, latency_us, z_score}`, a small per-tenant
+  ring), `errors` (deduplicated groups), `recent_traces` (in-memory, with per-stage
+  span breakdown), and the optional `?history=<hours>` (per-minute snapshots —
+  `{ts, p50_us, p95_us, burn_rate, error_ratio, slo_status}`) and `?traces=slow`
+  (the persisted slow/errored traces of the last 24h, with full waterfall spans).
+  These are read-only projections of data the engine already computes; the anomaly
+  ring is recorded only on a detection (off the common request path).
 
 **Tenant suspension** flips a control-plane flag and blocks NEW logins for that
 tenant's users (enforced on the non-hot login path); already-issued JWTs live to
@@ -816,18 +824,37 @@ default `Appitools Platform`). The platform MFA secret is encrypted at rest with
 ### Admin panel UI (ADMIN-UI-V1)
 
 A SolidJS SPA, **embedded in the engine binary** (`//go:embed`, `pkg/adminui`) and
-served at **`/admin`**. It consumes the ADMIN-API endpoints above. The operational
-core is complete: **super-admin login (with MFA)**, **tenant management**, **user
-management per tenant**, and **read-only data navigation**. A topbar **tenant
-selector** (persisted) sets the context that Users + Data operate on (a future
-tenant-admin would have a fixed tenant and no selector — documented extension
-point). Observability is ADMIN-UI-V2 (ECharts / trace waterfall / live SSE).
+served at **`/admin`**. It consumes the ADMIN-API endpoints above. The panel is
+**feature-complete for Phase 1**: **super-admin login (with MFA)**, **tenant
+management**, **user management per tenant**, **read-only data navigation**, and
+**observability** (ADMIN-UI-V2). A topbar **tenant selector** (persisted) sets the
+context that Users + Data + Observability operate on (a future tenant-admin would
+have a fixed tenant and no selector — documented extension point).
+
+The **Observability** screen (ADMIN-UI-V2) is the visual face of the engine's
+existing observability — it EXPOSES `GET /admin/observability/tenants/{id}`, it does
+not re-implement anything. Three tabs: **Metrics** (ECharts line charts — p50/p95
+latency over time and the SLO burn rate with the 6×/14.4× multi-window thresholds
+overlaid, plus current percentile/SLO/anomaly stat cards), **Traces** (a normal
+`DataTable` of recent + persisted-slow traces → click a row for a **span waterfall**:
+each sequential stage is a bar positioned by cumulative offset and sized by
+duration, with a side panel of the selected span's metadata; error traces tint red),
+and **Issues** (the z-score **anomalies** table — when/latency/z-score — plus the
+deduplicated error groups and the SLO summary). Charts are ECharts (canvas renderer,
+tree-shaken, lazy-loaded in their own chunk so the rest of the SPA stays light),
+theme-aware (colors re-resolved on the light/dark toggle), and data-ink high (no
+chartjunk). Status uses the **double channel** (colour + icon + text). An opt-in
+**Live** toggle on Metrics polls the snapshot every 5 s and updates the canvas in
+place (true streaming SSE for metrics is a documented V2.1 increment — the obs API
+is a JSON snapshot, not a stream).
 
 - **Source**: `pkg/adminui/web/` (Solid + Vite). Stack: `@solidjs/router` (HASH
-  routing), `@tanstack/solid-table` + `@tanstack/solid-virtual` (the table is
-  virtualized from day one), `@ark-ui/solid` (accessible dialog). The command
-  palette (⌘K) is a small native component (cmdk-solid was skipped to keep the
-  bundle/deps lean — same minimal-dependency ethos as the engine).
+  routing), `@tanstack/solid-table` (headless sorting; a plain fixed-layout table —
+  virtualization was removed to fix row-overlap and is re-added only past ~1000
+  rows), `@ark-ui/solid` (accessible dialog), and `echarts` (canvas, tree-shaken,
+  lazy-loaded only on the Observability route). The command palette (⌘K) is a small
+  native component (cmdk-solid was skipped to keep the bundle/deps lean — same
+  minimal-dependency ethos as the engine).
 - **Routing is hash-based** (`/admin#/tenants`): client routes live in the URL
   fragment, so they NEVER collide with the `/admin/*` ADMIN-API-V1 routes. The Go
   server only serves `GET /admin` (the shell, `no-cache`) and `GET /admin/assets/*`
