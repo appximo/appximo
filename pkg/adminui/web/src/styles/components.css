@@ -84,7 +84,16 @@ table.dt thead th {
   user-select: none;
 }
 table.dt thead th.sortable { cursor: pointer; }
-table.dt tbody td { padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border); color: var(--color-text-primary); }
+table.dt tbody td {
+  padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  /* Dense table: every cell is ONE line, clipped with an ellipsis. This keeps each
+     row a fixed height so the virtualizer's offsets always match the real height
+     (no overlap from variable/long content); full values live in the detail panel.
+     max-width:0 + table-layout:fixed makes the ellipsis kick in. */
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  vertical-align: middle; max-width: 0;
+}
 table.dt tbody tr { transition: background var(--motion-fast) ease; }
 table.dt tbody tr:hover { background: var(--color-surface-hover); } /* hover-highlight, NOT zebra */
 table.dt tbody tr:last-child td { border-bottom: none; }

@@ -50,13 +50,9 @@ export function Tenants() {
     {
       accessorKey: "display_name",
       header: "Tenant",
-      cell: (c) => (
-        <div class="col">
-          <span class="cell-id">{c.getValue() || c.row.original.id}</span>
-          <span class="muted" style={{ "font-size": "12px" }}>{c.row.original.id}</span>
-        </div>
-      ),
+      cell: (c) => <span class="cell-id" title={c.row.original.id}>{c.getValue() || c.row.original.id}</span>,
     },
+    { accessorKey: "id", header: "ID", cell: (c) => <span class="secondary">{c.getValue()}</span> },
     {
       accessorKey: "suspended",
       header: "Status",

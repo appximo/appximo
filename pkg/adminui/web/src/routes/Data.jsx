@@ -9,6 +9,18 @@ import { selectedTenant } from "../lib/tenantContext"
 import { registerCommands } from "../lib/commands"
 
 const NUMERIC = new Set(["int", "int64", "float64"])
+// Field names that make a good human-readable FIRST column (so the table never
+// leads with a raw UUID). First match wins; otherwise the first string field; else
+// the first declared field.
+const PRIMARY_NAMES = ["name", "title", "label", "subject", "email", "slug", "code", "display_name"]
+
+function orderedFields(def) {
+  const fields = def.fields.filter((f) => f.name !== "id")
+  let primaryIdx = fields.findIndex((f) => PRIMARY_NAMES.includes(f.name.toLowerCase()))
+  if (primaryIdx < 0) primaryIdx = fields.findIndex((f) => f.type === "string" || f.type === "text")
+  if (primaryIdx < 0) return fields
+  return [fields[primaryIdx], ...fields.filter((_, i) => i !== primaryIdx)]
+}
 
 export function Data() {
   const navigate = useNavigate()
@@ -75,7 +87,7 @@ export function Data() {
   const columns = () => {
     const def = currentDef()
     if (!def) return []
-    const fields = def.fields.filter((f) => f.name !== "id")
+    const fields = orderedFields(def)
     const cols = fields.map((f) => ({
       accessorKey: f.name,
       header: f.name,

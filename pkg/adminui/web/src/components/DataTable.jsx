@@ -72,6 +72,10 @@ export function DataTable(props) {
                   style={{
                     position: "absolute", top: 0, left: 0, width: "100%",
                     display: "table", "table-layout": "fixed",
+                    // Pin the row to EXACTLY the virtualizer's slot height so the
+                    // translateY offsets never disagree with the rendered height
+                    // (the cause of overlapping rows with variable content).
+                    height: `${vrow.size}px`, overflow: "hidden",
                     transform: `translateY(${vrow.start}px)`,
                   }}
                 >

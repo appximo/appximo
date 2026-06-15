@@ -29,7 +29,9 @@ func ClaimsFromCtx(ctx context.Context) *Claims {
 // happen BEFORE a token exists, so they are unauthenticated (but tenant-aware via
 // Host). The trailing slash keeps the prefix exact — it never matches an /api/
 // resource (those live under /api/) nor a hypothetical "/authors".
-var skipJWT = []string{"/health", "/readyz", "/graphiql", "/metrics", "/debug", "/admin", "/auth/"}
+// "/favicon.ico" is the admin panel's icon (a static asset the browser probes at
+// the origin root before any token exists) — it must not 401 (ADMIN-UI-V1.2).
+var skipJWT = []string{"/health", "/readyz", "/graphiql", "/metrics", "/debug", "/admin", "/auth/", "/favicon.ico"}
 
 // JWTMiddleware validates Bearer tokens on all routes except those in skipJWT.
 // 401 is returned for missing or invalid tokens on enforced routes.

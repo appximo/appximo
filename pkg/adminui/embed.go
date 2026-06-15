@@ -36,6 +36,15 @@ var distFS embed.FS
 const cspAdmin = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
 	"script-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 
+// faviconSVG is the panel's icon, served WITHOUT auth at /favicon.ico (and
+// /admin/favicon.svg) so the browser's root probe never gets a 401 — keeping the
+// console clean (ADMIN-UI-V1.2). A tiny inline SVG: a rounded brand-blue tile.
+const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">` +
+	`<rect width="32" height="32" rx="7" fill="#3b5bdb"/>` +
+	`<rect x="8" y="8" width="16" height="4" rx="2" fill="#fff"/>` +
+	`<rect x="8" y="14" width="16" height="4" rx="2" fill="#fff" opacity="0.75"/>` +
+	`<rect x="8" y="20" width="10" height="4" rx="2" fill="#fff" opacity="0.5"/></svg>`
+
 // mimeByExt maps the handful of extensions the bundle emits to a content type
 // (avoids depending on the host's mime database, which varies).
 var mimeByExt = map[string]string{
@@ -89,7 +98,17 @@ func Register(r chi.Router) error {
 	r.Get("/admin", h.serveIndex)
 	r.Get("/admin/", h.serveIndex)
 	r.Get("/admin/assets/*", h.serveAsset)
+	// Public favicon (no auth — /favicon.ico is JWT-skipped) so a browser root
+	// probe never 401s. Also at /admin/favicon.svg for the index <link>.
+	r.Get("/favicon.ico", serveFavicon)
+	r.Get("/admin/favicon.svg", serveFavicon)
 	return nil
+}
+
+func serveFavicon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write([]byte(faviconSVG))
 }
 
 func (h *handler) serveIndex(w http.ResponseWriter, r *http.Request) {
