@@ -2,6 +2,7 @@ import { For, Show, createMemo } from "solid-js"
 import { A, useNavigate, useLocation } from "@solidjs/router"
 import { ThemeToggle, Button } from "../components/ui"
 import { CommandPalette } from "../components/CommandPalette"
+import { TenantSelect } from "../components/TenantSelect"
 import { admin, logout } from "../lib/auth"
 import { pageCommands } from "../lib/commands"
 
@@ -10,13 +11,14 @@ const NAV = [
     label: "Management",
     items: [
       { href: "/tenants", title: "Tenants", icon: "▦", enabled: true },
-      { href: "/users", title: "Users", icon: "◑", enabled: false },
-      { href: "/data", title: "Data", icon: "≣", enabled: false },
+      { href: "/users", title: "Users", icon: "◑", enabled: true },
+      { href: "/data", title: "Data", icon: "≣", enabled: true },
     ],
   },
   {
     label: "Insight",
     items: [
+      // Observability is ADMIN-UI-V2 (ECharts / trace waterfall / live SSE).
       { href: "/observability", title: "Observability", icon: "◔", enabled: false },
     ],
   },
@@ -69,7 +71,7 @@ export function Shell(props) {
         <header class="topbar">
           <strong>{titleFor(location.pathname)}</strong>
           <div class="spacer" />
-          <Button variant="ghost" size="sm" onClick={() => {/* opened via Cmd+K */}} ariaLabel="Commands">⌘K</Button>
+          <TenantSelect />
           <ThemeToggle />
           <Show when={admin()}>
             <span class="secondary" style={{ "font-size": "13px" }}>{admin().email}</span>

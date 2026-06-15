@@ -422,6 +422,9 @@ func New(cfg Config) (*App, error) {
 				return rbacPolicy.Allows(role, obsSentinel, "read")
 			},
 		})
+	// Read-only data browsing (ADMIN-UI-V1.2): reuses the engine's tenant-scoped DB
+	// + query builder; never touches the hot path (new /admin routes).
+	app.platformAdmin.SetTenantDB(app.tdb)
 	log.Println("admin API: platform super-admin + tenant/user/observability management enabled at /admin/*")
 
 	app.authSvc = userauth.NewService(authStore, userauth.Config{

@@ -49,4 +49,12 @@ export const api = {
   suspendTenant: (id) => request("POST", `/admin/tenants/${encodeURIComponent(id)}/suspend`, { body: {} }),
   activateTenant: (id) => request("POST", `/admin/tenants/${encodeURIComponent(id)}/activate`, { body: {} }),
   deleteTenant: (id, confirm) => request("DELETE", "/admin/tenants/" + encodeURIComponent(id), { body: { confirm } }),
+  // users (per tenant)
+  listUsers: (tid) => request("GET", `/admin/tenants/${encodeURIComponent(tid)}/users`),
+  createUser: (tid, payload) => request("POST", `/admin/tenants/${encodeURIComponent(tid)}/users`, { body: payload }),
+  updateUser: (tid, uid, patch) => request("PATCH", `/admin/tenants/${encodeURIComponent(tid)}/users/${encodeURIComponent(uid)}`, { body: patch }),
+  deleteUser: (tid, uid) => request("DELETE", `/admin/tenants/${encodeURIComponent(tid)}/users/${encodeURIComponent(uid)}`),
+  // data navigation (read-only browse)
+  listResources: (tid) => request("GET", `/admin/tenants/${encodeURIComponent(tid)}/resources`),
+  listData: (tid, resource, qs) => request("GET", `/admin/tenants/${encodeURIComponent(tid)}/data/${encodeURIComponent(resource)}${qs ? "?" + qs : ""}`),
 }

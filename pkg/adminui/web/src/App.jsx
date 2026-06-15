@@ -3,6 +3,8 @@ import { HashRouter, Route, Navigate } from "@solidjs/router"
 import { Shell } from "./shell/Shell"
 import { Login } from "./routes/Login"
 import { Tenants } from "./routes/Tenants"
+import { Users } from "./routes/Users"
+import { Data } from "./routes/Data"
 import { isAuthed } from "./lib/auth"
 import { Toaster } from "./components/ui"
 
@@ -28,7 +30,9 @@ export default function App() {
       <Route path="/" component={() => <Navigate href="/tenants" />} />
       <Route path="/login" component={() => <Navigate href="/tenants" />} />
       <Route path="/tenants" component={Tenants} />
-      {/* Reserved for ADMIN-UI-V1.2 (users + data navigation), already in the nav. */}
+      <Route path="/users" component={Users} />
+      <Route path="/data" component={Data} />
+      {/* /observability is ADMIN-UI-V2. */}
       <Route path="*" component={() => <Navigate href="/tenants" />} />
     </HashRouter>
   )

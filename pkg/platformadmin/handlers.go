@@ -209,6 +209,50 @@ func (s *Service) writeUserUpdateErr(w http.ResponseWriter, err error) {
 	}
 }
 
+// --- data navigation handlers (read-only browse) ----------------------------
+
+func (s *Service) handleListResources(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	rs, err := s.ListResources(r.Context(), id)
+	switch {
+	case err == nil:
+		roles, _ := s.ListRoles(r.Context(), id) // best-effort; empty on error
+		writeJSON(w, http.StatusOK, map[string]any{"resources": rs, "roles": roles})
+	case errors.Is(err, controlplane.ErrNotFound), errors.Is(err, ErrTenantNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "tenant not found"})
+	default:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list resources failed"})
+	}
+}
+
+func (s *Service) handleListData(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	resource := chi.URLParam(r, "resource")
+	res, err := s.ListData(r.Context(), id, resource, r.URL.Query())
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, res)
+	case errors.Is(err, ErrResourceNotFound), errors.Is(err, controlplane.ErrNotFound), errors.Is(err, ErrTenantNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "resource not found"})
+	case isQueryParamError(err):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	default:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list data failed"})
+	}
+}
+
+// isQueryParamError reports whether err is a client-side query-builder error
+// (unknown field, bad op/param) — those map to 400, not 500. The query builder
+// returns plain errors, so we classify by the absence of our known sentinels and
+// the presence of the builder's phrasing.
+func isQueryParamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	m := err.Error()
+	return strings.Contains(m, "invalid") || strings.Contains(m, "unknown") || strings.Contains(m, "filter") || strings.Contains(m, "parameter")
+}
+
 // --- observability handler --------------------------------------------------
 
 // observabilityHandler authorizes a per-tenant observability read and delegates to

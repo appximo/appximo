@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"testing"
 
@@ -18,6 +19,7 @@ import (
 
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/controlplane"
+	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/userauth"
 )
@@ -97,13 +99,15 @@ func requirePG(t *testing.T) {
 // admin checker over a tiny fixed RBAC: "admin" is admin-grade, "viewer" is not).
 func newSvc(t *testing.T) *Service {
 	t.Helper()
-	return NewService(NewStore(testPool), userauth.NewStore(testPool),
+	svc := NewService(NewStore(testPool), userauth.NewStore(testPool),
 		controlplane.NewService(testPool, nil), testPool,
 		Config{
 			JWTSecret:       itSecret,
 			RoleExists:      func(r string) bool { return r == "admin" || r == "viewer" },
 			TenantAdminRole: func(r string) bool { return r == "admin" },
 		})
+	svc.SetTenantDB(db.NewTenantDB(testPool))
+	return svc
 }
 
 func ctxBG() context.Context { return context.Background() }
@@ -409,6 +413,67 @@ func TestIntegration_SuperAdminMFA(t *testing.T) {
 	lr3, _ := svc.Login(ctx, "mfa@x.com", "a-strong-passphrase-123")
 	if _, err := svc.MFAVerify(ctx, lr3.MFAToken, backups[0]); err != ErrMFAInvalidCode {
 		t.Fatalf("reused backup code accepted: %v", err)
+	}
+}
+
+// --- data navigation (read-only browse) -------------------------------------
+
+func TestIntegration_DataBrowsing(t *testing.T) {
+	requirePG(t)
+	svc := newSvc(t)
+	ctx := ctxBG()
+	createTenant(t, svc, "databrowse")
+
+	// Insert a couple of rows directly into the tenant's table (the control plane
+	// created tenant_databrowse.tasks at registration).
+	for i, title := range []string{"first", "second"} {
+		if _, err := testPool.Exec(ctx,
+			`INSERT INTO tenant_databrowse.tasks (title) VALUES ($1)`, title); err != nil {
+			t.Fatalf("seed row %d: %v", i, err)
+		}
+	}
+
+	// ListResources reflects the schema (tasks, with id first + title).
+	rs, err := svc.ListResources(ctx, "databrowse")
+	if err != nil {
+		t.Fatalf("list resources: %v", err)
+	}
+	var tasks *ResourceInfo
+	for i := range rs {
+		if rs[i].Name == "tasks" {
+			tasks = &rs[i]
+		}
+	}
+	if tasks == nil {
+		t.Fatalf("tasks resource not listed: %+v", rs)
+	}
+	if tasks.Fields[0].Name != "id" {
+		t.Fatalf("first field should be id, got %+v", tasks.Fields)
+	}
+
+	// ListData returns the rows with meta.
+	res, err := svc.ListData(ctx, "databrowse", "tasks", url.Values{})
+	if err != nil {
+		t.Fatalf("list data: %v", err)
+	}
+	data, _ := res["data"].([]map[string]any)
+	if len(data) != 2 {
+		t.Fatalf("expected 2 rows, got %d (%+v)", len(data), res)
+	}
+
+	// Unknown resource → ErrResourceNotFound.
+	if _, err := svc.ListData(ctx, "databrowse", "nope", url.Values{}); err != ErrResourceNotFound {
+		t.Fatalf("unknown resource: got %v", err)
+	}
+
+	// A filter is honored (and validated by the reused query builder).
+	filtered, err := svc.ListData(ctx, "databrowse", "tasks", url.Values{"filter[title]": {"first"}})
+	if err != nil {
+		t.Fatalf("filtered list: %v", err)
+	}
+	fd, _ := filtered["data"].([]map[string]any)
+	if len(fd) != 1 {
+		t.Fatalf("filter[title]=first expected 1 row, got %d", len(fd))
 	}
 }
 

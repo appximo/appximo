@@ -789,6 +789,14 @@ off the CRUD/JWT hot path — measured `no_change`):
   `PATCH /admin/tenants/{id}/users/{uid}` (`role` and/or `suspended`),
   `DELETE …/users/{uid}`. Data CRUD is NOT duplicated — the panel consumes the
   existing generated `/api/*` per tenant.
+- Tenant data browse (read-only; platform token OR admin key): `GET
+  /admin/tenants/{id}/resources` (the tenant's resources with each field's type,
+  plus the tenant's RBAC role names — for the data + user UIs), `GET
+  /admin/tenants/{id}/data/{resource}` (a page of records). The data endpoint
+  REUSES the engine's validated query builder (`filter[…]`, `sort`/`order`,
+  `per_page`, keyset `after` — same params as `/api`) over the tenant-scoped DB; it
+  exists because the panel (one origin, platform JWT) cannot reach the Host-scoped
+  `/api/{resource}`. Read-only in V1.2 (record edit is a documented increment).
 - Observability (consolidated, correct authz): `GET /admin/observability/tenants/{id}`
   serves the SAME data as `/debug/tenant/{id}` — a platform super-admin sees ANY
   tenant, a tenant admin (valid tenant JWT, matching tenant, admin-grade role)
@@ -808,10 +816,12 @@ default `Appitools Platform`). The platform MFA secret is encrypted at rest with
 ### Admin panel UI (ADMIN-UI-V1)
 
 A SolidJS SPA, **embedded in the engine binary** (`//go:embed`, `pkg/adminui`) and
-served at **`/admin`**. It consumes the ADMIN-API-V1 endpoints above. This session
-ships the foundation (design-token system, shell, reusable virtualized table) plus
-two verticals: **super-admin login (with MFA)** and **tenant management**. Users +
-data navigation are ADMIN-UI-V1.2.
+served at **`/admin`**. It consumes the ADMIN-API endpoints above. The operational
+core is complete: **super-admin login (with MFA)**, **tenant management**, **user
+management per tenant**, and **read-only data navigation**. A topbar **tenant
+selector** (persisted) sets the context that Users + Data operate on (a future
+tenant-admin would have a fixed tenant and no selector — documented extension
+point). Observability is ADMIN-UI-V2 (ECharts / trace waterfall / live SSE).
 
 - **Source**: `pkg/adminui/web/` (Solid + Vite). Stack: `@solidjs/router` (HASH
   routing), `@tanstack/solid-table` + `@tanstack/solid-virtual` (the table is

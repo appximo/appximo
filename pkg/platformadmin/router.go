@@ -60,6 +60,14 @@ func (s *Service) Register(r chi.Router, obs ObsHandler, adminKey string) {
 	r.With(s.requirePlatform).Patch("/admin/tenants/{id}/users/{uid}", s.handleUpdateUser)
 	r.With(s.requirePlatform).Delete("/admin/tenants/{id}/users/{uid}", s.handleDeleteUser)
 
+	// --- tenant data navigation (read-only browse; platform token OR admin key) ---
+	// Resources come from the tenant's stored schema; records reuse the engine's
+	// query builder over the tenant-scoped DB. The SPA cannot reach the Host-scoped
+	// /api/{resource} (one origin, platform JWT), so these path-scoped endpoints are
+	// how the panel browses a tenant's data.
+	r.With(s.requirePlatform).Get("/admin/tenants/{id}/resources", s.handleListResources)
+	r.With(s.requirePlatform).Get("/admin/tenants/{id}/data/{resource}", s.handleListData)
+
 	// --- observability (platform → any tenant; tenant admin → its own) ---
 	r.Get("/admin/observability/tenants/{id}", s.observabilityHandler(obs))
 }

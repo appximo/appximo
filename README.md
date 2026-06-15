@@ -162,8 +162,9 @@ baseline faster are welcome; we'll publish updated numbers.
   tenants, their users, and their observability — inheriting the schema RBAC +
   tenant isolation (not a second permission system); the `X-Admin-Key` still works
   for machine callers. Bootstrap with `appitools admin create`. A **SolidJS UI is
-  embedded in the binary and served at `/admin`** (login + MFA + tenant management;
-  built with `make admin-ui` before `go build`)
+  embedded in the binary and served at `/admin`** — login + MFA, tenant management,
+  per-tenant user management, and read-only data navigation (built with
+  `make admin-ui` before `go build`)
 - **Real-time**: per-resource SSE streams with RBAC applied at delivery
 - **Webhooks**: HMAC-SHA256-signed, async, retries with backoff, SSRF-guarded
 - **Extensions**: JS sandbox (Goja, watchdog-interrupted) with built-in helpers —

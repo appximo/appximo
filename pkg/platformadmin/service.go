@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/miguelangel/appitools/pkg/controlplane"
+	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/userauth"
 )
 
@@ -60,6 +61,7 @@ type Service struct {
 	users     *userauth.Store // tenant users (auth_users), reused — not reimplemented
 	cp        controlplane.Service
 	pool      *pgxpool.Pool
+	tdb       *db.TenantDB // tenant-scoped DB for read-only data browsing (set via SetTenantDB)
 	cfg       Config
 	cipher    *userauth.SecretCipher
 	limiter   *loginThrottle
