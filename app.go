@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/miguelangel/appitools/pkg/adminui"
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/cache"
 	"github.com/miguelangel/appitools/pkg/codegen"
@@ -693,6 +694,20 @@ func (a *App) buildRouter() *chi.Mux {
 	// NEW routes off the CRUD/JWT hot path — the gate measures no_change.
 	if a.platformAdmin != nil {
 		a.platformAdmin.Register(r, a.obsServer, adminKey)
+	}
+
+	// Admin panel UI (ADMIN-UI-V1): the embedded SolidJS SPA served under /admin
+	// (shell at /admin, hashed assets at /admin/assets/*). Hash routing keeps client
+	// routes in the URL fragment so they never collide with the /admin/* API above.
+	// Static serving — no hot-path impact. If the bundle was not built before
+	// `go build` (only the placeholder index.html is embedded), the shell still
+	// loads but is empty; log a hint.
+	if err := adminui.Register(r); err != nil {
+		log.Printf("WARNING: admin UI not mounted: %v", err)
+	} else if !adminui.HasBuiltAssets() {
+		log.Println("admin UI: serving /admin (WARNING: no built assets embedded — run `make admin-ui` (npm run build) before `go build`)")
+	} else {
+		log.Println("admin UI: SolidJS admin panel served at /admin")
 	}
 
 	r.Get("/healthz", a.ss.HealthzHandler)

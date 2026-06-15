@@ -1,0 +1,71 @@
+@import "./tokens.css";
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  background: var(--color-bg);
+  /* Tabular figures EVERYWHERE by default — numbers line up column to column,
+     the single biggest lift in perceived data quality. Proportional text is
+     opted back in only for prose if ever needed. */
+  font-feature-settings: "tnum" 1, "cv01" 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numeric cells: tabular + right-aligned. */
+.num { font-variant-numeric: tabular-nums; text-align: right; }
+
+h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); line-height: 1.25; }
+h1 { font-size: var(--text-xl); }
+h2 { font-size: var(--text-lg); }
+h3 { font-size: var(--text-md); }
+
+a { color: var(--color-action); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Visible focus ring on every interactive element (accessibility + microstate). */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+:focus:not(:focus-visible) { outline: none; }
+
+button { font-family: inherit; font-size: inherit; cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: 0.55; }
+
+input, select {
+  font-family: inherit;
+  font-size: var(--text-base);
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  transition: border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease;
+}
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--color-focus);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-focus) 25%, transparent);
+}
+
+/* Respect reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Utility primitives used by components. */
+.row { display: flex; align-items: center; gap: var(--space-2); }
+.col { display: flex; flex-direction: column; }
+.spacer { flex: 1; }
+.muted { color: var(--color-text-muted); }
+.secondary { color: var(--color-text-secondary); }

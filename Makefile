@@ -104,7 +104,7 @@ build-pgo: default.pgo
 # ─── DEV TOOLS (S41) ─────────────────────────────────────────
 .PHONY: test-watch test-watch-pkg test-watch-integration test-reflex \
         cover cover-treemap test-perf-dashboard test-perf-smoke \
-        dev-layout dev-metrics dev-setup devhub-run devhub-build bench-protocol
+        dev-layout dev-metrics dev-setup devhub-run devhub-build admin-ui bench-protocol
 
 test-watch:
 	gotestsum --watch --format testdox --watch-chdir -- -race -short ./...
@@ -170,6 +170,13 @@ devhub-run:
 devhub-build:
 	cd tools/devhub/web && npm run build
 	go build -trimpath -ldflags="-s -w" -o devhub ./tools/devhub/
+
+# admin-ui: build the embedded SolidJS admin panel (ADMIN-UI-V1). The hashed assets
+# are gitignored (same pattern as the devhub), so this MUST run before `go build` /
+# the release / the Docker image for the panel to be populated. `npm ci` is used in
+# CI/release for reproducibility; locally `npm install` is fine.
+admin-ui:
+	cd pkg/adminui/web && npm install --no-audit --no-fund && npm run build
 
 # Protocolo de benchmark científico: N runs + warmup + cooldown + import a SQLite
 # Uso: make bench-protocol RUNS=10 LABEL=baseline-s42 [RATE=500] [DURATION=30s] [SCRIPT=tests/performance/sustained_writes.js]

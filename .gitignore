@@ -59,3 +59,9 @@ tools/devhub/db/*.db-wal
 # devhub UI build output (placeholder index.html stays committed for go:embed)
 tools/devhub/web/dist/assets/
 tools/devhub/web/node_modules/
+
+# admin panel UI build output — SAME pattern as the devhub above (ADMIN-UI-V1):
+# the built index.html stays committed so //go:embed web/dist always resolves;
+# the hashed assets are produced by `npm run build` (make admin-ui) before go build.
+pkg/adminui/web/dist/assets/
+pkg/adminui/web/node_modules/

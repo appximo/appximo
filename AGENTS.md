@@ -805,6 +805,42 @@ check to the CRUD/JWT hot path** — the p50 is preserved.
 default `Appitools Platform`). The platform MFA secret is encrypted at rest with
 `APPITOOLS_MFA_KEY` (falls back to `JWT_SECRET`), same as tenant MFA.
 
+### Admin panel UI (ADMIN-UI-V1)
+
+A SolidJS SPA, **embedded in the engine binary** (`//go:embed`, `pkg/adminui`) and
+served at **`/admin`**. It consumes the ADMIN-API-V1 endpoints above. This session
+ships the foundation (design-token system, shell, reusable virtualized table) plus
+two verticals: **super-admin login (with MFA)** and **tenant management**. Users +
+data navigation are ADMIN-UI-V1.2.
+
+- **Source**: `pkg/adminui/web/` (Solid + Vite). Stack: `@solidjs/router` (HASH
+  routing), `@tanstack/solid-table` + `@tanstack/solid-virtual` (the table is
+  virtualized from day one), `@ark-ui/solid` (accessible dialog). The command
+  palette (⌘K) is a small native component (cmdk-solid was skipped to keep the
+  bundle/deps lean — same minimal-dependency ethos as the engine).
+- **Routing is hash-based** (`/admin#/tenants`): client routes live in the URL
+  fragment, so they NEVER collide with the `/admin/*` ADMIN-API-V1 routes. The Go
+  server only serves `GET /admin` (the shell, `no-cache`) and `GET /admin/assets/*`
+  (hashed bundles, `Cache-Control: immutable`). Vite `base` is `/admin/`.
+- **Develop it**: `make admin-ui` (`cd pkg/adminui/web && npm install && npm run
+  build`) → produces `web/dist`, then `make build`. Dev loop: `npm run dev` (Vite
+  on :5174, proxies `/admin/*` to a local engine on :8080).
+- **Build pattern — IMPORTANT (matches the devhub, NOT a committed dist):** the
+  hashed assets `pkg/adminui/web/dist/assets/` are **gitignored**; only the built
+  `dist/index.html` is committed (so `//go:embed web/dist` always resolves). This
+  mirrors `tools/devhub/` exactly. Consequence: **the release/Docker/CI build MUST
+  run `make admin-ui` before `go build`**, or the binary serves an empty shell (the
+  engine logs a WARNING when only the placeholder is embedded). A bare `go build`
+  from a fresh clone does NOT include the UI — same trade-off the devhub already
+  lives with. (To make a bare `go build` ship the UI, un-ignore the assets; left as
+  Miguel's call for consistency with the devhub.)
+- **Light theme default** (better dense-data legibility), instant dark toggle (CSS
+  variables, persisted in `localStorage` — this is a served app, not an artifact,
+  so `localStorage` is fine). Status is shown with a **double channel** (colour +
+  icon + text, WCAG 1.4.1), numbers use **tabular figures**, tables use
+  hover-highlight (no zebra). No skeletons/optimistic UI — the backend is local
+  (~ms), so rows render directly.
+
 ## Does not exist — do not invent
 
 - Field type `number` → schema rejected; use `int`, `int64` or

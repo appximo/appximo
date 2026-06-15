@@ -1,0 +1,114 @@
+/* ── Design tokens — three layers (ADMIN-UI-V1) ──────────────────────────────
+ * Layer 1: primitives — the raw palette/scale, never referenced by components.
+ * Layer 2: semantic  — intent-named (<150), the ONLY layer components should use
+ *                      indirectly, and the ONLY layer redefined for dark mode.
+ * Layer 3: component — per-component knobs that point at semantic tokens.
+ * Dark/light flips by redefining the SEMANTIC layer under [data-theme="dark"];
+ * primitives and component tokens are unchanged, so the theme switch is instant
+ * (live CSS variables, no re-render). LIGHT is the default (better legibility of
+ * small dense data — the advantage grows as the font shrinks).
+ * ------------------------------------------------------------------------- */
+
+:root {
+  /* Layer 1 — primitives (OKLCH for perceptual uniformity). */
+  --gray-50:  oklch(0.985 0.002 250);
+  --gray-100: oklch(0.967 0.003 250);
+  --gray-150: oklch(0.945 0.004 250);
+  --gray-200: oklch(0.920 0.005 250);
+  --gray-300: oklch(0.868 0.007 250);
+  --gray-400: oklch(0.708 0.010 250);
+  --gray-500: oklch(0.586 0.012 250);
+  --gray-600: oklch(0.487 0.013 250);
+  --gray-700: oklch(0.398 0.012 250);
+  --gray-800: oklch(0.290 0.010 250);
+  --gray-900: oklch(0.210 0.008 250);
+  --gray-950: oklch(0.155 0.006 250);
+  --white:    #ffffff;
+
+  --brand-400: oklch(0.70 0.15 255);
+  --brand-500: oklch(0.62 0.17 255);
+  --brand-600: oklch(0.55 0.18 255);
+  --brand-700: oklch(0.48 0.17 255);
+
+  --green-100: oklch(0.95 0.05 150);
+  --green-500: oklch(0.62 0.15 150);
+  --green-700: oklch(0.48 0.13 150);
+  --amber-100: oklch(0.96 0.05 80);
+  --amber-500: oklch(0.72 0.15 70);
+  --amber-700: oklch(0.55 0.13 60);
+  --red-100:   oklch(0.95 0.04 25);
+  --red-500:   oklch(0.62 0.20 25);
+  --red-700:   oklch(0.50 0.19 25);
+
+  /* spacing scale */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 24px; --space-6: 32px; --space-8: 48px;
+  /* radii */
+  --radius-sm: 4px; --radius-md: 6px; --radius-lg: 10px; --radius-full: 999px;
+  /* type scale */
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --text-xs: 12px; --text-sm: 13px; --text-base: 14px; --text-md: 15px;
+  --text-lg: 18px; --text-xl: 24px;
+  --weight-normal: 400; --weight-medium: 500; --weight-semibold: 600;
+  /* elevation */
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.06);
+  --shadow-md: 0 4px 12px oklch(0 0 0 / 0.10);
+  --shadow-lg: 0 12px 32px oklch(0 0 0 / 0.16);
+  --motion-fast: 120ms; --motion-base: 150ms;
+
+  /* Layer 2 — semantic (light). */
+  --color-bg:             var(--gray-100);
+  --color-surface:        var(--white);
+  --color-surface-2:      var(--gray-50);
+  --color-surface-hover:  var(--gray-100);
+  --color-border:         var(--gray-200);
+  --color-border-strong:  var(--gray-300);
+  --color-text-primary:   var(--gray-900);
+  --color-text-secondary: var(--gray-600);
+  --color-text-muted:     var(--gray-500);
+  --color-text-inverse:   var(--white);
+  --color-action:         var(--brand-600);
+  --color-action-hover:   var(--brand-700);
+  --color-action-text:    var(--white);
+  --color-focus:          var(--brand-500);
+  --color-danger:         var(--red-600, var(--red-700));
+  --color-danger-hover:   var(--red-700);
+
+  --color-status-ok-bg:   var(--green-100);
+  --color-status-ok-fg:   var(--green-700);
+  --color-status-warn-bg: var(--amber-100);
+  --color-status-warn-fg: var(--amber-700);
+  --color-status-crit-bg: var(--red-100);
+  --color-status-crit-fg: var(--red-700);
+}
+
+[data-theme="dark"] {
+  /* Only the SEMANTIC layer is redefined for dark. */
+  --color-bg:             var(--gray-950);
+  --color-surface:        var(--gray-900);
+  --color-surface-2:      var(--gray-800);
+  --color-surface-hover:  var(--gray-800);
+  --color-border:         var(--gray-800);
+  --color-border-strong:  var(--gray-700);
+  --color-text-primary:   var(--gray-50);
+  --color-text-secondary: var(--gray-300);
+  --color-text-muted:     var(--gray-400);
+  --color-text-inverse:   var(--gray-950);
+  --color-action:         var(--brand-500);
+  --color-action-hover:   var(--brand-400);
+  --color-action-text:    var(--white);
+  --color-focus:          var(--brand-400);
+  --color-danger:         var(--red-500);
+  --color-danger-hover:   var(--red-700);
+
+  --color-status-ok-bg:   oklch(0.30 0.06 150);
+  --color-status-ok-fg:   oklch(0.85 0.10 150);
+  --color-status-warn-bg: oklch(0.32 0.06 70);
+  --color-status-warn-fg: oklch(0.86 0.10 80);
+  --color-status-crit-bg: oklch(0.30 0.08 25);
+  --color-status-crit-fg: oklch(0.85 0.10 25);
+
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.4);
+  --shadow-md: 0 4px 12px oklch(0 0 0 / 0.5);
+  --shadow-lg: 0 12px 32px oklch(0 0 0 / 0.6);
+}

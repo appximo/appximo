@@ -157,12 +157,13 @@ baseline faster are welcome; we'll publish updated numbers.
   signed state, identity linked by stable provider id, no new dependency.
   **TOTP MFA** (opt-in, RFC 6238) — encrypted secret, one-time backup codes,
   two-step login; the secret never password-degrades the request hot path
-- **Admin API**: backend of the admin panel — a **platform super-admin** (in a
-  system schema, above all tenants, with its own login + MFA) plus a consolidated
-  `/admin/*` API to manage tenants, their users, and their observability. It
-  inherits the schema RBAC + tenant isolation (not a second permission system);
-  the `X-Admin-Key` still works for machine callers. Bootstrap with
-  `appitools admin create`
+- **Admin panel**: a **platform super-admin** (in a system schema, above all
+  tenants, with its own login + MFA) plus a consolidated `/admin/*` API to manage
+  tenants, their users, and their observability — inheriting the schema RBAC +
+  tenant isolation (not a second permission system); the `X-Admin-Key` still works
+  for machine callers. Bootstrap with `appitools admin create`. A **SolidJS UI is
+  embedded in the binary and served at `/admin`** (login + MFA + tenant management;
+  built with `make admin-ui` before `go build`)
 - **Real-time**: per-resource SSE streams with RBAC applied at delivery
 - **Webhooks**: HMAC-SHA256-signed, async, retries with backoff, SSRF-guarded
 - **Extensions**: JS sandbox (Goja, watchdog-interrupted) with built-in helpers —
