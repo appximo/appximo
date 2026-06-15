@@ -154,7 +154,9 @@ baseline faster are welcome; we'll publish updated numbers.
   **Password reset + email verification** via single-use tokens, delivered async
   through the outbox + email worker (the email never blocks the request).
   **Social login** (OAuth2: Google / GitHub / Microsoft) — tenant carried in a
-  signed state, identity linked by stable provider id, no new dependency
+  signed state, identity linked by stable provider id, no new dependency.
+  **TOTP MFA** (opt-in, RFC 6238) — encrypted secret, one-time backup codes,
+  two-step login; the secret never password-degrades the request hot path
 - **Real-time**: per-resource SSE streams with RBAC applied at delivery
 - **Webhooks**: HMAC-SHA256-signed, async, retries with backoff, SSRF-guarded
 - **Extensions**: JS sandbox (Goja, watchdog-interrupted) with built-in helpers —
@@ -216,6 +218,7 @@ It serves our own production workload today.
 | `APPITOOLS_AUTH_BASE_URL` | env | no | origin for reset/verify email links (else derived from the request Host) |
 | `APPITOOLS_OAUTH_{GOOGLE,GITHUB,MICROSOFT}_CLIENT_ID` / `…_CLIENT_SECRET` | env | no | enable social login per provider (unset = provider not offered) |
 | `APPITOOLS_OAUTH_CALLBACK_URL` / `APPITOOLS_OAUTH_DEFAULT_ROLE` | env | no | fixed OAuth redirect origin; role for auto-created social users (falls back to signup role) |
+| `APPITOOLS_MFA_KEY` / `APPITOOLS_MFA_ISSUER` | env | no | TOTP-secret encryption key (falls back to `JWT_SECRET`); authenticator-app issuer label |
 | `DB_MAX_CONNS`, `GOMAXPROCS`, `OBS_DB_PATH`, `SLACK_WEBHOOK_URL`, `REDIS_URL` | env | no | see [docs/DEPLOY.md](docs/DEPLOY.md) |
 | `--schema` | flag | **yes** | path to the JSON schema |
 | `--port` | flag | no | data-plane port (default 8080) |

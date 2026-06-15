@@ -84,4 +84,13 @@ type Config struct {
 	// "<url>#token=<jwt>" instead of returning JSON. Empty falls back to
 	// APPITOOLS_OAUTH_SUCCESS_REDIRECT.
 	OAuthSuccessRedirect string
+
+	// MFAKey is the key material that ENCRYPTS users' TOTP secrets at rest
+	// (AUTH-MFA-V1, AES-256-GCM). Empty falls back to APPITOOLS_MFA_KEY, then to
+	// the JWT secret. Set a dedicated key if you want to rotate it independently of
+	// JWT_SECRET (rotating it invalidates existing TOTP enrollments).
+	MFAKey string
+	// MFAIssuer is the issuer label shown in authenticator apps. Empty falls back
+	// to APPITOOLS_MFA_ISSUER, then to "Appitools".
+	MFAIssuer string
 }

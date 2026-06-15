@@ -88,6 +88,15 @@ type Config struct {
 	// tests never reach a real provider.
 	oauthEndpoints  map[string]oauthEndpoints
 	oauthHTTPClient *http.Client
+
+	// --- AUTH-MFA-V1: TOTP multi-factor ---
+	// MFAKey is the key material that ENCRYPTS the TOTP secret at rest (AES-256-GCM
+	// over SHA-256(MFAKey)). Empty falls back to JWTSecret. A TOTP secret must be
+	// recoverable (the server re-derives codes), so it is encrypted, not hashed.
+	MFAKey string
+	// MFAIssuer is the issuer label shown in the authenticator app (otpauth URI).
+	// Empty ⇒ "Appitools".
+	MFAIssuer string
 }
 
 // Service implements the password identity core: signup, login, refresh, plus
@@ -97,7 +106,10 @@ type Service struct {
 	cfg          Config
 	limiter      *loginLimiter // login throttle, per (tenant,email)
 	emailLimiter *loginLimiter // reset/verify REQUEST throttle (anti email-spam)
+	mfaLimiter   *loginLimiter // mfa/verify throttle, per (tenant,user) — anti 6-digit brute-force
 	oauth        *oauthManager // social login (AUTH-OAUTH-V1); nil when no provider configured
+	mfaCipher    *secretCipher // encrypts the TOTP secret at rest (AUTH-MFA-V1)
+	mfaIssuer    string        // otpauth issuer label
 	// dummyHash equalizes login timing for an unknown email: we run a verify
 	// against it so "no such user" costs the same as "wrong password", denying a
 	// timing oracle for email enumeration.
@@ -117,6 +129,13 @@ func NewService(store *Store, cfg Config) *Service {
 		cfg.EmailTopic = "email.send"
 	}
 	dummy, _ := HashPassword("appitools-anti-enumeration-timing-equalizer")
+	// MFA secret cipher: encrypts the TOTP secret at rest. Key material is MFAKey,
+	// falling back to the (always-present) JWTSecret, so MFA works out of the box.
+	mfaKey := cfg.MFAKey
+	if mfaKey == "" {
+		mfaKey = cfg.JWTSecret
+	}
+	cipher, _ := newSecretCipher(mfaKey) // nil only if key material empty (JWTSecret is required)
 	return &Service{
 		store:   store,
 		cfg:     cfg,
@@ -124,7 +143,10 @@ func NewService(store *Store, cfg Config) *Service {
 		// Reset/verify email requests are far rarer than logins and each one sends
 		// an email — throttle tighter (3/min) to blunt email-spam / amplification.
 		emailLimiter: newLoginLimiter(3, 3),
+		mfaLimiter:   newLoginLimiter(cfg.LoginAttemptsPerMinute, cfg.LoginBurst),
 		oauth:        newOAuthManager(cfg),
+		mfaCipher:    cipher,
+		mfaIssuer:    cfg.MFAIssuer,
 		dummyHash:    dummy,
 	}
 }
@@ -146,10 +168,14 @@ func toPublic(u User) PublicUser {
 }
 
 // AuthResult is returned by Signup and Login: the user (no hash) plus a freshly
-// minted, engine-valid JWT (signup auto-logs-in).
+// minted, engine-valid JWT (signup auto-logs-in). When a password login hits a
+// user with MFA enabled, Token is empty and MFARequired+MFAToken are set instead:
+// the final JWT is withheld until /auth/mfa/verify succeeds.
 type AuthResult struct {
-	User  PublicUser `json:"user"`
-	Token string     `json:"token"`
+	User        PublicUser `json:"user"`
+	Token       string     `json:"token,omitempty"`
+	MFARequired bool       `json:"mfa_required,omitempty"`
+	MFAToken    string     `json:"mfa_token,omitempty"`
 }
 
 // Signup creates a user in the tenant's schema and returns it plus a token.
@@ -209,6 +235,23 @@ func (s *Service) Login(ctx context.Context, tenantID, email, password string) (
 	// someone who already holds the correct password — never an enumeration vector.
 	if s.cfg.RequireVerified && !user.EmailVerified {
 		return AuthResult{}, ErrEmailNotVerified
+	}
+	// Second factor (AUTH-MFA-V1): if the user has MFA enabled, DO NOT issue the
+	// final JWT yet — issue a short-lived mfa_token and require /auth/mfa/verify.
+	// One indexed lookup, only on the (occasional) login path, never on the CRUD
+	// hot path. mfaCipher is always set (JWTSecret is required), so this is live.
+	if s.mfaCipher != nil {
+		enabled, merr := s.store.MFAEnabled(ctx, tenantID, user.ID)
+		if merr != nil {
+			return AuthResult{}, merr
+		}
+		if enabled {
+			mfaToken, terr := s.signMFAPending(user.ID, tenantID)
+			if terr != nil {
+				return AuthResult{}, terr
+			}
+			return AuthResult{MFARequired: true, MFAToken: mfaToken}, nil
+		}
 	}
 	token, err := s.mint(user, tenantID)
 	if err != nil {

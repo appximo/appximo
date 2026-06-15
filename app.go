@@ -376,6 +376,17 @@ func New(cfg Config) (*App, error) {
 		oauthSuccessRedirect = os.Getenv("APPITOOLS_OAUTH_SUCCESS_REDIRECT")
 	}
 
+	// AUTH-MFA-V1: TOTP second factor. The secret-encryption key falls back to the
+	// JWT secret (so MFA works out of the box); MFAIssuer labels the authenticator app.
+	mfaKey := cfg.MFAKey
+	if mfaKey == "" {
+		mfaKey = os.Getenv("APPITOOLS_MFA_KEY")
+	}
+	mfaIssuer := cfg.MFAIssuer
+	if mfaIssuer == "" {
+		mfaIssuer = os.Getenv("APPITOOLS_MFA_ISSUER")
+	}
+
 	app.authSvc = userauth.NewService(userauth.NewStore(pool), userauth.Config{
 		JWTSecret:            cfg.JWTSecret,
 		SignupRole:           signupRole,
@@ -387,6 +398,8 @@ func New(cfg Config) (*App, error) {
 		OAuthCallbackURL:     oauthCallbackURL,
 		OAuthDefaultRole:     oauthDefaultRole,
 		OAuthSuccessRedirect: oauthSuccessRedirect,
+		MFAKey:               mfaKey,
+		MFAIssuer:            mfaIssuer,
 	})
 	if signupRole != "" {
 		log.Printf("auth: password identity enabled (public signup → role %q)", signupRole)

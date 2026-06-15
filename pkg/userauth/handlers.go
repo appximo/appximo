@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
@@ -42,7 +43,155 @@ func (s *Service) Router() http.Handler {
 	r.Get("/oauth", s.handleOAuthProviders)
 	r.Get("/oauth/{provider}", s.handleOAuthStart)
 	r.Get("/oauth/{provider}/callback", s.handleOAuthCallback)
+	// AUTH-MFA-V1: TOTP second factor. enable/confirm/disable require a valid
+	// session JWT (parsed here since /auth/ is JWT-skipped); verify uses the
+	// intermediate mfa_token from the login challenge (no session yet).
+	r.Post("/mfa/enable", s.handleMFAEnable)
+	r.Post("/mfa/confirm", s.handleMFAConfirm)
+	r.Post("/mfa/verify", s.handleMFAVerify)
+	r.Post("/mfa/disable", s.handleMFADisable)
 	return r
+}
+
+// authClaims extracts and validates the session JWT from the Authorization header
+// for the JWT-skipped /auth/ routes that DO need authentication (mfa enable/confirm/
+// disable). It also enforces that the token's tenant matches the request Host
+// tenant. Returns nil when there is no valid, tenant-matching token.
+func (s *Service) authClaims(r *http.Request, tenantID string) *auth.Claims {
+	h := r.Header.Get("Authorization")
+	if !strings.HasPrefix(h, "Bearer ") {
+		return nil
+	}
+	claims, err := auth.ValidateToken(strings.TrimPrefix(h, "Bearer "), s.cfg.JWTSecret)
+	if err != nil || claims.UserID == "" {
+		return nil
+	}
+	if claims.TenantID != "" && claims.TenantID != tenantID {
+		return nil
+	}
+	return claims
+}
+
+type mfaCodeRequest struct {
+	Code string `json:"code"`
+}
+
+type mfaVerifyRequest struct {
+	MFAToken string `json:"mfa_token"`
+	Code     string `json:"code"`
+}
+
+type mfaDisableRequest struct {
+	Code     string `json:"code,omitempty"`
+	Password string `json:"password,omitempty"`
+}
+
+func (s *Service) handleMFAEnable(w http.ResponseWriter, r *http.Request) {
+	tc := tenant.FromCtx(r.Context())
+	if tc == nil {
+		writeAuthErr(w, http.StatusBadRequest, "invalid tenant")
+		return
+	}
+	claims := s.authClaims(r, tc.ID)
+	if claims == nil {
+		writeAuthErr(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	secret, uri, err := s.EnableMFA(r.Context(), tc.ID, claims.UserID)
+	if err != nil {
+		writeAuthErr(w, http.StatusInternalServerError, "mfa enable failed")
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]string{"secret": secret, "otpauth_uri": uri})
+}
+
+func (s *Service) handleMFAConfirm(w http.ResponseWriter, r *http.Request) {
+	tc := tenant.FromCtx(r.Context())
+	if tc == nil {
+		writeAuthErr(w, http.StatusBadRequest, "invalid tenant")
+		return
+	}
+	claims := s.authClaims(r, tc.ID)
+	if claims == nil {
+		writeAuthErr(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	var req mfaCodeRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	codes, err := s.ConfirmMFA(r.Context(), tc.ID, claims.UserID, req.Code)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrMFANotEnrolled):
+			writeAuthErr(w, http.StatusBadRequest, "mfa not started")
+		case errors.Is(err, ErrMFAInvalidCode):
+			writeAuthErr(w, http.StatusUnauthorized, "invalid code")
+		default:
+			writeAuthErr(w, http.StatusInternalServerError, "mfa confirm failed")
+		}
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{"enabled": true, "backup_codes": codes})
+}
+
+func (s *Service) handleMFAVerify(w http.ResponseWriter, r *http.Request) {
+	tc := tenant.FromCtx(r.Context())
+	if tc == nil {
+		writeAuthErr(w, http.StatusBadRequest, "invalid tenant")
+		return
+	}
+	var req mfaVerifyRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	res, err := s.MFAVerify(r.Context(), tc.ID, req.MFAToken, req.Code)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrTooManyAttempts):
+			w.Header().Set("Retry-After", "60")
+			writeAuthErr(w, http.StatusTooManyRequests, "too many attempts, try again later")
+		case errors.Is(err, ErrMFAToken):
+			writeAuthErr(w, http.StatusUnauthorized, "invalid or expired mfa token")
+		case errors.Is(err, ErrMFAInvalidCode), errors.Is(err, ErrMFANotEnrolled):
+			writeAuthErr(w, http.StatusUnauthorized, "invalid code")
+		default:
+			writeAuthErr(w, http.StatusInternalServerError, "mfa verify failed")
+		}
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, res)
+}
+
+func (s *Service) handleMFADisable(w http.ResponseWriter, r *http.Request) {
+	tc := tenant.FromCtx(r.Context())
+	if tc == nil {
+		writeAuthErr(w, http.StatusBadRequest, "invalid tenant")
+		return
+	}
+	claims := s.authClaims(r, tc.ID)
+	if claims == nil {
+		writeAuthErr(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	var req mfaDisableRequest
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	err := s.DisableMFA(r.Context(), tc.ID, claims.UserID, req.Code, req.Password)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrMFANotEnrolled):
+			writeAuthErr(w, http.StatusBadRequest, "mfa not enabled")
+		case errors.Is(err, ErrMFAInvalidCode):
+			// Disable requires a SECOND FACTOR (code or password) — the session JWT alone is not enough.
+			writeAuthErr(w, http.StatusUnauthorized, "second factor required to disable mfa")
+		default:
+			writeAuthErr(w, http.StatusInternalServerError, "mfa disable failed")
+		}
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{"enabled": false})
 }
 
 // oauthCallbackURI builds the redirect_uri for a provider. It MUST be byte-identical

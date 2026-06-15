@@ -52,6 +52,7 @@ type Store struct {
 	ensured           sync.Map // tenant id → struct{}: auth_users DDL run once
 	ensuredTokens     sync.Map // tenant id → struct{}: auth_tokens DDL run once
 	ensuredIdentities sync.Map // tenant id → struct{}: auth_identities DDL run once
+	ensuredMFA        sync.Map // tenant id → struct{}: auth_mfa + auth_backup_codes DDL run once
 }
 
 // NewStore builds a Store over the engine pool.

@@ -698,7 +698,47 @@ provider_user_id)` per schema):
 - `APPITOOLS_OAUTH_SUCCESS_REDIRECT` — optional; `302` to `<url>#token=<jwt>` for a
   browser SPA instead of returning JSON.
 
-**Not in this core (Fase 1 follow-up):** MFA.
+### Multi-factor auth — TOTP (AUTH-MFA-V1)
+
+Optional, per-user **TOTP** second factor (Google Authenticator / Authy / 1Password
+…), multi-tenant-aware. TOTP only (RFC 6238) — no SMS (no provider, no SIM-swap).
+Implemented from the standard library (HMAC-SHA1 + base32, verified against the RFC
+6238 test vectors) — **no new dependency**.
+
+- `POST /auth/mfa/enable` *(needs a session JWT)* — generates a TOTP secret, stores
+  it ENCRYPTED with `enabled=false`, returns `{secret, otpauth_uri}` **once** (the
+  client renders the QR from the `otpauth://` URI; the engine ships no image encoder).
+- `POST /auth/mfa/confirm` *(session JWT)* — `{ "code" }`. Validates the first TOTP
+  code, flips `enabled=true`, and returns `{enabled:true, backup_codes:[…]}` **once**
+  (10 one-time recovery codes; only their hashes are stored). Requiring a valid code
+  before enabling means a mis-scanned secret can never lock the user out.
+- `POST /auth/mfa/verify` *(no session — uses the login challenge)* —
+  `{ "mfa_token", "code" }`. Accepts a current TOTP code (±1 step / ±30 s) OR a
+  one-time backup code (consumed), then mints the FINAL engine JWT. Throttled per
+  (tenant, user). Bad code → `401`.
+- `POST /auth/mfa/disable` *(session JWT **and** a second factor)* —
+  `{ "code" }` (TOTP/backup) **or** `{ "password" }`. The session JWT alone is NOT
+  enough (a stolen access token can't strip MFA). Clears the secret + backup codes.
+
+**Two-step login.** When a user has MFA enabled, `POST /auth/login` with the right
+password returns `200 {"mfa_required":true,"mfa_token":"…"}` — **the final JWT is
+withheld**. The client completes it at `/auth/mfa/verify`. The `mfa_token` is a
+short-lived (5 min) HS256 token whose claim keys differ from the access token's, so
+presented as a Bearer to `/api/` it carries no role → RBAC denies (it can only
+finish the MFA step, never authorize CRUD). MFA applies to the password login;
+social login is gated by the provider.
+
+**Storage / security.** `tenant_<id>.auth_mfa` (per-user, the TOTP secret
+**encrypted at rest** with AES-256-GCM — recoverable because the server re-derives
+each code; key = `APPITOOLS_MFA_KEY` or the JWT secret) and
+`tenant_<id>.auth_backup_codes` (hash only, one-time). Per-tenant, isolated — a
+user's MFA in tenant A never affects tenant B. TOTP window is exactly ±1 step.
+**Config:** `APPITOOLS_MFA_KEY` (secret-encryption key; falls back to `JWT_SECRET`
+— rotating it invalidates enrollments), `APPITOOLS_MFA_ISSUER` (authenticator-app
+label; default `Appitools`).
+
+**Auth-as-product is now complete: password (signup/login/refresh) + reset/verify +
+OAuth social login + TOTP MFA.**
 
 ## Does not exist — do not invent
 
