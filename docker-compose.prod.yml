@@ -42,8 +42,13 @@ services:
       GOMAXPROCS: "2"
       # Content-addressable file store (FILES-V1); shared with the worker.
       APPITOOLS_FILES_DIR: /var/lib/appitools/files
+      # Observability store (trace + snapshot history) on its own volume so the
+      # history SURVIVES a container restart (the default /var/lib/appitools/obs.db
+      # would otherwise live in the container's ephemeral writable layer).
+      OBS_DB_PATH: /var/lib/appitools/obs/obs.db
     volumes:
       - files_data:/var/lib/appitools/files
+      - obs_data:/var/lib/appitools/obs
     depends_on:
       db:
         condition: service_healthy
@@ -102,6 +107,7 @@ services:
 volumes:
   pgdata:
   files_data: # content-addressable file store, shared by engine + worker
+  obs_data: # observability SQLite store (OBS_DB_PATH), engine only — survives restart
   caddy_data:
   caddy_config:
 

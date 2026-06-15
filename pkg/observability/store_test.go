@@ -2,6 +2,7 @@ package observability
 
 import (
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -90,15 +91,23 @@ func TestStore_PruneDropsOldKeepsRecent(t *testing.T) {
 	}
 }
 
-func TestStore_EmptyPathUsesDefault(t *testing.T) {
-	// OpenStore("") must not fail; it falls back to the default /tmp path.
-	store, err := OpenStore("")
-	if err != nil {
-		t.Fatalf("OpenStore(\"\"): %v", err)
+func TestStore_EmptyPathUsesPersistentDefault(t *testing.T) {
+	// An empty path resolves to the persistent default — NOT /tmp (R1: the history
+	// must survive a restart out of the box). Asserted on the pure resolver so the
+	// test never writes to the real system path.
+	got := resolveObsDBPath("")
+	if got != defaultObsDBPath {
+		t.Fatalf("resolveObsDBPath(\"\") = %q, want %q", got, defaultObsDBPath)
 	}
-	defer store.Close()
-	if _, err := store.History("x", 1); err != nil {
-		t.Errorf("default-path store unusable: %v", err)
+	if got == "/tmp/obs.db" || strings.HasPrefix(got, "/tmp/") {
+		t.Errorf("default obs path %q is ephemeral (under /tmp) — R1 regression", got)
+	}
+	if !filepath.IsAbs(got) {
+		t.Errorf("default obs path %q should be absolute", got)
+	}
+	// An explicit path is honored verbatim.
+	if p := resolveObsDBPath("/data/obs.db"); p != "/data/obs.db" {
+		t.Errorf("resolveObsDBPath(explicit) = %q, want /data/obs.db", p)
 	}
 }
 

@@ -250,6 +250,9 @@ Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
 LimitNOFILE=65536
+# Creates /var/lib/appitools owned by the service user before start — used by the
+# observability store (OBS_DB_PATH default) and the file store (APPITOOLS_FILES_DIR).
+StateDirectory=appitools
 
 [Install]
 WantedBy=multi-user.target
@@ -498,6 +501,55 @@ WantedBy=multi-user.target
 On SIGTERM (`systemctl stop`) the worker finishes its current batch, closes its
 DB connections, and exits cleanly. It reconnects on its own (capped backoff) if
 Postgres blips, so `Restart=on-failure` is a backstop, not the primary recovery.
+
+---
+
+## Observability store (`OBS_DB_PATH`)
+
+The engine persists its trace + snapshot history to one SQLite file (modernc, no
+CGO — full map in [docs/PERSISTENCE.md](PERSISTENCE.md)). It is best-effort: a bad
+path is logged and degrades to disabled, **never a boot failure**.
+
+- **The default is persistent.** With `OBS_DB_PATH` unset the store lives at
+  `/var/lib/appitools/obs.db` (the same root as the file store), so the history
+  **survives a process or container restart out of the box**. The parent directory
+  is created on open.
+- **Ephemeral-path warning.** If the resolved path is under `/tmp` or a tmpfs, the
+  engine logs a boot WARNING (`observability store at <path> is ephemeral …`), so
+  an accidental `/tmp` in production is visible. Using `/tmp` in dev is fine — the
+  warning is informational, not a block.
+- **An unwritable path is safe.** If the directory cannot be created or written
+  (e.g. a stricter user/permission setup), the store falls back to an ephemeral
+  temp file and logs a WARNING. Observability is reduced; the engine keeps serving.
+
+**Docker — persist it with a volume.** Inside a container `/var/lib/appitools/obs.db`
+would live in the ephemeral writable layer and vanish on `docker rm`. The shipped
+compose files therefore put it on a dedicated named volume and point `OBS_DB_PATH`
+at it (engine only — the worker does not write observability):
+
+```yaml
+services:
+  engine:
+    environment:
+      OBS_DB_PATH: /var/lib/appitools/obs/obs.db
+    volumes:
+      - obs_data:/var/lib/appitools/obs   # history survives the container
+volumes:
+  obs_data:
+```
+
+The image pre-creates `/var/lib/appitools/obs` owned by the runtime user, so the
+named volume inherits that ownership on first init — the same pattern as
+`files_data`.
+
+**Native (systemd).** The Level-3 unit above adds `StateDirectory=appitools`, which
+makes systemd create `/var/lib/appitools` (owned by the service user) before start
+— covering both the observability store and the file store. To put the history on a
+different disk, set `OBS_DB_PATH=/your/persistent/path/obs.db` in
+`/etc/appitools/engine.env`.
+
+Retention is automatic (a 7-day window plus a 50 000-row cap on slow traces), so
+the file stays bounded (tens of MB in normal operation).
 
 ---
 

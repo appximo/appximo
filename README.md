@@ -219,7 +219,8 @@ It serves our own production workload today.
 | `APPITOOLS_OAUTH_{GOOGLE,GITHUB,MICROSOFT}_CLIENT_ID` / `…_CLIENT_SECRET` | env | no | enable social login per provider (unset = provider not offered) |
 | `APPITOOLS_OAUTH_CALLBACK_URL` / `APPITOOLS_OAUTH_DEFAULT_ROLE` | env | no | fixed OAuth redirect origin; role for auto-created social users (falls back to signup role) |
 | `APPITOOLS_MFA_KEY` / `APPITOOLS_MFA_ISSUER` | env | no | TOTP-secret encryption key (falls back to `JWT_SECRET`); authenticator-app issuer label |
-| `DB_MAX_CONNS`, `GOMAXPROCS`, `OBS_DB_PATH`, `SLACK_WEBHOOK_URL`, `REDIS_URL` | env | no | see [docs/DEPLOY.md](docs/DEPLOY.md) |
+| `OBS_DB_PATH` | env | no | observability SQLite path; default `/var/lib/appitools/obs.db` (persistent — survives restarts). See [docs/DEPLOY.md](docs/DEPLOY.md#observability-store-obs_db_path) |
+| `DB_MAX_CONNS`, `GOMAXPROCS`, `SLACK_WEBHOOK_URL`, `REDIS_URL` | env | no | see [docs/DEPLOY.md](docs/DEPLOY.md) |
 | `--schema` | flag | **yes** | path to the JSON schema |
 | `--port` | flag | no | data-plane port (default 8080) |
 

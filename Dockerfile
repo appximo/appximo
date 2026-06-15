@@ -54,14 +54,15 @@ COPY deploy/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # pass a different --schema) for your project.
 COPY --from=builder /app/examples/quickstart/schema.json /etc/appitools/schema.json
 
-# Content-addressable file store root (FILES-V1), owned by the runtime user so
-# both the engine (VFS.Put) and the worker (VFS.Get) can write/read it. Creating
-# it here means a named volume mounted at this path inherits the appitools
-# ownership on first init (Docker seeds an empty named volume from the image dir),
-# so the non-root user can write without a chown sidecar. APPITOOLS_FILES_DIR
-# defaults to exactly this path; mount the SAME volume on engine + worker so they
-# share one CAS.
-RUN mkdir -p /var/lib/appitools/files && chown -R appitools:appitools /var/lib/appitools
+# Runtime state roots under /var/lib/appitools, owned by the runtime user:
+#   * files/  — content-addressable file store (FILES-V1): engine VFS.Put +
+#               worker VFS.Get. Mount the SAME volume on engine + worker (one CAS).
+#   * obs/    — observability SQLite store (OBS_DB_PATH): trace + snapshot history.
+#               Engine only; persist it so the history survives a container restart.
+# Creating these here means a named volume mounted at either path inherits the
+# appitools ownership on first init (Docker seeds an empty named volume from the
+# image dir), so the non-root user can write without a chown sidecar.
+RUN mkdir -p /var/lib/appitools/files /var/lib/appitools/obs && chown -R appitools:appitools /var/lib/appitools
 
 USER appitools
 

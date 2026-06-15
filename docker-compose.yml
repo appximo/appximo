@@ -27,11 +27,16 @@ services:
       # Content-addressable file store (FILES-V1). Shared with the worker via the
       # files_data volume so the worker's VFS.Get sees what the engine's VFS.Put wrote.
       APPITOOLS_FILES_DIR: /var/lib/appitools/files
+      # Observability store (trace + snapshot history). Pointed at the obs_data
+      # volume below so the history SURVIVES a container restart (the default
+      # /var/lib/appitools/obs.db would otherwise sit in the ephemeral layer).
+      OBS_DB_PATH: /var/lib/appitools/obs/obs.db
     ports:
       - "8080:8080" # data plane: REST + GraphQL (public)
       - "9090:9090" # control plane: tenant/schema admin (keep private in prod)
     volumes:
       - files_data:/var/lib/appitools/files
+      - obs_data:/var/lib/appitools/obs # observability history survives restarts
     depends_on:
       db:
         condition: service_healthy
@@ -115,6 +120,7 @@ services:
 volumes:
   pgdata:
   files_data: # content-addressable file store, shared by engine + worker
+  obs_data: # observability SQLite store (OBS_DB_PATH), engine only — survives restart
 
 configs:
   # Inline copy of migrations/001_control_plane.sql so the quickstart needs only
