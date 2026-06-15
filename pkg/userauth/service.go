@@ -27,6 +27,8 @@ var (
 	ErrInvalidToken       = errors.New("userauth: invalid or expired token")
 	ErrTenantMismatch     = errors.New("userauth: token tenant mismatch")
 	ErrEmailNotVerified   = errors.New("userauth: email not verified")
+	ErrUserSuspended      = errors.New("userauth: account suspended")
+	ErrTenantSuspended    = errors.New("userauth: tenant suspended")
 )
 
 // Config configures a Service. JWTSecret and SignupRole are the levers a deployer
@@ -65,6 +67,13 @@ type Config struct {
 	// false (→ 403). Default false: AUTH-CORE's login flow is unchanged unless an
 	// app opts in to mandatory verification.
 	RequireVerified bool
+
+	// TenantActive, when set, is consulted on LOGIN to block a suspended tenant
+	// (the admin API suspends a tenant by flipping a control-plane flag; this
+	// predicate reads it). It runs ONLY on the login path — never the CRUD/JWT hot
+	// path — so a suspended tenant can mint no NEW sessions while the measured p50
+	// is untouched. nil ⇒ every tenant is active (zero overhead, current behaviour).
+	TenantActive func(ctx context.Context, tenantID string) bool
 
 	// --- AUTH-OAUTH-V1: social login ---
 	// OAuthProviders maps a provider name ("google"/"github"/"microsoft") to its
@@ -216,6 +225,12 @@ func (s *Service) Login(ctx context.Context, tenantID, email, password string) (
 	if !s.limiter.allow(tenantID, email) {
 		return AuthResult{}, ErrTooManyAttempts
 	}
+	// A suspended tenant mints no new sessions (admin-API control-plane state).
+	// Checked before the lookup — a suspended tenant is rejected regardless of
+	// credentials (tenant existence is the public subdomain, not a secret).
+	if s.cfg.TenantActive != nil && !s.cfg.TenantActive(ctx, tenantID) {
+		return AuthResult{}, ErrTenantSuspended
+	}
 	user, err := s.store.GetByEmail(ctx, tenantID, email)
 	if errors.Is(err, ErrUserNotFound) {
 		// Equalize timing: do the same argon2 work we'd do for a real user, then
@@ -229,6 +244,13 @@ func (s *Service) Login(ctx context.Context, tenantID, email, password string) (
 	ok, err := VerifyPassword(password, user.PasswordHash)
 	if err != nil || !ok {
 		return AuthResult{}, ErrInvalidCredentials
+	}
+	// Administrative lockout (managed by the admin API). Checked AFTER the password
+	// verifies, so it only ever reveals "suspended" to someone holding the correct
+	// password — never an enumeration vector. A suspended user cannot complete login
+	// (no token, and no MFA challenge is even started).
+	if user.Suspended {
+		return AuthResult{}, ErrUserSuspended
 	}
 	// Optional mandatory verification (opt-in via RequireVerified). This is checked
 	// AFTER the password verifies, so it only ever reveals "verified or not" to

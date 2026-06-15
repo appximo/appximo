@@ -157,6 +157,12 @@ baseline faster are welcome; we'll publish updated numbers.
   signed state, identity linked by stable provider id, no new dependency.
   **TOTP MFA** (opt-in, RFC 6238) — encrypted secret, one-time backup codes,
   two-step login; the secret never password-degrades the request hot path
+- **Admin API**: backend of the admin panel — a **platform super-admin** (in a
+  system schema, above all tenants, with its own login + MFA) plus a consolidated
+  `/admin/*` API to manage tenants, their users, and their observability. It
+  inherits the schema RBAC + tenant isolation (not a second permission system);
+  the `X-Admin-Key` still works for machine callers. Bootstrap with
+  `appitools admin create`
 - **Real-time**: per-resource SSE streams with RBAC applied at delivery
 - **Webhooks**: HMAC-SHA256-signed, async, retries with backoff, SSRF-guarded
 - **Extensions**: JS sandbox (Goja, watchdog-interrupted) with built-in helpers —
@@ -219,6 +225,7 @@ It serves our own production workload today.
 | `APPITOOLS_OAUTH_{GOOGLE,GITHUB,MICROSOFT}_CLIENT_ID` / `…_CLIENT_SECRET` | env | no | enable social login per provider (unset = provider not offered) |
 | `APPITOOLS_OAUTH_CALLBACK_URL` / `APPITOOLS_OAUTH_DEFAULT_ROLE` | env | no | fixed OAuth redirect origin; role for auto-created social users (falls back to signup role) |
 | `APPITOOLS_MFA_KEY` / `APPITOOLS_MFA_ISSUER` | env | no | TOTP-secret encryption key (falls back to `JWT_SECRET`); authenticator-app issuer label |
+| `APPITOOLS_PLATFORM_SUPER_ADMIN_ROLE` / `APPITOOLS_PLATFORM_MFA_ISSUER` | env | no | admin API: platform super-admin role marker (default `platform_super_admin`); platform authenticator label. Bootstrap the first super-admin with `appitools admin create` |
 | `OBS_DB_PATH` | env | no | observability SQLite path; default `/var/lib/appitools/obs.db` (persistent — survives restarts). See [docs/DEPLOY.md](docs/DEPLOY.md#observability-store-obs_db_path) |
 | `DB_MAX_CONNS`, `GOMAXPROCS`, `SLACK_WEBHOOK_URL`, `REDIS_URL` | env | no | see [docs/DEPLOY.md](docs/DEPLOY.md) |
 | `--schema` | flag | **yes** | path to the JSON schema |

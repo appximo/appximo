@@ -39,8 +39,13 @@ type User struct {
 	PasswordHash  string
 	Role          string
 	EmailVerified bool
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// Suspended, when true, blocks login (an administrative lockout managed by the
+	// admin API — pkg/platformadmin). Only GetByEmail reads it (login is the only
+	// path that enforces it); Create/GetByID leave it zero (false) as they never
+	// need it. The column is added idempotently in ensure.
+	Suspended bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Store persists per-tenant users. It uses the engine's shared pool directly and
@@ -88,11 +93,13 @@ CREATE TABLE IF NOT EXISTS %s (
     password_hash  TEXT        NOT NULL,
     role           TEXT        NOT NULL,
     email_verified BOOLEAN     NOT NULL DEFAULT false,
+    suspended      BOOLEAN     NOT NULL DEFAULT false,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE %s ADD COLUMN IF NOT EXISTS suspended BOOLEAN NOT NULL DEFAULT false;
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_%s_email_%s ON %s (lower(email));`,
-		tbl, usersTable, tenantID, tbl)
+		tbl, tbl, usersTable, tenantID, tbl)
 	if _, err := s.pool.Exec(ctx, ddl); err != nil {
 		return fmt.Errorf("userauth: ensure table: %w", err)
 	}
@@ -140,11 +147,11 @@ func (s *Store) GetByEmail(ctx context.Context, tenantID, email string) (User, e
 	if err != nil {
 		return User{}, err
 	}
-	q := fmt.Sprintf(`SELECT id::text, email, password_hash, role, email_verified, created_at, updated_at
+	q := fmt.Sprintf(`SELECT id::text, email, password_hash, role, email_verified, suspended, created_at, updated_at
 		FROM %s WHERE lower(email) = lower($1)`, tbl)
 	var u User
 	err = s.pool.QueryRow(ctx, q, email).
-		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.EmailVerified, &u.CreatedAt, &u.UpdatedAt)
+		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.EmailVerified, &u.Suspended, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return User{}, ErrUserNotFound

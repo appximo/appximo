@@ -740,6 +740,71 @@ label; default `Appitools`).
 **Auth-as-product is now complete: password (signup/login/refresh) + reset/verify +
 OAuth social login + TOTP MFA.**
 
+## Admin API — platform super-admin + management (ADMIN-API-V1)
+
+The backend of the admin panel. It is **not a second permission system** — it
+INHERITS the schema RBAC, the schema-per-tenant isolation, auth-as-product, the
+control plane, and the observability that already exist. It adds only the one
+thing that did not exist: a **platform super-admin** (above the tenants) plus a
+consolidated, authenticated `/admin/*` API. Two access levels, modelled as roles:
+
+- **Platform super-admin** — lives in a SYSTEM schema (`appitools_system.platform_admins`),
+  ABOVE every tenant. Not a tenant user. Authenticates with the SAME
+  auth-as-product (password login + TOTP MFA) but against the system schema, and
+  receives a **platform JWT** (claim `scope=platform`, signed with the same
+  `JWT_SECRET`). A platform JWT carries no tenant identity, so presented to a
+  tenant `/api/` route it is denied by RBAC (deny by default) — it can never act
+  as a tenant without explicitly selecting one through this API.
+- **Tenant admin** — just a tenant user whose schema RBAC role is broad
+  (wildcard `resources`/`actions`). Nothing new; the isolation + RBAC already
+  govern it.
+
+The legacy `X-Admin-Key` still works for **machine-to-machine** callers (DevHub,
+scripts) on the management routes — humans log in (auditable identity + MFA),
+machines present the key. Two paths for two consumers; the key is NOT removed.
+
+**Bootstrap the first super-admin** (no public super-admin signup — a super-admin
+cannot be created by a super-admin that does not yet exist):
+
+```bash
+DATABASE_URL=… JWT_SECRET=… \
+  appitools admin create --email me@example.com --password 'a-strong-passphrase'
+```
+
+**Routes** (all under `/admin/*` on the data plane; they do their OWN auth and are
+off the CRUD/JWT hot path — measured `no_change`):
+
+- Super-admin auth: `POST /admin/auth/login` (→ `{admin, token}`, or
+  `{mfa_required, mfa_token}` when MFA is on), `POST /admin/auth/refresh`,
+  `POST /admin/auth/mfa/{enable,confirm,verify,disable}` (TOTP, mirrors the tenant
+  MFA; `enable/confirm/disable` need the platform token, `verify` completes the
+  login challenge). The admin key is NOT accepted on `/admin/auth/*`.
+- Tenants (platform token OR admin key): `GET /admin/tenants`,
+  `POST /admin/tenants` (wraps the control plane — same schema validation),
+  `GET /admin/tenants/{id}`, `POST /admin/tenants/{id}/suspend` /`/activate`,
+  `DELETE /admin/tenants/{id}` (**destructive** — requires
+  `{"confirm":"<tenant_id>"}` in the body; drops the tenant schema CASCADE).
+- Tenant users (platform token OR admin key): `GET /admin/tenants/{id}/users`,
+  `POST` (create with an admin-chosen role, validated against the RBAC),
+  `PATCH /admin/tenants/{id}/users/{uid}` (`role` and/or `suspended`),
+  `DELETE …/users/{uid}`. Data CRUD is NOT duplicated — the panel consumes the
+  existing generated `/api/*` per tenant.
+- Observability (consolidated, correct authz): `GET /admin/observability/tenants/{id}`
+  serves the SAME data as `/debug/tenant/{id}` — a platform super-admin sees ANY
+  tenant, a tenant admin (valid tenant JWT, matching tenant, admin-grade role)
+  sees ONLY its own; everyone else 403. The store already filters by `tenant_id`,
+  so no cross-tenant leak.
+
+**Tenant suspension** flips a control-plane flag and blocks NEW logins for that
+tenant's users (enforced on the non-hot login path); already-issued JWTs live to
+their `exp` (the documented stateless-JWT trade-off). It adds **no per-request
+check to the CRUD/JWT hot path** — the p50 is preserved.
+
+**Config:** `APPITOOLS_PLATFORM_SUPER_ADMIN_ROLE` (platform role marker; default
+`platform_super_admin`), `APPITOOLS_PLATFORM_MFA_ISSUER` (authenticator label;
+default `Appitools Platform`). The platform MFA secret is encrypted at rest with
+`APPITOOLS_MFA_KEY` (falls back to `JWT_SECRET`), same as tenant MFA.
+
 ## Does not exist — do not invent
 
 - Field type `number` → schema rejected; use `int`, `int64` or

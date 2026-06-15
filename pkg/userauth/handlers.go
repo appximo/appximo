@@ -486,6 +486,10 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrInvalidCredentials):
 			// Identical message + status for unknown-email and wrong-password.
 			writeAuthErr(w, http.StatusUnauthorized, "invalid credentials")
+		case errors.Is(err, ErrUserSuspended):
+			writeAuthErr(w, http.StatusForbidden, "account suspended")
+		case errors.Is(err, ErrTenantSuspended):
+			writeAuthErr(w, http.StatusForbidden, "tenant suspended")
 		default:
 			writeAuthErr(w, http.StatusInternalServerError, "login failed")
 		}

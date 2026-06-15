@@ -11,12 +11,12 @@ import (
 
 // ObsServer exposes internal observability data over HTTP.
 type ObsServer struct {
-	hist       *TenantHistogram
-	errors     *ErrorStore
-	anomaly    *AnomalyDetector
-	synthmon   *SyntheticMonitor
-	rings      *Rings
-	slo        *SLOEngine
+	hist          *TenantHistogram
+	errors        *ErrorStore
+	anomaly       *AnomalyDetector
+	synthmon      *SyntheticMonitor
+	rings         *Rings
+	slo           *SLOEngine
 	store         *ObsStore
 	tracesHandler http.Handler // serves /debug/traces; performs its own auth
 	geo           *GeoLookup   // country lookup for enriching recent_traces
@@ -91,6 +91,18 @@ func (s *ObsServer) Router(adminKey string) *chi.Mux {
 	r := chi.NewRouter()
 	r.Mount("/debug", s.DebugRouter(adminKey))
 	return r
+}
+
+// ServeTenantData serves the per-tenant observability JSON (the same payload as
+// the admin-gated GET /debug/tenant/{id}), reading the tenant id from the chi
+// "id" URL param. It performs NO authorization itself — the caller (e.g. the admin
+// API in pkg/platformadmin) is responsible for authorizing the request first
+// (platform super-admin → any tenant; tenant admin → its own). This exists so the
+// observability logic is REUSED with a different authorization gate, never
+// duplicated. The data is already tenant-scoped (filtered by tenant_id), so no
+// cross-tenant data can leak through it (R5 of the persistence audit).
+func (s *ObsServer) ServeTenantData(w http.ResponseWriter, r *http.Request) {
+	s.handleTenant(w, r)
 }
 
 func (s *ObsServer) handleTenant(w http.ResponseWriter, r *http.Request) {

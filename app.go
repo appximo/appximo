@@ -38,6 +38,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/observability"
 	"github.com/miguelangel/appitools/pkg/outbox"
+	"github.com/miguelangel/appitools/pkg/platformadmin"
 	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/resilience"
 	"github.com/miguelangel/appitools/pkg/schema"
@@ -91,6 +92,8 @@ type App struct {
 	filesMaxBytes int64     // per-upload body cap
 
 	authSvc *userauth.Service // password identity core (AUTH-CORE-V1)
+
+	platformAdmin *platformadmin.Service // admin API backend (ADMIN-API-V1)
 
 	routes  []Route
 	started bool
@@ -387,13 +390,47 @@ func New(cfg Config) (*App, error) {
 		mfaIssuer = os.Getenv("APPITOOLS_MFA_ISSUER")
 	}
 
-	app.authSvc = userauth.NewService(userauth.NewStore(pool), userauth.Config{
+	// One shared per-tenant identity store, used by BOTH the password identity core
+	// and the admin API's user-management (so the lazy DDL cache is shared).
+	authStore := userauth.NewStore(pool)
+
+	// Admin API backend (ADMIN-API-V1): the platform super-admin (in the system
+	// schema, ABOVE the tenants) plus the consolidated tenant/user/observability
+	// admin API. It WRAPS the existing control plane and REUSES the existing
+	// per-tenant identity + RBAC — it is not a second permission system. Built
+	// before authSvc so the login flow can consult its tenant-suspension predicate.
+	platformSuperAdminRole := os.Getenv("APPITOOLS_PLATFORM_SUPER_ADMIN_ROLE")
+	platformMFAIssuer := os.Getenv("APPITOOLS_PLATFORM_MFA_ISSUER")
+	// obsSentinel is a resource name no schema can declare (resource names match
+	// ^[a-z][a-z0-9-]*$, no dots) — Allows(role, obsSentinel, "read") is true only
+	// for a wildcard-resource admin role, the "admin-grade" test for tenant-scoped
+	// observability access. This INHERITS the RBAC, it does not invent a new check.
+	const obsSentinel = "__platform.observability__"
+	app.platformAdmin = platformadmin.NewService(
+		platformadmin.NewStore(pool), authStore, app.cpSvc, pool,
+		platformadmin.Config{
+			JWTSecret:      cfg.JWTSecret,
+			MFAKey:         mfaKey,
+			MFAIssuer:      platformMFAIssuer,
+			SuperAdminRole: platformSuperAdminRole,
+			RoleExists: func(role string) bool {
+				_, ok := rbacPolicy.Roles[role]
+				return ok
+			},
+			TenantAdminRole: func(role string) bool {
+				return rbacPolicy.Allows(role, obsSentinel, "read")
+			},
+		})
+	log.Println("admin API: platform super-admin + tenant/user/observability management enabled at /admin/*")
+
+	app.authSvc = userauth.NewService(authStore, userauth.Config{
 		JWTSecret:            cfg.JWTSecret,
 		SignupRole:           signupRole,
 		MinPasswordLength:    minPw,
 		EmailTopic:           emailTopic,
 		BaseURL:              baseURL,
 		RequireVerified:      requireVerified,
+		TenantActive:         app.platformAdmin.IsTenantActive,
 		OAuthProviders:       oauthProviders,
 		OAuthCallbackURL:     oauthCallbackURL,
 		OAuthDefaultRole:     oauthDefaultRole,
@@ -648,6 +685,15 @@ func (a *App) buildRouter() *chi.Mux {
 	r.Method(http.MethodPost, "/admin/backup", observability.AdminAuth(adminKey, backupHandler(a.pool)))
 	r.Method(http.MethodPost, "/admin/tenants/{id}/reload",
 		observability.AdminAuth(adminKey, reloadHandler(a.cpSvc, a.responseCache, a.schemaCache, a.schema)))
+
+	// Admin API (ADMIN-API-V1): platform super-admin auth + tenant/user/
+	// observability management. Routes live under /admin/* (JWT-skipped,
+	// RBAC-passthrough — they do their OWN auth) and are registered individually so
+	// they coexist with the machine endpoints above (no Mount collision). They are
+	// NEW routes off the CRUD/JWT hot path — the gate measures no_change.
+	if a.platformAdmin != nil {
+		a.platformAdmin.Register(r, a.obsServer, adminKey)
+	}
 
 	r.Get("/healthz", a.ss.HealthzHandler)
 	r.Get("/readyz", a.ss.ReadyzHandler)
