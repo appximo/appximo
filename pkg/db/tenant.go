@@ -463,6 +463,25 @@ func (tdb *TenantDB) QueryScalarTenant(ctx context.Context, schemaName, query st
 	return n, rows.Err()
 }
 
+// QueryScalarDirect runs a single-int64 query (e.g. COUNT(*)) against the
+// schema-qualified table, mirroring QueryDirect (no transaction, no SET LOCAL) —
+// used by the REST list's opt-in ?count=true total, which shares the list's
+// QueryDirect path.
+func (tdb *TenantDB) QueryScalarDirect(ctx context.Context, pgSchema, tableName, query string, args ...any) (int64, error) {
+	rows, err := tdb.QueryDirect(ctx, pgSchema, tableName, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var n int64
+	if rows.Next() {
+		if err := rows.Scan(&n); err != nil {
+			return 0, fmt.Errorf("scan scalar: %w", err)
+		}
+	}
+	return n, rows.Err()
+}
+
 // IncludeListJSON runs a RELATIONS-V1 list-with-embeds query (built by
 // query.BuildListInclude) inside the tenant search_path and scans its single row
 // of (data text, n bigint): data is the JSON array of nested rows (the engine

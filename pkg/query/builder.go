@@ -300,6 +300,21 @@ func (qb *QueryBuilder) buildWhere() (clause string, args []any) {
 		idx++
 	}
 
+	parts, args, _ = qb.appendConditions(parts, args, idx)
+
+	if len(parts) == 0 {
+		return "", args
+	}
+	return " WHERE " + strings.Join(parts, " AND "), args
+}
+
+// appendConditions emits the RBAC row condition, the filters, and the search
+// predicate into parts/args starting at parameter index idx, returning the
+// updated parts, args, and next index. It is the shared core of both the list
+// WHERE (called after the cursor clause — buildWhere) and the aggregate WHERE
+// (called with no cursor — aggregateWhere), so both apply the SAME RBAC scope and
+// filters. The list SQL is byte-identical to before this extraction.
+func (qb *QueryBuilder) appendConditions(parts []string, args []any, idx int) ([]string, []any, int) {
 	if qb.condition != nil {
 		parts = append(parts, fmt.Sprintf("%s = $%d", qb.condition.Field, idx))
 		args = append(args, qb.condition.Value)
@@ -343,8 +358,17 @@ func (qb *QueryBuilder) buildWhere() (clause string, args []any) {
 		}
 	}
 
+	return parts, args, idx
+}
+
+// aggregateWhere builds the SAME condition+filter+search WHERE as the list path
+// (buildWhere) but WITHOUT the cursor clause or pagination — an aggregate covers
+// the whole filtered, RBAC-scoped set, not a page.
+func (qb *QueryBuilder) aggregateWhere() (clause string, args []any) {
+	var parts []string
+	parts, args, _ = qb.appendConditions(parts, nil, 1)
 	if len(parts) == 0 {
-		return "", args
+		return "", nil
 	}
 	return " WHERE " + strings.Join(parts, " AND "), args
 }

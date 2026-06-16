@@ -3,6 +3,7 @@ package codegen
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -89,6 +90,46 @@ func writeIncludeList(w http.ResponseWriter, data []byte, page, perPage, n int) 
 // TTL. May be nil (e.g. in tests or when no cache is wired).
 type CacheInvalidator interface {
 	Invalidate(tenantID string)
+}
+
+// aggregateResponse shapes aggregate rows (alias→value maps from RowsToMaps) into
+// the response body (G3). Without group_by: a single object carrying only the
+// requested functions — {count, sum:{field:v}, avg:{…}, min:{…}, max:{…}}. With
+// group_by: {"groups": [{<group fields>, count, sum:{…}, …}, …]}.
+func aggregateResponse(aq *query.AggregateQuery, recs []map[string]any) map[string]any {
+	metrics := func(rec map[string]any) map[string]any {
+		out := map[string]any{}
+		if aq.HasCount() {
+			out["count"] = rec[query.CountAlias]
+		}
+		for _, m := range aq.Metrics() {
+			sub, _ := out[m.Fn].(map[string]any)
+			if sub == nil {
+				sub = map[string]any{}
+				out[m.Fn] = sub
+			}
+			sub[m.Field] = rec[m.Alias]
+		}
+		return out
+	}
+
+	if len(aq.GroupBy()) == 0 {
+		rec := map[string]any{}
+		if len(recs) > 0 {
+			rec = recs[0]
+		}
+		return metrics(rec)
+	}
+
+	groups := make([]map[string]any, 0, len(recs))
+	for _, rec := range recs {
+		g := metrics(rec)
+		for _, gb := range aq.GroupBy() {
+			g[gb] = rec[gb]
+		}
+		groups = append(groups, g)
+	}
+	return map[string]any{"groups": groups}
 }
 
 // writeJSONErr writes {"error": msg} with the given status and JSON content type.
@@ -286,16 +327,84 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			hasNext := len(data) == qb.PerPage()
 			hasPrev := qb.Page() > 1
 
+			meta := map[string]any{
+				"page":     qb.Page(),
+				"per_page": qb.PerPage(),
+				"has_next": hasNext,
+				"has_prev": hasPrev,
+			}
+			// Opt-in total (G3): ?count=true runs a COUNT(*) over the SAME filtered,
+			// RBAC-scoped set and adds total + total_pages. Off by default, so the
+			// plain list path is byte-identical (and free of the extra COUNT) — the
+			// no-regression gate. Closes the REST↔GraphQL asymmetry (GraphQL already
+			// returns total).
+			if _, want := req.URL.Query()["count"]; want {
+				_, countQ, _, countArgs := qb.SQL()
+				if total, cerr := tdb.QueryScalarDirect(req.Context(), tc.PGSchema, name, countQ, countArgs...); cerr == nil {
+					per := int64(qb.PerPage())
+					tp := (total + per - 1) / per
+					if tp == 0 {
+						tp = 1
+					}
+					meta["total"] = total
+					meta["total_pages"] = tp
+				}
+			}
+
 			w.Header().Set("Content-Type", "application/json")
 			pkghandlers.WriteJSON(w, map[string]any{ //nolint:errcheck
 				"data": data,
-				"meta": map[string]any{
-					"page":     qb.Page(),
-					"per_page": qb.PerPage(),
-					"has_next": hasNext,
-					"has_prev": hasPrev,
-				},
+				"meta": meta,
 			})
+			markSpan(req, "serialize")
+		}))
+
+		// --- Aggregate (G3) ---
+		// GET /api/{resource}/aggregate?count&sum=f&avg=f&min=f&max=f&group_by=f&filter[...]
+		// A NEW read path (the list/CRUD SQL is untouched). Scoped EXACTLY like a
+		// list read: the same RBAC row condition is injected into the WHERE, the
+		// same field allowlist applies (a field the role may not read cannot be
+		// aggregated → 403, no leak via aggregates), the same filters, the same
+		// tenant. Functions come from a fixed allowlist; field/group_by names are
+		// validated against the schema (no arbitrary SQL).
+		r.Get("/api/"+name+"/aggregate", pkghandlers.CachedGet(func(w http.ResponseWriter, req *http.Request) {
+			tc := tenant.MustFromCtx(req.Context())
+			evalResult := rbac.EvalResultFromCtx(req.Context())
+
+			var cond *rbac.WhereCondition
+			var allowedFields []string
+			if evalResult != nil {
+				cond = evalResult.Condition
+				allowedFields = evalResult.AllowedFields
+			}
+
+			aq, err := query.BuildAggregate(name, &res, req.URL.Query(), cond, allowedFields)
+			if err != nil {
+				if errors.Is(err, query.ErrAggForbiddenField) {
+					writeJSONErr(w, http.StatusForbidden, err.Error())
+					return
+				}
+				writeJSONErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+
+			aggSQL, aggArgs := aq.SQL()
+			rows, err := tdb.QueryDirect(req.Context(), tc.PGSchema, name, aggSQL, aggArgs...)
+			if err != nil {
+				markSpan(req, "query")
+				writeDBErr(w, req, err)
+				return
+			}
+			defer rows.Close()
+			recs, err := pkghandlers.RowsToMaps(rows)
+			if err != nil {
+				writeDBErr(w, req, err)
+				return
+			}
+			markSpan(req, "query")
+
+			w.Header().Set("Content-Type", "application/json")
+			pkghandlers.WriteJSON(w, aggregateResponse(aq, recs)) //nolint:errcheck
 			markSpan(req, "serialize")
 		}))
 

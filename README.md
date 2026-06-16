@@ -134,6 +134,11 @@ baseline faster are welcome; we'll publish updated numbers.
   (`eq` everywhere; `partial`/`start` on strings; `gt/gte/lt/lte` on numbers and
   time; `after`/`before` on time), single-field sort (`?sort=created_at&order=desc`),
   keyset pagination (`?after=<uuid>`, no OFFSET)
+- **Aggregation**: `count`/`sum`/`avg`/`min`/`max` + `group_by` per resource
+  (`GET /api/{resource}/aggregate` and `<resource>Aggregate` in GraphQL), plus
+  opt-in `?count=true` total on lists — all scoped by the SAME RBAC row condition,
+  field allowlist and filters as a read (a row-scoped role aggregates only its own
+  rows; a hidden field can't be summed)
 - **Declarative validation**: required/enum/type rules compiled from the schema;
   one `422` lists every failing field; field `default` values applied on insert
   (literals + `"now"` for time); a `unique`/composite-unique collision is a clean

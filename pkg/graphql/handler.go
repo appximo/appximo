@@ -3,6 +3,7 @@ package graphql
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	gql "github.com/graphql-go/graphql"
@@ -356,6 +358,42 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 		},
 	})
 
+	// Aggregation result types (G3) — shared across resources. An aggregate value
+	// is typed String so ONE shape carries every result (ints, floats, and
+	// timestamps for min/max on a time field) without a custom scalar; the client
+	// parses by the known field type. `count` is null unless count was requested.
+	aggValue := gql.NewObject(gql.ObjectConfig{
+		Name: "AggValue",
+		Fields: gql.Fields{
+			"fn":    &gql.Field{Type: gql.NewNonNull(gql.String)},
+			"field": &gql.Field{Type: gql.NewNonNull(gql.String)},
+			"value": &gql.Field{Type: gql.String},
+		},
+	})
+	aggGroupKey := gql.NewObject(gql.ObjectConfig{
+		Name: "AggGroupKey",
+		Fields: gql.Fields{
+			"field": &gql.Field{Type: gql.NewNonNull(gql.String)},
+			"value": &gql.Field{Type: gql.String},
+		},
+	})
+	aggGroup := gql.NewObject(gql.ObjectConfig{
+		Name: "AggGroup",
+		Fields: gql.Fields{
+			"key":    &gql.Field{Type: gql.NewNonNull(gql.NewList(gql.NewNonNull(aggGroupKey)))},
+			"count":  &gql.Field{Type: gql.Int},
+			"values": &gql.Field{Type: gql.NewNonNull(gql.NewList(gql.NewNonNull(aggValue)))},
+		},
+	})
+	aggregateResult := gql.NewObject(gql.ObjectConfig{
+		Name: "AggregateResult",
+		Fields: gql.Fields{
+			"count":  &gql.Field{Type: gql.Int},
+			"values": &gql.Field{Type: gql.NewNonNull(gql.NewList(gql.NewNonNull(aggValue)))},
+			"groups": &gql.Field{Type: gql.NewNonNull(gql.NewList(gql.NewNonNull(aggGroup)))},
+		},
+	})
+
 	names := sortedNames(s)
 
 	// Build per-resource types.
@@ -520,6 +558,25 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 			},
 			Resolve: getByIDResolver(name, tdb, policy, s),
 		}
+		// Aggregate (G3): <resource>Aggregate(filter, count, sum/avg/min/max, group_by).
+		// Same RBAC scope (row condition + field allowlist) and filters as the list,
+		// reusing query.BuildAggregate via the SAME args→url.Values translation.
+		aggArgs := gql.FieldConfigArgument{
+			"count":    &gql.ArgumentConfig{Type: gql.Boolean},
+			"sum":      &gql.ArgumentConfig{Type: gql.NewList(gql.NewNonNull(gql.String))},
+			"avg":      &gql.ArgumentConfig{Type: gql.NewList(gql.NewNonNull(gql.String))},
+			"min":      &gql.ArgumentConfig{Type: gql.NewList(gql.NewNonNull(gql.String))},
+			"max":      &gql.ArgumentConfig{Type: gql.NewList(gql.NewNonNull(gql.String))},
+			"group_by": &gql.ArgumentConfig{Type: gql.NewList(gql.NewNonNull(gql.String))},
+		}
+		if ft := filterTypes[name]; ft != nil {
+			aggArgs["filter"] = &gql.ArgumentConfig{Type: ft}
+		}
+		queryFields[name+"Aggregate"] = &gql.Field{
+			Type:    gql.NewNonNull(aggregateResult),
+			Args:    aggArgs,
+			Resolve: aggregateResolver(name, &resCopy, tdb, policy),
+		}
 		_ = title // title used for type names above; suppress unused warning
 	}
 
@@ -578,6 +635,139 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 }
 
 // ── resolvers ─────────────────────────────────────────────────────────────────
+
+// aggregateResolver serves <resource>Aggregate (G3): count/sum/avg/min/max +
+// group_by, scoped EXACTLY like the list read — the RBAC row condition is in the
+// WHERE and the field allowlist forbids aggregating a hidden field (→ error, no
+// leak via aggregates). Reuses query.BuildAggregate by translating the GraphQL
+// args into url.Values the same way the list resolver does.
+func aggregateResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, policy *rbac.Policy) gql.FieldResolveFn {
+	return func(p gql.ResolveParams) (any, error) {
+		tc := tenant.MustFromCtx(p.Context)
+		evalResult, err := checkRBAC(p.Context, policy, name, "read")
+		if err != nil {
+			return nil, err
+		}
+		var cond *rbac.WhereCondition
+		var allowed []string
+		if evalResult != nil {
+			cond = evalResult.Condition
+			allowed = evalResult.AllowedFields
+		}
+
+		params := argsToURLValues(p.Args) // filter (the agg args below are ignored here)
+		if b, _ := p.Args["count"].(bool); b {
+			params.Set("count", "true")
+		}
+		for _, fn := range []string{"sum", "avg", "min", "max"} {
+			if fs := stringList(p.Args[fn]); len(fs) > 0 {
+				params.Set(fn, strings.Join(fs, ","))
+			}
+		}
+		if fs := stringList(p.Args["group_by"]); len(fs) > 0 {
+			params.Set("group_by", strings.Join(fs, ","))
+		}
+
+		aq, err := query.BuildAggregate(name, res, params, cond, allowed)
+		if err != nil {
+			if errors.Is(err, query.ErrAggForbiddenField) {
+				return nil, fmt.Errorf("forbidden: %s", err.Error())
+			}
+			return nil, err
+		}
+
+		sql, args := aq.SQL()
+		rows, err := tdb.QueryTenant(p.Context, tc.PGSchema, sql, args...)
+		if err != nil {
+			return nil, safeDBErr(err)
+		}
+		defer rows.Close()
+		recs, err := pkghandlers.RowsToMaps(rows)
+		if err != nil {
+			return nil, safeDBErr(err)
+		}
+		return shapeGQLAggregate(aq, recs), nil
+	}
+}
+
+// stringList coerces a GraphQL [String!] arg ([]any of strings) to []string.
+func stringList(v any) []string {
+	lst, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(lst))
+	for _, e := range lst {
+		if s, ok := e.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// aggValueString renders an aggregate cell as a String (numbers stringified,
+// timestamps as RFC3339) so the single AggValue.value shape carries any type.
+func aggValueString(v any) any {
+	switch t := v.(type) {
+	case nil:
+		return nil
+	case time.Time:
+		return t.Format(time.RFC3339Nano)
+	case []byte:
+		return string(t)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// aggCountInt coerces a COUNT(*) cell (int64 from pgx) to int for gql.Int.
+func aggCountInt(v any) any {
+	switch n := v.(type) {
+	case int64:
+		return int(n)
+	case int:
+		return n
+	case float64:
+		return int(n)
+	default:
+		return nil
+	}
+}
+
+// shapeGQLAggregate maps aggregate rows to the AggregateResult shape.
+func shapeGQLAggregate(aq *query.AggregateQuery, recs []map[string]any) map[string]any {
+	valuesOf := func(rec map[string]any) []map[string]any {
+		vals := make([]map[string]any, 0, len(aq.Metrics()))
+		for _, m := range aq.Metrics() {
+			vals = append(vals, map[string]any{"fn": m.Fn, "field": m.Field, "value": aggValueString(rec[m.Alias])})
+		}
+		return vals
+	}
+	countOf := func(rec map[string]any) any {
+		if aq.HasCount() {
+			return aggCountInt(rec[query.CountAlias])
+		}
+		return nil
+	}
+
+	if len(aq.GroupBy()) == 0 {
+		rec := map[string]any{}
+		if len(recs) > 0 {
+			rec = recs[0]
+		}
+		return map[string]any{"count": countOf(rec), "values": valuesOf(rec), "groups": []any{}}
+	}
+
+	groups := make([]map[string]any, 0, len(recs))
+	for _, rec := range recs {
+		key := make([]map[string]any, 0, len(aq.GroupBy()))
+		for _, gb := range aq.GroupBy() {
+			key = append(key, map[string]any{"field": gb, "value": aggValueString(rec[gb])})
+		}
+		groups = append(groups, map[string]any{"key": key, "count": countOf(rec), "values": valuesOf(rec)})
+	}
+	return map[string]any{"count": nil, "values": []any{}, "groups": groups}
+}
 
 func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, policy *rbac.Policy, s *schema.APISchema) gql.FieldResolveFn {
 	return func(p gql.ResolveParams) (any, error) {

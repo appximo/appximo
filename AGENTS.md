@@ -524,7 +524,52 @@ subroutes.
 - **Pagination**: keyset — `?after=<uuid>` / `?before=<uuid>` with
   `?per_page=` (default 20, max 100). `?page=` exists but is
   OFFSET-based; prefer keyset.
+- **Total count (opt-in)**: `?count=true` on a list adds `meta.total` +
+  `meta.total_pages` (a `COUNT(*)` over the SAME filtered + RBAC-scoped set).
+  **Off by default** — the plain list pays nothing and is byte-identical; turn it
+  on only when you need the total (closes the old REST↔GraphQL asymmetry: GraphQL
+  always returned `total`).
 - Responses are `{"data": [...], "meta": {...}}`.
+
+## Aggregation (G3)
+
+`GET /api/{resource}/aggregate` runs `count` / `sum` / `avg` / `min` / `max` and
+`group_by` over a resource. It is a **separate read path** (the list/CRUD SQL is
+untouched) and is scoped **exactly like a list read of that resource**: the role's
+row condition is injected into the `WHERE`, the same `filter[…]` apply, and the
+tenant `search_path` is enforced — so a row-scoped role aggregates **only its own
+rows** (no totals leak across principals), and a field outside the role's
+allowlist **cannot be aggregated** (→ `403`, no leak via aggregates).
+
+```
+GET /api/orders/aggregate?count&sum=total,tax&avg=total&min=created&max=created&group_by=status&filter[status][eq]=paid
+```
+
+- **Functions** (a fixed allowlist — never arbitrary SQL): `count` (presence
+  flag → `COUNT(*)`); `sum` / `avg` (numeric fields only); `min` / `max` (numeric
+  **or** `time`). Each of `sum`/`avg`/`min`/`max` takes a comma-separated field
+  list. `group_by` is a comma-separated field list (anything but `json`).
+- Field and `group_by` names are validated against the schema; an unknown field,
+  a function applied to an incompatible type, or no function requested → `400`.
+- **Response — without `group_by`** (one overall object, only the requested keys):
+  `{"count":17,"sum":{"total":4210.5},"avg":{"total":247.6},"min":{"created":"…"},"max":{"created":"…"}}`
+- **Response — with `group_by`** (`groups`, each carrying its group fields + the
+  aggregates): `{"groups":[{"status":"paid","count":12,"sum":{"total":3900}}, …]}`
+
+**GraphQL:** the same surface is `<resource>Aggregate(filter, count, sum, avg,
+min, max, group_by)` returning `AggregateResult`:
+
+```graphql
+{ ordersAggregate(count:true, sum:["total"], group_by:["status"]) {
+    count                       # overall count (null when group_by is used)
+    values { fn field value }   # overall sum/avg/min/max (value is a String)
+    groups { key { field value } count values { fn field value } }
+} }
+```
+
+Aggregate `value`s are **Strings** in GraphQL (one shape carries integers, floats
+and timestamps without a custom scalar — parse by the field's known type). The
+RBAC scope + field allowlist + filters apply identically to the REST endpoint.
 
 ## GraphQL
 
@@ -971,7 +1016,11 @@ is a JSON snapshot, not a stream).
   `before_delete`/`after_delete`).
 - Filter ops `neq`, `in`, `like`, `is_null` → 400.
 - Multi-field sort or `sort=field:desc` → silently ignored.
-- Total-count in list responses (`count=true` is not a thing).
+- Aggregation BEYOND `count`/`sum`/`avg`/`min`/`max` + `group_by` (e.g. `HAVING`,
+  `DISTINCT`, expression aggregates, window functions) — the
+  [Aggregation](#aggregation-g3) surface is exactly those functions over schema
+  fields, nothing more. (`count` total IS now a thing: `?count=true` on a list, or
+  the aggregate endpoint.)
 - FK **constraints** / cascades. (Declarative relations DO exist — nested
   `?include=` embeds via `json_agg`+LATERAL, see
   [Declarative relations](#declarative-relations--nested-embeds-relations-adr-019)

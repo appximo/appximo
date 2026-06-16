@@ -111,9 +111,20 @@ clean modeling in **~5/6** (ecommerce, social, saas, chat; booking only survives
 because every owned resource happens to share the column). Per-resource
 conditions would be the biggest single unlock.
 
-### 🟠 G3 — No aggregation anywhere; REST has no total count (GraphQL does)
+### ✅ G3 — No aggregation anywhere; REST has no total count — **RESOLVED (FIX-G3)**
 
-No `count` / `sum` / `avg` / `min` / `max` / `group-by` in the API. The REST
+> **Resolved.** `count`/`sum`/`avg`/`min`/`max` + `group_by` are now served per
+> resource — `GET /api/{resource}/aggregate` and `<resource>Aggregate` in GraphQL
+> — plus opt-in `?count=true` on lists (adds `meta.total`/`total_pages`, closing
+> the REST↔GraphQL asymmetry). Every aggregate is scoped by the SAME RBAC row
+> condition + field allowlist + filters as a read: a row-scoped role aggregates
+> only its own rows (no totals leak across principals) and a field outside the
+> role's allowlist cannot be aggregated (`403`). Functions come from a fixed
+> allowlist over schema fields (no arbitrary SQL). This unblocks balances (SUM),
+> counts, dashboards and facets in all six archetypes. The original finding is
+> preserved below.
+
+No `count` / `sum` / `avg` / `min` / `max` / `group-by` **used to exist** in the API. The REST
 list `meta` is `{page, per_page, has_next, has_prev}` — **no total** (verified;
 dropped "for performance"). This blocks, in **6/6** archetypes: account balances
 (fintech, a SUM of ledger entries), like/comment counts (social), category
@@ -352,9 +363,9 @@ Ordered to unlock the most modern apps per unit of engine work:
 2. ~~**G6 — Map `unique_violation` → `409`**~~ ✅ **DONE (FIX-G1-G6).** The create
    path (REST + GraphQL) now returns a clean `409` on a unique collision, matching
    the update path.
-3. **G3 — An aggregation surface** *(medium).* Start by exposing the count REST
-   already has internally (GraphQL exposes it), then a `sum`/`group-by` for one
-   column. Unblocks counts/balances/dashboards in **6/6**.
+3. ~~**G3 — An aggregation surface**~~ ✅ **DONE (FIX-G3).** `count`/`sum`/`avg`/
+   `min`/`max` + `group_by` on REST + GraphQL, RBAC-scoped and filter-aware, plus
+   opt-in list `?count=true`. Unblocks counts/balances/dashboards in **6/6**.
 4. **G2 — Per-resource RBAC conditions** *(medium-large).* The biggest *modeling*
    unlock: workspace/participation scoping and public-read+owner-write become
    expressible. Turns several 🟡 into near-🟢.
@@ -369,11 +380,12 @@ Then, as depth: **computed/derived fields** (totals, counts, balances),
 
 **Bottom line for the AI layer:** the engine is already a strong target for "lay
 out the data, relations, validation, RBAC, and multi-tenant isolation of an app."
-G1/G6 are now closed (the examples are robust and idempotency/dedup work);
-closing G2/G3 (the role-global condition and aggregation) is what turns five of
-these six archetypes from "partial" into "yes" — and only after that can an AI
-reliably *generate* the variety of apps people expect, because the AI can only
-generate what the engine can model.
+G1/G6 are closed (robust examples + idempotency/dedup), and **G3 is closed**
+(aggregation — counts, balances, dashboards now work on both surfaces). The
+remaining big modeling unlock is **G2** (the role-global condition →
+per-resource conditions), which is what turns workspace/participation-scoped
+archetypes from "partial" toward "yes" — and only with the engine able to model
+these patterns can an AI reliably *generate* the variety of apps people expect.
 
 ---
 
