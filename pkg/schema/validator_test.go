@@ -100,6 +100,63 @@ func TestValidate_ResourceNameWithUppercase(t *testing.T) {
 	}
 }
 
+// G1 (FIX-G1-G6): a hyphenated resource name passed `validate` but PANICKED the
+// engine at boot building the GraphQL schema ('-' is not a valid GraphQL
+// identifier char). It must now be REJECTED at validation, so validate↔boot agree.
+func TestValidate_HyphenatedResourceNameRejected(t *testing.T) {
+	s := &schema.APISchema{
+		Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+		Resources: map[string]schema.ResourceSchema{
+			"order-items": {Fields: map[string]schema.FieldDef{"sku": {Type: "string"}}},
+		},
+	}
+	errs := schema.Validate(s)
+	if !hasError(errs, "resources.order-items") {
+		t.Errorf("expected hyphenated resource name to be rejected, got: %v", errs)
+	}
+	if !hasError(errs, "order_items") {
+		t.Errorf("expected the error to suggest the underscore form, got: %v", errs)
+	}
+}
+
+// The supported multi-word form (underscore) must VALIDATE — it is a valid
+// GraphQL identifier and boots end-to-end.
+func TestValidate_UnderscoreResourceNameAccepted(t *testing.T) {
+	s := &schema.APISchema{
+		Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+		Resources: map[string]schema.ResourceSchema{
+			"order_items": {Fields: map[string]schema.FieldDef{"sku": {Type: "string"}}},
+		},
+	}
+	if errs := schema.Validate(s); len(errs) != 0 {
+		t.Errorf("expected underscore resource name to validate, got: %v", errs)
+	}
+}
+
+// Allowing '_' means a resource could otherwise be named "auth_users" and collide
+// with the per-tenant authentication tables; the "auth_" prefix is reserved.
+func TestValidate_ReservedAuthPrefixRejected(t *testing.T) {
+	s := &schema.APISchema{
+		Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+		Resources: map[string]schema.ResourceSchema{
+			"auth_users": {Fields: map[string]schema.FieldDef{"email": {Type: "string"}}},
+		},
+	}
+	if errs := schema.Validate(s); !hasError(errs, "reserved") {
+		t.Errorf("expected auth_ prefix to be rejected as reserved, got: %v", errs)
+	}
+	// A name that merely starts with "auth" (no underscore) is fine.
+	ok := &schema.APISchema{
+		Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+		Resources: map[string]schema.ResourceSchema{
+			"authors": {Fields: map[string]schema.FieldDef{"name": {Type: "string"}}},
+		},
+	}
+	if errs := schema.Validate(ok); len(errs) != 0 {
+		t.Errorf("expected 'authors' to validate, got: %v", errs)
+	}
+}
+
 func TestValidate_EmptyEnum(t *testing.T) {
 	s := &schema.APISchema{
 		Schema:  "https://appitools.dev/schema/v1",

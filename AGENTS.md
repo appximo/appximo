@@ -218,9 +218,13 @@ without them). A complete, working example:
 }
 ```
 
-Naming rules (enforced at load): resource names `^[a-z][a-z0-9-]*$`,
-field names `^[a-z][a-z0-9_]*$`. An `id` UUID primary key is implicit —
-don't declare it. The validator is **strict about keys**: any key
+Naming rules (enforced at load): resource **and** field names both match
+`^[a-z][a-z0-9_]*$` — lowercase, start with a letter, `_` for multi-word names
+(`order_items`). **`-` is NOT allowed in a resource name** (it is not a valid
+GraphQL identifier; a hyphenated name used to pass `validate` then crash the
+engine at boot). The `auth_` prefix is **reserved** (the per-tenant
+authentication tables), so a resource cannot be named `auth_users`. An `id` UUID
+primary key is implicit — don't declare it. The validator is **strict about keys**: any key
 outside the documented surface — at any level — rejects the schema with
 an error listing the valid keys for that level, so typos never become
 silently dead config.
@@ -240,7 +244,10 @@ silently dead config.
 
 - `required: true` — NOT NULL column; must be present on POST and PUT
   (PATCH validates only the fields sent).
-- `unique: true` — UNIQUE constraint.
+- `unique: true` — UNIQUE constraint. A write that collides (this field **or** a
+  composite `unique` index) returns **`409 Conflict`** —
+  `{"error":"field \"<field>\": value already exists"}` — on both REST (create &
+  update) and GraphQL (in `errors[]`); the raw Postgres error is never exposed.
 - `auto: true` — engine-managed `TIMESTAMPTZ DEFAULT now()` (for
   `created_at` / `updated_at`); exempt from the required check.
 - `enum: ["a", "b"]` — string values only; writes outside the set → 422.
@@ -652,8 +659,8 @@ Identity answers WHO you are; the schema RBAC still governs WHAT you may do.
   `exp` (standard stateless-JWT trade-off).
 
 **Per-tenant users, email unique PER SCHEMA.** Users live in
-`tenant_<id>.auth_users` (the table name carries an underscore, which a resource
-name cannot, so it never collides with a schema resource). Email is `UNIQUE` on
+`tenant_<id>.auth_users` (the `auth_` prefix is reserved — `validate` rejects a
+resource named `auth_*`, so it never collides with a schema resource). Email is `UNIQUE` on
 `lower(email)` **within the tenant's schema**, not globally — so the same email
 is a distinct account in tenant A and tenant B. This is the structural advantage
 over Supabase, whose Auth cannot do multi-tenancy because its `email` is globally

@@ -405,7 +405,7 @@ func New(cfg Config) (*App, error) {
 	platformSuperAdminRole := os.Getenv("APPITOOLS_PLATFORM_SUPER_ADMIN_ROLE")
 	platformMFAIssuer := os.Getenv("APPITOOLS_PLATFORM_MFA_ISSUER")
 	// obsSentinel is a resource name no schema can declare (resource names match
-	// ^[a-z][a-z0-9-]*$, no dots) — Allows(role, obsSentinel, "read") is true only
+	// ^[a-z][a-z0-9_]*$ — no dots, no leading underscore) — Allows(role, obsSentinel, "read") is true only
 	// for a wildcard-resource admin role, the "admin-grade" test for tenant-scoped
 	// observability access. This INHERITS the RBAC, it does not invent a new check.
 	const obsSentinel = "__platform.observability__"

@@ -39,9 +39,17 @@ today.
 Each gap below was **observed live** this session. "Blocks N/6" = how many
 archetypes it materially blocks.
 
-### 🔴 G1 — Hyphenated resource names crash the engine at boot (GraphQL) — `validate` does not catch it
+### ✅ G1 — Hyphenated resource names crash the engine at boot (GraphQL) — **RESOLVED (FIX-G1-G6)**
 
-The single most surprising finding. Resource names are validated against
+> **Resolved.** Resource names now match `^[a-z][a-z0-9_]*$` (the same charset as
+> field names): `_` is allowed (readable multi-word names like `order_items` that
+> are valid GraphQL identifiers and boot end-to-end), and `-` is **rejected at
+> `validate`** with a clear message — so `validate` and `serve` now agree (a name
+> that validates always boots). The `auth_` prefix is reserved to keep
+> underscored names from colliding with the per-tenant auth tables. The original
+> finding is preserved below.
+
+The single most surprising finding. Resource names **were** validated against
 `^[a-z][a-z0-9-]*$` — **hyphen allowed, underscore forbidden**. GraphQL field
 names must match `^[_a-zA-Z][_a-zA-Z0-9]*$` — **underscore allowed, hyphen
 forbidden**. The GraphQL builder uses the raw (singularized) resource name as a
@@ -148,9 +156,16 @@ freely changed; a booking status freely changed. Status is a free label the
 client is trusted to advance correctly. **Severity: degrades.** Affects **5/6**
 (ecommerce, booking, fintech, saas, chat).
 
-### 🟠 G6 — Unique-constraint violations return `500 internal error`, not `409`
+### ✅ G6 — Unique-constraint violations return `500 internal error`, not `409` — **RESOLVED (FIX-G1-G6)**
 
-The schema-derived CRUD path does **not** map Postgres `unique_violation`. Both a
+> **Resolved.** The create path (REST `POST` + GraphQL `createX`) now maps a
+> Postgres `unique_violation` (SQLSTATE 23505) to **`409 Conflict`** with a
+> consumable `field "<field>": value already exists` message (the raw DB error is
+> never exposed), mirroring what the update path already did. So a duplicate
+> idempotency key / handle / SKU / one-per-user guard is now a designed conflict,
+> not a server error. The original finding is preserved below.
+
+The schema-derived CRUD path **used to** not map Postgres `unique_violation`. Both a
 field `unique:true` collision and a composite `indexes`-`unique` collision return
 **`500 {"error":"internal error"}`** (verified twice each: ecommerce review,
 social duplicate-follow, chat participant/reaction, fintech idempotency-key +
@@ -331,13 +346,12 @@ read/projection layer.
 
 Ordered to unlock the most modern apps per unit of engine work:
 
-1. **G1 — Fix the hyphen→GraphQL boot panic** *(small, critical).* Sanitize
-   GraphQL field names (or allow `_` in resource names) and make `validate` reject
-   what `serve` can't build. Removes a crash that blocks GraphQL for *any*
-   multi-word resource — i.e. almost every real schema.
-2. **G6 — Map `unique_violation` → `409`** *(small).* The auth handler already
-   does it; reuse on the generated CRUD path. Unblocks idempotency/dedup across
-   ~5 archetypes and turns a `500` into a designed conflict.
+1. ~~**G1 — Fix the hyphen→GraphQL boot panic**~~ ✅ **DONE (FIX-G1-G6).** Resource
+   names now allow `_` (and reject `-`) so they are valid GraphQL identifiers;
+   `validate` rejects what `serve` can't build. `auth_` reserved.
+2. ~~**G6 — Map `unique_violation` → `409`**~~ ✅ **DONE (FIX-G1-G6).** The create
+   path (REST + GraphQL) now returns a clean `409` on a unique collision, matching
+   the update path.
 3. **G3 — An aggregation surface** *(medium).* Start by exposing the count REST
    already has internally (GraphQL exposes it), then a `sum`/`group-by` for one
    column. Unblocks counts/balances/dashboards in **6/6**.
@@ -355,11 +369,11 @@ Then, as depth: **computed/derived fields** (totals, counts, balances),
 
 **Bottom line for the AI layer:** the engine is already a strong target for "lay
 out the data, relations, validation, RBAC, and multi-tenant isolation of an app."
-Closing G1/G6 (small) makes the examples robust; closing G2/G3 (the role-global
-condition and aggregation) is what turns five of these six archetypes from
-"partial" into "yes" — and only after that can an AyI reliably *generate* the
-variety of apps people expect, because the AI can only generate what the engine
-can model.
+G1/G6 are now closed (the examples are robust and idempotency/dedup work);
+closing G2/G3 (the role-global condition and aggregation) is what turns five of
+these six archetypes from "partial" into "yes" — and only after that can an AI
+reliably *generate* the variety of apps people expect, because the AI can only
+generate what the engine can model.
 
 ---
 

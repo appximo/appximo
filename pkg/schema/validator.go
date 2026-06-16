@@ -3,6 +3,7 @@ package schema
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -17,12 +18,24 @@ func (e ValidationError) Error() string {
 }
 
 var (
-	resourceNameRe = regexp.MustCompile(`^[a-z][a-z0-9\-]*$`)
+	// resourceNameRe matches the SAME charset as field names (G1, FIX-G1-G6):
+	// a resource name becomes a GraphQL type/field name, and GraphQL identifiers
+	// allow '_' but NOT '-'. Allowing '-' here let a schema PASS `validate` and
+	// then PANIC the engine at boot building the GraphQL schema. Underscores give
+	// readable multi-word names (order_items) that are valid end-to-end.
+	resourceNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 	fieldNameRe    = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-	// throughNameRe validates a many_to_many junction TABLE name — it may be a
-	// declared resource (hyphenated) or a bare snake_case join table
-	// (order_products), so both separators are allowed.
+	// throughNameRe validates a many_to_many junction TABLE name. A junction may
+	// be a declared resource (now snake_case, like the resources) OR a bare join
+	// table that is never a GraphQL type — so the SQL layer still tolerates a
+	// hyphen here (it is quoted), even though declared resource names may not.
 	throughNameRe = regexp.MustCompile(`^[a-z][a-z0-9_\-]*$`)
+	// reservedResourcePrefix guards the per-tenant authentication tables
+	// (auth_users, auth_tokens, auth_identities, auth_mfa, auth_backup_codes):
+	// now that resource names may carry '_', a resource named "auth_users" would
+	// collide with them. Reserving the prefix is the new collision guard (the old
+	// guard was "resource names can't contain '_'", which G1 removed).
+	reservedResourcePrefix = "auth_"
 
 	validFieldTypes = map[string]bool{
 		"string":  true,
@@ -46,7 +59,12 @@ func Validate(s *APISchema) []ValidationError {
 		if !resourceNameRe.MatchString(resName) {
 			errs = append(errs, ValidationError{
 				Field:   resPrefix,
-				Message: fmt.Sprintf("invalid resource name %q: must match ^[a-z][a-z0-9-]*$", resName),
+				Message: fmt.Sprintf("invalid resource name %q: must match ^[a-z][a-z0-9_]*$ — start with a lowercase letter and use '_' for multi-word names (e.g. order_items); '-' is not allowed (a resource name must be a valid GraphQL identifier)", resName),
+			})
+		} else if strings.HasPrefix(resName, reservedResourcePrefix) {
+			errs = append(errs, ValidationError{
+				Field:   resPrefix,
+				Message: fmt.Sprintf("invalid resource name %q: the %q prefix is reserved for the engine's per-tenant authentication tables (auth_users, auth_tokens, …)", resName, reservedResourcePrefix),
 			})
 		}
 

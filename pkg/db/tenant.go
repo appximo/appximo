@@ -178,12 +178,13 @@ func validateSchemaName(name string) error {
 	return nil
 }
 
-// tableNameRe matches a resource/table identifier. Unlike a Postgres schema name,
-// a resource name may contain hyphens (resourceNameRe at schema load is
-// ^[a-z][a-z0-9-]*$), so a separate, hyphen-tolerant validator is used for the
-// table argument of QueryDirect — otherwise a valid hyphenated resource (e.g. a
-// many-to-many junction "order-products") is wrongly rejected. The name is still
-// safely quoted via pgx.Identifier downstream; this is defence-in-depth.
+// tableNameRe matches a resource/table identifier. A declared resource name is
+// ^[a-z][a-z0-9_]*$ (no hyphen since G1), but a many_to_many JUNCTION table that
+// is not a declared resource may still carry a hyphen (throughNameRe at schema
+// load allows it), so a separate, hyphen-tolerant validator is used for the table
+// argument of QueryDirect — otherwise a valid hyphenated junction (e.g.
+// "order-products") is wrongly rejected. The name is still safely quoted via
+// pgx.Identifier downstream; this is defence-in-depth.
 var tableNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 func validateTableName(name string) error {

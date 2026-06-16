@@ -262,6 +262,28 @@ func dpStatus(t *testing.T, srv *httptest.Server, method, path, token string, bo
 	return resp.StatusCode
 }
 
+// dpStatusBody is dpStatus but also returns the raw response body (for asserting
+// error message shape, e.g. the G6 409 conflict body).
+func dpStatusBody(t *testing.T, srv *httptest.Server, method, path, token string, body any) (int, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	if body != nil {
+		json.NewEncoder(&buf).Encode(body)
+	}
+	req, _ := http.NewRequest(method, srv.URL+path, &buf)
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
 // ── main test ─────────────────────────────────────────────────────────────────
 
 func TestE2E_FullLifecycle(t *testing.T) {

@@ -13,10 +13,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// usersTable is the per-tenant identity table. The name carries an underscore,
-// which a user-declared resource name CANNOT (resource names match
-// ^[a-z][a-z0-9-]*$ — hyphens only), so this table can never collide with a
-// schema resource's table. It lives INSIDE the tenant's own Postgres schema
+// usersTable is the per-tenant identity table. The "auth_" prefix is RESERVED —
+// schema.Validate rejects any resource whose name starts with it (resource names
+// match ^[a-z][a-z0-9_]*$, so a resource COULD otherwise be named "auth_users") —
+// so this table can never collide with a schema resource's table. It lives INSIDE
+// the tenant's own Postgres schema
 // (tenant_<id>), so a user row is physically isolated per tenant exactly like
 // the tenant's business data — the structural property that lets the SAME email
 // be a distinct user in two different tenants (email is UNIQUE per schema, not

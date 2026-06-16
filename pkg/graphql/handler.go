@@ -836,6 +836,11 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		// set (no res.Fields whitelist), mirroring REST.
 		result, err := codegen.RunInsert(p.Context, tdb, tbl, name, tc.ID, tc.PGSchema, body, emitCreate)
 		if err != nil {
+			// Surface a unique-constraint collision as a clean conflict (G6),
+			// identical to the GraphQL update resolver — not a masked DB error.
+			if field, ok := db.UniqueViolationField(err); ok {
+				return nil, fmt.Errorf("field %q: value already exists", field)
+			}
 			return nil, safeDBErr(err)
 		}
 

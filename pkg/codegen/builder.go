@@ -399,6 +399,14 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// plain ExecRowsTenant, zero added overhead.
 			result, err := RunInsert(req.Context(), tdb, tbl, name, tc.ID, tc.PGSchema, body, emitCreate)
 			if err != nil {
+				// A unique-constraint collision (field unique:true OR a unique
+				// index) is an EXPECTED conflict, not a server error — map it to
+				// 409, same as the UPDATE path (G6). Only the error branch runs;
+				// the success path is byte-identical.
+				if field, ok := db.UniqueViolationField(err); ok {
+					writeJSONErr(w, http.StatusConflict, fmt.Sprintf("field %q: value already exists", field))
+					return
+				}
 				writeDBErr(w, req, err)
 				return
 			}

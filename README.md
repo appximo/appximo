@@ -136,7 +136,8 @@ baseline faster are welcome; we'll publish updated numbers.
   keyset pagination (`?after=<uuid>`, no OFFSET)
 - **Declarative validation**: required/enum/type rules compiled from the schema;
   one `422` lists every failing field; field `default` values applied on insert
-  (literals + `"now"` for time)
+  (literals + `"now"` for time); a `unique`/composite-unique collision is a clean
+  `409 Conflict` (REST create & update + GraphQL), never a raw DB error
 - **Declarative relations**: `has_many` / `belongs_to` / `many_to_many` served
   nested in one round-trip (`json_agg` + `LATERAL`, no N+1) on opt-in `?include=`,
   RBAC compiled into the SQL; FK columns auto-indexed

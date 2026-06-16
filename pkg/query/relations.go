@@ -98,9 +98,10 @@ func (b *includeBuilder) placeholder(val any) string {
 }
 
 // quoteIdent wraps a schema-validated identifier in double quotes. Resource and
-// field names are validated at schema load (^[a-z][a-z0-9-]*$ / ^[a-z][a-z0-9_]*$)
-// so they can never contain a quote — the wrap is injection-inert and lets
-// hyphenated resource names work unqualified under the tenant search_path.
+// field names are validated at schema load (both ^[a-z][a-z0-9_]*$) so they can
+// never contain a quote — the wrap is injection-inert and lets a name work
+// unqualified under the tenant search_path (it still safely quotes a hyphenated
+// junction-table name, which the SQL layer tolerates).
 func quoteIdent(s string) string { return `"` + s + `"` }
 
 // BuildListInclude wraps a base list SELECT so each row becomes a nested JSON
