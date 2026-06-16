@@ -1,6 +1,9 @@
 package schema
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"sort"
+)
 
 // APISchema is the top-level contract for an Appitools project.
 type APISchema struct {
@@ -91,6 +94,93 @@ type FieldDef struct {
 	MaxLength *int     `json:"maxLength,omitempty"` // string/text: rune count <= MaxLength
 	Pattern   string   `json:"pattern,omitempty"`   // string/text: RE2 regex, len <= MaxPatternLength
 	Format    string   `json:"format,omitempty"`    // string/text: email | uuid | url | date
+
+	// StateMachine (G5) declares the allowed lifecycle transitions of a string
+	// status field: which states a row may be CREATED in (Initial) and which moves
+	// are permitted between states (Transitions). The engine forces it on create
+	// (the initial state must be valid) and on update (a state may only move along a
+	// declared transition; a state with no outgoing transitions is terminal /
+	// immutable). A field without StateMachine is a free string (unchanged). Only
+	// string/text fields; coherent with `enum` if both are declared.
+	StateMachine *StateMachine `json:"state_machine,omitempty"`
+}
+
+// StateMachine is the declarative lifecycle of a status field (G5). Initial is the
+// set of states a row may be created in; Transitions maps each state to the states
+// it may move to (an absent key or empty list ⇒ terminal). `initial` accepts a
+// single string or an array in JSON; it is always a slice after parsing.
+type StateMachine struct {
+	Initial     []string            `json:"initial"`
+	Transitions map[string][]string `json:"transitions"`
+}
+
+// UnmarshalJSON accepts `initial` as either a string ("pending") or an array
+// (["pending","draft"]), normalizing to a slice — the rest is plain.
+func (sm *StateMachine) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		Initial     json.RawMessage     `json:"initial"`
+		Transitions map[string][]string `json:"transitions"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	sm.Transitions = aux.Transitions
+	if len(aux.Initial) == 0 {
+		return nil
+	}
+	var single string
+	if err := json.Unmarshal(aux.Initial, &single); err == nil {
+		sm.Initial = []string{single}
+		return nil
+	}
+	return json.Unmarshal(aux.Initial, &sm.Initial)
+}
+
+// KnownStates returns the set of every state the machine references (initial states,
+// transition sources, and transition targets) — the universe of valid state values.
+func (sm *StateMachine) KnownStates() map[string]bool {
+	k := make(map[string]bool, len(sm.Transitions)+len(sm.Initial))
+	for _, s := range sm.Initial {
+		k[s] = true
+	}
+	for from, tos := range sm.Transitions {
+		k[from] = true
+		for _, to := range tos {
+			k[to] = true
+		}
+	}
+	return k
+}
+
+// IsInitial reports whether s is a state a row may be created in.
+func (sm *StateMachine) IsInitial(s string) bool {
+	for _, x := range sm.Initial {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+// OriginsOf returns the states from which a transition to target is declared (the
+// reverse of Transitions), sorted for deterministic SQL. Empty ⇒ no state may
+// transition INTO target (it is only reachable as an initial state, if at all).
+func (sm *StateMachine) OriginsOf(target string) []string {
+	froms := make([]string, 0, len(sm.Transitions))
+	for f := range sm.Transitions {
+		froms = append(froms, f)
+	}
+	sort.Strings(froms)
+	var origins []string
+	for _, f := range froms {
+		for _, to := range sm.Transitions[f] {
+			if to == target {
+				origins = append(origins, f)
+				break
+			}
+		}
+	}
+	return origins
 }
 
 // RelationDef declares one relation between resources (RELATIONS-V1, ADR-019),

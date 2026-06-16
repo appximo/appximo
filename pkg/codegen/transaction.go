@@ -110,7 +110,7 @@ type preparedOp struct {
 // Postgres transaction — all-or-nothing. It is a NEW path: the per-resource
 // generated handlers are untouched (the single-op create/update/delete gate is
 // preserved byte-for-byte).
-func registerTransactionRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, policy *rbac.Policy, hookEval func(ctx context.Context, hook *schema.HookConfig, body map[string]any) (map[string]any, int, string)) {
+func registerTransactionRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, policy *rbac.Policy, inv CacheInvalidator, hookEval func(ctx context.Context, hook *schema.HookConfig, body map[string]any) (map[string]any, int, string)) {
 	refs := make(map[string]*txResource, len(s.Resources))
 	for name, res := range s.Resources {
 		rc := res
@@ -195,6 +195,13 @@ func registerTransactionRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantD
 			return
 		}
 
+		// The batch committed: drop this tenant's cached GETs so a follow-up read
+		// reflects the writes immediately (the single-op write path does the same —
+		// without this a cached read after a transaction is stale).
+		if inv != nil {
+			inv.Invalidate(tc.ID)
+		}
+
 		markSpan(req, "transaction")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -238,6 +245,9 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 		if verrs := ref.validator.ValidateWrite(data, true); len(verrs) > 0 {
 			return nil, &txError{status: http.StatusUnprocessableEntity, op: op.Op, resource: op.Resource, msg: "validation_failed", fields: verrs}
 		}
+		if verrs := ref.validator.ValidateInitialStates(data); len(verrs) > 0 { // G5: create in an initial state
+			return nil, &txError{status: http.StatusUnprocessableEntity, op: op.Op, resource: op.Resource, msg: "validation_failed", fields: verrs}
+		}
 		if hc, has := ref.res.Hooks["before_create"]; has {
 			c := hc
 			nd, st, msg := hookEval(ctx, &c, data)
@@ -265,6 +275,12 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 		}
 		if len(op.Data) == 0 {
 			return nil, &txError{status: http.StatusBadRequest, op: op.Op, resource: op.Resource, msg: "update requires a non-empty data object"}
+		}
+		// Declarative rules (min/max/pattern/format) + state-machine known-state, the
+		// SAME ValidateWrite the single-op PATCH runs before CollectUpdate — a batched
+		// update is validated identically to a standalone one.
+		if verrs := ref.validator.ValidateWrite(op.Data, false); len(verrs) > 0 {
+			return nil, &txError{status: http.StatusUnprocessableEntity, op: op.Op, resource: op.Resource, msg: "validation_failed", fields: verrs}
 		}
 		writable := writableFn(eval.AllowedFields)
 		sets, st, msg := CollectUpdate(&ref.res, op.Data, false, writable)
@@ -342,7 +358,13 @@ func execPreparedOp(ctx context.Context, tx pgx.Tx, tenantID string, p *prepared
 	}
 	if len(out) == 0 {
 		if p.kind == "update" {
-			return nil, &txError{status: http.StatusNotFound, op: p.kind, resource: p.resource, msg: notFoundMsg(p)}
+			// A state-machine transition guard rejecting the move is a 422
+			// (unprocessable), not a 404 — distinguish by the guard's marker in the SQL.
+			status := http.StatusNotFound
+			if strings.Contains(p.sql, " = ANY($") {
+				status = http.StatusUnprocessableEntity
+			}
+			return nil, &txError{status: status, op: p.kind, resource: p.resource, msg: notFoundMsg(p)}
 		}
 		return nil, &txError{status: http.StatusInternalServerError, op: p.kind, resource: p.resource, msg: "insert returned no row"}
 	}
@@ -390,6 +412,12 @@ func buildUpdateSQL(res *schema.ResourceSchema, tbl, id string, sets map[string]
 	var terr *txError
 	if q, args, terr = appendGuards(q, args, guards, res); terr != nil {
 		return "", nil, terr
+	}
+	// State-machine transition guard (G5) — same race-safe predicate the single-op
+	// RunUpdate appends, so a batched update enforces transitions identically.
+	var serr error
+	if q, args, serr = appendStateTransitionGuard(q, args, res, sets); serr != nil {
+		return "", nil, &txError{status: http.StatusUnprocessableEntity, msg: serr.Error()}
 	}
 	return q + " RETURNING *", args, nil
 }
@@ -512,9 +540,14 @@ func validateOpID(id string) error {
 	return nil
 }
 
-// notFoundMsg explains a zero-row update/delete: a guard hint when guards were
-// present, else the standard not-found/excluded message.
+// notFoundMsg explains a zero-row update/delete: it lists the possible causes a
+// guard / state-machine transition adds (a precise per-field message would need a
+// read inside the rolling-back tx; the single-op path gives that, the batch names
+// the failing operation + the cause set).
 func notFoundMsg(p *preparedOp) string {
+	if strings.Contains(p.sql, " = ANY($") { // state-machine transition guard present
+		return "not found, excluded by access policy, or an invalid state transition"
+	}
 	if strings.Contains(p.sql, " AND ") && (strings.Contains(p.sql, " <> ") || strings.Contains(p.sql, " >= ") || strings.Contains(p.sql, " <= ") || strings.Contains(p.sql, " > ") || strings.Contains(p.sql, " < ")) {
 		return "not found, excluded by access policy, or a guard condition was not met"
 	}

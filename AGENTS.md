@@ -272,6 +272,55 @@ silently dead config.
 A write that violates rules returns **422 with every failing field at
 once**: `{"error":"validation_failed","fields":[{"field":"title","rule":"required","message":"is required"}]}`.
 
+#### State machines (`state_machine`, G5)
+
+A string status field can declare a **lifecycle**: which states a row may be created
+in, and which moves are allowed between states. The engine forces it — a status is
+no longer a free label the client advances arbitrarily.
+
+```json
+"status": {
+  "type": "string",
+  "enum": ["pending", "paid", "shipped", "delivered", "cancelled"],
+  "default": "pending",
+  "state_machine": {
+    "initial": "pending",
+    "transitions": {
+      "pending":   ["paid", "cancelled"],
+      "paid":      ["shipped"],
+      "shipped":   ["delivered"],
+      "delivered": [],
+      "cancelled": []
+    }
+  }
+}
+```
+
+- **`initial`** — the state(s) a row may be **created** in (a string or an array). A
+  create whose status is not initial → `422`; you can't create a row already
+  advanced. The field's `default` (if any) must be an initial state.
+- **`transitions`** — per state, the states it may move to. On **update**, a status
+  may only move along a declared transition; an undeclared move → `422` with a clear
+  `invalid transition from "X" to "Y"`. A state with **no outgoing transitions
+  (`[]`) is terminal — immutable** (it can never change to another state; this is
+  how a fintech "posted" entry stays append-only). Re-sending the current value is a
+  no-op (so a full-object PUT/PATCH that includes the unchanged status still works).
+- **Race-safe.** The transition is enforced **inside the UPDATE's `WHERE`** (the move
+  is allowed only if the row's CURRENT state permits it), so two concurrent updates
+  can't both advance the same row — one wins, the other matches no row and fails. No
+  read-modify-write window.
+- **REST, GraphQL, and inside a `POST /api/transaction`** all enforce it (a batch op
+  that violates a transition fails the WHOLE transaction). A field **without**
+  `state_machine` is a free string, unchanged.
+- **Validated at load:** `state_machine` only on a string/text field; at least one
+  `initial`; every state coherent with `enum` when declared; a string `default` must
+  be an initial state. Strict-key (`initial`/`transitions`).
+- **Out of scope (documented):** per-transition RBAC ("only role X may move to
+  shipped") — today the transition is validated structurally and the normal `update`
+  RBAC governs WHO may update; in-place value rewriting is a transition, not arbitrary
+  math. The single-op update path without a state machine is unchanged (measured
+  `no_change`). Example: [examples/model-lab/state-machine.json](examples/model-lab/state-machine.json).
+
 ### Relations
 
 ```json
@@ -685,6 +734,8 @@ POST /api/transaction
   `400` over the cap; the 1 MiB body cap also applies.
 - **Reserved**: a schema resource may not be named `transaction` (it would shadow
   this route).
+- A committed batch **invalidates the tenant's response cache** (like a single-op
+  write), so a read right after a transaction reflects it (no stale cached GET).
 - **Not in v1** (documented): `after_*` webhooks and the SSE broadcast do NOT fire
   for batch ops (use the emitted **outbox events** to react); no GraphQL batch
   (REST only); no in-place arithmetic (`stock = stock - n`) — use a compare-and-set

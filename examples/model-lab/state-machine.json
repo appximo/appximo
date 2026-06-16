@@ -1,0 +1,60 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "state-machine-lab",
+  "resources": {
+    "orders": {
+      "fields": {
+        "code":   { "type": "string",  "required": true, "unique": true },
+        "total":  { "type": "float64", "min": 0 },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "paid", "shipped", "delivered", "cancelled", "refunded"],
+          "default": "pending",
+          "state_machine": {
+            "initial": "pending",
+            "transitions": {
+              "pending":   ["paid", "cancelled"],
+              "paid":      ["shipped", "refunded"],
+              "shipped":   ["delivered"],
+              "delivered": [],
+              "cancelled": [],
+              "refunded":  []
+            }
+          }
+        }
+      },
+      "events": ["create", "update"]
+    },
+    "ledger_entries": {
+      "fields": {
+        "ref":    { "type": "string",  "required": true, "unique": true },
+        "amount": { "type": "float64", "required": true },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "posted", "void"],
+          "default": "pending",
+          "state_machine": {
+            "initial": "pending",
+            "transitions": {
+              "pending": ["posted", "void"],
+              "posted":  [],
+              "void":    []
+            }
+          }
+        }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": { "resources": "*", "actions": ["*"] },
+      "clerk": {
+        "permissions": {
+          "orders":         { "actions": ["read", "create", "update"] },
+          "ledger_entries": { "actions": ["read", "create", "update"] }
+        }
+      }
+    }
+  }
+}

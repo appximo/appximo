@@ -3,6 +3,7 @@ package schema
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -114,6 +115,7 @@ func Validate(s *APISchema) []ValidationError {
 
 			errs = append(errs, validateFieldRules(fieldPrefix, field)...)
 			errs = append(errs, validateDefault(fieldPrefix, field)...)
+			errs = append(errs, validateStateMachine(fieldPrefix, field)...)
 		}
 
 		// events: opt-in outbox emission (CRUD-EMIT-V1). Each value must be a
@@ -491,6 +493,75 @@ func validateDefault(fieldPrefix string, fd FieldDef) []ValidationError {
 		// Any JSON value is acceptable for a json column.
 	}
 	return nil
+}
+
+// validateStateMachine checks a field's `state_machine` DEFINITION (G5) at load so a
+// bad lifecycle is rejected cleanly, never a surprise at request time: the field must
+// be string/text, at least one `initial` state, every referenced state must be an
+// `enum` value when an enum is declared (coherence), and a string `default` must be
+// one of the initial states (you can only default to a state a row may be created
+// in). A field without `state_machine` produces no errors.
+func validateStateMachine(fieldPrefix string, fd FieldDef) []ValidationError {
+	if fd.StateMachine == nil {
+		return nil
+	}
+	sm := fd.StateMachine
+	smPrefix := fieldPrefix + ".state_machine"
+	var errs []ValidationError
+
+	if !stringTypes[fd.Type] {
+		errs = append(errs, ValidationError{
+			Field:   smPrefix,
+			Message: fmt.Sprintf("state_machine only applies to string/text fields, not %q", fd.Type),
+		})
+		return errs // the rest of the checks assume string states
+	}
+	if len(sm.Initial) == 0 {
+		errs = append(errs, ValidationError{
+			Field:   smPrefix + ".initial",
+			Message: "state_machine requires at least one initial state",
+		})
+	}
+	for _, s := range sm.Initial {
+		if s == "" {
+			errs = append(errs, ValidationError{Field: smPrefix + ".initial", Message: "initial state must be a non-empty string"})
+		}
+	}
+
+	known := sm.KnownStates()
+
+	// Coherence with enum: every state the machine names must be an allowed enum
+	// value (a transition to a state the field can never hold is dead config).
+	if len(fd.Enum) > 0 {
+		enumSet := make(map[string]bool, len(fd.Enum))
+		for _, e := range fd.Enum {
+			enumSet[e] = true
+		}
+		states := make([]string, 0, len(known))
+		for s := range known {
+			states = append(states, s)
+		}
+		sort.Strings(states)
+		for _, s := range states {
+			if !enumSet[s] {
+				errs = append(errs, ValidationError{
+					Field:   smPrefix,
+					Message: fmt.Sprintf("state %q is not one of the field's enum values", s),
+				})
+			}
+		}
+	}
+
+	// A string default must be an initial state — a row's create-time value.
+	if ds, ok := fd.Default.(string); ok {
+		if !sm.IsInitial(ds) {
+			errs = append(errs, ValidationError{
+				Field:   fieldPrefix + ".default",
+				Message: fmt.Sprintf("default %q must be one of the state_machine initial states", ds),
+			})
+		}
+	}
+	return errs
 }
 
 // numericTypes are the field types min/max apply to.

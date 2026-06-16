@@ -145,6 +145,11 @@ baseline faster are welcome; we'll publish updated numbers.
   single-op counterpart, outbox events emit in the same tx, and an optimistic-lock
   `guard` (compare-and-set) gives race-safe conditional writes; failures name the
   offending operation. The single-op write path is unchanged
+- **State machines**: a status field can declare its `state_machine` (initial
+  state(s) + allowed transitions); the engine forces the lifecycle — create only in
+  an initial state, update only along a declared transition, a terminal state is
+  immutable (append-only). Enforced race-safely in the UPDATE itself, on REST,
+  GraphQL, and inside a transaction
 - **Declarative validation**: required/enum/type rules compiled from the schema;
   one `422` lists every failing field; field `default` values applied on insert
   (literals + `"now"` for time); a `unique`/composite-unique collision is a clean

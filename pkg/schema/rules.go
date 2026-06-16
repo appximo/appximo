@@ -49,6 +49,15 @@ type ResourceValidator struct {
 	required []string // non-auto required field names, sorted
 	rules    map[string][]ruleFn
 	defaults map[string]defaultSpec // field → default to fill on create (SCHEMA-CLOSE-V1)
+	states   map[string]*compiledSM // field → state-machine sets (G5); nil when none declared
+}
+
+// compiledSM is the precompiled state-machine of one field (G5): the set of states
+// a row may be created in (initial) and the universe of valid states (known).
+// Transition validity (current→new) is enforced in the UPDATE SQL, not here.
+type compiledSM struct {
+	initial map[string]bool
+	known   map[string]bool
 }
 
 // defaultSpec is a precompiled field default. literal carries a fixed value
@@ -167,6 +176,19 @@ func CompileRules(res *ResourceSchema) *ResourceValidator {
 				rv.defaults[name] = defaultSpec{literal: fd.Default}
 			}
 		}
+
+		// State machine (G5): precompile the initial + known state sets for the
+		// create/update body checks (the transition itself is enforced in SQL).
+		if fd.StateMachine != nil {
+			if rv.states == nil {
+				rv.states = make(map[string]*compiledSM)
+			}
+			initial := make(map[string]bool, len(fd.StateMachine.Initial))
+			for _, s := range fd.StateMachine.Initial {
+				initial[s] = true
+			}
+			rv.states[name] = &compiledSM{initial: initial, known: fd.StateMachine.KnownStates()}
+		}
 	}
 	return rv
 }
@@ -231,6 +253,76 @@ func (rv *ResourceValidator) ValidateWrite(body map[string]any, requireAll bool)
 					errs = append(errs, *e)
 				}
 			}
+		}
+	}
+	// State machine (G5): a present state field must hold a KNOWN state (a valid
+	// member of the lifecycle), on BOTH create and update — an unknown value is
+	// rejected before any SQL. The create-time "must be an initial state" check and
+	// the update-time transition check live elsewhere (ValidateInitialStates and the
+	// UPDATE SQL guard) so this one rule is correct on every path.
+	errs = append(errs, rv.checkKnownStates(body)...)
+	return errs
+}
+
+// checkKnownStates verifies every present state-machine field holds a declared state
+// (string + member of the lifecycle). No-op (zero cost) for a resource with no state
+// machines (rv.states is nil).
+func (rv *ResourceValidator) checkKnownStates(body map[string]any) []FieldRuleError {
+	if len(rv.states) == 0 {
+		return nil
+	}
+	var errs []FieldRuleError
+	fields := make([]string, 0, len(rv.states))
+	for f := range rv.states {
+		fields = append(fields, f)
+	}
+	sort.Strings(fields)
+	for _, f := range fields {
+		v, present := body[f]
+		if !present || v == nil {
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			errs = append(errs, FieldRuleError{Field: f, Rule: "state", Message: "must be a string"})
+			continue
+		}
+		if !rv.states[f].known[s] {
+			errs = append(errs, FieldRuleError{Field: f, Rule: "state", Message: fmt.Sprintf("unknown state %q", s)})
+		}
+	}
+	return errs
+}
+
+// ValidateInitialStates checks, for a CREATE body, that every present state-machine
+// field holds one of its INITIAL states — a row may not be created already advanced
+// in its lifecycle. Call it on create only, after ValidateWrite (which already
+// rejected unknown states). No-op for a resource with no state machines.
+func (rv *ResourceValidator) ValidateInitialStates(body map[string]any) []FieldRuleError {
+	if len(rv.states) == 0 {
+		return nil
+	}
+	var errs []FieldRuleError
+	fields := make([]string, 0, len(rv.states))
+	for f := range rv.states {
+		fields = append(fields, f)
+	}
+	sort.Strings(fields)
+	for _, f := range fields {
+		v, present := body[f]
+		if !present || v == nil {
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			continue // a non-string was already reported by ValidateWrite
+		}
+		if rv.states[f].known[s] && !rv.states[f].initial[s] {
+			errs = append(errs, FieldRuleError{
+				Field:   f,
+				Rule:    "state",
+				Message: fmt.Sprintf("cannot be created in state %q (must be an initial state)", s),
+			})
 		}
 	}
 	return errs

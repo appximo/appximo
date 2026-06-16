@@ -18,12 +18,12 @@
 
 | Archetype | Verdict | One-line |
 |---|---|---|
-| **SaaS / productivity** (Notion/Trello/Linear) | 🟢 mostly yes | Nesting, tags, assignees, threads model cleanly; **owner/workspace isolation is now expressible** (per-resource RBAC, G2) and dashboards have aggregation (G3). A non-id workspace **claim variable** is the remaining scoping nicety; status workflow (G5) is the last gap. |
-| **E-commerce / marketplace** | 🟡 partial (improved) | The catalog (variants, category tree, m2m) is excellent; **checkout is now atomic** (order + lines + stock decrement in one transaction, with a compare-and-set guard against oversell — G4). Order totals (G7) and status workflow (G5) are the remaining gaps. |
+| **SaaS / productivity** (Notion/Trello/Linear) | 🟢 yes | Nesting, tags, assignees, threads model cleanly; **owner/workspace isolation** (per-resource RBAC, G2), dashboards (aggregation, G3), and **task-status workflows** (state machine, G5) all work. A non-id workspace **claim variable** is the only remaining scoping nicety. |
+| **E-commerce / marketplace** | 🟢 mostly yes | The catalog (variants, category tree, m2m) is excellent; **checkout is atomic** (order + lines + guarded stock decrement, G4) and the **order lifecycle is enforced** (pending→paid→shipped→delivered, no illegal jumps, G5). The only remaining gap is order **totals** as a computed field (G7). |
 | **Social / content** | 🟢 mostly yes | The graph (follows, threaded comments, posts) is excellent; **public-read + owner-write now works in ONE role** (per-resource RBAC + `condition_actions`, G2) and counts have aggregation (G3). The feed-join and polymorphic likes (G11) remain. |
-| **Booking / reservations** (Airbnb/Calendly) | 🟡 partial | Listings/bookings/embeds work; the **defining invariant — no double-booking** — is unmeetable (no time-range/overlap), and payments aren't atomic. |
+| **Booking / reservations** (Airbnb/Calendly) | 🟡 partial | Listings/bookings/embeds work, payments are atomic (G4), and the **reservation lifecycle is enforced** (pending→confirmed→cancelled, G5); but the **defining invariant — no double-booking** — is still unmeetable (no time-range/overlap exclusion, G8). |
 | **Messaging / chat** | 🟡 partial (improved) | Conversations/messages/participants/keyset streams work; **per-resource scoping landed (G2)** so each resource carries its own condition, but **membership-by-subquery** (messages of conversations I'm in) still needs the participant denormalized onto the row; per-conversation realtime remains (G3 covers unread counts). |
-| **Fintech / wallet** | 🟡 partial | The big three now work: **derived balance** (SUM, G3), **atomic transfer** (two legs in one transaction, G4), and **idempotency keys** (a unique `ref` → clean `409`, G6). Remaining for a true ledger: **append-only immutability** (G5 — a posted entry can still be PATCHed) and **exact decimal money** (G10 — `float64` only). Much closer to a system of record. |
+| **Fintech / wallet** | 🟡 partial (close) | **Derived balance** (SUM, G3), **atomic transfer** (G4), **idempotency keys** (clean `409`, G6), and **append-only immutability** (a `posted` ledger entry is a terminal state — frozen, G5) all work now. The one remaining gap for a true ledger is **exact decimal money** (G10 — `float64` only). |
 
 **The engine is a superb declarative CRUD + relations + RBAC + multi-tenant
 core.** It models the *shape* of every archetype. What it consistently cannot do
@@ -203,7 +203,22 @@ Observed consequences:
 booking payments). **Workaround:** a custom Go handler on the library surface
 (`appitools.New` + `Ctx.Tx`) or a single-consumer outbox worker — i.e. write code.
 
-### 🟠 G5 — No state-machine / status-transition enforcement
+### ✅ G5 — No state-machine / status-transition enforcement — **RESOLVED (FIX-G5)**
+
+> **Resolved.** A string status field declares a **`state_machine`** (`initial`
+> state(s) + per-state `transitions`); the engine FORCES the lifecycle: a row may
+> only be created in an initial state (an advanced state at create → `422`), and an
+> update may only move along a DECLARED transition (an undeclared jump → `422`
+> "invalid transition from X to Y"). A state with no outgoing transitions (`[]`) is
+> **terminal — immutable** (it can never change to another state), which gives the
+> fintech **append-only** intent (a posted ledger entry's status is frozen). It is
+> enforced **race-safely inside the UPDATE's WHERE** (the move depends on the row's
+> CURRENT state, so two concurrent updates can't both advance it — no
+> read-modify-write window), on REST, GraphQL, and inside a `POST /api/transaction`
+> (a batch op that violates a transition fails the whole tx). Validated at load
+> (string field, coherent with `enum`, default an initial state). A field without a
+> state machine is a free string (measured `no_change`). The original finding is
+> preserved below.
 
 An `enum` permits any member → any member. There is no "allowed transitions"
 rule, and update hooks see only the new body. Verified illegal jumps accepted:
@@ -335,28 +350,29 @@ Schemas: [ecommerce](../examples/model-lab/ecommerce.json) ·
 [chat](../examples/model-lab/chat.json) ·
 [fintech](../examples/model-lab/fintech.json).
 
-### SaaS / productivity — 🟢 mostly yes (the best fit)
+### SaaS / productivity — 🟢 yes (the best fit)
 **Models well:** workspace → project → list → task → comment nesting (depth-2
 embeds), task↔tag m2m, assignee `belongs_to`, threaded comments (self-ref),
 status filter, priority+due sort, search. Closest to a "yes" because it is
 CRUD-with-clear-ownership.
 **Now works:** owner-scoped per-resource RBAC — each resource scoped by its own
 column, some resources shared, "read all / write own" — is expressible (G2 ✅);
-board/dashboard rollups have aggregation (G3 ✅). **Remaining:** scoping by a
-non-id workspace claim needs a `$workspace_id`-style variable; status workflow
-unenforced (G5).
+board/dashboard rollups have aggregation (G3 ✅); task-status **workflows are
+enforced** (todo→doing→done, state machine, G5 ✅). **Remaining:** scoping by a
+non-id workspace claim needs a `$workspace_id`-style variable (minor).
 
-### E-commerce / marketplace — 🟡 partial
+### E-commerce / marketplace — 🟢 mostly yes
 **Models well:** sellers, products, SKU-level variants (composite-unique
 `(product_id,color,size)`), a **self-referencing category tree**, product↔category
 m2m, carts/orders/lines/reviews; rich validation (slug/SKU/order-number patterns);
 owner-scoped `customer` role; the storefront nested read in one round-trip.
 **Now works:** **checkout is atomic** — order + lines + a guarded stock decrement
 in one `POST /api/transaction`, all-or-nothing, with a compare-and-set guard that
-prevents oversell (G4 ✅); a seller can own-scope its products while reading the
-shared catalog (per-resource RBAC, G2 ✅); facets/revenue have aggregation (G3 ✅);
-one-review-per-buyer collision is a clean `409` (G6 ✅). **Remaining:** order totals
-are client-supplied (G7); status workflow unenforced (G5).
+prevents oversell (G4 ✅); the **order lifecycle is enforced** — pending→paid→
+shipped→delivered, no illegal jumps (state machine, G5 ✅); a seller can own-scope
+its products while reading the shared catalog (per-resource RBAC, G2 ✅);
+facets/revenue have aggregation (G3 ✅); one-review-per-buyer collision is a clean
+`409` (G6 ✅). **Remaining:** order totals as a computed field (G7).
 
 ### Social / content — 🟢 mostly yes
 **Models well:** profiles, posts, **threaded comments (self-ref)**, **follows as a
@@ -373,10 +389,12 @@ needs two resources (G11, polymorphic).
 **Models well:** hosts, listings, availability slots, bookings, payments, reviews,
 amenities m2m; host/guest row-scoping; public catalog with a field allowlist;
 nested embeds; date-window filtering with `gte`/`lte`.
-**Breaks:** **double-booking is not preventable** — the defining invariant (G8,
-verified two overlapping bookings both `201`); "free slots with remaining capacity"
-needs client logic (G3, no aggregation); payment + booking aren't atomic (G4);
-status workflow unenforced (G5); slot/idempotency collisions are `500` (G6).
+**Now works:** payment + booking are atomic (G4 ✅); the **reservation lifecycle is
+enforced** — pending→confirmed→cancelled, no illegal jumps (state machine, G5 ✅);
+occupancy via aggregation (G3 ✅); slot/idempotency collisions are a clean `409`
+(G6 ✅). **Still breaks:** **double-booking is not preventable** — the defining
+invariant (G8, verified two overlapping bookings both `201`; no time-range/overlap
+exclusion).
 
 ### Messaging / chat — 🟡 partial (improved)
 **Models well:** users, conversations, participants (m2m), messages with a sorted
@@ -390,7 +408,7 @@ collisions are now `409` (G6 ✅). **Still breaks:** true participation scoping
 `member` then sees its own messages, not co-participants'); SSE is per-resource,
 **not per-conversation** (no server-side conversation filter on the stream).
 
-### Fintech / wallet — 🟡 partial
+### Fintech / wallet — 🟡 partial (close)
 **Models well:** accounts, immutable-intent ledger entries, transfers, holds,
 idempotency keys, audit events; owner-scoped `account_holder`; auditor field
 allowlist; ledger embeds.
@@ -398,11 +416,12 @@ allowlist; ledger embeds.
 (G3 ✅); a **transfer's two legs are atomic** — debit + credit in one
 `POST /api/transaction`, both-or-neither (G4 ✅, verified the first leg reverts when
 the second collides); **idempotency keys** are a clean `409`, not a `500` (a unique
-`ref`, G6 ✅). **Remaining for a true ledger:** **append-only/immutability** is not
-enforced — a posted entry can still be PATCHed (G5/G7); **money is `float64`**, not
-exact decimal (G10). With those two closed the engine becomes a system of record for
-money; today the money-movement is atomic and the balance is derivable, but exact
-decimal + immutability still need engine work.
+`ref`, G6 ✅); **append-only immutability** is enforced — a `posted` ledger entry is
+a TERMINAL state in its `state_machine`, so its status can never change again (G5 ✅,
+verified posted→void/pending both `422`). **Remaining for a true ledger:** **money is
+`float64`**, not exact decimal (G10). That one type is now the only thing between the
+engine and being a system of record for money — the movement is atomic, the balance
+derivable, and posted entries frozen.
 
 ---
 
@@ -430,28 +449,35 @@ Ordered to unlock the most modern apps per unit of engine work:
    RBAC + validation + outbox, with a compare-and-set `guard` for race-safety.
    Unblocks the commerce/finance core (checkout, transfer). The last remaining big
    gap is G5.
-6. **G5 — Status-transition enforcement** *(medium).* Allowed-transitions per enum
-   field; unblocks order/booking/payment workflows in 5/6.
+6. ~~**G5 — Status-transition enforcement**~~ ✅ **DONE (FIX-G5).** A field's
+   `state_machine` (initial + transitions) forces the lifecycle on create and update,
+   race-safely, with terminal states immutable — unblocks order/booking/payment
+   workflows and append-only ledgers. **All six high-impact gaps (G1–G6) are now
+   closed.**
 
-Then, as depth: **computed/derived fields** (totals, counts, balances),
-**time-range type + overlap exclusion** (booking), a **decimal/money type**
-(fintech exactness), **polymorphic relations**, and **full-text search**.
+Then, as depth (none blocking for most apps): **computed/derived fields** (totals,
+counts, balances), **time-range type + overlap exclusion** (booking double-booking,
+G8), a **decimal/money type** (fintech exactness, G10), **polymorphic relations**,
+and **full-text search**.
 
-**Bottom line for the AI layer:** the engine is already a strong target for "lay
-out the data, relations, validation, RBAC, and multi-tenant isolation of an app."
-**Five of the six highest-impact gaps are now closed** — G1 (robust names), G6
-(idempotency/dedup `409`), G3 (aggregation — counts, balances, dashboards), G2
-(per-resource RBAC — workspace/owner scoping, public-read+owner-write), and **G4
-(atomic multi-resource transactions — the commerce/finance core: a transfer's legs
-and a checkout's order+lines+stock are now all-or-nothing, with a compare-and-set
-guard for race-safety)**. SaaS and Social are 🟢; e-commerce and fintech jumped from
-"core lives outside the engine" to "core is in the engine." The **one remaining big
-behavioral invariant is G5** (status-transition enforcement); after it, the depth
-items are exact-decimal money (G10, fintech), order/balance computed fields (G7),
-and the smaller scoping follow-ups under G2 (a `$workspace_id`-style claim variable;
-membership/subquery conditions). Closing G5 leaves the six archetypes modelable
-end-to-end — shape, permissions, AND behavior — which is what lets an AI layer
-reliably *generate* the variety of apps people expect.
+**Bottom line for the AI layer:** **all six highest-impact gaps (G1–G6) are now
+closed** — G1 (robust names), G6 (idempotency/dedup `409`), G3 (aggregation —
+counts, balances, dashboards), G2 (per-resource RBAC — workspace/owner scoping,
+public-read+owner-write), G4 (atomic multi-resource transactions — transfer,
+checkout), and **G5 (state-machine transitions — order/booking/payment lifecycles
+forced, terminal states immutable for append-only ledgers)**. The engine now models
+all three layers of an app — **shape** (resources, relations, types), **permissions**
+(per-resource RBAC, multi-tenant isolation), AND **behavior** (validation, derived
+aggregates, atomic multi-write invariants, state-transition rules). SaaS and Social
+are 🟢 yes; e-commerce is 🟢; fintech and booking are one *type/constraint* away from
+yes (exact-decimal money G10; time-range overlap G8). The remaining items are
+**depth, not blockers** for most apps: computed/derived fields (G7), a decimal/money
+type + array/geo (G10), time-range exclusion (G8), polymorphic relations and
+full-text search (G11), and the smaller scoping follow-ups under G2 (a
+`$workspace_id`-style claim variable; membership/subquery conditions). With shape +
+permissions + behavior all expressible, an AI layer can now reliably *generate* the
+variety of real apps people expect — which is the next frontier (schema-for-AI +
+the visual editor).
 
 ---
 

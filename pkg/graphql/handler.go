@@ -999,6 +999,9 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		if verrs := rv.ValidateWrite(norm, true); len(verrs) > 0 {
 			return nil, &validationError{fields: verrs}
 		}
+		if verrs := rv.ValidateInitialStates(norm); len(verrs) > 0 { // G5: create in an initial state
+			return nil, &validationError{fields: verrs}
+		}
 
 		hc := hookCfg(name, "before_create", res)
 		hookRes, err := hr.RunBeforeHook(p.Context, hc, input, nil)
@@ -1148,7 +1151,11 @@ func updateResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 			return nil, safeDBErr(err)
 		}
 		if len(rows) == 0 {
-			return nil, fmt.Errorf("not found")
+			// Zero rows: not found, RBAC-excluded, or a state-machine transition
+			// rejected the move — explain precisely (a plain "not found" for a resource
+			// without a state machine, no extra read).
+			_, msg := codegen.ExplainTransitionFailure(p.Context, tdb, tc.PGSchema, pgx.Identifier{name}.Sanitize(), idStr, res, sets)
+			return nil, fmt.Errorf("%s", msg)
 		}
 		record := rows[0]
 

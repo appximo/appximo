@@ -447,6 +447,12 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				writeValidationErrs(w, verrs)
 				return
 			}
+			// State-machine (G5): a row may only be CREATED in an initial state.
+			if verrs := rv.ValidateInitialStates(body); len(verrs) > 0 {
+				markSpan(req, "validate")
+				writeValidationErrs(w, verrs)
+				return
+			}
 
 			var beforeHook *schema.HookConfig
 			if hc, ok := res.Hooks["before_create"]; ok {
@@ -810,8 +816,18 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				}
 				markSpan(req, "update")
 				if len(result) == 0 {
-					// Row vanished between the existence check and the UPDATE (race).
-					writeJSONErr(w, http.StatusNotFound, "not found")
+					// Zero rows: either the row vanished after the existence check (a
+					// race → 404) or a state-machine transition guard rejected the move
+					// (→ 422 "invalid transition"). ExplainTransitionFailure reads the
+					// current state ONLY here, on the error path, to say which — and is a
+					// plain 404 (no read) for a resource without a state machine.
+					status, msg := ExplainTransitionFailure(req.Context(), tdb, tc.PGSchema, tbl, id, &res, sets)
+					if status == http.StatusUnprocessableEntity {
+						if t := observability.SpanTrackerFromCtx(req.Context()); t != nil {
+							t.RecordError(msg)
+						}
+					}
+					writeJSONErr(w, status, msg)
 					return
 				}
 				record := result[0]
@@ -902,7 +918,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		}
 		return hookRes.Data, 0, ""
 	}
-	registerTransactionRoute(r, s, tdb, policy, hookEval)
+	registerTransactionRoute(r, s, tdb, policy, inv, hookEval)
 
 	return r
 }
@@ -1143,6 +1159,13 @@ func RunUpdate(ctx context.Context, tdb *db.TenantDB, res *schema.ResourceSchema
 	if err != nil {
 		return nil, err
 	}
+	// State-machine transition guard (G5): a row whose current state does not allow
+	// the requested transition matches zero rows → no write (race-safe). No-op for a
+	// resource without a state machine on an updated field.
+	q, args, err = appendStateTransitionGuard(q, args, res, sets)
+	if err != nil {
+		return nil, err
+	}
 	q += " RETURNING *"
 
 	if emitUpdate {
@@ -1185,6 +1208,94 @@ func RunDelete(ctx context.Context, tdb *db.TenantDB, tbl, name, tenantID, pgSch
 			}, args...)
 	}
 	return tdb.ExecTenant(ctx, pgSchema, q, args...)
+}
+
+// appendStateTransitionGuard appends, for each state-machine field being SET, a
+// race-safe transition guard to an UPDATE's WHERE: the row's CURRENT state must
+// either already equal the new value (a no-op self-set, so a full-object PUT/PATCH
+// that re-sends the unchanged state still succeeds) OR be a state from which the new
+// state is a DECLARED transition. A row whose current state allows neither matches
+// ZERO rows — so an invalid transition (or a terminal state) atomically writes
+// nothing, with no read-modify-write race. It appends NO clause for an update that
+// touches no state-machine field, so a resource without one is byte-identical (the
+// gate). The new value and the origin set are always bound parameters.
+func appendStateTransitionGuard(sql string, args []any, res *schema.ResourceSchema, sets map[string]any) (string, []any, error) {
+	fields := make([]string, 0, len(sets))
+	for f := range sets {
+		fields = append(fields, f)
+	}
+	sort.Strings(fields) // deterministic SQL
+	for _, f := range fields {
+		fd, ok := res.Fields[f]
+		if !ok || fd.StateMachine == nil {
+			continue
+		}
+		newState, ok := sets[f].(string)
+		if !ok {
+			return sql, args, fmt.Errorf("state field %q must be a string", f)
+		}
+		origins := fd.StateMachine.OriginsOf(newState)
+		if origins == nil {
+			origins = []string{} // bind '{}' (empty text[]), never NULL
+		}
+		col := pgx.Identifier{f}.Sanitize()
+		sql += fmt.Sprintf(" AND (%s = $%d OR %s = ANY($%d))", col, len(args)+1, col, len(args)+2)
+		args = append(args, newState, origins)
+	}
+	return sql, args, nil
+}
+
+// stateFieldsUpdated returns the state-machine fields present in sets (the columns
+// whose transition was guarded), sorted — used only on the error path to explain a
+// rejected update. Empty when the update touched no state field.
+func stateFieldsUpdated(res *schema.ResourceSchema, sets map[string]any) []string {
+	var out []string
+	for f := range sets {
+		if fd, ok := res.Fields[f]; ok && fd.StateMachine != nil {
+			out = append(out, f)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ExplainTransitionFailure runs on the 0-rows update path when a state field was set
+// (the row existed + passed RBAC, per the prior existence check): it reads the row's
+// CURRENT state and returns a precise 422 "invalid transition from X to Y", or a 404
+// if the row vanished (a race). It is an ERROR-PATH read only — never the hot path.
+func ExplainTransitionFailure(ctx context.Context, tdb *db.TenantDB, pgSchema, tbl, id string, res *schema.ResourceSchema, sets map[string]any) (int, string) {
+	stateFields := stateFieldsUpdated(res, sets)
+	if len(stateFields) == 0 {
+		return http.StatusNotFound, "not found"
+	}
+	cols := make([]string, len(stateFields))
+	for i, f := range stateFields {
+		cols[i] = pgx.Identifier{f}.Sanitize()
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s WHERE id = $1", strings.Join(cols, ", "), tbl)
+	rows, err := tdb.QueryTenant(ctx, pgSchema, q, id)
+	if err != nil {
+		return http.StatusNotFound, "not found"
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return http.StatusNotFound, "not found" // row vanished (race)
+	}
+	vals, err := rows.Values()
+	if err != nil || len(vals) != len(stateFields) {
+		return http.StatusConflict, "the resource changed during the update; retry"
+	}
+	for i, f := range stateFields {
+		cur, _ := vals[i].(string)
+		want, _ := sets[f].(string)
+		if cur != want { // this field's transition is the one that failed
+			return http.StatusUnprocessableEntity,
+				fmt.Sprintf("invalid transition for %q: from %q to %q is not allowed", f, cur, want)
+		}
+	}
+	// Every state field already equalled its target — the 0 rows was a concurrent
+	// change after the existence check (race), not a bad transition.
+	return http.StatusConflict, "the resource changed during the update; retry"
 }
 
 // CollectUpdate validates body against the resource schema for an update and
