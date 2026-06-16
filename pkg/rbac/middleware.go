@@ -87,10 +87,22 @@ func EvalResultFromCtx(ctx context.Context) *EvalResult {
 	return &v
 }
 
-// resourceFromPath extracts the resource name from paths like /api/guides or /api/guides/{id}.
+// TransactionRoute is the reserved single segment of the atomic multi-resource
+// transaction endpoint (G4): POST /api/transaction. It is NOT a resource — the
+// handler authorizes EACH operation in the batch against its own resource (so a
+// restricted role may transact over the resources it is allowed). The middleware
+// therefore passes this path through (no single-resource RBAC check here); per-op
+// RBAC is enforced in the handler. A schema resource may not be named "transaction"
+// (reserved at load), so this never shadows a real resource's policy.
+const TransactionRoute = "transaction"
+
+// resourceFromPath extracts the resource name from paths like /api/guides or
+// /api/guides/{id}. Returns "" for non-/api paths AND for the reserved
+// /api/transaction batch endpoint (which does its own per-operation RBAC), so the
+// middleware enforces nothing there and the handler authorizes each op itself.
 func resourceFromPath(path string) string {
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	if len(parts) >= 2 && parts[0] == "api" && parts[1] != "" {
+	if len(parts) >= 2 && parts[0] == "api" && parts[1] != "" && parts[1] != TransactionRoute {
 		return parts[1]
 	}
 	return ""

@@ -36,6 +36,11 @@ var (
 	// collide with them. Reserving the prefix is the new collision guard (the old
 	// guard was "resource names can't contain '_'", which G1 removed).
 	reservedResourcePrefix = "auth_"
+	// reservedTransactionResource is the one resource name the engine claims for the
+	// atomic multi-resource transaction endpoint (G4): POST /api/transaction. A
+	// resource so named would have its collection route shadowed by the batch
+	// handler, so it is rejected at load (the plural "transactions" is unaffected).
+	reservedTransactionResource = "transaction"
 
 	validFieldTypes = map[string]bool{
 		"string":  true,
@@ -65,6 +70,11 @@ func Validate(s *APISchema) []ValidationError {
 			errs = append(errs, ValidationError{
 				Field:   resPrefix,
 				Message: fmt.Sprintf("invalid resource name %q: the %q prefix is reserved for the engine's per-tenant authentication tables (auth_users, auth_tokens, …)", resName, reservedResourcePrefix),
+			})
+		} else if resName == reservedTransactionResource {
+			errs = append(errs, ValidationError{
+				Field:   resPrefix,
+				Message: fmt.Sprintf("invalid resource name %q: reserved for the atomic multi-resource transaction endpoint (POST /api/transaction)", resName),
 			})
 		}
 

@@ -139,6 +139,12 @@ baseline faster are welcome; we'll publish updated numbers.
   opt-in `?count=true` total on lists — all scoped by the SAME RBAC row condition,
   field allowlist and filters as a read (a row-scoped role aggregates only its own
   rows; a hidden field can't be summed)
+- **Atomic transactions**: `POST /api/transaction` runs many create/update/delete
+  ops across resources in **one Postgres transaction** — all-or-nothing (a transfer,
+  a checkout). Every op is authorized (per-resource RBAC) and validated like its
+  single-op counterpart, outbox events emit in the same tx, and an optimistic-lock
+  `guard` (compare-and-set) gives race-safe conditional writes; failures name the
+  offending operation. The single-op write path is unchanged
 - **Declarative validation**: required/enum/type rules compiled from the schema;
   one `422` lists every failing field; field `default` values applied on insert
   (literals + `"now"` for time); a `unique`/composite-unique collision is a clean
@@ -238,6 +244,7 @@ It serves our own production workload today.
 | `JWT_SECRET` | env | **yes** | HS256 signing secret (≥ 32 chars) |
 | `ADMIN_KEY` | env | **yes** | `X-Admin-Key` for `/metrics`, `/debug`, `/admin`, control plane |
 | `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | env | no | per-tenant token bucket (default 1000/100) |
+| `APPITOOLS_MAX_TX_OPS` | env | no | max operations per `POST /api/transaction` (default 100) |
 | `APPITOOLS_AUTH_SIGNUP_ROLE` | env | no | role assigned to public signup; **set it to enable `POST /auth/signup`** (empty = signup disabled). Must be a schema role |
 | `APPITOOLS_AUTH_MIN_PASSWORD` | env | no | minimum signup password length (default 8) |
 | `APPITOOLS_AUTH_REQUIRE_VERIFIED` | env | no | block login until the user's email is verified (default off) |

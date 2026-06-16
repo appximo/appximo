@@ -1,0 +1,60 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "atomic-tx-lab",
+  "resources": {
+    "accounts": {
+      "fields": {
+        "owner_id": { "type": "uuid" },
+        "balance":  { "type": "float64", "default": 0 }
+      }
+    },
+    "ledger_entries": {
+      "fields": {
+        "account_id": { "type": "uuid",    "required": true },
+        "amount":     { "type": "float64", "required": true },
+        "kind":       { "type": "string",  "enum": ["debit", "credit"], "required": true },
+        "ref":        { "type": "string",  "required": true, "unique": true },
+        "created_at": { "type": "time",    "auto": true }
+      },
+      "events": ["create"],
+      "indexes": [{ "fields": ["account_id"] }]
+    },
+    "products": {
+      "fields": {
+        "sku":   { "type": "string", "required": true, "unique": true },
+        "name":  { "type": "string", "required": true },
+        "stock": { "type": "int",    "min": 0, "required": true }
+      },
+      "events": ["update"]
+    },
+    "orders": {
+      "fields": {
+        "code":   { "type": "string", "required": true, "unique": true },
+        "status": { "type": "string", "enum": ["pending", "paid", "shipped"], "default": "pending" }
+      },
+      "events": ["create"]
+    },
+    "order_lines": {
+      "fields": {
+        "order_id":   { "type": "uuid", "required": true, "relation": "orders" },
+        "product_id": { "type": "uuid", "required": true, "relation": "products" },
+        "qty":        { "type": "int",  "min": 1, "required": true }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": { "resources": "*", "actions": ["*"] },
+      "clerk": {
+        "permissions": {
+          "accounts":       { "actions": ["read"] },
+          "ledger_entries": { "actions": ["read", "create"] },
+          "products":       { "actions": ["read", "update"] },
+          "orders":         { "actions": ["read", "create"] },
+          "order_lines":    { "actions": ["read", "create"] }
+        }
+      }
+    }
+  }
+}

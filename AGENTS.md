@@ -631,6 +631,68 @@ Aggregate `value`s are **Strings** in GraphQL (one shape carries integers, float
 and timestamps without a custom scalar — parse by the field's known type). The
 RBAC scope + field allowlist + filters apply identically to the REST endpoint.
 
+## Atomic multi-resource transactions (G4)
+
+`POST /api/transaction` runs several create/update/delete operations across
+resources in **ONE Postgres transaction** — all-or-nothing. If any operation fails
+(validation, RBAC, a constraint, a guard, a not-found), the WHOLE batch rolls back:
+zero partial state. It is the seam for a transfer (debit + credit), a checkout
+(order + lines + stock decrement), or any cross-resource invariant.
+
+```json
+POST /api/transaction
+{
+  "operations": [
+    { "op": "create", "resource": "ledger_entries", "data": { "account_id": "…", "amount": -100, "ref": "x1" } },
+    { "op": "create", "resource": "ledger_entries", "data": { "account_id": "…", "amount":  100, "ref": "x2" } }
+  ]
+}
+```
+
+- **Operations** (executed in order): `create` (`{op,resource,data}`), `update`
+  (`{op,resource,id,data}` — PATCH/partial semantics), `delete`
+  (`{op,resource,id}`).
+- **Every operation is authorized and validated EXACTLY like its single-op
+  counterpart**: per-resource RBAC (G2 — its own condition + field allowlist +
+  create mass-assignment block), the declarative validators, and the
+  `before_create`/`before_update` hooks all run. A row-scoped role can only write
+  its own rows inside a batch; an operation the role may not perform fails the whole
+  transaction with `403`.
+- **Outbox events emit in the SAME transaction** — a resource with
+  `events:[…]` enqueues its `{resource}.{created|updated|deleted}` event per op,
+  atomically with the write (a rolled-back batch emits nothing).
+- **Tenant-scoped**: the transaction runs in the request tenant's `search_path`
+  (Host) and cannot cross tenants.
+- **Optimistic-lock / conditional `guard`** (update & delete): extra predicates the
+  row must satisfy, else the op matches no row and the batch fails — the
+  compare-and-set tool for race-safe writes (e.g. decrement stock only if it hasn't
+  changed):
+
+  ```json
+  { "op": "update", "resource": "products", "id": "…", "data": { "stock": 7 },
+    "guard": [ { "field": "stock", "op": "eq", "value": 10 } ] }
+  ```
+
+  `op` ∈ `eq | ne | gt | gte | lt | lte`; the field must be a declared column and
+  the value is type-checked + bound (never interpolated). An update/delete that
+  matches no row (not found, excluded by the role's row condition, **or** a guard
+  not met) fails the transaction.
+- **Errors name the failing op** (never an opaque 500): a failure returns the
+  failing op's status with `{ "error", "failed_operation": <index>, "op",
+  "resource"[, "fields"] }`. A unique collision → `409`, an unknown field → `422`,
+  forbidden → `403`, a bad op/resource → `400`.
+- **Limit**: at most **100** operations per request (`APPITOOLS_MAX_TX_OPS`) →
+  `400` over the cap; the 1 MiB body cap also applies.
+- **Reserved**: a schema resource may not be named `transaction` (it would shadow
+  this route).
+- **Not in v1** (documented): `after_*` webhooks and the SSE broadcast do NOT fire
+  for batch ops (use the emitted **outbox events** to react); no GraphQL batch
+  (REST only); no in-place arithmetic (`stock = stock - n`) — use a compare-and-set
+  `guard`. The single-op `POST/PATCH/DELETE` path is **unchanged** (the batch is a
+  separate path; measured `no_change`). A 2-op transaction measured ≈ 6 ms p50 vs ≈
+  4 ms for one standalone write (the shared BEGIN/COMMIT is amortized). Example:
+  [examples/model-lab/atomic-tx.json](examples/model-lab/atomic-tx.json).
+
 ## GraphQL
 
 `POST /graphql`. Queries plus `create<Singular>` / `update<Singular>` /

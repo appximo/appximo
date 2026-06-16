@@ -886,6 +886,24 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		}
 	}
 
+	// Atomic multi-resource transactions (G4): POST /api/transaction. A NEW path off
+	// the per-resource handlers above — those are untouched, so the single-op
+	// create/update/delete gate is preserved. The batch reuses the SAME RBAC (G2),
+	// validation, before-hook and outbox cores, executed on ONE transaction. The
+	// before-hook result is mapped here (where hr lives) so transaction.go stays
+	// decoupled from the HookRunner's result type.
+	hookEval := func(ctx context.Context, hook *schema.HookConfig, body map[string]any) (map[string]any, int, string) {
+		hookRes, hookErr := hr.RunBeforeHook(ctx, hook, body, nil)
+		if hookErr != nil {
+			return nil, http.StatusInternalServerError, "internal error"
+		}
+		if !hookRes.Proceed {
+			return nil, http.StatusUnprocessableEntity, hookRes.Error
+		}
+		return hookRes.Data, 0, ""
+	}
+	registerTransactionRoute(r, s, tdb, policy, hookEval)
+
 	return r
 }
 

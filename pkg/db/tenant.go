@@ -446,6 +446,47 @@ func (tdb *TenantDB) ExecTenantEmit(ctx context.Context, schemaName, query strin
 	return res.(int64), nil
 }
 
+// txTimeout bounds a whole multi-operation transaction (WithTenantTx). It is more
+// generous than queryTimeout (which bounds ONE statement) because an atomic batch
+// runs N statements on the same connection; it still fail-fast caps a transaction
+// that hangs (e.g. an unreachable Postgres) instead of pinning a pool connection.
+const txTimeout = 15 * time.Second
+
+// WithTenantTx opens ONE transaction scoped to schemaName (search_path set once via
+// SET LOCAL, exactly like the single-statement helpers), runs fn against that tx,
+// and COMMITS iff fn returns nil — otherwise it ROLLS BACK. It is the atomic
+// multi-resource primitive (G4): a caller runs several writes through the one tx and
+// they are all-or-nothing. fn must use ONLY the handed-in tx (never the pool) so
+// every statement shares the tenant search_path and the atomic boundary; a panic or
+// error in fn leaves nothing partially committed (the deferred Rollback runs). The
+// tenant cannot be crossed — the search_path is fixed for the transaction's life.
+func (tdb *TenantDB) WithTenantTx(ctx context.Context, schemaName string, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	if err := validateSchemaName(schemaName); err != nil {
+		return err
+	}
+	cctx, cancel := context.WithTimeout(ctx, txTimeout)
+	defer cancel()
+	_, err := tdb.exec(func() (any, error) {
+		tx, err := tdb.pool.Begin(cctx)
+		if err != nil {
+			return nil, fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback(cctx) //nolint:errcheck // no-op after a successful Commit
+		setPath := "SET LOCAL search_path TO " + pgx.Identifier{schemaName}.Sanitize() + ", public"
+		if _, err := tx.Exec(cctx, setPath); err != nil {
+			return nil, fmt.Errorf("set search_path: %w", err)
+		}
+		if err := fn(cctx, tx); err != nil {
+			return nil, err // deferred Rollback discards every prior write
+		}
+		if err := tx.Commit(cctx); err != nil {
+			return nil, fmt.Errorf("commit: %w", err)
+		}
+		return nil, nil
+	})
+	return classify(err)
+}
+
 // QueryScalarTenant runs a query that returns a single int64 value (e.g. COUNT(*))
 // within the tenant schema. Returns 0 if no rows are returned.
 func (tdb *TenantDB) QueryScalarTenant(ctx context.Context, schemaName, query string, args ...any) (int64, error) {
