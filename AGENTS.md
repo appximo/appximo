@@ -348,6 +348,17 @@ a row condition reads as 404 (not 403).
 `$user_id` resolving to the JWT subject. The JWT `role` claim selects
 the policy.
 
+**`conditions` and `fields` are enforced on create too** (not only
+read/update/delete): on `POST` / GraphQL `create…`, a role's field
+allowlist drops any body field outside it, and a row `condition` field
+is **forced** to the caller's resolved value — a body that supplies a
+*different* value for it is rejected with `403`. So an owner-scoped role
+(`user_id = $user_id`) can only create rows attributed to itself; it
+cannot mass-assign another principal's id. REST and GraphQL share one
+enforcement core (`codegen.EnforceCreateRBAC`), so both behave
+identically. A role with neither a condition nor an allowlist creates
+unrestricted (no added cost on the create hot path).
+
 ### Hooks (lifecycle extensions)
 
 Declared per resource under `hooks`. Events are exactly

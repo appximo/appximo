@@ -302,6 +302,11 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		// --- Create ---
 		r.Post("/api/"+name, func(w http.ResponseWriter, req *http.Request) {
 			tc := tenant.MustFromCtx(req.Context())
+			// Row-level condition + field allowlist for this role (if any) — applied
+			// to the create below (FASE3-SEC Hallazgo 2), exactly as read/update/delete
+			// already consume it. nil for an unrestricted role (rrhh-admin) or a test
+			// without the RBAC middleware → enforcement is a no-op.
+			evalResult := rbac.EvalResultFromCtx(req.Context())
 			// Parse body (1 MiB cap → 413; malformed → 400). Mirrors the PUT/PATCH
 			// handlers and the OpenAPI contract (Error413), which already document a
 			// 413 for an oversized create body.
@@ -363,14 +368,30 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				markSpan(req, "hook")
 			}
 
+			// HALLAZGO-2 / FASE3-SEC: enforce the role's row-level condition + field
+			// allowlist on the create — the SAME enforcement read/update/delete apply,
+			// shared with the GraphQL create via EnforceCreateRBAC so the two surfaces
+			// are identical. A row-scoped role's record is forced to ITS OWN id; a body
+			// claiming another principal's id is rejected (403). Runs on the post-hook
+			// body so the inserted row is always consistent with the policy.
+			if status, msg := EnforceCreateRBAC(body, evalResult); status != 0 {
+				if t := observability.SpanTrackerFromCtx(req.Context()); t != nil {
+					t.RecordError(msg)
+				}
+				writeJSONErr(w, status, msg)
+				return
+			}
+
 			// NOTE: column identifiers are quoted by BuildInsertArgs so a client
 			// key cannot break out of the identifier position (SQL injection). We do
 			// NOT whitelist keys against res.Fields here: the schema can evolve at
 			// runtime (a migration adds a column without rebuilding this router), so
 			// the DB is the source of truth — an unknown column errors at the DB and
 			// WriteDBError maps that 42703 to a 422 unknown_field (S44 shape), never
-			// a 500. Residual mass-assignment (e.g. client-set id) is low-impact for
-			// the current schema (no privilege/tenant columns) and tracked separately.
+			// a 500. The row-level RBAC mass-assignment that used to live here (an
+			// owner-scoped role POSTing another principal's id) is now closed by
+			// EnforceCreateRBAC above; a role with no condition/allowlist still writes
+			// the body as-is (the DB-as-source-of-truth design for runtime columns).
 			// Shared create core (RunInsert): builds the INSERT and, when the
 			// resource opted into events:["create"], enqueues the {resource}.created
 			// event in the SAME tx. The GraphQL create mutation calls the same
@@ -870,11 +891,64 @@ func sseHandler(name string, hub *events.Hub) http.HandlerFunc {
 // the role's allowlist dropped every field in the body). Callers map it to 422.
 var ErrNoWritableUpdate = fmt.Errorf("no writable fields in request")
 
+// EnforceCreateRBAC applies a role's field allowlist and row-level condition to a
+// CREATE body, closing the mass-assignment gap that previously existed because the
+// create path — unlike read/update/delete — applied NEITHER (FASE3-SEC, Hallazgo 2).
+// It mutates body in place and is the ONE enforcement shared by the REST POST handler
+// and the GraphQL create mutation, so both surfaces behave identically. Call it on the
+// post-hook body, just before RunInsert.
+//
+//   - Field allowlist: when the role restricts writable fields, any body key outside
+//     the allowlist is dropped silently (the same contract CollectUpdate uses for
+//     update — drop, never error), EXCEPT the row-condition field, which is
+//     server-forced below and therefore implicitly allowed.
+//   - Row-level condition: a row-scoped role (e.g. user_id = $user_id) must create
+//     rows attributed to ITSELF. The condition field is FORCED to the principal's
+//     resolved value; if the body supplies a DIFFERENT non-null value, the create is
+//     REJECTED with 403 — a client can never create a row owned by another principal.
+//
+// Returns (0,"") to proceed, or (403, msg) to reject. ev may be nil (no policy result
+// — e.g. a test without the RBAC middleware, or the library Ctx path), and a role with
+// neither an allowlist nor a condition (e.g. rrhh-admin) is a cheap no-op, so the
+// unrestricted create path keeps behaving exactly as before (the GATE-WRITE case).
+func EnforceCreateRBAC(body map[string]any, ev *rbac.EvalResult) (int, string) {
+	if ev == nil {
+		return 0, ""
+	}
+	condField := ""
+	if ev.Condition != nil {
+		condField = ev.Condition.Field
+	}
+	if len(ev.AllowedFields) > 0 {
+		allow := make(map[string]struct{}, len(ev.AllowedFields))
+		for _, f := range ev.AllowedFields {
+			allow[f] = struct{}{}
+		}
+		for k := range body {
+			if k == condField {
+				continue // server-forced below; never client-droppable
+			}
+			if _, ok := allow[k]; !ok {
+				delete(body, k)
+			}
+		}
+	}
+	if ev.Condition != nil {
+		if cur, present := body[condField]; present && cur != nil {
+			if fmt.Sprintf("%v", cur) != ev.Condition.Value {
+				return http.StatusForbidden, fmt.Sprintf("field %q must match the authenticated principal", condField)
+			}
+		}
+		body[condField] = ev.Condition.Value
+	}
+	return 0, ""
+}
+
 // RunInsert builds and executes the INSERT … RETURNING * for an already-validated
-// body (after any before_create hook), emitting the outbox event in the SAME
-// transaction when emitCreate is set — exactly as RunUpdate does for updates. It is
-// the ONE create core shared by the REST POST handler and the GraphQL create
-// mutation, so both surfaces enqueue an IDENTICAL {resource}.created event (same
+// body (after any before_create hook AND EnforceCreateRBAC), emitting the outbox event
+// in the SAME transaction when emitCreate is set — exactly as RunUpdate does for
+// updates. It is the ONE create core shared by the REST POST handler and the GraphQL
+// create mutation, so both surfaces enqueue an IDENTICAL {resource}.created event (same
 // topic, same lean {id,tenant_id,resource,action} payload) atomically with the
 // insert. A resource that did not opt into events:["create"] takes the plain
 // ExecRowsTenant path — no emission, zero added overhead (the no-opt-in gate).

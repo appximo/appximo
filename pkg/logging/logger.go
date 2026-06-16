@@ -113,8 +113,8 @@ type RequestTap struct {
 	StartUS    int64 // request start, unix microseconds
 	DurationUS int64
 	FromCache  bool
-	TraceID    string               // 16-hex request trace id (also in X-Trace-ID)
-	Spans      []observability.Span // per-stage breakdown from the SpanTracker
+	TraceID    string                      // 16-hex request trace id (also in X-Trace-ID)
+	Spans      []observability.Span        // per-stage breakdown from the SpanTracker
 	ErrMsg     string                      // error message for an errored request ("" otherwise)
 	Capture    *observability.ErrorCapture // symbolized stack for a 500 (nil otherwise)
 	IP         string                      // client IP (X-Real-IP / X-Forwarded-For / RemoteAddr)
@@ -201,12 +201,23 @@ func RequestLogger(
 			}
 			if tap != nil {
 				// RoutePattern is populated only after routing completes; reading it
-				// post-ServeHTTP yields the matched template, falling back to the path.
+				// post-ServeHTTP yields the matched template (e.g. /api/empleados/{id}).
+				// A request REJECTED by a middleware BEFORE the router runs (e.g. a 403
+				// at RBAC, a 429 at the limiter) never reaches routeHTTP, so the pattern
+				// is empty — without normalization the raw path with its CONCRETE id
+				// (a UUID) would become the metric label, letting by-id probing explode
+				// /metrics cardinality (FASE3-SEC Hallazgo 3). When unmatched, template
+				// id-like segments to {id} so the label stays bounded to real patterns.
 				route := r.URL.Path
+				matched := false
 				if rc := chi.RouteContext(r.Context()); rc != nil {
 					if p := rc.RoutePattern(); p != "" {
 						route = p
+						matched = true
 					}
+				}
+				if !matched {
+					route = templatePath(route)
 				}
 				// Headers + full URL are captured ONLY for traces that will be
 				// persisted (errors or slow), using the exact persistence predicate.
@@ -241,4 +252,33 @@ func RequestLogger(
 			}
 		})
 	}
+}
+
+// idSegmentRe matches a path segment that is a concrete record id — a UUID or a
+// run of digits — so it can be collapsed to the {id} placeholder chi itself would
+// have produced had the request reached the router.
+var idSegmentRe = regexp.MustCompile(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9]+)$`)
+
+// templatePath normalizes the id-bearing segments of a raw URL path to {id}, so a
+// request rejected before the router (whose RoutePattern is empty) contributes a
+// BOUNDED metric label instead of one carrying the concrete UUID/id. It is only
+// reached on the non-routed path (denied / 404), never the 200 hot path. The
+// resource segment is left intact (a finite, schema-bounded set); only the
+// per-record id varies, and that is exactly what would otherwise be unbounded.
+func templatePath(p string) string {
+	if !strings.ContainsRune(p, '/') {
+		return p
+	}
+	segs := strings.Split(p, "/")
+	changed := false
+	for i, s := range segs {
+		if idSegmentRe.MatchString(s) {
+			segs[i] = "{id}"
+			changed = true
+		}
+	}
+	if !changed {
+		return p
+	}
+	return strings.Join(segs, "/")
 }

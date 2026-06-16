@@ -772,7 +772,8 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 	tbl := pgx.Identifier{name}.Sanitize()
 	return func(p gql.ResolveParams) (any, error) {
 		tc := tenant.MustFromCtx(p.Context)
-		if _, err := checkRBAC(p.Context, policy, name, "create"); err != nil {
+		evalResult, err := checkRBAC(p.Context, policy, name, "create")
+		if err != nil {
 			return nil, err
 		}
 
@@ -818,6 +819,14 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 			return nil, fmt.Errorf("%s", hookRes.Error)
 		}
 		body := hookRes.Data
+
+		// HALLAZGO-2 / FASE3-SEC: enforce the role's row-level condition + field
+		// allowlist on the create, identically to the REST POST path — same shared
+		// EnforceCreateRBAC. A row-scoped role's record is forced to its own id; a
+		// body claiming another principal's id is rejected (403 → GraphQL error).
+		if status, msg := codegen.EnforceCreateRBAC(body, evalResult); status != 0 {
+			return nil, fmt.Errorf("%s", msg)
+		}
 
 		// Shared create core: the SAME codegen.RunInsert the REST POST handler uses,
 		// so a resource with events:["create"] emits an IDENTICAL {resource}.created

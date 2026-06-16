@@ -145,7 +145,10 @@ baseline faster are welcome; we'll publish updated numbers.
   `pg_notify` — column-level only: **adding a new resource requires a process
   restart** (routes and GraphQL types are compiled at boot)
 - **RBAC**: JSON policies — per role, per resource, per action, per field, plus
-  dynamic row conditions (`operator_id = $user_id`); deny by default
+  dynamic row conditions (`operator_id = $user_id`); deny by default. Field
+  allowlists and row conditions are enforced on **create** as well as
+  read/update/delete — an owner-scoped role can only create rows attributed to
+  itself (no mass-assignment), on both REST and GraphQL
 - **Auth (password identity)**: in-engine signup/login/refresh (`POST /auth/*`),
   multi-tenant-aware — users live in the tenant's own schema, so **email is unique
   per tenant, not globally** (the same email is a distinct account in two tenants).

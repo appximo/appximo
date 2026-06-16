@@ -97,6 +97,52 @@ appitools_requests_total{method="GET",path="/api/guides",status="200",tenant_id=
 	}
 }
 
+// TestObservability_DeniedByIDPathIsTemplated proves the metric-cardinality fix
+// (FASE3-SEC Hallazgo 3): three DELETEs by DISTINCT random UUIDs, each REJECTED at
+// RBAC before the router resolves a pattern, must collapse into ONE bounded series
+// with path "/api/guides/{id}" — not three series carrying the concrete UUIDs. The
+// official comparator asserts the WHOLE requests_total family is exactly that single
+// series; a raw-UUID label would make it fail.
+func TestObservability_DeniedByIDPathIsTemplated(t *testing.T) {
+	s := helpers.FixtureSchema(t, "logistics_schema.json")
+	const tenantID = "obscard"
+	helpers.RegisterTenant(t, testPool, tenantID, s)
+	srv, metrics := helpers.BuildObservableServer(t, s, testPool)
+	// An unknown role → RBAC denies (deny-by-default) at the middleware, before the
+	// router runs, so RoutePattern is empty — the pre-router denial path under test.
+	token := helpers.GenToken(t, "nobody", "00000000-0000-0000-0000-000000000009", tenantID)
+
+	uuids := []string{
+		"3fa85f64-5717-4562-b3fc-2c963f66afa6",
+		"7c9e6679-7425-40de-944b-e07fc1f90ae7",
+		"01234567-89ab-cdef-0123-456789abcdef",
+	}
+	for _, u := range uuids {
+		req := helpers.TenantRequest(t, srv, http.MethodDelete, "/api/guides/"+u, tenantID, token)
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatalf("DELETE /api/guides/%s: %v", u, err)
+		}
+		io.Copy(io.Discard, resp.Body) //nolint:errcheck
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("DELETE by-id with unknown role: want 403, got %d", resp.StatusCode)
+		}
+	}
+
+	// The whole requests_total family must be exactly ONE templated 403 series with
+	// value 3 — proving the three random UUIDs did not create three series.
+	expected := `
+# HELP appitools_requests_total Total de requests por tenant y endpoint
+# TYPE appitools_requests_total counter
+appitools_requests_total{method="DELETE",path="/api/guides/{id}",status="403",tenant_id="obscard"} 3
+`
+	if err := testutil.GatherAndCompare(metrics.Gatherer(),
+		strings.NewReader(expected), "appitools_requests_total"); err != nil {
+		t.Fatalf("denied by-id path must be templated to {id} (bounded cardinality):\n%v", err)
+	}
+}
+
 // TestObservability_ActiveTenantsGauge drives traffic for two distinct tenants and
 // asserts the active-tenants gauge equals 2.
 func TestObservability_ActiveTenantsGauge(t *testing.T) {
