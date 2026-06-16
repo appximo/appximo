@@ -22,25 +22,46 @@ type WhereCondition struct {
 }
 
 // Evaluate determines whether evalCtx.Role may perform action on resource,
-// resolves any dynamic variables in Conditions, and returns the full result.
+// resolves any dynamic variables in the applicable Condition, and returns the full
+// result. The condition + field allowlist returned are ALWAYS the ones belonging to
+// THIS resource: in the legacy form the role-global ones, in the per-resource form
+// the matched resource's own — so every operation (read/create/update/delete/
+// aggregate, on REST and GraphQL, which all funnel through this one call) scopes by
+// the correct resource's condition.
 func (p *Policy) Evaluate(evalCtx EvalContext, resource, action string) EvalResult {
 	rp, ok := p.Roles[evalCtx.Role]
 	if !ok {
 		return EvalResult{Allowed: false}
 	}
 
+	// Per-resource form (G2): the role's permissions map is the sole source of
+	// truth. A resource absent from the map is denied (deny-by-default), and the
+	// matched entry carries its OWN condition/allowlist.
+	if len(rp.Permissions) > 0 {
+		perm, ok := rp.Permissions[resource]
+		if !ok || !actionAllowed(perm.Actions, action) {
+			return EvalResult{Allowed: false}
+		}
+		result := EvalResult{
+			Allowed:       true,
+			AllowedFields: perm.Fields,
+		}
+		if perm.Conditions != nil && conditionAppliesToAction(perm, action) {
+			result.Condition = &WhereCondition{
+				Field: perm.Conditions.Field,
+				Op:    perm.Conditions.Op,
+				Value: resolveVar(perm.Conditions.Val, evalCtx),
+			}
+		}
+		return result
+	}
+
+	// Legacy role-global form (unchanged): one condition/allowlist for every
+	// listed resource.
 	if !resourceAllowed(rp.Resources, resource) {
 		return EvalResult{Allowed: false}
 	}
-
-	allowed := false
-	for _, a := range rp.Actions {
-		if a == "*" || a == action {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
+	if !actionAllowed(rp.Actions, action) {
 		return EvalResult{Allowed: false}
 	}
 
@@ -58,6 +79,22 @@ func (p *Policy) Evaluate(evalCtx EvalContext, resource, action string) EvalResu
 	}
 
 	return result
+}
+
+// conditionAppliesToAction reports whether a per-resource permission's condition
+// gates this action. An empty ConditionActions means the condition applies to ALL
+// granted actions (the safe default); a non-empty list scopes it (e.g. read absent
+// from the list ⇒ reads are unconditional while writes stay owner-scoped).
+func conditionAppliesToAction(perm ResourcePermission, action string) bool {
+	if len(perm.ConditionActions) == 0 {
+		return true
+	}
+	for _, a := range perm.ConditionActions {
+		if a == action {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveVar(val string, ctx EvalContext) string {

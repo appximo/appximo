@@ -289,15 +289,12 @@ func New(cfg Config) (*App, error) {
 	}
 	app.eventsHub = events.NewHub(maxSSE)
 
-	// Response cache (5s TTL) + role gate.
+	// Response cache (5s TTL) + role gate. A role is cacheable only if it injects no
+	// per-user row condition and no field allowlist — for BOTH the legacy role-global
+	// form and the per-resource permissions form (any conditioned/allowlisted resource
+	// ⇒ not cacheable, fail-safe). See rbac.Policy.RoleCacheable.
 	app.responseCache = cache.New(5 * time.Second)
-	app.responseCache.SetRoleCacheGate(func(role string) bool {
-		rp, ok := rbacPolicy.Roles[role]
-		if !ok {
-			return false
-		}
-		return rp.Conditions == nil && len(rp.FieldsAllow) == 0
-	})
+	app.responseCache.SetRoleCacheGate(app.rbacPolicy.RoleCacheable)
 
 	// Rate limiter.
 	rlRPS := 1000.0

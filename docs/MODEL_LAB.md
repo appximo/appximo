@@ -18,11 +18,11 @@
 
 | Archetype | Verdict | One-line |
 |---|---|---|
-| **SaaS / productivity** (Notion/Trello/Linear) | 🟡 partial (closest to yes) | Nesting, tags, assignees, threads model cleanly; **per-workspace isolation** is broken by role-global RBAC, and dashboards need aggregation. |
+| **SaaS / productivity** (Notion/Trello/Linear) | 🟢 mostly yes | Nesting, tags, assignees, threads model cleanly; **owner/workspace isolation is now expressible** (per-resource RBAC, G2) and dashboards have aggregation (G3). A non-id workspace **claim variable** is the remaining scoping nicety; status workflow (G5) is the last gap. |
 | **E-commerce / marketplace** | 🟡 partial | The catalog (variants, category tree, m2m) is excellent; the **commerce core** (checkout atomicity, inventory, order totals, status workflow) lives outside the engine. |
-| **Social / content** | 🟡 partial | The graph (follows, threaded comments, posts) is excellent; **the feed, like-counts, public-read+owner-write, and polymorphic likes** are gaps. |
+| **Social / content** | 🟢 mostly yes | The graph (follows, threaded comments, posts) is excellent; **public-read + owner-write now works in ONE role** (per-resource RBAC + `condition_actions`, G2) and counts have aggregation (G3). The feed-join and polymorphic likes (G11) remain. |
 | **Booking / reservations** (Airbnb/Calendly) | 🟡 partial | Listings/bookings/embeds work; the **defining invariant — no double-booking** — is unmeetable (no time-range/overlap), and payments aren't atomic. |
-| **Messaging / chat** | 🟡 partial | Conversations/messages/participants/keyset streams work; **participation-scoped access** and **per-conversation realtime** and unread counts are gaps. |
+| **Messaging / chat** | 🟡 partial (improved) | Conversations/messages/participants/keyset streams work; **per-resource scoping landed (G2)** so each resource carries its own condition, but **membership-by-subquery** (messages of conversations I'm in) still needs the participant denormalized onto the row; per-conversation realtime remains (G3 covers unread counts). |
 | **Fintech / wallet** | 🔴 no | Ledger/accounts model fine, but **every defining need** — derived balance (SUM), atomic transfer, append-only immutability, idempotency without a 500, exact money — is unmet. Not a system of record for money. |
 
 **The engine is a superb declarative CRUD + relations + RBAC + multi-tenant
@@ -76,7 +76,32 @@ panic: appitools/graphql: failed to build schema:
 names, or allow `_` in resource names) and `validate` should reject hyphenated
 resource names until then. Blocks **5/6** as naturally written.
 
-### 🔴 G2 — RBAC `conditions` is role-global (one condition per role, applied to *all* its resources)
+### ✅ G2 — RBAC `conditions` is role-global (one condition per role, applied to *all* its resources) — **RESOLVED (FIX-G2)**
+
+> **Resolved.** A role may now declare a **`permissions` map** (resource → its own
+> `actions` + `conditions` + `fields`) instead of the role-global keys, so each
+> resource is scoped by its **OWN** column (`projects.owner_id`,
+> `documents.created_by`) — and `condition_actions` scopes a condition to a subset
+> of the actions, expressing **"read all, write own"** in one role. A resource with
+> no condition is unscoped; a literal `val` (e.g. `"published"`) gives public-read
+> of a row subset; a per-resource `fields` allowlist scopes the response per
+> resource. Every operation that already honored conditions
+> (read/create/update/delete/aggregate, REST + GraphQL) uses the **correct
+> resource's** condition — verified live with a no-leak-between-resources test. The
+> condition `field` is validated to **exist on that resource** at load (no masked
+> `500`). Backward-compatible: the role-global form is unchanged (mutually
+> exclusive with `permissions`), and the ERP demo behaves identically; measured
+> `no_change` on the RBAC hot path. This is the **biggest modeling unlock** —
+> workspace/owner scoping and public-read+owner-write become expressible.
+>
+> **Two pieces remain for the fullest scoping** (smaller, separate follow-ups, NOT
+> G2): (a) a condition value that resolves an arbitrary **JWT claim** (e.g.
+> `$workspace_id`) — today `val` resolves `$user_id`/`$external_client_id`/literal,
+> so workspace isolation works when the scoping value is the caller's id or a
+> literal; (b) **membership/subquery** conditions (chat: "messages in conversations
+> I participate in") — the condition is a single `field op val`, not a subquery, so
+> participation that needs a join still requires denormalizing the participant onto
+> the row. The original finding is preserved below.
 
 A `RolePolicy` carries a single `conditions`; it is appended as
 `AND <field> = $user_id` to **every** resource the role lists. Consequences seen
@@ -290,14 +315,16 @@ Schemas: [ecommerce](../examples/model-lab/ecommerce.json) ·
 [chat](../examples/model-lab/chat.json) ·
 [fintech](../examples/model-lab/fintech.json).
 
-### SaaS / productivity — 🟡 partial (the best fit)
+### SaaS / productivity — 🟢 mostly yes (the best fit)
 **Models well:** workspace → project → list → task → comment nesting (depth-2
 embeds), task↔tag m2m, assignee `belongs_to`, threaded comments (self-ref),
 status filter, priority+due sort, search. Closest to a "yes" because it is
 CRUD-with-clear-ownership.
-**Breaks:** per-workspace isolation is impossible with role-global conditions (a
-`member` listing its workspace returns `[]`); no aggregation for board/dashboard
-rollups; status workflow unenforced. Gaps: G2, G3, G5.
+**Now works:** owner-scoped per-resource RBAC — each resource scoped by its own
+column, some resources shared, "read all / write own" — is expressible (G2 ✅);
+board/dashboard rollups have aggregation (G3 ✅). **Remaining:** scoping by a
+non-id workspace claim needs a `$workspace_id`-style variable; status workflow
+unenforced (G5).
 
 ### E-commerce / marketplace — 🟡 partial
 **Models well:** sellers, products, SKU-level variants (composite-unique
@@ -309,15 +336,16 @@ are non-atomic and racy (G4); status workflow unenforced (G5); a seller can't re
 the shared catalog through its row-scoped role (G2); no facets/revenue
 aggregation (G3); one-review-per-buyer collision is a `500` (G6).
 
-### Social / content — 🟡 partial
+### Social / content — 🟢 mostly yes
 **Models well:** profiles, posts, **threaded comments (self-ref)**, **follows as a
 self-referencing user↔user m2m** (both directions embed), media. The graph is the
 strength.
-**Breaks:** "home feed = posts by people I follow" is not a single query (no join
-across the follow set); like/comment counts need denormalized counters (G3);
-"public-read + owner-write" can't be one role (G2); a "like on a post *or* a
-comment" needs two resources (G11, polymorphic); duplicate-follow collision is a
-`500` (G6).
+**Now works:** "public-read + owner-write" is one role — a member reads all posts
+but edits/deletes only its own via per-resource `condition_actions` (G2 ✅);
+like/comment counts have aggregation (G3 ✅); duplicate-follow collision is now a
+clean `409` (G6 ✅). **Remaining:** "home feed = posts by people I follow" is not a
+single query (no join across the follow set); a "like on a post *or* a comment"
+needs two resources (G11, polymorphic).
 
 ### Booking / reservations — 🟡 partial
 **Models well:** hosts, listings, availability slots, bookings, payments, reviews,
@@ -328,15 +356,17 @@ verified two overlapping bookings both `201`); "free slots with remaining capaci
 needs client logic (G3, no aggregation); payment + booking aren't atomic (G4);
 status workflow unenforced (G5); slot/idempotency collisions are `500` (G6).
 
-### Messaging / chat — 🟡 partial
+### Messaging / chat — 🟡 partial (improved)
 **Models well:** users, conversations, participants (m2m), messages with a sorted
 **keyset-paginated stream**, read receipts, reactions, attachments; per-resource
 SSE exists; JS hooks enforce message rules.
-**Breaks:** participation-scoped reading is impossible — a `member` sees only
-messages it *sent*, not its conversations (G2); SSE is per-resource, **not
-per-conversation** (no server-side conversation filter on the stream); unread
-counts need aggregation (G3); reaction/participant uniqueness collisions are `500`
-(G6).
+**Improved:** per-resource RBAC (G2 ✅) lets each resource carry its own condition
+column, and unread counts have aggregation (G3 ✅); reaction/participant uniqueness
+collisions are now `409` (G6 ✅). **Still breaks:** true participation scoping
+("messages of conversations I'm in") is a **subquery/membership** test, not a single
+`field op val` — so it works only by denormalizing the participant onto each row (a
+`member` then sees its own messages, not co-participants'); SSE is per-resource,
+**not per-conversation** (no server-side conversation filter on the stream).
 
 ### Fintech / wallet — 🔴 no
 **Models well (shape only):** accounts, immutable-intent ledger entries, transfers,
@@ -366,9 +396,12 @@ Ordered to unlock the most modern apps per unit of engine work:
 3. ~~**G3 — An aggregation surface**~~ ✅ **DONE (FIX-G3).** `count`/`sum`/`avg`/
    `min`/`max` + `group_by` on REST + GraphQL, RBAC-scoped and filter-aware, plus
    opt-in list `?count=true`. Unblocks counts/balances/dashboards in **6/6**.
-4. **G2 — Per-resource RBAC conditions** *(medium-large).* The biggest *modeling*
-   unlock: workspace/participation scoping and public-read+owner-write become
-   expressible. Turns several 🟡 into near-🟢.
+4. ~~**G2 — Per-resource RBAC conditions**~~ ✅ **DONE (FIX-G2).** A `permissions`
+   map gives each resource its own condition/actions/fields, with
+   `condition_actions` for read-all/write-own. Workspace/owner scoping and
+   public-read+owner-write are now expressible — SaaS and Social move to 🟢. The
+   remaining scoping pieces (a `$workspace_id`-style **claim variable** and
+   **membership/subquery** conditions for chat) are smaller, separate follow-ups.
 5. **G4 — A declarative multi-resource atomic write (or a documented `Ctx.Tx`
    recipe)** *(large).* Unblocks the commerce/finance core (checkout, transfer).
 6. **G5 — Status-transition enforcement** *(medium).* Allowed-transitions per enum
@@ -380,12 +413,16 @@ Then, as depth: **computed/derived fields** (totals, counts, balances),
 
 **Bottom line for the AI layer:** the engine is already a strong target for "lay
 out the data, relations, validation, RBAC, and multi-tenant isolation of an app."
-G1/G6 are closed (robust examples + idempotency/dedup), and **G3 is closed**
-(aggregation — counts, balances, dashboards now work on both surfaces). The
-remaining big modeling unlock is **G2** (the role-global condition →
-per-resource conditions), which is what turns workspace/participation-scoped
-archetypes from "partial" toward "yes" — and only with the engine able to model
-these patterns can an AI reliably *generate* the variety of apps people expect.
+G1/G6 are closed (robust examples + idempotency/dedup), **G3 is closed**
+(aggregation — counts, balances, dashboards on both surfaces), and **G2 is closed**
+(per-resource RBAC conditions — workspace/owner scoping and public-read+owner-write
+now expressible, moving SaaS and Social to 🟢). With the four highest-impact gaps
+(G1/G2/G3/G6) closed, the **six archetypes are all modelable** except for the two
+behavioral invariants that remain: **G4** (multi-resource atomic writes — the
+commerce/finance core) and **G5** (status-transition enforcement). Closing those —
+plus the smaller scoping follow-ups noted under G2 (a `$workspace_id`-style claim
+variable; membership/subquery conditions) — is what remains before an AI layer can
+reliably *generate* the full variety of apps people expect.
 
 ---
 

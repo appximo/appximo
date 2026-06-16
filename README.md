@@ -154,7 +154,12 @@ baseline faster are welcome; we'll publish updated numbers.
   dynamic row conditions (`operator_id = $user_id`); deny by default. Field
   allowlists and row conditions are enforced on **create** as well as
   read/update/delete — an owner-scoped role can only create rows attributed to
-  itself (no mass-assignment), on both REST and GraphQL
+  itself (no mass-assignment), on both REST and GraphQL. Conditions can be
+  **role-global** or **per-resource** (a `permissions` map): one role can scope
+  each resource by its **own** column (`projects.owner_id`, `documents.created_by`),
+  leave some resources unscoped, and even "read all, write own" via
+  `condition_actions` — unlocking workspace/owner scoping that role-global
+  conditions couldn't express
 - **Auth (password identity)**: in-engine signup/login/refresh (`POST /auth/*`),
   multi-tenant-aware — users live in the tenant's own schema, so **email is unique
   per tenant, not globally** (the same email is a distinct account in two tenants).

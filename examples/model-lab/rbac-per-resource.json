@@ -1,0 +1,57 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "rbac-per-resource-lab",
+  "resources": {
+    "projects": {
+      "fields": {
+        "owner_id": { "type": "uuid" },
+        "name":     { "type": "string", "required": true, "maxLength": 120 }
+      }
+    },
+    "documents": {
+      "fields": {
+        "created_by": { "type": "uuid" },
+        "title":      { "type": "string", "required": true, "maxLength": 120 }
+      }
+    },
+    "tags": {
+      "fields": {
+        "label": { "type": "string", "required": true, "maxLength": 40 }
+      }
+    },
+    "posts": {
+      "fields": {
+        "author_id": { "type": "uuid" },
+        "title":     { "type": "string", "required": true, "maxLength": 160 },
+        "status":    { "type": "string", "enum": ["draft", "published"], "default": "draft" }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": { "resources": "*", "actions": ["*"] },
+
+      "member": {
+        "permissions": {
+          "projects":  { "actions": ["read", "create", "update", "delete"],
+                         "conditions": { "field": "owner_id", "op": "eq", "val": "$user_id" } },
+          "documents": { "actions": ["read", "create", "update", "delete"],
+                         "conditions": { "field": "created_by", "op": "eq", "val": "$user_id" } },
+          "tags":      { "actions": ["read"] },
+          "posts":     { "actions": ["read", "create", "update", "delete"],
+                         "conditions": { "field": "author_id", "op": "eq", "val": "$user_id" },
+                         "condition_actions": ["create", "update", "delete"] }
+        }
+      },
+
+      "reader": {
+        "permissions": {
+          "posts": { "actions": ["read"],
+                     "fields": ["id", "title", "status"],
+                     "conditions": { "field": "status", "op": "eq", "val": "published" } }
+        }
+      }
+    }
+  }
+}

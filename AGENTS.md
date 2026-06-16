@@ -366,6 +366,66 @@ enforcement core (`codegen.EnforceCreateRBAC`), so both behave
 identically. A role with neither a condition nor an allowlist creates
 unrestricted (no added cost on the create hot path).
 
+#### Per-resource conditions (`permissions`, G2)
+
+The `conditions`/`actions`/`fields` above are **role-global**: the single
+condition applies to *every* resource the role lists. To give one role a
+**different condition (and actions and field allowlist) per resource**, declare a
+`permissions` map instead of the role-global keys — each resource carries its own
+grant:
+
+```json
+"rbac": { "roles": {
+  "member": {
+    "permissions": {
+      "projects":  { "actions": ["read","create","update","delete"],
+                     "conditions": { "field": "owner_id",   "op": "eq", "val": "$user_id" } },
+      "documents": { "actions": ["read","create","update","delete"],
+                     "conditions": { "field": "created_by", "op": "eq", "val": "$user_id" } },
+      "tags":      { "actions": ["read"] },
+      "posts":     { "actions": ["read","create","update","delete"],
+                     "fields": ["id","title","status"],
+                     "conditions": { "field": "author_id", "op": "eq", "val": "$user_id" },
+                     "condition_actions": ["create","update","delete"] }
+    }
+  }
+}}
+```
+
+- **Each resource is scoped by its OWN column** — `projects` by `owner_id`,
+  `documents` by `created_by` — so a role can own-scope resources that don't share
+  a column name. (Before, a row-scoped role could only span resources sharing one
+  condition column.)
+- **A resource with no `conditions`** (e.g. `tags`) is unscoped — the role reads
+  every row.
+- **`condition_actions`** scopes the condition to a subset of the actions; the
+  actions *not* listed are unconditional. The example reads **all** posts but
+  edits/deletes only its **own** ("read all, write own"). Omit `condition_actions`
+  and the condition applies to every granted action (the safe default).
+- **`fields`** is the per-resource response allowlist (a role may show different
+  fields per resource). The condition `val` may be `$user_id`,
+  `$external_client_id`, or a **literal** (e.g. `"published"` for a public role
+  that reads only published rows).
+- **Deny-by-default:** when `permissions` is present it is the SOLE source of truth
+  — a resource absent from the map is `403`, the same as a role-global role that
+  doesn't list it.
+- The condition applies to **every operation that already honors conditions**:
+  list/get (filters rows), aggregate (scopes the `COUNT`/`SUM`/…), create (forces /
+  rejects the condition field — mass-assignment block), update/delete (only own
+  rows), and relation embeds (`?include=`) — on **both REST and GraphQL** (all
+  funnel through `rbac.Policy.Evaluate(resource, action)`).
+- **Mutually exclusive with the role-global form** — a role uses one or the other,
+  never both (validation rejects mixing).
+- **Validated at load:** a `permissions` entry over an unknown resource, an unknown
+  action, a `condition` field that **doesn't exist on that resource**, a
+  `condition_actions` value not in `actions`, or a `fields` entry that doesn't
+  exist — each rejects the schema with a clear error (never a masked `500` at
+  runtime). Strict-key, like every other level.
+- **Backward-compatible:** existing schemas that use the role-global form (the ERP
+  demo, model-lab, quickstart) behave **identically** — the per-resource path is
+  additive and the legacy serialization is byte-unchanged. Measured `no_change` on
+  the RBAC read+write hot path. Example: [examples/model-lab/rbac-per-resource.json](examples/model-lab/rbac-per-resource.json).
+
 ### Hooks (lifecycle extensions)
 
 Declared per resource under `hooks`. Events are exactly

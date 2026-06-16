@@ -103,9 +103,19 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 	for roleName, rawRole := range object("rbac.roles", rbac["roles"]) {
 		rolePath := "rbac.roles." + roleName
 		role := object(rolePath, rawRole)
-		addUnknown(rolePath, role, "resources", "actions", "conditions", "fields")
+		addUnknown(rolePath, role, "resources", "actions", "conditions", "fields", "permissions")
 		if cond := object(rolePath+".conditions", role["conditions"]); cond != nil {
 			addUnknown(rolePath+".conditions", cond, "field", "op", "val")
+		}
+		// Per-resource permissions (G2): each entry is keyed by a resource name and
+		// has its own fixed key set, including a nested condition.
+		for resName, rawPerm := range object(rolePath+".permissions", role["permissions"]) {
+			permPath := rolePath + ".permissions." + resName
+			perm := object(permPath, rawPerm)
+			addUnknown(permPath, perm, "actions", "conditions", "condition_actions", "fields")
+			if cond := object(permPath+".conditions", perm["conditions"]); cond != nil {
+				addUnknown(permPath+".conditions", cond, "field", "op", "val")
+			}
 		}
 	}
 

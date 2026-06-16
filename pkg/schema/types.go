@@ -160,11 +160,34 @@ type RBACPolicy struct {
 
 // RolePolicy defines what a role can do.
 // Resources is json.RawMessage because it can be the string "*" or an array of resource names.
+//
+// A role is expressed in ONE of two mutually-exclusive forms (G2):
+//   - Role-global (legacy): Resources + Actions + (optional) Conditions/Fields — the
+//     single condition/allowlist applies to EVERY listed resource (unchanged).
+//   - Per-resource: a Permissions map where each resource carries its OWN actions,
+//     condition and field allowlist (workspace/participation/owner scoping). When
+//     present it is the sole source of truth (deny-by-default for absent resources).
+//
+// Declaring both forms on one role is rejected at validation.
 type RolePolicy struct {
-	Resources  json.RawMessage `json:"resources"`
-	Actions    []string        `json:"actions"`
+	Resources  json.RawMessage `json:"resources,omitempty"`
+	Actions    []string        `json:"actions,omitempty"`
 	Conditions *Condition      `json:"conditions,omitempty"`
 	Fields     []string        `json:"fields,omitempty"` // field-level allowlist (read-only roles)
+
+	// Permissions is the per-resource form (G2): resource name → its grant. Empty for
+	// a legacy role; omitempty keeps the marshalled legacy policy byte-identical so the
+	// schema→rbac.Policy round-trip is unchanged for every existing schema.
+	Permissions map[string]ResourcePermission `json:"permissions,omitempty"`
+}
+
+// ResourcePermission is one role's grant on one resource (G2). Mirrors
+// rbac.ResourcePermission so the schema→rbac.Policy JSON round-trip is lossless.
+type ResourcePermission struct {
+	Actions          []string   `json:"actions"`
+	Conditions       *Condition `json:"conditions,omitempty"`
+	ConditionActions []string   `json:"condition_actions,omitempty"` // actions the condition gates (empty = all)
+	Fields           []string   `json:"fields,omitempty"`            // per-resource field allowlist
 }
 
 // Condition is a simple predicate evaluated at request time for row-level filtering.
