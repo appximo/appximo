@@ -1,0 +1,226 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "chat-messaging",
+
+  "resources": {
+
+    "users": {
+      "fields": {
+        "user_id":      { "type": "uuid",   "required": true, "unique": true },
+        "handle":       { "type": "string", "required": true, "unique": true, "pattern": "^[a-z0-9_]{3,30}$", "minLength": 3, "maxLength": 30 },
+        "display_name": { "type": "string", "required": true, "minLength": 1, "maxLength": 80 },
+        "email":        { "type": "string", "format": "email", "maxLength": 200 },
+        "avatar_url":   { "type": "string", "format": "url", "maxLength": 500 },
+        "status":       { "type": "string", "enum": ["online", "away", "busy", "offline"], "default": "offline" },
+        "status_text":  { "type": "string", "maxLength": 140 },
+        "last_seen_at": { "type": "time" },
+        "typing_in_id": { "type": "uuid",   "relation": "conversations" },
+        "typing_at":    { "type": "time" },
+        "created_at":   { "type": "time",   "auto": true },
+        "updated_at":   { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "conversations": { "type": "many_to_many", "target": "conversations", "through": "participants", "fk": "user_id", "target_fk": "conversation_id", "limit": 100 },
+        "messages_sent": { "type": "has_many",     "target": "messages", "fk": "sender_id", "limit": 50 }
+      },
+      "events": ["create", "update"],
+      "indexes": [
+        { "fields": ["handle"], "unique": true },
+        { "fields": ["status"] },
+        { "fields": ["typing_in_id"] }
+      ]
+    },
+
+    "conversations": {
+      "fields": {
+        "user_id":           { "type": "uuid",   "required": true },
+        "kind":              { "type": "string", "enum": ["direct", "group"], "default": "direct", "required": true },
+        "title":             { "type": "string", "maxLength": 120 },
+        "topic":             { "type": "text",   "maxLength": 1000 },
+        "avatar_url":        { "type": "string", "format": "url", "maxLength": 500 },
+        "created_by_id":     { "type": "uuid",   "required": true, "relation": "users" },
+        "is_archived":       { "type": "bool",   "default": false },
+        "is_locked":         { "type": "bool",   "default": false },
+        "member_count":      { "type": "int",    "default": 0, "min": 0 },
+        "message_count":     { "type": "int64",  "default": 0, "min": 0 },
+        "last_message_id":   { "type": "uuid",   "relation": "messages" },
+        "last_message_at":   { "type": "time" },
+        "last_message_text": { "type": "string", "maxLength": 280 },
+        "created_at":        { "type": "time",   "auto": true },
+        "updated_at":        { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "participants": { "type": "has_many",     "target": "participants", "fk": "conversation_id", "limit": 100 },
+        "members":      { "type": "many_to_many", "target": "users", "through": "participants", "fk": "conversation_id", "target_fk": "user_id", "limit": 100 },
+        "messages":     { "type": "has_many",     "target": "messages", "fk": "conversation_id", "limit": 50 },
+        "creator":      { "type": "belongs_to",   "target": "users", "fk": "created_by_id" }
+      },
+      "hooks": {
+        "before_create": {
+          "type": "js",
+          "script": "if (data.kind === 'group' && (!data.title || data.title.trim().length === 0)) { result.proceed = false; result.error = 'group conversations require a title'; }"
+        }
+      },
+      "events": ["create", "update", "delete"],
+      "indexes": [
+        { "fields": ["created_by_id"] },
+        { "fields": ["kind"] },
+        { "fields": ["last_message_at"] },
+        { "fields": ["is_archived", "last_message_at"] }
+      ]
+    },
+
+    "participants": {
+      "fields": {
+        "user_id":              { "type": "uuid",   "required": true },
+        "conversation_id":      { "type": "uuid",   "required": true, "relation": "conversations" },
+        "member_id":            { "type": "uuid",   "required": true, "relation": "users" },
+        "role":                 { "type": "string", "enum": ["owner", "admin", "member"], "default": "member", "required": true },
+        "nickname":             { "type": "string", "maxLength": 80 },
+        "joined_at":            { "type": "time",   "auto": true },
+        "muted":                { "type": "bool",   "default": false },
+        "is_pinned":            { "type": "bool",   "default": false },
+        "last_read_message_id": { "type": "uuid",   "relation": "messages" },
+        "last_read_at":         { "type": "time" },
+        "unread_count":         { "type": "int",    "default": 0, "min": 0 },
+        "left_at":              { "type": "time" },
+        "created_at":           { "type": "time",   "auto": true },
+        "updated_at":           { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "conversation": { "type": "belongs_to", "target": "conversations", "fk": "conversation_id" },
+        "member":       { "type": "belongs_to", "target": "users", "fk": "member_id" }
+      },
+      "events": ["create", "update", "delete"],
+      "indexes": [
+        { "fields": ["conversation_id", "member_id"], "unique": true },
+        { "fields": ["member_id", "is_pinned"] },
+        { "fields": ["conversation_id", "role"] }
+      ]
+    },
+
+    "messages": {
+      "fields": {
+        "user_id":         { "type": "uuid",   "required": true },
+        "conversation_id": { "type": "uuid",   "required": true, "relation": "conversations" },
+        "sender_id":       { "type": "uuid",   "required": true, "relation": "users" },
+        "kind":            { "type": "string", "enum": ["text", "image", "video", "audio", "file", "system"], "default": "text" },
+        "body":            { "type": "text",   "maxLength": 8000 },
+        "reply_to_id":     { "type": "uuid",   "relation": "messages" },
+        "is_edited":       { "type": "bool",   "default": false },
+        "is_deleted":      { "type": "bool",   "default": false },
+        "deleted_at":      { "type": "time" },
+        "reaction_count":  { "type": "int",    "default": 0, "min": 0 },
+        "sent_at":         { "type": "time",   "auto": true },
+        "edited_at":       { "type": "time" },
+        "created_at":      { "type": "time",   "auto": true },
+        "updated_at":      { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "conversation": { "type": "belongs_to", "target": "conversations", "fk": "conversation_id" },
+        "sender":       { "type": "belongs_to", "target": "users", "fk": "sender_id" },
+        "reply_to":     { "type": "belongs_to", "target": "messages", "fk": "reply_to_id" },
+        "reactions":    { "type": "has_many",   "target": "reactions", "fk": "message_id", "limit": 50 },
+        "attachments":  { "type": "has_many",   "target": "attachments", "fk": "message_id", "limit": 20 },
+        "receipts":     { "type": "has_many",   "target": "receipts", "fk": "message_id", "limit": 100 }
+      },
+      "hooks": {
+        "before_create": {
+          "type": "js",
+          "script": "if (data.kind === 'text' && (!data.body || data.body.trim().length === 0)) { result.proceed = false; result.error = 'text messages require a non-empty body'; }"
+        }
+      },
+      "events": ["create", "update", "delete"],
+      "indexes": [
+        { "fields": ["conversation_id", "sent_at"] },
+        { "fields": ["sender_id"] },
+        { "fields": ["reply_to_id"] },
+        { "fields": ["conversation_id", "is_deleted", "sent_at"] }
+      ]
+    },
+
+    "reactions": {
+      "fields": {
+        "user_id":    { "type": "uuid",   "required": true },
+        "message_id": { "type": "uuid",   "required": true, "relation": "messages" },
+        "actor_id":   { "type": "uuid",   "required": true, "relation": "users" },
+        "emoji":      { "type": "string", "required": true, "minLength": 1, "maxLength": 16 },
+        "created_at": { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "message": { "type": "belongs_to", "target": "messages", "fk": "message_id" },
+        "actor":   { "type": "belongs_to", "target": "users", "fk": "actor_id" }
+      },
+      "events": ["create", "delete"],
+      "indexes": [
+        { "fields": ["message_id", "actor_id", "emoji"], "unique": true },
+        { "fields": ["actor_id"] }
+      ]
+    },
+
+    "attachments": {
+      "fields": {
+        "user_id":      { "type": "uuid",   "required": true },
+        "message_id":   { "type": "uuid",   "required": true, "relation": "messages" },
+        "file_id":      { "type": "uuid" },
+        "file_url":     { "type": "string", "required": true, "format": "url", "maxLength": 1000 },
+        "kind":         { "type": "string", "enum": ["image", "video", "audio", "file"], "default": "file" },
+        "mime_type":    { "type": "string", "maxLength": 120 },
+        "file_name":    { "type": "string", "maxLength": 300 },
+        "size_bytes":   { "type": "int64",  "min": 0 },
+        "width":        { "type": "int",    "min": 0, "max": 100000 },
+        "height":       { "type": "int",    "min": 0, "max": 100000 },
+        "duration_sec": { "type": "int",    "min": 0 },
+        "position":     { "type": "int",    "default": 0, "min": 0, "max": 19 },
+        "created_at":   { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "message": { "type": "belongs_to", "target": "messages", "fk": "message_id" }
+      },
+      "indexes": [
+        { "fields": ["message_id", "position"] }
+      ]
+    },
+
+    "receipts": {
+      "fields": {
+        "user_id":         { "type": "uuid",   "required": true },
+        "message_id":      { "type": "uuid",   "required": true, "relation": "messages" },
+        "conversation_id": { "type": "uuid",   "required": true, "relation": "conversations" },
+        "reader_id":       { "type": "uuid",   "required": true, "relation": "users" },
+        "state":           { "type": "string", "enum": ["delivered", "read"], "default": "delivered", "required": true },
+        "delivered_at":    { "type": "time",   "auto": true },
+        "read_at":         { "type": "time" }
+      },
+      "relations": {
+        "message": { "type": "belongs_to", "target": "messages", "fk": "message_id" },
+        "reader":  { "type": "belongs_to", "target": "users", "fk": "reader_id" }
+      },
+      "events": ["create", "update"],
+      "indexes": [
+        { "fields": ["message_id", "reader_id"], "unique": true },
+        { "fields": ["conversation_id", "reader_id", "state"] },
+        { "fields": ["reader_id", "state"] }
+      ]
+    }
+  },
+
+  "rbac": {
+    "roles": {
+      "admin": {
+        "resources": "*",
+        "actions": ["*"]
+      },
+      "support": {
+        "resources": ["users", "conversations", "participants", "messages", "reactions", "attachments", "receipts"],
+        "actions": ["read"]
+      },
+      "member": {
+        "resources": ["users", "conversations", "participants", "messages", "reactions", "attachments", "receipts"],
+        "actions": ["read", "create", "update", "delete"],
+        "conditions": { "field": "user_id", "op": "eq", "val": "$user_id" }
+      }
+    }
+  }
+}

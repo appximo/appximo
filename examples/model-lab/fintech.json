@@ -1,0 +1,216 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "fintech-wallet",
+
+  "resources": {
+
+    "accounts": {
+      "fields": {
+        "user_id":          { "type": "uuid",   "required": true },
+        "display_name":     { "type": "string", "required": true, "minLength": 1, "maxLength": 80 },
+        "currency":         { "type": "string", "required": true, "enum": ["USD", "EUR", "GBP", "COP", "MXN", "BTC", "ETH"] },
+        "kind":             { "type": "string", "enum": ["checking", "savings", "merchant", "escrow"], "default": "checking" },
+        "status":           { "type": "string", "enum": ["active", "frozen", "closed"], "default": "active" },
+        "external_ref":     { "type": "string", "maxLength": 120 },
+        "minor_unit_scale": { "type": "int",    "default": 2, "min": 0, "max": 18 },
+        "balance_cached":   { "type": "int64",  "default": 0 },
+        "available_cached": { "type": "int64",  "default": 0 },
+        "metadata":         { "type": "json" },
+        "created_at":       { "type": "time",   "auto": true },
+        "updated_at":       { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "ledger_entries": { "type": "has_many", "target": "ledgerentries", "fk": "account_id", "limit": 100 },
+        "holds":          { "type": "has_many", "target": "holds",          "fk": "account_id", "limit": 50 },
+        "outgoing":       { "type": "has_many", "target": "transfers",       "fk": "source_account_id", "limit": 50 },
+        "incoming":       { "type": "has_many", "target": "transfers",       "fk": "dest_account_id",   "limit": 50 }
+      },
+      "events": ["create", "update", "delete"],
+      "indexes": [
+        { "fields": ["user_id"] },
+        { "fields": ["user_id", "currency"] },
+        { "fields": ["status"] },
+        { "fields": ["external_ref"], "unique": true }
+      ],
+      "hooks": {
+        "before_update": {
+          "type": "js",
+          "script": "if (data.status === 'closed' && data.balance_cached && data.balance_cached !== 0) { result.proceed = false; result.error = 'cannot close account with non-zero cached balance'; }"
+        }
+      }
+    },
+
+    "ledgerentries": {
+      "fields": {
+        "user_id":         { "type": "uuid",   "required": true },
+        "account_id":      { "type": "uuid",   "required": true, "relation": "accounts" },
+        "transfer_id":     { "type": "uuid",   "relation": "transfers" },
+        "idempotency_key": { "type": "string", "required": true, "minLength": 8, "maxLength": 120 },
+        "direction":       { "type": "string", "required": true, "enum": ["debit", "credit"] },
+        "amount_minor":    { "type": "int64",  "required": true, "min": 1 },
+        "currency":        { "type": "string", "required": true, "enum": ["USD", "EUR", "GBP", "COP", "MXN", "BTC", "ETH"] },
+        "running_balance": { "type": "int64" },
+        "category":        { "type": "string", "enum": ["transfer", "fee", "interest", "adjustment", "payout", "deposit", "withdrawal", "reversal"], "default": "transfer" },
+        "status":          { "type": "string", "enum": ["pending", "posted", "reversed"], "default": "posted" },
+        "description":     { "type": "string", "maxLength": 280 },
+        "counterparty":    { "type": "string", "maxLength": 120 },
+        "metadata":        { "type": "json" },
+        "posted_at":       { "type": "time" },
+        "created_at":      { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "account":  { "type": "belongs_to", "target": "accounts",  "fk": "account_id" },
+        "transfer": { "type": "belongs_to", "target": "transfers", "fk": "transfer_id" }
+      },
+      "events": ["create"],
+      "indexes": [
+        { "fields": ["account_id", "created_at"] },
+        { "fields": ["user_id"] },
+        { "fields": ["transfer_id"] },
+        { "fields": ["account_id", "idempotency_key"], "unique": true },
+        { "fields": ["status"] },
+        { "fields": ["category"] }
+      ],
+      "hooks": {
+        "before_create": {
+          "type": "js",
+          "script": "if (typeof data.amount_minor === 'number' && data.amount_minor <= 0) { result.proceed = false; result.error = 'amount_minor must be a positive integer (debit/credit carries the sign)'; }"
+        }
+      }
+    },
+
+    "transfers": {
+      "fields": {
+        "user_id":           { "type": "uuid",   "required": true },
+        "source_account_id": { "type": "uuid",   "required": true, "relation": "accounts" },
+        "dest_account_id":   { "type": "uuid",   "required": true, "relation": "accounts" },
+        "idempotency_key":   { "type": "string", "required": true, "unique": true, "minLength": 8, "maxLength": 120 },
+        "amount_minor":      { "type": "int64",  "required": true, "min": 1 },
+        "currency":          { "type": "string", "required": true, "enum": ["USD", "EUR", "GBP", "COP", "MXN", "BTC", "ETH"] },
+        "fee_minor":         { "type": "int64",  "default": 0, "min": 0 },
+        "status":            { "type": "string", "enum": ["initiated", "pending", "settled", "failed", "reversed"], "default": "initiated" },
+        "reference":         { "type": "string", "maxLength": 200 },
+        "memo":              { "type": "string", "maxLength": 280 },
+        "failure_reason":    { "type": "string", "maxLength": 280 },
+        "metadata":          { "type": "json" },
+        "settled_at":        { "type": "time" },
+        "created_at":        { "type": "time",   "auto": true },
+        "updated_at":        { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "source":  { "type": "belongs_to", "target": "accounts",       "fk": "source_account_id" },
+        "dest":    { "type": "belongs_to", "target": "accounts",       "fk": "dest_account_id" },
+        "entries": { "type": "has_many",   "target": "ledgerentries", "fk": "transfer_id", "limit": 50 }
+      },
+      "events": ["create", "update"],
+      "indexes": [
+        { "fields": ["idempotency_key"], "unique": true },
+        { "fields": ["source_account_id"] },
+        { "fields": ["dest_account_id"] },
+        { "fields": ["user_id"] },
+        { "fields": ["status"] },
+        { "fields": ["created_at"] }
+      ]
+    },
+
+    "holds": {
+      "fields": {
+        "user_id":      { "type": "uuid",   "required": true },
+        "account_id":   { "type": "uuid",   "required": true, "relation": "accounts" },
+        "amount_minor": { "type": "int64",  "required": true, "min": 1 },
+        "currency":     { "type": "string", "required": true, "enum": ["USD", "EUR", "GBP", "COP", "MXN", "BTC", "ETH"] },
+        "reason":       { "type": "string", "enum": ["authorization", "pending_transfer", "dispute", "manual"], "default": "authorization" },
+        "status":       { "type": "string", "enum": ["active", "captured", "released", "expired"], "default": "active" },
+        "reference":    { "type": "string", "maxLength": 200 },
+        "expires_at":   { "type": "time" },
+        "created_at":   { "type": "time",   "auto": true },
+        "updated_at":   { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "account": { "type": "belongs_to", "target": "accounts", "fk": "account_id" }
+      },
+      "events": ["create", "update", "delete"],
+      "indexes": [
+        { "fields": ["account_id", "status"] },
+        { "fields": ["user_id"] },
+        { "fields": ["status"] }
+      ]
+    },
+
+    "idempotencykeys": {
+      "fields": {
+        "user_id":      { "type": "uuid",   "required": true },
+        "scope":        { "type": "string", "required": true, "enum": ["transfer", "ledger", "payout", "withdrawal"], "default": "transfer" },
+        "key":          { "type": "string", "required": true, "minLength": 8, "maxLength": 120 },
+        "request_hash": { "type": "string", "maxLength": 128 },
+        "status":       { "type": "string", "enum": ["reserved", "completed", "failed"], "default": "reserved" },
+        "result_ref":   { "type": "uuid" },
+        "expires_at":   { "type": "time" },
+        "created_at":   { "type": "time",   "auto": true }
+      },
+      "events": ["create", "update"],
+      "indexes": [
+        { "fields": ["scope", "key"], "unique": true },
+        { "fields": ["user_id"] },
+        { "fields": ["status"] }
+      ]
+    },
+
+    "auditevents": {
+      "fields": {
+        "user_id":      { "type": "uuid",   "required": true },
+        "actor_id":     { "type": "uuid",   "required": true },
+        "actor_role":   { "type": "string", "maxLength": 60 },
+        "action":       { "type": "string", "required": true, "maxLength": 80 },
+        "entity_type":  { "type": "string", "required": true, "enum": ["account", "ledger_entry", "transfer", "hold", "idempotency_key"] },
+        "entity_id":    { "type": "uuid",   "required": true },
+        "ip_address":   { "type": "string", "maxLength": 64 },
+        "before_state": { "type": "json" },
+        "after_state":  { "type": "json" },
+        "note":         { "type": "string", "maxLength": 500 },
+        "created_at":   { "type": "time",   "auto": true }
+      },
+      "events": ["create"],
+      "indexes": [
+        { "fields": ["user_id"] },
+        { "fields": ["entity_type", "entity_id"] },
+        { "fields": ["actor_id"] },
+        { "fields": ["action"] },
+        { "fields": ["created_at"] }
+      ]
+    }
+  },
+
+  "rbac": {
+    "roles": {
+      "admin": {
+        "resources": "*",
+        "actions": ["*"]
+      },
+
+      "ledger_service": {
+        "resources": ["accounts", "ledgerentries", "transfers", "holds", "idempotencykeys", "auditevents"],
+        "actions": ["read", "create", "update"]
+      },
+
+      "account_holder": {
+        "resources": ["accounts", "ledgerentries", "transfers", "holds", "idempotencykeys", "auditevents"],
+        "actions": ["read"],
+        "conditions": { "field": "user_id", "op": "eq", "val": "$user_id" }
+      },
+
+      "account_initiator": {
+        "resources": ["transfers", "idempotencykeys"],
+        "actions": ["read", "create"],
+        "conditions": { "field": "user_id", "op": "eq", "val": "$user_id" }
+      },
+
+      "auditor": {
+        "resources": ["accounts", "ledgerentries", "transfers", "holds", "auditevents"],
+        "actions": ["read"],
+        "fields": ["id", "user_id", "account_id", "transfer_id", "direction", "amount_minor", "currency", "status", "category", "action", "entity_type", "entity_id", "actor_id", "created_at"]
+      }
+    }
+  }
+}

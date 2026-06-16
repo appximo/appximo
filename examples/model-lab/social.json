@@ -1,0 +1,183 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "social-network",
+
+  "resources": {
+
+    "profiles": {
+      "fields": {
+        "user_id":      { "type": "uuid",   "required": true, "unique": true },
+        "handle":       { "type": "string", "required": true, "unique": true, "pattern": "^[a-z0-9_]{3,30}$", "minLength": 3, "maxLength": 30 },
+        "display_name": { "type": "string", "required": true, "minLength": 1, "maxLength": 60 },
+        "bio":          { "type": "text",   "maxLength": 500 },
+        "avatar_url":   { "type": "string", "format": "url", "maxLength": 500 },
+        "website":      { "type": "string", "format": "url", "maxLength": 500 },
+        "verified":     { "type": "bool",   "default": false },
+        "private":      { "type": "bool",   "default": false },
+        "created_at":   { "type": "time",   "auto": true },
+        "updated_at":   { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "posts":     { "type": "has_many",     "target": "posts",    "fk": "author_id",   "limit": 50 },
+        "following": { "type": "many_to_many", "target": "profiles", "through": "follows", "fk": "follower_id", "target_fk": "followee_id", "limit": 100 },
+        "followers": { "type": "many_to_many", "target": "profiles", "through": "follows", "fk": "followee_id", "target_fk": "follower_id", "limit": 100 }
+      },
+      "indexes": [
+        { "fields": ["handle"], "unique": true },
+        { "fields": ["verified"] }
+      ]
+    },
+
+    "posts": {
+      "fields": {
+        "user_id":       { "type": "uuid",   "required": true },
+        "author_id":     { "type": "uuid",   "required": true, "relation": "profiles" },
+        "body":          { "type": "text",   "required": true, "minLength": 1, "maxLength": 5000 },
+        "visibility":    { "type": "string", "enum": ["public", "followers", "private"], "default": "public" },
+        "like_count":    { "type": "int",    "default": 0, "min": 0 },
+        "comment_count": { "type": "int",    "default": 0, "min": 0 },
+        "reply_to_id":   { "type": "uuid",   "relation": "posts" },
+        "created_at":    { "type": "time",   "auto": true },
+        "updated_at":    { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "author":   { "type": "belongs_to", "target": "profiles",    "fk": "author_id" },
+        "comments": { "type": "has_many",   "target": "comments",    "fk": "post_id", "limit": 50 },
+        "likes":    { "type": "has_many",   "target": "postlikes",  "fk": "post_id", "limit": 50 },
+        "media":    { "type": "has_many",   "target": "media",       "fk": "post_id", "limit": 10 }
+      },
+      "hooks": {
+        "before_create": {
+          "type": "js",
+          "script": "if (data.body && data.body.trim().length === 0) { result.proceed = false; result.error = 'post body cannot be blank'; }"
+        }
+      },
+      "events": ["create", "update", "delete"],
+      "indexes": [
+        { "fields": ["author_id", "created_at"] },
+        { "fields": ["visibility"] },
+        { "fields": ["created_at"] }
+      ]
+    },
+
+    "comments": {
+      "fields": {
+        "user_id":    { "type": "uuid",   "required": true },
+        "post_id":    { "type": "uuid",   "required": true, "relation": "posts" },
+        "author_id":  { "type": "uuid",   "required": true, "relation": "profiles" },
+        "parent_id":  { "type": "uuid",   "relation": "comments" },
+        "body":       { "type": "text",   "required": true, "minLength": 1, "maxLength": 2000 },
+        "depth":      { "type": "int",    "default": 0, "min": 0, "max": 10 },
+        "like_count": { "type": "int",    "default": 0, "min": 0 },
+        "created_at": { "type": "time",   "auto": true },
+        "updated_at": { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "post":    { "type": "belongs_to", "target": "posts",        "fk": "post_id" },
+        "author":  { "type": "belongs_to", "target": "profiles",     "fk": "author_id" },
+        "parent":  { "type": "belongs_to", "target": "comments",     "fk": "parent_id" },
+        "replies": { "type": "has_many",   "target": "comments",     "fk": "parent_id", "limit": 50 },
+        "likes":   { "type": "has_many",   "target": "commentlikes","fk": "comment_id", "limit": 50 }
+      },
+      "events": ["create", "update", "delete"],
+      "indexes": [
+        { "fields": ["post_id", "created_at"] },
+        { "fields": ["parent_id"] },
+        { "fields": ["author_id"] }
+      ]
+    },
+
+    "follows": {
+      "fields": {
+        "user_id":     { "type": "uuid", "required": true },
+        "follower_id": { "type": "uuid", "required": true, "relation": "profiles" },
+        "followee_id": { "type": "uuid", "required": true, "relation": "profiles" },
+        "created_at":  { "type": "time", "auto": true }
+      },
+      "relations": {
+        "follower": { "type": "belongs_to", "target": "profiles", "fk": "follower_id" },
+        "followee": { "type": "belongs_to", "target": "profiles", "fk": "followee_id" }
+      },
+      "events": ["create", "delete"],
+      "indexes": [
+        { "fields": ["follower_id", "followee_id"], "unique": true },
+        { "fields": ["followee_id"] }
+      ]
+    },
+
+    "postlikes": {
+      "fields": {
+        "user_id":    { "type": "uuid", "required": true },
+        "post_id":    { "type": "uuid", "required": true, "relation": "posts" },
+        "actor_id":   { "type": "uuid", "required": true, "relation": "profiles" },
+        "created_at": { "type": "time", "auto": true }
+      },
+      "relations": {
+        "post":  { "type": "belongs_to", "target": "posts",    "fk": "post_id" },
+        "actor": { "type": "belongs_to", "target": "profiles", "fk": "actor_id" }
+      },
+      "events": ["create", "delete"],
+      "indexes": [
+        { "fields": ["post_id", "actor_id"], "unique": true },
+        { "fields": ["actor_id"] }
+      ]
+    },
+
+    "commentlikes": {
+      "fields": {
+        "user_id":    { "type": "uuid", "required": true },
+        "comment_id": { "type": "uuid", "required": true, "relation": "comments" },
+        "actor_id":   { "type": "uuid", "required": true, "relation": "profiles" },
+        "created_at": { "type": "time", "auto": true }
+      },
+      "relations": {
+        "comment": { "type": "belongs_to", "target": "comments", "fk": "comment_id" },
+        "actor":   { "type": "belongs_to", "target": "profiles", "fk": "actor_id" }
+      },
+      "events": ["create", "delete"],
+      "indexes": [
+        { "fields": ["comment_id", "actor_id"], "unique": true },
+        { "fields": ["actor_id"] }
+      ]
+    },
+
+    "media": {
+      "fields": {
+        "user_id":    { "type": "uuid",   "required": true },
+        "post_id":    { "type": "uuid",   "required": true, "relation": "posts" },
+        "file_url":   { "type": "string", "required": true, "format": "url", "maxLength": 1000 },
+        "kind":       { "type": "string", "enum": ["image", "video", "gif"], "default": "image" },
+        "alt_text":   { "type": "string", "maxLength": 300 },
+        "width":      { "type": "int",    "min": 0, "max": 100000 },
+        "height":     { "type": "int",    "min": 0, "max": 100000 },
+        "position":   { "type": "int",    "default": 0, "min": 0, "max": 9 },
+        "created_at": { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "post": { "type": "belongs_to", "target": "posts", "fk": "post_id" }
+      },
+      "indexes": [
+        { "fields": ["post_id", "position"] }
+      ]
+    }
+  },
+
+  "rbac": {
+    "roles": {
+      "admin": {
+        "resources": "*",
+        "actions": ["*"]
+      },
+      "reader": {
+        "resources": ["profiles", "posts", "comments", "follows", "postlikes", "commentlikes", "media"],
+        "actions": ["read"]
+      },
+      "member": {
+        "resources": ["profiles", "posts", "comments", "follows", "postlikes", "commentlikes", "media"],
+        "actions": ["read", "create", "update", "delete"],
+        "conditions": { "field": "user_id", "op": "eq", "val": "$user_id" }
+      }
+    }
+  }
+}

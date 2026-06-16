@@ -1,0 +1,279 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "booking-reservations",
+
+  "resources": {
+    "hosts": {
+      "fields": {
+        "user_id":      { "type": "uuid",   "unique": true },
+        "display_name": { "type": "string", "required": true, "minLength": 2, "maxLength": 80 },
+        "email":        { "type": "string", "required": true, "unique": true, "format": "email" },
+        "phone":        { "type": "string", "pattern": "^[0-9+ -]{7,20}$" },
+        "bio":          { "type": "text",   "maxLength": 2000 },
+        "payout_email": { "type": "string", "format": "email" },
+        "verified":     { "type": "bool",   "default": false },
+        "active":       { "type": "bool",   "default": true },
+        "created_at":   { "type": "time",   "auto": true },
+        "updated_at":   { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "listings": { "type": "has_many", "target": "listings", "fk": "host_id", "limit": 100 }
+      },
+      "indexes": [
+        { "fields": ["email"], "unique": true },
+        { "fields": ["active"] }
+      ],
+      "events": ["create", "update"]
+    },
+
+    "guests": {
+      "fields": {
+        "user_id":     { "type": "uuid",   "unique": true },
+        "full_name":   { "type": "string", "required": true, "minLength": 2, "maxLength": 80 },
+        "email":       { "type": "string", "required": true, "unique": true, "format": "email" },
+        "phone":       { "type": "string", "pattern": "^[0-9+ -]{7,20}$" },
+        "verified":    { "type": "bool",   "default": false },
+        "created_at":  { "type": "time",   "auto": true },
+        "updated_at":  { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "bookings": { "type": "has_many", "target": "bookings", "fk": "guest_id", "limit": 100 }
+      },
+      "indexes": [
+        { "fields": ["email"], "unique": true }
+      ],
+      "events": ["create"]
+    },
+
+    "listings": {
+      "fields": {
+        "host_id":        { "type": "uuid",    "required": true, "relation": "hosts" },
+        "title":          { "type": "string",  "required": true, "minLength": 3, "maxLength": 140 },
+        "slug":           { "type": "string",  "unique": true, "pattern": "^[a-z0-9-]{3,140}$" },
+        "description":    { "type": "text",     "maxLength": 5000 },
+        "listing_type":   { "type": "string",  "required": true, "enum": ["entire_place", "private_room", "shared_room", "service"] },
+        "city":           { "type": "string",  "maxLength": 80 },
+        "country":        { "type": "string",  "maxLength": 56 },
+        "address":        { "type": "text",     "maxLength": 300 },
+        "latitude":       { "type": "float64", "min": -90,  "max": 90 },
+        "longitude":      { "type": "float64", "min": -180, "max": 180 },
+        "max_guests":     { "type": "int",     "min": 1, "max": 50, "default": 2 },
+        "bedrooms":       { "type": "int",     "min": 0, "max": 30 },
+        "price_per_night": { "type": "float64", "required": true, "min": 0, "max": 100000 },
+        "cleaning_fee":   { "type": "float64", "min": 0, "max": 100000, "default": 0 },
+        "currency":       { "type": "string",  "enum": ["USD", "EUR", "GBP", "COP", "MXN"], "default": "USD" },
+        "min_nights":     { "type": "int",     "min": 1, "max": 365, "default": 1 },
+        "amenities":      { "type": "json" },
+        "status":         { "type": "string",  "enum": ["draft", "published", "snoozed", "delisted"], "default": "draft" },
+        "rating_avg":     { "type": "float64", "min": 0, "max": 5 },
+        "review_count":   { "type": "int",     "min": 0, "default": 0 },
+        "created_at":     { "type": "time",    "auto": true },
+        "updated_at":     { "type": "time",    "auto": true }
+      },
+      "relations": {
+        "host":     { "type": "belongs_to", "target": "hosts",         "fk": "host_id" },
+        "slots":    { "type": "has_many",   "target": "availabilityslots", "fk": "listing_id", "limit": 100 },
+        "bookings": { "type": "has_many",   "target": "bookings",      "fk": "listing_id", "limit": 100 },
+        "reviews":  { "type": "has_many",   "target": "reviews",       "fk": "listing_id", "limit": 50 },
+        "amenity_tags": { "type": "many_to_many", "target": "amenities", "through": "listingamenities", "fk": "listing_id", "target_fk": "amenity_id", "limit": 50 }
+      },
+      "indexes": [
+        { "fields": ["host_id"] },
+        { "fields": ["status", "city"] },
+        { "fields": ["listing_type", "status"] },
+        { "fields": ["price_per_night"] }
+      ],
+      "events": ["create", "update", "delete"]
+    },
+
+    "amenities": {
+      "fields": {
+        "code":  { "type": "string", "required": true, "unique": true, "pattern": "^[a-z_]{2,40}$" },
+        "label": { "type": "string", "required": true, "maxLength": 60 },
+        "icon":  { "type": "string", "maxLength": 60 }
+      },
+      "indexes": [
+        { "fields": ["code"], "unique": true }
+      ]
+    },
+
+    "listingamenities": {
+      "fields": {
+        "listing_id": { "type": "uuid", "required": true, "relation": "listings" },
+        "amenity_id": { "type": "uuid", "required": true, "relation": "amenities" }
+      },
+      "indexes": [
+        { "fields": ["listing_id", "amenity_id"], "unique": true },
+        { "fields": ["amenity_id"] }
+      ]
+    },
+
+    "availabilityslots": {
+      "fields": {
+        "listing_id":   { "type": "uuid",    "required": true, "relation": "listings" },
+        "host_id":      { "type": "uuid",    "required": true, "relation": "hosts" },
+        "slot_date":    { "type": "time",    "required": true },
+        "starts_at":    { "type": "time",    "required": true },
+        "ends_at":      { "type": "time",    "required": true },
+        "capacity":     { "type": "int",     "required": true, "min": 1, "max": 50, "default": 1 },
+        "booked_count": { "type": "int",     "min": 0, "default": 0 },
+        "is_blocked":   { "type": "bool",    "default": false },
+        "price_override": { "type": "float64", "min": 0, "max": 100000 },
+        "created_at":   { "type": "time",    "auto": true },
+        "updated_at":   { "type": "time",    "auto": true }
+      },
+      "relations": {
+        "listing": { "type": "belongs_to", "target": "listings", "fk": "listing_id" },
+        "host":    { "type": "belongs_to", "target": "hosts",    "fk": "host_id" }
+      },
+      "indexes": [
+        { "fields": ["listing_id", "starts_at"], "unique": true },
+        { "fields": ["listing_id", "slot_date"] },
+        { "fields": ["host_id"] },
+        { "fields": ["starts_at"] },
+        { "fields": ["ends_at"] },
+        { "fields": ["is_blocked"] }
+      ],
+      "events": ["create", "update", "delete"]
+    },
+
+    "bookings": {
+      "fields": {
+        "listing_id":   { "type": "uuid",    "required": true, "relation": "listings" },
+        "slot_id":      { "type": "uuid",    "relation": "availabilityslots" },
+        "host_id":      { "type": "uuid",    "required": true, "relation": "hosts" },
+        "guest_id":     { "type": "uuid",    "required": true, "relation": "guests" },
+        "guest_user_id": { "type": "uuid" },
+        "check_in":     { "type": "time",    "required": true },
+        "check_out":    { "type": "time",    "required": true },
+        "nights":       { "type": "int",     "min": 1, "max": 365 },
+        "party_size":   { "type": "int",     "required": true, "min": 1, "max": 50, "default": 1 },
+        "status":       { "type": "string",  "required": true, "enum": ["pending", "confirmed", "checked_in", "completed", "cancelled", "declined", "expired"], "default": "pending" },
+        "subtotal":     { "type": "float64", "min": 0, "max": 10000000 },
+        "fees_total":   { "type": "float64", "min": 0, "max": 10000000, "default": 0 },
+        "total_amount": { "type": "float64", "required": true, "min": 0, "max": 10000000 },
+        "currency":     { "type": "string",  "enum": ["USD", "EUR", "GBP", "COP", "MXN"], "default": "USD" },
+        "guest_note":   { "type": "text",     "maxLength": 1000 },
+        "cancel_reason": { "type": "string",  "maxLength": 200 },
+        "confirmation_code": { "type": "string", "unique": true, "pattern": "^[A-Z0-9]{6,12}$" },
+        "created_at":   { "type": "time",    "auto": true },
+        "updated_at":   { "type": "time",    "auto": true }
+      },
+      "relations": {
+        "listing":  { "type": "belongs_to", "target": "listings",          "fk": "listing_id" },
+        "slot":     { "type": "belongs_to", "target": "availabilityslots", "fk": "slot_id" },
+        "host":     { "type": "belongs_to", "target": "hosts",             "fk": "host_id" },
+        "guest":    { "type": "belongs_to", "target": "guests",            "fk": "guest_id" },
+        "payments": { "type": "has_many",   "target": "payments",          "fk": "booking_id", "limit": 20 },
+        "review":   { "type": "has_many",   "target": "reviews",           "fk": "booking_id", "limit": 2 }
+      },
+      "indexes": [
+        { "fields": ["listing_id", "check_in"] },
+        { "fields": ["host_id", "status"] },
+        { "fields": ["guest_id", "status"] },
+        { "fields": ["slot_id"] },
+        { "fields": ["status"] },
+        { "fields": ["check_in"] },
+        { "fields": ["check_out"] },
+        { "fields": ["confirmation_code"], "unique": true }
+      ],
+      "hooks": {
+        "before_create": {
+          "type": "js",
+          "script": "if (data.check_in && data.check_out && data.check_out <= data.check_in) { result.proceed = false; result.error = 'check_out must be after check_in'; }"
+        }
+      },
+      "events": ["create", "update", "delete"]
+    },
+
+    "payments": {
+      "fields": {
+        "booking_id":    { "type": "uuid",    "required": true, "relation": "bookings" },
+        "host_id":       { "type": "uuid",    "required": true, "relation": "hosts" },
+        "guest_id":      { "type": "uuid",    "required": true, "relation": "guests" },
+        "amount":        { "type": "float64", "required": true, "min": 0, "max": 10000000 },
+        "currency":      { "type": "string",  "enum": ["USD", "EUR", "GBP", "COP", "MXN"], "default": "USD" },
+        "kind":          { "type": "string",  "enum": ["charge", "refund", "payout", "deposit_hold"], "default": "charge" },
+        "status":        { "type": "string",  "required": true, "enum": ["initiated", "authorized", "captured", "failed", "refunded", "partially_refunded"], "default": "initiated" },
+        "provider":      { "type": "string",  "enum": ["stripe", "adyen", "paypal", "manual"], "default": "stripe" },
+        "provider_ref":  { "type": "string",  "maxLength": 120 },
+        "idempotency_key": { "type": "string", "unique": true, "maxLength": 120 },
+        "captured_at":   { "type": "time" },
+        "created_at":    { "type": "time",    "auto": true },
+        "updated_at":    { "type": "time",    "auto": true }
+      },
+      "relations": {
+        "booking": { "type": "belongs_to", "target": "bookings", "fk": "booking_id" },
+        "host":    { "type": "belongs_to", "target": "hosts",    "fk": "host_id" },
+        "guest":   { "type": "belongs_to", "target": "guests",   "fk": "guest_id" }
+      },
+      "indexes": [
+        { "fields": ["booking_id"] },
+        { "fields": ["host_id", "status"] },
+        { "fields": ["guest_id", "status"] },
+        { "fields": ["status"] },
+        { "fields": ["idempotency_key"], "unique": true }
+      ],
+      "events": ["create", "update"]
+    },
+
+    "reviews": {
+      "fields": {
+        "booking_id":  { "type": "uuid",   "required": true, "unique": true, "relation": "bookings" },
+        "listing_id":  { "type": "uuid",   "required": true, "relation": "listings" },
+        "host_id":     { "type": "uuid",   "required": true, "relation": "hosts" },
+        "guest_id":    { "type": "uuid",   "required": true, "relation": "guests" },
+        "rating":      { "type": "int",    "required": true, "min": 1, "max": 5 },
+        "title":       { "type": "string", "maxLength": 140 },
+        "body":        { "type": "text",   "maxLength": 4000 },
+        "host_reply":  { "type": "text",   "maxLength": 2000 },
+        "is_published": { "type": "bool",  "default": true },
+        "created_at":  { "type": "time",   "auto": true },
+        "updated_at":  { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "booking": { "type": "belongs_to", "target": "bookings", "fk": "booking_id" },
+        "listing": { "type": "belongs_to", "target": "listings", "fk": "listing_id" },
+        "host":    { "type": "belongs_to", "target": "hosts",    "fk": "host_id" },
+        "guest":   { "type": "belongs_to", "target": "guests",   "fk": "guest_id" }
+      },
+      "indexes": [
+        { "fields": ["booking_id"], "unique": true },
+        { "fields": ["listing_id", "is_published"] },
+        { "fields": ["host_id"] },
+        { "fields": ["guest_id"] },
+        { "fields": ["rating"] }
+      ],
+      "events": ["create"]
+    }
+  },
+
+  "rbac": {
+    "roles": {
+      "admin": {
+        "resources": "*",
+        "actions": ["*"]
+      },
+      "support": {
+        "resources": "*",
+        "actions": ["read", "update"]
+      },
+      "host": {
+        "resources": ["listings", "availabilityslots", "bookings", "payments", "reviews"],
+        "actions": ["read", "create", "update", "delete"],
+        "conditions": { "field": "host_id", "op": "eq", "val": "$user_id" }
+      },
+      "guest": {
+        "resources": ["bookings", "reviews"],
+        "actions": ["read", "create", "update"],
+        "conditions": { "field": "guest_id", "op": "eq", "val": "$user_id" }
+      },
+      "public": {
+        "resources": ["listings", "amenities", "reviews"],
+        "actions": ["read"],
+        "fields": ["id", "host_id", "listing_id", "title", "slug", "description", "listing_type", "city", "country", "max_guests", "bedrooms", "price_per_night", "cleaning_fee", "currency", "min_nights", "status", "rating_avg", "review_count", "code", "label", "icon", "rating", "body", "is_published", "created_at"]
+      }
+    }
+  }
+}

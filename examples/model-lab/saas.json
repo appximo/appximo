@@ -1,0 +1,323 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "saas-productivity",
+
+  "resources": {
+
+    "workspaces": {
+      "fields": {
+        "user_id":     { "type": "uuid",   "required": true },
+        "owner_id":    { "type": "uuid",   "required": true, "relation": "members" },
+        "name":        { "type": "string", "required": true, "minLength": 1, "maxLength": 80 },
+        "slug":        { "type": "string", "required": true, "unique": true, "pattern": "^[a-z0-9-]{2,40}$", "minLength": 2, "maxLength": 40 },
+        "plan":        { "type": "string", "enum": ["free", "pro", "enterprise"], "default": "free" },
+        "seats_used":  { "type": "int",    "default": 0, "min": 0 },
+        "archived":    { "type": "bool",   "default": false },
+        "created_at":  { "type": "time",   "auto": true },
+        "updated_at":  { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "members":  { "type": "has_many", "target": "members",  "fk": "workspace_id", "limit": 100 },
+        "projects": { "type": "has_many", "target": "projects", "fk": "workspace_id", "limit": 50 }
+      },
+      "events": ["create", "update", "delete"],
+      "indexes": [
+        { "fields": ["slug"], "unique": true },
+        { "fields": ["owner_id"] },
+        { "fields": ["archived"] }
+      ]
+    },
+
+    "members": {
+      "fields": {
+        "user_id":      { "type": "uuid",   "required": true },
+        "workspace_id": { "type": "uuid",   "required": true, "relation": "workspaces" },
+        "account_id":   { "type": "uuid",   "required": true },
+        "email":        { "type": "string", "required": true, "format": "email", "maxLength": 200 },
+        "display_name": { "type": "string", "required": true, "minLength": 1, "maxLength": 80 },
+        "role":         { "type": "string", "enum": ["owner", "admin", "editor", "viewer"], "default": "editor" },
+        "status":       { "type": "string", "enum": ["invited", "active", "suspended"], "default": "invited" },
+        "avatar_url":   { "type": "string", "format": "url", "maxLength": 500 },
+        "joined_at":    { "type": "time" },
+        "created_at":   { "type": "time",   "auto": true },
+        "updated_at":   { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "workspace":      { "type": "belongs_to", "target": "workspaces", "fk": "workspace_id" },
+        "assigned_tasks": { "type": "has_many",   "target": "tasks",      "fk": "assignee_id", "limit": 100 },
+        "comments":       { "type": "has_many",   "target": "comments",   "fk": "author_id",   "limit": 100 }
+      },
+      "events": ["create", "update", "delete"],
+      "indexes": [
+        { "fields": ["workspace_id", "account_id"], "unique": true },
+        { "fields": ["workspace_id", "role"] },
+        { "fields": ["account_id"] },
+        { "fields": ["status"] }
+      ]
+    },
+
+    "projects": {
+      "fields": {
+        "user_id":      { "type": "uuid",   "required": true },
+        "workspace_id": { "type": "uuid",   "required": true, "relation": "workspaces" },
+        "lead_id":      { "type": "uuid",   "relation": "members" },
+        "name":         { "type": "string", "required": true, "minLength": 1, "maxLength": 120 },
+        "key":          { "type": "string", "required": true, "pattern": "^[A-Z]{2,6}$", "minLength": 2, "maxLength": 6 },
+        "description":  { "type": "text",   "maxLength": 2000 },
+        "color":        { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$", "default": "#3b82f6" },
+        "status":       { "type": "string", "enum": ["active", "paused", "archived"], "default": "active" },
+        "is_public":    { "type": "bool",   "default": false },
+        "start_on":     { "type": "time" },
+        "target_on":    { "type": "time" },
+        "created_at":   { "type": "time",   "auto": true },
+        "updated_at":   { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "workspace": { "type": "belongs_to", "target": "workspaces", "fk": "workspace_id" },
+        "lead":      { "type": "belongs_to", "target": "members",    "fk": "lead_id" },
+        "lists":     { "type": "has_many",   "target": "lists",      "fk": "project_id", "limit": 50 },
+        "tasks":     { "type": "has_many",   "target": "tasks",      "fk": "project_id", "limit": 100 }
+      },
+      "events": ["create", "update", "delete"],
+      "indexes": [
+        { "fields": ["workspace_id", "key"], "unique": true },
+        { "fields": ["workspace_id", "status"] },
+        { "fields": ["lead_id"] }
+      ]
+    },
+
+    "lists": {
+      "fields": {
+        "user_id":      { "type": "uuid",   "required": true },
+        "workspace_id": { "type": "uuid",   "required": true },
+        "project_id":   { "type": "uuid",   "required": true, "relation": "projects" },
+        "name":         { "type": "string", "required": true, "minLength": 1, "maxLength": 80 },
+        "position":     { "type": "int",    "default": 0, "min": 0, "max": 1000 },
+        "wip_limit":    { "type": "int",    "min": 0, "max": 1000 },
+        "is_done_col":  { "type": "bool",   "default": false },
+        "created_at":   { "type": "time",   "auto": true },
+        "updated_at":   { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "project": { "type": "belongs_to", "target": "projects", "fk": "project_id" },
+        "tasks":   { "type": "has_many",   "target": "tasks",    "fk": "list_id", "limit": 100 }
+      },
+      "events": ["create", "update", "delete"],
+      "indexes": [
+        { "fields": ["project_id", "position"] }
+      ]
+    },
+
+    "tasks": {
+      "fields": {
+        "user_id":      { "type": "uuid",   "required": true },
+        "workspace_id": { "type": "uuid",   "required": true },
+        "project_id":   { "type": "uuid",   "required": true, "relation": "projects" },
+        "list_id":      { "type": "uuid",   "relation": "lists" },
+        "assignee_id":  { "type": "uuid",   "relation": "members" },
+        "parent_id":    { "type": "uuid",   "relation": "tasks" },
+        "title":        { "type": "string", "required": true, "minLength": 1, "maxLength": 200 },
+        "description":  { "type": "text",   "maxLength": 10000 },
+        "number":       { "type": "int",    "required": true, "min": 1 },
+        "status":       { "type": "string", "enum": ["todo", "in_progress", "in_review", "done", "cancelled"], "default": "todo" },
+        "priority":     { "type": "string", "enum": ["none", "low", "medium", "high", "urgent"], "default": "none" },
+        "position":     { "type": "float64","default": 1000, "min": 0 },
+        "estimate":     { "type": "float64","min": 0, "max": 1000 },
+        "story_points": { "type": "int",    "min": 0, "max": 100 },
+        "due_at":       { "type": "time" },
+        "started_at":   { "type": "time" },
+        "completed_at": { "type": "time" },
+        "is_blocked":   { "type": "bool",   "default": false },
+        "archived":     { "type": "bool",   "default": false },
+        "created_at":   { "type": "time",   "auto": true },
+        "updated_at":   { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "project":  { "type": "belongs_to",   "target": "projects",   "fk": "project_id" },
+        "list":     { "type": "belongs_to",   "target": "lists",      "fk": "list_id" },
+        "assignee": { "type": "belongs_to",   "target": "members",    "fk": "assignee_id" },
+        "parent":   { "type": "belongs_to",   "target": "tasks",      "fk": "parent_id" },
+        "subtasks": { "type": "has_many",     "target": "tasks",      "fk": "parent_id",  "limit": 50 },
+        "comments": { "type": "has_many",     "target": "comments",   "fk": "task_id",    "limit": 50 },
+        "checklist":{ "type": "has_many",     "target": "checklistitems", "fk": "task_id", "limit": 50 },
+        "attachments": { "type": "has_many",  "target": "attachments","fk": "task_id",    "limit": 20 },
+        "activity": { "type": "has_many",     "target": "activity",   "fk": "task_id",    "limit": 50 },
+        "tags":     { "type": "many_to_many", "target": "tags",       "through": "tasktags", "fk": "task_id", "target_fk": "tag_id", "limit": 30 }
+      },
+      "hooks": {
+        "before_update": {
+          "type": "js",
+          "script": "if (data.status === 'done' && !data.completed_at) { data.completed_at = new Date().toISOString(); }"
+        }
+      },
+      "events": ["create", "update", "delete"],
+      "indexes": [
+        { "fields": ["project_id", "number"], "unique": true },
+        { "fields": ["workspace_id", "status"] },
+        { "fields": ["project_id", "status"] },
+        { "fields": ["list_id", "position"] },
+        { "fields": ["assignee_id", "status"] },
+        { "fields": ["parent_id"] },
+        { "fields": ["priority"] },
+        { "fields": ["due_at"] }
+      ]
+    },
+
+    "tags": {
+      "fields": {
+        "user_id":      { "type": "uuid",   "required": true },
+        "workspace_id": { "type": "uuid",   "required": true },
+        "name":         { "type": "string", "required": true, "minLength": 1, "maxLength": 40 },
+        "color":        { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$", "default": "#6b7280" },
+        "created_at":   { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "tasks": { "type": "many_to_many", "target": "tasks", "through": "tasktags", "fk": "tag_id", "target_fk": "task_id", "limit": 100 }
+      },
+      "events": ["create", "delete"],
+      "indexes": [
+        { "fields": ["workspace_id", "name"], "unique": true }
+      ]
+    },
+
+    "tasktags": {
+      "fields": {
+        "user_id":      { "type": "uuid", "required": true },
+        "workspace_id": { "type": "uuid", "required": true },
+        "task_id":      { "type": "uuid", "required": true, "relation": "tasks" },
+        "tag_id":       { "type": "uuid", "required": true, "relation": "tags" },
+        "created_at":   { "type": "time", "auto": true }
+      },
+      "relations": {
+        "task": { "type": "belongs_to", "target": "tasks", "fk": "task_id" },
+        "tag":  { "type": "belongs_to", "target": "tags",  "fk": "tag_id" }
+      },
+      "events": ["create", "delete"],
+      "indexes": [
+        { "fields": ["task_id", "tag_id"], "unique": true },
+        { "fields": ["tag_id"] }
+      ]
+    },
+
+    "comments": {
+      "fields": {
+        "user_id":      { "type": "uuid", "required": true },
+        "workspace_id": { "type": "uuid", "required": true },
+        "task_id":      { "type": "uuid", "required": true, "relation": "tasks" },
+        "author_id":    { "type": "uuid", "required": true, "relation": "members" },
+        "parent_id":    { "type": "uuid", "relation": "comments" },
+        "body":         { "type": "text", "required": true, "minLength": 1, "maxLength": 5000 },
+        "edited":       { "type": "bool", "default": false },
+        "created_at":   { "type": "time", "auto": true },
+        "updated_at":   { "type": "time", "auto": true }
+      },
+      "relations": {
+        "task":    { "type": "belongs_to", "target": "tasks",    "fk": "task_id" },
+        "author":  { "type": "belongs_to", "target": "members",  "fk": "author_id" },
+        "parent":  { "type": "belongs_to", "target": "comments", "fk": "parent_id" },
+        "replies": { "type": "has_many",   "target": "comments", "fk": "parent_id", "limit": 50 }
+      },
+      "events": ["create", "update", "delete"],
+      "indexes": [
+        { "fields": ["task_id", "created_at"] },
+        { "fields": ["parent_id"] },
+        { "fields": ["author_id"] }
+      ]
+    },
+
+    "checklistitems": {
+      "fields": {
+        "user_id":      { "type": "uuid",   "required": true },
+        "workspace_id": { "type": "uuid",   "required": true },
+        "task_id":      { "type": "uuid",   "required": true, "relation": "tasks" },
+        "label":        { "type": "string", "required": true, "minLength": 1, "maxLength": 200 },
+        "checked":      { "type": "bool",   "default": false },
+        "position":     { "type": "int",    "default": 0, "min": 0, "max": 1000 },
+        "checked_at":   { "type": "time" },
+        "created_at":   { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "task": { "type": "belongs_to", "target": "tasks", "fk": "task_id" }
+      },
+      "events": ["create", "update", "delete"],
+      "indexes": [
+        { "fields": ["task_id", "position"] }
+      ]
+    },
+
+    "attachments": {
+      "fields": {
+        "user_id":       { "type": "uuid",   "required": true },
+        "workspace_id":  { "type": "uuid",   "required": true },
+        "task_id":       { "type": "uuid",   "required": true, "relation": "tasks" },
+        "uploader_id":   { "type": "uuid",   "required": true, "relation": "members" },
+        "file_id":       { "type": "uuid" },
+        "filename":      { "type": "string", "required": true, "minLength": 1, "maxLength": 255 },
+        "content_type":  { "type": "string", "maxLength": 120 },
+        "size_bytes":    { "type": "int64",  "min": 0 },
+        "url":           { "type": "string", "format": "url", "maxLength": 1000 },
+        "created_at":    { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "task":     { "type": "belongs_to", "target": "tasks",   "fk": "task_id" },
+        "uploader": { "type": "belongs_to", "target": "members", "fk": "uploader_id" }
+      },
+      "events": ["create", "delete"],
+      "indexes": [
+        { "fields": ["task_id"] },
+        { "fields": ["uploader_id"] }
+      ]
+    },
+
+    "activity": {
+      "fields": {
+        "user_id":      { "type": "uuid",   "required": true },
+        "workspace_id": { "type": "uuid",   "required": true },
+        "task_id":      { "type": "uuid",   "relation": "tasks" },
+        "project_id":   { "type": "uuid",   "relation": "projects" },
+        "actor_id":     { "type": "uuid",   "required": true, "relation": "members" },
+        "verb":         { "type": "string", "required": true, "enum": ["created", "updated", "status_changed", "assigned", "commented", "completed", "archived"] },
+        "field":        { "type": "string", "maxLength": 60 },
+        "from_value":   { "type": "string", "maxLength": 200 },
+        "to_value":     { "type": "string", "maxLength": 200 },
+        "meta":         { "type": "json" },
+        "created_at":   { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "task":    { "type": "belongs_to", "target": "tasks",    "fk": "task_id" },
+        "project": { "type": "belongs_to", "target": "projects", "fk": "project_id" },
+        "actor":   { "type": "belongs_to", "target": "members",  "fk": "actor_id" }
+      },
+      "events": ["create"],
+      "indexes": [
+        { "fields": ["task_id", "created_at"] },
+        { "fields": ["workspace_id", "created_at"] },
+        { "fields": ["actor_id"] }
+      ]
+    }
+  },
+
+  "rbac": {
+    "roles": {
+      "admin": {
+        "resources": "*",
+        "actions": ["*"]
+      },
+      "workspace_admin": {
+        "resources": ["workspaces", "members", "projects", "lists", "tasks", "tags", "tasktags", "comments", "checklistitems", "attachments", "activity"],
+        "actions": ["read", "create", "update", "delete"]
+      },
+      "member": {
+        "resources": ["workspaces", "members", "projects", "lists", "tasks", "tags", "tasktags", "comments", "checklistitems", "attachments", "activity"],
+        "actions": ["read", "create", "update", "delete"],
+        "conditions": { "field": "user_id", "op": "eq", "val": "$user_id" }
+      },
+      "viewer": {
+        "resources": ["workspaces", "members", "projects", "lists", "tasks", "tags", "tasktags", "comments", "checklistitems", "attachments", "activity"],
+        "actions": ["read"],
+        "fields": ["id", "workspace_id", "project_id", "task_id", "title", "name", "status", "priority", "body", "label", "due_at", "assignee_id"]
+      }
+    }
+  }
+}
