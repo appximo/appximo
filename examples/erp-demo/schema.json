@@ -1,0 +1,153 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "nimbus-erp",
+  "resources": {
+    "departamentos": {
+      "fields": {
+        "codigo":       { "type": "string",  "required": true, "unique": true, "pattern": "^[A-Z]{2,5}$", "maxLength": 5 },
+        "nombre":       { "type": "string",  "required": true, "minLength": 2, "maxLength": 80 },
+        "presupuesto":  { "type": "float64", "min": 0, "max": 999999999 },
+        "centro_costo": { "type": "string",  "maxLength": 20 },
+        "activo":       { "type": "bool",    "default": true },
+        "created_at":   { "type": "time",    "auto": true }
+      },
+      "relations": {
+        "empleados": { "type": "has_many", "target": "empleados", "fk": "departamento_id", "limit": 100 }
+      },
+      "indexes": [
+        { "fields": ["activo"] }
+      ]
+    },
+
+    "empleados": {
+      "fields": {
+        "user_id":         { "type": "uuid",    "unique": true },
+        "documento":       { "type": "string",  "required": true, "unique": true, "pattern": "^[0-9]{6,12}$" },
+        "nombre":          { "type": "string",  "required": true, "minLength": 2, "maxLength": 60 },
+        "apellido":        { "type": "string",  "required": true, "minLength": 2, "maxLength": 60 },
+        "email":           { "type": "string",  "required": true, "unique": true, "format": "email" },
+        "telefono":        { "type": "string",  "pattern": "^[0-9+ -]{7,20}$" },
+        "cargo":           { "type": "string",  "required": true, "maxLength": 80 },
+        "departamento_id": { "type": "uuid",    "relation": "departamentos" },
+        "salario":         { "type": "float64", "min": 0, "max": 100000000 },
+        "tipo_contrato":   { "type": "string",  "enum": ["indefinido", "fijo", "prestacion", "aprendiz"], "default": "indefinido" },
+        "fecha_ingreso":   { "type": "time",    "required": true },
+        "activo":          { "type": "bool",    "default": true },
+        "created_at":      { "type": "time",    "auto": true },
+        "updated_at":      { "type": "time",    "auto": true }
+      },
+      "relations": {
+        "departamento": { "type": "belongs_to",   "target": "departamentos", "fk": "departamento_id" },
+        "solicitudes":  { "type": "has_many",      "target": "solicitudes",   "fk": "empleado_id", "limit": 50 },
+        "evaluaciones": { "type": "has_many",      "target": "evaluaciones",  "fk": "empleado_id", "limit": 20 },
+        "proyectos":    { "type": "many_to_many",  "target": "proyectos", "through": "asignaciones", "fk": "empleado_id", "target_fk": "proyecto_id", "limit": 50 }
+      },
+      "indexes": [
+        { "fields": ["email"] },
+        { "fields": ["activo", "cargo"] }
+      ]
+    },
+
+    "solicitudes": {
+      "fields": {
+        "empleado_id":  { "type": "uuid",   "required": true, "relation": "empleados" },
+        "user_id":      { "type": "uuid" },
+        "tipo":         { "type": "string", "required": true, "enum": ["vacaciones", "permiso", "incapacidad", "licencia"] },
+        "motivo":       { "type": "text" },
+        "fecha_inicio": { "type": "time",   "required": true },
+        "fecha_fin":    { "type": "time",   "required": true },
+        "dias":         { "type": "int",    "min": 1, "max": 365 },
+        "estado":       { "type": "string", "enum": ["pendiente", "aprobada", "rechazada"], "default": "pendiente" },
+        "aprobador_id": { "type": "uuid",   "relation": "empleados" },
+        "created_at":   { "type": "time",   "auto": true }
+      },
+      "relations": {
+        "empleado": { "type": "belongs_to", "target": "empleados", "fk": "empleado_id" }
+      },
+      "hooks": {
+        "before_create": {
+          "type": "js",
+          "script": "if (data.tipo === 'permiso' && !data.motivo) { result.proceed = false; result.error = 'el motivo es obligatorio para una solicitud de permiso'; }"
+        }
+      },
+      "events": ["create", "update"],
+      "indexes": [
+        { "fields": ["estado", "created_at"] },
+        { "fields": ["user_id"] }
+      ]
+    },
+
+    "proyectos": {
+      "fields": {
+        "codigo":          { "type": "string",  "required": true, "unique": true, "pattern": "^[A-Z]{2,4}-[0-9]{3,5}$" },
+        "nombre":          { "type": "string",  "required": true, "minLength": 2, "maxLength": 120 },
+        "descripcion":     { "type": "text" },
+        "estado":          { "type": "string",  "enum": ["planificado", "activo", "pausado", "cerrado"], "default": "planificado" },
+        "presupuesto":     { "type": "float64", "min": 0, "max": 999999999 },
+        "horas_estimadas": { "type": "int",     "min": 0, "max": 100000 },
+        "fecha_inicio":    { "type": "time" },
+        "fecha_fin":       { "type": "time" },
+        "created_at":      { "type": "time",    "auto": true }
+      },
+      "relations": {
+        "empleados": { "type": "many_to_many", "target": "empleados", "through": "asignaciones", "fk": "proyecto_id", "target_fk": "empleado_id", "limit": 100 }
+      },
+      "indexes": [
+        { "fields": ["estado"] }
+      ]
+    },
+
+    "asignaciones": {
+      "fields": {
+        "empleado_id":  { "type": "uuid",   "required": true, "relation": "empleados" },
+        "proyecto_id":  { "type": "uuid",   "required": true, "relation": "proyectos" },
+        "rol_proyecto": { "type": "string", "enum": ["lider", "desarrollador", "qa", "analista"], "default": "desarrollador" },
+        "horas_semana": { "type": "int",    "min": 1, "max": 60 },
+        "asignado_at":  { "type": "time",   "auto": true }
+      },
+      "indexes": [
+        { "fields": ["empleado_id", "proyecto_id"], "unique": true }
+      ]
+    },
+
+    "evaluaciones": {
+      "fields": {
+        "empleado_id":  { "type": "uuid",    "required": true, "relation": "empleados" },
+        "periodo":      { "type": "string",  "required": true, "pattern": "^[0-9]{4}-(Q[1-4]|H[1-2]|A)$" },
+        "puntaje":      { "type": "float64", "required": true, "min": 0, "max": 5 },
+        "comentarios":  { "type": "text" },
+        "evaluador_id": { "type": "uuid",    "relation": "empleados" },
+        "created_at":   { "type": "time",    "auto": true }
+      },
+      "relations": {
+        "empleado": { "type": "belongs_to", "target": "empleados", "fk": "empleado_id" }
+      },
+      "indexes": [
+        { "fields": ["periodo"] }
+      ]
+    }
+  },
+
+  "rbac": {
+    "roles": {
+      "rrhh-admin": {
+        "resources": "*",
+        "actions": ["*"]
+      },
+      "supervisor": {
+        "resources": "*",
+        "actions": ["read", "create", "update"]
+      },
+      "empleado": {
+        "resources": ["empleados", "solicitudes"],
+        "actions": ["read", "create", "update"],
+        "conditions": { "field": "user_id", "op": "eq", "val": "$user_id" }
+      },
+      "auditor": {
+        "resources": "*",
+        "actions": ["read"]
+      }
+    }
+  }
+}

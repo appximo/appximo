@@ -31,7 +31,11 @@ func ClaimsFromCtx(ctx context.Context) *Claims {
 // resource (those live under /api/) nor a hypothetical "/authors".
 // "/favicon.ico" is the admin panel's icon (a static asset the browser probes at
 // the origin root before any token exists) — it must not 401 (ADMIN-UI-V1.2).
-var skipJWT = []string{"/health", "/readyz", "/graphiql", "/metrics", "/debug", "/admin", "/auth/", "/favicon.ico"}
+// "/openapi" (the generated spec) and "/docs" (Swagger UI) are the PUBLIC API
+// contract + its explorer (API-PRODUCTIVA-V1): the schema surface is the same for
+// every tenant of this engine, so the spec is engine-global and unauthenticated —
+// a consumer reads the contract before it has a token.
+var skipJWT = []string{"/health", "/readyz", "/graphiql", "/metrics", "/debug", "/admin", "/auth/", "/favicon.ico", "/openapi", "/docs"}
 
 // JWTMiddleware validates Bearer tokens on all routes except those in skipJWT.
 // 401 is returned for missing or invalid tokens on enforced routes.

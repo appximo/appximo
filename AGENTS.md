@@ -543,6 +543,67 @@ root selections** per operation and **2000 total selections** across the
 whole document — over either limit the request is rejected (there is no
 separate nesting-depth counter).
 
+## OpenAPI spec + Swagger UI (API-PRODUCTIVA-V1)
+
+The engine generates an **OpenAPI 3.0.3** document from the schema and serves it,
+plus an interactive explorer — no flag needed:
+
+- `GET /openapi.json` / `GET /openapi.yaml` — the full spec (unauthenticated; the
+  contract is engine-global, the same for every tenant). Covers the schema-derived
+  `/api/{resource}` CRUD + subresources **and** the always-present engine surface:
+  the `/auth/*` endpoints (with `security: []` to mark the unauthenticated ones)
+  and the `/api/files` store. The 422 body is modelled as `ValidationErrorResponse`
+  (`{error, fields[]}`); list responses advertise `meta` only (no `links` — the
+  live engine returns `{data, meta:{page,per_page,has_next,has_prev}}`, COUNT was
+  dropped for performance).
+- `GET /docs` — Swagger UI (loaded from a pinned CDN) pointed at `/openapi.json`,
+  for interactive "Try it out" against the same origin.
+- The CLI still prints the spec: `appitools openapi schema.json` (YAML) — same
+  document the HTTP routes serve.
+
+## CORS (API-PRODUCTIVA-V1)
+
+CORS is **configurable instance infrastructure**, NOT a schema key. It is
+**disabled by default** (no `Access-Control-*` headers emitted, no middleware in
+the chain — zero cost). Enable it by listing browser origins:
+
+- `APPITOOLS_CORS_ORIGINS` — comma-separated exact origins, or the single `*`.
+  **Setting it ENABLES CORS**; empty keeps it off.
+- `APPITOOLS_CORS_METHODS` (default `GET,POST,PUT,PATCH,DELETE,OPTIONS`),
+  `APPITOOLS_CORS_HEADERS` (default `Authorization,Content-Type`),
+  `APPITOOLS_CORS_EXPOSE_HEADERS` (default none),
+  `APPITOOLS_CORS_CREDENTIALS` (`true`/`1`/`on`; default false),
+  `APPITOOLS_CORS_MAX_AGE` (preflight cache seconds; default 600).
+- **Scope**: only the browser-consumed routes — `/api/*`, `/auth/*`, `/graphql`,
+  `/openapi*`. The control plane (`:9090`), `/admin`, `/metrics`, `/debug` are
+  **never** given CORS (operation surfaces, same-origin / machine callers).
+- **Preflight**: `OPTIONS` is answered `204` with the CORS headers BEFORE auth (a
+  preflight has no token), so it never 401s. A disallowed origin gets no
+  `Allow-Origin`. With credentials + `*`, the request origin is reflected (the
+  Fetch spec forbids `*` with credentials). Measured `no_change` on the hot path.
+
+## Auth cycle for an API consumer (API-PRODUCTIVA-V1)
+
+The complete cycle a client uses (all tenant-aware via Host; the issued JWT is the
+SAME one `/api/*` validates — HS256, 24 h TTL, stateless):
+
+1. **Log in** — `POST /auth/login {email,password}` → `200 {user, token}` (or
+   `{mfa_required, mfa_token}` if TOTP MFA is on → finish at `/auth/mfa/verify`).
+   (Public **signup** is `POST /auth/signup`, enabled only when
+   `APPITOOLS_AUTH_SIGNUP_ROLE` is set.)
+2. **Use** the token: `Authorization: Bearer <token>` on every `/api/*` call.
+3. **Expiry** — a request with an expired/invalid token gets a clear
+   `401 {"error":"invalid token: …"}` (never a 500). That is the client's signal
+   to refresh.
+4. **Refresh** — `POST /auth/refresh` with the still-valid token (in the
+   `Authorization` header **or** `{"token":"…"}` body) → `200 {token}` with a fresh
+   expiry. Re-mint, not rotation (stateless); the old token works until its own
+   `exp`. There is no separate long-lived refresh token.
+5. **Log out** — the JWT is **stateless**: logout = the client **discards the
+   token** (there is no server-side session or denylist to add per-request hot-path
+   cost). For forced revocation an admin **suspends** the user/tenant (blocks new
+   logins; already-issued tokens live to `exp` — the documented stateless trade-off).
+
 ## File store (FILES-V1)
 
 The engine ships a content-addressable file store on two routes (no schema
@@ -909,8 +970,6 @@ is a JSON snapshot, not a stream).
   [Declarative relations](#declarative-relations--nested-embeds-relations-adr-019)
   — but they create no FK constraint and no `ON DELETE` cascade; the field-level
   `relation` still only adds the read-only subresource route.)
-- CORS headers — browser SPAs must be served same-origin
-  ([workaround](docs/DEPLOY.md#cors--current-status-important-for-spas)).
 - `workflows` schema block — parsed for forward compatibility, no executor.
 - OTLP/OpenTelemetry export (observability is Prometheus `/metrics` + an
   internal trace ring).

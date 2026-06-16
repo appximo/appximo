@@ -177,6 +177,12 @@ baseline faster are welcome; we'll publish updated numbers.
 - **GraphQL**: queries (with nested relation embeds) + create/update/delete
   mutations, selection-count limits (alias-amplification guard), introspection
   off in production
+- **API contract, served**: an OpenAPI 3.0 spec generated from the schema —
+  including the auth + file-store endpoints — served at `/openapi.json` (and
+  `/openapi.yaml`), with **Swagger UI at `/docs`** for interactive exploration
+- **CORS**: configurable cross-origin access for browser SPAs on another origin
+  (`APPITOOLS_CORS_ORIGINS`), disabled by default, scoped to `/api`,`/auth`,
+  `/graphql`,`/openapi` — never the control plane or `/admin`
 - **Ops**: Prometheus `/metrics`, per-request trace ring with stage breakdown,
   SLO burn-rate alerts (Slack), graceful drain on SIGTERM, circuit breaker
   (verified open/recover with toxiproxy), zero-downtime additive migrations —
@@ -206,9 +212,6 @@ It serves our own production workload today.
 
 **Known limits, honestly:**
 
-- **No CORS middleware**: browser SPAs must be served same-origin (workaround in
-  [docs/DEPLOY.md](docs/DEPLOY.md#cors--current-status-important-for-spas)); native
-  support is next on the engine roadmap.
 - **Single node.** No HA/clustering story; scale is vertical (the benchmark shows
   how far one cheap box goes).
 - Observability is Prometheus + an internal trace ring — **no OTLP export**.
@@ -231,6 +234,8 @@ It serves our own production workload today.
 | `APPITOOLS_OAUTH_{GOOGLE,GITHUB,MICROSOFT}_CLIENT_ID` / `…_CLIENT_SECRET` | env | no | enable social login per provider (unset = provider not offered) |
 | `APPITOOLS_OAUTH_CALLBACK_URL` / `APPITOOLS_OAUTH_DEFAULT_ROLE` | env | no | fixed OAuth redirect origin; role for auto-created social users (falls back to signup role) |
 | `APPITOOLS_MFA_KEY` / `APPITOOLS_MFA_ISSUER` | env | no | TOTP-secret encryption key (falls back to `JWT_SECRET`); authenticator-app issuer label |
+| `APPITOOLS_CORS_ORIGINS` | env | no | comma-separated browser origins allowed cross-origin (or `*`); **empty = CORS disabled** (safe default). Scoped to `/api`,`/auth`,`/graphql`,`/openapi` |
+| `APPITOOLS_CORS_METHODS` / `APPITOOLS_CORS_HEADERS` / `APPITOOLS_CORS_EXPOSE_HEADERS` / `APPITOOLS_CORS_CREDENTIALS` / `APPITOOLS_CORS_MAX_AGE` | env | no | CORS preflight tuning (see [docs/DEPLOY.md](docs/DEPLOY.md#cors--configurable-for-browser-spas-on-another-origin)) |
 | `APPITOOLS_PLATFORM_SUPER_ADMIN_ROLE` / `APPITOOLS_PLATFORM_MFA_ISSUER` | env | no | admin API: platform super-admin role marker (default `platform_super_admin`); platform authenticator label. Bootstrap the first super-admin with `appitools admin create` |
 | `OBS_DB_PATH` | env | no | observability SQLite path; default `/var/lib/appitools/obs.db` (persistent — survives restarts). See [docs/DEPLOY.md](docs/DEPLOY.md#observability-store-obs_db_path) |
 | `DB_MAX_CONNS`, `GOMAXPROCS`, `SLACK_WEBHOOK_URL`, `REDIS_URL` | env | no | see [docs/DEPLOY.md](docs/DEPLOY.md) |

@@ -1,0 +1,380 @@
+{
+  "info": {
+    "name": "Appitools API Certification — ERP (nimbus)",
+    "description": "End-to-end certification of the Appitools production API against the live ERP demo (tenant 'nimbus'). Exercises, as a real external consumer would: the OpenAPI contract, the full auth cycle (refresh + expired/invalid token handling), CRUD with pagination/filters/sort, consumable error codes, RBAC deny-by-default, and create-time mass-assignment protection. Run with scripts/api-cert.sh (mints the tokens) — `newman run` exits non-zero on any failed assertion.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "dept_id", "value": "" },
+    { "key": "dept_code", "value": "" },
+    { "key": "refreshed_token", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Contract — GET /health (unauthenticated)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Host", "value": "{{host}}" }],
+        "url": "{{base_url}}/health"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('health 200', () => pm.response.to.have.status(200));",
+          "pm.test('reports status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+        ] }
+      }]
+    },
+    {
+      "name": "2. Contract — GET /openapi.json (unauthenticated)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Host", "value": "{{host}}" }],
+        "url": "{{base_url}}/openapi.json"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('openapi 200', () => pm.response.to.have.status(200));",
+          "const s = pm.response.json();",
+          "pm.test('OpenAPI 3.0.x', () => pm.expect(s.openapi).to.match(/^3\\.0/));",
+          "pm.test('documents /auth/login', () => pm.expect(s.paths).to.have.property('/auth/login'));",
+          "pm.test('documents the ERP resources', () => pm.expect(s.paths).to.have.property('/api/empleados'));"
+        ] }
+      }]
+    },
+    {
+      "name": "3. Auth — refresh the admin token",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer {{admin_token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "{}" },
+        "url": "{{base_url}}/auth/refresh"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('refresh 200', () => pm.response.to.have.status(200));",
+          "const t = pm.response.json().token;",
+          "pm.test('returns a fresh token', () => pm.expect(t).to.be.a('string').and.not.empty);",
+          "pm.collectionVariables.set('refreshed_token', t);"
+        ] }
+      }]
+    },
+    {
+      "name": "4. Auth — refreshed token works on /api",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer {{refreshed_token}}" }
+        ],
+        "url": "{{base_url}}/api/empleados?per_page=1"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('refreshed token authorizes (200)', () => pm.response.to.have.status(200));"
+        ] }
+      }]
+    },
+    {
+      "name": "5. Auth — invalid token → 401 (clear)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer not.a.real.token" }
+        ],
+        "url": "{{base_url}}/api/empleados"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('invalid token → 401', () => pm.response.to.have.status(401));",
+          "pm.test('error body is JSON {error}', () => pm.expect(pm.response.json()).to.have.property('error'));"
+        ] }
+      }]
+    },
+    {
+      "name": "6. Auth — missing token → 401",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Host", "value": "{{host}}" }],
+        "url": "{{base_url}}/api/empleados"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('missing token → 401', () => pm.response.to.have.status(401));"
+        ] }
+      }]
+    },
+    {
+      "name": "7. CRUD — create departamento (admin)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": { "exec": [
+            "const rnd = () => String.fromCharCode(65 + Math.floor(Math.random()*26));",
+            "pm.collectionVariables.set('dept_code', 'C'+rnd()+rnd()+rnd());"
+          ] }
+        },
+        {
+          "listen": "test",
+          "script": { "exec": [
+            "pm.test('create → 201', () => pm.response.to.have.status(201));",
+            "const r = pm.response.json();",
+            "pm.test('returns an id', () => pm.expect(r.id).to.be.a('string').and.not.empty);",
+            "pm.test('default applied (activo=true)', () => pm.expect(r.activo).to.eql(true));",
+            "pm.collectionVariables.set('dept_id', r.id);"
+          ] }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer {{admin_token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "{\"codigo\":\"{{dept_code}}\",\"nombre\":\"Certificacion API\",\"presupuesto\":150000,\"centro_costo\":\"CC-CERT\"}" },
+        "url": "{{base_url}}/api/departamentos"
+      }
+    },
+    {
+      "name": "8. CRUD — get departamento by id",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+        ],
+        "url": "{{base_url}}/api/departamentos/{{dept_id}}"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('get → 200', () => pm.response.to.have.status(200));",
+          "pm.test('round-trips codigo', () => pm.expect(pm.response.json().codigo).to.eql(pm.collectionVariables.get('dept_code')));"
+        ] }
+      }]
+    },
+    {
+      "name": "9. List — pagination meta is consumable",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+        ],
+        "url": "{{base_url}}/api/departamentos?per_page=5"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('list → 200', () => pm.response.to.have.status(200));",
+          "const b = pm.response.json();",
+          "pm.test('has data array', () => pm.expect(b.data).to.be.an('array'));",
+          "pm.test('meta has pagination fields', () => {",
+          "  pm.expect(b.meta).to.have.property('page');",
+          "  pm.expect(b.meta).to.have.property('per_page');",
+          "  pm.expect(b.meta).to.have.property('has_next');",
+          "  pm.expect(b.meta).to.have.property('has_prev');",
+          "});",
+          "pm.test('per_page honored', () => pm.expect(b.data.length).to.be.at.most(5));"
+        ] }
+      }]
+    },
+    {
+      "name": "10. List — filter + sort",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+        ],
+        "url": "{{base_url}}/api/departamentos?filter[activo][eq]=true&sort=nombre&order=asc"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('filtered+sorted list → 200', () => pm.response.to.have.status(200));",
+          "pm.test('all rows match the filter', () => pm.response.json().data.forEach(d => pm.expect(d.activo).to.eql(true)));"
+        ] }
+      }]
+    },
+    {
+      "name": "11. Error — bad filter field → 400",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+        ],
+        "url": "{{base_url}}/api/departamentos?filter[nope][eq]=x"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('unknown filter field → 400', () => pm.response.to.have.status(400));",
+          "pm.test('error body is JSON {error}', () => pm.expect(pm.response.json()).to.have.property('error'));"
+        ] }
+      }]
+    },
+    {
+      "name": "12. Error — validation 422 lists every field",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer {{admin_token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "{\"codigo\":\"toolongandlowercase\",\"presupuesto\":-5}" },
+        "url": "{{base_url}}/api/departamentos"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('validation → 422', () => pm.response.to.have.status(422));",
+          "const b = pm.response.json();",
+          "pm.test('error=validation_failed', () => pm.expect(b.error).to.eql('validation_failed'));",
+          "pm.test('fields[] reports multiple violations', () => pm.expect(b.fields.length).to.be.at.least(2));"
+        ] }
+      }]
+    },
+    {
+      "name": "13. CRUD — patch departamento",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer {{admin_token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "{\"presupuesto\":200000}" },
+        "url": "{{base_url}}/api/departamentos/{{dept_id}}"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('patch → 200', () => pm.response.to.have.status(200));",
+          "pm.test('field updated', () => pm.expect(pm.response.json().presupuesto).to.eql(200000));"
+        ] }
+      }]
+    },
+    {
+      "name": "14. RBAC — auditor (read-only) cannot create → 403",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer {{auditor_token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "{\"codigo\":\"AUD\",\"nombre\":\"should not exist\"}" },
+        "url": "{{base_url}}/api/departamentos"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('read-only role create → 403', () => pm.response.to.have.status(403));"
+        ] }
+      }]
+    },
+    {
+      "name": "15. RBAC — auditor can read → 200",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer {{auditor_token}}" }
+        ],
+        "url": "{{base_url}}/api/empleados?per_page=1"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('read-only role read → 200', () => pm.response.to.have.status(200));"
+        ] }
+      }]
+    },
+    {
+      "name": "16. Security — mass-assignment blocked (owner-scoped create) → 403",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer {{empleado_token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "{\"empleado_id\":\"11111111-1111-1111-1111-111111111111\",\"user_id\":\"{{wrong_user_id}}\",\"tipo\":\"vacaciones\",\"fecha_inicio\":\"2026-07-01T00:00:00Z\",\"fecha_fin\":\"2026-07-05T00:00:00Z\"}" },
+        "url": "{{base_url}}/api/solicitudes"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('foreign user_id on create → 403 (no mass-assignment)', () => pm.response.to.have.status(403));"
+        ] }
+      }]
+    },
+    {
+      "name": "17. Security — owner can create for itself → 201",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer {{empleado_token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "{\"empleado_id\":\"11111111-1111-1111-1111-111111111111\",\"user_id\":\"{{empleado_user_id}}\",\"tipo\":\"vacaciones\",\"fecha_inicio\":\"2026-07-01T00:00:00Z\",\"fecha_fin\":\"2026-07-05T00:00:00Z\"}" },
+        "url": "{{base_url}}/api/solicitudes"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('own user_id on create → 201', () => pm.response.to.have.status(201));"
+        ] }
+      }]
+    },
+    {
+      "name": "18. CRUD — delete departamento (cleanup) → 204",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+        ],
+        "url": "{{base_url}}/api/departamentos/{{dept_id}}"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('delete → 204', () => pm.response.to.have.status(204));"
+        ] }
+      }]
+    },
+    {
+      "name": "19. CRUD — deleted is gone → 404",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Host", "value": "{{host}}" },
+          { "key": "Authorization", "value": "Bearer {{admin_token}}" }
+        ],
+        "url": "{{base_url}}/api/departamentos/{{dept_id}}"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": [
+          "pm.test('get deleted → 404', () => pm.response.to.have.status(404));"
+        ] }
+      }]
+    }
+  ]
+}

@@ -96,6 +96,8 @@ type App struct {
 
 	platformAdmin *platformadmin.Service // admin API backend (ADMIN-API-V1)
 
+	corsConfig appmiddleware.CORSConfig // cross-origin policy (API-PRODUCTIVA-V1); empty origins ⇒ disabled
+
 	routes  []Route
 	started bool
 }
@@ -458,6 +460,33 @@ func New(cfg Config) (*App, error) {
 		log.Printf("auth: OAuth social login enabled (providers: %s)", strings.Join(enabled, ", "))
 	}
 
+	// CORS (API-PRODUCTIVA-V1): cross-origin policy for the public data-plane
+	// routes. Config fields win; each falls back to its APPITOOLS_CORS_* env var.
+	// An empty origin list (the default) leaves CORS DISABLED — the middleware is
+	// not even wired, so a default deployment pays zero and never emits an
+	// Access-Control-* header. An operator enables it by listing browser origins.
+	app.corsConfig = appmiddleware.CORSConfig{
+		AllowedOrigins:   coalesceCSV(cfg.CORSAllowedOrigins, os.Getenv("APPITOOLS_CORS_ORIGINS")),
+		AllowedMethods:   coalesceCSV(cfg.CORSAllowedMethods, os.Getenv("APPITOOLS_CORS_METHODS")),
+		AllowedHeaders:   coalesceCSV(cfg.CORSAllowedHeaders, os.Getenv("APPITOOLS_CORS_HEADERS")),
+		ExposedHeaders:   coalesceCSV(cfg.CORSExposedHeaders, os.Getenv("APPITOOLS_CORS_EXPOSE_HEADERS")),
+		AllowCredentials: cfg.CORSAllowCredentials || envTruthy(os.Getenv("APPITOOLS_CORS_CREDENTIALS")),
+		MaxAge:           cfg.CORSMaxAge,
+	}
+	if app.corsConfig.MaxAge == 0 {
+		if v := os.Getenv("APPITOOLS_CORS_MAX_AGE"); v != "" {
+			if n, perr := strconv.Atoi(v); perr == nil {
+				app.corsConfig.MaxAge = n
+			}
+		}
+	}
+	if app.corsConfig.Enabled() {
+		log.Printf("CORS enabled for /api,/auth,/graphql,/openapi — origins: %s (credentials=%t)",
+			strings.Join(app.corsConfig.AllowedOrigins, ", "), app.corsConfig.AllowCredentials)
+	} else {
+		log.Println("CORS disabled (no origins configured — set APPITOOLS_CORS_ORIGINS to enable browser cross-origin access)")
+	}
+
 	// engineRefs for custom-route Ctx helpers: compile validators once.
 	validators := make(map[string]*schema.ResourceValidator, len(s.Resources))
 	for name, res := range s.Resources {
@@ -574,6 +603,13 @@ func (a *App) buildRouter() *chi.Mux {
 	adminKey := a.cfg.AdminKey
 	r := chi.NewMux()
 	r.Use(appmiddleware.SecurityHeaders)
+	// CORS (API-PRODUCTIVA-V1) runs BEFORE tenant/cache/JWT/RBAC so a preflight
+	// (no credentials, no tenant) is answered without 401/400, and so a per-request
+	// Allow-Origin is never cached. Wired ONLY when origins are configured — a
+	// default deployment has no CORS middleware in the chain at all (zero cost).
+	if a.corsConfig.Enabled() {
+		r.Use(appmiddleware.CORS(a.corsConfig))
+	}
 	r.Use(chimiddleware.Compress(5, "application/json", "application/graphql+json"))
 	r.Use(chimiddleware.RequestID)
 	r.Use(tenant.TenantMiddleware)
@@ -723,6 +759,11 @@ func (a *App) buildRouter() *chi.Mux {
 		})
 	})
 
+	// OpenAPI spec (/openapi.json, /openapi.yaml) + Swagger UI (/docs) — the public,
+	// interactive API contract (API-PRODUCTIVA-V1). Unauthenticated (JWT-skipped),
+	// off the CRUD hot path; derived from the boot schema.
+	a.registerOpenAPIRoutes(r)
+
 	// Password identity core (AUTH-CORE-V1): /auth/signup, /auth/login,
 	// /auth/refresh. These flow through the SAME chain (tenant → rate limit →
 	// JWT[skipped for /auth/] → RBAC[passes through, not /api/]) — no duplicated
@@ -768,6 +809,26 @@ func (a *App) buildRouter() *chi.Mux {
 func mustMarshal(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+// coalesceCSV returns cfgVal when non-empty, otherwise the comma-separated env
+// string parsed into a trimmed, non-empty slice (nil when both are empty). Used to
+// resolve the CORS list config fields against their APPITOOLS_CORS_* env vars.
+func coalesceCSV(cfgVal []string, env string) []string {
+	if len(cfgVal) > 0 {
+		return cfgVal
+	}
+	if strings.TrimSpace(env) == "" {
+		return nil
+	}
+	parts := strings.Split(env, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // envTruthy reports whether an env-var string means "on" (true/1/on/yes,

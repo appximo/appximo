@@ -612,19 +612,38 @@ Honest readings of those numbers:
 
 ---
 
-### CORS — current status (important for SPAs)
+### CORS — configurable (for browser SPAs on another origin)
 
-The engine currently ships **no CORS middleware**: it never emits
-`Access-Control-Allow-*` headers. Practical consequences:
+The engine ships **configurable CORS**, disabled by default. With no origins
+configured it emits **no `Access-Control-Allow-*` header** (the safe default —
+server-to-server / mobile / curl are unaffected, CORS is a browser concept). An
+operator opts in by listing the browser origins allowed to call the API:
 
-- Server-to-server, mobile apps, curl: **unaffected** (CORS is a browser thing).
-- A browser SPA served from a **different origin** (e.g. `app.example.com`
-  calling `api.example.com`): the browser will block the responses — preflighted
-  requests (`POST`/`PUT`/`PATCH`/`DELETE` with JSON, or any request carrying
-  `Authorization`) fail at the `OPTIONS` preflight.
+```bash
+APPITOOLS_CORS_ORIGINS="https://app.example.com,https://admin.example.com"
+# optional:
+APPITOOLS_CORS_METHODS="GET,POST,PUT,PATCH,DELETE,OPTIONS"   # default shown
+APPITOOLS_CORS_HEADERS="Authorization,Content-Type"          # default shown
+APPITOOLS_CORS_EXPOSE_HEADERS="X-Cache"                      # default: none
+APPITOOLS_CORS_CREDENTIALS=true                              # cookies/Authorization; default false
+APPITOOLS_CORS_MAX_AGE=600                                   # preflight cache seconds; default 600
+```
 
-Workaround today: serve the SPA from the **same origin** as the API (Caddy can
-do both: add a `handle /app/*` block, or a separate subdomain that proxies both
-to the right place — same-origin means scheme+host+port all match). Native CORS
-configuration in the engine is planned as a dedicated session (engine changes go
-through the measurement pipeline).
+Behaviour:
+
+- **Scope**: CORS applies ONLY to the public data-plane routes a browser consumes
+  — `/api/*`, `/auth/*`, `/graphql`, `/openapi*`. The control plane (`:9090`),
+  `/admin`, `/metrics` and `/debug` are operation surfaces (same-origin or machine
+  callers) and are **never** given cross-origin access.
+- **Preflight**: `OPTIONS` requests are answered directly (`204`) with the CORS
+  headers, before auth runs — a preflight carries no credentials, so it never 401s.
+- **Origins**: an exact allowlist, or the single value `"*"` for any origin. With
+  `APPITOOLS_CORS_CREDENTIALS=true`, a `"*"` allowlist **reflects** the request
+  origin (the Fetch spec forbids `*` with credentials). A disallowed origin gets
+  **no** `Access-Control-Allow-Origin` (the browser blocks the response).
+- **Cost**: the middleware runs only when an `Origin` header is present and the
+  path is in scope, and is wired only when origins are configured — measured
+  `no_change` on the read and write hot paths (group Mann-Whitney, 0.5 ms gate).
+
+You can still serve the SPA **same-origin** as the API (Caddy proxying both) and
+skip CORS entirely — that remains the simplest setup.

@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 
@@ -9,21 +10,23 @@ import (
 )
 
 type openAPISpec struct {
-	OpenAPI    string           `yaml:"openapi"`
-	Info       map[string]any   `yaml:"info"`
-	Servers    []map[string]any `yaml:"servers,omitempty"`
-	Security   []map[string]any `yaml:"security"`
-	Paths      map[string]any   `yaml:"paths"`
-	Components map[string]any   `yaml:"components"`
+	OpenAPI    string           `yaml:"openapi" json:"openapi"`
+	Info       map[string]any   `yaml:"info" json:"info"`
+	Servers    []map[string]any `yaml:"servers,omitempty" json:"servers,omitempty"`
+	Security   []map[string]any `yaml:"security" json:"security"`
+	Paths      map[string]any   `yaml:"paths" json:"paths"`
+	Components map[string]any   `yaml:"components" json:"components"`
 }
 
-// GenerateOpenAPI produces an OpenAPI 3.0.3 YAML document from an APISchema.
-// baseURL is set as the server URL (defaults to "/" when empty).
-func GenerateOpenAPI(s *schema.APISchema, baseURL string) ([]byte, error) {
+// buildOASpec assembles the full OpenAPI 3.0.3 document object for an APISchema.
+// It is the single source of truth shared by the YAML and JSON marshallers, so the
+// `appitools openapi` CLI and the served /openapi.json are byte-for-byte the same
+// contract in two encodings.
+func buildOASpec(s *schema.APISchema, baseURL string) openAPISpec {
 	if baseURL == "" {
 		baseURL = "/"
 	}
-	spec := openAPISpec{
+	return openAPISpec{
 		OpenAPI: "3.0.3",
 		Info: map[string]any{
 			"title":       s.Name,
@@ -35,13 +38,32 @@ func GenerateOpenAPI(s *schema.APISchema, baseURL string) ([]byte, error) {
 		Paths:      buildOAPaths(s),
 		Components: buildOAComponents(s),
 	}
-	return yaml.Marshal(spec)
+}
+
+// GenerateOpenAPI produces an OpenAPI 3.0.3 YAML document from an APISchema.
+// baseURL is set as the server URL (defaults to "/" when empty).
+func GenerateOpenAPI(s *schema.APISchema, baseURL string) ([]byte, error) {
+	return yaml.Marshal(buildOASpec(s, baseURL))
+}
+
+// GenerateOpenAPIJSON produces the SAME OpenAPI 3.0.3 document as GenerateOpenAPI
+// but JSON-encoded — the format Swagger UI and most client generators consume. The
+// engine serves it at GET /openapi.json.
+func GenerateOpenAPIJSON(s *schema.APISchema, baseURL string) ([]byte, error) {
+	return json.MarshalIndent(buildOASpec(s, baseURL), "", "  ")
 }
 
 // ── paths ─────────────────────────────────────────────────────────────────────
 
 func buildOAPaths(s *schema.APISchema) map[string]any {
 	paths := map[string]any{}
+	// Auth-as-product endpoints (AUTH-CORE-V1 …): always part of the engine's API
+	// surface, independent of the schema, so they are always documented.
+	addOAAuthPaths(paths)
+	// File store routes exist whenever no schema resource is literally named "files".
+	if _, taken := s.Resources["files"]; !taken {
+		addOAFilePaths(paths)
+	}
 	for _, name := range sortedResourceKeys(s) {
 		res := s.Resources[name]
 		title := toPascalCase(name)
@@ -69,6 +91,135 @@ func buildOAPaths(s *schema.APISchema) map[string]any {
 		}
 	}
 	return paths
+}
+
+// addOAAuthPaths documents the auth-as-product endpoints. The unauthenticated
+// flows (signup/login/refresh/reset/verify) carry `security: []` to OVERRIDE the
+// global bearerAuth requirement (they run before a token exists); the MFA enroll
+// endpoints keep the global bearer requirement. Host is the tenant subdomain.
+func addOAAuthPaths(paths map[string]any) {
+	noAuth := []any{} // security: [] — overrides the global bearerAuth
+
+	paths["/auth/signup"] = map[string]any{"post": map[string]any{
+		"operationId": "authSignup",
+		"summary":     "Sign up a new user in the tenant (public signup must be enabled)",
+		"tags":        []string{"auth"},
+		"security":    noAuth,
+		"requestBody": oaReqBody("AuthCredentials"),
+		"responses": map[string]any{
+			"201": oaSuccessResp(oaSchemaRef("AuthResult")),
+			"403": oaRespRef("Error403"), "409": oaRespRef("Error409"), "422": oaRespRef("Error422"),
+		},
+	}}
+	paths["/auth/login"] = map[string]any{"post": map[string]any{
+		"operationId": "authLogin",
+		"summary":     "Log in with email + password; returns a JWT (or an MFA challenge)",
+		"description": "On success returns {user, token}. If the user has TOTP MFA enabled, returns {mfa_required:true, mfa_token} instead — complete the login at /auth/mfa/verify. Wrong password and unknown email are indistinguishable (401).",
+		"tags":        []string{"auth"},
+		"security":    noAuth,
+		"requestBody": oaReqBody("AuthCredentials"),
+		"responses": map[string]any{
+			"200": oaSuccessResp(oaSchemaRef("AuthResult")),
+			"401": oaRespRef("Error401"), "403": oaRespRef("Error403"), "429": oaRespRef("Error429"),
+		},
+	}}
+	paths["/auth/refresh"] = map[string]any{"post": map[string]any{
+		"operationId": "authRefresh",
+		"summary":     "Re-mint a fresh JWT from a still-valid one",
+		"description": "Send the current token in the Authorization: Bearer header OR a {\"token\":\"…\"} body. Returns {token} with a new expiry. Stateless: the old token keeps working until its own exp.",
+		"tags":        []string{"auth"},
+		"security":    noAuth,
+		"requestBody": oaReqBodyOptional("RefreshRequest"),
+		"responses": map[string]any{
+			"200": oaSuccessResp(oaSchemaRef("TokenResponse")),
+			"400": oaRespRef("Error400"), "401": oaRespRef("Error401"),
+		},
+	}}
+	paths["/auth/reset/request"] = map[string]any{"post": map[string]any{
+		"operationId": "authResetRequest",
+		"summary":     "Request a password-reset email (uniform anti-enumeration response)",
+		"tags":        []string{"auth"}, "security": noAuth,
+		"requestBody": oaReqBody("EmailRequest"),
+		"responses":   map[string]any{"200": oaSuccessResp(oaSchemaRef("MessageResponse")), "429": oaRespRef("Error429")},
+	}}
+	paths["/auth/reset/confirm"] = map[string]any{"post": map[string]any{
+		"operationId": "authResetConfirm",
+		"summary":     "Consume a reset token and set a new password",
+		"tags":        []string{"auth"}, "security": noAuth,
+		"requestBody": oaReqBody("ResetConfirmRequest"),
+		"responses":   map[string]any{"200": oaSuccessResp(oaSchemaRef("MessageResponse")), "400": oaRespRef("Error400"), "422": oaRespRef("Error422")},
+	}}
+	paths["/auth/verify/request"] = map[string]any{"post": map[string]any{
+		"operationId": "authVerifyRequest",
+		"summary":     "Request an email-verification link (uniform anti-enumeration response)",
+		"tags":        []string{"auth"}, "security": noAuth,
+		"requestBody": oaReqBody("EmailRequest"),
+		"responses":   map[string]any{"200": oaSuccessResp(oaSchemaRef("MessageResponse")), "429": oaRespRef("Error429")},
+	}}
+	paths["/auth/verify"] = map[string]any{
+		"get": map[string]any{
+			"operationId": "authVerifyLink",
+			"summary":     "Verify an email via the clickable link token",
+			"tags":        []string{"auth"}, "security": noAuth,
+			"parameters": []any{oaQueryParamDesc("token", map[string]any{"type": "string"}, "the single-use verification token from the email link")},
+			"responses":  map[string]any{"200": oaSuccessResp(oaSchemaRef("MessageResponse")), "400": oaRespRef("Error400")},
+		},
+		"post": map[string]any{
+			"operationId": "authVerifyConfirm",
+			"summary":     "Verify an email by posting the token",
+			"tags":        []string{"auth"}, "security": noAuth,
+			"requestBody": oaReqBodyOptional("TokenRequest"),
+			"responses":   map[string]any{"200": oaSuccessResp(oaSchemaRef("MessageResponse")), "400": oaRespRef("Error400")},
+		},
+	}
+	paths["/auth/mfa/verify"] = map[string]any{"post": map[string]any{
+		"operationId": "authMFAVerify",
+		"summary":     "Complete a two-step login with a TOTP or backup code",
+		"tags":        []string{"auth"}, "security": noAuth,
+		"requestBody": oaReqBody("MFAVerifyRequest"),
+		"responses":   map[string]any{"200": oaSuccessResp(oaSchemaRef("AuthResult")), "401": oaRespRef("Error401"), "429": oaRespRef("Error429")},
+	}}
+}
+
+// addOAFilePaths documents the built-in content-addressable file store routes.
+func addOAFilePaths(paths map[string]any) {
+	paths["/api/files"] = map[string]any{"post": map[string]any{
+		"operationId": "uploadFile",
+		"summary":     "Upload a file (multipart, streamed + content-addressed)",
+		"tags":        []string{"files"},
+		"requestBody": map[string]any{
+			"required": true,
+			"content": map[string]any{"multipart/form-data": map[string]any{"schema": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"file": map[string]any{"type": "string", "format": "binary"}},
+				"required":   []string{"file"},
+			}}},
+		},
+		"responses": map[string]any{
+			"201": map[string]any{"description": "Created", "content": oaJSONContent(oaSchemaRef("FileUploadResult"))},
+			"401": oaRespRef("Error401"), "403": oaRespRef("Error403"), "413": oaRespRef("Error413"),
+		},
+	}}
+	paths["/api/files/{id}"] = map[string]any{"get": map[string]any{
+		"operationId": "downloadFile",
+		"summary":     "Download a file blob by id (streamed)",
+		"tags":        []string{"files"},
+		"parameters":  []any{oaPathIDParam()},
+		"responses": map[string]any{
+			"200": map[string]any{"description": "The file bytes", "content": map[string]any{
+				"application/octet-stream": map[string]any{"schema": map[string]any{"type": "string", "format": "binary"}},
+			}},
+			"401": oaRespRef("Error401"), "403": oaRespRef("Error403"), "404": oaRespRef("Error404"),
+		},
+	}}
+}
+
+func oaReqBody(schemaName string) map[string]any {
+	return map[string]any{"required": true, "content": oaJSONContent(oaSchemaRef(schemaName))}
+}
+
+func oaReqBodyOptional(schemaName string) map[string]any {
+	return map[string]any{"required": false, "content": oaJSONContent(oaSchemaRef(schemaName))}
 }
 
 func oaListOp(name, title string, res *schema.ResourceSchema) map[string]any {
@@ -272,30 +423,41 @@ func buildOAComponents(s *schema.APISchema) map[string]any {
 				"error": map[string]any{"type": "string"},
 			},
 		},
-		// Matches the actual list response: page/per_page/has_next/has_prev. No
+		// The declarative-validation 422 body: every failing field reported at once.
+		// Matches builder.go writeValidationErrs: {"error":"validation_failed","fields":[{field,rule,message}]}.
+		"ValidationError": map[string]any{
+			"type":     "object",
+			"required": []string{"field", "rule", "message"},
+			"properties": map[string]any{
+				"field":   map[string]any{"type": "string"},
+				"rule":    map[string]any{"type": "string"},
+				"message": map[string]any{"type": "string"},
+			},
+		},
+		"ValidationErrorResponse": map[string]any{
+			"type":     "object",
+			"required": []string{"error", "fields"},
+			"properties": map[string]any{
+				"error":  map[string]any{"type": "string", "example": "validation_failed"},
+				"fields": map[string]any{"type": "array", "items": oaSchemaRef("ValidationError")},
+			},
+		},
+		// Matches the actual list response meta: page/per_page/has_next/has_prev. No
 		// total/total_pages — COUNT(*) was removed from the list handler for
-		// performance, so the response never carries row totals.
+		// performance, so the response never carries row totals; and no `links`
+		// object — the live engine emits meta only (keyset pages via ?after=<last id>).
 		"PaginationMeta": map[string]any{
 			"type":     "object",
 			"required": []string{"page", "per_page", "has_next", "has_prev"},
 			"properties": map[string]any{
 				"page":     map[string]any{"type": "integer"},
 				"per_page": map[string]any{"type": "integer"},
-				"has_next": map[string]any{"type": "boolean"},
+				"has_next": map[string]any{"type": "boolean", "description": "more rows exist after this page (continue with ?after=<last item's id>)"},
 				"has_prev": map[string]any{"type": "boolean"},
 			},
 		},
-		"PaginationLinks": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"self":  map[string]any{"type": "string"},
-				"first": map[string]any{"type": "string"},
-				"last":  map[string]any{"type": "string"},
-				"prev":  map[string]any{"type": "string", "nullable": true},
-				"next":  map[string]any{"type": "string", "nullable": true},
-			},
-		},
 	}
+	addOAAuthSchemas(schemas)
 
 	for _, name := range sortedResourceKeys(s) {
 		res := s.Resources[name]
@@ -314,8 +476,7 @@ func buildOAComponents(s *schema.APISchema) map[string]any {
 					"type":  "array",
 					"items": oaSchemaRef(title),
 				},
-				"meta":  oaSchemaRef("PaginationMeta"),
-				"links": oaSchemaRef("PaginationLinks"),
+				"meta": oaSchemaRef("PaginationMeta"),
 			},
 		}
 	}
@@ -336,7 +497,86 @@ func buildOAComponents(s *schema.APISchema) map[string]any {
 			"Error404": oaErrResp("Resource not found"),
 			"Error409": oaErrResp("Conflict — a unique constraint would be violated"),
 			"Error413": oaErrResp("Request body too large (1 MiB limit)"),
-			"Error422": oaErrResp("Validation failed, or a before_create/before_update hook rejected the request"),
+			"Error429": oaErrResp("Too many requests — rate or login-attempt limit exceeded (see Retry-After)"),
+			"Error422": map[string]any{
+				"description": "Validation failed (every offending field is listed), or a before_create/before_update hook rejected the request",
+				"content":     oaJSONContent(oaSchemaRef("ValidationErrorResponse")),
+			},
+		},
+	}
+}
+
+// addOAAuthSchemas registers the request/response component schemas for the
+// auth-as-product endpoints and the file store, so the served spec documents their
+// exact JSON shapes (matching pkg/userauth and pkg/files).
+func addOAAuthSchemas(schemas map[string]any) {
+	str := map[string]any{"type": "string"}
+	schemas["AuthCredentials"] = map[string]any{
+		"type": "object", "required": []string{"email", "password"},
+		"properties": map[string]any{
+			"email":    map[string]any{"type": "string", "format": "email"},
+			"password": str,
+		},
+	}
+	schemas["PublicUser"] = map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id":             map[string]any{"type": "string", "format": "uuid"},
+			"email":          map[string]any{"type": "string", "format": "email"},
+			"role":           str,
+			"email_verified": map[string]any{"type": "boolean"},
+			"created_at":     map[string]any{"type": "string", "format": "date-time"},
+		},
+	}
+	schemas["AuthResult"] = map[string]any{
+		"type":        "object",
+		"description": "Either {user, token} on success, or {mfa_required, mfa_token} when the user has TOTP MFA enabled.",
+		"properties": map[string]any{
+			"user":         oaSchemaRef("PublicUser"),
+			"token":        map[string]any{"type": "string", "description": "the engine JWT (HS256) — send as Authorization: Bearer"},
+			"mfa_required": map[string]any{"type": "boolean"},
+			"mfa_token":    map[string]any{"type": "string", "description": "short-lived challenge token; complete login at /auth/mfa/verify"},
+		},
+	}
+	schemas["RefreshRequest"] = map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"token": map[string]any{"type": "string", "description": "optional — omit to send the token in the Authorization header instead"},
+		},
+	}
+	schemas["TokenResponse"] = map[string]any{
+		"type": "object", "required": []string{"token"},
+		"properties": map[string]any{"token": str},
+	}
+	schemas["EmailRequest"] = map[string]any{
+		"type": "object", "required": []string{"email"},
+		"properties": map[string]any{"email": map[string]any{"type": "string", "format": "email"}},
+	}
+	schemas["ResetConfirmRequest"] = map[string]any{
+		"type": "object", "required": []string{"token", "new_password"},
+		"properties": map[string]any{"token": str, "new_password": str},
+	}
+	schemas["TokenRequest"] = map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"token": str},
+	}
+	schemas["MFAVerifyRequest"] = map[string]any{
+		"type": "object", "required": []string{"mfa_token", "code"},
+		"properties": map[string]any{
+			"mfa_token": str,
+			"code":      map[string]any{"type": "string", "description": "a current TOTP code or a one-time backup code"},
+		},
+	}
+	schemas["MessageResponse"] = map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"message": str},
+	}
+	schemas["FileUploadResult"] = map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"file_id": map[string]any{"type": "string", "format": "uuid"},
+			"sha256":  str,
+			"size":    map[string]any{"type": "integer", "format": "int64"},
 		},
 	}
 }

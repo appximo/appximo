@@ -93,4 +93,31 @@ type Config struct {
 	// MFAIssuer is the issuer label shown in authenticator apps. Empty falls back
 	// to APPITOOLS_MFA_ISSUER, then to "Appitools".
 	MFAIssuer string
+
+	// --- CORS (API-PRODUCTIVA-V1): cross-origin access for browser clients ---
+	// CORS is instance INFRASTRUCTURE config, not schema. An empty CORSAllowedOrigins
+	// DISABLES CORS (the safe default — no Access-Control-* headers, no preflight
+	// short-circuit); an operator opts in by listing browser origins. CORS applies
+	// ONLY to the public data-plane routes (/api, /auth, /graphql, /openapi), never
+	// to the control plane, /admin, /metrics or /debug.
+	//
+	// CORSAllowedOrigins is the exact origin allowlist, or the single literal "*"
+	// for any origin. Empty falls back to APPITOOLS_CORS_ORIGINS (comma-separated).
+	CORSAllowedOrigins []string
+	// CORSAllowedMethods is echoed in preflight responses. Empty falls back to
+	// APPITOOLS_CORS_METHODS, then to "GET,POST,PUT,PATCH,DELETE,OPTIONS".
+	CORSAllowedMethods []string
+	// CORSAllowedHeaders is echoed in preflight responses. Empty falls back to
+	// APPITOOLS_CORS_HEADERS, then to "Authorization,Content-Type".
+	CORSAllowedHeaders []string
+	// CORSExposedHeaders lists response headers a browser script may read. Empty
+	// falls back to APPITOOLS_CORS_EXPOSE_HEADERS, then to none.
+	CORSExposedHeaders []string
+	// CORSAllowCredentials sends Access-Control-Allow-Credentials: true (browser may
+	// send cookies/Authorization). Falls back to APPITOOLS_CORS_CREDENTIALS (truthy).
+	// With credentials a literal "*" origin is reflected (the Fetch spec forbids "*").
+	CORSAllowCredentials bool
+	// CORSMaxAge bounds preflight caching (seconds). 0 falls back to
+	// APPITOOLS_CORS_MAX_AGE, then to 600.
+	CORSMaxAge int
 }
