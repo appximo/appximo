@@ -64,11 +64,70 @@ func ApplyTenantMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema stri
 		return nil
 	}
 
+	// Foreign-key additions are applied with a TRANSITION-TOLERANT policy (see
+	// applyForeignKeys), separate from the rest of the plan: the ADD … NOT VALID
+	// commits to protect every NEW write immediately, and VALIDATE is best-effort
+	// over pre-existing data. The remaining ops go through the standard executor
+	// (which fails atomically, as it must). FKs reference tables created by the
+	// non-FK plan, so they are applied AFTER it.
+	nonFK, fkAdds := splitForeignKeyAdds(applyPlan)
+
 	ex := &schemadiff.Executor{Pool: pool, Schema: pgSchema}
-	if err := ex.Apply(ctx, applyPlan); err != nil {
+	if err := ex.Apply(ctx, nonFK); err != nil {
 		return fmt.Errorf("apply migration %s: %w", pgSchema, err)
 	}
+	applyForeignKeys(ctx, ex, pgSchema, fkAdds)
 	return nil
+}
+
+// splitForeignKeyAdds separates AddForeignKey ops from the rest of a plan so the
+// FKs can be applied with the transition-tolerant policy while everything else
+// goes through the standard (fail-atomic) executor.
+func splitForeignKeyAdds(plan *schemadiff.Plan) (nonFK *schemadiff.Plan, fkAdds []schemadiff.Operation) {
+	keep := make([]schemadiff.Operation, 0, len(plan.Ops))
+	for _, op := range plan.Ops {
+		if op.Kind() == schemadiff.OpAddForeignKey {
+			fkAdds = append(fkAdds, op)
+			continue
+		}
+		keep = append(keep, op)
+	}
+	return &schemadiff.Plan{Ops: keep}, fkAdds
+}
+
+// applyForeignKeys adds each foreign key with a policy made for the transition of
+// EXISTING tenants (their FK columns predate the constraint):
+//
+//  1. `ADD CONSTRAINT … NOT VALID` is committed FIRST — the FK immediately enforces
+//     every NEW insert/update/delete (forward protection), under lock_timeout+retry.
+//  2. `VALIDATE CONSTRAINT` is attempted as a SEPARATE step. On a CONSISTENT tenant
+//     (or any brand-new/empty table) it succeeds and the FK is fully validated. On a
+//     tenant carrying historical orphan rows it FAILS — and the FK is LEFT NOT VALID:
+//     it still guards forward, the drift is logged for an operator to fix (then VALIDATE
+//     manually), and provisioning is NOT broken.
+//
+// This is the documented v1 policy. A hard failure of the ADD itself (not a VALIDATE
+// failure) is logged and skipped so one problematic FK never aborts the whole
+// migration of the rest of the schema.
+func applyForeignKeys(ctx context.Context, ex *schemadiff.Executor, pgSchema string, fkAdds []schemadiff.Operation) {
+	for _, op := range fkAdds {
+		stmts, err := schemadiff.Render(&schemadiff.Plan{Ops: []schemadiff.Operation{op}})
+		if err != nil || len(stmts) == 0 {
+			log.Printf("migration[%s]: foreign key render failed, skipped: %s: %v", pgSchema, op.String(), err)
+			continue
+		}
+		// stmts[0] = ADD CONSTRAINT … NOT VALID ; stmts[1] = VALIDATE CONSTRAINT.
+		if err := ex.Exec(ctx, stmts[0].SQL); err != nil {
+			log.Printf("migration[%s]: foreign key add failed, skipped (schema unprotected for this relation): %s: %v", pgSchema, op.String(), err)
+			continue
+		}
+		for _, st := range stmts[1:] {
+			if err := ex.Exec(ctx, st.SQL); err != nil {
+				log.Printf("migration[%s]: foreign key left NOT VALID — pre-existing rows violate it (NEW writes ARE protected; fix the orphan data then VALIDATE manually): %s: %v",
+					pgSchema, op.String(), err)
+			}
+		}
+	}
 }
 
 // diffTenant computes the typed plan that converges pgSchema to s: introspect the

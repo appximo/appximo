@@ -72,6 +72,36 @@ func UniqueViolationField(err error) (field string, ok bool) {
 	return pgErr.ConstraintName, true
 }
 
+// fkStillReferencedRe / fkNotPresentRe parse the two Postgres foreign_key_violation
+// Detail shapes: a RESTRICT/NO-ACTION delete of a still-referenced parent
+// ("…is still referenced from table \"empleados\".") and an insert/update of a child
+// whose parent is absent ("…is not present in table \"departamentos\".").
+var (
+	fkStillReferencedRe = regexp.MustCompile(`is still referenced from table "([^"]+)"`)
+	fkNotPresentRe      = regexp.MustCompile(`is not present in table "([^"]+)"`)
+)
+
+// ForeignKeyViolation reports whether err is a Postgres foreign_key_violation
+// (SQLSTATE 23503) and, if so, returns a safe, human-readable message naming the
+// related resource (parsed from the error Detail, never raw SQL). Handlers map this
+// to 409 Conflict — a delete blocked by a RESTRICT FK, or a write referencing a row
+// that does not exist — instead of leaking a masked 500. ok is false for any other
+// error. The resource names exposed are the tenant's OWN schema resources, not
+// engine internals.
+func ForeignKeyViolation(err error) (msg string, ok bool) {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		return "", false
+	}
+	if m := fkStillReferencedRe.FindStringSubmatch(pgErr.Detail); len(m) == 2 {
+		return fmt.Sprintf("cannot delete: still referenced by %q record(s)", m[1]), true
+	}
+	if m := fkNotPresentRe.FindStringSubmatch(pgErr.Detail); len(m) == 2 {
+		return fmt.Sprintf("invalid reference: no matching %q record", m[1]), true
+	}
+	return "referential integrity violation", true
+}
+
 // undefinedColumnMsgRe extracts the column from a Postgres undefined_column
 // message: `column "priority" of relation "tasks" does not exist` → "priority".
 var undefinedColumnMsgRe = regexp.MustCompile(`column "([^"]+)"`)

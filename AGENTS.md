@@ -333,13 +333,30 @@ no longer a free label the client advances arbitrarily.
 ### Relations
 
 ```json
-"customer_id": { "type": "uuid", "relation": "customers" }
+"customer_id": { "type": "uuid", "relation": "customers", "on_delete": "restrict" }
 ```
 
 generates one read-only route — `GET /api/orders/{id}/customer` (field
-name minus `_id`) — returning the referenced record. That is **all** the
-field-level `relation` does: no FK constraint, no joins in list queries, no
-nested writes, no cascade.
+name minus `_id`) — returning the referenced record, AND a **real Postgres
+foreign key** on the column (MIG-F1-S1): `customer_id` → `customers.id`.
+
+- **`on_delete`** declares the referential action when the referenced (parent)
+  row is deleted: `restrict` | `cascade` | `set_null`. **Unset defaults to
+  `restrict`** — the safe choice: a delete of a still-referenced row is rejected
+  with **`409 Conflict`** (`{"error":"cannot delete: still referenced by \"orders\"
+  record(s)"}`, REST and GraphQL) instead of silently orphaning its children.
+  `cascade` deletes the children; `set_null` nulls the FK (the column must be
+  nullable — `set_null` on a `required` field is rejected at load). The FK column
+  is auto-indexed (the RESTRICT check is an index lookup).
+- The field-level `relation` is the source of the FK; a `many_to_many` junction's
+  FK columns are themselves field-level relations, so the junction gets integrity
+  too. It still does **no joins in list queries and no nested writes** (those are
+  the opt-in `?include=` embeds below).
+- **Existing tenants**: the FK is added `NOT VALID` (protecting all NEW writes
+  immediately) then `VALIDATE`d; if pre-existing rows are inconsistent (historical
+  orphans), VALIDATE is skipped and the FK is left `NOT VALID` (forward-protected,
+  logged) rather than breaking provisioning. A cascade/set-null does NOT fire the
+  child's outbox `…deleted`/`…updated` event (Postgres handles it below the engine).
 
 ### Declarative relations + nested embeds (`relations`, ADR-019)
 
@@ -1203,11 +1220,11 @@ is a JSON snapshot, not a stream).
   [Aggregation](#aggregation-g3) surface is exactly those functions over schema
   fields, nothing more. (`count` total IS now a thing: `?count=true` on a list, or
   the aggregate endpoint.)
-- FK **constraints** / cascades. (Declarative relations DO exist — nested
-  `?include=` embeds via `json_agg`+LATERAL, see
-  [Declarative relations](#declarative-relations--nested-embeds-relations-adr-019)
-  — but they create no FK constraint and no `ON DELETE` cascade; the field-level
-  `relation` still only adds the read-only subresource route.)
+- FK **constraints** with arbitrary `ON UPDATE`, composite/multi-column FKs, or a
+  FK to a non-`id` column. Real single-column FKs to the target's `id` DO exist now
+  (a field-level `relation` creates one, with `on_delete` restrict/cascade/set_null
+  — see [Relations](#relations)); what does NOT exist is `on_update`, composite FKs,
+  or referencing a column other than the implicit `id` PK.
 - `workflows` schema block — parsed for forward compatibility, no executor.
 - OTLP/OpenTelemetry export (observability is Prometheus `/metrics` + an
   internal trace ring).

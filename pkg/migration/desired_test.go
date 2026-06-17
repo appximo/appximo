@@ -92,9 +92,50 @@ func TestBuildDesiredSchema_MirrorsConverger(t *testing.T) {
 		t.Errorf("email declared index missing")
 	}
 
-	// No FK or CHECK constraints are modeled (the converger creates neither).
-	if len(emp.FKs) != 0 || len(emp.Checks) != 0 {
-		t.Errorf("desired must model no FK/CHECK constraints: FKs=%v Checks=%v", emp.FKs, emp.Checks)
+	// MIG-F1-S1: a field-level relation now models a REAL foreign key (default
+	// on_delete = RESTRICT) on the FK column, referencing the target's id.
+	fk, ok := emp.FKs["fk_empleados_departamento_id"]
+	if !ok {
+		t.Fatalf("expected FK fk_empleados_departamento_id, got: %v", emp.FKs)
+	}
+	if len(fk.Columns) != 1 || fk.Columns[0] != "departamento_id" || fk.RefTable != "departamentos" ||
+		len(fk.RefColumns) != 1 || fk.RefColumns[0] != "id" || fk.OnDelete != schemadiff.Restrict {
+		t.Errorf("FK not faithful: %+v", fk)
+	}
+	// CHECK constraints are still never modeled (the converger creates none).
+	if len(emp.Checks) != 0 {
+		t.Errorf("desired must model no CHECK constraints: Checks=%v", emp.Checks)
+	}
+}
+
+// TestBuildDesiredSchema_OnDeleteActions verifies the on_delete → RefAction mapping
+// (default restrict, plus cascade and set_null) and that set_null lands on a
+// nullable column.
+func TestBuildDesiredSchema_OnDeleteActions(t *testing.T) {
+	s := &schema.APISchema{Resources: map[string]schema.ResourceSchema{
+		"parents": {Fields: map[string]schema.FieldDef{"name": {Type: "string"}}},
+		"kids": {Fields: map[string]schema.FieldDef{
+			"p_restrict": {Type: "uuid", Relation: "parents"},                                   // default → restrict
+			"p_cascade":  {Type: "uuid", Relation: "parents", OnDelete: schema.OnDeleteCascade}, // cascade
+			"p_setnull":  {Type: "uuid", Relation: "parents", OnDelete: schema.OnDeleteSetNull}, // set_null (nullable)
+		}},
+	}}
+	ds := buildDesiredSchema("t", s)
+	kids := ds.Tables["kids"]
+	cases := map[string]schemadiff.RefAction{
+		"fk_kids_p_restrict": schemadiff.Restrict,
+		"fk_kids_p_cascade":  schemadiff.Cascade,
+		"fk_kids_p_setnull":  schemadiff.SetNull,
+	}
+	for sym, want := range cases {
+		fk, ok := kids.FKs[sym]
+		if !ok {
+			t.Errorf("missing FK %s", sym)
+			continue
+		}
+		if fk.OnDelete != want {
+			t.Errorf("FK %s on_delete = %v, want %v", sym, fk.OnDelete, want)
+		}
 	}
 }
 

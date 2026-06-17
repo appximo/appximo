@@ -59,6 +59,40 @@ func TestValidate_RelationToMissingResource(t *testing.T) {
 	}
 }
 
+func TestValidate_OnDelete(t *testing.T) {
+	mk := func(f schema.FieldDef) *schema.APISchema {
+		return &schema.APISchema{
+			Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+			Resources: map[string]schema.ResourceSchema{
+				"parents": {Fields: map[string]schema.FieldDef{"name": {Type: "string"}}},
+				"kids":    {Fields: map[string]schema.FieldDef{"p": f}},
+			},
+		}
+	}
+	// Valid: restrict / cascade / set_null (on a nullable column).
+	for _, action := range []string{"restrict", "cascade", "set_null"} {
+		if errs := schema.Validate(mk(schema.FieldDef{Type: "uuid", Relation: "parents", OnDelete: action})); hasError(errs, "on_delete") {
+			t.Errorf("on_delete %q should be valid, got: %v", action, errs)
+		}
+	}
+	// Invalid value.
+	if errs := schema.Validate(mk(schema.FieldDef{Type: "uuid", Relation: "parents", OnDelete: "nuke"})); !hasError(errs, "on_delete") {
+		t.Errorf("unknown on_delete must be rejected")
+	}
+	// on_delete without a relation.
+	if errs := schema.Validate(mk(schema.FieldDef{Type: "uuid", OnDelete: "cascade"})); !hasError(errs, "on_delete") {
+		t.Errorf("on_delete without a relation must be rejected")
+	}
+	// set_null on a REQUIRED (NOT NULL) column → invalid.
+	if errs := schema.Validate(mk(schema.FieldDef{Type: "uuid", Relation: "parents", Required: true, OnDelete: "set_null"})); !hasError(errs, "on_delete") {
+		t.Errorf("set_null on a required column must be rejected")
+	}
+	// cascade on a required column is fine.
+	if errs := schema.Validate(mk(schema.FieldDef{Type: "uuid", Relation: "parents", Required: true, OnDelete: "cascade"})); hasError(errs, "on_delete") {
+		t.Errorf("cascade on a required column should be valid, got: %v", errs)
+	}
+}
+
 func TestValidate_WebhookWithoutURL(t *testing.T) {
 	s := &schema.APISchema{
 		Schema:  "https://appitools.dev/schema/v1",

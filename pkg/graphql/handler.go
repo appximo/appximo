@@ -260,6 +260,11 @@ func (e *validationError) Extensions() map[string]any {
 // the GraphQL errors array. Mirrors the REST WriteDBError masking. Always returns a
 // generic message — never the original error.
 func safeDBErr(err error) error {
+	// Foreign-key violation → a clear referential message (MIG-F1-S1), mirroring the
+	// REST 409 so a RESTRICT delete / bad reference is never a masked "internal error".
+	if fkMsg, ok := db.ForeignKeyViolation(err); ok {
+		return fmt.Errorf("%s", fkMsg)
+	}
 	switch {
 	case db.IsMissingTenant(err):
 		return fmt.Errorf("invalid tenant")

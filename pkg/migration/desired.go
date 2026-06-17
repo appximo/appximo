@@ -91,9 +91,91 @@ func buildDesiredSchema(pgSchema string, s *schema.APISchema) *schemadiff.Schema
 		ds.Tables[resName] = tbl
 	}
 
+	addForeignKeys(ds, s, names)
 	addRelationIndexes(ds, s, names)
 	addDeclaredIndexes(ds, s, names)
 	return ds
+}
+
+// addForeignKeys models a REAL foreign-key constraint for every field that
+// declares a `relation` (MIG-F1-S1) — the column IS the FK, like `unique`/
+// `required` are field-level. Each FK references the target table's implicit `id`
+// PK, carrying the field's `on_delete` action (default RESTRICT — the safe choice
+// that closes the silent-orphan integrity bug). It ALSO ensures the FK column is
+// indexed, so the referential check Postgres runs on a RESTRICT delete (and the
+// embed/join paths) is an index lookup, never a sequential scan.
+//
+// The field-level `relation` is the COMPLETE, unambiguous source of every physical
+// FK: a relations-block `belongs_to`/`many_to_many` FK column is also declared as a
+// field-level relation, while the inverse `has_many` is a read-embed view of the
+// SAME constraint (so deriving FKs from the relations block would double-count). The
+// junction columns of a many_to_many are likewise field-level relations on the
+// through table, so their integrity comes for free.
+func addForeignKeys(ds *schemadiff.Schema, s *schema.APISchema, names []string) {
+	for _, resName := range names {
+		tbl := ds.Tables[resName]
+		if tbl == nil {
+			continue
+		}
+		for _, fieldName := range sortedFieldNames(s.Resources[resName]) {
+			f := s.Resources[resName].Fields[fieldName]
+			if f.Relation == "" {
+				continue
+			}
+			if _, ok := ds.Tables[f.Relation]; !ok {
+				continue // target not a managed resource (validated away at load; defensive)
+			}
+			sym := fkConstraintName(resName, fieldName)
+			tbl.FKs[sym] = &schemadiff.ForeignKey{
+				Symbol:     sym,
+				Columns:    []string{fieldName},
+				RefTable:   f.Relation,
+				RefColumns: []string{"id"},
+				OnDelete:   refActionForOnDelete(f.OnDelete),
+				OnUpdate:   schemadiff.NoAction,
+			}
+			// Index the FK column so the RESTRICT referential check is an index
+			// lookup (deduped by name with the relation/declared index adders).
+			idxName := "idx_" + resName + "_" + fieldName
+			if _, exists := tbl.Indexes[idxName]; !exists {
+				tbl.Indexes[idxName] = &schemadiff.Index{
+					Name: idxName, Columns: []string{fieldName}, Method: "btree",
+				}
+			}
+		}
+	}
+}
+
+// fkConstraintName derives a deterministic FK constraint symbol. The diff matches
+// FKs by STRUCTURE (columns + referenced table), not by symbol, so the exact name
+// only has to be a valid, stable identifier for the emitted DDL (Postgres truncates
+// at 63 bytes; our resource/field names are short).
+func fkConstraintName(table, column string) string {
+	return "fk_" + table + "_" + column
+}
+
+// refActionForOnDelete maps a schema `on_delete` string to the canonical RefAction.
+// Empty (unset) and "restrict" both yield RESTRICT — the safe default.
+func refActionForOnDelete(onDelete string) schemadiff.RefAction {
+	switch onDelete {
+	case schema.OnDeleteCascade:
+		return schemadiff.Cascade
+	case schema.OnDeleteSetNull:
+		return schemadiff.SetNull
+	default:
+		return schemadiff.Restrict
+	}
+}
+
+// sortedFieldNames returns a resource's field names sorted, for deterministic FK
+// emission order.
+func sortedFieldNames(res schema.ResourceSchema) []string {
+	out := make([]string, 0, len(res.Fields))
+	for n := range res.Fields {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // addRelationIndexes mirrors ensureRelationIndexes: a single btree index per

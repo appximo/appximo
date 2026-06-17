@@ -29,7 +29,7 @@
         "email":           { "type": "string",  "required": true, "unique": true, "format": "email" },
         "telefono":        { "type": "string",  "pattern": "^[0-9+ -]{7,20}$" },
         "cargo":           { "type": "string",  "required": true, "maxLength": 80 },
-        "departamento_id": { "type": "uuid",    "relation": "departamentos" },
+        "departamento_id": { "type": "uuid",    "relation": "departamentos", "on_delete": "set_null" },
         "salario":         { "type": "float64", "min": 0, "max": 100000000 },
         "tipo_contrato":   { "type": "string",  "enum": ["indefinido", "fijo", "prestacion", "aprendiz"], "default": "indefinido" },
         "fecha_ingreso":   { "type": "time",    "required": true },
@@ -51,7 +51,7 @@
 
     "solicitudes": {
       "fields": {
-        "empleado_id":  { "type": "uuid",   "required": true, "relation": "empleados" },
+        "empleado_id":  { "type": "uuid",   "required": true, "relation": "empleados", "on_delete": "cascade" },
         "user_id":      { "type": "uuid" },
         "tipo":         { "type": "string", "required": true, "enum": ["vacaciones", "permiso", "incapacidad", "licencia"] },
         "motivo":       { "type": "text" },
@@ -100,8 +100,8 @@
 
     "asignaciones": {
       "fields": {
-        "empleado_id":  { "type": "uuid",   "required": true, "relation": "empleados" },
-        "proyecto_id":  { "type": "uuid",   "required": true, "relation": "proyectos" },
+        "empleado_id":  { "type": "uuid",   "required": true, "relation": "empleados", "on_delete": "cascade" },
+        "proyecto_id":  { "type": "uuid",   "required": true, "relation": "proyectos", "on_delete": "cascade" },
         "rol_proyecto": { "type": "string", "enum": ["lider", "desarrollador", "qa", "analista"], "default": "desarrollador" },
         "horas_semana": { "type": "int",    "min": 1, "max": 60 },
         "asignado_at":  { "type": "time",   "auto": true }

@@ -84,7 +84,15 @@ type FieldDef struct {
 	Auto     bool     `json:"auto,omitempty"` // for created_at / updated_at
 	Enum     []string `json:"enum,omitempty"`
 	Relation string   `json:"relation,omitempty"` // name of the related resource
-	Default  any      `json:"default,omitempty"`
+	// OnDelete declares the referential action of THIS field's foreign key when the
+	// referenced (parent) row is deleted (MIG-F1-S1): "restrict" | "cascade" |
+	// "set_null". Only meaningful on a field that also declares `relation` (the FK
+	// lives on the column, like `unique`/`required`). EMPTY DEFAULTS TO RESTRICT —
+	// the safe choice: a delete of a still-referenced row is rejected (409) rather
+	// than silently orphaning its children (the integrity bug this closes). set_null
+	// requires the column to be nullable (not `required`); validated at load.
+	OnDelete string `json:"on_delete,omitempty"`
+	Default  any    `json:"default,omitempty"`
 
 	// Declarative validation rules (S44). Pointer types distinguish "absent"
 	// from a legitimate zero (min: 0, minLength: 0).
@@ -222,6 +230,23 @@ var validRelationTypes = map[string]bool{
 	RelationHasMany:    true,
 	RelationBelongsTo:  true,
 	RelationManyToMany: true,
+}
+
+// On-delete referential actions for a field-level foreign key (MIG-F1-S1). An
+// unset action defaults to RESTRICT — the safe choice (reject a delete that would
+// orphan children, rather than silently orphaning them, the integrity bug closed
+// here). set_null requires the FK column to be nullable.
+const (
+	OnDeleteRestrict = "restrict"
+	OnDeleteCascade  = "cascade"
+	OnDeleteSetNull  = "set_null"
+)
+
+// validOnDeleteActions is the closed set accepted for FieldDef.OnDelete.
+var validOnDeleteActions = map[string]bool{
+	OnDeleteRestrict: true,
+	OnDeleteCascade:  true,
+	OnDeleteSetNull:  true,
 }
 
 // HookConfig defines a lifecycle hook on a resource (before_create, after_create, etc.).

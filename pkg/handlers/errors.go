@@ -17,6 +17,9 @@ func IsServerError(err error) bool {
 	if _, unknownCol := db.UndefinedColumnField(err); unknownCol {
 		return false // client sent a field no column backs — 422, not a bug
 	}
+	if _, fk := db.ForeignKeyViolation(err); fk {
+		return false // referential conflict (RESTRICT delete / bad ref) — 409, not a bug
+	}
 	return !db.IsMissingTenant(err) && !db.IsBadInput(err) && !db.IsUnavailable(err)
 }
 
@@ -39,6 +42,15 @@ func WriteDBError(w http.ResponseWriter, err error) {
 				{"field": field, "rule": "unknown_field", "message": "is not a field of this resource"},
 			},
 		})
+		return
+	}
+	// Foreign-key violation → 409 Conflict (MIG-F1-S1): a RESTRICT delete of a
+	// still-referenced row, or a write referencing a non-existent row. A clear,
+	// safe message — never a masked 500.
+	if fkMsg, ok := db.ForeignKeyViolation(err); ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]string{"error": fkMsg}) //nolint:errcheck
 		return
 	}
 	status := http.StatusInternalServerError

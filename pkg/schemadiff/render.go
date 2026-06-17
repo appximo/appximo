@@ -350,6 +350,20 @@ func (e *Executor) Apply(ctx context.Context, plan *Plan) error {
 	return flush()
 }
 
+// Exec runs ONE DDL statement in its own transaction with this executor's
+// search_path, lock_timeout and retry-on-lock-timeout — the same safety wrapper
+// Apply uses for a transactional batch. It is exposed so a caller can apply a
+// single statement with those guarantees OUTSIDE a full Plan: e.g. the migration
+// layer's transition-tolerant foreign-key policy, which commits an
+// `ADD CONSTRAINT … NOT VALID` and then attempts `VALIDATE CONSTRAINT` as a
+// separate, failure-tolerant step over pre-existing data.
+func (e *Executor) Exec(ctx context.Context, sql string) error {
+	if e.Pool == nil || e.Schema == "" {
+		return errors.New("schemadiff: Executor needs Pool and Schema")
+	}
+	return e.runTxnBatch(ctx, []Statement{{SQL: sql}})
+}
+
 // runTxnBatch runs a contiguous group of transactional statements in ONE
 // transaction (atomic: any failure rolls back the whole batch), under a short
 // lock_timeout, retrying the whole batch with backoff on a lock-timeout.

@@ -105,6 +105,29 @@ func Validate(s *APISchema) []ValidationError {
 				}
 			}
 
+			// on_delete (MIG-F1-S1): the FK's referential action. Only valid on a
+			// relation field; set_null requires the column be nullable (else
+			// Postgres rejects the SET NULL at delete time — caught at load here).
+			if field.OnDelete != "" {
+				switch {
+				case field.Relation == "":
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".on_delete",
+						Message: "on_delete is only valid on a field that declares a relation",
+					})
+				case !validOnDeleteActions[field.OnDelete]:
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".on_delete",
+						Message: fmt.Sprintf("unknown on_delete %q: must be one of restrict, cascade, set_null", field.OnDelete),
+					})
+				case field.OnDelete == OnDeleteSetNull && field.Required:
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".on_delete",
+						Message: "on_delete set_null requires a nullable column, but this field is required (NOT NULL)",
+					})
+				}
+			}
+
 			// Enum key present but empty
 			if field.Enum != nil && len(field.Enum) == 0 {
 				errs = append(errs, ValidationError{

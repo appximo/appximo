@@ -80,7 +80,7 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 			fieldPath := resPath + ".fields." + fieldName
 			fld := object(fieldPath, rawField)
 			addUnknown(fieldPath, fld,
-				"type", "required", "unique", "auto", "enum", "relation", "default",
+				"type", "required", "unique", "auto", "enum", "relation", "on_delete", "default",
 				"min", "max", "minLength", "maxLength", "pattern", "format", "state_machine")
 			// state_machine has a fixed key set; `transitions` keys are user state
 			// names (free-form), so only the top-level keys are strict-checked.

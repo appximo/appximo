@@ -17,8 +17,14 @@
 > - **#6/#7 (drop de campo / locking):** el DROP está **GATEADO** (política v1 aditiva,
 >   nunca borra → caso D = drift, igual que antes); todo DDL aplicado pasa por
 >   `lock_timeout`+retry y los índices por `CONCURRENTLY`.
-> - **#2 (integridad referencial / FK) y #8 (orquestador multi-tenant):** SIGUEN abiertos
->   (el desired no modela FKs todavía; falta el fan-out multi-tenant reanudable).
+> - **#2 (integridad referencial / FK):** CERRADO (MIG-F1-S1) — un campo con `relation`
+>   ahora crea una FOREIGN KEY real con `on_delete` declarativo (`restrict` por defecto
+>   = seguro, `cascade`, `set_null`). Borrar un referenciado ya NO orfaniza en silencio:
+>   restrict → **409** claro (REST + GraphQL), cascade borra hijos, set_null anula la FK.
+>   Aplicada segura (NOT VALID/VALIDATE); datos previos inconsistentes → FK queda NOT VALID
+>   (protege adelante), no rompe el provisioning. Columna FK auto-indexada.
+> - **#8 (orquestador multi-tenant):** SIGUE abierto (falta el fan-out reanudable). También
+>   pendiente: wiring de intención de rename, y `on_update`/FK compuestas/FK a no-`id`.
 >
 > El resto del documento queda como **registro histórico** del comportamiento PRE-integración.
 
