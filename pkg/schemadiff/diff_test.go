@@ -22,11 +22,7 @@ func assertConverges(t *testing.T, current, desired *sd.Schema) *sd.Plan {
 	if err != nil {
 		t.Fatalf("diff(current, ∅): %v", err)
 	}
-	mpOrdered, err := sd.OrderPlan(mp)
-	if err != nil {
-		t.Fatalf("order(materialize plan): %v", err)
-	}
-	apply(t, pool, schema, mpOrdered)
+	apply(t, pool, schema, mp) // Executor orders + renders (production-safe) + executes
 	rc := introspectSchema(t, pool, schema)
 	if !schemaEquivalent(rc, current) {
 		t.Fatalf("materialization fidelity failed: introspected != current\n-- introspected --\n%s\n-- current --\n%s", render(rc), render(current))
@@ -36,11 +32,7 @@ func assertConverges(t *testing.T, current, desired *sd.Schema) *sd.Plan {
 	if err != nil {
 		t.Fatalf("diff(desired, current): %v", err)
 	}
-	ordered, err := sd.OrderPlan(plan)
-	if err != nil {
-		t.Fatalf("order(diff plan): %v", err)
-	}
-	apply(t, pool, schema, ordered)
+	apply(t, pool, schema, plan)
 	final := introspectSchema(t, pool, schema)
 	if !schemaEquivalent(final, desired) {
 		t.Fatalf("convergence failed: final != desired\n-- plan --\n%s\n-- final --\n%s\n-- desired --\n%s", plan, render(final), render(desired))
