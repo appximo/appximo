@@ -43,6 +43,11 @@ func buildDesiredSchema(pgSchema string, s *schema.APISchema) *schemadiff.Schema
 	for _, resName := range names {
 		res := s.Resources[resName]
 		tbl := schemadiff.NewTable(resName)
+		// Rename intent (MIG-F1-S2): a table whose schema declares renamed_from is
+		// matched to its old self so the diff emits ALTER TABLE … RENAME (data
+		// preserving), not drop+add. The intent is resolved against the live DB in
+		// diffTenant (resolveRenames) so an already-applied rename is inert.
+		tbl.RenamedFrom = res.RenamedFrom
 
 		// Implicit id PK — the converger's first column.
 		tbl.AddColumn(&schemadiff.Column{
@@ -71,9 +76,10 @@ func buildDesiredSchema(pgSchema string, s *schema.APISchema) *schemadiff.Schema
 		for _, name := range regular {
 			f := res.Fields[name]
 			tbl.AddColumn(&schemadiff.Column{
-				Name:    name,
-				Type:    schemadiff.TypeForAPIType(f.Type),
-				NotNull: f.Required,
+				Name:        name,
+				Type:        schemadiff.TypeForAPIType(f.Type),
+				NotNull:     f.Required,
+				RenamedFrom: f.RenamedFrom, // MIG-F1-S2: ALTER RENAME COLUMN, not drop+add
 			})
 			if f.Unique {
 				sym := resName + "_" + name + "_key" // mirrors Postgres' inline-UNIQUE auto-name
@@ -82,9 +88,10 @@ func buildDesiredSchema(pgSchema string, s *schema.APISchema) *schemadiff.Schema
 		}
 		for _, name := range auto {
 			tbl.AddColumn(&schemadiff.Column{
-				Name:    name,
-				Type:    schemadiff.Type{Base: schemadiff.BaseTimestamptz},
-				Default: &schemadiff.Expr{Raw: "now()"},
+				Name:        name,
+				Type:        schemadiff.Type{Base: schemadiff.BaseTimestamptz},
+				Default:     &schemadiff.Expr{Raw: "now()"},
+				RenamedFrom: res.Fields[name].RenamedFrom,
 			})
 		}
 

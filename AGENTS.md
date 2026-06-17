@@ -271,6 +271,16 @@ silently dead config.
   it when omitted; a required field **without** one still returns 422. Defaults
   are create-only — `PUT` (full replace) writes an omitted optional field as NULL.
 - `relation: "<resource>"` — see [Relations](#relations).
+- `renamed_from: "<old_name>"` — declares the field's PREVIOUS column name
+  (MIG-F1-S2). The migration engine renames the column with `ALTER TABLE …
+  RENAME COLUMN` (metadata-only — the **data stays in the renamed column**,
+  accessible under the new name, and the column's FK / unique / index follow it)
+  instead of the old converger's drop+add that stranded the data. The old name
+  must NOT still be a declared field (validated at load). Once applied the intent
+  is **inert** — re-provisioning with `renamed_from` still present is a no-op (the
+  old column no longer exists), so it is safe to leave in the schema. A table
+  (resource) rename is the same key at the resource level:
+  `"clients": { "renamed_from": "customers", "fields": {…} }`.
 - Validation rules (all optional, compiled at load; a bad rule rejects
   the schema with a clear error):
   - numeric fields: `min`, `max`

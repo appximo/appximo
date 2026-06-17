@@ -140,7 +140,11 @@ func diffTenant(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *sch
 		return nil, fmt.Errorf("introspect %s: %w", pgSchema, err)
 	}
 	desired := buildDesiredSchema(pgSchema, s)
-	current := managedSubset(real, desired)
+	// Reconcile rename intent against the live DB BEFORE diffing: keep a rename only
+	// while it is pending (old name present, new absent), and remember the table
+	// rename sources so managedSubset does not drop them.
+	keepSources := resolveRenames(desired, real)
+	current := managedSubset(real, desired, keepSources)
 	plan, err := schemadiff.Diff(desired, current)
 	if err != nil {
 		return nil, fmt.Errorf("diff %s: %w", pgSchema, err)
@@ -148,16 +152,116 @@ func diffTenant(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *sch
 	return plan, nil
 }
 
+// resolveRenames reconciles the declared rename intent (RenamedFrom, set by
+// buildDesiredSchema from the schema's renamed_from) against the LIVE database, so
+// the diff emits an ALTER RENAME only for a rename that is actually PENDING — and is
+// otherwise inert:
+//
+//   - A table/column rename whose OLD name IS present in real and whose NEW name is
+//     NOT yet present is a pending rename: the intent is kept, and (for a table) the
+//     old name is recorded in keepSources so managedSubset keeps the rename source.
+//   - Otherwise — the rename is already applied (the new name exists), or the old
+//     name is absent — the intent is CLEARED, so the diff matches by the current name
+//     (a no-op once renamed) instead of erroring on a missing rename source, and a
+//     rename onto an already-existing target is skipped (left as drift) rather than
+//     failing.
+//
+// This makes a renamed_from declaration safe to LEAVE in the schema after it is
+// applied: re-provisioning is a clean no-op.
+func resolveRenames(desired, real *schemadiff.Schema) (keepSources map[string]bool) {
+	keepSources = make(map[string]bool)
+	for _, dt := range desired.Tables {
+		if dt.RenamedFrom != "" {
+			_, oldExists := real.Tables[dt.RenamedFrom]
+			_, newExists := real.Tables[dt.Name]
+			if oldExists && !newExists {
+				keepSources[dt.RenamedFrom] = true // pending table rename
+				// Postgres rewrites every FK that targets a renamed table, so align
+				// the real model's reftables old→new — otherwise a FK pointing at the
+				// renamed table would diff as drop+add (a spurious duplicate).
+				rewriteRefTable(real, dt.RenamedFrom, dt.Name)
+			} else {
+				dt.RenamedFrom = "" // already applied / inapplicable → inert
+			}
+		}
+		// Column renames are checked against whichever real table this desired table
+		// maps to: the rename source if the table itself is being renamed, else its
+		// own current name.
+		realTbl := real.Tables[dt.Name]
+		if dt.RenamedFrom != "" {
+			realTbl = real.Tables[dt.RenamedFrom]
+		}
+		for _, col := range dt.Columns {
+			if col.RenamedFrom == "" {
+				continue
+			}
+			if realTbl == nil {
+				col.RenamedFrom = ""
+				continue
+			}
+			_, oldCol := realTbl.Columns[col.RenamedFrom]
+			_, newCol := realTbl.Columns[col.Name]
+			if oldCol && !newCol {
+				// Pending column rename. Postgres preserves the column's FK / unique /
+				// index through ALTER RENAME COLUMN, so rewrite the real model's
+				// constraint/index column refs old→new — otherwise they would diff as
+				// drop+add (a spurious duplicate on the renamed column).
+				rewriteColumnRefs(realTbl, col.RenamedFrom, col.Name)
+			} else {
+				col.RenamedFrom = "" // already applied / inapplicable → inert
+			}
+		}
+	}
+	return keepSources
+}
+
+// rewriteRefTable repoints every foreign key in s that REFERENCES table old to
+// reference new (mirrors Postgres updating FK references when a table is renamed).
+func rewriteRefTable(s *schemadiff.Schema, old, new string) {
+	for _, tbl := range s.Tables {
+		for _, fk := range tbl.FKs {
+			if fk.RefTable == old {
+				fk.RefTable = new
+			}
+		}
+	}
+}
+
+// rewriteColumnRefs repoints a table's PK / FK / unique / index column references
+// from old to new (mirrors Postgres preserving them across ALTER RENAME COLUMN).
+func rewriteColumnRefs(tbl *schemadiff.Table, old, new string) {
+	repl := func(cols []string) {
+		for i, c := range cols {
+			if c == old {
+				cols[i] = new
+			}
+		}
+	}
+	if tbl.PK != nil {
+		repl(tbl.PK.Columns)
+	}
+	for _, fk := range tbl.FKs {
+		repl(fk.Columns)
+	}
+	for _, u := range tbl.Uniques {
+		repl(u.Columns)
+	}
+	for _, idx := range tbl.Indexes {
+		repl(idx.Columns)
+	}
+}
+
 // managedSubset returns a view of real keeping only the tables the API schema
-// declares (those present in desired). Tables that exist physically but are not
-// resources — the engine's own auth_*/files tables, or a resource removed from the
-// schema — are excluded, so the diff never proposes dropping a table the migration
-// does not own. Enums are not copied (the API schema does not manage enum types,
-// and Diff ignores them regardless).
-func managedSubset(real, desired *schemadiff.Schema) *schemadiff.Schema {
+// declares (those present in desired) PLUS any table that is the source of a pending
+// rename (keepSources). Tables that exist physically but are not resources — the
+// engine's own auth_*/files tables, or a resource removed from the schema — are
+// excluded, so the diff never proposes dropping a table the migration does not own.
+// Enums are not copied (the API schema does not manage enum types, and Diff ignores
+// them regardless).
+func managedSubset(real, desired *schemadiff.Schema, keepSources map[string]bool) *schemadiff.Schema {
 	out := schemadiff.NewSchema(real.Name)
 	for name, tbl := range real.Tables {
-		if _, ok := desired.Tables[name]; ok {
+		if _, ok := desired.Tables[name]; ok || keepSources[name] {
 			out.Tables[name] = tbl
 		}
 	}

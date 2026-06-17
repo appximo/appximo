@@ -93,6 +93,59 @@ func TestValidate_OnDelete(t *testing.T) {
 	}
 }
 
+func TestValidate_RenamedFrom(t *testing.T) {
+	// Field-level renamed_from.
+	mkField := func(fields map[string]schema.FieldDef) *schema.APISchema {
+		return &schema.APISchema{
+			Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+			Resources: map[string]schema.ResourceSchema{"r": {Fields: fields}},
+		}
+	}
+	// Valid: rename from an absent name.
+	if errs := schema.Validate(mkField(map[string]schema.FieldDef{
+		"full_name": {Type: "string", RenamedFrom: "nombre"},
+	})); hasError(errs, "renamed_from") {
+		t.Errorf("valid field renamed_from rejected: %v", errs)
+	}
+	// Invalid: old name still a declared field.
+	if errs := schema.Validate(mkField(map[string]schema.FieldDef{
+		"full_name": {Type: "string", RenamedFrom: "nombre"},
+		"nombre":    {Type: "string"},
+	})); !hasError(errs, "renamed_from") {
+		t.Errorf("renamed_from of a still-present field must be rejected")
+	}
+	// Invalid: rename from itself.
+	if errs := schema.Validate(mkField(map[string]schema.FieldDef{
+		"full_name": {Type: "string", RenamedFrom: "full_name"},
+	})); !hasError(errs, "renamed_from") {
+		t.Errorf("renamed_from equal to the field name must be rejected")
+	}
+	// Invalid: bad identifier.
+	if errs := schema.Validate(mkField(map[string]schema.FieldDef{
+		"full_name": {Type: "string", RenamedFrom: "Bad-Name"},
+	})); !hasError(errs, "renamed_from") {
+		t.Errorf("renamed_from with an invalid identifier must be rejected")
+	}
+
+	// Resource-level renamed_from.
+	mkRes := func(resources map[string]schema.ResourceSchema) *schema.APISchema {
+		return &schema.APISchema{Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test", Resources: resources}
+	}
+	// Valid: table rename from an absent name.
+	if errs := schema.Validate(mkRes(map[string]schema.ResourceSchema{
+		"clients": {RenamedFrom: "customers", Fields: map[string]schema.FieldDef{"name": {Type: "string"}}},
+	})); hasError(errs, "renamed_from") {
+		t.Errorf("valid resource renamed_from rejected: %v", errs)
+	}
+	// Invalid: old resource still declared.
+	if errs := schema.Validate(mkRes(map[string]schema.ResourceSchema{
+		"clients":   {RenamedFrom: "customers", Fields: map[string]schema.FieldDef{"name": {Type: "string"}}},
+		"customers": {Fields: map[string]schema.FieldDef{"name": {Type: "string"}}},
+	})); !hasError(errs, "renamed_from") {
+		t.Errorf("renamed_from of a still-present resource must be rejected")
+	}
+}
+
 func TestValidate_WebhookWithoutURL(t *testing.T) {
 	s := &schema.APISchema{
 		Schema:  "https://appitools.dev/schema/v1",

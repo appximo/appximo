@@ -10,10 +10,13 @@
 > - **#3 (`required`/NOT NULL sobre datos):** CERRADO — el NOT NULL se aplica FIEL: en
 >   tabla vacía es real, sobre datos **falla fuerte y hace rollback atómico** (nunca la
 >   divergencia silenciosa nullable).
-> - **#4 (cambio de tipo) y #1 (rename):** la capacidad existe en el motor (`ALTER … TYPE`,
->   `RENAME` que preserva datos), pero el **schema JSON no tiene aún sintaxis para declarar
->   un rename**, así que un rename en JSON sigue degradando a add-nueva-columna (+ drop de
->   la vieja GATEADO, datos preservados) — wiring de intención de rename = incremento sig.
+> - **#1 (rename):** CERRADO (MIG-F1-S2) — `renamed_from` (campo y recurso) en el schema JSON
+>   declara el nombre anterior; el motor emite `ALTER … RENAME COLUMN`/`RENAME TO` (metadata-only,
+>   **los datos quedan en la columna/tabla renombrada, accesibles bajo el nombre nuevo**; FK/
+>   unique/índice la siguen, sin churn). Validado al load (el nombre viejo no debe seguir
+>   existiendo). Inerte tras aplicar → re-provision no-op. Cierra el peor bug del caso F.
+> - **#4 (cambio de tipo):** la capacidad existe (`ALTER … TYPE … USING`) y se aplica si el diff
+>   lo detecta (cambiar el `type` de un campo); falla fuerte sobre datos no convertibles.
 > - **#6/#7 (drop de campo / locking):** el DROP está **GATEADO** (política v1 aditiva,
 >   nunca borra → caso D = drift, igual que antes); todo DDL aplicado pasa por
 >   `lock_timeout`+retry y los índices por `CONCURRENTLY`.
@@ -24,7 +27,10 @@
 >   Aplicada segura (NOT VALID/VALIDATE); datos previos inconsistentes → FK queda NOT VALID
 >   (protege adelante), no rompe el provisioning. Columna FK auto-indexada.
 > - **#8 (orquestador multi-tenant):** SIGUE abierto (falta el fan-out reanudable). También
->   pendiente: wiring de intención de rename, y `on_update`/FK compuestas/FK a no-`id`.
+>   pendiente: `on_update`/FK compuestas/FK a no-`id`, y un gate de aprobación de destructivas.
+>   **Con #1 (rename) + #2 (FK) + #3 (NOT NULL) + #5 (diff/plan) cerrados y el locking
+>   protegido, los tres grandes 🔴 del diagnóstico están cerrados** — el motor es
+>   production-safe e invocable desde el schema (listo para que la IA evolucione schemas).
 >
 > El resto del documento queda como **registro histórico** del comportamiento PRE-integración.
 

@@ -79,6 +79,31 @@ func Validate(s *APISchema) []ValidationError {
 			})
 		}
 
+		// renamed_from (MIG-F1-S2): the resource's previous table name. It must be a
+		// valid identifier, differ from the current name, and NOT still be a declared
+		// resource (you cannot rename from a name that still exists).
+		if res.RenamedFrom != "" {
+			switch {
+			case !resourceNameRe.MatchString(res.RenamedFrom):
+				errs = append(errs, ValidationError{
+					Field:   resPrefix + ".renamed_from",
+					Message: fmt.Sprintf("invalid renamed_from %q: must match ^[a-z][a-z0-9_]*$", res.RenamedFrom),
+				})
+			case res.RenamedFrom == resName:
+				errs = append(errs, ValidationError{
+					Field:   resPrefix + ".renamed_from",
+					Message: "renamed_from must differ from the resource's own name",
+				})
+			default:
+				if _, exists := s.Resources[res.RenamedFrom]; exists {
+					errs = append(errs, ValidationError{
+						Field:   resPrefix + ".renamed_from",
+						Message: fmt.Sprintf("renamed_from %q is still a declared resource — you cannot rename from a name that still exists (remove the old resource)", res.RenamedFrom),
+					})
+				}
+			}
+		}
+
 		for fieldName, field := range res.Fields {
 			fieldPrefix := resPrefix + ".fields." + fieldName
 
@@ -125,6 +150,36 @@ func Validate(s *APISchema) []ValidationError {
 						Field:   fieldPrefix + ".on_delete",
 						Message: "on_delete set_null requires a nullable column, but this field is required (NOT NULL)",
 					})
+				}
+			}
+
+			// renamed_from (MIG-F1-S2): the field's previous column name. Valid
+			// identifier, differs from the current name, and NOT still a declared
+			// field of this resource (cannot rename from a name that still exists).
+			if field.RenamedFrom != "" {
+				switch {
+				case !fieldNameRe.MatchString(field.RenamedFrom):
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".renamed_from",
+						Message: fmt.Sprintf("invalid renamed_from %q: must match ^[a-z][a-z0-9_]*$", field.RenamedFrom),
+					})
+				case field.RenamedFrom == fieldName:
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".renamed_from",
+						Message: "renamed_from must differ from the field's own name",
+					})
+				case field.RenamedFrom == "id":
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".renamed_from",
+						Message: "cannot rename from \"id\" (the implicit primary key)",
+					})
+				default:
+					if _, exists := res.Fields[field.RenamedFrom]; exists {
+						errs = append(errs, ValidationError{
+							Field:   fieldPrefix + ".renamed_from",
+							Message: fmt.Sprintf("renamed_from %q is still a declared field — you cannot rename from a name that still exists (remove the old field)", field.RenamedFrom),
+						})
+					}
 				}
 			}
 

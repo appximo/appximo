@@ -24,6 +24,15 @@ type ResourceSchema struct {
 	Hooks   map[string]HookConfig `json:"hooks,omitempty"`
 	Indexes []IndexDef            `json:"indexes,omitempty"`
 
+	// RenamedFrom declares the PREVIOUS name of this resource's table (MIG-F1-S2):
+	// the migration engine emits `ALTER TABLE <old> RENAME TO <new>` (metadata-only,
+	// data + indexes + constraints preserved) instead of the converger's drop+add
+	// that stranded the data. The old name must NOT still be a current resource
+	// (you cannot rename from a name that still exists); validated at load. Once the
+	// rename is applied the intent is INERT — re-provisioning with it still present
+	// is a no-op (the old table no longer exists), so it is safe to leave in place.
+	RenamedFrom string `json:"renamed_from,omitempty"`
+
 	// Relations is the opt-in set of declarative relations (RELATIONS-V1,
 	// ADR-019) keyed by the embed name exposed to clients (the key used in
 	// ?include=<name> and the GraphQL nested field). A resource that omits this
@@ -92,7 +101,15 @@ type FieldDef struct {
 	// than silently orphaning its children (the integrity bug this closes). set_null
 	// requires the column to be nullable (not `required`); validated at load.
 	OnDelete string `json:"on_delete,omitempty"`
-	Default  any    `json:"default,omitempty"`
+	// RenamedFrom declares the PREVIOUS name of this field's column (MIG-F1-S2): the
+	// migration engine emits `ALTER TABLE … RENAME COLUMN <old> TO <new>`
+	// (metadata-only, data preserved, indexes/FK/unique follow the column) instead
+	// of the converger's drop+add that stranded the data in the old column. The old
+	// name must NOT still be a current field (you cannot rename from a name that
+	// still exists); validated at load. Once applied the intent is INERT — a
+	// re-provision with it present is a no-op (the old column no longer exists).
+	RenamedFrom string `json:"renamed_from,omitempty"`
+	Default     any    `json:"default,omitempty"`
 
 	// Declarative validation rules (S44). Pointer types distinguish "absent"
 	// from a legitimate zero (min: 0, minLength: 0).
