@@ -4,111 +4,195 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"sort"
-	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/miguelangel/appitools/pkg/schemadiff"
 )
 
-// ApplyTenantMigration creates or evolves all resource tables in pgSchema.
-// For each resource it:
-//  1. CREATE TABLE IF NOT EXISTS  — handles new resources
-//  2. ALTER TABLE ADD COLUMN IF NOT EXISTS — handles new fields in existing tables
+// ApplyTenantMigration converges the resource tables in pgSchema to the tenant's
+// schema, using the real migration engine (pkg/schemadiff): introspect the live
+// state, build the desired state, diff into a typed plan, and apply it through the
+// production-safe executor (lock_timeout + retry, NOT VALID/VALIDATE, CONCURRENTLY
+// partitioning, data-preserving renames).
 //
-// Fully qualified identifiers are used throughout; no search_path mutation required.
+// This REPLACES the historical converger (CREATE TABLE / ADD COLUMN IF NOT EXISTS),
+// which lost data on a rename, silently discarded NOT NULL, no-op'd a type change
+// and took locks unguarded (docs/MIGRATION_DIAG.md). The engine now migrates for
+// real: it detects what changed and applies it safely.
+//
+// v1 policy (documented):
+//   - Provisioning a NEW tenant is identical to before: the diff against an empty
+//     schema is all CreateTable, applied as it always was.
+//   - Re-applying an UNCHANGED schema is a true no-op: the diff is empty, no DDL
+//     runs (introspect is the only DB read).
+//   - DROP operations are NEVER applied — they are logged and left as drift,
+//     exactly the converger's "never removes anything" contract. This guarantees
+//     no data loss (strictly not worse than before) and that a minor modeling gap
+//     can never spuriously undo a converger artifact. A field removed from the
+//     schema leaves its column in place (docs/MIGRATION_DIAG.md case D, unchanged).
+//   - Every NON-drop change IS applied faithfully: a rename preserves data, a real
+//     NOT NULL is enforced (over populated data it fails loudly and rolls back
+//     atomically — never the converger's silent NULL-accepting divergence), a type
+//     change is a real ALTER … TYPE. Planning concerns (backfill/transformational)
+//     are logged before applying.
+//
+// Tables physically present but NOT declared as resources — the engine's own
+// auth_*/files tables, or a resource dropped from the schema — are excluded from
+// the diff (managedSubset) so the migration only ever touches resource tables.
+//
+// The signature is unchanged, so every call site (tenant registration, PUT schema,
+// the Redis worker, the `migrate` CLI) is untouched.
 func ApplyTenantMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *schema.APISchema) error {
-	conn, err := pool.Acquire(ctx)
+	plan, err := diffTenant(ctx, pool, pgSchema, s)
 	if err != nil {
-		return fmt.Errorf("acquire connection: %w", err)
+		return err
 	}
-	defer conn.Release()
-
-	names := make([]string, 0, len(s.Resources))
-	for n := range s.Resources {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-
-	for _, resName := range names {
-		res := s.Resources[resName]
-		if _, err := conn.Exec(ctx, buildCreateTable(pgSchema, resName, res)); err != nil {
-			return fmt.Errorf("create table %s.%s: %w", pgSchema, resName, err)
-		}
-		if err := addMissingColumns(ctx, conn, pgSchema, resName, res); err != nil {
-			return fmt.Errorf("evolve table %s.%s: %w", pgSchema, resName, err)
-		}
+	if plan.Empty() {
+		return nil // converged — nothing to do
 	}
 
-	// RELATIONS-V1 (ADR-019 §3): every declared relation's FK column gets an
-	// index, so the embed's correlated subquery is an index lookup, not a per-
-	// parent sequential scan (N+1 at the storage layer). This is also the first
-	// concrete use of index DDL from the schema (the `indexes` debt). Run AFTER
-	// all tables exist (a junction `through` table may itself be a resource).
-	if err := ensureRelationIndexes(ctx, conn, pgSchema, s); err != nil {
-		return fmt.Errorf("relation indexes %s: %w", pgSchema, err)
+	// Surface every planning concern (backfill / destructive / transformational)
+	// before touching the database — the up-front signal a future approval gate uses.
+	logConcerns(pgSchema, plan)
+
+	applyPlan, skipped := partitionByPolicy(plan)
+	for _, op := range skipped {
+		log.Printf("migration[%s]: SKIPPED (v1 is additive — never drops; data preserved as drift): %s", pgSchema, op.String())
+	}
+	if applyPlan.Empty() {
+		return nil
 	}
 
-	// User-declared `indexes` (BUGS-V1): the schema's explicit index blocks are
-	// now materialized as real DB indexes (previously parsed with a warning).
-	if err := ensureDeclaredIndexes(ctx, conn, pgSchema, s); err != nil {
-		return fmt.Errorf("declared indexes %s: %w", pgSchema, err)
+	ex := &schemadiff.Executor{Pool: pool, Schema: pgSchema}
+	if err := ex.Apply(ctx, applyPlan); err != nil {
+		return fmt.Errorf("apply migration %s: %w", pgSchema, err)
 	}
 	return nil
 }
 
-// ensureDeclaredIndexes materializes every resource's user-declared `indexes`
-// as CREATE [UNIQUE] INDEX IF NOT EXISTS over the listed columns (composite when
-// more than one). Idempotent. Each column's existence is verified against
-// information_schema first; an index naming a column that does not exist (yet) is
-// a WARNING and skipped — never a hard failure (same "warn, don't die" contract
-// as relation FK indexes; columns can be added to the live table at runtime).
-func ensureDeclaredIndexes(ctx context.Context, conn *pgxpool.Conn, pgSchema string, s *schema.APISchema) error {
-	names := make([]string, 0, len(s.Resources))
-	for n := range s.Resources {
-		names = append(names, n)
+// diffTenant computes the typed plan that converges pgSchema to s: introspect the
+// real state, build the desired state from the tenant JSON, restrict the real
+// state to the managed (resource) tables, and diff. Exposed (unexported, same
+// package) so tests can assert no-op convergence without observing DDL side effects.
+func diffTenant(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *schema.APISchema) (*schemadiff.Plan, error) {
+	real, err := schemadiff.Introspect(ctx, pool, pgSchema)
+	if err != nil {
+		return nil, fmt.Errorf("introspect %s: %w", pgSchema, err)
 	}
-	sort.Strings(names)
+	desired := buildDesiredSchema(pgSchema, s)
+	current := managedSubset(real, desired)
+	plan, err := schemadiff.Diff(desired, current)
+	if err != nil {
+		return nil, fmt.Errorf("diff %s: %w", pgSchema, err)
+	}
+	return plan, nil
+}
 
-	for _, resName := range names {
-		for _, idx := range s.Resources[resName].Indexes {
-			if len(idx.Fields) == 0 {
-				continue
-			}
-			missing := false
-			for _, col := range idx.Fields {
-				exists, err := columnExists(ctx, conn, pgSchema, resName, col)
-				if err != nil {
-					return fmt.Errorf("check column %s.%s: %w", resName, col, err)
-				}
-				if !exists {
-					log.Printf("WARNING: declared index column %q.%q.%q not found in information_schema — index skipped",
-						pgSchema, resName, col)
-					missing = true
-					break
-				}
-			}
-			if missing {
-				continue
-			}
-
-			quotedCols := make([]string, len(idx.Fields))
-			for i, col := range idx.Fields {
-				quotedCols[i] = fmt.Sprintf(`"%s"`, col)
-			}
-			prefix, unique := "idx", ""
-			if idx.Unique {
-				prefix, unique = "uniq", " UNIQUE"
-			}
-			idxName := prefix + "_" + resName + "_" + strings.Join(idx.Fields, "_")
-			ddl := fmt.Sprintf(`CREATE%s INDEX IF NOT EXISTS "%s" ON "%s"."%s" (%s)`,
-				unique, idxName, pgSchema, resName, strings.Join(quotedCols, ", "))
-			if _, err := conn.Exec(ctx, ddl); err != nil {
-				return fmt.Errorf("create index %s on %s: %w", idxName, resName, err)
-			}
+// managedSubset returns a view of real keeping only the tables the API schema
+// declares (those present in desired). Tables that exist physically but are not
+// resources — the engine's own auth_*/files tables, or a resource removed from the
+// schema — are excluded, so the diff never proposes dropping a table the migration
+// does not own. Enums are not copied (the API schema does not manage enum types,
+// and Diff ignores them regardless).
+func managedSubset(real, desired *schemadiff.Schema) *schemadiff.Schema {
+	out := schemadiff.NewSchema(real.Name)
+	for name, tbl := range real.Tables {
+		if _, ok := desired.Tables[name]; ok {
+			out.Tables[name] = tbl
 		}
 	}
-	return nil
+	return out
+}
+
+// partitionByPolicy splits an ordered plan into the ops to APPLY and the DROP ops
+// to SKIP. v1 is purely additive/in-place — it creates, adds, alters and renames,
+// but never drops — preserving the converger's "removes nothing" guarantee while
+// applying everything else through the safe executor. Skipped ops keep their data
+// as drift (the columns/indexes simply remain).
+func partitionByPolicy(plan *schemadiff.Plan) (apply *schemadiff.Plan, skipped []schemadiff.Operation) {
+	keep := make([]schemadiff.Operation, 0, len(plan.Ops))
+	for _, op := range plan.Ops {
+		if isDropOp(op.Kind()) {
+			skipped = append(skipped, op)
+			continue
+		}
+		keep = append(keep, op)
+	}
+	return &schemadiff.Plan{Ops: keep}, skipped
+}
+
+// logConcerns surfaces a plan's backfill/destructive/transformational concerns,
+// EXCEPT those acting on a table created in the same plan: a constraint or column
+// added to a brand-new, empty tenant table is no data risk, so logging it would
+// fire a misleading "backfill" warning on every fresh-tenant provision. Concerns on
+// pre-existing tables (the cases that actually matter) are still surfaced.
+func logConcerns(pgSchema string, plan *schemadiff.Plan) {
+	created := make(map[string]bool)
+	for _, op := range plan.Ops {
+		if ct, ok := op.(schemadiff.CreateTable); ok {
+			created[ct.Table.Name] = true
+		}
+	}
+	for _, c := range schemadiff.Validate(plan) {
+		if t := opTable(c.Op); t != "" && created[t] {
+			continue
+		}
+		log.Printf("migration[%s]: concern [%s]: %s", pgSchema, c.Risk, c.Message)
+	}
+}
+
+// opTable returns the table an operation targets (the desired/post-rename name).
+func opTable(op schemadiff.Operation) string {
+	switch o := op.(type) {
+	case schemadiff.CreateTable:
+		return o.Table.Name
+	case schemadiff.DropTable:
+		return o.Table.Name
+	case schemadiff.RenameTable:
+		return o.To
+	case schemadiff.AddColumn:
+		return o.Table
+	case schemadiff.DropColumn:
+		return o.Table
+	case schemadiff.AlterColumn:
+		return o.Table
+	case schemadiff.RenameColumn:
+		return o.Table
+	case schemadiff.AddPrimaryKey:
+		return o.Table
+	case schemadiff.DropPrimaryKey:
+		return o.Table
+	case schemadiff.AddForeignKey:
+		return o.Table
+	case schemadiff.DropForeignKey:
+		return o.Table
+	case schemadiff.AddUnique:
+		return o.Table
+	case schemadiff.DropUnique:
+		return o.Table
+	case schemadiff.AddCheck:
+		return o.Table
+	case schemadiff.DropCheck:
+		return o.Table
+	case schemadiff.AddIndex:
+		return o.Table
+	case schemadiff.DropIndex:
+		return o.Table
+	}
+	return ""
+}
+
+// isDropOp reports whether an op kind removes a schema object (table, column,
+// index or constraint) — the operations v1 gates rather than applies.
+func isDropOp(k schemadiff.OpKind) bool {
+	switch k {
+	case schemadiff.OpDropTable, schemadiff.OpDropColumn, schemadiff.OpDropIndex,
+		schemadiff.OpDropUnique, schemadiff.OpDropCheck, schemadiff.OpDropPrimaryKey,
+		schemadiff.OpDropForeignKey:
+		return true
+	}
+	return false
 }
 
 // fkIndexTarget names one (table, column) pair to index for a declared relation.
@@ -134,175 +218,4 @@ func relationIndexTargets(resName string, res schema.ResourceSchema) []fkIndexTa
 		}
 	}
 	return out
-}
-
-// ensureRelationIndexes creates a btree index on every relation FK column, once,
-// idempotently. The column's existence is verified against information_schema
-// first (an FK on a runtime-evolved or junction table that the schema did not
-// create is reported as a WARNING, never a hard failure — same "warn, don't die"
-// contract as the `indexes` key). Indexes are created NON-concurrently: at tenant
-// registration the table is new/empty so the build is instant and effectively
-// lock-free; adding a relation to an existing large table is a separate, manual
-// CREATE INDEX CONCURRENTLY migration (documented).
-func ensureRelationIndexes(ctx context.Context, conn *pgxpool.Conn, pgSchema string, s *schema.APISchema) error {
-	names := make([]string, 0, len(s.Resources))
-	for n := range s.Resources {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-
-	seen := make(map[string]bool)
-	for _, resName := range names {
-		for _, t := range relationIndexTargets(resName, s.Resources[resName]) {
-			key := t.table + "." + t.column
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-
-			exists, err := columnExists(ctx, conn, pgSchema, t.table, t.column)
-			if err != nil {
-				return fmt.Errorf("check column %s.%s: %w", t.table, t.column, err)
-			}
-			if !exists {
-				log.Printf("WARNING: relation FK %q.%q.%q not found in information_schema — index skipped (no such table/column yet)",
-					pgSchema, t.table, t.column)
-				continue
-			}
-			idxName := fmt.Sprintf("idx_%s_%s", t.table, t.column)
-			ddl := fmt.Sprintf(`CREATE INDEX IF NOT EXISTS "%s" ON "%s"."%s" ("%s")`,
-				idxName, pgSchema, t.table, t.column)
-			if _, err := conn.Exec(ctx, ddl); err != nil {
-				return fmt.Errorf("create index on %s.%s: %w", t.table, t.column, err)
-			}
-		}
-	}
-	return nil
-}
-
-// columnExists reports whether pgSchema.table has a column named col.
-func columnExists(ctx context.Context, conn *pgxpool.Conn, pgSchema, table, col string) (bool, error) {
-	var n int
-	err := conn.QueryRow(ctx,
-		`SELECT count(*) FROM information_schema.columns
-		 WHERE table_schema = $1 AND table_name = $2 AND column_name = $3`,
-		pgSchema, table, col).Scan(&n)
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
-}
-
-// addMissingColumns issues ALTER TABLE … ADD COLUMN IF NOT EXISTS for every
-// schema field that is absent from the live table. New columns are always
-// nullable — adding NOT NULL to an existing table with rows requires a DEFAULT.
-func addMissingColumns(ctx context.Context, conn *pgxpool.Conn, pgSchema, resName string, res schema.ResourceSchema) error {
-	rows, err := conn.Query(ctx,
-		`SELECT column_name FROM information_schema.columns
-		 WHERE table_schema = $1 AND table_name = $2`,
-		pgSchema, resName,
-	)
-	if err != nil {
-		return fmt.Errorf("query columns: %w", err)
-	}
-	existing := map[string]bool{}
-	for rows.Next() {
-		var col string
-		if err := rows.Scan(&col); err != nil {
-			rows.Close()
-			return err
-		}
-		existing[col] = true
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	keys := make([]string, 0, len(res.Fields))
-	for name, f := range res.Fields {
-		if name != "id" && !f.Auto {
-			keys = append(keys, name)
-		}
-	}
-	sort.Strings(keys)
-
-	for _, name := range keys {
-		if existing[name] {
-			continue
-		}
-		alter := fmt.Sprintf(
-			`ALTER TABLE "%s"."%s" ADD COLUMN IF NOT EXISTS "%s" %s`,
-			pgSchema, resName, name, fieldTypeToPG(res.Fields[name].Type),
-		)
-		if _, err := conn.Exec(ctx, alter); err != nil {
-			return fmt.Errorf("add column %q: %w", name, err)
-		}
-	}
-	return nil
-}
-
-// buildCreateTable generates a CREATE TABLE IF NOT EXISTS statement for one resource.
-// Column order: id (implicit) → regular fields (sorted) → auto fields (sorted).
-func buildCreateTable(pgSchema, resName string, res schema.ResourceSchema) string {
-	cols := []string{"id UUID DEFAULT gen_random_uuid() PRIMARY KEY"}
-
-	// Collect and sort regular field names for deterministic output.
-	regular := make([]string, 0, len(res.Fields))
-	auto := make([]string, 0)
-	for name := range res.Fields {
-		if name == "id" {
-			continue
-		}
-		if res.Fields[name].Auto {
-			auto = append(auto, name)
-		} else {
-			regular = append(regular, name)
-		}
-	}
-	sort.Strings(regular)
-	sort.Strings(auto)
-
-	for _, name := range regular {
-		f := res.Fields[name]
-		col := fmt.Sprintf("%s %s", name, fieldTypeToPG(f.Type))
-		if f.Required {
-			col += " NOT NULL"
-		}
-		if f.Unique {
-			col += " UNIQUE"
-		}
-		cols = append(cols, col)
-	}
-
-	for _, name := range auto {
-		cols = append(cols, fmt.Sprintf("%s TIMESTAMPTZ DEFAULT now()", name))
-	}
-
-	// Quote both identifiers: schema or table names may contain hyphens.
-	return fmt.Sprintf(
-		`CREATE TABLE IF NOT EXISTS "%s"."%s" (`+"\n  %s\n)",
-		pgSchema, resName, strings.Join(cols, ",\n  "),
-	)
-}
-
-func fieldTypeToPG(t string) string {
-	switch t {
-	case "string", "text":
-		return "TEXT"
-	case "int":
-		return "INTEGER"
-	case "int64":
-		return "BIGINT"
-	case "float64":
-		return "DOUBLE PRECISION"
-	case "bool":
-		return "BOOLEAN"
-	case "uuid":
-		return "UUID"
-	case "time":
-		return "TIMESTAMPTZ"
-	default:
-		return "TEXT"
-	}
 }

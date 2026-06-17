@@ -1,5 +1,27 @@
 # Diagnóstico de migraciones — ¿qué hace el motor cuando el schema EVOLUCIONA sobre datos reales?
 
+> ⚠️ **ACTUALIZACIÓN (Fase 0 INTEGRADA, MIG-F0-S5).** Este diagnóstico describe el
+> **convergedor histórico** (`CREATE TABLE / ADD COLUMN IF NOT EXISTS`), que **ya fue
+> reemplazado** por el motor de migraciones real (`pkg/schemadiff`) en
+> `migration.ApplyTenantMigration` (introspect → desired → diff → apply seguro). Lo que
+> el motor hace HOY frente a cada caso:
+> - **#5 (sin diff/plan):** CERRADO — ahora hay introspect + diff tipado + `Validate`
+>   (concerns logueados antes de aplicar).
+> - **#3 (`required`/NOT NULL sobre datos):** CERRADO — el NOT NULL se aplica FIEL: en
+>   tabla vacía es real, sobre datos **falla fuerte y hace rollback atómico** (nunca la
+>   divergencia silenciosa nullable).
+> - **#4 (cambio de tipo) y #1 (rename):** la capacidad existe en el motor (`ALTER … TYPE`,
+>   `RENAME` que preserva datos), pero el **schema JSON no tiene aún sintaxis para declarar
+>   un rename**, así que un rename en JSON sigue degradando a add-nueva-columna (+ drop de
+>   la vieja GATEADO, datos preservados) — wiring de intención de rename = incremento sig.
+> - **#6/#7 (drop de campo / locking):** el DROP está **GATEADO** (política v1 aditiva,
+>   nunca borra → caso D = drift, igual que antes); todo DDL aplicado pasa por
+>   `lock_timeout`+retry y los índices por `CONCURRENTLY`.
+> - **#2 (integridad referencial / FK) y #8 (orquestador multi-tenant):** SIGUEN abiertos
+>   (el desired no modela FKs todavía; falta el fan-out multi-tenant reanudable).
+>
+> El resto del documento queda como **registro histórico** del comportamiento PRE-integración.
+
 > **Tipo:** diagnóstico empírico (como el model-lab). **No** cambia el motor — descubre
 > y documenta el comportamiento actual con evidencia reproducible.
 > **Fecha:** 2026-06-16. **Commit base:** `1777538` (G1–G6 cerrados).

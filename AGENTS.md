@@ -116,7 +116,16 @@ One line per layer — navigate the code for the rest:
 - `pkg/tenant` — Host-subdomain resolution + per-tenant schema cache.
 - `pkg/extensions` — hooks: Goja JS sandbox, Wazero WASM, webhook dispatcher.
 - `pkg/events` — SSE hub, post-commit fan-out.
-- `pkg/migration` — idempotent DDL (`CREATE TABLE / ADD COLUMN IF NOT EXISTS`).
+- `pkg/migration` — tenant table provisioning/evolution. `ApplyTenantMigration`
+  now drives the real migration engine (`pkg/schemadiff`): introspect the live
+  schema → build the desired schema from the tenant JSON (`buildDesiredSchema`,
+  the canonical bridge) → diff → apply through the production-safe executor
+  (lock_timeout+retry, NOT VALID/VALIDATE, CONCURRENTLY indexes, data-preserving
+  renames). v1 policy is **additive**: it creates/adds/alters/renames but NEVER
+  drops (a removed field's column stays as drift, logged) — re-applying an
+  unchanged schema is a true no-op, and a new tenant provisions identically to the
+  old converger. A real NOT NULL is now enforced faithfully (fails loud + rolls
+  back over populated data instead of the old silent NULL-accepting divergence).
 - `pkg/outbox` — transactional outbox (ADR-016 §Class 2): `Enqueue` writes a job
   in the caller's tx and emits `pg_notify(outbox_notify, <id>)` on commit.
 - `pkg/worker` — the outbox consumer behind the SEPARATE `cmd/appitools-worker`
