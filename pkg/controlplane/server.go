@@ -170,8 +170,15 @@ func handleUpdateSchema(svc Service) http.HandlerFunc {
 		id := chi.URLParam(r, "id")
 		r.Body = http.MaxBytesReader(w, r.Body, maxControlPlaneBody)
 
+		// dry_run → return the classified plan + destructive impact, apply nothing.
+		// approved_drops → the enumerated destructive keys (DropTable "<table>" /
+		// DropColumn "<table>.<column>") permitted to apply; everything else stays
+		// gated. The two compose: dry_run with approved_drops previews exactly what an
+		// apply with those approvals would do.
 		var body struct {
-			Schema json.RawMessage `json:"schema"`
+			Schema        json.RawMessage `json:"schema"`
+			DryRun        bool            `json:"dry_run"`
+			ApprovedDrops []string        `json:"approved_drops"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
@@ -183,7 +190,26 @@ func handleUpdateSchema(svc Service) http.HandlerFunc {
 			return
 		}
 
-		if err := svc.UpdateSchema(r.Context(), id, parsed); err != nil {
+		if body.DryRun {
+			pv, err := svc.PreviewSchema(r.Context(), id, parsed, body.ApprovedDrops)
+			if err != nil {
+				if errors.Is(err, ErrNotFound) {
+					writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+					return
+				}
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+				return
+			}
+			resp := map[string]any{"status": "dry_run", "preview": pv}
+			if warns := schemaWarnings(parsed); len(warns) > 0 {
+				resp["warnings"] = warns
+			}
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
+
+		outcome, err := svc.UpdateSchemaApproved(r.Context(), id, parsed, body.ApprovedDrops)
+		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 				return
@@ -192,6 +218,17 @@ func handleUpdateSchema(svc Service) http.HandlerFunc {
 			return
 		}
 		resp := map[string]any{"status": "migration_queued"}
+		if outcome != nil {
+			if len(outcome.AppliedDrops) > 0 {
+				resp["applied_drops"] = outcome.AppliedDrops
+			}
+			if len(outcome.GatedDrops) > 0 {
+				resp["gated_drops"] = outcome.GatedDrops
+			}
+			if len(outcome.UnmatchedApprovals) > 0 {
+				resp["unmatched_approvals"] = outcome.UnmatchedApprovals
+			}
+		}
 		if warns := schemaWarnings(parsed); len(warns) > 0 {
 			resp["warnings"] = warns
 		}

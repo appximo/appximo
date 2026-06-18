@@ -616,6 +616,68 @@ index over one or more columns (composite when more than one), optionally
   [Declarative relations](#declarative-relations--nested-embeds-relations-adr-019));
   you do not need to declare those by hand.
 
+### Evolving a schema safely — the destructive approval gate
+
+When you change a tenant's schema (control-plane `PUT /tenants/{id}/schema`, or the
+`migrate` CLI), the engine diffs the new schema against the live database and applies
+the change through the production-safe migration engine. The policy is **additive by
+default**: it creates/adds/alters/renames but NEVER drops — a removed field's column
+or a removed resource's table stays as **drift** (logged, no data lost). To actually
+remove something, you go through a two-step **approval gate** so a data-losing drop
+can never happen by accident.
+
+A **destructive** operation is one that loses data: dropping a **column** (a removed
+field) or a **table** (a removed resource). Each has a stable approval **key**:
+
+- a column → `"<table>.<column>"` (e.g. `"empleados.telefono"`)
+- a table  → `"<table>"` (e.g. `"proyectos"`)
+
+(Removing an *index* or a *constraint* loses no row data; those are not approvable in
+v1 — they simply stay as additive drift.)
+
+**Step 1 — dry-run (informed consent).** Ask what the change would do, applying
+nothing:
+
+```
+PUT /tenants/{id}/schema   { "schema": {…}, "dry_run": true }
+```
+
+returns a classified plan: `apply` (the safe ops that will run), `destructive` (each
+data-losing drop with its **impact** — `rows_lost` of `table_rows`, the rows whose
+data would be destroyed — and `approved:false`), `drift` (safe drops left as drift),
+and `concerns` (backfill/type-change risks on existing data). It writes nothing.
+
+**Step 2 — apply with enumerated approval.** Re-send WITHOUT `dry_run`, listing the
+exact keys you approve:
+
+```
+PUT /tenants/{id}/schema   { "schema": {…}, "approved_drops": ["empleados.telefono"] }
+```
+
+ONLY the enumerated drops execute (response: `applied_drops`); every other drop stays
+gated (`gated_drops`). A key that matches nothing is reported (`unmatched_approvals`),
+never silently assumed. There is **no global "drop everything" flag** — approval must
+name each operation, so you confirm exactly what you understood from the dry-run.
+
+**CLI** mirrors this: `appitools migrate --tenant <id> --schema <file> --dry-run`
+prints the same plan + impact; `--approve-drops "empleados.telefono,proyectos"`
+applies the enumerated drops. Without `--approve-drops`, destructive drops are gated.
+
+Guarantees:
+
+- **Default-gated, fail-safe.** No approval ⇒ nothing is dropped (identical net effect
+  to the additive default). Zero data loss by accident.
+- **The worker never auto-approves.** Tenant registration and the async Redis
+  migration worker use the purely additive path — an automated process can only add;
+  a data-losing drop requires explicit, recorded human consent through `PUT` / the CLI.
+- **Preview↔apply is faithful.** The plan is recomputed against the live DB at apply
+  time, and a drop runs iff its key is approved. A destructive that appeared since the
+  dry-run carries a different (un-approved) key, so it is gated automatically — a new,
+  unreviewed drop can never slip through between preview and apply.
+- An approved table drop also removes any foreign key that still references it (a
+  required, data-safe consequence), so the `DROP TABLE` succeeds rather than failing on
+  a dangling reference.
+
 ## Running it and making the first call
 
 Fastest path is the published Docker image — the four copy-paste

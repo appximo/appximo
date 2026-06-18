@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/miguelangel/appitools/pkg/controlplane"
+	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/schema"
 )
 
@@ -21,7 +22,13 @@ func (stubService) Register(_ context.Context, req controlplane.RegisterRequest)
 }
 func (stubService) GetByID(context.Context, string) (*controlplane.Tenant, error) { return nil, nil }
 func (stubService) UpdateSchema(context.Context, string, *schema.APISchema) error { return nil }
-func (stubService) GetSchema(context.Context, string) (*schema.APISchema, error)  { return nil, nil }
+func (stubService) UpdateSchemaApproved(context.Context, string, *schema.APISchema, []string) (*migration.ApplyOutcome, error) {
+	return &migration.ApplyOutcome{}, nil
+}
+func (stubService) PreviewSchema(context.Context, string, *schema.APISchema, []string) (*migration.Preview, error) {
+	return &migration.Preview{}, nil
+}
+func (stubService) GetSchema(context.Context, string) (*schema.APISchema, error) { return nil, nil }
 
 const indexedSchema = `{
 	"$schema": "s", "version": "1", "name": "t",

@@ -152,8 +152,8 @@ func TestBuildDesiredSchema_SelfDiffEmpty(t *testing.T) {
 	}
 }
 
-// TestPartitionByPolicy_GatesDrops verifies the additive policy: every DROP op is
-// skipped, every other op is applied.
+// TestPartitionByPolicy_GatesDrops verifies the fail-safe default: with NO approval,
+// every DROP op is gated, every other op is applied (the additive v1 policy).
 func TestPartitionByPolicy_GatesDrops(t *testing.T) {
 	plan := &schemadiff.Plan{Ops: []schemadiff.Operation{
 		schemadiff.CreateTable{Table: schemadiff.NewTable("t")},
@@ -163,16 +163,53 @@ func TestPartitionByPolicy_GatesDrops(t *testing.T) {
 		schemadiff.RenameColumn{Table: "t", From: "a", To: "b"},
 		schemadiff.DropIndex{Table: "t", Index: &schemadiff.Index{Name: "idx_old"}},
 	}}
-	apply, skipped := partitionByPolicy(plan)
+	apply, gated, applied := partitionByPolicyApproved(plan, nil)
 	if len(apply.Ops) != 3 {
 		t.Errorf("expected 3 applied ops (create/add/rename), got %d: %v", len(apply.Ops), apply)
 	}
-	if len(skipped) != 3 {
-		t.Errorf("expected 3 skipped drops, got %d: %v", len(skipped), skipped)
+	if len(gated) != 3 {
+		t.Errorf("expected 3 gated drops, got %d: %v", len(gated), gated)
+	}
+	if len(applied) != 0 {
+		t.Errorf("no destructive drop may be applied without approval, got %v", applied)
 	}
 	for _, op := range apply.Ops {
 		if isDropOp(op.Kind()) {
 			t.Errorf("a drop op leaked into the apply set: %s", op)
 		}
+	}
+}
+
+// TestPartitionByPolicy_ApprovedDropApplies verifies the gate opens ONLY for the
+// enumerated destructive keys: an approved drop is applied, an un-approved one stays
+// gated, and a safe drop is never applied (additive drift), even alongside approvals.
+func TestPartitionByPolicy_ApprovedDropApplies(t *testing.T) {
+	plan := &schemadiff.Plan{Ops: []schemadiff.Operation{
+		schemadiff.DropColumn{Table: "empleados", Column: &schemadiff.Column{Name: "telefono"}},
+		schemadiff.DropColumn{Table: "empleados", Column: &schemadiff.Column{Name: "fax"}},
+		schemadiff.DropTable{Table: schemadiff.NewTable("proyectos")},
+		schemadiff.DropIndex{Table: "empleados", Index: &schemadiff.Index{Name: "idx_old"}},
+	}}
+	// Approve ONLY empleados.telefono and proyectos — fax and the index must stay gated.
+	apply, gated, applied := partitionByPolicyApproved(plan, map[string]bool{
+		"empleados.telefono": true,
+		"proyectos":          true,
+	})
+	if len(applied) != 2 {
+		t.Fatalf("expected 2 applied drops, got %d: %v", len(applied), applied)
+	}
+	gotApplied := map[string]bool{}
+	for _, k := range applied {
+		gotApplied[k] = true
+	}
+	if !gotApplied["empleados.telefono"] || !gotApplied["proyectos"] {
+		t.Errorf("approved keys not applied: %v", applied)
+	}
+	// fax (unapproved destructive) + idx_old (safe drop) must be gated.
+	if len(gated) != 2 {
+		t.Errorf("expected 2 gated ops (unapproved fax + safe index), got %d: %v", len(gated), gated)
+	}
+	if len(apply.Ops) != 2 {
+		t.Errorf("expected 2 ops in apply plan (the 2 approved drops), got %d: %v", len(apply.Ops), apply)
 	}
 }

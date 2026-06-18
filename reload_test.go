@@ -14,6 +14,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/cache"
 	"github.com/miguelangel/appitools/pkg/controlplane"
+	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/observability"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
@@ -34,6 +35,12 @@ func (m *mockCPService) GetByID(ctx context.Context, id string) (*controlplane.T
 	return m.getByID(ctx, id)
 }
 func (m *mockCPService) UpdateSchema(context.Context, string, *schema.APISchema) error { return nil }
+func (m *mockCPService) UpdateSchemaApproved(context.Context, string, *schema.APISchema, []string) (*migration.ApplyOutcome, error) {
+	return &migration.ApplyOutcome{}, nil
+}
+func (m *mockCPService) PreviewSchema(context.Context, string, *schema.APISchema, []string) (*migration.Preview, error) {
+	return &migration.Preview{}, nil
+}
 func (m *mockCPService) GetSchema(ctx context.Context, id string) (*schema.APISchema, error) {
 	return m.getSchema(ctx, id)
 }

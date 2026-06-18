@@ -17,8 +17,14 @@
 >   existiendo). Inerte tras aplicar → re-provision no-op. Cierra el peor bug del caso F.
 > - **#4 (cambio de tipo):** la capacidad existe (`ALTER … TYPE … USING`) y se aplica si el diff
 >   lo detecta (cambiar el `type` de un campo); falla fuerte sobre datos no convertibles.
-> - **#6/#7 (drop de campo / locking):** el DROP está **GATEADO** (política v1 aditiva,
->   nunca borra → caso D = drift, igual que antes); todo DDL aplicado pasa por
+> - **#6/#7 (drop de campo/recurso / locking):** el DROP sigue **GATEADO por defecto**
+>   (política v1 aditiva, nunca borra → caso D = drift), PERO ahora hay un **gate de
+>   aprobación** (MIG-F1-S3) que lo hace aplicable de forma CONTROLADA: un `--dry-run` /
+>   `PUT {"dry_run":true}` reporta cada drop destructivo (DropTable/DropColumn) con su
+>   IMPACTO (filas que se pierden) sin aplicar nada, y la operación se ejecuta SOLO si se
+>   ENUMERA explícitamente (`--approve-drops "empleados.telefono,proyectos"` /
+>   `{"approved_drops":[…]}`). Sin la enumeración exacta sigue gateado (cero pérdida por
+>   accidente); el worker/registro NUNCA auto-aprueba. Todo DDL aplicado pasa por
 >   `lock_timeout`+retry y los índices por `CONCURRENTLY`.
 > - **#2 (integridad referencial / FK):** CERRADO (MIG-F1-S1) — un campo con `relation`
 >   ahora crea una FOREIGN KEY real con `on_delete` declarativo (`restrict` por defecto
@@ -26,11 +32,16 @@
 >   restrict → **409** claro (REST + GraphQL), cascade borra hijos, set_null anula la FK.
 >   Aplicada segura (NOT VALID/VALIDATE); datos previos inconsistentes → FK queda NOT VALID
 >   (protege adelante), no rompe el provisioning. Columna FK auto-indexada.
+> - **Gate de aprobación de destructivas:** CERRADO (MIG-F1-S3) — ver #6/#7 arriba (dry-run
+>   con impacto + aprobación enumerada explícita; default gateado, worker no auto-aprueba).
 > - **#8 (orquestador multi-tenant):** SIGUE abierto (falta el fan-out reanudable). También
->   pendiente: `on_update`/FK compuestas/FK a no-`id`, y un gate de aprobación de destructivas.
->   **Con #1 (rename) + #2 (FK) + #3 (NOT NULL) + #5 (diff/plan) cerrados y el locking
->   protegido, los tres grandes 🔴 del diagnóstico están cerrados** — el motor es
->   production-safe e invocable desde el schema (listo para que la IA evolucione schemas).
+>   pendiente: `on_update`/FK compuestas/FK a no-`id`.
+>   **Con #1 (rename) + #2 (FK) + #3 (NOT NULL) + #5 (diff/plan) cerrados, el locking
+>   protegido y el gate de aprobación de destructivas, los tres grandes 🔴 del diagnóstico
+>   están cerrados Y evolucionar un schema (incl. drops) es seguro** — el motor es
+>   production-safe e invocable desde el schema. La IA puede PROPONER cambios, el dry-run
+>   los MUESTRA (con el impacto), y un humano APRUEBA lo destructivo enumerándolo: ningún
+>   error destruye datos en silencio.
 >
 > El resto del documento queda como **registro histórico** del comportamiento PRE-integración.
 
@@ -395,7 +406,7 @@ capacidad que le sale natural y que los ORMs maduros manejan mal.
 | 3 | **`required`/`default` al agregar sobre datos** (casos B, C) | 🔴 ALTO | NOT NULL descartado, default sin backfill → filas viejas NULL en campos "required"; el schema miente | `ADD COLUMN NOT NULL DEFAULT x` (backfillea) o falla con mensaje claro |
 | 4 | **Cambio de tipo** (caso E) | 🔴 ALTO | no-op silencioso: columna y schema divergen → posibles errores de tipo tras reinicio | `ALTER … TYPE … USING` (con plan de conversión) o falla explícito |
 | 5 | **Sin _diff_ / plan / gate de seguridad** (transversal) | 🔴 ALTO | el validador aprueba CUALQUIER cambio (valida el schema aislado, sin comparar contra el estado) → los 4 de arriba pasan sin aviso | genera un plan, clasifica cada cambio seguro/destructivo y exige confirmación |
-| 6 | **Eliminar campo** (caso D) | 🟡 MEDIO | columna + datos quedan para siempre (drift, PII no borrada) | `DROP COLUMN` explícito (o marcado para borrar) |
+| 6 | **Eliminar campo/recurso** (caso D) | 🟢 CERRADO (MIG-F1-S3) | gateado por defecto (drift), pero aplicable con **aprobación enumerada** tras un dry-run que muestra el impacto (filas perdidas); PII borrable de forma controlada | `DROP COLUMN`/`DROP TABLE` con consentimiento informado |
 | 7 | **Locking sin protección** (Paso 3) | 🟡 MEDIO | sin `lock_timeout`/reintento/`CONCURRENTLY` en el path síncrono | (la mayoría tampoco; oportunidad de superar) |
 | 8 | **Migración multi-tenant** (Paso 4) | 🟡 MEDIO | solo per-tenant; sin orquestador para N tenants | Prisma sin fan-out nativo; Django secuencial |
 

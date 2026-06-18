@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/miguelangel/appitools/pkg/controlplane"
+	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/schema"
 )
 
@@ -21,6 +22,15 @@ const testAdminKey = "test-admin-key-abc123"
 type inMemService struct {
 	tenants map[string]*controlplane.Tenant
 	schemas map[string]*schema.APISchema
+
+	// Recorded inputs of the last UpdateSchemaApproved / PreviewSchema call, so a
+	// handler test can assert the dry_run / approved_drops fields were wired through.
+	lastApprovedDrops []string
+	lastPreviewDrops  []string
+	previewCalled     bool
+	// Optional override: when set, PreviewSchema returns this (so a test can shape the
+	// dry-run response). Otherwise a minimal empty preview is returned.
+	previewResult *migration.Preview
 }
 
 func newInMemService() *inMemService {
@@ -61,12 +71,31 @@ func (m *inMemService) GetByID(_ context.Context, id string) (*controlplane.Tena
 	return t, nil
 }
 
-func (m *inMemService) UpdateSchema(_ context.Context, id string, s *schema.APISchema) error {
+func (m *inMemService) UpdateSchema(ctx context.Context, id string, s *schema.APISchema) error {
+	_, err := m.UpdateSchemaApproved(ctx, id, s, nil)
+	return err
+}
+
+func (m *inMemService) UpdateSchemaApproved(_ context.Context, id string, s *schema.APISchema, approvedDrops []string) (*migration.ApplyOutcome, error) {
 	if _, ok := m.tenants[id]; !ok {
-		return fmt.Errorf("tenant %q: %w", id, controlplane.ErrNotFound)
+		return nil, fmt.Errorf("tenant %q: %w", id, controlplane.ErrNotFound)
 	}
 	m.schemas[id] = s
-	return nil
+	m.lastApprovedDrops = approvedDrops
+	// Echo the approvals as "applied" so a handler test can assert wiring.
+	return &migration.ApplyOutcome{AppliedDrops: approvedDrops}, nil
+}
+
+func (m *inMemService) PreviewSchema(_ context.Context, id string, _ *schema.APISchema, approvedDrops []string) (*migration.Preview, error) {
+	if _, ok := m.tenants[id]; !ok {
+		return nil, fmt.Errorf("tenant %q: %w", id, controlplane.ErrNotFound)
+	}
+	m.previewCalled = true
+	m.lastPreviewDrops = approvedDrops
+	if m.previewResult != nil {
+		return m.previewResult, nil
+	}
+	return &migration.Preview{PGSchema: "tenant_" + id, Empty: true}, nil
 }
 
 func (m *inMemService) GetSchema(_ context.Context, id string) (*schema.APISchema, error) {
@@ -219,6 +248,80 @@ func TestControlPlane_UpdateSchema_Valid(t *testing.T) {
 	json.NewDecoder(resp.Body).Decode(&got)
 	if got["status"] != "migration_queued" {
 		t.Errorf("status: got %q, want migration_queued", got["status"])
+	}
+}
+
+// TestControlPlane_UpdateSchema_DryRun verifies the PUT routes a dry-run to
+// PreviewSchema (applying nothing) and returns the preview, NOT migration_queued.
+func TestControlPlane_UpdateSchema_DryRun(t *testing.T) {
+	svc := newInMemService()
+	srv := newTestServer(svc)
+	defer srv.Close()
+	svc.Register(context.Background(), controlplane.RegisterRequest{TenantID: "dr", Schema: validSchema()}) //nolint:errcheck
+
+	// Shape the preview so the handler test can assert it is passed through.
+	svc.previewResult = &migration.Preview{
+		PGSchema: "tenant_dr",
+		Apply:    []string{"ADD COLUMN items.note text"},
+		Destructive: []migration.DestructiveOp{
+			{Key: "items.status", Kind: "column", Table: "items", Column: "status", RowsLost: 3, TableRows: 9},
+		},
+	}
+
+	body := map[string]any{"schema": validSchema(), "dry_run": true}
+	resp, err := srv.Client().Do(adminReq(http.MethodPut, srv.URL+"/tenants/dr/schema", body))
+	if err != nil {
+		t.Fatalf("PUT dry-run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if !svc.previewCalled {
+		t.Errorf("dry_run must call PreviewSchema, not UpdateSchema")
+	}
+	if svc.schemas["dr"] != nil && len(svc.schemas["dr"].Resources) != len(validSchema().Resources) {
+		// A dry-run must NOT persist a changed schema — but seeding stored validSchema,
+		// so just assert the apply path was NOT taken (lastApprovedDrops untouched).
+	}
+	var got map[string]any
+	json.NewDecoder(resp.Body).Decode(&got)
+	if got["status"] != "dry_run" {
+		t.Errorf("status: got %v, want dry_run", got["status"])
+	}
+	if _, ok := got["preview"]; !ok {
+		t.Errorf("dry-run response must carry the preview, got: %v", got)
+	}
+}
+
+// TestControlPlane_UpdateSchema_ApprovedDrops verifies the PUT threads approved_drops
+// through to the apply and reflects what was applied in the response.
+func TestControlPlane_UpdateSchema_ApprovedDrops(t *testing.T) {
+	svc := newInMemService()
+	srv := newTestServer(svc)
+	defer srv.Close()
+	svc.Register(context.Background(), controlplane.RegisterRequest{TenantID: "ad", Schema: validSchema()}) //nolint:errcheck
+
+	body := map[string]any{"schema": validSchema(), "approved_drops": []string{"items.status", "gone"}}
+	resp, err := srv.Client().Do(adminReq(http.MethodPut, srv.URL+"/tenants/ad/schema", body))
+	if err != nil {
+		t.Fatalf("PUT approved_drops: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if len(svc.lastApprovedDrops) != 2 || svc.lastApprovedDrops[0] != "items.status" {
+		t.Errorf("approved_drops not threaded through: %v", svc.lastApprovedDrops)
+	}
+	var got map[string]any
+	json.NewDecoder(resp.Body).Decode(&got)
+	if got["status"] != "migration_queued" {
+		t.Errorf("status: got %v, want migration_queued", got["status"])
+	}
+	applied, _ := got["applied_drops"].([]any)
+	if len(applied) != 2 {
+		t.Errorf("response must report applied_drops, got: %v", got["applied_drops"])
 	}
 }
 

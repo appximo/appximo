@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/miguelangel/appitools/pkg/schema"
@@ -21,16 +22,24 @@ import (
 // and took locks unguarded (docs/MIGRATION_DIAG.md). The engine now migrates for
 // real: it detects what changed and applies it safely.
 //
+// This is the PURELY ADDITIVE entry point: it gates EVERY drop (no approval is
+// possible through it), exactly the v1 policy. It is used by tenant registration (a
+// brand-new tenant has no drops anyway) and the Redis migration worker — an
+// AUTOMATED process must NEVER drop data without prior, recorded human approval, so
+// the worker can only ever create/add/alter/rename. To apply an explicitly approved
+// destructive drop, use ApplyTenantMigrationApproved (the control-plane PUT / CLI
+// path), which is the only place a drop is ever executed.
+//
 // v1 policy (documented):
 //   - Provisioning a NEW tenant is identical to before: the diff against an empty
 //     schema is all CreateTable, applied as it always was.
 //   - Re-applying an UNCHANGED schema is a true no-op: the diff is empty, no DDL
 //     runs (introspect is the only DB read).
-//   - DROP operations are NEVER applied — they are logged and left as drift,
-//     exactly the converger's "never removes anything" contract. This guarantees
-//     no data loss (strictly not worse than before) and that a minor modeling gap
-//     can never spuriously undo a converger artifact. A field removed from the
-//     schema leaves its column in place (docs/MIGRATION_DIAG.md case D, unchanged).
+//   - DROP operations are NEVER applied through THIS function — they are logged and
+//     left as drift, exactly the converger's "never removes anything" contract. This
+//     guarantees no data loss and that a minor modeling gap can never spuriously undo
+//     a converger artifact. A field removed from the schema leaves its column in
+//     place (docs/MIGRATION_DIAG.md case D, unchanged).
 //   - Every NON-drop change IS applied faithfully: a rename preserves data, a real
 //     NOT NULL is enforced (over populated data it fails loudly and rolls back
 //     atomically — never the converger's silent NULL-accepting divergence), a type
@@ -39,29 +48,94 @@ import (
 //
 // Tables physically present but NOT declared as resources — the engine's own
 // auth_*/files tables, or a resource dropped from the schema — are excluded from
-// the diff (managedSubset) so the migration only ever touches resource tables.
+// the diff (managedSubset) so the additive migration only ever touches resource
+// tables. (The approval-aware path additionally SURFACES a removed-resource table
+// as a gated/approvable DropTable; see ApplyTenantMigrationApproved.)
 //
-// The signature is unchanged, so every call site (tenant registration, PUT schema,
-// the Redis worker, the `migrate` CLI) is untouched.
+// The signature is unchanged, so every additive call site (tenant registration, the
+// Redis worker) is untouched.
 func ApplyTenantMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *schema.APISchema) error {
-	plan, err := diffTenant(ctx, pool, pgSchema, s)
+	_, err := applyMigration(ctx, pool, pgSchema, s, nil, false)
+	return err
+}
+
+// ApplyOutcome reports what a migration apply did with the data-losing drops in the
+// plan: which approved drops it APPLIED, which it GATED (present but not approved,
+// kept as drift), and which approval tokens matched NOTHING (a typo or an
+// already-applied drop). It carries no error semantics — an apply that fails returns
+// an error instead.
+type ApplyOutcome struct {
+	AppliedDrops       []string // destructive keys applied (explicitly approved)
+	GatedDrops         []string // destructive keys present but NOT approved (drift)
+	UnmatchedApprovals []string // approved keys that matched no destructive op
+}
+
+// ApplyTenantMigrationApproved is the APPROVAL-AWARE apply: it converges pgSchema to
+// the desired schema and, for the data-losing drops (DropTable / DropColumn), applies
+// ONLY those whose approval key (schemadiff.DestructiveKey) appears in `approved`.
+// Every other drop stays gated as drift, exactly as the additive policy. With an
+// empty `approved`, it is fail-safe: NOTHING is dropped (identical net effect to the
+// additive path, plus visibility of what COULD be approved).
+//
+// This is the ONLY function that ever executes a destructive drop, and only by
+// explicit, enumerated consent. It is wired to the control-plane PUT (after a
+// dry-run preview) and the CLI `migrate --approve-drops`. It is NEVER reachable from
+// the Redis worker (which must not auto-approve).
+//
+// Preview↔apply consistency is structural: the plan is recomputed FRESH against the
+// live database here, and a drop is applied iff its key is approved. A destructive
+// drop that appeared since the preview carries a different (un-approved) key, so it
+// is gated automatically — a new, unreviewed drop can never slip through.
+func ApplyTenantMigrationApproved(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *schema.APISchema, approved []string) (*ApplyOutcome, error) {
+	return applyMigration(ctx, pool, pgSchema, s, approved, true)
+}
+
+// applyMigration is the shared core. includeOrphans makes a removed-resource table
+// visible to the diff as a (gated/approvable) DropTable: false for the additive path
+// (byte-identical to before — a removed resource is invisible drift), true for the
+// approval-aware path (so a table can be previewed and approved for dropping).
+func applyMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *schema.APISchema, approved []string, includeOrphans bool) (*ApplyOutcome, error) {
+	plan, err := diffTenant(ctx, pool, pgSchema, s, includeOrphans)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	outcome := &ApplyOutcome{}
 	if plan.Empty() {
-		return nil // converged — nothing to do
+		return outcome, nil // converged — nothing to do
 	}
 
 	// Surface every planning concern (backfill / destructive / transformational)
-	// before touching the database — the up-front signal a future approval gate uses.
+	// before touching the database — the up-front safety signal.
 	logConcerns(pgSchema, plan)
 
-	applyPlan, skipped := partitionByPolicy(plan)
-	for _, op := range skipped {
-		log.Printf("migration[%s]: SKIPPED (v1 is additive — never drops; data preserved as drift): %s", pgSchema, op.String())
+	approvedSet := toSet(approved)
+	applyPlan, gated, appliedKeys := partitionByPolicyApproved(plan, approvedSet)
+
+	// Log + record the gated drops, distinguishing a data-losing drop awaiting
+	// approval from a safe drop kept as additive drift.
+	for _, op := range gated {
+		if key, destructive := schemadiff.DestructiveKey(op); destructive {
+			outcome.GatedDrops = append(outcome.GatedDrops, key)
+			log.Printf("migration[%s]: GATED destructive drop (NOT approved — data preserved as drift; approve %q to apply): %s", pgSchema, key, op.String())
+		} else {
+			log.Printf("migration[%s]: SKIPPED (v1 is additive — never drops; data preserved as drift): %s", pgSchema, op.String())
+		}
 	}
+	// Log + record the approved drops actually applied (the audit trail of consent).
+	outcome.AppliedDrops = appliedKeys
+	for _, key := range appliedKeys {
+		log.Printf("migration[%s]: APPLYING APPROVED destructive drop (explicit, enumerated consent): %s", pgSchema, key)
+	}
+	// An approval that matched nothing (typo / already applied) is reported, not fatal.
+	for _, k := range approved {
+		if !appliedSetHas(appliedKeys, k) {
+			outcome.UnmatchedApprovals = append(outcome.UnmatchedApprovals, k)
+			log.Printf("migration[%s]: approval %q matched no destructive operation (typo, or already applied) — ignored", pgSchema, k)
+		}
+	}
+
 	if applyPlan.Empty() {
-		return nil
+		return outcome, nil
 	}
 
 	// Foreign-key additions are applied with a TRANSITION-TOLERANT policy (see
@@ -74,10 +148,20 @@ func ApplyTenantMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema stri
 
 	ex := &schemadiff.Executor{Pool: pool, Schema: pgSchema}
 	if err := ex.Apply(ctx, nonFK); err != nil {
-		return fmt.Errorf("apply migration %s: %w", pgSchema, err)
+		return nil, fmt.Errorf("apply migration %s: %w", pgSchema, err)
 	}
 	applyForeignKeys(ctx, ex, pgSchema, fkAdds)
-	return nil
+	return outcome, nil
+}
+
+// appliedSetHas reports whether key is in keys (small slices; linear is fine).
+func appliedSetHas(keys []string, key string) bool {
+	for _, k := range keys {
+		if k == key {
+			return true
+		}
+	}
+	return false
 }
 
 // splitForeignKeyAdds separates AddForeignKey ops from the rest of a plan so the
@@ -134,7 +218,14 @@ func applyForeignKeys(ctx context.Context, ex *schemadiff.Executor, pgSchema str
 // real state, build the desired state from the tenant JSON, restrict the real
 // state to the managed (resource) tables, and diff. Exposed (unexported, same
 // package) so tests can assert no-op convergence without observing DDL side effects.
-func diffTenant(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *schema.APISchema) (*schemadiff.Plan, error) {
+//
+// includeOrphans controls whether a table that exists physically but is no longer a
+// declared resource (a removed resource) is brought into the diff as a DropTable:
+// false for the additive path (a removed resource is invisible drift, the exact v1
+// behavior); true for the approval-aware path (so the table can be previewed and,
+// with explicit consent, dropped). The engine's own auth_*/files tables are NEVER
+// brought in, in either mode (isEngineManagedTable).
+func diffTenant(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *schema.APISchema, includeOrphans bool) (*schemadiff.Plan, error) {
 	real, err := schemadiff.Introspect(ctx, pool, pgSchema)
 	if err != nil {
 		return nil, fmt.Errorf("introspect %s: %w", pgSchema, err)
@@ -144,7 +235,7 @@ func diffTenant(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *sch
 	// while it is pending (old name present, new absent), and remember the table
 	// rename sources so managedSubset does not drop them.
 	keepSources := resolveRenames(desired, real)
-	current := managedSubset(real, desired, keepSources)
+	current := managedSubset(real, desired, keepSources, includeOrphans)
 	plan, err := schemadiff.Diff(desired, current)
 	if err != nil {
 		return nil, fmt.Errorf("diff %s: %w", pgSchema, err)
@@ -251,58 +342,133 @@ func rewriteColumnRefs(tbl *schemadiff.Table, old, new string) {
 	}
 }
 
-// managedSubset returns a view of real keeping only the tables the API schema
-// declares (those present in desired) PLUS any table that is the source of a pending
-// rename (keepSources). Tables that exist physically but are not resources — the
-// engine's own auth_*/files tables, or a resource removed from the schema — are
-// excluded, so the diff never proposes dropping a table the migration does not own.
+// managedSubset returns a view of real restricted to the tables the migration is
+// allowed to reason about. It ALWAYS excludes the engine's own auth_*/files tables
+// (isEngineManagedTable — the migration must never propose dropping them) and ALWAYS
+// includes the declared resource tables (present in desired) plus any pending-rename
+// source (keepSources).
+//
+// A table that is neither a resource nor engine-internal is a REMOVED resource (its
+// resource was deleted from the schema; its table lingers physically). Whether to
+// bring it into the diff as a DropTable depends on includeOrphans:
+//   - false (additive path): EXCLUDE it — a removed resource is invisible drift, the
+//     exact historical behavior (no DropTable is ever proposed for it).
+//   - true (approval-aware path): INCLUDE it — the diff proposes a DropTable, which
+//     the policy GATES by default (drift, as before) and applies only under explicit
+//     approval. This is what makes a removed resource visible in a dry-run preview.
+//
 // Enums are not copied (the API schema does not manage enum types, and Diff ignores
 // them regardless).
-func managedSubset(real, desired *schemadiff.Schema, keepSources map[string]bool) *schemadiff.Schema {
+func managedSubset(real, desired *schemadiff.Schema, keepSources map[string]bool, includeOrphans bool) *schemadiff.Schema {
 	out := schemadiff.NewSchema(real.Name)
 	for name, tbl := range real.Tables {
-		if _, ok := desired.Tables[name]; ok || keepSources[name] {
-			out.Tables[name] = tbl
+		switch {
+		case isEngineManagedTable(name):
+			continue // never the engine's own auth_*/files tables
+		case keepSources[name]:
+			out.Tables[name] = tbl // pending rename source
+		case desired.Tables[name] != nil:
+			out.Tables[name] = tbl // a declared resource
+		case includeOrphans:
+			out.Tables[name] = tbl // a removed resource → DropTable (gated/approvable)
 		}
 	}
 	return out
 }
 
-// partitionByPolicy splits an ordered plan into the ops to APPLY and the DROP ops
-// to SKIP. v1 is purely additive/in-place — it creates, adds, alters and renames,
-// but never drops — preserving the converger's "removes nothing" guarantee while
-// applying everything else through the safe executor. Skipped ops keep their data
-// as drift (the columns/indexes simply remain).
-func partitionByPolicy(plan *schemadiff.Plan) (apply *schemadiff.Plan, skipped []schemadiff.Operation) {
-	keep := make([]schemadiff.Operation, 0, len(plan.Ops))
-	for _, op := range plan.Ops {
-		if isDropOp(op.Kind()) {
-			skipped = append(skipped, op)
-			continue
-		}
-		keep = append(keep, op)
-	}
-	return &schemadiff.Plan{Ops: keep}, skipped
+// isEngineManagedTable reports whether a tenant-schema table is owned by the engine
+// itself (the auth_* identity tables and the files store), not by the user's schema.
+// These are created/managed outside ApplyTenantMigration and the migration must never
+// touch them — both names are RESERVED (a resource cannot be named auth_* or files),
+// so this can never shadow a real resource table.
+func isEngineManagedTable(name string) bool {
+	return strings.HasPrefix(name, "auth_") || name == "files"
 }
 
-// logConcerns surfaces a plan's backfill/destructive/transformational concerns,
-// EXCEPT those acting on a table created in the same plan: a constraint or column
-// added to a brand-new, empty tenant table is no data risk, so logging it would
-// fire a misleading "backfill" warning on every fresh-tenant provision. Concerns on
-// pre-existing tables (the cases that actually matter) are still surfaced.
+// partitionByPolicyApproved splits a plan into the ops to APPLY and the drops to
+// GATE, honoring an explicit approval set for the DATA-LOSING drops. It is the SOLE
+// place a drop is ever scheduled for execution, and the SAME classifier the dry-run
+// preview uses — so a preview is faithful to the apply by construction.
+//
+// The policy:
+//   - A non-drop op always applies (create/add/alter/rename, FK adds).
+//   - A DESTRUCTIVE drop (DropTable/DropColumn, schemadiff.DestructiveKey) applies
+//     ONLY if its key is in `approved`; otherwise it is gated (drift). This is the
+//     fail-safe default: without enumerated consent, nothing is dropped.
+//   - A SAFE drop (index/constraint/FK) is gated as additive drift — EXCEPT a foreign
+//     key whose referenced table is itself an APPROVED table drop: that FK must be
+//     removed for the DROP TABLE to succeed, and dropping an FK loses no data, so it
+//     is applied as a necessary, safe CONSEQUENCE of the approved table drop (never an
+//     independent constraint removal). This keeps an approved table drop self-coherent
+//     even when a still-present table kept the referencing column.
+func partitionByPolicyApproved(plan *schemadiff.Plan, approved map[string]bool) (apply *schemadiff.Plan, gated []schemadiff.Operation, appliedKeys []string) {
+	// Which tables are being dropped by explicit approval — needed to un-gate the
+	// incoming foreign keys that would otherwise block their DROP TABLE.
+	approvedDropTables := make(map[string]bool)
+	for _, op := range plan.Ops {
+		if dt, ok := op.(schemadiff.DropTable); ok {
+			if key, _ := schemadiff.DestructiveKey(op); approved[key] {
+				approvedDropTables[dt.Table.Name] = true
+			}
+		}
+	}
+
+	keep := make([]schemadiff.Operation, 0, len(plan.Ops))
+	for _, op := range plan.Ops {
+		if !isDropOp(op.Kind()) {
+			keep = append(keep, op)
+			continue
+		}
+		if key, destructive := schemadiff.DestructiveKey(op); destructive {
+			if approved[key] {
+				keep = append(keep, op)
+				appliedKeys = append(appliedKeys, key)
+			} else {
+				gated = append(gated, op)
+			}
+			continue
+		}
+		// Safe drop: kept as drift, unless it is an incoming FK to an approved table
+		// drop (a required, data-safe consequence — see the doc comment).
+		if dfk, ok := op.(schemadiff.DropForeignKey); ok && approvedDropTables[dfk.FK.RefTable] {
+			keep = append(keep, op)
+			continue
+		}
+		gated = append(gated, op)
+	}
+	return &schemadiff.Plan{Ops: keep}, gated, appliedKeys
+}
+
+// logConcerns surfaces a plan's backfill/destructive/transformational concerns on
+// PRE-EXISTING tables (the shared filter concernsOnExistingTables drops concerns about
+// a table created in the same plan — no data risk on a brand-new, empty table). The
+// dry-run preview formats the SAME concern set.
 func logConcerns(pgSchema string, plan *schemadiff.Plan) {
+	for _, c := range concernsOnExistingTables(plan) {
+		log.Printf("migration[%s]: concern [%s]: %s", pgSchema, c.Risk, c.Message)
+	}
+}
+
+// concernsOnExistingTables returns the plan's concerns (schemadiff.Validate) minus
+// those acting on a table created in the same plan: a constraint/column added to a
+// brand-new, empty tenant table is no data risk, so reporting it would fire a
+// misleading "backfill" warning on every fresh-tenant provision. The concerns that
+// remain are exactly the ones that matter over real data.
+func concernsOnExistingTables(plan *schemadiff.Plan) []schemadiff.Concern {
 	created := make(map[string]bool)
 	for _, op := range plan.Ops {
 		if ct, ok := op.(schemadiff.CreateTable); ok {
 			created[ct.Table.Name] = true
 		}
 	}
+	var out []schemadiff.Concern
 	for _, c := range schemadiff.Validate(plan) {
 		if t := opTable(c.Op); t != "" && created[t] {
 			continue
 		}
-		log.Printf("migration[%s]: concern [%s]: %s", pgSchema, c.Risk, c.Message)
+		out = append(out, c)
 	}
+	return out
 }
 
 // opTable returns the table an operation targets (the desired/post-rename name).

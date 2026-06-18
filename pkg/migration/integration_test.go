@@ -88,7 +88,7 @@ func TestIntegration_ProvisionEvolveNoop(t *testing.T) {
 	}
 
 	// ── re-provision unchanged → EMPTY diff ──
-	plan, err := diffTenant(ctx, pool, pg, base)
+	plan, err := diffTenant(ctx, pool, pg, base, false)
 	if err != nil {
 		t.Fatalf("re-diff: %v", err)
 	}

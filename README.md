@@ -209,6 +209,12 @@ baseline faster are welcome; we'll publish updated numbers.
 - **CORS**: configurable cross-origin access for browser SPAs on another origin
   (`APPITOOLS_CORS_ORIGINS`), disabled by default, scoped to `/api`,`/auth`,
   `/graphql`,`/openapi` — never the control plane or `/admin`
+- **Safe schema evolution**: a real diff-based migration engine — renames preserve
+  data, NOT NULL is enforced faithfully, all DDL runs under `lock_timeout`+retry with
+  `CONCURRENTLY` indexes. Additive by default (it never drops); a **destructive drop**
+  (removing a field/resource) needs a two-step **approval gate** — a dry-run reports
+  exactly what would be lost (rows affected), and the drop runs only when you enumerate
+  it explicitly. No accidental data loss; automated workers never auto-approve
 - **Ops**: Prometheus `/metrics`, per-request trace ring with stage breakdown,
   SLO burn-rate alerts (Slack), graceful drain on SIGTERM, circuit breaker
   (verified open/recover with toxiproxy), zero-downtime additive migrations —
