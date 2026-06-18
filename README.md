@@ -214,7 +214,12 @@ baseline faster are welcome; we'll publish updated numbers.
   `CONCURRENTLY` indexes. Additive by default (it never drops); a **destructive drop**
   (removing a field/resource) needs a two-step **approval gate** — a dry-run reports
   exactly what would be lost (rows affected), and the drop runs only when you enumerate
-  it explicitly. No accidental data loss; automated workers never auto-approve
+  it explicitly. No accidental data loss; automated workers never auto-approve. Rolling a
+  change out to **every tenant** is a **resumable fan-out** (`migrate --all-tenants`):
+  one tenant at a time under its advisory lock, resilient to partial failure (a broken
+  tenant is recorded and the rest continue) and resumable (re-run skips the converged
+  ones, retries the failed) — the multi-tenant migration story Prisma and django-tenants
+  don't have
 - **Ops**: Prometheus `/metrics`, per-request trace ring with stage breakdown,
   SLO burn-rate alerts (Slack), graceful drain on SIGTERM, circuit breaker
   (verified open/recover with toxiproxy), zero-downtime additive migrations —

@@ -34,14 +34,26 @@
 >   (protege adelante), no rompe el provisioning. Columna FK auto-indexada.
 > - **Gate de aprobación de destructivas:** CERRADO (MIG-F1-S3) — ver #6/#7 arriba (dry-run
 >   con impacto + aprobación enumerada explícita; default gateado, worker no auto-aprueba).
-> - **#8 (orquestador multi-tenant):** SIGUE abierto (falta el fan-out reanudable). También
->   pendiente: `on_update`/FK compuestas/FK a no-`id`.
+> - **#8 (orquestador multi-tenant):** CERRADO (MIG-F1-S4) — `migration.RunFanout` +
+>   `appitools migrate --all-tenants`/`--tenants` aplican un cambio de schema a los N tenants
+>   de forma RESILIENTE (un tenant que falla NO aborta a los sanos; se registra en
+>   `public.migration_log` y se reporta) y REANUDABLE (re-correr salta los ya migrados —
+>   diff vacío = no-op — y reintenta los fallidos; el diff idempotente hace que "reanudar"
+>   == "volver a correr"). Cada tenant se aplica bajo SU advisory lock (el mismo del worker)
+>   y atómicamente (rollback por batch → un fallo deja al tenant en su estado previo, nunca a
+>   medias). ADITIVO por defecto (NUNCA auto-aprueba un drop, como el worker); un drop masivo
+>   exige `--approve-drops` enumerado y el dry-run muestra el impacto AGREGADO (filas perdidas
+>   × tenants). Secuencial en v1. Es el diferencial vs Prisma (sin fan-out nativo) y
+>   django-tenants (frágil ante fallo parcial). Pendiente: `on_update`/FK compuestas/FK a
+>   no-`id`, y el paralelismo acotado del fan-out (optimización).
 >   **Con #1 (rename) + #2 (FK) + #3 (NOT NULL) + #5 (diff/plan) cerrados, el locking
->   protegido y el gate de aprobación de destructivas, los tres grandes 🔴 del diagnóstico
->   están cerrados Y evolucionar un schema (incl. drops) es seguro** — el motor es
+>   protegido, el gate de aprobación de destructivas Y el orquestador multi-tenant reanudable,
+>   los tres grandes 🔴 del diagnóstico están cerrados, evolucionar un schema (incl. drops) es
+>   seguro, y propagar ese cambio a N tenants es resiliente y reanudable** — el motor es
 >   production-safe e invocable desde el schema. La IA puede PROPONER cambios, el dry-run
->   los MUESTRA (con el impacto), y un humano APRUEBA lo destructivo enumerándolo: ningún
->   error destruye datos en silencio.
+>   los MUESTRA (con el impacto, por-tenant y agregado), y un humano APRUEBA lo destructivo
+>   enumerándolo: ningún error destruye datos en silencio, y un fallo en un tenant no
+>   bloquea a los demás.
 >
 > El resto del documento queda como **registro histórico** del comportamiento PRE-integración.
 
@@ -408,7 +420,7 @@ capacidad que le sale natural y que los ORMs maduros manejan mal.
 | 5 | **Sin _diff_ / plan / gate de seguridad** (transversal) | 🔴 ALTO | el validador aprueba CUALQUIER cambio (valida el schema aislado, sin comparar contra el estado) → los 4 de arriba pasan sin aviso | genera un plan, clasifica cada cambio seguro/destructivo y exige confirmación |
 | 6 | **Eliminar campo/recurso** (caso D) | 🟢 CERRADO (MIG-F1-S3) | gateado por defecto (drift), pero aplicable con **aprobación enumerada** tras un dry-run que muestra el impacto (filas perdidas); PII borrable de forma controlada | `DROP COLUMN`/`DROP TABLE` con consentimiento informado |
 | 7 | **Locking sin protección** (Paso 3) | 🟡 MEDIO | sin `lock_timeout`/reintento/`CONCURRENTLY` en el path síncrono | (la mayoría tampoco; oportunidad de superar) |
-| 8 | **Migración multi-tenant** (Paso 4) | 🟡 MEDIO | solo per-tenant; sin orquestador para N tenants | Prisma sin fan-out nativo; Django secuencial |
+| 8 | **Migración multi-tenant** (Paso 4) | 🟢 CERRADO (MIG-F1-S4) | orquestador de fan-out reanudable (`migrate --all-tenants`): resiliente ante fallo parcial (no aborta, registra, reanuda), aditivo por defecto, drop masivo requiere aprobación enumerada | Prisma sin fan-out nativo; Django secuencial/frágil |
 
 > Nota: 1–5 pueden **perder datos, corromper integridad o tirar la escritura** y deberían
 > cerrarse antes de la etapa de IA (que evolucionará schemas constantemente). 6–8 son de

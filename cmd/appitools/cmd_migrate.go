@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/schema"
@@ -15,35 +16,55 @@ import (
 
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
-	Short: "Migra el schema de un tenant (diff seguro + gate de aprobación de drops)",
-	Long: `Converge las tablas del tenant a su schema con el motor de migraciones real
+	Short: "Migra el schema de uno o TODOS los tenants (diff seguro + gate de drops + fan-out reanudable)",
+	Long: `Converge las tablas del/los tenant(s) a su schema con el motor de migraciones real
 (introspección → diff → apply seguro): renames preservan datos, NOT NULL se
 aplica fiel, los índices/constraints declarados se materializan.
 
 Por defecto la política es ADITIVA: crea/agrega/altera/renombra pero NUNCA
 dropea — una operación destructiva (eliminar un recurso/tabla o un campo/columna)
-queda GATEADA como drift, sin pérdida de datos.
+queda GATEADA como drift, sin pérdida de datos. Aplicar un drop requiere ENUMERARLO
+explícitamente con --approve-drops (consentimiento informado — nunca un "sí a todo").
 
-Para ver qué haría sin aplicar nada (incluido el impacto de cada drop):
-    appitools migrate --tenant acme --schema schema.json --dry-run
+UN tenant:
+    appitools migrate --tenant acme --schema schema.json [--dry-run]
+    appitools migrate --tenant acme --schema schema.json --approve-drops "empleados.telefono"
 
-Para APLICAR un drop destructivo hay que ENUMERARLO explícitamente (consentimiento
-informado — nunca un "sí a todo"):
-    appitools migrate --tenant acme --schema schema.json \
-        --approve-drops "empleados.telefono,proyectos"
+TODOS los tenants (fan-out reanudable — el diferencial vs Prisma):
+    appitools migrate --all-tenants --schema base.json --dry-run   # plan + impacto AGREGADO
+    appitools migrate --all-tenants --schema base.json             # aplica a los N
+    appitools migrate --tenants acme,globex --schema base.json     # a un subconjunto
+
+El fan-out es RESILIENTE (un tenant que falla no aborta a los sanos; se registra y
+se reporta) y REANUDABLE (re-correrlo salta los ya migrados — diff vacío = no-op — y
+reintenta los que fallaron). NUNCA auto-aprueba destructivas: para un drop masivo hay
+que pasar --approve-drops (se aplica a CADA tenant; el dry-run muestra el impacto
+agregado primero). Secuencial en v1.
 
 Útil para instalaciones on-premise o para depurar sin un worker de Redis.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		schemaFile, _ := cmd.Flags().GetString("schema")
 		tenantID, _ := cmd.Flags().GetString("tenant")
+		allTenants, _ := cmd.Flags().GetBool("all-tenants")
+		tenantsRaw, _ := cmd.Flags().GetString("tenants")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
-		approveRaw, _ := cmd.Flags().GetString("approve-drops")
-		approved := parseApprovedDrops(approveRaw)
+		approved := parseCSV(mustString(cmd, "approve-drops"))
+		tenantList := parseCSV(tenantsRaw)
+
+		// Mode dispatch: exactly one target selector.
+		fanout := allTenants || len(tenantList) > 0
+		switch {
+		case fanout && tenantID != "":
+			fatal("use --tenant for a single tenant, OR --all-tenants/--tenants for a fan-out — not both")
+		case allTenants && len(tenantList) > 0:
+			fatal("use --all-tenants OR --tenants, not both")
+		case !fanout && tenantID == "":
+			fatal("one of --tenant, --all-tenants or --tenants is required")
+		}
 
 		s, err := schema.LoadFromFile(schemaFile)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Error leyendo schema:", err)
-			os.Exit(1)
+			fatal("Error leyendo schema: " + err.Error())
 		}
 		if errs := schema.Validate(s); len(errs) > 0 {
 			fmt.Fprintln(os.Stderr, "Schema inválido:")
@@ -55,56 +76,141 @@ informado — nunca un "sí a todo"):
 
 		connStr := os.Getenv("DATABASE_URL")
 		if connStr == "" {
-			fmt.Fprintln(os.Stderr, "DATABASE_URL environment variable is required")
-			os.Exit(1)
+			fatal("DATABASE_URL environment variable is required")
 		}
-
 		ctx := context.Background()
 		pool, err := db.NewPool(ctx, connStr)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Error conectando a la DB:", err)
-			os.Exit(1)
+			fatal("Error conectando a la DB: " + err.Error())
 		}
 		defer pool.Close()
 
-		pgSchema := "tenant_" + tenantID
-
-		// ── dry-run: classify and report, apply nothing ──
-		if dryRun {
-			pv, err := migration.PreviewTenantMigration(ctx, pool, pgSchema, s, approved)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "Dry-run failed:", err)
-				os.Exit(1)
-			}
-			printPreview(pgSchema, pv)
+		if fanout {
+			runFanout(ctx, pool, s, tenantList, approved, dryRun)
 			return
 		}
-
-		// ── apply (only enumerated destructives are dropped; the rest gated) ──
-		fmt.Printf("Applying migration to schema %q...\n", pgSchema)
-		outcome, err := migration.ApplyTenantMigrationApproved(ctx, pool, pgSchema, s, approved)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Migration failed:", err)
-			os.Exit(1)
-		}
-
-		// Print each resource table (sorted for deterministic output).
-		tables := make([]string, 0, len(s.Resources))
-		for name := range s.Resources {
-			tables = append(tables, name)
-		}
-		sort.Strings(tables)
-		for _, t := range tables {
-			fmt.Printf("  ✓ %s.%s\n", pgSchema, t)
-		}
-		printOutcome(outcome)
-		fmt.Println("Done.")
+		runSingleTenant(ctx, pool, s, "tenant_"+tenantID, approved, dryRun)
 	},
 }
 
-// parseApprovedDrops splits a comma-separated --approve-drops value into trimmed,
-// non-empty keys.
-func parseApprovedDrops(raw string) []string {
+// ── single-tenant path (unchanged behavior) ────────────────────────────────────
+
+func runSingleTenant(ctx context.Context, pool *pgxpool.Pool, s *schema.APISchema, pgSchema string, approved []string, dryRun bool) {
+	if dryRun {
+		pv, err := migration.PreviewTenantMigration(ctx, pool, pgSchema, s, approved)
+		if err != nil {
+			fatal("Dry-run failed: " + err.Error())
+		}
+		printPreview(pgSchema, pv)
+		return
+	}
+	fmt.Printf("Applying migration to schema %q...\n", pgSchema)
+	outcome, err := migration.ApplyTenantMigrationApproved(ctx, pool, pgSchema, s, approved)
+	if err != nil {
+		fatal("Migration failed: " + err.Error())
+	}
+	tables := make([]string, 0, len(s.Resources))
+	for name := range s.Resources {
+		tables = append(tables, name)
+	}
+	sort.Strings(tables)
+	for _, t := range tables {
+		fmt.Printf("  ✓ %s.%s\n", pgSchema, t)
+	}
+	printOutcome(outcome)
+	fmt.Println("Done.")
+}
+
+// ── fan-out path (multi-tenant orchestrator) ────────────────────────────────────
+
+func runFanout(ctx context.Context, pool *pgxpool.Pool, s *schema.APISchema, tenantIDs, approved []string, dryRun bool) {
+	scope := "ALL tenants"
+	if len(tenantIDs) > 0 {
+		scope = fmt.Sprintf("%d tenant(s): %s", len(tenantIDs), strings.Join(tenantIDs, ", "))
+	}
+	mode := "APPLY"
+	if dryRun {
+		mode = "DRY-RUN (nothing is applied)"
+	}
+	fmt.Printf("Fan-out migration — %s — %s\n", mode, scope)
+	if len(approved) > 0 && !dryRun {
+		fmt.Printf("⚠ MASS DESTRUCTIVE approval active — these drops will be applied to EVERY targeted tenant: %s\n",
+			strings.Join(approved, ", "))
+	}
+	fmt.Println()
+
+	opts := migration.FanoutOptions{
+		Schema:        s,
+		TenantIDs:     tenantIDs,
+		ApprovedDrops: approved,
+		DryRun:        dryRun,
+		OnTenant:      func(tr migration.TenantFanoutResult) { printTenantLine(tr, dryRun) },
+	}
+	res, err := migration.RunFanout(ctx, pool, opts)
+	if err != nil {
+		fatal("Fan-out failed: " + err.Error())
+	}
+
+	fmt.Println()
+	if len(res.MissingTenants) > 0 {
+		fmt.Printf("⚠ requested tenants NOT found (ignored): %s\n", strings.Join(res.MissingTenants, ", "))
+	}
+	fmt.Printf("── Summary [%s] ──  total=%d  applied=%d  noop=%d  failed=%d\n",
+		res.RunID, res.Total, res.Applied, res.Noop, res.Failed)
+
+	if dryRun {
+		if imp := res.AggregateDestructive(); len(imp) > 0 {
+			fmt.Println("\nAGGREGATE destructive impact (data lost if approved across the fan-out):")
+			for _, d := range imp {
+				fmt.Printf("  ! %s (%s) — %d row(s) across %d tenant(s) [approve with --approve-drops %s]\n",
+					d.Key, d.Kind, d.RowsLost, d.Tenants, d.Key)
+			}
+		}
+	}
+	if res.Failed > 0 {
+		fmt.Printf("\n%d tenant(s) failed — fix the cause and RE-RUN the same command to resume "+
+			"(already-migrated tenants are no-ops, only the failed ones retry).\n", res.Failed)
+		os.Exit(1)
+	}
+}
+
+// printTenantLine streams one tenant's outcome as it completes.
+func printTenantLine(tr migration.TenantFanoutResult, dryRun bool) {
+	switch tr.Status {
+	case migration.FanoutApplied:
+		verb := "applied"
+		if dryRun {
+			verb = "would apply"
+		}
+		extra := ""
+		if len(tr.AppliedDrops) > 0 {
+			extra = " (dropped: " + strings.Join(tr.AppliedDrops, ", ") + ")"
+		} else if len(tr.GatedDrops) > 0 {
+			extra = " (gated drops: " + strings.Join(tr.GatedDrops, ", ") + ")"
+		}
+		fmt.Printf("  ✓ %-20s %s%s  (%dms)\n", tr.TenantID, verb, extra, tr.DurationMS)
+	case migration.FanoutNoop:
+		fmt.Printf("  · %-20s no-op (already converged)  (%dms)\n", tr.TenantID, tr.DurationMS)
+	case migration.FanoutFailed:
+		fmt.Printf("  ✗ %-20s FAILED: %s  (%dms)\n", tr.TenantID, tr.Error, tr.DurationMS)
+	}
+}
+
+// ── shared helpers ──────────────────────────────────────────────────────────────
+
+// mustString reads a string flag (ignoring the always-nil "not found" error).
+func mustString(cmd *cobra.Command, name string) string {
+	v, _ := cmd.Flags().GetString(name)
+	return v
+}
+
+func fatal(msg string) {
+	fmt.Fprintln(os.Stderr, msg)
+	os.Exit(1)
+}
+
+// parseCSV splits a comma-separated value into trimmed, non-empty items.
+func parseCSV(raw string) []string {
 	if strings.TrimSpace(raw) == "" {
 		return nil
 	}
@@ -117,9 +223,9 @@ func parseApprovedDrops(raw string) []string {
 	return out
 }
 
-// printPreview renders a dry-run preview: the safe ops that would apply, the data-
-// losing drops with their impact + approval status, the additive drift, concerns, and
-// any approval token that matched nothing.
+// printPreview renders a single-tenant dry-run preview: the safe ops that would
+// apply, the data-losing drops with their impact + approval status, the additive
+// drift, concerns, and any approval token that matched nothing.
 func printPreview(pgSchema string, pv *migration.Preview) {
 	fmt.Printf("Dry-run for schema %q — NOTHING was applied.\n\n", pgSchema)
 	if pv.Empty {
@@ -186,7 +292,7 @@ func pendingKeys(pv *migration.Preview) []string {
 	return out
 }
 
-// printOutcome reports what an apply did with the data-losing drops.
+// printOutcome reports what a single-tenant apply did with the data-losing drops.
 func printOutcome(o *migration.ApplyOutcome) {
 	if o == nil {
 		return
@@ -204,9 +310,10 @@ func printOutcome(o *migration.ApplyOutcome) {
 
 func init() {
 	migrateCmd.Flags().String("schema", "schema.json", "path to schema.json")
-	migrateCmd.Flags().String("tenant", "", "tenant ID (required)")
+	migrateCmd.Flags().String("tenant", "", "single tenant ID to migrate")
+	migrateCmd.Flags().Bool("all-tenants", false, "fan-out: migrate EVERY tenant in public.tenants (resumable)")
+	migrateCmd.Flags().String("tenants", "", "fan-out: migrate this comma-separated subset of tenant IDs")
 	migrateCmd.Flags().Bool("dry-run", false, "show the migration plan + destructive impact WITHOUT applying anything")
-	migrateCmd.Flags().String("approve-drops", "", "comma-separated destructive drop keys to apply (e.g. \"empleados.telefono,proyectos\"); unlisted drops stay gated")
-	migrateCmd.MarkFlagRequired("tenant") //nolint:errcheck
+	migrateCmd.Flags().String("approve-drops", "", "comma-separated destructive drop keys to apply (e.g. \"empleados.telefono,proyectos\"); in a fan-out they apply to EVERY tenant")
 	rootCmd.AddCommand(migrateCmd)
 }

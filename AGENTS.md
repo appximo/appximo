@@ -125,7 +125,17 @@ One line per layer — navigate the code for the rest:
   drops (a removed field's column stays as drift, logged) — re-applying an
   unchanged schema is a true no-op, and a new tenant provisions identically to the
   old converger. A real NOT NULL is now enforced faithfully (fails loud + rolls
-  back over populated data instead of the old silent NULL-accepting divergence).
+  back over populated data instead of the old silent NULL-accepting divergence). A
+  data-losing **drop** (DropTable/DropColumn) is gated by default but applicable
+  through a controlled **approval gate** (`ApplyTenantMigrationApproved` /
+  `PreviewTenantMigration`, MIG-F1-S3): a dry-run shows each drop's row-loss impact,
+  and a drop runs only when its key is explicitly enumerated. `RunFanout` (MIG-F1-S4)
+  is the **resumable multi-tenant orchestrator**: it applies a schema to N tenants,
+  one at a time under each tenant's advisory lock, RESILIENT to partial failure (a
+  broken tenant is recorded in `public.migration_log` and the rest continue) and
+  RESUMABLE (re-running is a no-op for converged tenants — the idempotent diff makes
+  "resume" == "run again"); additive by default, it never auto-approves a drop. See
+  [Evolving a schema safely](#evolving-a-schema-safely--the-destructive-approval-gate).
 - `pkg/outbox` — transactional outbox (ADR-016 §Class 2): `Enqueue` writes a job
   in the caller's tx and emits `pg_notify(outbox_notify, <id>)` on commit.
 - `pkg/worker` — the outbox consumer behind the SEPARATE `cmd/appitools-worker`
@@ -677,6 +687,43 @@ Guarantees:
 - An approved table drop also removes any foreign key that still references it (a
   required, data-safe consequence), so the `DROP TABLE` succeeds rather than failing on
   a dangling reference.
+
+#### Applying a change to ALL tenants — the resumable fan-out
+
+Everything above migrates ONE tenant. To roll a schema change out to **every** tenant
+(or a subset), the `migrate` CLI fans out:
+
+```
+appitools migrate --all-tenants  --schema base.json --dry-run   # plan + AGGREGATE impact, applies nothing
+appitools migrate --all-tenants  --schema base.json             # apply to every tenant
+appitools migrate --tenants a,b  --schema base.json             # apply to a subset
+```
+
+It enumerates `public.tenants` and migrates each one **sequentially**, under that
+tenant's advisory lock (the same lock the Redis worker uses, so the two never collide).
+The properties that make it safe at scale — the differentiator over Prisma (no native
+multi-tenant fan-out) and django-tenants (fragile on partial failure):
+
+- **Resilient to partial failure.** If tenant K fails (e.g. a NOT NULL add over its
+  existing rows), it is left in its previous state (the Executor rolls back per batch —
+  never half-applied), the failure is recorded in `public.migration_log`, and the
+  fan-out **continues** with the rest. One broken tenant never blocks the healthy ones.
+  The command exits non-zero and the summary names the failed tenants.
+- **Resumable.** Re-run the SAME command to resume: already-migrated tenants produce an
+  empty diff (a no-op, skipped for free) and only the failed ones retry. The idempotent
+  diff makes "resume" == "run again" — no separate state machine.
+- **Additive by default; never auto-approves a drop.** With no `--approve-drops`, every
+  destructive drop is gated in every tenant (zero data loss). A MASS destructive change
+  requires `--approve-drops` (the enumerated keys apply to EVERY targeted tenant), and
+  the `--dry-run` reports the **aggregate** impact first (rows lost × tenants).
+- **Tracked.** Each tenant's outcome (applied / no-op / failed, with the error) is
+  written to `public.migration_log`, stamped with the run id, so the run state is
+  consultable and a resume is informed.
+
+A successful per-tenant apply also persists the schema to that tenant's record (so a
+fan-out is the "propagate this schema to N tenants" operation; scope custom tenants out
+with `--tenants`). Bounded parallelism is a documented future increment — v1 is
+sequential (safe on a small box).
 
 ## Running it and making the first call
 

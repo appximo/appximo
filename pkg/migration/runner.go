@@ -68,6 +68,11 @@ type ApplyOutcome struct {
 	AppliedDrops       []string // destructive keys applied (explicitly approved)
 	GatedDrops         []string // destructive keys present but NOT approved (drift)
 	UnmatchedApprovals []string // approved keys that matched no destructive op
+	// NoChange is true when NO DDL was applied — the schema was already converged, or
+	// the only pending operations were gated drops. It is the noop signal the
+	// multi-tenant orchestrator uses to distinguish an "already up to date" tenant
+	// from one it actually migrated.
+	NoChange bool
 }
 
 // ApplyTenantMigrationApproved is the APPROVAL-AWARE apply: it converges pgSchema to
@@ -101,6 +106,7 @@ func applyMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s 
 	}
 	outcome := &ApplyOutcome{}
 	if plan.Empty() {
+		outcome.NoChange = true
 		return outcome, nil // converged — nothing to do
 	}
 
@@ -135,6 +141,7 @@ func applyMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s 
 	}
 
 	if applyPlan.Empty() {
+		outcome.NoChange = true // only gated drops were pending; no DDL ran
 		return outcome, nil
 	}
 
