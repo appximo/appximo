@@ -285,6 +285,25 @@ func AppendRowCondition(sql string, args []any, cond *rbac.WhereCondition) (stri
 	return sql, args, nil
 }
 
+// AppendAliasedRowCondition is AppendRowCondition for a statement that JOINs more
+// than one table, so the condition column must be qualified by its table alias to be
+// unambiguous (the relation subresource route: SELECT r.* FROM <target> r JOIN
+// <parent> src …). alias is an engine-controlled identifier (e.g. "r"), never user
+// input; the condition field is validated as a bare identifier and the value is
+// always a bound parameter. The operator is equality — the only operator an RBAC
+// condition may declare (enforced at schema load; see schema.validateConditionOp).
+func AppendAliasedRowCondition(sql string, args []any, alias string, cond *rbac.WhereCondition) (string, []any, error) {
+	if cond == nil {
+		return sql, args, nil
+	}
+	if !conditionFieldRe.MatchString(cond.Field) {
+		return sql, args, fmt.Errorf("invalid rbac condition field: %q", cond.Field)
+	}
+	sql += fmt.Sprintf(" AND %s.%s = $%d", alias, cond.Field, len(args)+1)
+	args = append(args, cond.Value)
+	return sql, args, nil
+}
+
 func (qb *QueryBuilder) buildWhere() (clause string, args []any) {
 	var parts []string
 	idx := 1

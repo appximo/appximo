@@ -358,7 +358,12 @@ no longer a free label the client advances arbitrarily.
 
 generates one read-only route — `GET /api/orders/{id}/customer` (field
 name minus `_id`) — returning the referenced record, AND a **real Postgres
-foreign key** on the column (MIG-F1-S1): `customer_id` → `customers.id`.
+foreign key** on the column (MIG-F1-S1): `customer_id` → `customers.id`. The
+subroute enforces the role's RBAC on the **referenced** resource (SEC-AUDIT-V1):
+`read` on the target is required (else `403`), the target's row condition scopes the
+result (a hidden row is `404`), and the target's field allowlist applies — the same
+scoping `GET /api/customers` and the `?include=` embeds apply, so the subroute never
+exposes a row/field the role could not otherwise read.
 
 - **`on_delete`** declares the referential action when the referenced (parent)
   row is deleted: `restrict` | `cascade` | `set_null`. **Unset defaults to
@@ -487,8 +492,16 @@ a row condition reads as 404 (not 403).
 ```
 
 `fields` is a response allowlist; `conditions` filters rows, with
-`$user_id` resolving to the JWT subject. The JWT `role` claim selects
-the policy.
+`$user_id` resolving to the JWT subject (or `$external_client_id`, or a
+literal). The JWT `role` claim selects the policy.
+
+A row `condition`'s **`op` must be `eq`** (or omitted) — row conditions are
+enforced as equality, so a non-eq operator is **rejected at schema load**
+(SEC-AUDIT-V1) rather than silently ignored ("declared == applied"; richer
+operators are a future increment). Field/condition existence is validated at load
+for **both** the role-global and per-resource forms: `conditions.field` and each
+`fields` entry must name a real column of the role's resources, or the schema is
+rejected (a typo is caught at load, never a runtime error).
 
 **`conditions` and `fields` are enforced on create too** (not only
 read/update/delete): on `POST` / GraphQL `create…`, a role's field

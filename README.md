@@ -172,7 +172,12 @@ baseline faster are welcome; we'll publish updated numbers.
   dynamic row conditions (`operator_id = $user_id`); deny by default. Field
   allowlists and row conditions are enforced on **create** as well as
   read/update/delete — an owner-scoped role can only create rows attributed to
-  itself (no mass-assignment), on both REST and GraphQL. Conditions can be
+  itself (no mass-assignment), on both REST and GraphQL. Row conditions are
+  equality (`field = $user_id`), validated at load (a condition can't declare an
+  operator the engine wouldn't apply), and enforced uniformly on **every** read
+  path — including `?include=` embeds and the relation read subroute
+  (`GET /api/{res}/{id}/{rel}` scopes the *referenced* resource, not just the
+  parent). Conditions can be
   **role-global** or **per-resource** (a `permissions` map): one role can scope
   each resource by its **own** column (`projects.owner_id`, `documents.created_by`),
   leave some resources unscoped, and even "read all, write own" via

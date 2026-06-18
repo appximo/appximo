@@ -62,10 +62,9 @@ func policyFromSchema(s *schema.APISchema) *rbac.Policy {
 // row-level condition (injected into the embed WHERE). RBAC-at-compilation, not
 // a post-hoc filter — the SQL never selects a child the role may not see.
 func makeRelationRBAC(policy *rbac.Policy, req *http.Request) query.RelationRBAC {
-	var ev rbac.EvalContext
-	if c := auth.ClaimsFromCtx(req.Context()); c != nil {
-		ev = rbac.EvalContext{Role: c.Role, UserID: c.UserID, ExternalClientID: c.ExternalClientID}
-	}
+	// Identity resolved the SAME way the route RBAC middleware resolves it (JWT
+	// claims, else X-User-* headers) — one principal across every authorization path.
+	ev := rbac.EvalContextFromRequest(req)
 	return func(resource string) (bool, []string, *rbac.WhereCondition) {
 		r := policy.Evaluate(ev, resource, "read")
 		return r.Allowed, r.AllowedFields, r.Condition
@@ -881,11 +880,33 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					json.NewEncoder(w).Encode(map[string]string{"error": "invalid id format"})
 					return
 				}
+
+				// SEC-AUDIT-V1 Hallazgo 2: enforce the role's RBAC on the RELATED
+				// resource — not just the parent's `read` (which the route middleware
+				// already checked). The route's resource is the PARENT, so without this
+				// the subroute would return the related row with NO row condition and NO
+				// field allowlist, leaking rows/fields the role could not see via
+				// GET /api/<related>. Reuse the SAME evaluator the embeds use.
+				allowed, allowedFields, cond := makeRelationRBAC(policy, req)(relResource)
+				if !allowed {
+					writeJSONErr(w, http.StatusForbidden, "forbidden")
+					return
+				}
+
 				q := fmt.Sprintf(
 					"SELECT r.* FROM %s r JOIN %s src ON src.%s = r.%s WHERE src.id = $1",
 					pgx.Identifier{relResource}.Sanitize(), tbl, pgx.Identifier{fn}.Sanitize(), pgx.Identifier{refCol}.Sanitize(),
 				)
-				rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema, q, parentID)
+				args := []any{parentID}
+				// The related resource's row condition is ANDed in, qualified by the
+				// `r` alias so it scopes the RELATED rows (not the parent join).
+				q, args, cerr := query.AppendAliasedRowCondition(q, args, "r", cond)
+				if cerr != nil {
+					capture500(req, cerr)
+					writeJSONErr(w, http.StatusInternalServerError, "internal error")
+					return
+				}
+				rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema, q, args...)
 				if err != nil {
 					writeDBErr(w, req, err)
 					return
@@ -897,13 +918,21 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					return
 				}
 				if len(result) == 0 {
+					// Not found OR hidden by the related resource's row condition — a
+					// 404 either way (never reveal a row the role may not see).
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusNotFound)
 					json.NewEncoder(w).Encode(map[string]string{"error": "not found"})
 					return
 				}
+				rec := result[0]
+				// Apply the related resource's field allowlist (drop fields the role may
+				// not read), exactly as the list/embed paths do.
+				if len(allowedFields) > 0 {
+					rec = pkghandlers.FilterFields(rec, allowedFields)
+				}
 				w.Header().Set("Content-Type", "application/json")
-				pkghandlers.WriteJSON(w, result[0]) //nolint:errcheck
+				pkghandlers.WriteJSON(w, rec) //nolint:errcheck
 			}))
 		}
 	}

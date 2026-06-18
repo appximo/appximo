@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -328,10 +329,17 @@ var validRBACActions = map[string]bool{
 func validateRBAC(s *APISchema) []ValidationError {
 	var errs []ValidationError
 	for roleName, role := range s.RBAC.Roles {
-		if len(role.Permissions) == 0 {
-			continue // legacy-only (or empty) role: unchanged behaviour
-		}
 		rolePrefix := "rbac.roles." + roleName
+		if len(role.Permissions) == 0 {
+			// Role-global (legacy) form (SEC-AUDIT-V1): the legacy form used to skip
+			// validation entirely. It now gets the SAME guarantees as the per-resource
+			// form — its condition operator must be one the engine actually enforces
+			// (eq-only, Hallazgo 1), and conditions.field / the fields allowlist must
+			// reference columns that EXIST on the role's resources (Hallazgo 3) — so a
+			// typo is caught at load, never a masked runtime error.
+			errs = append(errs, validateRoleGlobal(rolePrefix, role, s)...)
+			continue
+		}
 
 		// Mutual exclusivity: a role uses one form or the other, never both — mixing
 		// would make "which condition wins" ambiguous, unacceptable for authorization.
@@ -369,6 +377,7 @@ func validateRBAC(s *APISchema) []ValidationError {
 			}
 
 			if perm.Conditions != nil {
+				errs = append(errs, validateConditionOp(permPrefix+".conditions", perm.Conditions)...)
 				if perm.Conditions.Field == "" {
 					errs = append(errs, ValidationError{
 						Field:   permPrefix + ".conditions.field",
@@ -425,6 +434,115 @@ func validateRBAC(s *APISchema) []ValidationError {
 		}
 	}
 	return errs
+}
+
+// validConditionOps is the set of operators an RBAC row condition may DECLARE. The
+// row-level condition is enforced as EQUALITY everywhere it is built (the list /
+// aggregate WHERE, query.AppendRowCondition for get/update/delete, and the
+// relation-embed WHERE all emit `field = $n`); a non-eq operator would be SILENTLY
+// IGNORED. So the schema may only declare what the engine actually enforces —
+// "declared == applied" (SEC-AUDIT-V1 Hallazgo 1). An empty op defaults to eq.
+// (Richer operators would require type-aware value binding, as the G4 transaction
+// `guard` does; that is a deliberate future increment, not the current behavior.)
+var validConditionOps = map[string]bool{"": true, "eq": true}
+
+// validateConditionOp rejects an RBAC condition whose operator the engine does not
+// enforce. prefix is the condition's path (e.g. "rbac.roles.x.conditions"). A nil
+// condition or an eq/empty op produces no error.
+func validateConditionOp(prefix string, cond *Condition) []ValidationError {
+	if cond == nil || validConditionOps[cond.Op] {
+		return nil
+	}
+	return []ValidationError{{
+		Field:   prefix + ".op",
+		Message: fmt.Sprintf("unsupported RBAC condition operator %q: only equality (\"eq\") is enforced for row conditions — a non-eq operator would be silently ignored, so it may not be declared", cond.Op),
+	}}
+}
+
+// validateRoleGlobal validates the legacy role-global RBAC form (SEC-AUDIT-V1
+// Hallazgo 1 + 3). A role with neither a condition nor a field allowlist (e.g. a
+// wildcard admin) has nothing to validate against resources and is unchanged. For a
+// role that DOES carry a condition or allowlist, the condition operator must be
+// eq-only, and conditions.field / each allowlist field must exist on at least one of
+// the resources the role applies to — a field that exists on NONE is a typo (dead
+// config that would error at runtime). The condition is checked against the union of
+// the role's resources (not each) because the role-global allowlist is itself a
+// union across them; a condition field present on some-but-not-all resources is a
+// fail-closed correctness concern, not a security leak, and is left as a documented
+// limitation rather than rejecting several shipped schemas.
+func validateRoleGlobal(rolePrefix string, role RolePolicy, s *APISchema) []ValidationError {
+	if role.Conditions == nil && len(role.Fields) == 0 {
+		return nil
+	}
+	var errs []ValidationError
+	resources := applicableResources(role.Resources, s)
+
+	if role.Conditions != nil {
+		errs = append(errs, validateConditionOp(rolePrefix+".conditions", role.Conditions)...)
+		if role.Conditions.Field == "" {
+			errs = append(errs, ValidationError{
+				Field:   rolePrefix + ".conditions.field",
+				Message: "condition field is required",
+			})
+		} else if !fieldExistsOnAny(role.Conditions.Field, resources, s) {
+			errs = append(errs, ValidationError{
+				Field:   rolePrefix + ".conditions.field",
+				Message: fmt.Sprintf("condition field %q does not exist on any of the role's resources", role.Conditions.Field),
+			})
+		}
+	}
+	for _, f := range role.Fields {
+		if !fieldExistsOnAny(f, resources, s) {
+			errs = append(errs, ValidationError{
+				Field:   rolePrefix + ".fields",
+				Message: fmt.Sprintf("field %q does not exist on any of the role's resources", f),
+			})
+		}
+	}
+	return errs
+}
+
+// applicableResources resolves a role-global `resources` value (the "*" string or an
+// array of names) to the set of declared resource names it covers. Unknown names are
+// dropped (a role-global resource list was never existence-checked, so dropping keeps
+// the change non-breaking; the field checks still run against the names that exist).
+func applicableResources(raw json.RawMessage, s *APISchema) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var wildcard string
+	if err := json.Unmarshal(raw, &wildcard); err == nil {
+		if wildcard == "*" {
+			names := make([]string, 0, len(s.Resources))
+			for n := range s.Resources {
+				names = append(names, n)
+			}
+			return names
+		}
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(list))
+	for _, rn := range list {
+		if _, ok := s.Resources[rn]; ok {
+			out = append(out, rn)
+		}
+	}
+	return out
+}
+
+// fieldExistsOnAny reports whether field is a column (declared field or the implicit
+// id) of at least one of the named resources.
+func fieldExistsOnAny(field string, resources []string, s *APISchema) bool {
+	for _, rn := range resources {
+		if res, ok := s.Resources[rn]; ok && rbacFieldExists(res, field) {
+			return true
+		}
+	}
+	return false
 }
 
 // rbacFieldExists reports whether name is a column the resource exposes: a declared

@@ -153,6 +153,106 @@ func TestValidateRBAC_FieldAllowlistMustExist(t *testing.T) {
 	}
 }
 
+// ── SEC-AUDIT-V1 ────────────────────────────────────────────────────────────
+
+// TestValidateRBAC_ConditionOpEqOnly proves a non-eq RBAC condition operator is
+// rejected at load on BOTH forms (Hallazgo 1): the engine only enforces equality for
+// row conditions, so a declared non-eq operator (which would be silently ignored)
+// must not be accepted — "declared == applied".
+func TestValidateRBAC_ConditionOpEqOnly(t *testing.T) {
+	perResource := `{
+      "$schema":"x","version":"1","name":"x",
+      "resources": { "posts": { "fields": { "author_id": { "type": "uuid" }, "views": { "type": "int" } } } },
+      "rbac": { "roles": { "member": { "permissions": {
+        "posts": { "actions": ["read"], "conditions": { "field":"views","op":"gt","val":"0" } }
+      } } } }
+    }`
+	if !hasError(schema.Validate(parseSchema(t, perResource)), "only equality") {
+		t.Fatalf("per-resource: expected non-eq op rejection, got: %v", schema.Validate(parseSchema(t, perResource)))
+	}
+
+	roleGlobal := `{
+      "$schema":"x","version":"1","name":"x",
+      "resources": { "posts": { "fields": { "author_id": { "type": "uuid" } } } },
+      "rbac": { "roles": { "owner": {
+        "resources": ["posts"], "actions": ["read"],
+        "conditions": { "field":"author_id","op":"ne","val":"$user_id" }
+      } } }
+    }`
+	if !hasError(schema.Validate(parseSchema(t, roleGlobal)), "only equality") {
+		t.Fatalf("role-global: expected non-eq op rejection, got: %v", schema.Validate(parseSchema(t, roleGlobal)))
+	}
+
+	// eq (and an omitted op) are accepted.
+	okEq := `{
+      "$schema":"x","version":"1","name":"x",
+      "resources": { "posts": { "fields": { "author_id": { "type": "uuid" } } } },
+      "rbac": { "roles": { "owner": {
+        "resources": ["posts"], "actions": ["read"],
+        "conditions": { "field":"author_id","op":"eq","val":"$user_id" }
+      } } }
+    }`
+	if errs := schema.Validate(parseSchema(t, okEq)); len(errs) != 0 {
+		t.Fatalf("eq condition should be valid, got: %v", errs)
+	}
+}
+
+// TestValidateRBAC_RoleGlobalFieldExistence proves the legacy role-global form now
+// validates conditions.field and the fields allowlist against the role's resources
+// (Hallazgo 3) — a typo is caught at load instead of failing at runtime.
+func TestValidateRBAC_RoleGlobalFieldExistence(t *testing.T) {
+	condTypo := `{
+      "$schema":"x","version":"1","name":"x",
+      "resources": { "posts": { "fields": { "author_id": { "type": "uuid" } } } },
+      "rbac": { "roles": { "owner": {
+        "resources": ["posts"], "actions": ["read"],
+        "conditions": { "field":"autor_id","op":"eq","val":"$user_id" }
+      } } }
+    }`
+	if !hasError(schema.Validate(parseSchema(t, condTypo)), "does not exist on any of the role's resources") {
+		t.Fatalf("expected role-global condition-field typo rejection, got: %v", schema.Validate(parseSchema(t, condTypo)))
+	}
+
+	fieldsTypo := `{
+      "$schema":"x","version":"1","name":"x",
+      "resources": { "posts": { "fields": { "title": { "type": "string" } } } },
+      "rbac": { "roles": { "viewer": {
+        "resources": ["posts"], "actions": ["read"], "fields": ["id","title","nope"]
+      } } }
+    }`
+	if !hasError(schema.Validate(parseSchema(t, fieldsTypo)), "does not exist on any of the role's resources") {
+		t.Fatalf("expected role-global allowlist typo rejection, got: %v", schema.Validate(parseSchema(t, fieldsTypo)))
+	}
+
+	// Union semantics: a fields allowlist spanning several resources is valid as long
+	// as each field exists on at least one of them (price only on products, sku only
+	// on variants) — mirrors how the real model-lab "public" roles are written.
+	unionOK := `{
+      "$schema":"x","version":"1","name":"x",
+      "resources": {
+        "products": { "fields": { "price": { "type": "float64" } } },
+        "variants": { "fields": { "sku": { "type": "string" } } }
+      },
+      "rbac": { "roles": { "public": {
+        "resources": ["products","variants"], "actions": ["read"],
+        "fields": ["id","price","sku"]
+      } } }
+    }`
+	if errs := schema.Validate(parseSchema(t, unionOK)); len(errs) != 0 {
+		t.Fatalf("union allowlist should be valid, got: %v", errs)
+	}
+
+	// A wildcard admin with no condition/allowlist is unaffected.
+	wildcard := `{
+      "$schema":"x","version":"1","name":"x",
+      "resources": { "posts": { "fields": { "title": { "type": "string" } } } },
+      "rbac": { "roles": { "admin": { "resources": "*", "actions": ["*"] } } }
+    }`
+	if errs := schema.Validate(parseSchema(t, wildcard)); len(errs) != 0 {
+		t.Fatalf("wildcard admin should be valid, got: %v", errs)
+	}
+}
+
 // TestCheckUnknownKeys_PermissionsStrict verifies the strict-key pass covers the new
 // permissions level and its nested condition (a typo there must not be silent).
 func TestCheckUnknownKeys_PermissionsStrict(t *testing.T) {

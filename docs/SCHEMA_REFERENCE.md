@@ -530,6 +530,12 @@ name does NOT end in `_id` keeps its full name in the route (e.g. a field
 `…/manager_user`). The FK column is also auto-indexed (`idx_<table>_<field>`,
 `desired.go:217-224`).
 
+The subroute enforces the role's RBAC on the **referenced** resource (SEC-AUDIT-V1):
+it requires `read` on the target (→ `403` otherwise), injects the target's row
+condition (→ a hidden row is `404`), and applies the target's field allowlist — the
+same scoping `GET /api/{target}` and the `?include=` embeds apply, so the subroute
+can never expose a row or field the role could not otherwise read.
+
 (Multi-column composite FKs use the resource-level `foreign_keys` block, not a
 field key — covered in a later section. Declarative nested embeds use the
 resource-level `relations` block — also a later section.)
@@ -1071,7 +1077,7 @@ A `conditions` object is `{ "field", "op", "val" }` (`pkg/schema/types.go:385-38
   - `$user_id` → the JWT subject (`EvalContext.UserID`),
   - `$external_client_id` → `EvalContext.ExternalClientID`,
   - anything else → used **as a literal** (e.g. `"published"` for a public-read role).
-- `op` — present in the JSON shape but, **for row-level filtering, it is ignored.** See §7.7. **Only equality is ever applied.**
+- `op` — **must be `"eq"` (or omitted).** Row conditions are enforced as equality; a non-eq operator is **rejected at load** (SEC-AUDIT-V1) so the schema can only declare what the engine applies. See §7.7.
 
 When a condition applies, a row excluded by it reads as **404, not 403** (the row simply isn't in the result set / matches no row).
 
@@ -1084,11 +1090,29 @@ When a condition applies, a row excluded by it reads as **404, not 403** (the ro
 
 This enables "read all, write own": grant `["read","create","update","delete"]` with a condition gated by `condition_actions: ["create","update","delete"]` — reads are unrestricted, writes are owner-scoped.
 
-### 7.6 Validation (`validateRBAC`, `pkg/schema/validator.go:328-428`)
+### 7.6 Validation (`validateRBAC`, `pkg/schema/validator.go`)
 
-Validation is applied **only to the per-resource form**. The legacy role-global form is **intentionally not newly validated** (`pkg/schema/validator.go:324-327`) — a role with no `permissions` is skipped entirely (`validator.go:331-333`), so existing schemas behave identically and a role-global condition over a wildcard resource set is never field-checked.
+**Both forms are validated** (SEC-AUDIT-V1). Every condition — role-global or
+per-resource — must use the eq-only operator (`validateConditionOp`): a non-`eq`,
+non-empty `op` is rejected with
+`unsupported RBAC condition operator "<op>": only equality ("eq") is enforced for row conditions — a non-eq operator would be silently ignored, so it may not be declared`.
 
-For a role that declares `permissions`, the following are enforced (exact messages):
+For the **role-global form** (`validateRoleGlobal`), a role that carries a condition
+or a `fields` allowlist is checked against the resources it applies to (a wildcard
+admin with neither is unaffected):
+
+- **Condition field exists** on at least one applicable resource, else
+  `condition field "<f>" does not exist on any of the role's resources` (empty →
+  `condition field is required`).
+- **Allowlist fields exist** on at least one applicable resource, else
+  `field "<f>" does not exist on any of the role's resources`.
+- The check is **union** (a field on ≥1 of the role's resources is accepted),
+  matching how a role-global allowlist spans several resources; a field present on
+  some-but-not-all is a fail-closed runtime concern, not a load error (see the
+  finding in Appendix A.7).
+
+For a role that declares `permissions` (per-resource form), the following are
+enforced (exact messages):
 
 - **Mutual exclusivity.** If the role ALSO has any of `resources` / `actions` / `conditions` / `fields` (`validator.go:338`):
   `"a role uses EITHER the role-global form (resources/actions/conditions/fields) OR per-resource permissions, not both — move the role-global keys into permissions entries"`
@@ -1103,20 +1127,26 @@ For a role that declares `permissions`, the following are enforced (exact messag
   - requires a condition: `condition_actions requires conditions to be set`
   - must be a concrete action (`"*"` rejected): `invalid condition action "<a>": must be a concrete action (read, create, update, delete)`
   - must be a subset of `actions` (unless `actions` contains `"*"`): `condition_actions lists "<a>" which is not in actions`
-- **`fields` must name real columns:** `field "<f>" does not exist on resource "<res>"`
+- **`fields` must name real columns** (per-resource form): `field "<f>" does not exist on resource "<res>"`
+- **Condition `op` must be eq** (both forms): see `validateConditionOp` above.
 
-Note: the condition `op` value is **not validated** by `validateRBAC` — any string passes load (and is then ignored at runtime; §7.7).
+### 7.7 Row conditions are equality-only (`op` must be `eq`)
 
-### 7.7 IMPORTANT — row conditions are equality-only; `op` is ignored
+A row condition is always enforced as a bare equality `field = $n`:
 
-Although the `Condition` struct has an `op` field, **the operator is never used when filtering rows.** The row condition is always emitted as a bare equality `field = $n`:
+- single-row get/delete path — `AppendRowCondition` appends `" AND %s = $%d"` (`pkg/query/builder.go`).
+- list / aggregate path — `appendConditions` appends `"%s = $%d"`.
+- the relation-embed and subroute paths likewise emit `<alias>.<field> = $n`.
 
-- single-row get/delete path — `AppendRowCondition` appends `" AND %s = $%d"` (`pkg/query/builder.go:283`); `cond.Op` is never read.
-- list / aggregate path — `appendConditions` appends `"%s = $%d"` (`pkg/query/builder.go:319`); again `op` is not consulted.
+Because the operator is never anything but equality, the schema may **only declare
+`op: "eq"`** (or omit it): a non-eq operator is **rejected at load** (SEC-AUDIT-V1,
+§7.6), so "declared == applied" — a condition can never silently behave differently
+from what it states. (Before SEC-AUDIT-V1 a non-eq `op` loaded clean and was then
+ignored at runtime; that is now impossible.)
 
-So a condition like `{ "field":"owner_id", "op":"neq", "val":"$user_id" }` does **not** produce `owner_id <> …` — it produces `owner_id = <user_id>` exactly as if `op` were `eq`. The `op` key is effectively inert for row-level RBAC; treat every condition as equality.
-
-This is distinct from the transaction `guard` mechanism (§10), which is a different feature that genuinely supports `eq | ne | gt | gte | lt | lte`. Do not conflate the two.
+This is distinct from the transaction `guard` mechanism (§10), a different feature
+that genuinely supports `eq | ne | gt | gte | lt | lte` (with type-aware binding).
+Richer RBAC row operators would require the same binding and are a future increment.
 
 ### 7.8 Enforcement across operations (read, create, update, delete, aggregate, embeds)
 
@@ -1979,23 +2009,37 @@ audit. Knowing these is essential for generating schemas that behave as intended
    `<field> = $1` over the TEXT column. Only `eq` works; `gt`/`partial`/etc. are
    still rejected. (`pkg/query/builder.go:36-44, 378-384`) **(verified)**
 
-2. **RBAC row conditions ignore `op` — filtering is ALWAYS equality.** The
-   `conditions` object carries an `op` key (documented "eq", "neq", "in", …) on
-   both the role-global and per-resource forms, but `AppendRowCondition`
-   hard-codes `<field> = $n`; `op` is neither honored nor validated. Writing
-   `"op":"gt"` silently behaves as `eq`. (Do not confuse this with the
-   transaction `guard` in §10, a *different* mechanism that genuinely supports
-   `eq|ne|gt|gte|lt|lte`.) (`pkg/query/builder.go` `AppendRowCondition`;
-   `pkg/rbac/evaluator.go:18-22`) **(verified)**
+2. **RBAC row conditions ignore `op` — filtering is ALWAYS equality.**
+   **✅ RESOLVED (SEC-AUDIT-V1):** the row condition is enforced as equality
+   everywhere it is built, so the schema may only DECLARE what is enforced — the
+   validator now rejects any condition whose `op` is not `eq` (or omitted), on
+   BOTH the role-global and per-resource forms, with a clear load-time error. A
+   non-eq operator can no longer be silently ignored ("declared == applied").
+   Richer operators (with type-aware value binding, like the §10 transaction
+   `guard`) remain a future increment. (`pkg/schema/validator.go`
+   `validateConditionOp`)
 
-3. **The relation read-subroute is NOT RBAC row/field scoped.** Every other read
-   path (list, get, aggregate, `?include=` embed, GraphQL) injects the role's row
-   condition and field allowlist. The generated `GET /api/{res}/{id}/{relField}`
-   subroute issues a bare `SELECT r.* FROM <target> r JOIN <parent> … WHERE
-   src.id = $1`, gated only by the route-level `read` RBAC **on the parent
-   resource**. A role that may read the parent receives the full related row
-   regardless of the target's own row condition or field allowlist.
-   (`pkg/codegen/builder.go` ~875-907) **(verified)**
+   *Original finding:* the `conditions` object carried an `op` key (documented
+   "eq", "neq", "in", …) but `AppendRowCondition` hard-coded `<field> = $n`; `op`
+   was neither honored nor validated, so `"op":"gt"` silently behaved as `eq`. (Do
+   not confuse this with the transaction `guard` in §10, a *different* mechanism
+   that genuinely supports `eq|ne|gt|gte|lt|lte`.)
+
+3. **The relation read-subroute is NOT RBAC row/field scoped.**
+   **✅ RESOLVED (SEC-AUDIT-V1):** `GET /api/{res}/{id}/{relField}` now enforces
+   the role's RBAC on the **related** resource — it evaluates `read` on the target
+   (→ `403` if the role may not read it), injects the target's row condition into
+   the JOIN (qualified by the `r` alias via `query.AppendAliasedRowCondition`, so
+   a hidden row reads as `404`), and applies the target's field allowlist to the
+   returned record. It reuses the SAME evaluator the `?include=` embeds use, so the
+   subroute, the embeds, and `GET /api/{related}` all scope identically. (Embeds /
+   GraphQL nested reads were already scoped — only the subroute was bare.)
+   (`pkg/codegen/builder.go` subresource handler)
+
+   *Original finding:* the subroute issued a bare `SELECT r.* FROM <target> r JOIN
+   <parent> … WHERE src.id = $1`, gated only by the route-level `read` on the
+   PARENT, so a role could read related rows/fields it could not see via
+   `GET /api/{related}`.
 
 4. **Only `webhook` *after*-hooks fire; JS/WASM after-hooks are silent no-ops, and
    there are no delete hooks.** A `type:"js"` `after_create`/`after_update` hook
@@ -2017,11 +2061,20 @@ audit. Knowing these is essential for generating schemas that behave as intended
    REST mode. (`pkg/graphql/handler.go` `listResolver`, `argsToURLValues` vs
    `pkg/codegen/builder.go`)
 
-7. **The legacy role-global RBAC form is not field-validated.** `validateRBAC`
-   returns early for any role without a `permissions` map, so a role-global
-   `conditions.field` or `fields` allowlist naming a column that does **not**
-   exist on a resource loads clean (only the per-resource `permissions` form gets
-   the stricter checks). (`pkg/schema/validator.go:331-343`) **(verified)**
+7. **The legacy role-global RBAC form is not field-validated.**
+   **✅ RESOLVED (SEC-AUDIT-V1):** the role-global form now validates, at load,
+   that `conditions.field` and each `fields` allowlist entry reference a column
+   that exists on at least one of the resources the role applies to (reusing
+   `rbacFieldExists`), so a typo is caught at load instead of failing at runtime. A
+   wildcard admin with no condition/allowlist is unaffected. (Union semantics: a
+   field present on some-but-not-all of a role's resources is accepted — that is a
+   fail-closed correctness concern, not a leak, and validating it strictly would
+   reject several shipped schemas; it remains a documented limitation.)
+   (`pkg/schema/validator.go` `validateRoleGlobal`)
+
+   *Original finding:* `validateRBAC` returned early for any role without a
+   `permissions` map, so a role-global `conditions.field`/`fields` naming a
+   nonexistent column loaded clean (only the per-resource form was checked).
 
 8. **Control-plane schema reload no longer warns about hook drift.**
    `controlplane.schemaWarnings` is a stub returning `nil`, so a

@@ -39,22 +39,7 @@ func RBACMiddleware(policyJSON []byte) func(http.Handler) http.Handler {
 
 			action := actionFromMethod(r.Method)
 
-			// Prefer JWT claims injected by JWTMiddleware; fall back to
-			// explicit headers so integration tests can run without a full JWT stack.
-			evalCtx := EvalContext{
-				Role:             r.Header.Get("X-User-Role"),
-				UserID:           r.Header.Get("X-User-ID"),
-				ExternalClientID: r.Header.Get("X-External-Client-ID"),
-			}
-			if claims := auth.ClaimsFromCtx(r.Context()); claims != nil {
-				evalCtx = EvalContext{
-					Role:             claims.Role,
-					UserID:           claims.UserID,
-					ExternalClientID: claims.ExternalClientID,
-				}
-			}
-
-			result := policy.Evaluate(evalCtx, resource, action)
+			result := policy.Evaluate(EvalContextFromRequest(r), resource, action)
 			if !result.Allowed {
 				// Mark the rbac stage so a persisted 403 trace shows it reached
 				// (and was stopped at) RBAC (no stack — 403 is a client error).
@@ -74,6 +59,27 @@ func RBACMiddleware(policyJSON []byte) func(http.Handler) http.Handler {
 			ctx := context.WithValue(r.Context(), evalResultKey{}, result)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
+	}
+}
+
+// EvalContextFromRequest resolves the caller identity for a request: the JWT claims
+// injected by JWTMiddleware when present, else the X-User-* headers (so integration
+// tests can run without a full JWT stack). This is the SINGLE identity-resolution
+// used by both the route RBAC middleware AND the relation/subresource read checks
+// (codegen.makeRelationRBAC), so every authorization path scopes by the same
+// principal.
+func EvalContextFromRequest(r *http.Request) EvalContext {
+	if claims := auth.ClaimsFromCtx(r.Context()); claims != nil {
+		return EvalContext{
+			Role:             claims.Role,
+			UserID:           claims.UserID,
+			ExternalClientID: claims.ExternalClientID,
+		}
+	}
+	return EvalContext{
+		Role:             r.Header.Get("X-User-Role"),
+		UserID:           r.Header.Get("X-User-ID"),
+		ExternalClientID: r.Header.Get("X-External-Client-ID"),
 	}
 }
 
