@@ -372,11 +372,51 @@ foreign key** on the column (MIG-F1-S1): `customer_id` → `customers.id`.
   FK columns are themselves field-level relations, so the junction gets integrity
   too. It still does **no joins in list queries and no nested writes** (those are
   the opt-in `?include=` embeds below).
+- **`on_update`** (MIG-F1-S5) declares the action when the referenced row's KEY
+  changes: `restrict` | `cascade` | `set_null` (same vocabulary as `on_delete`).
+  **Unset defaults to NO ACTION** — deliberately, NOT `restrict`: an FK created
+  without `ON UPDATE` already carries NO ACTION in Postgres, so adding `on_update`
+  to a schema generates **zero churn** on existing tenants (a re-provision stays a
+  no-op). `set_null` requires a nullable column.
+- **`references`** (MIG-F1-S5) points the FK at a target column **other than `id`**:
+  `{ "type":"string", "relation":"users", "references":"email" }`. **Unset defaults
+  to `id`** (total retrocompat). The named column must be `id` or a **`unique`**
+  column of the target (Postgres requires a unique/PK destination) and
+  type-compatible — both checked at load. The read subroute follows the FK to that
+  column.
 - **Existing tenants**: the FK is added `NOT VALID` (protecting all NEW writes
   immediately) then `VALIDATE`d; if pre-existing rows are inconsistent (historical
   orphans), VALIDATE is skipped and the FK is left `NOT VALID` (forward-protected,
   logged) rather than breaking provisioning. A cascade/set-null does NOT fire the
   child's outbox `…deleted`/`…updated` event (Postgres handles it below the engine).
+
+#### Composite foreign keys (`foreign_keys`, MIG-F1-S5)
+
+A single-column FK is the field-level `relation` above (1 column → the target's `id`
+or a `unique` column). A **multi-column** FK — `(col_a, col_b)` referencing a
+target's **composite** PK/unique — does not fit the field-level model, so it is a
+resource-level `foreign_keys` array (sibling of `fields`):
+
+```json
+"orders": {
+  "fields": { "region_code": { "type": "string" }, "branch_code": { "type": "string" } },
+  "foreign_keys": [
+    { "columns": ["region_code", "branch_code"], "target": "branches",
+      "ref_columns": ["region_code", "branch_code"],
+      "on_delete": "cascade", "on_update": "restrict" }
+  ]
+}
+```
+
+- `columns` (source columns on this resource) and `ref_columns` (target columns)
+  must have the **same length**; `ref_columns` must together form the target's
+  **primary key or a `unique` constraint/index** (a composite `unique` index in the
+  target's `indexes` block — Postgres requires a unique destination). Both, plus
+  per-position **type compatibility**, are validated at load.
+- `on_delete` defaults to `restrict` (safe); `on_update` defaults to NO ACTION
+  (no-churn). `set_null` on either requires every source column nullable.
+- The source columns are auto-indexed (a composite btree) so the referential check
+  is an index lookup. A violation is the same clean **`409`** as a single FK.
 
 ### Declarative relations + nested embeds (`relations`, ADR-019)
 
@@ -1339,11 +1379,12 @@ is a JSON snapshot, not a stream).
   [Aggregation](#aggregation-g3) surface is exactly those functions over schema
   fields, nothing more. (`count` total IS now a thing: `?count=true` on a list, or
   the aggregate endpoint.)
-- FK **constraints** with arbitrary `ON UPDATE`, composite/multi-column FKs, or a
-  FK to a non-`id` column. Real single-column FKs to the target's `id` DO exist now
-  (a field-level `relation` creates one, with `on_delete` restrict/cascade/set_null
-  — see [Relations](#relations)); what does NOT exist is `on_update`, composite FKs,
-  or referencing a column other than the implicit `id` PK.
+- FK coverage is now **complete** (MIG-F1-S5): `on_delete` AND `on_update`
+  (restrict/cascade/set_null), single-column FKs to the target's `id` OR a `unique`
+  non-`id` column (`references`), and **composite** multi-column FKs (the resource-
+  level `foreign_keys` block) — all in [Relations](#relations). What still does NOT
+  exist: a FK referencing a column that is neither a PK nor `unique` (Postgres
+  forbids it — rejected at load), and `MATCH PARTIAL`.
 - `workflows` schema block — parsed for forward compatibility, no executor.
 - OTLP/OpenTelemetry export (observability is Prometheus `/metrics` + an
   internal trace ring).

@@ -157,10 +157,13 @@ baseline faster are welcome; we'll publish updated numbers.
 - **Declarative relations**: `has_many` / `belongs_to` / `many_to_many` served
   nested in one round-trip (`json_agg` + `LATERAL`, no N+1) on opt-in `?include=`,
   RBAC compiled into the SQL; FK columns auto-indexed
-- **Referential integrity**: a field with `relation` creates a **real foreign key**
-  with declarative `on_delete` (`restrict` default — a blocked delete is a clean
-  `409`, never a silent orphan; plus `cascade` and `set_null`), applied safely
-  (`NOT VALID`/`VALIDATE`, no long lock) and enforced on REST + GraphQL
+- **Referential integrity (complete FK coverage)**: a field with `relation` creates
+  a **real foreign key** with declarative `on_delete` **and `on_update`**
+  (`restrict`/`cascade`/`set_null` — a blocked delete is a clean `409`, never a silent
+  orphan), pointing at the target's `id` or a `unique` non-id column (`references`);
+  genuine **composite** multi-column FKs are a resource-level `foreign_keys` block.
+  All applied safely (`NOT VALID`/`VALIDATE`, no long lock) and enforced on REST +
+  GraphQL — adding `on_update` to an existing schema causes zero migration churn
 - **Multi-tenancy**: schema-per-tenant Postgres isolation (`SET LOCAL search_path`),
   subdomain → tenant routing, per-tenant rate limiting, live schema reload via
   `pg_notify` — column-level only: **adding a new resource requires a process

@@ -153,6 +153,54 @@ func Validate(s *APISchema) []ValidationError {
 				}
 			}
 
+			// on_update (MIG-F1-S5): the FK's ON UPDATE action. Same shape as on_delete
+			// (only valid on a relation; set_null requires a nullable column). The unset
+			// default is NO ACTION (no-churn), resolved in buildDesiredSchema.
+			if field.OnUpdate != "" {
+				switch {
+				case field.Relation == "":
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".on_update",
+						Message: "on_update is only valid on a field that declares a relation",
+					})
+				case !validOnUpdateActions[field.OnUpdate]:
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".on_update",
+						Message: fmt.Sprintf("unknown on_update %q: must be one of restrict, cascade, set_null", field.OnUpdate),
+					})
+				case field.OnUpdate == OnUpdateSetNull && field.Required:
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".on_update",
+						Message: "on_update set_null requires a nullable column, but this field is required (NOT NULL)",
+					})
+				}
+			}
+
+			// references (MIG-F1-S5): the FK's target COLUMN. Only valid on a relation;
+			// must be "id" (the default) or a column that is UNIQUE on the target
+			// (Postgres requires a unique/PK destination), and type-compatible with this
+			// field. The target's existence was already checked above.
+			if field.References != "" && field.References != "id" {
+				if field.Relation == "" {
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".references",
+						Message: "references is only valid on a field that declares a relation",
+					})
+				} else if target, ok := s.Resources[field.Relation]; ok {
+					if !columnsAreUniqueOnTarget(target, []string{field.References}) {
+						errs = append(errs, ValidationError{
+							Field:   fieldPrefix + ".references",
+							Message: fmt.Sprintf("references %q must be the target's id or a UNIQUE column of %q (a foreign key may only point at a primary key or unique column)", field.References, field.Relation),
+						})
+					} else if k, tk := pgKindForAPIType(field.Type), refColumnKind(target, field.References); k != tk {
+						errs = append(errs, ValidationError{
+							Field:   fieldPrefix + ".references",
+							Message: fmt.Sprintf("references %q has an incompatible type: this field is %q but %s.%s is %q", field.References, field.Type, field.Relation, field.References, targetFieldType(target, field.References)),
+						})
+					}
+				}
+			}
+
 			// renamed_from (MIG-F1-S2): the field's previous column name. Valid
 			// identifier, differs from the current name, and NOT still a declared
 			// field of this resource (cannot rename from a name that still exists).
@@ -219,6 +267,7 @@ func Validate(s *APISchema) []ValidationError {
 
 		errs = append(errs, validateRelations(resPrefix, resName, res, s)...)
 		errs = append(errs, validateIndexes(resPrefix, res)...)
+		errs = append(errs, validateForeignKeys(resPrefix, res, s)...)
 
 		for hookName, hook := range res.Hooks {
 			hookPrefix := resPrefix + ".hooks." + hookName
@@ -507,6 +556,172 @@ func validateIndexes(resPrefix string, res ResourceSchema) []ValidationError {
 		}
 	}
 	return errs
+}
+
+// validateForeignKeys checks each resource-level COMPOSITE foreign key (MIG-F1-S5):
+// at least one source column (all existing on this resource), a known target, a
+// matching count of ref_columns that together form a PK/unique on the target, valid
+// on_delete/on_update actions, set_null only over nullable source columns, and
+// per-position type compatibility. A single-column FK should use the field-level
+// `relation` instead; the block is for the genuinely multi-column case.
+func validateForeignKeys(resPrefix string, res ResourceSchema, s *APISchema) []ValidationError {
+	var errs []ValidationError
+	for i, fk := range res.ForeignKeys {
+		fkPrefix := fmt.Sprintf("%s.foreign_keys[%d]", resPrefix, i)
+
+		if len(fk.Columns) == 0 {
+			errs = append(errs, ValidationError{Field: fkPrefix + ".columns", Message: "foreign key must list at least one column"})
+		}
+		anyRequired := false
+		for _, c := range fk.Columns {
+			if c == "id" {
+				continue // the implicit PK is a valid source column
+			}
+			f, ok := res.Fields[c]
+			if !ok {
+				errs = append(errs, ValidationError{Field: fkPrefix + ".columns", Message: fmt.Sprintf("column %q does not exist on this resource", c)})
+				continue
+			}
+			if f.Required {
+				anyRequired = true
+			}
+		}
+
+		target, ok := s.Resources[fk.Target]
+		if !ok {
+			errs = append(errs, ValidationError{Field: fkPrefix + ".target", Message: fmt.Sprintf("foreign key target %q references unknown resource", fk.Target)})
+		}
+
+		if len(fk.RefColumns) == 0 {
+			errs = append(errs, ValidationError{Field: fkPrefix + ".ref_columns", Message: "foreign key must list at least one ref_column"})
+		}
+		if len(fk.Columns) != len(fk.RefColumns) {
+			errs = append(errs, ValidationError{Field: fkPrefix, Message: fmt.Sprintf("columns (%d) and ref_columns (%d) must have the same length", len(fk.Columns), len(fk.RefColumns))})
+		}
+
+		if ok { // target exists — check ref_columns existence, uniqueness and types
+			for _, rc := range fk.RefColumns {
+				if rc != "id" {
+					if _, has := target.Fields[rc]; !has {
+						errs = append(errs, ValidationError{Field: fkPrefix + ".ref_columns", Message: fmt.Sprintf("ref_column %q does not exist on target %q", rc, fk.Target)})
+					}
+				}
+			}
+			if !columnsAreUniqueOnTarget(target, fk.RefColumns) {
+				errs = append(errs, ValidationError{Field: fkPrefix + ".ref_columns", Message: fmt.Sprintf("ref_columns must together form the target's primary key or a UNIQUE constraint/index on %q (a foreign key may only point at a unique key)", fk.Target)})
+			}
+			// Per-position type compatibility (Postgres requires the column types to match).
+			if len(fk.Columns) == len(fk.RefColumns) {
+				for j := range fk.Columns {
+					srcKind := refColumnKind(res, fk.Columns[j])
+					refKind := refColumnKind(target, fk.RefColumns[j])
+					if srcKind != "" && refKind != "" && srcKind != refKind {
+						errs = append(errs, ValidationError{Field: fkPrefix, Message: fmt.Sprintf("type mismatch: %s (%s) references %s.%s (%s)", fk.Columns[j], targetFieldType(res, fk.Columns[j]), fk.Target, fk.RefColumns[j], targetFieldType(target, fk.RefColumns[j]))})
+					}
+				}
+			}
+		}
+
+		if fk.OnDelete != "" && !validOnDeleteActions[fk.OnDelete] {
+			errs = append(errs, ValidationError{Field: fkPrefix + ".on_delete", Message: fmt.Sprintf("unknown on_delete %q: must be one of restrict, cascade, set_null", fk.OnDelete)})
+		}
+		if fk.OnUpdate != "" && !validOnUpdateActions[fk.OnUpdate] {
+			errs = append(errs, ValidationError{Field: fkPrefix + ".on_update", Message: fmt.Sprintf("unknown on_update %q: must be one of restrict, cascade, set_null", fk.OnUpdate)})
+		}
+		// set_null on either action requires every source column to be nullable.
+		if (fk.OnDelete == OnDeleteSetNull || fk.OnUpdate == OnUpdateSetNull) && anyRequired {
+			errs = append(errs, ValidationError{Field: fkPrefix, Message: "set_null requires all source columns to be nullable, but at least one is required (NOT NULL)"})
+		}
+	}
+	return errs
+}
+
+// columnsAreUniqueOnTarget reports whether the column set cols is guaranteed unique
+// on res — the precondition Postgres enforces for a foreign-key destination. True
+// when cols is exactly the implicit primary key (["id"]), a single field declared
+// `unique`, or the column set of some declared UNIQUE index (composite or single).
+func columnsAreUniqueOnTarget(res ResourceSchema, cols []string) bool {
+	if len(cols) == 1 {
+		if cols[0] == "id" {
+			return true
+		}
+		if f, ok := res.Fields[cols[0]]; ok && f.Unique {
+			return true
+		}
+	}
+	for _, idx := range res.Indexes {
+		if idx.Unique && sameStringSet(idx.Fields, cols) {
+			return true
+		}
+	}
+	return false
+}
+
+// sameStringSet reports whether a and b contain the same elements (order-independent;
+// a foreign key may reference a unique constraint's columns in any order).
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, x := range a {
+		seen[x]++
+	}
+	for _, x := range b {
+		seen[x]--
+		if seen[x] < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// pgKindForAPIType maps an Appitools field type to a coarse Postgres compatibility
+// class for foreign-key type checking. Two columns may be joined by an FK only when
+// their classes match. string/text/json all land on TEXT; the implicit id is uuid.
+func pgKindForAPIType(t string) string {
+	switch t {
+	case "string", "text", "json":
+		return "text"
+	case "int":
+		return "integer"
+	case "int64":
+		return "bigint"
+	case "float64":
+		return "double"
+	case "bool":
+		return "bool"
+	case "uuid":
+		return "uuid"
+	case "time":
+		return "timestamptz"
+	default:
+		return ""
+	}
+}
+
+// refColumnKind returns the FK-compatibility class of a column on res — "uuid" for
+// the implicit id, else the field's type class. Empty if the column is unknown.
+func refColumnKind(res ResourceSchema, col string) string {
+	if col == "id" {
+		return "uuid"
+	}
+	if f, ok := res.Fields[col]; ok {
+		return pgKindForAPIType(f.Type)
+	}
+	return ""
+}
+
+// targetFieldType returns the human-readable type of a column on res (for error
+// messages): "uuid" for the implicit id, else the declared field type.
+func targetFieldType(res ResourceSchema, col string) string {
+	if col == "id" {
+		return "uuid"
+	}
+	if f, ok := res.Fields[col]; ok {
+		return f.Type
+	}
+	return "?"
 }
 
 // validateDefault checks that a field's `default` value is type-compatible with

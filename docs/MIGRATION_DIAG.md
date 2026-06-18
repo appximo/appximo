@@ -44,8 +44,17 @@
 >   medias). ADITIVO por defecto (NUNCA auto-aprueba un drop, como el worker); un drop masivo
 >   exige `--approve-drops` enumerado y el dry-run muestra el impacto AGREGADO (filas perdidas
 >   × tenants). Secuencial en v1. Es el diferencial vs Prisma (sin fan-out nativo) y
->   django-tenants (frágil ante fallo parcial). Pendiente: `on_update`/FK compuestas/FK a
->   no-`id`, y el paralelismo acotado del fan-out (optimización).
+>   django-tenants (frágil ante fallo parcial). Pendiente: el paralelismo acotado del fan-out
+>   (optimización).
+> - **Cobertura COMPLETA de FKs:** CERRADA (MIG-F1-S5) — `on_update` declarativo
+>   (restrict/cascade/set_null, default NO ACTION = sin churn sobre FKs existentes), FK a una
+>   columna `unique` que no sea `id` (`references`), y FKs COMPUESTAS multi-columna (bloque
+>   `foreign_keys` a nivel de recurso → PK/unique compuesta del target). El modelo canónico
+>   (S1) y el render seguro (S4) ya soportaban estas formas; S5 puentea la sintaxis + la
+>   validación al load + el mapeo en buildDesiredSchema, y arregla un bug de introspección (un
+>   índice unique referenciado por una FK quedaba excluido vía `conindid` → re-add espurio;
+>   ahora sólo se excluyen los índices que respaldan constraints p/u/x). Ya no quedan límites
+>   v1 de FKs.
 >   **Con #1 (rename) + #2 (FK) + #3 (NOT NULL) + #5 (diff/plan) cerrados, el locking
 >   protegido, el gate de aprobación de destructivas Y el orquestador multi-tenant reanudable,
 >   los tres grandes 🔴 del diagnóstico están cerrados, evolucionar un schema (incl. drops) es

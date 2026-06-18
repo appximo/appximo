@@ -225,10 +225,15 @@ func introspectConstraints(ctx context.Context, q Querier, schemaName string, s 
 
 // ── query 3: standalone indexes ──────────────────────────────────────────────
 //
-// Excludes any index that backs a constraint (con.conindid) — PK and unique
-// constraints are modeled as PK / Uniques, so only standalone CREATE INDEX /
-// CREATE UNIQUE INDEX definitions remain here. indkey is rendered to a space-
-// separated text then to int[] for clean scanning; a 0 entry is an expression key.
+// Excludes only an index that BACKS a primary-key/unique/exclusion constraint
+// (those are modeled as PK / Uniques), so standalone CREATE INDEX / CREATE UNIQUE
+// INDEX definitions remain here. The contype filter ('p','u','x') is essential: a
+// FOREIGN KEY constraint's conindid points at the REFERENCED table's unique index
+// (a standalone index this introspection MUST capture), so excluding on any conindid
+// would drop a unique index merely because some FK references it — making a re-diff
+// spuriously re-add it (the no-churn bug a composite/non-id FK would otherwise hit).
+// indkey is rendered to a space-separated text then to int[] for clean scanning; a
+// 0 entry is an expression key.
 const indexesQuery = `
 SELECT t.relname                                   AS table_name,
        t.oid::int8                                 AS relid,
@@ -244,7 +249,7 @@ JOIN pg_namespace n ON n.oid = t.relnamespace
 JOIN pg_am am ON am.oid = ic.relam
 WHERE n.nspname = $1
   AND t.relkind IN ('r', 'p')
-  AND NOT EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid = i.indexrelid)
+  AND NOT EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid = i.indexrelid AND con.contype IN ('p', 'u', 'x'))
 ORDER BY t.relname, ic.relname`
 
 func introspectIndexes(ctx context.Context, q Querier, schemaName string, s *Schema, attnum map[int64]map[int32]string) error {

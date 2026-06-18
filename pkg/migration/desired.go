@@ -99,9 +99,78 @@ func buildDesiredSchema(pgSchema string, s *schema.APISchema) *schemadiff.Schema
 	}
 
 	addForeignKeys(ds, s, names)
+	addCompositeForeignKeys(ds, s, names)
 	addRelationIndexes(ds, s, names)
 	addDeclaredIndexes(ds, s, names)
 	return ds
+}
+
+// addCompositeForeignKeys models each resource-level COMPOSITE foreign key
+// (MIG-F1-S5) — a multi-column constraint that does not fit the field-level
+// `relation` (one column = one column). Each ForeignKeyDef becomes a real FK over
+// (Columns) → Target(RefColumns) with its declared on_delete/on_update, and the
+// source columns are indexed (a composite btree) so the referential check is an
+// index lookup, exactly like the single-column FKs. The constraint is matched by
+// STRUCTURE in the diff, so a re-provision of an unchanged composite FK is a no-op.
+func addCompositeForeignKeys(ds *schemadiff.Schema, s *schema.APISchema, names []string) {
+	for _, resName := range names {
+		tbl := ds.Tables[resName]
+		if tbl == nil {
+			continue
+		}
+		for _, fk := range s.Resources[resName].ForeignKeys {
+			if _, ok := ds.Tables[fk.Target]; !ok {
+				continue // target not a managed resource (validated away at load; defensive)
+			}
+			sym := compositeFKConstraintName(resName, fk.Columns)
+			tbl.FKs[sym] = &schemadiff.ForeignKey{
+				Symbol:     sym,
+				Columns:    append([]string(nil), fk.Columns...),
+				RefTable:   fk.Target,
+				RefColumns: append([]string(nil), fk.RefColumns...),
+				OnDelete:   refActionForOnDelete(fk.OnDelete),
+				OnUpdate:   refActionForOnUpdate(fk.OnUpdate),
+			}
+			idxName := "idx_" + resName + "_" + strings.Join(fk.Columns, "_")
+			if _, exists := tbl.Indexes[idxName]; !exists {
+				tbl.Indexes[idxName] = &schemadiff.Index{
+					Name: idxName, Columns: append([]string(nil), fk.Columns...), Method: "btree",
+				}
+			}
+		}
+	}
+}
+
+// compositeFKConstraintName derives a deterministic symbol for a composite FK. The
+// diff matches by structure, so the name only has to be a stable valid identifier.
+func compositeFKConstraintName(table string, columns []string) string {
+	return "fk_" + table + "_" + strings.Join(columns, "_")
+}
+
+// refColumnOrID returns the FK target column, defaulting to the implicit "id" when
+// `references` is unset (retrocompat: every pre-S5 FK points at id).
+func refColumnOrID(references string) string {
+	if references == "" {
+		return "id"
+	}
+	return references
+}
+
+// refActionForOnUpdate maps a schema `on_update` string to the canonical RefAction.
+// Empty (unset) yields NO ACTION — the Postgres default an FK created without ON
+// UPDATE already carries — so adding on_update to a schema never churns existing FKs
+// (the no-churn default, the deliberate asymmetry with refActionForOnDelete's RESTRICT).
+func refActionForOnUpdate(onUpdate string) schemadiff.RefAction {
+	switch onUpdate {
+	case schema.OnUpdateCascade:
+		return schemadiff.Cascade
+	case schema.OnUpdateSetNull:
+		return schemadiff.SetNull
+	case schema.OnUpdateRestrict:
+		return schemadiff.Restrict
+	default:
+		return schemadiff.NoAction
+	}
 }
 
 // addForeignKeys models a REAL foreign-key constraint for every field that
@@ -134,12 +203,16 @@ func addForeignKeys(ds *schemadiff.Schema, s *schema.APISchema, names []string) 
 			}
 			sym := fkConstraintName(resName, fieldName)
 			tbl.FKs[sym] = &schemadiff.ForeignKey{
-				Symbol:     sym,
-				Columns:    []string{fieldName},
+				Symbol:  sym,
+				Columns: []string{fieldName},
+				// references the target's id by default, or an explicit unique column
+				// (MIG-F1-S5) when the field declares `references` (validated unique at load).
 				RefTable:   f.Relation,
-				RefColumns: []string{"id"},
+				RefColumns: []string{refColumnOrID(f.References)},
 				OnDelete:   refActionForOnDelete(f.OnDelete),
-				OnUpdate:   schemadiff.NoAction,
+				// on_update defaults to NO ACTION (MIG-F1-S5) — what an FK created without
+				// ON UPDATE already carries, so existing FKs do not churn.
+				OnUpdate: refActionForOnUpdate(f.OnUpdate),
 			}
 			// Index the FK column so the RESTRICT referential check is an index
 			// lookup (deduped by name with the relation/declared index adders).

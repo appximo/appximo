@@ -139,6 +139,160 @@ func TestBuildDesiredSchema_OnDeleteActions(t *testing.T) {
 	}
 }
 
+// TestBuildDesiredSchema_OnUpdateActions verifies the on_update → RefAction mapping
+// (MIG-F1-S5): the UNSET default is NO ACTION (the no-churn choice — an FK created
+// without ON UPDATE already carries NO ACTION), while cascade/restrict/set_null map
+// faithfully.
+func TestBuildDesiredSchema_OnUpdateActions(t *testing.T) {
+	s := &schema.APISchema{Resources: map[string]schema.ResourceSchema{
+		"parents": {Fields: map[string]schema.FieldDef{"name": {Type: "string"}}},
+		"kids": {Fields: map[string]schema.FieldDef{
+			"p_default":  {Type: "uuid", Relation: "parents"},                                   // on_update unset → NO ACTION
+			"p_cascade":  {Type: "uuid", Relation: "parents", OnUpdate: schema.OnUpdateCascade}, // cascade
+			"p_setnull":  {Type: "uuid", Relation: "parents", OnUpdate: schema.OnUpdateSetNull}, // set_null (nullable)
+			"p_restrict": {Type: "uuid", Relation: "parents", OnUpdate: schema.OnUpdateRestrict},
+		}},
+	}}
+	ds := buildDesiredSchema("t", s)
+	kids := ds.Tables["kids"]
+	cases := map[string]schemadiff.RefAction{
+		"fk_kids_p_default":  schemadiff.NoAction, // CRITICAL: no-churn default
+		"fk_kids_p_cascade":  schemadiff.Cascade,
+		"fk_kids_p_setnull":  schemadiff.SetNull,
+		"fk_kids_p_restrict": schemadiff.Restrict,
+	}
+	for sym, want := range cases {
+		fk, ok := kids.FKs[sym]
+		if !ok {
+			t.Errorf("missing FK %s", sym)
+			continue
+		}
+		if fk.OnUpdate != want {
+			t.Errorf("FK %s on_update = %v, want %v", sym, fk.OnUpdate, want)
+		}
+		// on_delete is unaffected — still RESTRICT (its own default).
+		if fk.OnDelete != schemadiff.Restrict {
+			t.Errorf("FK %s on_delete should stay RESTRICT, got %v", sym, fk.OnDelete)
+		}
+	}
+}
+
+// TestBuildDesiredSchema_ReferencesNonIDColumn verifies a field-level relation with
+// `references` points the FK at the named unique column instead of id (MIG-F1-S5).
+func TestBuildDesiredSchema_ReferencesNonIDColumn(t *testing.T) {
+	s := &schema.APISchema{Resources: map[string]schema.ResourceSchema{
+		"users": {Fields: map[string]schema.FieldDef{
+			"email": {Type: "string", Required: true, Unique: true, Format: "email"},
+		}},
+		"posts": {Fields: map[string]schema.FieldDef{
+			"author_email": {Type: "string", Relation: "users", References: "email"},
+		}},
+	}}
+	ds := buildDesiredSchema("t", s)
+	fk, ok := ds.Tables["posts"].FKs["fk_posts_author_email"]
+	if !ok {
+		t.Fatalf("missing FK fk_posts_author_email: %v", ds.Tables["posts"].FKs)
+	}
+	if fk.RefTable != "users" || len(fk.RefColumns) != 1 || fk.RefColumns[0] != "email" {
+		t.Errorf("FK should reference users(email), got reftable=%q refcols=%v", fk.RefTable, fk.RefColumns)
+	}
+	if len(fk.Columns) != 1 || fk.Columns[0] != "author_email" {
+		t.Errorf("FK source column wrong: %v", fk.Columns)
+	}
+}
+
+// TestBuildDesiredSchema_CompositeForeignKey verifies the resource-level foreign_keys
+// block produces a real multi-column FK + a composite source index (MIG-F1-S5).
+func TestBuildDesiredSchema_CompositeForeignKey(t *testing.T) {
+	s := &schema.APISchema{Resources: map[string]schema.ResourceSchema{
+		"branches": {
+			Fields: map[string]schema.FieldDef{
+				"region_code": {Type: "string", Required: true},
+				"branch_code": {Type: "string", Required: true},
+			},
+			Indexes: []schema.IndexDef{{Fields: []string{"region_code", "branch_code"}, Unique: true}},
+		},
+		"orders": {
+			Fields: map[string]schema.FieldDef{
+				"region_code": {Type: "string"},
+				"branch_code": {Type: "string"},
+			},
+			ForeignKeys: []schema.ForeignKeyDef{{
+				Columns:    []string{"region_code", "branch_code"},
+				Target:     "branches",
+				RefColumns: []string{"region_code", "branch_code"},
+				OnDelete:   schema.OnDeleteCascade,
+				OnUpdate:   schema.OnUpdateRestrict,
+			}},
+		},
+	}}
+	ds := buildDesiredSchema("t", s)
+	orders := ds.Tables["orders"]
+	fk, ok := orders.FKs["fk_orders_region_code_branch_code"]
+	if !ok {
+		t.Fatalf("missing composite FK: %v", orders.FKs)
+	}
+	if !equalSlice(fk.Columns, []string{"region_code", "branch_code"}) ||
+		fk.RefTable != "branches" || !equalSlice(fk.RefColumns, []string{"region_code", "branch_code"}) {
+		t.Errorf("composite FK not faithful: %+v", fk)
+	}
+	if fk.OnDelete != schemadiff.Cascade || fk.OnUpdate != schemadiff.Restrict {
+		t.Errorf("composite FK actions wrong: del=%v upd=%v", fk.OnDelete, fk.OnUpdate)
+	}
+	if idx, ok := orders.Indexes["idx_orders_region_code_branch_code"]; !ok || !equalSlice(idx.Columns, []string{"region_code", "branch_code"}) {
+		t.Errorf("composite FK source index missing/wrong: %v", orders.Indexes)
+	}
+}
+
+// TestBuildDesiredSchema_AllFKFormsSelfDiffEmpty is the no-churn guardrail for the
+// three new forms: a schema using on_update, references and a composite FK diffs to
+// nothing against itself (the model is internally consistent — idempotent).
+func TestBuildDesiredSchema_AllFKFormsSelfDiffEmpty(t *testing.T) {
+	s := &schema.APISchema{Resources: map[string]schema.ResourceSchema{
+		"users": {Fields: map[string]schema.FieldDef{
+			"email": {Type: "string", Required: true, Unique: true},
+		}},
+		"branches": {
+			Fields: map[string]schema.FieldDef{
+				"region_code": {Type: "string", Required: true},
+				"branch_code": {Type: "string", Required: true},
+			},
+			Indexes: []schema.IndexDef{{Fields: []string{"region_code", "branch_code"}, Unique: true}},
+		},
+		"posts": {
+			Fields: map[string]schema.FieldDef{
+				"author_email": {Type: "string", Relation: "users", References: "email", OnUpdate: schema.OnUpdateCascade},
+				"region_code":  {Type: "string"},
+				"branch_code":  {Type: "string"},
+			},
+			ForeignKeys: []schema.ForeignKeyDef{{
+				Columns: []string{"region_code", "branch_code"}, Target: "branches",
+				RefColumns: []string{"region_code", "branch_code"}, OnDelete: schema.OnDeleteCascade,
+			}},
+		},
+	}}
+	ds := buildDesiredSchema("t", s)
+	plan, err := schemadiff.Diff(ds, ds)
+	if err != nil {
+		t.Fatalf("self-diff: %v", err)
+	}
+	if !plan.Empty() {
+		t.Errorf("desired self-diff must be empty:\n%s", plan)
+	}
+}
+
+func equalSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // TestBuildDesiredSchema_SelfDiffEmpty is the pure (no-DB) guardrail: the desired
 // schema diffs to nothing against itself — the model is internally consistent.
 func TestBuildDesiredSchema_SelfDiffEmpty(t *testing.T) {

@@ -24,6 +24,16 @@ type ResourceSchema struct {
 	Hooks   map[string]HookConfig `json:"hooks,omitempty"`
 	Indexes []IndexDef            `json:"indexes,omitempty"`
 
+	// ForeignKeys declares COMPOSITE (multi-column) foreign keys at the resource
+	// level (MIG-F1-S5). A single-column FK is the field-level `relation` (which is
+	// inherently 1 column = 1 column → target.id, optionally → a unique non-id column
+	// via `references`); a composite FK references MULTIPLE columns of the target's
+	// composite PK/unique, which does not fit the field-level model, so it gets an
+	// explicit block. Each entry is one constraint over (columns) → target(ref_columns)
+	// with its own on_delete/on_update. A resource that omits this key behaves exactly
+	// as before. See ForeignKeyDef.
+	ForeignKeys []ForeignKeyDef `json:"foreign_keys,omitempty"`
+
 	// RenamedFrom declares the PREVIOUS name of this resource's table (MIG-F1-S2):
 	// the migration engine emits `ALTER TABLE <old> RENAME TO <new>` (metadata-only,
 	// data + indexes + constraints preserved) instead of the converger's drop+add
@@ -101,6 +111,22 @@ type FieldDef struct {
 	// than silently orphaning its children (the integrity bug this closes). set_null
 	// requires the column to be nullable (not `required`); validated at load.
 	OnDelete string `json:"on_delete,omitempty"`
+	// OnUpdate declares the referential action of THIS field's foreign key when the
+	// referenced (parent) row's KEY changes (MIG-F1-S5): "restrict" | "cascade" |
+	// "set_null". Only meaningful with `relation`. EMPTY DEFAULTS TO NO ACTION — which
+	// is what Postgres already records for an FK created without ON UPDATE, so adding
+	// this key to an existing schema generates NO churn (a re-provision stays a no-op;
+	// see refActionForOnUpdate). This is the deliberate asymmetry with on_delete (whose
+	// default is RESTRICT): on_delete shipped RESTRICT from the start, so the live FKs
+	// already carry it; on_update is introduced over FKs that already exist with NO
+	// ACTION, so its default must match them. set_null requires a nullable column.
+	OnUpdate string `json:"on_update,omitempty"`
+	// References declares the target COLUMN this field's foreign key points at
+	// (MIG-F1-S5). EMPTY DEFAULTS TO "id" (the target's implicit primary key — the only
+	// behavior before this key, so retrocompat is total). A non-id value must name a
+	// column that is UNIQUE on the target (Postgres requires an FK destination to be a
+	// PK or unique column/index); validated at load. Only meaningful with `relation`.
+	References string `json:"references,omitempty"`
 	// RenamedFrom declares the PREVIOUS name of this field's column (MIG-F1-S2): the
 	// migration engine emits `ALTER TABLE … RENAME COLUMN <old> TO <new>`
 	// (metadata-only, data preserved, indexes/FK/unique follow the column) instead
@@ -264,6 +290,39 @@ var validOnDeleteActions = map[string]bool{
 	OnDeleteRestrict: true,
 	OnDeleteCascade:  true,
 	OnDeleteSetNull:  true,
+}
+
+// On-update referential actions (MIG-F1-S5). The action vocabulary mirrors
+// on_delete, but the UNSET default is NO ACTION (Postgres' own default, which the
+// pre-S5 FKs already carry) — not RESTRICT — so introducing on_update generates no
+// drift on existing tenants (see FieldDef.OnUpdate). set_null requires the FK column
+// to be nullable.
+const (
+	OnUpdateRestrict = "restrict"
+	OnUpdateCascade  = "cascade"
+	OnUpdateSetNull  = "set_null"
+)
+
+// validOnUpdateActions is the closed set accepted for FieldDef.OnUpdate and
+// ForeignKeyDef.OnUpdate.
+var validOnUpdateActions = map[string]bool{
+	OnUpdateRestrict: true,
+	OnUpdateCascade:  true,
+	OnUpdateSetNull:  true,
+}
+
+// ForeignKeyDef is one resource-level COMPOSITE foreign key (MIG-F1-S5): a set of
+// local Columns referencing the same number of RefColumns on the Target resource,
+// which must together form the target's PRIMARY KEY or a UNIQUE constraint/index
+// (Postgres requires it; validated at load). OnDelete defaults to RESTRICT (safe —
+// like the field-level relation) and OnUpdate defaults to NO ACTION (no-churn). A
+// single-column FK is the field-level `relation`, not this block.
+type ForeignKeyDef struct {
+	Columns    []string `json:"columns"`             // local columns (this resource)
+	Target     string   `json:"target"`              // referenced resource
+	RefColumns []string `json:"ref_columns"`         // referenced columns on Target (same count as Columns)
+	OnDelete   string   `json:"on_delete,omitempty"` // restrict (default) | cascade | set_null
+	OnUpdate   string   `json:"on_update,omitempty"` // restrict | cascade | set_null; unset → NO ACTION
 }
 
 // HookConfig defines a lifecycle hook on a resource (before_create, after_create, etc.).

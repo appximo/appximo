@@ -57,7 +57,17 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 	for resName, rawRes := range object("resources", top["resources"]) {
 		resPath := "resources." + resName
 		res := object(resPath, rawRes)
-		addUnknown(resPath, res, "fields", "hooks", "indexes", "events", "relations", "renamed_from")
+		addUnknown(resPath, res, "fields", "hooks", "indexes", "events", "relations", "renamed_from", "foreign_keys")
+
+		// foreign_keys: array of composite-FK entries (MIG-F1-S5). Strict-key each so a
+		// typo (e.g. "refcolumns" instead of "ref_columns") is rejected, not dropped.
+		var fkArr []json.RawMessage
+		if res["foreign_keys"] != nil && json.Unmarshal(res["foreign_keys"], &fkArr) == nil {
+			for i, rawFK := range fkArr {
+				fkPath := fmt.Sprintf("%s.foreign_keys[%d]", resPath, i)
+				addUnknown(fkPath, object(fkPath, rawFK), "columns", "target", "ref_columns", "on_delete", "on_update")
+			}
+		}
 
 		for relName, rawRel := range object(resPath+".relations", res["relations"]) {
 			relPath := resPath + ".relations." + relName
@@ -80,7 +90,7 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 			fieldPath := resPath + ".fields." + fieldName
 			fld := object(fieldPath, rawField)
 			addUnknown(fieldPath, fld,
-				"type", "required", "unique", "auto", "enum", "relation", "on_delete", "renamed_from", "default",
+				"type", "required", "unique", "auto", "enum", "relation", "on_delete", "on_update", "references", "renamed_from", "default",
 				"min", "max", "minLength", "maxLength", "pattern", "format", "state_machine")
 			// state_machine has a fixed key set; `transitions` keys are user state
 			// names (free-form), so only the top-level keys are strict-checked.

@@ -865,6 +865,12 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			fn := fieldName // capture
 			relResource := fd.Relation
 			relRoute := strings.TrimSuffix(fn, "_id")
+			// The FK targets the referenced column (MIG-F1-S5: `references`), defaulting
+			// to the target's id — so the subresource JOIN follows the FK faithfully.
+			refCol := fd.References
+			if refCol == "" {
+				refCol = "id"
+			}
 
 			r.Get("/api/"+name+"/{id}/"+relRoute, pkghandlers.CachedGet(func(w http.ResponseWriter, req *http.Request) {
 				tc := tenant.MustFromCtx(req.Context())
@@ -876,8 +882,8 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					return
 				}
 				q := fmt.Sprintf(
-					"SELECT r.* FROM %s r JOIN %s src ON src.%s = r.id WHERE src.id = $1",
-					pgx.Identifier{relResource}.Sanitize(), tbl, pgx.Identifier{fn}.Sanitize(),
+					"SELECT r.* FROM %s r JOIN %s src ON src.%s = r.%s WHERE src.id = $1",
+					pgx.Identifier{relResource}.Sanitize(), tbl, pgx.Identifier{fn}.Sanitize(), pgx.Identifier{refCol}.Sanitize(),
 				)
 				rows, err := tdb.QueryTenant(req.Context(), tc.PGSchema, q, parentID)
 				if err != nil {
