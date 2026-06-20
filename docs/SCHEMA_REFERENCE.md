@@ -48,6 +48,7 @@ feature is documented elsewhere), it is recorded — not fixed — in
 9. [Indexes, events, the file store, and reserved blocks](#9-indexes-events-the-file-store-and-reserved-blocks)
 10. [What a schema generates (the API surface)](#10-what-a-schema-generates-the-api-surface)
 11. [Complete annotated example](#11-complete-annotated-example)
+12. [Machine validation — the formal JSON Schema meta-schema](#12-machine-validation--the-formal-json-schema-meta-schema)
 - [Appendix A — code-vs-expectation findings](#appendix-a--code-vs-expectation-findings)
 
 ---
@@ -1996,6 +1997,71 @@ The following is the exact, comment-free JSON that passed `appitools validate` (
 - `member` is the **per-resource `permissions`** form, mutually exclusive with the role-global keys. Its `orders` grant shows the **read-all / write-own** pattern: a `conditions` on `owner_id = $user_id` scoped by `condition_actions: ["update", "delete"]`, so reads and creates are unconditional while updates/deletes are restricted to the caller's own rows. Each `condition_actions` entry must be a concrete action present in `actions` (`"*"` is not allowed). The `products` grant is read-only with a per-resource field allowlist. The `customers` grant scopes by the implicit `id` column (allowed because `rbacFieldExists` treats `id` as a real column) so a member can only read/update their own customer record. Every per-resource `conditions.field` is validated to exist on that exact resource.
 
 Together this single schema exercises: all nine field types; `required`/`unique`/`enum`/`min`/`max`/`minLength`/`maxLength`/`pattern`/`format`; literal, enum, and `"now"` defaults; a state machine; field-level relations with `on_delete` + `on_update` + a `references`-to-unique-non-id; a composite `foreign_keys` block against a composite unique index; `has_many`, `belongs_to`, and `many_to_many` relations; plain and composite-unique indexes; outbox `events`; `js` + `webhook` hooks; a `renamed_from`; and both RBAC role forms. It validates clean with `appitools validate`.
+
+---
+
+## 12. Machine validation — the formal JSON Schema meta-schema
+
+This whole grammar is also published as a **formal JSON Schema (Draft 2020-12)
+meta-schema** — `pkg/schema/appitools.schema.json`, embedded in the binary
+(AI-F0-S1). It is the **deterministic structural net**: any candidate schema can be
+checked against it instantly, with no engine and no database, which is exactly what
+an AI generation layer (or an editor / IDE) needs — generate JSON, validate it
+against the meta-schema, get precise located errors, iterate.
+
+### 12.1 The two layers — structural vs. semantic
+
+Validation is split in two, and the split is deliberate:
+
+- **Structural (the meta-schema, `appitools.schema.json`).** Everything JSON Schema
+  *can* express on its own: the field-type enum, the `on_delete`/`on_update`/
+  `format`/`relation type`/RBAC-action/condition-`op` enums, the identifier
+  patterns (`^[a-z][a-z0-9_]*$`; the `auth_`/`transaction` resource-name
+  exclusions), the strict key sets at every level (`additionalProperties: false`),
+  which keys are required, the value types, and the two mutually-exclusive RBAC
+  forms (`oneOf`). It also encodes the audit outcomes: a condition `op` may only be
+  `eq` (SEC-AUDIT-V1), and an `after_create`/`after_update` hook must be `webhook`
+  (SEC-AUDIT-V2).
+- **Semantic (the Go validator, `pkg/schema` — the AUTHORITY).** Everything that
+  needs to look *across* the document, which JSON Schema cannot express:
+  - a `relation` / FK `target`, a `references` column, and the FK `ref_columns`
+    must **exist** on the target — and `references`/`ref_columns` must be a PK or a
+    **unique** column/index of the target, and type-compatible;
+  - a condition `field` and a `fields` allowlist entry must **exist** on the
+    role's resource(s) (the meta-schema only checks they are valid identifiers);
+  - a `state_machine`'s states must be coherent with the field's `enum`, and a
+    string `default` must be one of the `initial` states;
+  - a `default` must be type-compatible with its field; an `enum` `default` a
+    member; `set_null` requires a nullable column;
+  - `renamed_from` must not still be a declared name; `condition_actions` must be a
+    subset of `actions`; etc.
+
+A document that passes **both** is accepted by the engine. The meta-schema never
+rejects a schema the Go validator accepts (verified by a parity test over every
+valid schema in the repo); where they differ, it is always the Go validator being
+*stricter* (the semantic checks above), never the meta-schema.
+
+### 12.2 Using it
+
+```bash
+appitools validate-schema schema.json   # structural (meta-schema), engine-free
+appitools validate schema.json          # semantic (Go) — the authority
+appitools meta-schema > appitools.schema.json   # print it (for an IDE's $schema, tooling, or an AI)
+```
+
+`validate-schema` reports each structural error with its JSON path and a precise
+reason, e.g.:
+
+```
+resources.t.fields.a.type: value must be one of 'string', 'text', 'int', 'int64', 'float64', 'bool', 'uuid', 'time', 'json'
+resources.t.hooks.after_create.type: value must be 'webhook'
+rbac.roles.r.conditions.op: value must be one of 'eq', ''
+```
+
+The Go API mirrors this: `schema.ValidateAgainstMetaSchema(raw []byte)
+[]ValidationError` (structural) alongside `schema.Validate(*APISchema)
+[]ValidationError` (semantic). The existing `validate` command and the engine boot
+path are **unchanged** — the meta-schema is a new, additive layer.
 
 ---
 

@@ -24,6 +24,7 @@ require (
 	github.com/prometheus/client_model v0.6.2
 	github.com/redis/go-redis/v9 v9.20.0
 	github.com/rs/zerolog v1.35.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/sony/gobreaker v1.0.0
 	github.com/spf13/cobra v1.10.2
 	github.com/testcontainers/testcontainers-go v0.42.0
