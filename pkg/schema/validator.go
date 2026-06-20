@@ -13,10 +13,62 @@ import (
 type ValidationError struct {
 	Field   string
 	Message string
+
+	// Structured metadata for the LLM-friendly report (AI-F0-S2). All optional —
+	// an error that predates the enrichment leaves them empty and the report derives
+	// a fallback Rule from the Field path. They are NOT part of Error(), so the human
+	// (interactive) output is byte-unchanged.
+	Rule     string   `json:"rule,omitempty"`     // machine-readable category, e.g. "invalid_type"
+	Fix      string   `json:"fix,omitempty"`      // how to correct it (an LLM can apply this)
+	Expected []string `json:"expected,omitempty"` // the allowed values, when a closed set
+	Got      string   `json:"got,omitempty"`      // the offending value, when applicable
 }
 
 func (e ValidationError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Field, e.Message)
+}
+
+// sortedSetKeys returns the keys of a set, sorted — for stable "expected" lists and
+// option hints in messages.
+func sortedSetKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// resourceNamesList returns the schema's resource names, sorted (for "available
+// resources: …" hints that let an LLM pick a valid target).
+func resourceNamesList(s *APISchema) []string {
+	out := make([]string, 0, len(s.Resources))
+	for n := range s.Resources {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// fieldNamesList returns a resource's column names (declared fields + the implicit
+// id), sorted — for "available fields: …" hints.
+func fieldNamesList(res ResourceSchema) []string {
+	out := make([]string, 0, len(res.Fields)+1)
+	out = append(out, "id")
+	for n := range res.Fields {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// joinQuoted renders a string slice as a quoted, comma-separated list for messages.
+func joinQuoted(ss []string) string {
+	q := make([]string, len(ss))
+	for i, s := range ss {
+		q[i] = "'" + s + "'"
+	}
+	return strings.Join(q, ", ")
 }
 
 var (
@@ -116,17 +168,27 @@ func Validate(s *APISchema) []ValidationError {
 			}
 
 			if !validFieldTypes[field.Type] {
+				types := sortedSetKeys(validFieldTypes)
 				errs = append(errs, ValidationError{
-					Field:   fieldPrefix + ".type",
-					Message: fmt.Sprintf("unknown field type %q", field.Type),
+					Field:    fieldPrefix + ".type",
+					Rule:     "invalid_type",
+					Got:      field.Type,
+					Expected: types,
+					Message:  fmt.Sprintf("unknown field type %q: must be one of %s", field.Type, joinQuoted(types)),
+					Fix:      "set type to one of the valid field types (e.g. 'string' for short text, 'text' for long text, 'int'/'int64'/'float64' for numbers, 'time' for timestamps, 'bool', 'uuid', 'json')",
 				})
 			}
 
 			if field.Relation != "" {
 				if _, ok := s.Resources[field.Relation]; !ok {
+					avail := resourceNamesList(s)
 					errs = append(errs, ValidationError{
-						Field:   fieldPrefix + ".relation",
-						Message: fmt.Sprintf("relation %q references unknown resource", field.Relation),
+						Field:    fieldPrefix + ".relation",
+						Rule:     "unknown_relation_target",
+						Got:      field.Relation,
+						Expected: avail,
+						Message:  fmt.Sprintf("relation %q references unknown resource — available resources: %s", field.Relation, joinQuoted(avail)),
+						Fix:      "set relation to one of the existing resources listed above, or define that resource",
 					})
 				}
 			}
@@ -191,12 +253,18 @@ func Validate(s *APISchema) []ValidationError {
 					if !columnsAreUniqueOnTarget(target, []string{field.References}) {
 						errs = append(errs, ValidationError{
 							Field:   fieldPrefix + ".references",
+							Rule:    "reference_not_unique",
+							Got:     field.References,
 							Message: fmt.Sprintf("references %q must be the target's id or a UNIQUE column of %q (a foreign key may only point at a primary key or unique column)", field.References, field.Relation),
+							Fix:     fmt.Sprintf("add \"unique\": true to %s.%s, or set references to a column that is already unique (or 'id')", field.Relation, field.References),
 						})
 					} else if k, tk := pgKindForAPIType(field.Type), refColumnKind(target, field.References); k != tk {
 						errs = append(errs, ValidationError{
 							Field:   fieldPrefix + ".references",
+							Rule:    "reference_type_mismatch",
+							Got:     field.Type,
 							Message: fmt.Sprintf("references %q has an incompatible type: this field is %q but %s.%s is %q", field.References, field.Type, field.Relation, field.References, targetFieldType(target, field.References)),
+							Fix:     fmt.Sprintf("change this field's type to %q so it matches %s.%s", targetFieldType(target, field.References), field.Relation, field.References),
 						})
 					}
 				}
@@ -369,9 +437,14 @@ func validateRBAC(s *APISchema) []ValidationError {
 			permPrefix := rolePrefix + ".permissions." + resName
 			res, ok := s.Resources[resName]
 			if !ok {
+				avail := resourceNamesList(s)
 				errs = append(errs, ValidationError{
-					Field:   permPrefix,
-					Message: fmt.Sprintf("permission references unknown resource %q", resName),
+					Field:    permPrefix,
+					Rule:     "unknown_resource",
+					Got:      resName,
+					Expected: avail,
+					Message:  fmt.Sprintf("permission references unknown resource %q — available resources: %s", resName, joinQuoted(avail)),
+					Fix:      "key this permission by one of the existing resources above (or define that resource)",
 				})
 				continue
 			}
@@ -385,8 +458,12 @@ func validateRBAC(s *APISchema) []ValidationError {
 			for _, a := range perm.Actions {
 				if !validRBACActions[a] {
 					errs = append(errs, ValidationError{
-						Field:   permPrefix + ".actions",
-						Message: fmt.Sprintf("unknown action %q: must be one of read, create, update, delete, *", a),
+						Field:    permPrefix + ".actions",
+						Rule:     "unknown_action",
+						Got:      a,
+						Expected: []string{"read", "create", "update", "delete", "*"},
+						Message:  fmt.Sprintf("unknown action %q: must be one of read, create, update, delete, *", a),
+						Fix:      "use one of read, create, update, delete (or '*' for all)",
 					})
 				}
 			}
@@ -396,12 +473,19 @@ func validateRBAC(s *APISchema) []ValidationError {
 				if perm.Conditions.Field == "" {
 					errs = append(errs, ValidationError{
 						Field:   permPrefix + ".conditions.field",
+						Rule:    "missing_condition_field",
 						Message: "condition field is required",
+						Fix:     "set conditions.field to a column of this resource (commonly an owner column like user_id), with val \"$user_id\"",
 					})
 				} else if !rbacFieldExists(res, perm.Conditions.Field) {
+					avail := fieldNamesList(res)
 					errs = append(errs, ValidationError{
-						Field:   permPrefix + ".conditions.field",
-						Message: fmt.Sprintf("condition field %q does not exist on resource %q", perm.Conditions.Field, resName),
+						Field:    permPrefix + ".conditions.field",
+						Rule:     "unknown_field",
+						Got:      perm.Conditions.Field,
+						Expected: avail,
+						Message:  fmt.Sprintf("condition field %q does not exist on resource %q — available fields: %s", perm.Conditions.Field, resName, joinQuoted(avail)),
+						Fix:      "set conditions.field to one of the available fields above",
 					})
 				}
 			}
@@ -431,8 +515,12 @@ func validateRBAC(s *APISchema) []ValidationError {
 						})
 					case !grantsAll && !containsStr(perm.Actions, a):
 						errs = append(errs, ValidationError{
-							Field:   permPrefix + ".condition_actions",
-							Message: fmt.Sprintf("condition_actions lists %q which is not in actions", a),
+							Field:    permPrefix + ".condition_actions",
+							Rule:     "condition_action_not_granted",
+							Got:      a,
+							Expected: perm.Actions,
+							Message:  fmt.Sprintf("condition_actions lists %q which is not in actions (granted: %s)", a, joinQuoted(perm.Actions)),
+							Fix:      fmt.Sprintf("add %q to this permission's actions, or remove it from condition_actions", a),
 						})
 					}
 				}
@@ -440,9 +528,14 @@ func validateRBAC(s *APISchema) []ValidationError {
 
 			for _, f := range perm.Fields {
 				if !rbacFieldExists(res, f) {
+					avail := fieldNamesList(res)
 					errs = append(errs, ValidationError{
-						Field:   permPrefix + ".fields",
-						Message: fmt.Sprintf("field %q does not exist on resource %q", f, resName),
+						Field:    permPrefix + ".fields",
+						Rule:     "unknown_field",
+						Got:      f,
+						Expected: avail,
+						Message:  fmt.Sprintf("field %q does not exist on resource %q — available fields: %s", f, resName, joinQuoted(avail)),
+						Fix:      "remove this entry or replace it with one of the available fields above",
 					})
 				}
 			}
@@ -497,24 +590,51 @@ func validateRoleGlobal(rolePrefix string, role RolePolicy, s *APISchema) []Vali
 		if role.Conditions.Field == "" {
 			errs = append(errs, ValidationError{
 				Field:   rolePrefix + ".conditions.field",
+				Rule:    "missing_condition_field",
 				Message: "condition field is required",
+				Fix:     "set conditions.field to a column present on the role's resources (commonly an owner column like user_id)",
 			})
 		} else if !fieldExistsOnAny(role.Conditions.Field, resources, s) {
+			avail := unionFieldNames(resources, s)
 			errs = append(errs, ValidationError{
-				Field:   rolePrefix + ".conditions.field",
-				Message: fmt.Sprintf("condition field %q does not exist on any of the role's resources", role.Conditions.Field),
+				Field:    rolePrefix + ".conditions.field",
+				Rule:     "unknown_field",
+				Got:      role.Conditions.Field,
+				Expected: avail,
+				Message:  fmt.Sprintf("condition field %q does not exist on any of the role's resources — available fields: %s", role.Conditions.Field, joinQuoted(avail)),
+				Fix:      "set conditions.field to a field present on the role's resources (listed above)",
 			})
 		}
 	}
 	for _, f := range role.Fields {
 		if !fieldExistsOnAny(f, resources, s) {
+			avail := unionFieldNames(resources, s)
 			errs = append(errs, ValidationError{
-				Field:   rolePrefix + ".fields",
-				Message: fmt.Sprintf("field %q does not exist on any of the role's resources", f),
+				Field:    rolePrefix + ".fields",
+				Rule:     "unknown_field",
+				Got:      f,
+				Expected: avail,
+				Message:  fmt.Sprintf("field %q does not exist on any of the role's resources — available fields: %s", f, joinQuoted(avail)),
+				Fix:      "remove this entry or replace it with one of the available fields above",
 			})
 		}
 	}
 	return errs
+}
+
+// unionFieldNames returns the sorted union of column names across the named
+// resources (declared fields + the implicit id) — the "available fields" hint for a
+// role-global condition/allowlist that spans several resources.
+func unionFieldNames(resources []string, s *APISchema) []string {
+	set := map[string]bool{"id": true}
+	for _, rn := range resources {
+		if res, ok := s.Resources[rn]; ok {
+			for n := range res.Fields {
+				set[n] = true
+			}
+		}
+	}
+	return sortedSetKeys(set)
 }
 
 // applicableResources resolves a role-global `resources` value (the "*" string or an

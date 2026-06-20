@@ -2045,9 +2045,15 @@ valid schema in the repo); where they differ, it is always the Go validator bein
 
 ```bash
 appitools validate-schema schema.json   # structural (meta-schema), engine-free
-appitools validate schema.json          # semantic (Go) — the authority
+appitools validate schema.json          # semantic (Go) — the authority, human output
+appitools validate --json schema.json   # UNIFIED LLM-friendly report (structural + semantic)
 appitools meta-schema > appitools.schema.json   # print it (for an IDE's $schema, tooling, or an AI)
 ```
+
+`validate --json` emits one machine-readable report — `{ "valid", "errors":[ {path,
+rule, message, expected, got, fix, source} ] }` — merging both validators, the
+feedback an AI uses to self-correct. The format and the correction loop are
+documented in [AI_SCHEMA_GENERATION.md](AI_SCHEMA_GENERATION.md) (AI-F0-S2).
 
 `validate-schema` reports each structural error with its JSON path and a precise
 reason, e.g.:

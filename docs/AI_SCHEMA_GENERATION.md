@@ -1,0 +1,131 @@
+# Generating Appitools schemas with an LLM — the validation feedback loop
+
+This is the contract between an AI (or any tool) and the Appitools validator. It lets
+a model generate a schema, get **machine-readable, actionable feedback**, and
+self-correct until the schema is valid — no human in the loop.
+
+The two pieces that make this deterministic:
+
+1. **The formal meta-schema** (`pkg/schema/appitools.schema.json`, Draft 2020-12) —
+   the structural grammar. See [SCHEMA_REFERENCE.md §12](SCHEMA_REFERENCE.md#12-machine-validation--the-formal-json-schema-meta-schema).
+2. **The unified validation report** (this document) — one structured result that
+   merges the structural (meta-schema) and semantic (Go) validators.
+
+## The loop
+
+```
+generate schema  →  appitools validate --json schema.json  →  read report
+      ↑                                                            │
+      └────────────── apply each error's "fix" ←──────────────────┘
+   (repeat until { "valid": true })
+```
+
+Each round, the model:
+1. runs `appitools validate --json <file>` (exit 0 = valid, 1 = invalid);
+2. for every entry in `errors[]`, edits the schema at `path` per `fix` (using
+   `expected` to choose a valid value);
+3. re-validates. The validators are pure and deterministic — the same schema always
+   yields the same report.
+
+## The report format
+
+```json
+{
+  "valid": false,
+  "errors": [
+    {
+      "path": "resources.users.fields.email.type",
+      "rule": "invalid_enum_value",
+      "message": "value must be one of 'string', 'text', 'int', 'int64', 'float64', 'bool', 'uuid', 'time', 'json'",
+      "expected": ["string","text","int","int64","float64","bool","uuid","time","json"],
+      "got": "varchar",
+      "source": "metaschema",
+      "fix": "use one of the allowed values listed in expected"
+    },
+    {
+      "path": "resources.posts.fields.author_id.references",
+      "rule": "reference_not_unique",
+      "message": "references \"email\" must be the target's id or a UNIQUE column of \"users\" ...",
+      "got": "email",
+      "source": "semantic",
+      "fix": "add \"unique\": true to users.email, or set references to a column that is already unique (or 'id')"
+    }
+  ]
+}
+```
+
+Per-error fields:
+
+| field | meaning |
+|---|---|
+| `path` | dotted location of the offending value (`resources.<r>.fields.<f>.<key>`, `rbac.roles.<role>.…`). Edit here. |
+| `rule` | machine-readable category (stable; switch on this). |
+| `message` | human-readable explanation (also lists options inline). |
+| `expected` | the allowed values, when the rule is a closed set — pick one of these. |
+| `got` | the offending value you supplied. |
+| `fix` | a concrete instruction to correct it. |
+| `source` | `metaschema` (structural) or `semantic` (cross-reference) — see below. |
+
+`errors` is always an array (`[]` when valid). A `path` is reported by **one** source
+at most: a structural error suppresses the semantic error at the same path (they are
+the same problem), so there are no duplicates to reconcile.
+
+## Two sources, two layers
+
+- **`metaschema` (structural).** Type/enum/pattern/required/unknown-key/RBAC-form
+  errors — everything JSON Schema can express. These are *shape* problems: a bad
+  `type`, an unknown key, a name that isn't `^[a-z][a-z0-9_]*$`, an `op` other than
+  `eq`, a `js`/`wasm` after-hook, mixing the two RBAC forms.
+- **`semantic` (cross-reference).** Problems that need to look across the document,
+  which the meta-schema cannot see: a `relation`/FK `target` or `references` column
+  that doesn't **exist** or isn't **unique** on the target; a condition/allowlist
+  field that doesn't exist on the resource; a `state_machine` state not in the
+  field's `enum`; a `default` whose type doesn't match the field; a `renamed_from`
+  that still names a declared field.
+
+Fix the structural errors first if both appear — once the shape is right, re-validate
+to surface any remaining semantic ones.
+
+## Rule categories
+
+Structural (`source: "metaschema"`): `invalid_enum_value`, `invalid_value`,
+`unknown_key`, `missing_required`, `pattern_mismatch`, `form_mismatch`,
+`length_out_of_bounds`, `structural_error`.
+
+Semantic (`source: "semantic"`): `invalid_type`, `unknown_relation_target`,
+`reference_not_unique`, `reference_type_mismatch`, `unknown_field`,
+`unknown_resource`, `unknown_action`, `missing_condition_field`,
+`condition_action_not_granted`, `invalid_condition_op`, `invalid_on_delete`,
+`invalid_on_update`, `invalid_default`, `invalid_state_machine`, `invalid_relation`,
+`invalid_foreign_key`, `invalid_index`, `invalid_renamed_from`,
+`invalid_resource_name`, `rbac_form_conflict`, `invalid_events`, and the catch-all
+`schema_error`.
+
+(The set may grow; treat an unknown `rule` as "read `message`/`fix` and correct at
+`path`".)
+
+## How to apply a fix (examples)
+
+- `rule: invalid_enum_value` / `invalid_value` → replace `got` at `path` with one of
+  `expected`.
+- `rule: unknown_relation_target` / `unknown_resource` → `expected` lists the real
+  resources; pick the intended one (or add the missing resource).
+- `rule: unknown_field` → `expected` lists the resource's columns; pick one.
+- `rule: reference_not_unique` → either add `"unique": true` to the target column or
+  point `references` at `id`.
+- `rule: unknown_key` → delete the key named in `got` (it's a typo or not part of the
+  grammar; the meta-schema lists the valid keys for that level).
+- `rule: rbac_form_conflict` → a role is **either** role-global
+  (`resources`/`actions`/`conditions`/`fields`) **or** per-resource (`permissions`),
+  never both.
+
+## Notes
+
+- `appitools validate` (no `--json`) stays human-readable and is the semantic
+  authority; `--json` adds the structural layer and the machine format. The engine's
+  validation **rules** are identical to either — only the presentation differs.
+- The Go API mirrors the CLI: `schema.ValidateReport(raw []byte) ValidationReport`
+  (unified), `schema.ValidateAgainstMetaSchema(raw) []ValidationError` (structural),
+  `schema.Validate(*APISchema) []ValidationError` (semantic).
+- The complete grammar each rule enforces is in
+  [SCHEMA_REFERENCE.md](SCHEMA_REFERENCE.md).

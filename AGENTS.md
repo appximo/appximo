@@ -47,10 +47,13 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   subcommands** (no `serve`). Use the package path:
   `go run ./cmd/appitools serve …`.
 - Other subcommands: `validate <schema>` (SEMANTIC, the Go authority — load +
-  cross-reference checks), `validate-schema <schema>` (STRUCTURAL — validates
-  against the embedded formal JSON Schema meta-schema, `pkg/schema/appitools.schema.json`;
-  engine-free, the deterministic net for AI-generated schemas), `meta-schema`
-  (prints that meta-schema for IDE `$schema` / tooling), `token` (mint a dev JWT),
+  cross-reference checks; `--json` emits the UNIFIED LLM-friendly report —
+  structural + semantic — with path/rule/message/expected/got/fix/source per error,
+  the AI correction loop, see docs/AI_SCHEMA_GENERATION.md), `validate-schema <schema>`
+  (STRUCTURAL — validates against the embedded formal JSON Schema meta-schema,
+  `pkg/schema/appitools.schema.json`; engine-free, the deterministic net for
+  AI-generated schemas), `meta-schema` (prints that meta-schema for IDE `$schema` /
+  tooling), `token` (mint a dev JWT),
   `openapi`, `graphql` (SDL), `generate`, `migrate`, `backup`, `init`,
   `blueprints list` (lists schema files in a local `blueprints/` dir),
   `version` (prints the ldflags-injected build version; "dev" on a plain
