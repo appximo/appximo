@@ -42,6 +42,7 @@ Examples:
 		out, _ := cmd.Flags().GetString("out")
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		verbose, _ := cmd.Flags().GetBool("verbose")
+		noStructured, _ := cmd.Flags().GetBool("no-structured")
 
 		client, err := aigen.NewAnthropicClient(model)
 		if err != nil {
@@ -54,9 +55,14 @@ Examples:
 			return err
 		}
 
+		// Structured outputs (constrained decoding) by default when the model
+		// supports it; --no-structured forces plain generation for comparison.
+		useStructured := !noStructured && aigen.SupportsStructuredOutput(client.Model())
+
 		res, err := aigen.Generate(context.Background(), client, args[0], aigen.Options{
 			MaxIterations: maxIter,
 			Model:         client.Model(),
+			NoStructured:  !useStructured,
 		})
 		if err != nil {
 			return err
@@ -96,6 +102,13 @@ Examples:
 func printReport(res *aigen.Result, verbose bool) {
 	w := os.Stderr
 	fmt.Fprintln(w, "── AI schema generation ─────────────────────────")
+	if res.Refused {
+		fmt.Fprintf(w, "  resultado:   ⚠ RECHAZADO por el modelo (no es un error de schema)\n")
+		fmt.Fprintf(w, "  motivo:      %s\n", strings.TrimSpace(res.RefusalText))
+		fmt.Fprintf(w, "  modelo:      %s\n", res.Model)
+		fmt.Fprintln(w, "─────────────────────────────────────────────────")
+		return
+	}
 	status := "✗ NO convergió"
 	if res.Converged {
 		status = "✓ VÁLIDO"
@@ -105,11 +118,19 @@ func printReport(res *aigen.Result, verbose bool) {
 			status += " (tras corrección)"
 		}
 	}
+	decode := "plano (sin structured outputs)"
+	if res.Structured {
+		decode = "structured outputs (estructura garantizada en el decoding)"
+	}
 	fmt.Fprintf(w, "  resultado:   %s\n", status)
 	fmt.Fprintf(w, "  modelo:      %s\n", res.Model)
+	fmt.Fprintf(w, "  decoding:    %s\n", decode)
 	fmt.Fprintf(w, "  iteraciones: %d\n", res.Iterations)
-	fmt.Fprintf(w, "  tokens:      %d in / %d out (%d total)\n",
-		res.Usage.InputTokens, res.Usage.OutputTokens, res.Usage.InputTokens+res.Usage.OutputTokens)
+	fmt.Fprintf(w, "  tokens:      %d in / %d out", res.Usage.InputTokens, res.Usage.OutputTokens)
+	if res.Usage.CacheReadTokens > 0 || res.Usage.CacheCreationTokens > 0 {
+		fmt.Fprintf(w, " (cache: %d leídos @0.1x, %d escritos)", res.Usage.CacheReadTokens, res.Usage.CacheCreationTokens)
+	}
+	fmt.Fprintln(w)
 	if _, ok := aigen.PricingFor(res.Model); ok {
 		fmt.Fprintf(w, "  costo aprox: $%.5f USD\n", res.CostUSD)
 	} else {
@@ -123,8 +144,8 @@ func printReport(res *aigen.Result, verbose bool) {
 			if a.Valid {
 				tag = "válido"
 			}
-			fmt.Fprintf(w, "    %d. %s — %d errores, %d/%d tokens\n",
-				a.Iteration, tag, len(a.Errors), a.Usage.InputTokens, a.Usage.OutputTokens)
+			fmt.Fprintf(w, "    %d. %s — %d estructurales / %d semánticos, %d/%d tokens\n",
+				a.Iteration, tag, a.StructuralCount, a.SemanticCount, a.Usage.InputTokens, a.Usage.OutputTokens)
 		}
 	}
 
@@ -142,6 +163,7 @@ func init() {
 	aiGenerateCmd.Flags().Int("max-iterations", aigen.DefaultMaxIterations, "máximo de rondas generate→corregir")
 	aiGenerateCmd.Flags().String("out", "", "archivo donde escribir el schema válido (default: stdout)")
 	aiGenerateCmd.Flags().Bool("json", false, "emitir el resultado completo (schema + métricas) como JSON")
-	aiGenerateCmd.Flags().Bool("verbose", false, "mostrar el detalle por ronda")
+	aiGenerateCmd.Flags().Bool("verbose", false, "mostrar el detalle por ronda (errores estructurales vs semánticos)")
+	aiGenerateCmd.Flags().Bool("no-structured", false, "desactivar structured outputs (generación plana, para comparar)")
 	rootCmd.AddCommand(aiGenerateCmd)
 }

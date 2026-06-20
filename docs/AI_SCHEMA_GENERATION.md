@@ -174,6 +174,59 @@ task board, e-commerce, social) is `scripts/aigen-e2e.sh` (golden schemas in
 `examples/aigen/`); with `ANTHROPIC_API_KEY` set it runs the live loop and records the
 economics, without it it proves the provision→CRUD half against the committed schemas.
 
+### Constrained decoding (AI-F1-S1) — structure at decode time, loop for semantics
+
+Research (peer-reviewed) refined the loop: **constrained decoding** guarantees
+structural validity *by construction*, so the loop should not spend rounds fixing
+structure. The decomposition is `p = p_struct × p_sem`; fixing `p_struct = 1` at the
+decoder removes the structural-error class entirely, leaving the loop for the
+semantic, cross-reference class — which the trusted external validator makes
+correctable (Huang et al., ICLR 2024: self-correction without an external oracle
+does not work). Two mechanisms, two layers — mirroring this document's
+`metaschema`/`semantic` split:
+
+- **Structure → Anthropic structured outputs** (`output_config.format`, strict
+  grammar). `aigen.OutputSchema()` is the JSON Schema the decoder is constrained to.
+- **Semantics → the correction loop**, driven by `schema.ValidateReport` (the engine's
+  own validator, kept as the final full check too — defense in depth).
+
+**The honest guarantee boundary.** The Appitools schema is an *arbitrary-keyed map*
+(resources keyed by resource name, fields by field name, roles by role name). The
+strict-outputs subset is narrow — every object must be `additionalProperties:false`,
+and it offers no `patternProperties` / `propertyNames` / `additionalProperties`-as-
+schema — so that map shape **cannot** be expressed in it. Structured outputs therefore
+constrains the **envelope**, not the deep structure:
+
+| Guaranteed by the decoder (envelope) | Still validated + corrected by the loop |
+|---|---|
+| well-formed JSON (no fences / prose / truncation) | field `type` in the closed set |
+| `$schema` = the v1 const, `version` = `"1"` | strict field/resource keys (unknown-key) |
+| `name` present (string); `resources` present | enums, `min`/`max`, `pattern`, `format` |
+| no **unknown top-level key** | relations/FKs to existing targets, RBAC fields, state machines, defaults — all the cross-reference semantics |
+
+So constrained decoding removes the *JSON-wellformedness + envelope* class of
+structural errors; the deep-structure + semantic classes remain the validator's job.
+The model keeps emitting the **canonical map form**, so the validator's error paths
+(`resources.X.fields.Y…`) stay coherent for in-context correction. Pushing
+`p_struct → 1` on the deep structure (an array-IR the subset *can* fully constrain,
+with a transform back to the map form) is the documented next increment.
+
+**Defense in depth / graceful fallback.** A structured request that the live subset
+rejects, or that returns an **empty `resources`** map (which the engine would otherwise
+accept — a silent-worsening trap), drops to plain generation automatically; a
+**safety refusal** (`stop_reason: "refusal"`) is surfaced as a refusal, not mis-handled
+as a schema error. The default iteration budget dropped **5 → 3** (no structural rounds
+to absorb). The **system prompt is sent as a prompt-cache block** (`cache_control`), so
+correction rounds re-read it at ≈0.1× — the cost line reports the cache split (caveat:
+the prompt must exceed the model's cache minimum, e.g. 4096 tokens on Haiku, to actually
+cache). The **model is a pure parameter** (`--model`); the `ModelClient` seam is also
+where a future cheap→expensive **cascade** wrapper plugs in, unknown to the loop.
+
+`--no-structured` forces plain generation for comparison. Verified end-to-end against a
+mock (`ANTHROPIC_BASE_URL`): the request carries `output_config.format` with the
+const-pinned envelope and the cached system block; round 1 reports **0 structural / 1
+semantic** errors (the structural class is gone) and converges on round 2.
+
 ## Notes
 
 - `appitools validate` (no `--json`) stays human-readable and is the semantic

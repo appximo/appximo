@@ -55,13 +55,18 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   AI-generated schemas), `meta-schema` (prints that meta-schema for IDE `$schema` /
   tooling), `token` (mint a dev JWT),
   `openapi`, `graphql` (SDL), `generate`, `migrate`, `backup`, `init`,
-  `ai-generate "<description>"` (the AI-F0-S3 democratization loop: a
-  natural-language app description → LLM-generated schema → `ValidateReport`
-  → self-correct from the actionable errors → a VALID schema, printing the
-  ECONOMIC instrumentation — iterations / tokens / approx cost — that proves
-  the cheap model is enough; `pkg/aigen`, key from `ANTHROPIC_API_KEY`, raw
-  `/v1/messages` so no new dependency; default model `claude-haiku-4-5`; see
-  docs/AI_SCHEMA_GENERATION.md §The generation loop),
+  `ai-generate "<description>"` (the AI democratization loop: a natural-language
+  app description → LLM-generated schema → self-correct from `ValidateReport`'s
+  actionable errors → a VALID schema, printing the ECONOMIC instrumentation —
+  iterations / tokens / approx cost. AI-F1-S1 re-architected it to **constrained
+  decoding**: structured outputs (`output_config.format`) guarantee the ENVELOPE at
+  decode time (well-formed JSON + top-level skeleton + `$schema`/`version` consts +
+  no unknown top-level keys; the deep arbitrary-keyed map isn't expressible in the
+  strict subset, so field types / strict-keys / semantics stay with the validator +
+  loop, K=3), plus graceful fallback (empty-resources or structured-reject → plain),
+  refusal handling, a prompt-cached system prompt, and an interchangeable `--model`.
+  `pkg/aigen`, key from `ANTHROPIC_API_KEY`, raw `/v1/messages` so no new dependency;
+  default model `claude-haiku-4-5`; see docs/AI_SCHEMA_GENERATION.md §Constrained decoding),
   `blueprints list` (lists schema files in a local `blueprints/` dir),
   `version` (prints the ldflags-injected build version; "dev" on a plain
   local build — releases and published images carry their tag).
