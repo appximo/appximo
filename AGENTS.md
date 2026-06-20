@@ -55,6 +55,13 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   AI-generated schemas), `meta-schema` (prints that meta-schema for IDE `$schema` /
   tooling), `token` (mint a dev JWT),
   `openapi`, `graphql` (SDL), `generate`, `migrate`, `backup`, `init`,
+  `ai-generate "<description>"` (the AI-F0-S3 democratization loop: a
+  natural-language app description → LLM-generated schema → `ValidateReport`
+  → self-correct from the actionable errors → a VALID schema, printing the
+  ECONOMIC instrumentation — iterations / tokens / approx cost — that proves
+  the cheap model is enough; `pkg/aigen`, key from `ANTHROPIC_API_KEY`, raw
+  `/v1/messages` so no new dependency; default model `claude-haiku-4-5`; see
+  docs/AI_SCHEMA_GENERATION.md §The generation loop),
   `blueprints list` (lists schema files in a local `blueprints/` dir),
   `version` (prints the ldflags-injected build version; "dev" on a plain
   local build — releases and published images carry their tag).

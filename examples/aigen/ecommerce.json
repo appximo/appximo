@@ -1,0 +1,35 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "shop-api",
+  "resources": {
+    "categorias": {
+      "fields": { "nombre": { "type": "string", "required": true, "unique": true, "maxLength": 80 } },
+      "relations": { "productos": { "type": "has_many", "target": "productos", "fk": "categoria_id" } }
+    },
+    "productos": {
+      "fields": {
+        "categoria_id": { "type": "uuid", "relation": "categorias", "on_delete": "set_null" },
+        "nombre": { "type": "string", "required": true, "maxLength": 200 },
+        "precio": { "type": "float64", "required": true, "min": 0 },
+        "stock": { "type": "int", "min": 0, "default": 0 }
+      }
+    },
+    "ordenes": {
+      "fields": {
+        "cliente_email": { "type": "string", "format": "email", "required": true },
+        "estado": { "type": "string", "enum": ["nueva", "pagada", "enviada"], "default": "nueva" },
+        "created_at": { "type": "time", "auto": true }
+      },
+      "relations": { "lineas": { "type": "has_many", "target": "lineas_orden", "fk": "orden_id" } }
+    },
+    "lineas_orden": {
+      "fields": {
+        "orden_id": { "type": "uuid", "required": true, "relation": "ordenes", "on_delete": "cascade" },
+        "producto_id": { "type": "uuid", "required": true, "relation": "productos", "on_delete": "restrict" },
+        "cantidad": { "type": "int", "required": true, "min": 1 }
+      }
+    }
+  },
+  "rbac": { "roles": { "admin": { "resources": "*", "actions": ["*"] } } }
+}

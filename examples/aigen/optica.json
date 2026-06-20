@@ -1,0 +1,39 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "optica-crm",
+  "resources": {
+    "clientes": {
+      "fields": {
+        "nombre": { "type": "string", "required": true, "maxLength": 120 },
+        "email": { "type": "string", "format": "email", "unique": true },
+        "telefono": { "type": "string", "maxLength": 20 },
+        "created_at": { "type": "time", "auto": true }
+      },
+      "relations": {
+        "citas": { "type": "has_many", "target": "citas", "fk": "cliente_id" },
+        "ventas": { "type": "has_many", "target": "ventas", "fk": "cliente_id" }
+      }
+    },
+    "citas": {
+      "fields": {
+        "cliente_id": { "type": "uuid", "required": true, "relation": "clientes", "on_delete": "cascade" },
+        "fecha": { "type": "time", "required": true },
+        "estado": { "type": "string", "enum": ["agendada", "atendida", "cancelada"], "default": "agendada" }
+      }
+    },
+    "ventas": {
+      "fields": {
+        "cliente_id": { "type": "uuid", "required": true, "relation": "clientes", "on_delete": "restrict" },
+        "total": { "type": "float64", "min": 0 },
+        "fecha": { "type": "time", "auto": true }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": { "resources": "*", "actions": ["*"] },
+      "vendedor": { "resources": ["clientes", "citas", "ventas"], "actions": ["read", "create", "update"] }
+    }
+  }
+}

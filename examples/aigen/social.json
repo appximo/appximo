@@ -1,0 +1,40 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "social-api",
+  "resources": {
+    "usuarios": {
+      "fields": {
+        "handle": { "type": "string", "required": true, "unique": true, "pattern": "^[a-z0-9_]{3,20}$" },
+        "nombre": { "type": "string", "maxLength": 120 }
+      },
+      "relations": { "posts": { "type": "has_many", "target": "posts", "fk": "usuario_id" } }
+    },
+    "posts": {
+      "fields": {
+        "usuario_id": { "type": "uuid", "required": true, "relation": "usuarios", "on_delete": "cascade" },
+        "cuerpo": { "type": "text", "required": true },
+        "created_at": { "type": "time", "auto": true }
+      },
+      "relations": {
+        "comentarios": { "type": "has_many", "target": "comentarios", "fk": "post_id" },
+        "likes": { "type": "has_many", "target": "likes", "fk": "post_id" }
+      }
+    },
+    "comentarios": {
+      "fields": {
+        "post_id": { "type": "uuid", "required": true, "relation": "posts", "on_delete": "cascade" },
+        "usuario_id": { "type": "uuid", "required": true, "relation": "usuarios", "on_delete": "cascade" },
+        "cuerpo": { "type": "text", "required": true }
+      }
+    },
+    "likes": {
+      "fields": {
+        "post_id": { "type": "uuid", "required": true, "relation": "posts", "on_delete": "cascade" },
+        "usuario_id": { "type": "uuid", "required": true, "relation": "usuarios", "on_delete": "cascade" }
+      },
+      "indexes": [ { "fields": ["post_id", "usuario_id"], "unique": true } ]
+    }
+  },
+  "rbac": { "roles": { "admin": { "resources": "*", "actions": ["*"] } } }
+}

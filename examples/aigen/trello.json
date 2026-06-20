@@ -1,0 +1,31 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "task-board",
+  "resources": {
+    "proyectos": {
+      "fields": {
+        "nombre": { "type": "string", "required": true, "maxLength": 120 },
+        "descripcion": { "type": "text" },
+        "created_at": { "type": "time", "auto": true }
+      },
+      "relations": { "tareas": { "type": "has_many", "target": "tareas", "fk": "proyecto_id" } }
+    },
+    "tareas": {
+      "fields": {
+        "proyecto_id": { "type": "uuid", "required": true, "relation": "proyectos", "on_delete": "cascade" },
+        "titulo": { "type": "string", "required": true, "maxLength": 200 },
+        "estado": { "type": "string", "enum": ["pendiente", "en_progreso", "hecha"], "default": "pendiente" },
+        "asignado": { "type": "string", "maxLength": 80 }
+      },
+      "relations": { "proyecto": { "type": "belongs_to", "target": "proyectos", "fk": "proyecto_id" } },
+      "indexes": [ { "fields": ["estado"] } ]
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": { "resources": "*", "actions": ["*"] },
+      "miembro": { "resources": ["proyectos", "tareas"], "actions": ["read", "create", "update"] }
+    }
+  }
+}

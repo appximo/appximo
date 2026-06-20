@@ -119,6 +119,61 @@ Semantic (`source: "semantic"`): `invalid_type`, `unknown_relation_target`,
   (`resources`/`actions`/`conditions`/`fields`) **or** per-resource (`permissions`),
   never both.
 
+## The generation loop (AI-F0-S3) — `pkg/aigen` + `appitools ai-generate`
+
+The sections above are the *contract* (validate → actionable errors → correct). The
+`aigen` package and the `ai-generate` CLI are that contract **closed into a working
+loop**: a natural-language app description goes in, a VALID schema comes out, with
+the model self-correcting from the report — no human in the loop.
+
+```
+appitools ai-generate "un CRM para una óptica: clientes, citas, ventas"
+```
+
+What it does each round (`aigen.Generate`):
+
+1. Sends the description + a **compact grammar** system prompt (`pkg/aigen/prompt.go`
+   — the closed sets, the strict-key rule, and the canonical example, condensed from
+   this reference so the model needs few tokens) to the model.
+2. Extracts the JSON (strips ``` fences / prose), runs `schema.ValidateReport` — the
+   **same** validators the engine uses, no shell-out.
+3. If invalid, appends the machine-readable `errors[]` (the format above) to the
+   conversation with a "correct these" preamble and loops — so the model corrects
+   *in context*, not blind.
+4. Stops at the first valid schema, or after `--max-iterations` (default 5), reporting
+   the remaining errors if it never converged.
+
+**The model is reached over raw `/v1/messages`** (`pkg/aigen/client.go`) — no SDK
+dependency, CGO-free, key from `ANTHROPIC_API_KEY` (never hardcoded; absent → a clear
+message, not an obscure failure). The `ModelClient` interface is the seam: tests inject
+a deterministic stub, so the loop is *proven* (generate → invalid → correct → valid)
+with no network and no key.
+
+**Economic instrumentation — the point.** Every run reports the iterations it took to
+converge, the cumulative input/output tokens, and the **approximate USD cost** on the
+model's published price. The default model is the **cheap** one (`claude-haiku-4-5`,
+$1/$5 per MTok) on purpose: the thesis is that a cheap model is enough, and this is the
+number that confirms or challenges it. `--model` switches tiers for comparison;
+`--json` emits the full result (schema + metrics) for tooling.
+
+```
+── AI schema generation ─────────────────────────
+  resultado:   ✓ VÁLIDO (tras corrección)
+  modelo:      claude-haiku-4-5
+  iteraciones: 2
+  tokens:      2400 in / 700 out (3100 total)
+  costo aprox: $0.00590 USD
+─────────────────────────────────────────────────
+```
+
+The loop closes the democratization argument: **the AI produces bounded, verifiable
+JSON (tractable + cheap), the engine guarantees the hard part (correctness, RBAC, SQL),
+and the loop converges without a human.** The end-to-end proof — generate → validate →
+correct → provision a real tenant → CRUD works — for four app archetypes (óptica CRM,
+task board, e-commerce, social) is `scripts/aigen-e2e.sh` (golden schemas in
+`examples/aigen/`); with `ANTHROPIC_API_KEY` set it runs the live loop and records the
+economics, without it it proves the provision→CRUD half against the committed schemas.
+
 ## Notes
 
 - `appitools validate` (no `--json`) stays human-readable and is the semantic
