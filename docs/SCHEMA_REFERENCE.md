@@ -1274,6 +1274,14 @@ unknown hook type "<type>": must be "js", "webhook", or "wasm"
 
 Note: the validator only enforces the **presence** of the type-appropriate key. It does **not** reject a hook that *also* carries keys irrelevant to its type (e.g. a `js` hook that also sets `url`) — those keys are simply ignored at runtime, as long as every key is in the allowed set below.
 
+**After-hooks must be `webhook` (SEC-AUDIT-V2).** A `js` or `wasm` hook on `after_create` / `after_update` is **rejected at load** — a sandboxed hook runs *after* the commit with no way to change the row and no I/O, so it could only ever be a silent no-op:
+
+```
+after_create hooks of type "js" are not supported — a sandboxed hook running after the commit cannot change the row or reach an external system; use a "webhook" after-hook to notify externally, or a before_create/before_update hook to transform the write
+```
+
+So: `js`/`wasm` belong on `before_create` / `before_update` (where they transform/validate the write); `webhook` is the only meaningful after-hook (external notification).
+
 ### 8.3 The full `HookConfig` key set
 
 The strict-key allowlist for a hook object (`pkg/schema/keys.go`, the `addUnknown` call for `…hooks.<event>`) is exactly:
@@ -1303,7 +1311,7 @@ A `js` hook runs `script` in a fresh Goja VM per invocation (`pkg/extensions/js_
 **Bindings injected into the VM:**
 
 - `data` — the mutable request record (a JS object of the incoming write body). The script may read and modify it.
-- `user` — the caller context object. (Note: in the live CRUD path the engine passes `nil` for the user context — see the finding "`user` is nil on the CRUD path".)
+- `user` — the caller/actor context (SEC-AUDIT-V2): `user.user_id`, `user.role`, `user.tenant_id` from the JWT claims (and `user.external_client_id` when present), so a before-hook knows WHO performed the operation. It is `nil` only when there are no claims (an internal call without a JWT). Built by `auth.HookUserContext`.
 - `result` — an object pre-initialised to `{ proceed: true, data: <the record>, error: "" }`.
 
 **The contract** — to reject a write, set `result.proceed = false` and `result.error = "<message>"`. The script's final `result` object decides the outcome:
@@ -1331,7 +1339,7 @@ A `js` hook runs `script` in a fresh Goja VM per invocation (`pkg/extensions/js_
 
 (Note: the engine ships `isValidNIT` *and* `validateNIT` as distinct helpers — `isValidNIT` is a regex shape check; `validateNIT` is the algorithmic check-digit validator. AGENTS.md lists only `validateNIT`.)
 
-**`js` and `after_*` events:** a `js` hook only does meaningful work on `before_create` / `before_update`. On `after_create` / `after_update` a `js` hook is a **no-op** (`RunAfterHook` only dispatches `webhook` type; the `js` case is an explicit no-op). So put validation/transformation logic in a `before_*` `js` hook.
+**`js` and `after_*` events:** a `js` (or `wasm`) hook is **only valid on `before_create` / `before_update`** — declaring one on `after_create` / `after_update` is **rejected at schema load** (SEC-AUDIT-V2; it would be a post-commit no-op, see §8.2). Put validation/transformation logic in a `before_*` `js` hook; use a `webhook` for after-the-fact notification.
 
 ### 8.5 `webhook` hooks — async signed POST
 
@@ -1343,7 +1351,7 @@ A `webhook` hook (`pkg/extensions/webhook_dispatcher.go`, `WebhookDispatcher.Dis
 **Request shape** — POST with JSON body (the record / payload), headers:
 
 - `Content-Type: application/json`
-- `X-Appitools-Event: after_create` — **always the literal string `after_create`**, regardless of the actual lifecycle event. `FireAfterHook`/`RunAfterHook` take no event argument and `RunAfterHook` calls `dispatcher.Dispatch(ctx, hook, "after_create", …)` with the value hard-coded, so an `after_update` webhook also sends `X-Appitools-Event: after_create` (see the finding "webhook event header is always `after_create`").
+- `X-Appitools-Event: <event>` — the **real lifecycle event** (`after_create` or `after_update`): the runner threads it through `FireAfterHook`→`RunAfterHook`→`Dispatch` (SEC-AUDIT-V2), so an `after_update` webhook sends `X-Appitools-Event: after_update`.
 - `X-Appitools-Signature: sha256=<hmac>` where `<hmac>` is hex `HMAC-SHA256(secret, body)`. The secret is read from the environment variable **named** by `hmac_secret_env` (`os.Getenv(hook.HMACSecretEnv)` — an unset/empty env var simply yields an empty-key HMAC).
 
 **HTTPS-only + SSRF guard** (production dispatcher, `NewWebhookDispatcher`):
@@ -1429,7 +1437,7 @@ A `webhook` `after_create` hook (HMAC secret read from env var `WEBHOOK_SECRET_I
 }
 ```
 
-The receiver verifies the delivery by recomputing `HMAC-SHA256(os.Getenv("WEBHOOK_SECRET_INVOICES"), rawBody)` and comparing it (hex) against the value after `sha256=` in the `X-Appitools-Signature` header. Note the `X-Appitools-Event` header is `after_create` for both `after_create` and `after_update` webhooks (see §8.5).
+The receiver verifies the delivery by recomputing `HMAC-SHA256(os.Getenv("WEBHOOK_SECRET_INVOICES"), rawBody)` and comparing it (hex) against the value after `sha256=` in the `X-Appitools-Signature` header. The `X-Appitools-Event` header carries the real event (`after_create` or `after_update`; see §8.5).
 
 ---
 
@@ -1684,7 +1692,7 @@ Request body:
 One endpoint (`pkg/graphql/handler.go`). Resource names are singularized + PascalCased for type/mutation names (`tasks` → `Task`, `createTask`).
 
 - **Queries:**
-  - `{res}(page, per_page, filter, order)` — list, returns a `{res}Connection` with `data`, `meta` (`page`, `per_page`, `total`, `total_pages`, `has_next`, `has_prev` — all NonNull), and `links` (`self`/`first`/`last`/`next`/`prev`). Nested relation fields embed via the same `json_agg`+`LATERAL` query as REST `?include=`. **GraphQL list ALWAYS runs a `COUNT(*)`** (to populate `total`/`total_pages`) — there is no opt-in like REST's `?count=true`, and GraphQL exposes **no keyset cursors** (`after`/`before`); only `page`/`per_page` offset pagination is forwarded to the query builder.
+  - `{res}(page, per_page, filter, order)` — list, returns a `{res}Connection` with `data`, `meta` (`page`, `per_page`, `total`, `total_pages`, `has_next`, `has_prev`), and `links` (`self`/`first`/`last`/`next`/`prev`). Nested relation fields embed via the same `json_agg`+`LATERAL` query as REST `?include=`. The **`COUNT(*)` is lazy** (SEC-AUDIT-V2): it runs **only when** `meta.total` / `meta.total_pages` / `links.last` is selected — a list that doesn't ask for the total pays no COUNT (consistent with REST's opt-in `?count=true`). `has_next` is page-fullness (`len(data) == per_page`), matching REST. GraphQL still exposes **no keyset cursors** (`after`/`before`); only `page`/`per_page` offset pagination is forwarded to the query builder (a documented future increment).
   - `{singular}(id: ID!)` — get by id.
   - `{res}Aggregate(count, sum, avg, min, max, group_by, filter)` — returns `AggregateResult { count, values{fn,field,value}, groups{key{field,value},count,values} }`. Aggregate `value`s are Strings (one shape carries ints/floats/timestamps); `count` is null when `group_by` is used.
 - **Mutations** (each exists only when applicable):
@@ -2003,11 +2011,14 @@ audit. Knowing these is essential for generating schemas that behave as intended
 ### A.1 High-impact (behavior contradicts documentation or expectation)
 
 1. **`json` fields ARE filterable by `eq`** — the README/AGENTS.md field-type
-   table says `json` has *no* filter operators. In fact `json` is simply absent
+   table said `json` has *no* filter operators. In fact `json` is simply absent
    from `operatorsForType`, and `validateFilterOp` falls into its "unknown type →
    allow `eq` only" branch, so `filter[<jsonfield>]=v` is accepted and emits
    `<field> = $1` over the TEXT column. Only `eq` works; `gt`/`partial`/etc. are
    still rejected. (`pkg/query/builder.go:36-44, 378-384`) **(verified)**
+   **✅ DOC-ALIGNED (SEC-AUDIT-V2):** the code is correct (eq is a sensible exact-
+   match on the stored text); §3's type table and AGENTS.md now document `json` as
+   `eq`-only rather than "none". No code change.
 
 2. **RBAC row conditions ignore `op` — filtering is ALWAYS equality.**
    **✅ RESOLVED (SEC-AUDIT-V1):** the row condition is enforced as equality
@@ -2041,25 +2052,32 @@ audit. Knowing these is essential for generating schemas that behave as intended
    PARENT, so a role could read related rows/fields it could not see via
    `GET /api/{related}`.
 
-4. **Only `webhook` *after*-hooks fire; JS/WASM after-hooks are silent no-ops, and
-   there are no delete hooks.** A `type:"js"` `after_create`/`after_update` hook
-   passes validation but does nothing — `RunAfterHook` switches only on
-   `"webhook"` (js is an explicit no-op, wasm unhandled).
-   (`pkg/extensions/hook_runner.go:167-183`) **(verified)**
+4. **JS/WASM after-hooks were silent no-ops.**
+   **✅ RESOLVED (SEC-AUDIT-V2):** a `js`/`wasm` `after_create`/`after_update` hook
+   is now **rejected at schema load** (a sandboxed hook running after the commit
+   can neither change the row nor reach an external system, so it could only ever
+   be a no-op). Use a `webhook` after-hook to notify externally, or a
+   `before_create`/`before_update` js/wasm hook to transform the write. (There are
+   still no delete hooks — by design.) (`pkg/schema/validator.go`, the hook loop)
 
-5. **The webhook `X-Appitools-Event` header is hard-coded to `after_create`** for
-   *every* after-hook — an `after_update` webhook still reports `after_create`.
-   (`pkg/extensions/hook_runner.go:178`) **(verified)**
+   *Original finding:* `RunAfterHook` switched only on `"webhook"`; a js/wasm
+   after-hook passed validation and did nothing.
 
-6. **GraphQL↔REST list asymmetry (inverted vs the docs).** GraphQL lists
-   *always* run `COUNT(*)` and return `total`/`total_pages` + a `links` object;
-   REST returns the total only on opt-in `?count=true`. GraphQL also computes
-   `has_next` from the total (`total > page*per_page`) while REST uses page
-   fullness (`len(data) == per_page`) — so they disagree on a final page that is
-   exactly full. And **GraphQL has no keyset pagination** (`after`/`before`):
-   GraphQL lists are OFFSET-only, even though keyset is the documented preferred
-   REST mode. (`pkg/graphql/handler.go` `listResolver`, `argsToURLValues` vs
-   `pkg/codegen/builder.go`)
+5. **The webhook `X-Appitools-Event` header was hard-coded to `after_create`.**
+   **✅ RESOLVED (SEC-AUDIT-V2):** the runner now threads the real event through
+   `FireAfterHook`→`RunAfterHook`→`Dispatch`, so an `after_update` webhook carries
+   `X-Appitools-Event: after_update`. (`pkg/extensions/hook_runner.go`)
+
+6. **GraphQL↔REST list asymmetry.**
+   **✅ RESOLVED (SEC-AUDIT-V2) — COUNT + has_next:** GraphQL no longer runs
+   `COUNT(*)` by default — `meta.total` / `meta.total_pages` / `links.last` are
+   **lazy field resolvers** that run the COUNT only when selected (consistent with
+   REST's opt-in `?count=true`, and measurably cheaper: a default list dropped
+   from p50 ≈ 3.3 ms to ≈ 2.7 ms in an A/B). A client that selects `total` still
+   gets it (no breakage). `has_next` now matches REST (`len(data) == per_page`).
+   **Still open:** GraphQL has no keyset (`after`/`before`) — a documented future
+   increment; GraphQL lists remain OFFSET-paginated. (`pkg/graphql/handler.go`
+   `listResolver` + `resolveTotal`/`resolveTotalPages`/`resolveLastLink`)
 
 7. **The legacy role-global RBAC form is not field-validated.**
    **✅ RESOLVED (SEC-AUDIT-V1):** the role-global form now validates, at load,
@@ -2156,10 +2174,12 @@ audit. Knowing these is essential for generating schemas that behave as intended
     the JS watchdog uses fixed budgets (≈80 ms soft / 500 ms hard) regardless.
     (`pkg/schema/types.go` `HookConfig`)
 
-23. **A hook's `user` context is always `nil` on the live CRUD path** — both REST
-    and GraphQL pass `nil` for `userCtx` to `RunBeforeHook`, so a JS hook's `user`
-    binding is empty. (`pkg/codegen/builder.go:462,773,918`;
-    `pkg/graphql/handler.go:1012,1128`) **(verified)**
+23. **A hook's `user` context was always `nil` on the live CRUD path.**
+    **✅ RESOLVED (SEC-AUDIT-V2):** REST and GraphQL now pass
+    `auth.HookUserContext(ctx)` to `RunBeforeHook`, so a before-hook's `user`
+    binding carries the actor (`user.user_id`, `user.role`, `user.tenant_id`) from
+    the JWT claims. (`pkg/auth/middleware.go` `HookUserContext`; the
+    `RunBeforeHook` call sites in `pkg/codegen/builder.go` + `pkg/graphql/handler.go`)
 
 24. **A throwing/failing JS *before*-hook is a 422** (`{"error": <js error>}`),
     not a 500. (`pkg/extensions` + `pkg/codegen/builder.go`)

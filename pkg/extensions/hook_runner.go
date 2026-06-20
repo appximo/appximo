@@ -139,34 +139,38 @@ func (hr *HookRunner) runWasmBeforeHook(
 //
 // This is the production entry point used by the create handler; prefer it over
 // `go hr.RunAfterHook(...)` so the number of in-flight dispatches stays bounded.
-func (hr *HookRunner) FireAfterHook(hook *schema.HookConfig, record map[string]any, tenantID string) bool {
+func (hr *HookRunner) FireAfterHook(hook *schema.HookConfig, event string, record map[string]any, tenantID string) bool {
 	if hook == nil {
 		return true
 	}
 	select {
 	case hr.afterSem <- struct{}{}:
 	default:
-		log.Printf("WEBHOOK [%s] dispatch pool saturated (cap=%d); dropping %s after_create hook",
-			tenantID, cap(hr.afterSem), hook.Type)
+		log.Printf("WEBHOOK [%s] dispatch pool saturated (cap=%d); dropping %s %s hook",
+			tenantID, cap(hr.afterSem), hook.Type, event)
 		return false
 	}
 	go func() {
 		defer func() { <-hr.afterSem }()
-		// Detached context: the after_create dispatch must survive the request
-		// it was triggered by (fire-and-forget). The dispatcher enforces its own
-		// per-request timeout and retry budget.
-		hr.RunAfterHook(context.Background(), hook, record, tenantID)
+		// Detached context: the after-hook dispatch must survive the request it was
+		// triggered by (fire-and-forget). The dispatcher enforces its own per-request
+		// timeout and retry budget.
+		hr.RunAfterHook(context.Background(), hook, event, record, tenantID)
 	}()
 	return true
 }
 
-// RunAfterHook fires the after_create hook synchronously on the calling
-// goroutine. Production code should call FireAfterHook (which bounds concurrency
-// and returns immediately); RunAfterHook is kept for direct/synchronous use and
-// is the worker invoked by FireAfterHook.
+// RunAfterHook fires an after-hook synchronously on the calling goroutine. event is
+// the REAL lifecycle event ("after_create" | "after_update") so the webhook carries
+// the correct X-Appitools-Event header (SEC-AUDIT-V2 Hallazgo B). Production code
+// should call FireAfterHook (which bounds concurrency and returns immediately);
+// RunAfterHook is the worker it invokes. Only "webhook" after-hooks do anything —
+// js/wasm after-hooks are rejected at schema load (see schema.Validate), so the
+// js/wasm branch here is unreachable from a validated schema and kept fail-safe.
 func (hr *HookRunner) RunAfterHook(
 	ctx context.Context,
 	hook *schema.HookConfig,
+	event string,
 	record map[string]any,
 	tenantID string,
 ) {
@@ -175,8 +179,8 @@ func (hr *HookRunner) RunAfterHook(
 	}
 	switch hook.Type {
 	case "webhook":
-		hr.dispatcher.Dispatch(ctx, hook, "after_create", record, tenantID)
-	case "js":
-		// JS after_create hooks are not supported — no-op.
+		hr.dispatcher.Dispatch(ctx, hook, event, record, tenantID)
+	default:
+		// js/wasm after-hooks are rejected at load — a no-op here is defense in depth.
 	}
 }

@@ -19,6 +19,28 @@ func ClaimsFromCtx(ctx context.Context) *Claims {
 	return v
 }
 
+// HookUserContext builds the `user` binding passed to a lifecycle hook from the
+// request's JWT claims (SEC-AUDIT-V2 Hallazgo B): so a before_create/before_update
+// js/wasm hook can see WHO performed the operation (`user.user_id`, `user.role`,
+// `user.tenant_id`). Returns nil when there are no claims (e.g. an internal call
+// without a JWT) — the hook's `user` is then nil, the pre-fix behavior. The SAME
+// shape is used on REST and GraphQL so a hook is portable across both surfaces.
+func HookUserContext(ctx context.Context) map[string]any {
+	c := ClaimsFromCtx(ctx)
+	if c == nil {
+		return nil
+	}
+	uc := map[string]any{
+		"user_id":   c.UserID,
+		"role":      c.Role,
+		"tenant_id": c.TenantID,
+	}
+	if c.ExternalClientID != "" {
+		uc["external_client_id"] = c.ExternalClientID
+	}
+	return uc
+}
+
 // skipJWT lists path prefixes that bypass JWT enforcement.
 // /metrics, /debug and /admin carry their own admin-key gate (observability.AdminAuth),
 // so JWT is not enforced on them — they must never require a tenant Bearer token.

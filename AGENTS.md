@@ -257,7 +257,7 @@ silently dead config.
 | `time` | TIMESTAMPTZ | `eq`, `gt`, `gte`, `lt`, `lte`, `after`, `before` |
 | `uuid` | UUID | `eq` |
 | `bool` | BOOLEAN | `eq` |
-| `json` | TEXT (stored as text) | none — not filterable |
+| `json` | TEXT (stored as text) | `eq` only (exact match on the stored text) |
 
 ### Field keys
 
@@ -579,8 +579,11 @@ grant:
 Declared per resource under `hooks`. Events are exactly
 `before_create | after_create | before_update | after_update` — there
 are **no delete hooks**, and any other event name is rejected at
-validation. Three hook types (all fields below verified against
-`pkg/schema/types.go`):
+validation. **After-hooks (`after_create`/`after_update`) must be `webhook`**:
+a `js`/`wasm` after-hook is rejected at load (a sandboxed hook runs post-commit
+with no way to change the row or reach out — it would be a silent no-op; put
+js/wasm logic in a `before_*` hook). Three hook types (all fields below verified
+against `pkg/schema/types.go`):
 
 ```json
 "hooks": {
@@ -597,10 +600,12 @@ validation. Three hook types (all fields below verified against
 ```
 
 - `js` — Goja sandbox, watchdog-interrupted (80 ms soft / 500 ms hard).
-  `data` is the record; setting `result.proceed = false` +
-  `result.error` rejects the write with 422. Built-ins available:
-  `validateNIT`, `calculateCUFE`, `isValidEmail`, `formatMoney`.
-- `webhook` — async signed POST: headers `X-Appitools-Event` and
+  `data` is the record; `user` is the actor (`user.user_id`/`role`/`tenant_id`
+  from the JWT claims); setting `result.proceed = false` + `result.error`
+  rejects the write with 422. Built-ins available: `validateNIT`,
+  `calculateCUFE`, `isValidEmail`, `formatMoney`. (`before_*` only.)
+- `webhook` — async signed POST: headers `X-Appitools-Event` (the real event:
+  `after_create` or `after_update`) and
   `X-Appitools-Signature: sha256=<hmac>`; 3 retries with backoff.
   **`hmac_secret_env` is the NAME of an env var holding the secret**,
   not the secret itself (a `"secret"` key does not exist). Constraints
@@ -834,8 +839,10 @@ subroutes.
 - **Total count (opt-in)**: `?count=true` on a list adds `meta.total` +
   `meta.total_pages` (a `COUNT(*)` over the SAME filtered + RBAC-scoped set).
   **Off by default** — the plain list pays nothing and is byte-identical; turn it
-  on only when you need the total (closes the old REST↔GraphQL asymmetry: GraphQL
-  always returned `total`).
+  on only when you need the total. GraphQL matches this: its `meta.total` /
+  `meta.total_pages` are **lazy** — the `COUNT(*)` runs only when those fields are
+  selected (SEC-AUDIT-V2), so a GraphQL list that doesn't ask for the total pays no
+  COUNT either.
 - Responses are `{"data": [...], "meta": {...}}`.
 
 ## Aggregation (G3)

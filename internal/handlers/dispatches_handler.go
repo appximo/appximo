@@ -142,7 +142,7 @@ func (h *Handlers) CreateDispatches(w http.ResponseWriter, r *http.Request) {
 		if len(result) > 0 {
 			record = result[0]
 		}
-		go h.hr.RunAfterHook(context.Background(), afterHook, record, tc.ID)
+		go h.hr.RunAfterHook(context.Background(), afterHook, "after_create", record, tc.ID)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

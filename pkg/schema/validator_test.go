@@ -263,6 +263,54 @@ func TestValidate_EmptyEnum(t *testing.T) {
 	}
 }
 
+// TestValidate_AfterHookType proves SEC-AUDIT-V2 Hallazgo A: an after_create /
+// after_update hook of type js or wasm is rejected at load (it would be a silent
+// no-op — the sandbox runs post-commit with no I/O and a discarded result), while a
+// webhook after-hook and js/wasm BEFORE-hooks remain valid.
+func TestValidate_AfterHookType(t *testing.T) {
+	mk := func(event, typ string) *schema.APISchema {
+		h := schema.HookConfig{Type: typ}
+		switch typ {
+		case "js":
+			h.Script = "result.proceed = true;"
+		case "wasm":
+			h.WasmModule = "m"
+		case "webhook":
+			h.URL = "https://example.com/hook"
+		}
+		return &schema.APISchema{
+			Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+			Resources: map[string]schema.ResourceSchema{
+				"tasks": {
+					Fields: map[string]schema.FieldDef{"title": {Type: "string"}},
+					Hooks:  map[string]schema.HookConfig{event: h},
+				},
+			},
+		}
+	}
+	// Rejected: js/wasm on after_create and after_update.
+	for _, event := range []string{"after_create", "after_update"} {
+		for _, typ := range []string{"js", "wasm"} {
+			if errs := schema.Validate(mk(event, typ)); !hasError(errs, "are not supported") {
+				t.Errorf("%s of type %q must be rejected, got: %v", event, typ, errs)
+			}
+		}
+	}
+	// Valid: webhook after-hooks, and js/wasm before-hooks.
+	for _, event := range []string{"after_create", "after_update"} {
+		if errs := schema.Validate(mk(event, "webhook")); hasError(errs, "are not supported") {
+			t.Errorf("%s webhook must be valid, got: %v", event, errs)
+		}
+	}
+	for _, event := range []string{"before_create", "before_update"} {
+		for _, typ := range []string{"js", "wasm"} {
+			if errs := schema.Validate(mk(event, typ)); hasError(errs, "are not supported") {
+				t.Errorf("%s of type %q must be valid, got: %v", event, typ, errs)
+			}
+		}
+	}
+}
+
 func hasError(errs []schema.ValidationError, substr string) bool {
 	for _, e := range errs {
 		if strings.Contains(e.Field, substr) || strings.Contains(e.Message, substr) {

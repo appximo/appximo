@@ -341,13 +341,19 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 			"lte": &gql.InputObjectFieldConfig{Type: gql.Float},
 		},
 	})
+	// total / total_pages are LAZY (SEC-AUDIT-V2 Hallazgo C): their resolvers run
+	// the COUNT(*) only when the field is actually selected, so a list query that
+	// does not ask for the total pays no COUNT (consistent with REST's opt-in
+	// ?count=true, and cheaper). A client that DOES select total still gets it
+	// (no breakage). graphql-go invokes a field resolver iff the field is in the
+	// selection — fragment-correct, no AST walking needed.
 	pageMeta := gql.NewObject(gql.ObjectConfig{
 		Name: "PageMeta",
 		Fields: gql.Fields{
 			"page":        &gql.Field{Type: gql.NewNonNull(gql.Int)},
 			"per_page":    &gql.Field{Type: gql.NewNonNull(gql.Int)},
-			"total":       &gql.Field{Type: gql.NewNonNull(gql.Int)},
-			"total_pages": &gql.Field{Type: gql.NewNonNull(gql.Int)},
+			"total":       &gql.Field{Type: gql.NewNonNull(gql.Int), Resolve: resolveTotal},
+			"total_pages": &gql.Field{Type: gql.NewNonNull(gql.Int), Resolve: resolveTotalPages},
 			"has_next":    &gql.Field{Type: gql.NewNonNull(gql.Boolean)},
 			"has_prev":    &gql.Field{Type: gql.NewNonNull(gql.Boolean)},
 		},
@@ -357,7 +363,7 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 		Fields: gql.Fields{
 			"self":  &gql.Field{Type: gql.String},
 			"first": &gql.Field{Type: gql.String},
-			"last":  &gql.Field{Type: gql.String},
+			"last":  &gql.Field{Type: gql.String, Resolve: resolveLastLink}, // lazy: needs the COUNT
 			"next":  &gql.Field{Type: gql.String},
 			"prev":  &gql.Field{Type: gql.String},
 		},
@@ -795,9 +801,24 @@ func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, pol
 
 		selectQ, countQ, selectArgs, countArgs := qb.SQL()
 
-		total, err := tdb.QueryScalarTenant(p.Context, tc.PGSchema, countQ, countArgs...)
-		if err != nil {
-			return nil, safeDBErr(err)
+		// COUNT is LAZY (SEC-AUDIT-V2 Hallazgo C): memoized, run at most once, and
+		// ONLY if meta.total / meta.total_pages / links.last is actually selected
+		// (their field resolvers call this). A list query that doesn't ask for the
+		// total pays no COUNT — consistent with REST's opt-in ?count=true.
+		var (
+			countMu  sync.Mutex
+			counted  bool
+			countVal int64
+			countErr error
+		)
+		countFn := func() (int64, error) {
+			countMu.Lock()
+			defer countMu.Unlock()
+			if !counted {
+				countVal, countErr = tdb.QueryScalarTenant(p.Context, tc.PGSchema, countQ, countArgs...)
+				counted = true
+			}
+			return countVal, countErr
 		}
 
 		// Register the base field allowlist so the result scrubber drops any
@@ -845,11 +866,10 @@ func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, pol
 			data = []map[string]any{}
 		}
 
-		totalPages := (total + int64(qb.PerPage()) - 1) / int64(qb.PerPage())
-		if totalPages == 0 {
-			totalPages = 1
-		}
-		hasNext := total > int64(qb.Page()*qb.PerPage())
+		// has_next from page fullness (len(data) == per_page), MATCHING REST — no
+		// COUNT needed, and it removes the prior REST↔GraphQL disagreement on a full
+		// final page (SEC-AUDIT-V2 Hallazgo C).
+		hasNext := len(data) == qb.PerPage()
 		hasPrev := qb.Page() > 1
 
 		buildLink := func(pg int) string {
@@ -861,7 +881,19 @@ func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, pol
 		links := map[string]any{
 			"self":  buildLink(qb.Page()),
 			"first": buildLink(1),
-			"last":  buildLink(int(totalPages)),
+			// last is lazy (resolveLastLink): it needs the total, so it runs the COUNT
+			// only when links.last is selected.
+			"__last": func() (any, error) {
+				total, err := countFn()
+				if err != nil {
+					return nil, err
+				}
+				tp := (total + int64(qb.PerPage()) - 1) / int64(qb.PerPage())
+				if tp == 0 {
+					tp = 1
+				}
+				return buildLink(int(tp)), nil
+			},
 		}
 		if hasNext {
 			links["next"] = buildLink(qb.Page() + 1)
@@ -873,16 +905,72 @@ func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, pol
 		return map[string]any{
 			"data": data,
 			"meta": map[string]any{
-				"page":        qb.Page(),
-				"per_page":    qb.PerPage(),
-				"total":       int(total),
-				"total_pages": int(totalPages),
-				"has_next":    hasNext,
-				"has_prev":    hasPrev,
+				"page":     qb.Page(),
+				"per_page": qb.PerPage(),
+				"has_next": hasNext,
+				"has_prev": hasPrev,
+				// total / total_pages are resolved lazily from this COUNT closure
+				// (resolveTotal / resolveTotalPages) — only if selected.
+				"__count": countFn,
 			},
 			"links": links,
 		}, nil
 	}
+}
+
+// resolveTotal is the lazy resolver for PageMeta.total: it runs the list's memoized
+// COUNT closure (stored under "__count" by listResolver) only when total is
+// selected. Absent closure (defensive) ⇒ 0.
+func resolveTotal(p gql.ResolveParams) (any, error) {
+	n, err := countFromSource(p.Source)
+	return n, err
+}
+
+// resolveTotalPages is the lazy resolver for PageMeta.total_pages: COUNT → ceil by
+// per_page (min 1).
+func resolveTotalPages(p gql.ResolveParams) (any, error) {
+	total, err := countFromSource(p.Source)
+	if err != nil {
+		return nil, err
+	}
+	per := 1
+	if m, ok := p.Source.(map[string]any); ok {
+		if pp, ok := m["per_page"].(int); ok && pp > 0 {
+			per = pp
+		}
+	}
+	tp := (total + per - 1) / per
+	if tp == 0 {
+		tp = 1
+	}
+	return tp, nil
+}
+
+// resolveLastLink is the lazy resolver for PageLinks.last: it calls the "__last"
+// closure (which runs the COUNT) only when links.last is selected.
+func resolveLastLink(p gql.ResolveParams) (any, error) {
+	m, ok := p.Source.(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+	if lf, ok := m["__last"].(func() (any, error)); ok {
+		return lf()
+	}
+	return m["last"], nil
+}
+
+// countFromSource pulls the memoized COUNT closure ("__count") from a PageMeta
+// source map and runs it, returning the total as an int. Absent ⇒ 0.
+func countFromSource(src any) (int, error) {
+	m, ok := src.(map[string]any)
+	if !ok {
+		return 0, nil
+	}
+	if cf, ok := m["__count"].(func() (int64, error)); ok {
+		n, err := cf()
+		return int(n), err
+	}
+	return 0, nil
 }
 
 func getByIDResolver(name string, tdb *db.TenantDB, policy *rbac.Policy, s *schema.APISchema) gql.FieldResolveFn {
@@ -1009,7 +1097,7 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		}
 
 		hc := hookCfg(name, "before_create", res)
-		hookRes, err := hr.RunBeforeHook(p.Context, hc, input, nil)
+		hookRes, err := hr.RunBeforeHook(p.Context, hc, input, auth.HookUserContext(p.Context))
 		if err != nil {
 			return nil, err
 		}
@@ -1055,7 +1143,7 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 			// Bounded async dispatch — same as the REST path. A previous version
 			// spawned an unbounded `go RunAfterHook` per mutation, which a create
 			// storm could turn into unbounded in-flight goroutines.
-			hr.FireAfterHook(afterHook, record, tc.ID)
+			hr.FireAfterHook(afterHook, "after_create", record, tc.ID)
 		}
 
 		if len(result) > 0 {
@@ -1125,7 +1213,7 @@ func updateResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 
 		// before_update hook (same contract as REST / GraphQL create).
 		hc := hookCfg(name, "before_update", res)
-		hookRes, herr := hr.RunBeforeHook(p.Context, hc, input, nil)
+		hookRes, herr := hr.RunBeforeHook(p.Context, hc, input, auth.HookUserContext(p.Context))
 		if herr != nil {
 			return nil, herr
 		}
@@ -1168,7 +1256,7 @@ func updateResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		gqlPublish(hub, tc.ID, name, "update", record, "")
 
 		if ah := hookCfg(name, "after_update", res); ah != nil {
-			hr.FireAfterHook(ah, record, tc.ID)
+			hr.FireAfterHook(ah, "after_update", record, tc.ID)
 		}
 
 		if evalResult != nil && len(evalResult.AllowedFields) > 0 {

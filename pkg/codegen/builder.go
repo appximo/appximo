@@ -458,7 +458,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				c := hc
 				beforeHook = &c
 			}
-			hookRes, hookErr := hr.RunBeforeHook(req.Context(), beforeHook, body, nil)
+			hookRes, hookErr := hr.RunBeforeHook(req.Context(), beforeHook, body, auth.HookUserContext(req.Context()))
 			if hookErr != nil {
 				// before_create hook failed to execute → 500: capture the stack.
 				capture500(req, hookErr)
@@ -542,7 +542,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				// Bounded async dispatch: returns immediately, never blocks the
 				// 201 on webhook latency, and caps in-flight dispatches so a
 				// create storm cannot spawn unbounded goroutines.
-				hr.FireAfterHook(&afterHook, record, tc.ID)
+				hr.FireAfterHook(&afterHook, "after_create", record, tc.ID)
 			}
 
 			w.Header().Set("Content-Type", "application/json")
@@ -769,7 +769,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					c := hc
 					beforeHook = &c
 				}
-				hookRes, hookErr := hr.RunBeforeHook(req.Context(), beforeHook, body, nil)
+				hookRes, hookErr := hr.RunBeforeHook(req.Context(), beforeHook, body, auth.HookUserContext(req.Context()))
 				if hookErr != nil {
 					capture500(req, hookErr)
 					writeJSONErr(w, http.StatusInternalServerError, "internal error")
@@ -842,7 +842,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 
 				if hc, ok := res.Hooks["after_update"]; ok {
 					afterHook := hc
-					hr.FireAfterHook(&afterHook, record, tc.ID)
+					hr.FireAfterHook(&afterHook, "after_update", record, tc.ID)
 				}
 
 				if evalResult != nil && len(evalResult.AllowedFields) > 0 {
@@ -944,7 +944,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 	// before-hook result is mapped here (where hr lives) so transaction.go stays
 	// decoupled from the HookRunner's result type.
 	hookEval := func(ctx context.Context, hook *schema.HookConfig, body map[string]any) (map[string]any, int, string) {
-		hookRes, hookErr := hr.RunBeforeHook(ctx, hook, body, nil)
+		hookRes, hookErr := hr.RunBeforeHook(ctx, hook, body, auth.HookUserContext(ctx))
 		if hookErr != nil {
 			return nil, http.StatusInternalServerError, "internal error"
 		}

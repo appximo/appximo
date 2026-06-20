@@ -34,7 +34,7 @@ func TestFireAfterHook_BoundsConcurrency(t *testing.T) {
 	hook := &schema.HookConfig{Type: "webhook", URL: srv.URL}
 	admitted, dropped := 0, 0
 	for i := 0; i < 5; i++ {
-		if hr.FireAfterHook(hook, map[string]any{"id": i}, "t") {
+		if hr.FireAfterHook(hook, "after_create", map[string]any{"id": i}, "t") {
 			admitted++
 		} else {
 			dropped++
@@ -74,7 +74,7 @@ func TestFireAfterHook_NonBlocking(t *testing.T) {
 	hook := &schema.HookConfig{Type: "webhook", URL: srv.URL}
 
 	start := time.Now()
-	if !hr.FireAfterHook(hook, map[string]any{"id": "x"}, "t") {
+	if !hr.FireAfterHook(hook, "after_create", map[string]any{"id": "x"}, "t") {
 		t.Fatal("expected FireAfterHook to admit the dispatch")
 	}
 	if elapsed := time.Since(start); elapsed > 20*time.Millisecond {
@@ -85,7 +85,7 @@ func TestFireAfterHook_NonBlocking(t *testing.T) {
 // A nil hook is a no-op that reports success (true) and dispatches nothing.
 func TestFireAfterHook_NilHook(t *testing.T) {
 	hr := extensions.NewHookRunner(extensions.NewJSSandbox())
-	if !hr.FireAfterHook(nil, map[string]any{"id": "x"}, "t") {
+	if !hr.FireAfterHook(nil, "after_create", map[string]any{"id": "x"}, "t") {
 		t.Fatal("nil hook should return true (no-op)")
 	}
 }

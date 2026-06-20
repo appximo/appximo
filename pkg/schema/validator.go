@@ -273,6 +273,21 @@ func Validate(s *APISchema) []ValidationError {
 		for hookName, hook := range res.Hooks {
 			hookPrefix := resPrefix + ".hooks." + hookName
 
+			// after-hooks only do something as a `webhook` (SEC-AUDIT-V2 Hallazgo A):
+			// a sandboxed js/wasm hook runs POST-commit with no way to affect the
+			// already-written row and no I/O (the JS sandbox has no fetch/fs/db and
+			// its return value is discarded after the write), so a js/wasm after-hook
+			// would be a SILENT NO-OP. Reject it at load so the schema only declares
+			// what runs — use a "webhook" after-hook to notify an external system, or a
+			// before_create/before_update js/wasm hook to transform/validate the write.
+			if (hookName == "after_create" || hookName == "after_update") && (hook.Type == "js" || hook.Type == "wasm") {
+				errs = append(errs, ValidationError{
+					Field:   hookPrefix + ".type",
+					Message: fmt.Sprintf("%s hooks of type %q are not supported — a sandboxed hook running after the commit cannot change the row or reach an external system; use a \"webhook\" after-hook to notify externally, or a before_create/before_update hook to transform the write", hookName, hook.Type),
+				})
+				continue
+			}
+
 			switch hook.Type {
 			case "js":
 				if hook.Script == "" {

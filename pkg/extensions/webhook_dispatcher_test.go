@@ -77,6 +77,26 @@ func TestWebhookDispatcher_SignatureAndEvent(t *testing.T) {
 	}
 }
 
+// TestRunAfterHook_EventHeaderReflectsRealEvent proves SEC-AUDIT-V2 Hallazgo B: the
+// hook runner threads the REAL lifecycle event through to the webhook, so an
+// after_update hook carries X-Appitools-Event: after_update (previously hard-coded
+// to after_create).
+func TestRunAfterHook_EventHeaderReflectsRealEvent(t *testing.T) {
+	var gotEvent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEvent = r.Header.Get("X-Appitools-Event")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	hr := extensions.NewHookRunnerWithDispatcher(extensions.NewJSSandbox(), testDispatcher(), 0)
+	hook := &schema.HookConfig{Type: "webhook", URL: srv.URL}
+	hr.RunAfterHook(context.Background(), hook, "after_update", map[string]any{"id": "x"}, "t")
+	if gotEvent != "after_update" {
+		t.Fatalf("X-Appitools-Event: got %q, want after_update", gotEvent)
+	}
+}
+
 func TestWebhookDispatcher_RetriesOnFailure(t *testing.T) {
 	attempts := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
