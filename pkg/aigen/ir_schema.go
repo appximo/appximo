@@ -32,27 +32,31 @@ import "sort"
 // field `default` (string/number/bool). A union is still strict-subset-shaped
 // (it is just `type: [...]`); these stay the validator's job for the precise rule.
 func IROutputSchema() map[string]any {
-	actionEnum := irEnum("read", "create", "update", "delete", "*")
-
-	condition := irObj(map[string]any{
-		"field": irStr(),
-		"op":    irNullable(irEnum("eq")),
-		"val":   irStr(),
-	})
+	// Each builder call must return a FRESH map: irNullable mutates the node in
+	// place, so a shared sub-schema reused at two sites would be mutated twice
+	// (the live API rejected a doubly-applied null: type ["object","null","null"]).
+	actionEnum := func() map[string]any { return irEnum("read", "create", "update", "delete", "*") }
+	condition := func() map[string]any {
+		return irObj(map[string]any{
+			"field": irStr(),
+			"op":    irNullable(irEnum("eq")),
+			"val":   irStr(),
+		})
+	}
 
 	permissionItem := irObj(map[string]any{
 		"resource":          irStr(),
-		"actions":           irArr(actionEnum),
-		"conditions":        irNullable(condition),
-		"condition_actions": irNullable(irArr(actionEnum)),
+		"actions":           irArr(actionEnum()),
+		"conditions":        irNullable(condition()),
+		"condition_actions": irNullable(irArr(actionEnum())),
 		"fields":            irNullable(irArr(irStr())),
 	})
 
 	roleItem := irObj(map[string]any{
 		"name":        irStr(),
 		"resources":   irNullable(strOrArray()),
-		"actions":     irNullable(irArr(actionEnum)),
-		"conditions":  irNullable(condition),
+		"actions":     irNullable(irArr(actionEnum())),
+		"conditions":  irNullable(condition()),
 		"fields":      irNullable(irArr(irStr())),
 		"permissions": irNullable(irArr(permissionItem)),
 	})
@@ -188,14 +192,20 @@ func irObj(props map[string]any) map[string]any {
 // it widens `type` to include "null" and, when the node is an enum, adds null as a
 // member so the value is "one of the enum, OR null".
 func irNullable(s map[string]any) map[string]any {
+	// Nullable enum: the live strict API rejects an `enum` combined with a
+	// type-array ("enum value 'x' does not match declared type ['string','null']"),
+	// so a nullable enum carries null IN the enum and drops the explicit type — the
+	// enum alone constrains the value (one of the members, or null).
+	if e, ok := s["enum"].([]any); ok {
+		s["enum"] = append(e, nil)
+		delete(s, "type")
+		return s
+	}
 	switch t := s["type"].(type) {
 	case string:
 		s["type"] = []any{t, "null"}
 	case []any:
 		s["type"] = append(t, "null")
-	}
-	if e, ok := s["enum"].([]any); ok {
-		s["enum"] = append(e, nil)
 	}
 	return s
 }

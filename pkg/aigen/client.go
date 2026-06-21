@@ -27,6 +27,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -153,11 +154,12 @@ var ErrNoAPIKey = fmt.Errorf("aigen: ANTHROPIC_API_KEY is not set (export it to 
 // /v1/messages endpoint. No SDK dependency — the request/response shapes are
 // stable and small.
 type AnthropicClient struct {
-	apiKey    string
-	model     string
-	baseURL   string
-	maxTokens int
-	http      *http.Client
+	apiKey      string
+	model       string
+	baseURL     string
+	maxTokens   int
+	temperature float64
+	http        *http.Client
 }
 
 // NewAnthropicClient builds a client for the given model, reading the API key
@@ -177,16 +179,63 @@ func NewAnthropicClient(model string) (*AnthropicClient, error) {
 		base = "https://api.anthropic.com"
 	}
 	return &AnthropicClient{
-		apiKey:    key,
-		model:     model,
-		baseURL:   strings.TrimRight(base, "/"),
-		maxTokens: 8192, // a schema is a few KB; 8K output tokens is ample headroom
-		http:      &http.Client{Timeout: 120 * time.Second},
+		apiKey:  key,
+		model:   model,
+		baseURL: strings.TrimRight(base, "/"),
+		// 4096 output tokens is ample for any schema (even the largest array-IR
+		// compleja case is well under it) and HALVES the per-request reservation
+		// against an output-tokens-per-minute rate limit vs the old 8192 — so a
+		// rate-limited tier fits more requests per minute.
+		maxTokens: 4096,
+		// temperature 0 — greedy decoding, the most reproducible setting for schema
+		// generation and the measurement instrument (--live). A schema is a precise
+		// artifact, not creative writing; determinism is the goal.
+		temperature: 0,
+		http:        &http.Client{Timeout: 120 * time.Second},
 	}, nil
 }
 
 // Model returns the model id this client targets.
 func (c *AnthropicClient) Model() string { return c.model }
+
+// maxRetries bounds the retry-on-throttle loop in Complete. With exponential
+// backoff this tolerates a sustained rate-limited tier over a long --live run.
+const maxRetries = 8
+
+// backoffSleep waits before a retry: the server's Retry-After (seconds) when given,
+// else exponential backoff (2^attempt seconds, capped). Returns false if the
+// context is cancelled while waiting. Deterministic (no jitter) so --live stays as
+// reproducible as the API allows.
+func backoffSleep(ctx context.Context, attempt int, retryAfter time.Duration) bool {
+	d := retryAfter
+	if d <= 0 {
+		d = time.Duration(1<<uint(attempt)) * time.Second
+		if d > 30*time.Second {
+			d = 30 * time.Second
+		}
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+// parseRetryAfter reads a Retry-After header value as a whole-second duration (the
+// form the Anthropic API uses); 0 when absent or unparseable.
+func parseRetryAfter(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return 0
+}
 
 type cacheControl struct {
 	Type string `json:"type"`
@@ -210,6 +259,7 @@ type outputConfig struct {
 type apiRequest struct {
 	Model        string        `json:"model"`
 	MaxTokens    int           `json:"max_tokens"`
+	Temperature  float64       `json:"temperature"`
 	System       []systemBlock `json:"system,omitempty"`
 	Messages     []Message     `json:"messages"`
 	OutputConfig *outputConfig `json:"output_config,omitempty"`
@@ -241,9 +291,10 @@ type apiResponse struct {
 // Completion.Refused (not an error) so the loop can stop cleanly.
 func (c *AnthropicClient) Complete(ctx context.Context, req Request) (Completion, error) {
 	ar := apiRequest{
-		Model:     c.model,
-		MaxTokens: c.maxTokens,
-		Messages:  req.Messages,
+		Model:       c.model,
+		MaxTokens:   c.maxTokens,
+		Temperature: c.temperature,
+		Messages:    req.Messages,
 	}
 	if req.System != "" {
 		// One cached block: the system prompt is identical every iteration and
@@ -263,35 +314,68 @@ func (c *AnthropicClient) Complete(ctx context.Context, req Request) (Completion
 		return Completion{}, fmt.Errorf("aigen: marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/messages", bytes.NewReader(body))
-	if err != nil {
-		return Completion{}, fmt.Errorf("aigen: build request: %w", err)
-	}
-	httpReq.Header.Set("x-api-key", c.apiKey)
-	httpReq.Header.Set("anthropic-version", "2023-06-01")
-	httpReq.Header.Set("content-type", "application/json")
-
-	resp, err := c.http.Do(httpReq)
-	if err != nil {
-		return Completion{}, fmt.Errorf("aigen: call API: %w", err)
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return Completion{}, fmt.Errorf("aigen: read response: %w", err)
-	}
-
+	// Send with retry-on-throttle: a 429 (rate_limit_error) or a transient 5xx is
+	// retried with backoff, honoring the Retry-After header when present. This makes
+	// the loop — and the measurement instrument's long --live runs — survive a
+	// rate-limited tier (e.g. a low OTPM cap) instead of aborting the whole run on
+	// the first throttle. A non-retryable error (4xx other than 429) returns at once.
 	var parsed apiResponse
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return Completion{}, fmt.Errorf("aigen: decode response (status %d): %w", resp.StatusCode, err)
-	}
-	if resp.StatusCode != http.StatusOK || parsed.Error != nil {
-		msg := fmt.Sprintf("status %d", resp.StatusCode)
-		if parsed.Error != nil {
-			msg = fmt.Sprintf("%s: %s", parsed.Error.Type, parsed.Error.Message)
+	for attempt := 0; ; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/messages", bytes.NewReader(body))
+		if err != nil {
+			return Completion{}, fmt.Errorf("aigen: build request: %w", err)
 		}
-		return Completion{}, fmt.Errorf("aigen: API error: %s", msg)
+		httpReq.Header.Set("x-api-key", c.apiKey)
+		httpReq.Header.Set("anthropic-version", "2023-06-01")
+		httpReq.Header.Set("content-type", "application/json")
+
+		resp, err := c.http.Do(httpReq)
+		if err != nil {
+			// Network error: retry a few times, then give up.
+			if attempt < maxRetries {
+				if !backoffSleep(ctx, attempt, 0) {
+					return Completion{}, ctx.Err()
+				}
+				continue
+			}
+			return Completion{}, fmt.Errorf("aigen: call API: %w", err)
+		}
+		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		retryAfter := parseRetryAfter(resp.Header.Get("retry-after"))
+		resp.Body.Close() //nolint:errcheck
+		if readErr != nil {
+			if attempt < maxRetries {
+				if !backoffSleep(ctx, attempt, 0) {
+					return Completion{}, ctx.Err()
+				}
+				continue
+			}
+			return Completion{}, fmt.Errorf("aigen: read response: %w", readErr)
+		}
+
+		parsed = apiResponse{}
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return Completion{}, fmt.Errorf("aigen: decode response (status %d): %w", resp.StatusCode, err)
+		}
+
+		throttled := resp.StatusCode == http.StatusTooManyRequests ||
+			(parsed.Error != nil && parsed.Error.Type == "rate_limit_error")
+		transient := resp.StatusCode == http.StatusServiceUnavailable ||
+			resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusGatewayTimeout
+		if (throttled || transient) && attempt < maxRetries {
+			if !backoffSleep(ctx, attempt, retryAfter) {
+				return Completion{}, ctx.Err()
+			}
+			continue
+		}
+		if resp.StatusCode != http.StatusOK || parsed.Error != nil {
+			msg := fmt.Sprintf("status %d", resp.StatusCode)
+			if parsed.Error != nil {
+				msg = fmt.Sprintf("%s: %s", parsed.Error.Type, parsed.Error.Message)
+			}
+			return Completion{}, fmt.Errorf("aigen: API error: %s", msg)
+		}
+		break
 	}
 
 	usage := Usage{

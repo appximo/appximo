@@ -67,6 +67,25 @@ func LoadCorpus() ([]Case, error) {
 	return cases, nil
 }
 
+// SampleStratified returns at most n cases per stratum, taking the first n by the
+// deterministic (stratum, id) order LoadCorpus already guarantees. n <= 0 returns
+// all cases unchanged. Used to bound a cost-/rate-limited --live run to a
+// stratified subsample while the full corpus stays the standing measurement set.
+func SampleStratified(cases []Case, n int) []Case {
+	if n <= 0 {
+		return cases
+	}
+	perStratum := map[string]int{}
+	out := make([]Case, 0, n*len(Strata))
+	for _, c := range cases {
+		if perStratum[c.Stratum] < n {
+			out = append(out, c)
+			perStratum[c.Stratum]++
+		}
+	}
+	return out
+}
+
 // CorpusCounts returns the number of cases per stratum.
 func CorpusCounts(cases []Case) map[string]int {
 	out := map[string]int{}
@@ -81,6 +100,10 @@ func CorpusCounts(cases []Case) map[string]int {
 // purpose, and the harness grows to it without changing.
 const TargetPerStratum = 120
 
-// CorpusNote is the honest one-liner about the seed's statistical limits.
-const CorpusNote = "seed corpus — below the ~120-160/stratum needed for full power; " +
-	"wide Wilson intervals and inconclusive McNemar (few discordants) are EXPECTED and correct"
+// CorpusNote is the honest one-liner about the corpus's statistical limits. At
+// 40/stratum it is a 5x scale-up from the original seed (a real narrowing of the
+// Wilson intervals) but still ~1/3 of the ~120-160/stratum the research wants for
+// full power, so a McNemar with few discordants is still flagged INCONCLUSIVE.
+const CorpusNote = "40/stratum (5x the original seed) — a substantial scale-up that narrows the " +
+	"Wilson intervals, still below the ~120-160/stratum ideal for full power; an underpowered " +
+	"McNemar (few discordants) remains EXPECTED and is flagged INCONCLUSIVE, not sold as significant"

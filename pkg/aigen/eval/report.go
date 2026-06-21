@@ -26,6 +26,13 @@ type CondStats struct {
 	MeanStructErr0  float64 `json:"mean_struct_err0"`
 	MeanSemErr0     float64 `json:"mean_sem_err0"`
 	MeanCostUSD     float64 `json:"mean_cost_usd"`
+	// StructuredEngaged / ArrayIREngaged count outcomes whose final decoding
+	// actually used structured / array-IR (vs fell back to plain). For the plain arm
+	// these are 0 by design; for the structured/array-IR arms a value BELOW n means
+	// the live API rejected the constrained request and the arm silently measured
+	// plain — the honest signal that the structural foundation did not engage.
+	StructuredEngaged int `json:"structured_engaged"`
+	ArrayIREngaged    int `json:"array_ir_engaged"`
 }
 
 // PairTest is a paired McNemar comparison between two conditions (optionally within
@@ -135,6 +142,12 @@ func condStats(outcomes []Outcome, cond, stratum string) CondStats {
 		sumStruct += float64(o.StructErrs0)
 		sumSem += float64(o.SemErrs0)
 		sumCost += o.CostUSD
+		if o.EffStructured {
+			cs.StructuredEngaged++
+		}
+		if o.EffArrayIR {
+			cs.ArrayIREngaged++
+		}
 	}
 	if cs.N == 0 {
 		return cs
@@ -257,6 +270,24 @@ func Format(a Analysis) string {
 			cs.Condition, st, cs.N, cs.Phat, cs.WilsonLo, cs.WilsonHi,
 			cs.MeanIter, cs.MedianIter, cs.NonConverged, cs.MeanStructErr0, cs.MeanSemErr0)
 	}
+	// Effective-decoding honesty line: if a structured/array-IR arm engaged its
+	// decoding in FEWER than n cases, it fell back to plain and is measuring plain.
+	for _, cs := range a.PerCondition {
+		if cs.Stratum != "" {
+			continue
+		}
+		switch cs.Condition {
+		case "structured":
+			if cs.StructuredEngaged < cs.N {
+				fmt.Fprintf(&b, "  ⚠ structured arm: constrained decoding engaged in only %d/%d cases (rest FELL BACK to plain)\n", cs.StructuredEngaged, cs.N)
+			}
+		case "array-IR":
+			if cs.ArrayIREngaged < cs.N {
+				fmt.Fprintf(&b, "  ⚠ array-IR arm: IR decoding engaged in only %d/%d cases (rest FELL BACK to plain)\n", cs.ArrayIREngaged, cs.N)
+			}
+		}
+	}
+
 	fmt.Fprintf(&b, "\n(E[it]μ = empirical mean iterations to valid; E[it]~ = median. The geometric\n"+
 		" 1/p_sem is NOT used — the validator-guided loop is not i.i.d.; 1/p_sem is only a\n"+
 		" theoretical 'independent retries' bound: ")

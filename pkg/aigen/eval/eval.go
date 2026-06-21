@@ -44,6 +44,16 @@ type Outcome struct {
 	InputTok    int     `json:"input_tokens"`
 	OutputTok   int     `json:"output_tokens"`
 	CostUSD     float64 `json:"cost_usd"`
+	// EffStructured / EffArrayIR record the decoding that ACTUALLY ran for the
+	// converged/final attempt — NOT what the condition requested. They differ when
+	// the constrained-decoding request was rejected by the live API and the loop
+	// fell back to plain generation (the live finding: the strict-outputs subset
+	// rejects the Appitools grammar — open objects need additionalProperties:false,
+	// and the field grammar exceeds the 16-union-parameter limit — so the structured
+	// and array-IR arms fall back to plain). Surfacing this keeps the instrument
+	// honest: an arm that fell back is measuring plain, not its named treatment.
+	EffStructured bool `json:"eff_structured"`
+	EffArrayIR    bool `json:"eff_array_ir"`
 }
 
 // ClientFactory builds the ModelClient for a (case, condition). Live mode returns
@@ -71,6 +81,7 @@ func RunAblation(ctx context.Context, cases []Case, conds []Condition, factory C
 				FirstTry: res.FirstTry, Converged: res.Converged, Iterations: res.Iterations,
 				Refused:  res.Refused,
 				InputTok: res.Usage.InputTokens, OutputTok: res.Usage.OutputTokens, CostUSD: res.CostUSD,
+				EffStructured: res.Structured, EffArrayIR: res.ArrayIR,
 			}
 			if len(res.Attempts) > 0 {
 				o.StructErrs0 = res.Attempts[0].StructuralCount
@@ -101,6 +112,13 @@ func RunAblation(ctx context.Context, cases []Case, conds []Condition, factory C
 //
 // The semantic-fault probability is shared by all arms (no decoder constrains
 // cross-reference semantics). The report labels this mode SIMULATED, loudly.
+//
+// IMPORTANT (AI-F2-S3): this simulator ASSUMES the structured/array-IR decoders
+// actually engage. The real --live run showed they DON'T on the current Anthropic
+// API (the strict-outputs subset rejects the envelope's open objects and the IR's
+// >16 union params, so both fall back to plain). So these arm differences are a
+// demonstration of the MECHANISM, not a prediction of live behavior — the live
+// numbers (and the EffStructured/EffArrayIR engagement counts) are the truth.
 type SimulatedClient struct {
 	gold      json.RawMessage
 	caseID    string

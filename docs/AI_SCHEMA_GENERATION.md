@@ -252,8 +252,19 @@ Three pieces make it a working mode:
 
 The deep structural error class can no longer occur in IR generation; only the
 semantic, cross-reference class remains for the validator + loop. **Measured** as a
-harness arm below — confirmed in simulation (0 deep structural errors at attempt 1),
-pending the scaled corpus to conclude with McNemar against the envelope.
+harness arm below — confirmed in *simulation* (0 deep structural errors at attempt 1).
+
+> ⚠ **Live reality (AI-F2-S3, measured).** Against the **real** Anthropic API the IR
+> schema is **rejected** — the strict-outputs subset has a hard limit of **16
+> union-typed (nullable) parameters**, and the Appitools field grammar has ~17
+> optional keys, so `IROutputSchema` exceeds it ("too many parameters with union
+> types"). The envelope (`OutputSchema`) is *also* rejected, for a different reason:
+> the subset requires `additionalProperties:false` on **every** object, which cannot
+> express the envelope's deliberately-open `resources`/`rbac`. So **neither
+> constrained-decoding mode engages on the real API** — both fall back to plain
+> generation. See the live measurement section. (Two genuine schema bugs were fixed
+> en route — a double-applied null from a shared sub-schema, and a nullable enum
+> combined with a type-array — but the 16-union ceiling is structural, not a bug.)
 
 **Defense in depth / graceful fallback.** A structured request that the live subset
 rejects, or that returns an **empty `resources`** map (which the engine would otherwise
@@ -334,6 +345,58 @@ scaled to ~120-160/stratum**; the arm is now wired into the gate, ready to concl
 
 This is the gate every future technique passes: measured against the baseline with
 McNemar on **this** domain, or discarded.
+
+### The first real measurement (AI-F2-S3) — corpus scaled + `--live` verdict
+
+The corpus was scaled **24 → 120** (40/stratum, a 5× lift; every gold validates and
+passes the `map→IR→map` identity round-trip), the client got **retry-with-backoff**
+(honoring `Retry-After`) + **temperature 0** for reproducibility, and `ai-eval`
+gained `--sample N` (stratified subsample to bound a cost-/rate-limited live run):
+
+```
+appitools ai-eval --live --model claude-haiku-4-5            # full 120-case 3-arm run
+appitools ai-eval --live --model claude-haiku-4-5 --sample 10  # 10/stratum bounded run
+```
+
+**Measured live (Haiku, temp 0, 30-case stratified subsample, 90 generations,
+total API cost ≈ $0.52):**
+
+| stratum | first-try valid | convergence | E[iterations] | cost/schema |
+|---|---|---|---|---|
+| simple | 100% (10/10) | 10/10 | 1.00 | ~$0.003 |
+| media | 80% (8/10) | 10/10 | 1.20 | ~$0.007 |
+| compleja | 90% (9/10) | 10/10 | 1.10 | ~$0.008 |
+| **all** | **90% (27/30)** | **30/30** | **1.10** | **~$0.006** |
+
+**Two findings, both honest and load-bearing:**
+
+1. **The democratization thesis holds — strongly.** The *cheap* model (Haiku) reaches
+   **90% first-try** valid schemas and **100% convergence** within the 3-iteration
+   budget, at **~$0.006/schema** and **~1.1 iterations**, across simple → complex
+   (FKs, both RBAC forms, state machines). "El barato alcanza" is confirmed on the
+   real domain, not extrapolated.
+
+2. **The constrained-decoding foundation does NOT engage on the real API — a
+   data-over-expectation result.** Both structured-decoding arms **fell back to plain
+   in 0/30 cases** (the instrument now prints this `⚠ … engaged in only 0/30 …`): the
+   envelope can't express open `resources`/`rbac` (every object needs
+   `additionalProperties:false`), and the array-IR exceeds the subset's **16-union
+   limit**. So `plain`, `structured`, and `array-IR` were the *same* generation; their
+   tiny p_sem differences (0.900 / 0.933 / 0.900) are temp-0 API nondeterminism, not
+   treatment effects, and every McNemar is INCONCLUSIVE (0–1 discordants). **What
+   actually delivers the 90% is the validator-guided plain loop** (the AI-F0
+   contract), not the AI-F1/AI-F2 decoder constraints.
+
+**Verdict on the structural foundation:** *not validated on real data as designed.*
+The structured-outputs path is dead weight on the current API for this grammar (it
+silently falls back). The honest options, to decide with data: **(a)** accept that the
+plain validator-guided loop is already enough on this domain (90%/100% at ~$0.006) and
+treat constrained decoding as not worth its complexity here; or **(b)** redesign the
+IR to fit the real subset (≤16 unions, no open objects) — e.g. a reduced *core* IR for
+generation-time keys only, or staged generation — and re-measure. The instrument and
+the 120-case corpus are ready to score whichever path is tried next; the full
+120-case `--live` run (rate-limited on a low-OTPM tier; the subsample is the bounded
+proxy) is the standing next data point.
 
 ## Notes
 

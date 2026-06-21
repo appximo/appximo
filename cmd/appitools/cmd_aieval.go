@@ -54,6 +54,10 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("load corpus: %w", err)
 		}
+		if sample, _ := cmd.Flags().GetInt("sample"); sample > 0 {
+			cases = eval.SampleStratified(cases, sample)
+			fmt.Fprintf(os.Stderr, "sampling %d cases/stratum → %d total (bounded run)\n", sample, len(cases))
+		}
 
 		conds := eval.BaselineConditions()
 		if maxIter > 0 {
@@ -119,5 +123,6 @@ func init() {
 	aiEvalCmd.Flags().String("out", "", "persistir los outcomes pareados como JSON (reproducibilidad)")
 	aiEvalCmd.Flags().Bool("json", false, "emitir el análisis estadístico completo como JSON")
 	aiEvalCmd.Flags().Int("max-iterations", 0, "override del budget de iteraciones (0 = default del loop)")
+	aiEvalCmd.Flags().Int("sample", 0, "submuestra estratificada: N casos por estrato (0 = corpus completo) — para acotar una corrida --live bajo límite de tasa")
 	rootCmd.AddCommand(aiEvalCmd)
 }

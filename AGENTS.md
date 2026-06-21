@@ -74,14 +74,21 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   `pkg/aigen`, key from `ANTHROPIC_API_KEY`, raw `/v1/messages` so no new dependency;
   default model `claude-haiku-4-5`; see docs/AI_SCHEMA_GENERATION.md §Array-IR),
   `ai-eval` (the AI-F2-S1 measurement instrument: runs the embedded stratified
-  NL→schema gold test set — `pkg/aigen/eval/corpus`, simple/media/compleja — through
-  a paired ablation (plain vs structured-envelope vs **array-IR**, 3 arms) and emits
-  rigorous statistics: `p_sem` with **Wilson** CIs,
-  **empirical** E[iterations] (never the geometric 1/p_sem — the loop isn't i.i.d.),
-  **McNemar** (exact <25 discordants else Edwards χ²) + **Cochran-Q**/**Holm** for
-  >2 arms, flagging underpowered comparisons as INCONCLUSIVE. SIMULATED + deterministic
-  by default (no key); `--live` measures a real model. The gate every future technique
-  passes; see docs/AI_SCHEMA_GENERATION.md §The measurement instrument),
+  NL→schema gold test set — `pkg/aigen/eval/corpus`, simple/media/compleja, scaled to
+  **40/stratum = 120** in AI-F2-S3 — through a paired ablation (plain vs
+  structured-envelope vs **array-IR**, 3 arms) and emits rigorous statistics: `p_sem`
+  with **Wilson** CIs, **empirical** E[iterations] (never the geometric 1/p_sem — the
+  loop isn't i.i.d.), **McNemar** (exact <25 discordants else Edwards χ²) +
+  **Cochran-Q**/**Holm** for >2 arms, flagging underpowered comparisons as
+  INCONCLUSIVE. SIMULATED + deterministic by default (no key); `--live` measures a real
+  model (temp 0, retry-with-backoff on rate limits), `--sample N` bounds it to a
+  stratified subsample. **AI-F2-S3 LIVE FINDING (Haiku):** the structured-envelope and
+  array-IR arms FALL BACK TO PLAIN on the real API (the strict-outputs subset rejects
+  the envelope's open objects and the IR's >16 union params — the instrument prints
+  `⚠ … engaged in only 0/N …`), so all 3 arms run plain; plain itself gets ~90%
+  first-try / 100% convergence / ~$0.006/schema with the cheap model (thesis holds,
+  the constrained-decoding foundation does NOT engage as designed). The gate every
+  future technique passes; see docs/AI_SCHEMA_GENERATION.md §The first real measurement),
   `blueprints list` (lists schema files in a local `blueprints/` dir),
   `version` (prints the ldflags-injected build version; "dev" on a plain
   local build — releases and published images carry their tag).
