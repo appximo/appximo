@@ -104,3 +104,12 @@ object — ONLY the JSON, no prose, no fences.
 
 VALIDATION ERRORS:
 `
+
+// irCorrectionNote is appended to the correction preamble in array-IR mode. The
+// model generated the IR (arrays of named objects), so the error paths use array
+// indices (resources[0].fields[1]…); this reminds it to keep emitting the IR form.
+const irCorrectionNote = `(You are generating the ARRAY-IR form: resources, fields, relations and roles are
+ARRAYS of objects with an explicit "name". The error paths below use array indices
+into that IR — correct at those positions and keep the same array-IR shape.)
+
+`

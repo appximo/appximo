@@ -209,7 +209,51 @@ structural errors; the deep-structure + semantic classes remain the validator's 
 The model keeps emitting the **canonical map form**, so the validator's error paths
 (`resources.X.fields.Y…`) stay coherent for in-context correction. Pushing
 `p_struct → 1` on the deep structure (an array-IR the subset *can* fully constrain,
-with a transform back to the map form) is the documented next increment.
+with a transform back to the map form) is the array-IR below.
+
+### Array-IR — deep structure constrained by construction (AI-F2-S2)
+
+The envelope's limit is that the strict subset cannot express an **arbitrary-keyed
+map**. The fix is to change the *representation*: rewrite every arbitrary-keyed map
+as an **array of objects with an explicit name key** (`pkg/aigen/ir.go`):
+
+```
+MAP  (engine consumes): "resources": { "empleados": { "fields": { "email": {"type":"string"} } } }
+IR   (model generates):  "resources": [ { "name":"empleados", "fields":[ {"name":"email","type":"string"} ] } ]
+```
+
+An array of objects with a **fixed item schema** IS inside the strict subset, so
+`IROutputSchema()` constrains the structure **in depth**: every item is
+`additionalProperties:false` with all keys in `required` (optionals emulated as
+nullable), `type` is the 9-value enum, `on_delete`/`format`/relation-kind/… are
+enums — so a wrong type or an unknown deep key is **impossible by decode time**, not
+merely correctable. Every arbitrary-keyed map becomes an array: `resources`,
+`fields`, `relations`, `hooks`, `rbac.roles`, a role's `permissions`, and a state
+machine's `transitions` (keyed `from`→`to`). `TestIROutputSchemaIsStrictSubset`
+walks the whole IR schema and asserts it uses **no** disallowed keyword and that
+every object is closed with a complete `required` — the property the map-form
+meta-schema could never satisfy.
+
+Three pieces make it a working mode:
+
+- **`MapToIR` / `IRToMap`** — total, deterministic transforms (arrays sorted by the
+  explicit key). The round-trip is **identity**: `map→IR→map == map` (and
+  `IR→map→IR == IR`) over **every** corpus gold and repo example schema
+  (`TestIRRoundTripIdentity`, property-based) — the IR loses and distorts nothing.
+- **Error-path translation** — the validator runs on the map form and emits map
+  paths (`resources.empleados.fields.email.type`); `TranslateMapPathToIR` rewrites
+  them to the IR the model produced (`resources[0].fields[1].type`) by resolving
+  each named segment to its array index, so the loop's correction round speaks the
+  model's own space.
+- **The loop** (`Options.ArrayIR`, `appitools ai-generate --array-ir`) — generate IR
+  under `IROutputSchema` → `IRToMap` → validate (the engine's validator, unchanged)
+  → translate remaining errors to IR paths → correct. The same graceful fallback as
+  the envelope (a rejected structured request or an empty result drops to plain).
+
+The deep structural error class can no longer occur in IR generation; only the
+semantic, cross-reference class remains for the validator + loop. **Measured** as a
+harness arm below — confirmed in simulation (0 deep structural errors at attempt 1),
+pending the scaled corpus to conclude with McNemar against the envelope.
 
 **Defense in depth / graceful fallback.** A structured request that the live subset
 rejects, or that returns an **empty `resources`** map (which the engine would otherwise
@@ -247,12 +291,17 @@ Three parts:
    and the instrument says so.
 
 2. **A generic paired ablation harness.** Each case runs under every **condition**
-   (today `plain` vs the AI-F1-S1 `structured` decoding) → a **paired** binary
-   outcome (first-try semantic success), empirical iterations-to-valid, and the
-   structural/semantic error split. A future technique (array-IR, constraint-aware,
-   RAG) plugs in as a **new condition** — the harness, outcomes, and statistics are
-   unchanged. Deterministic: a built-in **simulated** model makes the whole run
-   reproducible with no API key (`ai-eval`); `--live` measures a real model.
+   (`plain` vs the AI-F1-S1 `structured` envelope vs the AI-F2-S2 `array-IR` deep
+   decoding) → a **paired** binary outcome (first-try semantic success), empirical
+   iterations-to-valid, and the structural/semantic error split. A future technique
+   (constraint-aware, RAG) plugs in as a **new condition** — the harness, outcomes,
+   and statistics are unchanged. Deterministic: a built-in **simulated** model makes
+   the whole run reproducible with no API key (`ai-eval`); `--live` measures a real
+   model. The simulator's structural-fault model is **depth-faithful** so the three
+   arms genuinely differ: `plain` can emit a shallow ENVELOPE fault AND a DEEP one,
+   `structured` removes only the envelope (deep still leaks), `array-IR` removes both
+   (only the semantic class remains) — exactly the AI-F2-S2 hypothesis, made
+   measurable.
 
 3. **Statistics with paper-grade rigor** (`stats.go`, pure Go):
    - `p_sem` per condition/stratum with a **Wilson** score interval (not Wald —
@@ -270,10 +319,18 @@ Three parts:
      flagged INCONCLUSIVE, never sold as significant.
 
 ```
-appitools ai-eval            # simulated, deterministic — demonstrates the instrument
+appitools ai-eval            # simulated, deterministic — runs all 3 arms
 appitools ai-eval --json     # machine-readable analysis
 appitools ai-eval --live --model claude-haiku-4-5   # measure a real model (temp 0)
 ```
+
+The simulated 3-arm run (n=24 seed) shows the expected ordering: structural errors
+at attempt 1 are **plain 0.38 → structured 0.12 → array-IR 0.00** (deep p_struct→1)
+and first-try `p_sem` rises **plain 0.54 → structured 0.71 → array-IR 0.75**. The
+McNemar comparisons are flagged **UNDERPOWERED / INCONCLUSIVE** (7–10 discordants ≪
+25) and Cochran's Q is not significant — exactly right at this corpus size, and the
+instrument says so loudly. **The conclusion (array-IR vs envelope) needs the corpus
+scaled to ~120-160/stratum**; the arm is now wired into the gate, ready to conclude.
 
 This is the gate every future technique passes: measured against the baseline with
 McNemar on **this** domain, or discarded.

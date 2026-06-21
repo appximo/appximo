@@ -43,6 +43,7 @@ Examples:
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		verbose, _ := cmd.Flags().GetBool("verbose")
 		noStructured, _ := cmd.Flags().GetBool("no-structured")
+		arrayIR, _ := cmd.Flags().GetBool("array-ir")
 
 		client, err := aigen.NewAnthropicClient(model)
 		if err != nil {
@@ -57,12 +58,19 @@ Examples:
 
 		// Structured outputs (constrained decoding) by default when the model
 		// supports it; --no-structured forces plain generation for comparison.
+		// --array-ir uses the AI-F2-S2 array-IR form (deep structural guarantee),
+		// which implies structured outputs.
 		useStructured := !noStructured && aigen.SupportsStructuredOutput(client.Model())
+		if arrayIR && !aigen.SupportsStructuredOutput(client.Model()) {
+			fmt.Fprintf(os.Stderr, "Aviso: --array-ir requiere structured outputs; %s no los soporta — usando generación plana\n", client.Model())
+			arrayIR = false
+		}
 
 		res, err := aigen.Generate(context.Background(), client, args[0], aigen.Options{
 			MaxIterations: maxIter,
 			Model:         client.Model(),
 			NoStructured:  !useStructured,
+			ArrayIR:       arrayIR,
 		})
 		if err != nil {
 			return err
@@ -119,8 +127,11 @@ func printReport(res *aigen.Result, verbose bool) {
 		}
 	}
 	decode := "plano (sin structured outputs)"
-	if res.Structured {
-		decode = "structured outputs (estructura garantizada en el decoding)"
+	switch {
+	case res.ArrayIR:
+		decode = "array-IR (estructura PROFUNDA garantizada en el decoding)"
+	case res.Structured:
+		decode = "structured outputs (envelope garantizada en el decoding)"
 	}
 	fmt.Fprintf(w, "  resultado:   %s\n", status)
 	fmt.Fprintf(w, "  modelo:      %s\n", res.Model)
@@ -165,5 +176,6 @@ func init() {
 	aiGenerateCmd.Flags().Bool("json", false, "emitir el resultado completo (schema + métricas) como JSON")
 	aiGenerateCmd.Flags().Bool("verbose", false, "mostrar el detalle por ronda (errores estructurales vs semánticos)")
 	aiGenerateCmd.Flags().Bool("no-structured", false, "desactivar structured outputs (generación plana, para comparar)")
+	aiGenerateCmd.Flags().Bool("array-ir", false, "usar el array-IR (AI-F2-S2): estructura PROFUNDA garantizada por construcción (implica structured outputs)")
 	rootCmd.AddCommand(aiGenerateCmd)
 }

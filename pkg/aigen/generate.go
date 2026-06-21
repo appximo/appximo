@@ -26,6 +26,14 @@ type Options struct {
 	// generator also falls back to plain generation automatically on a structured
 	// error or an empty-resources result — this flag forces it off from the start.
 	NoStructured bool
+	// ArrayIR generates in the array-IR form (AI-F2-S2): the decoder is constrained
+	// to IROutputSchema (which constrains the structure IN DEPTH, not just the
+	// envelope), the model emits IR, and the loop transforms IR→map before
+	// validating and translates error paths back to IR for correction. Implies
+	// structured outputs (it is a stricter structured mode); NoStructured is ignored
+	// when ArrayIR is set. Falls back to plain generation on a structured error or an
+	// empty result, exactly like the envelope mode.
+	ArrayIR bool
 }
 
 // Attempt records one round of the loop: whether it validated, the errors split
@@ -52,11 +60,14 @@ type Result struct {
 	Iterations int             `json:"iterations"`
 	// Structured reports whether the final/converged generation used structured
 	// outputs (false when it fell back to plain generation).
-	Structured bool      `json:"structured"`
-	Attempts   []Attempt `json:"attempts"`
-	Usage      Usage     `json:"usage"`
-	Model      string    `json:"model"`
-	CostUSD    float64   `json:"cost_usd"`
+	Structured bool `json:"structured"`
+	// ArrayIR reports whether the final/converged generation used the array-IR form
+	// (false when it fell back, or when never requested).
+	ArrayIR  bool      `json:"array_ir"`
+	Attempts []Attempt `json:"attempts"`
+	Usage    Usage     `json:"usage"`
+	Model    string    `json:"model"`
+	CostUSD  float64   `json:"cost_usd"`
 	// Refused is set when the model declined for safety — not a schema failure.
 	Refused     bool   `json:"refused,omitempty"`
 	RefusalText string `json:"refusal_text,omitempty"`
@@ -83,11 +94,11 @@ func Generate(ctx context.Context, client ModelClient, description string, opts 
 
 	// Structured outputs on by default; the per-model capability is checked by the
 	// caller (it passes a client for a supporting model). NoStructured forces off.
-	useStructured := !opts.NoStructured
-	var outSchema map[string]any
-	if useStructured {
-		outSchema = OutputSchema()
-	}
+	// ArrayIR is a STRICTER structured mode (the IR schema, constrained in depth);
+	// it implies structured outputs regardless of NoStructured.
+	useIR := opts.ArrayIR
+	useStructured := useIR || !opts.NoStructured
+	outSchema := pickOutputSchema(useStructured, useIR)
 
 	messages := []Message{
 		{Role: "user", Content: "Generate an Appitools schema for this app:\n\n" + description},
@@ -103,9 +114,9 @@ func Generate(ctx context.Context, client ModelClient, description string, opts 
 		if err != nil {
 			// A structured request can be rejected (e.g. the live subset rejects the
 			// schema). Degrade gracefully to plain generation rather than aborting —
-			// never worse than the unstructured loop.
+			// never worse than the unstructured loop. (The IR mode degrades too.)
 			if useStructured {
-				useStructured, outSchema = false, nil
+				useStructured, useIR, outSchema = false, false, nil
 				req.OutputSchema = nil
 				comp, err = client.Complete(ctx, req)
 			}
@@ -124,13 +135,16 @@ func Generate(ctx context.Context, client ModelClient, description string, opts 
 			return res, nil
 		}
 
-		raw := extractJSON(comp.Text)
+		// In IR mode the model emits the array-IR; transform it to the map form the
+		// validator/engine consume. irDoc is the IR document (nil in non-IR mode),
+		// kept to translate error paths back to IR for the correction round.
+		raw, irDoc := toValidationInput(comp.Text, useIR)
 
 		// Empty-resources guard: structured outputs forcing an empty resources map
 		// would "validate" (the engine accepts zero resources) and the loop would
 		// wrongly converge. If that happens, drop structured and regenerate plainly.
 		if useStructured && !HasResources([]byte(raw)) {
-			useStructured, outSchema = false, nil
+			useStructured, useIR, outSchema = false, false, nil
 			res.Iterations = i
 			res.Attempts = append(res.Attempts, Attempt{
 				Iteration: i, Structured: true, Valid: false, Usage: comp.Usage,
@@ -161,23 +175,83 @@ func Generate(ctx context.Context, client ModelClient, description string, opts 
 			res.Converged = true
 			res.FirstTry = (i == 1)
 			res.Structured = useStructured
+			res.ArrayIR = useIR
 			res.CostUSD = res.Usage.CostUSD(res.Model)
 			return res, nil
 		}
 
-		// Feed back the actionable errors so the next round corrects in-context.
+		// Feed back the actionable errors so the next round corrects in-context. In IR
+		// mode the errors are translated to IR paths (resources[i].fields[j]…) so the
+		// model corrects in the SAME space it generated — the assistant turn is the IR
+		// it produced, and the error paths point into it.
+		fbErrors := report.Errors
+		preamble := correctionPreamble
+		if useIR && irDoc != nil {
+			fbErrors = translateErrorsToIR(report.Errors, irDoc)
+			preamble = correctionPreamble + irCorrectionNote
+		}
 		messages = append(messages, Message{Role: "assistant", Content: comp.Text})
-		messages = append(messages, Message{Role: "user", Content: correctionPreamble + formatErrors(report.Errors)})
+		messages = append(messages, Message{Role: "user", Content: preamble + formatErrors(fbErrors)})
 
 		if i == maxIter {
 			res.Schema = prettyJSON(raw)
 			res.RemainingErrors = report.Errors
 			res.Structured = useStructured
+			res.ArrayIR = useIR
 		}
 	}
 
 	res.CostUSD = res.Usage.CostUSD(res.Model)
 	return res, nil
+}
+
+// pickOutputSchema returns the JSON Schema the decoder is constrained to: the
+// array-IR schema (deep structural guarantee) when useIR, the envelope schema when
+// only useStructured, nil for plain generation.
+func pickOutputSchema(useStructured, useIR bool) map[string]any {
+	switch {
+	case useIR:
+		return IROutputSchema()
+	case useStructured:
+		return OutputSchema()
+	default:
+		return nil
+	}
+}
+
+// toValidationInput converts the model's completion text into the map-form schema
+// bytes the validator consumes. In IR mode it parses the IR and transforms it to
+// the map form, returning the IR document so error paths can be translated back to
+// IR. Non-IR mode returns the extracted JSON unchanged and a nil IR document. If IR
+// text fails to parse, it returns the extracted text so the validator surfaces the
+// problem (and a nil IR document → no translation, paths stay map-form).
+func toValidationInput(text string, useIR bool) (raw string, irDoc map[string]any) {
+	extracted := extractJSON(text)
+	if !useIR {
+		return extracted, nil
+	}
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(extracted), &doc); err != nil {
+		return extracted, nil
+	}
+	b, err := json.Marshal(IRToMap(doc))
+	if err != nil {
+		return extracted, doc
+	}
+	return string(b), doc
+}
+
+// translateErrorsToIR rewrites each error's path from the map form (what the
+// validator emits) to the IR form (what the model generated), using the IR document
+// to resolve named segments to array indices. The rule/message/fix are unchanged —
+// only the path is moved into the model's space.
+func translateErrorsToIR(errs []schema.StructuredError, irDoc map[string]any) []schema.StructuredError {
+	out := make([]schema.StructuredError, len(errs))
+	for i, e := range errs {
+		e.Path = TranslateMapPathToIR(e.Path, irDoc)
+		out[i] = e
+	}
+	return out
 }
 
 // countBySource splits a report's errors into structural (metaschema) vs semantic

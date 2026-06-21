@@ -18,13 +18,15 @@ type Condition struct {
 	Options aigen.Options
 }
 
-// BaselineConditions are the two arms available today: plain generation vs the
-// AI-F1-S1 structured-envelope decoding. (Cochran's Q + Holm engage automatically
-// once a third arm exists.)
+// BaselineConditions are the three arms: plain generation, the AI-F1-S1
+// structured-ENVELOPE decoding, and the AI-F2-S2 array-IR (structured DEEP)
+// decoding. With three arms Cochran's Q + Holm engage automatically; the canonical
+// per-stratum first-vs-last pair becomes plain vs array-IR (the full effect).
 func BaselineConditions() []Condition {
 	return []Condition{
 		{Name: "plain", Options: aigen.Options{NoStructured: true}},
 		{Name: "structured", Options: aigen.Options{NoStructured: false}},
+		{Name: "array-IR", Options: aigen.Options{ArrayIR: true}},
 	}
 }
 
@@ -86,37 +88,60 @@ func RunAblation(ctx context.Context, cases []Case, conds []Condition, factory C
 // end-to-end WITHOUT an API key, for demonstrating + testing the harness. It is
 // NOT a real measurement — real p_sem requires a real model (temperature 0). Its
 // outcomes are a deterministic function of (case id, condition, attempt), modeling
-// the documented mechanism: harder strata fail more often, correction makes later
-// attempts more likely to succeed, and the `structured` condition CANNOT emit a
-// structural fault (the AI-F1-S1 envelope), so it strictly dominates `plain` on
-// the structural-error class. The report labels this mode SIMULATED, loudly.
+// the documented mechanism with a FAITHFUL structural-depth split so the three arms
+// genuinely differ (the point of measuring array-IR):
+//
+//   - `plain` can emit BOTH a shallow ENVELOPE structural fault (unknown top-level
+//     key, bad const) AND a DEEP structural fault (a field's type outside the set).
+//   - `structured` (AI-F1-S1 envelope) removes the ENVELOPE class but can STILL emit
+//     a DEEP structural fault — the strict subset cannot reach the map-keyed depth.
+//   - `array-IR` (AI-F2-S2) removes BOTH classes by construction (an array of fixed
+//     items constrains the depth too), leaving only the SEMANTIC, cross-reference
+//     class — the hypothesis the harness measures: deep p_struct→1.
+//
+// The semantic-fault probability is shared by all arms (no decoder constrains
+// cross-reference semantics). The report labels this mode SIMULATED, loudly.
 type SimulatedClient struct {
 	gold      json.RawMessage
 	caseID    string
 	condition string
 	stratum   string
-	plain     bool // condition emits structural faults (the envelope is off)
+	arrayIR   bool // emit the array-IR form (the loop transforms IR→map)
+	envelope  bool // this arm can emit a shallow envelope structural fault (plain only)
+	deep      bool // this arm can emit a deep structural fault (plain + structured)
 	attempt   int
 }
 
-// NewSimulatedClient builds the demonstration driver for one (case, condition).
+// NewSimulatedClient builds the demonstration driver for one (case, condition),
+// deriving each arm's structural coverage from its Options: plain emits both fault
+// depths, structured removes only the envelope, array-IR removes both.
 func NewSimulatedClient(c Case, cond Condition) *SimulatedClient {
+	plain := cond.Options.NoStructured
+	arrayIR := cond.Options.ArrayIR
 	return &SimulatedClient{
 		gold: c.Gold, caseID: c.ID, condition: cond.Name, stratum: c.Stratum,
-		plain: cond.Options.NoStructured,
+		arrayIR:  arrayIR,
+		envelope: plain,    // only plain can fail the envelope
+		deep:     !arrayIR, // plain + structured can fail the deep structure; IR cannot
 	}
 }
 
-// semFailProb / structFailProb are the documented difficulty model. Semantic-fault
-// probability is shared by both conditions; structural-fault probability applies
-// only to `plain` (structured decoding removes the structural class). Both decay by
-// half per attempt (the validator-guided correction shrinks the remaining failure).
+// The documented difficulty model: each fault class has a per-stratum base rate that
+// decays by half per attempt (the validator-guided correction shrinks the remaining
+// failure each round). semFailProb is the cross-reference (semantic) class shared by
+// every arm; envelopeFailProb is the shallow structural class (top-level); deepFailProb
+// is the deep structural class (field types / strict keys) — the class the array-IR
+// removes that the envelope cannot.
 func semFailProb(stratum string, attempt int) float64 {
 	base := map[string]float64{"simple": 0.12, "media": 0.32, "compleja": 0.50}[stratum]
 	return base * pow2(attempt-1)
 }
-func structFailProb(stratum string, attempt int) float64 {
+func deepFailProb(stratum string, attempt int) float64 {
 	base := map[string]float64{"simple": 0.08, "media": 0.18, "compleja": 0.28}[stratum]
+	return base * pow2(attempt-1)
+}
+func envelopeFailProb(stratum string, attempt int) float64 {
+	base := map[string]float64{"simple": 0.05, "media": 0.10, "compleja": 0.15}[stratum]
 	return base * pow2(attempt-1)
 }
 func pow2(n int) float64 {
@@ -150,10 +175,11 @@ func itoa(n int) string {
 	return string(b)
 }
 
-// Complete returns the gold on a simulated success, or a fault-injected schema on
-// a simulated failure (structural fault only when `plain`, else semantic). The
-// real validator + loop then react to it — so the harness measures the real loop
-// over the simulated model.
+// Complete returns the (faithfully fault-injected) schema for this attempt. In the
+// array-IR arm it emits the IR FORM (the loop transforms IR→map); the other arms
+// emit the map form. Each fault class fires independently per the arm's coverage,
+// so the validator + the real loop react to exactly what a model of that capability
+// would produce — the harness measures the real loop over the simulated model.
 func (s *SimulatedClient) Complete(_ context.Context, req aigen.Request) (aigen.Completion, error) {
 	s.attempt++
 	usage := aigen.Usage{InputTokens: 1200, OutputTokens: 400}
@@ -163,27 +189,44 @@ func (s *SimulatedClient) Complete(_ context.Context, req aigen.Request) (aigen.
 	}
 
 	semFail := unit("sem", s.caseID, s.condition, itoa(s.attempt)) < semFailProb(s.stratum, s.attempt)
-	structFail := s.plain && unit("struct", s.caseID, s.condition, itoa(s.attempt)) < structFailProb(s.stratum, s.attempt)
+	deepFail := s.deep && unit("deep", s.caseID, s.condition, itoa(s.attempt)) < deepFailProb(s.stratum, s.attempt)
+	envFail := s.envelope && unit("env", s.caseID, s.condition, itoa(s.attempt)) < envelopeFailProb(s.stratum, s.attempt)
 
-	switch {
-	case structFail:
-		return aigen.Completion{Text: string(injectStructuralFault(s.gold)), Usage: usage}, nil
-	case semFail:
-		return aigen.Completion{Text: string(injectSemanticFault(s.gold)), Usage: usage}, nil
-	default:
-		return aigen.Completion{Text: string(s.gold), Usage: usage}, nil
+	// Array-IR arm: emit the IR form. Only semantic faults can occur (the IR removes
+	// both structural classes by construction); the loop transforms IR→map.
+	if s.arrayIR {
+		ir := aigen.MapToIR(decode(s.gold))
+		if semFail {
+			ir = injectSemanticFaultIR(ir)
+		}
+		return aigen.Completion{Text: string(encode(ir)), Usage: usage}, nil
 	}
+
+	// Map-form arms: apply every fault that fired (they touch disjoint parts), so the
+	// validator reports each — plain accumulates envelope+deep+sem, structured deep+sem.
+	doc := decode(s.gold)
+	if envFail {
+		injectEnvelopeFault(doc)
+	}
+	if deepFail {
+		injectDeepFault(doc)
+	}
+	if semFail {
+		injectSemanticFault(doc)
+	}
+	return aigen.Completion{Text: string(encode(doc)), Usage: usage}, nil
 }
 
-// injectStructuralFault sets the (deterministically) first field's type to the
-// invalid "number" — a metaschema (structural) error. injectSemanticFault adds a
-// validly-named relation field whose target resource does not exist — a PURELY
-// semantic (cross-reference) error (the field name is valid, so it adds no
-// structural error). Both pick targets by SORTED key, so they are deterministic
-// (reproducibility — map iteration order must never leak in). Tests assert each
-// produces exactly the intended error source via schema.ValidateReport.
-func injectStructuralFault(gold json.RawMessage) json.RawMessage {
-	doc := decode(gold)
+// injectEnvelopeFault adds an unknown TOP-LEVEL key — a shallow (envelope) metaschema
+// (structural) error: the class the structured-envelope decoding (AI-F1-S1) removes.
+func injectEnvelopeFault(doc map[string]any) {
+	doc["extra_top_key"] = 1
+}
+
+// injectDeepFault sets the (deterministically) first field's type to the invalid
+// "number" — a DEEP metaschema (structural) error inside the map-keyed structure:
+// the class the envelope CANNOT reach but the array-IR (AI-F2-S2) removes.
+func injectDeepFault(doc map[string]any) {
 	if res := firstResource(doc); res != nil {
 		if fields, ok := res["fields"].(map[string]any); ok {
 			if k := firstKey(fields); k != "" {
@@ -193,19 +236,44 @@ func injectStructuralFault(gold json.RawMessage) json.RawMessage {
 			}
 		}
 	}
+}
+
+// injectStructuralFault is the legacy single-fault entry point kept for the
+// faithfulness test (it must still produce a metaschema error). It is the deep fault.
+func injectStructuralFault(gold json.RawMessage) json.RawMessage {
+	doc := decode(gold)
+	injectDeepFault(doc)
 	return encode(doc)
 }
 
-func injectSemanticFault(gold json.RawMessage) json.RawMessage {
-	doc := decode(gold)
+// injectSemanticFault adds a validly-named relation field whose target resource does
+// not exist — a PURELY semantic (cross-reference) error (the field name is valid, so
+// it adds no structural error). Deterministic (targets the SORTED-first resource).
+func injectSemanticFault(doc map[string]any) {
 	if res := firstResource(doc); res != nil {
 		if fields, ok := res["fields"].(map[string]any); ok {
-			// valid name + a relation to a non-existent (but validly-named) target:
-			// structurally fine, semantically broken (unknown_relation_target).
 			fields["brokenref_id"] = map[string]any{"type": "uuid", "relation": "nope"}
 		}
 	}
-	return encode(doc)
+}
+
+// injectSemanticFaultIR injects the SAME semantic fault into the IR form: it appends
+// a broken-relation field object to the sorted-first resource's fields ARRAY. After
+// the loop's IR→map transform this is the identical unknown_relation_target error.
+func injectSemanticFaultIR(ir map[string]any) map[string]any {
+	resources, ok := ir["resources"].([]any)
+	if !ok || len(resources) == 0 {
+		return ir
+	}
+	res, ok := resources[0].(map[string]any)
+	if !ok {
+		return ir
+	}
+	fields, _ := res["fields"].([]any)
+	res["fields"] = append(fields, map[string]any{
+		"name": "brokenref_id", "type": "uuid", "relation": "nope",
+	})
+	return ir
 }
 
 func decode(b json.RawMessage) map[string]any {

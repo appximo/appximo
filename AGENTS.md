@@ -65,11 +65,18 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   strict subset, so field types / strict-keys / semantics stay with the validator +
   loop, K=3), plus graceful fallback (empty-resources or structured-reject → plain),
   refusal handling, a prompt-cached system prompt, and an interchangeable `--model`.
+  AI-F2-S2 added `--array-ir`: generate in an ARRAY-IR (every arbitrary-keyed map —
+  resources/fields/relations/roles/permissions/transitions — becomes an array of
+  named objects) that the strict subset CAN constrain IN DEPTH (type-enum + strict
+  keys guaranteed by construction, not just the envelope); `pkg/aigen/ir.go` does the
+  lossless `MapToIR`/`IRToMap` round-trip (identity over all golds) + error-path
+  translation (map-path→IR-path) so the loop corrects in the model's space.
   `pkg/aigen`, key from `ANTHROPIC_API_KEY`, raw `/v1/messages` so no new dependency;
-  default model `claude-haiku-4-5`; see docs/AI_SCHEMA_GENERATION.md §Constrained decoding),
+  default model `claude-haiku-4-5`; see docs/AI_SCHEMA_GENERATION.md §Array-IR),
   `ai-eval` (the AI-F2-S1 measurement instrument: runs the embedded stratified
   NL→schema gold test set — `pkg/aigen/eval/corpus`, simple/media/compleja — through
-  a paired ablation and emits rigorous statistics: `p_sem` with **Wilson** CIs,
+  a paired ablation (plain vs structured-envelope vs **array-IR**, 3 arms) and emits
+  rigorous statistics: `p_sem` with **Wilson** CIs,
   **empirical** E[iterations] (never the geometric 1/p_sem — the loop isn't i.i.d.),
   **McNemar** (exact <25 discordants else Edwards χ²) + **Cochran-Q**/**Holm** for
   >2 arms, flagging underpowered comparisons as INCONCLUSIVE. SIMULATED + deterministic

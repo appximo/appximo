@@ -265,6 +265,106 @@ func TestGenerate_CostWithCacheTokens(t *testing.T) {
 	}
 }
 
+// toIRJSON converts a map-form schema string to its array-IR JSON (what a model
+// would emit in IR mode), for driving the scripted client through the IR path.
+func toIRJSON(t *testing.T, mapSchema string) string {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(mapSchema), &m); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	b, err := json.Marshal(MapToIR(m))
+	if err != nil {
+		t.Fatalf("marshal IR: %v", err)
+	}
+	return string(b)
+}
+
+func TestGenerate_ArrayIR_ValidFirstTry(t *testing.T) {
+	client := &scriptedClient{responses: []string{toIRJSON(t, validSchema)}}
+	res, err := Generate(context.Background(), client, "a todo app", Options{Model: ModelHaiku, ArrayIR: true})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if !res.Valid || !res.Converged || !res.FirstTry {
+		t.Fatalf("expected valid first-try in IR mode, got %+v", res)
+	}
+	if !res.ArrayIR || !res.Structured {
+		t.Errorf("expected ArrayIR=true and Structured=true, got ir=%v struct=%v", res.ArrayIR, res.Structured)
+	}
+	// The decoder must be constrained to the IR schema (deep keys present — e.g. the
+	// 9-type field enum and a relations array item), not the envelope.
+	b, _ := json.Marshal(client.reqs[0].OutputSchema)
+	if !strings.Contains(string(b), "belongs_to") || !strings.Contains(string(b), "float64") {
+		t.Errorf("IR mode must pass IROutputSchema (deep constraint), got %s", string(b))
+	}
+	// The recovered (map-form) schema must revalidate — IR→map was lossless+valid.
+	if rep := schema.ValidateReport(res.Schema); !rep.Valid {
+		t.Errorf("IR-recovered schema does not revalidate: %+v", rep.Errors)
+	}
+}
+
+func TestGenerate_ArrayIR_CorrectsSemanticInIRSpace(t *testing.T) {
+	client := &scriptedClient{responses: []string{
+		toIRJSON(t, semanticInvalidSchema), toIRJSON(t, validSchema),
+	}}
+	res, err := Generate(context.Background(), client, "a todo app", Options{Model: ModelHaiku, ArrayIR: true})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if !res.Converged || res.FirstTry || res.Iterations != 2 {
+		t.Fatalf("expected convergence after 1 IR correction, got %+v", res)
+	}
+	// Attempt 1 must be a pure SEMANTIC error (the relation target) with ZERO deep
+	// structural errors — the IR guarantees the deep structure by construction.
+	a0 := res.Attempts[0]
+	if a0.StructuralCount != 0 || a0.SemanticCount == 0 {
+		t.Errorf("IR attempt1 should be 0 structural / >0 semantic, got struct=%d sem=%d", a0.StructuralCount, a0.SemanticCount)
+	}
+	// The correction turn must carry IR-translated paths (array indices), not map keys.
+	last := client.reqs[1].Messages[len(client.reqs[1].Messages)-1].Content
+	if !strings.Contains(last, "resources[0]") {
+		t.Errorf("correction must use IR array-index paths, got: %s", last)
+	}
+	if !strings.Contains(last, "array-IR") {
+		t.Errorf("correction should carry the IR note")
+	}
+}
+
+func TestGenerate_ArrayIR_StructuredErrorFallsBackToPlain(t *testing.T) {
+	// The IR structured request errors → degrade to plain (non-IR) in the same iter.
+	client := &erroringStructuredClient{plain: validSchema}
+	res, err := Generate(context.Background(), client, "a todo app", Options{Model: ModelHaiku, ArrayIR: true})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if !res.Converged {
+		t.Fatalf("expected convergence via fallback")
+	}
+	if res.ArrayIR || res.Structured {
+		t.Errorf("expected IR+structured disabled after the structured request errored")
+	}
+}
+
+func TestIROutputSchema_WithinStrictSubset_StringScan(t *testing.T) {
+	// A coarse string scan complements the structural walk in ir_test.go: no
+	// disallowed keyword appears as a JSON key anywhere in the serialized schema.
+	b, err := json.Marshal(IROutputSchema())
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(b)
+	// "min"/"max"/"pattern"/"minLength"/"maxLength" are field PROPERTY names in the IR
+	// (under "properties"), legitimately present as keys; the structural walk in
+	// ir_test.go already proves they are not used as schema KEYWORDS. Here scan only
+	// the keywords that must never appear at all.
+	for _, bad := range []string{"patternProperties", "propertyNames", "oneOf", "not", "multipleOf", "minItems", "maxItems", "minProperties", "maxProperties"} {
+		if strings.Contains(s, "\""+bad+"\"") {
+			t.Errorf("IROutputSchema uses %q, outside the strict subset", bad)
+		}
+	}
+}
+
 func TestOutputSchema_WithinStrictSubset(t *testing.T) {
 	b, err := json.Marshal(OutputSchema())
 	if err != nil {
