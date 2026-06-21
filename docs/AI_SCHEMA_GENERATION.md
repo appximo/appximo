@@ -140,8 +140,16 @@ What it does each round (`aigen.Generate`):
 3. If invalid, appends the machine-readable `errors[]` (the format above) to the
    conversation with a "correct these" preamble and loops — so the model corrects
    *in context*, not blind.
-4. Stops at the first valid schema, or after `--max-iterations` (default 5), reporting
+4. Stops at the first valid schema, or after `--max-iterations` (default 3), reporting
    the remaining errors if it never converged.
+
+> **This plain validator-guided loop is the PRODUCT DEFAULT (AI-F2-S4), decided with
+> real data.** The cheap model + the validator oracle reach ~90% first-try / 100%
+> convergence / ~$0.006 per schema (see [§The first real measurement](#the-first-real-measurement-ai-f2-s3--corpus-scaled--live-verdict)).
+> The constrained-decoding sections that follow (AI-F1-S1 envelope, AI-F2-S2 array-IR)
+> are **archived / experimental opt-ins**: they do not engage on the real Anthropic API
+> and silently fall back to this loop. Read them for the boundary they map and the IR
+> the visual editor reuses — not as the default path.
 
 **The model is reached over raw `/v1/messages`** (`pkg/aigen/client.go`) — no SDK
 dependency, CGO-free, key from `ANTHROPIC_API_KEY` (never hardcoded; absent → a clear
@@ -397,6 +405,37 @@ generation-time keys only, or staged generation — and re-measure. The instrume
 the 120-case corpus are ready to score whichever path is tried next; the full
 120-case `--live` run (rate-limited on a low-OTPM tier; the subsample is the bounded
 proxy) is the standing next data point.
+
+### The decision (AI-F2-S4) — plain is the architecture; the machinery is archived
+
+With the data in, the decision is taken: **the plain validator-guided loop (AI-F0) is
+the default AI architecture.** It is what `ai-generate` runs with no flags; the CLI
+passes `NoStructured:true` by default. The reasons, all evidenced above:
+
+- It delivers the goal on real data: **~90% first-try, 100% convergence, ~$0.006/schema,
+  ~1.1 iterations** with the cheap model, across simple → complex.
+- The constrained-decoding machinery (the `structured` envelope and `array-IR`) **does
+  not engage on the real Anthropic API** — the strict-outputs subset cannot express the
+  schema's open maps and exceeds its 16-union-parameter cap, so both fall back to plain.
+  Carrying it in the default path is complexity that buys nothing here.
+
+**What is archived, not deleted** (and why):
+
+- `OutputSchema` / `IROutputSchema` + the `--structured` / `--array-ir` opt-ins stay as
+  **experimental**, exercised by the measurement harness (`ai-eval`), so the boundary
+  stays measured and the decision stays falsifiable if the API's subset changes.
+- **The array-IR transforms (`ir.go`: `MapToIR`/`IRToMap`, lossless round-trip) are
+  preserved for the VISUAL EDITOR.** They are the stable, array-shaped,
+  index-addressable representation a UI needs to manipulate resources/fields/relations
+  as ordered objects and convert back to the canonical map the engine consumes. The
+  round-trip identity test stays green — this is live code, archived from the *decode
+  path*, not dead.
+
+**What remains the path to the last ~10%** (future, measured with the same harness as
+new arms vs the plain baseline): the *semantic* techniques — dynamic few-shot
+(retrieve near-miss corpus examples), constraint-aware context, topological ordering of
+the generated resources — not decoder constraints. And, orthogonally, a cheap→expensive
+cascade behind the `ModelClient` seam for the residual hard cases.
 
 ## Notes
 

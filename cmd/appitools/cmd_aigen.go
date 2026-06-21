@@ -42,7 +42,7 @@ Examples:
 		out, _ := cmd.Flags().GetString("out")
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		verbose, _ := cmd.Flags().GetBool("verbose")
-		noStructured, _ := cmd.Flags().GetBool("no-structured")
+		structured, _ := cmd.Flags().GetBool("structured")
 		arrayIR, _ := cmd.Flags().GetBool("array-ir")
 
 		client, err := aigen.NewAnthropicClient(model)
@@ -56,14 +56,22 @@ Examples:
 			return err
 		}
 
-		// Structured outputs (constrained decoding) by default when the model
-		// supports it; --no-structured forces plain generation for comparison.
-		// --array-ir uses the AI-F2-S2 array-IR form (deep structural guarantee),
-		// which implies structured outputs.
-		useStructured := !noStructured && aigen.SupportsStructuredOutput(client.Model())
-		if arrayIR && !aigen.SupportsStructuredOutput(client.Model()) {
-			fmt.Fprintf(os.Stderr, "Aviso: --array-ir requiere structured outputs; %s no los soporta — usando generación plana\n", client.Model())
+		// AI-F2-S4 — the DEFAULT is the plain validator-guided loop. The real
+		// measurement (AI-F2-S3, docs §The first real measurement) showed the cheap
+		// model + the validator oracle reach ~90% first-try / 100% convergence /
+		// ~$0.006 per schema, and that the constrained-decoding modes do NOT engage on
+		// the real Anthropic API (the strict-outputs subset rejects the schema's open
+		// objects and >16 union params, so they silently fall back to plain). So they
+		// are EXPERIMENTAL opt-ins, kept for measurement + future reuse, not the
+		// default. --array-ir implies structured.
+		useStructured := (structured || arrayIR) && aigen.SupportsStructuredOutput(client.Model())
+		if (structured || arrayIR) && !useStructured {
+			fmt.Fprintf(os.Stderr, "Aviso: structured outputs no soportado por %s — usando el loop plano (default)\n", client.Model())
 			arrayIR = false
+		}
+		if useStructured {
+			fmt.Fprintln(os.Stderr, "Aviso: structured/array-IR es EXPERIMENTAL — NO engancha contra la API real de Anthropic")
+			fmt.Fprintln(os.Stderr, "  (límites del subset strict: objetos abiertos + tope de 16 params union) y cae al loop plano.")
 		}
 
 		res, err := aigen.Generate(context.Background(), client, args[0], aigen.Options{
@@ -126,12 +134,12 @@ func printReport(res *aigen.Result, verbose bool) {
 			status += " (tras corrección)"
 		}
 	}
-	decode := "plano (sin structured outputs)"
+	decode := "plain loop (validator-guided — the default, AI-F2-S4)"
 	switch {
 	case res.ArrayIR:
-		decode = "array-IR (estructura PROFUNDA garantizada en el decoding)"
+		decode = "array-IR (EXPERIMENTAL; engaged this run)"
 	case res.Structured:
-		decode = "structured outputs (envelope garantizada en el decoding)"
+		decode = "structured envelope (EXPERIMENTAL; engaged this run)"
 	}
 	fmt.Fprintf(w, "  resultado:   %s\n", status)
 	fmt.Fprintf(w, "  modelo:      %s\n", res.Model)
@@ -175,7 +183,13 @@ func init() {
 	aiGenerateCmd.Flags().String("out", "", "archivo donde escribir el schema válido (default: stdout)")
 	aiGenerateCmd.Flags().Bool("json", false, "emitir el resultado completo (schema + métricas) como JSON")
 	aiGenerateCmd.Flags().Bool("verbose", false, "mostrar el detalle por ronda (errores estructurales vs semánticos)")
-	aiGenerateCmd.Flags().Bool("no-structured", false, "desactivar structured outputs (generación plana, para comparar)")
-	aiGenerateCmd.Flags().Bool("array-ir", false, "usar el array-IR (AI-F2-S2): estructura PROFUNDA garantizada por construcción (implica structured outputs)")
+	// EXPERIMENTAL opt-ins (default is the plain validator-guided loop, AI-F2-S4).
+	// Both fall back to plain on the real Anthropic API (strict-subset limits); kept
+	// for measurement (ai-eval) and future reuse (the IR backs the visual editor).
+	aiGenerateCmd.Flags().Bool("structured", false, "EXPERIMENTAL: AI-F1-S1 structured-outputs envelope (no engancha contra la API real; cae a plano)")
+	aiGenerateCmd.Flags().Bool("array-ir", false, "EXPERIMENTAL: AI-F2-S2 array-IR (no engancha contra la API real por el tope de 16 union params; cae a plano)")
+	// Deprecated no-op: plain is now the default, so --no-structured is redundant.
+	aiGenerateCmd.Flags().Bool("no-structured", false, "(obsoleto/no-op: el loop plano ya es el default)")
+	_ = aiGenerateCmd.Flags().MarkDeprecated("no-structured", "plain is the default now; this flag is a no-op")
 	rootCmd.AddCommand(aiGenerateCmd)
 }

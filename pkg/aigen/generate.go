@@ -21,18 +21,20 @@ type Options struct {
 	MaxIterations int
 	// Model prices the run (set to the ModelClient's model id for an accurate cost).
 	Model string
-	// NoStructured disables structured outputs (forces plain generation). Default
-	// (false) uses structured outputs when the client/model supports it. The
-	// generator also falls back to plain generation automatically on a structured
-	// error or an empty-resources result — this flag forces it off from the start.
+	// NoStructured disables structured outputs (forces the plain validator-guided
+	// loop). AI-F2-S4 made plain the PRODUCT DEFAULT — the real measurement
+	// (AI-F2-S3) showed it reaches ~90% first-try / 100% convergence / ~$0.006 per
+	// schema with the cheap model, and that structured decoding does not engage on
+	// the real API. The CLI passes NoStructured:true by default; structured/array-IR
+	// are EXPERIMENTAL opt-ins. (The generator also falls back to plain automatically
+	// on a structured error or an empty-resources result.)
 	NoStructured bool
 	// ArrayIR generates in the array-IR form (AI-F2-S2): the decoder is constrained
-	// to IROutputSchema (which constrains the structure IN DEPTH, not just the
-	// envelope), the model emits IR, and the loop transforms IR→map before
-	// validating and translates error paths back to IR for correction. Implies
-	// structured outputs (it is a stricter structured mode); NoStructured is ignored
-	// when ArrayIR is set. Falls back to plain generation on a structured error or an
-	// empty result, exactly like the envelope mode.
+	// to IROutputSchema and the loop transforms IR→map before validating. EXPERIMENTAL
+	// / archived: it does NOT engage on the real Anthropic API (the strict-outputs
+	// subset caps union params at 16; the field grammar has ~17 optionals), so it
+	// silently falls back to plain — kept for measurement (ai-eval) and because the IR
+	// transforms (ir.go) are reused by the visual editor, not for production decoding.
 	ArrayIR bool
 }
 

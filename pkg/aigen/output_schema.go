@@ -5,6 +5,13 @@ import "encoding/json"
 // OutputSchema returns the JSON Schema passed to Anthropic structured outputs
 // (output_config.format) so the model's response is DECODE-CONSTRAINED to it.
 //
+// ARCHIVED / EXPERIMENTAL (AI-F2-S4): the real Anthropic strict-outputs subset
+// REJECTS this envelope — it requires additionalProperties:false on EVERY object, so
+// the deliberately-open `resources`/`rbac` here cannot be expressed, and the request
+// errors → the generator falls back to the plain validator-guided loop (the default).
+// Kept opt-in for measurement (pkg/aigen/eval) and as the documented record of the
+// boundary; the plain loop is the product path. See docs/AI_SCHEMA_GENERATION.md.
+//
 // Why only the ENVELOPE. The strict-outputs subset is narrow: every object must
 // declare additionalProperties:false, and it offers no patternProperties /
 // propertyNames / additionalProperties-as-schema. The Appitools schema is an

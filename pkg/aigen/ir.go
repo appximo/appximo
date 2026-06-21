@@ -8,6 +8,17 @@ import (
 
 // ── Array-IR (AI-F2-S2) ─────────────────────────────────────────────────────
 //
+// STATUS (AI-F2-S4): ARCHIVED for constrained decoding, PRESERVED for the visual
+// editor. The original goal — feed IROutputSchema to Anthropic structured outputs so
+// the deep structure is decode-guaranteed — does NOT work on the real API (the strict
+// subset caps union params at 16; the field grammar exceeds it), so the array-IR loop
+// falls back to plain (see docs §The first real measurement). The transforms below
+// (MapToIR / IRToMap, lossless round-trip) are kept because they are exactly what the
+// VISUAL EDITOR needs: a stable, array-shaped, index-addressable representation of the
+// schema for manipulating resources/fields/relations as ordered objects in a UI, then
+// converting back to the canonical map the engine consumes. This is live, tested code
+// (the round-trip identity test stays green) — archived from the decode path, not dead.
+//
 // The HONEST limit of AI-F1-S1 (see output_schema.go): the Appitools schema is an
 // arbitrary-keyed map (resources keyed by resource name, fields by field name,
 // roles by role name), and the structured-outputs strict subset cannot express a

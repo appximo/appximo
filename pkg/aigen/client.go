@@ -1,18 +1,23 @@
 // Package aigen is the AI schema-generation layer: it turns a natural-language
-// description into a VALID Appitools schema. The architecture (AI-F1-S1, research-
-// validated) is constrained decoding + a semantic loop:
+// description into a VALID Appitools schema.
 //
-//   - STRUCTURE is constrained at decoding time via Anthropic structured outputs
-//     (output_config.format, the strict-grammar mode). For the Appitools schema —
-//     an arbitrary-keyed map of resources/fields — the strict subset can only
-//     constrain the ENVELOPE (well-formed JSON, the top-level skeleton, the
-//     $schema/version consts, no unknown top-level keys); the deep, map-keyed
-//     structure (field types, strict keys) is not expressible in the subset (it
-//     forbids patternProperties / additionalProperties-as-schema). See OutputSchema.
-//   - SEMANTICS (and the deep structure the envelope can't reach) are handled by a
-//     short correction loop driven by schema.ValidateReport — the engine's own
-//     validator as the trusted external oracle (Huang et al. ICLR 2024: self-
-//     correction without an external oracle does not work).
+// ARCHITECTURE (AI-F2-S4, decided with real data): the plain VALIDATOR-GUIDED LOOP.
+// The model generates a candidate schema; schema.ValidateReport (the engine's own
+// validator) is the trusted external oracle that returns actionable errors; the loop
+// feeds them back and the model self-corrects until valid (Huang et al. ICLR 2024:
+// self-correction without an external oracle does not work). The real measurement
+// (AI-F2-S3) showed this reaches ~90% first-try / 100% convergence / ~$0.006 per
+// schema with the CHEAP model — the democratization thesis, confirmed on real data.
+//
+// ARCHIVED / EXPERIMENTAL — constrained decoding (AI-F1-S1 structured-outputs
+// envelope, AI-F2-S2 array-IR). The intent was to fix p_struct=1 at the decoder, but
+// the real Anthropic strict-outputs subset REJECTS the Appitools grammar (every
+// object needs additionalProperties:false → the schema's open maps can't be
+// expressed; a hard 16-union-param cap → the field grammar with ~17 optionals
+// exceeds it), so both modes silently fall back to plain. They are kept opt-in
+// (OutputSchema/IROutputSchema, Options.ArrayIR) for measurement (pkg/aigen/eval) and
+// because the array-IR transforms (ir.go) are the structured representation the
+// VISUAL EDITOR will reuse — not for production decoding. See docs/AI_SCHEMA_GENERATION.md.
 //
 // It is a NEW, isolated layer: it imports pkg/schema (the validator) but the
 // engine core imports nothing here. The model is reached over raw net/http (the

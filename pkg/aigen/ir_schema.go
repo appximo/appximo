@@ -3,9 +3,17 @@ package aigen
 import "sort"
 
 // IROutputSchema returns the JSON Schema the decoder is constrained to when the
-// model generates in ARRAY-IR form (AI-F2-S2). Unlike OutputSchema (which can only
-// pin the ENVELOPE because the map form is not expressible in the strict subset),
-// this schema constrains the structure IN DEPTH: every arbitrary-keyed map is an
+// model generates in ARRAY-IR form (AI-F2-S2).
+//
+// ARCHIVED / EXPERIMENTAL (AI-F2-S4): the real Anthropic strict-outputs subset
+// REJECTS this schema — it caps union-typed (nullable) parameters at 16 and the
+// Appitools field grammar has ~17 optional keys, so the request errors ("too many
+// parameters with union types") → the generator falls back to the plain
+// validator-guided loop (the default). Kept opt-in for measurement and as the record
+// of the boundary; the transforms in ir.go are reused by the visual editor.
+//
+// Unlike OutputSchema (which can only pin the ENVELOPE because the map form is not
+// expressible in the strict subset), this schema constrains the structure IN DEPTH: every arbitrary-keyed map is an
 // array of objects with a FIXED item schema, which the strict subset CAN express.
 //
 // Every construction here is inside the structured-outputs strict subset:

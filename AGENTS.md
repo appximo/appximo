@@ -58,21 +58,19 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   `ai-generate "<description>"` (the AI democratization loop: a natural-language
   app description → LLM-generated schema → self-correct from `ValidateReport`'s
   actionable errors → a VALID schema, printing the ECONOMIC instrumentation —
-  iterations / tokens / approx cost. AI-F1-S1 re-architected it to **constrained
-  decoding**: structured outputs (`output_config.format`) guarantee the ENVELOPE at
-  decode time (well-formed JSON + top-level skeleton + `$schema`/`version` consts +
-  no unknown top-level keys; the deep arbitrary-keyed map isn't expressible in the
-  strict subset, so field types / strict-keys / semantics stay with the validator +
-  loop, K=3), plus graceful fallback (empty-resources or structured-reject → plain),
-  refusal handling, a prompt-cached system prompt, and an interchangeable `--model`.
-  AI-F2-S2 added `--array-ir`: generate in an ARRAY-IR (every arbitrary-keyed map —
-  resources/fields/relations/roles/permissions/transitions — becomes an array of
-  named objects) that the strict subset CAN constrain IN DEPTH (type-enum + strict
-  keys guaranteed by construction, not just the envelope); `pkg/aigen/ir.go` does the
-  lossless `MapToIR`/`IRToMap` round-trip (identity over all golds) + error-path
-  translation (map-path→IR-path) so the loop corrects in the model's space.
-  `pkg/aigen`, key from `ANTHROPIC_API_KEY`, raw `/v1/messages` so no new dependency;
-  default model `claude-haiku-4-5`; see docs/AI_SCHEMA_GENERATION.md §Array-IR),
+  iterations / tokens / approx cost. **DEFAULT = the plain validator-guided loop
+  (AI-F2-S4, decided with real data):** the cheap model + the validator oracle reach
+  ~90% first-try / 100% convergence / ~$0.006 per schema (K=3). **ARCHIVED /
+  EXPERIMENTAL** — constrained decoding (AI-F1-S1 `--structured` envelope, AI-F2-S2
+  `--array-ir`): both are opt-in and do NOT engage on the real Anthropic API (the
+  strict-outputs subset needs additionalProperties:false on every object → open maps
+  inexpressible, and caps union params at 16 → the field grammar exceeds it), so they
+  silently fall back to plain. Kept for measurement (`ai-eval`) and because the
+  array-IR transforms (`pkg/aigen/ir.go`: lossless `MapToIR`/`IRToMap`) are REUSED BY
+  THE VISUAL EDITOR (the structured, index-addressable schema representation a UI
+  needs) — not for production decoding. `pkg/aigen`, key from `ANTHROPIC_API_KEY`, raw
+  `/v1/messages` so no new dependency; default model `claude-haiku-4-5`; see
+  docs/AI_SCHEMA_GENERATION.md §The decision (AI-F2-S4)),
   `ai-eval` (the AI-F2-S1 measurement instrument: runs the embedded stratified
   NL→schema gold test set — `pkg/aigen/eval/corpus`, simple/media/compleja, scaled to
   **40/stratum = 120** in AI-F2-S3 — through a paired ablation (plain vs
