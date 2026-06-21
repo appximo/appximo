@@ -1,0 +1,155 @@
+/* Appitools Studio — design tokens + base styles.
+   Light default (dense-data legibility), instant dark toggle via [data-theme].
+   Tabular figures for numbers; system font stack; one accent (brand blue). */
+
+:root {
+	--brand: #3b5bdb;
+	--brand-600: #364fc7;
+	--brand-100: #dbe4ff;
+
+	--bg: #f5f6f8;
+	--surface: #ffffff;
+	--surface-2: #f1f3f5;
+	--border: #dee2e6;
+	--border-strong: #ced4da;
+	--text: #1a1d23;
+	--text-2: #5c6370;
+	--text-3: #868e96;
+
+	--accent-fk: #1c7ed6;
+	--ok: #2f9e44;
+	--warn: #e8590c;
+	--danger: #e03131;
+	--violet: #7048e8;
+
+	--shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
+	--shadow-md: 0 4px 12px rgba(16, 24, 40, 0.12);
+	--radius: 8px;
+	--radius-sm: 5px;
+
+	--font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+	--mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+	--topbar-h: 52px;
+	--panel-w: 340px;
+}
+
+:root[data-theme='dark'] {
+	--bg: #0f1115;
+	--surface: #181b21;
+	--surface-2: #20242c;
+	--border: #2a2f38;
+	--border-strong: #3a4150;
+	--text: #e6e8ec;
+	--text-2: #aab1bd;
+	--text-3: #6b7280;
+	--brand-100: #1e2a52;
+	--accent-fk: #4dabf7;
+	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+	--shadow-md: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	height: 100%;
+}
+
+body {
+	font-family: var(--font);
+	color: var(--text);
+	background: var(--bg);
+	font-size: 14px;
+	-webkit-font-smoothing: antialiased;
+}
+
+.tnum {
+	font-variant-numeric: tabular-nums;
+}
+
+button {
+	font-family: inherit;
+	font-size: 13px;
+	cursor: pointer;
+}
+
+input,
+select,
+textarea {
+	font-family: inherit;
+	font-size: 13px;
+	color: var(--text);
+}
+
+/* ── shared controls ──────────────────────────────────────────────────────── */
+
+.btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 11px;
+	border: 1px solid var(--border-strong);
+	background: var(--surface);
+	color: var(--text);
+	border-radius: var(--radius-sm);
+	font-weight: 500;
+	transition:
+		background 0.12s ease,
+		border-color 0.12s ease;
+	white-space: nowrap;
+}
+.btn:hover {
+	background: var(--surface-2);
+}
+.btn.primary {
+	background: var(--brand);
+	border-color: var(--brand);
+	color: #fff;
+}
+.btn.primary:hover {
+	background: var(--brand-600);
+}
+.btn.subtle {
+	border-color: transparent;
+	background: transparent;
+}
+.btn.subtle:hover {
+	background: var(--surface-2);
+}
+.btn.danger {
+	color: var(--danger);
+	border-color: var(--border-strong);
+}
+.btn.danger:hover {
+	background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.field-input,
+.field-select {
+	width: 100%;
+	padding: 6px 8px;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-sm);
+	background: var(--surface);
+}
+.field-input:focus,
+.field-select:focus {
+	outline: 2px solid var(--brand-100);
+	border-color: var(--brand);
+}
+
+.badge {
+	display: inline-flex;
+	align-items: center;
+	height: 16px;
+	padding: 0 5px;
+	border-radius: 4px;
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+	line-height: 1;
+}

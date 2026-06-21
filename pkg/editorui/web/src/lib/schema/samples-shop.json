@@ -1,0 +1,68 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "shop-api",
+  "resources": {
+    "customers": {
+      "fields": {
+        "email": { "type": "string", "required": true, "unique": true, "format": "email" },
+        "name": { "type": "string", "required": true, "maxLength": 120 },
+        "created_at": { "type": "time", "auto": true }
+      }
+    },
+    "products": {
+      "fields": {
+        "sku": { "type": "string", "required": true, "unique": true, "pattern": "^[A-Z0-9-]{3,20}$" },
+        "name": { "type": "string", "required": true },
+        "price": { "type": "float64", "required": true, "min": 0 },
+        "stock": { "type": "int", "default": 0, "min": 0 }
+      }
+    },
+    "orders": {
+      "fields": {
+        "customer_id": { "type": "uuid", "required": true, "relation": "customers", "on_delete": "restrict" },
+        "total": { "type": "float64", "min": 0 },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "paid", "shipped", "delivered", "cancelled"],
+          "default": "pending",
+          "state_machine": {
+            "initial": "pending",
+            "transitions": {
+              "pending": ["paid", "cancelled"],
+              "paid": ["shipped"],
+              "shipped": ["delivered"],
+              "delivered": [],
+              "cancelled": []
+            }
+          }
+        },
+        "created_at": { "type": "time", "auto": true }
+      },
+      "relations": {
+        "customer": { "type": "belongs_to", "target": "customers", "fk": "customer_id" },
+        "lines": { "type": "has_many", "target": "order_lines", "fk": "order_id", "limit": 100 }
+      },
+      "events": ["create", "update"]
+    },
+    "order_lines": {
+      "fields": {
+        "order_id": { "type": "uuid", "required": true, "relation": "orders", "on_delete": "cascade" },
+        "product_id": { "type": "uuid", "required": true, "relation": "products", "on_delete": "restrict" },
+        "qty": { "type": "int", "required": true, "min": 1 },
+        "unit_price": { "type": "float64", "required": true, "min": 0 }
+      },
+      "indexes": [{ "fields": ["order_id"] }]
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": { "resources": "*", "actions": ["*"] },
+      "shopper": {
+        "resources": ["orders", "order_lines"],
+        "actions": ["read", "create"],
+        "conditions": { "field": "customer_id", "op": "eq", "val": "$user_id" }
+      }
+    }
+  }
+}

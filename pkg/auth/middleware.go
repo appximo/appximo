@@ -57,7 +57,10 @@ func HookUserContext(ctx context.Context) map[string]any {
 // contract + its explorer (API-PRODUCTIVA-V1): the schema surface is the same for
 // every tenant of this engine, so the spec is engine-global and unauthenticated —
 // a consumer reads the contract before it has a token.
-var skipJWT = []string{"/health", "/readyz", "/graphiql", "/metrics", "/debug", "/admin", "/auth/", "/favicon.ico", "/openapi", "/docs"}
+// "/editor" is the visual schema editor SPA (UI-F0-S1): a static client-side app
+// (HTML/JS/CSS) served from the binary; the shell loads before any token exists,
+// exactly like /admin.
+var skipJWT = []string{"/health", "/readyz", "/graphiql", "/metrics", "/debug", "/admin", "/editor", "/auth/", "/favicon.ico", "/openapi", "/docs"}
 
 // JWTMiddleware validates Bearer tokens on all routes except those in skipJWT.
 // 401 is returned for missing or invalid tokens on enforced routes.

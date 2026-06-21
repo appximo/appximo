@@ -94,6 +94,15 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   It is **not part of the engine** — never ship engine features there.
   `make devhub-run` is only for developing the devhub itself (stop the
   service first or :3099 is taken and the stale binary keeps serving).
+- `pkg/editorui/` is the **visual schema editor** (Appitools Studio, UI-F0-S1):
+  a static Svelte 5 SPA (plain Vite, `pkg/editorui/web/`) `go:embed`-served at
+  **`/editor`** — a graphical ERD over the schema, no AI, zero Node in prod. Build
+  it with `make editor-ui` BEFORE `go build` (same committed-`index.html` /
+  gitignored-assets pattern as the admin UI); a bare build serves an empty shell
+  (logged). It edits/exports the same schema JSON the engine consumes (round-trip
+  faithful, `appitools validate`-clean). It is the schema-authoring FACE of the
+  product — engine features still live in the schema/engine, never in the editor.
+  Architecture + how-it-grows: `pkg/editorui/web/ARCHITECTURE.md`.
 
 ## Conventions (this repo, non-obvious)
 

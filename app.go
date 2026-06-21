@@ -30,6 +30,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/codegen"
 	"github.com/miguelangel/appitools/pkg/controlplane"
 	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/miguelangel/appitools/pkg/editorui"
 	"github.com/miguelangel/appitools/pkg/events"
 	"github.com/miguelangel/appitools/pkg/extensions"
 	"github.com/miguelangel/appitools/pkg/files"
@@ -746,6 +747,19 @@ func (a *App) buildRouter() *chi.Mux {
 		log.Println("admin UI: SolidJS admin panel served at /admin")
 	}
 
+	// Visual schema editor (UI-F0-S1): the embedded Svelte 5 SPA served at /editor
+	// (shell at /editor, hashed assets at /editor/assets/*). Static serving — no
+	// hot-path impact, tenant-agnostic, JWT-skipped (see pkg/auth.skipJWT). Built
+	// with `make editor-ui` (npm run build) before `go build`; without it only the
+	// placeholder shell is embedded (logged).
+	if err := editorui.Register(r); err != nil {
+		log.Printf("WARNING: visual editor not mounted: %v", err)
+	} else if !editorui.HasBuiltAssets() {
+		log.Println("editor: serving /editor (WARNING: no built assets embedded — run `make editor-ui` (npm run build) before `go build`)")
+	} else {
+		log.Println("editor: visual schema editor (Appitools Studio) served at /editor")
+	}
+
 	r.Get("/healthz", a.ss.HealthzHandler)
 	r.Get("/readyz", a.ss.ReadyzHandler)
 	r.Get("/health", func(w http.ResponseWriter, req *http.Request) {
@@ -848,6 +862,7 @@ func isInfraPath(p string) bool {
 	case strings.HasPrefix(p, "/metrics"),
 		strings.HasPrefix(p, "/debug"),
 		strings.HasPrefix(p, "/admin"),
+		strings.HasPrefix(p, "/editor"),
 		strings.HasPrefix(p, "/health"),
 		strings.HasPrefix(p, "/readyz"):
 		return true

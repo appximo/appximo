@@ -65,3 +65,11 @@ tools/devhub/web/node_modules/
 # the hashed assets are produced by `npm run build` (make admin-ui) before go build.
 pkg/adminui/web/dist/assets/
 pkg/adminui/web/node_modules/
+
+# visual schema editor UI build output — SAME pattern (UI-F0-S1): the built
+# build/index.html stays committed so //go:embed all:web/build always resolves;
+# the hashed assets are produced by `npm run build` (make editor-ui) before go build.
+# (public/favicon.svg is the committed SOURCE; build/favicon.svg is its build copy.)
+pkg/editorui/web/build/assets/
+pkg/editorui/web/build/favicon.svg
+pkg/editorui/web/node_modules/

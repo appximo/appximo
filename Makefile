@@ -104,7 +104,7 @@ build-pgo: default.pgo
 # ─── DEV TOOLS (S41) ─────────────────────────────────────────
 .PHONY: test-watch test-watch-pkg test-watch-integration test-reflex \
         cover cover-treemap test-perf-dashboard test-perf-smoke \
-        dev-layout dev-metrics dev-setup devhub-run devhub-build admin-ui bench-protocol
+        dev-layout dev-metrics dev-setup devhub-run devhub-build admin-ui editor-ui bench-protocol
 
 test-watch:
 	gotestsum --watch --format testdox --watch-chdir -- -race -short ./...
@@ -177,6 +177,13 @@ devhub-build:
 # CI/release for reproducibility; locally `npm install` is fine.
 admin-ui:
 	cd pkg/adminui/web && npm install --no-audit --no-fund && npm run build
+
+# editor-ui: build the embedded visual schema editor SPA (Appitools Studio, UI-F0-S1).
+# Plain Vite + Svelte 5 → static files in pkg/editorui/web/build. Same gitignore
+# pattern as admin-ui: the hashed assets are gitignored, so this MUST run before
+# `go build` / the release / the Docker image for the editor to be populated.
+editor-ui:
+	cd pkg/editorui/web && npm install --no-audit --no-fund && npm run build
 
 # Protocolo de benchmark científico: N runs + warmup + cooldown + import a SQLite
 # Uso: make bench-protocol RUNS=10 LABEL=baseline-s42 [RATE=500] [DURATION=30s] [SCRIPT=tests/performance/sustained_writes.js]
