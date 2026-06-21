@@ -1,0 +1,43 @@
+{
+  "id": "notes",
+  "stratum": "simple",
+  "domain": "productivity",
+  "description": "A note-taking app: notes with a title, content and a pinned flag.",
+  "gold": {
+    "name": "notes-api",
+    "resources": {
+      "notes": {
+        "fields": {
+          "title": {
+            "type": "string",
+            "required": true,
+            "maxLength": 200
+          },
+          "content": {
+            "type": "text"
+          },
+          "pinned": {
+            "type": "bool",
+            "default": false
+          },
+          "created_at": {
+            "type": "time",
+            "auto": true
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

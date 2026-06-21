@@ -1,0 +1,114 @@
+{
+  "id": "inventory",
+  "stratum": "media",
+  "domain": "retail",
+  "description": "An inventory system: suppliers (name), categories (name), and products (name, sku, price, stock) where a product belongs to a category and a supplier.",
+  "gold": {
+    "name": "inventory-api",
+    "resources": {
+      "suppliers": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120,
+            "unique": true
+          }
+        },
+        "relations": {
+          "products": {
+            "type": "has_many",
+            "target": "products",
+            "fk": "supplier_id"
+          }
+        }
+      },
+      "categories": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 80,
+            "unique": true
+          }
+        },
+        "relations": {
+          "products": {
+            "type": "has_many",
+            "target": "products",
+            "fk": "category_id"
+          }
+        }
+      },
+      "products": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 200
+          },
+          "sku": {
+            "type": "string",
+            "required": true,
+            "unique": true,
+            "maxLength": 40
+          },
+          "price": {
+            "type": "float64",
+            "required": true,
+            "min": 0
+          },
+          "stock": {
+            "type": "int",
+            "min": 0,
+            "default": 0
+          },
+          "category_id": {
+            "type": "uuid",
+            "relation": "categories",
+            "on_delete": "set_null"
+          },
+          "supplier_id": {
+            "type": "uuid",
+            "relation": "suppliers",
+            "on_delete": "set_null"
+          }
+        },
+        "relations": {
+          "category": {
+            "type": "belongs_to",
+            "target": "categories",
+            "fk": "category_id"
+          },
+          "supplier": {
+            "type": "belongs_to",
+            "target": "suppliers",
+            "fk": "supplier_id"
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        },
+        "clerk": {
+          "resources": [
+            "products",
+            "categories"
+          ],
+          "actions": [
+            "read",
+            "update"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

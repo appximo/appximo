@@ -1,0 +1,108 @@
+{
+  "id": "realestate",
+  "stratum": "media",
+  "domain": "realestate",
+  "description": "A real-estate listing app: agents (name), properties (title, price, address) listed by an agent, and visits to a property with a date.",
+  "gold": {
+    "name": "realestate-api",
+    "resources": {
+      "agents": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "phone": {
+            "type": "string",
+            "maxLength": 30
+          }
+        },
+        "relations": {
+          "properties": {
+            "type": "has_many",
+            "target": "properties",
+            "fk": "agent_id"
+          }
+        }
+      },
+      "properties": {
+        "fields": {
+          "title": {
+            "type": "string",
+            "required": true,
+            "maxLength": 200
+          },
+          "price": {
+            "type": "float64",
+            "required": true,
+            "min": 0
+          },
+          "address": {
+            "type": "string",
+            "maxLength": 240
+          },
+          "agent_id": {
+            "type": "uuid",
+            "relation": "agents",
+            "on_delete": "set_null"
+          }
+        },
+        "relations": {
+          "agent": {
+            "type": "belongs_to",
+            "target": "agents",
+            "fk": "agent_id"
+          },
+          "visits": {
+            "type": "has_many",
+            "target": "visits",
+            "fk": "property_id"
+          }
+        }
+      },
+      "visits": {
+        "fields": {
+          "property_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "properties",
+            "on_delete": "cascade"
+          },
+          "visitor": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "at": {
+            "type": "time",
+            "required": true
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        },
+        "agent": {
+          "resources": [
+            "properties",
+            "visits"
+          ],
+          "actions": [
+            "read",
+            "create",
+            "update"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

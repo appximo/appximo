@@ -1,0 +1,147 @@
+{
+  "id": "hospital",
+  "stratum": "compleja",
+  "domain": "health",
+  "description": "A hospital system: wards (name, beds), staff (name, role), patients (name, dob), and admissions linking a patient to a ward with an attending staff member; an admission goes admitted → in_treatment → discharged. Staff can read patients and update admissions.",
+  "gold": {
+    "name": "hospital-api",
+    "resources": {
+      "wards": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "unique": true,
+            "maxLength": 80
+          },
+          "beds": {
+            "type": "int",
+            "min": 1,
+            "max": 200,
+            "default": 10
+          }
+        },
+        "relations": {
+          "admissions": {
+            "type": "has_many",
+            "target": "admissions",
+            "fk": "ward_id"
+          }
+        }
+      },
+      "staff": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "doctor",
+              "nurse",
+              "admin"
+            ],
+            "default": "nurse"
+          }
+        },
+        "relations": {
+          "admissions": {
+            "type": "has_many",
+            "target": "admissions",
+            "fk": "attending_id"
+          }
+        }
+      },
+      "patients": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "dob": {
+            "type": "time"
+          }
+        },
+        "relations": {
+          "admissions": {
+            "type": "has_many",
+            "target": "admissions",
+            "fk": "patient_id"
+          }
+        }
+      },
+      "admissions": {
+        "fields": {
+          "patient_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "patients",
+            "on_delete": "restrict"
+          },
+          "ward_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "wards",
+            "on_delete": "restrict"
+          },
+          "attending_id": {
+            "type": "uuid",
+            "relation": "staff",
+            "on_delete": "set_null"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "admitted",
+              "in_treatment",
+              "discharged"
+            ],
+            "default": "admitted",
+            "state_machine": {
+              "initial": "admitted",
+              "transitions": {
+                "admitted": [
+                  "in_treatment",
+                  "discharged"
+                ],
+                "in_treatment": [
+                  "discharged"
+                ],
+                "discharged": []
+              }
+            }
+          },
+          "admitted_at": {
+            "type": "time",
+            "auto": true
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        },
+        "staff": {
+          "resources": [
+            "patients",
+            "admissions"
+          ],
+          "actions": [
+            "read",
+            "update"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

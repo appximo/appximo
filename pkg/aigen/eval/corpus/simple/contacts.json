@@ -1,0 +1,44 @@
+{
+  "id": "contacts",
+  "stratum": "simple",
+  "domain": "crm",
+  "description": "A contacts list: each contact has a name, email, phone and company.",
+  "gold": {
+    "name": "contacts-api",
+    "resources": {
+      "contacts": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "phone": {
+            "type": "string",
+            "maxLength": 30
+          },
+          "company": {
+            "type": "string",
+            "maxLength": 120
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "id": "expenses",
+  "stratum": "simple",
+  "domain": "finance",
+  "description": "An expense tracker: expenses with an amount, a category (food, transport, other), a description and a date.",
+  "gold": {
+    "name": "expenses-api",
+    "resources": {
+      "expenses": {
+        "fields": {
+          "amount": {
+            "type": "float64",
+            "required": true,
+            "min": 0
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "food",
+              "transport",
+              "other"
+            ],
+            "default": "other"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "spent_on": {
+            "type": "time",
+            "required": true
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

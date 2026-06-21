@@ -1,0 +1,127 @@
+{
+  "id": "ledger",
+  "stratum": "compleja",
+  "domain": "fintech",
+  "description": "A double-entry ledger: accounts (name, kind asset/liability/equity/income/expense) and journal entries (belonging to an account, amount, a reference, and a status draft → posted where posted is final and immutable). A user role can read and create its own entries scoped by user_id.",
+  "gold": {
+    "name": "ledger-api",
+    "resources": {
+      "accounts": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "unique": true,
+            "maxLength": 120
+          },
+          "kind": {
+            "type": "string",
+            "required": true,
+            "enum": [
+              "asset",
+              "liability",
+              "equity",
+              "income",
+              "expense"
+            ]
+          }
+        },
+        "relations": {
+          "entries": {
+            "type": "has_many",
+            "target": "entries",
+            "fk": "account_id"
+          }
+        }
+      },
+      "entries": {
+        "fields": {
+          "account_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "accounts",
+            "on_delete": "restrict"
+          },
+          "user_id": {
+            "type": "uuid"
+          },
+          "amount": {
+            "type": "float64",
+            "required": true
+          },
+          "ref": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "posted"
+            ],
+            "default": "draft",
+            "state_machine": {
+              "initial": "draft",
+              "transitions": {
+                "draft": [
+                  "posted"
+                ],
+                "posted": []
+              }
+            }
+          },
+          "created_at": {
+            "type": "time",
+            "auto": true
+          }
+        },
+        "relations": {
+          "account": {
+            "type": "belongs_to",
+            "target": "accounts",
+            "fk": "account_id"
+          }
+        },
+        "indexes": [
+          {
+            "fields": [
+              "status"
+            ]
+          },
+          {
+            "fields": [
+              "user_id"
+            ]
+          }
+        ]
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        },
+        "user": {
+          "resources": [
+            "entries",
+            "accounts"
+          ],
+          "actions": [
+            "read",
+            "create"
+          ],
+          "conditions": {
+            "field": "user_id",
+            "op": "eq",
+            "val": "$user_id"
+          }
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

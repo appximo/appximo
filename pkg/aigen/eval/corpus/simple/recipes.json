@@ -1,0 +1,47 @@
+{
+  "id": "recipes",
+  "stratum": "simple",
+  "domain": "food",
+  "description": "A recipe box: recipes with a title, ingredients text, steps text and a difficulty (easy, medium, hard).",
+  "gold": {
+    "name": "recipes-api",
+    "resources": {
+      "recipes": {
+        "fields": {
+          "title": {
+            "type": "string",
+            "required": true,
+            "maxLength": 160
+          },
+          "ingredients": {
+            "type": "text"
+          },
+          "steps": {
+            "type": "text"
+          },
+          "difficulty": {
+            "type": "string",
+            "enum": [
+              "easy",
+              "medium",
+              "hard"
+            ],
+            "default": "easy"
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

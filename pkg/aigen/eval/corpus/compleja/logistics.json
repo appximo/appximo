@@ -1,0 +1,165 @@
+{
+  "id": "logistics",
+  "stratum": "compleja",
+  "domain": "logistics",
+  "description": "A logistics tracker: drivers (name, license), routes (code, region) where the pair (region, code) is unique, shipments assigned to a driver and a route moving created → picked_up → in_transit → delivered (or → returned), and stops on a shipment with a sequence number and address.",
+  "gold": {
+    "name": "logistics-api",
+    "resources": {
+      "drivers": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "license": {
+            "type": "string",
+            "required": true,
+            "unique": true,
+            "maxLength": 40
+          }
+        },
+        "relations": {
+          "shipments": {
+            "type": "has_many",
+            "target": "shipments",
+            "fk": "driver_id"
+          }
+        }
+      },
+      "routes": {
+        "fields": {
+          "code": {
+            "type": "string",
+            "required": true,
+            "maxLength": 20
+          },
+          "region": {
+            "type": "string",
+            "required": true,
+            "maxLength": 40
+          }
+        },
+        "indexes": [
+          {
+            "fields": [
+              "region",
+              "code"
+            ],
+            "unique": true
+          }
+        ],
+        "relations": {
+          "shipments": {
+            "type": "has_many",
+            "target": "shipments",
+            "fk": "route_id"
+          }
+        }
+      },
+      "shipments": {
+        "fields": {
+          "driver_id": {
+            "type": "uuid",
+            "relation": "drivers",
+            "on_delete": "set_null"
+          },
+          "route_id": {
+            "type": "uuid",
+            "relation": "routes",
+            "on_delete": "set_null"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "picked_up",
+              "in_transit",
+              "delivered",
+              "returned"
+            ],
+            "default": "created",
+            "state_machine": {
+              "initial": "created",
+              "transitions": {
+                "created": [
+                  "picked_up"
+                ],
+                "picked_up": [
+                  "in_transit"
+                ],
+                "in_transit": [
+                  "delivered",
+                  "returned"
+                ],
+                "delivered": [],
+                "returned": []
+              }
+            }
+          },
+          "created_at": {
+            "type": "time",
+            "auto": true
+          }
+        },
+        "relations": {
+          "driver": {
+            "type": "belongs_to",
+            "target": "drivers",
+            "fk": "driver_id"
+          },
+          "stops": {
+            "type": "has_many",
+            "target": "stops",
+            "fk": "shipment_id"
+          }
+        }
+      },
+      "stops": {
+        "fields": {
+          "shipment_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "shipments",
+            "on_delete": "cascade"
+          },
+          "seq": {
+            "type": "int",
+            "required": true,
+            "min": 1
+          },
+          "address": {
+            "type": "string",
+            "required": true,
+            "maxLength": 240
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        },
+        "dispatcher": {
+          "resources": [
+            "shipments",
+            "stops",
+            "routes"
+          ],
+          "actions": [
+            "read",
+            "create",
+            "update"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

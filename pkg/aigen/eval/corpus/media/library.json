@@ -1,0 +1,102 @@
+{
+  "id": "library",
+  "stratum": "media",
+  "domain": "library",
+  "description": "A library system: books (title, isbn, year), authors (name), and loans linking a book to a borrower with a due date. A book belongs to an author; an author has many books.",
+  "gold": {
+    "name": "library-api",
+    "resources": {
+      "authors": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          }
+        },
+        "relations": {
+          "books": {
+            "type": "has_many",
+            "target": "books",
+            "fk": "author_id"
+          }
+        }
+      },
+      "books": {
+        "fields": {
+          "title": {
+            "type": "string",
+            "required": true,
+            "maxLength": 200
+          },
+          "isbn": {
+            "type": "string",
+            "maxLength": 20,
+            "unique": true
+          },
+          "year": {
+            "type": "int",
+            "min": 0,
+            "max": 3000
+          },
+          "author_id": {
+            "type": "uuid",
+            "relation": "authors",
+            "on_delete": "set_null"
+          }
+        },
+        "relations": {
+          "author": {
+            "type": "belongs_to",
+            "target": "authors",
+            "fk": "author_id"
+          }
+        }
+      },
+      "loans": {
+        "fields": {
+          "book_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "books",
+            "on_delete": "cascade"
+          },
+          "borrower": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "due": {
+            "type": "time",
+            "required": true
+          },
+          "returned": {
+            "type": "bool",
+            "default": false
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        },
+        "member": {
+          "resources": [
+            "books",
+            "authors"
+          ],
+          "actions": [
+            "read"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

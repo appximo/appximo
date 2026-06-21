@@ -1,0 +1,108 @@
+{
+  "id": "helpdesk",
+  "stratum": "media",
+  "domain": "saas",
+  "description": "A helpdesk: agents (name, email) and tickets (subject, body, priority low/normal/high, status open/pending/closed) assigned to an agent.",
+  "gold": {
+    "name": "helpdesk-api",
+    "resources": {
+      "agents": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "email": {
+            "type": "string",
+            "required": true,
+            "format": "email",
+            "unique": true
+          }
+        },
+        "relations": {
+          "tickets": {
+            "type": "has_many",
+            "target": "tickets",
+            "fk": "agent_id"
+          }
+        }
+      },
+      "tickets": {
+        "fields": {
+          "subject": {
+            "type": "string",
+            "required": true,
+            "maxLength": 200
+          },
+          "body": {
+            "type": "text"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high"
+            ],
+            "default": "normal"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "pending",
+              "closed"
+            ],
+            "default": "open"
+          },
+          "agent_id": {
+            "type": "uuid",
+            "relation": "agents",
+            "on_delete": "set_null"
+          }
+        },
+        "relations": {
+          "agent": {
+            "type": "belongs_to",
+            "target": "agents",
+            "fk": "agent_id"
+          }
+        },
+        "indexes": [
+          {
+            "fields": [
+              "status"
+            ]
+          },
+          {
+            "fields": [
+              "priority"
+            ]
+          }
+        ]
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        },
+        "agent": {
+          "resources": [
+            "tickets"
+          ],
+          "actions": [
+            "read",
+            "update"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

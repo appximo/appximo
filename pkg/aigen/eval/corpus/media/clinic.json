@@ -1,0 +1,102 @@
+{
+  "id": "clinic",
+  "stratum": "media",
+  "domain": "health",
+  "description": "A medical clinic: doctors (name, specialty), patients (name, dob), and appointments linking a patient and a doctor at a time with a status (scheduled, attended, cancelled).",
+  "gold": {
+    "name": "clinic-api",
+    "resources": {
+      "doctors": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "specialty": {
+            "type": "string",
+            "maxLength": 80
+          }
+        },
+        "relations": {
+          "appointments": {
+            "type": "has_many",
+            "target": "appointments",
+            "fk": "doctor_id"
+          }
+        }
+      },
+      "patients": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "dob": {
+            "type": "time"
+          }
+        },
+        "relations": {
+          "appointments": {
+            "type": "has_many",
+            "target": "appointments",
+            "fk": "patient_id"
+          }
+        }
+      },
+      "appointments": {
+        "fields": {
+          "patient_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "patients",
+            "on_delete": "cascade"
+          },
+          "doctor_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "doctors",
+            "on_delete": "restrict"
+          },
+          "at": {
+            "type": "time",
+            "required": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "scheduled",
+              "attended",
+              "cancelled"
+            ],
+            "default": "scheduled"
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        },
+        "reception": {
+          "resources": [
+            "patients",
+            "appointments"
+          ],
+          "actions": [
+            "read",
+            "create",
+            "update"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

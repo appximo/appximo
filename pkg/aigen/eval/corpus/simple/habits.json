@@ -1,0 +1,50 @@
+{
+  "id": "habits",
+  "stratum": "simple",
+  "domain": "health",
+  "description": "A habit tracker: habits with a name and a target count per week, plus check-ins each with a date.",
+  "gold": {
+    "name": "habits-api",
+    "resources": {
+      "habits": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 80
+          },
+          "weekly_target": {
+            "type": "int",
+            "min": 1,
+            "max": 7,
+            "default": 1
+          }
+        }
+      },
+      "checkins": {
+        "fields": {
+          "day": {
+            "type": "time",
+            "required": true
+          },
+          "done": {
+            "type": "bool",
+            "default": true
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

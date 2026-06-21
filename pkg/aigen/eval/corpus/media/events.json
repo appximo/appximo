@@ -1,0 +1,94 @@
+{
+  "id": "events",
+  "stratum": "media",
+  "domain": "events",
+  "description": "An events platform: events (name, venue, starts_at) and attendees (name, email) registered to an event.",
+  "gold": {
+    "name": "events-api",
+    "resources": {
+      "events": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 160
+          },
+          "venue": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "starts_at": {
+            "type": "time",
+            "required": true
+          }
+        },
+        "relations": {
+          "attendees": {
+            "type": "has_many",
+            "target": "attendees",
+            "fk": "event_id"
+          }
+        }
+      },
+      "attendees": {
+        "fields": {
+          "event_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "events",
+            "on_delete": "cascade"
+          },
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "email": {
+            "type": "string",
+            "required": true,
+            "format": "email"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "registered",
+              "checked_in",
+              "no_show"
+            ],
+            "default": "registered"
+          }
+        },
+        "relations": {
+          "event": {
+            "type": "belongs_to",
+            "target": "events",
+            "fk": "event_id"
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        },
+        "organizer": {
+          "resources": [
+            "events",
+            "attendees"
+          ],
+          "actions": [
+            "read",
+            "create",
+            "update"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

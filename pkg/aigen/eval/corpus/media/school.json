@@ -1,0 +1,106 @@
+{
+  "id": "school",
+  "stratum": "media",
+  "domain": "education",
+  "description": "A school: students (name), courses (title, credits), and enrollments linking a student to a course with a grade.",
+  "gold": {
+    "name": "school-api",
+    "resources": {
+      "students": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "unique": true
+          }
+        },
+        "relations": {
+          "enrollments": {
+            "type": "has_many",
+            "target": "enrollments",
+            "fk": "student_id"
+          }
+        }
+      },
+      "courses": {
+        "fields": {
+          "title": {
+            "type": "string",
+            "required": true,
+            "maxLength": 160
+          },
+          "credits": {
+            "type": "int",
+            "min": 1,
+            "max": 12,
+            "default": 3
+          }
+        },
+        "relations": {
+          "enrollments": {
+            "type": "has_many",
+            "target": "enrollments",
+            "fk": "course_id"
+          }
+        }
+      },
+      "enrollments": {
+        "fields": {
+          "student_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "students",
+            "on_delete": "cascade"
+          },
+          "course_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "courses",
+            "on_delete": "cascade"
+          },
+          "grade": {
+            "type": "float64",
+            "min": 0,
+            "max": 100
+          }
+        },
+        "indexes": [
+          {
+            "fields": [
+              "student_id",
+              "course_id"
+            ],
+            "unique": true
+          }
+        ]
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        },
+        "teacher": {
+          "resources": [
+            "enrollments",
+            "students"
+          ],
+          "actions": [
+            "read",
+            "update"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "id": "saas",
+  "stratum": "compleja",
+  "domain": "saas",
+  "description": "A multi-tenant SaaS workspace tool: organizations, workspaces (in an org), members, and projects (in a workspace). A member role uses per-resource permissions: it owns its projects (scoped by owner_id) and can read all workspaces but only edit its own.",
+  "gold": {
+    "name": "workspace-api",
+    "resources": {
+      "organizations": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120,
+            "unique": true
+          }
+        },
+        "relations": {
+          "workspaces": {
+            "type": "has_many",
+            "target": "workspaces",
+            "fk": "org_id"
+          }
+        }
+      },
+      "workspaces": {
+        "fields": {
+          "org_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "organizations",
+            "on_delete": "cascade"
+          },
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "owner_id": {
+            "type": "uuid"
+          }
+        },
+        "relations": {
+          "org": {
+            "type": "belongs_to",
+            "target": "organizations",
+            "fk": "org_id"
+          },
+          "projects": {
+            "type": "has_many",
+            "target": "projects",
+            "fk": "workspace_id"
+          }
+        }
+      },
+      "members": {
+        "fields": {
+          "email": {
+            "type": "string",
+            "required": true,
+            "format": "email",
+            "unique": true
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          }
+        }
+      },
+      "projects": {
+        "fields": {
+          "workspace_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "workspaces",
+            "on_delete": "cascade"
+          },
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 160
+          },
+          "owner_id": {
+            "type": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ],
+            "default": "active"
+          }
+        },
+        "relations": {
+          "workspace": {
+            "type": "belongs_to",
+            "target": "workspaces",
+            "fk": "workspace_id"
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        },
+        "member": {
+          "permissions": {
+            "projects": {
+              "actions": [
+                "read",
+                "create",
+                "update",
+                "delete"
+              ],
+              "conditions": {
+                "field": "owner_id",
+                "op": "eq",
+                "val": "$user_id"
+              }
+            },
+            "workspaces": {
+              "actions": [
+                "read",
+                "update"
+              ],
+              "conditions": {
+                "field": "owner_id",
+                "op": "eq",
+                "val": "$user_id"
+              },
+              "condition_actions": [
+                "update"
+              ]
+            },
+            "organizations": {
+              "actions": [
+                "read"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

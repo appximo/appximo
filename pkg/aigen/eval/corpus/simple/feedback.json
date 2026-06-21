@@ -1,0 +1,40 @@
+{
+  "id": "feedback",
+  "stratum": "simple",
+  "domain": "saas",
+  "description": "A product feedback board: feedback items with a title, details, and a vote count.",
+  "gold": {
+    "name": "feedback-api",
+    "resources": {
+      "feedback": {
+        "fields": {
+          "title": {
+            "type": "string",
+            "required": true,
+            "maxLength": 160
+          },
+          "details": {
+            "type": "text"
+          },
+          "votes": {
+            "type": "int",
+            "min": 0,
+            "default": 0
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

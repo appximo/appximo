@@ -1,0 +1,51 @@
+{
+  "id": "blog",
+  "stratum": "simple",
+  "domain": "blogging",
+  "description": "A simple blog: posts with a title, body, an author name, a status that is either draft or published, and a created date.",
+  "gold": {
+    "name": "blog-api",
+    "resources": {
+      "posts": {
+        "fields": {
+          "title": {
+            "type": "string",
+            "required": true,
+            "maxLength": 200
+          },
+          "body": {
+            "type": "text"
+          },
+          "author": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published"
+            ],
+            "default": "draft"
+          },
+          "created_at": {
+            "type": "time",
+            "auto": true
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

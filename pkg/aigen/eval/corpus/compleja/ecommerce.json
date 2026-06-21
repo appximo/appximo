@@ -1,0 +1,194 @@
+{
+  "id": "ecommerce",
+  "stratum": "compleja",
+  "domain": "retail",
+  "description": "An e-commerce backend: categories, products (in a category), customers, orders (belonging to a customer) and order lines (each line links an order and a product with a quantity). An order moves through a lifecycle: pending → paid → shipped → delivered, or pending → cancelled. Admins do everything; a viewer can only read products and categories.",
+  "gold": {
+    "name": "shop-api",
+    "resources": {
+      "categories": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "unique": true,
+            "maxLength": 80
+          }
+        },
+        "relations": {
+          "products": {
+            "type": "has_many",
+            "target": "products",
+            "fk": "category_id"
+          }
+        }
+      },
+      "products": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 200
+          },
+          "sku": {
+            "type": "string",
+            "required": true,
+            "unique": true,
+            "maxLength": 40
+          },
+          "price": {
+            "type": "float64",
+            "required": true,
+            "min": 0
+          },
+          "stock": {
+            "type": "int",
+            "min": 0,
+            "default": 0
+          },
+          "category_id": {
+            "type": "uuid",
+            "relation": "categories",
+            "on_delete": "set_null"
+          }
+        },
+        "relations": {
+          "category": {
+            "type": "belongs_to",
+            "target": "categories",
+            "fk": "category_id"
+          }
+        }
+      },
+      "customers": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "email": {
+            "type": "string",
+            "required": true,
+            "format": "email",
+            "unique": true
+          }
+        },
+        "relations": {
+          "orders": {
+            "type": "has_many",
+            "target": "orders",
+            "fk": "customer_id"
+          }
+        }
+      },
+      "orders": {
+        "fields": {
+          "customer_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "customers",
+            "on_delete": "restrict"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "paid",
+              "shipped",
+              "delivered",
+              "cancelled"
+            ],
+            "default": "pending",
+            "state_machine": {
+              "initial": "pending",
+              "transitions": {
+                "pending": [
+                  "paid",
+                  "cancelled"
+                ],
+                "paid": [
+                  "shipped"
+                ],
+                "shipped": [
+                  "delivered"
+                ],
+                "delivered": [],
+                "cancelled": []
+              }
+            }
+          },
+          "total": {
+            "type": "float64",
+            "min": 0,
+            "default": 0
+          },
+          "created_at": {
+            "type": "time",
+            "auto": true
+          }
+        },
+        "relations": {
+          "customer": {
+            "type": "belongs_to",
+            "target": "customers",
+            "fk": "customer_id"
+          },
+          "lines": {
+            "type": "has_many",
+            "target": "order_lines",
+            "fk": "order_id"
+          }
+        }
+      },
+      "order_lines": {
+        "fields": {
+          "order_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "orders",
+            "on_delete": "cascade"
+          },
+          "product_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "products",
+            "on_delete": "restrict"
+          },
+          "qty": {
+            "type": "int",
+            "required": true,
+            "min": 1
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        },
+        "viewer": {
+          "resources": [
+            "products",
+            "categories"
+          ],
+          "actions": [
+            "read"
+          ],
+          "fields": [
+            "id",
+            "name",
+            "price",
+            "sku"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

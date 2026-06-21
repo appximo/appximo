@@ -1,0 +1,163 @@
+{
+  "id": "forum",
+  "stratum": "compleja",
+  "domain": "social",
+  "description": "A discussion forum: users, threads (title, body, author), posts (reply to a thread, author, body) and tags on a thread. Members read everything but can only edit or delete their own threads and posts (read-all, write-own).",
+  "gold": {
+    "name": "forum-api",
+    "resources": {
+      "users": {
+        "fields": {
+          "handle": {
+            "type": "string",
+            "required": true,
+            "unique": true,
+            "maxLength": 30,
+            "pattern": "^[a-z0-9_]{3,30}$"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          }
+        },
+        "relations": {
+          "threads": {
+            "type": "has_many",
+            "target": "threads",
+            "fk": "author_id"
+          }
+        }
+      },
+      "threads": {
+        "fields": {
+          "author_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "users",
+            "on_delete": "cascade"
+          },
+          "title": {
+            "type": "string",
+            "required": true,
+            "maxLength": 200
+          },
+          "body": {
+            "type": "text"
+          },
+          "created_at": {
+            "type": "time",
+            "auto": true
+          }
+        },
+        "relations": {
+          "author": {
+            "type": "belongs_to",
+            "target": "users",
+            "fk": "author_id"
+          },
+          "posts": {
+            "type": "has_many",
+            "target": "posts",
+            "fk": "thread_id"
+          }
+        }
+      },
+      "posts": {
+        "fields": {
+          "thread_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "threads",
+            "on_delete": "cascade"
+          },
+          "author_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "users",
+            "on_delete": "cascade"
+          },
+          "body": {
+            "type": "text",
+            "required": true
+          }
+        }
+      },
+      "tags": {
+        "fields": {
+          "thread_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "threads",
+            "on_delete": "cascade"
+          },
+          "label": {
+            "type": "string",
+            "required": true,
+            "maxLength": 40
+          }
+        }
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        },
+        "member": {
+          "permissions": {
+            "threads": {
+              "actions": [
+                "read",
+                "create",
+                "update",
+                "delete"
+              ],
+              "conditions": {
+                "field": "author_id",
+                "op": "eq",
+                "val": "$user_id"
+              },
+              "condition_actions": [
+                "update",
+                "delete"
+              ]
+            },
+            "posts": {
+              "actions": [
+                "read",
+                "create",
+                "update",
+                "delete"
+              ],
+              "conditions": {
+                "field": "author_id",
+                "op": "eq",
+                "val": "$user_id"
+              },
+              "condition_actions": [
+                "update",
+                "delete"
+              ]
+            },
+            "users": {
+              "actions": [
+                "read"
+              ]
+            },
+            "tags": {
+              "actions": [
+                "read",
+                "create"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}

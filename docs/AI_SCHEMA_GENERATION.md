@@ -227,6 +227,57 @@ mock (`ANTHROPIC_BASE_URL`): the request carries `output_config.format` with the
 const-pinned envelope and the cached system block; round 1 reports **0 structural / 1
 semantic** errors (the structural class is gone) and converges on round 2.
 
+### The measurement instrument (AI-F2-S1) — `appitools ai-eval` + `pkg/aigen/eval`
+
+Before any *new* generation technique, the research demands the **instrument** to
+judge it: "without this, no later decision is defensible." The loop's real
+convergence rate on **this** domain (typed schemas with FKs/RBAC/state machines) is
+published nowhere — every figure in the literature is extrapolated from
+text-to-SQL/code-gen. `pkg/aigen/eval` measures it.
+
+Three parts:
+
+1. **A stratified gold test set** (`pkg/aigen/eval/corpus/`, embedded): NL
+   description + a hand-written, validate-clean **gold schema**, across three
+   complexity tiers — `simple` (2-3 resources), `media` (relations + basic RBAC),
+   `compleja` (FKs, both RBAC forms, state machines). A test asserts **every gold
+   validates**. It is a **seed** (24 cases now); the research wants **~120-160 per
+   stratum** for full power, and the harness grows to that without changing. A
+   too-small corpus yields wide intervals and inconclusive tests — that is correct,
+   and the instrument says so.
+
+2. **A generic paired ablation harness.** Each case runs under every **condition**
+   (today `plain` vs the AI-F1-S1 `structured` decoding) → a **paired** binary
+   outcome (first-try semantic success), empirical iterations-to-valid, and the
+   structural/semantic error split. A future technique (array-IR, constraint-aware,
+   RAG) plugs in as a **new condition** — the harness, outcomes, and statistics are
+   unchanged. Deterministic: a built-in **simulated** model makes the whole run
+   reproducible with no API key (`ai-eval`); `--live` measures a real model.
+
+3. **Statistics with paper-grade rigor** (`stats.go`, pure Go):
+   - `p_sem` per condition/stratum with a **Wilson** score interval (not Wald —
+     Wald under-covers near 0/1).
+   - **E[iterations] measured empirically** (mean + median). The geometric `1/p_sem`
+     is reported **only** as a labeled "independent retries" bound — the
+     validator-guided loop is *not* i.i.d. (each attempt conditions on the previous
+     feedback), so the memoryless formula does not apply.
+   - **McNemar's** paired test (Dietterich 1998 — the test with acceptable Type I
+     error for run-once algorithms; never a paired t-test or a proportion
+     difference): **exact binomial** when discordants `b+c < 25`, Edwards
+     continuity-corrected χ² otherwise. For >2 conditions, **Cochran's Q** omnibus +
+     pairwise McNemar with **Holm-Bonferroni** FWER control.
+   - **Honest about power:** an underpowered comparison (`< 25` discordants) is
+     flagged INCONCLUSIVE, never sold as significant.
+
+```
+appitools ai-eval            # simulated, deterministic — demonstrates the instrument
+appitools ai-eval --json     # machine-readable analysis
+appitools ai-eval --live --model claude-haiku-4-5   # measure a real model (temp 0)
+```
+
+This is the gate every future technique passes: measured against the baseline with
+McNemar on **this** domain, or discarded.
+
 ## Notes
 
 - `appitools validate` (no `--json`) stays human-readable and is the semantic

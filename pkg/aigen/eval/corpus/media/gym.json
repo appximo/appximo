@@ -1,0 +1,105 @@
+{
+  "id": "gym",
+  "stratum": "media",
+  "domain": "fitness",
+  "description": "A gym: members (name, email), classes (name, capacity), and bookings linking a member to a class. A class has many bookings.",
+  "gold": {
+    "name": "gym-api",
+    "resources": {
+      "members": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "email": {
+            "type": "string",
+            "required": true,
+            "format": "email",
+            "unique": true
+          }
+        },
+        "relations": {
+          "bookings": {
+            "type": "has_many",
+            "target": "bookings",
+            "fk": "member_id"
+          }
+        }
+      },
+      "classes": {
+        "fields": {
+          "name": {
+            "type": "string",
+            "required": true,
+            "maxLength": 120
+          },
+          "capacity": {
+            "type": "int",
+            "min": 1,
+            "max": 500,
+            "default": 20
+          }
+        },
+        "relations": {
+          "bookings": {
+            "type": "has_many",
+            "target": "bookings",
+            "fk": "class_id"
+          }
+        }
+      },
+      "bookings": {
+        "fields": {
+          "member_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "members",
+            "on_delete": "cascade"
+          },
+          "class_id": {
+            "type": "uuid",
+            "required": true,
+            "relation": "classes",
+            "on_delete": "cascade"
+          },
+          "booked_at": {
+            "type": "time",
+            "auto": true
+          }
+        },
+        "indexes": [
+          {
+            "fields": [
+              "member_id",
+              "class_id"
+            ],
+            "unique": true
+          }
+        ]
+      }
+    },
+    "rbac": {
+      "roles": {
+        "admin": {
+          "resources": "*",
+          "actions": [
+            "*"
+          ]
+        },
+        "trainer": {
+          "resources": [
+            "classes",
+            "bookings"
+          ],
+          "actions": [
+            "read"
+          ]
+        }
+      }
+    },
+    "$schema": "https://appitools.dev/schema/v1",
+    "version": "1"
+  }
+}
