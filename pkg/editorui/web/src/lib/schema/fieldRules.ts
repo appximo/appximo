@@ -27,6 +27,35 @@ export function isStringType(t: FieldType): boolean {
 }
 
 /**
+ * The coarse Postgres compatibility class of a field type — a faithful mirror of
+ * pgKindForAPIType (validator.go). Two columns may be joined by a foreign key only
+ * when their classes match. string/text/json all collapse to TEXT; the implicit id
+ * is uuid. Empty for an unknown type.
+ */
+export function pgKind(t: string): string {
+	switch (t) {
+		case 'string':
+		case 'text':
+		case 'json':
+			return 'text';
+		case 'int':
+			return 'integer';
+		case 'int64':
+			return 'bigint';
+		case 'float64':
+			return 'double';
+		case 'bool':
+			return 'bool';
+		case 'uuid':
+			return 'uuid';
+		case 'time':
+			return 'timestamptz';
+		default:
+			return '';
+	}
+}
+
+/**
  * Returns the compile error of a regex, or null when it compiles. JS's engine is
  * not RE2, but it rejects the same structurally-malformed patterns (unbalanced
  * groups/classes, bad quantifiers) the engine would — and where the two grammars

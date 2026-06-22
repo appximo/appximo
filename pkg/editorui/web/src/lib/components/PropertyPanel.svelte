@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { editor } from '../stores/editor.svelte';
 	import { ui } from '../stores/ui.svelte';
+	import EntityDataPanel from './EntityDataPanel.svelte';
 	import { smKnownStates } from '../schema/fieldRules';
 	import {
 		FIELD_TYPES,
@@ -86,10 +87,14 @@
 		if (!target) {
 			editor.patchFieldDef(entity.id, field.id, 'relation', undefined);
 			editor.patchFieldDef(entity.id, field.id, 'on_delete', undefined);
+			editor.patchFieldDef(entity.id, field.id, 'on_update', undefined);
+			editor.patchFieldDef(entity.id, field.id, 'references', undefined);
 			return;
 		}
 		editor.patchFieldDef(entity.id, field.id, 'type', 'uuid');
 		editor.patchFieldDef(entity.id, field.id, 'relation', target);
+		// A new target invalidates a non-id `references` — reset it to id (the default).
+		editor.patchFieldDef(entity.id, field.id, 'references', undefined);
 		if (!field.def.on_delete) editor.patchFieldDef(entity.id, field.id, 'on_delete', 'restrict');
 	}
 	function setOnDelete(v: string) {
@@ -99,6 +104,11 @@
 	function setOnUpdate(v: string) {
 		if (entity && field)
 			editor.patchFieldDef(entity.id, field.id, 'on_update', v ? (v as ReferentialAction) : undefined);
+	}
+	function setReferences(v: string) {
+		// "id" is the default — store it as absent so the round-trip stays minimal.
+		if (entity && field)
+			editor.patchFieldDef(entity.id, field.id, 'references', v && v !== 'id' ? v : undefined);
 	}
 
 	function toggleEvent(action: EventAction, on: boolean) {
@@ -242,6 +252,18 @@
 						</select>
 					</div>
 				</div>
+				<label class="lbl" for="f-ref">references <span class="muted">(target column)</span></label>
+				<select
+					id="f-ref"
+					class="field-select"
+					value={field.def.references ?? 'id'}
+					onchange={(e) => setReferences(e.currentTarget.value)}
+				>
+					{#each editor.referenceableColumns(field.def.relation) as c}<option value={c}>{c}</option>{/each}
+				</select>
+				{#if editor.referenceableColumns(field.def.relation).length === 1}
+					<div class="rule-note muted">{field.def.relation} has no unique column besides id.</div>
+				{/if}
 			{/if}
 		</section>
 
@@ -389,6 +411,8 @@
 				{#if entity.fields.length === 0}<div class="muted pad">no fields yet</div>{/if}
 			</div>
 		</section>
+
+		<EntityDataPanel {entity} />
 
 		<section class="p-sec">
 			<div class="sec-title">Outbox events</div>

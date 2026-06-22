@@ -36,11 +36,13 @@ import type { EntityModel, FieldModel, XY } from '../types/editor';
 import { schemaToModel, modelToSchema } from '../schema/transform';
 import {
 	fieldDefIssues,
+	pgKind,
 	smInitialList,
 	smKnownStates,
 	NUMERIC_TYPES,
 	STRING_TYPES
 } from '../schema/fieldRules';
+import type { ForeignKeyDef, IndexDef, ReferentialAction } from '../types/schema';
 import { blankSchema } from '../schema/samples';
 import { newId } from '../schema/ids';
 
@@ -73,6 +75,20 @@ function uniqueName(base: string, taken: Set<string>): string {
 function fkFieldName(target: string, taken: Set<string>): string {
 	const singular = target.endsWith('s') && target.length > 3 ? target.slice(0, -1) : target;
 	return uniqueName(`${singular}_id`, taken);
+}
+
+/** Order-independent equality of two string lists (a unique key may be referenced
+ *  in any order — mirrors sameStringSet in validator.go). */
+function sameStringSet(a: string[], b: string[]): boolean {
+	if (a.length !== b.length) return false;
+	const seen = new Map<string, number>();
+	for (const x of a) seen.set(x, (seen.get(x) ?? 0) + 1);
+	for (const x of b) {
+		const n = (seen.get(x) ?? 0) - 1;
+		if (n < 0) return false;
+		seen.set(x, n);
+	}
+	return true;
 }
 
 class EditorStore {
@@ -518,6 +534,130 @@ class EditorStore {
 		this.deleteField(m[1], m[2]);
 	}
 
+	// ── data model: indexes + composite foreign keys (UI-F2-S4, MIG-F1-S5) ─────
+	// These live in entity.extras (deep $state), round-tripped verbatim. The
+	// helpers mirror the engine's columnsAreUniqueOnTarget / pgKindForAPIType so the
+	// editor only offers what the validator accepts.
+
+	/** Columns of a resource a foreign key may point at: the implicit id + every
+	 *  `unique` field (Postgres requires an FK destination to be a PK or unique). */
+	referenceableColumns(entityName: string): string[] {
+		const e = this.getEntityByName(entityName);
+		if (!e) return ['id'];
+		return ['id', ...e.fields.filter((f) => f.def.unique).map((f) => f.name)];
+	}
+
+	/** Mirror of columnsAreUniqueOnTarget: a column set is a valid FK destination on
+	 *  the target when it is exactly ["id"], a single `unique` field, or the column
+	 *  set of a declared UNIQUE index (composite or single). */
+	columnsFormUniqueOnTarget(targetName: string, cols: string[]): boolean {
+		const e = this.getEntityByName(targetName);
+		if (!e || cols.length === 0 || cols.some((c) => !c)) return false;
+		if (cols.length === 1) {
+			if (cols[0] === 'id') return true;
+			if (e.fields.find((f) => f.name === cols[0])?.def.unique) return true;
+		}
+		for (const idx of e.extras.indexes ?? []) {
+			if (idx.unique && sameStringSet(idx.fields, cols)) return true;
+		}
+		return false;
+	}
+
+	// composite foreign keys ----------------------------------------------------
+	private entityFKs(entityId: string): ForeignKeyDef[] | undefined {
+		return this.getEntity(entityId)?.extras.foreign_keys;
+	}
+	addForeignKey(entityId: string) {
+		const e = this.getEntity(entityId);
+		if (!e) return;
+		if (!e.extras.foreign_keys) e.extras.foreign_keys = [];
+		e.extras.foreign_keys.push({ columns: [''], target: '', ref_columns: [''] });
+		this.bump();
+	}
+	removeForeignKey(entityId: string, fkIdx: number) {
+		const e = this.getEntity(entityId);
+		const fks = e?.extras.foreign_keys;
+		if (!e || !fks) return;
+		fks.splice(fkIdx, 1);
+		if (fks.length === 0) e.extras.foreign_keys = undefined;
+		this.bump();
+	}
+	/** Add one (source ▸ ref) column pair — keeps columns and ref_columns the same length. */
+	addFKPair(entityId: string, fkIdx: number) {
+		const fk = this.entityFKs(entityId)?.[fkIdx];
+		if (!fk) return;
+		fk.columns.push('');
+		fk.ref_columns.push('');
+		this.bump();
+	}
+	removeFKPair(entityId: string, fkIdx: number, pairIdx: number) {
+		const fk = this.entityFKs(entityId)?.[fkIdx];
+		if (!fk) return;
+		fk.columns.splice(pairIdx, 1);
+		fk.ref_columns.splice(pairIdx, 1);
+		this.bump();
+	}
+	setFKPair(entityId: string, fkIdx: number, pairIdx: number, side: 'source' | 'ref', val: string) {
+		const fk = this.entityFKs(entityId)?.[fkIdx];
+		if (!fk) return;
+		if (side === 'source') fk.columns[pairIdx] = val;
+		else fk.ref_columns[pairIdx] = val;
+		this.bump();
+	}
+	setFKTarget(entityId: string, fkIdx: number, target: string) {
+		const fk = this.entityFKs(entityId)?.[fkIdx];
+		if (!fk) return;
+		fk.target = target;
+		// A new target invalidates the referenced columns — reset them, keeping count.
+		fk.ref_columns = fk.columns.map(() => '');
+		this.bump();
+	}
+	setFKAction(entityId: string, fkIdx: number, key: 'on_delete' | 'on_update', val: string) {
+		const fk = this.entityFKs(entityId)?.[fkIdx];
+		if (!fk) return;
+		if (val) fk[key] = val as ReferentialAction;
+		else delete fk[key];
+		this.bump();
+	}
+
+	// indexes -------------------------------------------------------------------
+	private entityIndexes(entityId: string): IndexDef[] | undefined {
+		return this.getEntity(entityId)?.extras.indexes;
+	}
+	addIndex(entityId: string) {
+		const e = this.getEntity(entityId);
+		if (!e) return;
+		if (!e.extras.indexes) e.extras.indexes = [];
+		e.extras.indexes.push({ fields: [] });
+		this.bump();
+	}
+	removeIndex(entityId: string, idx: number) {
+		const e = this.getEntity(entityId);
+		const ix = e?.extras.indexes;
+		if (!e || !ix) return;
+		ix.splice(idx, 1);
+		if (ix.length === 0) e.extras.indexes = undefined;
+		this.bump();
+	}
+	toggleIndexField(entityId: string, idx: number, field: string, on: boolean) {
+		const e = this.getEntity(entityId);
+		const index = e?.extras.indexes?.[idx];
+		if (!e || !index) return;
+		const cur = new Set(index.fields);
+		if (on) cur.add(field);
+		else cur.delete(field);
+		// Preserve the entity's field order for a stable, deterministic index.
+		index.fields = e.fields.map((f) => f.name).filter((n) => cur.has(n));
+		this.bump();
+	}
+	setIndexUnique(entityId: string, idx: number, on: boolean) {
+		const index = this.entityIndexes(entityId)?.[idx];
+		if (!index) return;
+		if (on) index.unique = true;
+		else delete index.unique;
+		this.bump();
+	}
+
 	// ── selection ──────────────────────────────────────────────────────────────
 
 	selectEntity(id: string | null) {
@@ -745,6 +885,78 @@ class EditorStore {
 		return out;
 	}
 
+	/** Live validation of the relational forms the engine accepts (UI-F2-S4): the
+	 *  field-level `references` target column, composite `foreign_keys`, and declared
+	 *  `indexes`. Mirrors validateForeignKeys + the references checks so a form the
+	 *  validator would reject is surfaced before deploy. */
+	dataModelIssues(): string[] {
+		const out: string[] = [];
+		for (const e of this.entities) {
+			// field-level references (FK to a non-id column).
+			for (const f of e.fields) {
+				const ref = f.def.references;
+				if (!ref) continue;
+				if (!f.def.relation) {
+					out.push(`field "${e.name}.${f.name}": references needs a relation`);
+					continue;
+				}
+				if (ref === 'id') continue;
+				const t = this.getEntityByName(f.def.relation);
+				if (!t) continue; // unknown relation already flagged elsewhere
+				if (!this.referenceableColumns(f.def.relation).includes(ref)) {
+					out.push(`field "${e.name}.${f.name}": references "${ref}" must be the target's id or a unique column of ${f.def.relation}`);
+				} else {
+					const refType = t.fields.find((x) => x.name === ref)?.def.type ?? '';
+					if (pgKind(f.def.type) !== pgKind(refType)) {
+						out.push(`field "${e.name}.${f.name}": references "${ref}" type mismatch (field is ${f.def.type}, ${f.def.relation}.${ref} is ${refType})`);
+					}
+				}
+			}
+			// composite foreign keys.
+			(e.extras.foreign_keys ?? []).forEach((fk, i) => {
+				const where = `entity "${e.name}" composite FK #${i + 1}`;
+				const cols = fk.columns ?? [];
+				const refs = fk.ref_columns ?? [];
+				if (cols.length === 0 || cols.some((c) => !c)) out.push(`${where}: choose every source column`);
+				if (!fk.target) {
+					out.push(`${where}: choose a target`);
+					return;
+				}
+				const t = this.getEntityByName(fk.target);
+				if (!t) {
+					out.push(`${where}: unknown target "${fk.target}"`);
+					return;
+				}
+				if (cols.length !== refs.length) out.push(`${where}: source and referenced columns must match in count`);
+				if (refs.some((c) => !c)) out.push(`${where}: choose every referenced column`);
+				const colExists = (n: string) => n === 'id' || e.fields.some((f) => f.name === n);
+				const refExists = (n: string) => n === 'id' || t.fields.some((f) => f.name === n);
+				for (const c of cols) if (c && !colExists(c)) out.push(`${where}: column "${c}" is not a field of ${e.name}`);
+				for (const c of refs) if (c && !refExists(c)) out.push(`${where}: referenced column "${c}" is not a field of ${fk.target}`);
+				if (refs.length > 0 && refs.every(Boolean) && !this.columnsFormUniqueOnTarget(fk.target, refs)) {
+					out.push(`${where}: referenced columns must form ${fk.target}'s primary key or a unique index`);
+				}
+				if (cols.length === refs.length) {
+					for (let j = 0; j < cols.length; j++) {
+						if (!cols[j] || !refs[j]) continue;
+						const sk = cols[j] === 'id' ? 'uuid' : (e.fields.find((f) => f.name === cols[j])?.def.type ?? '');
+						const rk = refs[j] === 'id' ? 'uuid' : (t.fields.find((f) => f.name === refs[j])?.def.type ?? '');
+						if (sk && rk && pgKind(sk) !== pgKind(rk)) out.push(`${where}: type mismatch ${cols[j]} (${sk}) → ${fk.target}.${refs[j]} (${rk})`);
+					}
+				}
+				const anyRequired = cols.some((c) => c !== 'id' && e.fields.find((f) => f.name === c)?.def.required);
+				if ((fk.on_delete === 'set_null' || fk.on_update === 'set_null') && anyRequired) {
+					out.push(`${where}: set_null requires all source columns to be nullable`);
+				}
+			});
+			// declared indexes.
+			(e.extras.indexes ?? []).forEach((idx, i) => {
+				if (!idx.fields || idx.fields.length === 0) out.push(`entity "${e.name}" index #${i + 1}: choose at least one column`);
+			});
+		}
+		return out;
+	}
+
 	validateResourceName(name: string, exceptId?: string): string | null {
 		if (!IDENT_RE.test(name)) return 'must match ^[a-z][a-z0-9_]*$ (no hyphens)';
 		if (name === 'transaction') return '"transaction" is reserved';
@@ -781,6 +993,7 @@ class EditorStore {
 			}
 		}
 		issues.push(...this.fieldIssues());
+		issues.push(...this.dataModelIssues());
 		issues.push(...this.rbacIssues());
 		return issues;
 	}
