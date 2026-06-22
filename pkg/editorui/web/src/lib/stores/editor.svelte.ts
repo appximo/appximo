@@ -402,6 +402,36 @@ class EditorStore {
 		if (this.entities.some((e) => e.name === name && e.id !== exceptId)) return 'duplicate resource name';
 		return null;
 	}
+
+	/**
+	 * Client-side pre-deploy sanity check — fast, local feedback BEFORE the engine
+	 * validates authoritatively (the server's parse + schema.Validate is the real
+	 * gate; this just catches the obvious so a bad schema is never even sent).
+	 * Returns human-readable issues; empty means "looks deployable".
+	 */
+	validate(): string[] {
+		const issues: string[] = [];
+		if (!this.schemaName.trim()) issues.push('the API needs a name');
+		if (this.entities.length === 0) issues.push('add at least one entity before deploying');
+		const seen = new Set<string>();
+		for (const e of this.entities) {
+			const nameErr = this.validateResourceName(e.name, e.id);
+			if (nameErr) issues.push(`entity "${e.name || '(unnamed)'}": ${nameErr}`);
+			if (seen.has(e.name)) issues.push(`duplicate entity name "${e.name}"`);
+			seen.add(e.name);
+			if (e.fields.length === 0) issues.push(`entity "${e.name}" has no fields`);
+			const fseen = new Set<string>();
+			for (const f of e.fields) {
+				if (!IDENT_RE.test(f.name)) issues.push(`field "${e.name}.${f.name}" must match ^[a-z][a-z0-9_]*$`);
+				if (fseen.has(f.name)) issues.push(`duplicate field "${e.name}.${f.name}"`);
+				fseen.add(f.name);
+				if (f.def.relation && !this.getEntityByName(f.def.relation)) {
+					issues.push(`field "${e.name}.${f.name}" → unknown resource "${f.def.relation}"`);
+				}
+			}
+		}
+		return issues;
+	}
 }
 
 export const editor = new EditorStore();

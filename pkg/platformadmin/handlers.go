@@ -37,6 +37,88 @@ func (s *Service) handleGetTenant(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleGetTenantSchema returns a tenant's stored schema so the editor can load an
+// already-deployed app back onto the canvas (the iterative loop).
+func (s *Service) handleGetTenantSchema(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	sc, err := s.GetTenantSchema(r.Context(), id)
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, sc) // sc may be nil (tenant exists, no schema yet)
+	case errors.Is(err, controlplane.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "tenant not found"})
+	default:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "get schema failed"})
+	}
+}
+
+// handleUpdateTenantSchema is the editor's DEPLOY-to-an-existing-tenant endpoint. It
+// mirrors the control plane's PUT /tenants/{id}/schema:
+//   - dry_run:true        → the classified migration plan + destructive impact (the
+//     preview the editor shows before applying); applies nothing.
+//   - dry_run:false       → applies the change, executing ONLY the enumerated
+//     approved_drops; every other drop stays gated.
+//
+// Unlike the public/control-plane surfaces, an apply failure here returns the
+// engine's ACTIONABLE error (e.g. a NOT NULL added over populated data): this is the
+// authenticated super-admin deploy path, so the operator must see exactly why a
+// migration could not be applied — not a masked "internal error".
+func (s *Service) handleUpdateTenantSchema(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	r.Body = http.MaxBytesReader(w, r.Body, maxAdminBody)
+	var body struct {
+		Schema        json.RawMessage `json:"schema"`
+		DryRun        bool            `json:"dry_run"`
+		ApprovedDrops []string        `json:"approved_drops"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	parsed, errs := parseSchema(body.Schema)
+	if len(errs) > 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"errors": errs})
+		return
+	}
+
+	if body.DryRun {
+		pv, err := s.PreviewTenantSchema(r.Context(), id, parsed, body.ApprovedDrops)
+		if err != nil {
+			if errors.Is(err, controlplane.ErrNotFound) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "tenant not found"})
+				return
+			}
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "stage": "preview"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "dry_run", "preview": pv})
+		return
+	}
+
+	outcome, err := s.ApplyTenantSchema(r.Context(), id, parsed, body.ApprovedDrops)
+	if err != nil {
+		if errors.Is(err, controlplane.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "tenant not found"})
+			return
+		}
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error(), "stage": "migration"})
+		return
+	}
+	resp := map[string]any{"status": "applied", "tenant_id": id}
+	if outcome != nil {
+		if len(outcome.AppliedDrops) > 0 {
+			resp["applied_drops"] = outcome.AppliedDrops
+		}
+		if len(outcome.GatedDrops) > 0 {
+			resp["gated_drops"] = outcome.GatedDrops
+		}
+		if len(outcome.UnmatchedApprovals) > 0 {
+			resp["unmatched_approvals"] = outcome.UnmatchedApprovals
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (s *Service) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxAdminBody)
 	var raw struct {

@@ -51,6 +51,10 @@ func (s *Service) Register(r chi.Router, obs ObsHandler, adminKey string) {
 	r.With(s.requirePlatform).Post("/admin/tenants", s.handleCreateTenant)
 	r.With(s.requirePlatform).Get("/admin/tenants/{id}", s.handleGetTenant)
 	r.With(s.requirePlatform).Delete("/admin/tenants/{id}", s.handleDeleteTenant)
+	// Schema deploy (UI-F1-S1): the editor loads (GET) and deploys (PUT, with the
+	// dry-run migration preview + destructive-approval gate) a tenant's schema.
+	r.With(s.requirePlatform).Get("/admin/tenants/{id}/schema", s.handleGetTenantSchema)
+	r.With(s.requirePlatform).Put("/admin/tenants/{id}/schema", s.handleUpdateTenantSchema)
 	r.With(s.requirePlatform).Post("/admin/tenants/{id}/suspend", s.handleSuspendTenant)
 	r.With(s.requirePlatform).Post("/admin/tenants/{id}/activate", s.handleActivateTenant)
 

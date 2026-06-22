@@ -4,6 +4,7 @@
 	import Toolbar from './lib/components/Toolbar.svelte';
 	import Canvas from './lib/components/Canvas.svelte';
 	import PropertyPanel from './lib/components/PropertyPanel.svelte';
+	import DeployModal from './lib/components/DeployModal.svelte';
 	import { editor } from './lib/stores/editor.svelte';
 	import { SAMPLES } from './lib/schema/samples';
 
@@ -25,6 +26,7 @@
 			<PropertyPanel />
 		</div>
 	</SvelteFlowProvider>
+	<DeployModal />
 </div>
 
 <style>

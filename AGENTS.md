@@ -102,7 +102,13 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   (logged). It edits/exports the same schema JSON the engine consumes (round-trip
   faithful, `appitools validate`-clean). It is the schema-authoring FACE of the
   product — engine features still live in the schema/engine, never in the editor.
-  Architecture + how-it-grows: `pkg/editorui/web/ARCHITECTURE.md`.
+  **Deploy from the editor (UI-F1-S1):** a "Deploy" button signs in as a platform
+  super-admin (token held in MEMORY only, never persisted) and provisions a new
+  tenant or migrates an existing one via the `/admin/tenants/{id}/schema` routes —
+  with the dry-run migration preview + destructive-approval gate shown in the UI. It
+  INVOKES the engine's migration path, never reimplements it — closing the
+  design→deploy→running loop. Architecture + how-it-grows:
+  `pkg/editorui/web/ARCHITECTURE.md`.
 
 ## Conventions (this repo, non-obvious)
 
@@ -1334,6 +1340,17 @@ off the CRUD/JWT hot path — measured `no_change`):
   `GET /admin/tenants/{id}`, `POST /admin/tenants/{id}/suspend` /`/activate`,
   `DELETE /admin/tenants/{id}` (**destructive** — requires
   `{"confirm":"<tenant_id>"}` in the body; drops the tenant schema CASCADE).
+- Tenant schema deploy (platform token OR admin key; UI-F1-S1): `GET
+  /admin/tenants/{id}/schema` (the stored schema — the visual editor loads it back
+  onto the canvas) and `PUT /admin/tenants/{id}/schema` with
+  `{schema, dry_run, approved_drops}` — the SAME diff→preview→approved-apply
+  migration path as the control-plane `PUT /tenants/{id}/schema` (it delegates to
+  `PreviewSchema`/`UpdateSchemaApproved`), so the editor's "Deploy" gets the dry-run
+  preview + destructive-approval gate for free. **It is the editor's deploy seam**:
+  the SPA is browser-served and cannot reach the internal control plane (:9090), so
+  it deploys/migrates through `/admin`. Unlike the masked public surfaces, an apply
+  failure here returns the engine's ACTIONABLE error (e.g. a NOT NULL added over
+  populated data → `422`), since this is the authenticated super-admin path.
 - Tenant users (platform token OR admin key): `GET /admin/tenants/{id}/users`,
   `POST` (create with an admin-chosen role, validated against the RBAC),
   `PATCH /admin/tenants/{id}/users/{uid}` (`role` and/or `suspended`),

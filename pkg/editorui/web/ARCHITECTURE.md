@@ -101,7 +101,41 @@ canvas to call `updateNodeInternals` when a node's handle set changes;
 - **`PropertyPanel.svelte`** — the inspector. Field / entity / schema sections.
   **This is the main extension point** (see below).
 - **`Toolbar.svelte`** — New / Examples / Import / Export / +Entity / Auto-layout /
-  theme. Import & Export are modals (Export shows the exact engine JSON + download).
+  **Deploy** / theme. Import & Export are modals (Export shows the exact engine JSON).
+
+## Deploy — closing the loop (UI-F1-S1)
+
+The **Deploy** button takes the canvas live: design → deploy → a running REST +
+GraphQL API, with the safe migration engine underneath. It is wired to the engine's
+EXISTING admin API (it never reimplements provisioning or migration).
+
+- **`api/admin.ts`** — a thin same-origin client for `/admin/*` (the editor is
+  served by the engine, so no CORS; dev proxies `/admin`→:8080). Normalizes errors
+  to `ApiError` (carrying the engine's `errors[]` and actionable message).
+- **`stores/deploy.svelte.ts`** — the deploy state machine (`login → mfa → target →
+  preview → result`). The platform super-admin **token lives in memory only** — a
+  privileged JWT is never written to localStorage/sessionStorage (a reload re-prompts).
+  Designing needs no auth; only deploying does.
+- **`components/DeployModal.svelte`** — the full flow: sign in (with MFA), pick a
+  target (**new tenant** → `POST /admin/tenants`, or **update existing** → pick from
+  `GET /admin/tenants`, with a per-row "Load" that pulls a deployed schema back onto
+  the canvas), client pre-validate (`editor.validate()`), then for an existing tenant
+  a **migration preview** (`PUT …/schema {dry_run:true}`): the safe ops, the
+  data-losing drops each with a checkbox + measured `rows_lost` (the **destructive
+  gate** — unchecked drops stay gated/drift), and the concerns. Apply sends only the
+  checked `approved_drops`. The result step shows the running endpoints (REST /
+  GraphQL / Swagger). Errors (auth/validation/migration/network) surface inline — a
+  failed migration shows the engine's actionable message verbatim.
+
+Backed by two routes added to `pkg/platformadmin` (`GET`/`PUT
+/admin/tenants/{id}/schema`) that delegate to the control plane's
+`PreviewSchema`/`UpdateSchemaApproved` — the same gate the CLI/control-plane use.
+
+> Engine caveat (documented): the live **route surface + GraphQL types are compiled
+> from the engine's boot `--schema`**; column-level changes to a boot-schema resource
+> hot-reload per tenant, but a brand-new resource is served only after the engine
+> restarts with that schema. Provisioning + migration (what Deploy does) are
+> per-tenant and immediate.
 
 ## How to grow (the point of the structure)
 
@@ -118,9 +152,7 @@ losslessly; you are just surfacing more of it.
   preserved; add a sub-editor in the field section (a mini graph of states).
 - **Index / composite-FK editor**: `entity.extras.indexes` / `extras.foreign_keys`
   are preserved; add an "Indexes" section to the entity inspector.
-- **Deploy from the editor**: add a "Deploy" button that POSTs `editor.toSchema()`
-  to the control plane (`PUT /tenants/{id}/schema`) — the dev proxy and `toJSON()`
-  are already in place; this needs the control-plane auth wiring.
+- **Deploy from the editor**: ✅ done (UI-F1-S1) — see the Deploy section above.
 - **A new node/edge visual**: register another component in `Canvas.svelte`'s
   `nodeTypes`/`edgeTypes`.
 - **Multiple views / pages**: the app is a single page today; introduce a small

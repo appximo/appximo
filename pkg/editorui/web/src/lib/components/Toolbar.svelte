@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { editor } from '../stores/editor.svelte';
 	import { ui } from '../stores/ui.svelte';
+	import { deploy } from '../stores/deploy.svelte';
 	import { SAMPLES } from '../schema/samples';
 
 	let showExport = $state(false);
@@ -100,6 +101,10 @@
 	<div class="spacer"></div>
 
 	<div class="api-name" title="API name">{editor.schemaName}</div>
+
+	<button class="btn primary deploy" onclick={() => deploy.openDeploy()} title="Deploy to the engine">
+		▲ Deploy
+	</button>
 
 	<button class="btn subtle icon" onclick={() => ui.toggle()} title="Toggle theme" aria-label="Toggle theme">
 		{ui.theme === 'light' ? '☾' : '☀'}
