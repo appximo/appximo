@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { editor } from '../stores/editor.svelte';
+	import { ui } from '../stores/ui.svelte';
+	import { smKnownStates } from '../schema/fieldRules';
 	import {
 		FIELD_TYPES,
 		FIELD_FORMATS,
@@ -328,10 +330,25 @@
 					{#each fieldIssues as iss}<div class="issue">⚠ {iss}</div>{/each}
 				</div>
 			{/if}
-			{#if field.def.state_machine}
-				<div class="sm-note">
-					<span class="badge b-sm">SM</span> state machine declared
-					<span class="muted">(visual editing coming soon)</span>
+			{#if isStringy}
+				<div class="sm-block">
+					{#if field.def.state_machine}
+						<button class="btn subtle sm-edit" onclick={() => ui.openStateMachine(entity.id, field.id)}>
+							<span class="badge b-sm">SM</span> Edit state machine
+							<span class="muted">({smKnownStates(field.def.state_machine).length} states)</span>
+						</button>
+					{:else}
+						<button
+							class="btn subtle sm-add"
+							onclick={() => {
+								editor.enableStateMachine(entity.id, field.id);
+								ui.openStateMachine(entity.id, field.id);
+							}}
+						>
+							⮌ Add state machine
+						</button>
+						<div class="rule-note muted">A lifecycle of states + allowed transitions (G5).</div>
+					{/if}
 				</div>
 			{/if}
 		</section>
@@ -600,16 +617,28 @@
 		margin-top: 2px;
 	}
 
-	.sm-note {
+	.sm-block {
 		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		margin-top: 2px;
+	}
+	.sm-edit,
+	.sm-add {
+		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-		font-size: 12px;
-		color: var(--text-2);
+		width: 100%;
+		justify-content: flex-start;
+		font-size: 12.5px;
 	}
 	.badge.b-sm {
 		background: color-mix(in srgb, var(--ok) 16%, transparent);
 		color: var(--ok);
+		font-size: 10px;
+		font-weight: 700;
+		padding: 1px 5px;
+		border-radius: 5px;
 	}
 
 	.p-foot {

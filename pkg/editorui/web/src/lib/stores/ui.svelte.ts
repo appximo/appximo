@@ -8,6 +8,15 @@ class UIStore {
 	theme = $state<Theme>('light');
 	/** Whether the Roles & Permissions (RBAC) editor is open. */
 	rbacOpen = $state(false);
+	/** The field whose state-machine designer is open ({entityId, fieldId}), or null. */
+	smTarget = $state<{ entityId: string; fieldId: string } | null>(null);
+
+	openStateMachine(entityId: string, fieldId: string) {
+		this.smTarget = { entityId, fieldId };
+	}
+	closeStateMachine() {
+		this.smTarget = null;
+	}
 
 	init() {
 		if (typeof localStorage !== 'undefined') {

@@ -28,12 +28,19 @@ import type {
 	FieldType,
 	RBACPolicy,
 	ResourcePermission,
-	RolePolicy
+	RolePolicy,
+	StateMachine
 } from '../types/schema';
 import { IDENT_RE, RBAC_ACTIONS } from '../types/schema';
 import type { EntityModel, FieldModel, XY } from '../types/editor';
 import { schemaToModel, modelToSchema } from '../schema/transform';
-import { fieldDefIssues, NUMERIC_TYPES, STRING_TYPES } from '../schema/fieldRules';
+import {
+	fieldDefIssues,
+	smInitialList,
+	smKnownStates,
+	NUMERIC_TYPES,
+	STRING_TYPES
+} from '../schema/fieldRules';
 import { blankSchema } from '../schema/samples';
 import { newId } from '../schema/ids';
 
@@ -386,6 +393,100 @@ class EditorStore {
 			this.rebuildEdges();
 			this.structureVersion++;
 		}
+		this.bump();
+	}
+
+	// ── state machine designer (UI-F2-S3, G5) ──────────────────────────────────
+	// The state_machine lives on the field def (deep $state); these are the
+	// structural edits. The states' universe = StateMachine.KnownStates (the
+	// transition keys ∪ initial ∪ targets), kept faithful to the engine. A field
+	// with an enum constrains the states to enum members (coherence is required at
+	// load); a field without an enum lets the machine define its own state universe.
+
+	private fieldDef(entityId: string, fieldId: string): FieldDef | undefined {
+		return this.getEntity(entityId)?.fields.find((x) => x.id === fieldId)?.def;
+	}
+
+	/** Enable a state machine on a string/text field, seeding states from its enum
+	 *  (terminals = []) and the initial from the field's default when valid. No-op if
+	 *  one already exists or the field is not string/text. */
+	enableStateMachine(entityId: string, fieldId: string) {
+		const def = this.fieldDef(entityId, fieldId);
+		if (!def || def.state_machine) return;
+		if (def.type !== 'string' && def.type !== 'text') return;
+		const states = def.enum ?? [];
+		const transitions: Record<string, string[]> = {};
+		for (const s of states) transitions[s] = [];
+		let initial = '';
+		if (states.length > 0) {
+			initial = typeof def.default === 'string' && states.includes(def.default) ? def.default : states[0];
+		}
+		def.state_machine = { initial, transitions };
+		this.bump();
+	}
+
+	disableStateMachine(entityId: string, fieldId: string) {
+		const def = this.fieldDef(entityId, fieldId);
+		if (def?.state_machine) {
+			delete def.state_machine;
+			this.bump();
+		}
+	}
+
+	/** Write `initial`: a bare string for exactly one (the common authored form), an
+	 *  array otherwise — preserving the typical schema shape on round-trip. */
+	private smWriteInitial(sm: StateMachine, states: string[]) {
+		sm.initial = states.length === 1 ? states[0] : states;
+	}
+
+	smAddState(entityId: string, fieldId: string, raw: string): string | null {
+		const def = this.fieldDef(entityId, fieldId);
+		const sm = def?.state_machine;
+		if (!def || !sm) return null;
+		const name = raw.trim();
+		if (!name) return 'state name is required';
+		if (smKnownStates(sm).includes(name)) return 'duplicate state';
+		// With an enum, a state must be an enum member (the engine requires it).
+		if (def.enum && def.enum.length > 0 && !def.enum.includes(name)) {
+			return 'state must be one of the field’s enum values';
+		}
+		sm.transitions[name] = [];
+		// The first state becomes the initial so the machine is valid immediately.
+		if (smInitialList(sm).length === 0) this.smWriteInitial(sm, [name]);
+		this.bump();
+		return null;
+	}
+
+	smRemoveState(entityId: string, fieldId: string, state: string) {
+		const sm = this.fieldDef(entityId, fieldId)?.state_machine;
+		if (!sm) return;
+		delete sm.transitions[state];
+		// Strip it as a transition target and from the initial set.
+		for (const k of Object.keys(sm.transitions)) {
+			sm.transitions[k] = sm.transitions[k].filter((t) => t !== state);
+		}
+		this.smWriteInitial(sm, smInitialList(sm).filter((s) => s !== state));
+		this.bump();
+	}
+
+	smToggleInitial(entityId: string, fieldId: string, state: string, on: boolean) {
+		const sm = this.fieldDef(entityId, fieldId)?.state_machine;
+		if (!sm) return;
+		const cur = new Set(smInitialList(sm));
+		if (on) cur.add(state);
+		else cur.delete(state);
+		// Preserve declared order.
+		this.smWriteInitial(sm, smKnownStates(sm).filter((s) => cur.has(s)));
+		this.bump();
+	}
+
+	smToggleTransition(entityId: string, fieldId: string, from: string, to: string, on: boolean) {
+		const sm = this.fieldDef(entityId, fieldId)?.state_machine;
+		if (!sm || from === to) return;
+		const cur = new Set(sm.transitions[from] ?? []);
+		if (on) cur.add(to);
+		else cur.delete(to);
+		sm.transitions[from] = smKnownStates(sm).filter((s) => cur.has(s));
 		this.bump();
 	}
 

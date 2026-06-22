@@ -9,7 +9,7 @@
 // pattern, a rule on the wrong type, …) so a bad schema is flagged in the panel and
 // never even sent.
 
-import { FIELD_FORMATS, type FieldDef, type FieldType } from '../types/schema';
+import { FIELD_FORMATS, type FieldDef, type FieldType, type StateMachine } from '../types/schema';
 
 /** The field types min/max apply to (engine numericTypes). */
 export const NUMERIC_TYPES = new Set<FieldType>(['int', 'int64', 'float64']);
@@ -97,10 +97,93 @@ export function defaultIssues(def: FieldDef): string[] {
 	}
 }
 
+// ── state machine (G5) ──────────────────────────────────────────────────────
+
+/** Normalize `initial` (a string or array in the schema) to an ordered list. */
+export function smInitialList(sm: StateMachine): string[] {
+	if (Array.isArray(sm.initial)) return sm.initial;
+	return sm.initial ? [sm.initial] : [];
+}
+
+/**
+ * The universe of valid states (mirror of StateMachine.KnownStates in Go), ORDERED:
+ * the transition keys first (declaration order), then any initial or transition
+ * target not already a key. So a target-only "leaf" state still surfaces (it is a
+ * terminal in the engine), and an imported machine renders faithfully.
+ */
+export function smKnownStates(sm: StateMachine): string[] {
+	const out: string[] = [];
+	const seen = new Set<string>();
+	const add = (s: string) => {
+		if (s && !seen.has(s)) {
+			seen.add(s);
+			out.push(s);
+		}
+	};
+	for (const k of Object.keys(sm.transitions ?? {})) add(k);
+	for (const s of smInitialList(sm)) add(s);
+	for (const tos of Object.values(sm.transitions ?? {})) for (const t of tos) add(t);
+	return out;
+}
+
+/** Outgoing transitions of a state ([] when none → terminal). */
+export function smTargets(sm: StateMachine, state: string): string[] {
+	return sm.transitions?.[state] ?? [];
+}
+
+/** True when a state has no outgoing transition (terminal / immutable). */
+export function smIsTerminal(sm: StateMachine, state: string): boolean {
+	return smTargets(sm, state).length === 0;
+}
+
+/**
+ * Issues with a field's `state_machine` — a faithful mirror of validateStateMachine:
+ * string/text only, ≥1 initial (each a non-empty, known state), every known state
+ * present in `enum` when one is declared (coherence), and a string `default` that is
+ * an initial state. Plus a UI-helpful "needs ≥1 state". Empty ⇒ the engine accepts it.
+ */
+export function stateMachineIssues(def: FieldDef): string[] {
+	const sm = def.state_machine;
+	if (!sm) return [];
+	const out: string[] = [];
+
+	if (!isStringType(def.type)) {
+		// The rest of the checks assume string states (as the engine does).
+		out.push(`state_machine only applies to string/text fields, not "${def.type}"`);
+		return out;
+	}
+
+	const known = smKnownStates(sm);
+	if (known.length === 0) out.push('state machine needs at least one state');
+
+	const initial = smInitialList(sm);
+	if (initial.length === 0) out.push('state machine requires at least one initial state');
+	for (const s of initial) {
+		if (!s) out.push('an initial state is empty');
+		else if (!known.includes(s)) out.push(`initial state "${s}" is not a declared state`);
+	}
+
+	// Coherence with enum: every known state must be an enum value.
+	if (def.enum && def.enum.length > 0) {
+		for (const s of known) {
+			if (!def.enum.includes(s)) out.push(`state "${s}" is not one of the field's enum values`);
+		}
+	}
+
+	// A string default must be an initial state (a row's create-time value).
+	if (typeof def.default === 'string') {
+		if (!initial.includes(def.default)) {
+			out.push(`default "${def.default}" must be one of the initial states`);
+		}
+	}
+
+	return out;
+}
+
 /**
  * All load-time issues with one field's def — a faithful mirror of
- * validateFieldRules + validateDefault. Each string is a human-readable, panel-
- * ready message. Empty means the engine would accept the field.
+ * validateFieldRules + validateDefault (+ validateStateMachine). Each string is a
+ * human-readable, panel-ready message. Empty means the engine would accept the field.
  */
 export function fieldDefIssues(def: FieldDef): string[] {
 	const out: string[] = [];
@@ -147,5 +230,6 @@ export function fieldDefIssues(def: FieldDef): string[] {
 	}
 
 	out.push(...defaultIssues(def));
+	out.push(...stateMachineIssues(def));
 	return out;
 }
