@@ -107,8 +107,14 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   tenant or migrates an existing one via the `/admin/tenants/{id}/schema` routes —
   with the dry-run migration preview + destructive-approval gate shown in the UI. It
   INVOKES the engine's migration path, never reimplements it — closing the
-  design→deploy→running loop. Architecture + how-it-grows:
-  `pkg/editorui/web/ARCHITECTURE.md`.
+  design→deploy→running loop. **Visual RBAC (UI-F2-S1):** a "Roles" button opens a
+  full editor for the engine's RBAC grammar — both forms (per-resource `permissions`
+  + legacy role-global), row conditions (field-dropdown of real fields + `id`, op
+  fixed at `eq`, val `$user_id`/`$external_client_id`/literal), condition_actions,
+  field allowlists, deny-by-default. It can only produce schemas the validator
+  accepts (op=eq, existing fields), round-trips faithfully, and the roles enforce
+  real security on deploy (row-level filter, field allowlist, 403). Architecture +
+  how-it-grows: `pkg/editorui/web/ARCHITECTURE.md`.
 
 ## Conventions (this repo, non-obvious)
 

@@ -137,6 +137,47 @@ Backed by two routes added to `pkg/platformadmin` (`GET`/`PUT
 > restarts with that schema. Provisioning + migration (what Deploy does) are
 > per-tenant and immediate.
 
+## RBAC — visual roles & permissions (UI-F2-S1)
+
+The **Roles** button (toolbar) opens `RbacModal.svelte`, a full editor for the
+engine's RBAC grammar — so a designed app ships with real security, not just a data
+shape. The roles live in `editor.rbac` (deep `$state`, round-tripped verbatim); the
+modal edits them and `Deploy` enforces them on the live API.
+
+It mirrors the engine grammar **faithfully** (it can only produce schemas the
+validator accepts):
+
+- **Two forms**, mutually exclusive: **per-resource** `permissions` (the rich,
+  recommended form — actions + row condition + condition-actions + field allowlist
+  *per resource*) and the legacy **role-global** form. A loaded schema keeps its
+  form (faithful round-trip); a role-global role can be **converted** to per-resource
+  (`editor.convertToPerResource`). New roles start per-resource, deny-all.
+- **actions** `read/create/update/delete` (checkboxes; `*` is preserved if present
+  and only expanded to the concrete set when the user toggles).
+- **row condition** — the field is a **dropdown of the resource's real fields + the
+  implicit `id`** (never free text → never the dangling-field error SEC-AUDIT-V1
+  closed); the **op is fixed at `=` (eq)** (the only operator the engine enforces);
+  `val` is `$user_id` / `$external_client_id` / a literal.
+- **condition_actions** (per-resource): "the filter applies only to these actions"
+  (read-all / write-own) — checkboxes of the granted actions; ⊆ actions, no `*`.
+- **field allowlist** — checkboxes of the resource's fields (+`id`); none = all.
+- **deny-by-default** is stated in the UI; nothing is granted unless added.
+
+Store surface (in `editor.svelte.ts`): `roleNames`, `getRole`, `roleForm`,
+`addRole`/`renameRole`/`deleteRole`, `addPermission`/`removePermission`,
+`convertToPerResource`, the field-source helpers `fieldNamesForResource` /
+`rbacFieldUnion` / `roleResourceNames` (single source of truth = the canvas model),
+and `rbacIssues()` (live validation mirroring `validateRBAC`, surfaced per role in
+the modal and folded into `editor.validate()` for the deploy pre-check). When a
+field/resource is deleted or renamed, the store **cleans the per-resource RBAC
+references** (`rbacOnField*` / `rbacOnResource*`) so the policy never dangles. On
+export, `transform.cleanRBACPolicy` serializes each role in ONE form, drops empties,
+and pins the condition op to `eq` — always engine-clean.
+
+Verified live: a deployed schema's roles enforce **row-level filtering** (owner sees
+only own rows, on REST + GraphQL), the **field allowlist hides columns**, and an
+empty role is **403** (deny-by-default).
+
 ## How to grow (the point of the structure)
 
 Everything below is additive — the model and store already carry the data
@@ -145,9 +186,7 @@ losslessly; you are just surfacing more of it.
 - **A new property editor** (validations, defaults, more FK options): add a section
   to `PropertyPanel.svelte` and, if needed, a `patchFieldDef`-style method on the
   store. The field def is the full engine `FieldDef`, so all keys are already there.
-- **RBAC visual editor**: the store already holds `rbac` verbatim (round-tripped).
-  Add an `RbacPanel.svelte` + a route/tab and store methods (`addRole`,
-  `setPermission`) that mutate `editor.rbac`. No model change needed.
+- **RBAC visual editor**: ✅ done (UI-F2-S1) — see the RBAC section below.
 - **State-machine designer**: `field.def.state_machine` is already modelled and
   preserved; add a sub-editor in the field section (a mini graph of states).
 - **Index / composite-FK editor**: `entity.extras.indexes` / `extras.foreign_keys`

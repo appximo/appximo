@@ -96,6 +96,7 @@
 	<div class="group">
 		<button class="btn" onclick={() => editor.addEntity()}>+ Entity</button>
 		<button class="btn" onclick={() => editor.autoLayout()} title="Auto-layout (dagre)">Auto-layout</button>
+		<button class="btn" onclick={() => (ui.rbacOpen = true)} title="Roles & permissions (RBAC)">🛡 Roles</button>
 	</div>
 
 	<div class="spacer"></div>

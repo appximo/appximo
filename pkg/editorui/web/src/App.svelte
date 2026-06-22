@@ -5,6 +5,7 @@
 	import Canvas from './lib/components/Canvas.svelte';
 	import PropertyPanel from './lib/components/PropertyPanel.svelte';
 	import DeployModal from './lib/components/DeployModal.svelte';
+	import RbacModal from './lib/components/RbacModal.svelte';
 	import { editor } from './lib/stores/editor.svelte';
 	import { SAMPLES } from './lib/schema/samples';
 
@@ -27,6 +28,7 @@
 		</div>
 	</SvelteFlowProvider>
 	<DeployModal />
+	<RbacModal />
 </div>
 
 <style>

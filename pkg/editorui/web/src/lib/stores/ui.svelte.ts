@@ -6,6 +6,8 @@ type Theme = 'light' | 'dark';
 
 class UIStore {
 	theme = $state<Theme>('light');
+	/** Whether the Roles & Permissions (RBAC) editor is open. */
+	rbacOpen = $state(false);
 
 	init() {
 		if (typeof localStorage !== 'undefined') {

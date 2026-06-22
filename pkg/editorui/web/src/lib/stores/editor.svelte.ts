@@ -21,8 +21,16 @@
 import { MarkerType, type Edge, type Node } from '@xyflow/svelte';
 import dagre from '@dagrejs/dagre';
 
-import type { APISchema, FieldDef, FieldType, RBACPolicy } from '../types/schema';
-import { IDENT_RE } from '../types/schema';
+import type {
+	APISchema,
+	Condition,
+	FieldDef,
+	FieldType,
+	RBACPolicy,
+	ResourcePermission,
+	RolePolicy
+} from '../types/schema';
+import { IDENT_RE, RBAC_ACTIONS } from '../types/schema';
 import type { EntityModel, FieldModel, XY } from '../types/editor';
 import { schemaToModel, modelToSchema } from '../schema/transform';
 import { blankSchema } from '../schema/samples';
@@ -102,6 +110,12 @@ class EditorStore {
 
 	private bump() {
 		this.revision++;
+	}
+
+	/** Public bump for components that mutate reactive state directly (e.g. RbacModal
+	 *  editing this.rbac in place) so the revision/export-freshness still advances. */
+	touch() {
+		this.bump();
 	}
 
 	// ── load / export ──────────────────────────────────────────────────────────
@@ -251,6 +265,7 @@ class EditorStore {
 			for (const r of other.relations) if (r.def.target === old) r.def.target = name;
 			for (const fk of other.extras.foreign_keys ?? []) if (fk.target === old) fk.target = name;
 		}
+		this.rbacOnResourceRenamed(old, name);
 		this.rebuildEdges();
 		this.bump();
 		return null;
@@ -278,6 +293,7 @@ class EditorStore {
 				other.extras.foreign_keys = other.extras.foreign_keys.filter((fk) => fk.target !== name);
 			}
 		}
+		this.rbacOnResourceDeleted(name);
 		if (this.selectedEntityId === id) this.clearSelection();
 		this.rebuildNodes();
 		this.rebuildEdges();
@@ -302,9 +318,11 @@ class EditorStore {
 	deleteField(entityId: string, fieldId: string) {
 		const e = this.getEntity(entityId);
 		if (!e) return;
-		const wasFk = !!e.fields.find((f) => f.id === fieldId)?.def.relation;
+		const gone = e.fields.find((f) => f.id === fieldId);
+		const wasFk = !!gone?.def.relation;
 		e.fields = e.fields.filter((f) => f.id !== fieldId);
 		if (this.selectedFieldId === fieldId) this.selectedFieldId = null;
+		if (gone) this.rbacOnFieldDeleted(e.name, gone.name);
 		if (wasFk) this.rebuildEdges();
 		this.structureVersion++;
 		this.bump();
@@ -318,7 +336,9 @@ class EditorStore {
 		if (name === f.name) return null;
 		if (!IDENT_RE.test(name)) return 'must match ^[a-z][a-z0-9_]*$';
 		if (e.fields.some((x) => x.id !== fieldId && x.name === name)) return 'duplicate field name';
+		const oldField = f.name;
 		f.name = name;
+		this.rbacOnFieldRenamed(e.name, oldField, name);
 		this.rebuildEdges();
 		this.bump();
 		return null;
@@ -393,6 +413,200 @@ class EditorStore {
 		this.selectedFieldId = null;
 	}
 
+	// ── RBAC (UI-F2-S1) ──────────────────────────────────────────────────────────
+	// this.rbac is deep $state, round-tripped verbatim. These are the STRUCTURAL edits;
+	// leaf edits (toggling an action, a fields entry) are done directly on the reactive
+	// policy by RbacModal, and the export normalizer (transform.cleanRBACPolicy) drops
+	// empties so the exported schema is always engine-clean and valid.
+
+	get roleNames(): string[] {
+		return Object.keys(this.rbac.roles).sort();
+	}
+	getRole(name: string): RolePolicy | undefined {
+		return this.rbac.roles[name];
+	}
+	/** Which form a role uses: per-resource permissions, or the legacy role-global. */
+	roleForm(name: string): 'perResource' | 'global' {
+		const r = this.rbac.roles[name];
+		return r && r.permissions && Object.keys(r.permissions).length > 0 ? 'perResource' : 'global';
+	}
+
+	addRole(raw: string): string | null {
+		const name = raw.trim();
+		if (!name) return 'role name is required';
+		if (this.rbac.roles[name]) return 'duplicate role name';
+		// New roles start per-resource (the recommended form) and deny-all until a
+		// grant is added — deny-by-default.
+		this.rbac.roles[name] = { permissions: {} };
+		this.bump();
+		return null;
+	}
+	renameRole(oldName: string, raw: string): string | null {
+		const name = raw.trim();
+		if (oldName === name) return null;
+		if (!name) return 'role name is required';
+		if (this.rbac.roles[name]) return 'duplicate role name';
+		if (!this.rbac.roles[oldName]) return 'role not found';
+		const next: Record<string, RolePolicy> = {};
+		for (const [k, v] of Object.entries(this.rbac.roles)) next[k === oldName ? name : k] = v;
+		this.rbac.roles = next;
+		this.bump();
+		return null;
+	}
+	deleteRole(name: string) {
+		delete this.rbac.roles[name];
+		this.bump();
+	}
+
+	addPermission(roleName: string, resource: string) {
+		const role = this.rbac.roles[roleName];
+		if (!role || !this.getEntityByName(resource)) return;
+		if (!role.permissions) role.permissions = {};
+		if (role.permissions[resource]) return;
+		// First permission commits the role to per-resource — drop role-global keys
+		// (the two forms are mutually exclusive).
+		delete role.resources;
+		delete role.actions;
+		delete role.conditions;
+		delete role.fields;
+		role.permissions[resource] = { actions: ['read'] };
+		this.bump();
+	}
+	removePermission(roleName: string, resource: string) {
+		const role = this.rbac.roles[roleName];
+		if (role?.permissions) {
+			delete role.permissions[resource];
+			this.bump();
+		}
+	}
+
+	/** Upgrade a role-global role to the per-resource form, expanding its resources. */
+	convertToPerResource(roleName: string) {
+		const role = this.rbac.roles[roleName];
+		if (!role || this.roleForm(roleName) === 'perResource') return;
+		const actions = role.actions && role.actions.length > 0 ? [...role.actions] : ['read'];
+		const perms: Record<string, ResourcePermission> = {};
+		for (const res of this.roleResourceNames(role)) {
+			const valid = this.fieldNamesForResource(res);
+			const p: ResourcePermission = { actions: [...actions] };
+			if (role.conditions?.field && valid.includes(role.conditions.field)) {
+				p.conditions = { field: role.conditions.field, op: 'eq', val: role.conditions.val };
+			}
+			const here = (role.fields ?? []).filter((f) => valid.includes(f));
+			if (here.length > 0) p.fields = here;
+			perms[res] = p;
+		}
+		this.rbac.roles[roleName] = { permissions: perms };
+		this.bump();
+	}
+
+	/** Resource names a role-global role applies to ('*' → every entity). */
+	roleResourceNames(role: RolePolicy): string[] {
+		if (role.resources === '*') return this.entities.map((e) => e.name);
+		if (Array.isArray(role.resources)) return role.resources.filter((r) => !!this.getEntityByName(r));
+		return [];
+	}
+
+	/** Valid RBAC field names for a resource: the implicit id + its declared fields. */
+	fieldNamesForResource(resource: string): string[] {
+		const e = this.getEntityByName(resource);
+		return ['id', ...(e ? e.fields.map((f) => f.name) : [])];
+	}
+	/** Union of valid field names across resources (a role-global condition/allowlist). */
+	rbacFieldUnion(resources: string[]): string[] {
+		const set = new Set<string>(['id']);
+		for (const r of resources) {
+			const e = this.getEntityByName(r);
+			if (e) for (const f of e.fields) set.add(f.name);
+		}
+		return [...set].sort();
+	}
+
+	// RBAC reference cleanup when the schema changes (keeps the policy valid). Only
+	// per-resource permissions + role-global `resources` are touched precisely; a
+	// role-global condition/allowlist field is union-scoped, so validate() flags it
+	// rather than guessing.
+	private rbacOnResourceDeleted(name: string) {
+		for (const role of Object.values(this.rbac.roles)) {
+			if (role.permissions) delete role.permissions[name];
+			if (Array.isArray(role.resources)) role.resources = role.resources.filter((r) => r !== name);
+		}
+	}
+	private rbacOnResourceRenamed(oldName: string, newName: string) {
+		for (const role of Object.values(this.rbac.roles)) {
+			if (role.permissions?.[oldName]) {
+				role.permissions[newName] = role.permissions[oldName];
+				delete role.permissions[oldName];
+			}
+			if (Array.isArray(role.resources)) {
+				role.resources = role.resources.map((r) => (r === oldName ? newName : r));
+			}
+		}
+	}
+	private rbacOnFieldDeleted(resource: string, field: string) {
+		for (const role of Object.values(this.rbac.roles)) {
+			const p = role.permissions?.[resource];
+			if (!p) continue;
+			if (p.conditions?.field === field) {
+				delete p.conditions;
+				delete p.condition_actions;
+			}
+			if (p.fields) p.fields = p.fields.filter((f) => f !== field);
+		}
+	}
+	private rbacOnFieldRenamed(resource: string, oldField: string, newField: string) {
+		for (const role of Object.values(this.rbac.roles)) {
+			const p = role.permissions?.[resource];
+			if (!p) continue;
+			if (p.conditions?.field === oldField) p.conditions.field = newField;
+			if (p.fields) p.fields = p.fields.map((f) => (f === oldField ? newField : f));
+		}
+	}
+
+	/** Live RBAC validation — mirrors the engine's validateRBAC for fast feedback.
+	 *  Each message is prefixed `role "<name>"` so a UI can scope them per role. */
+	rbacIssues(): string[] {
+		const out: string[] = [];
+		const actions = RBAC_ACTIONS as readonly string[];
+		for (const [name, role] of Object.entries(this.rbac.roles)) {
+			const perms = role.permissions ?? {};
+			if (Object.keys(perms).length > 0) {
+				if (role.resources !== undefined || role.actions !== undefined || role.conditions !== undefined || role.fields !== undefined) {
+					out.push(`role "${name}": mixes per-resource and role-global keys — use one form`);
+				}
+				for (const [res, p] of Object.entries(perms)) {
+					if (!this.getEntityByName(res)) {
+						out.push(`role "${name}": permission over unknown resource "${res}"`);
+						continue;
+					}
+					const valid = this.fieldNamesForResource(res);
+					if (!p.actions || p.actions.length === 0) out.push(`role "${name}" / ${res}: needs at least one action`);
+					for (const a of p.actions ?? []) if (!actions.includes(a)) out.push(`role "${name}" / ${res}: unknown action "${a}"`);
+					if (p.conditions?.field && !valid.includes(p.conditions.field)) {
+						out.push(`role "${name}" / ${res}: condition field "${p.conditions.field}" is not a field of ${res}`);
+					}
+					if (p.condition_actions && p.condition_actions.length > 0 && !p.conditions?.field) {
+						out.push(`role "${name}" / ${res}: condition_actions needs a condition`);
+					}
+					for (const ca of p.condition_actions ?? []) {
+						if (ca === '*' || !actions.includes(ca)) out.push(`role "${name}" / ${res}: invalid condition action "${ca}"`);
+						else if (!(p.actions ?? []).includes('*') && !(p.actions ?? []).includes(ca)) {
+							out.push(`role "${name}" / ${res}: condition action "${ca}" is not in the granted actions`);
+						}
+					}
+					for (const f of p.fields ?? []) if (!valid.includes(f)) out.push(`role "${name}" / ${res}: field "${f}" is not a field of ${res}`);
+				}
+			} else {
+				const union = this.rbacFieldUnion(this.roleResourceNames(role));
+				if (role.conditions?.field && !union.includes(role.conditions.field)) {
+					out.push(`role "${name}": condition field "${role.conditions.field}" is not on its resources`);
+				}
+				for (const f of role.fields ?? []) if (!union.includes(f)) out.push(`role "${name}": field "${f}" is not on its resources`);
+			}
+		}
+		return out;
+	}
+
 	// ── validation helpers ─────────────────────────────────────────────────────
 
 	validateResourceName(name: string, exceptId?: string): string | null {
@@ -430,6 +644,7 @@ class EditorStore {
 				}
 			}
 		}
+		issues.push(...this.rbacIssues());
 		return issues;
 	}
 }

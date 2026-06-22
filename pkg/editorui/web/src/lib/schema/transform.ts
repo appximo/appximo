@@ -11,7 +11,15 @@
 // (ids, canvas positions) is never emitted. The round-trip is property-tested in
 // schema/transform.test.mts.
 
-import type { APISchema, RBACPolicy, RelationDef, ResourceSchema } from '../types/schema';
+import type {
+	APISchema,
+	Condition,
+	RBACPolicy,
+	RelationDef,
+	ResourcePermission,
+	ResourceSchema,
+	RolePolicy
+} from '../types/schema';
 import type { EntityModel, FieldModel, RelationModel, SchemaModel } from '../types/editor';
 import { newId } from './ids';
 
@@ -77,7 +85,7 @@ export function modelToSchema(model: SchemaModel): APISchema {
 		resources
 	};
 	if (model.rbac && Object.keys(model.rbac.roles ?? {}).length > 0) {
-		out.rbac = cleanRBAC(model.rbac);
+		out.rbac = cleanRBACPolicy(model.rbac);
 	}
 	if (model.workflows && Object.keys(model.workflows).length > 0) {
 		out.workflows = model.workflows;
@@ -104,10 +112,56 @@ function entityToResource(ent: EntityModel): ResourceSchema {
 	return res;
 }
 
-function cleanRBAC(rbac: RBACPolicy): RBACPolicy {
-	// RBAC rides through verbatim today (no RBAC visual editing yet); just drop
-	// any undefined leaves so the JSON is clean.
-	return cleanObject(rbac);
+// cleanRBACPolicy normalizes the edited RBAC into the exact, minimal shape the
+// engine accepts (UI-F2-S1): each role is serialized in ONE form only (per-resource
+// `permissions` when non-empty, else role-global), empty arrays/conditions are
+// dropped, and the row-condition op is pinned to "eq" (the only operator the engine
+// enforces — SEC-AUDIT-V1). Faithful round-trip: a role with no empties (e.g. the
+// erp-demo roles) is reproduced identically.
+function cleanRBACPolicy(rbac: RBACPolicy): RBACPolicy {
+	const roles: Record<string, RolePolicy> = {};
+	for (const [name, role] of Object.entries(rbac.roles ?? {})) {
+		roles[name] = cleanRole(role);
+	}
+	return { roles };
+}
+
+function cleanRole(role: RolePolicy): RolePolicy {
+	const perms = role.permissions ?? {};
+	// Per-resource form wins when it has entries; role-global keys are dropped
+	// (the two forms are mutually exclusive in the engine).
+	if (Object.keys(perms).length > 0) {
+		const permissions: Record<string, ResourcePermission> = {};
+		for (const [res, p] of Object.entries(perms)) permissions[res] = cleanPermission(p);
+		return { permissions };
+	}
+	const out: RolePolicy = {};
+	if (role.resources === '*') out.resources = '*';
+	else if (Array.isArray(role.resources) && role.resources.length > 0) out.resources = [...role.resources];
+	if (role.actions && role.actions.length > 0) out.actions = [...role.actions];
+	const cond = cleanCondition(role.conditions);
+	if (cond) out.conditions = cond;
+	if (role.fields && role.fields.length > 0) out.fields = [...role.fields];
+	return out;
+}
+
+function cleanPermission(p: ResourcePermission): ResourcePermission {
+	const out: ResourcePermission = { actions: [...(p.actions ?? [])] };
+	const cond = cleanCondition(p.conditions);
+	if (cond) {
+		out.conditions = cond;
+		// condition_actions is meaningless without a condition (the engine rejects it).
+		if (p.condition_actions && p.condition_actions.length > 0) {
+			out.condition_actions = [...p.condition_actions];
+		}
+	}
+	if (p.fields && p.fields.length > 0) out.fields = [...p.fields];
+	return out;
+}
+
+function cleanCondition(c?: Condition): Condition | undefined {
+	if (!c || !c.field) return undefined; // a condition with no field is dropped
+	return { field: c.field, op: 'eq', val: c.val ?? '' }; // op is always eq
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
