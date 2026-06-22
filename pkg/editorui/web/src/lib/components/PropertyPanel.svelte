@@ -10,6 +10,7 @@
 		type ReferentialAction,
 		type EventAction
 	} from '../types/schema';
+	import { fieldDefIssues, isNumericType, isStringType } from '../schema/fieldRules';
 
 	const entity = $derived(editor.selectedEntity);
 	const field = $derived(editor.selectedField);
@@ -17,10 +18,11 @@
 	let nameError = $state<string | null>(null);
 	let fieldNameError = $state<string | null>(null);
 
-	const NUMERIC = new Set<FieldType>(['int', 'int64', 'float64']);
-	const STRINGY = new Set<FieldType>(['string', 'text']);
-	const isNumeric = $derived(field ? NUMERIC.has(field.def.type) : false);
-	const isStringy = $derived(field ? STRINGY.has(field.def.type) : false);
+	const isNumeric = $derived(field ? isNumericType(field.def.type) : false);
+	const isStringy = $derived(field ? isStringType(field.def.type) : false);
+	const hasEnum = $derived((field?.def.enum ?? []).length > 0);
+	/** Live fidelity issues for the selected field — mirrors the engine validator. */
+	const fieldIssues = $derived(field ? fieldDefIssues(field.def) : []);
 
 	function renameEntity(value: string) {
 		if (!entity) return;
@@ -65,7 +67,11 @@
 			return;
 		}
 		let val: unknown = raw;
-		if (isNumeric) {
+		// An enum default must be a STRING member (the engine validates it as such),
+		// so never coerce it to a number even on a numeric-typed enum field.
+		if (hasEnum) {
+			val = raw;
+		} else if (isNumeric) {
 			const n = Number(raw);
 			if (!Number.isNaN(n)) val = n;
 		} else if (field.def.type === 'bool') {
@@ -157,13 +163,42 @@
 			</div>
 
 			<label class="lbl" for="f-default">Default <span class="muted">(on create)</span></label>
-			<input
-				id="f-default"
-				class="field-input"
-				value={field.def.default === undefined ? '' : String(field.def.default)}
-				placeholder={field.def.type === 'time' ? '"now" or a timestamp' : ''}
-				onchange={(e) => setDefault(e.currentTarget.value)}
-			/>
+			{#if hasEnum}
+				<!-- enum default: pick a member (the engine requires it to be one) -->
+				<select
+					id="f-default"
+					class="field-select"
+					value={field.def.default === undefined ? '' : String(field.def.default)}
+					onchange={(e) => setDefault(e.currentTarget.value)}
+				>
+					<option value="">— none —</option>
+					{#each field.def.enum ?? [] as ev}<option value={ev}>{ev}</option>{/each}
+				</select>
+			{:else if field.def.type === 'bool'}
+				<select
+					id="f-default"
+					class="field-select"
+					value={field.def.default === undefined ? '' : String(field.def.default)}
+					onchange={(e) => setDefault(e.currentTarget.value)}
+				>
+					<option value="">— none —</option>
+					<option value="true">true</option>
+					<option value="false">false</option>
+				</select>
+			{:else}
+				<input
+					id="f-default"
+					class="field-input"
+					type={isNumeric ? 'number' : 'text'}
+					value={field.def.default === undefined ? '' : String(field.def.default)}
+					placeholder={field.def.type === 'time'
+						? '"now" or a timestamp'
+						: field.def.type === 'uuid'
+							? 'a uuid'
+							: ''}
+					onchange={(e) => setDefault(e.currentTarget.value)}
+				/>
+			{/if}
 		</section>
 
 		<!-- Relation (foreign key) -->
@@ -283,6 +318,16 @@
 				value={(field.def.enum ?? []).join(', ')}
 				onchange={(e) => setEnum(e.currentTarget.value)}
 			/>
+			{#if !isNumeric && !isStringy}
+				<div class="rule-note muted">
+					{field.def.type} fields take no length/range/pattern rules — only enum and a default.
+				</div>
+			{/if}
+			{#if fieldIssues.length > 0}
+				<div class="issues" role="alert">
+					{#each fieldIssues as iss}<div class="issue">⚠ {iss}</div>{/each}
+				</div>
+			{/if}
 			{#if field.def.state_machine}
 				<div class="sm-note">
 					<span class="badge b-sm">SM</span> state machine declared
@@ -532,6 +577,27 @@
 	.rr-meta {
 		color: var(--text-3);
 		font-size: 11px;
+	}
+
+	.issues {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		margin-top: 4px;
+		padding: 7px 9px;
+		border-radius: var(--radius-sm);
+		background: color-mix(in srgb, var(--danger) 8%, transparent);
+		border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+	}
+	.issue {
+		font-size: 11.5px;
+		line-height: 1.4;
+		color: var(--danger);
+	}
+	.rule-note {
+		font-size: 11.5px;
+		line-height: 1.4;
+		margin-top: 2px;
 	}
 
 	.sm-note {

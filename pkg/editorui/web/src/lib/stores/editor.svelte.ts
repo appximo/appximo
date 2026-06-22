@@ -33,6 +33,7 @@ import type {
 import { IDENT_RE, RBAC_ACTIONS } from '../types/schema';
 import type { EntityModel, FieldModel, XY } from '../types/editor';
 import { schemaToModel, modelToSchema } from '../schema/transform';
+import { fieldDefIssues, NUMERIC_TYPES, STRING_TYPES } from '../schema/fieldRules';
 import { blankSchema } from '../schema/samples';
 import { newId } from '../schema/ids';
 
@@ -363,6 +364,24 @@ class EditorStore {
 			this.rebuildEdges();
 			this.structureVersion++;
 		}
+		// Changing the type also strips the validation rules that no longer apply to
+		// the new type — the engine REJECTS minLength/maxLength/pattern/format on a
+		// non-string field and min/max on a non-numeric one, so a stale rule from the
+		// old type would make the schema invalid at load. We drop them rather than
+		// emit something the validator refuses (string→int with a pattern still set).
+		if (key === 'type') {
+			const t = value as FieldType;
+			if (!NUMERIC_TYPES.has(t)) {
+				delete f.def.min;
+				delete f.def.max;
+			}
+			if (!STRING_TYPES.has(t)) {
+				delete f.def.minLength;
+				delete f.def.maxLength;
+				delete f.def.pattern;
+				delete f.def.format;
+			}
+		}
 		if (affectsEdges) {
 			this.rebuildEdges();
 			this.structureVersion++;
@@ -609,6 +628,22 @@ class EditorStore {
 
 	// ── validation helpers ─────────────────────────────────────────────────────
 
+	/** Live field-validation issues — mirrors the engine's validateFieldRules +
+	 *  validateDefault (see schema/fieldRules.ts) so a rule the validator would
+	 *  reject (min > max, default out of enum, a bad pattern, a rule on the wrong
+	 *  type) is surfaced before deploy. Each message is prefixed with the field path. */
+	fieldIssues(): string[] {
+		const out: string[] = [];
+		for (const e of this.entities) {
+			for (const f of e.fields) {
+				for (const msg of fieldDefIssues(f.def)) {
+					out.push(`field "${e.name}.${f.name}": ${msg}`);
+				}
+			}
+		}
+		return out;
+	}
+
 	validateResourceName(name: string, exceptId?: string): string | null {
 		if (!IDENT_RE.test(name)) return 'must match ^[a-z][a-z0-9_]*$ (no hyphens)';
 		if (name === 'transaction') return '"transaction" is reserved';
@@ -644,6 +679,7 @@ class EditorStore {
 				}
 			}
 		}
+		issues.push(...this.fieldIssues());
 		issues.push(...this.rbacIssues());
 		return issues;
 	}
