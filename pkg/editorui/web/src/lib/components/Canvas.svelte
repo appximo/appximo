@@ -137,14 +137,15 @@
 		text-align: center;
 		background: var(--surface);
 		border: 1px solid var(--border);
-		border-radius: var(--radius);
-		box-shadow: var(--shadow-md);
-		padding: 28px 36px;
+		border-radius: var(--radius-lg);
+		box-shadow: var(--shadow-lg);
+		padding: 30px 38px;
 		max-width: 340px;
 	}
 	.es-title {
-		font-weight: 700;
+		font-weight: 600;
 		font-size: 16px;
+		letter-spacing: -0.01em;
 		margin-bottom: 6px;
 	}
 	.es-card p {

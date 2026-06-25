@@ -358,7 +358,8 @@
 	.overlay {
 		position: fixed;
 		inset: 0;
-		background: rgba(10, 12, 16, 0.5);
+		background: color-mix(in srgb, #0a0c10 46%, transparent);
+		backdrop-filter: blur(3px);
 		display: grid;
 		place-items: center;
 		z-index: 200;
@@ -370,8 +371,8 @@
 		flex-direction: column;
 		background: var(--surface);
 		border: 1px solid var(--border);
-		border-radius: var(--radius);
-		box-shadow: var(--shadow-md);
+		border-radius: var(--radius-lg);
+		box-shadow: var(--shadow-lg);
 		overflow: hidden;
 	}
 	.m-head {

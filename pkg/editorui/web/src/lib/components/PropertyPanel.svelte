@@ -659,10 +659,10 @@
 		font-size: 12.5px;
 	}
 	.badge.b-sm {
-		background: color-mix(in srgb, var(--ok) 16%, transparent);
-		color: var(--ok);
+		background: var(--brand-100);
+		color: var(--brand);
 		font-size: 10px;
-		font-weight: 700;
+		font-weight: 600;
 		padding: 1px 5px;
 		border-radius: 5px;
 	}

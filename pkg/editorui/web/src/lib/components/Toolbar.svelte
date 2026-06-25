@@ -64,7 +64,12 @@
 
 <header class="topbar">
 	<div class="brand">
-		<span class="logo" aria-hidden="true">▤</span>
+		<span class="logo" aria-hidden="true">
+			<svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+				<rect x="2" y="2.5" width="12" height="11" rx="2.5" stroke="currentColor" stroke-width="1.5" />
+				<path d="M2 6.25h12M6 6.5v7" stroke="currentColor" stroke-width="1.5" />
+			</svg>
+		</span>
 		<span class="brand-name">Appitools <b>Studio</b></span>
 	</div>
 
@@ -74,7 +79,7 @@
 		<button class="btn subtle" onclick={() => editor.newSchema()}>New</button>
 
 		<div class="menu" class:open={menuOpen}>
-			<button class="btn subtle" onclick={() => (menuOpen = !menuOpen)}>Examples ▾</button>
+			<button class="btn subtle" onclick={() => (menuOpen = !menuOpen)}>Examples <span class="chev">▾</span></button>
 			{#if menuOpen}
 				<div class="menu-pop" role="menu">
 					{#each SAMPLES as s}
@@ -96,7 +101,12 @@
 	<div class="group">
 		<button class="btn" onclick={() => editor.addEntity()}>+ Entity</button>
 		<button class="btn" onclick={() => editor.autoLayout()} title="Auto-layout (dagre)">Auto-layout</button>
-		<button class="btn" onclick={() => (ui.rbacOpen = true)} title="Roles & permissions (RBAC)">🛡 Roles</button>
+		<button class="btn" onclick={() => (ui.rbacOpen = true)} title="Roles & permissions (RBAC)">
+			<svg class="bi" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+				<path d="M8 1.6l5 1.9v3.9c0 3-2.2 5.2-5 6.4-2.8-1.2-5-3.4-5-6.4V3.5l5-1.9z" stroke="currentColor" stroke-width="1.3" />
+			</svg>
+			Roles
+		</button>
 	</div>
 
 	<div class="spacer"></div>
@@ -104,7 +114,10 @@
 	<div class="api-name" title="API name">{editor.schemaName}</div>
 
 	<button class="btn primary deploy" onclick={() => deploy.openDeploy()} title="Deploy to the engine">
-		▲ Deploy
+		<svg class="bi" width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+			<path d="M8 13.2V4.2M8 4.2 4.6 7.6M8 4.2l3.4 3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+		</svg>
+		Deploy
 	</button>
 
 	<button class="btn subtle icon" onclick={() => ui.toggle()} title="Toggle theme" aria-label="Toggle theme">
@@ -177,17 +190,17 @@
 		flex: 0 0 var(--topbar-h);
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		padding: 0 14px;
+		gap: 6px;
+		padding: 0 12px;
 		background: var(--surface);
 		border-bottom: 1px solid var(--border);
-		box-shadow: var(--shadow-sm);
 		z-index: 5;
 	}
 	.brand {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 9px;
+		padding-right: 2px;
 	}
 	.logo {
 		display: grid;
@@ -196,41 +209,55 @@
 		height: 26px;
 		background: var(--brand);
 		color: #fff;
-		border-radius: 6px;
-		font-size: 14px;
+		border-radius: 7px;
+		box-shadow: 0 1px 2px color-mix(in srgb, var(--brand) 40%, transparent);
 	}
 	.brand-name {
-		font-size: 14px;
-		color: var(--text-2);
+		font-size: 13.5px;
+		color: var(--text-3);
+		letter-spacing: -0.01em;
+		font-weight: 500;
 	}
 	.brand-name b {
 		color: var(--text);
+		font-weight: 600;
 	}
 	.sep {
 		width: 1px;
-		height: 24px;
+		height: 22px;
 		background: var(--border);
-		margin: 0 4px;
+		margin: 0 6px;
 	}
 	.group {
 		display: flex;
 		align-items: center;
-		gap: 4px;
+		gap: 2px;
+	}
+	.chev {
+		color: var(--text-3);
+		font-size: 9px;
+	}
+	.bi {
+		flex: 0 0 auto;
 	}
 	.spacer {
 		flex: 1;
 	}
 	.api-name {
 		font-family: var(--mono);
-		font-size: 12.5px;
+		font-size: 12px;
 		color: var(--text-2);
 		background: var(--surface-2);
-		padding: 4px 10px;
-		border-radius: 12px;
+		border: 1px solid var(--border);
+		padding: 3px 10px;
+		border-radius: 7px;
 		max-width: 220px;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+	.deploy {
+		margin-left: 2px;
 	}
 	.icon {
 		font-size: 15px;
@@ -242,14 +269,14 @@
 	}
 	.menu-pop {
 		position: absolute;
-		top: calc(100% + 4px);
+		top: calc(100% + 6px);
 		left: 0;
-		min-width: 240px;
+		min-width: 248px;
 		background: var(--surface);
 		border: 1px solid var(--border);
 		border-radius: var(--radius);
-		box-shadow: var(--shadow-md);
-		padding: 4px;
+		box-shadow: var(--shadow-lg);
+		padding: 5px;
 		z-index: 20;
 	}
 	.menu-item {
@@ -278,7 +305,8 @@
 	.overlay {
 		position: fixed;
 		inset: 0;
-		background: rgba(10, 12, 16, 0.45);
+		background: color-mix(in srgb, #0a0c10 42%, transparent);
+		backdrop-filter: blur(3px);
 		display: grid;
 		place-items: center;
 		z-index: 100;
@@ -290,8 +318,8 @@
 		flex-direction: column;
 		background: var(--surface);
 		border: 1px solid var(--border);
-		border-radius: var(--radius);
-		box-shadow: var(--shadow-md);
+		border-radius: var(--radius-lg);
+		box-shadow: var(--shadow-lg);
 		overflow: hidden;
 	}
 	.modal-head {

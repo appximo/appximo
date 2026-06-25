@@ -106,13 +106,14 @@
 		position: relative;
 	}
 	.en-icon {
-		color: var(--brand);
-		font-size: 12px;
+		color: var(--text-3);
+		font-size: 11px;
 	}
 	.en-title {
-		font-weight: 700;
+		font-weight: 600;
 		font-family: var(--mono);
 		font-size: 13px;
+		letter-spacing: -0.01em;
 		color: var(--text);
 		flex: 1;
 		overflow: hidden;
@@ -179,24 +180,28 @@
 		font-size: 11px;
 	}
 
+	/* Sober badge scheme: structural facts (REQ/UQ/auto) stay monochrome so a dense
+	   schema reads calm; only the relational/lifecycle signals (FK, SM) carry a
+	   whisper of accent — minimal colour, maximal scannability. */
 	.badge.b-req {
-		background: color-mix(in srgb, var(--danger) 16%, transparent);
-		color: var(--danger);
+		background: var(--surface-3);
+		color: var(--text);
 	}
 	.badge.b-uniq {
-		background: color-mix(in srgb, var(--violet) 16%, transparent);
-		color: var(--violet);
+		background: var(--surface-3);
+		color: var(--text-2);
 	}
 	.badge.b-auto {
-		background: var(--surface-2);
+		background: transparent;
 		color: var(--text-3);
+		box-shadow: inset 0 0 0 1px var(--border);
 	}
 	.badge.b-sm {
-		background: color-mix(in srgb, var(--ok) 16%, transparent);
-		color: var(--ok);
+		background: var(--brand-100);
+		color: var(--brand);
 	}
 	.badge.b-fk {
-		background: color-mix(in srgb, var(--accent-fk) 16%, transparent);
+		background: color-mix(in srgb, var(--accent-fk) 12%, transparent);
 		color: var(--accent-fk);
 	}
 
