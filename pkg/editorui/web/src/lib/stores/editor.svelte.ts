@@ -31,7 +31,8 @@ import type {
 	RolePolicy,
 	StateMachine
 } from '../types/schema';
-import { IDENT_RE, RBAC_ACTIONS } from '../types/schema';
+import { IDENT_RE, RBAC_ACTIONS, HOOK_EVENTS } from '../types/schema';
+import type { ForeignKeyDef, IndexDef, ReferentialAction, HookConfig, HookEvent } from '../types/schema';
 import type { EntityModel, FieldModel, XY } from '../types/editor';
 import { schemaToModel, modelToSchema } from '../schema/transform';
 import {
@@ -42,7 +43,6 @@ import {
 	NUMERIC_TYPES,
 	STRING_TYPES
 } from '../schema/fieldRules';
-import type { ForeignKeyDef, IndexDef, ReferentialAction } from '../types/schema';
 import { blankSchema } from '../schema/samples';
 import { newId } from '../schema/ids';
 
@@ -658,6 +658,86 @@ class EditorStore {
 		this.bump();
 	}
 
+	// ── hooks (UI-F2-S5) ────────────────────────────────────────────────────────
+	// hooks is a MAP keyed by event (one hook per event), in entity.extras.hooks
+	// (deep $state). Fidelity to SEC-AUDIT-V2: an after_* hook may ONLY be a webhook
+	// (a sandboxed js/wasm hook post-commit is a no-op the engine rejects at load).
+
+	/** True for after_create / after_update (webhook-only events). */
+	isAfterEvent(event: string): boolean {
+		return event === 'after_create' || event === 'after_update';
+	}
+	/** Hook types valid for an event: after ⇒ webhook only; before ⇒ js/webhook/wasm. */
+	hookTypesFor(event: string): Array<'js' | 'webhook' | 'wasm'> {
+		return this.isAfterEvent(event) ? ['webhook'] : ['js', 'webhook', 'wasm'];
+	}
+	/** Events not yet used by a hook on this entity (a map allows one hook per event). */
+	unusedHookEvents(entityId: string): HookEvent[] {
+		const used = new Set(Object.keys(this.getEntity(entityId)?.extras.hooks ?? {}));
+		return HOOK_EVENTS.filter((e) => !used.has(e));
+	}
+
+	addHook(entityId: string, event: HookEvent) {
+		const e = this.getEntity(entityId);
+		if (!e) return;
+		if (!e.extras.hooks) e.extras.hooks = {};
+		if (e.extras.hooks[event]) return;
+		// Default to a valid type for the event (after ⇒ webhook; before ⇒ js).
+		e.extras.hooks[event] = this.isAfterEvent(event) ? { type: 'webhook' } : { type: 'js' };
+		this.bump();
+	}
+	removeHook(entityId: string, event: string) {
+		const e = this.getEntity(entityId);
+		if (!e?.extras.hooks) return;
+		delete e.extras.hooks[event];
+		if (Object.keys(e.extras.hooks).length === 0) e.extras.hooks = undefined;
+		this.bump();
+	}
+	/** Move a hook to a different event key (rename), coercing the type to webhook if
+	 *  the new event is after_* (fidelity). No-op if the target event is taken. */
+	setHookEvent(entityId: string, oldEvent: string, newEvent: HookEvent) {
+		const e = this.getEntity(entityId);
+		const hooks = e?.extras.hooks;
+		if (!hooks || oldEvent === newEvent || hooks[newEvent]) return;
+		const cfg = hooks[oldEvent];
+		if (!cfg) return;
+		if (this.isAfterEvent(newEvent) && cfg.type !== 'webhook') {
+			this.coerceHookType(cfg, 'webhook');
+		}
+		hooks[newEvent] = cfg;
+		delete hooks[oldEvent];
+		this.bump();
+	}
+	setHookType(entityId: string, event: string, type: 'js' | 'webhook' | 'wasm') {
+		const cfg = this.getEntity(entityId)?.extras.hooks?.[event];
+		if (!cfg) return;
+		this.coerceHookType(cfg, type);
+		this.bump();
+	}
+	/** Set/clear one config field of a hook (drops the key when empty so the export
+	 *  never serializes a dead "" value). */
+	patchHook(entityId: string, event: string, key: keyof HookConfig, value: string) {
+		const cfg = this.getEntity(entityId)?.extras.hooks?.[event];
+		if (!cfg) return;
+		if (value) (cfg[key] as string) = value;
+		else delete cfg[key];
+		this.bump();
+	}
+	/** Switch a hook's type and drop the fields that no longer apply (so a webhook
+	 *  never keeps a stale `script`, etc.). */
+	private coerceHookType(cfg: HookConfig, type: 'js' | 'webhook' | 'wasm') {
+		cfg.type = type;
+		if (type !== 'js') delete cfg.script;
+		if (type !== 'webhook') {
+			delete cfg.url;
+			delete cfg.hmac_secret_env;
+		}
+		if (type !== 'wasm') {
+			delete cfg.wasm_module;
+			delete cfg.wasm_fn;
+		}
+	}
+
 	// ── selection ──────────────────────────────────────────────────────────────
 
 	selectEntity(id: string | null) {
@@ -957,6 +1037,40 @@ class EditorStore {
 		return out;
 	}
 
+	/** Live validation of hooks — mirrors the engine (keys.go ValidHookEvents +
+	 *  validator.go): a known event, after_* must be webhook (SEC-AUDIT-V2), and the
+	 *  type's required field present (js→script, webhook→url, wasm→wasm_module). */
+	hookIssues(): string[] {
+		const out: string[] = [];
+		for (const e of this.entities) {
+			for (const [event, hook] of Object.entries(e.extras.hooks ?? {})) {
+				const where = `entity "${e.name}" hook "${event}"`;
+				if (!(HOOK_EVENTS as readonly string[]).includes(event)) {
+					out.push(`${where}: unknown event (valid: ${HOOK_EVENTS.join(', ')})`);
+					continue;
+				}
+				if (this.isAfterEvent(event) && (hook.type === 'js' || hook.type === 'wasm')) {
+					out.push(`${where}: an after hook must be a webhook (a sandboxed ${hook.type} hook can't act post-commit)`);
+					continue;
+				}
+				switch (hook.type) {
+					case 'js':
+						if (!hook.script?.trim()) out.push(`${where}: a js hook needs a script`);
+						break;
+					case 'webhook':
+						if (!hook.url?.trim()) out.push(`${where}: a webhook needs a url`);
+						break;
+					case 'wasm':
+						if (!hook.wasm_module?.trim()) out.push(`${where}: a wasm hook needs a wasm_module`);
+						break;
+					default:
+						out.push(`${where}: unknown type "${hook.type}" (must be js, webhook or wasm)`);
+				}
+			}
+		}
+		return out;
+	}
+
 	validateResourceName(name: string, exceptId?: string): string | null {
 		if (!IDENT_RE.test(name)) return 'must match ^[a-z][a-z0-9_]*$ (no hyphens)';
 		if (name === 'transaction') return '"transaction" is reserved';
@@ -994,6 +1108,7 @@ class EditorStore {
 		}
 		issues.push(...this.fieldIssues());
 		issues.push(...this.dataModelIssues());
+		issues.push(...this.hookIssues());
 		issues.push(...this.rbacIssues());
 		return issues;
 	}

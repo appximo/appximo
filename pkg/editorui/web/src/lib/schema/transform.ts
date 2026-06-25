@@ -14,6 +14,7 @@
 import type {
 	APISchema,
 	Condition,
+	HookConfig,
 	RBACPolicy,
 	RelationDef,
 	ResourcePermission,
@@ -106,7 +107,13 @@ function entityToResource(ent: EntityModel): ResourceSchema {
 	const x = ent.extras;
 	if (x.indexes && x.indexes.length > 0) res.indexes = x.indexes;
 	if (x.foreign_keys && x.foreign_keys.length > 0) res.foreign_keys = x.foreign_keys;
-	if (x.hooks && Object.keys(x.hooks).length > 0) res.hooks = x.hooks;
+	if (x.hooks && Object.keys(x.hooks).length > 0) {
+		// Prune each hook's empty optional fields (a webhook never keeps a stale ""
+		// script, etc.) so the exported schema is engine-clean and minimal.
+		const hooks: Record<string, HookConfig> = {};
+		for (const [ev, h] of Object.entries(x.hooks)) hooks[ev] = cleanObject(h);
+		res.hooks = hooks;
+	}
 	if (x.events && x.events.length > 0) res.events = x.events;
 	if (x.renamed_from) res.renamed_from = x.renamed_from;
 	return res;

@@ -2,6 +2,7 @@
 	import { editor } from '../stores/editor.svelte';
 	import { ui } from '../stores/ui.svelte';
 	import EntityDataPanel from './EntityDataPanel.svelte';
+	import EntityHooksPanel from './EntityHooksPanel.svelte';
 	import { smKnownStates } from '../schema/fieldRules';
 	import {
 		FIELD_TYPES,
@@ -413,6 +414,7 @@
 		</section>
 
 		<EntityDataPanel {entity} />
+		<EntityHooksPanel {entity} />
 
 		<section class="p-sec">
 			<div class="sec-title">Outbox events</div>
