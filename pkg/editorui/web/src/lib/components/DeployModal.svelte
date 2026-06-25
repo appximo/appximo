@@ -124,6 +124,13 @@
 						</button>
 					</div>
 
+					<p class="hint-sm model-note">
+						The engine serves routes / GraphQL / RBAC from its <b>boot schema</b>: editing
+						existing resources (columns, validations, roles…) deploys <b>live</b>; a brand-new
+						resource is provisioned but needs an engine restart to be served. You'll be told
+						before any restart is needed.
+					</p>
+
 					{#if deploy.mode === 'new'}
 						<label class="lbl" for="d-tid">Tenant id <span class="muted">(subdomain)</span></label>
 						<input
@@ -242,6 +249,28 @@
 						{/if}
 					{/if}
 
+					{#if deploy.newResources.length > 0}
+						<div class="plan-sec warn-sec">
+							<div class="plan-h warn-h">⟳ Needs an engine restart</div>
+							<p class="danger-note">
+								<b class="mono">{deploy.newResources.join(', ')}</b>
+								{deploy.newResources.length === 1 ? 'is a new resource' : 'are new resources'} —
+								its tables will be created, but the engine serves REST / GraphQL / RBAC from its
+								<b>boot schema</b>, so the API for {deploy.newResources.length === 1 ? 'it' : 'them'}
+								is <b>unavailable</b> (a <b>403</b> or <b>404</b>) until the engine restarts with a
+								schema that includes {deploy.newResources.length === 1 ? 'it' : 'them'}.
+								{#if deploy.liveResources.length > 0}
+									Changes to <span class="mono">{deploy.liveResources.join(', ')}</span> are served immediately.
+								{/if}
+							</p>
+							<p class="hint-sm">
+								This does <b>not</b> block the deploy — the tables are still provisioned. To serve
+								{deploy.newResources.length === 1 ? 'it' : 'them'} now, restart the engine with this
+								schema (<code>--schema your-export.json</code>).
+							</p>
+						</div>
+					{/if}
+
 					<div class="m-actions">
 						<button class="btn subtle" onclick={() => (deploy.step = 'target')}>Back</button>
 						<button class="btn primary" onclick={() => deploy.confirmDeploy()} disabled={deploy.busy || (deploy.mode === 'existing' && planEmpty)}>
@@ -265,12 +294,27 @@
 								<b class="mono">{deploy.result.tenantId}</b> is {deploy.result.created ? 'live' : 'updated'}
 							</div>
 							<div class="rh-sub">
-								{deploy.result.created
-									? 'Your diagram is now a running REST + GraphQL API.'
-									: 'The migration was applied safely.'}
+								{#if deploy.result.restartResources && deploy.result.restartResources.length > 0}
+									The existing resources are live; the new ones need an engine restart (below).
+								{:else if deploy.result.created}
+									Your diagram is now a running REST + GraphQL API.
+								{:else}
+									The migration was applied safely.
+								{/if}
 							</div>
 						</div>
 					</div>
+
+					{#if deploy.result.restartResources && deploy.result.restartResources.length > 0}
+						<div class="banner warn">
+							<div class="banner-msg">Provisioned — needs a restart to be served: {deploy.result.restartResources.join(', ')}</div>
+							<div class="banner-sub">
+								Their tables exist, but the REST / GraphQL API is unavailable (<b>403</b>/<b>404</b>)
+								until the engine restarts with a schema that includes them (routes, GraphQL and RBAC
+								are boot-compiled).
+							</div>
+						</div>
+					{/if}
 
 					{#if deploy.result.appliedDrops && deploy.result.appliedDrops.length > 0}
 						<div class="banner warn">
@@ -291,7 +335,8 @@
 						</div>
 						<p class="hint-sm">
 							The tenant is addressed by Host subdomain (<span class="mono">{eps.tenantHost}</span>).
-							A request needs that Host + a JWT for one of the schema's roles.
+							A request needs that Host + a JWT for one of the schema's roles.{#if deploy.result.restartResources && deploy.result.restartResources.length > 0}
+								The new resources above respond only after the engine restart.{/if}
 						</p>
 					{/if}
 
@@ -431,6 +476,12 @@
 		padding: 1px 5px;
 		border-radius: 4px;
 	}
+	.model-note {
+		background: var(--surface-2);
+		border-radius: var(--radius-sm);
+		padding: 8px 10px;
+		line-height: 1.5;
+	}
 	.pad {
 		padding: 10px 0;
 	}
@@ -457,6 +508,13 @@
 	}
 	.banner-msg {
 		font-weight: 600;
+	}
+	.banner-sub {
+		margin-top: 4px;
+		font-size: 11.5px;
+		font-weight: 400;
+		line-height: 1.45;
+		opacity: 0.92;
 	}
 	.banner-list {
 		margin: 6px 0 0;
@@ -572,6 +630,10 @@
 	.danger-sec {
 		border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
 		background: color-mix(in srgb, var(--danger) 5%, transparent);
+	}
+	.warn-sec {
+		border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+		background: color-mix(in srgb, var(--warn) 6%, transparent);
 	}
 	.danger-note {
 		font-size: 12px;

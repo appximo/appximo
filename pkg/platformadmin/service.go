@@ -52,6 +52,17 @@ type Config struct {
 	// user is treated as an observability admin (only the platform super-admin sees
 	// observability). Implemented over the boot RBAC policy (inherits RBAC).
 	TenantAdminRole func(role string) bool
+
+	// ServedResources is the set of resource names the engine serves LIVE — the REST
+	// routes, GraphQL types and RBAC policy are all compiled from the BOOT --schema
+	// (codegen.BuildRouter / gqlhandler.BuildHandler / rbac.RBACMiddleware), globally
+	// and at boot. A resource deployed to a tenant but ABSENT here gets its tables
+	// provisioned by the migration, but its API is unavailable (403 from RBAC deny-by-
+	// default, or 404 when a wildcard role passes RBAC but no route exists) until the
+	// engine restarts with a schema that includes it. Exposed
+	// read-only at GET /admin/served-resources so the editor can honestly warn before
+	// a new-resource deploy. Empty ⇒ the route reports an empty set.
+	ServedResources []string
 }
 
 // Service is the platform admin backend: super-admin auth (login + MFA) and the

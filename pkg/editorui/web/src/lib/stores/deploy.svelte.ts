@@ -18,6 +18,10 @@ export interface DeployResult {
 	created: boolean; // true = new tenant provisioned; false = existing tenant migrated
 	appliedDrops?: string[];
 	gatedDrops?: string[];
+	// Resources provisioned but NOT served by the running engine (absent from the boot
+	// --schema) — their tables exist but the API is 403 until the engine restarts with
+	// a schema that includes them. Snapshotted at deploy time so the result is honest.
+	restartResources?: string[];
 }
 
 export interface Endpoints {
@@ -60,6 +64,10 @@ class DeployStore {
 	preview = $state<Preview | null>(null);
 	approved = $state<Record<string, boolean>>({});
 
+	// The resources the engine serves live (from its boot --schema), fetched once per
+	// session. null = not yet known (the restart hint stays hidden until loaded).
+	servedResources = $state<string[] | null>(null);
+
 	// result
 	result = $state<DeployResult | null>(null);
 
@@ -75,6 +83,35 @@ class DeployStore {
 	/** A destructive op present but NOT approved → it will stay gated (drift). */
 	get hasPendingDestructive(): boolean {
 		return (this.preview?.destructive ?? []).some((d) => !this.approved[d.key]);
+	}
+
+	/** Resources in the schema being deployed that the running engine does NOT serve
+	 *  (absent from its boot --schema). Their tables get provisioned, but the REST/
+	 *  GraphQL/RBAC for them is boot-compiled, so the API is 403 until a restart. Empty
+	 *  while servedResources is unknown (the hint stays hidden rather than guess). */
+	get newResources(): string[] {
+		if (!this.servedResources) return [];
+		const served = new Set(this.servedResources);
+		return editor.entities.map((e) => e.name).filter((n) => !served.has(n));
+	}
+	/** Resources in the deploy that the engine already serves — changes to these
+	 *  (columns, validations, RBAC…) take effect live, no restart. */
+	get liveResources(): string[] {
+		if (!this.servedResources) return editor.entities.map((e) => e.name);
+		const served = new Set(this.servedResources);
+		return editor.entities.map((e) => e.name).filter((n) => served.has(n));
+	}
+
+	/** Fetch the engine's served-resource set once (non-fatal: on failure the restart
+	 *  hint simply stays hidden — never blocks a deploy). */
+	async loadServedResources() {
+		if (!this.token || this.servedResources !== null) return;
+		try {
+			const res = await adminApi.servedResources(this.token);
+			this.servedResources = res.resources ?? [];
+		} catch {
+			/* non-fatal — the hint is advisory, the engine remains the authority */
+		}
 	}
 
 	openDeploy() {
@@ -215,6 +252,10 @@ class DeployStore {
 			return;
 		}
 
+		// Learn which resources the engine serves live, so the preview can honestly
+		// flag any new resource as "provisioned but needs a restart".
+		await this.loadServedResources();
+
 		if (this.mode === 'new') {
 			const id = this.newId.trim();
 			if (!TENANT_ID_RE.test(id)) {
@@ -261,7 +302,7 @@ class DeployStore {
 					schema: editor.toSchema()
 				};
 				await adminApi.createTenant(this.token!, body);
-				this.result = { tenantId: id, created: true };
+				this.result = { tenantId: id, created: true, restartResources: this.newResources };
 				this.step = 'result';
 				await this.refreshTenants();
 			} else {
@@ -271,7 +312,8 @@ class DeployStore {
 					tenantId: id,
 					created: false,
 					appliedDrops: res.applied_drops,
-					gatedDrops: res.gated_drops
+					gatedDrops: res.gated_drops,
+					restartResources: this.newResources
 				};
 				this.step = 'result';
 			}

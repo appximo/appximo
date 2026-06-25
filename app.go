@@ -407,13 +407,22 @@ func New(cfg Config) (*App, error) {
 	// for a wildcard-resource admin role, the "admin-grade" test for tenant-scoped
 	// observability access. This INHERITS the RBAC, it does not invent a new check.
 	const obsSentinel = "__platform.observability__"
+	// The resources the engine serves live come from the boot --schema (routes,
+	// GraphQL and RBAC are all compiled from it). Exposed read-only so the editor can
+	// warn that a deployed-but-not-booted resource needs a restart (UI-F3-S1).
+	servedResources := make([]string, 0, len(s.Resources))
+	for name := range s.Resources {
+		servedResources = append(servedResources, name)
+	}
+	sort.Strings(servedResources)
 	app.platformAdmin = platformadmin.NewService(
 		platformadmin.NewStore(pool), authStore, app.cpSvc, pool,
 		platformadmin.Config{
-			JWTSecret:      cfg.JWTSecret,
-			MFAKey:         mfaKey,
-			MFAIssuer:      platformMFAIssuer,
-			SuperAdminRole: platformSuperAdminRole,
+			JWTSecret:       cfg.JWTSecret,
+			MFAKey:          mfaKey,
+			MFAIssuer:       platformMFAIssuer,
+			SuperAdminRole:  platformSuperAdminRole,
+			ServedResources: servedResources,
 			RoleExists: func(role string) bool {
 				_, ok := rbacPolicy.Roles[role]
 				return ok

@@ -72,8 +72,25 @@ func (s *Service) Register(r chi.Router, obs ObsHandler, adminKey string) {
 	r.With(s.requirePlatform).Get("/admin/tenants/{id}/resources", s.handleListResources)
 	r.With(s.requirePlatform).Get("/admin/tenants/{id}/data/{resource}", s.handleListData)
 
+	// --- served resources (boot-schema introspection; platform token OR admin key) ---
+	// The names of resources the engine serves live (routes/GraphQL/RBAC are compiled
+	// from the boot --schema). The editor diffs a to-deploy schema against this to warn
+	// that a NEW resource is provisioned but needs an engine restart to be served.
+	r.With(s.requirePlatform).Get("/admin/served-resources", s.handleServedResources)
+
 	// --- observability (platform → any tenant; tenant admin → its own) ---
 	r.Get("/admin/observability/tenants/{id}", s.observabilityHandler(obs))
+}
+
+// handleServedResources returns the resource names the engine serves live (from the
+// boot --schema). A resource a tenant has but that is absent here is provisioned but
+// not served until the engine restarts with a schema that includes it.
+func (s *Service) handleServedResources(w http.ResponseWriter, r *http.Request) {
+	names := s.cfg.ServedResources
+	if names == nil {
+		names = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"resources": names})
 }
 
 // adminKey is stored on the Service by Register (machine credential).

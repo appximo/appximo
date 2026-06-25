@@ -90,6 +90,11 @@ export const adminApi = {
 	listTenants: (token: string) =>
 		call<{ tenants: TenantInfo[] }>('GET', '/admin/tenants', { token }),
 
+	/** Resource names the engine serves live (compiled from the boot --schema). A
+	 *  deployed resource absent here is provisioned but needs a restart to be served. */
+	servedResources: (token: string) =>
+		call<{ resources: string[] }>('GET', '/admin/served-resources', { token }),
+
 	getTenantSchema: (token: string, id: string) =>
 		call<APISchema | null>('GET', `/admin/tenants/${encodeURIComponent(id)}/schema`, { token }),
 
