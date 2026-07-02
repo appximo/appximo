@@ -230,6 +230,11 @@ class DeployStore {
 				return;
 			}
 			editor.loadSchema(sc);
+			// The tenant's declared names ARE its live names (the stored schema is the
+			// last applied one), so a canvas rename must chain from THEM — and a stale,
+			// already-applied renamed_from in the stored copy must not seed a re-rename
+			// intent (UI-F4-S1).
+			editor.commitBaselines();
 			this.close();
 		} catch (e) {
 			this.fail(e);
@@ -302,12 +307,18 @@ class DeployStore {
 					schema: editor.toSchema()
 				};
 				await adminApi.createTenant(this.token!, body);
+				// The tenant was provisioned with the CURRENT names — re-anchor the
+				// rename baselines so the next rename chains from what is now live
+				// (UI-F4-S1). Same after a successful migration below (renames are
+				// safe ops, always applied on success).
+				editor.commitBaselines();
 				this.result = { tenantId: id, created: true, restartResources: this.newResources };
 				this.step = 'result';
 				await this.refreshTenants();
 			} else {
 				const id = this.targetId!;
 				const res = await adminApi.applySchema(this.token!, id, editor.toSchema(), this.approvedKeys);
+				editor.commitBaselines();
 				this.result = {
 					tenantId: id,
 					created: false,

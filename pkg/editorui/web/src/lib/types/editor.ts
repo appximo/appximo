@@ -31,6 +31,14 @@ export interface FieldModel {
 	id: string; // editor-only stable id (SvelteFlow handle id, {#each} key)
 	name: string; // the field key in the schema
 	def: FieldDef; // the complete engine definition (the property panel edits this)
+	/** The column name the deployed baseline knows this field by (UI-F4-S1). Set on
+	 *  import — an imported `renamed_from` wins (it IS the declared baseline), else
+	 *  the imported name; undefined for a field created in this session (no deployed
+	 *  data to preserve). Export DERIVES `renamed_from` from it whenever it differs
+	 *  from the current name, so a rename deploys as the engine's data-preserving
+	 *  ALTER … RENAME (MIG-F1-S2) instead of drop+create. Chained renames (a→b→c)
+	 *  keep pointing at the baseline (a); renaming back to it emits nothing. */
+	originalName?: string;
 }
 
 /** One declarative relation (?include= embed), id + full RelationDef. */
@@ -40,13 +48,14 @@ export interface RelationModel {
 	def: RelationDef;
 }
 
-/** Resource-level keys other than fields/relations — preserved losslessly. */
+/** Resource-level keys other than fields/relations — preserved losslessly.
+ *  `renamed_from` is NOT here: it is DERIVED at export from EntityModel.originalName
+ *  (UI-F4-S1), never edited as a raw extra. */
 export interface EntityExtras {
 	indexes?: IndexDef[];
 	foreign_keys?: ForeignKeyDef[];
 	hooks?: Record<string, HookConfig>;
 	events?: string[];
-	renamed_from?: string;
 }
 
 /** One resource (table) = one ERD node. */
@@ -57,6 +66,12 @@ export interface EntityModel {
 	relations: RelationModel[];
 	extras: EntityExtras;
 	position: XY; // canvas geometry — editor-only, stripped on export
+	/** The table name the deployed baseline knows this resource by (UI-F4-S1) —
+	 *  same contract as FieldModel.originalName: imported `renamed_from` ?? imported
+	 *  name; undefined for an entity created in this session. Export derives
+	 *  `renamed_from` from it so an entity rename deploys as ALTER TABLE … RENAME
+	 *  (data preserved), never as drop+create. */
+	originalName?: string;
 }
 
 /** The whole schema in editor form. */

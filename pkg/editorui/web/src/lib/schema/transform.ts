@@ -8,8 +8,11 @@
 // ROUND-TRIP CONTRACT: modelToSchema(schemaToModel(x)) is semantically identical
 // to x (key order aside). Unmodeled resource-level keys ride along in
 // EntityModel.extras; rbac/workflows are preserved verbatim. Editor-only data
-// (ids, canvas positions) is never emitted. The round-trip is property-tested in
-// schema/transform.test.mts.
+// (ids, canvas positions) is never emitted. `renamed_from` (resource + field) is
+// NOT stored raw: import lifts it into the model's `originalName` baseline and
+// export derives it back (originalName !== name ⇒ renamed_from=originalName), so
+// the identity holds AND session renames chain correctly from the deployed
+// baseline (UI-F4-S1).
 
 import type {
 	APISchema,
@@ -46,7 +49,11 @@ function resourceToEntity(name: string, res: ResourceSchema): EntityModel {
 	const fields: FieldModel[] = [];
 	const fieldDefs = res.fields ?? {};
 	for (const fname of Object.keys(fieldDefs)) {
-		fields.push({ id: newId('f'), name: fname, def: { ...fieldDefs[fname] } });
+		// renamed_from is lifted OUT of the def into the baseline (originalName):
+		// export derives it back, so the round-trip is identical and a session
+		// rename CHAINS from the declared baseline instead of an intermediate name.
+		const { renamed_from, ...def } = fieldDefs[fname];
+		fields.push({ id: newId('f'), name: fname, def, originalName: renamed_from ?? fname });
 	}
 
 	const relations: RelationModel[] = [];
@@ -64,10 +71,10 @@ function resourceToEntity(name: string, res: ResourceSchema): EntityModel {
 			indexes: res.indexes,
 			foreign_keys: res.foreign_keys,
 			hooks: res.hooks,
-			events: res.events,
-			renamed_from: res.renamed_from
+			events: res.events
 		},
-		position: { x: 0, y: 0 } // laid out by the store (dagre) on import
+		position: { x: 0, y: 0 }, // laid out by the store (dagre) on import
+		originalName: res.renamed_from ?? name
 	};
 }
 
@@ -97,7 +104,15 @@ export function modelToSchema(model: SchemaModel): APISchema {
 function entityToResource(ent: EntityModel): ResourceSchema {
 	const res: ResourceSchema = { fields: {} };
 	for (const f of ent.fields) {
-		res.fields[f.name] = cleanObject(f.def);
+		const def = cleanObject(f.def);
+		// Derive renamed_from from the baseline (UI-F4-S1): emitted only when the
+		// name changed against the deployed baseline, so the engine's ALTER … RENAME
+		// COLUMN preserves the data (MIG-F1-S2). A session-created field has no
+		// baseline (undefined) and never emits one; renaming back to the baseline
+		// emits nothing (no-op).
+		if (f.originalName && f.originalName !== f.name) def.renamed_from = f.originalName;
+		else delete def.renamed_from;
+		res.fields[f.name] = def;
 	}
 	if (ent.relations.length > 0) {
 		const rels: Record<string, RelationDef> = {};
@@ -115,7 +130,8 @@ function entityToResource(ent: EntityModel): ResourceSchema {
 		res.hooks = hooks;
 	}
 	if (x.events && x.events.length > 0) res.events = x.events;
-	if (x.renamed_from) res.renamed_from = x.renamed_from;
+	// Table-level rename intent, derived from the baseline exactly like fields.
+	if (ent.originalName && ent.originalName !== ent.name) res.renamed_from = ent.originalName;
 	return res;
 }
 

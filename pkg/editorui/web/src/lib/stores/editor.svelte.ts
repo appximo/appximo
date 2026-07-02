@@ -144,9 +144,20 @@ class EditorStore {
 
 	// ── load / export ──────────────────────────────────────────────────────────
 
-	loadSchema(schema: APISchema) {
+	/** Load a schema onto the canvas. `baseline` controls the rename baseline
+	 *  (UI-F4-S1): 'declared' (default — an import may describe something already
+	 *  deployed, so renames must chain from the declared names / pending
+	 *  renamed_from) or 'none' (a fresh design that exists in no tenant — renaming
+	 *  never emits a spurious renamed_from). */
+	loadSchema(schema: APISchema, opts: { baseline?: 'declared' | 'none' } = {}) {
 		const model = schemaToModel(schema);
 		this.entities = model.entities;
+		if (opts.baseline === 'none') {
+			for (const e of this.entities) {
+				e.originalName = undefined;
+				for (const f of e.fields) f.originalName = undefined;
+			}
+		}
 		this.schemaName = model.name;
 		this.version = model.version;
 		this.schemaUrl = model.$schema;
@@ -159,7 +170,22 @@ class EditorStore {
 	}
 
 	newSchema(name = 'my-api') {
-		this.loadSchema(blankSchema(name));
+		this.loadSchema(blankSchema(name), { baseline: 'none' });
+	}
+
+	/** Re-anchor every rename baseline to the CURRENT names (UI-F4-S1). Called after
+	 *  a successful deploy (the tenant now knows each object by its current name —
+	 *  the next rename must chain from HERE, not from a name that no longer exists
+	 *  live) and when a tenant's stored schema is loaded onto the canvas (its
+	 *  declared names ARE the live names). Also stops an applied rename from
+	 *  re-emitting: the engine's resolveRenames is idempotent anyway, but the export
+	 *  stays clean. */
+	commitBaselines() {
+		for (const e of this.entities) {
+			e.originalName = e.name;
+			for (const f of e.fields) f.originalName = f.name;
+		}
+		this.bump();
 	}
 
 	toSchema(): APISchema {
@@ -283,10 +309,14 @@ class EditorStore {
 		if (err) return err;
 		const old = e.name;
 		e.name = name;
-		// Keep referencing relations/FKs pointed at the new name so edges survive.
+		// Keep referencing relations/FKs pointed at the new name so edges survive —
+		// including m2m `through` (the junction is itself a resource name).
 		for (const other of this.entities) {
 			for (const f of other.fields) if (f.def.relation === old) f.def.relation = name;
-			for (const r of other.relations) if (r.def.target === old) r.def.target = name;
+			for (const r of other.relations) {
+				if (r.def.target === old) r.def.target = name;
+				if (r.def.through === old) r.def.through = name;
+			}
 			for (const fk of other.extras.foreign_keys ?? []) if (fk.target === old) fk.target = name;
 		}
 		this.rbacOnResourceRenamed(old, name);
@@ -362,10 +392,47 @@ class EditorStore {
 		if (e.fields.some((x) => x.id !== fieldId && x.name === name)) return 'duplicate field name';
 		const oldField = f.name;
 		f.name = name;
+		this.propagateFieldRename(e, oldField, name);
 		this.rbacOnFieldRenamed(e.name, oldField, name);
 		this.rebuildEdges();
 		this.bump();
 		return null;
+	}
+
+	/** Repoint every schema reference to a renamed column (UI-F4-S1) so nothing is
+	 *  left dangling: same-entity indexes and composite-FK source columns, other
+	 *  entities' composite-FK ref_columns and field-level `references` targeting
+	 *  this column, and the relations blocks whose fk/target_fk IS this column
+	 *  (has_many → a column on the target; belongs_to → a column on the declaring
+	 *  entity; many_to_many → columns on the junction). */
+	private propagateFieldRename(e: EntityModel, oldField: string, newField: string) {
+		for (const idx of e.extras.indexes ?? []) {
+			idx.fields = (idx.fields ?? []).map((c) => (c === oldField ? newField : c));
+		}
+		for (const fk of e.extras.foreign_keys ?? []) {
+			fk.columns = (fk.columns ?? []).map((c) => (c === oldField ? newField : c));
+		}
+		for (const other of this.entities) {
+			for (const fk of other.extras.foreign_keys ?? []) {
+				if (fk.target === e.name) {
+					fk.ref_columns = (fk.ref_columns ?? []).map((c) => (c === oldField ? newField : c));
+				}
+			}
+			for (const fld of other.fields) {
+				if (fld.def.relation === e.name && fld.def.references === oldField) {
+					fld.def.references = newField;
+				}
+			}
+			for (const r of other.relations) {
+				const d = r.def;
+				if (d.type === 'has_many' && d.target === e.name && d.fk === oldField) d.fk = newField;
+				if (d.type === 'belongs_to' && other.name === e.name && d.fk === oldField) d.fk = newField;
+				if (d.type === 'many_to_many' && d.through === e.name) {
+					if (d.fk === oldField) d.fk = newField;
+					if (d.target_fk === oldField) d.target_fk = newField;
+				}
+			}
+		}
 	}
 
 	/** Set or (when value === undefined) delete one key of a field's def. */
@@ -897,9 +964,27 @@ class EditorStore {
 	private rbacOnFieldRenamed(resource: string, oldField: string, newField: string) {
 		for (const role of Object.values(this.rbac.roles)) {
 			const p = role.permissions?.[resource];
-			if (!p) continue;
-			if (p.conditions?.field === oldField) p.conditions.field = newField;
-			if (p.fields) p.fields = p.fields.map((f) => (f === oldField ? newField : f));
+			if (p) {
+				if (p.conditions?.field === oldField) p.conditions.field = newField;
+				if (p.fields) p.fields = p.fields.map((f) => (f === oldField ? newField : f));
+				continue;
+			}
+			// Role-global form: the condition/allowlist is union-scoped over every
+			// covered resource. Repoint it only in the UNAMBIGUOUS case — the role
+			// covers the renamed entity and no other covered entity still declares the
+			// old column (else the shared reference is still valid there; validate()
+			// flags the ambiguity instead of guessing).
+			if (role.permissions) continue;
+			const refersOld = role.conditions?.field === oldField || (role.fields ?? []).includes(oldField);
+			if (!refersOld) continue;
+			const covered = this.roleResourceNames(role);
+			if (!covered.includes(resource)) continue;
+			const stillHasOld = covered.some(
+				(r) => r !== resource && this.getEntityByName(r)?.fields.some((f) => f.name === oldField)
+			);
+			if (stillHasOld) continue;
+			if (role.conditions?.field === oldField) role.conditions.field = newField;
+			if (role.fields) role.fields = role.fields.map((f) => (f === oldField ? newField : f));
 		}
 	}
 
@@ -972,6 +1057,21 @@ class EditorStore {
 	dataModelIssues(): string[] {
 		const out: string[] = [];
 		for (const e of this.entities) {
+			// Pending renames (UI-F4-S1): the engine rejects a renamed_from that still
+			// names a DECLARED resource/field — e.g. rename empleados→personal and then
+			// create a new "empleados". Surfaced live so it never reaches the deploy.
+			if (e.originalName && e.originalName !== e.name && this.entities.some((o) => o.name === e.originalName)) {
+				out.push(
+					`entity "${e.name}": deploys as a rename of "${e.originalName}", but an entity named "${e.originalName}" still exists — the engine rejects this (rename it or delete the conflicting entity)`
+				);
+			}
+			for (const f of e.fields) {
+				if (f.originalName && f.originalName !== f.name && e.fields.some((o) => o.name === f.originalName)) {
+					out.push(
+						`field "${e.name}.${f.name}": deploys as a rename of "${f.originalName}", but a field named "${f.originalName}" still exists on ${e.name} — the engine rejects this`
+					);
+				}
+			}
 			// field-level references (FK to a non-id column).
 			for (const f of e.fields) {
 				const ref = f.def.references;

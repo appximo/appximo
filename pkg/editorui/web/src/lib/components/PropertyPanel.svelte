@@ -140,6 +140,14 @@
 				onchange={(e) => renameField(e.currentTarget.value)}
 			/>
 			{#if fieldNameError}<div class="err">{fieldNameError}</div>{/if}
+			{#if field.originalName && field.originalName !== field.name}
+				<div
+					class="rename-note"
+					title="The deploy runs ALTER TABLE … RENAME COLUMN: the column and its data move to the new name — nothing is dropped or recreated."
+				>
+					↪ renames “{field.originalName}” on deploy — existing data is preserved
+				</div>
+			{/if}
 
 			<label class="lbl" for="f-type">Type</label>
 			<select
@@ -395,6 +403,14 @@
 				onchange={(e) => renameEntity(e.currentTarget.value)}
 			/>
 			{#if nameError}<div class="err">{nameError}</div>{/if}
+			{#if entity.originalName && entity.originalName !== entity.name}
+				<div
+					class="rename-note"
+					title="The deploy runs ALTER TABLE … RENAME: the table and all its rows move to the new name — nothing is dropped or recreated."
+				>
+					↪ renames “{entity.originalName}” on deploy — existing data is preserved
+				</div>
+			{/if}
 		</section>
 
 		<section class="p-sec">
@@ -569,6 +585,12 @@
 	.err {
 		color: var(--danger);
 		font-size: 11.5px;
+	}
+	.rename-note {
+		color: var(--ok, var(--text-2));
+		font-size: 11.5px;
+		margin-top: 4px;
+		cursor: help;
 	}
 
 	.field-list {

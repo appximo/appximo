@@ -203,7 +203,11 @@
 							<div class="plan-sec">
 								<div class="plan-h ok-h">Safe changes ({deploy.preview.apply.length})</div>
 								<ul class="plan-list">
-									{#each deploy.preview.apply as op}<li class="mono">{op}</li>{/each}
+									{#each deploy.preview.apply as op}
+										<li class="mono">
+											{op}{#if op.startsWith('RENAME ')}<span class="preserve-tag">data preserved</span>{/if}
+										</li>
+									{/each}
 								</ul>
 							</div>
 						{/if}
@@ -627,6 +631,17 @@
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
+	}
+	.preserve-tag {
+		margin-left: 8px;
+		padding: 1px 6px;
+		border-radius: 999px;
+		font-size: 10.5px;
+		font-family: inherit;
+		color: var(--ok);
+		border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--border));
+		background: color-mix(in srgb, var(--ok) 8%, transparent);
+		white-space: nowrap;
 	}
 	.danger-sec {
 		border-color: color-mix(in srgb, var(--danger) 45%, var(--border));

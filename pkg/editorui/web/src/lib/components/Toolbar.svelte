@@ -15,7 +15,9 @@
 
 	function loadSample(id: string) {
 		const s = SAMPLES.find((x) => x.id === id);
-		if (s) editor.loadSchema(structuredClone(s.schema));
+		// A sample is a fresh design — it exists in no tenant, so renaming its
+		// entities/fields must never emit a renamed_from (UI-F4-S1).
+		if (s) editor.loadSchema(structuredClone(s.schema), { baseline: 'none' });
 		menuOpen = false;
 	}
 
