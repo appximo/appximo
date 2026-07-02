@@ -2,6 +2,7 @@
 	import { editor } from '../stores/editor.svelte';
 	import { ui } from '../stores/ui.svelte';
 	import EntityDataPanel from './EntityDataPanel.svelte';
+	import EntityRelationsPanel from './EntityRelationsPanel.svelte';
 	import EntityHooksPanel from './EntityHooksPanel.svelte';
 	import { smKnownStates } from '../schema/fieldRules';
 	import {
@@ -430,6 +431,7 @@
 		</section>
 
 		<EntityDataPanel {entity} />
+		<EntityRelationsPanel {entity} />
 		<EntityHooksPanel {entity} />
 
 		<section class="p-sec">
@@ -445,17 +447,6 @@
 					>
 				{/each}
 			</div>
-			{#if entity.relations.length > 0}
-				<div class="sec-title" style="margin-top:14px">Declared embeds</div>
-				<div class="rel-list">
-					{#each entity.relations as r (r.id)}
-						<div class="rel-row">
-							<span class="rr-name">{r.name}</span>
-							<span class="rr-meta">{r.def.type} → {r.def.target}</span>
-						</div>
-					{/each}
-				</div>
-			{/if}
 		</section>
 
 		<div class="p-foot">
@@ -623,25 +614,6 @@
 		font-family: var(--mono);
 		font-size: 11px;
 		color: var(--text-3);
-	}
-
-	.rel-list {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-	.rel-row {
-		display: flex;
-		justify-content: space-between;
-		gap: 8px;
-		font-size: 12px;
-	}
-	.rr-name {
-		font-family: var(--mono);
-	}
-	.rr-meta {
-		color: var(--text-3);
-		font-size: 11px;
 	}
 
 	.issues {

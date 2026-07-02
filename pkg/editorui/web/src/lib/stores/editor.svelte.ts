@@ -32,8 +32,15 @@ import type {
 	StateMachine
 } from '../types/schema';
 import { IDENT_RE, RBAC_ACTIONS, HOOK_EVENTS } from '../types/schema';
-import type { ForeignKeyDef, IndexDef, ReferentialAction, HookConfig, HookEvent } from '../types/schema';
-import type { EntityModel, FieldModel, XY } from '../types/editor';
+import type {
+	ForeignKeyDef,
+	IndexDef,
+	ReferentialAction,
+	RelationDef,
+	HookConfig,
+	HookEvent
+} from '../types/schema';
+import type { EntityModel, FieldModel, RelationModel, XY } from '../types/editor';
 import { schemaToModel, modelToSchema } from '../schema/transform';
 import {
 	fieldDefIssues,
@@ -342,7 +349,11 @@ class EditorStore {
 					delete f.def.references;
 				}
 			}
-			other.relations = other.relations.filter((r) => r.def.target !== name);
+			// A relation TARGETING the deleted resource is meaningless, and so is a
+			// many_to_many whose JUNCTION (through) was deleted — drop both.
+			other.relations = other.relations.filter(
+				(r) => r.def.target !== name && r.def.through !== name
+			);
 			if (other.extras.foreign_keys) {
 				other.extras.foreign_keys = other.extras.foreign_keys.filter((fk) => fk.target !== name);
 			}
@@ -723,6 +734,166 @@ class EditorStore {
 		if (on) index.unique = true;
 		else delete index.unique;
 		this.bump();
+	}
+
+	// ── relations block: the ?include= embeds (UI-F4-S3) ───────────────────────
+	// Faithful to the engine grammar (pkg/schema validateRelations): a relation is
+	// {type, target, fk[, through, target_fk][, limit]} where fk's MEANING depends
+	// on the kind — has_many: a column ON THE TARGET pointing here; belongs_to: an
+	// OWN column pointing at the target; many_to_many: fk + target_fk are the two
+	// columns OF THE JUNCTION (through). through/target_fk apply to m2m ONLY (the
+	// engine rejects them elsewhere); limit bounds children per parent (0 → 50).
+
+	addRelation(entityId: string): RelationModel | null {
+		const e = this.getEntity(entityId);
+		if (!e) return null;
+		const taken = new Set(e.relations.map((r) => r.name));
+		const rel: RelationModel = {
+			id: newId('r'),
+			name: uniqueName('embed', taken),
+			def: { type: 'has_many', target: '', fk: '' }
+		};
+		e.relations.push(rel);
+		this.bump();
+		return rel;
+	}
+
+	removeRelation(entityId: string, relId: string) {
+		const e = this.getEntity(entityId);
+		if (!e) return;
+		e.relations = e.relations.filter((r) => r.id !== relId);
+		this.bump();
+	}
+
+	/** Rename an embed. Mirrors the engine's checks: valid identifier, unique among
+	 *  the entity's relations, and no collision with a field of the same resource
+	 *  (the embed keys json_build_object and becomes a GraphQL field). */
+	renameRelation(entityId: string, relId: string, raw: string): string | null {
+		const e = this.getEntity(entityId);
+		const r = e?.relations.find((x) => x.id === relId);
+		if (!e || !r) return 'relation not found';
+		const name = raw.trim();
+		if (name === r.name) return null;
+		if (!IDENT_RE.test(name)) return 'must match ^[a-z][a-z0-9_]*$';
+		if (e.relations.some((x) => x.id !== relId && x.name === name)) return 'duplicate relation name';
+		if (e.fields.some((f) => f.name === name)) return 'collides with a field of the same name';
+		r.name = name;
+		this.bump();
+		return null;
+	}
+
+	/** Set one key of a relation def, keeping the shape ENGINE-VALID for its kind:
+	 *  a kind change strips the keys that no longer apply and resets fk (its meaning
+	 *  changes table); a target/through change resets the column choices that lived
+	 *  on the previous table — the dropdowns then only ever offer real columns. */
+	patchRelation<K extends keyof RelationDef>(
+		entityId: string,
+		relId: string,
+		key: K,
+		value: RelationDef[K] | undefined
+	) {
+		const r = this.getEntity(entityId)?.relations.find((x) => x.id === relId);
+		if (!r) return;
+		if (value === undefined) delete r.def[key];
+		else r.def[key] = value;
+
+		if (key === 'type') {
+			// fk's meaning is per-kind (target column / own column / junction column)
+			// — a stale choice from another kind would reference the wrong table.
+			r.def.fk = '';
+			if (value !== 'many_to_many') {
+				delete r.def.through;
+				delete r.def.target_fk;
+			}
+		}
+		if (key === 'target') {
+			if (r.def.type === 'has_many') r.def.fk = ''; // fk lives on the target
+			if (r.def.type === 'many_to_many') delete r.def.target_fk; // junction column → target
+		}
+		if (key === 'through') {
+			// Both junction columns belong to the (new) through table.
+			r.def.fk = '';
+			delete r.def.target_fk;
+		}
+		this.bump();
+	}
+
+	/** The columns a relation's fk/target_fk may choose from, per the kind's
+	 *  semantics. Empty until the owning table (target/self/through) is chosen. */
+	relationFKColumns(entity: EntityModel, def: RelationDef, which: 'fk' | 'target_fk'): string[] {
+		let owner: EntityModel | undefined;
+		switch (def.type) {
+			case 'has_many':
+				owner = this.getEntityByName(def.target) ?? undefined;
+				break;
+			case 'belongs_to':
+				owner = entity;
+				break;
+			case 'many_to_many':
+				owner = def.through ? (this.getEntityByName(def.through) ?? undefined) : undefined;
+				break;
+		}
+		if (!owner) return [];
+		if (which === 'target_fk' && def.type !== 'many_to_many') return [];
+		return owner.fields.map((f) => f.name);
+	}
+
+	/** Live issues for ONE relation — mirrors the engine's validateRelations plus
+	 *  the column-existence checks the migration would warn about, so an invalid
+	 *  embed is surfaced before deploy (shown inline in the panel and aggregated
+	 *  into validate()). */
+	relationIssuesFor(e: EntityModel, r: RelationModel): string[] {
+		const out: string[] = [];
+		const d = r.def;
+		if (!IDENT_RE.test(r.name)) out.push('name must match ^[a-z][a-z0-9_]*$');
+		if (e.fields.some((f) => f.name === r.name)) out.push(`name collides with field "${r.name}"`);
+		if (!d.target) {
+			out.push('choose a target');
+		} else if (!this.getEntityByName(d.target)) {
+			out.push(`unknown target "${d.target}"`);
+		}
+		if ((d.limit ?? 0) < 0) out.push('limit must be >= 0');
+		const cols = (name: string) => this.getEntityByName(name)?.fields.map((f) => f.name) ?? [];
+		switch (d.type) {
+			case 'has_many':
+				if (!d.fk) out.push(`choose the FK column on ${d.target || 'the target'} that points here`);
+				else if (d.target && this.getEntityByName(d.target) && !cols(d.target).includes(d.fk))
+					out.push(`fk "${d.fk}" is not a field of ${d.target}`);
+				break;
+			case 'belongs_to':
+				if (!d.fk) out.push('choose the own FK column that points at the target');
+				else if (!e.fields.some((f) => f.name === d.fk)) out.push(`fk "${d.fk}" is not a field of ${e.name}`);
+				break;
+			case 'many_to_many': {
+				if (!d.through) out.push('many_to_many needs a through (junction) resource');
+				else if (!this.getEntityByName(d.through)) out.push(`unknown through "${d.through}"`);
+				const jcols = d.through ? cols(d.through) : [];
+				if (!d.fk) out.push('choose the junction column that points here');
+				else if (d.through && this.getEntityByName(d.through) && !jcols.includes(d.fk))
+					out.push(`fk "${d.fk}" is not a field of ${d.through}`);
+				if (!d.target_fk) out.push(`choose the junction column that points at ${d.target || 'the target'}`);
+				else if (d.through && this.getEntityByName(d.through) && !jcols.includes(d.target_fk))
+					out.push(`target_fk "${d.target_fk}" is not a field of ${d.through}`);
+				break;
+			}
+		}
+		return out;
+	}
+
+	/** All relation issues, prefixed per relation (aggregated by validate()). */
+	relationIssues(): string[] {
+		const out: string[] = [];
+		for (const e of this.entities) {
+			const seen = new Set<string>();
+			for (const r of e.relations) {
+				if (seen.has(r.name)) out.push(`entity "${e.name}": duplicate relation "${r.name}"`);
+				seen.add(r.name);
+				for (const msg of this.relationIssuesFor(e, r)) {
+					out.push(`relation "${e.name}.${r.name}": ${msg}`);
+				}
+			}
+		}
+		return out;
 	}
 
 	// ── hooks (UI-F2-S5) ────────────────────────────────────────────────────────
@@ -1208,6 +1379,7 @@ class EditorStore {
 		}
 		issues.push(...this.fieldIssues());
 		issues.push(...this.dataModelIssues());
+		issues.push(...this.relationIssues());
 		issues.push(...this.hookIssues());
 		issues.push(...this.rbacIssues());
 		return issues;

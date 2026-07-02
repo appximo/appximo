@@ -116,7 +116,15 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   (supervisor-agnostic, same PID, ~6 s); an invalid schema is a 422 with NOTHING
   written and no restart, and a relaunch that can't load the schema auto-restores
   the `.bak` (marker-gated, restart.go). The editor polls `/readyz` and verifies
-  the new resources are served before declaring it live. **Visual RBAC (UI-F2-S1):** a "Roles" button opens a
+  the new resources are served before declaring it live. **Relations authoring
+  (UI-F4-S3):** the `relations` block (?include= embeds) is fully AUTHORABLE in
+  the entity panel — kind (has_many/belongs_to/many_to_many) with per-kind
+  conditional fields faithful to `validateRelations` (fk = a column ON the
+  target / an OWN column / a column of the `through` junction; through +
+  target_fk m2m-only; `limit`), every target/column a dropdown over EXISTING
+  entities/fields, live issues mirroring the validator. This closed the last
+  parity gap from AUDIT-F1-S1: the editor authors 100% of the effective schema
+  surface. **Visual RBAC (UI-F2-S1):** a "Roles" button opens a
   full editor for the engine's RBAC grammar — both forms (per-resource `permissions`
   + legacy role-global), row conditions (field-dropdown of real fields + `id`, op
   fixed at `eq`, val `$user_id`/`$external_client_id`/literal), condition_actions,
