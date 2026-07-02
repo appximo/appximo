@@ -165,9 +165,12 @@ baseline faster are welcome; we'll publish updated numbers.
   All applied safely (`NOT VALID`/`VALIDATE`, no long lock) and enforced on REST +
   GraphQL — adding `on_update` to an existing schema causes zero migration churn
 - **Multi-tenancy**: schema-per-tenant Postgres isolation (`SET LOCAL search_path`),
-  subdomain → tenant routing, per-tenant rate limiting, live schema reload via
-  `pg_notify` — column-level only: **adding a new resource requires a process
-  restart** (routes and GraphQL types are compiled at boot)
+  subdomain → tenant routing, per-tenant rate limiting. One API structure for all
+  tenants, compiled at boot: per-tenant migrations apply **live** (a new column is
+  readable/writable immediately — the DB is the source of truth for write keys),
+  while everything derived from the compiled definition — validation rules,
+  filters, GraphQL fields, `/docs`, and **new resources** — activates on a process
+  restart with the new schema (see [docs/MENTAL_MODEL.md](docs/MENTAL_MODEL.md))
 - **RBAC**: JSON policies — per role, per resource, per action, per field, plus
   dynamic row conditions (`operator_id = $user_id`); deny by default. Field
   allowlists and row conditions are enforced on **create** as well as

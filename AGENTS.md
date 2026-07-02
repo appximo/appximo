@@ -857,6 +857,14 @@ Facts agents most often get wrong:
   `Host: acme.localhost` (or a real subdomain). Host of a different
   tenant → 401 `token tenant mismatch`; Host with no subdomain (bare
   IP/`localhost`) → 500 with empty body.
+- **One API structure, N tenants with isolated data.** Routes, GraphQL types,
+  RBAC, validators, hooks and `/docs` are compiled ONCE from the boot `--schema`
+  and are identical for every tenant; only the DATA (and each tenant's physical
+  table set, via per-tenant migrations) is per-tenant. A deploy migrates ONE
+  tenant's tables live — new columns are readable/writable immediately (the DB is
+  the source of truth for write keys) — but validation rules, filters, GraphQL
+  fields, `/docs` and NEW resources activate only on a restart with the new
+  schema. The full verified model: [docs/MENTAL_MODEL.md](docs/MENTAL_MODEL.md).
 - **JWT**: HS256 only, `exp` required, `role` claim must match a schema
   role. Mint dev tokens with
   `appitools token --secret "$JWT_SECRET" --tenant acme --role admin`.
