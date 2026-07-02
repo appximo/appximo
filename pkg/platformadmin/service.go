@@ -2,6 +2,7 @@ package platformadmin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/mail"
 	"strings"
@@ -26,6 +27,10 @@ var (
 	ErrUnknownRole        = errors.New("platformadmin: role not declared in the schema RBAC")
 	ErrTenantNotFound     = errors.New("platformadmin: tenant not found")
 	ErrConfirmRequired    = errors.New("platformadmin: explicit confirmation required")
+	// ErrSchemaRejected marks a PersistBootSchema failure caused by an INVALID
+	// schema — nothing was persisted and no restart happens (→ 422). Any other
+	// persist failure (e.g. an unwritable schema file) is an infrastructure 500.
+	ErrSchemaRejected = errors.New("schema rejected")
 )
 
 // Config configures the platform admin Service.
@@ -63,6 +68,18 @@ type Config struct {
 	// read-only at GET /admin/served-resources so the editor can honestly warn before
 	// a new-resource deploy. Empty ⇒ the route reports an empty set.
 	ServedResources []string
+
+	// PersistBootSchema validates a schema and ATOMICALLY persists it as the new
+	// BOOT schema (the file the engine loads at start), backing up the previous
+	// one for rollback (UI-F4-S2). An invalid schema must be reported wrapped in
+	// ErrSchemaRejected (→ 422) with NOTHING written. nil ⇒ the engine cannot
+	// self-restart (POST /admin/engine/schema answers 503).
+	PersistBootSchema func(raw json.RawMessage) error
+	// TriggerRestart initiates the engine's graceful self-restart (drain via
+	// readyz→503 + http.Server.Shutdown, then relaunch with the persisted
+	// schema). Called only AFTER PersistBootSchema succeeded — never with an
+	// invalid schema.
+	TriggerRestart func()
 }
 
 // Service is the platform admin backend: super-admin auth (login + MFA) and the

@@ -109,15 +109,89 @@ class DeployStore {
 		try {
 			const res = await adminApi.servedResources(this.token);
 			this.servedResources = res.resources ?? [];
+			this.selfRestartAvailable = res.self_restart ?? false;
 		} catch {
 			/* non-fatal — the hint is advisory, the engine remains the authority */
 		}
+	}
+
+	// ── engine self-restart (UI-F4-S2): the restart banner as a real click ─────
+
+	/** Whether POST /admin/engine/schema is offered by this engine. */
+	selfRestartAvailable = $state(false);
+	/** The restart flow's phase: idle → confirm (explicit user consent) →
+	 *  restarting (persisting) → waiting (engine draining + relaunching, polled via
+	 *  /readyz) → live (new resources verified served) | failed. */
+	restartPhase = $state<'idle' | 'confirm' | 'restarting' | 'waiting' | 'live' | 'failed'>('idle');
+	restartError = $state<string | null>(null);
+
+	private async pollReady(): Promise<boolean> {
+		try {
+			const r = await fetch('/readyz', { cache: 'no-store' });
+			return r.ok;
+		} catch {
+			return false; // connection refused during the relaunch window counts as down
+		}
+	}
+
+	/** Persist the canvas schema as the new BOOT schema and gracefully restart the
+	 *  engine, then wait for it to come back and VERIFY the new resources are now
+	 *  served. The engine's safety order protects every unhappy path: an invalid
+	 *  schema is rejected with nothing persisted and NO restart (the service keeps
+	 *  running), and a relaunch that cannot boot auto-restores the backed-up schema. */
+	async restartEngine() {
+		if (!this.token) return;
+		const pending = this.result?.restartResources ?? [];
+		this.restartError = null;
+		this.restartPhase = 'restarting';
+		try {
+			await adminApi.restartEngine(this.token, editor.toSchema());
+		} catch (e) {
+			// Rejected/unreachable ⇒ nothing was restarted; the engine keeps serving.
+			this.restartPhase = 'failed';
+			this.restartError = e instanceof ApiError ? e.message : String(e);
+			return;
+		}
+		this.restartPhase = 'waiting';
+		const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
+		// Phase 1 — drain: /readyz flips 503 (or the port blips during the relaunch).
+		// Missing a fast blip between polls is fine — phase 2 verifies the OUTCOME
+		// (served resources), not the transition.
+		for (let i = 0; i < 30; i++) {
+			if (!(await this.pollReady())) break;
+			await sleep(1000);
+		}
+		// Phase 2 — relaunch: wait for ready again, then confirm the new resources
+		// are actually served by the rebooted engine (the honest "live" signal).
+		for (let i = 0; i < 90; i++) {
+			if (await this.pollReady()) {
+				this.servedResources = null;
+				this.selfRestartAvailable = false;
+				await this.loadServedResources();
+				const served = new Set<string>(this.servedResources ?? []);
+				const missing = pending.filter((n) => !served.has(n));
+				if (missing.length === 0) {
+					this.restartPhase = 'live';
+					if (this.result) this.result.restartResources = [];
+				} else {
+					this.restartPhase = 'failed';
+					this.restartError = `the engine is back but still not serving: ${missing.join(', ')} — it may have rolled back to the previous schema (kept as .bak); check the engine log`;
+				}
+				return;
+			}
+			await sleep(1000);
+		}
+		this.restartPhase = 'failed';
+		this.restartError =
+			'the engine did not come back within 90 s. If the new schema failed to boot it auto-restores the previous one (.bak) — check the engine log.';
 	}
 
 	openDeploy() {
 		this.error = null;
 		this.fieldErrors = [];
 		this.result = null;
+		this.restartPhase = 'idle';
+		this.restartError = null;
 		this.open = true;
 		if (this.authed) {
 			this.step = 'target';
@@ -353,6 +427,11 @@ class DeployStore {
 		this.preview = null;
 		this.error = null;
 		this.fieldErrors = [];
+		this.restartPhase = 'idle';
+		this.restartError = null;
+		// The engine may have restarted since — re-learn what it serves.
+		this.servedResources = null;
+		this.selfRestartAvailable = false;
 		this.step = 'target';
 		void this.refreshTenants();
 	}

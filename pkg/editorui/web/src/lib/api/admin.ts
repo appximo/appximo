@@ -91,9 +91,21 @@ export const adminApi = {
 		call<{ tenants: TenantInfo[] }>('GET', '/admin/tenants', { token }),
 
 	/** Resource names the engine serves live (compiled from the boot --schema). A
-	 *  deployed resource absent here is provisioned but needs a restart to be served. */
+	 *  deployed resource absent here is provisioned but needs a restart to be served.
+	 *  self_restart reports whether POST /admin/engine/schema exists (UI-F4-S2). */
 	servedResources: (token: string) =>
-		call<{ resources: string[] }>('GET', '/admin/served-resources', { token }),
+		call<{ resources: string[]; self_restart?: boolean }>('GET', '/admin/served-resources', {
+			token
+		}),
+
+	/** Persist the schema as the engine's new BOOT schema (validated + atomic + the
+	 *  previous one backed up) and gracefully restart it (UI-F4-S2) — new resources'
+	 *  routes/GraphQL//docs go live on relaunch. Privileged; same auth as the deploy. */
+	restartEngine: (token: string, schema: APISchema) =>
+		call<{ ok: boolean; restarting: boolean; note?: string }>('POST', '/admin/engine/schema', {
+			token,
+			body: { schema }
+		}),
 
 	getTenantSchema: (token: string, id: string) =>
 		call<APISchema | null>('GET', `/admin/tenants/${encodeURIComponent(id)}/schema`, { token }),

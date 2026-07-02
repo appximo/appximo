@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -99,6 +100,11 @@ type App struct {
 
 	corsConfig appmiddleware.CORSConfig // cross-origin policy (API-PRODUCTIVA-V1); empty origins ⇒ disabled
 
+	// restartRequested is set by the admin self-restart endpoint (UI-F4-S2);
+	// after the graceful shutdown completes, Start re-execs the process so it
+	// relaunches with the persisted boot schema.
+	restartRequested atomic.Bool
+
 	routes  []Route
 	started bool
 }
@@ -141,17 +147,21 @@ func New(cfg Config) (*App, error) {
 
 	logging.Init(cfg.Env)
 
-	s, err := schema.LoadFromFile(cfg.SchemaPath)
+	s, err := loadAndValidateSchema(cfg.SchemaPath)
 	if err != nil {
-		return nil, fmt.Errorf("appitools: read schema: %w", err)
-	}
-	if errs := schema.Validate(s); len(errs) > 0 {
-		msgs := make([]string, len(errs))
-		for i, e := range errs {
-			msgs[i] = e.Error()
+		// Self-restart rollback (UI-F4-S2): if this boot follows a self-restart
+		// persist (marker present) and the previous schema is backed up, restore
+		// it and boot from it — the service comes back on the old structure
+		// instead of staying down. A plain (non-self-restart) load failure still
+		// fails loud, unchanged.
+		if !recoverBootSchema(cfg.SchemaPath, err) {
+			return nil, err
 		}
-		return nil, fmt.Errorf("appitools: invalid schema:\n  %s", strings.Join(msgs, "\n  "))
+		if s, err = loadAndValidateSchema(cfg.SchemaPath); err != nil {
+			return nil, err
+		}
 	}
+	clearBootMarker(cfg.SchemaPath)
 	app := &App{cfg: cfg, version: cfg.Version, schema: s}
 	if app.version == "" {
 		app.version = defaultVersion
@@ -423,6 +433,12 @@ func New(cfg Config) (*App, error) {
 			MFAIssuer:       platformMFAIssuer,
 			SuperAdminRole:  platformSuperAdminRole,
 			ServedResources: servedResources,
+			// Engine self-restart (UI-F4-S2): the editor's "Apply & restart" —
+			// persist the deployed schema as the new BOOT schema (validated +
+			// atomic + backed up) and gracefully re-exec so new resources'
+			// routes/GraphQL/RBAC/docs go live without touching the terminal.
+			PersistBootSchema: app.persistBootSchema,
+			TriggerRestart:    app.requestRestart,
 			RoleExists: func(role string) bool {
 				_, ok := rbacPolicy.Roles[role]
 				return ok
@@ -597,6 +613,12 @@ func (a *App) Start() error {
 		return err
 	}
 	log.Println("server shut down cleanly")
+	// Self-restart (UI-F4-S2): the drain above ran the normal graceful sequence;
+	// now replace the process with a fresh instance that boots the persisted
+	// schema. On success execRestart never returns.
+	if a.restartRequested.Load() {
+		a.execRestart()
+	}
 	return nil
 }
 

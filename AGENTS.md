@@ -107,7 +107,16 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   tenant or migrates an existing one via the `/admin/tenants/{id}/schema` routes —
   with the dry-run migration preview + destructive-approval gate shown in the UI. It
   INVOKES the engine's migration path, never reimplements it — closing the
-  design→deploy→running loop. **Visual RBAC (UI-F2-S1):** a "Roles" button opens a
+  design→deploy→running loop. **One-click engine restart (UI-F4-S2):** when a
+  deploy contains a NEW resource (boot-compiled routes/GraphQL/docs can't serve
+  it yet), the result step offers "Restart engine now" — `POST
+  /admin/engine/schema` (same super-admin auth) validates + ATOMICALLY persists
+  the schema as the new boot schema (previous kept at `<schema>.bak`), drains
+  through the normal shutdown (`/readyz`→503) and RE-EXECS the process
+  (supervisor-agnostic, same PID, ~6 s); an invalid schema is a 422 with NOTHING
+  written and no restart, and a relaunch that can't load the schema auto-restores
+  the `.bak` (marker-gated, restart.go). The editor polls `/readyz` and verifies
+  the new resources are served before declaring it live. **Visual RBAC (UI-F2-S1):** a "Roles" button opens a
   full editor for the engine's RBAC grammar — both forms (per-resource `permissions`
   + legacy role-global), row conditions (field-dropdown of real fields + `id`, op
   fixed at `eq`, val `$user_id`/`$external_client_id`/literal), condition_actions,
@@ -864,7 +873,9 @@ Facts agents most often get wrong:
   tenant's tables live — new columns are readable/writable immediately (the DB is
   the source of truth for write keys) — but validation rules, filters, GraphQL
   fields, `/docs` and NEW resources activate only on a restart with the new
-  schema. The full verified model: [docs/MENTAL_MODEL.md](docs/MENTAL_MODEL.md).
+  schema — one click from the editor since UI-F4-S2 (graceful self-restart via
+  `POST /admin/engine/schema`). The full verified model:
+  [docs/MENTAL_MODEL.md](docs/MENTAL_MODEL.md).
 - **JWT**: HS256 only, `exp` required, `role` claim must match a schema
   role. Mint dev tokens with
   `appitools token --secret "$JWT_SECRET" --tenant acme --role admin`.

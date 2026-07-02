@@ -12,7 +12,14 @@ func LoadFromFile(path string) (*APISchema, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read schema file: %w", err)
 	}
+	return LoadFromBytes(data)
+}
 
+// LoadFromBytes parses and structurally checks a schema from raw JSON — the
+// exact checks LoadFromFile performs (strict keys, required $schema/version),
+// for callers that receive the schema over the wire (e.g. the engine
+// self-restart persist, UI-F4-S2) instead of from a file.
+func LoadFromBytes(data []byte) (*APISchema, error) {
 	var s APISchema
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, fmt.Errorf("parse schema JSON: %w", err)

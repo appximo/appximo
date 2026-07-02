@@ -169,8 +169,11 @@ baseline faster are welcome; we'll publish updated numbers.
   tenants, compiled at boot: per-tenant migrations apply **live** (a new column is
   readable/writable immediately — the DB is the source of truth for write keys),
   while everything derived from the compiled definition — validation rules,
-  filters, GraphQL fields, `/docs`, and **new resources** — activates on a process
-  restart with the new schema (see [docs/MENTAL_MODEL.md](docs/MENTAL_MODEL.md))
+  filters, GraphQL fields, `/docs`, and **new resources** — activates on a
+  **graceful self-restart** (`POST /admin/engine/schema`, super-admin-gated:
+  validated + atomic boot-schema persist with a `.bak` rollback, drain via
+  `/readyz`→503, re-exec — one click from the visual editor, ~6 s, no terminal;
+  see [docs/MENTAL_MODEL.md](docs/MENTAL_MODEL.md))
 - **RBAC**: JSON policies — per role, per resource, per action, per field, plus
   dynamic row conditions (`operator_id = $user_id`); deny by default. Field
   allowlists and row conditions are enforced on **create** as well as

@@ -97,9 +97,11 @@ the source of truth for write keys); everything *derived from the schema
 definition* (validation, filters, GraphQL, docs, RBAC, hooks, routes) is the
 boot snapshot until the process restarts with the new schema.
 
-**To see your change in `/docs`:** restart the engine with the edited schema as
-`--schema` (or mount it over the Docker image's schema path). That single
-restart activates everything in the ❌ rows at once.
+**To see your change in `/docs`:** restart the engine with the edited schema —
+**one click from the editor** since UI-F4-S2: the deploy result's "Restart
+engine now" button persists the schema as the new boot schema and gracefully
+self-restarts (see [§7](#7-is-compiled-at-boot-fundamental-or-evolvable)).
+That single restart activates everything in the ❌ rows at once.
 
 ## 5. Deploy scope — one tenant, not all
 
@@ -159,12 +161,18 @@ validators, RBAC and GraphQL once means the request path executes only
 precompiled closures — the property the public benchmark rests on. But it is
 **evolvable**, in increasing order of cost:
 
-1. **Graceful self-restart after deploy** (cheapest, recommended): the deploy
-   endpoint stores the schema, the process exits cleanly, a supervisor
-   (systemd/Docker `restart: always`) brings it back with the new schema.
-   Sub-second downtime, `/readyz` already flips 503 while draining, all
-   boot-derived state rebuilds consistently. Closes "one-click deploy" without
-   touching the hot path.
+1. **Graceful self-restart after deploy** — **IMPLEMENTED (UI-F4-S2)**:
+   `POST /admin/engine/schema` (super-admin auth, same as the deploy) validates
+   the schema, persists it ATOMICALLY as the boot schema (previous kept at
+   `<schema>.bak`), then drains through the normal shutdown path (`/readyz`→503
+   ~5 s, in-flight requests finish) and **re-execs** the process — supervisor-
+   agnostic (same PID; works for a loose process, systemd and Docker alike).
+   ~6 s of unavailability, verified live. An invalid schema is rejected with
+   nothing written and NO restart; if the relaunch cannot load the schema, boot
+   auto-restores the `.bak` (marker-gated rollback, restart.go). The editor's
+   restart banner is now an **"Restart engine now" button** with an explicit
+   consent step, progress (drain → relaunch) and a served-resources
+   verification when the engine returns.
 2. **Hot router swap**: rebuild `BuildRouter` + GraphQL handler + RBAC
    middleware + OpenAPI into a new handler and swap it behind an
    `atomic.Pointer`. Feasible — nothing in chi prevents it — but the hard parts
@@ -181,6 +189,6 @@ precompiled closures — the property the public benchmark rests on. But it is
    tenant). Nothing requires it for the current "one product, N tenants" thesis.
 
 Today the practical answer for "I added a resource": deploy from the editor
-(the tables are migrated, the editor shows the restart banner), then restart
-the engine with the new schema — option 1 is the natural next increment to make
-that restart automatic.
+(the tables are migrated), then click **"Restart engine now"** in the deploy
+result — the engine persists the schema, drains, relaunches, and the editor
+confirms the new resource is served. No terminal involved.

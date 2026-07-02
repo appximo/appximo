@@ -78,19 +78,69 @@ func (s *Service) Register(r chi.Router, obs ObsHandler, adminKey string) {
 	// that a NEW resource is provisioned but needs an engine restart to be served.
 	r.With(s.requirePlatform).Get("/admin/served-resources", s.handleServedResources)
 
+	// --- engine self-restart (UI-F4-S2; platform token OR admin key) ---
+	// Persists the posted schema as the new BOOT schema (validated first, written
+	// atomically, previous one backed up) and gracefully restarts the engine
+	// (drain via readyz→503 → http shutdown → relaunch), so a NEW resource's
+	// routes/GraphQL/RBAC/docs go live without touching the terminal. PRIVILEGED:
+	// it restarts the service and changes the GLOBAL structure for every tenant —
+	// gated by the same super-admin auth as the deploy, never public.
+	r.With(s.requirePlatform).Post("/admin/engine/schema", s.handleEngineSchema)
+
 	// --- observability (platform → any tenant; tenant admin → its own) ---
 	r.Get("/admin/observability/tenants/{id}", s.observabilityHandler(obs))
 }
 
 // handleServedResources returns the resource names the engine serves live (from the
 // boot --schema). A resource a tenant has but that is absent here is provisioned but
-// not served until the engine restarts with a schema that includes it.
+// not served until the engine restarts with a schema that includes it. self_restart
+// tells the editor whether POST /admin/engine/schema is available (UI-F4-S2), so the
+// restart banner can offer the one-click restart instead of manual instructions.
 func (s *Service) handleServedResources(w http.ResponseWriter, r *http.Request) {
 	names := s.cfg.ServedResources
 	if names == nil {
 		names = []string{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"resources": names})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"resources":    names,
+		"self_restart": s.cfg.PersistBootSchema != nil && s.cfg.TriggerRestart != nil,
+	})
+}
+
+// handleEngineSchema is POST /admin/engine/schema (UI-F4-S2): validate + persist
+// the posted schema as the new BOOT schema, then trigger the graceful self-restart.
+// The safety order is absolute: an invalid schema persists NOTHING and restarts
+// NOTHING (422, the engine keeps serving); only a validated, atomically-persisted
+// schema (previous kept as .bak for the boot-failure rollback) triggers the drain.
+func (s *Service) handleEngineSchema(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.PersistBootSchema == nil || s.cfg.TriggerRestart == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "engine self-restart is not available on this deployment",
+		})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxAdminBody)
+	var body struct {
+		Schema json.RawMessage `json:"schema"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Schema) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `body must be {"schema": {…}}`})
+		return
+	}
+	if err := s.cfg.PersistBootSchema(body.Schema); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrSchemaRejected) {
+			status = http.StatusUnprocessableEntity
+		}
+		writeJSON(w, status, map[string]string{"error": err.Error()})
+		return
+	}
+	s.cfg.TriggerRestart()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"restarting": true,
+		"note":       "boot schema persisted (previous kept as .bak); the engine is draining and will relaunch — poll /readyz until it returns 200",
+	})
 }
 
 // adminKey is stored on the Service by Register (machine credential).

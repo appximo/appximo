@@ -311,11 +311,56 @@
 
 					{#if deploy.result.restartResources && deploy.result.restartResources.length > 0}
 						<div class="banner warn">
-							<div class="banner-msg">Provisioned — needs a restart to be served: {deploy.result.restartResources.join(', ')}</div>
+							<div class="banner-msg">Provisioned — needs an engine restart to be served: {deploy.result.restartResources.join(', ')}</div>
 							<div class="banner-sub">
 								Their tables exist, but the REST / GraphQL API is unavailable (<b>403</b>/<b>404</b>)
 								until the engine restarts with a schema that includes them (routes, GraphQL and RBAC
 								are boot-compiled).
+							</div>
+							{#if deploy.selfRestartAvailable}
+								{#if deploy.restartPhase === 'idle'}
+									<button class="btn primary restart-btn" onclick={() => (deploy.restartPhase = 'confirm')}>
+										Restart engine now
+									</button>
+								{:else if deploy.restartPhase === 'confirm'}
+									<div class="restart-confirm">
+										<p>
+											This persists your design as the engine's new <b>boot schema</b> and restarts it
+											gracefully. The API structure changes for <b>all tenants</b> and the engine is
+											briefly unavailable (~5–10&nbsp;s: in-flight requests finish draining, then it
+											relaunches). Tenant data is untouched, and the previous schema is kept as a
+											backup for automatic rollback.
+										</p>
+										<div class="restart-actions">
+											<button class="btn primary" onclick={() => deploy.restartEngine()}>Confirm — restart engine</button>
+											<button class="btn subtle" onclick={() => (deploy.restartPhase = 'idle')}>Cancel</button>
+										</div>
+									</div>
+								{:else if deploy.restartPhase === 'restarting'}
+									<div class="restart-progress">Persisting the boot schema…</div>
+								{:else if deploy.restartPhase === 'waiting'}
+									<div class="restart-progress">
+										Engine restarting — draining (<span class="mono">/readyz</span> → 503), relaunching,
+										waiting for it to come back…
+									</div>
+								{:else if deploy.restartPhase === 'failed'}
+									<div class="restart-err">{deploy.restartError}</div>
+									<div class="restart-actions">
+										<button class="btn subtle" onclick={() => deploy.restartEngine()}>Retry</button>
+									</div>
+								{/if}
+							{:else}
+								<div class="banner-sub">
+									Restart the engine with this schema as <span class="mono">--schema</span> to serve them.
+								</div>
+							{/if}
+						</div>
+					{:else if deploy.restartPhase === 'live'}
+						<div class="banner ok">
+							<div class="banner-msg">Engine restarted — the new resources are now served.</div>
+							<div class="banner-sub">
+								Verified against the relaunched engine: their REST routes, GraphQL types and
+								<a href="/docs" target="_blank" rel="noreferrer">/docs</a> entries are live.
 							</div>
 						</div>
 					{/if}
@@ -631,6 +676,51 @@
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
+	}
+	.restart-btn {
+		margin-top: 10px;
+	}
+	.restart-confirm {
+		margin-top: 10px;
+		padding: 10px 12px;
+		border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+		border-radius: 8px;
+		font-size: 12.5px;
+	}
+	.restart-confirm p {
+		margin: 0 0 10px;
+	}
+	.restart-actions {
+		display: flex;
+		gap: 8px;
+		margin-top: 8px;
+	}
+	.restart-progress {
+		margin-top: 10px;
+		font-size: 12.5px;
+		color: var(--text-2);
+	}
+	.restart-err {
+		margin-top: 10px;
+		font-size: 12px;
+		color: var(--danger);
+	}
+	.restart-progress::before {
+		content: '';
+		display: inline-block;
+		width: 10px;
+		height: 10px;
+		margin-right: 7px;
+		border: 2px solid var(--text-3);
+		border-top-color: transparent;
+		border-radius: 50%;
+		animation: restart-spin 0.8s linear infinite;
+		vertical-align: -1px;
+	}
+	@keyframes restart-spin {
+		to {
+			transform: rotate(360deg);
+		}
 	}
 	.preserve-tag {
 		margin-left: 8px;
