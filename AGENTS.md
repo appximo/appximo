@@ -248,19 +248,31 @@ One line per layer — navigate the code for the rest:
   against one outbox (silent event loss under SKIP LOCKED) — for multiple event
   types compose a `consumers.Router` (topic → Processor) in one dispatching worker
   and scale that (ADR-016 library model).
-- `pkg/files` — content-addressable file store (FILES-V1), INSIDE the binary (no
-  MinIO/sidecar; ~0 RAM at rest — it is streamed disk I/O). Blobs are keyed by
-  SHA-256 at `<root>/<tenant>/<aa>/<bb>/<sha>` (dedup free within a tenant; the
-  tenant prefix gives physical isolation); metadata lives in a per-tenant
-  `tenant_<id>.files` table (idempotent `EnsureTable`). The `VFS` interface has a
-  `Local` backend (this is it) and a documented `S3` contract for next session
-  (presigned URL + 302 — the engine authorizes but never proxies the bytes).
-  `Put` streams with `io.CopyBuffer` (64 KiB, NEVER `io.ReadAll`), hashing as it
-  goes, atomic-renames into the CAS, and cleans the temp on an interrupted upload;
-  `original_name` is metadata ONLY and never builds a path (path-traversal inert).
-  Engine routes `POST /api/files` + `GET /api/files/{id}` flow through the shared
-  chain; the download bypasses the response cache (a blob is never buffered/cached
-  in RAM — same bypass as SSE).
+- `pkg/files` — content-addressable file store with INTERCHANGEABLE backends
+  (FILES-V2, the PocketBase pattern): a thin owned `Backend` interface
+  (Put/Get/Delete/Stat/List/Serve/SignedURL over validated CAS keys
+  `<tenant>/<aa>/<bb>/<sha>`) under a shared `Store` that owns everything that
+  must be identical across drivers — metadata AUTHORITATIVE in the per-tenant
+  `tenant_<id>.files` table, tenancy checks, SHA-256 streaming hash (64 KiB
+  `io.CopyBuffer`, NEVER `io.ReadAll`) + dedup, and the OWASP upload validation
+  (extension ALLOWLIST + magic-byte sniff of the first 512 bytes — the client
+  Content-Type is never trusted — + `original_name` sanitized at rest, metadata
+  only, never a path; rejection → 422). Drivers: `LocalBackend` (direct disk,
+  deliberately NOT gocloud fileblob — `http.ServeContent` over `*os.File` gives
+  Range/strong content-hash ETag/sendfile, the measured local ceiling; atomic
+  temp+rename, interrupted uploads leave nothing) and `S3Backend` (gocloud.dev
+  s3blob — R2/Spaces/MinIO/AWS by config: endpoint/region/creds/bucket/
+  forcePathStyle; automatic multipart; serve = 302 to a short-lived presigned
+  URL by DEFAULT — the FILES-V1 contract: authorize, never proxy — or `proxy`
+  mode). Signed access: `GET /api/files/{id}/url` mints a short-lived (~180 s)
+  URL — native presigned on S3; on local an engine HMAC-token URL
+  (`GET /files/signed/{token}`, JWT-skipped, tenant-bound, role re-checked at
+  serve, ANY failure a uniform 404). Routes `POST /api/files`,
+  `GET|DELETE /api/files/{id}`, `GET /api/files/{id}/url` flow through the
+  shared chain (RBAC create/read/delete on `files`); downloads bypass the
+  response cache (same bypass as SSE). BOTH drivers pass one conformance suite
+  (S3 against real MinIO: `go test -tags integration -run TestS3 ./pkg/files/`).
+  Operator doc + the three setups (local / R2 / MinIO): docs/FILES.md.
 
 Request flow: tenant (Host) → rate limit → response cache → JWT → RBAC →
 handler (`pkg/codegen`) → query build / validation → hooks → pgx →
@@ -1121,27 +1133,49 @@ SAME one `/api/*` validates — HS256, 24 h TTL, stateless):
    cost). For forced revocation an admin **suspends** the user/tenant (blocks new
    logins; already-issued tokens live to `exp` — the documented stateless trade-off).
 
-## File store (FILES-V1)
+## File store (FILES-V2 — local disk or any S3-compatible, by config)
 
-The engine ships a content-addressable file store on two routes (no schema
-declaration needed — they exist whenever no resource is literally named `files`):
+The engine ships a content-addressable, multi-tenant file store (no schema
+declaration needed — the routes exist whenever no resource is literally named
+`files`). Storage is a **swappable backend**: `APPITOOLS_FILES_BACKEND=local`
+(default — blobs on this VPS under `APPITOOLS_FILES_DIR`, served by the engine
+with Range/ETag/sendfile) or `=s3` (any S3-compatible provider — Cloudflare R2 /
+DO Spaces / MinIO / AWS — via `APPITOOLS_FILES_S3_{BUCKET,ENDPOINT,REGION,
+ACCESS_KEY,SECRET_KEY,FORCE_PATH_STYLE,PREFIX,SERVE}`). Tenancy, RBAC, metadata
+and upload validation are IDENTICAL on both. Full doc + setups:
+[docs/FILES.md](docs/FILES.md).
 
-- `POST /api/files` — multipart upload (form field `file`). Streamed to disk in
-  64 KiB chunks (never buffered whole), de-duplicated by content hash. Returns
+- `POST /api/files` — multipart upload (form field `file`). Streamed in 64 KiB
+  chunks (never buffered whole), de-duplicated by content hash, and validated
+  OWASP-style: extension ALLOWLIST (default curated list; override
+  `APPITOOLS_FILES_ALLOWED_EXT`, `*` disables) + magic-byte check (a `.jpg`
+  containing PHP source, or a declared `image/*` that isn't, → `422`; the
+  client Content-Type is never trusted) + name sanitized at rest. Returns
   `201 {"file_id","sha256","size"}`. Body capped by `APPITOOLS_FILES_MAX_BYTES`
-  (default 256 MiB) → `413` on overflow. RBAC action is `create` on the `files`
-  resource.
-- `GET /api/files/{id}` — streams the blob back with its `Content-Type` and
-  `Content-Disposition`. RBAC action is `read` on `files`. `404` if the id is
-  unknown to the tenant (ids are tenant-scoped — no cross-tenant handle).
+  (default 256 MiB) → `413`. RBAC action: `create` on `files`.
+- `GET /api/files/{id}` — the blob, with its stored `Content-Type` and
+  `attachment` disposition. Local backend: proxied via `http.ServeContent`
+  (Range → `206`, strong content-hash `ETag` → `304`). S3 backend: `302` to a
+  short-lived presigned URL by default (the engine authorizes, the bucket
+  serves), or streamed through the engine with `APPITOOLS_FILES_S3_SERVE=proxy`.
+  RBAC: `read` on `files`. `404` if the id is unknown to the tenant (ids are
+  tenant-scoped — no cross-tenant handle).
+- `GET /api/files/{id}/url` — mints a short-lived signed download URL
+  (`APPITOOLS_FILES_TOKEN_TTL`, default 180 s): `200 {"url","expires_in"}`.
+  S3 → native presigned; local → an engine token URL `GET
+  /files/signed/{token}` that needs NO Authorization header (for `<img>`/share
+  links) — the HMAC token is tenant-bound and role-re-checked at serve, and any
+  invalid/expired/foreign token is a uniform `404` (anti-fingerprinting). RBAC:
+  `read` on `files`.
+- `DELETE /api/files/{id}` — removes the file (`204`); the blob is deleted only
+  when no other upload references the same content. RBAC: `delete` on `files`.
 
-Both inherit the normal chain (tenant Host → JWT → RBAC), so a role needs the
-`files` resource in its policy (`"resources": ["files", …]` or `"*"`). Blobs live
-under `APPITOOLS_FILES_DIR` (default `/var/lib/appitools/files`), created lazily
-on first upload. Use a `file_id` as a filejob's `file_ref` to feed the async XLSX
-consumer (`APPITOOLS_FILES_DIR` must be set on the worker, pointing at the same
-root). An S3 backend (presigned URL + 302) is the next increment; today the store
-is local-disk only.
+All inherit the normal chain (tenant Host → JWT → RBAC), so a role needs the
+`files` resource in its policy (`"resources": ["files", …]` or `"*"`). Local
+blobs live under `APPITOOLS_FILES_DIR` (default `/var/lib/appitools/files`),
+created lazily on first upload. Use a `file_id` as a filejob's `file_ref` to
+feed the async XLSX consumer (`APPITOOLS_FILES_DIR` must be set on the worker,
+pointing at the same root — the worker resolves refs through the same VFS).
 
 ## Authentication — password identity core (AUTH-CORE-V1)
 

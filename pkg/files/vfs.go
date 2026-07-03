@@ -1,23 +1,26 @@
-// Package files is the engine's content-addressable file store (FILES-V1): the
-// real source of the file_ref the XLSX consumer reads. It lives INSIDE the binary
-// — no MinIO, no storage sidecar — and keeps RAM at ~0 in steady state (it is disk
-// I/O, streamed, never buffered whole).
+// Package files is the engine's content-addressable file store (FILES-V1 core,
+// FILES-V2 backends): the real source of the file_ref the XLSX consumer reads.
 //
-// Layout: a blob is named by the SHA-256 of its content and stored at
+// Layout: a blob is keyed by the SHA-256 of its content as
 //
-//	<root>/<tenant>/<aa>/<bb>/<sha256-hex>
+//	<tenant>/<aa>/<bb>/<sha256-hex>
 //
 // where aa/bb are the first two bytes of the hash (a fan-out so one directory
-// never holds millions of entries). Identical content hashes to the same path, so
+// never holds millions of entries). Identical content hashes to the same key, so
 // dedup is free WITHIN a tenant; the tenant prefix gives physical isolation (one
 // tenant's bytes never share a directory with another's). File METADATA (id,
 // sha256, size, content_type, original_name) lives in a per-tenant Postgres table
-// — the blob on disk, the row in the tenant schema, the same isolation model the
-// rest of the engine uses.
+// — the blob in storage, the row in the tenant schema, the same isolation model
+// the rest of the engine uses. Metadata is AUTHORITATIVE in the DB; storage only
+// moves bytes.
 //
-// The VFS interface has two backends: Local (this session, CAS on disk) and S3
-// (next session — presigned URL + 302 so the engine authorizes but never proxies
-// the bytes). Local is complete here; S3 is documented as the interface contract.
+// FILES-V2 splits the Store (tenancy + metadata + OWASP upload validation +
+// hashing + dedup — identical everywhere) from the Backend (byte storage): the
+// LocalBackend serves from disk inside the binary (http.ServeContent —
+// Range/ETag/sendfile; signed access via engine-minted short-lived HMAC tokens),
+// and the S3Backend targets any S3-compatible provider by config (R2, Spaces,
+// MinIO, AWS), serving via short-lived presigned URL + 302 by default (the
+// engine authorizes but never proxies the bytes) or via proxy mode.
 package files
 
 import (

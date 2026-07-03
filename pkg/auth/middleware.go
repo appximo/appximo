@@ -60,7 +60,12 @@ func HookUserContext(ctx context.Context) map[string]any {
 // "/editor" is the visual schema editor SPA (UI-F0-S1): a static client-side app
 // (HTML/JS/CSS) served from the binary; the shell loads before any token exists,
 // exactly like /admin.
-var skipJWT = []string{"/health", "/readyz", "/graphiql", "/metrics", "/debug", "/admin", "/editor", "/auth/", "/favicon.ico", "/openapi", "/docs"}
+// "/files/signed/" is the signed-token download route (FILES-V2): the HMAC token
+// in the path IS the credential (short-lived, tenant-bound, role-rechecked by the
+// handler; any failure is a uniform 404). A Bearer requirement would defeat the
+// point — the URL exists so <img>/video tags and share links can fetch without an
+// Authorization header.
+var skipJWT = []string{"/health", "/readyz", "/graphiql", "/metrics", "/debug", "/admin", "/editor", "/auth/", "/favicon.ico", "/openapi", "/docs", "/files/signed/"}
 
 // JWTMiddleware validates Bearer tokens on all routes except those in skipJWT.
 // 401 is returned for missing or invalid tokens on enforced routes.

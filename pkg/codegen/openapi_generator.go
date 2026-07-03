@@ -200,15 +200,45 @@ func addOAFilePaths(paths map[string]any) {
 			"401": oaRespRef("Error401"), "403": oaRespRef("Error403"), "413": oaRespRef("Error413"),
 		},
 	}}
-	paths["/api/files/{id}"] = map[string]any{"get": map[string]any{
-		"operationId": "downloadFile",
-		"summary":     "Download a file blob by id (streamed)",
+	paths["/api/files/{id}"] = map[string]any{
+		"get": map[string]any{
+			"operationId": "downloadFile",
+			"summary":     "Download a file blob by id (Range/ETag honored; the S3 backend may answer 302 to a short-lived presigned URL)",
+			"tags":        []string{"files"},
+			"parameters":  []any{oaPathIDParam()},
+			"responses": map[string]any{
+				"200": map[string]any{"description": "The file bytes", "content": map[string]any{
+					"application/octet-stream": map[string]any{"schema": map[string]any{"type": "string", "format": "binary"}},
+				}},
+				"206": map[string]any{"description": "Partial content (Range request)"},
+				"302": map[string]any{"description": "Redirect to a short-lived presigned storage URL (S3 backend, redirect mode)"},
+				"401": oaRespRef("Error401"), "403": oaRespRef("Error403"), "404": oaRespRef("Error404"),
+			},
+		},
+		"delete": map[string]any{
+			"operationId": "deleteFile",
+			"summary":     "Delete a file (metadata row + blob when no other upload references the same content)",
+			"tags":        []string{"files"},
+			"parameters":  []any{oaPathIDParam()},
+			"responses": map[string]any{
+				"204": map[string]any{"description": "Deleted"},
+				"401": oaRespRef("Error401"), "403": oaRespRef("Error403"), "404": oaRespRef("Error404"),
+			},
+		},
+	}
+	paths["/api/files/{id}/url"] = map[string]any{"get": map[string]any{
+		"operationId": "signFileURL",
+		"summary":     "Mint a short-lived signed download URL (engine token URL on the local backend; native presigned URL on S3)",
 		"tags":        []string{"files"},
 		"parameters":  []any{oaPathIDParam()},
 		"responses": map[string]any{
-			"200": map[string]any{"description": "The file bytes", "content": map[string]any{
-				"application/octet-stream": map[string]any{"schema": map[string]any{"type": "string", "format": "binary"}},
-			}},
+			"200": map[string]any{"description": "Signed URL", "content": oaJSONContent(map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"url":        map[string]any{"type": "string"},
+					"expires_in": map[string]any{"type": "integer", "description": "seconds"},
+				},
+			})},
 			"401": oaRespRef("Error401"), "403": oaRespRef("Error403"), "404": oaRespRef("Error404"),
 		},
 	}}

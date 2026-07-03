@@ -279,6 +279,9 @@ It serves our own production workload today.
 | `ADMIN_KEY` | env | **yes** | `X-Admin-Key` for `/metrics`, `/debug`, `/admin`, control plane |
 | `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | env | no | per-tenant token bucket (default 1000/100) |
 | `APPITOOLS_MAX_TX_OPS` | env | no | max operations per `POST /api/transaction` (default 100) |
+| `APPITOOLS_FILES_BACKEND` | env | no | file-store storage: `local` (default, this box's disk) or `s3` (R2/Spaces/MinIO/AWS). See [docs/FILES.md](docs/FILES.md) |
+| `APPITOOLS_FILES_S3_*` | env | with `s3` | `BUCKET`,`ENDPOINT`,`REGION`,`ACCESS_KEY`,`SECRET_KEY`,`FORCE_PATH_STYLE`,`PREFIX`,`SERVE` — provider-agnostic S3 config |
+| `APPITOOLS_FILES_DIR` / `APPITOOLS_FILES_MAX_BYTES` / `APPITOOLS_FILES_TOKEN_TTL` / `APPITOOLS_FILES_ALLOWED_EXT` | env | no | local blob root; upload cap (256 MiB); signed-URL TTL (180 s); upload extension allowlist |
 | `APPITOOLS_AUTH_SIGNUP_ROLE` | env | no | role assigned to public signup; **set it to enable `POST /auth/signup`** (empty = signup disabled). Must be a schema role |
 | `APPITOOLS_AUTH_MIN_PASSWORD` | env | no | minimum signup password length (default 8) |
 | `APPITOOLS_AUTH_REQUIRE_VERIFIED` | env | no | block login until the user's email is verified (default off) |

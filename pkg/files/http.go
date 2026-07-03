@@ -5,12 +5,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
@@ -19,14 +20,21 @@ import (
 // override via the engine's APPITOOLS_FILES_MAX_BYTES.
 const DefaultMaxUploadBytes int64 = 256 << 20 // 256 MiB
 
-// UploadHandler streams a multipart upload to the VFS and returns the file handle.
-// It runs AFTER the engine middleware chain (tenant → JWT → RBAC for the "files"
-// resource), so it re-implements none of that — it only reads the resolved tenant
-// and streams. The body is read with r.MultipartReader (no in-memory form parse),
-// the file part is piped to VFS.Put in 64 KiB chunks, and an oversize body is
-// rejected 413 via http.MaxBytesReader (which also frees the partial temp through
-// Put's interrupted-upload cleanup).
-func UploadHandler(vfs VFS, maxBytes int64) http.HandlerFunc {
+// SignedPathPrefix is where the engine serves signed-token downloads
+// (GET /files/signed/{token}). It sits OUTSIDE /api on purpose: the token IS
+// the credential, so the route skips JWT (pkg/auth.skipJWT) and the response
+// cache (a blob must never be buffered), while still flowing through the
+// tenant + rate-limit middleware.
+const SignedPathPrefix = "/files/signed"
+
+// UploadHandler streams a multipart upload to the store and returns the file
+// handle. It runs AFTER the engine middleware chain (tenant → JWT → RBAC for
+// the "files" resource), so it re-implements none of that — it only reads the
+// resolved tenant and streams. The body is read with r.MultipartReader (no
+// in-memory form parse); the OWASP validation (extension allowlist + magic
+// bytes + size cap + name sanitization) happens inside Store.Put, and a
+// rejected upload surfaces as 422 with the reason.
+func UploadHandler(store *Store, maxBytes int64) http.HandlerFunc {
 	if maxBytes <= 0 {
 		maxBytes = DefaultMaxUploadBytes
 	}
@@ -37,7 +45,7 @@ func UploadHandler(vfs VFS, maxBytes int64) http.HandlerFunc {
 			return
 		}
 		// Cap the whole request body; an overshoot surfaces as a read error inside
-		// VFS.Put (cleaning the partial temp) which we map to 413 below.
+		// Store.Put (cleaning the partial temp) which we map to 413 below.
 		r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 
 		mr, err := r.MultipartReader()
@@ -63,17 +71,20 @@ func UploadHandler(vfs VFS, maxBytes int64) http.HandlerFunc {
 				continue
 			}
 
-			meta, perr := vfs.Put(r.Context(), tc.ID, part, PutMeta{
+			meta, perr := store.Put(r.Context(), tc.ID, part, PutMeta{
 				ContentType:  part.Header.Get("Content-Type"),
 				OriginalName: part.FileName(),
 			})
 			_ = part.Close()
 			if perr != nil {
-				if isTooLarge(perr) {
+				switch {
+				case isTooLarge(perr):
 					writeErr(w, http.StatusRequestEntityTooLarge, "upload too large")
-					return
+				case errors.Is(perr, ErrUploadRejected):
+					writeErr(w, http.StatusUnprocessableEntity, perr.Error())
+				default:
+					writeErr(w, http.StatusInternalServerError, "upload failed")
 				}
-				writeErr(w, http.StatusInternalServerError, "upload failed")
 				return
 			}
 			writeJSON(w, http.StatusCreated, map[string]any{
@@ -87,10 +98,13 @@ func UploadHandler(vfs VFS, maxBytes int64) http.HandlerFunc {
 	}
 }
 
-// DownloadHandler streams a stored file back to the client. It is deliberately
-// served OUTSIDE the response cache (the cache middleware bypasses /api/files/…
-// GETs) — a binary blob is unbounded and must never be buffered or cached in RAM.
-func DownloadHandler(vfs VFS) http.HandlerFunc {
+// DownloadHandler serves a stored file through the backend's strategy: the
+// local driver proxies with http.ServeContent (Range/206, strong ETag/304,
+// sendfile zero-copy); the S3 driver 302-redirects to a short-lived presigned
+// URL (default) or proxies. It is deliberately served OUTSIDE the response
+// cache (the cache middleware bypasses /api/files/… GETs) — a binary blob is
+// unbounded and must never be buffered or cached in RAM.
+func DownloadHandler(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tc := tenant.FromCtx(r.Context())
 		if tc == nil {
@@ -102,30 +116,147 @@ func DownloadHandler(vfs VFS) http.HandlerFunc {
 			writeErr(w, http.StatusBadRequest, "invalid id format")
 			return
 		}
-		rc, m, err := vfs.Get(r.Context(), tc.ID, id)
+		serveFile(w, r, store, tc.ID, id)
+	}
+}
+
+// DeleteHandler removes a stored file (metadata row + blob when unreferenced).
+// RBAC has already required the `delete` action on the "files" resource.
+func DeleteHandler(store *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tc := tenant.FromCtx(r.Context())
+		if tc == nil {
+			writeErr(w, http.StatusBadRequest, "invalid tenant")
+			return
+		}
+		id := chi.URLParam(r, "id")
+		if _, err := uuid.Parse(id); err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid id format")
+			return
+		}
+		if err := store.Delete(r.Context(), tc.ID, id); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				writeErr(w, http.StatusNotFound, "not found")
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, "delete failed")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// SignedURLHandler mints a short-lived signed download URL for a file the
+// caller may read (tenant + JWT + RBAC `read files` already enforced by the
+// chain). S3 backends answer with a NATIVE presigned URL (Signature v4, the
+// bucket serves the bytes); the local backend answers with an engine-token URL
+// (/files/signed/{token}, HMAC-signed, validated + RBAC-rechecked at serve).
+// Response: {"url","expires_in"}.
+func SignedURLHandler(store *Store, secret []byte, ttl time.Duration) http.HandlerFunc {
+	if ttl <= 0 {
+		ttl = DefaultSignedURLTTL
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		tc := tenant.FromCtx(r.Context())
+		if tc == nil {
+			writeErr(w, http.StatusBadRequest, "invalid tenant")
+			return
+		}
+		id := chi.URLParam(r, "id")
+		if _, err := uuid.Parse(id); err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid id format")
+			return
+		}
+
+		u, err := store.SignedURL(r.Context(), tc.ID, id, ttl)
+		if errors.Is(err, ErrSignedURLUnsupported) {
+			// Local backend: mint the engine's own capability token. The role is
+			// embedded and re-checked at serve time.
+			role := roleFromRequest(r)
+			tok, terr := MintDownloadToken(secret, tc.ID, id, role, ttl)
+			if terr != nil {
+				writeErr(w, http.StatusInternalServerError, "signing failed")
+				return
+			}
+			// Confirm the file exists BEFORE handing out a URL (same 404 the
+			// download would give).
+			if _, serr := store.Stat(r.Context(), tc.ID, id); serr != nil {
+				writeErr(w, http.StatusNotFound, "not found")
+				return
+			}
+			u, err = requestOrigin(r)+SignedPathPrefix+"/"+tok, nil
+		}
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				writeErr(w, http.StatusNotFound, "not found")
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, "signing failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"url":        u,
+			"expires_in": int(ttl.Seconds()),
+		})
+	}
+}
+
+// SignedServeHandler serves GET /files/signed/{token}: verifies the HMAC
+// token (signature, expiry, claim shape), that the token's tenant matches the
+// request's tenant (a token minted for tenant A is useless on tenant B's
+// host), and that the embedded role STILL may read files (a revoked grant does
+// not outlive the policy) — then streams through the same backend Serve as the
+// authenticated download. EVERY failure is a uniform 404 (never 403): an
+// invalid token must be indistinguishable from a missing file
+// (anti-fingerprinting, OWASP).
+func SignedServeHandler(store *Store, secret []byte, allowRead func(role string) bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tc := tenant.FromCtx(r.Context())
+		if tc == nil {
+			writeErr(w, http.StatusNotFound, "not found")
+			return
+		}
+		tok := chi.URLParam(r, "token")
+		tokTenant, fileID, role, err := VerifyDownloadToken(secret, tok)
+		if err != nil || tokTenant != tc.ID || !allowRead(role) {
+			writeErr(w, http.StatusNotFound, "not found")
+			return
+		}
+		serveFile(w, r, store, tc.ID, fileID)
+	}
+}
+
+// serveFile is the shared serve tail: backend Serve with the 404/500 mapping.
+func serveFile(w http.ResponseWriter, r *http.Request, store *Store, tenantID, id string) {
+	if err := store.Serve(w, r, tenantID, id); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "not found")
 			return
 		}
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "download failed")
-			return
-		}
-		defer rc.Close() //nolint:errcheck
-
-		ct := m.ContentType
-		if ct == "" {
-			ct = "application/octet-stream"
-		}
-		w.Header().Set("Content-Type", ct)
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		if m.Size > 0 {
-			w.Header().Set("Content-Length", strconv.FormatInt(m.Size, 10))
-		}
-		w.Header().Set("Content-Disposition", "attachment; filename=\""+safeFilename(m.OriginalName)+"\"")
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.CopyBuffer(w, rc, make([]byte, copyBufSize))
+		writeErr(w, http.StatusInternalServerError, "download failed")
 	}
+}
+
+// roleFromRequest reads the caller's role the same way the RBAC middleware
+// does (JWT claims first, X-User-Role fallback for tests).
+func roleFromRequest(r *http.Request) string {
+	if claims := auth.ClaimsFromCtx(r.Context()); claims != nil {
+		return claims.Role
+	}
+	return r.Header.Get("X-User-Role")
+}
+
+// requestOrigin rebuilds the caller-facing origin for minted URLs: the
+// forwarded proto when a proxy terminated TLS, else the direct scheme.
+func requestOrigin(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if xf := r.Header.Get("X-Forwarded-Proto"); xf != "" {
+		scheme = xf
+	}
+	return scheme + "://" + r.Host
 }
 
 // safeFilename reduces a stored original_name to a header-safe basename: no path

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -91,8 +92,9 @@ type App struct {
 	cpSrv *http.Server
 	ss    *shutdown.State
 
-	files         files.VFS // content-addressable file store (FILES-V1)
-	filesMaxBytes int64     // per-upload body cap
+	files         *files.Store  // content-addressable file store (FILES-V2: local | s3 backend)
+	filesMaxBytes int64         // per-upload body cap
+	filesTokenTTL time.Duration // signed download URL/token lifetime
 
 	authSvc *userauth.Service // password identity core (AUTH-CORE-V1)
 
@@ -182,23 +184,62 @@ func New(cfg Config) (*App, error) {
 
 	app.tdb = db.NewTenantDB(pool)
 
-	// Content-addressable file store (FILES-V1). The blob root is created lazily
-	// on the first upload, so an engine that never serves /api/files pays nothing.
-	filesDir := cfg.FilesDir
-	if filesDir == "" {
-		filesDir = os.Getenv("APPITOOLS_FILES_DIR")
+	// Content-addressable file store (FILES-V2): the Store (tenancy + metadata +
+	// OWASP upload validation + dedup) over a swappable Backend — "local" (disk,
+	// the default: everything on this VPS) or "s3" (any S3-compatible provider by
+	// config: R2/Spaces/MinIO/AWS). A misconfigured s3 backend fails boot loudly;
+	// the local blob root is created lazily on the first upload, so an engine
+	// that never serves /api/files pays nothing.
+	filesBackendName := strings.ToLower(strings.TrimSpace(coalesce(cfg.FilesBackend, os.Getenv("APPITOOLS_FILES_BACKEND"))))
+	uploadPolicy := files.NewUploadPolicy(coalesceCSV(cfg.FilesAllowedExt, os.Getenv("APPITOOLS_FILES_ALLOWED_EXT")))
+	var filesBackend files.Backend
+	switch filesBackendName {
+	case "", "local":
+		filesDir := coalesce(cfg.FilesDir, os.Getenv("APPITOOLS_FILES_DIR"))
+		if filesDir == "" {
+			filesDir = "/var/lib/appitools/files"
+		}
+		filesBackend = files.NewLocalBackend(filesDir)
+		log.Printf("files: local backend at %s", filesDir)
+	case "s3":
+		s3cfg := files.S3Config{
+			Bucket:         coalesce(cfg.FilesS3Bucket, os.Getenv("APPITOOLS_FILES_S3_BUCKET")),
+			Endpoint:       coalesce(cfg.FilesS3Endpoint, os.Getenv("APPITOOLS_FILES_S3_ENDPOINT")),
+			Region:         coalesce(cfg.FilesS3Region, os.Getenv("APPITOOLS_FILES_S3_REGION")),
+			AccessKey:      coalesce(cfg.FilesS3AccessKey, os.Getenv("APPITOOLS_FILES_S3_ACCESS_KEY")),
+			SecretKey:      coalesce(cfg.FilesS3SecretKey, os.Getenv("APPITOOLS_FILES_S3_SECRET_KEY")),
+			ForcePathStyle: cfg.FilesS3ForcePathStyle || envTruthy(os.Getenv("APPITOOLS_FILES_S3_FORCE_PATH_STYLE")),
+			Prefix:         coalesce(cfg.FilesS3Prefix, os.Getenv("APPITOOLS_FILES_S3_PREFIX")),
+			ServeMode:      files.S3ServeMode(coalesce(cfg.FilesS3ServeMode, os.Getenv("APPITOOLS_FILES_S3_SERVE"))),
+		}
+		s3b, s3err := files.NewS3Backend(context.Background(), s3cfg)
+		if s3err != nil {
+			pool.Close()
+			return nil, fmt.Errorf("appitools: %w", s3err)
+		}
+		filesBackend = s3b
+		log.Printf("files: s3 backend — bucket %q endpoint %q (serve mode %s)",
+			s3cfg.Bucket, s3cfg.Endpoint, s3cfg.ServeMode)
+	default:
+		pool.Close()
+		return nil, fmt.Errorf("appitools: unknown files backend %q (use \"local\" or \"s3\")", filesBackendName)
 	}
-	if filesDir == "" {
-		filesDir = "/var/lib/appitools/files"
-	}
-	app.files = files.NewLocal(filesDir, files.NewPGStore(pool))
+	app.files = files.NewStore(filesBackend, files.NewPGStore(pool), files.WithUploadPolicy(uploadPolicy))
 	app.filesMaxBytes = files.DefaultMaxUploadBytes
 	if v := os.Getenv("APPITOOLS_FILES_MAX_BYTES"); v != "" {
 		if n, perr := strconv.ParseInt(v, 10, 64); perr == nil && n > 0 {
 			app.filesMaxBytes = n
 		}
 	}
-	log.Printf("files: content-addressable store at %s (max upload %d bytes)", filesDir, app.filesMaxBytes)
+	app.filesTokenTTL = files.DefaultSignedURLTTL
+	if cfg.FilesTokenTTLSeconds > 0 {
+		app.filesTokenTTL = time.Duration(cfg.FilesTokenTTLSeconds) * time.Second
+	} else if v := os.Getenv("APPITOOLS_FILES_TOKEN_TTL"); v != "" {
+		if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
+			app.filesTokenTTL = time.Duration(n) * time.Second
+		}
+	}
+	log.Printf("files: max upload %d bytes, signed URL TTL %s", app.filesMaxBytes, app.filesTokenTTL)
 
 	// HookRunner with Capa 3 (WASM) when the runtime initializes; JS+webhook only on error.
 	sandbox := extensions.NewJSSandbox()
@@ -608,6 +649,11 @@ func (a *App) Start() error {
 		if a.obsStore != nil {
 			a.obsStore.Close() //nolint:errcheck
 		}
+		if a.files != nil {
+			if c, ok := a.files.Backend().(io.Closer); ok {
+				c.Close() //nolint:errcheck
+			}
+		}
 	}
 	if err := a.ss.Run(ctx, srv, 5*time.Second, cleanup); err != nil {
 		return err
@@ -831,16 +877,27 @@ func (a *App) buildRouter() *chi.Mux {
 		for _, rt := range a.routes {
 			sub.Method(rt.Method, rt.Path, a.customHandler(rt))
 		}
-		// File store routes (FILES-V1): upload/download flow through the IDENTICAL
-		// chain (tenant → JWT → RBAC for the "files" resource) — no duplicated
-		// middleware. Download is bypassed by the response cache (see cache
-		// Middleware) so a binary blob is never buffered/cached in RAM. Skipped if a
-		// schema resource is literally named "files" (the generated routes win).
+		// File store routes (FILES-V2): upload/download/delete/signed-URL flow
+		// through the IDENTICAL chain (tenant → JWT → RBAC for the "files"
+		// resource: create/read/delete) — no duplicated middleware. Download is
+		// bypassed by the response cache (see cache Middleware) so a binary blob is
+		// never buffered/cached in RAM. Skipped if a schema resource is literally
+		// named "files" (the generated routes win).
 		if _, taken := a.schema.Resources["files"]; taken {
 			log.Println("WARNING: schema declares a \"files\" resource — engine file-store routes (/api/files) are disabled for this schema")
 		} else if a.files != nil {
+			filesSecret := []byte(a.cfg.JWTSecret)
 			sub.Post("/api/files", files.UploadHandler(a.files, a.filesMaxBytes))
 			sub.Get("/api/files/{id}", files.DownloadHandler(a.files))
+			sub.Get("/api/files/{id}/url", files.SignedURLHandler(a.files, filesSecret, a.filesTokenTTL))
+			sub.Delete("/api/files/{id}", files.DeleteHandler(a.files))
+			// Signed-token downloads live OUTSIDE /api: the token IS the credential
+			// (JWT is skipped for this prefix — pkg/auth.skipJWT — and the RBAC
+			// middleware only guards /api/*), but the handler re-verifies signature,
+			// expiry, tenant match AND that the embedded role still reads "files".
+			// Any failure is a uniform 404 (anti-fingerprinting).
+			sub.Get(files.SignedPathPrefix+"/{token}", files.SignedServeHandler(a.files, filesSecret,
+				func(role string) bool { return a.rbacPolicy.Allows(role, "files", "read") }))
 		}
 		sub.Mount("/", codegen.BuildRouter(a.schema, a.tdb, a.hr, a.responseCache, a.eventsHub))
 	})
@@ -850,6 +907,14 @@ func (a *App) buildRouter() *chi.Mux {
 
 func mustMarshal(v any) []byte {
 	b, _ := json.Marshal(v)
+	return b
+}
+
+// coalesce returns a when non-empty, else b.
+func coalesce(a, b string) string {
+	if a != "" {
+		return a
+	}
 	return b
 }
 

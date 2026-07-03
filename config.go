@@ -38,7 +38,52 @@ type Config struct {
 	// (FILES-V1). Empty falls back to APPITOOLS_FILES_DIR, then to
 	// /var/lib/appitools/files. The directory is created lazily on the first
 	// upload, so an engine that never serves /api/files touches no disk.
+	// Applies to the "local" files backend only.
 	FilesDir string
+
+	// --- File store backends (FILES-V2): BYOC storage, swappable by config ---
+	//
+	// FilesBackend selects where blobs live: "local" (default — the tenant's
+	// files on this VPS's disk, served by the engine with Range/ETag/sendfile)
+	// or "s3" (any S3-compatible provider: Cloudflare R2, DO Spaces, MinIO,
+	// AWS — served via short-lived presigned URL + 302 by default). Empty falls
+	// back to APPITOOLS_FILES_BACKEND, then "local". Tenancy, RBAC, metadata
+	// and upload validation are IDENTICAL on both backends.
+	FilesBackend string
+	// FilesS3Bucket / FilesS3Endpoint / FilesS3Region / FilesS3AccessKey /
+	// FilesS3SecretKey configure the S3 backend provider-agnostically. Each
+	// falls back to its APPITOOLS_FILES_S3_* env var (BUCKET, ENDPOINT, REGION,
+	// ACCESS_KEY, SECRET_KEY). Endpoint empty means AWS S3 proper; Region
+	// empty defaults to "auto" (R2's spelling, harmless elsewhere). With
+	// FilesBackend="s3", a missing bucket or credentials fails boot loudly.
+	FilesS3Bucket    string
+	FilesS3Endpoint  string
+	FilesS3Region    string
+	FilesS3AccessKey string
+	FilesS3SecretKey string
+	// FilesS3ForcePathStyle addresses the bucket as <endpoint>/<bucket>
+	// (required by MinIO). Falls back to APPITOOLS_FILES_S3_FORCE_PATH_STYLE
+	// (truthy).
+	FilesS3ForcePathStyle bool
+	// FilesS3Prefix namespaces keys inside the bucket. Empty falls back to
+	// APPITOOLS_FILES_S3_PREFIX, then "tenants/".
+	FilesS3Prefix string
+	// FilesS3ServeMode is how GET /api/files/{id} delivers S3 bytes:
+	// "redirect" (default — 302 to a short-lived presigned URL; the engine
+	// authorizes, the bucket serves, zero engine bandwidth) or "proxy" (bytes
+	// stream through the engine; bucket never exposed). Falls back to
+	// APPITOOLS_FILES_S3_SERVE.
+	FilesS3ServeMode string
+	// FilesTokenTTLSeconds bounds signed download URLs (both the engine-minted
+	// local tokens and S3 presigned URLs from /api/files/{id}/url). 0 falls
+	// back to APPITOOLS_FILES_TOKEN_TTL (seconds), then 180.
+	FilesTokenTTLSeconds int
+	// FilesAllowedExt replaces the default upload extension ALLOWLIST
+	// (OWASP: allowlist, never denylist). Entries with or without the dot;
+	// the single value "*" disables the extension check (magic-byte checks
+	// still apply). Empty falls back to APPITOOLS_FILES_ALLOWED_EXT
+	// (comma-separated), then to files.DefaultAllowedExtensions.
+	FilesAllowedExt []string
 
 	// Version is reported by /health and the synthetic monitor. Empty reports
 	// "dev"; the cmd binary passes its ldflags-injected build version.

@@ -19,7 +19,7 @@ import (
 // filesTestServer mounts the upload/download handlers behind a middleware that
 // injects a fixed tenant — standing in for the engine's TenantMiddleware so the
 // handlers run exactly as they do in the chain.
-func filesTestServer(t *testing.T, vfs VFS, maxBytes int64, tenantID string) *httptest.Server {
+func filesTestServer(t *testing.T, vfs *Store, maxBytes int64, tenantID string) *httptest.Server {
 	t.Helper()
 	r := chi.NewMux()
 	r.Use(func(next http.Handler) http.Handler {

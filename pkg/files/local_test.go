@@ -14,9 +14,12 @@ import (
 	"github.com/google/uuid"
 )
 
-func newLocal(t *testing.T) *Local {
+// newLocal builds a disk-backed Store over a temp root, returning both (the
+// tests assert the physical CAS layout under root).
+func newLocal(t *testing.T) (*Store, string) {
 	t.Helper()
-	return NewLocal(t.TempDir(), newMemStore())
+	root := t.TempDir()
+	return NewLocal(root, newMemStore()), root
 }
 
 // countFiles returns the number of regular files under root (recursively).
@@ -39,7 +42,7 @@ func countFiles(t *testing.T, root string) int {
 }
 
 func TestLocalPut_CASLayout_And_RoundTrip(t *testing.T) {
-	l := newLocal(t)
+	l, root := newLocal(t)
 	content := []byte("hello content-addressable world")
 	want := sha256.Sum256(content)
 	wantHex := hex.EncodeToString(want[:])
@@ -61,7 +64,7 @@ func TestLocalPut_CASLayout_And_RoundTrip(t *testing.T) {
 	}
 
 	// Blob lands at <root>/acme/aa/bb/<sha>.
-	blob := filepath.Join(l.root, "acme", wantHex[0:2], wantHex[2:4], wantHex)
+	blob := filepath.Join(root, "acme", wantHex[0:2], wantHex[2:4], wantHex)
 	if _, err := os.Stat(blob); err != nil {
 		t.Fatalf("blob not at expected CAS path %s: %v", blob, err)
 	}
@@ -82,7 +85,7 @@ func TestLocalPut_CASLayout_And_RoundTrip(t *testing.T) {
 }
 
 func TestLocalPut_Dedup(t *testing.T) {
-	l := newLocal(t)
+	l, root := newLocal(t)
 	content := []byte("same bytes twice")
 
 	m1, err := l.Put(context.Background(), "acme", bytes.NewReader(content), PutMeta{OriginalName: "a.bin"})
@@ -100,7 +103,7 @@ func TestLocalPut_Dedup(t *testing.T) {
 		t.Fatal("same content must hash equal")
 	}
 	// Exactly one blob on disk (tmp dir is empty after both Puts).
-	if n := countFiles(t, filepath.Join(l.root, "acme")); n != 1 {
+	if n := countFiles(t, filepath.Join(root, "acme")); n != 1 {
 		t.Fatalf("dedup: %d files on disk, want 1 (shared blob)", n)
 	}
 	// Both ids resolve to the same content.
@@ -161,7 +164,7 @@ func TestLocalPut_Streaming50MB_BoundedBuffer(t *testing.T) {
 	}
 	wantHex := hex.EncodeToString(h.Sum(nil))
 
-	l := newLocal(t)
+	l, _ := newLocal(t)
 	mc := &maxChunkReader{src: patternReader(size)}
 	m, err := l.Put(context.Background(), "big", mc, PutMeta{OriginalName: "big.bin"})
 	if err != nil {
@@ -216,26 +219,26 @@ func (e *errAfter) Read(p []byte) (int, error) {
 }
 
 func TestLocalPut_InterruptedUpload_NoGarbage(t *testing.T) {
-	l := newLocal(t)
+	l, root := newLocal(t)
 	_, err := l.Put(context.Background(), "acme", &errAfter{remaining: 1 << 20}, PutMeta{OriginalName: "partial.bin"})
 	if err == nil {
 		t.Fatal("expected Put to fail on an interrupted upload")
 	}
 	// No blob, no leftover temp file — the partial upload left nothing on disk.
-	if n := countFiles(t, l.root); n != 0 {
+	if n := countFiles(t, root); n != 0 {
 		t.Fatalf("interrupted upload left %d files on disk, want 0", n)
 	}
 }
 
 func TestLocalGet_NotFound(t *testing.T) {
-	l := newLocal(t)
+	l, _ := newLocal(t)
 	if _, _, err := l.Get(context.Background(), "acme", uuid.NewString()); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestLocalDelete_DedupAware(t *testing.T) {
-	l := newLocal(t)
+	l, root := newLocal(t)
 	content := []byte("shared blob")
 	m1, _ := l.Put(context.Background(), "acme", bytes.NewReader(content), PutMeta{})
 	m2, _ := l.Put(context.Background(), "acme", bytes.NewReader(content), PutMeta{})
@@ -244,7 +247,7 @@ func TestLocalDelete_DedupAware(t *testing.T) {
 	if err := l.Delete(context.Background(), "acme", m1.ID); err != nil {
 		t.Fatalf("Delete m1: %v", err)
 	}
-	if n := countFiles(t, filepath.Join(l.root, "acme")); n != 1 {
+	if n := countFiles(t, filepath.Join(root, "acme")); n != 1 {
 		t.Fatalf("after first delete: %d blobs, want 1 (still referenced)", n)
 	}
 	if _, _, err := l.Get(context.Background(), "acme", m2.ID); err != nil {
@@ -255,7 +258,7 @@ func TestLocalDelete_DedupAware(t *testing.T) {
 	if err := l.Delete(context.Background(), "acme", m2.ID); err != nil {
 		t.Fatalf("Delete m2: %v", err)
 	}
-	if n := countFiles(t, filepath.Join(l.root, "acme")); n != 0 {
+	if n := countFiles(t, filepath.Join(root, "acme")); n != 0 {
 		t.Fatalf("after last delete: %d blobs, want 0 (orphaned blob removed)", n)
 	}
 	// Deleting an unknown id is ErrNotFound.
@@ -265,7 +268,7 @@ func TestLocalDelete_DedupAware(t *testing.T) {
 }
 
 func TestLocalTenantIsolation(t *testing.T) {
-	l := newLocal(t)
+	l, root := newLocal(t)
 	m, err := l.Put(context.Background(), "tenanta", bytes.NewReader([]byte("a's secret")), PutMeta{})
 	if err != nil {
 		t.Fatalf("Put: %v", err)
@@ -275,16 +278,16 @@ func TestLocalTenantIsolation(t *testing.T) {
 		t.Fatalf("cross-tenant Get err = %v, want ErrNotFound", err)
 	}
 	// And the blob is physically under tenant A's directory, not a shared root.
-	if n := countFiles(t, filepath.Join(l.root, "tenanta")); n != 1 {
+	if n := countFiles(t, filepath.Join(root, "tenanta")); n != 1 {
 		t.Fatalf("tenant A blob count = %d, want 1", n)
 	}
-	if _, err := os.Stat(filepath.Join(l.root, "tenantb")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "tenantb")); !os.IsNotExist(err) {
 		t.Fatalf("tenant B directory should not exist, stat err = %v", err)
 	}
 }
 
 func TestLocalPut_PathTraversal_OriginalNameIsInert(t *testing.T) {
-	l := newLocal(t)
+	l, root := newLocal(t)
 	content := []byte("traversal attempt")
 	sum := sha256.Sum256(content)
 	wantHex := hex.EncodeToString(sum[:])
@@ -296,22 +299,23 @@ func TestLocalPut_PathTraversal_OriginalNameIsInert(t *testing.T) {
 		t.Fatalf("Put: %v", err)
 	}
 	// The blob is at the hash path — never at a path derived from original_name.
-	blob := filepath.Join(l.root, "acme", wantHex[0:2], wantHex[2:4], wantHex)
+	blob := filepath.Join(root, "acme", wantHex[0:2], wantHex[2:4], wantHex)
 	if _, err := os.Stat(blob); err != nil {
 		t.Fatalf("blob not at hash path: %v", err)
 	}
 	// Nothing escaped the CAS root: exactly one file under root, named by the hash.
-	if n := countFiles(t, l.root); n != 1 {
+	if n := countFiles(t, root); n != 1 {
 		t.Fatalf("path traversal: %d files under root, want 1 (the hashed blob)", n)
 	}
-	// original_name survives ONLY as metadata.
-	if m.OriginalName != "../../../../etc/passwd" {
-		t.Fatalf("original_name metadata = %q, want it preserved verbatim", m.OriginalName)
+	// original_name survives ONLY as metadata, SANITIZED at rest (FILES-V2 /
+	// OWASP: basename only — no traversal sequences stored anywhere).
+	if m.OriginalName != "passwd" {
+		t.Fatalf("original_name metadata = %q, want sanitized %q", m.OriginalName, "passwd")
 	}
 }
 
 func TestLocalPut_InvalidTenant(t *testing.T) {
-	l := newLocal(t)
+	l, _ := newLocal(t)
 	for _, bad := range []string{"", "../etc", "a/b", "UPPER"} {
 		if _, err := l.Put(context.Background(), bad, bytes.NewReader([]byte("x")), PutMeta{}); err == nil {
 			t.Fatalf("Put with invalid tenant %q should fail", bad)

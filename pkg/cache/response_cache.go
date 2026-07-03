@@ -121,11 +121,12 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		// File downloads (GET /api/files/{id}, FILES-V1) stream an unbounded binary
+		// File downloads (GET /api/files/{id} and the signed-token route
+		// GET /files/signed/{token}, FILES-V1/V2) stream an unbounded binary
 		// blob: buffering it into captureWriter — let alone storing it — would put
 		// the whole file in RAM (and, for a cacheable role, cache it). Bypass for
 		// the same reason SSE does, on the same hot path (one HasPrefix per GET).
-		if strings.HasPrefix(r.URL.Path, "/api/files/") {
+		if strings.HasPrefix(r.URL.Path, "/api/files/") || strings.HasPrefix(r.URL.Path, "/files/signed/") {
 			next.ServeHTTP(w, r)
 			return
 		}
