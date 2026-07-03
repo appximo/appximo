@@ -26,18 +26,37 @@
 	const tint = $derived(
 		d.onDelete === 'cascade' ? 'cascade' : d.onDelete === 'set_null' ? 'setnull' : 'restrict'
 	);
+
+	// Relations-block embed edge (UI-F4-S4): dashed + a cardinality chip, quieter
+	// than a field FK so a relation-heavy schema reads ordered, not saturated.
+	const cardinality = $derived(
+		d.embed?.kind === 'has_many' ? '1:N' : d.embed?.kind === 'belongs_to' ? 'N:1' : 'N:N'
+	);
 </script>
 
-<BaseEdge {id} path={path[0]} {markerEnd} class={selected ? 'rel-edge sel' : 'rel-edge'} />
-
-<EdgeLabel x={path[1]} y={path[2]}>
-	<div class="rel-label {tint}" class:sel={selected}>
-		<span class="rl-name">{d.fieldName}</span>
-		{#if d.onDelete && d.onDelete !== 'restrict'}
-			<span class="rl-od">{d.onDelete === 'cascade' ? '⇊' : '∅'}</span>
-		{/if}
-	</div>
-</EdgeLabel>
+{#if d.embed}
+	<BaseEdge {id} path={path[0]} {markerEnd} class={selected ? 'emb-edge sel' : 'emb-edge'} />
+	<EdgeLabel x={path[1]} y={path[2]}>
+		<div
+			class="rel-label embed"
+			class:sel={selected}
+			title={`?include=${d.embed.name} — ${d.embed.kind}`}
+		>
+			<span class="rl-name">{d.embed.name}</span>
+			<span class="rl-card">{cardinality}</span>
+		</div>
+	</EdgeLabel>
+{:else}
+	<BaseEdge {id} path={path[0]} {markerEnd} class={selected ? 'rel-edge sel' : 'rel-edge'} />
+	<EdgeLabel x={path[1]} y={path[2]}>
+		<div class="rel-label {tint}" class:sel={selected}>
+			<span class="rl-name">{d.fieldName}</span>
+			{#if d.onDelete && d.onDelete !== 'restrict'}
+				<span class="rl-od">{d.onDelete === 'cascade' ? '⇊' : '∅'}</span>
+			{/if}
+		</div>
+	</EdgeLabel>
+{/if}
 
 <style>
 	:global(.svelte-flow__edge .rel-edge) {
@@ -47,6 +66,19 @@
 	:global(.svelte-flow__edge .rel-edge.sel) {
 		stroke: var(--brand);
 		stroke-width: 2;
+	}
+
+	/* Embed (relations-block) edge: dashed and one step quieter than a field FK —
+	   both themes inherit the token, so light/dark stay coherent. */
+	:global(.svelte-flow__edge .emb-edge) {
+		stroke: color-mix(in srgb, var(--border-strong) 72%, transparent);
+		stroke-width: 1.25;
+		stroke-dasharray: 5 4;
+	}
+	:global(.svelte-flow__edge .emb-edge.sel) {
+		stroke: var(--brand);
+		stroke-width: 1.75;
+		stroke-dasharray: 5 4;
 	}
 
 	.rel-label {
@@ -73,6 +105,28 @@
 	}
 	.rel-label.setnull {
 		border-color: color-mix(in srgb, var(--warn) 55%, var(--border-strong));
+	}
+	/* Embed label: dashed border echoes the edge; the cardinality chip is the
+	   double channel (text, not colour alone) that names the kind at a glance. */
+	.rel-label.embed {
+		border-style: dashed;
+		color: var(--text-3);
+		font-weight: 500;
+	}
+	.rel-label.embed.sel {
+		color: var(--brand);
+	}
+	.rl-card {
+		padding: 0 4px;
+		border-radius: 6px;
+		font-size: 9.5px;
+		font-weight: 700;
+		letter-spacing: 0.03em;
+		background: var(--surface-2);
+		color: var(--text-2);
+	}
+	.rel-label.embed.sel .rl-card {
+		color: var(--brand);
 	}
 	.rl-od {
 		font-weight: 800;

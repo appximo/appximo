@@ -54,7 +54,15 @@ import { blankSchema } from '../schema/samples';
 import { newId } from '../schema/ids';
 
 export type EntityNodeData = { entityId: string };
-export type RelationEdgeData = { fieldName: string; onDelete?: string; selfRef?: boolean };
+/** Edge payload: a field-FK edge carries fieldName/onDelete; a relations-block
+ *  embed edge (UI-F4-S4) carries `embed` instead — the custom edge renders them
+ *  distinctly (solid vs dashed, FK label vs name + 1:N/N:1/N:N chip). */
+export type RelationEdgeData = {
+	fieldName?: string;
+	onDelete?: string;
+	selfRef?: boolean;
+	embed?: { name: string; kind: 'has_many' | 'belongs_to' | 'many_to_many' };
+};
 export type FlowNode = Node<EntityNodeData, 'entity'>;
 export type FlowEdge = Edge<RelationEdgeData, 'relation'>;
 
@@ -240,6 +248,26 @@ class EditorStore {
 					type: 'relation',
 					markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
 					data: { fieldName: f.name, onDelete: f.def.on_delete, selfRef: target.id === e.id }
+				});
+			}
+		}
+		// Relations-block embeds (UI-F4-S4): each authored relation is projected as
+		// its own edge, anchored at the node HEADER handle (vs the field row a FK
+		// edge leaves from) so the two never overlap. Derived + informative — the
+		// panel is the source of truth; a dangling target draws nothing.
+		for (const e of this.entities) {
+			for (const r of e.relations) {
+				const target = this.getEntityByName(r.def.target);
+				if (!target) continue;
+				edges.push({
+					id: `emb:${e.id}:${r.id}`,
+					source: e.id,
+					target: target.id,
+					sourceHandle: NEW_SOURCE_HANDLE,
+					targetHandle: TARGET_HANDLE,
+					type: 'relation',
+					markerEnd: { type: MarkerType.ArrowClosed, width: 13, height: 13 },
+					data: { embed: { name: r.name, kind: r.def.type }, selfRef: target.id === e.id }
 				});
 			}
 		}
@@ -607,9 +635,15 @@ class EditorStore {
 
 	/** Delete the FK behind an edge id ("fk:<entityId>:<fieldId>"). */
 	deleteEdge(edgeId: string) {
-		const m = /^fk:([^:]+):(.+)$/.exec(edgeId);
-		if (!m) return;
-		this.deleteField(m[1], m[2]);
+		const fk = /^fk:([^:]+):(.+)$/.exec(edgeId);
+		if (fk) {
+			this.deleteField(fk[1], fk[2]);
+			return;
+		}
+		// An embed edge is the relation itself — deleting it removes the relation
+		// (same contract as an FK edge removing its field).
+		const emb = /^emb:([^:]+):(.+)$/.exec(edgeId);
+		if (emb) this.removeRelation(emb[1], emb[2]);
 	}
 
 	// ── data model: indexes + composite foreign keys (UI-F2-S4, MIG-F1-S5) ─────
@@ -754,6 +788,7 @@ class EditorStore {
 			def: { type: 'has_many', target: '', fk: '' }
 		};
 		e.relations.push(rel);
+		this.rebuildEdges();
 		this.bump();
 		return rel;
 	}
@@ -762,6 +797,7 @@ class EditorStore {
 		const e = this.getEntity(entityId);
 		if (!e) return;
 		e.relations = e.relations.filter((r) => r.id !== relId);
+		this.rebuildEdges();
 		this.bump();
 	}
 
@@ -778,6 +814,7 @@ class EditorStore {
 		if (e.relations.some((x) => x.id !== relId && x.name === name)) return 'duplicate relation name';
 		if (e.fields.some((f) => f.name === name)) return 'collides with a field of the same name';
 		r.name = name;
+		this.rebuildEdges(); // the embed edge label shows the name
 		this.bump();
 		return null;
 	}
@@ -815,6 +852,7 @@ class EditorStore {
 			r.def.fk = '';
 			delete r.def.target_fk;
 		}
+		if (key === 'type' || key === 'target') this.rebuildEdges(); // kind chip / edge endpoints
 		this.bump();
 	}
 
