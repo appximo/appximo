@@ -88,6 +88,7 @@ chore: upgrade pgx to v5.9.2
 - `gofmt` is non-negotiable — format before committing. `make fmt-check` runs
   the exact gate CI enforces (it fails listing every unformatted file).
 - No comments that describe *what* the code does — names do that. Only explain *why* when it's non-obvious.
+- Docs that cite code use **file + symbol** (`pkg/schema/validator.go` `validateRBAC`), never `file:line` — line numbers drift, symbol names don't (see `docs/SCHEMA_REFERENCE.md`, `docs/MENTAL_MODEL.md`).
 - No new abstraction unless three concrete use cases exist.
 - Security-sensitive code (schema validation, SQL building, RBAC) requires a test for each invariant.
 

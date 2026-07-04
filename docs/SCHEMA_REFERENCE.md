@@ -11,10 +11,11 @@ server at boot. There are no handlers, models, or migration files — the schema
 *is* the contract. This document specifies that contract precisely enough that a
 human (or an AI generation layer) can author a valid schema from it alone.
 
-> Note on source references: the `file:line` pointers below were exact when this
-> reference was extracted and some have since drifted as files grew — treat the
-> **file + named symbol** as authoritative and line numbers as approximate
-> (grep the symbol). The *grammar* statements themselves are kept current.
+> Source references use **file + symbol** (a function/type/var/const name), not
+> line numbers — line numbers drift as files grow, symbol names don't. Each
+> citation names the file and the symbol its rule lives in; find it with your
+> editor's go-to-symbol or `grep`. (Same convention as
+> [MENTAL_MODEL.md](MENTAL_MODEL.md).)
 
 ## Provenance — this is extracted from the code
 
@@ -24,7 +25,7 @@ was read out of the validator and parser (`pkg/schema`), the query builder
 (`pkg/rbac`), the migration bridge (`pkg/migration`, `pkg/schemadiff`), the hook
 runtime (`pkg/extensions`), and the boot wiring (`app.go`). The authority for
 "what is a valid schema" is `schema.Validate` + `schema.LoadFromFile`
-(`pkg/schema`). Citations are inline as `file:line`.
+(`pkg/schema`). Citations are inline as **file + symbol**.
 
 This is documentation only — no engine behavior was changed. Where the code does
 something that diverges from what a reader would reasonably expect (or from how a
@@ -33,7 +34,7 @@ feature is documented elsewhere), it is recorded — not fixed — in
 
 ## How to read this
 
-- **`file:line` citations** point at the rule's implementation.
+- **file + symbol citations** point at the rule's implementation (grep the symbol).
 - **`§N` cross-references** point at another section of this document.
 - A claim of the form *"rejected at load"* means `schema.Validate` (or
   `LoadFromFile`'s strict-key / required-field pass) returns an error and the
@@ -60,11 +61,11 @@ feature is documented elsewhere), it is recorded — not fixed — in
 
 ## 1. Root schema structure
 
-An Appitools project is **one JSON file**. It is loaded in two stages and the second only runs if the first succeeds (`app.go:143-153`): `schema.LoadFromFile` (parse + strict-key + required-field check) then `schema.Validate` (semantic validation). Both must pass clean for the engine to boot.
+An Appitools project is **one JSON file**. It is loaded in two stages and the second only runs if the first succeeds (`app.go`): `schema.LoadFromFile` (parse + strict-key + required-field check) then `schema.Validate` (semantic validation). Both must pass clean for the engine to boot.
 
 ### 1.1 Top-level keys
 
-The root object is the `APISchema` struct (`pkg/schema/types.go:8-19`). Its complete, exhaustive key set — and the only keys accepted at the top level — is (`pkg/schema/keys.go:55`):
+The root object is the `APISchema` struct (`pkg/schema/types.go`). Its complete, exhaustive key set — and the only keys accepted at the top level — is (`pkg/schema/keys.go`):
 
 | JSON key | Type | Required? | Meaning |
 |---|---|---|---|
@@ -75,18 +76,18 @@ The root object is the `APISchema` struct (`pkg/schema/types.go:8-19`). Its comp
 | `rbac` | object (`{ "roles": { … } }`) | No (structurally optional) | Role policies. See §7. |
 | `workflows` | object (`map[string]WorkflowSchema`) | No — **reserved, non-functional** (see §1.4) | Forward-compatibility only; no executor runs it. |
 
-**Exact required-field rule** (`pkg/schema/loader.go:32-37`): only `$schema` and `version` are checked, and only for emptiness (the zero value of a Go `string`, which is also what an absent key unmarshals to). The exact failure messages are:
+**Exact required-field rule** (`pkg/schema/loader.go`): only `$schema` and `version` are checked, and only for emptiness (the zero value of a Go `string`, which is also what an absent key unmarshals to). The exact failure messages are:
 
 - missing/empty `$schema` → `missing required field "$schema"`
 - missing/empty `version` → `missing required field "version"`
 
 `$schema` is checked first; if it is empty the loader returns that error before even looking at `version`. Neither value is format-checked — `$schema: "x"` and `version: "banana"` both pass; only emptiness is rejected. (`version` is a Go `string` field, so a JSON number such as `"version": 1` fails to unmarshal at the parse stage — `parse schema JSON: …` — rather than at the required-field stage.)
 
-`name`, `resources`, and `rbac` are **structurally optional** — neither `LoadFromFile` nor `Validate` requires their presence. `Validate` (`pkg/schema/validator.go:59-62`) simply iterates `s.Resources` and `s.RBAC.Roles`; absent/empty maps yield zero iterations and zero errors. (Whether a useful API results is another matter — a schema with no resources exposes no CRUD routes, and a request whose role is not in `rbac.roles` is denied by RBAC's deny-by-default.)
+`name`, `resources`, and `rbac` are **structurally optional** — neither `LoadFromFile` nor `Validate` requires their presence. `Validate` (`pkg/schema/validator.go`) simply iterates `s.Resources` and `s.RBAC.Roles`; absent/empty maps yield zero iterations and zero errors. (Whether a useful API results is another matter — a schema with no resources exposes no CRUD routes, and a request whose role is not in `rbac.roles` is denied by RBAC's deny-by-default.)
 
 ### 1.2 Two-stage load contract & strict-key rejection
 
-**Stage 1 — `LoadFromFile(path)` (`pkg/schema/loader.go:10-40`):**
+**Stage 1 — `LoadFromFile(path)` (`pkg/schema/loader.go`):**
 1. Read the file (`read schema file: …` on I/O error).
 2. `json.Unmarshal` into `APISchema` (`parse schema JSON: …` on malformed JSON).
 3. `CheckUnknownKeys(rawBytes)` — strict-key validation against the **raw** bytes (run after unmarshalling, on the original bytes, because `json.Unmarshal` has already silently dropped unknown keys by the time it returns). Any unknown key aborts the load with:
@@ -99,24 +100,24 @@ The root object is the `APISchema` struct (`pkg/schema/types.go:8-19`). Its comp
 
 Note the order: strict-key (step 3) runs **before** the required-field check (step 4), so an unknown key is reported even when `$schema`/`version` are also missing.
 
-**Strict keys at EVERY level.** `CheckUnknownKeys` (`pkg/schema/keys.go:20-158`) walks the entire document and rejects any key outside the documented set *for that level*, listing the valid keys in the error. This is deliberate: an unknown key is a typo, not an extension (e.g. `webhooks` instead of `hooks`, `refcolumns` instead of `ref_columns`), and a silently-dropped key would become quietly dead config. The levels it strict-checks (each "valid keys" list below is emitted in the exact argument order shown):
+**Strict keys at EVERY level.** `CheckUnknownKeys` (`pkg/schema/keys.go`) walks the entire document and rejects any key outside the documented set *for that level*, listing the valid keys in the error. This is deliberate: an unknown key is a typo, not an extension (e.g. `webhooks` instead of `hooks`, `refcolumns` instead of `ref_columns`), and a silently-dropped key would become quietly dead config. The levels it strict-checks (each "valid keys" list below is emitted in the exact argument order shown):
 
-- root: `$schema, version, name, resources, rbac, workflows` (keys.go:55)
-- each resource: `fields, hooks, indexes, events, relations, renamed_from, foreign_keys` (keys.go:60)
-- each `foreign_keys[]` entry: `columns, target, ref_columns, on_delete, on_update` (keys.go:68)
-- each relation: `type, target, fk, through, target_fk, limit` (keys.go:75)
-- each `indexes[]` entry: `fields, unique` (keys.go:85)
-- each field: `type, required, unique, auto, enum, relation, on_delete, on_update, references, renamed_from, default, min, max, minLength, maxLength, pattern, format, state_machine` (keys.go:93-94)
-- each field's `state_machine`: `initial, transitions` (the `transitions` map's *keys* are user state names, so only these two top-level keys are checked) (keys.go:97-99)
-- each hook event name must be one of `before_create, after_create, before_update, after_update` (keys.go:103-111) and each hook object: `type, script, url, hmac_secret_env, wasm_module, wasm_fn, timeout` (keys.go:113-114)
-- `rbac`: `roles` (keys.go:119); each role: `resources, actions, conditions, fields, permissions` (keys.go:123); each role `conditions`: `field, op, val` (keys.go:125); each `permissions.<resource>`: `actions, conditions, condition_actions, fields` (keys.go:132), and that permission's nested `conditions`: `field, op, val` (keys.go:134)
-- each workflow: `trigger, steps`; the trigger: `type, event, resource, cron, path`; each step: `name, type, ref, config, next` (keys.go:142-151) — note `step.config` is the **one deliberately free-form map** (its inner keys are not strict-checked).
+- root: `$schema, version, name, resources, rbac, workflows` (keys.go)
+- each resource: `fields, hooks, indexes, events, relations, renamed_from, foreign_keys` (keys.go)
+- each `foreign_keys[]` entry: `columns, target, ref_columns, on_delete, on_update` (keys.go)
+- each relation: `type, target, fk, through, target_fk, limit` (keys.go)
+- each `indexes[]` entry: `fields, unique` (keys.go)
+- each field: `type, required, unique, auto, enum, relation, on_delete, on_update, references, renamed_from, default, min, max, minLength, maxLength, pattern, format, state_machine` (keys.go)
+- each field's `state_machine`: `initial, transitions` (the `transitions` map's *keys* are user state names, so only these two top-level keys are checked) (keys.go)
+- each hook event name must be one of `before_create, after_create, before_update, after_update` (keys.go) and each hook object: `type, script, url, hmac_secret_env, wasm_module, wasm_fn, timeout` (keys.go)
+- `rbac`: `roles` (keys.go); each role: `resources, actions, conditions, fields, permissions` (keys.go); each role `conditions`: `field, op, val` (keys.go); each `permissions.<resource>`: `actions, conditions, condition_actions, fields` (keys.go), and that permission's nested `conditions`: `field, op, val` (keys.go)
+- each workflow: `trigger, steps`; the trigger: `type, event, resource, cron, path`; each step: `name, type, ref, config, next` (keys.go) — note `step.config` is the **one deliberately free-form map** (its inner keys are not strict-checked).
 
-A non-object value where an object is expected is reported (`must be a JSON object`), not silently ignored (keys.go:43-53). The root itself, if not a JSON object, is reported as `schema is not a JSON object: …` (keys.go:23). Errors are sorted by field path (keys.go:156).
+A non-object value where an object is expected is reported (`must be a JSON object`), not silently ignored (keys.go). The root itself, if not a JSON object, is reported as `schema is not a JSON object: …` (keys.go). Errors are sorted by field path (keys.go).
 
-**Stage 2 — `schema.Validate(s)` (`pkg/schema/validator.go:59`):** semantic validation over the already-parsed, strict-key-clean struct: identifier regexes, reserved names, type/relation/RBAC/state-machine/default coherence, etc. (covered in the later sections). On the boot path `app.New` joins all returned errors into one message prefixed `appitools: invalid schema:` (app.go:147-153). The `appitools validate <schema>` subcommand runs the same two stages.
+**Stage 2 — `schema.Validate(s)` (`pkg/schema/validator.go`):** semantic validation over the already-parsed, strict-key-clean struct: identifier regexes, reserved names, type/relation/RBAC/state-machine/default coherence, etc. (covered in the later sections). On the boot path `app.New` joins all returned errors into one message prefixed `appitools: invalid schema:` (app.go). The `appitools validate <schema>` subcommand runs the same two stages.
 
-Identifier rule relevant at this level: resource and field names both match the regex `^[a-z][a-z0-9_]*$` — lowercase, start with a letter, `_` for multi-word names; `-` is rejected (`pkg/schema/validator.go:27-28, 65-68`). Reserved resource names: any name with the `auth_` prefix and the exact name `transaction` are rejected (validator.go:39-44, 70-80).
+Identifier rule relevant at this level: resource and field names both match the regex `^[a-z][a-z0-9_]*$` — lowercase, start with a letter, `_` for multi-word names; `-` is rejected (`pkg/schema/validator.go`). Reserved resource names: any name with the `auth_` prefix and the exact name `transaction` are rejected (validator.go).
 
 ### 1.3 Minimal complete example
 
@@ -147,9 +148,9 @@ Identifier rule relevant at this level: resource and field names both match the 
 
 ### 1.4 The `workflows` block — reserved, non-functional
 
-`workflows` is **parsed for forward-compatibility only; no executor runs it** (`pkg/schema/types.go:15-18, 391-396`). It exists so a schema that declares workflows loads today and stays valid when the orchestration engine eventually ships. Its keys ARE strict-checked (keys.go:139-153), so typos are still caught, but nothing in the engine consults the block at runtime.
+`workflows` is **parsed for forward-compatibility only; no executor runs it** (`pkg/schema/types.go`). It exists so a schema that declares workflows loads today and stays valid when the orchestration engine eventually ships. Its keys ARE strict-checked (keys.go), so typos are still caught, but nothing in the engine consults the block at runtime.
 
-Reserved shape (`pkg/schema/types.go:398-419`):
+Reserved shape (`pkg/schema/types.go`):
 
 ```json
 "workflows": {
@@ -367,29 +368,29 @@ Here both `region_code` and `branch_code` on `orders` are nullable (not `require
 
 A resource's data shape is declared under its `fields` map: each key is a field
 name and each value a `FieldDef`. Field names are validated against
-`^[a-z][a-z0-9_]*$` (`pkg/schema/validator.go:28`, `fieldNameRe`) — lowercase, start
+`^[a-z][a-z0-9_]*$` (`pkg/schema/validator.go`, `fieldNameRe`) — lowercase, start
 with a letter, `_` for multi-word names; anything else rejects the schema with
-`invalid field name "<name>": must match ^[a-z][a-z0-9_]*$` (`validator.go:110-115`).
+`invalid field name "<name>": must match ^[a-z][a-z0-9_]*$` (`validator.go`).
 
 ### 3.1 The implicit `id` primary key
 
 Every resource gets an implicit `id` column of type UUID, `NOT NULL`, primary key,
 `DEFAULT gen_random_uuid()` — added by the migration builder, not declared in JSON
-(`pkg/migration/desired.go:53-59`). **Do NOT declare `id` in `fields`**: the builder
-explicitly skips a field literally named `id` (`desired.go:64`), and RBAC/FK code
+(`pkg/migration/desired.go`). **Do NOT declare `id` in `fields`**: the builder
+explicitly skips a field literally named `id` (`desired.go`), and RBAC/FK code
 treats `id` as always-present (`rbacFieldExists` returns true for `id`,
-`validator.go:433-439`; `refColumnKind`/`targetFieldType` treat `id` as `uuid`,
-`validator.go:705-725`). `id` is also the implicit FK destination (see §3.4) and the
+`validator.go`; `refColumnKind`/`targetFieldType` treat `id` as `uuid`,
+`validator.go`). `id` is also the implicit FK destination (see §3.4) and the
 default sort/keyset key (see the query section).
 
 ### 3.2 The field type set
 
 `type` is required and must be one of exactly nine values from `validFieldTypes`
-(`pkg/schema/validator.go:46-56`). Any other value — notably `number` — rejects the
-schema with `unknown field type "<type>"` (`validator.go:117-122`). The Postgres
-column type is fixed by `TypeForAPIType` (`pkg/schemadiff/parsetype.go:155-176`), and
+(`pkg/schema/validator.go`). Any other value — notably `number` — rejects the
+schema with `unknown field type "<type>"` (`validator.go`). The Postgres
+column type is fixed by `TypeForAPIType` (`pkg/schemadiff/parsetype.go`), and
 the filter operators a type accepts are fixed by `operatorsForType`
-(`pkg/query/builder.go:35-44`).
+(`pkg/query/builder.go`).
 
 | `type` | Meaning | Postgres column | Filter ops available |
 |---|---|---|---|
@@ -405,17 +406,17 @@ the filter operators a type accepts are fixed by `operatorsForType`
 
 Notes verified in code:
 - `string` and `text` are byte-identical at the column level (both `BaseText` →
-  `TEXT`, `parsetype.go:157-158`) and share the same filter ops; `text` exists only
+  `TEXT`, `parsetype.go`) and share the same filter ops; `text` exists only
   as a documentation hint. The declarative validation keys `minLength`/`maxLength`/
   `pattern`/`format` apply to both (`stringTypes = {string, text}`,
-  `validator.go:864`), and `min`/`max` apply to the three numeric types
-  (`numericTypes = {int, int64, float64}`, `validator.go:861`).
+  `validator.go`), and `min`/`max` apply to the three numeric types
+  (`numericTypes = {int, int64, float64}`, `validator.go`).
 - `after`/`before` on `time` are aliases: `filterToSQL` maps `after`→`>`,
-  `before`→`<` (`builder.go:404-407`).
+  `before`→`<` (`builder.go`).
 - A filter operator outside a KNOWN type's set returns `400`
-  `operator "<op>" not allowed for type "<type>" (allowed: …)` (`builder.go:386-393`).
+  `operator "<op>" not allowed for type "<type>" (allowed: …)` (`builder.go`).
   A `filter[<field>]` for an unknown field returns `400`
-  `unknown filter field: <field>` (`builder.go:128`).
+  `unknown filter field: <field>` (`builder.go`).
 
 Example resource exercising the type table:
 
@@ -453,23 +454,23 @@ These keys shape the column and its constraints. (The declarative *validation* k
 
 - **`type`** (string, required) — see §3.2.
 - **`required`** (bool, default false) — emits a `NOT NULL` column
-  (`desired.go:81`, `NotNull: f.Required`). A POST/PUT (full write) that omits a
+  (`desired.go`, `NotNull: f.Required`). A POST/PUT (full write) that omits a
   required field is a `422` validation failure; a PATCH validates only the fields
   actually sent (partial semantics). A required field that also declares a `default`
   is satisfied by the default when omitted (see §4).
 - **`unique`** (bool, default false) — emits a single-column `UNIQUE` constraint
-  named `<resource>_<field>_key` (`desired.go:84-87`). A write that collides returns
+  named `<resource>_<field>_key` (`desired.go`). A write that collides returns
   `409 Conflict` (the raw Postgres error is masked). A composite unique constraint
   is declared via `indexes` (`{ "fields": [...], "unique": true }`), not here.
 - **`auto`** (bool, default false) — engine-managed timestamp column: `TIMESTAMPTZ
-  DEFAULT now()`, nullable (`desired.go:89-96`). Intended for `created_at` /
+  DEFAULT now()`, nullable (`desired.go`). Intended for `created_at` /
   `updated_at`. An `auto` field is exempt from the `required` check, and **cannot
   declare a `default`** — `validateDefault` rejects it with
-  `default cannot be set on an auto field` (`validator.go:737-739`).
+  `default cannot be set on an auto field` (`validator.go`).
 - **`enum`** (array of strings) — restricts the value to the listed set. String
   values only; a write outside the set is a `422`. The key must not be present and
   empty: an empty array rejects the schema with `enum must not be empty`
-  (`validator.go:235-240`).
+  (`validator.go`).
 - **`default`** — applied on create when the field is omitted; type-checked at
   load. Full rules (per-type literal forms, the dynamic `"now"` on `time`, enum
   membership, interaction with `required` and `auto`) are in §4.
@@ -492,49 +493,49 @@ generates one read-only subroute (see below).
 
 **`relation`** (string) — the name of the referenced resource. It must be a known
 resource in the same schema, else the schema is rejected with
-`relation "<name>" references unknown resource` (`validator.go:124-131`). The FK
+`relation "<name>" references unknown resource` (`validator.go`). The FK
 column references the target's `id` by default (or the `references` column).
 
 **`on_delete`** — the referential action when the parent row is deleted. Valid
 values are exactly `restrict`, `cascade`, `set_null`
-(`validOnDeleteActions`, `types.go:288-293`). **Unset defaults to `restrict`**
-(`refActionForOnDelete`, `desired.go:239-248` — empty and `"restrict"` both map to
+(`validOnDeleteActions`, `types.go`). **Unset defaults to `restrict`**
+(`refActionForOnDelete`, `desired.go` — empty and `"restrict"` both map to
 `Restrict`). `restrict` rejects a delete of a still-referenced row with `409`;
 `cascade` deletes the children; `set_null` nulls the FK column. Rejection
-conditions (`validator.go:136-154`):
+conditions (`validator.go`):
 - `on_delete` without `relation` → `on_delete is only valid on a field that declares a relation`
 - an unknown value → `unknown on_delete "<v>": must be one of restrict, cascade, set_null`
 - `set_null` on a `required` field → `on_delete set_null requires a nullable column, but this field is required (NOT NULL)`
 
 **`on_update`** — the action when the parent row's referenced key changes. Same
 value set `restrict`/`cascade`/`set_null` (`validOnUpdateActions`,
-`types.go:306-312`). **Unset defaults to NO ACTION** — deliberately NOT `restrict`
-(`refActionForOnUpdate`, `desired.go:163-174`; the empty/default case returns
+`types.go`). **Unset defaults to NO ACTION** — deliberately NOT `restrict`
+(`refActionForOnUpdate`, `desired.go`; the empty/default case returns
 `NoAction`). This asymmetry with `on_delete` exists so adding `on_update` to an
 existing schema produces no churn on FKs already created without an `ON UPDATE`
 clause (Postgres stores such FKs with confupdtype `'a'` = NO ACTION). Rejection
-conditions mirror `on_delete` (`validator.go:159-177`): only valid with `relation`;
+conditions mirror `on_delete` (`validator.go`): only valid with `relation`;
 unknown value rejected; `set_null` on a `required` field rejected.
 
 **`references`** (string) — the target COLUMN the FK points at. **Unset (or `"id"`)
-defaults to `"id"`** (`refColumnOrID`, `desired.go:150-157`; the load-time validator
+defaults to `"id"`** (`refColumnOrID`, `desired.go`; the load-time validator
 also skips the unique/type checks when `references` is empty or `"id"`,
-`validator.go:183`). A non-`id` value must name a column that is UNIQUE on the target
-and be type-compatible with this field (`validator.go:183-202`). Rejection
+`validator.go`). A non-`id` value must name a column that is UNIQUE on the target
+and be type-compatible with this field (`validator.go`). Rejection
 conditions:
 - `references` without `relation` → `references is only valid on a field that declares a relation`
-- a non-unique target column → `references "<col>" must be the target's id or a UNIQUE column of "<target>" (a foreign key may only point at a primary key or unique column)` (uniqueness is satisfied by the target's `id`, a field with `unique: true`, or a single-column unique `indexes` entry — `columnsAreUniqueOnTarget`, `validator.go:643-658`)
-- a type mismatch → `references "<col>" has an incompatible type: this field is "<type>" but <target>.<col> is "<targetType>"` (FK type classes from `pgKindForAPIType`: `string`/`text`/`json`→`text`, `int`→`integer`, `int64`→`bigint`, `float64`→`double`, `bool`→`bool`, `uuid`→`uuid`, `time`→`timestamptz`; `id` is `uuid`, `validator.go:682-713`)
+- a non-unique target column → `references "<col>" must be the target's id or a UNIQUE column of "<target>" (a foreign key may only point at a primary key or unique column)` (uniqueness is satisfied by the target's `id`, a field with `unique: true`, or a single-column unique `indexes` entry — `columnsAreUniqueOnTarget`, `validator.go`)
+- a type mismatch → `references "<col>" has an incompatible type: this field is "<type>" but <target>.<col> is "<targetType>"` (FK type classes from `pgKindForAPIType`: `string`/`text`/`json`→`text`, `int`→`integer`, `int64`→`bigint`, `float64`→`double`, `bool`→`bool`, `uuid`→`uuid`, `time`→`timestamptz`; `id` is `uuid`, `validator.go`)
 
 **Generated read subroute.** For a relation field, the engine registers
 `GET /api/{resource}/{id}/{relRoute}` returning the referenced record, where
-`relRoute = strings.TrimSuffix(fieldName, "_id")` (`pkg/codegen/builder.go:867`).
+`relRoute = strings.TrimSuffix(fieldName, "_id")` (`pkg/codegen/builder.go`).
 So `customer_id` → `GET /api/orders/{id}/customer`. The JOIN follows the FK to the
-`references` column (default `id`) (`builder.go:870-887`). A relation field whose
+`references` column (default `id`) (`builder.go`). A relation field whose
 name does NOT end in `_id` keeps its full name in the route (e.g. a field
 `customer_email` → `GET /api/orders/{id}/customer_email`; `manager_user_id` →
 `…/manager_user`). The FK column is also auto-indexed (`idx_<table>_<field>`,
-`desired.go:217-224`).
+`desired.go`).
 
 The subroute enforces the role's RBAC on the **referenced** resource (SEC-AUDIT-V1):
 it requires `read` on the target (→ `403` otherwise), injects the target's row
@@ -571,13 +572,13 @@ Example relation field in context:
 `renamed_from` declares this column's PREVIOUS name so the migration engine emits
 `ALTER TABLE … RENAME COLUMN <old> TO <new>` (metadata-only, data preserved, with
 the column's index/FK/unique following it) instead of a drop+add that would strand
-the data (`desired.go:82`, `RenamedFrom` wired onto the column).
+the data (`desired.go`, `RenamedFrom` wired onto the column).
 
 ```json
 "full_name": { "type": "string", "renamed_from": "nombre_completo" }
 ```
 
-Validation (`validator.go:204-232`):
+Validation (`validator.go`):
 - must be a valid identifier — else `invalid renamed_from "<old>": must match ^[a-z][a-z0-9_]*$`
 - must differ from the field's own name — else `renamed_from must differ from the field's own name`
 - cannot be `"id"` — else `cannot rename from "id" (the implicit primary key)`
@@ -585,7 +586,7 @@ Validation (`validator.go:204-232`):
 
 Once the rename is applied the key is inert (the old column no longer exists, so a
 re-provision is a no-op) and safe to leave in place. (A resource/table-level
-`renamed_from` exists analogously at the resource level, `validator.go:85-105`; see
+`renamed_from` exists analogously at the resource level, `validator.go`; see
 the resources section.)
 
 ### 3.6 What does not exist as a field type
@@ -602,10 +603,10 @@ elsewhere; they are recorded, not fixed.
 
 - **`json` fields accept the `eq` filter operator, not "none".** AGENTS.md and the
   README field-type table state `json` fields have NO filter operators. In code,
-  `json` is absent from `operatorsForType` (`builder.go:35-44`), so a
+  `json` is absent from `operatorsForType` (`builder.go`), so a
   `filter[<jsonfield>]=...` query falls into the `validateFilterOp` fallback for
   unknown types, which explicitly ALLOWS `eq` (`if op != "eq" { return error };
-  return nil` — `builder.go:378-385`). So `?filter[attributes][eq]=...` on a `json`
+  return nil` — `builder.go`). So `?filter[attributes][eq]=...` on a `json`
   field is accepted (compared as TEXT equality, since `json`→`TEXT`); any other op
   (`gt`, `partial`, …) is rejected. The validator never rejects a `json` filter
   itself. Net: real behaviour is `json` → `eq` only, not `json` → none. (The
@@ -614,12 +615,12 @@ elsewhere; they are recorded, not fixed.
 
 - **`unique` is single-column only; composite uniqueness is a separate code path.**
   `unique: true` produces exactly one single-column UNIQUE constraint named
-  `<resource>_<field>_key` (`desired.go:84-87`). There is no field-level way to
+  `<resource>_<field>_key` (`desired.go`). There is no field-level way to
   express composite uniqueness; that requires a resource-level `indexes` entry with
   `"unique": true`. The two keys are entirely separate.
 
 - **The relation read-subroute strips only a trailing `_id`.** `relRoute =
-  strings.TrimSuffix(fieldName, "_id")` (`builder.go:867`). For `customer_id` this
+  strings.TrimSuffix(fieldName, "_id")` (`builder.go`). For `customer_id` this
   yields `…/customer` as documented, but a relation field without an `_id` suffix
   keeps its full name verbatim (`customer` → `…/customer`; `manager_user_id` →
   `…/manager_user`). The doc phrasing "field name minus _id" is only correct when
@@ -627,13 +628,13 @@ elsewhere; they are recorded, not fixed.
 
 - **A regular field's `default` is intentionally NOT emitted as a Postgres column
   DEFAULT.** `buildDesiredSchema` deliberately ignores a regular field's `default`
-  when building the migration model (`desired.go:23-26`: "The field's `default` is
+  when building the migration model (`desired.go`: "The field's `default` is
   DELIBERATELY IGNORED"). Defaults are an app-layer concern applied on create by the
   engine, not a DB-level `DEFAULT`. Consequence: the database column has no DEFAULT;
   the value only materialises through the engine's create path. A direct SQL insert
   bypassing the engine would not get the default. Only `auto` fields and the implicit
   `id` carry real DB defaults — `now()` and `gen_random_uuid()` respectively
-  (`desired.go:57,92-93`).
+  (`desired.go`).
 
 ---
 
@@ -830,7 +831,7 @@ The compiled form (`compiledSM{initial, known}` in `pkg/schema/rules.go`) holds 
 
 These surface as the standard **422** declarative-validation response (`writeValidationErrs` → `{"error":"validation_failed","fields":[{"field":"status","rule":"state","message":"…"}]}`). An absent or `null` field is skipped (a PATCH that doesn't touch the status is unaffected).
 
-**Create — must be an INITIAL state** (`ValidateInitialStates`, `pkg/schema/rules.go`). Called on the create path only, after `ValidateWrite`. For every state-machine field present with a string value that is `known` but **not** `initial`, it returns `FieldRuleError{Rule:"state", Message:'cannot be created in state "<s>" (must be an initial state)'}` → **422**. So you cannot create a row already advanced in its lifecycle (e.g. create an order directly as `shipped`). This is wired on all three create paths: REST POST (`pkg/codegen/builder.go` ~L451), GraphQL `create<Singular>` (`pkg/graphql/handler.go` ~L1007), and a `create` op inside a transaction (`pkg/codegen/transaction.go` ~L248).
+**Create — must be an INITIAL state** (`ValidateInitialStates`, `pkg/schema/rules.go`). Called on the create path only, after `ValidateWrite`. For every state-machine field present with a string value that is `known` but **not** `initial`, it returns `FieldRuleError{Rule:"state", Message:'cannot be created in state "<s>" (must be an initial state)'}` → **422**. So you cannot create a row already advanced in its lifecycle (e.g. create an order directly as `shipped`). This is wired on all three create paths: REST POST (`pkg/codegen/builder.go`), GraphQL `create<Singular>` (`pkg/graphql/handler.go`), and a `create` op inside a transaction (`pkg/codegen/transaction.go`).
 
 **Update — only along a DECLARED transition, RACE-SAFE.** The transition is **not** enforced with a read-then-write; it is compiled directly into the UPDATE's `WHERE` clause by `appendStateTransitionGuard` (`pkg/codegen/builder.go`). For each state-machine field being SET to `newState`, it appends:
 
@@ -846,7 +847,7 @@ Consequences of this single WHERE guard:
 - It is **race-safe**: two concurrent updates can't both advance the same row — the move is permitted by the row's CURRENT state inside the atomic UPDATE, so one wins and the other matches **zero rows**. No read-modify-write window.
 - The guard appends **no clause** for an update touching no state-machine field, so a resource without one is byte-identical (no overhead).
 
-When the guarded UPDATE matches **zero rows**, `ExplainTransitionFailure` (`pkg/codegen/builder.go`) runs on the error path only (it is the sole place a current-state read happens): it reads the row's current state(s) and returns **422** `invalid transition for "<field>": from "<current>" to "<wanted>" is not allowed`, or **404** `not found` if the row vanished (a race), or **409** `the resource changed during the update; retry` if every state field already equalled its target (a concurrent change after the existence check). This is enforced on REST PUT/PATCH (`builder.go` ~L818-824), GraphQL `update<Singular>` (`pkg/graphql/handler.go` ~L1162), and an `update` op inside a transaction (`pkg/codegen/transaction.go`). A transition violation inside `POST /api/transaction` fails the WHOLE batch (all-or-nothing).
+When the guarded UPDATE matches **zero rows**, `ExplainTransitionFailure` (`pkg/codegen/builder.go`) runs on the error path only (it is the sole place a current-state read happens): it reads the row's current state(s) and returns **422** `invalid transition for "<field>": from "<current>" to "<wanted>" is not allowed`, or **404** `not found` if the row vanished (a race), or **409** `the resource changed during the update; retry` if every state field already equalled its target (a concurrent change after the existence check). This is enforced on REST PUT/PATCH (`builder.go`), GraphQL `update<Singular>` (`pkg/graphql/handler.go`), and an `update` op inside a transaction (`pkg/codegen/transaction.go`). A transition violation inside `POST /api/transaction` fails the WHOLE batch (all-or-nothing).
 
 ### Out of scope (honest limits)
 
@@ -1039,35 +1040,35 @@ Note also: `validateRelations` is **structural only** — it does NOT verify tha
 
 ## 7. RBAC — roles, permissions, conditions
 
-The `rbac` block declares the authorization policy. It is the schema's only access-control surface — there is no separate code path. Every request (REST and GraphQL, read or write, including aggregates and relation embeds) funnels through one call, `rbac.Policy.Evaluate(evalCtx, resource, action)` (`pkg/rbac/evaluator.go:31`), so a rule stated here applies uniformly to all of them.
+The `rbac` block declares the authorization policy. It is the schema's only access-control surface — there is no separate code path. Every request (REST and GraphQL, read or write, including aggregates and relation embeds) funnels through one call, `rbac.Policy.Evaluate(evalCtx, resource, action)` (`pkg/rbac/evaluator.go`), so a rule stated here applies uniformly to all of them.
 
 ### 7.1 Shape and key sets
 
-`rbac` is an object with exactly one valid key: `roles` (`pkg/schema/keys.go:118`). `roles` is a map from role name → role policy. The JWT `role` claim selects which policy applies; an unknown role is denied (`Evaluate` returns `Allowed:false` when the role is absent — `pkg/rbac/evaluator.go:32-35`).
+`rbac` is an object with exactly one valid key: `roles` (`pkg/schema/keys.go`). `roles` is a map from role name → role policy. The JWT `role` claim selects which policy applies; an unknown role is denied (`Evaluate` returns `Allowed:false` when the role is absent — `pkg/rbac/evaluator.go`).
 
 A role is expressed in **one of two mutually-exclusive forms**.
 
-**Role-global (legacy) form** — keys (strict-checked, `pkg/schema/keys.go:123`): `resources`, `actions`, `conditions`, `fields`. The single `conditions` and `fields` apply to **every** resource the role lists.
+**Role-global (legacy) form** — keys (strict-checked, `pkg/schema/keys.go`): `resources`, `actions`, `conditions`, `fields`. The single `conditions` and `fields` apply to **every** resource the role lists.
 
-**Per-resource form** — one key: `permissions`, a map from resource name → grant. Each grant has the strict key set `actions`, `conditions`, `condition_actions`, `fields` (`pkg/schema/keys.go:132`). Each resource is scoped by its **own** condition and field allowlist.
+**Per-resource form** — one key: `permissions`, a map from resource name → grant. Each grant has the strict key set `actions`, `conditions`, `condition_actions`, `fields` (`pkg/schema/keys.go`). Each resource is scoped by its **own** condition and field allowlist.
 
-A nested `conditions` object (in either form) has exactly the keys `field`, `op`, `val` (`pkg/schema/keys.go:125,134`).
+A nested `conditions` object (in either form) has exactly the keys `field`, `op`, `val` (`pkg/schema/keys.go`).
 
 Any key outside these sets rejects the schema with `unknown key "<k>" (valid keys: …)`.
 
 ### 7.2 Actions
 
-The valid action set is closed (`validRBACActions`, `pkg/schema/validator.go:313-315`):
+The valid action set is closed (`validRBACActions`, `pkg/schema/validator.go`):
 
 ```
 read | create | update | delete | *
 ```
 
-`*` grants all actions. Matching is by `actionAllowed` (`pkg/rbac/policy.go:78-85`): an action is allowed if the list contains `"*"` or the exact action string.
+`*` grants all actions. Matching is by `actionAllowed` (`pkg/rbac/policy.go`): an action is allowed if the list contains `"*"` or the exact action string.
 
 ### 7.3 `resources` (role-global form only)
 
-`resources` is a `json.RawMessage` that may be **either** the string `"*"` **or** an array of resource names (`pkg/rbac/policy.go:123-138`):
+`resources` is a `json.RawMessage` that may be **either** the string `"*"` **or** an array of resource names (`pkg/rbac/policy.go`):
 
 - `"*"` → wildcard, grants every resource.
 - `["tasks","projects"]` → only the listed resources.
@@ -1076,10 +1077,10 @@ A resource not listed (and not under a `"*"`) is denied. The parse is memoized p
 
 ### 7.4 Conditions (row-level filtering) — shape and the equality-only rule
 
-A `conditions` object is `{ "field", "op", "val" }` (`pkg/schema/types.go:385-389`).
+A `conditions` object is `{ "field", "op", "val" }` (`pkg/schema/types.go`).
 
 - `field` — the column the row is filtered on (must be a real column; see §7.6).
-- `val` — resolved by `resolveVar` (`pkg/rbac/evaluator.go:100-109`) to one of:
+- `val` — resolved by `resolveVar` (`pkg/rbac/evaluator.go`) to one of:
   - `$user_id` → the JWT subject (`EvalContext.UserID`),
   - `$external_client_id` → `EvalContext.ExternalClientID`,
   - anything else → used **as a literal** (e.g. `"published"` for a public-read role).
@@ -1089,7 +1090,7 @@ When a condition applies, a row excluded by it reads as **404, not 403** (the ro
 
 ### 7.5 `condition_actions` (per-resource form only — "read all, write own")
 
-`condition_actions` scopes the condition to a **subset** of the granted actions (`conditionAppliesToAction`, `pkg/rbac/evaluator.go:88-98`):
+`condition_actions` scopes the condition to a **subset** of the granted actions (`conditionAppliesToAction`, `pkg/rbac/evaluator.go`):
 
 - **empty / omitted** → the condition applies to **all** granted actions (the safe default, most restrictive).
 - a non-empty list → the condition applies only to the listed actions; actions not listed are **unconditional**.
@@ -1120,13 +1121,13 @@ admin with neither is unaffected):
 For a role that declares `permissions` (per-resource form), the following are
 enforced (exact messages):
 
-- **Mutual exclusivity.** If the role ALSO has any of `resources` / `actions` / `conditions` / `fields` (`validator.go:338`):
+- **Mutual exclusivity.** If the role ALSO has any of `resources` / `actions` / `conditions` / `fields` (`validator.go`):
   `"a role uses EITHER the role-global form (resources/actions/conditions/fields) OR per-resource permissions, not both — move the role-global keys into permissions entries"`
 - **Resource must exist.** A permission over an unknown resource:
   `permission references unknown resource "<name>"`
 - **Actions non-empty:** `at least one action is required (read, create, update, delete, or *)`
 - **Actions known:** `unknown action "<a>": must be one of read, create, update, delete, *`
-- **Condition field present + exists on that resource** (`rbacFieldExists` accepts the implicit `id` plus any declared field — `validator.go:433-439`):
+- **Condition field present + exists on that resource** (`rbacFieldExists` accepts the implicit `id` plus any declared field — `validator.go`):
   - empty: `condition field is required`
   - not a column: `condition field "<f>" does not exist on resource "<res>"`
 - **`condition_actions` rules:**
@@ -1156,22 +1157,22 @@ Richer RBAC row operators would require the same binding and are a future increm
 
 ### 7.8 Enforcement across operations (read, create, update, delete, aggregate, embeds)
 
-`Evaluate` returns the condition + field allowlist **of the requested resource** (legacy: the role-global ones; per-resource: the matched entry's own — `pkg/rbac/evaluator.go:40-81`). All operations on both REST and GraphQL go through it, so the scope is consistent.
+`Evaluate` returns the condition + field allowlist **of the requested resource** (legacy: the role-global ones; per-resource: the matched entry's own — `pkg/rbac/evaluator.go`). All operations on both REST and GraphQL go through it, so the scope is consistent.
 
 - **`fields`** is a response allowlist: only the listed columns are returned (`AllowedFields`).
 - **Conditions on reads/updates/deletes/aggregates** filter rows (equality, §7.7); an aggregate is scoped to the same row set, so totals never leak across principals.
-- **Conditions and `fields` are enforced on CREATE too** (mass-assignment block, `EnforceCreateRBAC`, `pkg/codegen/builder.go:1071-1102`, shared by REST POST and GraphQL `create…`):
-  - any body field outside `AllowedFields` is **dropped** (only when an allowlist is set — `len(AllowedFields) > 0`), except the condition field, which is preserved for forcing — `builder.go:1084-1091`.
-  - the condition field is **forced** to the caller's resolved value; if the body supplies a *different* non-null value for it, the create is **rejected with 403** `field "<f>" must match the authenticated principal` (`builder.go:1093-1100`). So an owner-scoped role can only create rows attributed to itself.
+- **Conditions and `fields` are enforced on CREATE too** (mass-assignment block, `EnforceCreateRBAC`, `pkg/codegen/builder.go`, shared by REST POST and GraphQL `create…`):
+  - any body field outside `AllowedFields` is **dropped** (only when an allowlist is set — `len(AllowedFields) > 0`), except the condition field, which is preserved for forcing — `builder.go`.
+  - the condition field is **forced** to the caller's resolved value; if the body supplies a *different* non-null value for it, the create is **rejected with 403** `field "<f>" must match the authenticated principal` (`builder.go`). So an owner-scoped role can only create rows attributed to itself.
 - **Relation embeds** (`?include=`) are governed by the target's `read` permission, field allowlist, and condition — the same `Evaluate` result.
 
 ### 7.9 Deny-by-default
 
 No matching policy → **403**:
 
-- unknown role → denied (`evaluator.go:32-35`);
-- per-resource form: a resource absent from `permissions`, or present but not granting the action → denied (`evaluator.go:40-44`);
-- legacy form: resource not in `resources` (and no `"*"`), or action not granted → denied (`evaluator.go:61-66`).
+- unknown role → denied (`evaluator.go`);
+- per-resource form: a resource absent from `permissions`, or present but not granting the action → denied (`evaluator.go`);
+- legacy form: resource not in `resources` (and no `"*"`), or action not granted → denied (`evaluator.go`).
 
 A row excluded by an applicable condition reads as **404** (it matches no row), not 403.
 
@@ -1777,7 +1778,7 @@ $ ./appitools validate schema.json
 Schema válido ✓
 ```
 
-That exact success line — `Schema válido ✓` — is what `cmd/appitools/cmd_validate.go` prints when `schema.Validate` returns zero errors (`cmd_validate.go:24`); any rule violation instead prints one line per `schema.ValidationError` to stderr (formatted as `<field>: <message>`) and exits non-zero. Everything claimed below was confirmed against the running validator, not from memory.
+That exact success line — `Schema válido ✓` — is what `cmd/appitools/cmd_validate.go` prints when `schema.Validate` returns zero errors (`cmd_validate.go`); any rule violation instead prints one line per `schema.ValidationError` to stderr (formatted as `<field>: <message>`) and exits non-zero. Everything claimed below was confirmed against the running validator, not from memory.
 
 ### 11.1 The validated schema
 
@@ -1958,12 +1959,12 @@ The following is the exact, comment-free JSON that passed `appitools validate` (
 
 #### Top level
 
-`$schema` and `version` are both mandatory — `LoadFromFile` (`pkg/schema/loader.go:32-37`) returns `missing required field "$schema"` / `"version"` if either is empty, before validation even runs. The six allowed top-level keys are exactly `$schema`, `version`, `name`, `resources`, `rbac`, and the forward-compat `workflows`; any other top-level key is rejected by the strict-key checker (`CheckUnknownKeys`, `pkg/schema/keys.go:55`). `name` here is `"shop-api"` — note that resource *names* are constrained to `^[a-z][a-z0-9_]*$` but the schema `name` is free text.
+`$schema` and `version` are both mandatory — `LoadFromFile` (`pkg/schema/loader.go`) returns `missing required field "$schema"` / `"version"` if either is empty, before validation even runs. The six allowed top-level keys are exactly `$schema`, `version`, `name`, `resources`, `rbac`, and the forward-compat `workflows`; any other top-level key is rejected by the strict-key checker (`CheckUnknownKeys`, `pkg/schema/keys.go`). `name` here is `"shop-api"` — note that resource *names* are constrained to `^[a-z][a-z0-9_]*$` but the schema `name` is free text.
 
 #### Resource `customers` — field types, validation rules, defaults, a rename
 
 - `email` exercises `required` (NOT NULL + present on POST/PUT), `unique` (a UNIQUE constraint; a collision is `409`), `format: "email"` (one of the four `validFormats` — `email | uuid | url | date`, string/text only), and `maxLength` (rune count). A 422 results from any rule violation.
-- `full_name` shows `minLength`/`maxLength` together (the validator requires `minLength <= maxLength`) and a **`renamed_from: "name"`**. The rename intent is accepted only because: `"name"` matches `^[a-z][a-z0-9_]*$`, differs from `full_name`, is not `"id"`, and `name` is **not still a declared field** of this resource (all four checks in `validator.go:207-232`). On migration the engine emits `ALTER TABLE … RENAME COLUMN name TO full_name`, preserving data.
+- `full_name` shows `minLength`/`maxLength` together (the validator requires `minLength <= maxLength`) and a **`renamed_from: "name"`**. The rename intent is accepted only because: `"name"` matches `^[a-z][a-z0-9_]*$`, differs from `full_name`, is not `"id"`, and `name` is **not still a declared field** of this resource (all four checks in `validator.go`). On migration the engine emits `ALTER TABLE … RENAME COLUMN name TO full_name`, preserving data.
 - `tier` shows an `enum` with a `default: "free"` — an enum default is validated to be a declared member (`validateDefault`). Writing a value outside the set is a 422.
 - `credit` is a `float64` with `default: 0` and `min: 0`. `min`/`max` apply only to numeric types (`int`, `int64`, `float64`). A JSON `0` decodes to `float64(0)`, which the float branch accepts.
 - `metadata` is `json` — stored as TEXT, not filterable, and accepts any JSON value as a default (it declares none here).
@@ -1998,7 +1999,7 @@ The following is the exact, comment-free JSON that passed `appitools validate` (
 #### RBAC — both role forms
 
 - `admin` is the simplest **role-global** form: `resources: "*"` (a string, valid because `resources` is `json.RawMessage`) and `actions: ["*"]`.
-- `support` is another role-global role with a response `fields` allowlist. Note this allowlist lists `status` even though `customers` has no `status` field — the role-global form is **intentionally not field-checked** by the validator (`validateRBAC` returns early for any role with no `permissions`, `validator.go:331-333`), so this passes (see findings).
+- `support` is another role-global role with a response `fields` allowlist. Note this allowlist lists `status` even though `customers` has no `status` field — the role-global form is **intentionally not field-checked** by the validator (`validateRBAC` returns early for any role with no `permissions`, `validator.go`), so this passes (see findings).
 - `member` is the **per-resource `permissions`** form, mutually exclusive with the role-global keys. Its `orders` grant shows the **read-all / write-own** pattern: a `conditions` on `owner_id = $user_id` scoped by `condition_actions: ["update", "delete"]`, so reads and creates are unconditional while updates/deletes are restricted to the caller's own rows. Each `condition_actions` entry must be a concrete action present in `actions` (`"*"` is not allowed). The `products` grant is read-only with a per-resource field allowlist. The `customers` grant scopes by the implicit `id` column (allowed because `rbacFieldExists` treats `id` as a real column) so a member can only read/update their own customer record. Every per-resource `conditions.field` is validated to exist on that exact resource.
 
 Together this single schema exercises: all nine field types; `required`/`unique`/`enum`/`min`/`max`/`minLength`/`maxLength`/`pattern`/`format`; literal, enum, and `"now"` defaults; a state machine; field-level relations with `on_delete` + `on_update` + a `references`-to-unique-non-id; a composite `foreign_keys` block against a composite unique index; `has_many`, `belongs_to`, and `many_to_many` relations; plain and composite-unique indexes; outbox `events`; `js` + `webhook` hooks; a `renamed_from`; and both RBAC role forms. It validates clean with `appitools validate`.
@@ -2092,7 +2093,7 @@ audit. Knowing these is essential for generating schemas that behave as intended
    from `operatorsForType`, and `validateFilterOp` falls into its "unknown type →
    allow `eq` only" branch, so `filter[<jsonfield>]=v` is accepted and emits
    `<field> = $1` over the TEXT column. Only `eq` works; `gt`/`partial`/etc. are
-   still rejected. (`pkg/query/builder.go:36-44, 378-384`) **(verified)**
+   still rejected. (`pkg/query/builder.go`) **(verified)**
    **✅ DOC-ALIGNED (SEC-AUDIT-V2):** the code is correct (eq is a sensible exact-
    match on the stored text); §3's type table and AGENTS.md now document `json` as
    `eq`-only rather than "none". No code change.
@@ -2177,23 +2178,23 @@ audit. Knowing these is essential for generating schemas that behave as intended
    are boot-compiled — restart required" warning AGENTS.md describes. (The
    separate admin endpoint `POST /admin/tenants/{id}/reload` in `app.go` *does*
    still compute hook-drift warnings via `hooksDiffering`.)
-   (`pkg/controlplane/server.go:89`; `app.go:964-986`) **(verified)**
+   (`pkg/controlplane/server.go`; `app.go`) **(verified)**
 
 9. **Naming a resource `files` silently disables the built-in file store** with
    only a boot `log.Println` warning — no validation error. The schema loads
-   normally and `POST/GET /api/files` simply stop existing. (`app.go:794`)
+   normally and `POST/GET /api/files` simply stop existing. (`app.go`)
 
 10. **The outbox event payload `action` is past-tense.** A resource declares
     `events: ["create", …]` (present tense), but the emitted payload's `action`
     field is the topic suffix `created`/`updated`/`deleted`. A consumer matching
-    on `action == "create"` will never match. (`pkg/codegen/builder.go:42`)
+    on `action == "create"` will never match. (`pkg/codegen/builder.go`)
 
 11. **The `workflows` block is fully parsed and strict-key validated but
     completely inert.** Typos in `trigger`/`steps` are rejected (giving the
     impression of a live feature), yet no executor runs it and `trigger.type` /
     `step.type` *values* are never semantically validated. A syntactically
-    perfect workflow does nothing. (`pkg/schema/types.go:15-18, 391-419`;
-    `pkg/schema/keys.go:139-153`)
+    perfect workflow does nothing. (`pkg/schema/types.go`;
+    `pkg/schema/keys.go`)
 
 ### A.2 Sharp edges & silent behaviors (generation-relevant gotchas)
 
@@ -2201,47 +2202,47 @@ audit. Knowing these is essential for generating schemas that behave as intended
     emptiness, accepting any non-empty string). `name`, `resources`, and `rbac`
     are structurally optional — a schema with none of them boots. A JSON-number
     `version` fails at the parse stage, not the required-field stage.
-    (`pkg/schema/loader.go:32-37`; `pkg/schema/validator.go:59-62`)
+    (`pkg/schema/loader.go`; `pkg/schema/validator.go`)
 
 13. **A field `default` is NOT a Postgres column `DEFAULT`** — it is an app-layer,
     **create-only** fill (`ApplyDefaults`). Existing rows are never backfilled,
     and a `PUT` (full replace) writes an omitted optional field as `NULL`.
-    (`pkg/migration/desired.go:24-26`; `pkg/schema/rules.go:209-223`)
+    (`pkg/migration/desired.go`; `pkg/schema/rules.go`)
 
 14. **An explicit JSON `null` on create bypasses `default`** and stores `null` —
     defaults fill only *absent* keys (matching SQL `DEFAULT`).
-    (`pkg/schema/rules.go:214`)
+    (`pkg/schema/rules.go`)
 
 15. **`pattern` is not implicitly anchored** — it is a substring match
     (`re.MatchString`). Authors must write `^…$` to validate the whole value.
-    (`pkg/schema/rules.go:138`)
+    (`pkg/schema/rules.go`)
 
 16. **`format:"date"` also accepts a full RFC3339 timestamp** (it tries RFC3339
     before `YYYY-MM-DD`), and **`format:"email"` requires a dotted domain**
     (rejecting `user@localhost`). Both are intentional pragmatic shape checks.
-    (`pkg/schema/rules.go:30-32, 378-385`)
+    (`pkg/schema/rules.go`)
 
 17. **A `default` is not cross-checked against the field's own `min`/`max`/
     `minLength`/`maxLength`/`pattern`/`format` at load** (only its type / enum
     membership / state-machine-initial). A rule-violating default still 422s at
-    create time, but the schema loads. (`pkg/schema/validator.go:732`)
+    create time, but the schema loads. (`pkg/schema/validator.go`)
 
 18. **`enum` is only meaningful on string fields, but `enum` on a non-string
     field is not rejected at load** — at runtime its enum closure requires a
     string, so every value would fail. (`enum` is `[]string`, so non-string
-    *members* fail at JSON parse instead.) (`pkg/schema/validator.go:235`;
-    `pkg/schema/rules.go:101-110`)
+    *members* fail at JSON parse instead.) (`pkg/schema/validator.go`;
+    `pkg/schema/rules.go`)
 
 19. **`relations.fk` / `target_fk` column existence is NOT validated at load** —
     `validateRelations` is structural (it only checks `target` is a declared
     resource). A typo'd FK passes `appitools validate` and surfaces only as a
     logged warning at tenant migration. The same is true of declared `indexes`
     field names (regex-checked only) and FK source columns of the composite
-    `foreign_keys` block. (`pkg/schema/validator.go:455, 538`)
+    `foreign_keys` block. (`pkg/schema/validator.go`)
 
 20. **`limit: 0` on a relation does NOT mean "no children"** — it is silently
     treated as the default 50 at SQL-build time (`if limit <= 0 { limit = 50 }`).
-    Only `limit < 0` is rejected at load. (`pkg/query/relations.go` ~269)
+    Only `limit < 0` is rejected at load. (`pkg/query/relations.go`)
 
 21. **Two independent `?include=` guards:** nesting depth > 2 → `400 include
     nesting exceeds max depth 2`; selection node count > 25 → `400 too many
@@ -2263,23 +2264,23 @@ audit. Knowing these is essential for generating schemas that behave as intended
 
 25. **The validator does not reject type-irrelevant hook keys** — a `type:"js"`
     hook may also carry `url` / `wasm_module`; only the type's own required key is
-    checked for presence. (`pkg/schema/validator.go:272-303`)
+    checked for presence. (`pkg/schema/validator.go`)
 
 26. **The `many_to_many` `through` (junction) name allows `-`** (`^[a-z][a-z0-9_\-]*$`)
     while every other identifier — resource, field, relation name, `fk`,
     `target_fk` — forbids it (`^[a-z][a-z0-9_]*$`), because a junction may be a
-    bare join table that is never a GraphQL type. (`pkg/schema/validator.go:33`)
+    bare join table that is never a GraphQL type. (`pkg/schema/validator.go`)
     **(verified)**
 
 27. **`renamed_from` is validated only structurally** (valid identifier, differs
     from the current name, not still a declared name) — never cross-checked
     against a live DB. Naming a never-existed old name is accepted and is simply a
-    no-op rename. (`pkg/schema/validator.go:85-105, 207-232`)
+    no-op rename. (`pkg/schema/validator.go`)
 
 28. **The resource-level `foreign_keys` block does not enforce multi-column-only**
     — a single-column entry validates and works; the "composite-only" framing is
     a convention. The implicit `id` is also usable as a FK source or `ref_column`
-    though it is never a declared field. (`pkg/schema/validator.go:572-637`)
+    though it is never a declared field. (`pkg/schema/validator.go`)
 
 29. **Derived index / FK constraint names have no 63-byte guard** — a long table
     plus a long composite column set can exceed Postgres' identifier limit and is

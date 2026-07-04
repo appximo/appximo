@@ -117,13 +117,13 @@ foreign keys): borrar un registro referenciado **orfaniza en silencio** a sus hi
 
 ### Dónde y cómo se aplica el schema a las tablas
 
-Hay **un solo** motor de DDL, [`migration.ApplyTenantMigration`](../pkg/migration/runner.go#L20),
+Hay **un solo** motor de DDL, [`migration.ApplyTenantMigration`](../pkg/migration/runner.go),
 invocado desde dos lugares:
 
-1. **Al registrar un tenant** — [`controlplane.RegisterTenant` paso 8](../pkg/controlplane/tenant_service.go#L148):
+1. **Al registrar un tenant** — [`controlplane.RegisterTenant` paso 8](../pkg/controlplane/tenant_service.go):
    tras `CREATE SCHEMA tenant_<id>`, corre `ApplyTenantMigration` (CREATE TABLE por recurso).
 2. **Al actualizar el schema de un tenant existente** —
-   [`controlplane.UpdateSchema`](../pkg/controlplane/service.go#L57) (`PUT /tenants/{id}/schema`,
+   [`controlplane.UpdateSchema`](../pkg/controlplane/service.go) (`PUT /tenants/{id}/schema`,
    plano de control `:9090`): hace `UPDATE public.tenants SET json_schema` y **acto seguido
    corre el mismo `ApplyTenantMigration` síncronamente** (líneas 73–80). Es el único camino
    de "evolucionar el schema de un tenant con datos". (Si hay Redis, además encola un job
@@ -149,12 +149,13 @@ el convergedor: si la columna ya existe por nombre, se la salta por completo.
 
 Tres hechos del código que explican todos los casos de abajo:
 
-- **`addMissingColumns` ([runner.go:196](../pkg/migration/runner.go#L196)) agrega SIEMPRE
-  columnas nullable, sin default, sin unique.** El comentario lo dice literal: _"New columns
+- **`addMissingColumns`** (una función del **converger histórico, ya removida** —
+  hoy la evolución la maneja `pkg/schemadiff`) **agregaba SIEMPRE
+  columnas nullable, sin default, sin unique.** El comentario lo decía literal: _"New columns
   are always nullable — adding NOT NULL to an existing table with rows requires a DEFAULT."_
-  El `ADD COLUMN` solo lleva nombre + tipo Postgres; `required`/`unique`/`default` del
-  campo **se descartan** en este path.
-- **`buildCreateTable` ([runner.go:247](../pkg/migration/runner.go#L247)) aplica `NOT NULL`
+  El `ADD COLUMN` solo llevaba nombre + tipo Postgres; `required`/`unique`/`default` del
+  campo **se descartaban** en ese path.
+- **`buildCreateTable`** (también del **converger histórico, removido**) **aplicaba `NOT NULL`
   y `UNIQUE` solo en el CREATE inicial, y NUNCA un `DEFAULT`** para campos normales (solo los
   `auto` reciben `DEFAULT now()`). El `default` del schema es de capa-app (Go `ApplyDefaults`,
   solo en create), nunca un `DEFAULT` de Postgres — verificado: la columna `status` con
@@ -175,7 +176,7 @@ Hay **dos fuentes de schema** que se actualizan por separado:
 `UpdateSchema` cambia el segundo y re-corre el DDL, pero el primero solo cambia al
 reiniciar el proceso (el propio README lo dice: _"column-level only; adding a new resource
 requires a process restart"_). El plano de datos toma el **DB como fuente de verdad de las
-columnas escribibles** (sin whitelist — ver el NOTE en `pool.go:37` y `db.UndefinedColumnField`),
+columnas escribibles** (sin whitelist — ver el NOTE en `pool.go` y `db.UndefinedColumnField`),
 así que una columna nueva agregada por `UpdateSchema` es escribible en vivo, pero **el tipo
 y el `required` que la validan viven en el boot-schema**. Esta separación es el telón de
 fondo de los casos B/C/E: el constraint del schema y el de la columna pueden discrepar.
@@ -356,21 +357,21 @@ Inspección de código (no se generó carga, como pide el brief):
 
 - **No hay `lock_timeout` ni `statement_timeout` en ningún lado** (grep en todo el repo: 0
   resultados). Ni en el path de DDL, ni en la configuración del pool
-  ([`db.NewPool`](../pkg/db/pool.go#L15) setea `MaxConns`, lifetimes y `DescribeExec`, pero
+  ([`db.NewPool`](../pkg/db/pool.go) setea `MaxConns`, lifetimes y `DescribeExec`, pero
   **ningún** timeout de lock/statement).
 - **No hay reintento** ante fallo de adquisición de lock en el path síncrono
   (`ApplyTenantMigration` corre el `Exec` directo, sin envoltura de retry).
-- **Los índices se crean NO concurrentemente** ([runner.go:139](../pkg/migration/runner.go#L139)):
+- **Los índices se crean NO concurrentemente** ([runner.go](../pkg/migration/runner.go)):
   el comentario asume que "en el registro la tabla es nueva/vacía, así que el build es
   instantáneo y libre de lock", y deja el `CREATE INDEX CONCURRENTLY` sobre tablas grandes
   como "una migración manual separada, documentada".
 - El **advisory lock** que menciona el brief existe **solo en el worker de Redis**
-  ([worker.go:137](../pkg/migration/worker.go#L137), `pg_try_advisory_lock`) y solo serializa
+  ([worker.go](../pkg/migration/worker.go), `pg_try_advisory_lock`) y solo serializa
   migraciones concurrentes del **mismo** tenant; **no** protege el path síncrono de
   `UpdateSchema` ni es un `lock_timeout`.
 
 **Riesgo:** el propio pool documenta que se espera DDL en vivo
-([pool.go:37](../pkg/db/pool.go#L37): _"a control-plane deploy runs ALTER TABLE ADD COLUMN
+([pool.go](../pkg/db/pool.go): _"a control-plane deploy runs ALTER TABLE ADD COLUMN
 under live traffic"_). Un `ADD COLUMN` (aunque nullable y metadata-only en PG11+) igual toma
 brevemente un `ACCESS EXCLUSIVE` que debe **encolar detrás de cualquier transacción larga en
 curso** y, mientras espera, **bloquea toda nueva query** sobre esa tabla. Un `CREATE INDEX`

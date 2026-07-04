@@ -2,7 +2,9 @@
 
 Auditoría de todo almacenamiento fuera de Postgres. Fuentes: código fuente
 (`pkg/observability/store.go`, `tools/devhub/api/bench.go`, `app.go`).
-Cada afirmación tiene cita de archivo:línea.
+Cada afirmación cita **archivo + símbolo** (función/tipo/var), no número de
+línea — los símbolos no derivan con cada edit (misma convención que
+[SCHEMA_REFERENCE.md](SCHEMA_REFERENCE.md) y [MENTAL_MODEL.md](MENTAL_MODEL.md)).
 
 ---
 
@@ -27,7 +29,7 @@ efímero** bajo el temp del sistema y **loguea un WARNING** explícito — la
 observabilidad es best-effort y un path inválido **nunca interrumpe el boot**.
 Si el path resuelto vive en `/tmp` o un tmpfs detectable, también se loguea un
 WARNING avisando que el historial no sobrevivirá un restart (visibilidad de R1).
-La apertura se hace en `New()` ([app.go:216](../app.go#L216)):
+La apertura se hace en `New()` ([app.go](../app.go)):
 
 ```go
 if st, openErr := observability.OpenStore(os.Getenv("OBS_DB_PATH")); openErr != nil {
@@ -42,13 +44,13 @@ Un fallo de apertura que ni el fallback efímero resuelve (p.ej. todo el disco
 lleno) produce un WARNING y **no interrumpe el boot**: `app.obsStore` queda nil,
 la observabilidad queda deshabilitada y el motor continúa sirviendo sin
 degradación funcional.
-Ninguna escritura posterior ocurre si `obsStore == nil` ([app.go:472](../app.go#L472),
-[app.go:589](../app.go#L589)).
+Ninguna escritura posterior ocurre si `obsStore == nil` (el tap de trazas en
+`buildRouter` y el lanzamiento de `flushObsSnapshots` en `Start`, [app.go](../app.go)).
 
 #### Conexión SQLite
 
 ```go
-// store.go:70-75
+// store.go
 dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", path)
 db, err := sql.Open("sqlite", dsn)
 ...
@@ -59,14 +61,14 @@ db.SetMaxOpenConns(1)
 - `journal_mode(WAL)`: Write-Ahead Logging — permite lecturas concurrentes
   mientras hay un escritor; reduce contención.
 - `SetMaxOpenConns(1)`: serializa todos los accesos desde un único pool de
-  conexión para que Flush/History/SlowTraces nunca compitan ([store.go:75](../pkg/observability/store.go#L75)).
+  conexión para que Flush/History/SlowTraces nunca compitan ([store.go](../pkg/observability/store.go)).
 
 Driver: `modernc.org/sqlite` — CGO-free, consistente con la restricción del
-proyecto ([store.go:9](../pkg/observability/store.go#L9)).
+proyecto ([store.go](../pkg/observability/store.go)).
 
 #### Tablas
 
-**`obs_snapshots`** — serie temporal de métricas por tenant ([store.go:78-88](../pkg/observability/store.go#L78)):
+**`obs_snapshots`** — serie temporal de métricas por tenant (el DDL de `OpenStore`, [store.go](../pkg/observability/store.go)):
 
 ```sql
 CREATE TABLE IF NOT EXISTS obs_snapshots (
@@ -86,7 +88,7 @@ Qué guarda: el snapshot de p50/p95 latencia + ratio de error + burn rate SLO +
 estado SLO (`ok`/`warning`/`critical`) de cada tenant activo, un registro
 cada 60 s.
 
-**`slow_traces`** — trazas de requests lentos y errores ([store.go:90-110](../pkg/observability/store.go#L90)):
+**`slow_traces`** — trazas de requests lentos y errores (el DDL de `OpenStore`, [store.go](../pkg/observability/store.go)):
 
 ```sql
 CREATE TABLE IF NOT EXISTS slow_traces (
@@ -117,13 +119,13 @@ descomposición de spans (auth, db, cache, etc.), IP, User-Agent, país
 (GeoLite2), headers filtrados y, para los 500, el stack frame.
 
 Hay ALTER TABLE idempotentes para columnas añadidas en versiones posteriores
-([store.go:115-123](../pkg/observability/store.go#L115)) — errores "duplicate column name"
+([store.go](../pkg/observability/store.go)) — errores "duplicate column name"
 se descartan silenciosamente.
 
 #### ¿Toca el hot path? — NO (con cita)
 
 **`obs_snapshots`:** Escrito por `flushObsSnapshots()`, goroutine de
-background lanzada en `Start()` ([app.go:472-474](../app.go#L472)):
+background lanzada en `Start()` ([app.go](../app.go)):
 
 ```go
 if a.obsStore != nil {
@@ -131,15 +133,15 @@ if a.obsStore != nil {
 }
 ```
 
-Este goroutine llama `store.Flush()` cada **60 s** ([app.go:739](../app.go#L739)).
+Este goroutine llama `store.Flush()` cada **60 s** ([app.go](../app.go)).
 No existe ningún camino desde un request HTTP hasta `Flush()`.
 
 **`slow_traces`:** El RequestLogger calcula si un trace debe persistirse y,
-si es así, lo lanza en un goroutine separado vía semáforo ([app.go:541](../app.go#L541)
-y [app.go:613-625](../app.go#L613)):
+si es así, lo lanza en un goroutine separado vía semáforo ([app.go](../app.go)
+y [app.go](../app.go)):
 
 ```go
-tracePersistSem := make(chan struct{}, 64)  // app.go:541
+tracePersistSem := make(chan struct{}, 64)  // app.go
 // ... dentro del tap post-request:
 select {
 case tracePersistSem <- struct{}{}:
@@ -161,7 +163,7 @@ garantiza que si los 64 slots están llenos, el trace **se descarta** en vez
 de bloquear. El hot path nunca espera SQLite. Impact en p50: **cero**.
 
 Optimización adicional: los headers y la URL completa solo se capturan si
-`ShouldPersistTrace()` es `true` ([pkg/logging/logger.go:216-222](../pkg/logging/logger.go#L216)):
+`ShouldPersistTrace()` es `true` ([pkg/logging/logger.go](../pkg/logging/logger.go)):
 
 ```go
 if observability.ShouldPersistTrace(...) {
@@ -172,7 +174,7 @@ if observability.ShouldPersistTrace(...) {
 
 Los requests 200-OK rápidos no iteran headers en ningún momento.
 
-**Predicado de persistencia** ([store.go:36-44](../pkg/observability/store.go#L36)):
+**Predicado de persistencia** ([store.go](../pkg/observability/store.go)):
 
 ```go
 func ShouldPersistTrace(s Sample) bool {
@@ -182,22 +184,22 @@ func ShouldPersistTrace(s Sample) bool {
 }
 ```
 
-`SlowTraceThresholdUS = 50_000` ([store.go:21](../pkg/observability/store.go#L21)),
-`PersistErrors = true` ([store.go:25](../pkg/observability/store.go#L25)).
+`SlowTraceThresholdUS = 50_000` ([store.go](../pkg/observability/store.go)),
+`PersistErrors = true` ([store.go](../pkg/observability/store.go)).
 
 #### Retención
 
-Gestionada por `Prune()` ([store.go:264-282](../pkg/observability/store.go#L264)), llamado
-en el boot ([app.go:220](../app.go#L220)) y cada 60 s junto con `flushObsSnapshots`
-([app.go:766](../app.go#L766)):
+Gestionada por `Prune()` ([store.go](../pkg/observability/store.go)), llamado
+en el boot ([app.go](../app.go)) y cada 60 s junto con `flushObsSnapshots`
+([app.go](../app.go)):
 
 | Tabla | Política | Código |
 |-------|----------|--------|
-| `obs_snapshots` | DELETE donde `ts < now - 7 días` | [store.go:266](../pkg/observability/store.go#L266) |
-| `slow_traces` (por tiempo) | DELETE donde `ts < now - 7 días` (en µs) | [store.go:270](../pkg/observability/store.go#L270) |
-| `slow_traces` (por volumen) | DELETE las filas más antiguas si hay más de 50 000 | [store.go:275-278](../pkg/observability/store.go#L275) |
+| `obs_snapshots` | DELETE donde `ts < now - 7 días` | [store.go](../pkg/observability/store.go) |
+| `slow_traces` (por tiempo) | DELETE donde `ts < now - 7 días` (en µs) | [store.go](../pkg/observability/store.go) |
+| `slow_traces` (por volumen) | DELETE las filas más antiguas si hay más de 50 000 | [store.go](../pkg/observability/store.go) |
 
-El cap de 50 000 filas (`maxSlowTraceRows = 50_000`, [store.go:258](../pkg/observability/store.go#L258))
+El cap de 50 000 filas (`maxSlowTraceRows = 50_000`, [store.go](../pkg/observability/store.go))
 es la guardia contra floods de errores: si un tenant emite miles de 401/429
 en pocos minutos, el archivo no crece sin tope dentro de la ventana de 7 días.
 Estimación de tamaño máximo: ~50 000 traces × ~2 KB por fila ≈ **~100 MB
@@ -209,8 +211,8 @@ como cota superior**. En operación normal (ratio de error bajo, tráfico a
 Un único archivo SQLite. Las tablas usan `tenant_id` como parte de la
 clave primaria y hay índices `(tenant_id, ts DESC)`. El motor **nunca
 cruza datos de un tenant en la respuesta de otro**: `History()` y
-`SlowTraces()` siempre filtran `WHERE tenant_id = ?` ([store.go:147](../pkg/observability/store.go#L147),
-[store.go:213](../pkg/observability/store.go#L213)). Los endpoints de observabilidad están protegidos
+`SlowTraces()` siempre filtran `WHERE tenant_id = ?` ([store.go](../pkg/observability/store.go),
+[store.go](../pkg/observability/store.go)). Los endpoints de observabilidad están protegidos
 por `X-Admin-Key` y el tenant se pasa explícitamente en el path —
 `/debug/tenant/{id}/...` — no puede ser inferido por el caller.
 
@@ -230,7 +232,7 @@ independiente del motor y no existe en producción.
 
 #### Path en disco
 
-Hardcodeado ([bench.go:43](../tools/devhub/api/bench.go#L43)):
+Hardcodeado ([bench.go](../tools/devhub/api/bench.go)):
 
 ```
 /root/appitools/tools/devhub/db/devhub.db
@@ -242,13 +244,13 @@ En el 105 el archivo vive en el repo (`tools/devhub/db/`) y está gitignoreado.
 #### Conexión SQLite
 
 ```go
-// bench.go:51
+// bench.go
 sql.Open("sqlite", "file:<path>?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
 ```
 
 Igual que el motor pero añade `foreign_keys(1)` para hacer cumplir `ON DELETE
-CASCADE` de `run_datapoints` ([db/schema.sql:22](../tools/devhub/db/schema.sql#L22)).
-Singleton process-wide vía `sync.Once` ([bench.go:32](../tools/devhub/api/bench.go#L32)).
+CASCADE` de `run_datapoints` ([db/schema.sql](../tools/devhub/db/schema.sql)).
+Singleton process-wide vía `sync.Once` ([bench.go](../tools/devhub/api/bench.go)).
 
 #### Tablas (schema en `tools/devhub/db/schema.sql`)
 
@@ -326,7 +328,7 @@ el WARNING de R1 lo hace visible.
 ### R3 — Disco lleno: degradación silenciosa, no crash
 
 Si el disco se llena y `SaveSlowTrace` falla, el error se loguea
-(`log.Printf("save slow trace [%s]: %v", tenantID, err)` en [app.go:619](../app.go#L619))
+(`log.Printf("save slow trace [%s]: %v", tenantID, err)` en [app.go](../app.go))
 pero el request ya fue respondido al cliente. **El motor sigue sirviendo**;
 simplemente deja de persistir trazas. No hay alerting automático sobre
 este estado. Mitigación: monitorear el tamaño de `OBS_DB_PATH` en Prometheus
@@ -356,12 +358,12 @@ a los propios tenants (vs. al operador vía `X-Admin-Key`).
 
 1. `obs_snapshots`: goroutine background, no invocado por ningún request.
 2. `slow_traces`: goroutine async lanzado post-response con semáforo; el
-   `select/default` en [app.go:613-624](../app.go#L613) garantiza que si los 64 slots están
+   `select/default` en [app.go](../app.go) garantiza que si los 64 slots están
    ocupados, el trace se descarta en vez de bloquear. La respuesta ya fue
    enviada al cliente antes de que el goroutine arranque.
 
 El RequestLogger además optimiza el 200-OK rápido: solo captura headers y URL
-completa cuando `ShouldPersistTrace()` es `true` ([pkg/logging/logger.go:216](../pkg/logging/logger.go#L216)),
+completa cuando `ShouldPersistTrace()` es `true` ([pkg/logging/logger.go](../pkg/logging/logger.go)),
 por lo que los requests del hot path rápido no pagan ni el coste de iterar headers.
 
 Los benchmarks de referencia (S46: 2000 RPS, p50 1.58 ms) se midieron con el
