@@ -73,3 +73,8 @@ pkg/adminui/web/node_modules/
 pkg/editorui/web/build/assets/
 pkg/editorui/web/build/favicon.svg
 pkg/editorui/web/node_modules/
+
+# Self-restart artifacts (UI-F4-S2): the boot-schema backup + marker written
+# next to the --schema file by POST /admin/engine/schema. Never commit them.
+*.bak
+*.selfrestart

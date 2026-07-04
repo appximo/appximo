@@ -6,7 +6,7 @@ Thank you for your interest. Appitools is early-stage — your feedback shapes t
 
 ## Reporting bugs
 
-1. **Search first** — check [open issues](https://github.com/miguelangel/appitools/issues) before opening a new one.
+1. **Search first** — check [open issues](https://github.com/miguel09acosta/appitools/issues) before opening a new one.
 2. **Minimal reproduction** — include the `schema.json` that triggers the bug and the exact command you ran.
 3. **Environment** — Go version (`go version`), OS, PostgreSQL version if relevant.
 
@@ -27,7 +27,9 @@ Use the issue title format: `[feature] short description`.
 
 ## Running the tests locally
 
-**Prerequisites:** Go 1.22+, Docker (for testcontainers).
+**Prerequisites:** Go 1.25+, Docker (for testcontainers), Node 20+ (only to
+build the embedded UIs: `make editor-ui admin-ui` before `go build` — without
+them the binary serves empty `/editor` and `/admin` shells).
 
 ```bash
 # All tests (testcontainers pulls postgres:16-alpine on first run — takes ~30s)

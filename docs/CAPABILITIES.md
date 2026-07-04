@@ -119,5 +119,9 @@ The capability list above without these limits would be marketing; together they
 - **No tenant-list endpoint** — the control plane is get-by-id only.
 - **Backup has no restore command and no scheduling.**
 - **Single node** — no HA/clustering; scale is vertical.
-- **No visual schema editor published yet** — the schema is a file you write by hand.
 - **No hosted/SaaS version** — self-hosted only, by design.
+
+(The former "no visual schema editor" limit is closed: **Appitools Studio**
+ships embedded at `/editor` — full schema-grammar design, per-tenant deploy
+with migration preview + destructive gate, one-click engine restart, and a
+tenant files manager. The schema remains plain JSON you can also write by hand.)

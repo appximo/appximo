@@ -30,12 +30,9 @@ run:
 # Test lanes (context-docs/TESTING_PLAN.md)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# test: fast unit lane — race detector + -short.
-# The S37 tests/ suites are build-tagged (integration / e2e) and excluded here.
-# NOTE: a few legacy pkg suites (pkg/db, pkg/graphql, pkg/migration,
-# pkg/controlplane, internal/handlers, pkg/benchmark) still use testcontainers
-# without a -short guard, so this lane currently needs Docker until those gain
-# guards/tags. See TESTING_PLAN follow-up.
+# test: fast unit lane — race detector + -short. No Docker needed: the S37
+# tests/ suites are build-tagged (integration / e2e) and the legacy
+# testcontainers suites carry testing.Short() guards (S40).
 test:
 	go test ./... -race -short
 

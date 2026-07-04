@@ -1,7 +1,7 @@
 # Appitools
 
 > **A JSON schema in. A production multi-tenant REST + GraphQL + OpenAPI server out.**
-> One ~45 MB static Go binary, on your own server. Apache 2.0.
+> One ~60 MB static Go binary, on your own server. Apache 2.0.
 
 [![CI](https://github.com/miguel09acosta/appitools/actions/workflows/ci.yml/badge.svg)](https://github.com/miguel09acosta/appitools/actions/workflows/ci.yml)
 [![Docker](https://img.shields.io/docker/v/neodevtrix/appitools-engine?label=docker&color=2496ED&logo=docker)](https://hub.docker.com/r/neodevtrix/appitools-engine)
@@ -266,9 +266,14 @@ It serves our own production workload today.
 - **Single node.** No HA/clustering story; scale is vertical (the benchmark shows
   how far one cheap box goes).
 - Observability is Prometheus + an internal trace ring — **no OTLP export**.
-- The visual schema editor exists but isn't published yet; today the schema is a
-  file you write by hand (it's ~20 lines — see above).
 - No hosted/SaaS version. Self-hosted only, by design, for now.
+
+Beyond the API surface, the binary also embeds **Appitools Studio** at `/editor`
+— a visual schema designer (full ERD over the schema grammar, visual RBAC,
+state machines, relations) that deploys/migrates tenants, restarts the engine
+in one click when a new resource needs it, and manages tenant files — plus the
+admin panel at `/admin`. Both are static SPAs compiled into the binary
+(`make editor-ui admin-ui` before `go build`; the published image ships them).
 
 ## Configuration
 
