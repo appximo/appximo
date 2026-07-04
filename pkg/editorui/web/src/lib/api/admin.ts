@@ -80,6 +80,66 @@ export interface CreateTenantBody {
 	schema: APISchema;
 }
 
+/** One stored file's metadata (pkg/files.Meta — the authoritative DB row). */
+export interface FileMeta {
+	id: string;
+	sha256: string;
+	size: number;
+	content_type: string;
+	original_name: string;
+	created_at: string;
+}
+
+/** A page of a tenant's files (GET /admin/tenants/{id}/files). */
+export interface FilesPage {
+	files: FileMeta[];
+	total: number;
+	page: number;
+	per_page: number;
+	/** The active storage backend ("local" | "s3") — informational. */
+	backend: string;
+}
+
+/** Upload via XHR so large files stream from disk with real progress events —
+ *  the browser never reads the File into JS memory (FormData streams it). The
+ *  engine's REAL rejections (422 with the OWASP reason, 413 over the cap)
+ *  surface as ApiError with the server's message, never masked. */
+export function uploadTenantFile(
+	token: string,
+	tenantId: string,
+	file: File,
+	onProgress: (pct: number) => void
+): Promise<{ file_id: string; sha256: string; size: number }> {
+	return new Promise((resolve, reject) => {
+		const xhr = new XMLHttpRequest();
+		xhr.open('POST', `/admin/tenants/${encodeURIComponent(tenantId)}/files`);
+		xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+		xhr.upload.onprogress = (e) => {
+			if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+		};
+		xhr.onerror = () => reject(new ApiError('could not reach the engine — is it running?', 0));
+		xhr.onload = () => {
+			let data: Record<string, unknown> | undefined;
+			try {
+				data = JSON.parse(xhr.responseText) as Record<string, unknown>;
+			} catch {
+				/* non-JSON body */
+			}
+			if (xhr.status >= 200 && xhr.status < 300) {
+				resolve(data as { file_id: string; sha256: string; size: number });
+			} else {
+				const msg =
+					(typeof data?.error === 'string' && data.error) ||
+					(xhr.status === 413 ? 'upload too large' : `upload failed (HTTP ${xhr.status})`);
+				reject(new ApiError(msg, xhr.status));
+			}
+		};
+		const form = new FormData();
+		form.append('file', file);
+		xhr.send(form);
+	});
+}
+
 export const adminApi = {
 	login: (email: string, password: string) =>
 		call<LoginResult>('POST', '/admin/auth/login', { body: { email, password } }),
@@ -123,5 +183,30 @@ export const adminApi = {
 		call<ApplyResponse>('PUT', `/admin/tenants/${encodeURIComponent(id)}/schema`, {
 			token,
 			body: { schema, dry_run: false, approved_drops: approved }
-		})
+		}),
+
+	// ── files manager (UI-F5-S1) — thin delegates into the engine's files.Store ──
+
+	listFiles: (token: string, id: string, page: number, perPage: number) =>
+		call<FilesPage>(
+			'GET',
+			`/admin/tenants/${encodeURIComponent(id)}/files?page=${page}&per_page=${perPage}`,
+			{ token }
+		),
+
+	/** Short-lived signed download URL — S3 native presigned, or the engine's
+	 *  token URL on the local backend. Open it; the storage/engine serves. */
+	fileSignedURL: (token: string, id: string, fid: string) =>
+		call<{ url: string; expires_in: number }>(
+			'GET',
+			`/admin/tenants/${encodeURIComponent(id)}/files/${encodeURIComponent(fid)}/url`,
+			{ token }
+		),
+
+	deleteFile: (token: string, id: string, fid: string) =>
+		call<void>(
+			'DELETE',
+			`/admin/tenants/${encodeURIComponent(id)}/files/${encodeURIComponent(fid)}`,
+			{ token }
+		)
 };

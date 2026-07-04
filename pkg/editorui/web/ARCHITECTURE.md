@@ -178,6 +178,32 @@ Verified live: a deployed schema's roles enforce **row-level filtering** (owner 
 only own rows, on REST + GraphQL), the **field allowlist hides columns**, and an
 empty role is **403** (deny-by-default).
 
+## Files — the runtime file manager (UI-F5-S1)
+
+The **Files** button (toolbar) opens `FilesModal.svelte` — unlike every other
+view it operates on RUNTIME data (a running tenant's files), not the schema:
+pick a tenant → browse the metadata table (name/type/size/date/sha + the active
+backend chip) → upload / download / delete, all through the engine's real files
+API. State lives in `stores/files.svelte.ts`; the HTTP surface is the thin
+`/admin/tenants/{id}/files` routes (see docs/FILES.md), which delegate into the
+same `files.Store` as `/api/files` — so the manager SURFACES the engine's
+behavior instead of reimplementing it:
+
+- **Auth is the deploy store's session** (in-memory platform super-admin) —
+  one login for Deploy and Files; a 401/403 anywhere drops back to the shared
+  login step.
+- **Upload** streams via XHR (`uploadTenantFile` — FormData streams the File
+  from disk, progress events drive the bar; the browser never buffers the file
+  in JS). The engine's REAL rejections render verbatim in the error banner:
+  the OWASP 422 (extension allowlist / magic-byte mismatch, with the reason)
+  and the 413 over the cap — never masked.
+- **Download** mints a short-lived signed URL (`GET …/files/{fid}/url` — S3
+  native presigned, or the engine's token URL on local) and navigates to it;
+  the storage/engine streams the bytes.
+- **Delete** requires a named confirmation (file + tenant) — destructive.
+- **Isolation**: the manager only ever operates on the selected tenant; ids
+  are tenant-scoped server-side (a cross-tenant id is a 404).
+
 ## How to grow (the point of the structure)
 
 Everything below is additive — the model and store already carry the data

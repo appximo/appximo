@@ -121,6 +121,33 @@ rate limit → JWT → RBAC deny-by-default): a role needs the `files` resource 
 its policy. File ids are tenant-scoped (no cross-tenant handle) and blobs are
 tenant-prefixed in storage.
 
+## The Studio files manager (UI-F5-S1)
+
+The visual editor (`/editor`) has a **Files** view (toolbar) — a per-tenant file
+manager: browse (metadata table: name/type/size/date/sha), upload (with
+progress), download (via the signed-URL mechanism) and delete (named
+confirmation), authenticated with the same in-memory platform super-admin
+session the Deploy flow uses.
+
+Because the SPA lives on ONE origin and the `/api/files` routes are
+tenant-Host-scoped, the manager talks to thin **admin routes** that delegate
+into the SAME `files.Store` (the ADMIN-UI-V1.2 data-browse precedent — no
+parallel path, no bypassed validation):
+
+| Route (platform token or `X-Admin-Key`) | Delegates to |
+|---|---|
+| `GET /admin/tenants/{id}/files?page=&per_page=` | `Store.ListMeta` — the metadata table, newest first, plus the active `backend` name |
+| `POST /admin/tenants/{id}/files` (multipart) | the same upload core as `/api/files` — identical OWASP `422`s and `413` |
+| `GET /admin/tenants/{id}/files/{fid}/url` | `Store.SignedURL` (S3 native presigned) or an engine download token |
+| `DELETE /admin/tenants/{id}/files/{fid}` | `Store.Delete` (dedup-aware) |
+| `GET /admin/tenants/{id}/files/{fid}/download?token=…` | `Store.Serve` — token-authenticated (minted by `/url`, short-lived, single-file, platform-only role; any failure a uniform `404`) |
+
+The download leg exists because the public `GET /files/signed/{token}` is
+deliberately bound to the tenant's Host — unusable from the editor origin; the
+admin leg reuses the same `files.MintDownloadToken` capability and the same
+`Store.Serve`, with the token's role pinned to a platform sentinel so admin-
+and tenant-minted tokens can never be replayed across each other's routes.
+
 ## Operator config
 
 | Env (Config field) | Default | Meaning |

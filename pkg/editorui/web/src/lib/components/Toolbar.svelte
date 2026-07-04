@@ -2,6 +2,7 @@
 	import { editor } from '../stores/editor.svelte';
 	import { ui } from '../stores/ui.svelte';
 	import { deploy } from '../stores/deploy.svelte';
+	import { filesStore } from '../stores/files.svelte';
 	import { SAMPLES } from '../schema/samples';
 
 	let showExport = $state(false);
@@ -108,6 +109,12 @@
 				<path d="M8 1.6l5 1.9v3.9c0 3-2.2 5.2-5 6.4-2.8-1.2-5-3.4-5-6.4V3.5l5-1.9z" stroke="currentColor" stroke-width="1.3" />
 			</svg>
 			Roles
+		</button>
+		<button class="btn" onclick={() => filesStore.openFiles()} title="Browse a tenant's files (file store)">
+			<svg class="bi" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+				<path d="M3 2.8h5l1.6 2H13a1.2 1.2 0 0 1 1.2 1.2v6.2A1.3 1.3 0 0 1 12.9 13.5H3.1A1.3 1.3 0 0 1 1.8 12.2V4.1A1.3 1.3 0 0 1 3 2.8z" stroke="currentColor" stroke-width="1.3" />
+			</svg>
+			Files
 		</button>
 	</div>
 

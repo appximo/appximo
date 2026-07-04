@@ -35,67 +35,77 @@ const SignedPathPrefix = "/files/signed"
 // bytes + size cap + name sanitization) happens inside Store.Put, and a
 // rejected upload surfaces as 422 with the reason.
 func UploadHandler(store *Store, maxBytes int64) http.HandlerFunc {
-	if maxBytes <= 0 {
-		maxBytes = DefaultMaxUploadBytes
-	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		tc := tenant.FromCtx(r.Context())
 		if tc == nil {
 			writeErr(w, http.StatusBadRequest, "invalid tenant")
 			return
 		}
-		// Cap the whole request body; an overshoot surfaces as a read error inside
-		// Store.Put (cleaning the partial temp) which we map to 413 below.
-		r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
-
-		mr, err := r.MultipartReader()
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "expected multipart/form-data")
-			return
-		}
-		for {
-			part, err := mr.NextPart()
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			if err != nil {
-				if isTooLarge(err) {
-					writeErr(w, http.StatusRequestEntityTooLarge, "upload too large")
-					return
-				}
-				writeErr(w, http.StatusBadRequest, "malformed multipart body")
-				return
-			}
-			if part.FormName() != "file" {
-				_ = part.Close()
-				continue
-			}
-
-			meta, perr := store.Put(r.Context(), tc.ID, part, PutMeta{
-				ContentType:  part.Header.Get("Content-Type"),
-				OriginalName: part.FileName(),
-			})
-			_ = part.Close()
-			if perr != nil {
-				switch {
-				case isTooLarge(perr):
-					writeErr(w, http.StatusRequestEntityTooLarge, "upload too large")
-				case errors.Is(perr, ErrUploadRejected):
-					writeErr(w, http.StatusUnprocessableEntity, perr.Error())
-				default:
-					writeErr(w, http.StatusInternalServerError, "upload failed")
-				}
-				return
-			}
-			writeJSON(w, http.StatusCreated, map[string]any{
-				"file_id": meta.ID,
-				"sha256":  meta.SHA256,
-				"size":    meta.Size,
-			})
-			return
-		}
-		writeErr(w, http.StatusBadRequest, `no "file" part in multipart body`)
+		ProcessUpload(store, maxBytes, tc.ID, w, r)
 	}
+}
+
+// ProcessUpload is the shared multipart-upload core: it streams the "file"
+// part of r into the store for tenantID and writes the HTTP result (201 with
+// the handle; 413/422/400 on the engine's real rejections). UploadHandler
+// (tenant from Host) and the platform-admin manager route (tenant from the
+// authenticated admin path) both delegate here, so EVERY ingestion surface
+// pays the identical OWASP validation and returns the identical errors.
+func ProcessUpload(store *Store, maxBytes int64, tenantID string, w http.ResponseWriter, r *http.Request) {
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxUploadBytes
+	}
+	// Cap the whole request body; an overshoot surfaces as a read error inside
+	// Store.Put (cleaning the partial temp) which we map to 413 below.
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+
+	mr, err := r.MultipartReader()
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "expected multipart/form-data")
+		return
+	}
+	for {
+		part, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			if isTooLarge(err) {
+				writeErr(w, http.StatusRequestEntityTooLarge, "upload too large")
+				return
+			}
+			writeErr(w, http.StatusBadRequest, "malformed multipart body")
+			return
+		}
+		if part.FormName() != "file" {
+			_ = part.Close()
+			continue
+		}
+
+		meta, perr := store.Put(r.Context(), tenantID, part, PutMeta{
+			ContentType:  part.Header.Get("Content-Type"),
+			OriginalName: part.FileName(),
+		})
+		_ = part.Close()
+		if perr != nil {
+			switch {
+			case isTooLarge(perr):
+				writeErr(w, http.StatusRequestEntityTooLarge, "upload too large")
+			case errors.Is(perr, ErrUploadRejected):
+				writeErr(w, http.StatusUnprocessableEntity, perr.Error())
+			default:
+				writeErr(w, http.StatusInternalServerError, "upload failed")
+			}
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"file_id": meta.ID,
+			"sha256":  meta.SHA256,
+			"size":    meta.Size,
+		})
+		return
+	}
+	writeErr(w, http.StatusBadRequest, `no "file" part in multipart body`)
 }
 
 // DownloadHandler serves a stored file through the backend's strategy: the
@@ -226,8 +236,11 @@ func SignedServeHandler(store *Store, secret []byte, allowRead func(role string)
 	}
 }
 
-// serveFile is the shared serve tail: backend Serve with the 404/500 mapping.
-func serveFile(w http.ResponseWriter, r *http.Request, store *Store, tenantID, id string) {
+// ServeStored is the shared serve tail: the backend Serve strategy (local
+// ServeContent proxy / S3 presigned 302) with the 404/500 mapping. Exported so
+// the platform-admin manager route serves through the IDENTICAL path as the
+// tenant download routes.
+func ServeStored(store *Store, tenantID, id string, w http.ResponseWriter, r *http.Request) {
 	if err := store.Serve(w, r, tenantID, id); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "not found")
@@ -235,6 +248,10 @@ func serveFile(w http.ResponseWriter, r *http.Request, store *Store, tenantID, i
 		}
 		writeErr(w, http.StatusInternalServerError, "download failed")
 	}
+}
+
+func serveFile(w http.ResponseWriter, r *http.Request, store *Store, tenantID, id string) {
+	ServeStored(store, tenantID, id, w, r)
 }
 
 // roleFromRequest reads the caller's role the same way the RBAC middleware

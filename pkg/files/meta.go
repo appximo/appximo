@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -44,6 +46,10 @@ type metaStore interface {
 	// del removes id's row and reports whether the blob (sha) is STILL referenced
 	// by another row — so the caller deletes the blob only when it is orphaned.
 	del(ctx context.Context, tenantID, id string) (sha string, stillReferenced bool, err error)
+	// list returns a page of the tenant's file metadata (newest first) plus the
+	// total row count. A tenant with no files table yet lists as empty, not an
+	// error (same contract as get/existsSHA).
+	list(ctx context.Context, tenantID string, limit, offset int) ([]Meta, int, error)
 }
 
 // ── in-memory store (unit tests) ────────────────────────────────────────────
@@ -71,8 +77,35 @@ func (s *memStore) insert(_ context.Context, tenant string, m Meta) (string, err
 		s.rows[tenant] = map[string]Meta{}
 	}
 	m.ID = uuid.NewString()
+	if m.CreatedAt.IsZero() {
+		m.CreatedAt = time.Now()
+	}
 	s.rows[tenant][m.ID] = m
 	return m.ID, nil
+}
+
+func (s *memStore) list(_ context.Context, tenant string, limit, offset int) ([]Meta, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	all := make([]Meta, 0, len(s.rows[tenant]))
+	for _, m := range s.rows[tenant] {
+		all = append(all, m)
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if !all[i].CreatedAt.Equal(all[j].CreatedAt) {
+			return all[i].CreatedAt.After(all[j].CreatedAt)
+		}
+		return all[i].ID > all[j].ID
+	})
+	total := len(all)
+	if offset >= total {
+		return []Meta{}, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return all[offset:end], total, nil
 }
 
 func (s *memStore) get(_ context.Context, tenant, id string) (Meta, error) {
@@ -248,6 +281,45 @@ func (s *pgStore) del(ctx context.Context, tenant, id string) (string, bool, err
 	}
 	return sha, stillRef, nil
 }
+
+func (s *pgStore) list(ctx context.Context, tenant string, limit, offset int) ([]Meta, int, error) {
+	tbl, err := s.table(tenant)
+	if err != nil {
+		return nil, 0, err
+	}
+	var total int
+	if err := s.pool.QueryRow(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM %s`, tbl)).Scan(&total); err != nil {
+		if isMissingTable(err) {
+			return []Meta{}, 0, nil // tenant has no files yet — an empty listing, not an error
+		}
+		return nil, 0, fmt.Errorf("files: count metadata: %w", err)
+	}
+	q := fmt.Sprintf(
+		`SELECT id::text, sha256, size, content_type, original_name, created_at
+		   FROM %s ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`, tbl)
+	rows, err := s.pool.Query(ctx, q, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("files: list metadata: %w", err)
+	}
+	defer rows.Close()
+	out := []Meta{}
+	for rows.Next() {
+		var m Meta
+		var ct, on *string
+		if err := rows.Scan(&m.ID, &m.SHA256, &m.Size, &ct, &on, &m.CreatedAt); err != nil {
+			return nil, 0, fmt.Errorf("files: scan metadata: %w", err)
+		}
+		m.ContentType, m.OriginalName = deref(ct), deref(on)
+		out = append(out, m)
+	}
+	return out, total, rows.Err()
+}
+
+// NewMemStore returns the in-memory metadata store — for TESTS and ephemeral
+// tooling only (nothing survives the process). Exported so other packages'
+// tests can build a files.Store without Postgres; production always uses
+// NewPGStore.
+func NewMemStore() metaStore { return newMemStore() } //nolint:revive // opaque handle by design
 
 func nullable(s string) any {
 	if s == "" {

@@ -72,6 +72,18 @@ func (s *Service) Register(r chi.Router, obs ObsHandler, adminKey string) {
 	r.With(s.requirePlatform).Get("/admin/tenants/{id}/resources", s.handleListResources)
 	r.With(s.requirePlatform).Get("/admin/tenants/{id}/data/{resource}", s.handleListData)
 
+	// --- tenant files manager (UI-F5-S1; platform token OR admin key) ---
+	// Thin delegates into the engine's files.Store — same OWASP upload validation
+	// (422/413), same dedup-aware delete, same serve strategy. The download leg is
+	// token-authenticated (a browser navigation cannot send headers): the token is
+	// minted by the requirePlatform /url route, short-lived, single-file, and any
+	// failure is a uniform 404.
+	r.With(s.requirePlatform).Get("/admin/tenants/{id}/files", s.handleListFiles)
+	r.With(s.requirePlatform).Post("/admin/tenants/{id}/files", s.handleUploadFile)
+	r.With(s.requirePlatform).Get("/admin/tenants/{id}/files/{fid}/url", s.handleFileURL)
+	r.With(s.requirePlatform).Delete("/admin/tenants/{id}/files/{fid}", s.handleDeleteFile)
+	r.Get("/admin/tenants/{id}/files/{fid}/download", s.handleFileDownload)
+
 	// --- served resources (boot-schema introspection; platform token OR admin key) ---
 	// The names of resources the engine serves live (routes/GraphQL/RBAC are compiled
 	// from the boot --schema). The editor diffs a to-deploy schema against this to warn

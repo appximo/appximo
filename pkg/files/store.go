@@ -268,6 +268,36 @@ func (s *Store) Stat(ctx context.Context, tenant, id string) (Meta, error) {
 	return m, err
 }
 
+// ListMeta returns a page of the tenant's file metadata (newest first) and the
+// total count — a METADATA query (the authoritative Postgres table), never a
+// storage List call. It is the browse surface for operational UIs (the Studio
+// files manager); a tenant with no files yet lists as empty.
+func (s *Store) ListMeta(ctx context.Context, tenant string, limit, offset int) ([]Meta, int, error) {
+	if err := validTenant(tenant); err != nil {
+		return nil, 0, err
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return s.store.list(ctx, tenant, limit, offset)
+}
+
+// BackendName names the driver behind b ("local", "s3", or "custom") — an
+// informational label for operational UIs, never a behavioral switch.
+func BackendName(b Backend) string {
+	switch b.(type) {
+	case *LocalBackend:
+		return "local"
+	case *S3Backend:
+		return "s3"
+	default:
+		return "custom"
+	}
+}
+
 // lookup resolves id → (metadata row, blob key) under tenant validation.
 func (s *Store) lookup(ctx context.Context, tenant, id string) (Meta, string, error) {
 	if err := validTenant(tenant); err != nil {

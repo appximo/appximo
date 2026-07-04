@@ -130,6 +130,15 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// Admin routes (/admin/*) do their OWN auth (platform token / admin key /
+		// signed download token) and are off the hot path; when Studio is reached
+		// via a tenant subdomain they would otherwise be buffered by captureWriter
+		// — including the files manager's binary downloads (UI-F5-S1). Never cache
+		// nor buffer them.
+		if strings.HasPrefix(r.URL.Path, "/admin/") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if r.Header.Get("Cache-Control") == "no-cache" {
 			next.ServeHTTP(w, r)
 			return

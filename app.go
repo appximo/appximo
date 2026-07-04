@@ -491,6 +491,11 @@ func New(cfg Config) (*App, error) {
 	// Read-only data browsing (ADMIN-UI-V1.2): reuses the engine's tenant-scoped DB
 	// + query builder; never touches the hot path (new /admin routes).
 	app.platformAdmin.SetTenantDB(app.tdb)
+	// Files manager (UI-F5-S1): the Studio files view manages a tenant's files
+	// through thin /admin/tenants/{id}/files routes that delegate into the SAME
+	// files.Store as /api/files — identical OWASP validation, serve strategy and
+	// dedup-aware delete; same signing secret and TTL as the public signed URLs.
+	app.platformAdmin.SetFileStore(app.files, app.filesMaxBytes, app.filesTokenTTL, []byte(cfg.JWTSecret))
 	log.Println("admin API: platform super-admin + tenant/user/observability management enabled at /admin/*")
 
 	app.authSvc = userauth.NewService(authStore, userauth.Config{

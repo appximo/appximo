@@ -12,6 +12,7 @@ import (
 
 	"github.com/miguelangel/appitools/pkg/controlplane"
 	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/miguelangel/appitools/pkg/files"
 	"github.com/miguelangel/appitools/pkg/userauth"
 )
 
@@ -96,6 +97,12 @@ type Service struct {
 	mfaLimit  *loginThrottle
 	dummyHash string
 	adminKey  string // machine credential accepted on management routes (set by Register)
+
+	// Files manager wiring (UI-F5-S1; set via SetFileStore, like tdb).
+	files         *files.Store
+	filesMaxBytes int64
+	filesTokenTTL time.Duration
+	filesSecret   []byte
 
 	ensureSuspendCol func(ctx context.Context) error
 }
