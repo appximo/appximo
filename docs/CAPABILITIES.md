@@ -47,6 +47,17 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 - Compiles RBAC at boot — roles added via `PUT` + reload do not take effect until restart.
 - Mints dev tokens from the CLI — `appitools token --tenant X --role Y`.
 
+## Identity (auth-as-product)
+
+- Serves in-engine signup/login/refresh at `POST /auth/*` — the issued JWT is the SAME one the engine validates (one token contract, no second path).
+- Isolates users per tenant — they live in `tenant_<id>.auth_users`, so **email is unique per tenant, not globally** (the same email is a distinct account in two tenants — the structural edge over Supabase Auth).
+- Hashes passwords with **argon2id** (pure Go, no CGO), paid only on signup/login — never the request hot path; anti-enumeration login (uniform 401, timing-equalized) + per-identity throttle.
+- Opt-in public signup — off by default; `APPITOOLS_AUTH_SIGNUP_ROLE` enables it and pins the role (a client-supplied role is ignored).
+- **Password reset + email verification** — single-use tokens delivered async via the outbox + email worker; `APPITOOLS_AUTH_REQUIRE_VERIFIED` can gate login on a verified email.
+- **Social login (OAuth2)** — Google, GitHub, Microsoft; standard authorization-code flow, tenant carried in a signed state (not the Host), identity linked by stable provider id, no new dependency. A provider is offered only when its client id is set.
+- **TOTP MFA (RFC 6238)** — opt-in per user, AES-256-GCM-encrypted secret, one-time backup codes, two-step login (an intermediate `mfa_token` that carries no role, so it can't authorize CRUD).
+- **Stateless sessions** — no server-side session/denylist; logout = discard the token; forced revocation is via admin suspend (blocks new logins; issued JWTs live to `exp`). No refresh-token rotation, magic-link/passwordless, or passkeys yet.
+
 ## Queries
 
 - Typed URL filters — `filter[field][op]=v`; ops are constrained per field type ([table](../AGENTS.md#field-types--the-complete-set)).
