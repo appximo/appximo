@@ -27,6 +27,36 @@ const DefaultMaxUploadBytes int64 = 256 << 20 // 256 MiB
 // tenant + rate-limit middleware.
 const SignedPathPrefix = "/files/signed"
 
+// IsByteServingPath reports whether (method, path) is one of the routes that
+// serve raw file BYTES — the complete set:
+//
+//	GET /api/files/{id}                              (tenant download)
+//	GET /files/signed/{token}                        (signed-token download)
+//	GET /admin/tenants/{id}/files/{fid}/download     (Studio manager download)
+//
+// These routes are routed AROUND the response-compression wrapper
+// (FILES-BENCH finding: chi Compress's writer lacks io.ReaderFrom, which
+// suppressed sendfile zero-copy on the shipped path — and compressing binary
+// blobs was counterproductive anyway). The JSON file routes (upload result,
+// /url, the manager listing) deliberately do NOT match — they stay
+// compressible like the rest of the API.
+func IsByteServingPath(method, path string) bool {
+	if method != http.MethodGet {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(path, SignedPathPrefix+"/"):
+		return true
+	case strings.HasPrefix(path, "/api/files/"):
+		// /api/files/{id} serves bytes; /api/files/{id}/url is JSON.
+		return !strings.HasSuffix(path, "/url")
+	case strings.HasPrefix(path, "/admin/tenants/") && strings.HasSuffix(path, "/download"):
+		return true
+	default:
+		return false
+	}
+}
+
 // UploadHandler streams a multipart upload to the store and returns the file
 // handle. It runs AFTER the engine middleware chain (tenant → JWT → RBAC for
 // the "files" resource), so it re-implements none of that — it only reads the

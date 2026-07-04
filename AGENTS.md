@@ -259,11 +259,12 @@ One line per layer — navigate the code for the rest:
   Content-Type is never trusted — + `original_name` sanitized at rest, metadata
   only, never a path; rejection → 422). Drivers: `LocalBackend` (direct disk,
   deliberately NOT gocloud fileblob — `http.ServeContent` over `*os.File` gives
-  Range/strong content-hash ETag/sendfile. FILES-BENCH measured the serving
-  code within 8% of nginx WITH sendfile firing, but the FULL shipped chain
-  currently suppresses zero-copy — chi Compress's response wrapper lacks
-  io.ReaderFrom → userspace copy loop, engine at 53% of nginx with ~5.5× the
-  CPU/byte on loopback; a documented FINDING awaiting its fix session, see
+  Range/strong content-hash ETag/sendfile zero-copy, MEASURED live on the
+  shipped path: 94% of nginx throughput at comparable CPU, 16.5k sendfile
+  calls straced. FILES-BENCH found chi Compress's wrapper (no io.ReaderFrom)
+  suppressing sendfile; FILES-FIX-SENDFILE routes the byte-serving routes
+  around the wrapper (`middleware.SelectiveCompress` +
+  `files.IsByteServingPath`, pinned by tests — JSON stays compressed); see
   docs/FILES.md §Performance. Atomic temp+rename, interrupted uploads leave
   nothing) and `S3Backend` (gocloud.dev
   s3blob — R2/Spaces/MinIO/AWS by config: endpoint/region/creds/bucket/

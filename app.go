@@ -690,7 +690,16 @@ func (a *App) buildRouter() *chi.Mux {
 	if a.corsConfig.Enabled() {
 		r.Use(appmiddleware.CORS(a.corsConfig))
 	}
-	r.Use(chimiddleware.Compress(5, "application/json", "application/graphql+json"))
+	// Response compression — SELECTIVE (FILES-FIX-SENDFILE): the file
+	// byte-serving routes are routed AROUND the Compress wrapper. chi's
+	// compressResponseWriter lacks io.ReaderFrom, which suppressed sendfile
+	// zero-copy on downloads (FILES-BENCH: 0 sendfile calls, 53% of nginx at
+	// ~5.5× the CPU/byte); binaries were never compressible anyway. JSON —
+	// including the file store's /url + listing responses — stays compressed.
+	// Same bypass shape as the response cache's (pkg/cache).
+	r.Use(appmiddleware.SelectiveCompress(
+		func(req *http.Request) bool { return files.IsByteServingPath(req.Method, req.URL.Path) },
+		5, "application/json", "application/graphql+json"))
 	r.Use(chimiddleware.RequestID)
 	r.Use(tenant.TenantMiddleware)
 	r.Use(resilience.RateLimit(a.tenantLimiter))

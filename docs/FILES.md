@@ -52,7 +52,7 @@ FILES-V2 reconciles per driver:
 
 | Backend | `GET /api/files/{id}` | Why |
 |---|---|---|
-| `local` | **proxy** — `http.ServeContent`: 200/206 Range, strong ETag (the content hash) → 304 revalidation, `sendfile` zero-copy in the serving code (today suppressed by the middleware chain — see [Performance](#performance--the-acceptance-benchmark-own-numbers)) | proxying is the only option AND the optimum: the standard library gives Range + conditional + zero-copy for free; the limit is the disk/NIC, never Go |
+| `local` | **proxy** — `http.ServeContent`: 200/206 Range, strong ETag (the content hash) → 304 revalidation, `sendfile` zero-copy — measured live on the shipped path (see [Performance](#performance--the-acceptance-benchmark-own-numbers)) | proxying is the only option AND the optimum: the standard library gives Range + conditional + zero-copy for free; the limit is the disk/NIC, never Go |
 | `s3` (default: `redirect`) | **302** to a short-lived presigned URL (Signature v4, same TTL as tokens) | keeps the FILES-V1 contract: the engine authorizes (tenant → JWT → RBAC ran before the redirect) and then gets out of the byte path — zero engine bandwidth, egress straight from the bucket (with R2 that egress is **$0**) |
 | `s3` with `APPITOOLS_FILES_S3_SERVE=proxy` | **proxy** — ServeContent over a lazy-seeking bucket reader (ranged GETs under the hood) | for buckets that must stay fully private / clients that can't follow redirects; the PocketBase trade-off: uniform headers, bytes transit the engine |
 
@@ -223,10 +223,10 @@ change** — no code path differs.
 The FILES-V2 design rests on a prediction from the storage investigation:
 *`http.ServeContent` over an `*os.File` fires `sendfile` zero-copy, so the
 engine's local serving lands within ~10-15% of nginx and the standard library
-is the practical ceiling.* FILES-BENCH **measured it** on our real dev box and
-the honest answer is in two parts: **the prediction holds for the serving
-code, and the shipped middleware chain currently defeats it** — a precise,
-fixable finding.
+is the practical ceiling.* FILES-BENCH **measured it** on our real dev box,
+found the shipped chain suppressing sendfile (a precise finding), and
+FILES-FIX-SENDFILE **fixed it and re-measured**: the shipped path now serves
+zero-copy at **94% of nginx** — the prediction holds, verified end to end.
 
 **Conditions.** 1-vCPU / 1.9 GB droplet (the 105); one 100 MB `urandom` file
 uploaded through the real API and served through the real
@@ -258,30 +258,48 @@ comparison is conservative **in the engine's favor**.
 | Engine serving code alone | **10,203** | 431 |
 | nginx | **15,128** | 0 (+123 writev) |
 
-**The finding (threshold FAILED on the shipped path).** Through the full
-chain the engine serves at **53% of nginx with ~5.5× the CPU per byte** —
+**The finding (FILES-BENCH; FIXED in FILES-FIX-SENDFILE).** Through the full
+chain the engine served at **53% of nginx with ~5.5× the CPU per byte** —
 far outside the 10-15% acceptance band — because **zero `sendfile` calls
-fire**. The culprit is precise: `chi/middleware.Compress` wraps EVERY
+fired**. The culprit was precise: `chi/middleware.Compress` wraps EVERY
 response in its `compressResponseWriter` (even content types it never
 compresses, like these downloads), and that wrapper does **not** implement
-`io.ReaderFrom` — so `http.ServeContent`'s `io.CopyN` can no longer reach
-`TCPConn.ReadFrom` and falls back to the userspace copy loop. (The request
-logger's wrapper forwards `ReadFrom` fine; Compress is the break.)
+`io.ReaderFrom` — so `http.ServeContent`'s `io.CopyN` could no longer reach
+`TCPConn.ReadFrom` and fell back to the userspace copy loop. (The request
+logger's wrapper forwards `ReadFrom` fine; Compress was the break.) The
+engine's serving code WITHOUT the wrapper (`LocalBackend.Serve` directly)
+already fired sendfile and landed at 92% of nginx — the standard library IS
+the ceiling once the chain lets it through.
 
-**The prediction, confirmed for the mechanism.** The engine's serving code
-WITHOUT the wrapper (`LocalBackend.Serve` directly) fires sendfile (10,203
-calls) and lands at **92% of nginx** (−8%, within the band) with CPU within
-~4 points — the standard library IS the ceiling once the chain lets it
-through. The fix is routing file downloads around the Compress wrapper (the
-same pattern as the response-cache bypass) — **a separate session**, per the
-measure-don't-optimize rule; this section gets re-measured then.
+**The fix + paired re-measurement (FILES-FIX-SENDFILE).** The byte-serving
+routes (`GET /api/files/{id}`, `GET /files/signed/{token}`, the Studio
+manager download — `files.IsByteServingPath`) are now routed **around** the
+Compress wrapper (`middleware.SelectiveCompress`, the same bypass shape as
+the response cache's; JSON — including the file store's own `/url` and
+listing responses — stays compressed). Doubly correct: it restores sendfile
+AND stops offering compression on binary blobs, which was counterproductive
+anyway. Pinned by tests (the handler must receive the UNWRAPPED writer; a
+gzip-accepting download must carry no `Content-Encoding` while a JSON route
+still gzips). Re-measured under the IDENTICAL protocol:
 
-**Practical context.** Even on the degraded path, 0.91 GB/s ≈ 7.3 Gbps —
-several times a typical droplet NIC, which is the real-world bottleneck for
-remote clients. The cost of the finding is **CPU efficiency**, not reachable
-throughput: at NIC-bound rates (~250 MB/s) the degraded path burns ~17% of a
-vCPU where the zero-copy path would burn ~4% — headroom that matters on a
-1-vCPU box serving API traffic alongside files.
+| Shipped path (`/api/files/{id}`) | throughput (median of 3) | server CPU | strace |
+|---|---|---|---|
+| **baseline** (FILES-BENCH) | 0.91 GB/s | 62.9% | 0 sendfile / 278,361 read+write |
+| **fixed** (runs 1.45/1.50/1.58) | **1.50 GB/s** | **26.5%** | **16,508 sendfile** / ~1.4k read+write (DB metadata + headers) |
+| nginx (same interleaved windows) | 1.59 GB/s (1.36/1.59/1.65) | 21.9% | 15,128 sendfile / ~0 |
+
+The shipped path now matches the bare serving code (1.50 vs 1.46 GB/s — the
+chain's overhead is noise) and lands at **94% of nginx (−6%), within the
+acceptance band**, with CPU within ~4.6 points. **+65% throughput, −58%
+process CPU** versus the baseline, verdict flipped to PASS with the same
+conditions and limitations as FILES-BENCH (loopback, c=50, no TLS,
+page-cache-hot file; the wrk client shares the single vCPU and caps the
+faster side more).
+
+**Practical context.** At NIC-bound rates (~250 MB/s on a typical droplet)
+the zero-copy path burns ~4% of a vCPU where the old degraded path burned
+~17% — CPU headroom that matters on a small box serving API traffic
+alongside files.
 
 ## What consumers see
 

@@ -169,3 +169,34 @@ func TestSafeFilename(t *testing.T) {
 		}
 	}
 }
+
+// TestIsByteServingPath pins the COMPLETE set of blob-serving routes that the
+// router must keep OUTSIDE the compression wrapper (FILES-FIX-SENDFILE) — and
+// that the JSON file routes stay inside it.
+func TestIsByteServingPath(t *testing.T) {
+	yes := [][2]string{
+		{"GET", "/api/files/7ef83c52-03c7-47d3-af27-c5b7dc6f668a"},
+		{"GET", "/files/signed/eyJhbGciOi.something.sig"},
+		{"GET", "/admin/tenants/acme/files/7ef83c52/download"},
+	}
+	no := [][2]string{
+		{"GET", "/api/files/7ef83c52/url"},         // signed-URL mint: JSON
+		{"POST", "/api/files"},                     // upload result: JSON
+		{"DELETE", "/api/files/7ef83c52"},          // 204/JSON error
+		{"GET", "/admin/tenants/acme/files"},       // manager listing: JSON
+		{"GET", "/admin/tenants/acme/files/x/url"}, // manager mint: JSON
+		{"GET", "/api/tasks"},                      // normal API
+		{"POST", "/files/signed/tok"},              // wrong method
+		{"GET", "/files/signednot/x"},              // prefix must be exact
+	}
+	for _, c := range yes {
+		if !IsByteServingPath(c[0], c[1]) {
+			t.Errorf("IsByteServingPath(%s %s) = false, want true", c[0], c[1])
+		}
+	}
+	for _, c := range no {
+		if IsByteServingPath(c[0], c[1]) {
+			t.Errorf("IsByteServingPath(%s %s) = true, want false", c[0], c[1])
+		}
+	}
+}

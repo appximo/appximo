@@ -195,3 +195,59 @@ func TestFiles_XLSX_EndToEnd(t *testing.T) {
 		t.Fatalf("unexpected aggregate: %+v", result)
 	}
 }
+
+// TestFiles_DownloadBypassesCompression pins the FILES-FIX-SENDFILE routing on
+// the FULL engine router: a download requested with Accept-Encoding: gzip must
+// come back UNCOMPRESSED (the byte-serving routes are routed around the
+// Compress wrapper so http.ServeContent keeps the io.ReaderFrom/sendfile fast
+// path) with its serve headers intact — while a JSON route through the same
+// chain still gets gzipped (compression itself is not disabled).
+func TestFiles_DownloadBypassesCompression(t *testing.T) {
+	helpers.RegisterTenant(t, itPool, "filesgz", loadFileJobSchema(t))
+	srv := newFileJobAppWithFiles(t, t.TempDir())
+
+	content := bytes.Repeat([]byte("compress-me-if-you-can "), 500) // ~11 KB, compressible on purpose
+	fileID, sha, _ := uploadMultipart(t, srv, "filesgz", "notes.txt", "text/plain", content)
+
+	adminTok := helpers.GenToken(t, "admin", "admin-user", "filesgz")
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/files/"+fileID, nil)
+	req.Host = "filesgz.localhost"
+	req.Header.Set("Authorization", "Bearer "+adminTok)
+	req.Header.Set("Accept-Encoding", "gzip")
+	tr := &http.Transport{DisableCompression: true} // see the wire encoding, no auto-gunzip
+	resp, err := (&http.Client{Transport: tr}).Do(req)
+	if err != nil {
+		t.Fatalf("download: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("download status = %d, want 200", resp.StatusCode)
+	}
+	if ce := resp.Header.Get("Content-Encoding"); ce != "" {
+		t.Fatalf("download Content-Encoding = %q, want none (bypass broken — sendfile lost)", ce)
+	}
+	if et := resp.Header.Get("Etag"); et != `"`+sha+`"` {
+		t.Fatalf("download ETag = %q, want content hash", et)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	if !bytes.Equal(got, content) {
+		t.Fatal("download body mismatch")
+	}
+
+	// Same chain, JSON route: gzip still applies (compression not disabled).
+	jreq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/files/"+fileID+"/url", nil)
+	jreq.Host = "filesgz.localhost"
+	jreq.Header.Set("Authorization", "Bearer "+adminTok)
+	jreq.Header.Set("Accept-Encoding", "gzip")
+	jresp, err := (&http.Client{Transport: tr}).Do(jreq)
+	if err != nil {
+		t.Fatalf("json route: %v", err)
+	}
+	defer jresp.Body.Close()
+	if jresp.StatusCode != http.StatusOK {
+		t.Fatalf("json route status = %d, want 200", jresp.StatusCode)
+	}
+	if ce := jresp.Header.Get("Content-Encoding"); ce != "gzip" {
+		t.Fatalf("json route Content-Encoding = %q, want gzip (Compress must stay on for JSON)", ce)
+	}
+}
