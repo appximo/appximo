@@ -52,7 +52,7 @@ FILES-V2 reconciles per driver:
 
 | Backend | `GET /api/files/{id}` | Why |
 |---|---|---|
-| `local` | **proxy** — `http.ServeContent`: 200/206 Range, strong ETag (the content hash) → 304 revalidation, `sendfile` zero-copy | proxying is the only option AND the optimum: the standard library gives Range + conditional + zero-copy for free; the limit is the disk/NIC, never Go |
+| `local` | **proxy** — `http.ServeContent`: 200/206 Range, strong ETag (the content hash) → 304 revalidation, `sendfile` zero-copy in the serving code (today suppressed by the middleware chain — see [Performance](#performance--the-acceptance-benchmark-own-numbers)) | proxying is the only option AND the optimum: the standard library gives Range + conditional + zero-copy for free; the limit is the disk/NIC, never Go |
 | `s3` (default: `redirect`) | **302** to a short-lived presigned URL (Signature v4, same TTL as tokens) | keeps the FILES-V1 contract: the engine authorizes (tenant → JWT → RBAC ran before the redirect) and then gets out of the byte path — zero engine bandwidth, egress straight from the bucket (with R2 that egress is **$0**) |
 | `s3` with `APPITOOLS_FILES_S3_SERVE=proxy` | **proxy** — ServeContent over a lazy-seeking bucket reader (ranged GETs under the hood) | for buckets that must stay fully private / clients that can't follow redirects; the PocketBase trade-off: uniform headers, bytes transit the engine |
 
@@ -217,6 +217,71 @@ DigitalOcean Spaces works with the same five variables ($5/mo flat: 250 GiB +
 1 TiB egress; endpoint `https://<region>.digitaloceanspaces.com`). AWS S3:
 leave the endpoint empty, set a real region. **Switching provider is a config
 change** — no code path differs.
+
+## Performance — the acceptance benchmark (own numbers)
+
+The FILES-V2 design rests on a prediction from the storage investigation:
+*`http.ServeContent` over an `*os.File` fires `sendfile` zero-copy, so the
+engine's local serving lands within ~10-15% of nginx and the standard library
+is the practical ceiling.* FILES-BENCH **measured it** on our real dev box and
+the honest answer is in two parts: **the prediction holds for the serving
+code, and the shipped middleware chain currently defeats it** — a precise,
+fixable finding.
+
+**Conditions.** 1-vCPU / 1.9 GB droplet (the 105); one 100 MB `urandom` file
+uploaded through the real API and served through the real
+`GET /api/files/{id}` path (JWT + tenant + full chain); nginx 1.18
+(`sendfile on`, `gzip off`, `access_log off`, 1 worker) serving the **same
+blob inode** on another port; `wrk -t1 -c50 -d30s` over **loopback**, runs
+interleaved A/B/A/B (3 per side), server-process CPU sampled from
+`/proc/<pid>/stat` over each run window. No TLS (sendfile does not apply under
+TLS; production TLS terminates at the proxy). Concurrency 50 — not 100 —
+because client and servers share the single vCPU (equal for both sides).
+Loopback measures the CPU/kernel ceiling, not a real NIC; the wrk client
+itself consumes the same core, which caps the *faster* side more — the
+comparison is conservative **in the engine's favor**.
+
+**Throughput + CPU (median of 3, interleaved):**
+
+| Server | Transfer/sec (runs) | median | server CPU |
+|---|---|---|---|
+| **Engine, full chain** (`/api/files/{id}`) | 0.88 / 0.91 / 0.91 GB/s | **0.91 GB/s** | **62.9%** |
+| **nginx** (same window) | 1.65 / 1.70 / 1.77 GB/s | **1.70 GB/s** | **21.5%** |
+| **Engine serving code alone** (`LocalBackend.Serve`, no middleware) | 1.40 / 1.46 / 1.51 GB/s | **1.46 GB/s** | **24.0%** |
+| **nginx** (same window) | 1.43 / 1.59 / 1.60 GB/s | **1.59 GB/s** | **20.1%** |
+
+**strace (separate short runs, `-c -f -e trace=sendfile,read,write,writev`):**
+
+| Server | sendfile calls | read+write calls |
+|---|---|---|
+| Engine, full chain | **0** | **278,361** (~64 KB copy loop) |
+| Engine serving code alone | **10,203** | 431 |
+| nginx | **15,128** | 0 (+123 writev) |
+
+**The finding (threshold FAILED on the shipped path).** Through the full
+chain the engine serves at **53% of nginx with ~5.5× the CPU per byte** —
+far outside the 10-15% acceptance band — because **zero `sendfile` calls
+fire**. The culprit is precise: `chi/middleware.Compress` wraps EVERY
+response in its `compressResponseWriter` (even content types it never
+compresses, like these downloads), and that wrapper does **not** implement
+`io.ReaderFrom` — so `http.ServeContent`'s `io.CopyN` can no longer reach
+`TCPConn.ReadFrom` and falls back to the userspace copy loop. (The request
+logger's wrapper forwards `ReadFrom` fine; Compress is the break.)
+
+**The prediction, confirmed for the mechanism.** The engine's serving code
+WITHOUT the wrapper (`LocalBackend.Serve` directly) fires sendfile (10,203
+calls) and lands at **92% of nginx** (−8%, within the band) with CPU within
+~4 points — the standard library IS the ceiling once the chain lets it
+through. The fix is routing file downloads around the Compress wrapper (the
+same pattern as the response-cache bypass) — **a separate session**, per the
+measure-don't-optimize rule; this section gets re-measured then.
+
+**Practical context.** Even on the degraded path, 0.91 GB/s ≈ 7.3 Gbps —
+several times a typical droplet NIC, which is the real-world bottleneck for
+remote clients. The cost of the finding is **CPU efficiency**, not reachable
+throughput: at NIC-bound rates (~250 MB/s) the degraded path burns ~17% of a
+vCPU where the zero-copy path would burn ~4% — headroom that matters on a
+1-vCPU box serving API traffic alongside files.
 
 ## What consumers see
 
