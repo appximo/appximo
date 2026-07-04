@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/redis/go-redis/v9"
 )
 
 // Exported stream constants so callers (cmd_serve, tests) use the same values.

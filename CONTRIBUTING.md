@@ -85,7 +85,8 @@ chore: upgrade pgx to v5.9.2
 
 ## Code style
 
-- `gofmt` is non-negotiable — format before committing.
+- `gofmt` is non-negotiable — format before committing. `make fmt-check` runs
+  the exact gate CI enforces (it fails listing every unformatted file).
 - No comments that describe *what* the code does — names do that. Only explain *why* when it's non-obvious.
 - No new abstraction unless three concrete use cases exist.
 - Security-sensitive code (schema validation, SQL building, RBAC) requires a test for each invariant.
@@ -94,6 +95,7 @@ chore: upgrade pgx to v5.9.2
 
 ## Pull request checklist
 
+- [ ] `make fmt-check` passes (gofmt — CI gates on it)
 - [ ] `go build ./...` passes
 - [ ] `go test ./...` passes
 - [ ] No new linter warnings (`golangci-lint run`)

@@ -49,7 +49,7 @@ func orphanSchemaErr(pgSchema, tenantID string) error {
 // RegisterTenant onboards a new tenant in 10 atomic steps:
 //  1. Validate tenantID format.
 //  2. Verify no duplicate in public.tenants.
-//  3-7. Transaction: INSERT tenant + CREATE SCHEMA + INSERT policy → COMMIT.
+//     3-7. Transaction: INSERT tenant + CREATE SCHEMA + INSERT policy → COMMIT.
 //  8. ApplyTenantMigration: CREATE TABLE for each resource.
 //  9. pg_notify('schema_updated', tenantID).
 //  10. Return the created Tenant.

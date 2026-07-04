@@ -300,8 +300,8 @@ func Forward(s *Server, remotePort int) (net.Listener, error) {
 					return
 				}
 				go func() { io.Copy(remote, local); remote.Close() }() //nolint:errcheck
-				io.Copy(local, remote)                                //nolint:errcheck
-				local.Close()                                         //nolint:errcheck
+				io.Copy(local, remote)                                 //nolint:errcheck
+				local.Close()                                          //nolint:errcheck
 			}()
 		}
 	}()

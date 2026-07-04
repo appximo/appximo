@@ -55,11 +55,11 @@ func (s *RegisteredServer) AdminKey() string {
 // Input validation. Strict allowlists: these values end up in SSH dials and as
 // arguments to fixed commands, so anything outside the pattern is rejected.
 var (
-	serverNameRe  = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$`)
-	hostnameRe    = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9.-]{0,252}[a-zA-Z0-9])?$`)
-	sshUserRe     = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
-	envVarNameRe  = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
-	absPathRe     = regexp.MustCompile(`^/[a-zA-Z0-9._/-]{1,255}$`)
+	serverNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$`)
+	hostnameRe   = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9.-]{0,252}[a-zA-Z0-9])?$`)
+	sshUserRe    = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+	envVarNameRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
+	absPathRe    = regexp.MustCompile(`^/[a-zA-Z0-9._/-]{1,255}$`)
 )
 
 func validHost(h string) bool {

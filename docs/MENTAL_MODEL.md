@@ -6,9 +6,10 @@ new user of Appitools eventually asks:
 1. *"If it's multi-tenant, why does `/docs` show one API for everyone?"*
 2. *"I deployed a change from the editor — why do I (sometimes) need a restart?"*
 
-Every claim below was verified against the source (file:line given) and, where
-it matters, against a **running engine** (a live tenant was migrated and probed;
-see [§4](#4-the-change-cycle--what-a-deploy-activates-live-and-what-needs-a-restart)).
+Every claim below was verified against the source (file + symbol given — symbol
+references survive edits; find them with your editor's go-to-symbol or grep) and,
+where it matters, against a **running engine** (a live tenant was migrated and
+probed; see [§4](#4-the-change-cycle--what-a-deploy-activates-live-and-what-needs-a-restart)).
 
 ## 1. The three artifacts
 
@@ -32,13 +33,13 @@ Compiled at process start and identical for every tenant:
 
 | Global artifact | Built where |
 |---|---|
-| REST routes (all CRUD + `/aggregate` + `/events` + relation subroutes) | `codegen.BuildRouter` (app.go:823), iterates boot `s.Resources` once |
-| GraphQL types + resolvers | `gqlhandler.BuildHandler(a.schema, …)` (app.go:797-798) |
-| RBAC policy middleware | `rbac.RBACMiddleware(mustMarshal(a.schema.RBAC))` (app.go:716) |
-| Declarative validators (S44 rules, state machines, defaults) | `schema.CompileRules` per resource inside `BuildRouter` (builder.go:236-242) |
-| Hooks (js/webhook/wasm config) | captured per-handler from boot `res.Hooks` (builder.go:457,536,768,843) |
-| OpenAPI spec + `/docs` | `codegen.GenerateOpenAPIJSON(a.schema, …)` once at boot (openapi_serve.go:47-48) |
-| `/admin/served-resources` (the editor's restart hint) | boot resource list (app.go:413-417) |
+| REST routes (all CRUD + `/aggregate` + `/events` + relation subroutes) | `codegen.BuildRouter`, mounted once in app.go `buildRouter`; iterates boot `s.Resources` once |
+| GraphQL types + resolvers | `gqlhandler.BuildHandler(a.schema, …)` (app.go `buildRouter`) |
+| RBAC policy middleware | `rbac.RBACMiddleware(mustMarshal(a.schema.RBAC))` (app.go `buildRouter`) |
+| Declarative validators (S44 rules, state machines, defaults) | `schema.CompileRules` per resource at the top of `codegen.BuildRouter` |
+| Hooks (js/webhook/wasm config) | captured per-handler from boot `res.Hooks["before_create"]` etc. inside `codegen.BuildRouter` |
+| OpenAPI spec + `/docs` | `codegen.GenerateOpenAPIJSON(a.schema, …)` once at boot (openapi_serve.go `registerOpenAPIRoutes`) |
+| `/admin/served-resources` (the editor's restart hint) | boot resource list (`servedResources` in app.go `New`) |
 
 **Nothing on the request hot path consults a per-tenant schema.** The
 per-tenant stored schema (`public.tenants.json_schema`) is read only by the
@@ -48,15 +49,16 @@ admin reload endpoint — it has **zero effect on routing, validation or RBAC**.
 
 That is why `/docs` shows one API: the OpenAPI document *is* the shared
 structure, generated from the boot schema, the same for every tenant (it is
-even served unauthenticated for exactly that reason — openapi_serve.go:41-45).
+even served unauthenticated for exactly that reason — see the comment atop
+openapi_serve.go `registerOpenAPIRoutes`).
 
 ## 3. What is per-tenant (isolated)
 
 | Per-tenant | Mechanism |
 |---|---|
-| **All data** — tables and rows | Postgres schema-per-tenant; every query runs inside a tx with `SET LOCAL search_path TO tenant_<id>` (pkg/db/tenant.go:256,291,327,387,452,505) |
+| **All data** — tables and rows | Postgres schema-per-tenant; every query runs inside a tx with `SET LOCAL search_path TO tenant_<id>` (every `setPath` site in pkg/db/tenant.go `TenantDB`) |
 | Users, tokens, identities, MFA | `tenant_<id>.auth_users` / `auth_tokens` / `auth_identities` / `auth_mfa` — email unique **per tenant** |
-| The *physical* table set | migrations apply to ONE tenant's schema (`ApplyTenantMigration("tenant_"+id, …)`, controlplane/service.go:93) |
+| The *physical* table set | migrations apply to ONE tenant's schema (controlplane/service.go `UpdateSchemaApproved` → `migration.ApplyTenantMigrationApproved`; provisioning in tenant_service.go `RegisterTenant`) |
 | Stored schema copy | `public.tenants.json_schema` — the deploy/migration input, NOT a routing input |
 | Rate-limit buckets, response-cache entries, observability rings/SLO, outbox `tenant_id` | keyed by tenant id from the Host middleware |
 | Files (CAS blobs + `files` table) | tenant-prefixed paths + per-tenant metadata table |
@@ -72,8 +74,8 @@ A deploy (editor "Deploy", control-plane `PUT /tenants/{id}/schema`, or
 `appitools migrate`) does three things: persists the schema to
 `public.tenants.json_schema`, runs the **real migration** against that tenant's
 tables (diff → production-safe DDL), and fires `pg_notify(schema_updated)`
-which only **invalidates the response cache** (app.go:1050-1076). It never
-recompiles routes, GraphQL, RBAC, validators or hooks.
+which only **invalidates the response cache** (app.go `startCacheInvalidator`).
+It never recompiles routes, GraphQL, RBAC, validators or hooks.
 
 The consequences, **verified live** (engine booted with one schema, a tenant
 migrated to a schema with a new column `notas`, then probed without restart):
@@ -81,14 +83,14 @@ migrated to a schema with a new column `notas`, then probed without restart):
 | After deploying, without restart… | Live? | Why |
 |---|---|---|
 | New/renamed **table or column** exists in the tenant DB | ✅ | the migration engine ran |
-| **Write** the new column (POST/PUT/PATCH, REST) | ✅ | the insert/update is body-driven; keys are NOT whitelisted against the boot schema — the DB is the source of truth, an unknown column's 42703 maps to a clean 422 `unknown_field` (builder.go:499-509, handlers/errors.go:30-42) |
+| **Write** the new column (POST/PUT/PATCH, REST) | ✅ | the insert/update is body-driven; keys are NOT whitelisted against the boot schema — the DB is the source of truth, an unknown column's 42703 maps to a clean 422 `unknown_field` (the insert error path in `codegen.BuildRouter` → handlers/errors.go `WriteDBError`) |
 | **Read** the new column (GET list/get, REST) | ✅ | `SELECT *` returns whatever columns the tenant table has |
 | Declarative **validation** of the new column (`maxLength`, `pattern`, …) | ❌ | validators are boot-compiled — a 300-char value passed a deployed `maxLength: 200` in the live test |
 | `filter[new_column]` | ❌ | the query builder validates filter fields against the boot resource (400 `unknown filter field`) |
 | The new column in **GraphQL** | ❌ | types are boot-compiled (`Cannot query field "notas" on type …`) |
 | The new column in **/docs** (OpenAPI) | ❌ | the spec is generated once at boot |
 | RBAC that names the new column (allowlist/condition) | ❌ | policy parsed at boot |
-| **Hook** changes | ❌ | hook config is captured in handler closures at boot; the reload endpoint honestly warns (app.go:988-1010) |
+| **Hook** changes | ❌ | hook config is captured in handler closures at boot; the reload endpoint honestly warns (app.go `reloadHandler` + `hooksDiffering`) |
 | A **new resource** (routes, GraphQL type, /docs entry) | ❌ | no route exists at all — the editor detects this via `/admin/served-resources` and shows the restart banner (UI-F3-S1) |
 
 So the honest one-liner is: **the migration is live; the definition is
@@ -107,8 +109,8 @@ That single restart activates everything in the ❌ rows at once.
 
 The editor's Deploy (and `PUT /admin/tenants/{id}/schema`, and the control
 plane's `PUT /tenants/{id}/schema`) migrates **exactly one tenant**
-(controlplane/service.go:73-112). There is no fan-out in the editor or the
-admin API.
+(controlplane/service.go `UpdateSchema` / `UpdateSchemaApproved`). There is no
+fan-out in the editor or the admin API.
 
 Concrete example: you have tenants `acme` and `demo`; you add resource
 `invoices` in the editor and deploy to `acme` → the `invoices` **table** is
@@ -117,12 +119,13 @@ created in `tenant_acme` only. `tenant_demo` does not change. (And the
 
 - Structural **divergence between tenants is possible** and tolerated: a tenant
   missing a table that the global routes serve gets a clean
-  `400 "invalid tenant"` (42P01/3F000 classified in handlers/errors.go:28,61),
-  never a raw error.
+  `400 "invalid tenant"` (42P01/3F000 classified in handlers/errors.go
+  `WriteDBError`), never a raw error.
 - Keeping N tenants in structural sync is the CLI's job:
   `appitools migrate --all-tenants --schema base.json` — the resumable,
-  partial-failure-tolerant fan-out (`migration.RunFanout`,
-  cmd_migrate.go:88-91). **RunFanout is reachable only from the CLI today**;
+  partial-failure-tolerant fan-out (`migration.RunFanout`, called from the
+  `--all-tenants` branch of cmd_migrate.go). **RunFanout is reachable only from
+  the CLI today**;
   the editor is per-tenant by design (divergence during a rollout is the
   expected transient state, and a mass destructive change must stay a
   deliberate, operator-driven act).
@@ -140,11 +143,11 @@ nothing to declare and therefore nothing for the editor to draw:
 
 | Automatic (no schema key exists) | Declarable (schema keys) |
 |---|---|
-| **SSE** — `GET /api/{r}/events` is mounted unconditionally for every resource (builder.go:675) | fields + all field properties (type, required, unique, auto, default, enum, min/max, minLength/maxLength, pattern, format) |
+| **SSE** — `GET /api/{r}/events` is mounted unconditionally for every resource (the `sseHandler` mount in `codegen.BuildRouter`) | fields + all field properties (type, required, unique, auto, default, enum, min/max, minLength/maxLength, pattern, format) |
 | Response cache (5 s TTL, role-gated) | `relation`, `on_delete`, `on_update`, `references`; resource-level `foreign_keys` |
 | Rate limiting (env-configured) | `relations` block (has_many / belongs_to / many_to_many, `limit`) |
-| Aggregation `GET /api/{r}/aggregate` (builder.go:369) | `indexes` |
-| `POST /api/transaction` (builder.go:956) | `state_machine` |
+| Aggregation `GET /api/{r}/aggregate` (the aggregate route in `codegen.BuildRouter`) | `indexes` |
+| `POST /api/transaction` (the transaction mount in `codegen.BuildRouter`) | `state_machine` |
 | File store `/api/files` (unless a resource is named `files`) | `hooks` (before/after; js/webhook/wasm) |
 | Auth `/auth/*` (env-gated features) | `events` (outbox opt-in — the one per-resource emission switch) |
 | OpenAPI `/openapi.*` + `/docs`, CORS, observability | `rbac` (both forms), `renamed_from` (field + resource) |

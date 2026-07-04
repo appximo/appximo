@@ -92,11 +92,11 @@ func main() {
 	// ── Global section (id 6) ────────────────────────────────────────────
 	// $heap: mutable i32 = 1024
 	var glob bytes.Buffer
-	glob.WriteByte(i32)        // valtype
-	glob.WriteByte(0x01)       // mutable
-	glob.WriteByte(0x41)       // i32.const
-	uleb(&glob, 1024)          // 1024
-	glob.WriteByte(0x0b)       // end
+	glob.WriteByte(i32)  // valtype
+	glob.WriteByte(0x01) // mutable
+	glob.WriteByte(0x41) // i32.const
+	uleb(&glob, 1024)    // 1024
+	glob.WriteByte(0x0b) // end
 	section(&out, 6, vec(1, glob.Bytes()))
 
 	// ── Export section (id 7) ────────────────────────────────────────────

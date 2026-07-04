@@ -65,8 +65,8 @@ func TestStore_PruneDropsOldKeepsRecent(t *testing.T) {
 	defer store.Close()
 
 	now := time.Now().Unix()
-	old := Snapshot{TenantID: "10", TS: now - 8*86400, SLOStatus: "ok"}   // 8 days → pruned
-	recent := Snapshot{TenantID: "10", TS: now - 3600, SLOStatus: "ok"}   // 1h → kept
+	old := Snapshot{TenantID: "10", TS: now - 8*86400, SLOStatus: "ok"} // 8 days → pruned
+	recent := Snapshot{TenantID: "10", TS: now - 3600, SLOStatus: "ok"} // 1h → kept
 	if err := store.Flush("10", old); err != nil {
 		t.Fatal(err)
 	}

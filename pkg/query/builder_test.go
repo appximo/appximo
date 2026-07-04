@@ -346,7 +346,7 @@ func TestBuildQuery_InvalidCursorRejected(t *testing.T) {
 	bad := []string{
 		"not-a-uuid",
 		"XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX", // uppercase
-		"01234567-89ab-cdef-0123-456789abcde",   // too short
+		"01234567-89ab-cdef-0123-456789abcde",  // too short
 		"",
 	}
 	for _, v := range bad {
@@ -359,7 +359,7 @@ func TestBuildQuery_InvalidCursorRejected(t *testing.T) {
 }
 
 func TestBuildQuery_AfterTakesPrecedenceOverBefore(t *testing.T) {
-	const after  = "aaaaaaaa-0000-0000-0000-000000000000"
+	const after = "aaaaaaaa-0000-0000-0000-000000000000"
 	const before = "bbbbbbbb-0000-0000-0000-000000000000"
 	params := url.Values{"after": {after}, "before": {before}}
 	qb := mustBuild(t, testResource(), params, nil)

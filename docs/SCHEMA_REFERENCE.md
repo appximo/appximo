@@ -11,6 +11,11 @@ server at boot. There are no handlers, models, or migration files — the schema
 *is* the contract. This document specifies that contract precisely enough that a
 human (or an AI generation layer) can author a valid schema from it alone.
 
+> Note on source references: the `file:line` pointers below were exact when this
+> reference was extracted and some have since drifted as files grew — treat the
+> **file + named symbol** as authoritative and line numbers as approximate
+> (grep the symbol). The *grammar* statements themselves are kept current.
+
 ## Provenance — this is extracted from the code
 
 The **source of truth is the engine code**, not memory or prose. Every rule below

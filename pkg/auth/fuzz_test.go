@@ -16,7 +16,7 @@ func FuzzValidateToken(f *testing.F) {
 		"a.b.c.d.e",
 		"Bearer something",
 		"eyJhbGciOiJIUzI1NiJ9.e30.x",
-		"eyJ0eXAiOiJKV1QiLCJhbGciOiJub25lIn0.e30.",       // alg=none, empty sig
+		"eyJ0eXAiOiJKV1QiLCJhbGciOiJub25lIn0.e30.",        // alg=none, empty sig
 		"eyJhbGciOiJSUzI1NiJ9.eyJ0ZW5hbnRfaWQiOiIxMCJ9.x", // alg=RS256 (HS expected)
 		"...",
 		"\x00\x00\x00",

@@ -31,10 +31,10 @@ func TestValidationScenario(t *testing.T) {
 		WithHeader("Authorization", admin).
 		WithJSON(map[string]any{
 			// email ABSENT            → required
-			"status": "archived",   // → enum
-			"amount": -10.5,        // → min
-			"nit":    "ABC",        // → pattern
-			"code":   "xy",         // → minLength
+			"status": "archived", // → enum
+			"amount": -10.5,      // → min
+			"nit":    "ABC",      // → pattern
+			"code":   "xy",       // → minLength
 		}).
 		Expect().Status(http.StatusUnprocessableEntity).
 		JSON().Object()

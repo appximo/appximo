@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	queryTimeout  = 250 * time.Millisecond
-	retryBackoff  = 100 * time.Millisecond
+	queryTimeout = 250 * time.Millisecond
+	retryBackoff = 100 * time.Millisecond
 )
 
 // WithQueryTimeout executes fn with a 250 ms deadline.

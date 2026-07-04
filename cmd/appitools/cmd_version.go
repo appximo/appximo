@@ -7,7 +7,9 @@ import (
 )
 
 // Inyectadas en build con
-//   -ldflags "-X main.version=v0.1.0 -X main.revision=<sha>"
+//
+//	-ldflags "-X main.version=v0.1.0 -X main.revision=<sha>"
+//
 // (release.yml y el Dockerfile lo hacen; un build local plano reporta "dev").
 var (
 	version  = "dev"

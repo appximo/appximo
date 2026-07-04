@@ -43,8 +43,8 @@ func setRole(token, role, userID string) {
 	auth.SetCachedClaims(token, &auth.Claims{Role: role, UserID: userID, TenantID: "acme"})
 }
 
-// 1. Admin caches a URL; an operario requesting the same URL must NOT receive
-//    the admin's response (the bypass that T3 found). It must run its own RBAC.
+//  1. Admin caches a URL; an operario requesting the same URL must NOT receive
+//     the admin's response (the bypass that T3 found). It must run its own RBAC.
 func TestRBACCache_OperarioNeverGetsAdminData(t *testing.T) {
 	var calls int64
 	rc := New(5 * time.Second)
@@ -72,8 +72,8 @@ func TestRBACCache_OperarioNeverGetsAdminData(t *testing.T) {
 	}
 }
 
-// 2. Two different admins in the same tenant share the cache (no conditions →
-//    identical data for all users → one backend call).
+//  2. Two different admins in the same tenant share the cache (no conditions →
+//     identical data for all users → one backend call).
 func TestRBACCache_AdminsShare(t *testing.T) {
 	var calls int64
 	rc := New(5 * time.Second)

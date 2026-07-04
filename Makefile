@@ -2,7 +2,7 @@
 # the gotestfmt-piped targets.
 SHELL := bash
 
-.PHONY: build engine worker lint run build-pgo collect-profile \
+.PHONY: build engine worker lint fmt-check run build-pgo collect-profile \
 	test test-integration test-e2e test-resilience test-perf test-security test-all bench
 
 build:
@@ -22,6 +22,16 @@ worker:
 
 lint:
 	golangci-lint run ./...
+
+# fmt-check: the formatting gate CI enforces (run it locally before committing).
+# Fails listing every file gofmt would rewrite; empty output = clean tree.
+# node_modules is excluded defensively (the UI trees ship no .go, but a dep might).
+fmt-check:
+	@out=$$(gofmt -l . 2>&1 | grep -v node_modules || true); \
+	if [ -n "$$out" ]; then \
+		echo "✗ gofmt gate — fix these (gofmt -w):"; echo "$$out"; exit 1; \
+	fi; \
+	echo "✓ gofmt clean"
 
 run:
 	go run ./cmd/appitools/main.go

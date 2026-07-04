@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// 1) Empty SLACK_WEBHOOK_URL → NewSlackAlerterFromEnv returns a NoopAlerter that
-//    sends without panicking or erroring.
+//  1. Empty SLACK_WEBHOOK_URL → NewSlackAlerterFromEnv returns a NoopAlerter that
+//     sends without panicking or erroring.
 func TestAlerter_EmptyEnvIsNoop(t *testing.T) {
 	t.Setenv("SLACK_WEBHOOK_URL", "")
 
@@ -24,8 +24,8 @@ func TestAlerter_EmptyEnvIsNoop(t *testing.T) {
 	}
 }
 
-// 2) CooldownAlerter suppresses a repeat (tenant, level) inside the window and lets it
-//    through once the window elapses. A short window keeps the test deterministic and fast.
+//  2. CooldownAlerter suppresses a repeat (tenant, level) inside the window and lets it
+//     through once the window elapses. A short window keeps the test deterministic and fast.
 func TestAlerter_CooldownWindow(t *testing.T) {
 	mock := &mockAlerter{}
 	c := NewCooldownAlerter(mock, 50*time.Millisecond)

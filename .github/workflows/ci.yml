@@ -34,6 +34,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Formatting gate FIRST — fails in seconds, listing every offending file
+      # (RELEASE-AUDIT-V1 finding: the tree had drifted because nothing gated it).
+      # Same command devs run locally: make fmt-check.
+      - name: gofmt gate
+        run: make fmt-check
+
       - name: Build
         run: go build ./...
 

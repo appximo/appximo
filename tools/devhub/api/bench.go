@@ -603,11 +603,11 @@ func BenchExportHandler(w http.ResponseWriter, r *http.Request) {
 	f := func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
 	for rows.Next() {
 		var (
-			id                  int64
-			label, createdAt    string
-			rps, durS, n        int
-			p50, p95, p99       float64
-			errRate, cv         float64
+			id               int64
+			label, createdAt string
+			rps, durS, n     int
+			p50, p95, p99    float64
+			errRate, cv      float64
 		)
 		if err := rows.Scan(&id, &label, &createdAt, &rps, &durS, &n,
 			&p50, &p95, &p99, &errRate, &cv); err != nil {
@@ -866,7 +866,9 @@ var benchTenantRe = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
 
 // BenchProtocolHandler — POST /api/bench/protocol
 // body: {"runs":3,"label":"ui-test","rate":50,"duration":"15s",
-//        "script":"sustained_writes.js","server_id":2}
+//
+//	"script":"sustained_writes.js","server_id":2}
+//
 // script is optional (default sustained_2krps.js) and must be one of the
 // protocolScripts allowlist keys — never a path.
 //

@@ -52,6 +52,6 @@ type bufferedWriter struct {
 	buf    bytes.Buffer
 }
 
-func (b *bufferedWriter) Header() http.Header        { return b.header }
-func (b *bufferedWriter) WriteHeader(code int)       { b.code = code }
+func (b *bufferedWriter) Header() http.Header         { return b.header }
+func (b *bufferedWriter) WriteHeader(code int)        { b.code = code }
 func (b *bufferedWriter) Write(p []byte) (int, error) { return b.buf.Write(p) }

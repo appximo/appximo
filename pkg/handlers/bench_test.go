@@ -27,7 +27,7 @@ type GuideRow struct {
 // Benchmarks use a single instance to avoid per-iteration allocation.
 type discardWriter struct{ h http.Header }
 
-func (d *discardWriter) Header() http.Header        { return d.h }
+func (d *discardWriter) Header() http.Header         { return d.h }
 func (d *discardWriter) Write(p []byte) (int, error) { return len(p), nil }
 func (d *discardWriter) WriteHeader(int)             {}
 

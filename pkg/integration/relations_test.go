@@ -65,7 +65,7 @@ func relSchema() *schema.APISchema {
 					"orders": {Type: "many_to_many", Target: "orders", Through: "orderproducts", FK: "product_id", TargetFK: "order_id"},
 				},
 			},
-			"customers":      {Fields: map[string]schema.FieldDef{"name": {Type: "string", Required: true}}},
+			"customers": {Fields: map[string]schema.FieldDef{"name": {Type: "string", Required: true}}},
 			// note (string) gives the junction an orderable/filterable field so the
 			// generated GraphQL Order/Filter input types are non-empty (graphql-go
 			// rejects an empty input object — a resource of only-uuid fields).

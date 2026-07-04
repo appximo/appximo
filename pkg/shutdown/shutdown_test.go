@@ -111,8 +111,8 @@ func TestGracefulShutdown_InFlightRequestsComplete(t *testing.T) {
 		inflight <- resp.StatusCode
 	}()
 
-	<-slowStarted         // request is actively being processed
-	cancel()              // signal shutdown
+	<-slowStarted                     // request is actively being processed
+	cancel()                          // signal shutdown
 	time.Sleep(20 * time.Millisecond) // let MarkShuttingDown propagate
 
 	// /readyz must now return 503

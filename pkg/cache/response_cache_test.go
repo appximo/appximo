@@ -105,7 +105,7 @@ func TestCacheTTLExpiry(t *testing.T) {
 	}
 
 	handler.ServeHTTP(httptest.NewRecorder(), makeReq()) // miss, caches
-	time.Sleep(100 * time.Millisecond)                    // let TTL expire
+	time.Sleep(100 * time.Millisecond)                   // let TTL expire
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, makeReq()) // should miss again after expiry
 

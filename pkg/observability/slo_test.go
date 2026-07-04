@@ -136,10 +136,10 @@ func TestSLO_ComputeBucketWindowAndErrorRule(t *testing.T) {
 	now := int64(100 * usPerMinute)
 	cfg := DefaultSLOConfig() // LatencySLOms = 100 → 100_000us threshold
 	samples := []Sample{
-		{Start: now - 1_000_000, DurUS: 5000, Status: 200},   // in window, ok
-		{Start: now - 2_000_000, DurUS: 5000, Status: 503},   // in window, error (5xx)
+		{Start: now - 1_000_000, DurUS: 5000, Status: 200},    // in window, ok
+		{Start: now - 2_000_000, DurUS: 5000, Status: 503},    // in window, error (5xx)
 		{Start: now - 3_000_000, DurUS: 200_000, Status: 200}, // in window, error (slow)
-		{Start: now - 120_000_000, DurUS: 5000, Status: 200}, // 2 min ago → excluded
+		{Start: now - 120_000_000, DurUS: 5000, Status: 200},  // 2 min ago → excluded
 	}
 	b := computeBucket(samples, cfg, now)
 	if b.Count != 3 {
