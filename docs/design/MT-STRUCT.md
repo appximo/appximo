@@ -391,6 +391,15 @@ touches the hot path** — the project's standing rule.
   mandatory*** — must confirm the predicted ~no-change (Number 3 says it will).
   *Verification: bench green (p50 no_change) + the full existing suite green with
   the single-app registry.*
+  ✅ **(MT-STRUCT-S2** — `registry.go` (`Registry`/`compiledApp`, lock-free
+  atomic.Pointer reads, zero-alloc Resolve) wired as the server handler with the
+  boot app as sole entry. Microbench on the shipped single-app path: **2.7 ns/op,
+  0 allocs** (domain walks for future N apps: 44–124 ns, 0 allocs). E2E
+  `bench-protocol` (k6 RATE=50×20 s, 6+6 INTERLEAVED runs, engine restarted per
+  run, devhub Mann-Whitney): **verdict `no_change`** — p=0.185, median-diff CI
+  **[−6.3 µs, +2.4 µs]** vs the 0.5 ms min-effect; per-run p50 medians
+  A=0.585 ms / B=0.596 ms. Suite green + acceptance **39/0** on the registry
+  binary — behavior identical. JWT/RBAC untouched (S3's job).**)**
 
 - **Stage 3 — per-app middleware + multi-app compile (B, part 2).** Rebuild the
   chain so JWT/RBAC/cache/validators resolve the **per-request app from context**

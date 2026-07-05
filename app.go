@@ -107,6 +107,12 @@ type App struct {
 	// relaunches with the persisted boot schema.
 	restartRequested atomic.Bool
 
+	// registry is the in-process app registry (MT-STRUCT-S2, the Option-B
+	// foundation): Host → compiled app, lock-free reads. In S2 it holds ONE
+	// app (the boot schema) and every Host resolves to it — behavior identical
+	// to pre-registry, benched. S3 loads N apps; S4 hot-swaps entries.
+	registry *Registry
+
 	routes  []Route
 	started bool
 }
@@ -651,10 +657,16 @@ func (a *App) Start() error {
 
 	r := a.buildRouter()
 
+	// MT-STRUCT-S2: the server's handler is the app REGISTRY, not the router
+	// directly. With the single boot app and no domain table, Resolve is two
+	// atomic loads → the same router as before (behavior identical, benched —
+	// the dispatch exists so S3 can load N apps and S4 can hot-swap one).
+	a.registry = NewRegistry(&compiledApp{name: a.schema.Name, handler: r}, nil)
+
 	addr := fmt.Sprintf(":%d", a.cfg.Port)
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           r,
+		Handler:           a.registry,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       20 * time.Second,
 		WriteTimeout:      30 * time.Second,
