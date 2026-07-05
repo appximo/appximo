@@ -118,6 +118,19 @@ type App struct {
 	// on the process-level 404 handler, not this app.
 	noSynthetic bool
 
+	// hotSwap, when non-nil, makes a deploy (POST /admin/engine/schema) rebuild
+	// THIS app's router from the newly-persisted schema and swap it into the
+	// registry WITHOUT restarting the process (MT-STRUCT-S4). It is set only by
+	// the in-process fleet runtime (ServeFleet). When nil (single-engine), a
+	// deploy falls back to the graceful whole-process re-exec (UI-F4-S2).
+	hotSwap func()
+
+	// liveResources holds the sorted resource names of the CURRENTLY-served
+	// surface (updated by buildRouter on boot AND on every hot-swap). It backs
+	// the platform admin's /admin/served-resources so the editor's post-deploy
+	// verify sees the live surface after a hot-swap, not the boot list.
+	liveResources atomic.Pointer[[]string]
+
 	routes  []Route
 	started bool
 }
@@ -502,12 +515,22 @@ func New(cfg Config) (*App, error) {
 			MFAIssuer:       platformMFAIssuer,
 			SuperAdminRole:  platformSuperAdminRole,
 			ServedResources: servedResources,
+			// Live served-resources for the editor's post-hot-swap verify: the
+			// current surface's list (MT-STRUCT-S4), falling back to the boot
+			// slice until the first buildRouter publishes it.
+			ServedResourcesFn: func() []string {
+				if p := app.liveResources.Load(); p != nil {
+					return *p
+				}
+				return servedResources
+			},
 			// Engine self-restart (UI-F4-S2): the editor's "Apply & restart" —
 			// persist the deployed schema as the new BOOT schema (validated +
-			// atomic + backed up) and gracefully re-exec so new resources'
-			// routes/GraphQL/RBAC/docs go live without touching the terminal.
+			// atomic + backed up) and activate it. In single-engine mode this
+			// gracefully re-execs the process; in the in-process fleet
+			// (MT-STRUCT-S4) it hot-swaps ONLY this app. triggerRestart dispatches.
 			PersistBootSchema: app.persistBootSchema,
-			TriggerRestart:    app.requestRestart,
+			TriggerRestart:    app.triggerRestart,
 			RoleExists: func(role string) bool {
 				_, ok := rbacPolicy.Roles[role]
 				return ok
@@ -636,7 +659,7 @@ func (a *App) Start() error {
 
 	a.startBackground(ctx)
 
-	r := a.buildRouter()
+	r := a.buildRouter(a.bootSurface())
 
 	// MT-STRUCT-S2: the server's handler is the app REGISTRY, not the router
 	// directly. With the single boot app and no domain table, Resolve is two
@@ -711,6 +734,13 @@ func (a *App) startBackground(ctx context.Context) {
 	auth.StartClaimsCacheGC(ctx)
 }
 
+// bootSurface is the schema-derived surface built from the app's boot schema
+// (a.schema + a.rbacPolicy) — the input buildRouter used implicitly before
+// MT-STRUCT-S4 parameterized it.
+func (a *App) bootSurface() builtSurface {
+	return builtSurface{schema: a.schema, policy: a.rbacPolicy}
+}
+
 // cleanup releases the app's resources after its server (or the fleet server)
 // has drained. Shared by Start and the multi-app runtime.
 func (a *App) cleanup() {
@@ -725,14 +755,42 @@ func (a *App) cleanup() {
 	}
 }
 
-// buildRouter assembles the outer chi router: the exact same middleware chain
-// generated routes have always paid (security headers → compression → request
-// id → tenant → rate limit → request logger → response cache → JWT → RBAC →
-// recoverer), then the infra/admin endpoints, then the /api group where custom
-// routes and the generated router mount. Custom routes go through the IDENTICAL
-// chain — no duplicated middleware (ADR-016 Decision 4C).
-func (a *App) buildRouter() *chi.Mux {
+// builtSurface is the schema-DERIVED input to buildRouter: the parsed schema and
+// its RBAC policy (MT-STRUCT-S4). Everything else buildRouter reads is
+// schema-INDEPENDENT process infra on the App (pool, caches, SSE hub, obs,
+// control plane, files, auth). Passing the surface explicitly — instead of
+// reading a.schema/a.rbacPolicy — is what lets a hot-swap build a NEW router from
+// a NEW schema, sharing all infra, and atomically replace the old one: the two
+// routers each capture their own surface, so an in-flight request on the old
+// router keeps the old schema/policy consistently.
+type builtSurface struct {
+	schema *schema.APISchema
+	policy *rbac.Policy
+}
+
+// buildRouter assembles the outer chi router for surf: the exact same middleware
+// chain generated routes have always paid (security headers → compression →
+// request id → tenant → rate limit → request logger → response cache → JWT →
+// RBAC → recoverer), then the infra/admin endpoints, then the /api group where
+// custom routes and the generated router mount. Custom routes go through the
+// IDENTICAL chain — no duplicated middleware (ADR-016 Decision 4C). The
+// schema-derived bits (routes, GraphQL, RBAC policy, OpenAPI, response-cache
+// gate) come from surf; the infra from a.
+func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 	adminKey := a.cfg.AdminKey
+	// Re-point the (shared) response cache's cacheability gate at THIS surface's
+	// policy. Atomic (MT-STRUCT-S4), so a hot-swap that tightens a role's
+	// conditions takes effect for the cache without a data race on the old
+	// surface's cache middleware.
+	a.responseCache.SetRoleCacheGate(surf.policy.RoleCacheable)
+	// Publish this surface's resource list for /admin/served-resources (so the
+	// editor's post-hot-swap verify reads the live surface).
+	names := make([]string, 0, len(surf.schema.Resources))
+	for name := range surf.schema.Resources {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	a.liveResources.Store(&names)
 	r := chi.NewMux()
 	r.Use(appmiddleware.SecurityHeaders)
 	// CORS (API-PRODUCTIVA-V1) runs BEFORE tenant/cache/JWT/RBAC so a preflight
@@ -847,7 +905,7 @@ func (a *App) buildRouter() *chi.Mux {
 	r.Use(auth.JWTMiddleware(a.cfg.JWTSecret, func(tenantID, reason string) {
 		a.errStore.Record(tenantID, fmt.Errorf("jwt: %s", reason))
 	}))
-	r.Use(rbac.RBACMiddleware(mustMarshal(a.schema.RBAC)))
+	r.Use(rbac.RBACMiddleware(mustMarshal(surf.schema.RBAC)))
 	r.Use(chimiddleware.Recoverer)
 
 	if a.cfg.Env == "development" {
@@ -924,8 +982,9 @@ func (a *App) buildRouter() *chi.Mux {
 
 	// OpenAPI spec (/openapi.json, /openapi.yaml) + Swagger UI (/docs) — the public,
 	// interactive API contract (API-PRODUCTIVA-V1). Unauthenticated (JWT-skipped),
-	// off the CRUD hot path; derived from the boot schema.
-	a.registerOpenAPIRoutes(r)
+	// off the CRUD hot path; derived from THIS surface's schema (a hot-swap
+	// rebuilds it live).
+	a.registerOpenAPIRoutes(r, surf.schema)
 
 	// Password identity core (AUTH-CORE-V1): /auth/signup, /auth/login,
 	// /auth/refresh. These flow through the SAME chain (tenant → rate limit →
@@ -938,7 +997,7 @@ func (a *App) buildRouter() *chi.Mux {
 	}
 
 	r.With(appmiddleware.StrictCSP).Handle("/graphql",
-		gqlhandler.BuildHandler(a.schema, a.tdb, a.hr, a.rbacPolicy, a.eventsHub))
+		gqlhandler.BuildHandler(surf.schema, a.tdb, a.hr, surf.policy, a.eventsHub))
 	if a.cfg.Env == "development" {
 		r.With(appmiddleware.PermissiveCSP).Handle("/graphiql", gqlhandler.PlaygroundHandler("/graphql"))
 		log.Println("GraphiQL playground enabled at /graphiql (APPITOOLS_ENV=development)")
@@ -958,10 +1017,11 @@ func (a *App) buildRouter() *chi.Mux {
 		// bypassed by the response cache (see cache Middleware) so a binary blob is
 		// never buffered/cached in RAM. Skipped if a schema resource is literally
 		// named "files" (the generated routes win).
-		if _, taken := a.schema.Resources["files"]; taken {
+		if _, taken := surf.schema.Resources["files"]; taken {
 			log.Println("WARNING: schema declares a \"files\" resource — engine file-store routes (/api/files) are disabled for this schema")
 		} else if a.files != nil {
 			filesSecret := []byte(a.cfg.JWTSecret)
+			policy := surf.policy // capture THIS surface's policy (a hot-swap builds a new router with the new policy)
 			sub.Post("/api/files", files.UploadHandler(a.files, a.filesMaxBytes))
 			sub.Get("/api/files/{id}", files.DownloadHandler(a.files))
 			sub.Get("/api/files/{id}/url", files.SignedURLHandler(a.files, filesSecret, a.filesTokenTTL))
@@ -972,9 +1032,9 @@ func (a *App) buildRouter() *chi.Mux {
 			// expiry, tenant match AND that the embedded role still reads "files".
 			// Any failure is a uniform 404 (anti-fingerprinting).
 			sub.Get(files.SignedPathPrefix+"/{token}", files.SignedServeHandler(a.files, filesSecret,
-				func(role string) bool { return a.rbacPolicy.Allows(role, "files", "read") }))
+				func(role string) bool { return policy.Allows(role, "files", "read") }))
 		}
-		sub.Mount("/", codegen.BuildRouter(a.schema, a.tdb, a.hr, a.responseCache, a.eventsHub))
+		sub.Mount("/", codegen.BuildRouter(surf.schema, a.tdb, a.hr, a.responseCache, a.eventsHub))
 	})
 
 	return r

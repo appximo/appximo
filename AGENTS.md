@@ -95,15 +95,21 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   process per app, supervised (restart-on-EXIT-only, reconciled with the
   engine's same-PID self-restart), behind a Host-routing reverse proxy (pure
   transport; inbound Host preserved for tenant resolution) — total isolation,
-  ~25–50 MB PSS/app. `serve` = MT-STRUCT-S3 IN-PROCESS (Option B): N full App
+  ~25–50 MB PSS/app. `serve` = MT-STRUCT-S3/S4 IN-PROCESS (Option B): N full App
   instances compiled in one process (~1 MB/app; 2 apps = 88 MB RSS total),
   dispatched by Host through the lock-free registry — the app is resolved
   BEFORE auth, so JWT/RBAC/data/cache/SSE are all the resolved app's own
   (security-reviewed: 18-vector cross-app matrix, zero leakage; the claims
   cache is keyed by (secret, token) so one app's validation never
   short-circuits another's; unmatched Host → clean 404, never an arbitrary
-  app; deploy restart relaunches the whole process — per-app hot-swap is S4;
-  per-app env in-process limited to Config-mapped keys, others loudly warned).
+  app; a deploy HOT-SWAPS just that app (S4): POST /admin/engine/schema
+  recompiles one app's router from the new schema and atomically swaps the
+  registry entry, reusing the pool/infra, NO process restart and the other apps
+  untouched — benched no_change on both the read path and other apps during a
+  swap (66 swaps, 0 errors, unchanged p50), race-clean, in-flight requests
+  finish on the old surface; single-engine keeps the graceful whole-process
+  re-exec; per-app env in-process limited to Config-mapped keys, others loudly
+  warned).
   Both: per-app DATABASE_URL/JWT_SECRET/ADMIN_KEY REQUIRED — a shared
   JWT_SECRET across apps is rejected at load; fresh databases bootstrapped
   automatically with the canonical control-plane DDL. Benches: S1 ports-only

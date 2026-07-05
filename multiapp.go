@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -119,7 +120,7 @@ func ServeFleet(mf *fleet.Manifest, version string, debugTracesHTML []byte) erro
 	// Start services + build routers only after every app constructed.
 	for i, app := range apps {
 		app.startBackground(ctx)
-		router := app.buildRouter()
+		router := app.buildRouter(app.bootSurface())
 		for _, d := range mf.Apps[i].Domains {
 			domains[d].handler = router
 		}
@@ -128,6 +129,29 @@ func ServeFleet(mf *fleet.Manifest, version string, debugTracesHTML []byte) erro
 	// Process-level state for the shared listener + the unmatched-Host handler.
 	fleetSS := shutdown.New()
 	reg := NewRegistry(unmatchedApp(fleetSS, version, len(apps)), domains)
+
+	// Wire per-app HOT-SWAP (MT-STRUCT-S4): a deploy on app X
+	// (POST /admin/engine/schema) recompiles X's router from its newly-persisted
+	// schema and atomically swaps X's registry entries — the process is NOT
+	// restarted and the OTHER apps are untouched. Each app's swaps are
+	// serialized by its own mutex (deploys are rare; the read path never takes
+	// it). The whole-process re-exec (S3) is gone for fleet-serve.
+	for i := range apps {
+		app := apps[i]
+		spec := &mf.Apps[i]
+		var swapMu sync.Mutex
+		app.hotSwap = func() {
+			swapMu.Lock()
+			defer swapMu.Unlock()
+			router, err := app.rebuildRouter()
+			if err != nil {
+				log.Printf("fleet serve: app %q hot-swap FAILED — keeping the current surface live: %v", spec.Name, err)
+				return
+			}
+			reg.SwapApp(spec.Domains, &compiledApp{name: spec.Name, handler: router})
+			log.Printf("fleet serve: app %q hot-swapped — new schema live, process untouched, other apps undisturbed", spec.Name)
+		}
+	}
 
 	srv := &http.Server{
 		Addr:              mf.Listen,
@@ -148,14 +172,9 @@ func ServeFleet(mf *fleet.Manifest, version string, debugTracesHTML []byte) erro
 		return err
 	}
 	log.Println("fleet serve: shut down cleanly")
-
-	// A deploy-triggered self-restart on ANY app relaunches the whole fleet
-	// with the persisted schema files (S3 semantics; per-app swap is S4).
-	for i, app := range apps {
-		if app.restartRequested.Load() {
-			execRestartProcess("fleet relaunch after deploy to app " + mf.Apps[i].Name)
-		}
-	}
+	// No post-drain re-exec here: a fleet-serve deploy is a per-app HOT-SWAP
+	// (MT-STRUCT-S4), not a process restart. The process only exits on SIGINT/
+	// SIGTERM (operator/supervisor), never on a deploy.
 	return nil
 }
 

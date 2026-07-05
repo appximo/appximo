@@ -176,14 +176,19 @@ precompiled closures — the property the public benchmark rests on. But it is
    restart banner is now an **"Restart engine now" button** with an explicit
    consent step, progress (drain → relaunch) and a served-resources
    verification when the engine returns.
-2. **Hot router swap**: rebuild `BuildRouter` + GraphQL handler + RBAC
-   middleware + OpenAPI into a new handler and swap it behind an
-   `atomic.Pointer`. Feasible — nothing in chi prevents it — but the hard parts
-   are real: the middleware chain closes over the boot policy (it must be
-   rebuilt or made swappable), long-lived SSE connections survive on the old
-   hub, in-flight requests straddle two schemas, and hooks/validators captured
-   in old closures linger until those requests finish. A correct version is a
-   focused engineering session, not a patch.
+2. **Hot router swap** — **IMPLEMENTED per-app in the in-process fleet
+   (`appitools fleet serve`, MT-STRUCT-S4)**: a deploy rebuilds one app's
+   `BuildRouter` + GraphQL + RBAC + OpenAPI from the new schema into a fresh
+   handler and swaps it behind the registry's `atomic.Pointer` — no process
+   restart, the other apps untouched, in-flight requests finishing consistently
+   on the old surface. The hard parts named here were handled: the middleware
+   chain is rebuilt from an explicit `builtSurface` (schema + policy) rather than
+   closing over boot globals; the SSE hub and response cache are shared across
+   the swap (live connections survive; the cache gate is re-set atomically); the
+   old closures are GC'd once their in-flight requests finish. Benched
+   `no_change`; race-detector clean. In **single-engine** mode a deploy still
+   uses the whole-process re-exec (item 1) — there are no sibling apps to
+   protect, so the simpler path is retained. See docs/design/MT-STRUCT.md Stage 4.
 3. **Per-tenant API surfaces** (different routes per tenant): this is the deep
    assumption. Routing, GraphQL type identity, the response cache keying, the
    OpenAPI contract and `/docs` all assume ONE structure. Making the surface

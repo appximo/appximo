@@ -172,9 +172,19 @@ app's validation can never short-circuit another's.
 - **Unmatched Host → clean `404 {"error":"unknown app domain"}`** (never an
   arbitrary app); `/healthz`, `/readyz`, `/health` on a bare Host stay
   process-level probes.
-- **Deploy + engine restart** (`POST /admin/engine/schema` on an app) persists
-  that app's boot schema and gracefully relaunches the **whole process** (all
-  apps, ~6 s). Per-app hot-swap without a process restart is the S4 increment.
+- **Deploy = per-app HOT-SWAP** (`POST /admin/engine/schema` on an app,
+  MT-STRUCT-S4): the engine persists that app's boot schema, recompiles **only
+  that app's** router from the new schema (reusing the pool — a schema deploy
+  never changes the DSN — and all other infra), and atomically swaps it into the
+  registry. **The process is not restarted and the other apps are not touched**
+  (measured: an app under load saw zero disruption and unchanged p50 during 66
+  swaps of another app; the swap itself is ~tens of ms). New resources/columns,
+  their GraphQL types, RBAC, `/openapi.json` and `/docs`, and
+  `/admin/served-resources` all go live from the swap — no downtime. In-flight
+  requests on the old surface finish consistently on it; the tenant DATA
+  migration is still a separate per-tenant step (control-plane `PUT
+  /tenants/{id}/schema`), exactly as in single-engine. (Single-engine keeps the
+  graceful re-exec of UI-F4-S2 — there are no other apps to protect.)
 - **Per-app env is limited to what maps into engine Config**: `DATABASE_URL`,
   `JWT_SECRET`, `ADMIN_KEY`, `OBS_DB_PATH`, `APPITOOLS_FILES_DIR`,
   `APPITOOLS_AUTH_SIGNUP_ROLE`, `APPITOOLS_ENV`. Any other manifest env key is

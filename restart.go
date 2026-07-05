@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,7 @@ import (
 	"time"
 
 	"github.com/miguelangel/appitools/pkg/platformadmin"
+	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/schema"
 )
 
@@ -149,6 +151,42 @@ func clearBootMarker(path string) { os.Remove(bootMarkerPath(path)) } //nolint:e
 // persistBootSchema is the App-level persist (closure the admin API calls).
 func (a *App) persistBootSchema(raw json.RawMessage) error {
 	return persistBootSchemaFile(a.cfg.SchemaPath, raw)
+}
+
+// triggerRestart is the deploy-activation dispatcher (called by the admin
+// POST /admin/engine/schema after the new schema is persisted). In the
+// in-process fleet (MT-STRUCT-S4) it hot-swaps ONLY this app — no process
+// restart, the other apps untouched. In single-engine mode (hotSwap nil) it
+// falls back to the graceful whole-process re-exec (UI-F4-S2).
+func (a *App) triggerRestart() {
+	if a.hotSwap != nil {
+		a.hotSwap()
+		return
+	}
+	a.requestRestart()
+}
+
+// rebuildRouter recompiles this app's data-plane router from the schema now on
+// disk (a.cfg.SchemaPath — the deploy persisted the new schema there first),
+// reusing ALL process infra (pool — the DSN never changes on a schema deploy —
+// control plane, obs, caches, SSE hub, files, auth). It returns the new handler
+// for the registry swap; the OLD router keeps serving in-flight requests until
+// they finish and is then GC'd. A schema that fails to load leaves the current
+// router in place (the caller keeps serving the old surface, logs loudly).
+func (a *App) rebuildRouter() (http.Handler, error) {
+	s, err := loadAndValidateSchema(a.cfg.SchemaPath)
+	if err != nil {
+		return nil, err
+	}
+	policyBytes, err := json.Marshal(s.RBAC)
+	if err != nil {
+		return nil, fmt.Errorf("serialize RBAC policy: %w", err)
+	}
+	var pol rbac.Policy
+	if err := json.Unmarshal(policyBytes, &pol); err != nil {
+		return nil, fmt.Errorf("parse RBAC policy: %w", err)
+	}
+	return a.buildRouter(builtSurface{schema: s, policy: &pol}), nil
 }
 
 // requestRestart initiates the graceful self-restart: it flags the intent and,

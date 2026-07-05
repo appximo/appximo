@@ -438,6 +438,31 @@ touches the hot path** — the project's standing rule.
   recompile, swap) without touching the others. *Hot path: TOUCHED (the swap).*
   ***`bench-protocol`.*** *Verification: live — deploy a new resource to app X,
   swap, confirm X serves it while app Y is undisturbed and never 503s.*
+  ✅ **(MT-STRUCT-S4** — in `fleet serve`, a deploy (`POST /admin/engine/schema`)
+  now **hot-swaps ONE app** instead of re-exec'ing the process. `buildRouter` was
+  parameterized by a `builtSurface` (schema + policy), so a deploy recompiles just
+  that app's router from the newly-persisted schema — **reusing all infra** (the
+  pgx pool: a schema deploy never changes the DSN, so zero connection churn; the
+  control plane, obs, response cache, SSE hub, files, auth) — and publishes it via
+  `Registry.SwapApp`, a **copy-on-write** map store behind the existing S2
+  `atomic.Pointer` (reads stay lock-free; every OTHER app's entry is copied
+  byte-identical). The old router keeps serving in-flight requests until they
+  finish, then is GC'd. `App.triggerRestart` dispatches: hot-swap in fleet-serve,
+  graceful re-exec in single-engine (unchanged). The response-cache gate is now an
+  `atomic.Pointer` (re-set per surface without a race); `served-resources` updates
+  live so the editor's post-deploy verify sees the new resource. **Verified
+  live:** a hot-swap of app X (new resource `notes` + new column `priority`, ~27 ms
+  wall) served the new routes/GraphQL/OpenAPI/`/docs` with **the same process PID**
+  while app SHOP under continuous load saw **600/600 → 200, zero disruption**; a
+  second consecutive swap worked; the S3 cross-app security matrix still held
+  post-swap. **Race:** `go test -race` clean, incl. a swap-under-8-concurrent-
+  readers test and an in-flight-request-keeps-its-resolved-app test. **Bench (k6
+  RATE=50, Mann-Whitney):** read path S3-vs-S4 `no_change` (CI [+1.4,+8.5] µs);
+  and the load app's p50 during **66 hot-swaps of another app** vs quiet is
+  `no_change` (CI [−26,−8.5] µs, 0 errors) — swapping X does not disturb Y. Suite
+  0 FAIL + acceptance 39/0. The registry also gained `AddApp`/`RemoveApp` (hot
+  add/remove of an app's domains); wiring those to a live fleet-management command
+  is an S5 increment.**)**
 
 - **Stage 5 — homologate the surface.** Admin UI app selector; obs keyed by
   (app, tenant) with an app filter; Studio deploy chooses the app;

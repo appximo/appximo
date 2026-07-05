@@ -7,6 +7,7 @@ import (
 
 	"github.com/miguelangel/appitools/pkg/codegen"
 	appmiddleware "github.com/miguelangel/appitools/pkg/middleware"
+	"github.com/miguelangel/appitools/pkg/schema"
 )
 
 // swaggerUIHTML is a self-contained Swagger UI page (loaded from a pinned CDN, the
@@ -39,13 +40,15 @@ const swaggerUIHTML = `<!DOCTYPE html>
 </html>`
 
 // registerOpenAPIRoutes mounts the spec + Swagger UI routes on r. The spec is
-// derived from the boot schema (a.schema) and is engine-global — identical for
-// every tenant of this engine — so it is served unauthenticated (the JWT skip list
-// covers /openapi and /docs) and computed once. Server URL is "/" so a browser's
-// "Try it out" calls the same origin the docs were loaded from.
-func (a *App) registerOpenAPIRoutes(r chi.Router) {
-	jsonSpec, jerr := codegen.GenerateOpenAPIJSON(a.schema, "/")
-	yamlSpec, yerr := codegen.GenerateOpenAPI(a.schema, "/")
+// derived from the SURFACE schema (sch) — engine-global for that app, identical
+// for every tenant — so it is served unauthenticated (the JWT skip list covers
+// /openapi and /docs) and computed once per surface build. A hot-swap
+// (MT-STRUCT-S4) rebuilds the router from the new schema, so /openapi.json and
+// /docs reflect the new structure live. Server URL is "/" so a browser's "Try it
+// out" calls the same origin the docs were loaded from.
+func (a *App) registerOpenAPIRoutes(r chi.Router, sch *schema.APISchema) {
+	jsonSpec, jerr := codegen.GenerateOpenAPIJSON(sch, "/")
+	yamlSpec, yerr := codegen.GenerateOpenAPI(sch, "/")
 
 	r.Get("/openapi.json", func(w http.ResponseWriter, req *http.Request) {
 		if jerr != nil || len(jsonSpec) == 0 {

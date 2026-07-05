@@ -70,6 +70,14 @@ type Config struct {
 	// a new-resource deploy. Empty ⇒ the route reports an empty set.
 	ServedResources []string
 
+	// ServedResourcesFn, when non-nil, supplies the LIVE served-resource list and
+	// takes precedence over the static ServedResources slice. It exists for the
+	// in-process fleet hot-swap (MT-STRUCT-S4): after a per-app hot-swap the served
+	// surface changes WITHOUT a process restart, so the editor's post-deploy verify
+	// must read the current surface's resources, not the boot list. Single-engine
+	// leaves it nil (a deploy re-execs, so the boot slice is authoritative).
+	ServedResourcesFn func() []string
+
 	// PersistBootSchema validates a schema and ATOMICALLY persists it as the new
 	// BOOT schema (the file the engine loads at start), backing up the previous
 	// one for rollback (UI-F4-S2). An invalid schema must be reported wrapped in

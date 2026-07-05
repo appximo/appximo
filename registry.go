@@ -3,6 +3,7 @@ package appitools
 import (
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -36,6 +37,12 @@ type Registry struct {
 	// (the boot schema), preserving today's "any Host reaches the engine"
 	// contract exactly. Never nil.
 	def atomic.Pointer[compiledApp]
+
+	// writeMu serializes MUTATIONS of the domain table (SwapApp/AddApp/
+	// RemoveApp), never the reads. Deploys/adds/removes are rare and must not
+	// interleave (two concurrent copy-on-writes would lose one), but the read
+	// path (Resolve) never takes it — it only atomic-loads the published map.
+	writeMu sync.Mutex
 }
 
 // compiledApp is one schema compiled into a servable API surface. In S2 the
@@ -97,6 +104,51 @@ func (r *Registry) Resolve(host string) *compiledApp {
 // S2 (benched: see docs/design/MT-STRUCT.md Stage 2).
 func (r *Registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.Resolve(req.Host).handler.ServeHTTP(w, req)
+}
+
+// swapDomains is the copy-on-write core of every table mutation (MT-STRUCT-S4):
+// under writeMu it clones the current map, applies mutate to the clone, and
+// atomic-stores the clone. Readers (Resolve) that loaded the OLD map keep
+// serving it consistently — a published map is NEVER mutated in place, so an
+// in-flight request that resolved app X finishes on X, and only requests that
+// load the NEW map see the change. Lock-free reads are preserved.
+func (r *Registry) swapDomains(mutate func(m map[string]*compiledApp)) {
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
+	cur := *r.domains.Load()
+	next := make(map[string]*compiledApp, len(cur)+1)
+	for k, v := range cur {
+		next[k] = v
+	}
+	mutate(next)
+	r.domains.Store(&next)
+}
+
+// SwapApp atomically replaces the app served for each of domains with app —
+// the per-app HOT-SWAP (MT-STRUCT-S4): a deploy recompiles ONE app's router
+// from its new schema and publishes it here, leaving every OTHER app's entry
+// byte-identical (their pointers are copied unchanged into the new map). No
+// process restart, no effect on the other apps, lock-free reads throughout.
+func (r *Registry) SwapApp(domains []string, app *compiledApp) {
+	r.swapDomains(func(m map[string]*compiledApp) {
+		for _, d := range domains {
+			m[strings.ToLower(d)] = app
+		}
+	})
+}
+
+// AddApp registers a NEW app on domains (hot add — a domain not previously
+// served starts routing to app). Same copy-on-write semantics as SwapApp.
+func (r *Registry) AddApp(domains []string, app *compiledApp) { r.SwapApp(domains, app) }
+
+// RemoveApp unregisters domains (hot remove — those Hosts fall back to the
+// default/unmatched app). Same copy-on-write semantics.
+func (r *Registry) RemoveApp(domains []string) {
+	r.swapDomains(func(m map[string]*compiledApp) {
+		for _, d := range domains {
+			delete(m, strings.ToLower(d))
+		}
+	})
 }
 
 // trimHostPort strips an optional :port (and IPv6 brackets) without

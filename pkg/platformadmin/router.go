@@ -109,7 +109,12 @@ func (s *Service) Register(r chi.Router, obs ObsHandler, adminKey string) {
 // tells the editor whether POST /admin/engine/schema is available (UI-F4-S2), so the
 // restart banner can offer the one-click restart instead of manual instructions.
 func (s *Service) handleServedResources(w http.ResponseWriter, r *http.Request) {
-	names := s.cfg.ServedResources
+	var names []string
+	if s.cfg.ServedResourcesFn != nil {
+		names = s.cfg.ServedResourcesFn() // live surface (fleet hot-swap, MT-STRUCT-S4)
+	} else {
+		names = s.cfg.ServedResources
+	}
 	if names == nil {
 		names = []string{}
 	}
@@ -151,7 +156,7 @@ func (s *Service) handleEngineSchema(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":         true,
 		"restarting": true,
-		"note":       "boot schema persisted (previous kept as .bak); the engine is draining and will relaunch — poll /readyz until it returns 200",
+		"note":       "boot schema persisted (previous kept as .bak); the new schema is being activated — poll /readyz until 200, then verify /admin/served-resources (single-engine drains+re-execs ~6 s; the in-process fleet hot-swaps this app with no downtime)",
 	})
 }
 

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -55,9 +56,14 @@ type ResponseCache struct {
 	// roleCacheable reports whether a role's responses may be shared through the
 	// cache. Roles with row-level conditions or field restrictions produce
 	// per-user/per-role responses, so caching them would let one user receive
-	// another's data on a HIT (the RBAC-bypass-via-cache vulnerability). nil
+	// another's data on a HIT (the RBAC-bypass-via-cache vulnerability). Held
+	// behind an atomic.Pointer (MT-STRUCT-S4): a per-app hot-swap re-sets the
+	// gate to the newly-deployed policy's cacheability WHILE the old surface's
+	// cache middleware may be reading it concurrently — a plain field would be a
+	// data race, and a stale gate would keep caching a role that the new schema
+	// just gave a row condition (a narrow RBAC-bypass regression). A nil pointer
 	// means "cache everything" — the default used by tests with no RBAC policy.
-	roleCacheable func(role string) bool
+	roleCacheable atomic.Pointer[roleGate]
 
 	// jwtSecret scopes this cache's claims-cache lookups to the OWNING app's
 	// JWT secret (MT-STRUCT-S3): the claims cache is keyed by (secret, token),
@@ -71,21 +77,27 @@ type ResponseCache struct {
 // (see the jwtSecret field). Called once at boot, before serving.
 func (rc *ResponseCache) SetJWTSecret(s string) { rc.jwtSecret = s }
 
+// roleGate wraps the cacheability predicate so it can live behind an
+// atomic.Pointer (a bare func value is not atomically swappable).
+type roleGate struct{ fn func(role string) bool }
+
 // SetRoleCacheGate installs a predicate that decides, per role, whether the
 // response cache may store and serve that role's responses. Roles that fail the
 // gate bypass the cache entirely so their RBAC conditions run on every request.
+// Atomic (MT-STRUCT-S4): safe to re-call on a hot-swap while requests read it.
 func (rc *ResponseCache) SetRoleCacheGate(fn func(role string) bool) {
-	rc.roleCacheable = fn
+	rc.roleCacheable.Store(&roleGate{fn: fn})
 }
 
 // cacheable reports whether responses for role may be cached. With no gate set,
 // every role is cacheable (test default). With a gate, an unknown/empty role is
 // treated as NOT cacheable, which fails safe.
 func (rc *ResponseCache) cacheable(role string) bool {
-	if rc.roleCacheable == nil {
+	g := rc.roleCacheable.Load()
+	if g == nil || g.fn == nil {
 		return true
 	}
-	return rc.roleCacheable(role)
+	return g.fn(role)
 }
 
 // New returns a ResponseCache with the given TTL and starts a background
