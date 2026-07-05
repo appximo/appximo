@@ -301,8 +301,9 @@ admin panel at `/admin`. Both are static SPAs compiled into the binary
 | `DB_MAX_CONNS`, `GOMAXPROCS`, `SLACK_WEBHOOK_URL`, `REDIS_URL` | env | no | see [docs/DEPLOY.md](docs/DEPLOY.md) |
 | `--schema` | flag | **yes** | path to the JSON schema |
 | `--port` | flag | no | data-plane port (default 8080) |
+| `--control-port` | flag | no | control-plane port (default 9090; also `APPITOOLS_CONTROL_PORT`) — parameterized so several engines can share one box (`appitools fleet`, [docs/FLEET.md](docs/FLEET.md)) |
 
-The control plane (tenant admin) listens on **9090** — keep it off the internet.
+The control plane (tenant admin) listens on **9090** by default — keep it off the internet.
 
 ## Testing
 

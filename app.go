@@ -306,12 +306,25 @@ func New(cfg Config) (*App, error) {
 		}))
 	}
 
-	// Control plane (:9090) router — started in Start.
+	// Control plane router — started in Start. The port was ":9090" hardcoded
+	// until MT-STRUCT-S1; it is now Config/env-parameterized (default preserved)
+	// so N engines can coexist on one box. Boot config only — not the hot path.
+	if cfg.ControlPort == 0 {
+		if v := os.Getenv("APPITOOLS_CONTROL_PORT"); v != "" {
+			if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
+				cfg.ControlPort = n
+			}
+		}
+	}
+	if cfg.ControlPort == 0 {
+		cfg.ControlPort = 9090
+	}
+	app.cfg.ControlPort = cfg.ControlPort
 	app.cpSvc = controlplane.NewService(pool, app.redisClient)
 	cpRouter := controlplane.NewControlPlaneRouter(app.cpSvc, adminKey)
 	cpRouter.Mount("/", app.obsServer.Router(adminKey))
 	app.cpSrv = &http.Server{
-		Addr:              ":9090",
+		Addr:              fmt.Sprintf(":%d", cfg.ControlPort),
 		Handler:           cpRouter,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       20 * time.Second,
@@ -621,7 +634,7 @@ func (a *App) Start() error {
 	}
 
 	go func() {
-		fmt.Println("Control plane serving on :9090")
+		fmt.Println("Control plane serving on " + a.cpSrv.Addr)
 		if err := a.cpSrv.ListenAndServe(); err != nil {
 			fmt.Fprintln(os.Stderr, "Control plane error:", err)
 		}
@@ -799,10 +812,19 @@ func (a *App) buildRouter() *chi.Mux {
 	r.Use(chimiddleware.Recoverer)
 
 	if a.cfg.Env == "development" {
+		// Dev-only pprof. The port was ":6060" hardcoded until MT-STRUCT-S1;
+		// APPITOOLS_PPROF_PORT overrides it (default preserved) so N dev
+		// engines can coexist on one box.
+		pprofAddr := ":6060"
+		if v := os.Getenv("APPITOOLS_PPROF_PORT"); v != "" {
+			if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
+				pprofAddr = fmt.Sprintf(":%d", n)
+			}
+		}
 		pprofMux := chimiddleware.Profiler()
-		pprofSrv := &http.Server{Addr: ":6060", Handler: pprofMux, ReadHeaderTimeout: 10 * time.Second}
+		pprofSrv := &http.Server{Addr: pprofAddr, Handler: pprofMux, ReadHeaderTimeout: 10 * time.Second}
 		go func() {
-			log.Println("WARNING: pprof profiler enabled on :6060 (APPITOOLS_ENV=development)")
+			log.Printf("WARNING: pprof profiler enabled on %s (APPITOOLS_ENV=development)", pprofAddr)
 			if err := pprofSrv.ListenAndServe(); err != nil {
 				log.Println("pprof server:", err)
 			}

@@ -89,7 +89,18 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   future technique passes; see docs/AI_SCHEMA_GENERATION.md §The first real measurement),
   `blueprints list` (lists schema files in a local `blueprints/` dir),
   `version` (prints the ldflags-injected build version; "dev" on a plain
-  local build — releases and published images carry their tag).
+  local build — releases and published images carry their tag),
+  `fleet run|status` (MT-STRUCT-S1: ONE server, N DISTINCT apps — one engine
+  process per app from a `fleet.json` manifest, supervised
+  (restart-on-EXIT-only, reconciled with the engine's same-PID self-restart),
+  behind a Host-routing reverse proxy (pure transport; inbound Host preserved
+  for tenant resolution). Per-app DATABASE_URL/JWT_SECRET/ADMIN_KEY are
+  REQUIRED — a shared JWT_SECRET across apps is rejected at load, and each
+  app's fresh database is bootstrapped automatically with the canonical
+  control-plane DDL. The engine hot path is UNTOUCHED: S1 only parameterized
+  the previously hardcoded control-plane `:9090` (`--control-port` /
+  `APPITOOLS_CONTROL_PORT`) and dev pprof `:6060` (`APPITOOLS_PPROF_PORT`),
+  defaults preserved. See docs/FLEET.md + docs/design/MT-STRUCT.md).
 - `tools/devhub/` is a local dev dashboard (systemd service on :3099).
   It is **not part of the engine** — never ship engine features there.
   `make devhub-run` is only for developing the devhub itself (stop the

@@ -47,10 +47,12 @@ var serveCmd = &cobra.Command{
 
 		schemaFile, _ := cmd.Flags().GetString("schema")
 		port, _ := cmd.Flags().GetInt("port")
+		controlPort, _ := cmd.Flags().GetInt("control-port")
 
 		app, err := appitools.New(appitools.Config{
 			SchemaPath:      schemaFile,
 			Port:            port,
+			ControlPort:     controlPort,
 			Version:         version,
 			DebugTracesHTML: debugTracesHTML,
 			// DSN, JWTSecret, AdminKey, Env fall back to DATABASE_URL / JWT_SECRET /
@@ -71,6 +73,7 @@ var serveCmd = &cobra.Command{
 func init() {
 	serveCmd.Flags().String("schema", "schema.json", "path to schema.json")
 	serveCmd.Flags().Int("port", 8080, "HTTP port to listen on")
+	serveCmd.Flags().Int("control-port", 0, "control-plane port (0 = APPITOOLS_CONTROL_PORT, then 9090)")
 	rootCmd.AddCommand(serveCmd)
 }
 

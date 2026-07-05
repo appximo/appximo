@@ -379,6 +379,10 @@ touches the hot path** — the project's standing rule.
   *Hot path: untouched (each app is today's engine). No engine `bench-protocol`
   needed.* *Verification: 3 apps up behind the proxy, each serving its own
   schema, one crashing/restarting without touching the others (live).*
+  ✅ **(MT-STRUCT-S1** — `pkg/fleet` + `appitools fleet run|status`, docs/FLEET.md.
+  Verified live with 3 apps: per-domain APIs, cross-app JWT rejected (401),
+  crash isolation + ~1 s respawn, per-app self-restart with same PID and the
+  supervisor untouched, per-app DB auto-bootstrap. Engine diff was ports-only.**)**
 
 - **Stage 2 — in-process registry foundation (B, part 1).** Introduce the
   `App`/`compiledApp` type and the `atomic.Pointer[map[appKey]*compiledApp]`

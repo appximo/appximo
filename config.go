@@ -24,6 +24,13 @@ type Config struct {
 	// Port is the data-plane HTTP port. 0 falls back to 8080.
 	Port int
 
+	// ControlPort is the control-plane HTTP port (tenant registration,
+	// X-Admin-Key-gated — keep it off the internet). 0 falls back to
+	// APPITOOLS_CONTROL_PORT, then 9090 (the historical fixed value, so a
+	// single-engine deployment boots byte-identically). Parameterized in
+	// MT-STRUCT-S1 so N engines can coexist on one box (`appitools fleet`).
+	ControlPort int
+
 	// JWTSecret signs/validates HS256 tokens. Empty falls back to JWT_SECRET.
 	JWTSecret string
 	// AdminKey gates the control plane (:9090) and /metrics, /debug, /admin on
