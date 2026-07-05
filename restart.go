@@ -179,13 +179,20 @@ func (a *App) requestRestart() {
 // still open (control plane, pprof) is released by the exec itself. On success
 // it never returns. On failure it logs and returns — the process then exits
 // normally and a supervisor (systemd/Docker restart policy) is the fallback.
-func (a *App) execRestart() {
+func (a *App) execRestart() { execRestartProcess("boot schema " + a.cfg.SchemaPath) }
+
+// execRestartProcess replaces the process image with a fresh instance of the
+// same binary + argv + env (same PID — supervisor-agnostic). Shared by the
+// single-app self-restart and the multi-app runtime (ServeFleet), where a
+// deploy-triggered restart relaunches the WHOLE fleet with the persisted
+// schema files (per-app hot-swap is MT-STRUCT-S4). On success it never returns.
+func execRestartProcess(note string) {
 	exe, err := os.Executable()
 	if err != nil {
 		log.Printf("CRITICAL: self-restart: cannot resolve own executable (%v) — exiting; a supervisor restart policy must relaunch the engine", err)
 		return
 	}
-	log.Printf("self-restart: re-exec %s (same argv — boot schema %s)", exe, a.cfg.SchemaPath)
+	log.Printf("self-restart: re-exec %s (same argv — %s)", exe, note)
 	if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
 		log.Printf("CRITICAL: self-restart: exec failed (%v) — exiting; a supervisor restart policy must relaunch the engine", err)
 	}

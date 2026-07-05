@@ -1,10 +1,20 @@
 # `appitools fleet` — one server, N distinct apps
 
-The fleet runs **N different APIs (different schemas) on one server**: one
-engine process per app, supervised, behind a Host-routing reverse proxy. It is
-the Option-A architecture of [docs/design/MT-STRUCT.md](design/MT-STRUCT.md)
-(MT-STRUCT-S1) — the multi-process MVP and, long-term, the isolation escape
-hatch next to the in-process Option B.
+The fleet runs **N different APIs (different schemas) on one server**, from one
+`fleet.json`, in either of two runtimes:
+
+- **`fleet run`** — multi-process (Option A, MT-STRUCT-S1): one engine process
+  per app, supervised, behind a Host-routing reverse proxy. Total isolation;
+  ~25–50 MB PSS per app. The isolation escape hatch.
+- **`fleet serve`** — in-process (Option B, MT-STRUCT-S3): N apps **compiled in
+  ONE process**, dispatched by Host through the lock-free registry. ~1 MB of
+  compiled surface per app (2 apps measured at 88 MB RSS total, vs ~154 MB as
+  two processes); scales to many apps on one box. Security-reviewed cross-app
+  isolation (see below).
+
+Same manifest, same taxonomy, same per-app secret rules — pick per deployment,
+or pin a noisy app to its own process (`run`) while the rest co-locate (`serve`).
+Architecture + measured numbers: [docs/design/MT-STRUCT.md](design/MT-STRUCT.md).
 
 **The engine's hot path is untouched.** Each app is exactly today's engine —
 same middleware chain, same compiled routes, same benchmark. The only engine
@@ -134,6 +144,48 @@ POST /fleet/apps/{name}/restart   → deliberate stop+start of ONE app
 
 `appitools fleet status` renders the table. Default bind is loopback; treat it
 like `:9090`.
+
+## `fleet serve` — the in-process runtime (MT-STRUCT-S3)
+
+```bash
+appitools fleet serve --config fleet.json   # N apps, ONE process, one listener
+```
+
+Each app is a full engine instance inside the process: its own schema-compiled
+router + GraphQL + OpenAPI, its own pgx pool (its own database), its own
+response cache, SSE hub, rate limiter, observability stack and control-plane
+listener — with the middleware chain closed over **its** JWT secret, RBAC
+policy and admin key. The registry resolves the app from the Host **before**
+any auth runs, so a token is only ever validated with the resolved app's
+secret.
+
+**Cross-app isolation (security-reviewed, 18-vector live matrix — zero
+leakage):** a JWT from app X on app Y's domain is a 401 (REST and GraphQL, even
+with X's caches hot); RBAC roles are per app (deny-by-default); data, response
+cache, SSE streams, admin keys, control planes and signed file URLs never
+cross apps — even for the same resource name and the same tenant id in both.
+The process-level claims cache is keyed by (secret, token) precisely so one
+app's validation can never short-circuit another's.
+
+**Semantics that differ from `fleet run`:**
+
+- **Unmatched Host → clean `404 {"error":"unknown app domain"}`** (never an
+  arbitrary app); `/healthz`, `/readyz`, `/health` on a bare Host stay
+  process-level probes.
+- **Deploy + engine restart** (`POST /admin/engine/schema` on an app) persists
+  that app's boot schema and gracefully relaunches the **whole process** (all
+  apps, ~6 s). Per-app hot-swap without a process restart is the S4 increment.
+- **Per-app env is limited to what maps into engine Config**: `DATABASE_URL`,
+  `JWT_SECRET`, `ADMIN_KEY`, `OBS_DB_PATH`, `APPITOOLS_FILES_DIR`,
+  `APPITOOLS_AUTH_SIGNUP_ROLE`, `APPITOOLS_ENV`. Any other manifest env key is
+  process-wide in this runtime and is **loudly warned** at boot — if an app
+  needs, say, its own OAuth providers or CORS origins today, run it under
+  `fleet run` (full env isolation) instead.
+- **No supervisor/status API** (nothing to supervise — one process; a crash is
+  everyone's crash, which is exactly the blast-radius trade the design doc
+  documents; pin risky apps to their own process with `fleet run`).
+- **Pools**: each app opens its own pgx pool (`DB_MAX_CONNS` applies per app) —
+  budget N × pool size against your Postgres `max_connections`.
 
 ## What S1 deliberately does not do
 

@@ -28,8 +28,8 @@ func TestCache_DoesNotServeAcrossTenantToken(t *testing.T) {
 	}))
 
 	const victimTok, attackerTok = "victim-token", "attacker-token"
-	auth.SetCachedClaims(victimTok, &auth.Claims{Role: "super_admin", TenantID: "victim"})
-	auth.SetCachedClaims(attackerTok, &auth.Claims{Role: "super_admin", TenantID: "attacker"})
+	auth.SetCachedClaims("", victimTok, &auth.Claims{Role: "super_admin", TenantID: "victim"})
+	auth.SetCachedClaims("", attackerTok, &auth.Claims{Role: "super_admin", TenantID: "attacker"})
 
 	victimReq := func() *http.Request {
 		r := withTenant(httptest.NewRequest(http.MethodGet, "/api/guides", nil), "victim")

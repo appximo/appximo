@@ -31,6 +31,12 @@ type Config struct {
 	// MT-STRUCT-S1 so N engines can coexist on one box (`appitools fleet`).
 	ControlPort int
 
+	// ObsDBPath is the observability SQLite path. Empty falls back to
+	// OBS_DB_PATH, then the package default (/var/lib/appitools/obs.db).
+	// A Config field (not env-only) since MT-STRUCT-S3: N in-process apps
+	// share the process env, and each app needs its OWN obs store.
+	ObsDBPath string
+
 	// JWTSecret signs/validates HS256 tokens. Empty falls back to JWT_SECRET.
 	JWTSecret string
 	// AdminKey gates the control plane (:9090) and /metrics, /debug, /admin on

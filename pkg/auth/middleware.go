@@ -116,7 +116,7 @@ func JWTMiddleware(secret string, onError ...func(tenantID, reason string)) func
 
 			tokenStr := strings.TrimPrefix(header, prefix)
 
-			claims, ok := GetCachedClaims(tokenStr)
+			claims, ok := GetCachedClaims(secret, tokenStr)
 			if !ok {
 				var err error
 				claims, err = ValidateToken(tokenStr, secret)
@@ -124,7 +124,7 @@ func JWTMiddleware(secret string, onError ...func(tenantID, reason string)) func
 					reject(w, r, "invalid token: "+err.Error())
 					return
 				}
-				setCachedClaims(tokenStr, claims)
+				setCachedClaims(secret, tokenStr, claims)
 			}
 
 			// Reject tokens whose TenantID does not match the request tenant.

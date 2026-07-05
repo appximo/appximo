@@ -67,7 +67,7 @@ func validatedReq(token, accept string) *http.Request {
 // and the wire bytes are smaller than the plain body.
 func TestCacheHitGzipEncoded(t *testing.T) {
 	const token = "tok-gzip-hit"
-	auth.SetCachedClaims(token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
+	auth.SetCachedClaims("", token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
 
 	rc := New(5 * time.Second)
 	calls := 0
@@ -104,7 +104,7 @@ func TestCacheHitGzipEncoded(t *testing.T) {
 // directly readable.
 func TestCacheHitPlainForNonGzipClient(t *testing.T) {
 	const token = "tok-plain-hit"
-	auth.SetCachedClaims(token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
+	auth.SetCachedClaims("", token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
 
 	rc := New(5 * time.Second)
 	calls := 0
@@ -128,7 +128,7 @@ func TestCacheHitPlainForNonGzipClient(t *testing.T) {
 // A miss must store BOTH the plain bytes and a smaller gzip copy.
 func TestCacheMissStoresCompressed(t *testing.T) {
 	const token = "tok-miss-store"
-	auth.SetCachedClaims(token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
+	auth.SetCachedClaims("", token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
 
 	rc := New(5 * time.Second)
 	h := gzipHandler(rc, bigBody, nil)
@@ -155,7 +155,7 @@ func TestCacheMissStoresCompressed(t *testing.T) {
 // Tiny, incompressible bodies must fall back to plain (no broken gzip).
 func TestCacheTinyBodyNotCompressed(t *testing.T) {
 	const token = "tok-tiny"
-	auth.SetCachedClaims(token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
+	auth.SetCachedClaims("", token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
 
 	rc := New(5 * time.Second)
 	h := gzipHandler(rc, `{}`, nil)
@@ -180,7 +180,7 @@ func TestCacheTinyBodyNotCompressed(t *testing.T) {
 func TestCacheETagAndConditional(t *testing.T) {
 	const token = "tok-etag"
 	const etag = `"v1-abc"`
-	auth.SetCachedClaims(token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
+	auth.SetCachedClaims("", token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
 
 	rc := New(5 * time.Second)
 	conditionalHits := 0
@@ -224,7 +224,7 @@ func TestCacheETagAndConditional(t *testing.T) {
 // -race) and every caller gets a correct, correctly-encoded body.
 func TestCacheConcurrentMixedEncoding(t *testing.T) {
 	const token = "tok-mixed"
-	auth.SetCachedClaims(token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
+	auth.SetCachedClaims("", token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
 
 	rc := New(5 * time.Second)
 	h := gzipHandler(rc, bigBody, nil)
@@ -275,7 +275,7 @@ func TestCacheConcurrentMixedEncoding(t *testing.T) {
 // written verbatim, no per-hit compression.
 func BenchmarkCacheHit(b *testing.B) {
 	const token = "bench-tok"
-	auth.SetCachedClaims(token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
+	auth.SetCachedClaims("", token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
 	rc := New(5 * time.Minute)
 	h := gzipHandler(rc, bigBody, nil)
 	h.ServeHTTP(httptest.NewRecorder(), validatedReq(token, "gzip")) // populate once

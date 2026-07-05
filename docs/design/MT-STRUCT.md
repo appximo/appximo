@@ -410,6 +410,28 @@ touches the hot path** — the project's standing rule.
   (the auth reorder). *Verification: two different schemas served from one process
   on two Hosts, RBAC/JWT correctly isolated per app (a token for app X rejected on
   app Y), bench green.*
+  ✅ **(MT-STRUCT-S3** — `appitools fleet serve` (`ServeFleet`, multiapp.go): the
+  SAME fleet.json served IN-PROCESS. Mechanism refinement over this plan's
+  sketch: instead of a per-request "app from context" indirection, S3 runs **N
+  full `App` instances in one process** — each chain already CLOSES OVER its own
+  secret/policy/pool/caches/SSE/obs — registered by domain in the S2 Registry, so
+  "app resolved before JWT, with that app's secret" holds by construction at
+  zero added per-request cost. One REAL cross-app hole found and fixed in review:
+  the package-global claims cache was keyed by token only — a token validated by
+  app X would have short-circuited app Y's signature check; now keyed by
+  **(secret, token)** (`pkg/auth/claims_cache.go` + regression tests). Unmatched
+  Hosts get a process-level 404 (+ health probes), never an arbitrary app.
+  **Security matrix: 18/18 vectors PASS live** (2 apps, same resource name +
+  same tenant id: JWT cross-app 401 on REST+GraphQL with caches hot, RBAC
+  deny-by-default per app, data/cache/SSE/admin-keys/control-planes/signed file
+  URLs all isolated, tenant isolation intact). **Bench (3 arms interleaved ×6,
+  k6 RATE=50, Mann-Whitney): baseline-vs-S3-single AND baseline-vs-S3-multi both
+  `no_change`** (CIs [−13.0,−3.7] µs and [−11.9,−1.9] µs — bounded at
+  microseconds vs the 0.5 ms gate; medians 0.623/0.609/0.634 ms). 2 apps in one
+  process: **88 MB RSS total** (vs ~154 MB as two Option-A processes). Deploy
+  self-restart in fleet-serve = whole-process relaunch (per-app hot-swap is S4);
+  per-app env keys not mappable in-process are LOUDLY warned. Suite 0 FAIL +
+  acceptance 39/0.**)**
 
 - **Stage 4 — per-app hot-swap deploy.** Evolve self-restart into a per-app
   pointer swap: deploy/migrate/restart ONE app (drain that app's in-flight + SSE,

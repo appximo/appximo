@@ -58,7 +58,18 @@ type ResponseCache struct {
 	// another's data on a HIT (the RBAC-bypass-via-cache vulnerability). nil
 	// means "cache everything" — the default used by tests with no RBAC policy.
 	roleCacheable func(role string) bool
+
+	// jwtSecret scopes this cache's claims-cache lookups to the OWNING app's
+	// JWT secret (MT-STRUCT-S3): the claims cache is keyed by (secret, token),
+	// so this cache can only see validations performed with ITS app's secret —
+	// a token validated by another in-process app never short-circuits here.
+	// Empty (the test default) matches claims seeded with an empty secret.
+	jwtSecret string
 }
+
+// SetJWTSecret scopes the cache's claims-cache lookups to the app's JWT secret
+// (see the jwtSecret field). Called once at boot, before serving.
+func (rc *ResponseCache) SetJWTSecret(s string) { rc.jwtSecret = s }
 
 // SetRoleCacheGate installs a predicate that decides, per role, whether the
 // response cache may store and serve that role's responses. Roles that fail the
@@ -166,7 +177,7 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 		// Unknown token → no short-circuit (JWT will validate it on the way through).
 		// Known token + cached response → skip JWT HMAC, DB, AND gzip entirely.
 		if tokenStr != "" {
-			if claims, ok := auth.GetCachedClaims(tokenStr); ok {
+			if claims, ok := auth.GetCachedClaims(rc.jwtSecret, tokenStr); ok {
 				// The cache runs BEFORE JWTMiddleware and a HIT short-circuits it,
 				// so the cache must replicate JWT's tenant cross-check itself.
 				// Otherwise a validated token for tenant A, replayed against
@@ -229,7 +240,7 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 			// condition/field-restricted role (or an unknown/empty role) must
 			// not have its response cached.
 			role := ""
-			if claims, ok := auth.GetCachedClaims(tokenStr); ok {
+			if claims, ok := auth.GetCachedClaims(rc.jwtSecret, tokenStr); ok {
 				role = claims.Role
 			}
 			if rc.cacheable(role) {

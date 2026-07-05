@@ -15,10 +15,15 @@ type cachedClaims struct {
 
 var claimsCache sync.Map // map[string]*cachedClaims
 
-// GetCachedClaims looks up previously validated claims by Bearer token string.
-// Returns nil, false on miss or expiry.
-func GetCachedClaims(token string) (*Claims, bool) {
-	key := tokenCacheKey(token)
+// GetCachedClaims looks up previously validated claims for a Bearer token,
+// SCOPED to the validating secret (MT-STRUCT-S3). The secret is part of the
+// cache key because with N apps in one process — each validating with its OWN
+// JWT secret — a token-only key would let a token validated by app X be served
+// from cache to app Y, silently bypassing the signature check with secret_Y (a
+// cross-app auth hole). Scoping the key makes a cache hit mean exactly "this
+// secret already validated this token". Returns nil, false on miss or expiry.
+func GetCachedClaims(secret, token string) (*Claims, bool) {
+	key := tokenCacheKey(secret, token)
 	v, ok := claimsCache.Load(key)
 	if !ok {
 		return nil, false
@@ -31,10 +36,10 @@ func GetCachedClaims(token string) (*Claims, bool) {
 	return cc.claims, true
 }
 
-// SetCachedClaims stores validated claims for a token. Exported for testing.
-func SetCachedClaims(token string, c *Claims) { setCachedClaims(token, c) }
+// SetCachedClaims stores validated claims for a (secret, token). Exported for testing.
+func SetCachedClaims(secret, token string, c *Claims) { setCachedClaims(secret, token, c) }
 
-func setCachedClaims(token string, c *Claims) {
+func setCachedClaims(secret, token string, c *Claims) {
 	ttl := 30 * time.Second
 	// Never cache past the token's own expiry.
 	if c.ExpiresAt != nil {
@@ -45,7 +50,7 @@ func setCachedClaims(token string, c *Claims) {
 	if ttl <= 0 {
 		return
 	}
-	claimsCache.Store(tokenCacheKey(token), &cachedClaims{
+	claimsCache.Store(tokenCacheKey(secret, token), &cachedClaims{
 		claims:    c,
 		expiresAt: time.Now().Add(ttl),
 	})
@@ -78,9 +83,15 @@ func StartClaimsCacheGC(ctx context.Context) {
 	}()
 }
 
-// tokenCacheKey returns the first 16 hex chars of SHA-256(token) — 64 bits,
-// sufficient for collision resistance across the small set of live tokens.
-func tokenCacheKey(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(sum[:8])
+// tokenCacheKey returns the first 16 hex chars of SHA-256(secret || 0x00 ||
+// token) — 64 bits, sufficient for collision resistance across the small set
+// of live tokens, and DISTINCT per validating secret (the cross-app guard; the
+// separator prevents ambiguous secret/token boundaries).
+func tokenCacheKey(secret, token string) string {
+	h := sha256.New()
+	h.Write([]byte(secret)) //nolint:errcheck
+	h.Write([]byte{0})      //nolint:errcheck
+	h.Write([]byte(token))  //nolint:errcheck
+	var sum [sha256.Size]byte
+	return hex.EncodeToString(h.Sum(sum[:0])[:8])
 }

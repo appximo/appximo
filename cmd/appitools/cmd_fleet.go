@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/miguelangel/appitools"
 	"github.com/miguelangel/appitools/pkg/fleet"
 )
 
@@ -93,6 +94,28 @@ var fleetRunCmd = &cobra.Command{
 	},
 }
 
+// fleetServeCmd is the MT-STRUCT-S3 Option-B runtime: the SAME fleet.json,
+// but N apps compiled IN ONE PROCESS (~1 MB/app vs ~45 MB/process in `fleet
+// run`), dispatched by Host through the in-process registry. Per-app JWT
+// secret / RBAC / database / caches hold identically (security-reviewed);
+// unmatched Hosts get a clean 404, never an arbitrary app.
+var fleetServeCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "Sirve N apps EN UN PROCESO (in-process, Opción B) desde el mismo fleet.json",
+	Run: func(cmd *cobra.Command, args []string) {
+		cfgPath, _ := cmd.Flags().GetString("config")
+		mf, err := fleet.LoadManifest(cfgPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if err := appitools.ServeFleet(mf, version, debugTracesHTML); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	},
+}
+
 var fleetStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Muestra el estado de la fleet (consulta el status API del fleet run)",
@@ -123,7 +146,8 @@ var fleetStatusCmd = &cobra.Command{
 
 func init() {
 	fleetRunCmd.Flags().String("config", "fleet.json", "path to the fleet manifest")
+	fleetServeCmd.Flags().String("config", "fleet.json", "path to the fleet manifest")
 	fleetStatusCmd.Flags().String("addr", "127.0.0.1:9601", "fleet status API address")
-	fleetCmd.AddCommand(fleetRunCmd, fleetStatusCmd)
+	fleetCmd.AddCommand(fleetRunCmd, fleetServeCmd, fleetStatusCmd)
 	rootCmd.AddCommand(fleetCmd)
 }

@@ -93,7 +93,7 @@ func NewSupervisor(mf *Manifest, bin string) *Supervisor {
 		dataDir:     mf.DataDir,
 		procs:       map[string]*appProc{},
 		baseBackoff: time.Second,
-		bootstrap:   bootstrapControlPlane,
+		bootstrap:   BootstrapControlPlane,
 	}
 }
 

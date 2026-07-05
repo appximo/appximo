@@ -113,6 +113,11 @@ type App struct {
 	// to pre-registry, benched. S3 loads N apps; S4 hot-swaps entries.
 	registry *Registry
 
+	// noSynthetic disables the synthetic monitor for this app — set by the
+	// multi-app runtime (ServeFleet), whose bare-Host canary probes would land
+	// on the process-level 404 handler, not this app.
+	noSynthetic bool
+
 	routes  []Route
 	started bool
 }
@@ -277,7 +282,7 @@ func New(cfg Config) (*App, error) {
 	alerter := observability.NewSlackAlerterFromEnv()
 	app.sloEngine = observability.NewSLOEngine(app.rings, app.hist, alerter)
 
-	if st, openErr := observability.OpenStore(os.Getenv("OBS_DB_PATH")); openErr != nil {
+	if st, openErr := observability.OpenStore(coalesce(cfg.ObsDBPath, os.Getenv("OBS_DB_PATH"))); openErr != nil {
 		log.Printf("WARNING: observability store disabled: %v", openErr)
 	} else {
 		app.obsStore = st
@@ -366,6 +371,10 @@ func New(cfg Config) (*App, error) {
 	// ⇒ not cacheable, fail-safe). See rbac.Policy.RoleCacheable.
 	app.responseCache = cache.New(5 * time.Second)
 	app.responseCache.SetRoleCacheGate(app.rbacPolicy.RoleCacheable)
+	// Scope the cache's claims-cache lookups to THIS app's JWT secret
+	// (MT-STRUCT-S3): with N in-process apps, a token validated by another
+	// app must never short-circuit this app's chain.
+	app.responseCache.SetJWTSecret(cfg.JWTSecret)
 
 	// Rate limiter.
 	rlRPS := 1000.0
@@ -621,17 +630,63 @@ func (a *App) Start() error {
 	if a.started {
 		return errors.New("appitools: Start called twice")
 	}
-	a.started = true
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	a.startBackground(ctx)
+
+	r := a.buildRouter()
+
+	// MT-STRUCT-S2: the server's handler is the app REGISTRY, not the router
+	// directly. With the single boot app and no domain table, Resolve is two
+	// atomic loads → the same router as before (behavior identical, benched —
+	// the dispatch exists so S3 can load N apps and S4 can hot-swap one).
+	a.registry = NewRegistry(&compiledApp{name: a.schema.Name, handler: r}, nil)
+
+	addr := fmt.Sprintf(":%d", a.cfg.Port)
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           a.registry,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       20 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	fmt.Printf("Appitools serving on %s — Ctrl+C to stop\n", addr)
+	if err := a.ss.Run(ctx, srv, 5*time.Second, a.cleanup); err != nil {
+		return err
+	}
+	log.Println("server shut down cleanly")
+	// Self-restart (UI-F4-S2): the drain above ran the normal graceful sequence;
+	// now replace the process with a fresh instance that boots the persisted
+	// schema. On success execRestart never returns.
+	if a.restartRequested.Load() {
+		a.execRestart()
+	}
+	return nil
+}
+
+// startBackground launches the app's non-listener services: the SLO engine,
+// obs snapshot flusher, synthetic monitor, control-plane listener, optional
+// migration worker, cache invalidator and the claims-cache GC. Split out of
+// Start (MT-STRUCT-S3) so the multi-app runtime (ServeFleet) can run N apps'
+// services in ONE process while owning the single data-plane listener itself.
+// Marks the app started (Register is boot-only in both modes).
+func (a *App) startBackground(ctx context.Context) {
+	a.started = true
 
 	go a.sloEngine.Run(ctx)
 	if a.obsStore != nil {
 		go flushObsSnapshots(ctx, a.obsStore, a.rings, a.hist, a.sloEngine)
 	}
 
-	if os.Getenv("APPITOOLS_SYNTHETIC") != "off" {
+	// The synthetic monitor probes http://localhost:<port>/… with a bare Host.
+	// In the multi-app runtime a bare Host resolves to the process-level 404
+	// handler, so the runner disables it per app (noSynthetic) instead of
+	// letting every app log canary failures.
+	if os.Getenv("APPITOOLS_SYNTHETIC") != "off" && !a.noSynthetic {
 		a.synthmon.AddDynamic(observability.DynamicCheck{
 			Name:    "api-canary",
 			Resolve: canaryResolver(a.pool, a.schema, a.cfg.JWTSecret, a.cfg.Port),
@@ -654,48 +709,20 @@ func (a *App) Start() error {
 
 	go startCacheInvalidator(ctx, a.pool, a.responseCache)
 	auth.StartClaimsCacheGC(ctx)
+}
 
-	r := a.buildRouter()
-
-	// MT-STRUCT-S2: the server's handler is the app REGISTRY, not the router
-	// directly. With the single boot app and no domain table, Resolve is two
-	// atomic loads → the same router as before (behavior identical, benched —
-	// the dispatch exists so S3 can load N apps and S4 can hot-swap one).
-	a.registry = NewRegistry(&compiledApp{name: a.schema.Name, handler: r}, nil)
-
-	addr := fmt.Sprintf(":%d", a.cfg.Port)
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           a.registry,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       20 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
+// cleanup releases the app's resources after its server (or the fleet server)
+// has drained. Shared by Start and the multi-app runtime.
+func (a *App) cleanup() {
+	a.pool.Close()
+	if a.obsStore != nil {
+		a.obsStore.Close() //nolint:errcheck
 	}
-
-	fmt.Printf("Appitools serving on %s — Ctrl+C to stop\n", addr)
-	cleanup := func() {
-		a.pool.Close()
-		if a.obsStore != nil {
-			a.obsStore.Close() //nolint:errcheck
-		}
-		if a.files != nil {
-			if c, ok := a.files.Backend().(io.Closer); ok {
-				c.Close() //nolint:errcheck
-			}
+	if a.files != nil {
+		if c, ok := a.files.Backend().(io.Closer); ok {
+			c.Close() //nolint:errcheck
 		}
 	}
-	if err := a.ss.Run(ctx, srv, 5*time.Second, cleanup); err != nil {
-		return err
-	}
-	log.Println("server shut down cleanly")
-	// Self-restart (UI-F4-S2): the drain above ran the normal graceful sequence;
-	// now replace the process with a fresh instance that boots the persisted
-	// schema. On success execRestart never returns.
-	if a.restartRequested.Load() {
-		a.execRestart()
-	}
-	return nil
 }
 
 // buildRouter assembles the outer chi router: the exact same middleware chain

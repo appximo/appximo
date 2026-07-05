@@ -23,7 +23,7 @@ func whoamiHandler(calls *int64) http.Handler {
 		atomic.AddInt64(calls, 1)
 		uid := "anon"
 		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-			if c, ok := auth.GetCachedClaims(strings.TrimPrefix(h, "Bearer ")); ok {
+			if c, ok := auth.GetCachedClaims("", strings.TrimPrefix(h, "Bearer ")); ok {
 				uid = c.UserID
 			}
 		}
@@ -40,7 +40,7 @@ func rbacReq(token string) *http.Request {
 }
 
 func setRole(token, role, userID string) {
-	auth.SetCachedClaims(token, &auth.Claims{Role: role, UserID: userID, TenantID: "acme"})
+	auth.SetCachedClaims("", token, &auth.Claims{Role: role, UserID: userID, TenantID: "acme"})
 }
 
 //  1. Admin caches a URL; an operario requesting the same URL must NOT receive

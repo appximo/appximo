@@ -27,7 +27,7 @@ func withTenant(r *http.Request, id string) *http.Request {
 // withAuth adds a Bearer token header and pre-populates the JWT claims cache
 // so the cache middleware's auth guard lets the request through to cache logic.
 func withAuth(r *http.Request) *http.Request {
-	auth.SetCachedClaims(testToken, &auth.Claims{Role: "super_admin", TenantID: "acme"})
+	auth.SetCachedClaims("", testToken, &auth.Claims{Role: "super_admin", TenantID: "acme"})
 	r.Header.Set("Authorization", "Bearer "+testToken)
 	return r
 }
@@ -217,7 +217,7 @@ func TestCacheNon200NotCached(t *testing.T) {
 // Postgres simultaneously (the stampede that produced a 3.2s uncached p95).
 func TestCacheStampedeSingleflight(t *testing.T) {
 	const token = "test-token-stampede"
-	auth.SetCachedClaims(token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
+	auth.SetCachedClaims("", token, &auth.Claims{Role: "super_admin", TenantID: "acme"})
 
 	rc := New(5 * time.Second)
 
@@ -287,8 +287,8 @@ func TestCacheStampedeSingleflight(t *testing.T) {
 func TestCacheTenantIsolation(t *testing.T) {
 	const tokenAcme = "test-token-acme"
 	const tokenBeta = "test-token-beta"
-	auth.SetCachedClaims(tokenAcme, &auth.Claims{Role: "super_admin", TenantID: "acme"})
-	auth.SetCachedClaims(tokenBeta, &auth.Claims{Role: "super_admin", TenantID: "beta"})
+	auth.SetCachedClaims("", tokenAcme, &auth.Claims{Role: "super_admin", TenantID: "acme"})
+	auth.SetCachedClaims("", tokenBeta, &auth.Claims{Role: "super_admin", TenantID: "beta"})
 
 	makeReq := func(tenantID, token string) *http.Request {
 		r := withTenant(httptest.NewRequest(http.MethodGet, "/api/guides", nil), tenantID)

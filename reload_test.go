@@ -243,7 +243,7 @@ func TestAdminReloadTenant(t *testing.T) {
 		sc := tenant.NewSchemaCache()
 		rc := cache.New(5 * time.Second)
 		const token = "reload-test-token"
-		auth.SetCachedClaims(token, &auth.Claims{Role: "super_admin", TenantID: "10"})
+		auth.SetCachedClaims("", token, &auth.Claims{Role: "super_admin", TenantID: "10"})
 
 		calls := 0
 		backend := rc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

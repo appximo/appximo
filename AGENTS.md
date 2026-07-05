@@ -90,17 +90,26 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   `blueprints list` (lists schema files in a local `blueprints/` dir),
   `version` (prints the ldflags-injected build version; "dev" on a plain
   local build — releases and published images carry their tag),
-  `fleet run|status` (MT-STRUCT-S1: ONE server, N DISTINCT apps — one engine
-  process per app from a `fleet.json` manifest, supervised
-  (restart-on-EXIT-only, reconciled with the engine's same-PID self-restart),
-  behind a Host-routing reverse proxy (pure transport; inbound Host preserved
-  for tenant resolution). Per-app DATABASE_URL/JWT_SECRET/ADMIN_KEY are
-  REQUIRED — a shared JWT_SECRET across apps is rejected at load, and each
-  app's fresh database is bootstrapped automatically with the canonical
-  control-plane DDL. The engine hot path is UNTOUCHED: S1 only parameterized
-  the previously hardcoded control-plane `:9090` (`--control-port` /
-  `APPITOOLS_CONTROL_PORT`) and dev pprof `:6060` (`APPITOOLS_PPROF_PORT`),
-  defaults preserved. See docs/FLEET.md + docs/design/MT-STRUCT.md).
+  `fleet run|serve|status` (ONE server, N DISTINCT apps from a `fleet.json`
+  manifest, TWO runtimes. `run` = MT-STRUCT-S1 multi-process: one engine
+  process per app, supervised (restart-on-EXIT-only, reconciled with the
+  engine's same-PID self-restart), behind a Host-routing reverse proxy (pure
+  transport; inbound Host preserved for tenant resolution) — total isolation,
+  ~25–50 MB PSS/app. `serve` = MT-STRUCT-S3 IN-PROCESS (Option B): N full App
+  instances compiled in one process (~1 MB/app; 2 apps = 88 MB RSS total),
+  dispatched by Host through the lock-free registry — the app is resolved
+  BEFORE auth, so JWT/RBAC/data/cache/SSE are all the resolved app's own
+  (security-reviewed: 18-vector cross-app matrix, zero leakage; the claims
+  cache is keyed by (secret, token) so one app's validation never
+  short-circuits another's; unmatched Host → clean 404, never an arbitrary
+  app; deploy restart relaunches the whole process — per-app hot-swap is S4;
+  per-app env in-process limited to Config-mapped keys, others loudly warned).
+  Both: per-app DATABASE_URL/JWT_SECRET/ADMIN_KEY REQUIRED — a shared
+  JWT_SECRET across apps is rejected at load; fresh databases bootstrapped
+  automatically with the canonical control-plane DDL. Benches: S1 ports-only
+  (no hot-path change); S2 registry + S3 per-app chains both measured
+  `no_change` (Mann-Whitney, max(0.5ms,3%) gate). See docs/FLEET.md +
+  docs/design/MT-STRUCT.md).
 - `tools/devhub/` is a local dev dashboard (systemd service on :3099).
   It is **not part of the engine** — never ship engine features there.
   `make devhub-run` is only for developing the devhub itself (stop the
