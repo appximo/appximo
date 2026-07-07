@@ -126,9 +126,28 @@ func ServeFleet(mf *fleet.Manifest, version string, debugTracesHTML []byte) erro
 		}
 	}
 
+	// The unified fleet console (MT-STRUCT-S5): the fleet-operator's read-only
+	// view over all apps, mounted on the process-level handler below. Disabled
+	// (uniform 404) unless the manifest/env provides an operator key.
+	panel := &fleetPanel{operatorKey: mf.OperatorKey, version: version}
+	for i := range apps {
+		panel.apps = append(panel.apps, &panelApp{
+			name:        mf.Apps[i].Name,
+			domains:     mf.Apps[i].Domains,
+			schemaName:  apps[i].schema.Name,
+			controlPort: apps[i].cfg.ControlPort,
+			app:         apps[i],
+		})
+	}
+	if mf.OperatorKey != "" {
+		log.Println("fleet serve: unified fleet console enabled at /fleet (fleet-operator key required; process-level Host)")
+	} else {
+		log.Println("fleet serve: unified fleet console DISABLED (set operator_key in the manifest or APPITOOLS_FLEET_OPERATOR_KEY to enable /fleet)")
+	}
+
 	// Process-level state for the shared listener + the unmatched-Host handler.
 	fleetSS := shutdown.New()
-	reg := NewRegistry(unmatchedApp(fleetSS, version, len(apps)), domains)
+	reg := NewRegistry(unmatchedApp(fleetSS, version, len(apps), panel), domains)
 
 	// Wire per-app HOT-SWAP (MT-STRUCT-S4): a deploy on app X
 	// (POST /admin/engine/schema) recompiles X's router from its newly-persisted
@@ -139,6 +158,7 @@ func ServeFleet(mf *fleet.Manifest, version string, debugTracesHTML []byte) erro
 	for i := range apps {
 		app := apps[i]
 		spec := &mf.Apps[i]
+		pa := panel.apps[i]
 		var swapMu sync.Mutex
 		app.hotSwap = func() {
 			swapMu.Lock()
@@ -149,6 +169,7 @@ func ServeFleet(mf *fleet.Manifest, version string, debugTracesHTML []byte) erro
 				return
 			}
 			reg.SwapApp(spec.Domains, &compiledApp{name: spec.Name, handler: router})
+			pa.swaps.Add(1)
 			log.Printf("fleet serve: app %q hot-swapped — new schema live, process untouched, other apps undisturbed", spec.Name)
 		}
 	}
@@ -183,11 +204,15 @@ func ServeFleet(mf *fleet.Manifest, version string, debugTracesHTML []byte) erro
 // process must never route an unclaimed Host into an arbitrary app — that
 // would hand app X's traffic to app Y on a DNS/Host mistake. It serves ONLY
 // the process health probes (so supervisors/LBs polling a bare IP keep
-// working) and answers everything else with the fleet proxy's clean 404.
-func unmatchedApp(ss *shutdown.State, version string, nApps int) *compiledApp {
+// working), the operator-gated fleet console (S5, uniform-404 without the
+// key), and answers everything else with the fleet proxy's clean 404.
+func unmatchedApp(ss *shutdown.State, version string, nApps int, panel *fleetPanel) *compiledApp {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", ss.HealthzHandler)
 	mux.HandleFunc("/readyz", ss.ReadyzHandler)
+	if panel != nil {
+		panel.register(mux)
+	}
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck

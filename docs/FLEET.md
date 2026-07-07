@@ -197,6 +197,53 @@ app's validation can never short-circuit another's.
 - **Pools**: each app opens its own pgx pool (`DB_MAX_CONNS` applies per app) —
   budget N × pool size against your Postgres `max_connections`.
 
+## The unified fleet console (`/fleet`, MT-STRUCT-S5)
+
+`fleet serve` ships **one face over the N apps**: a read-only console at
+`GET /fleet` on the **process level** — the same handler that serves the
+health probes on a bare Host (an app domain never serves it; there the request
+goes to the app, which answers 401/404 like any unknown path). It shows, per
+app: domains, **live** resources (hot-swaps reflected), tenants, the hot-swap
+count, and **latency by (app, tenant)** — plus links into that app's own
+Studio (`/editor`), admin (`/admin`) and `/docs` on its domain. Choosing an
+app = entering its surface: the per-domain surfaces ARE the app-scoped
+consoles (Studio loads that app's schema and deploys to it via the S4
+hot-swap), and the fleet console is the level above them. Sober tokens, light
+and dark.
+
+**Fleet-operator auth (the taxonomy):** the console is gated by
+`operator_key` in the manifest (or `APPITOOLS_FLEET_OPERATOR_KEY`) — the
+credential of the **server owner**, one level above the apps. It is validated
+at manifest load to be distinct from every app's `ADMIN_KEY`/`JWT_SECRET`;
+a missing or wrong key gets a **uniform 404** (the console is not
+fingerprintable), and leaving it empty **disables** the console (safe
+default). The fleet key opens **no** app API — per-app JWT/RBAC/admin auth
+still applies underneath — and no app credential opens the console: the S3
+isolation is not bypassable from this level. Like `/metrics`, treat the
+console as an internal surface (firewall it or front it with your proxy).
+
+**Observability by (app, tenant):** S3 gave each app its OWN observability
+stack keyed by tenant, so the (app, tenant) dimension exists structurally —
+the console namespaces each app's per-tenant snapshots with zero re-keying
+and zero hot-path change. The same tenant id in two apps shows independent
+counters (verified live). *Memory at scale:* the cost is one ring/histogram
+set per (app × tenant) — the familiar per-tenant cost, multiplied by apps;
+with tens of apps × tens of active tenants this is fine, with hundreds ×
+hundreds budget accordingly (the rings are fixed-size; idle tenants age out
+of relevance but not memory until restart).
+
+**Editor (Studio) awareness:** `/admin/served-resources` reports
+`activation: "hot_swap"` in this runtime (vs `"restart"` in single-engine),
+and the deploy UI adapts — new resources show "Activates after deploy
+(hot-swap)" and a one-click **"Activate now (hot-swap)"** that swaps only
+that app, with no downtime and no drain wait, then verifies the resources
+are served.
+
+**DevHub:** every in-process app runs its own control plane (with the full
+`/debug` observability surface) on its own port — register each one as a
+server in DevHub's existing multi-server registry to navigate N apps; no
+DevHub coupling to the engine.
+
 ## What S1 deliberately does not do
 
 - **No federated single admin panel** — each app keeps its own `/admin` (reachable

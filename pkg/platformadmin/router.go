@@ -118,9 +118,16 @@ func (s *Service) handleServedResources(w http.ResponseWriter, r *http.Request) 
 	if names == nil {
 		names = []string{}
 	}
+	activation := "restart"
+	if s.cfg.ActivationFn != nil {
+		activation = s.cfg.ActivationFn()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"resources":    names,
 		"self_restart": s.cfg.PersistBootSchema != nil && s.cfg.TriggerRestart != nil,
+		// How a deploy activates here: "hot_swap" (fleet-serve, no downtime,
+		// only this app) or "restart" (single-engine graceful re-exec).
+		"activation": activation,
 	})
 }
 

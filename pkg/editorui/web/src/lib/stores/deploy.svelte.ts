@@ -110,6 +110,7 @@ class DeployStore {
 			const res = await adminApi.servedResources(this.token);
 			this.servedResources = res.resources ?? [];
 			this.selfRestartAvailable = res.self_restart ?? false;
+			this.activation = res.activation === 'hot_swap' ? 'hot_swap' : 'restart';
 		} catch {
 			/* non-fatal — the hint is advisory, the engine remains the authority */
 		}
@@ -119,6 +120,11 @@ class DeployStore {
 
 	/** Whether POST /admin/engine/schema is offered by this engine. */
 	selfRestartAvailable = $state(false);
+	/** HOW a deploy activates on this engine (MT-STRUCT-S5): 'hot_swap' — the
+	 *  in-process fleet recompiles and swaps ONLY this app, no downtime, other
+	 *  apps untouched — or 'restart' — the single-engine graceful re-exec (~6 s).
+	 *  Drives the banner wording and skips the drain-wait on hot-swap. */
+	activation = $state<'restart' | 'hot_swap'>('restart');
 	/** The restart flow's phase: idle → confirm (explicit user consent) →
 	 *  restarting (persisting) → waiting (engine draining + relaunching, polled via
 	 *  /readyz) → live (new resources verified served) | failed. */
@@ -156,10 +162,16 @@ class DeployStore {
 		const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 		// Phase 1 — drain: /readyz flips 503 (or the port blips during the relaunch).
 		// Missing a fast blip between polls is fine — phase 2 verifies the OUTCOME
-		// (served resources), not the transition.
-		for (let i = 0; i < 30; i++) {
-			if (!(await this.pollReady())) break;
-			await sleep(1000);
+		// (served resources), not the transition. On a HOT-SWAP there is no drain at
+		// all (the app is recompiled and swapped in place, /readyz never leaves 200),
+		// so skip straight to the outcome check after a short settle.
+		if (this.activation === 'hot_swap') {
+			await sleep(500);
+		} else {
+			for (let i = 0; i < 30; i++) {
+				if (!(await this.pollReady())) break;
+				await sleep(1000);
+			}
 		}
 		// Phase 2 — relaunch: wait for ready again, then confirm the new resources
 		// are actually served by the rebooted engine (the honest "live" signal).

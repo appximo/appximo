@@ -468,6 +468,40 @@ touches the hot path** — the project's standing rule.
   (app, tenant) with an app filter; Studio deploy chooses the app;
   served-resources per app; DevHub groups by app; per-app config UI. *Hot path:
   untouched (admin/obs are off it).* *Verification: the §5 table, each row live.*
+  ✅ **(MT-STRUCT-S5** — the **unified fleet console** at `/fleet` on the
+  in-process runtime's PROCESS-level handler (next to /healthz): the fleet
+  overview (per app: domains, live resources, tenants, hot-swap count, links)
+  plus **observability by (app, tenant)** — each app's per-tenant latency
+  snapshots namespaced under the app. The (app, tenant) dimension needed **zero
+  re-keying** of pkg/observability: S3 already gave each app its OWN obs stack
+  keyed by tenant, so the console just namespaces per-app snapshots (verified
+  live: the same tenant id `acme` in two apps shows independent counters, 30 vs
+  8 requests). **Auth taxonomy decided:** a FLEET-OPERATOR key (manifest
+  `operator_key` / APPITOOLS_FLEET_OPERATOR_KEY) — a level ABOVE the apps,
+  validated distinct from every app's ADMIN_KEY/JWT_SECRET at manifest load;
+  wrong/missing key ⇒ uniform 404 (unfingerprintable); empty ⇒ console disabled.
+  The fleet key opens NO app API (verified: 401 as Bearer, 401 as X-Admin-Key)
+  and app keys open no console — S3 isolation intact; the console is read-only
+  aggregation + navigation, per-app operations go through each app's own
+  authenticated surface (Studio/admin/docs on its domain, linked per app; the
+  "app selector" IS the per-domain surface). **Studio homologated for S4:**
+  `/admin/served-resources` now reports `activation: hot_swap|restart`, and the
+  editor's deploy flow uses it — in fleet-serve the banner reads "Activates
+  after deploy (hot-swap)" / "Activate now (hot-swap)" (no downtime, only this
+  app), skips the 30 s drain-wait, and verifies served-resources immediately;
+  single-engine keeps the exact restart wording. **DevHub:** each in-process
+  app exposes its own control plane (with the full /debug obs surface), so
+  DevHub's existing multi-server registry (S47) navigates N apps by registering
+  N control ports — no DevHub changes (it stays out of the engine per
+  AGENTS.md). Registry gained the read-only `Snapshot()` accessor — the diff
+  confirms Resolve/ServeHTTP/middleware untouched ⇒ **no hot-path bench needed
+  and none run**. Verified live (2 apps, same tenant id) + **playwright 8/8**
+  (console light/dark — computed colors probed, sober tokens; Studio + admin on
+  app domains; uniform 404 without key; hot-swap counter after an editor-flow
+  deploy). Suite 0 FAIL, acceptance 39/0, svelte-check 0/0. Obs memory at
+  scale: one ring/histogram set per (app × tenant) — the single-engine
+  per-tenant cost multiplied by apps (documented in docs/FLEET.md). **The
+  multi-app plan S1→S5 is complete.**)**
 
 - **(Ongoing) Option A as escape hatch.** Keep the Stage-1 path: any app can be
   pinned to its own process behind the same proxy for total isolation.

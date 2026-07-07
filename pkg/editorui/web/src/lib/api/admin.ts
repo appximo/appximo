@@ -154,9 +154,11 @@ export const adminApi = {
 	 *  deployed resource absent here is provisioned but needs a restart to be served.
 	 *  self_restart reports whether POST /admin/engine/schema exists (UI-F4-S2). */
 	servedResources: (token: string) =>
-		call<{ resources: string[]; self_restart?: boolean }>('GET', '/admin/served-resources', {
-			token
-		}),
+		call<{ resources: string[]; self_restart?: boolean; activation?: 'restart' | 'hot_swap' }>(
+			'GET',
+			'/admin/served-resources',
+			{ token }
+		),
 
 	/** Persist the schema as the engine's new BOOT schema (validated + atomic + the
 	 *  previous one backed up) and gracefully restart it (UI-F4-S2) — new resources'

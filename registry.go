@@ -151,6 +151,19 @@ func (r *Registry) RemoveApp(domains []string) {
 	})
 }
 
+// Snapshot returns a read-only copy of the current domain table (domain → app
+// name) — the fleet console's inventory view (MT-STRUCT-S5). It is a plain
+// atomic load + copy, entirely OFF the request hot path (Resolve is untouched),
+// and reflects hot-swaps/adds/removes at the moment of the call.
+func (r *Registry) Snapshot() map[string]string {
+	m := *r.domains.Load()
+	out := make(map[string]string, len(m))
+	for d, app := range m {
+		out[d] = app.name
+	}
+	return out
+}
+
 // trimHostPort strips an optional :port (and IPv6 brackets) without
 // allocating. Mirrors the tolerant parse net/http itself applies to Host.
 func trimHostPort(h string) string {

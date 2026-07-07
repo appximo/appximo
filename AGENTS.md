@@ -95,7 +95,7 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   process per app, supervised (restart-on-EXIT-only, reconciled with the
   engine's same-PID self-restart), behind a Host-routing reverse proxy (pure
   transport; inbound Host preserved for tenant resolution) — total isolation,
-  ~25–50 MB PSS/app. `serve` = MT-STRUCT-S3/S4 IN-PROCESS (Option B): N full App
+  ~25–50 MB PSS/app. `serve` = MT-STRUCT-S3/S4/S5 IN-PROCESS (Option B): N full App
   instances compiled in one process (~1 MB/app; 2 apps = 88 MB RSS total),
   dispatched by Host through the lock-free registry — the app is resolved
   BEFORE auth, so JWT/RBAC/data/cache/SSE are all the resolved app's own
@@ -109,7 +109,18 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   swap (66 swaps, 0 errors, unchanged p50), race-clean, in-flight requests
   finish on the old surface; single-engine keeps the graceful whole-process
   re-exec; per-app env in-process limited to Config-mapped keys, others loudly
-  warned).
+  warned. S5: the UNIFIED FLEET CONSOLE at /fleet on the process-level Host —
+  fleet overview (per app: domains, LIVE resources, tenants, hot-swap count,
+  links into that app's own Studio//admin//docs on its domain) + observability
+  by (app, tenant) (each app's per-tenant snapshots namespaced under the app —
+  zero obs re-keying, zero hot-path change); gated by the FLEET-OPERATOR key
+  (manifest operator_key / APPITOOLS_FLEET_OPERATOR_KEY, validated distinct
+  from every app credential; wrong/missing key = uniform 404; empty = console
+  disabled; the fleet key opens NO app API and vice versa). The editor reads
+  `activation: hot_swap|restart` from /admin/served-resources and words the
+  deploy banner accordingly (hot-swap = no downtime, only that app). DevHub
+  navigates N apps by registering each app's control port in its multi-server
+  registry — no engine coupling).
   Both: per-app DATABASE_URL/JWT_SECRET/ADMIN_KEY REQUIRED — a shared
   JWT_SECRET across apps is rejected at load; fresh databases bootstrapped
   automatically with the canonical control-plane DDL. Benches: S1 ports-only

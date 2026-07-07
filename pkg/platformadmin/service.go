@@ -78,6 +78,14 @@ type Config struct {
 	// leaves it nil (a deploy re-execs, so the boot slice is authoritative).
 	ServedResourcesFn func() []string
 
+	// ActivationFn, when non-nil, reports HOW a schema deploy activates on this
+	// engine: "hot_swap" (in-process fleet, MT-STRUCT-S4/S5 — only this app is
+	// recompiled and swapped, no downtime) or "restart" (single-engine graceful
+	// re-exec, ~6 s). Surfaced in GET /admin/served-resources so the editor's
+	// deploy UI describes the real activation instead of always saying "restart".
+	// nil ⇒ "restart" (the historical behavior).
+	ActivationFn func() string
+
 	// PersistBootSchema validates a schema and ATOMICALLY persists it as the new
 	// BOOT schema (the file the engine loads at start), backing up the previous
 	// one for rollback (UI-F4-S2). An invalid schema must be reported wrapped in

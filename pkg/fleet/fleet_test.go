@@ -319,3 +319,21 @@ func TestSupervisorShutdownStopsAll(t *testing.T) {
 	}
 	t.Fatalf("app still running after Shutdown: %+v", s.Status()[0])
 }
+
+// The fleet-operator key is a level ABOVE the apps: it must never coincide
+// with any app's ADMIN_KEY or JWT_SECRET (MT-STRUCT-S5).
+func TestOperatorKeyMustDifferFromAppCredentials(t *testing.T) {
+	dir := t.TempDir()
+	app := baseApp(t, dir, "crm", strings.Repeat("s", 32))
+	m := map[string]any{"operator_key": "k-crm", "apps": []any{app}} // == crm ADMIN_KEY
+	p := writeManifest(t, dir, m)
+	if _, err := LoadManifest(p); err == nil || !strings.Contains(err.Error(), "operator_key must differ") {
+		t.Fatalf("want operator_key collision error, got %v", err)
+	}
+	m["operator_key"] = "a-distinct-fleet-operator-key"
+	p = writeManifest(t, dir, m)
+	mf, err := LoadManifest(p)
+	if err != nil || mf.OperatorKey != "a-distinct-fleet-operator-key" {
+		t.Fatalf("distinct operator key must load: %v", err)
+	}
+}

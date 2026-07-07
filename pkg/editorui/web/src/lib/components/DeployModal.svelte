@@ -255,7 +255,9 @@
 
 					{#if deploy.newResources.length > 0}
 						<div class="plan-sec warn-sec">
-							<div class="plan-h warn-h">⟳ Needs an engine restart</div>
+							<div class="plan-h warn-h">
+								{deploy.activation === 'hot_swap' ? '⟳ Activates after deploy (hot-swap)' : '⟳ Needs an engine restart'}
+							</div>
 							<p class="danger-note">
 								<b class="mono">{deploy.newResources.join(', ')}</b>
 								{deploy.newResources.length === 1 ? 'is a new resource' : 'are new resources'} —
@@ -268,9 +270,15 @@
 								{/if}
 							</p>
 							<p class="hint-sm">
-								This does <b>not</b> block the deploy — the tables are still provisioned. To serve
-								{deploy.newResources.length === 1 ? 'it' : 'them'} now, restart the engine with this
-								schema (<code>--schema your-export.json</code>).
+								{#if deploy.activation === 'hot_swap'}
+									This does <b>not</b> block the deploy — the tables are still provisioned. After
+									deploying, one click <b>hot-swaps this app in place</b> (no downtime, no process
+									restart; the other apps on this server are untouched).
+								{:else}
+									This does <b>not</b> block the deploy — the tables are still provisioned. To serve
+									{deploy.newResources.length === 1 ? 'it' : 'them'} now, restart the engine with this
+									schema (<code>--schema your-export.json</code>).
+								{/if}
 							</p>
 						</div>
 					{/if}
@@ -299,7 +307,9 @@
 							</div>
 							<div class="rh-sub">
 								{#if deploy.result.restartResources && deploy.result.restartResources.length > 0}
-									The existing resources are live; the new ones need an engine restart (below).
+									{deploy.activation === 'hot_swap'
+										? 'The existing resources are live; activate the new ones below (hot-swap).'
+										: 'The existing resources are live; the new ones need an engine restart (below).'}
 								{:else if deploy.result.created}
 									Your diagram is now a running REST + GraphQL API.
 								{:else}
@@ -311,7 +321,11 @@
 
 					{#if deploy.result.restartResources && deploy.result.restartResources.length > 0}
 						<div class="banner warn">
-							<div class="banner-msg">Provisioned — needs an engine restart to be served: {deploy.result.restartResources.join(', ')}</div>
+							<div class="banner-msg">
+								{deploy.activation === 'hot_swap'
+									? 'Provisioned — activate to serve: ' + deploy.result.restartResources.join(', ')
+									: 'Provisioned — needs an engine restart to be served: ' + deploy.result.restartResources.join(', ')}
+							</div>
 							<div class="banner-sub">
 								Their tables exist, but the REST / GraphQL API is unavailable (<b>403</b>/<b>404</b>)
 								until the engine restarts with a schema that includes them (routes, GraphQL and RBAC
@@ -320,19 +334,30 @@
 							{#if deploy.selfRestartAvailable}
 								{#if deploy.restartPhase === 'idle'}
 									<button class="btn primary restart-btn" onclick={() => (deploy.restartPhase = 'confirm')}>
-										Restart engine now
+										{deploy.activation === 'hot_swap' ? 'Activate now (hot-swap)' : 'Restart engine now'}
 									</button>
 								{:else if deploy.restartPhase === 'confirm'}
 									<div class="restart-confirm">
 										<p>
-											This persists your design as the engine's new <b>boot schema</b> and restarts it
-											gracefully. The API structure changes for <b>all tenants</b> and the engine is
-											briefly unavailable (~5–10&nbsp;s: in-flight requests finish draining, then it
-											relaunches). Tenant data is untouched, and the previous schema is kept as a
-											backup for automatic rollback.
+											{#if deploy.activation === 'hot_swap'}
+												This persists your design as this app's new <b>boot schema</b> and
+												<b>hot-swaps only this app</b> in place — no downtime, no process restart,
+												in-flight requests finish on the old surface, and the other apps on this
+												server are untouched. The API structure changes for <b>all tenants of this
+												app</b>. Tenant data is untouched, and the previous schema is kept as a
+												backup.
+											{:else}
+												This persists your design as the engine's new <b>boot schema</b> and restarts it
+												gracefully. The API structure changes for <b>all tenants</b> and the engine is
+												briefly unavailable (~5–10&nbsp;s: in-flight requests finish draining, then it
+												relaunches). Tenant data is untouched, and the previous schema is kept as a
+												backup for automatic rollback.
+											{/if}
 										</p>
 										<div class="restart-actions">
-											<button class="btn primary" onclick={() => deploy.restartEngine()}>Confirm — restart engine</button>
+											<button class="btn primary" onclick={() => deploy.restartEngine()}>
+												{deploy.activation === 'hot_swap' ? 'Confirm — hot-swap this app' : 'Confirm — restart engine'}
+											</button>
 											<button class="btn subtle" onclick={() => (deploy.restartPhase = 'idle')}>Cancel</button>
 										</div>
 									</div>
@@ -340,8 +365,12 @@
 									<div class="restart-progress">Persisting the boot schema…</div>
 								{:else if deploy.restartPhase === 'waiting'}
 									<div class="restart-progress">
-										Engine restarting — draining (<span class="mono">/readyz</span> → 503), relaunching,
-										waiting for it to come back…
+										{#if deploy.activation === 'hot_swap'}
+											Hot-swapping this app — verifying the new resources are served…
+										{:else}
+											Engine restarting — draining (<span class="mono">/readyz</span> → 503), relaunching,
+											waiting for it to come back…
+										{/if}
 									</div>
 								{:else if deploy.restartPhase === 'failed'}
 									<div class="restart-err">{deploy.restartError}</div>
@@ -357,9 +386,15 @@
 						</div>
 					{:else if deploy.restartPhase === 'live'}
 						<div class="banner ok">
-							<div class="banner-msg">Engine restarted — the new resources are now served.</div>
+							<div class="banner-msg">
+								{deploy.activation === 'hot_swap'
+									? 'App hot-swapped — the new resources are now served.'
+									: 'Engine restarted — the new resources are now served.'}
+							</div>
 							<div class="banner-sub">
-								Verified against the relaunched engine: their REST routes, GraphQL types and
+								{deploy.activation === 'hot_swap'
+									? 'Verified against the live app: its REST routes, GraphQL types and '
+									: 'Verified against the relaunched engine: their REST routes, GraphQL types and '}
 								<a href="/docs" target="_blank" rel="noreferrer">/docs</a> entries are live.
 							</div>
 						</div>

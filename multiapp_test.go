@@ -14,7 +14,7 @@ import (
 // the process-level handler — health probes only, everything else a clean 404.
 func TestUnmatchedHostGets404NotAnApp(t *testing.T) {
 	crm := namedApp("crm")
-	reg := NewRegistry(unmatchedApp(shutdown.New(), "test", 2), map[string]*compiledApp{
+	reg := NewRegistry(unmatchedApp(shutdown.New(), "test", 2, nil), map[string]*compiledApp{
 		"crm.local": crm,
 	})
 
@@ -50,7 +50,7 @@ func TestUnmatchedHostGets404NotAnApp(t *testing.T) {
 // SUFFIXES, not substrings) — pinned above; this makes the intent explicit.
 func TestSuffixWalkNeverMatchesEmbeddedDomains(t *testing.T) {
 	crm := namedApp("crm")
-	reg := NewRegistry(unmatchedApp(shutdown.New(), "test", 1), map[string]*compiledApp{"crm.local": crm})
+	reg := NewRegistry(unmatchedApp(shutdown.New(), "test", 1, nil), map[string]*compiledApp{"crm.local": crm})
 	if got := reg.Resolve("crm.local.evil.com"); got.name != "__unmatched__" {
 		t.Fatalf("embedded-domain host resolved to %q — must be unmatched", got.name)
 	}

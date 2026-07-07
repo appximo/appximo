@@ -524,6 +524,14 @@ func New(cfg Config) (*App, error) {
 				}
 				return servedResources
 			},
+			// Deploy-activation mode for the editor (MT-STRUCT-S5): evaluated at
+			// request time because ServeFleet wires hotSwap AFTER New.
+			ActivationFn: func() string {
+				if app.hotSwap != nil {
+					return "hot_swap"
+				}
+				return "restart"
+			},
 			// Engine self-restart (UI-F4-S2): the editor's "Apply & restart" —
 			// persist the deployed schema as the new BOOT schema (validated +
 			// atomic + backed up) and activate it. In single-engine mode this

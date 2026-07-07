@@ -64,6 +64,16 @@ type Manifest struct {
 	// set it: <DataDir>/<app>/obs.db, <DataDir>/<app>/files, logs. Default
 	// "/var/lib/appitools/fleet".
 	DataDir string `json:"data_dir,omitempty"`
+	// OperatorKey is the FLEET-OPERATOR credential (MT-STRUCT-S5): it gates the
+	// unified fleet console (`/fleet` on the in-process runtime's process-level
+	// handler) — the server owner's view over ALL apps. It is a level ABOVE the
+	// per-app credentials and is deliberately DISTINCT from every app's
+	// ADMIN_KEY/JWT_SECRET: holding one app's keys never reveals the fleet, and
+	// the fleet key opens NO app API (per-app JWT/RBAC/admin auth still applies
+	// underneath — the S3 isolation is not bypassable from the console). Empty
+	// falls back to APPITOOLS_FLEET_OPERATOR_KEY; still empty ⇒ the console is
+	// DISABLED (safe by default).
+	OperatorKey string `json:"operator_key,omitempty"`
 	// Apps are the fleet's apps (≥1).
 	Apps []AppSpec `json:"apps"`
 
@@ -178,6 +188,21 @@ func LoadManifest(path string) (*Manifest, error) {
 		}
 		seenSecrets[merged["JWT_SECRET"]] = a.Name
 		dsnApps[merged["DATABASE_URL"]] = append(dsnApps[merged["DATABASE_URL"]], a.Name)
+	}
+
+	// Fleet-operator key (S5): env fallback, then guard the level separation —
+	// the fleet credential must not COINCIDE with any app's credentials (a
+	// shared value would collapse the fleet level into an app level).
+	if m.OperatorKey == "" {
+		m.OperatorKey = os.Getenv("APPITOOLS_FLEET_OPERATOR_KEY")
+	}
+	if m.OperatorKey != "" {
+		for i := range m.Apps {
+			env := m.Apps[i].MergedEnv()
+			if m.OperatorKey == env["ADMIN_KEY"] || m.OperatorKey == env["JWT_SECRET"] {
+				return nil, fmt.Errorf("fleet: operator_key must differ from every app's ADMIN_KEY/JWT_SECRET (matches app %q) — the fleet level is above the app level", m.Apps[i].Name)
+			}
+		}
 	}
 
 	// Sharing one DATABASE_URL means sharing public.tenants / outbox / the
