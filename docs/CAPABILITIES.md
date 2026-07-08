@@ -107,30 +107,41 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 
 ## CLI subcommands
 
-- `serve`, `validate`, `token`, `openapi`, `graphql` (SDL), `generate`, `migrate`, `backup`, `init`, `version`.
+- `serve`, `validate` (`--json` for the unified report), `validate-schema`, `meta-schema`,
+  `token`, `openapi`, `graphql` (SDL), `generate`, `migrate`, `backup`, `init`,
+  `ai-generate`, `ai-eval`, `blueprints`, `admin`, `fleet`, `version`.
 
 ## What it does NOT do
 
 The capability list above without these limits would be marketing; together they're engineering.
 
-- **No declarative relations** — `relation` adds only a read-only `GET /api/{res}/{id}/{rel}` subroute; no FK, no joins, no cascade.
-- **No CORS middleware** — browser SPAs must be served same-origin ([workaround](DEPLOY.md#cors--current-status-important-for-spas)).
-- **No GraphQL `update` mutation** — create/delete only; use REST `PUT`/`PATCH`.
-- **No total count** in list responses — `count=true` is not a thing.
+- **No `file` field type — file↔record linkage is by convention only.** The file
+  store (`/api/files`) is real, but a resource cannot declare a first-class file
+  field: you store the returned `file_id` in a `uuid` field yourself, and the
+  engine does not validate it, cascade it, or know it points at a file
+  (`relation` can only target declared resources, never the engine `files` table).
+- **No schema version history.** A deploy overwrites the tenant's stored schema
+  (`public.tenants.json_schema`) in place; the self-restart keeps exactly one
+  boot-schema backup (`<schema>.bak`). Rollback = re-deploying an old schema file
+  you kept yourself — the reverse migration works (additive parts apply; drops of
+  what the newer schema added are gated by the approval flow), but the engine
+  stores no history to roll back *to*.
 - **No `neq`/`in`/`like`/`is_null` filter ops** — unsupported ops → 400.
 - **Multi-field sort and `sort=field:desc` are silently ignored** — verify result order.
 - **No delete hooks** — only `before`/`after_create` and `before`/`after_update`.
-- **POST/DELETE do not invalidate the response cache** — those entries expire by TTL only.
-- **`default` values parse but are not applied** on insert.
-- **`indexes` parse but create no DB index** — accepted with a `warnings` entry.
 - **`workflows` block parses but has no executor.**
 - **No shipped WASM business module** — only a test identity module; DIAN logic is a JS built-in, not WASM.
 - **Webhooks can't reach localhost/LAN** — HTTPS-only + SSRF guard, always.
 - **No OTLP/OpenTelemetry export** — Prometheus `/metrics` + an internal trace ring.
-- **No tenant-list endpoint** — the control plane is get-by-id only.
 - **Backup has no restore command and no scheduling.**
 - **Single node** — no HA/clustering; scale is vertical.
 - **No hosted/SaaS version** — self-hosted only, by design.
+
+(Former limits now closed and documented elsewhere: declarative relations + real
+FKs (`?include=`), CORS (`APPITOOLS_CORS_ORIGINS`), GraphQL `update` mutation,
+opt-in list totals (`?count=true`), `default` values applied on insert, `indexes`
+materialized as real DB indexes, write-path response-cache invalidation, and the
+tenant list on the admin API (`GET /admin/tenants`).)
 
 (The former "no visual schema editor" limit is closed: **Appitools Studio**
 ships embedded at `/editor` — full schema-grammar design, per-tenant deploy
