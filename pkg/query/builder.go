@@ -41,6 +41,7 @@ var operatorsForType = map[string]map[string]bool{
 	"time":    {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true, "after": true, "before": true},
 	"uuid":    {"eq": true},
 	"bool":    {"eq": true},
+	"file":    {"eq": true}, // a file_id column — filters like uuid (FILES-LINK-S1)
 }
 
 type filterClause struct {

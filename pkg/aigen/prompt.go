@@ -30,7 +30,7 @@ in names. Do NOT name a resource "transaction" or start one with "auth_" (reserv
 Every resource has an implicit "id" UUID primary key — do NOT declare "id".
 
 FIELD TYPES (exact set — nothing else; "number" is INVALID):
-  string, text, int, int64, float64, bool, uuid, time, json
+  string, text, int, int64, float64, bool, uuid, time, json, file
 
 FIELD KEYS (all optional unless noted):
   "type" (required), "required": true, "unique": true,
@@ -42,6 +42,9 @@ FIELD KEYS (all optional unless noted):
   "auto": true  (engine-managed timestamp, for created_at/updated_at; type must be time)
   "relation": "<other_resource>"  (makes this uuid field a foreign key),
     optional "on_delete": "restrict" | "cascade" | "set_null"
+  a "file" field attaches an uploaded file to the record (stores a file_id with
+    referential integrity); optional "on_delete": "restrict" | "set_null" only —
+    no relation/references/enum/default/auto on it
 
 RELATIONS (optional per-resource "relations" block, sibling of "fields", for nested reads):
   "relations": {

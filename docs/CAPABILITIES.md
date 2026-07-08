@@ -12,6 +12,9 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 - Generates GraphQL from the same schema — queries + `create`/`delete` mutations at `/graphql`.
 - Generates an OpenAPI **3.0.3** spec — `appitools openapi schema.json`, importable into Swagger/Hoppscotch.
 - Creates the tenant's Postgres tables automatically — idempotent DDL when a tenant registers.
+- `file` field type — attaches an uploaded file to a **record** with real referential
+  integrity (a `file_id` column with a per-tenant FK to the file store; bad reference →
+  422, deleting an attached file → 409 or `set_null`; see [FILES.md](FILES.md#attaching-files-to-records--the-file-field-type-files-link-s1)).
 
 ## Multi-tenancy
 
@@ -115,11 +118,6 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 
 The capability list above without these limits would be marketing; together they're engineering.
 
-- **No `file` field type — file↔record linkage is by convention only.** The file
-  store (`/api/files`) is real, but a resource cannot declare a first-class file
-  field: you store the returned `file_id` in a `uuid` field yourself, and the
-  engine does not validate it, cascade it, or know it points at a file
-  (`relation` can only target declared resources, never the engine `files` table).
 - **No schema version history.** A deploy overwrites the tenant's stored schema
   (`public.tenants.json_schema`) in place; the self-restart keeps exactly one
   boot-schema backup (`<schema>.bak`). Rollback = re-deploying an old schema file

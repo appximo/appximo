@@ -180,10 +180,24 @@ func (s *pgStore) ensure(ctx context.Context, tenant string) error {
 	if _, done := s.ensured.Load(tenant); done {
 		return nil
 	}
-	tbl, err := s.table(tenant)
+	if err := EnsureMetaTable(ctx, s.pool, tenant); err != nil {
+		return err
+	}
+	s.ensured.Store(tenant, struct{}{})
+	return nil
+}
+
+// EnsureMetaTable creates the tenant's files metadata table idempotently — the
+// SAME DDL the store runs lazily on first upload. Exported (FILES-LINK-S1) so
+// the migration engine can guarantee the table exists BEFORE adding a file
+// field's foreign key to it (a schema may declare a `file` field for a tenant
+// that has never uploaded anything).
+func EnsureMetaTable(ctx context.Context, pool *pgxpool.Pool, tenant string) error {
+	sch, err := schemaFor(tenant)
 	if err != nil {
 		return err
 	}
+	tbl := pgx.Identifier{sch, "files"}.Sanitize()
 	ddl := fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS %s (
     id            UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -195,10 +209,9 @@ CREATE TABLE IF NOT EXISTS %s (
 );
 CREATE INDEX IF NOT EXISTS idx_files_sha256_%s ON %s (sha256);`,
 		tbl, tenant, tbl)
-	if _, err := s.pool.Exec(ctx, ddl); err != nil {
+	if _, err := pool.Exec(ctx, ddl); err != nil {
 		return fmt.Errorf("files: ensure table: %w", err)
 	}
-	s.ensured.Store(tenant, struct{}{})
 	return nil
 }
 

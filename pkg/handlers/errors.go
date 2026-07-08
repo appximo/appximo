@@ -44,6 +44,26 @@ func WriteDBError(w http.ResponseWriter, err error) {
 		})
 		return
 	}
+	// A write whose `file` field references no file of the tenant (FILES-LINK-S1)
+	// → the SAME field-addressed 422 the declarative validator uses: to the
+	// client it is input validation on that field (an id that isn't one of the
+	// tenant's files — nonexistent or another tenant's), even though the guard is
+	// the real FK. Checked BEFORE the generic FK 409, which keeps handling every
+	// resource↔resource referential conflict.
+	if column, ok := db.FileReferenceViolation(err); ok {
+		if column == "" {
+			column = "file"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+			"error": "validation_failed",
+			"fields": []map[string]string{
+				{"field": column, "rule": "file_not_found", "message": "does not reference an existing file of this tenant"},
+			},
+		})
+		return
+	}
 	// Foreign-key violation → 409 Conflict (MIG-F1-S1): a RESTRICT delete of a
 	// still-referenced row, or a write referencing a non-existent row. A clear,
 	// safe message — never a masked 500.

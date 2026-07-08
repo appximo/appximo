@@ -47,6 +47,7 @@ export function pgKind(t: string): string {
 		case 'bool':
 			return 'bool';
 		case 'uuid':
+		case 'file':
 			return 'uuid';
 		case 'time':
 			return 'timestamptz';
@@ -121,6 +122,10 @@ export function defaultIssues(def: FieldDef): string[] {
 				: ['default must be a string (an RFC3339 timestamp, or "now")'];
 		case 'json':
 			return []; // any JSON value is acceptable for a json column
+		case 'file':
+			// Mirror of validateDefault: file ids are minted per tenant at upload
+			// time, so a schema-level default would dangle everywhere.
+			return ['default is not valid on a file field — file ids are minted per tenant at upload time'];
 		default:
 			return [];
 	}
@@ -246,6 +251,24 @@ export function fieldDefIssues(def: FieldDef): string[] {
 		if (!isNum) out.push(`min/max only apply to numeric fields (int, int64, float64), not "${def.type}"`);
 		if (def.min !== undefined && def.max !== undefined && def.min > def.max) {
 			out.push('min must be <= max');
+		}
+	}
+
+	// file (FILES-LINK-S1): a fixed reference to the engine file store — mirror of
+	// the validator's file-field block. The target is not authorable (no
+	// relation/references), a file id never changes (no on_update), and cascade
+	// would delete the record when its file is deleted (rejected).
+	if (def.type === 'file') {
+		if (def.relation) out.push('relation is not valid on a file field — it already references the file store');
+		if (def.references) out.push("references is not valid on a file field — it always references the file store's id");
+		if (def.on_update) out.push("on_update is not valid on a file field — a stored file's id never changes");
+		if (def.auto) out.push('auto is not valid on a file field');
+		if (def.enum && def.enum.length > 0) out.push('enum is not valid on a file field');
+		if (def.on_delete === 'cascade') {
+			out.push('on_delete cascade is not valid on a file field — use restrict (default) or set_null');
+		}
+		if (def.required && def.on_delete === 'set_null') {
+			out.push('on_delete set_null requires a nullable column, but this field is required');
 		}
 	}
 

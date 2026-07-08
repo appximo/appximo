@@ -164,7 +164,9 @@ func TypeForAPIType(apiType string) Type {
 		return Type{Base: BaseDouble}
 	case "bool":
 		return Type{Base: BaseBool}
-	case "uuid":
+	case "uuid", "file":
+		// A file field (FILES-LINK-S1) stores a file_id — physically a UUID
+		// column (its FK to the tenant files table is modeled separately).
 		return Type{Base: BaseUUID}
 	case "time":
 		return Type{Base: BaseTimestamptz}

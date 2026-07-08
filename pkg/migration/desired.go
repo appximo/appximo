@@ -195,6 +195,31 @@ func addForeignKeys(ds *schemadiff.Schema, s *schema.APISchema, names []string) 
 		}
 		for _, fieldName := range sortedFieldNames(s.Resources[resName]) {
 			f := s.Resources[resName].Fields[fieldName]
+			// A file field (FILES-LINK-S1) is a FIXED relation to the engine's
+			// per-tenant files table: same FK machinery (NOT VALID/VALIDATE,
+			// auto-index, on_delete — restrict default, set_null allowed, cascade
+			// rejected at load), target hardcoded to files(id). The files table is
+			// engine-managed (never in ds.Tables — isEngineManagedTable excludes it
+			// from the diffed subset), so the FK references it by name and the
+			// runner ensures it exists before the FK lands (ensureFilesTable).
+			if f.Type == "file" {
+				sym := fkConstraintName(resName, fieldName)
+				tbl.FKs[sym] = &schemadiff.ForeignKey{
+					Symbol:     sym,
+					Columns:    []string{fieldName},
+					RefTable:   "files",
+					RefColumns: []string{"id"},
+					OnDelete:   refActionForOnDelete(f.OnDelete),
+					OnUpdate:   schemadiff.NoAction, // a file id never changes; on_update rejected at load
+				}
+				idxName := "idx_" + resName + "_" + fieldName
+				if _, exists := tbl.Indexes[idxName]; !exists {
+					tbl.Indexes[idxName] = &schemadiff.Index{
+						Name: idxName, Columns: []string{fieldName}, Method: "btree",
+					}
+				}
+				continue
+			}
 			if f.Relation == "" {
 				continue
 			}

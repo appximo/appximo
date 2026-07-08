@@ -260,6 +260,17 @@ func (e *validationError) Extensions() map[string]any {
 // the GraphQL errors array. Mirrors the REST WriteDBError masking. Always returns a
 // generic message — never the original error.
 func safeDBErr(err error) error {
+	// A `file` field referencing no file of the tenant (FILES-LINK-S1) → the same
+	// field-addressed validation_failed shape REST answers with 422, so both APIs
+	// present a bad file reference as input validation on that field.
+	if column, ok := db.FileReferenceViolation(err); ok {
+		if column == "" {
+			column = "file"
+		}
+		return &validationError{fields: []schema.FieldRuleError{
+			{Field: column, Rule: "file_not_found", Message: "does not reference an existing file of this tenant"},
+		}}
+	}
 	// Foreign-key violation → a clear referential message (MIG-F1-S1), mirroring the
 	// REST 409 so a RESTRICT delete / bad reference is never a masked "internal error".
 	if fkMsg, ok := db.ForeignKeyViolation(err); ok {
@@ -1398,7 +1409,7 @@ func scalarOutput(fd schema.FieldDef) gql.Output {
 		return gql.Float
 	case "bool":
 		return gql.Boolean
-	case "uuid":
+	case "uuid", "file":
 		return gql.ID
 	default:
 		return gql.String
@@ -1413,7 +1424,7 @@ func scalarInput(fd schema.FieldDef) gql.Input {
 		return gql.Float
 	case "bool":
 		return gql.Boolean
-	case "uuid":
+	case "uuid", "file":
 		return gql.ID
 	default:
 		return gql.String

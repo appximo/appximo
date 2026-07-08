@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/miguelangel/appitools/pkg/controlplane"
+	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/files"
 )
 
@@ -155,6 +156,12 @@ func (s *Service) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	if err := s.files.Delete(r.Context(), id, fid); err != nil {
 		if errors.Is(err, files.ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		// FILES-LINK-S1: a file attached to a record (RESTRICT file FK) — the same
+		// clean 409 the public delete route answers with.
+		if fkMsg, ok := db.ForeignKeyViolation(err); ok {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": fkMsg})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delete failed"})

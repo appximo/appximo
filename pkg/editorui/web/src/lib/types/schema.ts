@@ -20,7 +20,8 @@ export const FIELD_TYPES = [
 	'bool',
 	'uuid',
 	'time',
-	'json'
+	'json',
+	'file'
 ] as const;
 export type FieldType = (typeof FIELD_TYPES)[number];
 

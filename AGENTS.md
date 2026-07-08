@@ -390,6 +390,20 @@ silently dead config.
 | `uuid` | UUID | `eq` |
 | `bool` | BOOLEAN | `eq` |
 | `json` | TEXT (stored as text) | `eq` only (exact match on the stored text) |
+| `file` | UUID + a real FK to the tenant's `files` table | `eq` |
+
+A **`file` field** (FILES-LINK-S1) attaches an uploaded file to a RECORD,
+first-class: it stores the `file_id` that `POST /api/files` returns, and the
+engine enforces (via the FK, per tenant) that the value references an existing
+file — a nonexistent or other-tenant id is a **422**
+`{"error":"validation_failed","fields":[{"field":"<name>","rule":"file_not_found",…}]}`
+on REST and GraphQL. Flow: upload → take `file_id` → set it like any field value
+(create/update); read returns the id, the bytes come from `GET /api/files/{id}`
+/ the signed URL. `on_delete` (of the FILE): `restrict` (default — deleting a
+still-attached file is a 409) or `set_null` (deleting the file nulls the field);
+`cascade` is rejected at load. Deleting the RECORD never deletes the file.
+`relation`/`references`/`on_update`/`enum`/`default`/`auto` are all rejected on
+a file field. In GraphQL the field is an `ID`.
 
 ### Field keys
 
@@ -1076,7 +1090,9 @@ POST /api/transaction
 - **Errors name the failing op** (never an opaque 500): a failure returns the
   failing op's status with `{ "error", "failed_operation": <index>, "op",
   "resource"[, "fields"] }`. A unique collision → `409`, an unknown field → `422`,
-  forbidden → `403`, a bad op/resource → `400`.
+  a bad `file` reference → `422` `file_not_found`, any other FK violation (bad
+  relation reference / RESTRICT delete) → `409`, forbidden → `403`, a bad
+  op/resource → `400`.
 - **Limit**: at most **100** operations per request (`APPITOOLS_MAX_TX_OPS`) →
   `400` over the cap; the 1 MiB body cap also applies.
 - **Reserved**: a schema resource may not be named `transaction` (it would shadow

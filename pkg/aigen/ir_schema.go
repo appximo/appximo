@@ -80,7 +80,7 @@ func IROutputSchema() map[string]any {
 
 	fieldItem := irObj(map[string]any{
 		"name":          irStr(),
-		"type":          irEnum("string", "text", "int", "int64", "float64", "bool", "uuid", "time", "json"),
+		"type":          irEnum("string", "text", "int", "int64", "float64", "bool", "uuid", "time", "json", "file"),
 		"required":      irNullable(irBool()),
 		"unique":        irNullable(irBool()),
 		"auto":          irNullable(irBool()),

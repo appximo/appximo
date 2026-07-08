@@ -680,6 +680,9 @@ func oaFieldType(fd schema.FieldDef) map[string]any {
 		return map[string]any{"type": "boolean"}
 	case "uuid":
 		return map[string]any{"type": "string", "format": "uuid"}
+	case "file":
+		return map[string]any{"type": "string", "format": "uuid",
+			"description": "id of an uploaded file (POST /api/files) attached to this record"}
 	case "time":
 		return map[string]any{"type": "string", "format": "date-time"}
 	default:

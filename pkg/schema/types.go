@@ -97,7 +97,14 @@ func EmitTopic(resource, action string) string {
 // exactly as before. They are compiled into a ResourceValidator at schema load
 // (see rules.go); the request path never compiles anything.
 type FieldDef struct {
-	Type     string   `json:"type"` // string, int, int64, float64, bool, uuid, time
+	// Type is one of: string, text, int, int64, float64, bool, uuid, time, json,
+	// file. A `file` field (FILES-LINK-S1) stores the id of an uploaded file
+	// (the file_id `POST /api/files` returns) as a UUID column carrying a REAL
+	// foreign key to the tenant's own files table — the first-class file↔record
+	// link. Its on_delete (restrict default | set_null; cascade rejected) governs
+	// what happens to the record when the referenced FILE is deleted; deleting
+	// the record never deletes the file.
+	Type     string   `json:"type"`
 	Required bool     `json:"required,omitempty"`
 	Unique   bool     `json:"unique,omitempty"`
 	Auto     bool     `json:"auto,omitempty"` // for created_at / updated_at

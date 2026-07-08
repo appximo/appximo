@@ -7,9 +7,24 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/miguelangel/appitools/pkg/files"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/schemadiff"
 )
+
+// schemaHasFileFields reports whether any resource declares a `file` field
+// (FILES-LINK-S1) — the trigger for ensuring the tenant files table exists
+// before its FK is added.
+func schemaHasFileFields(s *schema.APISchema) bool {
+	for _, res := range s.Resources {
+		for _, f := range res.Fields {
+			if f.Type == "file" {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // ApplyTenantMigration converges the resource tables in pgSchema to the tenant's
 // schema, using the real migration engine (pkg/schemadiff): introspect the live
@@ -100,6 +115,16 @@ func ApplyTenantMigrationApproved(ctx context.Context, pool *pgxpool.Pool, pgSch
 // (byte-identical to before — a removed resource is invisible drift), true for the
 // approval-aware path (so a table can be previewed and approved for dropping).
 func applyMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *schema.APISchema, approved []string, includeOrphans bool) (*ApplyOutcome, error) {
+	// A `file` field's FK targets the engine's per-tenant files table
+	// (FILES-LINK-S1), which is otherwise created lazily on first upload — a
+	// tenant that never uploaded would have nothing for the FK to reference, so
+	// ensure it exists BEFORE planning/applying. Idempotent, and skipped entirely
+	// for schemas with no file fields (zero change to every existing migration).
+	if schemaHasFileFields(s) {
+		if err := files.EnsureMetaTable(ctx, pool, strings.TrimPrefix(pgSchema, "tenant_")); err != nil {
+			return nil, fmt.Errorf("ensure files table for %s: %w", pgSchema, err)
+		}
+	}
 	plan, err := diffTenant(ctx, pool, pgSchema, s, includeOrphans)
 	if err != nil {
 		return nil, err

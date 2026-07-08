@@ -385,7 +385,7 @@ default sort/keyset key (see the query section).
 
 ### 3.2 The field type set
 
-`type` is required and must be one of exactly nine values from `validFieldTypes`
+`type` is required and must be one of exactly ten values from `validFieldTypes`
 (`pkg/schema/validator.go`). Any other value — notably `number` — rejects the
 schema with `unknown field type "<type>"` (`validator.go`). The Postgres
 column type is fixed by `TypeForAPIType` (`pkg/schemadiff/parsetype.go`), and
@@ -403,6 +403,7 @@ the filter operators a type accepts are fixed by `operatorsForType`
 | `uuid` | UUID | `UUID` | `eq` |
 | `time` | timestamp with time zone | `TIMESTAMPTZ` | `eq`, `gt`, `gte`, `lt`, `lte`, `after` (→ `>`), `before` (→ `<`) |
 | `json` | JSON stored as text | `TEXT` | `eq` only (see §3.7 finding) |
+| `file` | reference to an uploaded file (FILES-LINK-S1) | `UUID` + a real FK to the tenant's `files(id)` | `eq` |
 
 Notes verified in code:
 - `string` and `text` are byte-identical at the column level (both `BaseText` →
@@ -413,6 +414,14 @@ Notes verified in code:
   (`numericTypes = {int, int64, float64}`, `validator.go`).
 - `after`/`before` on `time` are aliases: `filterToSQL` maps `after`→`>`,
   `before`→`<` (`builder.go`).
+- A `file` field stores the `file_id` that `POST /api/files` returns and carries a
+  REAL foreign key to the tenant's own `files` table (`buildDesiredSchema`,
+  `pkg/migration/desired.go`): a write whose value references no file of the tenant
+  is a `422` `file_not_found` on that field (REST and GraphQL —
+  `db.FileReferenceViolation`); deleting a still-attached file is a `409` unless the
+  field declares `on_delete: "set_null"` (`cascade` is rejected at load); deleting
+  the record never deletes the file. `relation`/`references`/`on_update`/`enum`/
+  `default`/`auto` are rejected on a file field (`Validate`, the file-field block).
 - A filter operator outside a KNOWN type's set returns `400`
   `operator "<op>" not allowed for type "<type>" (allowed: …)` (`builder.go`).
   A `filter[<field>]` for an unknown field returns `400`
@@ -593,7 +602,7 @@ the resources section.)
 
 `number` is NOT a type (use `int`, `int64`, or `float64`) — and there is no
 `date`/`datetime`/`decimal`/`array`/`enum`-as-type/`relation`-as-type. The full set
-is the nine values in §3.2; anything else is rejected at load with
+is the ten values in §3.2; anything else is rejected at load with
 `unknown field type "<type>"`.
 
 ### 3.7 Divergences recorded for findings

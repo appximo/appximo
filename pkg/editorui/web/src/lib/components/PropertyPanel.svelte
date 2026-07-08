@@ -25,6 +25,7 @@
 
 	const isNumeric = $derived(field ? isNumericType(field.def.type) : false);
 	const isStringy = $derived(field ? isStringType(field.def.type) : false);
+	const isFile = $derived(field?.def.type === 'file');
 	const hasEnum = $derived((field?.def.enum ?? []).length > 0);
 	/** Live fidelity issues for the selected field — mirrors the engine validator. */
 	const fieldIssues = $derived(field ? fieldDefIssues(field.def) : []);
@@ -40,7 +41,19 @@
 
 	// def patch helpers -----------------------------------------------------------
 	function setType(t: FieldType) {
-		if (entity && field) editor.patchFieldDef(entity.id, field.id, 'type', t);
+		if (!entity || !field) return;
+		editor.patchFieldDef(entity.id, field.id, 'type', t);
+		// A file field's target is FIXED (the engine file store): the keys of an
+		// authorable FK — and the ones the validator rejects on file — are cleared
+		// so switching a field to `file` never carries dead/invalid config.
+		if (t === 'file') {
+			for (const k of ['relation', 'references', 'on_update', 'default', 'enum', 'auto'] as const) {
+				editor.patchFieldDef(entity.id, field.id, k, undefined);
+			}
+			if (field.def.on_delete === 'cascade') {
+				editor.patchFieldDef(entity.id, field.id, 'on_delete', undefined);
+			}
+		}
 	}
 	function toggleFlag(key: 'required' | 'unique' | 'auto', on: boolean) {
 		if (entity && field) editor.patchFieldDef(entity.id, field.id, key, on ? true : undefined);
@@ -179,11 +192,17 @@
 					><input
 						type="checkbox"
 						checked={!!field.def.auto}
+						disabled={isFile}
 						onchange={(e) => toggleFlag('auto', e.currentTarget.checked)}
 					/> auto</label
 				>
 			</div>
 
+			{#if isFile}
+				<div class="rule-note muted">
+					No default — a file field is set per record with a file_id from an upload.
+				</div>
+			{:else}
 			<label class="lbl" for="f-default">Default <span class="muted">(on create)</span></label>
 			{#if hasEnum}
 				<!-- enum default: pick a member (the engine requires it to be one) -->
@@ -221,8 +240,29 @@
 					onchange={(e) => setDefault(e.currentTarget.value)}
 				/>
 			{/if}
+			{/if}
 		</section>
 
+		{#if isFile}
+			<!-- File reference (FILES-LINK-S1): target fixed to the engine file store -->
+			<section class="p-sec">
+				<div class="sec-title">File reference</div>
+				<div class="rule-note muted">
+					Stores a file_id from the tenant's file store (POST /api/files) with a real
+					foreign key — the value must be one of this tenant's files.
+				</div>
+				<label class="lbl" for="f-od-file">on_delete <span class="muted">(when the FILE is deleted)</span></label>
+				<select
+					id="f-od-file"
+					class="field-select"
+					value={field.def.on_delete ?? 'restrict'}
+					onchange={(e) => setOnDelete(e.currentTarget.value)}
+				>
+					<option value="restrict">restrict — the file cannot be deleted while attached</option>
+					<option value="set_null">set_null — deleting the file detaches it from the record</option>
+				</select>
+			</section>
+		{:else}
 		<!-- Relation (foreign key) -->
 		<section class="p-sec">
 			<div class="sec-title">Foreign key</div>
@@ -276,6 +316,7 @@
 				{/if}
 			{/if}
 		</section>
+		{/if}
 
 		<!-- Validation rules -->
 		<section class="p-sec">
@@ -345,14 +386,21 @@
 					{#each FIELD_FORMATS as f}<option value={f}>{f}</option>{/each}
 				</select>
 			{/if}
-			<label class="lbl" for="f-enum">enum <span class="muted">(comma-separated)</span></label>
-			<input
-				id="f-enum"
-				class="field-input"
-				value={(field.def.enum ?? []).join(', ')}
-				onchange={(e) => setEnum(e.currentTarget.value)}
-			/>
-			{#if !isNumeric && !isStringy}
+			{#if !isFile}
+				<label class="lbl" for="f-enum">enum <span class="muted">(comma-separated)</span></label>
+				<input
+					id="f-enum"
+					class="field-input"
+					value={(field.def.enum ?? []).join(', ')}
+					onchange={(e) => setEnum(e.currentTarget.value)}
+				/>
+			{/if}
+			{#if isFile}
+				<div class="rule-note muted">
+					A file field takes no validation rules — the engine enforces that its value
+					references an existing file of the tenant (422 otherwise).
+				</div>
+			{:else if !isNumeric && !isStringy}
 				<div class="rule-note muted">
 					{field.def.type} fields take no length/range/pattern rules — only enum and a default.
 				</div>

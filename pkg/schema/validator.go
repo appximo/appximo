@@ -106,6 +106,7 @@ var (
 		"time":    true,
 		"text":    true,
 		"json":    true,
+		"file":    true,
 	}
 )
 
@@ -175,7 +176,7 @@ func Validate(s *APISchema) []ValidationError {
 					Got:      field.Type,
 					Expected: types,
 					Message:  fmt.Sprintf("unknown field type %q: must be one of %s", field.Type, joinQuoted(types)),
-					Fix:      "set type to one of the valid field types (e.g. 'string' for short text, 'text' for long text, 'int'/'int64'/'float64' for numbers, 'time' for timestamps, 'bool', 'uuid', 'json')",
+					Fix:      "set type to one of the valid field types (e.g. 'string' for short text, 'text' for long text, 'int'/'int64'/'float64' for numbers, 'time' for timestamps, 'bool', 'uuid', 'json', 'file' for a reference to an uploaded file)",
 				})
 			}
 
@@ -193,15 +194,63 @@ func Validate(s *APISchema) []ValidationError {
 				}
 			}
 
+			// file (FILES-LINK-S1): a first-class reference to the engine file
+			// store — the column stores a file_id with a REAL FK to the tenant's
+			// files(id). Its target is fixed (the reserved files table), so the
+			// relation/references machinery does not apply; on_delete governs what
+			// happens to THIS record when the referenced FILE is deleted, and
+			// cascade is rejected (deleting a file must never silently delete the
+			// records that attached it — restrict blocks the file delete, set_null
+			// detaches).
+			if field.Type == "file" {
+				if field.Relation != "" {
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".relation",
+						Message: "relation is not valid on a file field — a file field already references the engine file store",
+					})
+				}
+				if field.References != "" {
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".references",
+						Message: "references is not valid on a file field — it always references the file store's id",
+					})
+				}
+				if field.OnUpdate != "" {
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".on_update",
+						Message: "on_update is not valid on a file field — a stored file's id never changes",
+					})
+				}
+				if field.Auto {
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".auto",
+						Message: "auto is not valid on a file field",
+					})
+				}
+				if len(field.Enum) > 0 {
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".enum",
+						Message: "enum is not valid on a file field",
+					})
+				}
+				if field.OnDelete == OnDeleteCascade {
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".on_delete",
+						Message: "on_delete cascade is not valid on a file field (deleting a file would silently delete the records that attached it) — use restrict (default: the file cannot be deleted while referenced) or set_null (deleting the file detaches it)",
+					})
+				}
+			}
+
 			// on_delete (MIG-F1-S1): the FK's referential action. Only valid on a
-			// relation field; set_null requires the column be nullable (else
+			// relation field (or a file field, whose FK targets the file store —
+			// FILES-LINK-S1); set_null requires the column be nullable (else
 			// Postgres rejects the SET NULL at delete time — caught at load here).
 			if field.OnDelete != "" {
 				switch {
-				case field.Relation == "":
+				case field.Relation == "" && field.Type != "file":
 					errs = append(errs, ValidationError{
 						Field:   fieldPrefix + ".on_delete",
-						Message: "on_delete is only valid on a field that declares a relation",
+						Message: "on_delete is only valid on a field that declares a relation (or a file field)",
 					})
 				case !validOnDeleteActions[field.OnDelete]:
 					errs = append(errs, ValidationError{
@@ -944,7 +993,7 @@ func pgKindForAPIType(t string) string {
 		return "double"
 	case "bool":
 		return "bool"
-	case "uuid":
+	case "uuid", "file":
 		return "uuid"
 	case "time":
 		return "timestamptz"
@@ -1031,6 +1080,11 @@ func validateDefault(fieldPrefix string, fd FieldDef) []ValidationError {
 		if _, err := uuid.Parse(s); err != nil {
 			return bad("default must be a valid uuid string")
 		}
+	case "file":
+		// A hardcoded file id can never be right: file ids are per-tenant and
+		// minted at upload time, so a schema-level default would dangle in every
+		// tenant except (at best) one.
+		return bad("default is not valid on a file field — file ids are minted per tenant at upload time")
 	case "time":
 		if _, ok := fd.Default.(string); !ok {
 			return bad(`default must be a string (an RFC3339 timestamp, or "now" for the insert moment)`)

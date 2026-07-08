@@ -449,7 +449,8 @@ func appendGuards(sql string, args []any, guards []txGuard, res *schema.Resource
 }
 
 // dbTxError classifies a DB error from inside the transaction into a txError. A
-// unique violation is a 409 and an undefined column a 422 (exactly the single-op
+// unique violation is a 409, an undefined column a 422, a bad `file` reference a
+// field-addressed 422 and any other FK violation a 409 (exactly the single-op
 // mapping); anything else is an unexpected 500 (the raw SQL is never exposed).
 func dbTxError(err error) *txError {
 	if field, ok := db.UniqueViolationField(err); ok {
@@ -457,6 +458,20 @@ func dbTxError(err error) *txError {
 	}
 	if field, ok := db.UndefinedColumnField(err); ok {
 		return &txError{status: http.StatusUnprocessableEntity, msg: fmt.Sprintf("unknown field: %q", field)}
+	}
+	// A `file` field referencing no file of the tenant (FILES-LINK-S1) — the same
+	// field-addressed 422 the single-op path answers.
+	if column, ok := db.FileReferenceViolation(err); ok {
+		if column == "" {
+			column = "file"
+		}
+		return &txError{status: http.StatusUnprocessableEntity, msg: "validation_failed",
+			fields: []schema.FieldRuleError{{Field: column, Rule: "file_not_found", Message: "does not reference an existing file of this tenant"}}}
+	}
+	// Any other referential conflict (a bad relation reference, a RESTRICT delete)
+	// — the same clean 409 as the single-op path (previously a masked 500).
+	if fkMsg, ok := db.ForeignKeyViolation(err); ok {
+		return &txError{status: http.StatusConflict, msg: fkMsg}
 	}
 	return &txError{status: http.StatusInternalServerError, msg: "internal error", fields: dbUnavailableMarker(err)}
 }

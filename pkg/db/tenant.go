@@ -76,10 +76,36 @@ func UniqueViolationField(err error) (field string, ok bool) {
 // Detail shapes: a RESTRICT/NO-ACTION delete of a still-referenced parent
 // ("…is still referenced from table \"empleados\".") and an insert/update of a child
 // whose parent is absent ("…is not present in table \"departamentos\".").
+// fkKeyColumnsRe extracts the violating column list from the same Detail
+// ("Key (formula)=(…) is not present…" → "formula").
 var (
 	fkStillReferencedRe = regexp.MustCompile(`is still referenced from table "([^"]+)"`)
 	fkNotPresentRe      = regexp.MustCompile(`is not present in table "([^"]+)"`)
+	fkKeyColumnsRe      = regexp.MustCompile(`^Key \(([^)]+)\)=`)
 )
+
+// FileReferenceViolation reports whether err is a foreign_key_violation on a
+// `file` field (FILES-LINK-S1): a write whose file_id references no row of the
+// tenant's files table. It returns the violating column (the file field's name,
+// parsed from the error Detail) so handlers can answer the write with the SAME
+// field-addressed 422 shape the declarative validator uses — a bad file
+// reference is field-level input validation to the client, even though the
+// guard is the real FK. A delete blocked by a file FK (the other direction) is
+// NOT this case — that stays the generic 409 (ForeignKeyViolation).
+func FileReferenceViolation(err error) (column string, ok bool) {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		return "", false
+	}
+	m := fkNotPresentRe.FindStringSubmatch(pgErr.Detail)
+	if len(m) != 2 || m[1] != "files" {
+		return "", false
+	}
+	if cm := fkKeyColumnsRe.FindStringSubmatch(pgErr.Detail); len(cm) == 2 {
+		return cm[1], true
+	}
+	return "", true // file FK violation with an unparseable column — still classifiable
+}
 
 // ForeignKeyViolation reports whether err is a Postgres foreign_key_violation
 // (SQLSTATE 23503) and, if so, returns a safe, human-readable message naming the

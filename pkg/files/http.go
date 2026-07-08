@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
@@ -177,6 +178,14 @@ func DeleteHandler(store *Store) http.HandlerFunc {
 		if err := store.Delete(r.Context(), tc.ID, id); err != nil {
 			if errors.Is(err, ErrNotFound) {
 				writeErr(w, http.StatusNotFound, "not found")
+				return
+			}
+			// A file attached to a record through a `file` field with the default
+			// RESTRICT (FILES-LINK-S1): the FK blocks the delete — a clean 409
+			// naming the referencing resource, never a masked 500. Detach first
+			// (null the field / delete the record), or declare on_delete set_null.
+			if fkMsg, ok := db.ForeignKeyViolation(err); ok {
+				writeErr(w, http.StatusConflict, fkMsg)
 				return
 			}
 			writeErr(w, http.StatusInternalServerError, "delete failed")

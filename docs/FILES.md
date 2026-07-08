@@ -121,6 +121,47 @@ rate limit → JWT → RBAC deny-by-default): a role needs the `files` resource 
 its policy. File ids are tenant-scoped (no cross-tenant handle) and blobs are
 tenant-prefixed in storage.
 
+## Attaching files to records — the `file` field type (FILES-LINK-S1)
+
+A resource can declare a **`file` field**: a column that references one of the
+tenant's uploaded files, with real integrity — the first-class file↔record link
+(a patient's prescription PDF belongs to THE PATIENT record, not merely to
+whoever uploaded it):
+
+```json
+"pacientes": {
+  "fields": {
+    "nombre":  { "type": "string", "required": true },
+    "formula": { "type": "file" },
+    "foto":    { "type": "file", "on_delete": "set_null" }
+  }
+}
+```
+
+- **The flow is upload → id → set.** `POST /api/files` returns `{file_id,…}`;
+  set that id as the field's value on a normal create/update (REST, GraphQL, or
+  inside `POST /api/transaction`). Reading the record returns the id; the bytes
+  come from `GET /api/files/{id}` or the signed URL (`/api/files/{id}/url`).
+- **Integrity is a real Postgres FK** to the tenant's own `files` table (added
+  `NOT VALID`/`VALIDATE` like every engine FK, column auto-indexed). A write
+  whose value is not one of THIS tenant's files — a nonexistent id or another
+  tenant's (isolation is structural: the FK can only see the tenant's own
+  schema) — is a **`422`**
+  `{"error":"validation_failed","fields":[{"field":"formula","rule":"file_not_found",…}]}`
+  on both REST and GraphQL.
+- **`on_delete` governs the FILE-delete direction.** `restrict` (the default):
+  `DELETE /api/files/{id}` of a still-attached file is a clean **`409`** naming
+  the referencing resource — detach first. `set_null`: deleting the file nulls
+  the field on its records. `cascade` is **rejected at load** — deleting a file
+  must never silently delete the records that attached it.
+- **Deleting the RECORD never deletes the file** (no surprise data loss; remove
+  it explicitly via `DELETE /api/files/{id}` when it is no longer referenced).
+- The field is a plain `uuid` column to every other subsystem: filter
+  `?filter[formula][eq]=<id>`, GraphQL type `ID`, OpenAPI `string`/`uuid`.
+  `relation`/`references`/`on_update`/`enum`/`default`/`auto` are rejected on it.
+- Studio authors it like any type: pick `file` in the field-type dropdown — the
+  panel offers exactly the engine surface (`on_delete` restrict/set_null).
+
 ## The Studio files manager (UI-F5-S1)
 
 The visual editor (`/editor`) has a **Files** view (toolbar) — a per-tenant file

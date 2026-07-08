@@ -148,7 +148,7 @@ func gqlFieldType(fd schema.FieldDef) string {
 		return "Float"
 	case "bool":
 		return "Boolean"
-	case "uuid":
+	case "uuid", "file":
 		return "ID"
 	default: // string, text, time, json
 		return "String"
