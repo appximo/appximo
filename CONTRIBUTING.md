@@ -25,6 +25,21 @@ Use the issue title format: `[feature] short description`.
 
 ---
 
+## Daily flow
+
+`make help` lists every annotated target. The day-to-day ones:
+
+```bash
+make dev          # build Studio + engine, load dev secrets (DEV_ENV env-file),
+                  # serve on :8080 — boots a BLANK app; SCHEMA=/PORT= to override
+make dev-fast     # skip the Studio SPA rebuild (when the editor didn't change)
+make stop         # stop the dev server by its exact PID (PORT= to target another)
+make spec         # regenerate appitools-spec.md (the agent grammar pack)
+make install      # version-stamped `appitools` CLI into /usr/local/bin (sudo if needed)
+```
+
+---
+
 ## Running the tests locally
 
 **Prerequisites:** Go 1.25+, Docker (for testcontainers), Node 20+ (only to

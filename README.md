@@ -322,6 +322,27 @@ at zero API cost. The flow: [docs/SCHEMA_SPEC_LLM.md](docs/SCHEMA_SPEC_LLM.md).
 
 The control plane (tenant admin) listens on **9090** by default — keep it off the internet.
 
+## Development (from a clone)
+
+One command per task (`make help` lists them all):
+
+```bash
+make dev         # build the Studio SPA + engine, load dev secrets, serve on :8080
+                 # boots a BLANK app — open http://localhost:8080/editor and
+                 # load/paste your schema; or: make dev SCHEMA=mine.json PORT=9000
+make dev-fast    # same, skipping the SPA rebuild (when you didn't touch the editor)
+make stop        # stop the dev server by its exact PID (make stop PORT=9000)
+make spec        # regenerate appitools-spec.md — the LLM grammar pack for your
+                 # agent (docs/SCHEMA_SPEC_LLM.md)
+make install     # install the version-stamped `appitools` CLI into /usr/local/bin
+                 # (may need sudo) — then `appitools validate --json x.json` works anywhere
+```
+
+`make dev` reads the env-file at `DEV_ENV` (default `/root/.appitools-secrets-dev`)
+for the three required vars — `DATABASE_URL`, `JWT_SECRET`, `ADMIN_KEY` — and
+loads them only into the launched process; it tells you exactly what to create
+if the file is missing.
+
 ## Testing
 
 ```bash

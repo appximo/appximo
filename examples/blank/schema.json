@@ -1,0 +1,17 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "my-api",
+  "resources": {
+    "items": {
+      "fields": {
+        "name": { "type": "string" }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": { "resources": "*", "actions": ["*"] }
+    }
+  }
+}
