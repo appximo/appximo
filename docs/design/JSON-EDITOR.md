@@ -152,27 +152,43 @@ one packaging command.
 
 ## Construction design (next sessions)
 
-**S1 — the validation surface (engine, thin):**
-- `POST /editor/validate` — body = raw schema JSON (1 MiB cap), response =
-  `ValidateReport`. Stateless, no data access, JWT-skipped like the rest of
-  `/editor` (same class as `/openapi.json`; the tenant rate limiter still
-  applies). `GET /editor/meta-schema` — serves `schema.MetaSchemaJSON()`.
-  ~40 lines + tests; zero hot-path impact (new routes).
-- `appitools spec` + the shared embedded grammar file (S1 or S3 — trivial).
+**S1 — the validation surface (engine, thin): ✅ BUILT (JSON-EDITOR-S1).**
+- `POST /editor/validate` — body = raw schema JSON (1 MiB cap, 413 over it),
+  response = `ValidateReport`. Stateless, no data access, JWT-skipped like the
+  rest of `/editor` (same class as `/openapi.json`; the tenant rate limiter
+  still applies). `GET /editor/meta-schema` — serves `schema.MetaSchemaJSON()`
+  (Cache-Control 1 h). Implemented in `pkg/editorui/validate.go` + registered
+  in `Register` (literal routes win over the asset wildcard in chi); tested in
+  `validate_test.go` (good schema → valid, the probe schema → unknown_key +
+  invalid type at their paths, body cap → 413, meta-schema == embedded bytes).
+  Zero hot-path impact (new routes).
+- `appitools spec` + the shared embedded grammar file (S3 — pending).
 
-**S2 — the JSON view in Studio (the editor):**
-- A "Code" view (Toolbar toggle or replacing Import/Export): CM6 with the
-  three layers above. Open = current canvas serialized (`editor.toJSON()`);
-  Apply = parse → `ValidateReport` gate (errors block with located
-  diagnostics; warnings listed) → `loadSchema` + `commitBaselines` semantics
-  preserved (renames!). Paste-from-agent lands here. Import/Export modals
-  become redundant (keep Download).
-- Path→position mapping via the CM syntax tree walk (no extra parser dep).
-- Round-trip honesty: the canvas model drops unknown keys — but with layer
-  2+3 in front, an unknown key can no longer enter silently (it is a located
-  error BEFORE Apply). Document that Apply normalizes formatting.
-- Playwright verification: paste the broken probe schema → see the two errors
-  at their lines → fix inline → Apply → canvas loads; dark/light computed.
+**S2 — the JSON view in Studio (the editor): ✅ BUILT (JSON-EDITOR-S2).**
+- The "Code" view (`CodeView.svelte`, Canvas | Code toolbar toggle): CM6 with
+  the three layers. Open = current canvas serialized (`editor.toJSON()`);
+  Apply = parse → `ValidateReport` gate (errors block, located, jump-to-first)
+  → `loadSchema` (renamed_from lifts into the baseline — renames preserved).
+  Paste-from-agent lands here. Import/Export modals kept (redundant but cheap).
+- Path→position mapping via the CM syntax tree walk (`pathToRange.ts`, no
+  extra parser dep; handles both `foreign_keys[0]` and `.0.` index dialects;
+  `unknown_key` errors refine to the offending property node).
+- **As-built deviation from §4's sketch:** layer 2 (meta-schema client-side) is
+  COMPLETION + HOVER only; buffer DIAGNOSTICS are unified in the debounced
+  layer 3 (`ValidateReport` carries the structural errors too). Rationale:
+  one authority (no duplicate markers for the same fault), and the client
+  library validates an older draft (Draft04 walker) while the meta-schema uses
+  Draft-2020-12 conditionals (if/then, dependentRequired) that only the Go
+  side evaluates — structural marks still land within the 400 ms debounce.
+  Also: the library's markdown-it+shiki hover renderer is aliased to a tiny
+  escape stub at build time (multi-MB chain for plain-sentence tooltips).
+- Bundle: the Code view is a LAZY chunk — canvas bundle 472 KB (was 469 KB),
+  CodeView chunk 654 KB (207 KB gzip) loaded on first toggle. No workers.
+- Playwright-verified live (20/20): the broken probe schema shows every error
+  at its line with its fix (silent-drop killed: `bloque_inventado` and
+  `"type": "number"` are located errors now, not silent discards); Apply is
+  gated while invalid and loads the canvas when fixed; renamed_from survives
+  Apply → re-export; syntax layer instant; theme computed light/dark.
 
 **S3 — the agent pack:** `docs/SCHEMA_SPEC_LLM.md` + `appitools spec` +
 README/AGENTS pointers. The golden external loop documented end-to-end.

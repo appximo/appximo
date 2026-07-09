@@ -80,6 +80,26 @@
 
 	<div class="sep"></div>
 
+	<div class="viewswitch" role="tablist" aria-label="Workspace view">
+		<button
+			class="vs-btn"
+			class:active={ui.view === 'canvas'}
+			role="tab"
+			aria-selected={ui.view === 'canvas'}
+			onclick={() => (ui.view = 'canvas')}
+		>Canvas</button>
+		<button
+			class="vs-btn"
+			class:active={ui.view === 'code'}
+			role="tab"
+			aria-selected={ui.view === 'code'}
+			data-testid="view-code"
+			onclick={() => (ui.view = 'code')}
+		>Code</button>
+	</div>
+
+	<div class="sep"></div>
+
 	<div class="group">
 		<button class="btn subtle" onclick={() => editor.newSchema()}>New</button>
 
@@ -250,6 +270,29 @@
 		height: 22px;
 		background: var(--border);
 		margin: 0 6px;
+	}
+	.viewswitch {
+		display: flex;
+		align-items: center;
+		gap: 2px;
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 2px;
+	}
+	.vs-btn {
+		border: none;
+		background: none;
+		font-size: 12px;
+		padding: 4px 11px;
+		border-radius: 6px;
+		color: var(--text-2);
+	}
+	.vs-btn.active {
+		background: var(--surface);
+		color: var(--text);
+		font-weight: 600;
+		box-shadow: 0 1px 2px color-mix(in srgb, #0a0c10 10%, transparent);
 	}
 	.group {
 		display: flex;

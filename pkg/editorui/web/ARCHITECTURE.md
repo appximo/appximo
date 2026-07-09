@@ -204,6 +204,42 @@ behavior instead of reimplementing it:
 - **Isolation**: the manager only ever operates on the selected tenant; ids
   are tenant-scoped server-side (a cross-tenant id is a 404).
 
+## Code — the assisted JSON editor (JSON-EDITOR-S2)
+
+The **Canvas | Code** toggle (toolbar, `ui.view`) swaps the workspace between
+the ERD and `CodeView.svelte` — the schema as editable JSON in **CodeMirror 6**
+(lazy chunk: CM6 + json-schema-library load on first use, so the canvas bundle
+doesn't pay; same pattern as the admin UI's lazy ECharts). Three assistance
+layers, none of which reimplements the validator:
+
+1. **Syntax** — `@codemirror/lang-json`'s `jsonParseLinter`, instant.
+2. **Structure (assistance)** — `codemirror-json-schema`'s completion + hover,
+   fed the engine's formal meta-schema from `GET /editor/meta-schema`
+   (`codeview/validateApi.ts`). Its markdown-it+shiki hover renderer is aliased
+   to a tiny escape stub at build time (`vite.config.ts` +
+   `codeview/markdown-stub.ts`) — that chain is multi-MB for plain sentences.
+3. **Semantics (diagnostics)** — the buffer is debounce-POSTed (400 ms) to
+   `POST /editor/validate` = `schema.ValidateReport`, the SAME unified
+   structural+semantic authority as `appitools validate --json`
+   (`codeview/engineLint.ts`). Every error is mapped to its buffer range by
+   walking CM's own JSON syntax tree from the report's dot-path
+   (`codeview/pathToRange.ts`; `unknown_key` errors refine to the offending
+   property), rendered with the report's `fix` in the tooltip. Diagnostics are
+   deliberately server-only — one authority, no duplicate markers, and the
+   Draft-2020-12 conditionals are evaluated by the real Go validator instead of
+   a client library's older draft.
+
+**Apply is gated** (the JSON-AUDIT-V1 silent-drop, killed): Apply re-runs
+`ValidateReport` and loads the model ONLY on a fully valid document — errors
+stay located in the buffer (jump-to-first) and nothing is applied. A valid
+Apply goes through the same `editor.loadSchema` path as Import, so
+`renamed_from` lifts into the rename baseline (UI-F4-S1) and re-export derives
+it back; renaming in JSON *without* `renamed_from` is honestly a delete+create
+— exactly what the engine would do with that document. The buffer opens as
+`editor.toJSON()` (round-trip with the canvas) and unapplied edits survive view
+switches (`ui.codeBuffer`); the theme is `codeview/cmTheme.ts` — CSS-variable
+tokens, so it follows the light/dark toggle live.
+
 ## How to grow (the point of the structure)
 
 Everything below is additive — the model and store already carry the data

@@ -98,6 +98,10 @@ func Register(r chi.Router) error {
 	r.Get("/editor", h.serveIndex)
 	r.Get("/editor/", h.serveIndex)
 	r.Get("/editor/*", h.serveAsset)
+	// JSON-EDITOR-S1: the assisted editor's validation surface (validate.go).
+	// Literal routes win over the wildcard in chi, so these never shadow assets.
+	r.Post("/editor/validate", serveValidate)
+	r.Get("/editor/meta-schema", serveMetaSchema)
 	return nil
 }
 

@@ -11,6 +11,7 @@
 	import RbacModal from './lib/components/RbacModal.svelte';
 	import StateMachineModal from './lib/components/StateMachineModal.svelte';
 	import { editor } from './lib/stores/editor.svelte';
+	import { ui } from './lib/stores/ui.svelte';
 	import { SAMPLES } from './lib/schema/samples';
 
 	// First impression: load a rich example so the canvas isn't blank. The user can
@@ -27,8 +28,17 @@
 	<SvelteFlowProvider>
 		<Toolbar />
 		<div class="workspace">
-			<Canvas />
-			<PropertyPanel />
+			{#if ui.view === 'code'}
+				<!-- Lazy chunk: CodeMirror + json-schema-library load on first use, so
+				     the canvas bundle doesn't pay for the Code view (the same pattern
+				     as the admin UI's lazy ECharts route). -->
+				{#await import('./lib/components/CodeView.svelte') then codeView}
+					<codeView.default />
+				{/await}
+			{:else}
+				<Canvas />
+				<PropertyPanel />
+			{/if}
 		</div>
 	</SvelteFlowProvider>
 	<DeployModal />

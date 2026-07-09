@@ -6,6 +6,11 @@ type Theme = 'light' | 'dark';
 
 class UIStore {
 	theme = $state<Theme>('light');
+	/** The main workspace view: the ERD canvas or the JSON code editor (JSON-EDITOR-S2). */
+	view = $state<'canvas' | 'code'>('canvas');
+	/** The Code view's buffer, preserved across view switches ONLY while it has
+	 *  unapplied edits (null = re-snapshot from the model on next open). */
+	codeBuffer = $state<string | null>(null);
 	/** Whether the Roles & Permissions (RBAC) editor is open. */
 	rbacOpen = $state(false);
 	/** The field whose state-machine designer is open ({entityId, fieldId}), or null. */
