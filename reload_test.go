@@ -17,6 +17,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/observability"
 	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/miguelangel/appitools/pkg/schemahistory"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
@@ -43,6 +44,15 @@ func (m *mockCPService) PreviewSchema(context.Context, string, *schema.APISchema
 }
 func (m *mockCPService) GetSchema(ctx context.Context, id string) (*schema.APISchema, error) {
 	return m.getSchema(ctx, id)
+}
+func (m *mockCPService) ListSchemaHistory(context.Context, string, int, int) (*schemahistory.Page, error) {
+	return &schemahistory.Page{}, nil
+}
+func (m *mockCPService) GetSchemaVersion(context.Context, string, int) (*schemahistory.Version, error) {
+	return nil, schemahistory.ErrVersionNotFound
+}
+func (m *mockCPService) RollbackSchema(context.Context, string, int, []string) (*controlplane.RollbackResult, error) {
+	return nil, schemahistory.ErrVersionNotFound
 }
 
 // reloadTestRouter wires the handler exactly as cmd_serve.go does: behind the

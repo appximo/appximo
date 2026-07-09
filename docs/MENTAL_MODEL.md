@@ -71,8 +71,10 @@ the same *route surface*.
 ## 4. The change cycle — what a deploy activates live, and what needs a restart
 
 A deploy (editor "Deploy", control-plane `PUT /tenants/{id}/schema`, or
-`appitools migrate`) does three things: persists the schema to
-`public.tenants.json_schema`, runs the **real migration** against that tenant's
+`appitools migrate`) does four things: persists the schema to
+`public.tenants.json_schema`, **appends it to the tenant's version history**
+(`public.schema_history`, append-only — the base of "roll back to vN"; see
+pkg/schemahistory), runs the **real migration** against that tenant's
 tables (diff → production-safe DDL), and fires `pg_notify(schema_updated)`
 which only **invalidates the response cache** (app.go `startCacheInvalidator`).
 It never recompiles routes, GraphQL, RBAC, validators or hooks.
@@ -200,3 +202,11 @@ Today the practical answer for "I added a resource": deploy from the editor
 (the tables are migrated), then click **"Restart engine now"** in the deploy
 result — the engine persists the schema, drains, relaunches, and the editor
 confirms the new resource is served. No terminal involved.
+
+And for "I want the previous version back": Studio's **History** view lists
+every deployed version (append-only, hash-identified) and rolls back to any of
+them through the SAME preview → destructive-gate → apply machinery as a deploy
+(`POST /admin/tenants/{id}/schema/rollback`) — what later versions added is
+reverted as gated drops with measured impact, data already lost to an approved
+forward drop is not recoverable, and the rollback itself is recorded as a new
+version.

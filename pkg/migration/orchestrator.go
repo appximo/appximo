@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/miguelangel/appitools/pkg/schemahistory"
 )
 
 // This file implements the RESUMABLE MULTI-TENANT MIGRATION ORCHESTRATOR — the
@@ -214,7 +215,7 @@ func applyToTenant(ctx context.Context, pool *pgxpool.Pool, t tenantRow, opts Fa
 		// schema_updated trigger invalidates its cache) — only AFTER a successful
 		// migration, so a failed tenant keeps its old record, consistent with its
 		// unchanged tables.
-		if err := persistTenantSchema(ctx, pool, t.id, opts.Schema); err != nil {
+		if err := persistTenantSchema(ctx, pool, t.id, opts.Schema, runID); err != nil {
 			return fmt.Errorf("persist schema: %w", err)
 		}
 		outcome = o
@@ -327,15 +328,23 @@ func withTenantLock(ctx context.Context, pool *pgxpool.Pool, pgSchema string, fn
 // persistTenantSchema writes the applied schema to the tenant record. The
 // schema_updated trigger (migrations/001_control_plane.sql) fires pg_notify on this
 // UPDATE, so the engine's caches invalidate exactly as they do for a per-tenant PUT.
-func persistTenantSchema(ctx context.Context, pool *pgxpool.Pool, tenantID string, s *schema.APISchema) error {
+// It also appends the schema to the tenant's version history (VERSION-S1) — the
+// history mirrors json_schema on EVERY persist path; a fan-out re-run over a
+// converged tenant is an unchanged-hash no-op, so resuming never spams versions.
+func persistTenantSchema(ctx context.Context, pool *pgxpool.Pool, tenantID string, s *schema.APISchema, runID string) error {
 	b, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
-	_, err = pool.Exec(ctx,
+	if _, err = pool.Exec(ctx,
 		`UPDATE public.tenants SET json_schema = $2, updated_at = now() WHERE id = $1`,
-		tenantID, b)
-	return err
+		tenantID, b); err != nil {
+		return err
+	}
+	if _, _, histErr := schemahistory.Append(ctx, pool, tenantID, b, schemahistory.SourceFanout, runID); histErr != nil {
+		log.Printf("WARNING: schema history append for tenant %q (fan-out %s) failed: %v", tenantID, runID, histErr)
+	}
+	return nil
 }
 
 // logFanout records one tenant's fan-out outcome in public.migration_log (the

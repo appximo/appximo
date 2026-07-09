@@ -55,6 +55,13 @@ func (s *Service) Register(r chi.Router, obs ObsHandler, adminKey string) {
 	// dry-run migration preview + destructive-approval gate) a tenant's schema.
 	r.With(s.requirePlatform).Get("/admin/tenants/{id}/schema", s.handleGetTenantSchema)
 	r.With(s.requirePlatform).Put("/admin/tenants/{id}/schema", s.handleUpdateTenantSchema)
+
+	// Schema version history + rollback (VERSION-S1): the append-only deploy
+	// timeline and "roll back to version N" — the same preview/gate/apply
+	// machinery as the deploy above, tagged in the history as a rollback.
+	r.With(s.requirePlatform).Get("/admin/tenants/{id}/schema/history", s.handleSchemaHistory)
+	r.With(s.requirePlatform).Get("/admin/tenants/{id}/schema/history/{version}", s.handleSchemaVersion)
+	r.With(s.requirePlatform).Post("/admin/tenants/{id}/schema/rollback", s.handleSchemaRollback)
 	r.With(s.requirePlatform).Post("/admin/tenants/{id}/suspend", s.handleSuspendTenant)
 	r.With(s.requirePlatform).Post("/admin/tenants/{id}/activate", s.handleActivateTenant)
 

@@ -11,6 +11,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/controlplane"
 	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/miguelangel/appitools/pkg/schemahistory"
 )
 
 // stubService satisfies controlplane.Service without a database — these tests
@@ -29,6 +30,15 @@ func (stubService) PreviewSchema(context.Context, string, *schema.APISchema, []s
 	return &migration.Preview{}, nil
 }
 func (stubService) GetSchema(context.Context, string) (*schema.APISchema, error) { return nil, nil }
+func (stubService) ListSchemaHistory(context.Context, string, int, int) (*schemahistory.Page, error) {
+	return &schemahistory.Page{}, nil
+}
+func (stubService) GetSchemaVersion(context.Context, string, int) (*schemahistory.Version, error) {
+	return nil, schemahistory.ErrVersionNotFound
+}
+func (stubService) RollbackSchema(context.Context, string, int, []string) (*controlplane.RollbackResult, error) {
+	return nil, schemahistory.ErrVersionNotFound
+}
 
 const indexedSchema = `{
 	"$schema": "s", "version": "1", "name": "t",

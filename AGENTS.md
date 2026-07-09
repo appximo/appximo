@@ -892,6 +892,21 @@ Guarantees:
   required, data-safe consequence), so the `DROP TABLE` succeeds rather than failing on
   a dangling reference.
 
+#### Version history + rollback (VERSION-S1)
+
+Every persisted tenant schema (register / deploy / rollback / fan-out) is recorded in
+**`public.schema_history`** — append-only, one row per DISTINCT schema (canonical-hash
+dedup: re-applying an unchanged schema adds no version), backfilled at boot for
+pre-versioning tenants. Read it via `GET /admin/tenants/{id}/schema/history` (and
+`…/history/{version}` for one full schema). **Rollback** is
+`POST /admin/tenants/{id}/schema/rollback` with `{version, dry_run, approved_drops}` —
+a RE-DEPLOY of the stored version through the same dry-run → destructive-gate → apply
+flow above (NOT a second engine): what later versions added reverts as gated drops
+(measured `rows_lost`, enumerate to approve), data already lost to an approved forward
+drop is NOT recovered, and the applied rollback appends a NEW version whose content is
+the target's (the trail is never rewritten). Studio's **History** view is the UI: the
+timeline, view any version, and the rollback with the same honest preview.
+
 #### Applying a change to ALL tenants — the resumable fan-out
 
 Everything above migrates ONE tenant. To roll a schema change out to **every** tenant

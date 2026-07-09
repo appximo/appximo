@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/miguelangel/appitools/pkg/schemahistory"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -31,6 +33,31 @@ type Service interface {
 	// against the given approval set. It is the informed-consent surface.
 	PreviewSchema(ctx context.Context, id string, s *schema.APISchema, approvedDrops []string) (*migration.Preview, error)
 	GetSchema(ctx context.Context, id string) (*schema.APISchema, error)
+
+	// ── schema version history + rollback (VERSION-S1) ──────────────────────
+
+	// ListSchemaHistory returns one page of the tenant's deployed-schema history,
+	// newest first (append-only; the latest version is the current schema).
+	ListSchemaHistory(ctx context.Context, id string, page, perPage int) (*schemahistory.Page, error)
+	// GetSchemaVersion returns one recorded version WITH its full schema.
+	GetSchemaVersion(ctx context.Context, id string, version int) (*schemahistory.Version, error)
+	// RollbackSchema re-applies the stored schema of history version v — the SAME
+	// diff→gate→apply migration path as UpdateSchemaApproved (NOT a second engine),
+	// so what later versions added is reverted as gated destructive drops, and data
+	// already lost by an approved forward drop is NOT recovered. Append-only: the
+	// rollback records a NEW version whose content is v's.
+	RollbackSchema(ctx context.Context, id string, version int, approvedDrops []string) (*RollbackResult, error)
+}
+
+// RollbackResult reports an applied rollback: the migration outcome (what was
+// applied/gated, same shape as a deploy), the version rolled back TO, the NEW
+// history version the rollback appended (0 if the history write failed —
+// logged, never blocks the applied migration), and the schema now live.
+type RollbackResult struct {
+	Outcome       *migration.ApplyOutcome
+	TargetVersion int
+	NewVersion    int
+	Schema        *schema.APISchema
 }
 
 // pgService is the production implementation backed by pgxpool + optional Redis.
@@ -71,19 +98,40 @@ func (s *pgService) UpdateSchema(ctx context.Context, id string, apiSchema *sche
 }
 
 func (s *pgService) UpdateSchemaApproved(ctx context.Context, id string, apiSchema *schema.APISchema, approvedDrops []string) (*migration.ApplyOutcome, error) {
+	outcome, _, err := s.updateSchemaSourced(ctx, id, apiSchema, approvedDrops, schemahistory.SourceDeploy, "")
+	return outcome, err
+}
+
+// updateSchemaSourced is the single json_schema write path: persist + migrate +
+// notify, and APPEND the schema to the version history tagged with its source
+// (deploy vs rollback). Returns the migration outcome and the history version
+// recorded (0 when the append failed or was a no-op re-deploy).
+func (s *pgService) updateSchemaSourced(ctx context.Context, id string, apiSchema *schema.APISchema, approvedDrops []string, source, note string) (*migration.ApplyOutcome, int, error) {
 	b, err := json.Marshal(apiSchema)
 	if err != nil {
-		return nil, fmt.Errorf("marshal schema: %w", err)
+		return nil, 0, fmt.Errorf("marshal schema: %w", err)
 	}
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE public.tenants SET json_schema = $2, updated_at = now() WHERE id = $1`,
 		id, b,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("update schema: %w", err)
+		return nil, 0, fmt.Errorf("update schema: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return nil, fmt.Errorf("tenant %q: %w", id, ErrNotFound)
+		return nil, 0, fmt.Errorf("tenant %q: %w", id, ErrNotFound)
+	}
+
+	// Version history (VERSION-S1): the history mirrors json_schema, so append in
+	// the same flow as the persist above (a no-op when the schema is unchanged).
+	// Best-effort AFTER the authoritative write — a history failure is logged
+	// loudly, never blocks the deploy that already persisted.
+	version, appended, histErr := schemahistory.Append(ctx, s.pool, id, b, source, note)
+	if histErr != nil {
+		log.Printf("WARNING: schema history append for tenant %q failed (the deploy itself succeeded): %v", id, histErr)
+		version = 0
+	} else if !appended {
+		version = 0 // unchanged schema — no new version recorded
 	}
 
 	// Apply the DDL synchronously so a schema change takes effect even when the async
@@ -92,7 +140,7 @@ func (s *pgService) UpdateSchemaApproved(ctx context.Context, id string, apiSche
 	// drop stays gated as drift.
 	outcome, err := migration.ApplyTenantMigrationApproved(ctx, s.pool, "tenant_"+id, apiSchema, approvedDrops)
 	if err != nil {
-		return nil, fmt.Errorf("apply migration: %w", err)
+		return nil, version, fmt.Errorf("apply migration: %w", err)
 	}
 
 	// Enqueue async migration to Redis Stream (best-effort — don't fail the request).
@@ -109,7 +157,7 @@ func (s *pgService) UpdateSchemaApproved(ctx context.Context, id string, apiSche
 
 	// Notify in-process caches to reload this tenant's schema.
 	s.pool.Exec(ctx, "SELECT pg_notify('schema_updated', $1)", id) //nolint:errcheck
-	return outcome, nil
+	return outcome, version, nil
 }
 
 func (s *pgService) PreviewSchema(ctx context.Context, id string, apiSchema *schema.APISchema, approvedDrops []string) (*migration.Preview, error) {
@@ -143,4 +191,91 @@ func (s *pgService) GetSchema(ctx context.Context, id string) (*schema.APISchema
 		return nil, fmt.Errorf("unmarshal schema: %w", err)
 	}
 	return &out, nil
+}
+
+// ── schema version history + rollback (VERSION-S1) ──────────────────────────
+
+func (s *pgService) ListSchemaHistory(ctx context.Context, id string, page, perPage int) (*schemahistory.Page, error) {
+	// Distinguish "tenant unknown" (404) from "tenant known, empty history".
+	if _, err := s.GetByID(ctx, id); err != nil {
+		return nil, err
+	}
+	return schemahistory.List(ctx, s.pool, id, page, perPage)
+}
+
+func (s *pgService) GetSchemaVersion(ctx context.Context, id string, version int) (*schemahistory.Version, error) {
+	if _, err := s.GetByID(ctx, id); err != nil {
+		return nil, err
+	}
+	return schemahistory.Get(ctx, s.pool, id, version)
+}
+
+func (s *pgService) RollbackSchema(ctx context.Context, id string, version int, approvedDrops []string) (*RollbackResult, error) {
+	v, err := s.GetSchemaVersion(ctx, id, version)
+	if err != nil {
+		return nil, err
+	}
+	// Re-validate under the CURRENT engine rules: the schema was valid when it
+	// was deployed, but the validator may have tightened since — the migration
+	// must never run on a schema today's engine would reject (fail actionable).
+	if errs := schema.CheckUnknownKeys(v.SchemaJSON); len(errs) > 0 {
+		return nil, fmt.Errorf("stored v%d is no longer valid under the current engine: %s", version, errs[0].Error())
+	}
+	var target schema.APISchema
+	if err := json.Unmarshal(v.SchemaJSON, &target); err != nil {
+		return nil, fmt.Errorf("unmarshal stored v%d: %w", version, err)
+	}
+	if errs := schema.Validate(&target); len(errs) > 0 {
+		return nil, fmt.Errorf("stored v%d is no longer valid under the current engine: %s", version, errs[0].Error())
+	}
+	// The rollback IS a deploy of the old schema: the same diff → destructive
+	// gate → production-safe apply. Only the history tag differs.
+	outcome, newVersion, err := s.updateSchemaSourced(ctx, id, &target, approvedDrops,
+		schemahistory.SourceRollback, fmt.Sprintf("rollback to v%d", version))
+	if err != nil {
+		return nil, err
+	}
+	return &RollbackResult{Outcome: outcome, TargetVersion: version, NewVersion: newVersion, Schema: &target}, nil
+}
+
+// BackfillSchemaHistory captures the CURRENT schema of every pre-versioning
+// tenant (json_schema set, history empty) as its v1 — run once at boot, so the
+// history is immediately useful on an existing install. Each schema is
+// re-marshaled through schema.APISchema so its hash is canonical (raw jsonb
+// text would hash differently than the engine's own marshaling and break the
+// unchanged-schema dedup). Best-effort per tenant; returns the first error
+// after attempting all.
+func BackfillSchemaHistory(ctx context.Context, pool *pgxpool.Pool) (int, error) {
+	svc := &pgService{pool: pool}
+	ids, err := schemahistory.TenantsNeedingBackfill(ctx, pool)
+	if err != nil {
+		return 0, err
+	}
+	var firstErr error
+	n := 0
+	for _, id := range ids {
+		sc, err := svc.GetSchema(ctx, id)
+		if err != nil || sc == nil {
+			if err != nil && firstErr == nil {
+				firstErr = fmt.Errorf("backfill %q: %w", id, err)
+			}
+			continue
+		}
+		b, err := json.Marshal(sc)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("backfill %q: %w", id, err)
+			}
+			continue
+		}
+		if _, _, err := schemahistory.Append(ctx, pool, id, b, schemahistory.SourceBackfill,
+			"pre-versioning schema captured at upgrade"); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("backfill %q: %w", id, err)
+			}
+			continue
+		}
+		n++
+	}
+	return n, firstErr
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/controlplane"
 	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/miguelangel/appitools/pkg/schemahistory"
 )
 
 // fakeCP is a controlplane.Service stub: the deploy handlers only delegate to it,
@@ -26,6 +27,15 @@ type fakeCP struct {
 	previewErr error
 	applyErr   error
 	getErr     error
+
+	// history + rollback (VERSION-S1)
+	histPage           *schemahistory.Page
+	histVersion        *schemahistory.Version
+	rollbackRes        *controlplane.RollbackResult
+	histErr            error
+	rollbackErr        error
+	gotRollbackVersion int
+	gotRollbackDrops   []string
 }
 
 func (f *fakeCP) Register(context.Context, controlplane.RegisterRequest) (*controlplane.Tenant, error) {
@@ -42,6 +52,29 @@ func (f *fakeCP) PreviewSchema(context.Context, string, *schema.APISchema, []str
 }
 func (f *fakeCP) GetSchema(context.Context, string) (*schema.APISchema, error) {
 	return f.gotSchema, f.getErr
+}
+func (f *fakeCP) ListSchemaHistory(context.Context, string, int, int) (*schemahistory.Page, error) {
+	if f.histErr != nil {
+		return nil, f.histErr
+	}
+	if f.histPage != nil {
+		return f.histPage, nil
+	}
+	return &schemahistory.Page{}, nil
+}
+func (f *fakeCP) GetSchemaVersion(context.Context, string, int) (*schemahistory.Version, error) {
+	if f.histErr != nil {
+		return nil, f.histErr
+	}
+	if f.histVersion == nil {
+		return nil, schemahistory.ErrVersionNotFound
+	}
+	return f.histVersion, nil
+}
+func (f *fakeCP) RollbackSchema(_ context.Context, _ string, version int, approved []string) (*controlplane.RollbackResult, error) {
+	f.gotRollbackVersion = version
+	f.gotRollbackDrops = approved
+	return f.rollbackRes, f.rollbackErr
 }
 
 const validSchemaJSON = `{"$schema":"https://appitools.dev/schema/v1","version":"1","name":"todo-api","resources":{"tasks":{"fields":{"title":{"type":"string","required":true}}}}}`

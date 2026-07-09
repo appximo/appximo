@@ -13,6 +13,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/controlplane"
 	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/miguelangel/appitools/pkg/schemahistory"
 )
 
 const testAdminKey = "test-admin-key-abc123"
@@ -103,6 +104,15 @@ func (m *inMemService) GetSchema(_ context.Context, id string) (*schema.APISchem
 		return nil, fmt.Errorf("tenant %q: %w", id, controlplane.ErrNotFound)
 	}
 	return m.schemas[id], nil
+}
+func (m *inMemService) ListSchemaHistory(context.Context, string, int, int) (*schemahistory.Page, error) {
+	return &schemahistory.Page{}, nil
+}
+func (m *inMemService) GetSchemaVersion(context.Context, string, int) (*schemahistory.Version, error) {
+	return nil, schemahistory.ErrVersionNotFound
+}
+func (m *inMemService) RollbackSchema(context.Context, string, int, []string) (*controlplane.RollbackResult, error) {
+	return nil, schemahistory.ErrVersionNotFound
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

@@ -31,6 +31,26 @@ CREATE TABLE IF NOT EXISTS public.migration_log (
     finished_at TIMESTAMPTZ
 );
 
+-- ── Schema version history (VERSION-S1) ───────────────────────────────────────
+-- Append-only: every persisted tenant schema (register / deploy / rollback /
+-- fan-out) is recorded as a version. A rollback appends a NEW version whose
+-- content equals an old one — the trace is never rewritten. The engine also
+-- ensures this table at boot (pkg/schemahistory.EnsureTable) for databases that
+-- predate it.
+CREATE TABLE IF NOT EXISTS public.schema_history (
+    id         BIGSERIAL   PRIMARY KEY,
+    tenant_id  TEXT        NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    version    INT         NOT NULL,
+    schema     JSONB       NOT NULL,
+    hash       TEXT        NOT NULL,
+    source     TEXT        NOT NULL,
+    note       TEXT        NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_schema_history_tenant
+    ON public.schema_history (tenant_id, version DESC);
+
 -- ── Notify listeners when a tenant's JSON schema is updated ───────────────────
 CREATE OR REPLACE FUNCTION public.notify_schema_updated()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$

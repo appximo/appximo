@@ -21,6 +21,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/files"
 	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/miguelangel/appitools/pkg/schemahistory"
 )
 
 // cpStub satisfies controlplane.Service with a fixed tenant set — the files
@@ -46,6 +47,15 @@ func (c cpStub) PreviewSchema(context.Context, string, *schema.APISchema, []stri
 	return nil, errors.New("not implemented")
 }
 func (c cpStub) GetSchema(context.Context, string) (*schema.APISchema, error) {
+	return nil, errors.New("not implemented")
+}
+func (c cpStub) ListSchemaHistory(context.Context, string, int, int) (*schemahistory.Page, error) {
+	return nil, errors.New("not implemented")
+}
+func (c cpStub) GetSchemaVersion(context.Context, string, int) (*schemahistory.Version, error) {
+	return nil, errors.New("not implemented")
+}
+func (c cpStub) RollbackSchema(context.Context, string, int, []string) (*controlplane.RollbackResult, error) {
 	return nil, errors.New("not implemented")
 }
 

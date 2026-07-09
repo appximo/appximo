@@ -46,6 +46,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/resilience"
 	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/miguelangel/appitools/pkg/schemahistory"
 	"github.com/miguelangel/appitools/pkg/shutdown"
 	"github.com/miguelangel/appitools/pkg/tenant"
 	"github.com/miguelangel/appitools/pkg/userauth"
@@ -205,6 +206,21 @@ func New(cfg Config) (*App, error) {
 		return nil, fmt.Errorf("appitools: ensure outbox table: %w", err)
 	}
 	log.Println("outbox: public.outbox table ready")
+
+	// Schema version history (VERSION-S1): ensure the append-only table (same
+	// idempotent pattern as the outbox — existing databases predate the canonical
+	// DDL) and capture pre-versioning tenants' current schema as their v1 so the
+	// history is immediately useful on an upgraded install. Backfill is
+	// best-effort: a failure is loud but never blocks boot.
+	if err := schemahistory.EnsureTable(context.Background(), pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("appitools: %w", err)
+	}
+	if n, bfErr := controlplane.BackfillSchemaHistory(context.Background(), pool); bfErr != nil {
+		log.Printf("WARNING: schema history backfill: %v", bfErr)
+	} else if n > 0 {
+		log.Printf("schema history: backfilled v1 for %d pre-versioning tenant(s)", n)
+	}
 
 	app.tdb = db.NewTenantDB(pool)
 

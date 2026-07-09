@@ -9,6 +9,7 @@
 
 import { adminApi, ApiError, type CreateTenantBody } from '../api/admin';
 import type { Preview, TenantInfo } from '../types/deploy';
+import type { APISchema } from '../types/schema';
 import { editor } from './editor.svelte';
 
 export type DeployStep = 'login' | 'mfa' | 'target' | 'preview' | 'result';
@@ -140,18 +141,22 @@ class DeployStore {
 		}
 	}
 
-	/** Persist the canvas schema as the new BOOT schema and gracefully restart the
-	 *  engine, then wait for it to come back and VERIFY the new resources are now
-	 *  served. The engine's safety order protects every unhappy path: an invalid
-	 *  schema is rejected with nothing persisted and NO restart (the service keeps
-	 *  running), and a relaunch that cannot boot auto-restores the backed-up schema. */
-	async restartEngine() {
+	/** Persist a schema as the new BOOT schema and gracefully restart the engine
+	 *  (or hot-swap this app in fleet-serve), then wait for it to come back and
+	 *  VERIFY the expected surface. Defaults activate the CANVAS schema (the
+	 *  deploy flow); the History rollback passes the target version's schema plus
+	 *  what must appear/disappear. The engine's safety order protects every
+	 *  unhappy path: an invalid schema is rejected with nothing persisted and NO
+	 *  restart (the service keeps running), and a relaunch that cannot boot
+	 *  auto-restores the backed-up schema. */
+	async restartEngine(opts?: { schema?: APISchema; expectServed?: string[]; expectAbsent?: string[] }) {
 		if (!this.token) return;
-		const pending = this.result?.restartResources ?? [];
+		const pending = opts?.expectServed ?? this.result?.restartResources ?? [];
+		const absent = opts?.expectAbsent ?? [];
 		this.restartError = null;
 		this.restartPhase = 'restarting';
 		try {
-			await adminApi.restartEngine(this.token, editor.toSchema());
+			await adminApi.restartEngine(this.token, opts?.schema ?? editor.toSchema());
 		} catch (e) {
 			// Rejected/unreachable ⇒ nothing was restarted; the engine keeps serving.
 			this.restartPhase = 'failed';
@@ -173,8 +178,10 @@ class DeployStore {
 				await sleep(1000);
 			}
 		}
-		// Phase 2 — relaunch: wait for ready again, then confirm the new resources
-		// are actually served by the rebooted engine (the honest "live" signal).
+		// Phase 2 — relaunch: wait for ready again, then confirm the expected
+		// surface is actually served by the rebooted engine (the honest "live"
+		// signal): every expected resource present AND every resource the
+		// activated schema removed gone.
 		for (let i = 0; i < 90; i++) {
 			if (await this.pollReady()) {
 				this.servedResources = null;
@@ -182,12 +189,16 @@ class DeployStore {
 				await this.loadServedResources();
 				const served = new Set<string>(this.servedResources ?? []);
 				const missing = pending.filter((n) => !served.has(n));
-				if (missing.length === 0) {
+				const lingering = absent.filter((n) => served.has(n));
+				if (missing.length === 0 && lingering.length === 0) {
 					this.restartPhase = 'live';
 					if (this.result) this.result.restartResources = [];
 				} else {
 					this.restartPhase = 'failed';
-					this.restartError = `the engine is back but still not serving: ${missing.join(', ')} — it may have rolled back to the previous schema (kept as .bak); check the engine log`;
+					const parts: string[] = [];
+					if (missing.length > 0) parts.push(`still not serving: ${missing.join(', ')}`);
+					if (lingering.length > 0) parts.push(`still serving: ${lingering.join(', ')}`);
+					this.restartError = `the engine is back but ${parts.join('; ')} — it may have rolled back to the previous schema (kept as .bak); check the engine log`;
 				}
 				return;
 			}

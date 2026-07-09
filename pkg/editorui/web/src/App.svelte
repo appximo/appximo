@@ -6,6 +6,7 @@
 	import PropertyPanel from './lib/components/PropertyPanel.svelte';
 	import DeployModal from './lib/components/DeployModal.svelte';
 	import FilesModal from './lib/components/FilesModal.svelte';
+	import HistoryModal from './lib/components/HistoryModal.svelte';
 	import RbacModal from './lib/components/RbacModal.svelte';
 	import StateMachineModal from './lib/components/StateMachineModal.svelte';
 	import { editor } from './lib/stores/editor.svelte';
@@ -31,6 +32,7 @@
 	</SvelteFlowProvider>
 	<DeployModal />
 	<FilesModal />
+	<HistoryModal />
 	<RbacModal />
 	<StateMachineModal />
 </div>

@@ -233,7 +233,11 @@ baseline faster are welcome; we'll publish updated numbers.
   one tenant at a time under its advisory lock, resilient to partial failure (a broken
   tenant is recorded and the rest continue) and resumable (re-run skips the converged
   ones, retries the failed) — the multi-tenant migration story Prisma and django-tenants
-  don't have
+  don't have. Every deployed schema is recorded in an **append-only version history**,
+  and **rollback to any prior version** re-deploys it through the same gate: a dry-run
+  shows exactly what reverting destroys (measured rows lost), nothing drops without
+  enumeration, and the rollback itself becomes a new version — browsable timeline +
+  rollback UI in the visual editor ("History")
 - **Ops**: Prometheus `/metrics`, per-request trace ring with stage breakdown,
   SLO burn-rate alerts (Slack), graceful drain on SIGTERM, circuit breaker
   (verified open/recover with toxiproxy), zero-downtime additive migrations —

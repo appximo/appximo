@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"regexp"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/miguelangel/appitools/pkg/migration"
 	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/miguelangel/appitools/pkg/schemahistory"
 )
 
 // tenantIDRe: first char alnum, rest alnum or hyphen, total 2-30 chars.
@@ -143,6 +145,13 @@ func RegisterTenant(ctx context.Context, pool *pgxpool.Pool, req RegisterRequest
 	// Step 7 — COMMIT.
 	if err = tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit: %w", err)
+	}
+
+	// Version history (VERSION-S1): the registration schema is the tenant's v1.
+	// Right after the commit that set json_schema (the history mirrors it), and
+	// best-effort — a history failure never fails the registration.
+	if _, _, histErr := schemahistory.Append(ctx, pool, req.TenantID, schemaJSON, schemahistory.SourceRegister, ""); histErr != nil {
+		log.Printf("WARNING: schema history append for new tenant %q failed: %v", req.TenantID, histErr)
 	}
 
 	// Step 8 — apply migrations (CREATE TABLE per resource, idempotent).

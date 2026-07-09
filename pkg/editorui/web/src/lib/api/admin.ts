@@ -13,6 +13,7 @@ import type {
 	ApplyResponse,
 	CreatedTenant,
 	LoginResult,
+	Preview,
 	PreviewResponse,
 	TenantInfo
 } from '../types/deploy';
@@ -210,5 +211,84 @@ export const adminApi = {
 			'DELETE',
 			`/admin/tenants/${encodeURIComponent(id)}/files/${encodeURIComponent(fid)}`,
 			{ token }
+		),
+
+	// ── schema version history + rollback (VERSION-S1) ────────────────────────
+
+	/** The tenant's deployed-schema timeline (append-only; newest first — the
+	 *  latest version IS the current schema). */
+	schemaHistory: (token: string, id: string, page: number, perPage: number) =>
+		call<HistoryPage>(
+			'GET',
+			`/admin/tenants/${encodeURIComponent(id)}/schema/history?page=${page}&per_page=${perPage}`,
+			{ token }
+		),
+
+	/** One recorded version WITH its full schema (view / load into the editor). */
+	schemaVersion: (token: string, id: string, version: number) =>
+		call<SchemaVersionFull>(
+			'GET',
+			`/admin/tenants/${encodeURIComponent(id)}/schema/history/${version}`,
+			{ token }
+		),
+
+	/** DRY-RUN of rolling back to a version: the engine's real migration preview
+	 *  of re-applying that schema — what later versions added shows as gated
+	 *  destructive drops with measured rows_lost. Applies nothing. */
+	rollbackPreview: (token: string, id: string, version: number, approved: string[]) =>
+		call<RollbackPreviewResponse>(
+			'POST',
+			`/admin/tenants/${encodeURIComponent(id)}/schema/rollback`,
+			{ token, body: { version, dry_run: true, approved_drops: approved } }
+		),
+
+	/** Apply the rollback (only the enumerated drops execute; the history gets a
+	 *  NEW version whose content is the target's — append-only). */
+	rollbackApply: (token: string, id: string, version: number, approved: string[]) =>
+		call<RollbackApplyResponse>(
+			'POST',
+			`/admin/tenants/${encodeURIComponent(id)}/schema/rollback`,
+			{ token, body: { version, dry_run: false, approved_drops: approved } }
 		)
 };
+
+// ── history types (mirrors of pkg/schemahistory + the rollback handler) ───────
+
+/** One recorded schema version (pkg/schemahistory.Version, listing shape). */
+export interface SchemaVersionMeta {
+	version: number;
+	hash: string;
+	source: 'register' | 'deploy' | 'rollback' | 'fanout' | 'backfill' | string;
+	note?: string;
+	created_at: string;
+	resources: string[];
+}
+
+export interface HistoryPage {
+	versions: SchemaVersionMeta[];
+	total: number;
+	page: number;
+	per_page: number;
+}
+
+export interface SchemaVersionFull extends SchemaVersionMeta {
+	schema: APISchema;
+}
+
+export interface RollbackPreviewResponse {
+	status: 'dry_run';
+	target_version: number;
+	target_hash: string;
+	preview: Preview;
+}
+
+export interface RollbackApplyResponse {
+	status: 'rolled_back';
+	tenant_id: string;
+	target_version: number;
+	new_version: number;
+	applied_drops?: string[];
+	gated_drops?: string[];
+	unmatched_approvals?: string[];
+	schema?: APISchema;
+}

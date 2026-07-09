@@ -29,6 +29,13 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 - Updates a tenant's schema live — `PUT /tenants/{id}/schema` validates, stores, applies additive DDL.
 - Reloads without a restart — `POST /admin/tenants/{id}/reload`: new columns take effect immediately.
 - Reload is column-level only — new resources, hooks, and roles still need a process restart.
+- **Records every deployed schema as a version** (VERSION-S1) — `public.schema_history`, append-only,
+  written by every persist path (register / deploy / rollback / fan-out), deduped by canonical hash
+  (an unchanged re-deploy adds no version); pre-versioning tenants are backfilled at boot.
+- **Rolls back to any prior version** — `POST /admin/tenants/{id}/schema/rollback` re-deploys the
+  stored version through the SAME diff→gate→apply migration engine: dry-run shows what reverting
+  destroys (gated drops with measured rows lost), only enumerated drops execute, and the rollback
+  appends a new version. Browsable timeline + rollback UI in Studio ("History").
 - Propagates schema reloads across the process via Postgres `pg_notify` on `schema_updated`.
 - Validates every schema on receipt — bad types, bad rules, unknown keys → error listing valid keys.
 
@@ -118,12 +125,13 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 
 The capability list above without these limits would be marketing; together they're engineering.
 
-- **No schema version history.** A deploy overwrites the tenant's stored schema
-  (`public.tenants.json_schema`) in place; the self-restart keeps exactly one
-  boot-schema backup (`<schema>.bak`). Rollback = re-deploying an old schema file
-  you kept yourself — the reverse migration works (additive parts apply; drops of
-  what the newer schema added are gated by the approval flow), but the engine
-  stores no history to roll back *to*.
+- **Rollback is honest, not magic.** The engine keeps an append-only schema
+  version history (`public.schema_history`, VERSION-S1) and "roll back to vN" is
+  a re-deploy of that stored version through the migration engine — so what
+  later versions ADDED is reverted as gated destructive drops (dry-run shows the
+  measured rows lost; each drop must be enumerated), and data already destroyed
+  by an approved forward drop is NOT recoverable (physics, not policy). A
+  rollback appends a new version; the trail is never rewritten.
 - **No `neq`/`in`/`like`/`is_null` filter ops** — unsupported ops → 400.
 - **Multi-field sort and `sort=field:desc` are silently ignored** — verify result order.
 - **No delete hooks** — only `before`/`after_create` and `before`/`after_update`.
