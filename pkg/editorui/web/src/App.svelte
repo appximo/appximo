@@ -12,14 +12,23 @@
 	import StateMachineModal from './lib/components/StateMachineModal.svelte';
 	import { editor } from './lib/stores/editor.svelte';
 	import { ui } from './lib/stores/ui.svelte';
-	import { SAMPLES } from './lib/schema/samples';
 
-	// First impression: load a rich example so the canvas isn't blank. The user can
-	// New / Import / load another example from the toolbar.
-	onMount(() => {
-		if (editor.entities.length === 0) {
-			const seed = SAMPLES.find((s) => s.id === 'erp') ?? SAMPLES[0];
-			if (seed) editor.loadSchema(structuredClone(seed.schema));
+	// EDITOR-BOOT-SYNC: the canvas opens on the schema the ENGINE SERVES
+	// (GET /editor/current-schema — the boot schema source), never a frontend
+	// sample. Booting with your óptica shows your óptica; the demo schemas live
+	// in the toolbar's Examples menu, opt-in. The engine's schema is deployed
+	// reality, so the default 'declared' rename baseline applies (renames made
+	// on the canvas chain from the served names — UI-F4-S1).
+	onMount(async () => {
+		if (editor.entities.length !== 0) return;
+		try {
+			const res = await fetch('/editor/current-schema');
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			editor.loadSchema(await res.json());
+		} catch {
+			// Engine unreachable (e.g. bare vite dev) — start blank, never a
+			// sample that could be mistaken for the running app.
+			editor.newSchema();
 		}
 	});
 </script>

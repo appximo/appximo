@@ -1015,6 +1015,10 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 	} else {
 		log.Println("editor: visual schema editor (Appitools Studio) served at /editor")
 	}
+	// EDITOR-BOOT-SYNC: the SOURCE schema the engine serves, so Studio boots
+	// showing reality instead of a frontend sample. Same thin/read-only class
+	// as /editor/validate (JWT-skipped via the /editor prefix, off hot path).
+	r.Get("/editor/current-schema", a.serveCurrentSchema)
 
 	r.Get("/healthz", a.ss.HealthzHandler)
 	r.Get("/readyz", a.ss.ReadyzHandler)

@@ -48,6 +48,7 @@ export default defineConfig({
 			'/docs': { target: 'http://localhost:8080', changeOrigin: true },
 			'/editor/validate': { target: 'http://localhost:8080', changeOrigin: true },
 			'/editor/meta-schema': { target: 'http://localhost:8080', changeOrigin: true },
+			'/editor/current-schema': { target: 'http://localhost:8080', changeOrigin: true },
 			'/tenants': { target: 'http://localhost:9090', changeOrigin: true }
 		}
 	}
