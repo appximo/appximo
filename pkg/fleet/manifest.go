@@ -77,7 +77,8 @@ type Manifest struct {
 	// Apps are the fleet's apps (≥1).
 	Apps []AppSpec `json:"apps"`
 
-	dir string // manifest file directory, for resolving relative paths
+	dir  string // manifest file directory, for resolving relative paths
+	path string // absolute manifest file path (lifecycle persistence)
 }
 
 var appNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
@@ -101,6 +102,7 @@ func LoadManifest(path string) (*Manifest, error) {
 		return nil, fmt.Errorf("fleet: resolve manifest path: %w", err)
 	}
 	m.dir = filepath.Dir(abs)
+	m.path = abs
 
 	if m.Listen == "" {
 		m.Listen = ":8080"

@@ -462,7 +462,13 @@ touches the hot path** — the project's standing rule.
   `no_change` (CI [−26,−8.5] µs, 0 errors) — swapping X does not disturb Y. Suite
   0 FAIL + acceptance 39/0. The registry also gained `AddApp`/`RemoveApp` (hot
   add/remove of an app's domains); wiring those to a live fleet-management command
-  is an S5 increment.**)**
+  is an S5 increment. **→ Wired in FLEET-LIFECYCLE-S1:** `appitools fleet
+  add/remove/list` + the console's Add/Remove actions expose them — validate
+  (ValidateReport + the manifest rules) → hot add/remove, manifest persisted
+  first (no live↔manifest drift), remove never touches the app's database.
+  Verified live: a third app added under another app's continuous load
+  (200/200), served after a fleet restart (persistence), S3 isolation matrix
+  smoked post-add. See docs/FLEET.md §App lifecycle.**)**
 
 - **Stage 5 — homologate the surface.** Admin UI app selector; obs keyed by
   (app, tenant) with an app filter; Studio deploy chooses the app;

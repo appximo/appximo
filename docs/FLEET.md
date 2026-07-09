@@ -244,6 +244,59 @@ are served.
 server in DevHub's existing multi-server registry to navigate N apps; no
 DevHub coupling to the engine.
 
+## App lifecycle — `fleet add / remove / list` (FLEET-LIFECYCLE-S1)
+
+Adding or removing an app is a command (or a console action), not a manual
+manifest edit + relaunch. Against a running `fleet serve` the operations are
+**HOT** — they expose the registry's copy-on-write `AddApp`/`RemoveApp` (built
+in MT-STRUCT-S4): the process is not restarted and the other apps are never
+touched (verified live: an app under continuous load saw 200/200 while a third
+app was added).
+
+```bash
+appitools fleet list   --config fleet.json     # LIVE inventory (or the manifest, if not running)
+appitools fleet add    --config fleet.json --name optica --schema optica.json \
+    --domain optica.example.com \
+    --env DATABASE_URL=postgres://… --env JWT_SECRET=… --env ADMIN_KEY=…
+appitools fleet remove --config fleet.json --name optica --yes
+```
+
+- **Validation before anything goes live** — the same rules a fleet boot
+  enforces, so a hot add can never create a composition the next start refuses:
+  the schema through the real validator (`ValidateReport` — an invalid schema
+  is rejected with the located error report), unclaimed domains, unique name,
+  required per-app env, the per-app `JWT_SECRET` rule, and the operator-key
+  separation.
+- **Manifest ↔ live coherence, no drift.** The manifest (`fleet.json`) is the
+  persistent source of truth; the registry is the live state. A lifecycle
+  operation persists the manifest FIRST (atomic file replace, surgical edit —
+  untouched fields survive verbatim) and then publishes the live change, so a
+  fleet restart always reloads exactly the post-operation composition
+  (verified live: an app added hot still serves after a full fleet restart).
+- **How the CLI reaches the live fleet:** the operator-gated console API on the
+  process-level Host (`POST /fleet/api/apps`, `DELETE /fleet/api/apps/{name}` —
+  the S5 channel, `X-Fleet-Key`). The CLI probes `/health` for the runtime's
+  `fleet_apps` marker; wrong/missing operator key is an ERROR, never a silent
+  manifest-only fallback. Without a live fleet (or under `fleet run`, which has
+  no hot lifecycle) the commands edit the manifest for the next start.
+- **Remove semantics (deliberate):** removing an app takes it OUT OF THE FLEET
+  — its domains stop serving (clean 404, immediately), its background services
+  stop, its infra is released after a short drain grace — but **its database
+  is NEVER touched**. Re-adding the app with the same `DATABASE_URL` restores
+  it intact. Destroying data is outside the fleet's vocabulary. The CLI
+  requires `--yes` (and prints exactly this) and the console a typed
+  name confirmation.
+- **The console** (`/fleet`, fleet-operator key) exposes the same lifecycle:
+  **Add app** pastes the schema JSON directly (the natural handoff from
+  Studio's Code view or an external agent — see docs/SCHEMA_SPEC_LLM.md) plus
+  domains and the app's env; **Remove** sits on each app card behind the typed
+  confirmation. An added app's pasted schema is persisted under
+  `<data_dir>/<app>/schema.json` and the manifest references it.
+- **Isolation is unchanged**: an added app is compiled through the exact same
+  per-app path as boot (own pool/secret/policy/caches); the S3 cross-app
+  matrix holds after an add (smoked live: a cross-app JWT is still a 401, the
+  operator key still opens no app API).
+
 ## What S1 deliberately does not do
 
 - **No federated single admin panel** — each app keeps its own `/admin` (reachable
