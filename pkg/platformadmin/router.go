@@ -62,6 +62,19 @@ func (s *Service) Register(r chi.Router, obs ObsHandler, adminKey string) {
 	r.With(s.requirePlatform).Get("/admin/tenants/{id}/schema/history", s.handleSchemaHistory)
 	r.With(s.requirePlatform).Get("/admin/tenants/{id}/schema/history/{version}", s.handleSchemaVersion)
 	r.With(s.requirePlatform).Post("/admin/tenants/{id}/schema/rollback", s.handleSchemaRollback)
+
+	// Flow tests + post-deploy regression (FLOWTEST-S1): persisted multi-step
+	// scenarios run against the LIVE app (full chain, tenant-user auth) with
+	// live SSE output; runs anchored to the schema version (the trust loop).
+	r.With(s.requirePlatform).Get("/admin/tenants/{id}/flows", s.handleListFlows)
+	r.With(s.requirePlatform).Post("/admin/tenants/{id}/flows", s.handleSaveFlow)
+	r.With(s.requirePlatform).Post("/admin/tenants/{id}/flows/run", s.handleRunSuite)
+	r.With(s.requirePlatform).Get("/admin/tenants/{id}/flows/runs", s.handleListRuns)
+	r.With(s.requirePlatform).Get("/admin/tenants/{id}/flows/runs/{rid}", s.handleGetRun)
+	r.With(s.requirePlatform).Get("/admin/tenants/{id}/flows/{fid}", s.handleGetFlow)
+	r.With(s.requirePlatform).Put("/admin/tenants/{id}/flows/{fid}", s.handleSaveFlow)
+	r.With(s.requirePlatform).Delete("/admin/tenants/{id}/flows/{fid}", s.handleDeleteFlow)
+	r.With(s.requirePlatform).Post("/admin/tenants/{id}/flows/{fid}/run", s.handleRunFlow)
 	r.With(s.requirePlatform).Post("/admin/tenants/{id}/suspend", s.handleSuspendTenant)
 	r.With(s.requirePlatform).Post("/admin/tenants/{id}/activate", s.handleActivateTenant)
 

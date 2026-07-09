@@ -51,6 +51,35 @@ CREATE TABLE IF NOT EXISTS public.schema_history (
 CREATE INDEX IF NOT EXISTS idx_schema_history_tenant
     ON public.schema_history (tenant_id, version DESC);
 
+-- ── Flow tests + regression runs (FLOWTEST-S1) ────────────────────────────────
+-- Persisted multi-step scenarios per tenant and their run verdicts, anchored to
+-- the schema version they ran against. The engine also ensures these at boot
+-- (pkg/flowtest.EnsureTables) for databases that predate them.
+CREATE TABLE IF NOT EXISTS public.flow_tests (
+    id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id  TEXT        NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    name       TEXT        NOT NULL,
+    flow       JSONB       NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, name)
+);
+CREATE TABLE IF NOT EXISTS public.flow_runs (
+    id             BIGSERIAL   PRIMARY KEY,
+    tenant_id      TEXT        NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+    schema_version INT         NOT NULL DEFAULT 0,
+    scope          TEXT        NOT NULL,
+    pass           BOOLEAN     NOT NULL,
+    flows_total    INT         NOT NULL DEFAULT 0,
+    flows_failed   INT         NOT NULL DEFAULT 0,
+    steps_total    INT         NOT NULL DEFAULT 0,
+    steps_failed   INT         NOT NULL DEFAULT 0,
+    results        JSONB       NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_flow_runs_tenant
+    ON public.flow_runs (tenant_id, id DESC);
+
 -- ── Notify listeners when a tenant's JSON schema is updated ───────────────────
 CREATE OR REPLACE FUNCTION public.notify_schema_updated()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$

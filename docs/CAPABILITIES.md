@@ -36,6 +36,15 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
   stored version through the SAME diff→gate→apply migration engine: dry-run shows what reverting
   destroys (gated drops with measured rows lost), only enumerated drops execute, and the rollback
   appends a new version. Browsable timeline + rollback UI in Studio ("History").
+- **Persists multi-step FLOW TESTS per tenant** (FLOWTEST-S1) — flows-as-data (steps =
+  request + assertions + captured variables chained between steps, the api-cert model
+  formalized), stored in `public.flow_tests`, authored/run from Studio ("Flows"). Flows
+  authenticate as TENANT users (a real `/auth/login` step or a declared role) — real RBAC.
+- **Runs post-deploy regression** — `POST /admin/tenants/{id}/flows/run` executes the suite
+  against the LIVE router (full chain, in-process) streaming each step's PASS/FAIL over SSE;
+  every run is persisted in `public.flow_runs` ANCHORED to the schema version it ran against.
+  Deploy → re-run → the exact failing step with expected-vs-got, or all green — trust with
+  evidence ("Run regression flows" on the deploy result).
 - Propagates schema reloads across the process via Postgres `pg_notify` on `schema_updated`.
 - Validates every schema on receipt — bad types, bad rules, unknown keys → error listing valid keys.
 

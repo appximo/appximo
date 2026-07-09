@@ -7,6 +7,7 @@
 	import DeployModal from './lib/components/DeployModal.svelte';
 	import FilesModal from './lib/components/FilesModal.svelte';
 	import HistoryModal from './lib/components/HistoryModal.svelte';
+	import FlowsModal from './lib/components/FlowsModal.svelte';
 	import RbacModal from './lib/components/RbacModal.svelte';
 	import StateMachineModal from './lib/components/StateMachineModal.svelte';
 	import { editor } from './lib/stores/editor.svelte';
@@ -33,6 +34,7 @@
 	<DeployModal />
 	<FilesModal />
 	<HistoryModal />
+	<FlowsModal />
 	<RbacModal />
 	<StateMachineModal />
 </div>

@@ -210,3 +210,9 @@ them through the SAME preview → destructive-gate → apply machinery as a depl
 reverted as gated drops with measured impact, data already lost to an approved
 forward drop is not recoverable, and the rollback itself is recorded as a new
 version.
+
+And for "did my change break anything?": Studio's **Flows** view keeps the
+tenant's multi-step flow tests (login as a role → create → attach → assert,
+state chained between steps) and re-runs them against the live app after a
+deploy — each run's PASS/FAIL verdict is persisted anchored to the schema
+version it ran against (pkg/flowtest; FLOWTEST-S1).

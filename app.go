@@ -36,6 +36,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/events"
 	"github.com/miguelangel/appitools/pkg/extensions"
 	"github.com/miguelangel/appitools/pkg/files"
+	"github.com/miguelangel/appitools/pkg/flowtest"
 	gqlhandler "github.com/miguelangel/appitools/pkg/graphql"
 	"github.com/miguelangel/appitools/pkg/logging"
 	appmiddleware "github.com/miguelangel/appitools/pkg/middleware"
@@ -132,6 +133,12 @@ type App struct {
 	// verify sees the live surface after a hot-swap, not the boot list.
 	liveResources atomic.Pointer[[]string]
 
+	// currentRouter is the CURRENTLY-served data-plane router (published by
+	// buildRouter on boot and on every hot-swap). The flow-test runner
+	// (FLOWTEST-S1) executes flows against it in-process — the real chain,
+	// always the live surface.
+	currentRouter atomic.Pointer[chi.Mux]
+
 	routes  []Route
 	started bool
 }
@@ -220,6 +227,13 @@ func New(cfg Config) (*App, error) {
 		log.Printf("WARNING: schema history backfill: %v", bfErr)
 	} else if n > 0 {
 		log.Printf("schema history: backfilled v1 for %d pre-versioning tenant(s)", n)
+	}
+
+	// Flow tests (FLOWTEST-S1): the persisted multi-step scenarios + their
+	// regression runs (same idempotent-ensure pattern).
+	if err := flowtest.EnsureTables(context.Background(), pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("appitools: %w", err)
 	}
 
 	app.tdb = db.NewTenantDB(pool)
@@ -539,6 +553,14 @@ func New(cfg Config) (*App, error) {
 					return *p
 				}
 				return servedResources
+			},
+			// Flow-test runner target (FLOWTEST-S1): the LIVE router — set by
+			// buildRouter at boot and re-set on every hot-swap.
+			FlowHandlerFn: func() http.Handler {
+				if m := app.currentRouter.Load(); m != nil {
+					return m
+				}
+				return nil
 			},
 			// Deploy-activation mode for the editor (MT-STRUCT-S5): evaluated at
 			// request time because ServeFleet wires hotSwap AFTER New.
@@ -1061,6 +1083,9 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 		sub.Mount("/", codegen.BuildRouter(surf.schema, a.tdb, a.hr, a.responseCache, a.eventsHub))
 	})
 
+	// Publish as the CURRENT router (flow-test runner target) — on boot and on
+	// every hot-swap, so flows always run against the live surface.
+	a.currentRouter.Store(r)
 	return r
 }
 

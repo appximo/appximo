@@ -4,6 +4,7 @@
 	import { deploy } from '../stores/deploy.svelte';
 	import { filesStore } from '../stores/files.svelte';
 	import { historyStore } from '../stores/history.svelte';
+	import { flowTests } from '../stores/flowtests.svelte';
 	import { SAMPLES } from '../schema/samples';
 
 	let showExport = $state(false);
@@ -122,6 +123,12 @@
 				<path d="M8 4.5V8l2.4 1.6M14 8A6 6 0 1 1 8 2a6 6 0 0 1 6 6z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
 			</svg>
 			History
+		</button>
+		<button class="btn" onclick={() => flowTests.openFlows()} title="Flow tests + post-deploy regression">
+			<svg class="bi" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+				<path d="M2.5 8h3l2-4.5L10 12l1.8-4H13.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+			</svg>
+			Flows
 		</button>
 	</div>
 

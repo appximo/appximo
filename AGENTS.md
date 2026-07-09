@@ -907,6 +907,24 @@ drop is NOT recovered, and the applied rollback appends a NEW version whose cont
 the target's (the trail is never rewritten). Studio's **History** view is the UI: the
 timeline, view any version, and the rollback with the same honest preview.
 
+#### Flow tests + post-deploy regression (FLOWTEST-S1)
+
+A tenant can persist **multi-step flow tests** — "flows as data" (the api-cert model
+formalized): each step is a request (method/path/body/headers or a multipart upload)
+plus assertions (`status`, and `exists|eq|contains` over dot-paths) plus **captures**
+that flow state into later steps (`{{token}}` from a login, `{{cita_id}}` from a
+create; `{{run_id}}` is unique per run). A flow authenticates as a TENANT user — a
+real `POST /auth/login` step, or a flow-level `role` that pre-mints a tenant JWT —
+never the super-admin, so it exercises the real RBAC. CRUD at
+`/admin/tenants/{id}/flows` (+`/{fid}`); `POST …/flows/run` (suite) or
+`…/flows/{fid}/run` executes against the app's LIVE router in-process (the full
+tenant→JWT→RBAC chain, current surface even after a hot-swap), streams each step's
+PASS/FAIL over SSE, and persists the verdict in `public.flow_runs` **anchored to the
+schema version** it ran against (`GET …/flows/runs`). The golden loop: deploy →
+re-run the suite → green means the change broke none of the known flows; red names
+the exact step with expected-vs-got. Studio's **Flows** view authors and runs them
+("Run regression flows" on the deploy result).
+
 #### Applying a change to ALL tenants — the resumable fan-out
 
 Everything above migrates ONE tenant. To roll a schema change out to **every** tenant

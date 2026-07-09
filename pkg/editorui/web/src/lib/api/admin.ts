@@ -252,6 +252,145 @@ export const adminApi = {
 		)
 };
 
+// ── flow tests (FLOWTEST-S1) — mirrors of pkg/flowtest ───────────────────────
+
+export interface FlowAssert {
+	path: string;
+	op: 'exists' | 'eq' | 'contains';
+	value?: string;
+}
+
+export interface FlowUpload {
+	field?: string;
+	filename: string;
+	content: string;
+}
+
+export interface FlowStep {
+	name: string;
+	method: string;
+	path: string;
+	body?: string;
+	headers?: Record<string, string>;
+	upload?: FlowUpload;
+	expect: { status: number; asserts?: FlowAssert[] };
+	capture?: Record<string, string>;
+}
+
+export interface FlowDef {
+	name: string;
+	description?: string;
+	role?: string;
+	steps: FlowStep[];
+}
+
+export interface StoredFlow {
+	id: string;
+	tenant_id: string;
+	name: string;
+	steps: number;
+	flow?: FlowDef;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface FlowStepResult {
+	index: number;
+	name: string;
+	method: string;
+	path: string;
+	skipped?: boolean;
+	pass: boolean;
+	status: number;
+	expected: number;
+	failures?: string[];
+	body_sample?: string;
+	captured?: Record<string, string>;
+	duration_ms: number;
+}
+
+export interface FlowRunSummary {
+	id: number;
+	schema_version: number;
+	scope: string;
+	pass: boolean;
+	flows_total: number;
+	flows_failed: number;
+	steps_total: number;
+	steps_failed: number;
+	results?: unknown;
+	created_at: string;
+}
+
+export const flowApi = {
+	list: (token: string, id: string) =>
+		call<{ flows: StoredFlow[] }>('GET', `/admin/tenants/${encodeURIComponent(id)}/flows`, { token }),
+	get: (token: string, id: string, fid: string) =>
+		call<StoredFlow>('GET', `/admin/tenants/${encodeURIComponent(id)}/flows/${encodeURIComponent(fid)}`, { token }),
+	create: (token: string, id: string, flow: FlowDef) =>
+		call<StoredFlow>('POST', `/admin/tenants/${encodeURIComponent(id)}/flows`, { token, body: { flow } }),
+	update: (token: string, id: string, fid: string, flow: FlowDef) =>
+		call<StoredFlow>('PUT', `/admin/tenants/${encodeURIComponent(id)}/flows/${encodeURIComponent(fid)}`, { token, body: { flow } }),
+	remove: (token: string, id: string, fid: string) =>
+		call<void>('DELETE', `/admin/tenants/${encodeURIComponent(id)}/flows/${encodeURIComponent(fid)}`, { token }),
+	runs: (token: string, id: string) =>
+		call<{ runs: FlowRunSummary[] }>('GET', `/admin/tenants/${encodeURIComponent(id)}/flows/runs`, { token })
+};
+
+/** Stream a run (one flow or the whole suite) — POST + SSE body consumed with
+ *  fetch streaming (EventSource can't send Authorization). onEvent receives
+ *  every parsed (event, data) pair as it arrives — the live PASS/FAIL. */
+export async function streamFlowRun(
+	token: string,
+	tenantId: string,
+	fid: string | null, // null ⇒ the whole suite
+	onEvent: (event: string, data: Record<string, unknown>) => void
+): Promise<void> {
+	const path = fid
+		? `/admin/tenants/${encodeURIComponent(tenantId)}/flows/${encodeURIComponent(fid)}/run`
+		: `/admin/tenants/${encodeURIComponent(tenantId)}/flows/run`;
+	const res = await fetch(path, {
+		method: 'POST',
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (!res.ok || !res.body) {
+		let msg = `run failed (HTTP ${res.status})`;
+		try {
+			const d = (await res.json()) as { error?: string };
+			if (d.error) msg = d.error;
+		} catch {
+			/* not JSON */
+		}
+		throw new ApiError(msg, res.status);
+	}
+	const reader = res.body.getReader();
+	const dec = new TextDecoder();
+	let buf = '';
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		buf += dec.decode(value, { stream: true });
+		let idx;
+		while ((idx = buf.indexOf('\n\n')) !== -1) {
+			const frame = buf.slice(0, idx);
+			buf = buf.slice(idx + 2);
+			let event = 'message';
+			let data = '';
+			for (const line of frame.split('\n')) {
+				if (line.startsWith('event: ')) event = line.slice(7).trim();
+				else if (line.startsWith('data: ')) data += line.slice(6);
+			}
+			if (data) {
+				try {
+					onEvent(event, JSON.parse(data) as Record<string, unknown>);
+				} catch {
+					/* skip malformed frame */
+				}
+			}
+		}
+	}
+}
+
 // ── history types (mirrors of pkg/schemahistory + the rollback handler) ───────
 
 /** One recorded schema version (pkg/schemahistory.Version, listing shape). */

@@ -205,6 +205,20 @@ func Get(ctx context.Context, pool *pgxpool.Pool, tenantID string, version int) 
 	return &v, nil
 }
 
+// Latest returns the tenant's current (highest) version number — 0 when the
+// tenant has no history. Used to anchor a flow-test regression run to the
+// schema version it ran against (FLOWTEST-S1).
+func Latest(ctx context.Context, pool *pgxpool.Pool, tenantID string) (int, error) {
+	var v int
+	err := pool.QueryRow(ctx,
+		`SELECT COALESCE(MAX(version), 0) FROM public.schema_history WHERE tenant_id = $1`,
+		tenantID).Scan(&v)
+	if err != nil {
+		return 0, fmt.Errorf("schemahistory: latest: %w", err)
+	}
+	return v, nil
+}
+
 // TenantsNeedingBackfill returns the ids of tenants that HAVE a stored schema
 // but NO history rows — pre-versioning tenants whose current schema should be
 // captured as v1 at upgrade (the caller re-marshals through schema.APISchema so

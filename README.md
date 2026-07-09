@@ -237,7 +237,11 @@ baseline faster are welcome; we'll publish updated numbers.
   and **rollback to any prior version** re-deploys it through the same gate: a dry-run
   shows exactly what reverting destroys (measured rows lost), nothing drops without
   enumeration, and the rollback itself becomes a new version — browsable timeline +
-  rollback UI in the visual editor ("History")
+  rollback UI in the visual editor ("History"). And the trust loop closes with
+  **persisted flow tests**: multi-step scenarios (login as a role → create → attach →
+  assert, state chained between steps) run server-side against the live app with live
+  PASS/FAIL output — re-run after a deploy as a **regression suite whose verdict is
+  anchored to the schema version** it ran against ("Flows" in the visual editor)
 - **Ops**: Prometheus `/metrics`, per-request trace ring with stage breakdown,
   SLO burn-rate alerts (Slack), graceful drain on SIGTERM, circuit breaker
   (verified open/recover with toxiproxy), zero-downtime additive migrations —

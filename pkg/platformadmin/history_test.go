@@ -25,6 +25,11 @@ func TestHistoryRoutesRequireAuth(t *testing.T) {
 		{http.MethodGet, "/admin/tenants/acme/schema/history", ""},
 		{http.MethodGet, "/admin/tenants/acme/schema/history/1", ""},
 		{http.MethodPost, "/admin/tenants/acme/schema/rollback", `{"version":1}`},
+		// Flow-test routes (FLOWTEST-S1) share the same platform gate.
+		{http.MethodGet, "/admin/tenants/acme/flows", ""},
+		{http.MethodPost, "/admin/tenants/acme/flows", `{"flow":{"name":"x","steps":[]}}`},
+		{http.MethodPost, "/admin/tenants/acme/flows/run", ""},
+		{http.MethodGet, "/admin/tenants/acme/flows/runs", ""},
 	} {
 		if rr := req(t, h, tc.method, tc.path, tc.body, ""); rr.Code != http.StatusForbidden {
 			t.Fatalf("%s %s without auth: got %d, want 403", tc.method, tc.path, rr.Code)

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { deploy } from '../stores/deploy.svelte';
+	import { flowTests } from '../stores/flowtests.svelte';
 	import { editor } from '../stores/editor.svelte';
 
 	const eps = $derived(deploy.result ? deploy.endpoints(deploy.result.tenantId) : null);
@@ -426,6 +427,17 @@
 
 					<div class="m-actions">
 						<button class="btn subtle" onclick={() => deploy.deployAgain()}>Deploy again</button>
+						<button
+							class="btn"
+							title="Re-run this tenant's saved flow tests against the deployed schema — the post-deploy regression"
+							onclick={() => {
+								const tid = deploy.result!.tenantId;
+								deploy.close();
+								flowTests.openAndRunSuite(tid);
+							}}
+						>
+							▶ Run regression flows
+						</button>
 						<button class="btn primary" onclick={() => deploy.close()}>Done</button>
 					</div>
 				{/if}

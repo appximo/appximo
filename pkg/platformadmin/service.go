@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/mail"
 	"strings"
 	"time"
@@ -69,6 +70,13 @@ type Config struct {
 	// read-only at GET /admin/served-resources so the editor can honestly warn before
 	// a new-resource deploy. Empty ⇒ the route reports an empty set.
 	ServedResources []string
+
+	// FlowHandlerFn, when non-nil, supplies the app's LIVE data-plane router for
+	// the flow-test runner (FLOWTEST-S1) — flows execute against the real chain
+	// (tenant → JWT → RBAC → generated routes), in-process. It is a function
+	// because the router is (re)built at boot and on every hot-swap; nil while
+	// the engine is still booting ⇒ the run endpoints answer 503.
+	FlowHandlerFn func() http.Handler
 
 	// ServedResourcesFn, when non-nil, supplies the LIVE served-resource list and
 	// takes precedence over the static ServedResources slice. It exists for the
