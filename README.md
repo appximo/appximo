@@ -278,10 +278,19 @@ It serves our own production workload today.
 
 Beyond the API surface, the binary also embeds **Appitools Studio** at `/editor`
 — a visual schema designer (full ERD over the schema grammar, visual RBAC,
-state machines, relations) that deploys/migrates tenants, restarts the engine
-in one click when a new resource needs it, and manages tenant files — plus the
-admin panel at `/admin`. Both are static SPAs compiled into the binary
-(`make editor-ui admin-ui` before `go build`; the published image ships them).
+state machines, relations, plus a **Code view**: the raw schema in an assisted
+JSON editor with live engine validation, every error on its line) that
+deploys/migrates tenants, restarts the engine in one click when a new resource
+needs it, and manages tenant files — plus the admin panel at `/admin`. Both are
+static SPAs compiled into the binary (`make editor-ui admin-ui` before
+`go build`; the published image ships them).
+
+And you don't have to write the schema by hand: `appitools ai-generate
+"<description>"` turns a natural-language app description into a valid schema
+(validator-guided loop, ~$0.006/schema), or — with **your own agent** (Claude
+Code, Cursor) — `appitools spec` prints the LLM-distilled grammar so *your*
+subscription generates it and self-corrects against `appitools validate --json`,
+at zero API cost. The flow: [docs/SCHEMA_SPEC_LLM.md](docs/SCHEMA_SPEC_LLM.md).
 
 ## Configuration
 

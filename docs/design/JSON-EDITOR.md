@@ -190,8 +190,23 @@ one packaging command.
   gated while invalid and loads the canvas when fixed; renamed_from survives
   Apply → re-export; syntax layer instant; theme computed light/dark.
 
-**S3 — the agent pack:** `docs/SCHEMA_SPEC_LLM.md` + `appitools spec` +
-README/AGENTS pointers. The golden external loop documented end-to-end.
+**S3 — the agent pack: ✅ BUILT (JSON-EDITOR-S3).**
+- `appitools spec` (cmd_spec.go) prints `aigen.Spec()`: the SHARED `GrammarCore`
+  (pkg/aigen/prompt.go — the internal generation prompt is now built by
+  concatenation from it, byte-identical to the pre-refactor literal, so
+  ai-generate behavior is unchanged) + the advanced blocks the compact internal
+  prompt deliberately omits (state machines, per-resource RBAC, hooks, events,
+  references/on_update/composite FKs, renames) + a "common mistakes" list + a
+  second worked example (optical-store CRM: file field, m2m, state machine,
+  per-resource RBAC) + the correction-loop instructions.
+- Divergence is pinned by `pkg/aigen/spec_test.go`: systemPrompt and Spec() must
+  both embed GrammarCore, every JSON example in the spec must pass the REAL
+  `schema.ValidateReport`, and the advanced sections must stay covered.
+- `docs/SCHEMA_SPEC_LLM.md` documents the 4-step external flow (spec → generate
+  with your agent → `validate --json` loop → paste into the Code view) and
+  connects the two fronts: internal `ai-generate` (Haiku, ~$0.006) for users
+  without AI tooling; the external pack for anyone with their own subscription
+  (zero product API cost). Pointers added in README, AGENTS.md and llms.txt.
 
 **Explicitly reused (nothing semantic is rebuilt):** `ValidateReport` +
 meta-schema + `Validate` dot-paths (server), `fieldRules.ts` mirror (panels,

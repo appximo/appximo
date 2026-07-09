@@ -22,6 +22,11 @@
 - [Explore guide](docs/EXPLORE.md): the observable surface of a running
   instance — health probes, metrics, trace explorer, per-tenant debug,
   SSE, control plane, laptop access via SSH tunnels
+- [Generate schemas with your agent](docs/SCHEMA_SPEC_LLM.md): paste
+  `appitools spec` (the LLM-distilled grammar) into your own Claude
+  Code/Cursor, generate the schema, self-correct with
+  `appitools validate --json` (machine-readable errors with path + fix),
+  then paste into Studio's Code view
 
 - [Public benchmark](context-docs/BENCHMARK_PUBLIC.md): full methodology
   vs NestJS — 2000 RPS sustained, p50 1.58 ms, statistical treatment,

@@ -87,6 +87,14 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   first-try / 100% convergence / ~$0.006/schema with the cheap model (thesis holds,
   the constrained-decoding foundation does NOT engage as designed). The gate every
   future technique passes; see docs/AI_SCHEMA_GENERATION.md §The first real measurement),
+  `spec` (JSON-EDITOR-S3: prints the schema grammar DISTILLED FOR AN LLM — closed
+  sets, strict keys, file field, state machines, hooks, events, both RBAC forms,
+  full FK coverage, two engine-validated worked examples, and the correction
+  loop. The EXTERNAL-agent front: paste it into your own Claude Code/Cursor,
+  generate, self-correct with `validate --json` as the oracle — the same
+  validator-guided loop as `ai-generate` but on YOUR subscription, zero product
+  API cost. SAME grammar source as the internal loop (`pkg/aigen` `GrammarCore`,
+  divergence pinned by `spec_test.go`); the flow: docs/SCHEMA_SPEC_LLM.md),
   `blueprints list` (lists schema files in a local `blueprints/` dir),
   `version` (prints the ldflags-injected build version; "dev" on a plain
   local build — releases and published images carry their tag),

@@ -1,23 +1,19 @@
 package aigen
 
-// systemPrompt is the COMPACT grammar that teaches a model the Appitools schema
-// format. It is deliberately condensed from docs/SCHEMA_REFERENCE.md (~2000
-// lines) to the essential grammar + one canonical few-shot example — an LLM does
-// not need the whole reference, it needs the closed sets (types, ops, actions),
-// the strict-key rule, and a worked example. The goal is to MINIMIZE iterations
-// (fewer round-trips = cheaper), so the prompt front-loads exactly the facts the
-// validator is strict about: required top-level keys, the type set, the two RBAC
-// forms, relation shapes, and "output ONLY JSON".
-const systemPrompt = `You generate Appitools schemas. An Appitools schema is ONE JSON object that an
-engine compiles into a multi-tenant REST + GraphQL API at boot. Given a
-natural-language description of an app, output a SINGLE valid schema JSON.
-
-OUTPUT RULES (critical):
-- Output ONLY the JSON object. No prose, no explanation, no markdown code fences.
-- The validator is STRICT about keys: any key outside the grammar below rejects
-  the schema. Use only the documented keys.
-
-REQUIRED top-level keys: "$schema", "version", "name", "resources".
+// GrammarCore is the COMPACT Appitools schema grammar for an LLM — the closed
+// sets (types, ops, actions), the strict-key rule, naming, relations, and one
+// canonical worked example. It is deliberately condensed from
+// docs/SCHEMA_REFERENCE.md (~2000 lines) to exactly the facts the validator is
+// strict about.
+//
+// It is the SINGLE SOURCE shared by two consumers (JSON-EDITOR-S3):
+//   - the internal generation loop (systemPrompt below — the ai-generate command)
+//   - `appitools spec` (Spec, spec.go) — the printable pack for an EXTERNAL
+//     agent (Claude Code / Cursor / any LLM with the user's own subscription)
+//
+// Change the grammar here and both stay in sync by construction; prompt_test.go
+// additionally validates every embedded example against the real validator.
+const GrammarCore = `REQUIRED top-level keys: "$schema", "version", "name", "resources".
 - "$schema" must be exactly "https://appitools.dev/schema/v1"
 - "version" must be the string "1"
 - "name" is a short kebab-case app name, e.g. "optica-crm"
@@ -90,7 +86,29 @@ CANONICAL EXAMPLE (a valid schema — follow this shape exactly):
       "viewer": { "resources": ["tasks"], "actions": ["read"], "fields": ["id", "title", "status"] }
     }
   }
-}
+}`
+
+// systemPrompt is the internal generation loop's system prompt: the shared
+// grammar wrapped in the loop-specific instructions ("output ONLY JSON", model
+// the app faithfully). Built by CONCATENATION from GrammarCore so the internal
+// loop and `appitools spec` can never diverge — the assembled text is
+// byte-identical to the pre-refactor literal (AI-F2-S4 behavior unchanged;
+// asserted by TestSystemPromptComposition).
+//
+// It deliberately stays COMPACT (the core grammar only, none of Spec's advanced
+// sections): the measured ~90% first-try / 100% convergence economics (AI-F2-S4)
+// were established with this prompt, and the internal loop has the validator
+// oracle to catch what brevity misses.
+const systemPrompt = `You generate Appitools schemas. An Appitools schema is ONE JSON object that an
+engine compiles into a multi-tenant REST + GraphQL API at boot. Given a
+natural-language description of an app, output a SINGLE valid schema JSON.
+
+OUTPUT RULES (critical):
+- Output ONLY the JSON object. No prose, no explanation, no markdown code fences.
+- The validator is STRICT about keys: any key outside the grammar below rejects
+  the schema. Use only the documented keys.
+
+` + GrammarCore + `
 
 Model the user's app faithfully: pick sensible resources, fields with appropriate
 types and validations, relations between them, and at least an "admin" role.
