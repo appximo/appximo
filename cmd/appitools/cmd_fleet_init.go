@@ -68,6 +68,21 @@ var fleetInitCmd = &cobra.Command{
 				"APPITOOLS_FLEET_ADMIN_EMAIL=%s\n"+
 				"APPITOOLS_FLEET_ADMIN_PASSWORD=%s\n",
 			operatorKey, adminEmail, adminPass)
+		// DB-assist (FLEET-DB-ASSIST): when a base DSN is known, declare a
+		// "local" instance so the console can create databases out of the box.
+		// The PRIVILEGED admin DSN (base DSN → the `postgres` maintenance
+		// database) lives HERE in the gitignored env-file, referenced from the
+		// committable manifest by env-var name only.
+		dbInstancesJSON := ""
+		if baseDSN != "" {
+			// The privileged admin DSN points at the `postgres` maintenance
+			// database (CREATE DATABASE cannot run from inside the target db).
+			fleetEnv += "APPITOOLS_FLEET_DB_LOCAL_ADMIN=" + swapDBName(baseDSN, "postgres") + "\n"
+			dbInstancesJSON = `,
+  "db_instances": [
+    { "name": "local", "label": "Local Postgres (this box)", "admin_dsn_env": "APPITOOLS_FLEET_DB_LOCAL_ADMIN" }
+  ]`
+		}
 		if err := os.WriteFile(filepath.Join(secretsDir, "fleet.env"), []byte(fleetEnv), 0o600); err != nil {
 			fmt.Fprintln(os.Stderr, "fleet init:", err)
 			os.Exit(1)
@@ -131,12 +146,12 @@ var fleetInitCmd = &cobra.Command{
 		manifest := fmt.Sprintf(`{
   "listen": ":8080",
   "data_dir": "fleet-data",
-  "operator_admin_email": %q,
+  "operator_admin_email": %q%s,
   "apps": [
 %s
   ]
 }
-`, adminEmail, strings.Join(appsJSON, ",\n"))
+`, adminEmail, dbInstancesJSON, strings.Join(appsJSON, ",\n"))
 		if err := os.WriteFile(cfgPath, []byte(manifest), 0o644); err != nil {
 			fmt.Fprintln(os.Stderr, "fleet init:", err)
 			os.Exit(1)
@@ -175,6 +190,17 @@ func dbNameOf(dsn string) string {
 		return strings.TrimPrefix(u.Path, "/")
 	}
 	return dsn
+}
+
+// swapDBName returns dsn with its database (URL path) replaced by db. Used to
+// point the "local" instance's admin DSN at the `postgres` maintenance database.
+func swapDBName(dsn, db string) string {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return dsn
+	}
+	u.Path = "/" + db
+	return u.String()
 }
 
 // ensureDatabase connects to the BASE database and creates dbName if missing

@@ -85,11 +85,74 @@ type Manifest struct {
 	// Empty email falls back to APPITOOLS_FLEET_ADMIN_EMAIL; both empty ⇒
 	// feature off (each app manages its own admins, the pre-S2 behavior).
 	OperatorAdminEmail string `json:"operator_admin_email,omitempty"`
+	// DBInstances declares the Postgres servers the console's Add-app form may
+	// suggest DSNs from and create databases on (FLEET-DB-ASSIST). The engine
+	// NEVER discovers Postgres on its own — this list, and only this list, is
+	// what the console offers. Committable: it holds no credentials, only each
+	// instance's name/label and the NAME of the env var carrying its privileged
+	// DSN (the secret lives in the env-file). Absent/empty ⇒ the form is
+	// manual-DSN + test-connection only (no create power). See DBInstance.
+	DBInstances []DBInstance `json:"db_instances,omitempty"`
 	// Apps are the fleet's apps (≥1).
 	Apps []AppSpec `json:"apps"`
 
 	dir  string // manifest file directory, for resolving relative paths
 	path string // absolute manifest file path (lifecycle persistence)
+}
+
+// DBInstance is one operator-declared Postgres server the console may create
+// databases on (FLEET-DB-ASSIST). AdminDSNEnv names an env var holding a
+// PRIVILEGED DSN (a role that may CREATE DATABASE, pointing at a maintenance
+// database such as `postgres`); the console derives the app's runtime DSN from
+// it by swapping the database name. Declaring an instance is the explicit,
+// auditable grant of create-power on that server — the credentials stay in the
+// env-file, never the committable manifest.
+type DBInstance struct {
+	// Name identifies the instance (^[a-z][a-z0-9_-]*$, unique). Referenced by
+	// the console when it asks the server to suggest/test/create — the DSN
+	// itself never travels to the browser.
+	Name string `json:"name"`
+	// Label is the human-friendly text shown in the console's instance picker.
+	Label string `json:"label,omitempty"`
+	// AdminDSNEnv is the NAME of the env var holding the privileged DSN. The
+	// secret is never a manifest key (committable-safe). Required and must be
+	// set — a declared-but-unwired instance fails the load loudly.
+	AdminDSNEnv string `json:"admin_dsn_env"`
+
+	adminDSN string // resolved from AdminDSNEnv at load; NEVER serialized.
+}
+
+// AdminDSN returns the resolved privileged DSN (empty until LoadManifest ran).
+func (i *DBInstance) AdminDSN() string { return i.adminDSN }
+
+// DBInstanceByName returns the declared instance named name, or nil.
+func (m *Manifest) DBInstanceByName(name string) *DBInstance {
+	for i := range m.DBInstances {
+		if m.DBInstances[i].Name == name {
+			return &m.DBInstances[i]
+		}
+	}
+	return nil
+}
+
+// SafeDBInstance is the console-facing view of an instance — never the DSN.
+type SafeDBInstance struct {
+	Name        string `json:"name"`
+	Label       string `json:"label"`
+	CanCreateDB bool   `json:"can_create_db"`
+}
+
+// SafeDBInstances returns the credential-free instance list for the console.
+func (m *Manifest) SafeDBInstances() []SafeDBInstance {
+	out := make([]SafeDBInstance, 0, len(m.DBInstances))
+	for i := range m.DBInstances {
+		out = append(out, SafeDBInstance{
+			Name:        m.DBInstances[i].Name,
+			Label:       m.DBInstances[i].Label,
+			CanCreateDB: m.DBInstances[i].adminDSN != "",
+		})
+	}
+	return out
 }
 
 // OperatorAdmin returns the unified operator identity (email, password), or
@@ -236,6 +299,29 @@ func LoadManifest(path string) (*Manifest, error) {
 	}
 	if m.OperatorAdminEmail != "" && os.Getenv("APPITOOLS_FLEET_ADMIN_PASSWORD") == "" {
 		return nil, fmt.Errorf("fleet: operator_admin_email %q is set but APPITOOLS_FLEET_ADMIN_PASSWORD is not — the operator admin password comes from the environment (an env-file), never the manifest", m.OperatorAdminEmail)
+	}
+
+	// DB instances (FLEET-DB-ASSIST): resolve each admin DSN from its env var.
+	// Declared-but-unwired fails loud (like operator_admin_email) — never a
+	// silently-powerless instance. The DSN is held in memory only, never
+	// re-serialized to the committable manifest.
+	seenInst := map[string]bool{}
+	for i := range m.DBInstances {
+		inst := &m.DBInstances[i]
+		if !appNameRe.MatchString(inst.Name) {
+			return nil, fmt.Errorf("fleet: db_instance %d: name %q must match %s", i, inst.Name, appNameRe)
+		}
+		if seenInst[inst.Name] {
+			return nil, fmt.Errorf("fleet: duplicate db_instance name %q", inst.Name)
+		}
+		seenInst[inst.Name] = true
+		if inst.AdminDSNEnv == "" {
+			return nil, fmt.Errorf("fleet: db_instance %q: admin_dsn_env is required (the NAME of the env var holding its privileged DSN — the credentials never go in the manifest)", inst.Name)
+		}
+		inst.adminDSN = os.Getenv(inst.AdminDSNEnv)
+		if inst.adminDSN == "" {
+			return nil, fmt.Errorf("fleet: db_instance %q: env var %s (admin_dsn_env) is not set — wire the privileged DSN in the fleet env-file, or remove the instance", inst.Name, inst.AdminDSNEnv)
+		}
 	}
 
 	// Sharing one DATABASE_URL means sharing public.tenants / outbox / the

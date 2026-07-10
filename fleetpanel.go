@@ -134,6 +134,11 @@ func (p *fleetPanel) register(mux *http.ServeMux) {
 	// FLEET-LIFECYCLE-S1: the operator's app add/remove (hot, manifest-synced).
 	mux.HandleFunc("POST /fleet/api/apps", p.requireOperator(p.handleAddApp))
 	mux.HandleFunc("DELETE /fleet/api/apps/{name}", p.requireOperator(p.handleRemoveApp))
+	// FLEET-DB-ASSIST: the declared instances + a connection test. Both are
+	// server-side: credentials never reach the browser (the console references
+	// an instance by NAME; the server holds the DSN).
+	mux.HandleFunc("GET /fleet/api/db/instances", p.requireOperator(p.handleDBInstances))
+	mux.HandleFunc("POST /fleet/api/db/test", p.requireOperator(p.handleDBTest))
 }
 
 // requireOperator gates a console handler behind the fleet-operator key
@@ -243,6 +248,83 @@ type addAppRequest struct {
 	SchemaPath string            `json:"schema_path,omitempty"`
 	Env        map[string]string `json:"env,omitempty"`
 	EnvFile    string            `json:"env_file,omitempty"`
+
+	// FLEET-DB-ASSIST — the DATABASE_URL by DECLARED INSTANCE instead of a raw
+	// DSN in Env. When DBInstance is set, the server resolves the instance's
+	// privileged DSN (never sent to the browser), derives the app's runtime DSN
+	// for DBName (default app_<name>), optionally CREATEs that database, and
+	// sets DATABASE_URL — the credentials stay server-side.
+	DBInstance string `json:"db_instance,omitempty"`
+	DBName     string `json:"db_name,omitempty"`
+	CreateDB   bool   `json:"create_db,omitempty"`
+}
+
+// dbTestRequest tests a connection either from a raw DSN (the manual path) or a
+// declared instance + database name (the instance path — the server resolves
+// the DSN, credentials never reach the browser).
+type dbTestRequest struct {
+	DSN      string `json:"dsn,omitempty"`
+	Instance string `json:"instance,omitempty"`
+	DBName   string `json:"db_name,omitempty"`
+}
+
+// handleDBInstances is GET /fleet/api/db/instances: the credential-free list of
+// operator-declared instances (name, label, whether it can create). enabled is
+// false when none are declared — the console then offers manual-DSN + test only.
+func (p *fleetPanel) handleDBInstances(w http.ResponseWriter, r *http.Request) {
+	var insts []fleet.SafeDBInstance
+	if p.lifecycle != nil && p.lifecycle.mf != nil {
+		insts = p.lifecycle.mf.SafeDBInstances()
+	}
+	writeJSONStatus(w, http.StatusOK, map[string]any{
+		"enabled":   len(insts) > 0,
+		"instances": insts,
+	})
+}
+
+// handleDBTest is POST /fleet/api/db/test: connect and report (no mutation). A
+// declared instance is resolved to its DSN server-side (with the DBName swapped
+// in); a raw dsn is tested verbatim. Either way the credentials never leave the
+// server.
+func (p *fleetPanel) handleDBTest(w http.ResponseWriter, r *http.Request) {
+	var req dbTestRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"error": "invalid request body: " + err.Error()})
+		return
+	}
+	dsn := req.DSN
+	if req.Instance != "" {
+		if p.lifecycle == nil || p.lifecycle.mf == nil {
+			writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{"error": "db instances are not available in this runtime"})
+			return
+		}
+		inst := p.lifecycle.mf.DBInstanceByName(req.Instance)
+		if inst == nil {
+			writeJSONStatus(w, http.StatusBadRequest, map[string]any{"error": "unknown db instance " + req.Instance})
+			return
+		}
+		dbName := req.DBName
+		if dbName == "" {
+			writeJSONStatus(w, http.StatusBadRequest, map[string]any{"error": "db_name is required to test an instance"})
+			return
+		}
+		if !fleet.ValidDBName(dbName) {
+			writeJSONStatus(w, http.StatusBadRequest, map[string]any{"error": "invalid database name " + dbName})
+			return
+		}
+		derived, err := fleet.DeriveDSN(inst.AdminDSN(), dbName)
+		if err != nil {
+			writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		dsn = derived
+	}
+	if dsn == "" {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"error": "provide a dsn or an instance + db_name"})
+		return
+	}
+	res := fleet.TestDSN(r.Context(), dsn)
+	writeJSONStatus(w, http.StatusOK, map[string]any{"result": res})
 }
 
 // handleAddApp is POST /fleet/api/apps: validate (schema via ValidateReport,
@@ -263,7 +345,11 @@ func (p *fleetPanel) handleAddApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	spec := &fleet.AppSpec{Name: req.Name, Domains: req.Domains, Schema: req.SchemaPath, Env: req.Env, EnvFile: req.EnvFile}
-	row, lerr := p.lifecycle.AddApp(spec, req.Schema)
+	var db *dbProvision
+	if req.DBInstance != "" {
+		db = &dbProvision{instance: req.DBInstance, dbName: req.DBName, create: req.CreateDB}
+	}
+	row, lerr := p.lifecycle.AddApp(spec, req.Schema, db)
 	if lerr != nil {
 		body := map[string]any{"error": lerr.msg}
 		if lerr.report != nil {
@@ -371,6 +457,17 @@ details.addapp summary{cursor:pointer;font-weight:600;font-size:13.5px}
 #addmsg{font-size:12.5px}
 #addmsg.bad{color:#dc2626}
 #addmsg.ok{color:var(--ok)}
+.dbsec{border:1px solid var(--border);border-radius:8px;padding:10px 12px;display:grid;gap:8px;background:var(--bg)}
+.dbsec .seg{display:inline-flex;gap:2px;background:var(--chip);border:1px solid var(--border);border-radius:6px;padding:2px;width:fit-content}
+.dbsec .seg button{border:none;background:none;color:var(--muted);font-size:12px;padding:3px 10px;border-radius:5px;cursor:pointer}
+.dbsec .seg button.on{background:var(--panel);color:var(--text);box-shadow:0 1px 1px color-mix(in srgb,#0a0c10 10%,transparent)}
+.dbsec select{background:var(--panel);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 9px;font-size:12.5px}
+.dbrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.dbrow label.inline{text-transform:none;letter-spacing:0;color:var(--text);font-size:12.5px;display:flex;gap:6px;align-items:center}
+button.ghost{background:var(--chip);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer}
+#dbtest{font-size:12px}
+#dbtest.ok{color:var(--ok)}#dbtest.bad{color:#dc2626}#dbtest.warn{color:#b45309}
+.hint{font-size:11.5px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -391,8 +488,32 @@ details.addapp summary{cursor:pointer;font-weight:600;font-size:13.5px}
       <input id="f-domains" placeholder="optica.example.com" autocomplete="off">
       <label for="f-schema">schema JSON (paste — e.g. from Studio's Code view or your agent)</label>
       <textarea id="f-schema" spellcheck="false" placeholder='{ "$schema": "https://appitools.dev/schema/v1", ... }'></textarea>
-      <label for="f-db">DATABASE_URL</label>
-      <input id="f-db" placeholder="postgres://user:pass@localhost:5432/app_optica" autocomplete="off">
+      <label>database</label>
+      <div class="dbsec">
+        <div class="seg" id="db-modes">
+          <button type="button" data-mode="instance" onclick="dbMode('instance')">Declared instance</button>
+          <button type="button" data-mode="manual" class="on" onclick="dbMode('manual')">Manual DSN</button>
+        </div>
+        <div id="db-instance" style="display:none;gap:8px;">
+          <div class="dbrow">
+            <select id="f-instance" onchange="dbTestReset()"></select>
+            <input id="f-dbname" placeholder="app_optica" autocomplete="off" style="flex:1;min-width:160px" oninput="dbTestReset()">
+          </div>
+          <div class="dbrow">
+            <label class="inline"><input type="checkbox" id="f-createdb" checked> Create the database if it doesn't exist</label>
+            <button type="button" class="ghost" onclick="dbTest()">Test connection</button>
+            <span id="dbtest"></span>
+          </div>
+          <div class="hint">The server derives the DSN from the declared instance — credentials never reach the browser.</div>
+        </div>
+        <div id="db-manual" style="display:grid;gap:8px;">
+          <div class="dbrow">
+            <input id="f-db" placeholder="postgres://user:pass@localhost:5432/app_optica" autocomplete="off" style="flex:1;min-width:220px">
+            <button type="button" class="ghost" onclick="dbTest()">Test connection</button>
+          </div>
+          <span id="dbtest-manual" style="font-size:12px"></span>
+        </div>
+      </div>
       <label for="f-jwt">JWT_SECRET (unique per app, ≥32 chars)</label>
       <input id="f-jwt" autocomplete="off">
       <label for="f-admin">ADMIN_KEY</label>
@@ -457,6 +578,72 @@ async function load(){
 }
 load(); setInterval(load, 10000);
 
+// FLEET-DB-ASSIST — declared instances, the mode toggle, and the connection
+// test. All server-side: the console names an instance, never a DSN, so the
+// admin credentials never reach the browser.
+let DB_MODE = 'manual';       // 'instance' | 'manual'
+let DB_ENABLED = false;
+function dbMode(m){
+  DB_MODE = m;
+  document.getElementById('db-instance').style.display = (m==='instance')?'grid':'none';
+  document.getElementById('db-manual').style.display   = (m==='manual')?'grid':'none';
+  for(const b of document.querySelectorAll('#db-modes button')) b.classList.toggle('on', b.dataset.mode===m);
+  dbTestReset();
+}
+function dbTestReset(){
+  document.getElementById('dbtest').textContent='';
+  document.getElementById('dbtest').className='';
+  document.getElementById('dbtest-manual').textContent='';
+}
+function suggestedDBName(){
+  const n = document.getElementById('f-name').value.trim().toLowerCase().replace(/-/g,'_');
+  return n ? 'app_'+n : '';
+}
+// Keep the db-name field tracking the app name until the operator edits it.
+document.getElementById('f-name').addEventListener('input', () => {
+  const dbn = document.getElementById('f-dbname');
+  if(!dbn.dataset.touched) dbn.value = suggestedDBName();
+});
+document.getElementById('f-dbname').addEventListener('input', (e)=>{ e.target.dataset.touched='1'; });
+async function loadInstances(){
+  try{
+    const r = await fetch('/fleet/api/db/instances?key='+encodeURIComponent(KEY));
+    const d = await r.json();
+    DB_ENABLED = !!d.enabled;
+    const sel = document.getElementById('f-instance'); sel.innerHTML='';
+    for(const i of (d.instances||[])){
+      const o = document.createElement('option');
+      o.value = i.name; o.textContent = (i.label||i.name) + (i.can_create_db?'':' (no create)');
+      sel.appendChild(o);
+    }
+    const instBtn = document.querySelector('#db-modes button[data-mode="instance"]');
+    if(DB_ENABLED){ instBtn.style.display=''; dbMode('instance'); }
+    else { instBtn.style.display='none'; dbMode('manual'); }
+  }catch(e){ /* manual-only fallback */ dbMode('manual'); }
+}
+loadInstances();
+async function dbTest(){
+  const out = document.getElementById(DB_MODE==='instance'?'dbtest':'dbtest-manual');
+  out.className=''; out.textContent='testing…';
+  const body = DB_MODE==='instance'
+    ? { instance: document.getElementById('f-instance').value, db_name: (document.getElementById('f-dbname').value.trim()||suggestedDBName()) }
+    : { dsn: document.getElementById('f-db').value.trim() };
+  try{
+    const r = await fetch('/fleet/api/db/test?key='+encodeURIComponent(KEY), {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d = await r.json();
+    if(!r.ok){ out.className='bad'; out.textContent=d.error||('HTTP '+r.status); return; }
+    const res = d.result||{};
+    if(res.ok){
+      out.className='ok';
+      out.textContent='✓ connects — database exists'+(res.server_version?' (PostgreSQL '+res.server_version+')':'')+(res.can_create_db?', role can create':'');
+    } else if(res.db_exists===false){
+      out.className='warn'; out.textContent='• '+(res.error||'database does not exist yet — enable Create');
+    } else {
+      out.className='bad'; out.textContent='✗ '+(res.error||'connection failed');
+    }
+  }catch(e){ out.className='bad'; out.textContent=String(e); }
+}
+
 // FLEET-LIFECYCLE-S1 — the operator's app lifecycle, over the gated API.
 async function addApp(){
   const msg = document.getElementById('addmsg');
@@ -469,11 +656,17 @@ async function addApp(){
     domains: document.getElementById('f-domains').value.split(',').map(s=>s.trim()).filter(Boolean),
     schema: schema,
     env: {
-      DATABASE_URL: document.getElementById('f-db').value.trim(),
       JWT_SECRET:   document.getElementById('f-jwt').value.trim(),
       ADMIN_KEY:    document.getElementById('f-admin').value.trim()
     }
   };
+  if(DB_MODE==='instance'){
+    body.db_instance = document.getElementById('f-instance').value;
+    body.db_name     = document.getElementById('f-dbname').value.trim() || suggestedDBName();
+    body.create_db   = document.getElementById('f-createdb').checked;
+  } else {
+    body.env.DATABASE_URL = document.getElementById('f-db').value.trim();
+  }
   const btn = document.getElementById('f-submit'); btn.disabled = true;
   try{
     const r = await fetch('/fleet/api/apps?key='+encodeURIComponent(KEY), {
@@ -487,7 +680,9 @@ async function addApp(){
     }else{
       msg.className='ok'; msg.textContent='app "'+body.name+'" is live — serving '+body.domains.join(', ')+' (manifest persisted)';
       document.getElementById('addapp').open = false;
-      for(const id of ['f-name','f-domains','f-schema','f-db','f-jwt','f-admin']) document.getElementById(id).value='';
+      for(const id of ['f-name','f-domains','f-schema','f-db','f-dbname','f-jwt','f-admin']) document.getElementById(id).value='';
+      document.getElementById('f-dbname').dataset.touched='';
+      dbTestReset();
       load();
     }
   }catch(e){ msg.className='bad'; msg.textContent=String(e); }

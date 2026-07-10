@@ -285,6 +285,75 @@ are served.
 server in DevHub's existing multi-server registry to navigate N apps; no
 DevHub coupling to the engine.
 
+## Database assistance in Add-app (FLEET-DB-ASSIST)
+
+Creating an app needs a `DATABASE_URL`. The console's Add-app form assists with
+it at three levels, on ONE security principle: **the engine never scans the
+system, Docker or the network to discover Postgres.** Everything comes from what
+the operator explicitly declares — a `db_instances` list — and credentials never
+reach the browser (the console names an instance; the server holds the DSN).
+
+**1 — Test connection** (always available). Probe a DSN (or an instance +
+database name) and get an actionable verdict: connects & the database exists
+(+ server version, + whether the role can create databases), the database
+doesn't exist yet (the cue to create it), auth failed, or the server is
+unreachable. Pure probe — zero administrative effect.
+
+**2 — Suggest the DSN from a declared instance.** Pick an instance from the
+operator's declared list; the server derives the app's runtime DSN (host +
+credentials from the instance, database name `app_<name>`) — no DSN typed from
+memory. The derived DSN, with its credentials, is computed and stored
+server-side; the browser only ever sends the instance NAME and the database name.
+
+**3 — Create the database** (explicit checkbox, only for instances with admin
+credentials). On add, the server runs `CREATE DATABASE` on that instance with
+the declared privileged DSN — bounded to `CREATE DATABASE` (no other power), it
+warns-and-reuses if the database already exists (never overwrites), it is logged
+(audited), and it is **all-or-nothing**: a database this add creates fresh is
+dropped again if the app-add then fails, so a failure leaves the server exactly
+as it was.
+
+### Declaring instances (secure by design)
+
+`db_instances` in the manifest is **committable** — it holds no credentials,
+only each instance's name/label and the NAME of the env var carrying its
+privileged DSN. The DSN itself (a role that may `CREATE DATABASE`, pointing at a
+maintenance database like `postgres`) lives in the gitignored env-file.
+
+```json
+{
+  "operator_admin_email": "operator@fleet.local",
+  "db_instances": [
+    { "name": "local", "label": "Local Postgres", "admin_dsn_env": "APPITOOLS_FLEET_DB_LOCAL_ADMIN" }
+  ],
+  "apps": [ … ]
+}
+```
+
+```bash
+# in fleet-secrets/fleet.env (gitignored) — the privileged DSN, → the postgres db:
+APPITOOLS_FLEET_DB_LOCAL_ADMIN=postgres://appuser:secret@localhost:5432/postgres?sslmode=disable
+```
+
+- **`make fleet-init` scaffolds this automatically** when it knows a base
+  `DATABASE_URL`: a `local` instance in the manifest + the admin DSN in
+  `fleet.env`, so the console can create databases out of the box.
+- **Declared-but-unwired fails loud**: an instance whose `admin_dsn_env` is unset
+  rejects the manifest at load (never a silently-powerless instance) — same
+  contract as `operator_admin_email` + its password env.
+- **No instances declared ⇒ clean degradation**: the form is manual-DSN + Test
+  connection only. Test needs no stored credentials (it probes the DSN the
+  operator typed), so it always works.
+- **The database is NOT on the app's own server credentials by necessity** — it
+  is on whichever instance the operator declared, which may be this box, another
+  instance, or a managed Postgres in the cloud. The instance's DSN is the only
+  authority the console has, and only for what was declared.
+
+Console-added apps now write their secrets (DATABASE_URL / JWT_SECRET /
+ADMIN_KEY, including a server-derived DSN) to a per-app **env-file** under the
+data dir (0600) referenced by `env_file` — never inline in the committable
+manifest.
+
 ## App lifecycle — `fleet add / remove / list` (FLEET-LIFECYCLE-S1)
 
 Adding or removing an app is a command (or a console action), not a manual

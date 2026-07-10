@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -460,6 +461,15 @@ type lifecycleError struct {
 
 func (e *lifecycleError) Error() string { return e.msg }
 
+// dbProvision carries the console's DB-assist choice (FLEET-DB-ASSIST): use a
+// DECLARED instance for the app's DATABASE_URL instead of a raw DSN, optionally
+// creating the database. nil ⇒ the DSN came in spec.Env verbatim (manual path).
+type dbProvision struct {
+	instance string
+	dbName   string
+	create   bool
+}
+
 // AddApp validates and hot-adds one app: schema through the REAL validator
 // (ValidateReport — the same oracle as everywhere), the manifest rules
 // (unique name, unclaimed domains, per-app JWT_SECRET) via ValidateNewApp,
@@ -467,7 +477,12 @@ func (e *lifecycleError) Error() string { return e.msg }
 // inline schema document (the console's paste path — JSON-EDITOR's Code view
 // output lands here); it is persisted under the fleet's data dir and the
 // manifest references that file. Otherwise spec.Schema names a readable file.
-func (l *fleetLifecycle) AddApp(spec *fleet.AppSpec, rawSchema []byte) (*panelAppJSON, *lifecycleError) {
+//
+// db (FLEET-DB-ASSIST), when non-nil, resolves DATABASE_URL from a DECLARED
+// instance (never from a browser-supplied DSN) and may CREATE the database —
+// all-or-nothing: a database this call creates fresh is dropped again if the
+// app-add then fails, so a failure leaves the system exactly as it was.
+func (l *fleetLifecycle) AddApp(spec *fleet.AppSpec, rawSchema []byte, db *dbProvision) (*panelAppJSON, *lifecycleError) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -501,22 +516,86 @@ func (l *fleetLifecycle) AddApp(spec *fleet.AppSpec, rawSchema []byte) (*panelAp
 		}
 	}
 
+	// DB assist (FLEET-DB-ASSIST): resolve DATABASE_URL from a declared instance
+	// BEFORE ValidateNewApp (which requires it present). The instance's DSN is
+	// held server-side; the browser only ever named the instance.
+	var adminDSN, createdDB string // set when this call must roll back a fresh create
+	if db != nil {
+		inst := l.mf.DBInstanceByName(db.instance)
+		if inst == nil {
+			return nil, &lifecycleError{status: http.StatusBadRequest, msg: fmt.Sprintf("unknown db instance %q — declare it in the manifest's db_instances", db.instance)}
+		}
+		dbName := db.dbName
+		if dbName == "" {
+			dbName = fleet.SuggestDBName(spec.Name)
+		}
+		if !fleet.ValidDBName(dbName) {
+			return nil, &lifecycleError{status: http.StatusBadRequest, msg: fmt.Sprintf("invalid database name %q", dbName)}
+		}
+		dsn, derr := fleet.DeriveDSN(inst.AdminDSN(), dbName)
+		if derr != nil {
+			return nil, &lifecycleError{status: http.StatusInternalServerError, msg: "derive DSN: " + derr.Error()}
+		}
+		if spec.Env == nil {
+			spec.Env = map[string]string{}
+		}
+		spec.Env["DATABASE_URL"] = dsn
+		adminDSN = inst.AdminDSN()
+		// Create the database now (idempotent) so buildFleetApp can connect.
+		if db.create {
+			created, cerr := fleet.CreateDatabase(l.ctx, adminDSN, dbName)
+			if cerr != nil {
+				return nil, &lifecycleError{status: http.StatusBadRequest, msg: "create database: " + cerr.Error()}
+			}
+			if created {
+				createdDB = dbName // roll back only what we made fresh
+			}
+		}
+	}
+
+	// rollback drops a freshly-created database (all-or-nothing). No-op when the
+	// database pre-existed (createdDB == "") — the fleet never destroys data it
+	// did not just make.
+	rollbackDB := func() {
+		if createdDB != "" {
+			if derr := fleet.DropDatabase(l.ctx, adminDSN, createdDB); derr != nil {
+				log.Printf("fleet serve: WARNING: app %q add failed AND rolling back its fresh database %q failed — drop it manually: %v", spec.Name, createdDB, derr)
+			}
+		}
+	}
+
 	// The manifest rules — the same ones a fleet restart would enforce, so a
 	// hot add can never create a composition the next boot refuses.
 	if err := l.mf.ValidateNewApp(spec); err != nil {
+		rollbackDB()
 		return nil, &lifecycleError{status: http.StatusBadRequest, msg: err.Error()}
 	}
 
 	// Compile the app through the SAME path as boot (no routing side effects yet).
 	app, err := buildFleetApp(l.ctx, l.mf, spec, l.listenPort, l.version, l.debugTracesHTML)
 	if err != nil {
+		rollbackDB()
 		return nil, &lifecycleError{status: http.StatusBadRequest, msg: err.Error()}
+	}
+
+	// Route the app's secrets (DATABASE_URL/JWT_SECRET/ADMIN_KEY, incl. the
+	// server-derived DSN) into a per-app ENV-FILE under the data dir instead of
+	// inline in the committable manifest — secrets never enter fleet.json. The
+	// running app already has them (buildFleetApp used MergedEnv); the manifest
+	// then references env_file, so a fleet restart reloads the same values.
+	if len(spec.Env) > 0 {
+		if err := l.writeAppEnvFile(spec); err != nil {
+			app.cleanup()
+			rollbackDB()
+			return nil, &lifecycleError{status: http.StatusInternalServerError, msg: "persist app secrets: " + err.Error()}
+		}
 	}
 
 	// Persist FIRST (the manifest is the source of truth); only then go live.
 	if path := l.mf.Path(); path != "" {
 		if err := fleet.AddAppToManifestFile(path, spec); err != nil {
 			app.cleanup()
+			rollbackDB()
 			return nil, &lifecycleError{status: http.StatusInternalServerError, msg: "persist manifest: " + err.Error()}
 		}
 	}
@@ -544,6 +623,45 @@ func (l *fleetLifecycle) AddApp(spec *fleet.AppSpec, rawSchema []byte) (*panelAp
 	log.Printf("fleet serve: app %q hot-ADDED — domains %v serving, other apps untouched, manifest persisted", spec.Name, spec.Domains)
 	row := l.panel.appRow(pa)
 	return &row, nil
+}
+
+// writeAppEnvFile persists a console-added app's secrets (DATABASE_URL /
+// JWT_SECRET / ADMIN_KEY, including a server-derived DSN) to a per-app env-file
+// next to its schema under the data dir, sets spec.EnvFile to it, and CLEARS
+// spec.Env so the committable manifest references the file instead of inlining
+// the secrets. spec.mergedEnv is left intact (the running fleet's in-memory
+// state), so future ValidateNewApp JWT-collision checks still see this app.
+func (l *fleetLifecycle) writeAppEnvFile(spec *fleet.AppSpec) error {
+	dir := l.mf.DataDir
+	if spec.Schema != "" {
+		dir = filepath.Dir(spec.Schema) // colocate with the persisted schema
+	} else {
+		dir = filepath.Join(dir, spec.Name)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, spec.Name+".env")
+	// Deterministic key order keeps the file stable across re-adds.
+	keys := make([]string, 0, len(spec.Env))
+	for k := range spec.Env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString("# Fleet app secrets (FLEET-DB-ASSIST) — generated, NEVER commit.\n")
+	for _, k := range keys {
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(spec.Env[k])
+		b.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		return err
+	}
+	spec.EnvFile = path
+	spec.Env = nil // manifest references env_file; secrets never inline
+	return nil
 }
 
 // removeGrace is how long a removed app keeps its infra (pool, control plane)

@@ -376,3 +376,42 @@ func TestLoadManifestOperatorAdmin(t *testing.T) {
 		t.Fatalf("email env fallback = %q", e)
 	}
 }
+
+// FLEET-DB-ASSIST: db_instances resolve their admin DSN from env (fail-loud when
+// the declared env var is unset), and the console-facing view never leaks it.
+func TestLoadManifestDBInstances(t *testing.T) {
+	dir := t.TempDir()
+	m := map[string]any{
+		"db_instances": []any{
+			map[string]any{"name": "local", "label": "Local PG", "admin_dsn_env": "TEST_DB_LOCAL_ADMIN"},
+		},
+		"apps": []any{baseApp(t, dir, "crm", strings.Repeat("a", 32))},
+	}
+	p := writeManifest(t, dir, m)
+
+	// Declared but unwired → fail loud.
+	t.Setenv("TEST_DB_LOCAL_ADMIN", "")
+	if _, err := LoadManifest(p); err == nil || !strings.Contains(err.Error(), "TEST_DB_LOCAL_ADMIN") {
+		t.Fatalf("declared-but-unwired instance must fail loud, got: %v", err)
+	}
+
+	// Wired → resolves, and the safe view exposes name/label/can_create but NOT the DSN.
+	t.Setenv("TEST_DB_LOCAL_ADMIN", "postgres://admin:secret@localhost:5432/postgres")
+	mf, err := LoadManifest(p)
+	if err != nil {
+		t.Fatalf("valid db_instance rejected: %v", err)
+	}
+	inst := mf.DBInstanceByName("local")
+	if inst == nil || inst.AdminDSN() != "postgres://admin:secret@localhost:5432/postgres" {
+		t.Fatalf("admin DSN not resolved: %+v", inst)
+	}
+	safe := mf.SafeDBInstances()
+	if len(safe) != 1 || safe[0].Name != "local" || !safe[0].CanCreateDB {
+		t.Fatalf("safe view wrong: %+v", safe)
+	}
+	// The safe view is a distinct type with no DSN field — a compile-time guarantee
+	// the secret can't be marshaled to the browser; assert the label round-trips.
+	if safe[0].Label != "Local PG" {
+		t.Fatalf("safe label = %q", safe[0].Label)
+	}
+}
