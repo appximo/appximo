@@ -202,6 +202,14 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
 - Performance-sensitive engine changes are measured, not eyeballed:
   `make bench-protocol RUNS=10 LABEL=my-change` (warmup + N runs +
   statistical verdict; see `scripts/bench-protocol.sh`).
+- **Verification sessions clean up their tenants.** A tenant created to probe
+  a feature is deleted when the session ends: `appitools tenant delete <id>
+  --yes` (DROP SCHEMA CASCADE + every control-plane row — history, flows,
+  policies, outbox — no orphans; `appitools tenant list` is the inventory).
+  Leftover test tenants pollute the editor's deploy modal and read as real
+  apps. Do NOT delete `nimbus` or `acme` on the dev box — they are the
+  bench/cert targets (`api-cert.sh` and `tests/performance/erp_*.js` default
+  to nimbus; `sustained_2krps.js` defaults to acme).
 
 ## Boundaries — do not
 

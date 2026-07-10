@@ -167,9 +167,21 @@ func (s *Service) DeleteTenant(ctx context.Context, id, confirm string) error {
 	if _, err := s.pool.Exec(ctx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", pgSchema)); err != nil {
 		return fmt.Errorf("platformadmin: drop schema: %w", err)
 	}
-	// Best-effort cleanup of control-plane rows (the schema is already gone).
-	s.pool.Exec(ctx, `DELETE FROM public.tenant_policies WHERE tenant_id = $1`, id) //nolint:errcheck
-	s.pool.Exec(ctx, `DELETE FROM public.migration_log WHERE tenant_id = $1`, id)   //nolint:errcheck
+	// Best-effort cleanup of EVERY control-plane table keyed by tenant_id (the
+	// schema is already gone; some of these tables are created lazily and may
+	// not exist in a given deployment — an error here must not abort the
+	// delete). DEV-CLEANUP-S1 extended this list to schema_history, flow
+	// tests/runs and outbox: a deleted tenant used to leave orphaned rows there.
+	for _, q := range []string{
+		`DELETE FROM public.tenant_policies WHERE tenant_id = $1`,
+		`DELETE FROM public.migration_log WHERE tenant_id = $1`,
+		`DELETE FROM public.schema_history WHERE tenant_id = $1`,
+		`DELETE FROM public.flow_runs WHERE tenant_id = $1`,
+		`DELETE FROM public.flow_tests WHERE tenant_id = $1`,
+		`DELETE FROM public.outbox WHERE tenant_id = $1`,
+	} {
+		s.pool.Exec(ctx, q, id) //nolint:errcheck
+	}
 	if _, err := s.pool.Exec(ctx, `DELETE FROM public.tenants WHERE id = $1`, id); err != nil {
 		return fmt.Errorf("platformadmin: delete tenant row: %w", err)
 	}
