@@ -15,9 +15,15 @@ import (
 	"github.com/miguelangel/appitools/pkg/userauth"
 )
 
-// tenantIDRe mirrors the control plane's tenant id rule (defence in depth before
-// interpolating a schema name).
-var tenantIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{1,29}$`)
+// tenantIDRe is the LOOKUP/DELETE-side id guard (defence in depth before
+// interpolating a schema name — every use is Sanitize()-quoted anyway). It is
+// deliberately LOOSER than the creation rule (controlplane's tenantIDRe,
+// ^[a-z][a-z0-9_]{1,29}$): it still accepts hyphens so that legacy/broken
+// tenants created under the old permissive rule (e.g. "punto-gafas-v1", the
+// zombie bug) remain DELETABLE through the admin API and CLI. Do not tighten
+// it to the creation rule — that would strand exactly the tenants that most
+// need deleting.
+var tenantIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9\-_]{1,29}$`)
 
 // TenantInfo is the per-tenant summary returned by the tenant list. resource_count
 // is derived from the stored schema (free); data_rows and user_count are pg_stat

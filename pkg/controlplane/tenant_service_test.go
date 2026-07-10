@@ -187,11 +187,13 @@ func TestRegisterTenant_InvalidID(t *testing.T) {
 	applyControlPlane(t, pool)
 
 	cases := []string{
-		"A",         // uppercase
-		"x",         // single char (regex requires ≥2)
-		"-start",    // starts with hyphen
-		"has space", // contains space
-		"UPPERCASE", // all uppercase
+		"A",              // uppercase
+		"x",              // single char (regex requires ≥2)
+		"-start",         // starts with hyphen
+		"has space",      // contains space
+		"UPPERCASE",      // all uppercase
+		"punto-gafas-v1", // hyphens — registrable under the OLD rule, then broken on every data access (the zombie bug)
+		"9lives",         // digit-first — the id must start with a letter (one rule with resource/field names)
 	}
 
 	for _, id := range cases {
@@ -335,5 +337,87 @@ func TestRegisterTenant_OrphanSchema(t *testing.T) {
 	pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM public.tenants WHERE id='ghost')").Scan(&exists)
 	if exists {
 		t.Error("no tenant row should exist after the refusal")
+	}
+}
+
+// TestRegisterTenant_InvalidIDSuggestsFix: the 400 must carry the corrected id,
+// not just the rule — "punto-gafas-v1" → try "punto_gafas_v1".
+func TestRegisterTenant_InvalidIDSuggestsFix(t *testing.T) {
+	pool, cleanup := startPostgres(t)
+	defer cleanup()
+	applyControlPlane(t, pool)
+
+	_, err := controlplane.RegisterTenant(context.Background(), pool, controlplane.RegisterRequest{
+		TenantID: "punto-gafas-v1",
+		Schema:   minimalSchema(),
+	})
+	if err == nil {
+		t.Fatal("expected invalid-id error, got nil")
+	}
+	if !errors.Is(err, controlplane.ErrInvalidInput) {
+		t.Errorf("must wrap ErrInvalidInput (HTTP 400), got: %v", err)
+	}
+	if !containsAny(err.Error(), `"punto_gafas_v1"`) {
+		t.Errorf("error must suggest the corrected id, got: %v", err)
+	}
+}
+
+// TestRegisterTenant_MigrationFailureRollsBack: the all-or-nothing contract.
+// The registration tx commits BEFORE the migration runs (the migration manages
+// its own transactions), so a migration failure used to strand a zombie — a
+// registered tenant whose schema has no tables. Force that failure through the
+// test seam and assert the system is left exactly as before: no tenants row,
+// no policy, no history, no migration_log rows, no Postgres schema.
+func TestRegisterTenant_MigrationFailureRollsBack(t *testing.T) {
+	pool, cleanup := startPostgres(t)
+	defer cleanup()
+	applyControlPlane(t, pool)
+	ctx := context.Background()
+
+	restore := controlplane.SetApplyMigrationForTest(
+		func(context.Context, *pgxpool.Pool, string, *schema.APISchema) error {
+			return errors.New("forced migration failure (test seam)")
+		})
+	defer restore()
+
+	_, err := controlplane.RegisterTenant(ctx, pool, controlplane.RegisterRequest{
+		TenantID: "zombie", DisplayName: "Zombie", Email: "z@z.com", Plan: "free",
+		Schema: minimalSchema(),
+	})
+	if err == nil {
+		t.Fatal("expected migration failure to surface, got nil")
+	}
+	if !containsAny(err.Error(), "rolled back") {
+		t.Errorf("error should say the registration was rolled back, got: %v", err)
+	}
+
+	if schemaExists(t, pool, "tenant_zombie") {
+		t.Error("postgres schema tenant_zombie must NOT survive a failed registration")
+	}
+	for _, q := range []string{
+		"SELECT count(*) FROM public.tenants WHERE id='zombie'",
+		"SELECT count(*) FROM public.tenant_policies WHERE tenant_id='zombie'",
+		"SELECT count(*) FROM public.schema_history WHERE tenant_id='zombie'",
+		"SELECT count(*) FROM public.migration_log WHERE tenant_id='zombie'",
+	} {
+		var n int
+		if err := pool.QueryRow(ctx, q).Scan(&n); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		if n != 0 {
+			t.Errorf("zombie leftovers: %s = %d, want 0", q, n)
+		}
+	}
+
+	// And the SAME id must be registrable afterwards (nothing half-claimed).
+	restore()
+	if _, err := controlplane.RegisterTenant(ctx, pool, controlplane.RegisterRequest{
+		TenantID: "zombie", DisplayName: "Zombie", Email: "z@z.com", Plan: "free",
+		Schema: minimalSchema(),
+	}); err != nil {
+		t.Fatalf("re-registering after a rolled-back failure must work: %v", err)
+	}
+	if !tableExists(t, pool, "tenant_zombie", "items") {
+		t.Error("re-registration should provision the tables")
 	}
 }

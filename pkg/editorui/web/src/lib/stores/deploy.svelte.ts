@@ -32,7 +32,35 @@ export interface Endpoints {
 	tenantHost: string;
 }
 
-const TENANT_ID_RE = /^[a-z0-9][a-z0-9-]{1,29}$/;
+// THE tenant id rule — the UX mirror of the backend authority (controlplane
+// tenantIDRe): the id becomes the Postgres schema `tenant_<id>` (which the data
+// path only accepts as ^[a-z][a-z0-9_]*$) and the Host subdomain. Hyphens,
+// uppercase and spaces are NOT allowed — the old rule here accepted hyphens and
+// let a tenant register that then failed every data access (the
+// "punto-gafas-v1" zombie bug).
+export const TENANT_ID_RE = /^[a-z][a-z0-9_]{1,29}$/;
+
+/** Why an id is invalid ('' / null when it's fine) — shown live under the field. */
+export function tenantIdIssue(raw: string): string | null {
+	if (raw === '') return null; // empty = untouched, the button is disabled anyway
+	if (/[A-Z]/.test(raw)) return 'Uppercase is not allowed — use lowercase.';
+	if (/[-\s.]/.test(raw)) return "Hyphens, spaces and dots are not allowed — use '_'.";
+	if (!/^[a-z]/.test(raw)) return 'Must start with a lowercase letter.';
+	if (raw.length < 2 || raw.length > 30) return 'Must be 2–30 characters.';
+	if (!TENANT_ID_RE.test(raw)) return "Only lowercase letters, digits and '_'.";
+	return null;
+}
+
+/** The closest VALID id (mirrors the backend's SuggestTenantID); '' if none. */
+export function suggestTenantId(raw: string): string {
+	let s = raw
+		.toLowerCase()
+		.replace(/[-\s.]/g, '_')
+		.replace(/[^a-z0-9_]/g, '')
+		.replace(/^[^a-z]+/, '')
+		.slice(0, 30);
+	return TENANT_ID_RE.test(s) ? s : '';
+}
 
 class DeployStore {
 	// modal + flow
@@ -361,7 +389,10 @@ class DeployStore {
 		if (this.mode === 'new') {
 			const id = this.newId.trim();
 			if (!TENANT_ID_RE.test(id)) {
-				this.error = 'tenant id must be 2–30 chars: lowercase letters, digits, hyphens';
+				const s = suggestTenantId(id);
+				this.error =
+					"tenant id must be 2–30 chars: a lowercase letter first, then lowercase letters, digits or '_' (no hyphens/uppercase/spaces)" +
+					(s && s !== id ? ` — try "${s}"` : '');
 				return;
 			}
 			this.preview = null; // a new tenant is all creation — no migration/destructives

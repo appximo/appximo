@@ -1,10 +1,16 @@
 <script lang="ts">
-	import { deploy } from '../stores/deploy.svelte';
+	import { deploy, tenantIdIssue, suggestTenantId } from '../stores/deploy.svelte';
 	import { flowTests } from '../stores/flowtests.svelte';
 	import { editor } from '../stores/editor.svelte';
 
 	const eps = $derived(deploy.result ? deploy.endpoints(deploy.result.tenantId) : null);
 	const planEmpty = $derived(deploy.preview?.empty === true);
+
+	// Live tenant-id validation (the UX mirror of the backend rule): the issue
+	// message, the one-click fix, and whether Continue may proceed at all.
+	const tidIssue = $derived(tenantIdIssue(deploy.newId.trim()));
+	const tidSuggestion = $derived(tidIssue ? suggestTenantId(deploy.newId.trim()) : '');
+	const tidBlocked = $derived(deploy.mode === 'new' && (deploy.newId.trim() === '' || tidIssue !== null));
 
 	function onKey(e: KeyboardEvent) {
 		if (e.key === 'Escape') deploy.close();
@@ -137,10 +143,34 @@
 						<input
 							id="d-tid"
 							class="field-input mono"
+							class:invalid={tidIssue !== null}
 							placeholder="acme"
 							spellcheck="false"
+							aria-invalid={tidIssue !== null}
+							aria-describedby="d-tid-hint"
 							bind:value={deploy.newId}
 						/>
+						{#if tidIssue}
+							<p class="tid-issue" id="d-tid-hint" data-testid="tid-issue">
+								{tidIssue}
+								{#if tidSuggestion && tidSuggestion !== deploy.newId.trim()}
+									<button
+										class="tid-fix mono"
+										data-testid="tid-fix"
+										onclick={() => (deploy.newId = tidSuggestion)}
+										title="Use the corrected id"
+									>use "{tidSuggestion}"</button>
+								{/if}
+							</p>
+						{:else if deploy.newId.trim() !== ''}
+							<p class="hint-sm mono" id="d-tid-hint" data-testid="tid-preview">
+								→ schema <b>tenant_{deploy.newId.trim()}</b> · host <b>{deploy.newId.trim()}.{location.host}</b>
+							</p>
+						{:else}
+							<p class="hint-sm" id="d-tid-hint">
+								Lowercase letter first, then lowercase letters, digits or '_' (2–30) — no hyphens, uppercase or spaces.
+							</p>
+						{/if}
 						<div class="grid2">
 							<div>
 								<label class="lbl" for="d-disp">Display name <span class="muted">(optional)</span></label>
@@ -185,7 +215,12 @@
 					{/if}
 
 					<div class="m-actions">
-						<button class="btn primary" onclick={() => deploy.proceedToPreview()} disabled={deploy.busy}>
+						<button
+							class="btn primary"
+							onclick={() => deploy.proceedToPreview()}
+							disabled={deploy.busy || tidBlocked}
+							title={tidBlocked ? 'Enter a valid tenant id first' : undefined}
+						>
 							{deploy.busy ? 'Checking…' : 'Continue'}
 						</button>
 					</div>
@@ -566,6 +601,30 @@
 		font-size: 12px;
 		color: var(--text-3);
 		margin: 2px 0 0;
+	}
+	.field-input.invalid {
+		border-color: var(--danger);
+	}
+	.tid-issue {
+		font-size: 12px;
+		color: var(--danger);
+		margin: 2px 0 0;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+	.tid-fix {
+		border: 1px solid var(--border-strong);
+		background: var(--surface-2);
+		border-radius: 5px;
+		padding: 1px 8px;
+		font-size: 12px;
+		color: var(--text);
+		cursor: pointer;
+	}
+	.tid-fix:hover {
+		background: var(--surface);
 	}
 	.hint-sm code {
 		font-family: var(--mono);

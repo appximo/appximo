@@ -992,6 +992,15 @@ Facts agents most often get wrong:
   `Host: acme.localhost` (or a real subdomain). Host of a different
   tenant → 401 `token tenant mismatch`; Host with no subdomain (bare
   IP/`localhost`) → 500 with empty body.
+- **Tenant id rule: `^[a-z][a-z0-9_]{1,29}$`** — a lowercase letter first, then
+  lowercase letters, digits or `_`, 2–30 chars. **No hyphens/uppercase/spaces**:
+  the id becomes the Postgres schema `tenant_<id>`, which the data path only
+  accepts as `^[a-z][a-z0-9_]*$` — a hyphenated id used to register and then
+  fail every query. One rule, three layers: the control plane rejects it with a
+  400 + suggested fix, Studio's deploy modal and the admin console validate it
+  live. And tenant creation is **all-or-nothing**: if any step fails (including
+  the migration, which runs after the registration tx), everything is rolled
+  back — a failed create leaves no zombie tenant behind.
 - **One API structure, N tenants with isolated data.** Routes, GraphQL types,
   RBAC, validators, hooks and `/docs` are compiled ONCE from the boot `--schema`
   and are identical for every tenant; only the DATA (and each tenant's physical

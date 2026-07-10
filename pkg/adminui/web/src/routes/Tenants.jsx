@@ -134,6 +134,24 @@ export function Tenants() {
   )
 }
 
+// THE tenant id rule — the UX mirror of the backend authority (controlplane):
+// the id becomes the Postgres schema tenant_<id> and the Host subdomain, so
+// hyphens/uppercase/spaces are refused up front (the "punto-gafas-v1" bug).
+const TENANT_ID_RE = /^[a-z][a-z0-9_]{1,29}$/
+function tenantIdIssue(raw) {
+  if (raw === "") return null
+  if (/[A-Z]/.test(raw)) return "Uppercase is not allowed — use lowercase."
+  if (/[-\s.]/.test(raw)) return "Hyphens, spaces and dots are not allowed — use '_'."
+  if (!/^[a-z]/.test(raw)) return "Must start with a lowercase letter."
+  if (raw.length < 2 || raw.length > 30) return "Must be 2–30 characters."
+  if (!TENANT_ID_RE.test(raw)) return "Only lowercase letters, digits and '_'."
+  return null
+}
+function suggestTenantId(raw) {
+  const s = raw.toLowerCase().replace(/[-\s.]/g, "_").replace(/[^a-z0-9_]/g, "").replace(/^[^a-z]+/, "").slice(0, 30)
+  return TENANT_ID_RE.test(s) ? s : ""
+}
+
 function CreateTenantDialog(props) {
   const [id, setId] = createSignal("")
   const [name, setName] = createSignal("")
@@ -164,7 +182,23 @@ function CreateTenantDialog(props) {
     <Modal open={props.open} onClose={(o) => !o && props.onClose()} busy={busy()} title="Create tenant"
       description="Provisions an isolated Postgres schema and tables for a new tenant.">
       <Show when={err()}><div class="errbar">{err()}</div></Show>
-      <Field id="t-id" label="Tenant ID" value={id()} onInput={setId} placeholder="acme" hint="lowercase, 2–30 chars; becomes the subdomain" />
+      <Field id="t-id" label="Tenant ID" value={id()} onInput={setId} placeholder="acme"
+        hint={tenantIdIssue(id().trim())
+          ? undefined
+          : id().trim()
+            ? `→ schema tenant_${id().trim()} · subdomain ${id().trim()}.<host>`
+            : "lowercase letter first, then lowercase/digits/'_' (2–30); no hyphens, uppercase or spaces"} />
+      <Show when={tenantIdIssue(id().trim())}>
+        <div class="errbar" style={{ "margin-top": "-8px" }}>
+          {tenantIdIssue(id().trim())}
+          <Show when={suggestTenantId(id().trim())}>
+            {" "}
+            <button class="linklike" onClick={() => setId(suggestTenantId(id().trim()))}>
+              use "{suggestTenantId(id().trim())}"
+            </button>
+          </Show>
+        </div>
+      </Show>
       <Field id="t-name" label="Display name" value={name()} onInput={setName} placeholder="Acme Inc." />
       <Field id="t-email" label="Contact email" type="email" value={email()} onInput={setEmail} placeholder="ops@acme.com" />
       <Field id="t-plan" label="Plan" value={plan()} onInput={setPlan} placeholder="free" />
@@ -175,7 +209,7 @@ function CreateTenantDialog(props) {
       </div>
       <div class="actions">
         <Button variant="ghost" onClick={props.onClose} disabled={busy()}>Cancel</Button>
-        <Button variant="primary" onClick={submit} disabled={busy() || !id().trim()}>{busy() ? "Creating…" : "Create tenant"}</Button>
+        <Button variant="primary" onClick={submit} disabled={busy() || !id().trim() || tenantIdIssue(id().trim()) !== null}>{busy() ? "Creating…" : "Create tenant"}</Button>
       </div>
     </Modal>
   )
