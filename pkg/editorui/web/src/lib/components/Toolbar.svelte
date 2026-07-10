@@ -163,6 +163,12 @@
 		Deploy
 	</button>
 
+	<!-- The sibling console (ADMIN-CONSOLE-S1): Studio designs the schema; the
+	     admin console manages tenants/users/data/files. Same platform, other face. -->
+	<a class="btn subtle console-link" href="/admin" target="_blank" rel="noopener" title="Admin console — tenants, users, data, files">
+		Console&nbsp;↗
+	</a>
+
 	<button class="btn subtle icon" onclick={() => ui.toggle()} title="Toggle theme" aria-label="Toggle theme">
 		{ui.theme === 'light' ? '☾' : '☀'}
 	</button>
@@ -324,6 +330,9 @@
 	}
 	.deploy {
 		margin-left: 2px;
+	}
+	.console-link {
+		text-decoration: none;
 	}
 	.icon {
 		font-size: 15px;

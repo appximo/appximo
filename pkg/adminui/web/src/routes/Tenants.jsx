@@ -5,6 +5,7 @@ import { Modal } from "../components/Modal"
 import { Button, Field, StatusBadge, toast } from "../components/ui"
 import { api, ApiError } from "../lib/api"
 import { logout } from "../lib/auth"
+import { setSelectedTenant, bumpTenants } from "../lib/tenantContext"
 import { registerCommands } from "../lib/commands"
 
 const DEFAULT_SCHEMA = JSON.stringify({
@@ -42,25 +43,33 @@ export function Tenants() {
     try {
       if (t.suspended) { await api.activateTenant(t.id); toast(`Activated ${t.id}`) }
       else { await api.suspendTenant(t.id); toast(`Suspended ${t.id}`) }
-      refetch()
+      refetch(); bumpTenants()
     } catch (ex) { toast(ex.message || "Operation failed", "err") }
   }
+
+  // Clicking a tenant's name enters it: sets the tenant context and opens its
+  // data — the app → tenant → data navigation (ADMIN-CONSOLE-S1).
+  const openTenant = (t) => { setSelectedTenant(t.id); navigate("/data") }
 
   const columns = [
     {
       accessorKey: "display_name",
       header: "Tenant",
-      size: 180,
-      cell: (c) => <span class="cell-id" title={c.row.original.id}>{c.getValue() || c.row.original.id}</span>,
+      size: 170,
+      cell: (c) => (
+        <button class="linklike cell-id" title={`Browse ${c.row.original.id}'s data`} onClick={() => openTenant(c.row.original)}>
+          {c.getValue() || c.row.original.id}
+        </button>
+      ),
     },
-    { accessorKey: "id", header: "ID", size: 250, cell: (c) => <span class="secondary">{c.getValue()}</span> },
+    { accessorKey: "id", header: "ID", size: 170, cell: (c) => <span class="secondary" title={c.getValue()}>{c.getValue()}</span> },
     {
       accessorKey: "suspended",
       header: "Status",
       size: 110,
       cell: (c) => <StatusBadge kind={c.getValue() ? "warn" : "ok"} okLabel="Active" warnLabel="Suspended" />,
     },
-    { accessorKey: "plan", header: "Plan", size: 100, cell: (c) => <span class="secondary">{c.getValue() || "—"}</span> },
+    { accessorKey: "plan", header: "Plan", size: 80, cell: (c) => <span class="secondary">{c.getValue() || "—"}</span> },
     {
       accessorKey: "resource_count", header: "Resources",
       size: 90,
@@ -68,13 +77,26 @@ export function Tenants() {
       cell: (c) => <span class="num">{c.getValue() ?? 0}</span>,
     },
     {
+      // pg_stat estimate — the same inventory `appitools tenant list` prints.
+      accessorKey: "data_rows", header: "Rows(~)",
+      size: 85,
+      meta: { align: "right" },
+      cell: (c) => <span class="num">{Number(c.getValue() || 0).toLocaleString("en-US")}</span>,
+    },
+    {
+      accessorKey: "user_count", header: "Users",
+      size: 70,
+      meta: { align: "right" },
+      cell: (c) => <span class="num">{Number(c.getValue() || 0).toLocaleString("en-US")}</span>,
+    },
+    {
       accessorKey: "created_at", header: "Created",
-      size: 130,
+      size: 110,
       cell: (c) => <span class="secondary">{fmtDate(c.getValue())}</span>,
     },
     {
       id: "actions", header: "",
-      size: 140,
+      size: 150,
       cell: (c) => {
         const t = c.row.original
         return (
@@ -106,8 +128,8 @@ export function Tenants() {
         emptyMessage={tenants.loading ? "Loading…" : "No tenants yet. Create the first one."}
       />
 
-      <CreateTenantDialog open={showCreate()} onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); refetch() }} navigate={navigate} />
-      <DeleteTenantDialog target={delTarget()} onClose={() => setDelTarget(null)} onDeleted={() => { setDelTarget(null); refetch() }} />
+      <CreateTenantDialog open={showCreate()} onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); refetch(); bumpTenants() }} navigate={navigate} />
+      <DeleteTenantDialog target={delTarget()} onClose={() => setDelTarget(null)} onDeleted={() => { setDelTarget(null); refetch(); bumpTenants() }} />
     </>
   )
 }

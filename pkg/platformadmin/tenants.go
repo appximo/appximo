@@ -20,8 +20,9 @@ import (
 var tenantIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{1,29}$`)
 
 // TenantInfo is the per-tenant summary returned by the tenant list. resource_count
-// is derived from the stored schema (free); user_count is filled only in the
-// single-tenant detail (a per-tenant query, not run for every row of a list).
+// is derived from the stored schema (free); data_rows and user_count are pg_stat
+// n_live_tup ESTIMATES (the same inventory `appitools tenant list` prints) — free
+// at list time, never a per-tenant exact COUNT.
 type TenantInfo struct {
 	ID            string    `json:"id"`
 	DisplayName   string    `json:"display_name"`
@@ -30,22 +31,32 @@ type TenantInfo struct {
 	Suspended     bool      `json:"suspended"`
 	CreatedAt     time.Time `json:"created_at"`
 	ResourceCount int       `json:"resource_count"`
+	DataRows      int64     `json:"data_rows"`
+	UserCount     int64     `json:"user_count"`
 }
 
-// TenantDetail is a single tenant with the extra (slightly costlier) counts.
+// TenantDetail is a single tenant; its UserCount is exact (one per-tenant query),
+// unlike the list's estimate.
 type TenantDetail struct {
 	TenantInfo
-	UserCount int `json:"user_count"`
 }
 
 // ListTenants returns every registered tenant (newest first) with cheap metadata.
+// Row/user counts come from pg_stat_user_tables estimates (auth_ tables split out
+// of data_rows), exactly like the `appitools tenant list` CLI inventory.
 func (s *Service) ListTenants(ctx context.Context) ([]TenantInfo, error) {
 	if err := s.ensureSuspendCol(ctx); err != nil {
 		return nil, fmt.Errorf("platformadmin: ensure suspended column: %w", err)
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, display_name, email, plan, suspended, created_at, json_schema
-		FROM public.tenants ORDER BY created_at DESC`)
+		SELECT t.id, t.display_name, t.email, t.plan, t.suspended, t.created_at, t.json_schema,
+		       COALESCE((SELECT SUM(s.n_live_tup) FROM pg_stat_user_tables s
+		           WHERE s.schemaname = 'tenant_'||t.id
+		             AND s.relname NOT LIKE 'auth\_%' AND s.relname <> 'files'), 0) AS data_rows,
+		       COALESCE((SELECT SUM(s.n_live_tup) FROM pg_stat_user_tables s
+		           WHERE s.schemaname = 'tenant_'||t.id
+		             AND s.relname = 'auth_users'), 0)                              AS user_count
+		FROM public.tenants t ORDER BY t.created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("platformadmin: list tenants: %w", err)
 	}
@@ -54,7 +65,7 @@ func (s *Service) ListTenants(ctx context.Context) ([]TenantInfo, error) {
 	for rows.Next() {
 		var ti TenantInfo
 		var raw []byte
-		if err := rows.Scan(&ti.ID, &ti.DisplayName, &ti.Email, &ti.Plan, &ti.Suspended, &ti.CreatedAt, &raw); err != nil {
+		if err := rows.Scan(&ti.ID, &ti.DisplayName, &ti.Email, &ti.Plan, &ti.Suspended, &ti.CreatedAt, &raw, &ti.DataRows, &ti.UserCount); err != nil {
 			return nil, fmt.Errorf("platformadmin: scan tenant: %w", err)
 		}
 		ti.ResourceCount = countResources(raw)
@@ -83,7 +94,7 @@ func (s *Service) GetTenant(ctx context.Context, id string) (TenantDetail, error
 	ti.ResourceCount = countResources(raw)
 	detail := TenantDetail{TenantInfo: ti}
 	if n, cerr := s.users.CountUsers(ctx, id); cerr == nil {
-		detail.UserCount = n
+		detail.UserCount = int64(n) // exact, replacing the list's estimate
 	}
 	return detail, nil
 }

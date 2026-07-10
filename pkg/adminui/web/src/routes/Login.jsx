@@ -19,7 +19,7 @@ export function Login() {
     try {
       const r = await login(email().trim(), password())
       if (r.mfaRequired) { setMfaToken(r.mfaToken); setStep("mfa") }
-      else navigate("/tenants")
+      else navigate("/")
     } catch (ex) {
       // Generic message, consistent with the backend's anti-enumeration response.
       setErr(ex.status === 401 ? "Invalid credentials." : "Sign-in failed. Try again.")
@@ -31,7 +31,7 @@ export function Login() {
     setErr(""); setBusy(true)
     try {
       await completeMfa(mfaToken(), code().trim())
-      navigate("/tenants")
+      navigate("/")
     } catch (ex) {
       setErr(ex.status === 401 ? "Invalid code." : "Verification failed.")
     } finally { setBusy(false) }

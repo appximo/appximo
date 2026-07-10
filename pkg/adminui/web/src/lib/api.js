@@ -63,4 +63,28 @@ export const api = {
     const qs = params ? new URLSearchParams(params).toString() : ""
     return request("GET", `/admin/observability/tenants/${encodeURIComponent(tid)}${qs ? "?" + qs : ""}`)
   },
+  // files (per tenant; UI-F5-S1 admin routes — same Store as the tenant API)
+  listFiles: (tid, page = 1) => request("GET", `/admin/tenants/${encodeURIComponent(tid)}/files?page=${page}&per_page=50`),
+  fileURL: (tid, fid) => request("GET", `/admin/tenants/${encodeURIComponent(tid)}/files/${encodeURIComponent(fid)}/url`),
+  deleteFile: (tid, fid) => request("DELETE", `/admin/tenants/${encodeURIComponent(tid)}/files/${encodeURIComponent(fid)}`),
+  uploadFile: async (tid, file) => {
+    const form = new FormData()
+    form.append("file", file)
+    const headers = {}
+    const t = getToken()
+    if (t) headers["Authorization"] = "Bearer " + t
+    const res = await fetch(`/admin/tenants/${encodeURIComponent(tid)}/files`, { method: "POST", headers, body: form })
+    let data = null
+    const text = await res.text()
+    if (text) { try { data = JSON.parse(text) } catch { data = { raw: text } } }
+    if (!res.ok) throw new ApiError(res.status, data)
+    return data
+  },
+  // schema version history (VERSION-S1; read-only here — rollback lives in Studio)
+  schemaHistory: (tid, page = 1) => request("GET", `/admin/tenants/${encodeURIComponent(tid)}/schema/history?page=${page}&per_page=50`),
+  schemaVersion: (tid, v) => request("GET", `/admin/tenants/${encodeURIComponent(tid)}/schema/history/${v}`),
+  // engine surface (for the Overview): what the running engine serves + how a
+  // deploy activates; /health is unauthenticated (version + fleet marker).
+  servedResources: () => request("GET", "/admin/served-resources"),
+  health: () => request("GET", "/health", { auth: false }),
 }

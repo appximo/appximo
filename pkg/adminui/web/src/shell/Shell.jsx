@@ -1,18 +1,30 @@
-import { For, Show, createMemo } from "solid-js"
+import { For, Show, createMemo, createResource } from "solid-js"
 import { A, useNavigate, useLocation } from "@solidjs/router"
 import { ThemeToggle, Button } from "../components/ui"
 import { CommandPalette } from "../components/CommandPalette"
 import { TenantSelect } from "../components/TenantSelect"
 import { admin, logout } from "../lib/auth"
+import { api } from "../lib/api"
 import { pageCommands } from "../lib/commands"
 
+// The console's taxonomy (ADMIN-CONSOLE-S1): Overview (the board) → App (the
+// structure: Studio, docs, fleet — the OTHER faces, linked, not rebuilt) →
+// Tenants (the instances) → the selected tenant's Data/Users/Files/History.
 const NAV = [
   {
-    label: "Management",
+    label: "Platform",
     items: [
+      { href: "/", title: "Overview", icon: "◈", enabled: true, end: true },
       { href: "/tenants", title: "Tenants", icon: "▦", enabled: true },
-      { href: "/users", title: "Users", icon: "◑", enabled: true },
+    ],
+  },
+  {
+    label: "Tenant",
+    items: [
       { href: "/data", title: "Data", icon: "≣", enabled: true },
+      { href: "/users", title: "Users", icon: "◑", enabled: true },
+      { href: "/files", title: "Files", icon: "▤", enabled: true },
+      { href: "/history", title: "History", icon: "↺", enabled: true },
     ],
   },
   {
@@ -24,14 +36,33 @@ const NAV = [
   },
 ]
 
+// The sibling consoles — same platform, other faces. Studio designs/deploys the
+// schema; /docs is the served API contract; /fleet exists only under fleet serve.
+const CONSOLES = [
+  { href: "/editor", title: "Studio (schema)", icon: "✎" },
+  { href: "/docs", title: "API docs", icon: "❐" },
+]
+
 export function Shell(props) {
   const navigate = useNavigate()
   const location = useLocation()
+
+  // Fleet marker: /health carries fleet_apps only in the in-process fleet
+  // runtime — that's when a /fleet console exists to link to.
+  const [health] = createResource(() => api.health().catch(() => null))
+  const consoles = () => {
+    const list = [...CONSOLES]
+    if ((health()?.fleet_apps ?? 0) > 0) list.push({ href: "/fleet", title: "Fleet console", icon: "⚑" })
+    return list
+  }
 
   const baseCommands = createMemo(() => {
     const cmds = []
     for (const g of NAV) for (const it of g.items) {
       if (it.enabled) cmds.push({ id: "nav:" + it.href, label: "Go to " + it.title, hint: "Navigate", run: () => navigate(it.href) })
+    }
+    for (const c of consoles()) {
+      cmds.push({ id: "console:" + c.href, label: "Open " + c.title, hint: "Consoles", run: () => window.open(c.href, "_blank") })
     }
     cmds.push({ id: "theme", label: "Toggle theme", hint: "Appearance", run: () => {
       const cur = document.documentElement.getAttribute("data-theme") || "light"
@@ -56,13 +87,21 @@ export function Shell(props) {
               <Show when={it.enabled} fallback={
                 <span class="navitem" aria-disabled="true" title="Coming soon"><span aria-hidden="true">{it.icon}</span>{it.title}<span class="spacer" /><span class="muted" style={{ "font-size": "10px" }}>soon</span></span>
               }>
-                <A href={it.href} class="navitem" activeClass="active" end={false}>
+                <A href={it.href} class="navitem" activeClass="active" end={it.end ?? false}>
                   <span aria-hidden="true">{it.icon}</span>{it.title}
                 </A>
               </Show>
             )}</For>
           </nav>
         )}</For>
+        <nav class="navgroup">
+          <div class="label">Consoles</div>
+          <For each={consoles()}>{(c) => (
+            <a href={c.href} target="_blank" rel="noopener" class="navitem" title="Opens in a new tab">
+              <span aria-hidden="true">{c.icon}</span>{c.title}<span class="spacer" /><span class="muted" aria-hidden="true">↗</span>
+            </a>
+          )}</For>
+        </nav>
         <div class="spacer" />
         <div class="muted" style={{ "font-size": "11px", padding: "8px" }}>Press <kbd>⌘K</kbd> for commands</div>
       </aside>
@@ -90,6 +129,8 @@ function titleFor(path) {
   if (path.startsWith("/tenants")) return "Tenants"
   if (path.startsWith("/users")) return "Users"
   if (path.startsWith("/data")) return "Data"
+  if (path.startsWith("/files")) return "Files"
+  if (path.startsWith("/history")) return "History"
   if (path.startsWith("/observability")) return "Observability"
-  return "Admin"
+  return "Overview"
 }

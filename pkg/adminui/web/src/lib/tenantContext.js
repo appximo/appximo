@@ -15,3 +15,13 @@ export function setSelectedTenant(id) {
   try { id ? localStorage.setItem(KEY, id) : localStorage.removeItem(KEY) } catch { /* ignore */ }
   setSelectedTenantSig(id)
 }
+
+// tenantsVersion — bumped by any tenant mutation (create/delete/suspend) so the
+// topbar TenantSelect refetches its list. Without it, selecting a JUST-created
+// tenant got reverted: the picker's stale list didn't contain it yet, and its
+// "chosen tenant no longer exists" guard reset the selection.
+// Starts at 1: a Solid resource skips falsy sources, and 0 would suppress the
+// initial fetch.
+const [tenantsVersion, setTenantsVersion] = createSignal(1)
+export { tenantsVersion }
+export function bumpTenants() { setTenantsVersion((v) => v + 1) }

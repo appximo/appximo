@@ -2,9 +2,12 @@ import { Show, lazy } from "solid-js"
 import { HashRouter, Route, Navigate } from "@solidjs/router"
 import { Shell } from "./shell/Shell"
 import { Login } from "./routes/Login"
+import { Overview } from "./routes/Overview"
 import { Tenants } from "./routes/Tenants"
 import { Users } from "./routes/Users"
 import { Data } from "./routes/Data"
+import { Files } from "./routes/Files"
+import { History } from "./routes/History"
 // Observability pulls in ECharts — lazy-load it so the charting bundle ships in its
 // own chunk, fetched only when the panel is opened (the rest of the SPA stays light).
 const Observability = lazy(() => import("./routes/Observability").then((m) => ({ default: m.Observability })))
@@ -30,13 +33,15 @@ function Layout(props) {
 export default function App() {
   return (
     <HashRouter root={Layout}>
-      <Route path="/" component={() => <Navigate href="/tenants" />} />
-      <Route path="/login" component={() => <Navigate href="/tenants" />} />
+      <Route path="/" component={Overview} />
+      <Route path="/login" component={() => <Navigate href="/" />} />
       <Route path="/tenants" component={Tenants} />
       <Route path="/users" component={Users} />
       <Route path="/data" component={Data} />
+      <Route path="/files" component={Files} />
+      <Route path="/history" component={History} />
       <Route path="/observability" component={Observability} />
-      <Route path="*" component={() => <Navigate href="/tenants" />} />
+      <Route path="*" component={() => <Navigate href="/" />} />
     </HashRouter>
   )
 }

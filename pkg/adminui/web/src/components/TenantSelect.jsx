@@ -1,13 +1,14 @@
 import { createResource, For, Show, createEffect } from "solid-js"
 import { api } from "../lib/api"
-import { selectedTenant, setSelectedTenant }
+import { selectedTenant, setSelectedTenant, tenantsVersion }
   from "../lib/tenantContext"
 
 // TenantSelect — the global tenant context picker in the topbar. The super-admin
 // chooses which tenant Users/Data operate on; the choice is reflected here and
-// persisted. Fetches the tenant list once.
+// persisted. The list re-fetches whenever a tenant is created/deleted (the
+// tenantsVersion signal), so a just-created tenant is selectable immediately.
 export function TenantSelect() {
-  const [tenants] = createResource(async () => {
+  const [tenants] = createResource(tenantsVersion, async () => {
     try { return (await api.listTenants()).tenants || [] } catch { return [] }
   })
 
