@@ -123,16 +123,41 @@ class DeployStore {
 		const served = new Set(this.servedResources);
 		return editor.entities.map((e) => e.name).filter((n) => !served.has(n));
 	}
-	/** Resources in the deploy that the engine already serves — changes to these
-	 *  (columns, validations, RBAC…) take effect live, no restart. */
+	/** Resources in the deploy the engine already serves. Their DB columns are
+	 *  read/write-live after a migration, but everything DERIVED from the schema
+	 *  definition (RBAC, validation, filters, GraphQL, /docs) is boot-compiled and
+	 *  needs an activation (hot-swap / restart) — see hasDefinitionChange. */
 	get liveResources(): string[] {
 		if (!this.servedResources) return editor.entities.map((e) => e.name);
 		const served = new Set(this.servedResources);
 		return editor.entities.map((e) => e.name).filter((n) => served.has(n));
 	}
 
-	/** Fetch the engine's served-resource set once (non-fatal: on failure the restart
-	 *  hint simply stays hidden — never blocks a deploy). */
+	/** The schema the engine currently SERVES (its boot/compiled definition),
+	 *  fetched from /editor/current-schema. null = unknown (never guess). */
+	servedSchema = $state<APISchema | null>(null);
+
+	/** True when the canvas differs from the served (compiled) schema in ways a
+	 *  migration does NOT carry — RBAC, validation rules, hooks, enums, defaults,
+	 *  and also new/changed resources' derived surface. These are compiled at boot,
+	 *  so they take effect only on an activation (hot-swap / restart), NOT from the
+	 *  per-tenant table migration. This is why an RBAC-only edit shows an empty
+	 *  migration plan yet still has something to deploy. false when the served
+	 *  schema is unknown (the engine stays the authority — never block a deploy). */
+	get hasDefinitionChange(): boolean {
+		if (!this.servedSchema) return false;
+		return canonical(editor.toSchema()) !== canonical(this.servedSchema);
+	}
+
+	/** Anything to activate on the engine: new resources OR a compiled-definition
+	 *  change (RBAC/validation/hooks/…). Drives the "Activate (hot-swap)/Restart"
+	 *  offer independently of the structural migration plan. */
+	get needsActivation(): boolean {
+		return this.newResources.length > 0 || this.hasDefinitionChange;
+	}
+
+	/** Fetch the engine's served-resource set AND its served schema once (non-fatal:
+	 *  on failure the hints simply stay hidden — never blocks a deploy). */
 	async loadServedResources() {
 		if (!this.token || this.servedResources !== null) return;
 		try {
@@ -142,6 +167,14 @@ class DeployStore {
 			this.activation = res.activation === 'hot_swap' ? 'hot_swap' : 'restart';
 		} catch {
 			/* non-fatal — the hint is advisory, the engine remains the authority */
+		}
+		// The served schema (this app's compiled definition) — the authority for
+		// detecting RBAC/validation/hook changes the migration diff cannot see.
+		try {
+			const r = await fetch('/editor/current-schema', { cache: 'no-store' });
+			if (r.ok) this.servedSchema = (await r.json()) as APISchema;
+		} catch {
+			/* non-fatal */
 		}
 	}
 
@@ -213,6 +246,7 @@ class DeployStore {
 		for (let i = 0; i < 90; i++) {
 			if (await this.pollReady()) {
 				this.servedResources = null;
+				this.servedSchema = null;
 				this.selfRestartAvailable = false;
 				await this.loadServedResources();
 				const served = new Set<string>(this.servedResources ?? []);
@@ -485,6 +519,7 @@ class DeployStore {
 		this.restartError = null;
 		// The engine may have restarted since — re-learn what it serves.
 		this.servedResources = null;
+		this.servedSchema = null;
 		this.selfRestartAvailable = false;
 		this.step = 'target';
 		void this.refreshTenants();
@@ -492,3 +527,23 @@ class DeployStore {
 }
 
 export const deploy = new DeployStore();
+
+/** Stable JSON of a value with object keys sorted recursively — so two schemas
+ *  that differ only in key order / whitespace compare equal, and a real change
+ *  (a removed RBAC action, a new field) does not. */
+function canonical(v: unknown): string {
+	const sort = (x: unknown): unknown => {
+		if (Array.isArray(x)) return x.map(sort);
+		if (x && typeof x === 'object') {
+			const o = x as Record<string, unknown>;
+			return Object.keys(o)
+				.sort()
+				.reduce<Record<string, unknown>>((acc, k) => {
+					acc[k] = sort(o[k]);
+					return acc;
+				}, {});
+		}
+		return x;
+	};
+	return JSON.stringify(sort(v));
+}

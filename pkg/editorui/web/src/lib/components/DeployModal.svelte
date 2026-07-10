@@ -6,6 +6,11 @@
 	const eps = $derived(deploy.result ? deploy.endpoints(deploy.result.tenantId) : null);
 	const planEmpty = $derived(deploy.preview?.empty === true);
 
+	// Result-step activation: new resources OR a compiled-definition change
+	// (RBAC/validation/hooks) both need a hot-swap/restart to go live.
+	const hasNewRes = $derived((deploy.result?.restartResources?.length ?? 0) > 0);
+	const showActivation = $derived(hasNewRes || deploy.hasDefinitionChange);
+
 	// Live tenant-id validation (the UX mirror of the backend rule): the issue
 	// message, the one-click fix, and whether Continue may proceed at all.
 	const tidIssue = $derived(tenantIdIssue(deploy.newId.trim()));
@@ -232,8 +237,30 @@
 							<div>resources will be created in a new isolated tenant
 								<b class="mono">{deploy.newId}</b>. Nothing to migrate — it's all fresh.</div>
 						</div>
-					{:else if planEmpty}
+					{:else if planEmpty && !deploy.hasDefinitionChange}
 						<div class="banner ok"><div class="banner-msg">No changes — the tenant is already up to date.</div></div>
+					{:else if planEmpty && deploy.hasDefinitionChange}
+						<div class="banner ok">
+							<div class="banner-msg">No table changes — the database structure is already up to date.</div>
+						</div>
+						<div class="plan-sec warn-sec">
+							<div class="plan-h warn-h">
+								{deploy.activation === 'hot_swap' ? '⟳ Definition change — activates with a hot-swap' : '⟳ Definition change — needs an engine restart'}
+							</div>
+							<p class="danger-note">
+								You changed the schema <b>definition</b> — RBAC / validation / hooks. The engine
+								compiles those from its <b>boot schema</b> at start, so the migration diff is empty,
+								but the change is <b>not live</b> until the engine recompiles this app.
+							</p>
+							<p class="hint-sm">
+								{#if deploy.activation === 'hot_swap'}
+									Deploying records it, then one click <b>hot-swaps this app in place</b> — no downtime,
+									no process restart, the other apps on this server untouched.
+								{:else}
+									Deploying records it; then restart the engine to enforce it on the live API.
+								{/if}
+							</p>
+						</div>
 					{:else}
 						{#if deploy.preview?.apply && deploy.preview.apply.length > 0}
 							<div class="plan-sec">
@@ -302,7 +329,9 @@
 								is <b>unavailable</b> (a <b>403</b> or <b>404</b>) until the engine restarts with a
 								schema that includes {deploy.newResources.length === 1 ? 'it' : 'them'}.
 								{#if deploy.liveResources.length > 0}
-									Changes to <span class="mono">{deploy.liveResources.join(', ')}</span> are served immediately.
+									For <span class="mono">{deploy.liveResources.join(', ')}</span>, raw column read/write is
+									live after the migration — but RBAC, validation, filters, GraphQL and /docs recompile
+									on the same activation.
 								{/if}
 							</p>
 							<p class="hint-sm">
@@ -321,13 +350,15 @@
 
 					<div class="m-actions">
 						<button class="btn subtle" onclick={() => (deploy.step = 'target')}>Back</button>
-						<button class="btn primary" onclick={() => deploy.confirmDeploy()} disabled={deploy.busy || (deploy.mode === 'existing' && planEmpty)}>
+						<button class="btn primary" onclick={() => deploy.confirmDeploy()} disabled={deploy.busy || (deploy.mode === 'existing' && planEmpty && !deploy.hasDefinitionChange)}>
 							{#if deploy.busy}
 								Deploying…
 							{:else if deploy.mode === 'new'}
 								Deploy new app
 							{:else if deploy.approvedKeys.length > 0}
 								Apply + drop {deploy.approvedKeys.length}
+							{:else if planEmpty && deploy.hasDefinitionChange}
+								Deploy the definition change
 							{:else}
 								Apply safe changes
 							{/if}
@@ -342,10 +373,14 @@
 								<b class="mono">{deploy.result.tenantId}</b> is {deploy.result.created ? 'live' : 'updated'}
 							</div>
 							<div class="rh-sub">
-								{#if deploy.result.restartResources && deploy.result.restartResources.length > 0}
+								{#if hasNewRes}
 									{deploy.activation === 'hot_swap'
 										? 'The existing resources are live; activate the new ones below (hot-swap).'
 										: 'The existing resources are live; the new ones need an engine restart (below).'}
+								{:else if deploy.hasDefinitionChange}
+									{deploy.activation === 'hot_swap'
+										? 'The migration is recorded; activate the definition change (RBAC / validation / hooks) below.'
+										: 'The migration is recorded; the definition change needs an engine restart (below).'}
 								{:else if deploy.result.created}
 									Your diagram is now a running REST + GraphQL API.
 								{:else}
@@ -355,17 +390,28 @@
 						</div>
 					</div>
 
-					{#if deploy.result.restartResources && deploy.result.restartResources.length > 0}
+					{#if showActivation}
 						<div class="banner warn">
 							<div class="banner-msg">
-								{deploy.activation === 'hot_swap'
-									? 'Provisioned — activate to serve: ' + deploy.result.restartResources.join(', ')
-									: 'Provisioned — needs an engine restart to be served: ' + deploy.result.restartResources.join(', ')}
+								{#if hasNewRes}
+									{deploy.activation === 'hot_swap'
+										? 'Provisioned — activate to serve: ' + (deploy.result.restartResources ?? []).join(', ')
+										: 'Provisioned — needs an engine restart to be served: ' + (deploy.result.restartResources ?? []).join(', ')}
+								{:else}
+									{deploy.activation === 'hot_swap'
+										? 'Definition change (RBAC / validation / hooks) — activate to enforce it on the live API.'
+										: 'Definition change (RBAC / validation / hooks) — needs an engine restart to take effect.'}
+								{/if}
 							</div>
 							<div class="banner-sub">
-								Their tables exist, but the REST / GraphQL API is unavailable (<b>403</b>/<b>404</b>)
-								until the engine restarts with a schema that includes them (routes, GraphQL and RBAC
-								are boot-compiled).
+								{#if hasNewRes}
+									Their tables exist, but the REST / GraphQL API is unavailable (<b>403</b>/<b>404</b>)
+									until the engine restarts with a schema that includes them (routes, GraphQL and RBAC
+									are boot-compiled).
+								{:else}
+									The schema is recorded, but RBAC / validation / hooks are compiled from the boot
+									schema, so the change is enforced only after the engine recompiles this app.
+								{/if}
 							</div>
 							{#if deploy.selfRestartAvailable}
 								{#if deploy.restartPhase === 'idle'}
