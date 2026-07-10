@@ -151,6 +151,15 @@ export const adminApi = {
 	listTenants: (token: string) =>
 		call<{ tenants: TenantInfo[] }>('GET', '/admin/tenants', { token }),
 
+	/** The tenant's users (email + role) — the Flows login assist picks a real
+	 *  user from here (the password is typed, never stored). */
+	listUsers: (token: string, id: string) =>
+		call<{ users: { id: string; email: string; role: string; suspended?: boolean }[] }>(
+			'GET',
+			`/admin/tenants/${encodeURIComponent(id)}/users`,
+			{ token }
+		),
+
 	/** Resource names the engine serves live (compiled from the boot --schema). A
 	 *  deployed resource absent here is provisioned but needs a restart to be served.
 	 *  self_restart reports whether POST /admin/engine/schema exists (UI-F4-S2). */
@@ -254,9 +263,22 @@ export const adminApi = {
 
 // ── flow tests (FLOWTEST-S1) — mirrors of pkg/flowtest ───────────────────────
 
+/** Ops mirror pkg/flowtest validOps (FLOWTEST-POWER-S1: the full vocabulary). */
+export type FlowAssertOp =
+	| 'exists'
+	| 'not_exists'
+	| 'eq'
+	| 'ne'
+	| 'contains'
+	| 'gt'
+	| 'gte'
+	| 'lt'
+	| 'lte'
+	| 'len';
+
 export interface FlowAssert {
 	path: string;
-	op: 'exists' | 'eq' | 'contains';
+	op: FlowAssertOp;
 	value?: string;
 }
 

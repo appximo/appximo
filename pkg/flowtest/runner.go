@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,7 +45,7 @@ type StepResult struct {
 	Status     int               `json:"status"`
 	Expected   int               `json:"expected"`
 	Failures   []string          `json:"failures,omitempty"`
-	BodySample string            `json:"body_sample,omitempty"` // first bytes of a failing response
+	BodySample string            `json:"body_sample,omitempty"` // the response body (capped ~2 KB) — every step, pass or fail
 	Captured   map[string]string `json:"captured,omitempty"`
 	DurationMS int64             `json:"duration_ms"`
 }
@@ -73,10 +74,18 @@ func (r *Runner) Run(ctx context.Context, tenantID string, flow *Flow, emit Emit
 	start := time.Now()
 	res := &FlowResult{Name: flow.Name, Pass: true, StepsTotal: len(flow.Steps)}
 
+	now := time.Now()
+	tag := strconv.FormatInt(now.UnixMicro(), 36)
+	if len(tag) > 8 {
+		tag = tag[len(tag)-8:]
+	}
 	vars := map[string]string{
 		// A unique run id for titles/uniques so re-running a flow never
 		// collides with its previous data (the acceptance RUN_ID pattern).
-		"run_id": fmt.Sprintf("%d", time.Now().UnixNano()),
+		"run_id": fmt.Sprintf("%d", now.UnixNano()),
+		// run_tag: the SHORT unique salt (8 base36 chars) — fits unique fields
+		// with a tight maxLength where the 19-digit run_id would overflow.
+		"run_tag": tag,
 	}
 	if flow.Role != "" {
 		if tok, err := auth.GenerateToken(auth.Claims{
@@ -180,26 +189,8 @@ func (r *Runner) runStep(ctx context.Context, tenantID string, idx int, st Step,
 	var doc any
 	docOK := json.Unmarshal(respBody, &doc) == nil
 	for _, a := range st.Expect.Asserts {
-		val, found := lookupPath(doc, a.Path)
-		switch a.Op {
-		case "exists":
-			if !docOK || !found {
-				sr.Failures = append(sr.Failures, fmt.Sprintf("assert %s exists: field not found", a.Path))
-			}
-		case "eq":
-			want := substitute(a.Value, vars)
-			if !docOK || !found {
-				sr.Failures = append(sr.Failures, fmt.Sprintf("assert %s == %q: field not found", a.Path, want))
-			} else if got := stringify(val); got != want {
-				sr.Failures = append(sr.Failures, fmt.Sprintf("assert %s: expected %q, got %q", a.Path, want, got))
-			}
-		case "contains":
-			want := substitute(a.Value, vars)
-			if !docOK || !found {
-				sr.Failures = append(sr.Failures, fmt.Sprintf("assert %s contains %q: field not found", a.Path, want))
-			} else if got := stringify(val); !strings.Contains(got, want) {
-				sr.Failures = append(sr.Failures, fmt.Sprintf("assert %s: expected to contain %q, got %q", a.Path, want, got))
-			}
+		if fail := evalAssert(a, doc, docOK, vars); fail != "" {
+			sr.Failures = append(sr.Failures, fail)
 		}
 	}
 
@@ -219,13 +210,96 @@ func (r *Runner) runStep(ctx context.Context, tenantID string, idx int, st Step,
 	}
 
 	sr.Pass = len(sr.Failures) == 0
-	if !sr.Pass {
-		sample := string(respBody)
-		if len(sample) > 300 {
-			sample = sample[:300] + "…"
-		}
-		sr.BodySample = sample
+	// The response travels with EVERY step (FLOWTEST-POWER-S1 — "see what came
+	// back", not just PASS/FAIL), capped so a 50-step persisted run stays lean.
+	sample := string(respBody)
+	if len(sample) > 2000 {
+		sample = sample[:2000] + "…"
 	}
+	sr.BodySample = sample
 	sr.DurationMS = time.Since(start).Milliseconds()
 	return sr
+}
+
+// evalAssert evaluates one assertion against the parsed response; "" = pass,
+// anything else is the actionable failure text (expected vs got, always).
+func evalAssert(a Assert, doc any, docOK bool, vars map[string]string) string {
+	val, found := lookupPath(doc, a.Path)
+	want := substitute(a.Value, vars)
+	switch a.Op {
+	case "exists":
+		if !docOK || !found {
+			return fmt.Sprintf("assert %s exists: field not found", a.Path)
+		}
+	case "not_exists":
+		if docOK && found {
+			return fmt.Sprintf("assert %s not_exists: field is present (value %q)", a.Path, stringify(val))
+		}
+	case "eq":
+		if !docOK || !found {
+			return fmt.Sprintf("assert %s == %q: field not found", a.Path, want)
+		}
+		if got := stringify(val); got != want {
+			return fmt.Sprintf("assert %s: expected %q, got %q", a.Path, want, got)
+		}
+	case "ne":
+		if !docOK || !found {
+			return fmt.Sprintf("assert %s != %q: field not found", a.Path, want)
+		}
+		if got := stringify(val); got == want {
+			return fmt.Sprintf("assert %s: expected anything but %q, got exactly that", a.Path, want)
+		}
+	case "contains":
+		if !docOK || !found {
+			return fmt.Sprintf("assert %s contains %q: field not found", a.Path, want)
+		}
+		if got := stringify(val); !strings.Contains(got, want) {
+			return fmt.Sprintf("assert %s: expected to contain %q, got %q", a.Path, want, got)
+		}
+	case "gt", "gte", "lt", "lte":
+		if !docOK || !found {
+			return fmt.Sprintf("assert %s %s %q: field not found", a.Path, a.Op, want)
+		}
+		got := stringify(val)
+		gotN, err1 := strconv.ParseFloat(got, 64)
+		wantN, err2 := strconv.ParseFloat(want, 64)
+		if err1 != nil || err2 != nil {
+			return fmt.Sprintf("assert %s %s %q: not numeric (got %q)", a.Path, a.Op, want, got)
+		}
+		ok := false
+		switch a.Op {
+		case "gt":
+			ok = gotN > wantN
+		case "gte":
+			ok = gotN >= wantN
+		case "lt":
+			ok = gotN < wantN
+		case "lte":
+			ok = gotN <= wantN
+		}
+		if !ok {
+			return fmt.Sprintf("assert %s: expected %s %s, got %s", a.Path, a.Op, want, got)
+		}
+	case "len":
+		if !docOK || !found {
+			return fmt.Sprintf("assert %s len %q: field not found", a.Path, want)
+		}
+		n := -1
+		switch x := val.(type) {
+		case []any:
+			n = len(x)
+		case string:
+			n = len(x)
+		default:
+			return fmt.Sprintf("assert %s len: value is not an array or string", a.Path)
+		}
+		wantN, err := strconv.Atoi(want)
+		if err != nil {
+			return fmt.Sprintf("assert %s len %q: expected length is not an integer", a.Path, want)
+		}
+		if n != wantN {
+			return fmt.Sprintf("assert %s: expected length %d, got %d", a.Path, wantN, n)
+		}
+	}
+	return ""
 }

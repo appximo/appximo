@@ -67,7 +67,17 @@ type Expect struct {
 }
 
 // Assert checks one field of the response JSON, addressed by dot-path.
-// Ops: "exists" | "eq" | "contains" (substring on the stringified value).
+// Ops (FLOWTEST-POWER-S1 — the full vocabulary, mirrored by the Studio
+// assertion controls):
+//   - "exists" / "not_exists" — the field is (not) present. not_exists is how a
+//     GraphQL step asserts success ("errors" not_exists — GraphQL is always 200).
+//   - "eq" / "ne" — the stringified value equals / differs from Value
+//     ({{var}} substitution applies to Value, so a response field can be
+//     compared against a captured variable).
+//   - "contains" — substring on the stringified value.
+//   - "gt" / "gte" / "lt" / "lte" — numeric comparison (both sides must parse
+//     as numbers; a non-numeric side is a clear failure, never a silent pass).
+//   - "len" — the field is an array (or string) whose length equals Value.
 type Assert struct {
 	Path  string `json:"path"`
 	Op    string `json:"op"`
@@ -76,8 +86,18 @@ type Assert struct {
 
 var (
 	validMethods = map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
-	validOps     = map[string]bool{"exists": true, "eq": true, "contains": true}
-	varRe        = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}`)
+	validOps     = map[string]bool{
+		"exists": true, "not_exists": true,
+		"eq": true, "ne": true, "contains": true,
+		"gt": true, "gte": true, "lt": true, "lte": true,
+		"len": true,
+	}
+	// opsNeedingValue: ops where an empty Value can't mean anything ("eq"
+	// against "" is a legitimate check; "gt" against "" never is).
+	opsNeedingValue = map[string]bool{
+		"gt": true, "gte": true, "lt": true, "lte": true, "len": true,
+	}
+	varRe = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}`)
 )
 
 // Validate rejects a malformed flow with an actionable error (the same
@@ -109,10 +129,13 @@ func (f *Flow) Validate() error {
 		}
 		for _, a := range st.Expect.Asserts {
 			if !validOps[a.Op] {
-				return fmt.Errorf("%s: assert op %q is not one of exists/eq/contains", where, a.Op)
+				return fmt.Errorf("%s: assert op %q is not one of exists/not_exists/eq/ne/contains/gt/gte/lt/lte/len", where, a.Op)
 			}
 			if a.Path == "" {
 				return fmt.Errorf("%s: assert path is required", where)
+			}
+			if opsNeedingValue[a.Op] && a.Value == "" {
+				return fmt.Errorf("%s: assert op %q needs a value", where, a.Op)
 			}
 		}
 		for v, p := range st.Capture {

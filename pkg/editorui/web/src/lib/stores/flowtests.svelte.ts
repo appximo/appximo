@@ -10,6 +10,7 @@
 
 import {
 	flowApi,
+	adminApi,
 	streamFlowRun,
 	ApiError,
 	type FlowDef,
@@ -20,14 +21,25 @@ import {
 } from '../api/admin';
 import { deploy } from './deploy.svelte';
 import { editor } from './editor.svelte';
+import {
+	endpointCatalog,
+	buildBody,
+	gqlBody,
+	gqlQueryFromBody,
+	type EndpointOption
+} from '../flows/assist';
+import type { APISchema } from '../types/schema';
 
 export type FlowsView = 'list' | 'edit' | 'run' | 'history';
 
 /** An editable step: FlowStep plus captures as ROWS (a map keyed by the var
  *  name re-creates DOM rows while typing the name — values were lost mid-edit;
- *  live finding). Folded back into the map on save. */
+ *  live finding). Folded back into the map on save. gqlText is the GraphQL
+ *  document edited as plain text for a /graphql step — serialized into
+ *  body = {"query": …} on save (never persisted itself). */
 export interface EditStep extends FlowStep {
 	captureRows: { k: string; v: string }[];
+	gqlText?: string;
 }
 
 export interface LiveEvent {
@@ -71,10 +83,60 @@ class FlowTestsStore {
 	// delete confirmation
 	confirmTarget = $state<StoredFlow | null>(null);
 
+	// ── the engine's knowledge, brought into the Flow (FLOWTEST-POWER-S1) ────
+	/** The SERVED schema (/editor/current-schema) — flows run against the live
+	 *  router, so assistance derives from what the engine actually serves, not
+	 *  the possibly-unsaved canvas. null until fetched (fallback: canvas). */
+	served = $state<APISchema | null>(null);
+	/** The served OpenAPI spec (/openapi.json) — the per-endpoint doc panel. */
+	openapi = $state<Record<string, unknown> | null>(null);
+	/** The tenant's users (email+role) — the login-step assist. */
+	users = $state<{ email: string; role: string }[]>([]);
+
+	private knowledgeLoaded = false;
+
+	/** Fetch what the engine serves (both unauthenticated, same-origin). A miss
+	 *  degrades to canvas-based suggestions — never blocks the editor. */
+	async loadKnowledge() {
+		if (this.knowledgeLoaded) return;
+		this.knowledgeLoaded = true;
+		try {
+			const r = await fetch('/editor/current-schema', { cache: 'no-store' });
+			if (r.ok) this.served = (await r.json()) as APISchema;
+		} catch {
+			/* served schema unavailable — canvas fallback below */
+		}
+		try {
+			const r = await fetch('/openapi.json');
+			if (r.ok) this.openapi = (await r.json()) as Record<string, unknown>;
+		} catch {
+			/* doc panel simply absent */
+		}
+	}
+
+	/** The schema assistance operates on: the served one, else the canvas. */
+	get assistSchema(): APISchema | null {
+		if (this.served) return this.served;
+		// canvas fallback: rebuild the map form from the editor model
+		const resources: APISchema['resources'] = {};
+		for (const e of editor.entities) {
+			const fields: Record<string, import('../types/schema').FieldDef> = {};
+			for (const f of e.fields) fields[f.name] = f.def;
+			resources[e.name] = { fields };
+		}
+		if (Object.keys(resources).length === 0) return null;
+		return { $schema: '', version: '1', name: editor.schemaName, resources, rbac: editor.rbac };
+	}
+
+	get endpoints(): EndpointOption[] {
+		return endpointCatalog(this.assistSchema);
+	}
+
 	openFlows() {
 		this.open = true;
 		this.error = null;
 		this.view = 'list';
+		void this.loadKnowledge();
 		if (deploy.authed) void this.afterAuth();
 	}
 
@@ -84,6 +146,7 @@ class FlowTestsStore {
 		this.error = null;
 		this.tenantId = tenantId;
 		this.view = 'list';
+		void this.loadKnowledge();
 		if (deploy.authed) {
 			void this.afterAuth().then(() => this.runSuite());
 		}
@@ -126,23 +189,30 @@ class FlowTestsStore {
 		} finally {
 			this.busy = false;
 		}
+		// users feed the login assist — best-effort, never blocks the list
+		try {
+			const res = await adminApi.listUsers(deploy.token, this.tenantId);
+			this.users = (res.users ?? []).map((u) => ({ email: u.email, role: u.role }));
+		} catch {
+			this.users = [];
+		}
 	}
 
 	// ── editor ──────────────────────────────────────────────────────────────
 
-	/** Path suggestions from what Studio knows: the canvas entities' /api routes
-	 *  plus the engine's auth/files endpoints — the schema-aware assist. */
+	/** Path suggestions (datalist fallback for a hand-typed path) from the
+	 *  SERVED schema — what the flows actually run against. */
 	get pathSuggestions(): string[] {
-		const out = ['/auth/login', '/api/files'];
-		for (const e of editor.entities) {
-			out.push(`/api/${e.name}`);
+		const out = ['/auth/login', '/api/files', '/graphql'];
+		for (const name of Object.keys(this.assistSchema?.resources ?? {})) {
+			out.push(`/api/${name}`);
 		}
 		return out;
 	}
 
-	/** Role suggestions from the canvas RBAC. */
+	/** Role suggestions from the served RBAC (canvas fallback inside assistSchema). */
 	get roleSuggestions(): string[] {
-		return Object.keys(editor.rbac?.roles ?? {});
+		return Object.keys(this.assistSchema?.rbac?.roles ?? editor.rbac?.roles ?? {});
 	}
 
 	newFlow() {
@@ -168,7 +238,9 @@ class FlowTestsStore {
 					...st,
 					body: st.body ?? '',
 					expect: { status: st.expect.status, asserts: st.expect.asserts ?? [] },
-					captureRows: Object.entries(st.capture ?? {}).map(([k, v]) => ({ k, v }))
+					captureRows: Object.entries(st.capture ?? {}).map(([k, v]) => ({ k, v })),
+					// a /graphql step is edited as a plain GraphQL document
+					gqlText: st.path.startsWith('/graphql') ? (gqlQueryFromBody(st.body ?? '') ?? '') : undefined
 				}))
 			};
 			this.view = 'edit';
@@ -182,6 +254,82 @@ class FlowTestsStore {
 
 	addStep() {
 		this.draft.steps.push(emptyStep());
+	}
+
+	/** Apply a catalog endpoint to a step: method+path, a sensible expected
+	 *  status, and — for a create/replace — a schema-built example body. */
+	applyEndpoint(si: number, ep: EndpointOption) {
+		const st = this.draft.steps[si];
+		if (!st) return;
+		st.method = ep.method;
+		st.path = ep.path;
+		st.upload = ep.kind === 'upload' ? { filename: 'demo.pdf', content: '%PDF-1.4\nflow-test file {{run_id}}' } : undefined;
+		st.gqlText = undefined;
+		const res = ep.resource ? this.assistSchema?.resources?.[ep.resource] : undefined;
+		switch (ep.kind) {
+			case 'create':
+				st.expect.status = 201;
+				if (res) st.body = buildBody(res, false);
+				break;
+			case 'replace':
+				st.expect.status = 200;
+				if (res) st.body = buildBody(res, false);
+				break;
+			case 'patch':
+				st.expect.status = 200;
+				st.body = '{\n  \n}';
+				break;
+			case 'delete':
+				st.expect.status = 204;
+				st.body = '';
+				break;
+			case 'upload':
+				st.expect.status = 201;
+				st.body = '';
+				break;
+			case 'login':
+				st.expect.status = 200;
+				st.body = '{\n  "email": "",\n  "password": ""\n}';
+				break;
+			case 'signup':
+				st.expect.status = 201;
+				st.body = '{\n  "email": "flow-{{run_id}}@example.com",\n  "password": "a-strong-pass-123"\n}';
+				break;
+			case 'refresh':
+				st.expect.status = 200;
+				st.body = '';
+				break;
+			case 'graphql':
+				st.expect.status = 200;
+				st.gqlText = '';
+				st.body = '';
+				break;
+			default:
+				st.expect.status = 200;
+				st.body = '';
+		}
+		if (!st.name.trim()) st.name = ep.label.split(' — ')[0];
+	}
+
+	/** The assisted login step: a REAL POST /auth/login as a tenant user, with
+	 *  the token captured into {{token}} (later steps authenticate with it
+	 *  automatically — the runner sends it as the Bearer by default). */
+	addLoginStep(email?: string) {
+		const st = emptyStep();
+		st.name = 'login' + (email ? ` ${email}` : '');
+		st.method = 'POST';
+		st.path = '/auth/login';
+		st.body = JSON.stringify({ email: email ?? '', password: '' }, null, 2);
+		st.expect = { status: 200, asserts: [{ path: 'token', op: 'exists' }] };
+		st.captureRows = [{ k: 'token', v: 'token' }];
+		// a login belongs at the top — insert before the first step unless the
+		// draft is a single pristine empty step (then replace it)
+		const first = this.draft.steps[0];
+		if (this.draft.steps.length === 1 && first && !first.name && first.path === '/api/' && !first.body) {
+			this.draft.steps[0] = st;
+		} else {
+			this.draft.steps.unshift(st);
+		}
 	}
 	removeStep(i: number) {
 		this.draft.steps.splice(i, 1);
@@ -205,7 +353,10 @@ class FlowTestsStore {
 				path: st.path.trim(),
 				expect: { status: Number(st.expect.status) || 200 }
 			};
-			if (st.body?.trim()) out.body = st.body;
+			// a GraphQL step's body is the edited document, wrapped as {"query": …}
+			if (st.path.startsWith('/graphql') && st.gqlText !== undefined) {
+				if (st.gqlText.trim()) out.body = gqlBody(st.gqlText);
+			} else if (st.body?.trim()) out.body = st.body;
 			if (st.upload?.filename) out.upload = st.upload;
 			const asserts = (st.expect.asserts ?? []).filter((a) => a.path.trim());
 			if (asserts.length > 0) out.expect.asserts = asserts;

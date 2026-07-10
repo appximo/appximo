@@ -164,6 +164,63 @@ func TestRunnerRolePremintsTenantToken(t *testing.T) {
 	}
 }
 
+// The enriched assertion vocabulary (FLOWTEST-POWER-S1): not_exists (the
+// GraphQL success check), ne, numeric comparisons, array length.
+func TestRunnerEnrichedAsserts(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		fmt.Fprint(w, `{"data":[{"id":"a","total":42.5},{"id":"b","total":10}],"meta":{"total":2}}`)
+	})
+	flow := &Flow{Name: "asserts", Steps: []Step{
+		{Name: "rich", Method: "GET", Path: "/api/x", Expect: Expect{Status: 200, Asserts: []Assert{
+			{Path: "errors", Op: "not_exists"},
+			{Path: "data", Op: "len", Value: "2"},
+			{Path: "data.0.id", Op: "ne", Value: "b"},
+			{Path: "data.0.total", Op: "gt", Value: "42"},
+			{Path: "data.0.total", Op: "gte", Value: "42.5"},
+			{Path: "data.1.total", Op: "lt", Value: "11"},
+			{Path: "meta.total", Op: "lte", Value: "2"},
+		}}},
+	}}
+	if err := flow.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	res := (&Runner{Handler: h}).Run(context.Background(), "acme", flow, nil)
+	if !res.Pass {
+		t.Fatalf("all enriched asserts should pass: %+v", res.Steps[0].Failures)
+	}
+	// Every step now carries its response, pass or fail (the "see what came
+	// back" contract).
+	if res.Steps[0].BodySample == "" {
+		t.Fatal("a passing step must carry its response body")
+	}
+
+	failing := &Flow{Name: "asserts-fail", Steps: []Step{
+		{Name: "rich", Method: "GET", Path: "/api/x", Expect: Expect{Status: 200, Asserts: []Assert{
+			{Path: "meta", Op: "not_exists"},
+			{Path: "data", Op: "len", Value: "3"},
+			{Path: "data.0.id", Op: "gt", Value: "1"},
+		}}},
+	}}
+	res = (&Runner{Handler: h}).Run(context.Background(), "acme", failing, nil)
+	st := res.Steps[0]
+	if res.Pass || len(st.Failures) != 3 {
+		t.Fatalf("expected 3 failures: %+v", st.Failures)
+	}
+	for want, frag := range map[string]string{
+		"not_exists": "field is present", "len": "expected length 3, got 2", "gt": "not numeric",
+	} {
+		found := false
+		for _, f := range st.Failures {
+			if strings.Contains(f, frag) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s failure must be actionable (%q): %+v", want, frag, st.Failures)
+		}
+	}
+}
+
 func TestFlowValidateRejectsMalformed(t *testing.T) {
 	cases := []struct {
 		name string
@@ -175,7 +232,9 @@ func TestFlowValidateRejectsMalformed(t *testing.T) {
 		{"bad path", Flow{Name: "x", Steps: []Step{{Name: "s", Method: "GET", Path: "api/a", Expect: Expect{Status: 200}}}}, "start with /"},
 		{"bad status", Flow{Name: "x", Steps: []Step{{Name: "s", Method: "GET", Path: "/a", Expect: Expect{Status: 9}}}}, "status"},
 		{"bad op", Flow{Name: "x", Steps: []Step{{Name: "s", Method: "GET", Path: "/a",
-			Expect: Expect{Status: 200, Asserts: []Assert{{Path: "id", Op: "regex"}}}}}}, "exists/eq/contains"},
+			Expect: Expect{Status: 200, Asserts: []Assert{{Path: "id", Op: "regex"}}}}}}, "exists/not_exists/eq/ne/contains"},
+		{"gt needs value", Flow{Name: "x", Steps: []Step{{Name: "s", Method: "GET", Path: "/a",
+			Expect: Expect{Status: 200, Asserts: []Assert{{Path: "n", Op: "gt"}}}}}}, "needs a value"},
 	}
 	for _, tc := range cases {
 		err := tc.f.Validate()

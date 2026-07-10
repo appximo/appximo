@@ -2,6 +2,7 @@
 	import { deploy } from '../stores/deploy.svelte';
 	import { flowTests } from '../stores/flowtests.svelte';
 	import { fmtDate } from '../stores/files.svelte';
+	import FlowStepCard from './FlowStepCard.svelte';
 
 	function onKey(e: KeyboardEvent) {
 		if (e.key === 'Escape') {
@@ -19,29 +20,22 @@
 		if (deploy.authed) await flowTests.afterAuth();
 	}
 
-	// per-step raw text for asserts/captures editing (kept simple: rows)
-	function addAssert(si: number) {
-		flowTests.draft.steps[si].expect.asserts!.push({ path: '', op: 'exists', value: '' });
-	}
-	function removeAssert(si: number, ai: number) {
-		flowTests.draft.steps[si].expect.asserts!.splice(ai, 1);
-	}
-	// captures are edited as ROWS (see EditStep — a map keyed by the variable
-	// name re-created the row mid-typing and dropped values; live finding)
-	function addCapture(si: number) {
-		flowTests.draft.steps[si].captureRows.push({ k: '', v: '' });
-	}
-	function removeCapture(si: number, ci: number) {
-		flowTests.draft.steps[si].captureRows.splice(ci, 1);
+	/** The assisted login step: pick a real tenant user (or blank) — the store
+	 *  builds the POST /auth/login step with the {{token}} capture wired. */
+	function addLoginFrom(e: Event) {
+		const sel = e.currentTarget as HTMLSelectElement;
+		if (sel.value === '') return;
+		flowTests.addLoginStep(sel.value === '·blank·' ? undefined : sel.value);
+		sel.value = '';
 	}
 
-	function toggleUpload(si: number) {
-		const st = flowTests.draft.steps[si];
-		if (st.upload) st.upload = undefined;
-		else {
-			st.upload = { filename: 'formula.pdf', content: '%PDF-1.4\nflow-test file {{run_id}}' };
-			st.method = 'POST';
-			if (!st.path.startsWith('/api/files')) st.path = '/api/files';
+	/** Pretty-print a step's response for the run log (raw when not JSON). */
+	function fmtResponse(s: string | undefined): string {
+		if (!s) return '';
+		try {
+			return JSON.stringify(JSON.parse(s), null, 2);
+		} catch {
+			return s;
 		}
 	}
 
@@ -186,67 +180,22 @@
 								</div>
 							</div>
 
-							{#each flowTests.draft.steps as st, si (si)}
-								<div class="step">
-									<div class="step-head">
-										<span class="step-n">step {si + 1}</span>
-										<input class="field-input step-name" placeholder="name (e.g. login optometra)" bind:value={st.name} />
-										<button class="btn subtle xs" title="move up" onclick={() => flowTests.moveStep(si, -1)} disabled={si === 0}>↑</button>
-										<button class="btn subtle xs" title="move down" onclick={() => flowTests.moveStep(si, 1)} disabled={si === flowTests.draft.steps.length - 1}>↓</button>
-										<button class="btn subtle xs danger-link" onclick={() => flowTests.removeStep(si)} disabled={flowTests.draft.steps.length === 1}>remove</button>
-									</div>
-									<div class="frow">
-										<select class="field-input method-sel" bind:value={st.method}>
-											{#each ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as m}<option>{m}</option>{/each}
-										</select>
-										<input class="field-input grow mono" list="fl-paths" placeholder="/api/citas o /api/citas/{'{{cita_id}}'}" bind:value={st.path} />
-										<datalist id="fl-paths">
-											{#each flowTests.pathSuggestions as p}<option value={p}></option>{/each}
-										</datalist>
-										<label class="chk"><input type="checkbox" checked={!!st.upload} onchange={() => toggleUpload(si)} /> file upload</label>
-									</div>
-									{#if st.upload}
-										<div class="frow">
-											<input class="field-input mono" placeholder="filename.pdf" bind:value={st.upload.filename} />
-											<input class="field-input grow mono" placeholder="inline content" bind:value={st.upload.content} />
-										</div>
-									{:else if st.method !== 'GET' && st.method !== 'DELETE'}
-										<textarea class="field-input mono body-in" rows="2" placeholder={'{"motivo":"control-{{run_id}}"}'} bind:value={st.body}></textarea>
-									{/if}
-									<div class="frow">
-										<label class="lbl inline" for={'fl-status-' + si}>expect status</label>
-										<input id={'fl-status-' + si} class="field-input status-in num" type="number" bind:value={st.expect.status} />
-										<div class="spacer"></div>
-										<button class="btn subtle xs" onclick={() => addAssert(si)}>+ assert</button>
-										<button class="btn subtle xs" onclick={() => addCapture(si)}>+ capture</button>
-									</div>
-									{#each st.expect.asserts ?? [] as a, ai (ai)}
-										<div class="frow sub">
-											<span class="tag">assert</span>
-											<input class="field-input mono grow" placeholder="path (e.g. data.0.nombre or id)" bind:value={a.path} />
-											<select class="field-input op-sel" bind:value={a.op}>
-												<option>exists</option><option>eq</option><option>contains</option>
-											</select>
-											{#if a.op !== 'exists'}
-												<input class="field-input mono grow" placeholder="value (vars ok: {'{{cita_id}}'})" bind:value={a.value} />
-											{/if}
-											<button class="btn subtle xs danger-link" onclick={() => removeAssert(si, ai)}>✕</button>
-										</div>
-									{/each}
-									{#each st.captureRows as row, ci (ci)}
-										<div class="frow sub">
-											<span class="tag cap">capture</span>
-											<input class="field-input mono" placeholder="variable" bind:value={row.k} />
-											<span class="dim">←</span>
-											<input class="field-input mono grow" placeholder="response path (e.g. id, token)" bind:value={row.v} />
-											<button class="btn subtle xs danger-link" onclick={() => removeCapture(si, ci)}>✕</button>
-										</div>
-									{/each}
-								</div>
+							{#each flowTests.draft.steps as _, si (si)}
+								<FlowStepCard {si} />
 							{/each}
+							<datalist id="fl-paths">
+								{#each flowTests.pathSuggestions as p}<option value={p}></option>{/each}
+							</datalist>
 
 							<div class="frow">
 								<button class="btn" onclick={() => flowTests.addStep()}>+ Step</button>
+								<select class="field-input login-sel" onchange={addLoginFrom} title="Insert an assisted login step at the top: POST /auth/login as a real tenant user, with the token captured into {'{{token}}'} — later steps authenticate with it automatically">
+									<option value="">+ Login step as…</option>
+									{#each flowTests.users as u (u.email)}
+										<option value={u.email}>{u.email} ({u.role})</option>
+									{/each}
+									<option value="·blank·">type the email myself</option>
+								</select>
 								<div class="spacer"></div>
 								<button class="btn subtle" onclick={() => (flowTests.view = 'list')}>Cancel</button>
 								<button class="btn primary" onclick={() => flowTests.saveDraft()} disabled={flowTests.busy || !flowTests.draft.name.trim()}>
@@ -255,7 +204,9 @@
 							</div>
 							<p class="hint-sm">
 								Variables captured in one step ({'{{token}}'}, {'{{cita_id}}'}…) substitute into later
-								paths/bodies/asserts. {'{{run_id}}'} is unique per run — use it for unique values.
+								paths/bodies/asserts. {'{{run_id}}'} (and the short {'{{run_tag}}'}) are unique per run — use
+								them for unique values. {'{{token}}'} authenticates every later step automatically (or set a
+								flow Role to pre-mint one).
 							</p>
 						</div>
 
@@ -285,8 +236,20 @@
 											{#if ev.step.failures && ev.step.failures.length > 0}
 												<div class="log-failures">
 													{#each ev.step.failures as f}<div class="mono">{f}</div>{/each}
-													{#if ev.step.body_sample}<div class="mono sample">{ev.step.body_sample}</div>{/if}
 												</div>
+											{/if}
+											{#if ev.step.captured && Object.keys(ev.step.captured).length > 0}
+												<div class="log-captured">
+													{#each Object.entries(ev.step.captured) as [k, v] (k)}
+														<span class="mono">{'{{' + k + '}}'} = {v}</span>
+													{/each}
+												</div>
+											{/if}
+											{#if !ev.step.skipped && ev.step.body_sample}
+												<details class="log-resp" open={!ev.step.pass}>
+													<summary class="dim">response</summary>
+													<pre class="mono resp-pre">{fmtResponse(ev.step.body_sample)}</pre>
+												</details>
 											{/if}
 										</div>
 									{:else if ev.kind === 'flow_done' && ev.summary}
@@ -612,9 +575,6 @@
 		align-items: center;
 		gap: 8px;
 	}
-	.frow.sub {
-		padding-left: 14px;
-	}
 	.fcol {
 		display: flex;
 		flex-direction: column;
@@ -624,65 +584,10 @@
 		flex: 1;
 		min-width: 0;
 	}
-	.step {
-		border: 1px solid var(--border);
-		border-radius: var(--radius);
-		padding: 10px 12px;
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-	}
-	.step-head {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
-	.step-n {
-		font-size: 11px;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--text-3);
-		white-space: nowrap;
-	}
-	.step-name {
-		flex: 1;
-	}
-	.method-sel {
-		width: 96px;
-		font-family: var(--mono);
-	}
-	.op-sel {
-		width: 100px;
-	}
-	.status-in {
-		width: 80px;
-	}
-	.body-in {
-		resize: vertical;
-	}
-	.chk {
-		display: flex;
-		align-items: center;
-		gap: 5px;
+	.login-sel {
+		width: auto;
+		max-width: 280px;
 		font-size: 12px;
-		color: var(--text-2);
-		white-space: nowrap;
-	}
-	.tag {
-		font-size: 10px;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		padding: 2px 7px;
-		border-radius: 999px;
-		background: var(--surface-2);
-		border: 1px solid var(--border);
-		color: var(--text-3);
-		white-space: nowrap;
-	}
-	.tag.cap {
-		color: var(--brand);
 	}
 
 	/* live run */
@@ -780,10 +685,36 @@
 		flex-direction: column;
 		gap: 2px;
 	}
-	.log-failures .sample {
-		color: var(--text-3);
-		word-break: break-all;
-		white-space: normal;
+	.log-captured {
+		flex-basis: 100%;
+		padding-left: 22px;
+		font-size: 11px;
+		color: var(--brand);
+		display: flex;
+		gap: 12px;
+		flex-wrap: wrap;
+	}
+	.log-resp {
+		flex-basis: 100%;
+		padding-left: 22px;
+		font-size: 11px;
+	}
+	.log-resp summary {
+		cursor: pointer;
+		user-select: none;
+	}
+	.resp-pre {
+		margin: 3px 0 4px;
+		padding: 7px 9px;
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		max-height: 220px;
+		overflow: auto;
+		white-space: pre-wrap;
+		word-break: break-word;
+		font-size: 11px;
+		line-height: 1.5;
 	}
 	.log-flowdone {
 		font-size: 12px;
