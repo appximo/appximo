@@ -3,6 +3,7 @@ package appitools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -12,13 +13,17 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/miguelangel/appitools/pkg/controlplane"
 	"github.com/miguelangel/appitools/pkg/fleet"
+	"github.com/miguelangel/appitools/pkg/platformadmin"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/shutdown"
+	"github.com/miguelangel/appitools/pkg/userauth"
 )
 
 // ServeFleet is the MT-STRUCT-S3 Option-B runtime: N DISTINCT apps compiled
@@ -94,7 +99,7 @@ func ServeFleet(mf *fleet.Manifest, version string, debugTracesHTML []byte) erro
 	// The unified fleet console (MT-STRUCT-S5): the fleet-operator's read-only
 	// view over all apps, mounted on the process-level handler below. Disabled
 	// (uniform 404) unless the manifest/env provides an operator key.
-	panel := &fleetPanel{operatorKey: mf.OperatorKey, version: version}
+	panel := &fleetPanel{operatorKey: mf.OperatorKey, version: version, operatorAdminEmail: mf.OperatorAdminEmail}
 	for i := range apps {
 		panel.apps = append(panel.apps, &panelApp{
 			name:        mf.Apps[i].Name,
@@ -188,20 +193,48 @@ func unmatchedApp(ss *shutdown.State, version string, nApps int, panel *fleetPan
 	return &compiledApp{name: "__unmatched__", handler: mux}
 }
 
+// fleetMappedEnv is the authoritative set of per-app env keys the in-process
+// runtime applies through Config (FLEET-CONSOLE-S2 closed the S1 gap: CORS,
+// OAuth, MFA, files backend and the auth knobs are now per-app too — every
+// engine setting that exists as a Config field). Keys OUTSIDE this set are
+// process-wide in `fleet serve` and warned loudly below (today that is the
+// process-level infra: RATE_LIMIT_*, DB_MAX_CONNS, GOMAXPROCS, REDIS_URL,
+// SLACK_WEBHOOK_URL — use `fleet run` if an app needs those isolated).
+var fleetMappedEnv = map[string]bool{
+	"DATABASE_URL": true, "JWT_SECRET": true, "ADMIN_KEY": true,
+	"OBS_DB_PATH": true, "APPITOOLS_ENV": true,
+	// files (FILES-V1/V2): local root + the whole S3 backend, per app.
+	"APPITOOLS_FILES_DIR": true, "APPITOOLS_FILES_BACKEND": true,
+	"APPITOOLS_FILES_S3_BUCKET": true, "APPITOOLS_FILES_S3_ENDPOINT": true,
+	"APPITOOLS_FILES_S3_REGION": true, "APPITOOLS_FILES_S3_ACCESS_KEY": true,
+	"APPITOOLS_FILES_S3_SECRET_KEY": true, "APPITOOLS_FILES_S3_FORCE_PATH_STYLE": true,
+	"APPITOOLS_FILES_S3_PREFIX": true, "APPITOOLS_FILES_S3_SERVE": true,
+	"APPITOOLS_FILES_TOKEN_TTL": true, "APPITOOLS_FILES_ALLOWED_EXT": true,
+	// auth-as-product knobs, per app.
+	"APPITOOLS_AUTH_SIGNUP_ROLE": true, "APPITOOLS_AUTH_MIN_PASSWORD": true,
+	"APPITOOLS_AUTH_REQUIRE_VERIFIED": true, "APPITOOLS_AUTH_BASE_URL": true,
+	// OAuth social login, per app (each app is a product with its own providers).
+	"APPITOOLS_OAUTH_CALLBACK_URL": true, "APPITOOLS_OAUTH_DEFAULT_ROLE": true,
+	"APPITOOLS_OAUTH_SUCCESS_REDIRECT": true,
+	// MFA key material + issuer label, per app.
+	"APPITOOLS_MFA_KEY": true, "APPITOOLS_MFA_ISSUER": true,
+	// CORS, per app.
+	"APPITOOLS_CORS_ORIGINS": true, "APPITOOLS_CORS_METHODS": true,
+	"APPITOOLS_CORS_HEADERS": true, "APPITOOLS_CORS_EXPOSE_HEADERS": true,
+	"APPITOOLS_CORS_CREDENTIALS": true, "APPITOOLS_CORS_MAX_AGE": true,
+}
+
 // warnUnmappedEnv flags manifest env keys that CANNOT be applied per-app in
-// the in-process runtime (they would be process-wide): everything except the
-// keys ServeFleet maps into Config. Loud, so an operator relying on, say, a
-// per-app APPITOOLS_CORS_ORIGINS knows it did not take effect.
+// the in-process runtime (they would be process-wide): everything except
+// fleetMappedEnv. Loud, so an operator relying on a per-app RATE_LIMIT_RPS
+// knows it did not take effect. (The OAuth provider client ids/secrets are
+// read per provider at boot — mapped via their APPITOOLS_OAUTH_* prefix.)
 func warnUnmappedEnv(app string, env map[string]string) {
-	mapped := map[string]bool{
-		"DATABASE_URL": true, "JWT_SECRET": true, "ADMIN_KEY": true,
-		"OBS_DB_PATH": true, "APPITOOLS_FILES_DIR": true,
-		"APPITOOLS_AUTH_SIGNUP_ROLE": true, "APPITOOLS_ENV": true,
-	}
 	for k := range env {
-		if !mapped[k] {
-			log.Printf("fleet serve: WARNING: app %q env %s is NOT applied in-process (process-wide setting; use `fleet run` for full per-app env isolation)", app, k)
+		if fleetMappedEnv[k] || strings.HasPrefix(k, "APPITOOLS_OAUTH_") {
+			continue
 		}
+		log.Printf("fleet serve: WARNING: app %q env %s is NOT applied in-process (process-wide setting; use `fleet run` for full per-app env isolation)", app, k)
 	}
 }
 
@@ -247,11 +280,43 @@ func buildFleetApp(ctx context.Context, mf *fleet.Manifest, spec *fleet.AppSpec,
 		// Per-app state that must NOT be shared between apps.
 		ObsDBPath: coalesce(env["OBS_DB_PATH"], filepath.Join(appDir, "obs.db")),
 		FilesDir:  coalesce(env["APPITOOLS_FILES_DIR"], filepath.Join(appDir, "files")),
-		// Optional per-app auth config (Config fields; other APPITOOLS_* env
-		// entries in the manifest are process-wide in-process — warned below).
-		AuthSignupRole:  env["APPITOOLS_AUTH_SIGNUP_ROLE"],
-		Version:         version,
-		DebugTracesHTML: debugTracesHTML,
+		// The app's own hostnames: a request to the BARE domain carries no
+		// tenant label — without this, "erp.example.com" recorded a phantom
+		// tenant "erp" in observability (FLEET-CONSOLE-S2 fix b).
+		BareDomains: spec.Domains,
+		// The FULL per-app surface (FLEET-CONSOLE-S2 fix a): every engine
+		// setting that exists as a Config field is applied per app — files
+		// backend, auth knobs, OAuth, MFA, CORS. Keys outside fleetMappedEnv
+		// stay process-wide and are warned below.
+		FilesBackend:          env["APPITOOLS_FILES_BACKEND"],
+		FilesS3Bucket:         env["APPITOOLS_FILES_S3_BUCKET"],
+		FilesS3Endpoint:       env["APPITOOLS_FILES_S3_ENDPOINT"],
+		FilesS3Region:         env["APPITOOLS_FILES_S3_REGION"],
+		FilesS3AccessKey:      env["APPITOOLS_FILES_S3_ACCESS_KEY"],
+		FilesS3SecretKey:      env["APPITOOLS_FILES_S3_SECRET_KEY"],
+		FilesS3ForcePathStyle: envTruthy(env["APPITOOLS_FILES_S3_FORCE_PATH_STYLE"]),
+		FilesS3Prefix:         env["APPITOOLS_FILES_S3_PREFIX"],
+		FilesS3ServeMode:      env["APPITOOLS_FILES_S3_SERVE"],
+		FilesTokenTTLSeconds:  envInt(env["APPITOOLS_FILES_TOKEN_TTL"]),
+		FilesAllowedExt:       envList(env["APPITOOLS_FILES_ALLOWED_EXT"]),
+		AuthSignupRole:        env["APPITOOLS_AUTH_SIGNUP_ROLE"],
+		AuthMinPasswordLength: envInt(env["APPITOOLS_AUTH_MIN_PASSWORD"]),
+		AuthRequireVerified:   envTruthy(env["APPITOOLS_AUTH_REQUIRE_VERIFIED"]),
+		AuthBaseURL:           env["APPITOOLS_AUTH_BASE_URL"],
+		OAuthCallbackURL:      env["APPITOOLS_OAUTH_CALLBACK_URL"],
+		OAuthDefaultRole:      env["APPITOOLS_OAUTH_DEFAULT_ROLE"],
+		OAuthSuccessRedirect:  env["APPITOOLS_OAUTH_SUCCESS_REDIRECT"],
+		OAuthProviders:        oauthProvidersFromEnv(env),
+		MFAKey:                env["APPITOOLS_MFA_KEY"],
+		MFAIssuer:             env["APPITOOLS_MFA_ISSUER"],
+		CORSAllowedOrigins:    envList(env["APPITOOLS_CORS_ORIGINS"]),
+		CORSAllowedMethods:    envList(env["APPITOOLS_CORS_METHODS"]),
+		CORSAllowedHeaders:    envList(env["APPITOOLS_CORS_HEADERS"]),
+		CORSExposedHeaders:    envList(env["APPITOOLS_CORS_EXPOSE_HEADERS"]),
+		CORSAllowCredentials:  envTruthy(env["APPITOOLS_CORS_CREDENTIALS"]),
+		CORSMaxAge:            envInt(env["APPITOOLS_CORS_MAX_AGE"]),
+		Version:               version,
+		DebugTracesHTML:       debugTracesHTML,
 	}
 	os.MkdirAll(appDir, 0o755) //nolint:errcheck
 	warnUnmappedEnv(spec.Name, env)
@@ -261,7 +326,79 @@ func buildFleetApp(ctx context.Context, mf *fleet.Manifest, spec *fleet.AppSpec,
 		return nil, fmt.Errorf("app %q: %w", spec.Name, err)
 	}
 	app.noSynthetic = true
+
+	// Unified operator identity (FLEET-CONSOLE-S2): when the manifest declares
+	// an operator admin, ensure a platform super-admin with those credentials
+	// exists in THIS app's database — so ONE login works on every app's /admin.
+	// Idempotent: an existing account (same email) is left untouched. Isolation
+	// holds: each app still has its own admin row, own DB, own tokens; this
+	// only removes the "N apps = N credential sets" friction.
+	if email, pass := mf.OperatorAdmin(); email != "" {
+		if err := ensureOperatorAdmin(ctx, app, email, pass); err != nil {
+			log.Printf("fleet serve: WARNING: app %q: operator admin %q not provisioned: %v", spec.Name, email, err)
+		}
+	}
 	return app, nil
+}
+
+// envInt parses a positive int; 0 (the Config zero → fall back) on empty/bad.
+func envInt(v string) int {
+	n, _ := strconv.Atoi(v)
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// envList splits a comma-separated env value into trimmed entries; nil on empty.
+func envList(v string) []string {
+	if v == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// oauthProvidersFromEnv builds the per-app social-login provider set from the
+// app's manifest env. Nil when the app configures no provider (Config then
+// falls back to the process env, preserving single-engine behavior).
+func oauthProvidersFromEnv(env map[string]string) map[string]userauth.OAuthProviderConfig {
+	out := map[string]userauth.OAuthProviderConfig{}
+	for _, p := range []string{"google", "github", "microsoft"} {
+		up := strings.ToUpper(p)
+		id, secret := env["APPITOOLS_OAUTH_"+up+"_CLIENT_ID"], env["APPITOOLS_OAUTH_"+up+"_CLIENT_SECRET"]
+		if id != "" || secret != "" {
+			out[p] = userauth.OAuthProviderConfig{ClientID: id, ClientSecret: secret}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// ensureOperatorAdmin provisions the fleet-wide operator identity in one app's
+// database (platform super-admin, appitools_system schema) if absent.
+func ensureOperatorAdmin(ctx context.Context, app *App, email, password string) error {
+	store := platformadmin.NewStore(app.pool)
+	if _, err := store.GetAdminByEmail(ctx, email); err == nil {
+		return nil // already provisioned — never overwrite an existing account
+	} else if !errors.Is(err, platformadmin.ErrAdminNotFound) {
+		return err
+	}
+	svc := platformadmin.NewService(store, nil, controlplane.NewService(app.pool, nil), app.pool,
+		platformadmin.Config{JWTSecret: app.cfg.JWTSecret, MFAKey: app.cfg.MFAKey})
+	_, err := svc.CreateAdmin(ctx, email, password, "")
+	if err == nil {
+		log.Printf("fleet serve: operator admin %q provisioned in app's admin panel (one login for every app)", email)
+	}
+	return err
 }
 
 // wireHotSwap installs the per-app S4 hot-swap closure: a deploy on this app

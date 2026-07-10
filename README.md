@@ -336,6 +336,10 @@ make spec        # regenerate appitools-spec.md — the LLM grammar pack for you
                  # agent (docs/SCHEMA_SPEC_LLM.md)
 make install     # install the version-stamped `appitools` CLI into /usr/local/bin
                  # (may need sudo) — then `appitools validate --json x.json` works anywhere
+make fleet-init  # scaffold a working FLEET (N distinct apps on one port): manifest +
+                 # generated secrets (gitignored) + starter schema + databases
+make fleet       # serve every app on :8080 with the unified console at /fleet —
+                 # per-app Studio//admin//docs by domain (docs/FLEET.md)
 ```
 
 `make dev` reads the env-file at `DEV_ENV` (default `/root/.appitools-secrets-dev`)

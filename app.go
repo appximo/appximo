@@ -478,10 +478,13 @@ func New(cfg Config) (*App, error) {
 	// when its client id is set, so leaving these unset disables OAuth with no boot
 	// error. The default role (for users auto-created on first social login) must
 	// exist in the RBAC if set; it falls back to the signup role.
-	oauthProviders := map[string]userauth.OAuthProviderConfig{
-		"google":    {ClientID: os.Getenv("APPITOOLS_OAUTH_GOOGLE_CLIENT_ID"), ClientSecret: os.Getenv("APPITOOLS_OAUTH_GOOGLE_CLIENT_SECRET")},
-		"github":    {ClientID: os.Getenv("APPITOOLS_OAUTH_GITHUB_CLIENT_ID"), ClientSecret: os.Getenv("APPITOOLS_OAUTH_GITHUB_CLIENT_SECRET")},
-		"microsoft": {ClientID: os.Getenv("APPITOOLS_OAUTH_MICROSOFT_CLIENT_ID"), ClientSecret: os.Getenv("APPITOOLS_OAUTH_MICROSOFT_CLIENT_SECRET")},
+	oauthProviders := cfg.OAuthProviders
+	if oauthProviders == nil {
+		oauthProviders = map[string]userauth.OAuthProviderConfig{
+			"google":    {ClientID: os.Getenv("APPITOOLS_OAUTH_GOOGLE_CLIENT_ID"), ClientSecret: os.Getenv("APPITOOLS_OAUTH_GOOGLE_CLIENT_SECRET")},
+			"github":    {ClientID: os.Getenv("APPITOOLS_OAUTH_GITHUB_CLIENT_ID"), ClientSecret: os.Getenv("APPITOOLS_OAUTH_GITHUB_CLIENT_SECRET")},
+			"microsoft": {ClientID: os.Getenv("APPITOOLS_OAUTH_MICROSOFT_CLIENT_ID"), ClientSecret: os.Getenv("APPITOOLS_OAUTH_MICROSOFT_CLIENT_SECRET")},
+		}
 	}
 	oauthCallbackURL := cfg.OAuthCallbackURL
 	if oauthCallbackURL == "" {
@@ -857,7 +860,11 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 		func(req *http.Request) bool { return files.IsByteServingPath(req.Method, req.URL.Path) },
 		5, "application/json", "application/graphql+json"))
 	r.Use(chimiddleware.RequestID)
-	r.Use(tenant.TenantMiddleware)
+	// With BareDomains set (fleet: the app's own manifest domains), a request to
+	// the app's bare domain carries NO tenant — it is app-level traffic (admin,
+	// docs, console), not the phantom tenant its first label would suggest.
+	// Empty (single-engine) ⇒ identical to the historical TenantMiddleware.
+	r.Use(tenant.MiddlewareWithBareHosts(a.cfg.BareDomains))
 	r.Use(resilience.RateLimit(a.tenantLimiter))
 
 	tracePersistSem := make(chan struct{}, 64)

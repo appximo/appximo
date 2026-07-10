@@ -74,11 +74,31 @@ type Manifest struct {
 	// falls back to APPITOOLS_FLEET_OPERATOR_KEY; still empty ⇒ the console is
 	// DISABLED (safe by default).
 	OperatorKey string `json:"operator_key,omitempty"`
+	// OperatorAdminEmail enables the UNIFIED OPERATOR IDENTITY
+	// (FLEET-CONSOLE-S2): the in-process runtime ensures a platform
+	// super-admin with this email exists in EVERY app's database (idempotent,
+	// never overwriting an existing account), so ONE login works on every
+	// app's /admin — without weakening the S3 isolation (each app keeps its
+	// own admin row, DB and tokens). The PASSWORD is deliberately NOT a
+	// manifest key: it comes from the APPITOOLS_FLEET_ADMIN_PASSWORD env var
+	// (an env-file, like the app secrets), so the manifest stays committable.
+	// Empty email falls back to APPITOOLS_FLEET_ADMIN_EMAIL; both empty ⇒
+	// feature off (each app manages its own admins, the pre-S2 behavior).
+	OperatorAdminEmail string `json:"operator_admin_email,omitempty"`
 	// Apps are the fleet's apps (≥1).
 	Apps []AppSpec `json:"apps"`
 
 	dir  string // manifest file directory, for resolving relative paths
 	path string // absolute manifest file path (lifecycle persistence)
+}
+
+// OperatorAdmin returns the unified operator identity (email, password), or
+// ("", "") when disabled. Password always from env — never the manifest.
+func (m *Manifest) OperatorAdmin() (string, string) {
+	if m.OperatorAdminEmail == "" {
+		return "", ""
+	}
+	return m.OperatorAdminEmail, os.Getenv("APPITOOLS_FLEET_ADMIN_PASSWORD")
 }
 
 var appNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
@@ -205,6 +225,17 @@ func LoadManifest(path string) (*Manifest, error) {
 				return nil, fmt.Errorf("fleet: operator_key must differ from every app's ADMIN_KEY/JWT_SECRET (matches app %q) — the fleet level is above the app level", m.Apps[i].Name)
 			}
 		}
+	}
+
+	// Unified operator identity (FLEET-CONSOLE-S2): env fallback for the email;
+	// the password ONLY ever comes from env (never a manifest key). Declaring
+	// the email without the password would silently disable the provisioning —
+	// fail loud instead, with the fix in the message.
+	if m.OperatorAdminEmail == "" {
+		m.OperatorAdminEmail = os.Getenv("APPITOOLS_FLEET_ADMIN_EMAIL")
+	}
+	if m.OperatorAdminEmail != "" && os.Getenv("APPITOOLS_FLEET_ADMIN_PASSWORD") == "" {
+		return nil, fmt.Errorf("fleet: operator_admin_email %q is set but APPITOOLS_FLEET_ADMIN_PASSWORD is not — the operator admin password comes from the environment (an env-file), never the manifest", m.OperatorAdminEmail)
 	}
 
 	// Sharing one DATABASE_URL means sharing public.tenants / outbox / the

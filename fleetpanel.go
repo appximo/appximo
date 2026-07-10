@@ -38,6 +38,10 @@ import (
 type fleetPanel struct {
 	operatorKey string
 	version     string
+	// operatorAdminEmail is the unified operator identity (FLEET-CONSOLE-S2):
+	// when set, this super-admin exists in EVERY app's /admin — the console
+	// shows it so the operator knows one login opens each app's panel.
+	operatorAdminEmail string
 	// mu guards apps: the inventory handlers read it while the lifecycle
 	// (FLEET-LIFECYCLE-S1) adds/removes entries. Console-only — never the
 	// request hot path (the registry has its own copy-on-write discipline).
@@ -203,9 +207,10 @@ func (p *fleetPanel) handleApps(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-		"fleet_apps": len(out),
-		"version":    p.version,
-		"apps":       out,
+		"fleet_apps":           len(out),
+		"version":              p.version,
+		"operator_admin_email": p.operatorAdminEmail,
+		"apps":                 out,
 	})
 }
 
@@ -407,20 +412,24 @@ function flip(){
 }
 function esc(s){const d=document.createElement('span');d.textContent=String(s);return d.innerHTML}
 function ms(us){return us ? (us/1000).toFixed(2)+' ms' : '—'}
+// The fleet's public port: the console is served by the SAME listener as the
+// apps, so per-app links must carry it (before this, links pointed at :80).
+const PORT = location.port ? ':'+location.port : '';
 async function load(){
   try{
     const r = await fetch('/fleet/api/apps?key='+encodeURIComponent(KEY));
     if(!r.ok) throw new Error('HTTP '+r.status);
     const d = await r.json();
     document.getElementById('summary').textContent =
-      d.fleet_apps + ' app' + (d.fleet_apps===1?'':'s') + ' in-process · ' + d.version;
+      d.fleet_apps + ' app' + (d.fleet_apps===1?'':'s') + ' in-process · ' + d.version +
+      (d.operator_admin_email ? ' · operator admin ' + d.operator_admin_email + ' (one login, every app\'s /admin)' : '');
     const root = document.getElementById('apps'); root.innerHTML='';
     for(const a of d.apps){
       const el = document.createElement('div'); el.className='card';
       const links = a.domains.map(dm =>
-        '<a href="http://'+esc(dm)+'/editor" target="_blank">Studio · '+esc(dm)+'</a>'+
-        '<a href="http://'+esc(dm)+'/admin" target="_blank">Admin</a>'+
-        '<a href="http://'+esc(dm)+'/docs" target="_blank">Docs</a>').join('');
+        '<a href="http://'+esc(dm)+PORT+'/editor" target="_blank">Studio · '+esc(dm)+'</a>'+
+        '<a href="http://'+esc(dm)+PORT+'/admin" target="_blank">Admin</a>'+
+        '<a href="http://'+esc(dm)+PORT+'/docs" target="_blank">Docs</a>').join('');
       const obsRows = Object.entries(a.obs).map(([t,o]) =>
         '<tr><td>'+esc(t)+'</td><td class="num">'+ms(o.p50_us_uncached)+'</td><td class="num">'+
         ms(o.p95_us_uncached)+'</td><td class="num">'+o.requests+'</td></tr>').join('');

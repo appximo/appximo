@@ -4,7 +4,8 @@ SHELL := bash
 
 .PHONY: build engine worker lint fmt-check run build-pgo collect-profile \
 	test test-integration test-e2e test-resilience test-perf test-security test-all bench \
-	dev dev-fast dev-serve build-cli spec install stop help
+	dev dev-fast dev-serve build-cli spec install stop help \
+	fleet fleet-fast fleet-init fleet-serve
 
 build: ## Compile every package (go build ./...)
 	go build ./...
@@ -78,6 +79,37 @@ dev-serve:
 	@echo "  Studio  http://localhost:$(PORT)/editor    admin  http://localhost:$(PORT)/admin"
 	@echo "  docs    http://localhost:$(PORT)/docs      stop with Ctrl+C (or: make stop PORT=$(PORT))"
 	@set -a; . "$(DEV_ENV)"; set +a; exec ./appitools-dev serve --schema "$(SCHEMA)" --port $(PORT)
+
+# ── Fleet (FLEET-CONSOLE-S2): N apps, one command — the `make dev` of fleets ──
+# make fleet-init   → scaffold fleet.json + fleet-secrets/ (gitignored, generated
+#                     secrets — nothing pasted by hand) + a starter schema + DBs
+# make fleet        → build UIs+engine, load the fleet secrets, serve everything
+# make fleet PORT=9000 / CONFIG=other.json — parameterized like make dev.
+FLEET_CONFIG ?= fleet.json
+FLEET_ENV    ?= fleet-secrets/fleet.env
+
+fleet: editor-ui admin-ui build-cli fleet-serve ## Build UIs+engine, load fleet secrets, serve all apps (CONFIG=…, PORT=…)
+
+fleet-fast: build-cli fleet-serve ## Like fleet but skips the SPA rebuilds (assumes they're built)
+
+fleet-init: build-cli ## Scaffold a working fleet: manifest + secrets (gitignored) + starter schema + DBs
+	@set -a; test -f "$(DEV_ENV)" && . "$(DEV_ENV)"; set +a; \
+		./appitools-dev fleet init --config "$(FLEET_CONFIG)"
+
+# fleet-serve: the shared serve step (not meant to be called directly). Loads
+# the fleet-level env file (operator key + operator admin password) into the
+# CHILD process only; per-app secrets ride in each app's env_file.
+fleet-serve:
+	@test -f "$(FLEET_CONFIG)" || { \
+		echo "✗ $(FLEET_CONFIG) not found."; \
+		echo "  Scaffold a working fleet (manifest + secrets + starter schema + DBs) with:"; \
+		echo "    make fleet-init"; \
+		echo "  Or point elsewhere: make fleet FLEET_CONFIG=path/to/fleet.json"; exit 1; }
+	@echo "→ fleet serving $(FLEET_CONFIG)$(if $(PORT), on :$(PORT),)"
+	@echo "  console  http://localhost:$(or $(PORT),8080)/fleet?key=…  (operator key: $(FLEET_ENV))"
+	@echo "  apps     http://<app>.localhost:$(or $(PORT),8080)/editor /admin /docs   stop: make stop PORT=$(or $(PORT),8080)"
+	@set -a; test -f "$(FLEET_ENV)" && . "$(FLEET_ENV)"; set +a; \
+		exec ./appitools-dev fleet serve --config "$(FLEET_CONFIG)" $(if $(PORT),--listen ":$(PORT)",)
 
 spec: build-cli ## Regenerate appitools-spec.md (the LLM grammar pack for your agent)
 	@./appitools-dev spec > appitools-spec.md

@@ -28,7 +28,28 @@ surface; a **tenant** is an isolated data instance *inside* an app; the
 (Host → proxy) and the tenant second (subdomain → engine middleware):
 `acme.crm.example.com` → app `crm`, tenant `acme`.
 
-## Quick start
+## Quick start — `make fleet-init` + `make fleet` (no hand-written JSON)
+
+From a clone, the whole flow is two commands (FLEET-CONSOLE-S2):
+
+```bash
+make fleet-init    # scaffolds a WORKING fleet:
+                   #   fleet.json            — the manifest (committable: holds NO secrets)
+                   #   fleet-secrets/        — GENERATED operator key + admin + per-app
+                   #                           secrets (gitignored by construction)
+                   #   schemas/<app>.json    — a starter schema per app
+                   #   app_<name> databases  — created from your $DATABASE_URL base
+make fleet         # build UIs+engine, load the fleet secrets, serve everything on :8080
+                   # make fleet PORT=9000 / FLEET_CONFIG=other.json — like make dev
+```
+
+Then open the **console** (`http://localhost:8080/fleet?key=…` — the operator key
+is in `fleet-secrets/fleet.env`) and manage every app from there: inventory,
+one-click Studio//admin//docs per app, add/remove apps. Secrets never enter git:
+the manifest references per-app `env_file`s under the gitignored `fleet-secrets/`.
+Customize the scaffold: `appitools fleet init --app crm --app shop --admin-email you@x.com`.
+
+## The manifest by hand
 
 `fleet.json`:
 
@@ -185,12 +206,20 @@ app's validation can never short-circuit another's.
   migration is still a separate per-tenant step (control-plane `PUT
   /tenants/{id}/schema`), exactly as in single-engine. (Single-engine keeps the
   graceful re-exec of UI-F4-S2 — there are no other apps to protect.)
-- **Per-app env is limited to what maps into engine Config**: `DATABASE_URL`,
-  `JWT_SECRET`, `ADMIN_KEY`, `OBS_DB_PATH`, `APPITOOLS_FILES_DIR`,
-  `APPITOOLS_AUTH_SIGNUP_ROLE`, `APPITOOLS_ENV`. Any other manifest env key is
-  process-wide in this runtime and is **loudly warned** at boot — if an app
-  needs, say, its own OAuth providers or CORS origins today, run it under
-  `fleet run` (full env isolation) instead.
+- **Per-app env covers the full engine Config surface** (FLEET-CONSOLE-S2 closed
+  the old gap): `DATABASE_URL`, `JWT_SECRET`, `ADMIN_KEY`, `OBS_DB_PATH`,
+  `APPITOOLS_ENV`, the whole file store (`APPITOOLS_FILES_*` — local dir or a
+  per-app S3 bucket), the auth knobs (`APPITOOLS_AUTH_*`), **OAuth per app**
+  (`APPITOOLS_OAUTH_*` including per-provider client ids/secrets), **MFA key/
+  issuer** and **CORS** (`APPITOOLS_CORS_*`) — each app is a product with its
+  own identity providers, storage and browser origins. What remains
+  process-wide (and is **loudly warned** at boot if set per app): the process
+  infra — `RATE_LIMIT_*`, `DB_MAX_CONNS`, `GOMAXPROCS`, `REDIS_URL`,
+  `SLACK_WEBHOOK_URL`. An app needing those isolated runs under `fleet run`.
+- **The app's bare domain is not a tenant**: a request whose Host is exactly an
+  app domain (`erp.example.com/admin` — no tenant label) carries no tenant, so
+  it no longer records a phantom tenant (`erp`) in that app's observability
+  (the S1 finding, fixed). Tenant subdomains resolve exactly as before.
 - **No supervisor/status API** (nothing to supervise — one process; a crash is
   everyone's crash, which is exactly the blast-radius trade the design doc
   documents; pin risky apps to their own process with `fleet run`).
@@ -210,6 +239,18 @@ app = entering its surface: the per-domain surfaces ARE the app-scoped
 consoles (Studio loads that app's schema and deploys to it via the S4
 hot-swap), and the fleet console is the level above them. Sober tokens, light
 and dark.
+
+**Unified operator identity (FLEET-CONSOLE-S2):** set `operator_admin_email` in
+the manifest (or `APPITOOLS_FLEET_ADMIN_EMAIL`) plus the
+`APPITOOLS_FLEET_ADMIN_PASSWORD` env var — the password is deliberately NOT a
+manifest key, so the manifest stays committable — and the runtime ensures a
+platform super-admin with those credentials exists in **every** app's database
+(idempotent at boot and on hot-add; an existing account is never overwritten).
+Result: **one login opens every app's `/admin`** — the console header names it —
+without weakening the S3 isolation (each app keeps its own admin row, own DB,
+own tokens; there is still no cross-app token). `make fleet-init` generates all
+of it. Declaring the email without the password env fails the manifest load
+loudly (never a silently-disabled feature).
 
 **Fleet-operator auth (the taxonomy):** the console is gated by
 `operator_key` in the manifest (or `APPITOOLS_FLEET_OPERATOR_KEY`) — the

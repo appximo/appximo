@@ -112,6 +112,11 @@ var fleetServeCmd = &cobra.Command{
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		// --listen overrides the manifest (e.g. `make fleet PORT=9000`) without
+		// editing the file — the manifest stays the fleet's persistent truth.
+		if listen, _ := cmd.Flags().GetString("listen"); listen != "" {
+			mf.Listen = listen
+		}
 		if err := appitools.ServeFleet(mf, version, debugTracesHTML); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -408,6 +413,7 @@ Re-run with --yes to confirm.
 func init() {
 	fleetRunCmd.Flags().String("config", "fleet.json", "path to the fleet manifest")
 	fleetServeCmd.Flags().String("config", "fleet.json", "path to the fleet manifest")
+	fleetServeCmd.Flags().String("listen", "", "override the manifest's listen address (e.g. :9000)")
 	fleetStatusCmd.Flags().String("addr", "127.0.0.1:9601", "fleet status API address")
 	fleetListCmd.Flags().String("config", "fleet.json", "path to the fleet manifest")
 	fleetAddCmd.Flags().String("config", "fleet.json", "path to the fleet manifest")

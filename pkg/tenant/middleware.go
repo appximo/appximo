@@ -27,35 +27,71 @@ func isValidSubdomain(s string) bool {
 //   - "localhost:8080"      → passes through with no TenantCtx (health / control plane)
 //   - anything invalid      → 400 {"error":"invalid tenant"}
 func TenantMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := r.Host
+	return MiddlewareWithBareHosts(nil)(next)
+}
 
-		// Strip port suffix.
-		if idx := strings.LastIndex(host, ":"); idx != -1 {
-			host = host[:idx]
+// MiddlewareWithBareHosts is TenantMiddleware for a server that KNOWS its own
+// hostnames (the fleet runtimes: an app's manifest `domains`). A request whose
+// Host is EXACTLY one of bare (no tenant label in front) passes through with
+// no TenantCtx — like a bare "localhost" — instead of mis-reading the domain's
+// first label as a tenant. Before this, `GET erp.example.com/admin` recorded a
+// phantom tenant "erp" in observability (the S1 finding); the domain's OWN
+// first label is not a tenant.
+//
+// With bare empty this is byte-identical to the historical middleware — the
+// single-engine chain (which has no domain knowledge) is unchanged, and the
+// fleet chain adds one map lookup on a pre-parsed string (~ns, pre-auth).
+func MiddlewareWithBareHosts(bare []string) func(http.Handler) http.Handler {
+	var bareSet map[string]struct{}
+	if len(bare) > 0 {
+		bareSet = make(map[string]struct{}, len(bare))
+		for _, h := range bare {
+			// Store hosts port-less, exactly how the request Host is compared.
+			if idx := strings.LastIndex(h, ":"); idx != -1 {
+				h = h[:idx]
+			}
+			bareSet[h] = struct{}{}
 		}
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			host := r.Host
 
-		// No dot → root host (e.g. "localhost"), treat as control-plane traffic.
-		dotIdx := strings.Index(host, ".")
-		if dotIdx == -1 {
-			next.ServeHTTP(w, r)
-			return
-		}
+			// Strip port suffix.
+			if idx := strings.LastIndex(host, ":"); idx != -1 {
+				host = host[:idx]
+			}
 
-		subdomain := host[:dotIdx]
+			// The app's own bare domain → app-level traffic (console, admin,
+			// docs, probes), NOT a tenant. Only exact matches: a subdomain of
+			// the app domain still resolves its first label as the tenant.
+			if _, ok := bareSet[host]; ok {
+				next.ServeHTTP(w, r)
+				return
+			}
 
-		if !isValidSubdomain(subdomain) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "invalid tenant"})
-			return
-		}
+			// No dot → root host (e.g. "localhost"), treat as control-plane traffic.
+			dotIdx := strings.Index(host, ".")
+			if dotIdx == -1 {
+				next.ServeHTTP(w, r)
+				return
+			}
 
-		tc := &TenantCtx{
-			ID:       subdomain,
-			PGSchema: "tenant_" + subdomain,
-		}
-		ctx := context.WithValue(r.Context(), contextKey{}, tc)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+			subdomain := host[:dotIdx]
+
+			if !isValidSubdomain(subdomain) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid tenant"})
+				return
+			}
+
+			tc := &TenantCtx{
+				ID:       subdomain,
+				PGSchema: "tenant_" + subdomain,
+			}
+			ctx := context.WithValue(r.Context(), contextKey{}, tc)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }

@@ -79,3 +79,9 @@ pkg/editorui/web/node_modules/
 *.bak
 *.selfrestart
 /appitools-spec.md
+
+# Fleet dev scaffold (make fleet-init) — user config + generated secrets/state
+/fleet.json
+/fleet-secrets/
+/fleet-data/
+/schemas/

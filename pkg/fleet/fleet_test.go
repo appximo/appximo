@@ -337,3 +337,42 @@ func TestOperatorKeyMustDifferFromAppCredentials(t *testing.T) {
 		t.Fatalf("distinct operator key must load: %v", err)
 	}
 }
+
+// FLEET-CONSOLE-S2: the unified operator identity — the email may live in the
+// manifest, the password ONLY in the environment; declaring the email without
+// the password env must fail the load loudly (never a silently-off feature).
+func TestLoadManifestOperatorAdmin(t *testing.T) {
+	dir := t.TempDir()
+	p := writeManifest(t, dir, map[string]any{
+		"operator_admin_email": "op@fleet.local",
+		"apps":                 []any{baseApp(t, dir, "crm", strings.Repeat("a", 32))},
+	})
+
+	t.Setenv("APPITOOLS_FLEET_ADMIN_PASSWORD", "")
+	if _, err := LoadManifest(p); err == nil || !strings.Contains(err.Error(), "APPITOOLS_FLEET_ADMIN_PASSWORD") {
+		t.Fatalf("email without password env must fail actionably, got: %v", err)
+	}
+
+	t.Setenv("APPITOOLS_FLEET_ADMIN_PASSWORD", "a-strong-passphrase")
+	m, err := LoadManifest(p)
+	if err != nil {
+		t.Fatalf("valid operator admin rejected: %v", err)
+	}
+	email, pass := m.OperatorAdmin()
+	if email != "op@fleet.local" || pass != "a-strong-passphrase" {
+		t.Fatalf("OperatorAdmin() = %q/%q", email, pass)
+	}
+
+	// Env fallback for the email too (APPITOOLS_FLEET_ADMIN_EMAIL).
+	p2 := writeManifest(t, dir, map[string]any{
+		"apps": []any{baseApp(t, dir, "crm", strings.Repeat("a", 32))},
+	})
+	t.Setenv("APPITOOLS_FLEET_ADMIN_EMAIL", "env@fleet.local")
+	m2, err := LoadManifest(p2)
+	if err != nil {
+		t.Fatalf("env-fallback email rejected: %v", err)
+	}
+	if e, _ := m2.OperatorAdmin(); e != "env@fleet.local" {
+		t.Fatalf("email env fallback = %q", e)
+	}
+}

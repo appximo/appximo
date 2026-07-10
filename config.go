@@ -11,6 +11,8 @@
 // versions. Treat `grep UnsafeTx` as the complete audit of RBAC-bypass sites.
 package appitools
 
+import "github.com/miguelangel/appitools/pkg/userauth"
+
 // Config configures a New engine. SchemaPath and DSN are the only required
 // fields; everything else falls back to the same defaults and environment
 // variables the `appitools serve` command has always used, so the pure binary
@@ -98,6 +100,14 @@ type Config struct {
 	// (comma-separated), then to files.DefaultAllowedExtensions.
 	FilesAllowedExt []string
 
+	// BareDomains are hostnames that are THIS APP ITSELF (the fleet manifest's
+	// `domains`), not a tenant: a request whose Host equals one exactly carries
+	// no tenant label, so the tenant middleware passes it through with no
+	// TenantCtx instead of mis-reading the domain's first label as a tenant
+	// (the observability phantom-tenant bug, FLEET-CONSOLE-S2). Empty (the
+	// single-engine default) leaves the middleware byte-identical to before.
+	BareDomains []string
+
 	// Version is reported by /health and the synthetic monitor. Empty reports
 	// "dev"; the cmd binary passes its ldflags-injected build version.
 	Version string
@@ -142,6 +152,13 @@ type Config struct {
 	// "<url>#token=<jwt>" instead of returning JSON. Empty falls back to
 	// APPITOOLS_OAUTH_SUCCESS_REDIRECT.
 	OAuthSuccessRedirect string
+	// OAuthProviders optionally sets the social-login provider credentials
+	// directly ("google"/"github"/"microsoft" → client id+secret). Nil falls
+	// back to the APPITOOLS_OAUTH_{PROVIDER}_CLIENT_ID/_CLIENT_SECRET env vars.
+	// A Config field so the in-process fleet can give EACH APP its own
+	// providers (each app is a product with its own identity) instead of the
+	// process-wide env.
+	OAuthProviders map[string]userauth.OAuthProviderConfig
 
 	// MFAKey is the key material that ENCRYPTS users' TOTP secrets at rest
 	// (AUTH-MFA-V1, AES-256-GCM). Empty falls back to APPITOOLS_MFA_KEY, then to
