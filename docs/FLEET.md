@@ -407,6 +407,55 @@ appitools fleet remove --config fleet.json --name optica --yes
   matrix holds after an add (smoked live: a cross-app JWT is still a 401, the
   operator key still opens no app API).
 
+### Editing an existing app's env — "Edit env" (FLEET-EDIT-S1)
+
+Add app/Remove app cover creating and destroying membership; **Edit env**
+covers the third case — changing an app **already in the fleet** (e.g. adding
+`APPITOOLS_GRAPHQL_PLAYGROUND=on` to one app without touching its siblings),
+hot, no restart, console-only (no CLI subcommand yet — see the note below).
+
+Each app card in `/fleet` has an **"Edit env"** button: a panel to `set` new/
+changed keys and `unset` others, submitted as
+`PATCH /fleet/api/apps/{name}` `{set_env, unset_env}` (operator-gated, same as
+Add/Remove). It is **write-only by design** — existing secret VALUES
+(`DATABASE_URL`/`JWT_SECRET`/`ADMIN_KEY`) are never read back to the browser;
+rows start blank, and only a key you type is changed.
+
+- **Not a remove-then-add.** A naive "remove, then re-add" would open a race
+  window (another operator's add/remove interleaving between the two calls)
+  and briefly 404 the app's domains. Edit takes the SAME lifecycle lock
+  (`fleetLifecycle.mu`) as Add/Remove and, in one hold: merges the change into
+  the app's CURRENTLY-resolved env, re-validates the same rules a boot would
+  (`DATABASE_URL`/`JWT_SECRET`/`ADMIN_KEY` required, JWT_SECRET unique across
+  apps, distinct from the operator key), compiles a FRESH `*App` instance off
+  to the side (a bad new value — an unreachable `DATABASE_URL` — fails HERE,
+  before anything is swapped; the OLD instance keeps serving untouched), then
+  atomically takes over the app's domains with the SAME `Registry.SwapApp`
+  primitive a schema hot-swap uses. The old instance drains for the same grace
+  period a remove gives (in-flight requests on the old surface finish; a
+  long-lived SSE stream on the edited app is cut when the grace ends) before
+  its pool/control-plane listener are released.
+- **Not gated by a typed-name confirmation** like Remove — editing env isn't
+  destructive (nothing in Postgres is touched, and the previous env is not
+  deleted, only superseded in this process's live config).
+- **Manifest ↔ live coherence, same discipline as Add/Remove:** the app's full
+  new env is written to its OWN env-file under `<data_dir>/<app>/<app>.env`
+  (never inline in `fleet.json` — secrets stay out of the committable
+  manifest) and the manifest entry is persisted FIRST, surgically, before the
+  live swap — a restart after an edit reloads the exact post-edit env.
+- A **live finding this feature surfaced**: the shared secrets-file helper
+  used to colocate the generated `.env` file with wherever `spec.Schema`
+  pointed — safe for a console-added app (its schema is always the persisted
+  `<data_dir>/<app>/schema.json` copy) but WRONG for editing an app whose
+  schema is a plain external path (a `schemas/` file, or any hand-added
+  manifest entry) — it would write the generated secrets file into that
+  external directory. Fixed: the file always lands under
+  `<data_dir>/<app>/`, regardless of where the schema lives.
+- **No CLI yet.** `appitools fleet add/remove/list` exist; there is no
+  `fleet edit` subcommand — env edits are console-only today. A CLI
+  counterpart would call the same `PATCH` endpoint and is a natural, small
+  follow-up if you want it scripted.
+
 ## What S1 deliberately does not do
 
 - **No federated single admin panel** — each app keeps its own `/admin` (reachable

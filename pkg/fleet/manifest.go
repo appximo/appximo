@@ -52,6 +52,13 @@ type AppSpec struct {
 // MergedEnv returns the app's resolved environment (EnvFile overlaid by Env).
 func (a *AppSpec) MergedEnv() map[string]string { return a.mergedEnv }
 
+// SetMergedEnv overwrites the resolved-env cache MergedEnv returns (FLEET-EDIT-S1):
+// after EditApp writes a new env file for this app, the in-memory spec must
+// reflect the change immediately — a concurrent JWT_SECRET-uniqueness check
+// against a DIFFERENT app's edit, or the next read of THIS app, must see the
+// new values without a manifest reload.
+func (a *AppSpec) SetMergedEnv(env map[string]string) { a.mergedEnv = env }
+
 // Manifest is the fleet config file: the proxy listen address, the status
 // endpoint, the per-app data root, and the apps.
 type Manifest struct {

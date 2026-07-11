@@ -630,19 +630,153 @@ func (l *fleetLifecycle) AddApp(spec *fleet.AppSpec, rawSchema []byte, db *dbPro
 	return &row, nil
 }
 
-// writeAppEnvFile persists a console-added app's secrets (DATABASE_URL /
-// JWT_SECRET / ADMIN_KEY, including a server-derived DSN) to a per-app env-file
-// next to its schema under the data dir, sets spec.EnvFile to it, and CLEARS
-// spec.Env so the committable manifest references the file instead of inlining
-// the secrets. spec.mergedEnv is left intact (the running fleet's in-memory
-// state), so future ValidateNewApp JWT-collision checks still see this app.
-func (l *fleetLifecycle) writeAppEnvFile(spec *fleet.AppSpec) error {
-	dir := l.mf.DataDir
-	if spec.Schema != "" {
-		dir = filepath.Dir(spec.Schema) // colocate with the persisted schema
-	} else {
-		dir = filepath.Join(dir, spec.Name)
+// EditApp hot-EDITS an existing app's env — the FLEET-EDIT-S1 counterpart to
+// AddApp/RemoveApp: an operator changes/adds env keys (e.g. the
+// APPITOOLS_GRAPHQL_PLAYGROUND opt-in) on an app already in the fleet, without
+// touching its name/domains/schema and without a process restart. Existing
+// SECRET VALUES are never read back to the caller (setEnv/unsetEnv are
+// write-only) — the merge happens server-side against the resolved env this
+// process already holds.
+//
+// Unlike a schema deploy (wireHotSwap: rebuild the ROUTER in place), an env
+// change can touch DATABASE_URL/JWT_SECRET — values baked into the *App at
+// construction (its pool, its JWT-validating middleware) — so this compiles a
+// FRESH *App (the same buildFleetApp path AddApp uses) and atomically swaps it
+// into the registry for the SAME domains (Registry.SwapApp — the same
+// primitive a schema hot-swap uses), then retires the OLD instance after the
+// same grace RemoveApp gives a removed app, so in-flight requests on the old
+// surface finish cleanly. One lock acquisition end to end — no remove-then-add
+// race window, and no destructive "type the name to confirm" gate (this isn't
+// destructive: the previous env is never deleted from Postgres, only this
+// process's live config changes).
+func (l *fleetLifecycle) EditApp(name string, setEnv map[string]string, unsetEnv []string) (*panelAppJSON, *lifecycleError) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	spec := l.mf.AppByName(name)
+	oldPA := l.panel.byName(name)
+	if spec == nil || oldPA == nil {
+		return nil, &lifecycleError{status: http.StatusNotFound, msg: fmt.Sprintf("no app named %q in the fleet", name)}
 	}
+	if len(setEnv) == 0 && len(unsetEnv) == 0 {
+		return nil, &lifecycleError{status: http.StatusBadRequest, msg: "provide at least one env key to set or unset"}
+	}
+
+	// Start from the env THIS PROCESS already has resolved for the app (never
+	// re-read from disk, so a stale/hand-edited file can't silently override a
+	// prior hot edit), apply the requested changes on top.
+	current := spec.MergedEnv()
+	next := make(map[string]string, len(current)+len(setEnv))
+	for k, v := range current {
+		next[k] = v
+	}
+	for k, v := range setEnv {
+		next[k] = v
+	}
+	for _, k := range unsetEnv {
+		delete(next, k)
+	}
+
+	for _, req := range []string{"DATABASE_URL", "JWT_SECRET", "ADMIN_KEY"} {
+		if next[req] == "" {
+			return nil, &lifecycleError{status: http.StatusBadRequest, msg: fmt.Sprintf("env %s is required — unsetting it would leave the engine unable to boot", req)}
+		}
+	}
+	for i := range l.mf.Apps {
+		if l.mf.Apps[i].Name == name {
+			continue // comparing against itself is not a collision
+		}
+		if l.mf.Apps[i].MergedEnv()["JWT_SECRET"] == next["JWT_SECRET"] {
+			return nil, &lifecycleError{status: http.StatusBadRequest, msg: fmt.Sprintf("would share app %q's JWT_SECRET — each app must have its own", l.mf.Apps[i].Name)}
+		}
+	}
+	if l.mf.OperatorKey != "" && (l.mf.OperatorKey == next["ADMIN_KEY"] || l.mf.OperatorKey == next["JWT_SECRET"]) {
+		return nil, &lifecycleError{status: http.StatusBadRequest, msg: "ADMIN_KEY/JWT_SECRET must differ from the fleet operator_key"}
+	}
+
+	// Persist the FULL new env to the app's env-file (never inline — same
+	// secrets-never-in-fleet.json discipline as a console-added app) and
+	// resolve the in-memory cache BEFORE compiling, so buildFleetApp's
+	// MergedEnv() read sees the new values.
+	spec.SetMergedEnv(next)
+	spec.Env = next
+	if err := l.writeAppEnvFile(spec); err != nil {
+		return nil, &lifecycleError{status: http.StatusInternalServerError, msg: "persist app secrets: " + err.Error()}
+	}
+
+	if path := l.mf.Path(); path != "" {
+		if err := fleet.EditAppInManifestFile(path, spec); err != nil {
+			return nil, &lifecycleError{status: http.StatusInternalServerError, msg: "persist manifest: " + err.Error()}
+		}
+	}
+
+	// Compile a FRESH instance off to the side (no routing effect yet) — same
+	// path as boot / AddApp. A bad new value (e.g. an unreachable DATABASE_URL)
+	// fails HERE, before anything is swapped live; the OLD instance keeps serving.
+	newApp, err := buildFleetApp(l.ctx, l.mf, spec, l.listenPort, l.version, l.debugTracesHTML)
+	if err != nil {
+		return nil, &lifecycleError{status: http.StatusBadRequest, msg: err.Error()}
+	}
+
+	appCtx, cancel := context.WithCancel(l.ctx)
+	newApp.startBackground(appCtx)
+	router := newApp.buildRouter(newApp.bootSurface())
+
+	newPA := &panelApp{
+		name:        spec.Name,
+		domains:     spec.Domains,
+		schemaName:  newApp.schema.Name,
+		controlPort: newApp.cfg.ControlPort,
+		app:         newApp,
+		cancel:      cancel,
+	}
+	wireHotSwap(l.reg, newApp, spec.Name, spec.Domains, newPA)
+
+	// The atomic takeover: SAME copy-on-write primitive AddApp uses — the new
+	// instance starts serving these domains in one publish, every other app's
+	// entry untouched.
+	l.reg.AddApp(spec.Domains, &compiledApp{name: spec.Name, handler: router})
+	l.panel.replaceApp(newPA)
+
+	// The OLD instance stops taking new work now; its infra (DB pool, control
+	// plane) is released after the same grace RemoveApp uses, so requests that
+	// already resolved the OLD registry entry finish on it cleanly.
+	oldApp := oldPA.app
+	if oldPA.cancel != nil {
+		oldPA.cancel()
+	}
+	time.AfterFunc(removeGrace, func() {
+		sctx, done := context.WithTimeout(context.Background(), 5*time.Second)
+		defer done()
+		oldApp.cpSrv.Shutdown(sctx) //nolint:errcheck
+		oldApp.cleanup()
+		log.Printf("fleet serve: app %q old instance released (%s after edit)", name, removeGrace)
+	})
+
+	log.Printf("fleet serve: app %q hot-EDITED — env updated, new instance serving %v, other apps untouched, manifest persisted", name, spec.Domains)
+	row := l.panel.appRow(newPA)
+	return &row, nil
+}
+
+// writeAppEnvFile persists an app's full env (DATABASE_URL / JWT_SECRET /
+// ADMIN_KEY plus anything else set) to a per-app env-file under the fleet's
+// OWN data dir (never wherever the app's schema happens to live — a live
+// finding: for a console-added app spec.Schema is always the persisted
+// <data_dir>/<name>/schema.json copy, so colocating with it used to be
+// equivalent to data_dir/<name>/ anyway; but EditApp (FLEET-EDIT-S1) can
+// target an app whose schema is a plain file path OUTSIDE data_dir — e.g. a
+// shared examples/ file, or any hand-added manifest entry — and colocating
+// there would write generated secrets into a directory the fleet doesn't
+// own). sets spec.EnvFile to it, and CLEARS spec.Env so the committable
+// manifest references the file instead of inlining secrets. Shared by AddApp
+// (spec.Env is exactly what the operator just provided) and EditApp
+// (spec.Env is set to the full new MERGED env just before this call, so an
+// edited app's file stays complete, not a diff). spec.mergedEnv is left as
+// the caller set it (AddApp via ValidateNewApp, EditApp via SetMergedEnv) —
+// the running fleet's in-memory state, so future JWT-collision checks
+// against OTHER apps still see this one correctly.
+func (l *fleetLifecycle) writeAppEnvFile(spec *fleet.AppSpec) error {
+	dir := filepath.Join(l.mf.DataDir, spec.Name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}

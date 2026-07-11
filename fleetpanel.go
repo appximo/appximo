@@ -82,6 +82,22 @@ func (p *fleetPanel) removeApp(name string) {
 	}
 }
 
+// replaceApp swaps the panel's entry for pa.name with pa (FLEET-EDIT-S1: the
+// new *App instance an env edit compiled) — same slot, so a concurrent
+// GET /fleet/api/apps never sees the app briefly missing (unlike
+// removeApp+addApp, which would).
+func (p *fleetPanel) replaceApp(pa *panelApp) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i, x := range p.apps {
+		if x.name == pa.name {
+			p.apps[i] = pa
+			return
+		}
+	}
+	p.apps = append(p.apps, pa) // defensive: shouldn't happen, EditApp checks byName first
+}
+
 func (p *fleetPanel) byName(name string) *panelApp {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -134,6 +150,9 @@ func (p *fleetPanel) register(mux *http.ServeMux) {
 	// FLEET-LIFECYCLE-S1: the operator's app add/remove (hot, manifest-synced).
 	mux.HandleFunc("POST /fleet/api/apps", p.requireOperator(p.handleAddApp))
 	mux.HandleFunc("DELETE /fleet/api/apps/{name}", p.requireOperator(p.handleRemoveApp))
+	// FLEET-EDIT-S1: edit an EXISTING app's env (add/change/remove keys) hot,
+	// no restart — e.g. turning on APPITOOLS_GRAPHQL_PLAYGROUND for one app.
+	mux.HandleFunc("PATCH /fleet/api/apps/{name}", p.requireOperator(p.handleEditApp))
 	// FLEET-DB-ASSIST: the declared instances + a connection test. Both are
 	// server-side: credentials never reach the browser (the console references
 	// an instance by NAME; the server holds the DSN).
@@ -381,6 +400,40 @@ func (p *fleetPanel) handleRemoveApp(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// editAppRequest is the body of PATCH /fleet/api/apps/{name} (FLEET-EDIT-S1).
+// SetEnv keys are added or overwritten; UnsetEnv keys are removed — both are
+// WRITE-ONLY (existing secret values are never read back to the caller; the
+// merge happens server-side against the env this process already holds).
+type editAppRequest struct {
+	SetEnv   map[string]string `json:"set_env,omitempty"`
+	UnsetEnv []string          `json:"unset_env,omitempty"`
+}
+
+// handleEditApp is PATCH /fleet/api/apps/{name}: hot-edit an app's env (add/
+// change/remove keys) — no name/domain/schema change, no restart. A fresh
+// *App instance is compiled with the new env and atomically takes over the
+// app's domains; the old instance drains and releases after a grace period.
+// Not gated by a "type the name to confirm" prompt like remove — this isn't
+// destructive (no data or membership is deleted).
+func (p *fleetPanel) handleEditApp(w http.ResponseWriter, r *http.Request) {
+	if p.lifecycle == nil {
+		writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{"error": "app lifecycle is not available in this runtime"})
+		return
+	}
+	name := r.PathValue("name")
+	var req editAppRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"error": "invalid request body: " + err.Error()})
+		return
+	}
+	row, lerr := p.lifecycle.EditApp(name, req.SetEnv, req.UnsetEnv)
+	if lerr != nil {
+		writeJSONStatus(w, lerr.status, map[string]any{"error": lerr.msg})
+		return
+	}
+	writeJSONStatus(w, http.StatusOK, map[string]any{"edited": row})
+}
+
 func writeJSONStatus(w http.ResponseWriter, status int, body map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -468,6 +521,20 @@ button.ghost{background:var(--chip);border:1px solid var(--border);color:var(--t
 #dbtest{font-size:12px}
 #dbtest.ok{color:var(--ok)}#dbtest.bad{color:#dc2626}#dbtest.warn{color:#b45309}
 .hint{font-size:11.5px;color:var(--muted)}
+button.subtle{background:none;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer}
+button.subtle:hover{border-color:var(--accent)}
+.overlay{position:fixed;inset:0;background:color-mix(in srgb,#0a0c10 42%,transparent);display:none;place-items:center;z-index:50}
+.overlay.open{display:grid}
+.editbox{width:min(520px,92vw);max-height:82vh;overflow:auto;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+.editbox h3{margin:0 0 4px;font-size:14px}
+.editbox .hint{margin-bottom:10px}
+.envrow{display:flex;gap:6px;margin-top:6px}
+.envrow input{flex:1;min-width:0}
+.envrow input.key{flex:0 0 42%;font-family:var(--mono)}
+.envrow input.val{font-family:var(--mono)}
+#editmsg{font-size:12.5px}
+#editmsg.bad{color:#dc2626}
+#editmsg.ok{color:var(--ok)}
 </style>
 </head>
 <body>
@@ -525,6 +592,24 @@ button.ghost{background:var(--chip);border:1px solid var(--border);color:var(--t
     </div>
   </details>
 </main>
+<!-- FLEET-EDIT-S1: a single shared panel, OUTSIDE #apps (which load() fully
+     re-renders every 10s) — otherwise a poll mid-edit would wipe whatever the
+     operator was typing. openEdit(name) targets it at one app. -->
+<div class="overlay" id="editov" onclick="if(event.target===this) closeEdit()">
+  <div class="editbox">
+    <h3>Edit env — <span id="edit-appname"></span></h3>
+    <div class="hint">Existing secret values are never shown here — set a NEW value to change a key, or leave rows blank and only use "unset" to remove one. Applies hot, no restart; the OLD instance drains over a few seconds.</div>
+    <div id="edit-rows"></div>
+    <button type="button" class="ghost" onclick="addEnvRow()" style="margin-top:8px">+ row</button>
+    <label for="edit-unset" style="display:block;margin-top:12px;font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">unset keys (comma-separated)</label>
+    <input id="edit-unset" placeholder="APPITOOLS_GRAPHQL_PLAYGROUND" autocomplete="off" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 9px;font-size:12.5px;font-family:var(--mono)">
+    <div class="form actions" style="margin-top:14px">
+      <button class="primary" id="edit-submit" onclick="applyEdit()">Apply (hot — no restart)</button>
+      <button class="ghost" onclick="closeEdit()">Cancel</button>
+      <span id="editmsg"></span>
+    </div>
+  </div>
+</div>
 <script>
 const KEY = new URLSearchParams(location.search).get('key') || '';
 function flip(){
@@ -563,6 +648,7 @@ async function load(){
         ' <span class="meta">'+esc(a.schema_name)+' · control :'+a.control_port+
         ' · '+a.hot_swaps+' hot-swap'+(a.hot_swaps===1?'':'s')+'</span></h2>'+
         '<span class="grow"></span>'+
+        '<button class="subtle" data-edit="'+esc(a.name)+'" onclick="openEdit(this.dataset.edit)">Edit env</button>'+
         '<button class="danger" data-remove="'+esc(a.name)+'" onclick="removeApp(this.dataset.remove)">Remove</button></div>'+
         '<div class="meta">domains: '+a.domains.map(esc).join(', ')+'</div>'+
         '<div class="section-title">Resources</div>'+
@@ -701,6 +787,63 @@ async function removeApp(name){
     if(!r.ok){ alert(d.error || ('HTTP '+r.status)); return; }
     load();
   }catch(e){ alert(String(e)); }
+}
+
+// FLEET-EDIT-S1 — edit an EXISTING app's env (add/change/remove keys), hot, no
+// restart. Existing secret VALUES are never fetched/shown; rows start blank —
+// this is a write surface, same discipline as "Add app"'s DB-assist fields.
+let EDIT_APP = null;
+function addEnvRow(key, val){
+  const rows = document.getElementById('edit-rows');
+  const row = document.createElement('div'); row.className='envrow';
+  row.innerHTML =
+    '<input class="key" placeholder="APPITOOLS_GRAPHQL_PLAYGROUND" autocomplete="off" value="'+esc(key||'')+'">'+
+    '<input class="val" placeholder="on" autocomplete="off" value="'+esc(val||'')+'">'+
+    '<button type="button" class="ghost" onclick="this.parentElement.remove()">✕</button>';
+  rows.appendChild(row);
+}
+function openEdit(name){
+  EDIT_APP = name;
+  document.getElementById('edit-appname').textContent = name;
+  document.getElementById('edit-rows').innerHTML = '';
+  document.getElementById('edit-unset').value = '';
+  const msg = document.getElementById('editmsg'); msg.className=''; msg.textContent='';
+  addEnvRow('', '');
+  document.getElementById('editov').classList.add('open');
+}
+function closeEdit(){
+  document.getElementById('editov').classList.remove('open');
+  EDIT_APP = null;
+}
+async function applyEdit(){
+  if(!EDIT_APP) return;
+  const msg = document.getElementById('editmsg'); msg.className=''; msg.textContent='';
+  const setEnv = {};
+  for(const row of document.querySelectorAll('#edit-rows .envrow')){
+    const k = row.querySelector('.key').value.trim();
+    const v = row.querySelector('.val').value;
+    if(k) setEnv[k] = v;
+  }
+  const unsetEnv = document.getElementById('edit-unset').value.split(',').map(s=>s.trim()).filter(Boolean);
+  if(Object.keys(setEnv).length===0 && unsetEnv.length===0){
+    msg.className='bad'; msg.textContent='add at least one key to set, or list one to unset';
+    return;
+  }
+  const btn = document.getElementById('edit-submit'); btn.disabled = true;
+  try{
+    const r = await fetch('/fleet/api/apps/'+encodeURIComponent(EDIT_APP)+'?key='+encodeURIComponent(KEY), {
+      method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({set_env: setEnv, unset_env: unsetEnv})
+    });
+    const d = await r.json();
+    if(!r.ok){ msg.className='bad'; msg.textContent = d.error || ('HTTP '+r.status); }
+    else{
+      msg.className='ok'; msg.textContent='applied — new instance serving, old one draining';
+      load();
+      setTimeout(closeEdit, 900);
+    }
+  }catch(e){ msg.className='bad'; msg.textContent=String(e); }
+  btn.disabled = false;
 }
 </script>
 </body>

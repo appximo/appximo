@@ -196,6 +196,40 @@ func AddAppToManifestFile(path string, spec *AppSpec) error {
 	})
 }
 
+// EditAppInManifestFile replaces the manifest entry named spec.Name with spec
+// (atomically) — used after EditApp (FLEET-EDIT-S1) resolves a new merged env:
+// the app's env now lives in a (possibly freshly written) env_file, so the
+// entry's env_file pointer is updated and any old inline env is cleared. This
+// is EDIT, not create: it errors if the manifest does not already declare the
+// app (mirrors RemoveAppFromManifestFile's not-found handling; see
+// AddAppToManifestFile for the create path).
+func EditAppInManifestFile(path string, spec *AppSpec) error {
+	entry := manifestAppJSON{
+		Name: spec.Name, Schema: spec.Schema, Domains: spec.Domains,
+		Port: spec.Port, ControlPort: spec.ControlPort,
+		EnvFile: spec.EnvFile, Env: spec.Env,
+	}
+	b, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	var generic map[string]any
+	if err := json.Unmarshal(b, &generic); err != nil {
+		return err
+	}
+	return editManifestFile(path, func(doc map[string]any) error {
+		apps, _ := doc["apps"].([]any)
+		for i, e := range apps {
+			if m, ok := e.(map[string]any); ok && m["name"] == spec.Name {
+				apps[i] = generic
+				doc["apps"] = apps
+				return nil
+			}
+		}
+		return fmt.Errorf("fleet: manifest does not declare app %q", spec.Name)
+	})
+}
+
 // RemoveAppFromManifestFile removes the app named name from the manifest file
 // (atomically). Returns an error if the manifest does not declare it.
 func RemoveAppFromManifestFile(path, name string) error {

@@ -133,3 +133,77 @@ func TestManifestFileAddRemove(t *testing.T) {
 		t.Fatalf("raw apps = %d, want 2", len(apps))
 	}
 }
+
+// TestManifestFileEdit (FLEET-EDIT-S1): EditAppInManifestFile replaces an
+// EXISTING entry's env_file/env pointer (not append, not the AddApp path),
+// errors on an app the manifest does not declare, and every OTHER field
+// (schema/domains/port) plus every OTHER app's entry survives byte-untouched.
+func TestManifestFileEdit(t *testing.T) {
+	path := writeLifecycleFixture(t)
+	dir := filepath.Dir(path)
+
+	// Editing an app the manifest doesn't declare must fail (edit, not create).
+	ghost := &AppSpec{Name: "ghost", Schema: filepath.Join(dir, "crm.json"), Domains: []string{"ghost.test"}}
+	if err := EditAppInManifestFile(path, ghost); err == nil {
+		t.Fatal("editing an undeclared app must error")
+	}
+
+	// "crm" now moves to an env_file (simulating what writeAppEnvFile does
+	// before EditApp calls this) instead of its original inline env. The file
+	// is written to disk first — same order EditApp uses (writeAppEnvFile
+	// before EditAppInManifestFile) — so the manifest stays loadable.
+	envFile := filepath.Join(dir, "crm.env")
+	envBody := "ADMIN_KEY=crm-admin\nDATABASE_URL=postgres://x/crm\nJWT_SECRET=crm-secret-32-chars-loooooooooong\n"
+	if err := os.WriteFile(envFile, []byte(envBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	edited := &AppSpec{
+		Name: "crm", Schema: "crm.json", Domains: []string{"crm.test"},
+		EnvFile: envFile,
+	}
+	if err := EditAppInManifestFile(path, edited); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, _ := os.ReadFile(path)
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	apps := doc["apps"].([]any)
+	if len(apps) != 2 {
+		t.Fatalf("edit must REPLACE in place, not append: raw apps = %d, want 2", len(apps))
+	}
+	var crmEntry, shopEntry map[string]any
+	for _, e := range apps {
+		m := e.(map[string]any)
+		switch m["name"] {
+		case "crm":
+			crmEntry = m
+		case "shop":
+			shopEntry = m
+		}
+	}
+	if crmEntry == nil {
+		t.Fatal("crm entry missing after edit")
+	}
+	if crmEntry["env"] != nil {
+		t.Fatalf("edited entry must clear the old inline env, got %v", crmEntry["env"])
+	}
+	if crmEntry["env_file"] != edited.EnvFile {
+		t.Fatalf("edited entry env_file = %v, want %v", crmEntry["env_file"], edited.EnvFile)
+	}
+	if shopEntry == nil || shopEntry["env"] == nil {
+		t.Fatal("the OTHER app's entry (shop) must survive the edit untouched")
+	}
+
+	// The edited manifest must still LOAD (the restart contract) with the
+	// edited app's env resolved from its NEW env_file.
+	mf2, err := LoadManifest(path)
+	if err != nil {
+		t.Fatalf("manifest after edit does not load: %v", err)
+	}
+	if got := mf2.AppByName("crm").MergedEnv()["ADMIN_KEY"]; got != "crm-admin" {
+		t.Fatalf("edited app's env not resolved from its new env_file: %q", got)
+	}
+}
