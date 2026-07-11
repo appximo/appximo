@@ -136,6 +136,15 @@ type Config struct {
 	// 0 falls back to APPITOOLS_AUTH_MIN_PASSWORD, then to 8.
 	AuthMinPasswordLength int
 
+	// PublicRouteRPS / PublicRouteBurst tune the DEDICATED rate limit applied
+	// to PUBLIC custom routes (Route.Public — LIBRARY-EXTEND-S1), per
+	// (tenant, client IP), on top of the per-tenant limiter. Zero falls back to
+	// APPITOOLS_PUBLIC_ROUTE_RPS / APPITOOLS_PUBLIC_ROUTE_BURST, then to the
+	// deliberately conservative 5 rps / burst 10 — an anonymous endpoint is
+	// abuse surface, so the default protects it without configuration.
+	PublicRouteRPS   float64
+	PublicRouteBurst int
+
 	// AuthRequireVerified, when true, blocks login for a user whose email is not
 	// yet verified (→ 403). Empty falls back to APPITOOLS_AUTH_REQUIRE_VERIFIED
 	// ("true"/"1"/"on"). Default false (login works without verification).

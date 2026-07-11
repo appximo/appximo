@@ -40,6 +40,27 @@ type Route struct {
 	// already applied; a Route with no RequireRole still gets deny-by-default
 	// from the policy when its path segment matches a policy rule.
 	RequireRole string
+
+	// Public marks this route as PRE-AUTHENTICATION (LIBRARY-EXTEND-S1): the
+	// JWT and path-RBAC middlewares skip it by EXACT method+path match, so a
+	// caller needs no Bearer token — the seam for a custom registration/webhook
+	// endpoint that must run before an identity exists.
+	//
+	// ⚠ A public route is ATTACK SURFACE. The engine keeps what it can by
+	// default — the tenant still resolves from the Host (per-tenant isolation
+	// holds), the shared per-tenant rate limit still applies, and a DEDICATED,
+	// far more aggressive public-route rate limit (per tenant+client IP,
+	// APPITOOLS_PUBLIC_ROUTE_RPS/BURST, default 5 rps / burst 10 → 429) is
+	// enforced before the handler runs. Everything else is the handler's
+	// responsibility: validate EVERY input, and treat the caller as hostile.
+	// Inside the handler Claims() is zero (no identity), so the RBAC-aware
+	// helpers (Query/Insert/Update) fail closed with forbidden — anonymous
+	// writes go through the APIs that carry their own rules (CreateUser) or
+	// through a deliberate, greppable UnsafeTx. Public routes must use literal
+	// paths (no chi {params} — the skip is an exact match) and cannot combine
+	// with RequireRole (a role implies authentication). Only routes explicitly
+	// marked Public skip auth; every other route keeps deny-by-default.
+	Public bool
 }
 
 var (
@@ -68,6 +89,20 @@ func validateRoute(rt Route, s *schema.APISchema, seen map[string]bool) error {
 		return fmt.Errorf("route %s: registered twice", key)
 	}
 
+	if rt.Public {
+		// The JWT/RBAC skip is an EXACT method+path match — a chi pattern like
+		// /api/x/{id} would route but never match the skip, yielding a public
+		// route that 401s. Reject at boot instead of failing confusingly live.
+		if strings.ContainsAny(rt.Path, "{*") {
+			return fmt.Errorf("route %s %s: a Public route must use a literal path (no chi {params}/wildcards — the auth skip matches the exact path)", method, rt.Path)
+		}
+		// RequireRole implies an authenticated caller; combining it with Public
+		// is a contradiction (an anonymous request has no role).
+		if rt.RequireRole != "" {
+			return fmt.Errorf("route %s %s: Public and RequireRole are mutually exclusive (a public route has no authenticated role)", method, rt.Path)
+		}
+	}
+
 	// First segment after /api/ — collision iff it names a generated resource.
 	segs := strings.Split(strings.TrimPrefix(rt.Path, "/api/"), "/")
 	first := segs[0]
@@ -82,6 +117,23 @@ func validateRoute(rt Route, s *schema.APISchema, seen map[string]bool) error {
 	return nil
 }
 
+// publicRoutePaths returns the "METHOD /path" set of routes registered Public,
+// or nil when there are none (the common case — the middlewares then skip the
+// lookup entirely).
+func (a *App) publicRoutePaths() map[string]bool {
+	var out map[string]bool
+	for _, rt := range a.routes {
+		if !rt.Public {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]bool)
+		}
+		out[rt.Method+" "+rt.Path] = true
+	}
+	return out
+}
+
 // customHandler wraps a Route's Handler in the withTenantTx pattern (ADR-016
 // Decision 4): it runs AFTER the shared middleware chain (so identity, tenant
 // and RBAC are already resolved), opens a transaction scoped to the tenant
@@ -94,6 +146,17 @@ func (a *App) customHandler(rt Route) http.HandlerFunc {
 		if tc == nil || !pgSchemaNameRe.MatchString(tc.PGSchema) {
 			writeErr(w, http.StatusBadRequest, "invalid tenant")
 			return
+		}
+		if rt.Public {
+			// Dedicated public-route throttle, per (tenant, client IP), far
+			// tighter than the per-tenant limiter that already ran — an
+			// anonymous endpoint must not be a free abuse vector. Before the
+			// transaction, so a throttled burst never touches the pool.
+			if !a.publicLimiter.Allow(tc.ID+"|"+remoteIP(r), "") {
+				w.Header().Set("Retry-After", "1")
+				writeErr(w, http.StatusTooManyRequests, "too many requests")
+				return
+			}
 		}
 		cl := auth.ClaimsFromCtx(r.Context())
 		if rt.RequireRole != "" && (cl == nil || cl.Role != rt.RequireRole) {

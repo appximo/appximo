@@ -308,6 +308,7 @@ at zero API cost. The flow: [docs/SCHEMA_SPEC_LLM.md](docs/SCHEMA_SPEC_LLM.md).
 | `APPITOOLS_FILES_BACKEND` | env | no | file-store storage: `local` (default, this box's disk) or `s3` (R2/Spaces/MinIO/AWS). See [docs/FILES.md](docs/FILES.md) |
 | `APPITOOLS_FILES_S3_*` | env | with `s3` | `BUCKET`,`ENDPOINT`,`REGION`,`ACCESS_KEY`,`SECRET_KEY`,`FORCE_PATH_STYLE`,`PREFIX`,`SERVE` — provider-agnostic S3 config |
 | `APPITOOLS_FILES_DIR` / `APPITOOLS_FILES_MAX_BYTES` / `APPITOOLS_FILES_TOKEN_TTL` / `APPITOOLS_FILES_ALLOWED_EXT` | env | no | local blob root; upload cap (256 MiB); signed-URL TTL (180 s); upload extension allowlist |
+| `APPITOOLS_PUBLIC_ROUTE_RPS` / `APPITOOLS_PUBLIC_ROUTE_BURST` | env | no | dedicated rate limit for **public custom routes** (`appitools.Route{Public: true}` in the library model), per tenant+client IP; default 5 rps / burst 10 |
 | `APPITOOLS_AUTH_SIGNUP_ROLE` | env | no | role assigned to public signup; **set it to enable `POST /auth/signup`** (empty = signup disabled). Must be a schema role |
 | `APPITOOLS_AUTH_MIN_PASSWORD` | env | no | minimum signup password length (default 8) |
 | `APPITOOLS_AUTH_REQUIRE_VERIFIED` | env | no | block login until the user's email is verified (default off) |

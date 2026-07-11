@@ -416,3 +416,79 @@ Class 1 handler before merge.
 | `ctx.DB()` raw without an Unsafe marker | Accidental RBAC bypass (the PocketBase/API Platform pattern); auditing requires reviewing every call site. |
 | Goja/Wasm for heavy business logic | Watchdog 80 ms is incompatible with multi-step workflows, external HTTP calls, and long-running calculations. |
 | Separate sidecar process for custom logic | Adds operational complexity (two binaries, two deployments, inter-process auth); violates "single binary" constraint. |
+
+---
+
+## Addendum (LIBRARY-EXTEND-S1): public routes + identity creation
+
+EXTENSIBILITY-AUDIT-V1 confirmed the Class-1 surface above works as designed,
+and found exactly two gaps between it and the full "custom registration"
+scenario (validate against an external API → create the user → create related
+records, atomically). Both are closed; each keeps the security posture of
+Decision 4.
+
+### `Route.Public` — pre-authentication custom endpoints
+
+A custom route may opt out of Bearer enforcement: `Route{..., Public: true}`.
+The skip is an **exact method+path match** compiled once at boot into both the
+JWT and the RBAC middlewares (`auth.JWTMiddlewareWithPublic` /
+`rbac.RBACMiddlewareWithPublic`); nothing else changes — deny-by-default for
+every other route is byte-identical (when no route is Public the matcher is
+nil and the middlewares pay a single nil check).
+
+Safeguards, in the order a request meets them:
+
+1. **Tenant still resolves from the Host** — a public route is per-tenant.
+2. The shared **per-tenant rate limit** still applies.
+3. A **dedicated public-route limiter** — per (tenant, client IP),
+   `APPITOOLS_PUBLIC_ROUTE_RPS/BURST` (Config: `PublicRouteRPS/Burst`),
+   default a deliberately conservative 5 rps / burst 10 → `429` with
+   `Retry-After` — runs BEFORE the handler and before any transaction is
+   opened. Security is the default; the developer opts INTO exposure, never
+   into protection.
+4. The handler's `Ctx` carries **no identity**: `Claims()` is zero, and the
+   RBAC-aware helpers (`Query`/`Insert`/`Update`) evaluate the empty role and
+   **fail closed**. Anonymous writes go through APIs that carry their own
+   rules (`CreateUser`) or a deliberate, greppable `UnsafeTx`.
+
+Restrictions validated at Register: a Public route must use a **literal path**
+(the skip is exact — a chi `{param}` would route but 401) and cannot combine
+with `RequireRole` (a role implies authentication). A public route is attack
+surface: the handler owns input validation, and the role of anything it
+creates comes from handler code, never from the request.
+
+### `Ctx.CreateUser` — identity creation from a handler
+
+`ctx.CreateUser(email, password, role)` creates a user in THIS tenant's
+`auth_users`, **inside the handler's transaction** — a later handler failure
+rolls the user back with everything else. It reuses the admin API's rules,
+via the same `pkg/userauth` store (`InsertUserTx` + `ValidateEmail` +
+`HashPassword`):
+
+- **role** must be declared in the schema RBAC (`ErrUnknownRole`) — checked
+  against the boot policy before any I/O; no privilege invention.
+- **email** normalized + format-checked (`ErrInvalidEmail`); duplicate within
+  the tenant → `ErrEmailTaken` (a 409 for the caller to map).
+- **password** argon2id-hashed, engine-configured minimum length
+  (`ErrWeakPassword`). An **empty password** creates an invitation-style user
+  that cannot password-login until a reset sets one — the OTP/invite gate,
+  the same contract as an OAuth-created user.
+- **tenant-scoped structurally**: the target schema is the Ctx's tenant;
+  there is no parameter that could name another tenant.
+
+Suspension and role changes remain admin-API operations (deliberately not on
+`Ctx` — fewer sensitive surfaces until a real case needs them).
+
+### When to use which (the extensibility map)
+
+| Need | Use |
+|---|---|
+| Validate/transform a CRUD write | schema `hooks` (js/wasm — no HTTP, no DB, 80 ms) |
+| Notify an external system after a write | `after_*` webhook / outbox `events` |
+| Custom endpoint for authenticated callers | Class-1 `Route` (default) |
+| Custom **pre-auth** endpoint (registration, external webhook receiver) | `Route{Public: true}` + `CreateUser` |
+| Orchestrate from another service/stack | BFF over the HTTP API (service JWT minted with the shared secret — the worker's `EngineClient` pattern — + `X-Admin-Key` for admin ops) |
+
+The canonical example (`examples/custom-handler`) registers both classes: the
+authenticated `/api/_echo` and the public `/api/_register` (external check →
+`CreateUser` → related record → `Enqueue`, one transaction).

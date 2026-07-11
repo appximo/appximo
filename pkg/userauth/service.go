@@ -477,6 +477,15 @@ func emailTemplateAndPath(ttype string) (template, path string) {
 
 func normalizeEmail(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
 
+// ValidateEmail normalizes (trim + lowercase) and format-checks an email for
+// callers OUTSIDE this package that create users (the library's Ctx.CreateUser)
+// — one email rule for signup, admin API and custom handlers. ok is false when
+// the address is not acceptable; normalized is always the canonical form.
+func ValidateEmail(email string) (normalized string, ok bool) {
+	normalized = normalizeEmail(email)
+	return normalized, validEmail(normalized)
+}
+
 // validEmail accepts an addr-spec parseable by net/mail with a single address
 // and a domain part. It is a format check, not deliverability.
 func validEmail(email string) bool {

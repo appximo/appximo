@@ -67,11 +67,28 @@ func HookUserContext(ctx context.Context) map[string]any {
 // Authorization header.
 var skipJWT = []string{"/health", "/readyz", "/graphiql", "/metrics", "/debug", "/admin", "/editor", "/auth/", "/favicon.ico", "/openapi", "/docs", "/files/signed/"}
 
+// PublicMatcher reports whether (method, path) is an EXPLICITLY-registered
+// public custom route (LIBRARY-EXTEND-S1: Route.Public). Matching is exact —
+// method + literal path, never a prefix — so marking one route public can never
+// widen the skip to a sibling. nil means "no public routes" (the default), and
+// the middlewares below pay only a nil check for it.
+type PublicMatcher func(method, path string) bool
+
 // JWTMiddleware validates Bearer tokens on all routes except those in skipJWT.
 // 401 is returned for missing or invalid tokens on enforced routes.
 // Optional onError callback (tenantID, reason) is called on every 401 so callers
 // can forward auth failures to an error store without importing auth from observability.
 func JWTMiddleware(secret string, onError ...func(tenantID, reason string)) func(http.Handler) http.Handler {
+	return JWTMiddlewareWithPublic(secret, nil, onError...)
+}
+
+// JWTMiddlewareWithPublic is JWTMiddleware plus an exact-match skip for the
+// custom routes explicitly registered as Public (appitools.Route{Public: true}).
+// A skipped (public) request carries NO claims — the handler sees Claims() zero
+// / ClaimsFromCtx nil, exactly like the /auth/ endpoints. Everything not
+// matched by isPublic keeps the full Bearer enforcement: deny-by-default is
+// unchanged for every other route.
+func JWTMiddlewareWithPublic(secret string, isPublic PublicMatcher, onError ...func(tenantID, reason string)) func(http.Handler) http.Handler {
 	var recordErr func(tenantID, reason string)
 	if len(onError) > 0 {
 		recordErr = onError[0]
@@ -95,6 +112,12 @@ func JWTMiddleware(secret string, onError ...func(tenantID, reason string)) func
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Explicit public custom routes (exact method+path). Anonymous by
+			// design: no claims are parsed even if a Bearer is present.
+			if isPublic != nil && isPublic(r.Method, r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			for _, p := range skipJWT {
 				if strings.HasPrefix(r.URL.Path, p) {
 					next.ServeHTTP(w, r)

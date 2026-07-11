@@ -104,22 +104,43 @@ func (s *Store) GetByID(ctx context.Context, tenantID, id string) (User, error) 
 // password-login (any password → invalid credentials) until they set one via
 // reset. Runs on the given tx so the user + its identity link commit atomically.
 func (s *Store) createExternalUserTx(ctx context.Context, tx pgx.Tx, tenantID, email, role string) (User, error) {
+	return s.insertUserTx(ctx, tx, tenantID, email, "", role, true)
+}
+
+// InsertUserTx inserts a user with the given (already argon2id-hashed) password
+// on the CALLER's transaction — the seam the library's Ctx.CreateUser uses so
+// the user commits or rolls back atomically with the handler's other writes. An
+// empty passwordHash creates an invitation-style user that cannot password-login
+// until a reset sets one (same contract as an OAuth-created user);
+// email_verified starts false (nothing verified it). The caller validates email
+// (ValidateEmail) and role (schema RBAC) BEFORE calling — this method only
+// persists. A duplicate email within the tenant returns ErrEmailTaken.
+func (s *Store) InsertUserTx(ctx context.Context, tx pgx.Tx, tenantID, email, passwordHash, role string) (User, error) {
+	if err := s.ensure(ctx, tenantID); err != nil {
+		return User{}, err
+	}
+	return s.insertUserTx(ctx, tx, tenantID, email, passwordHash, role, false)
+}
+
+// insertUserTx is the shared tx-scoped user insert behind createExternalUserTx
+// (OAuth auto-provision, verified email) and InsertUserTx (library handlers).
+func (s *Store) insertUserTx(ctx context.Context, tx pgx.Tx, tenantID, email, passwordHash, role string, emailVerified bool) (User, error) {
 	tbl, err := s.table(tenantID)
 	if err != nil {
 		return User{}, err
 	}
 	q := fmt.Sprintf(`INSERT INTO %s (email, password_hash, role, email_verified)
-		VALUES ($1, '', $2, true)
+		VALUES ($1, $2, $3, $4)
 		RETURNING id::text, email, role, email_verified, created_at, updated_at`, tbl)
 	var u User
-	err = tx.QueryRow(ctx, q, email, role).
+	err = tx.QueryRow(ctx, q, email, passwordHash, role, emailVerified).
 		Scan(&u.ID, &u.Email, &u.Role, &u.EmailVerified, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return User{}, ErrEmailTaken // a concurrent create won the email race
 		}
-		return User{}, fmt.Errorf("userauth: insert external user: %w", err)
+		return User{}, fmt.Errorf("userauth: insert user: %w", err)
 	}
 	return u, nil
 }

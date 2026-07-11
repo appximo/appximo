@@ -21,6 +21,7 @@ import (
 	"github.com/miguelangel/appitools/pkg/rbac"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/miguelangel/appitools/pkg/userauth"
 )
 
 // maxBodyBytes caps a custom handler's request body, matching the generated
@@ -94,6 +95,22 @@ type Ctx interface {
 	// the business write). A Handler error rolls back the enqueue too.
 	Enqueue(topic string, payload any) (int64, error)
 
+	// CreateUser creates an identity in THIS tenant's auth_users, inside the
+	// handler's transaction — if the handler later fails, the user rolls back
+	// with everything else (LIBRARY-EXTEND-S1). It applies the SAME rules as
+	// the admin API: the email is normalized + format-checked, the role must
+	// be declared in the schema RBAC (ErrUnknownRole — no privilege invention),
+	// the password is argon2id-hashed and must meet the engine's configured
+	// minimum length. An EMPTY password creates an invitation-style user that
+	// cannot password-login until a reset sets one (the OTP/invite gate — same
+	// contract as an OAuth-created user). Duplicate email in the tenant →
+	// ErrEmailTaken. Always scoped to Tenant(): a handler cannot create users
+	// in another tenant. Deliberately usable on a Public route — creating the
+	// user IS the point of a custom registration endpoint; the caller's
+	// anonymity is why the role comes from the handler's code, never from
+	// request input, and why every input must be validated by the handler.
+	CreateUser(email, password, role string) (CreatedUser, error)
+
 	// JSON buffers a success response flushed AFTER the transaction commits, so
 	// a commit failure becomes a 500 rather than a false 200. Error buffers an
 	// error response and returns a non-nil error so the Handler can
@@ -105,13 +122,41 @@ type Ctx interface {
 	Context() context.Context
 }
 
+// CreatedUser is the identity Ctx.CreateUser returns — the same public shape
+// the auth endpoints expose (never the password hash).
+type CreatedUser struct {
+	ID            string
+	Email         string
+	Role          string
+	EmailVerified bool
+}
+
+// Errors Ctx.CreateUser returns for the caller to branch on (map them to 409 /
+// 422 / 400 with ctx.Error as fits the endpoint's contract).
+var (
+	// ErrEmailTaken: the email already has a user in this tenant.
+	ErrEmailTaken = userauth.ErrEmailTaken
+	// ErrInvalidEmail: the email failed the engine's format check.
+	ErrInvalidEmail = errors.New("appitools: invalid email")
+	// ErrWeakPassword: a non-empty password shorter than the engine's minimum.
+	ErrWeakPassword = errors.New("appitools: password too short")
+	// ErrUnknownRole: the role is not declared in the schema RBAC.
+	ErrUnknownRole = errors.New("appitools: role not declared in the schema RBAC")
+)
+
 // engineRefs is the read-only engine state shared by every requestCtx: the
-// loaded schema, the validators compiled once at boot, and the RBAC policy.
-// It is never mutated after New returns.
+// loaded schema, the validators compiled once at boot, the RBAC policy, and
+// the per-tenant identity store (for Ctx.CreateUser). It is never mutated
+// after New returns.
 type engineRefs struct {
 	schema     *schema.APISchema
 	validators map[string]*schema.ResourceValidator
 	policy     *rbac.Policy
+	users      *userauth.Store
+	// minPassword is the engine's configured minimum password length
+	// (Config.AuthMinPasswordLength / APPITOOLS_AUTH_MIN_PASSWORD, default 8) —
+	// Ctx.CreateUser enforces the same bar as signup and the admin API.
+	minPassword int
 }
 
 // requestCtx is the per-request Ctx implementation. One is built by the custom
@@ -378,6 +423,39 @@ func (c *requestCtx) BindResource(resource string, dst any) error {
 
 func (c *requestCtx) Enqueue(topic string, payload any) (int64, error) {
 	return outbox.Enqueue(c.r.Context(), c.tx, c.tc.ID, topic, payload)
+}
+
+// --- identity creation (LIBRARY-EXTEND-S1) -----------------------------------
+
+func (c *requestCtx) CreateUser(email, password, role string) (CreatedUser, error) {
+	// Role must be declared in the schema RBAC — the same gate the admin API
+	// applies (checkRole) and boot applies to the signup role. The role comes
+	// from HANDLER CODE, so this catches typos at first use, not a caller
+	// escalating (a caller never chooses it).
+	if _, ok := c.eng.policy.Roles[role]; !ok {
+		return CreatedUser{}, ErrUnknownRole
+	}
+	normalized, ok := userauth.ValidateEmail(email)
+	if !ok {
+		return CreatedUser{}, ErrInvalidEmail
+	}
+	hash := ""
+	if password != "" {
+		if len([]rune(password)) < c.eng.minPassword {
+			return CreatedUser{}, ErrWeakPassword
+		}
+		var err error
+		if hash, err = userauth.HashPassword(password); err != nil {
+			return CreatedUser{}, err
+		}
+	}
+	// On the handler's tx and the Ctx's tenant — atomic with the handler's
+	// other writes, structurally incapable of touching another tenant.
+	u, err := c.eng.users.InsertUserTx(c.r.Context(), c.tx, c.tc.ID, normalized, hash, role)
+	if err != nil {
+		return CreatedUser{}, err
+	}
+	return CreatedUser{ID: u.ID, Email: u.Email, Role: u.Role, EmailVerified: u.EmailVerified}, nil
 }
 
 // --- response ---------------------------------------------------------------

@@ -17,6 +17,18 @@ type evalResultKey struct{}
 // the HTTP method to a CRUD action, and injects the EvalResult into context.
 // Requests to paths outside /api/ are passed through without enforcement.
 func RBACMiddleware(policyJSON []byte) func(http.Handler) http.Handler {
+	return RBACMiddlewareWithPublic(policyJSON, nil)
+}
+
+// RBACMiddlewareWithPublic is RBACMiddleware plus an exact-match pass-through
+// for the custom routes explicitly registered as Public (appitools.Route
+// {Public: true}): an anonymous request has no role, so path-based enforcement
+// would deny-by-default every public route. The pass-through injects NO
+// EvalResult — inside the handler, the Ctx's RBAC-aware helpers (Query/Insert/
+// Update) still evaluate the (empty) role themselves and fail closed; only
+// deliberate anonymous logic (UnsafeTx, CreateUser) proceeds. Everything not
+// matched by isPublic keeps full enforcement.
+func RBACMiddlewareWithPublic(policyJSON []byte, isPublic func(method, path string) bool) func(http.Handler) http.Handler {
 	var policy Policy
 	if err := json.Unmarshal(policyJSON, &policy); err != nil {
 		return func(next http.Handler) http.Handler {
@@ -30,6 +42,11 @@ func RBACMiddleware(policyJSON []byte) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isPublic != nil && isPublic(r.Method, r.URL.Path) {
+				// Explicit public custom route — anonymous, no EvalResult.
+				next.ServeHTTP(w, r)
+				return
+			}
 			resource := resourceFromPath(r.URL.Path)
 			if resource == "" {
 				// Not an /api/ route — pass through.

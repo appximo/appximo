@@ -77,6 +77,11 @@ type App struct {
 	responseCache *cache.ResponseCache
 	eventsHub     *events.Hub
 	tenantLimiter *resilience.TenantLimiter
+	// publicLimiter throttles PUBLIC custom routes (Route.Public) per
+	// (tenant, client IP) — a dedicated, far tighter bucket on top of the
+	// per-tenant limiter, because an anonymous endpoint is abuse surface by
+	// definition (LIBRARY-EXTEND-S1).
+	publicLimiter *resilience.TenantLimiter
 
 	// observability stack
 	hist      *observability.TenantHistogram
@@ -435,6 +440,33 @@ func New(cfg Config) (*App, error) {
 	app.tenantLimiter = resilience.NewConfiguredLimiter(resilience.RateLimitConfig{RPS: rlRPS, Burst: rlBurst})
 	log.Printf("rate limiter: %.0f RPS / %d burst per tenant", rlRPS, rlBurst)
 
+	// Public custom-route limiter (LIBRARY-EXTEND-S1): per (tenant, client IP),
+	// deliberately conservative by default — a Route.Public endpoint is
+	// pre-authentication surface. Applies ONLY to routes registered Public.
+	pubRPS := cfg.PublicRouteRPS
+	if pubRPS <= 0 {
+		if v := os.Getenv("APPITOOLS_PUBLIC_ROUTE_RPS"); v != "" {
+			if f, perr := strconv.ParseFloat(v, 64); perr == nil && f > 0 {
+				pubRPS = f
+			}
+		}
+	}
+	if pubRPS <= 0 {
+		pubRPS = 5
+	}
+	pubBurst := cfg.PublicRouteBurst
+	if pubBurst <= 0 {
+		if v := os.Getenv("APPITOOLS_PUBLIC_ROUTE_BURST"); v != "" {
+			if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
+				pubBurst = n
+			}
+		}
+	}
+	if pubBurst <= 0 {
+		pubBurst = 10
+	}
+	app.publicLimiter = resilience.NewConfiguredLimiter(resilience.RateLimitConfig{RPS: pubRPS, Burst: pubBurst})
+
 	app.ss = shutdown.New()
 
 	// Auth-as-product core (AUTH-CORE-V1): per-tenant password identity. Users
@@ -656,13 +688,19 @@ func New(cfg Config) (*App, error) {
 		log.Println("CORS disabled (no origins configured — set APPITOOLS_CORS_ORIGINS to enable browser cross-origin access)")
 	}
 
-	// engineRefs for custom-route Ctx helpers: compile validators once.
+	// engineRefs for custom-route Ctx helpers: compile validators once. The
+	// identity store + the resolved minimum password length back Ctx.CreateUser
+	// with the SAME rules as signup/the admin API (LIBRARY-EXTEND-S1).
 	validators := make(map[string]*schema.ResourceValidator, len(s.Resources))
 	for name, res := range s.Resources {
 		r := res
 		validators[name] = schema.CompileRules(&r)
 	}
-	app.eng = &engineRefs{schema: s, validators: validators, policy: &rbacPolicy}
+	ctxMinPw := minPw
+	if ctxMinPw <= 0 {
+		ctxMinPw = 8 // the same default userauth.NewService applies
+	}
+	app.eng = &engineRefs{schema: s, validators: validators, policy: &rbacPolicy, users: authStore, minPassword: ctxMinPw}
 
 	return app, nil
 }
@@ -955,10 +993,19 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 		},
 	))
 	r.Use(a.responseCache.Middleware)
-	r.Use(auth.JWTMiddleware(a.cfg.JWTSecret, func(tenantID, reason string) {
+	// Public custom routes (Route.Public, LIBRARY-EXTEND-S1): an exact
+	// method+path set built once at boot from the registered routes. nil when
+	// no route is public — the middlewares then pay a single nil check, and
+	// deny-by-default is byte-identical to before. Only explicitly-marked
+	// routes are skipped; the skip can never widen to a prefix.
+	var isPublic auth.PublicMatcher
+	if publicPaths := a.publicRoutePaths(); len(publicPaths) > 0 {
+		isPublic = func(method, path string) bool { return publicPaths[method+" "+path] }
+	}
+	r.Use(auth.JWTMiddlewareWithPublic(a.cfg.JWTSecret, isPublic, func(tenantID, reason string) {
 		a.errStore.Record(tenantID, fmt.Errorf("jwt: %s", reason))
 	}))
-	r.Use(rbac.RBACMiddleware(mustMarshal(surf.schema.RBAC)))
+	r.Use(rbac.RBACMiddlewareWithPublic(mustMarshal(surf.schema.RBAC), isPublic))
 	r.Use(chimiddleware.Recoverer)
 
 	if a.cfg.Env == "development" {
