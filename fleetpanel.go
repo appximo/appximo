@@ -550,7 +550,11 @@ async function load(){
       const links = a.domains.map(dm =>
         '<a href="http://'+esc(dm)+PORT+'/editor" target="_blank">Studio · '+esc(dm)+'</a>'+
         '<a href="http://'+esc(dm)+PORT+'/admin" target="_blank">Admin</a>'+
-        '<a href="http://'+esc(dm)+PORT+'/docs" target="_blank">Docs</a>').join('');
+        '<a href="http://'+esc(dm)+PORT+'/docs" target="_blank">Docs</a>'+
+        // GraphiQL (GRAPHQL-EXPLORER-S1): only mounted in dev or with the
+        // operator's APPITOOLS_GRAPHQL_PLAYGROUND opt-in, same as /docs is
+        // always mounted — a 404 here in a locked-down prod fleet is expected.
+        '<a href="http://'+esc(dm)+PORT+'/graphiql" target="_blank">GraphQL</a>').join('');
       const obsRows = Object.entries(a.obs).map(([t,o]) =>
         '<tr><td>'+esc(t)+'</td><td class="num">'+ms(o.p50_us_uncached)+'</td><td class="num">'+
         ms(o.p95_us_uncached)+'</td><td class="num">'+o.requests+'</td></tr>').join('');

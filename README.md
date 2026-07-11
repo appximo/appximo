@@ -216,7 +216,11 @@ baseline faster are welcome; we'll publish updated numbers.
   runtime (Wazero, no CGO)
 - **GraphQL**: queries (with nested relation embeds) + create/update/delete
   mutations, selection-count limits (alias-amplification guard), introspection
-  off in production
+  off in production by default. **GraphiQL** — the visual schema explorer —
+  is served at `/graphiql` (autocomplete, run queries/mutations, a Headers
+  editor for testing with a real token) whenever introspection is allowed:
+  dev, or the explicit `APPITOOLS_GRAPHQL_PLAYGROUND=on` opt-in for
+  production, per-app in the fleet
 - **API contract, served**: an OpenAPI 3.0 spec generated from the schema —
   including the auth + file-store endpoints — served at `/openapi.json` (and
   `/openapi.yaml`), with **Swagger UI at `/docs`** for interactive exploration
@@ -313,6 +317,7 @@ at zero API cost. The flow: [docs/SCHEMA_SPEC_LLM.md](docs/SCHEMA_SPEC_LLM.md).
 | `APPITOOLS_MFA_KEY` / `APPITOOLS_MFA_ISSUER` | env | no | TOTP-secret encryption key (falls back to `JWT_SECRET`); authenticator-app issuer label |
 | `APPITOOLS_CORS_ORIGINS` | env | no | comma-separated browser origins allowed cross-origin (or `*`); **empty = CORS disabled** (safe default). Scoped to `/api`,`/auth`,`/graphql`,`/openapi` |
 | `APPITOOLS_CORS_METHODS` / `APPITOOLS_CORS_HEADERS` / `APPITOOLS_CORS_EXPOSE_HEADERS` / `APPITOOLS_CORS_CREDENTIALS` / `APPITOOLS_CORS_MAX_AGE` | env | no | CORS preflight tuning (see [docs/DEPLOY.md](docs/DEPLOY.md#cors--configurable-for-browser-spas-on-another-origin)) |
+| `APPITOOLS_GRAPHQL_PLAYGROUND` | env | no | allow GraphQL introspection + serve the GraphiQL explorer at `/graphiql` outside development; **empty = off** (the safe default — `APPITOOLS_ENV=development` already enables both). Per-app in the fleet |
 | `APPITOOLS_PLATFORM_SUPER_ADMIN_ROLE` / `APPITOOLS_PLATFORM_MFA_ISSUER` | env | no | admin API: platform super-admin role marker (default `platform_super_admin`); platform authenticator label. Bootstrap the first super-admin with `appitools admin create` |
 | `OBS_DB_PATH` | env | no | observability SQLite path; default `/var/lib/appitools/obs.db` (persistent — survives restarts). See [docs/DEPLOY.md](docs/DEPLOY.md#observability-store-obs_db_path) |
 | `DB_MAX_CONNS`, `GOMAXPROCS`, `SLACK_WEBHOOK_URL`, `REDIS_URL` | env | no | see [docs/DEPLOY.md](docs/DEPLOY.md) |

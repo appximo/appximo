@@ -163,6 +163,14 @@
 		Deploy
 	</button>
 
+	<!-- GraphQL explorer (GRAPHQL-EXPLORER-S1): the GraphQL equivalent of /docs —
+	     schema browser + autocomplete + run queries/mutations with a real
+	     Authorization header. Only mounted in dev or with the operator's explicit
+	     APPITOOLS_GRAPHQL_PLAYGROUND opt-in; a plain 404 elsewhere is expected. -->
+	<a class="btn subtle console-link" href="/graphiql" target="_blank" rel="noopener" title="GraphiQL — explore and run GraphQL queries/mutations">
+		GraphQL&nbsp;↗
+	</a>
+
 	<!-- The sibling console (ADMIN-CONSOLE-S1): Studio designs the schema; the
 	     admin console manages tenants/users/data/files. Same platform, other face. -->
 	<a class="btn subtle console-link" href="/admin" target="_blank" rel="noopener" title="Admin console — tenants, users, data, files">

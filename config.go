@@ -45,9 +45,17 @@ type Config struct {
 	// the data plane. Empty falls back to ADMIN_KEY.
 	AdminKey string
 
-	// Env mirrors APPITOOLS_ENV ("development" enables GraphiQL + pprof).
-	// Empty falls back to the APPITOOLS_ENV environment variable.
+	// Env mirrors APPITOOLS_ENV ("development" enables GraphiQL + introspection +
+	// pprof). Empty falls back to the APPITOOLS_ENV environment variable.
 	Env string
+
+	// GraphQLPlayground explicitly enables GraphQL introspection and the
+	// GraphiQL explorer (/graphiql) OUTSIDE development — the operator's opt-in
+	// for exploring/testing GraphQL in production without flipping the broader
+	// Env=development flag (which also enables pprof). False falls back to
+	// APPITOOLS_GRAPHQL_PLAYGROUND (truthy); Env=="development" already implies
+	// this regardless (GRAPHQL-EXPLORER-S1).
+	GraphQLPlayground bool
 
 	// FilesDir is the root directory of the content-addressable file store
 	// (FILES-V1). Empty falls back to APPITOOLS_FILES_DIR, then to

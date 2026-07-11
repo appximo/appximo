@@ -141,7 +141,7 @@ func TestGraphQL(t *testing.T) {
 
 	tdb := db.NewTenantDB(pool)
 	hr := extensions.NewHookRunner(extensions.NewJSSandbox())
-	handler := gqlhandler.BuildHandler(testSchema, tdb, hr, &policy, nil)
+	handler := gqlhandler.BuildHandler(testSchema, tdb, hr, &policy, nil, false)
 	// host subdomain "gql" must match TenantID in tokens below
 	srv := httptest.NewServer(withFullStack(handler, "gql.localhost", gqlTestSecret))
 	defer srv.Close()
@@ -336,7 +336,7 @@ func TestGraphQLValidation(t *testing.T) {
 
 	tdb := db.NewTenantDB(pool)
 	hr := extensions.NewHookRunner(extensions.NewJSSandbox())
-	handler := gqlhandler.BuildHandler(testSchema, tdb, hr, &policy, nil)
+	handler := gqlhandler.BuildHandler(testSchema, tdb, hr, &policy, nil, false)
 	srv := httptest.NewServer(withFullStack(handler, "gqlval.localhost", gqlTestSecret))
 	defer srv.Close()
 

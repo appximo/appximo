@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,9 +53,18 @@ func (f *rbacResultFilter) store(gqlField string, allowed []string) {
 
 // BuildHandler constructs an http.Handler for the /graphql endpoint.
 // Callers must ensure tenant.TenantMiddleware runs before this handler.
-func BuildHandler(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy, hub *events.Hub) http.Handler {
+//
+// allowIntrospection gates the __schema/__type introspection fields (needed by
+// ANY schema explorer — GraphiQL, Apollo Sandbox, codegen tools) — an explicit
+// parameter, not read from os.Getenv here, so a caller compiling several
+// engine instances in one process (the in-process fleet, MT-STRUCT-S3) can
+// resolve it PER APP from that app's own env/Config, not the process-wide
+// env (GRAPHQL-EXPLORER-S1 — see app.go buildRouter and multiapp.go
+// buildFleetApp for the resolution: Env=="development" or the explicit
+// APPITOOLS_GRAPHQL_PLAYGROUND opt-in).
+func BuildHandler(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy, hub *events.Hub, allowIntrospection bool) http.Handler {
 	gqlSchema := buildGQLSchema(s, tdb, hr, policy, hub)
-	isDev := os.Getenv("APPITOOLS_ENV") == "development"
+	isDev := allowIntrospection
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// FIX 8: cap request body at 1 MB to prevent OOM from oversized payloads.
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
@@ -296,21 +304,55 @@ func writeGraphQLError(w http.ResponseWriter, msg string) {
 	})
 }
 
-// PlaygroundHandler serves GraphiQL in development mode.
+// PlaygroundHandler serves GraphiQL — the standard visual GraphQL explorer
+// (schema browser, introspection-driven autocomplete, run queries/mutations
+// in place, a Headers editor for testing with a real Authorization token) —
+// mounted at /graphiql alongside REST's Swagger UI at /docs (API-PRODUCTIVA-V1),
+// only when BuildHandler's introspection gate is open (dev, or the
+// APPITOOLS_GRAPHQL_PLAYGROUND opt-in) — GraphiQL is unusable without it.
+//
+// The CDN build is version-PINNED (same discipline as openapi_serve.go's
+// Swagger UI), not left to resolve "latest": GraphiQL dropped its standalone
+// UMD bundle after 3.9.0 (4.x+ is ESM/import-map only), so an unpinned
+// unpkg.com/graphiql/graphiql.min.js 404s — verified live. 3.9.0 is the last
+// version shipping graphiql.min.js.
 func PlaygroundHandler(endpoint string) http.Handler {
+	// Every request to /graphql — including the schema-introspection fetch
+	// GraphiQL itself makes on load to populate the Explorer/autocomplete — goes
+	// through the SAME JWT+RBAC chain as any other request (deny by default;
+	// unlike a public GraphQL API, there is no anonymous introspection). So the
+	// Headers tab starts EMPTY, not pre-filled with a fake "Bearer <token>"
+	// value: a literal placeholder would be sent as a real header on that very
+	// first fetch and fail with a confusing "token is malformed" — a live
+	// finding. The default QUERY comment explains what to paste instead, and
+	// the engine's own "missing token" error on the first (unauthenticated) run
+	// is the honest, actionable signal.
+	defaultQuery := `# Paste a JWT into the Headers tab below to authenticate:
+#   { "Authorization": "Bearer <token>" }
+# Mint one with: appitools token --secret "$JWT_SECRET" --tenant <id> --role <role>
+#
+# Then explore the schema (left panel) and run a query, e.g.:
+#
+# { __typename }
+`
 	page := fmt.Sprintf(`<!DOCTYPE html><html><head>
 <title>GraphiQL — Appitools</title>
-<link rel="stylesheet" href="https://unpkg.com/graphiql/graphiql.min.css"/>
+<link rel="stylesheet" href="https://unpkg.com/graphiql@3.9.0/graphiql.min.css"/>
 </head><body style="margin:0"><div id="graphiql" style="height:100vh"></div>
-<script src="https://unpkg.com/react/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/graphiql/graphiql.min.js"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/graphiql@3.9.0/graphiql.min.js"></script>
 <script>
 ReactDOM.render(
-  React.createElement(GraphiQL,{fetcher:GraphiQL.createFetcher({url:%q})}),
+  React.createElement(GraphiQL,{
+    fetcher: GraphiQL.createFetcher({url:%q}),
+    headerEditorEnabled: true,
+    shouldPersistHeaders: true,
+    defaultQuery: %q
+  }),
   document.getElementById('graphiql')
 );
-</script></body></html>`, endpoint)
+</script></body></html>`, endpoint, defaultQuery)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, page)

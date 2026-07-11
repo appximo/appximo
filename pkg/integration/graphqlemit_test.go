@@ -80,7 +80,7 @@ func setupEmit(t *testing.T) (*httptest.Server, http.Handler, *db.TenantDB, *pgx
 	hr := extensions.NewHookRunner(extensions.NewJSSandbox())
 	var rbacPolicy rbacpkg.Policy
 	_ = json.Unmarshal(policyJSON, &rbacPolicy)
-	gqlH := gqlhandler.BuildHandler(s, tdb, hr, &rbacPolicy, events.NewHub(0))
+	gqlH := gqlhandler.BuildHandler(s, tdb, hr, &rbacPolicy, events.NewHub(0), false)
 	mux := chi.NewMux()
 	mux.Use(tenant.TenantMiddleware)
 	mux.Use(auth.JWTMiddleware(jwtSecret))

@@ -1189,6 +1189,21 @@ root selections** per operation and **2000 total selections** across the
 whole document — over either limit the request is rejected (there is no
 separate nesting-depth counter).
 
+**GraphiQL — the visual explorer (GRAPHQL-EXPLORER-S1).** `/graphiql` is the
+GraphQL equivalent of REST's `/docs`: schema browser (introspection-driven),
+autocomplete, run queries/mutations in place, a Headers editor for a real
+`Authorization: Bearer <token>` (every request — including GraphiQL's own
+schema-fetch on load — goes through the same JWT+RBAC chain as any other
+request; there is no anonymous introspection). It is mounted, and
+introspection allowed, in the SAME two cases: `APPITOOLS_ENV=development`,
+or the explicit opt-in `APPITOOLS_GRAPHQL_PLAYGROUND=on` — for exploring
+GraphQL in production without the broader dev flag (which also enables
+pprof). Both are **per-app** in the in-process fleet (`appitools fleet
+serve`): one app can expose GraphiQL while a sibling in the same process
+stays locked down. The CDN build is version-pinned (`graphiql@3.9.0` — the
+last version shipping a standalone UMD bundle; 4.x+ dropped it for
+ESM/import-maps), the same discipline as `/docs`'s Swagger UI.
+
 ## OpenAPI spec + Swagger UI (API-PRODUCTIVA-V1)
 
 The engine generates an **OpenAPI 3.0.3** document from the schema and serves it,

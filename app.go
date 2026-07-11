@@ -1053,11 +1053,23 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 		r.With(appmiddleware.StrictCSP).Mount("/auth", a.authSvc.Router())
 	}
 
+	// GraphQL introspection + the GraphiQL explorer (GRAPHQL-EXPLORER-S1) share
+	// ONE gate, resolved from THIS surface's own cfg — a.cfg.GraphQLPlayground is
+	// already per-app-resolved by multiapp.go buildFleetApp for the in-process
+	// fleet (MT-STRUCT-S3), so two sibling apps in the same fleet process can
+	// differ (one exploring GraphQL, one locked down); the env fallback covers
+	// single-engine `serve`, mirroring the CORS pattern just above.
+	allowGraphQLIntrospection := a.cfg.Env == "development" || a.cfg.GraphQLPlayground ||
+		envTruthy(os.Getenv("APPITOOLS_GRAPHQL_PLAYGROUND"))
 	r.With(appmiddleware.StrictCSP).Handle("/graphql",
-		gqlhandler.BuildHandler(surf.schema, a.tdb, a.hr, surf.policy, a.eventsHub))
-	if a.cfg.Env == "development" {
+		gqlhandler.BuildHandler(surf.schema, a.tdb, a.hr, surf.policy, a.eventsHub, allowGraphQLIntrospection))
+	if allowGraphQLIntrospection {
+		// GraphiQL — the visual GraphQL explorer, the equivalent of /docs for
+		// REST: schema browser + introspection-driven autocomplete + run
+		// queries/mutations with a real Authorization header. It NEEDS the same
+		// gate as introspection above (it is unusable without it).
 		r.With(appmiddleware.PermissiveCSP).Handle("/graphiql", gqlhandler.PlaygroundHandler("/graphql"))
-		log.Println("GraphiQL playground enabled at /graphiql (APPITOOLS_ENV=development)")
+		log.Println("GraphiQL playground enabled at /graphiql (APPITOOLS_ENV=development or APPITOOLS_GRAPHQL_PLAYGROUND=on)")
 	}
 
 	r.Group(func(sub chi.Router) {

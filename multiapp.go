@@ -223,6 +223,10 @@ var fleetMappedEnv = map[string]bool{
 	"APPITOOLS_CORS_ORIGINS": true, "APPITOOLS_CORS_METHODS": true,
 	"APPITOOLS_CORS_HEADERS": true, "APPITOOLS_CORS_EXPOSE_HEADERS": true,
 	"APPITOOLS_CORS_CREDENTIALS": true, "APPITOOLS_CORS_MAX_AGE": true,
+	// GraphQL explorer opt-in (GRAPHQL-EXPLORER-S1), per app — one app in the
+	// fleet can expose GraphiQL/introspection for exploration while a sibling
+	// stays locked down, without either needing the broader APPITOOLS_ENV.
+	"APPITOOLS_GRAPHQL_PLAYGROUND": true,
 }
 
 // warnUnmappedEnv flags manifest env keys that CANNOT be applied per-app in
@@ -316,6 +320,7 @@ func buildFleetApp(ctx context.Context, mf *fleet.Manifest, spec *fleet.AppSpec,
 		CORSExposedHeaders:    envList(env["APPITOOLS_CORS_EXPOSE_HEADERS"]),
 		CORSAllowCredentials:  envTruthy(env["APPITOOLS_CORS_CREDENTIALS"]),
 		CORSMaxAge:            envInt(env["APPITOOLS_CORS_MAX_AGE"]),
+		GraphQLPlayground:     envTruthy(coalesce(env["APPITOOLS_GRAPHQL_PLAYGROUND"], os.Getenv("APPITOOLS_GRAPHQL_PLAYGROUND"))),
 		Version:               version,
 		DebugTracesHTML:       debugTracesHTML,
 	}

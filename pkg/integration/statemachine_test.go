@@ -98,7 +98,7 @@ func setupSM(t *testing.T) (*httptest.Server, *httptest.Server, *pgxpool.Pool, f
 	var pol rbacpkg.Policy
 	pj, _ := json.Marshal(s.RBAC)
 	_ = json.Unmarshal(pj, &pol)
-	gqlH := gqlhandler.BuildHandler(s, tdb, hr, &pol, events.NewHub(0))
+	gqlH := gqlhandler.BuildHandler(s, tdb, hr, &pol, events.NewHub(0), false)
 	mux := chi.NewMux()
 	mux.Use(tenant.TenantMiddleware)
 	mux.Use(auth.JWTMiddleware(jwtSecret))

@@ -46,7 +46,7 @@ func TestBuildHandler_OnlyUUIDResource_NoPanic(t *testing.T) {
 	}()
 
 	var policy rbac.Policy
-	if h := gqlhandler.BuildHandler(s, nil, nil, &policy, nil); h == nil {
+	if h := gqlhandler.BuildHandler(s, nil, nil, &policy, nil, false); h == nil {
 		t.Fatal("BuildHandler returned nil")
 	}
 }

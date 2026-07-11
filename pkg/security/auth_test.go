@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 
@@ -58,7 +57,7 @@ func buildGQLSrv(t *testing.T, pool *pgxpool.Pool, tenantID, pgSchema string, s 
 
 	tdb := db.NewTenantDB(pool)
 	hr := extensions.NewHookRunner(extensions.NewJSSandbox())
-	h := gqlhandler.BuildHandler(s, tdb, hr, &policy, nil)
+	h := gqlhandler.BuildHandler(s, tdb, hr, &policy, nil, false)
 	h = auth.JWTMiddleware(authTestSecret)(h)
 	h = tenant.TenantMiddleware(h)
 
@@ -222,15 +221,16 @@ func TestSecurity_PageClamped(t *testing.T) {
 // ── 6. __schema query en producción → error ───────────────────────────────────
 
 func TestSecurity_Introspection_DisabledInProd(t *testing.T) {
-	os.Unsetenv("APPITOOLS_ENV") // ensure not "development"
-
 	s := minimalSchema()
 	policyJSON, _ := json.Marshal(s.RBAC)
 	var policy rbacpkg.Policy
 	json.Unmarshal(policyJSON, &policy)
 
 	// nil tdb/hr are safe here: handler exits before any resolver fires.
-	h := gqlhandler.BuildHandler(s, nil, nil, &policy, nil)
+	// allowIntrospection=false — the caller's resolved gate (app.go: dev or the
+	// APPITOOLS_GRAPHQL_PLAYGROUND opt-in), exercised directly rather than via
+	// env vars now that BuildHandler takes it as an explicit parameter.
+	h := gqlhandler.BuildHandler(s, nil, nil, &policy, nil, false)
 	h = auth.JWTMiddleware(authTestSecret)(h)
 	h = tenant.TenantMiddleware(h)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -258,6 +258,42 @@ func TestSecurity_Introspection_DisabledInProd(t *testing.T) {
 	}
 }
 
+// ── 6b. the explicit opt-in allows introspection outside dev ────────────────
+// (GRAPHQL-EXPLORER-S1) — app.go resolves allowIntrospection as
+// Env=="development" || cfg.GraphQLPlayground || APPITOOLS_GRAPHQL_PLAYGROUND
+// (per-app in the in-process fleet, see multiapp.go buildFleetApp), then
+// passes the resolved bool into BuildHandler. This exercises the "opted in"
+// value directly — off by default, see the prod test above.
+func TestSecurity_Introspection_EnabledWhenExplicitlyAllowed(t *testing.T) {
+	s := minimalSchema()
+	policyJSON, _ := json.Marshal(s.RBAC)
+	var policy rbacpkg.Policy
+	json.Unmarshal(policyJSON, &policy)
+
+	h := gqlhandler.BuildHandler(s, nil, nil, &policy, nil, true)
+	h = auth.JWTMiddleware(authTestSecret)(h)
+	h = tenant.TenantMiddleware(h)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Host = "sec.localhost"
+		h.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	tok, _ := auth.GenerateToken(auth.Claims{UserID: "u", Role: "admin", TenantID: "sec"}, authTestSecret)
+	body, _ := json.Marshal(map[string]any{"query": `{ __schema { types { name } } }`})
+	resp := gqlPost(t, srv, body, tok)
+	defer resp.Body.Close()
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+	if errs, _ := result["errors"].([]any); len(errs) > 0 {
+		t.Fatalf("introspection should be allowed with APPITOOLS_GRAPHQL_PLAYGROUND=on, got errors: %v", errs)
+	}
+	data, _ := result["data"].(map[string]any)
+	if data["__schema"] == nil {
+		t.Fatal("expected __schema data in the response")
+	}
+}
+
 // ── 7. body de 2 MB → 413 ────────────────────────────────────────────────────
 
 func TestSecurity_LargeBody_Returns413(t *testing.T) {
@@ -266,7 +302,7 @@ func TestSecurity_LargeBody_Returns413(t *testing.T) {
 	var policy rbacpkg.Policy
 	json.Unmarshal(policyJSON, &policy)
 
-	h := gqlhandler.BuildHandler(s, nil, nil, &policy, nil)
+	h := gqlhandler.BuildHandler(s, nil, nil, &policy, nil, false)
 	h = auth.JWTMiddleware(authTestSecret)(h)
 	h = tenant.TenantMiddleware(h)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
