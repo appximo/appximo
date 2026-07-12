@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -95,6 +96,29 @@ type Ctx interface {
 	// the business write). A Handler error rolls back the enqueue too.
 	Enqueue(topic string, payload any) (int64, error)
 
+	// SafeGo launches fn in a NEW goroutine — the ONLY sanctioned way to start a
+	// goroutine from a handler (LIBRARY-HARDEN-S1). A raw `go func(){…}()` whose
+	// body panics crashes the ENTIRE multi-tenant process: recover() never
+	// crosses a goroutine boundary, so the request-chain Recoverer cannot save a
+	// child goroutine. SafeGo wraps fn in recover() + a structured log (tenant +
+	// request id) + the goroutine_panics_total metric, so a panicking background
+	// task degrades to a logged incident instead of an outage for every tenant.
+	//
+	// The context passed to fn is a FRESH root — it carries NO request values (a
+	// detached copy of the request context would retain chi's pooled route
+	// context, which is recycled once the handler returns) — with an INDEPENDENT
+	// bounded deadline. fn MUST honor that deadline (return promptly once ctx is
+	// Done): a deadline cancels the context, it cannot forcibly stop a goroutine,
+	// so an fn that ignores cancellation still leaks. fn MUST NOT use the
+	// handler's transaction (Tx/UnsafeTx/Query/Insert/Update) — that transaction
+	// commits or rolls back as the handler returns, and a goroutine touching it
+	// races a closed tx. SafeGo is for post-response, non-transactional side
+	// effects where at-most-once is acceptable (fire-and-forget: a metric ping, a
+	// best-effort cache warm). For DURABLE, retryable work use Enqueue (the
+	// transactional outbox + worker); for parallel work whose result the response
+	// needs, use SafeParallel and wait for it.
+	SafeGo(fn func(context.Context))
+
 	// CreateUser creates an identity in THIS tenant's auth_users, inside the
 	// handler's transaction — if the handler later fails, the user rolls back
 	// with everything else (LIBRARY-EXTEND-S1). It applies the SAME rules as
@@ -157,13 +181,29 @@ type engineRefs struct {
 	// (Config.AuthMinPasswordLength / APPITOOLS_AUTH_MIN_PASSWORD, default 8) —
 	// Ctx.CreateUser enforces the same bar as signup and the admin API.
 	minPassword int
+
+	// safeGoTimeout bounds a Ctx.SafeGo goroutine's CONTEXT (LIBRARY-HARDEN-S1):
+	// it is cancelled after this. fn must honor cancellation to actually stop — a
+	// deadline cannot forcibly kill a goroutine. Config.SafeGoTimeoutSeconds /
+	// APPITOOLS_SAFEGO_TIMEOUT, default 30s.
+	safeGoTimeout time.Duration
+	// onGoroutinePanic increments the goroutine_panics_total metric when a
+	// SafeGo goroutine recovers a panic (set to app.metrics.IncGoroutinePanic).
+	// nil in a bare test build — the recover + log still run.
+	onGoroutinePanic func()
 }
 
 // requestCtx is the per-request Ctx implementation. One is built by the custom
 // route middleware after the standard chain (tenant → JWT → RBAC) has run.
 type requestCtx struct {
-	w   http.ResponseWriter
-	r   *http.Request
+	w http.ResponseWriter
+	r *http.Request
+	// ctx is the handler's EFFECTIVE context: r.Context() wrapped with the
+	// route's deadline (Route.Timeout, default 5s) by customHandler. Every DB /
+	// outbox / user operation the Ctx runs uses it, so the deadline actually
+	// bounds the handler's work (LIBRARY-HARDEN-S1) — pgx cancels a query when it
+	// fires. It carries all of r.Context()'s values (tenant, claims, request id).
+	ctx context.Context
 	tx  pgx.Tx
 	eng *engineRefs
 	tc  *tenant.TenantCtx
@@ -284,7 +324,7 @@ func (c *requestCtx) Query(resource string, opts QueryOpts) ([]map[string]any, e
 	}
 	selectQ, _, selectArgs, _ := qb.SQL()
 
-	rows, err := c.tx.Query(c.r.Context(), selectQ, selectArgs...)
+	rows, err := c.tx.Query(c.ctx, selectQ, selectArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +414,7 @@ func (c *requestCtx) Update(resource, id string, data map[string]any) (map[strin
 // queryOne runs a RETURNING * write on the tenant transaction and returns the
 // first row (nil if none). UUID columns are normalised to strings by RowsToMaps.
 func (c *requestCtx) queryOne(q string, args []any) (map[string]any, error) {
-	rows, err := c.tx.Query(c.r.Context(), q, args...)
+	rows, err := c.tx.Query(c.ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +462,21 @@ func (c *requestCtx) BindResource(resource string, dst any) error {
 // --- outbox -----------------------------------------------------------------
 
 func (c *requestCtx) Enqueue(topic string, payload any) (int64, error) {
-	return outbox.Enqueue(c.r.Context(), c.tx, c.tc.ID, topic, payload)
+	return outbox.Enqueue(c.ctx, c.tx, c.tc.ID, topic, payload)
+}
+
+// --- safe goroutines (LIBRARY-HARDEN-S1) -------------------------------------
+
+func (c *requestCtx) SafeGo(fn func(context.Context)) {
+	// The goroutine outlives the request, so its context must NOT retain any
+	// request-scoped state. A detached COPY of c.ctx (context.WithoutCancel) would
+	// keep ALL its values — including chi's POOLED *RouteContext, which chi
+	// recycles the instant the handler returns — a use-after-recycle race for the
+	// whole life of the goroutine. So the base is a FRESH root carrying only the
+	// deadline; the tenant id and request id are extracted EAGERLY here (before
+	// `go`) and passed by value for the log. fn captures anything else it needs by
+	// value (it must never touch c.tx/c.w/c.r).
+	go runSafe(context.Background(), c.eng.safeGoTimeout, c.tc.ID, requestID(c.ctx), c.eng.onGoroutinePanic, fn)
 }
 
 // --- identity creation (LIBRARY-EXTEND-S1) -----------------------------------
@@ -451,7 +505,7 @@ func (c *requestCtx) CreateUser(email, password, role string) (CreatedUser, erro
 	}
 	// On the handler's tx and the Ctx's tenant — atomic with the handler's
 	// other writes, structurally incapable of touching another tenant.
-	u, err := c.eng.users.InsertUserTx(c.r.Context(), c.tx, c.tc.ID, normalized, hash, role)
+	u, err := c.eng.users.InsertUserTx(c.ctx, c.tx, c.tc.ID, normalized, hash, role)
 	if err != nil {
 		return CreatedUser{}, err
 	}
@@ -476,7 +530,7 @@ func (c *requestCtx) Error(status int, msg string, cause error) error {
 }
 
 func (c *requestCtx) Request() *http.Request   { return c.r }
-func (c *requestCtx) Context() context.Context { return c.r.Context() }
+func (c *requestCtx) Context() context.Context { return c.ctx }
 
 // --- helpers ----------------------------------------------------------------
 

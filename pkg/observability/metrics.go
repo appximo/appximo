@@ -22,6 +22,15 @@ type Metrics struct {
 	activeTenants     prometheus.Gauge
 	migrationDuration *prometheus.HistogramVec
 
+	// Phase-0 safety counters (LIBRARY-HARDEN-S1). requestPanics counts panics
+	// recovered by the request-chain Recoverer (a handler paniced → clean 500,
+	// process alive); goroutinePanics counts panics recovered inside Ctx.SafeGo
+	// (the ONLY sanctioned way to launch a goroutine from a handler — a raw
+	// `go func(){panic()}()` would take the whole multi-tenant process down).
+	// A nonzero rate is an alertable defect in extension code, never expected.
+	requestPanics   prometheus.Counter
+	goroutinePanics prometheus.Counter
+
 	// seenMu/seen bound tenant_id label cardinality: the id is client-controlled
 	// (Host subdomain), so without a cap an attacker could mint unbounded series.
 	seenMu sync.Mutex
@@ -51,17 +60,33 @@ func NewMetrics() *Metrics {
 			Help:    "Duración de migraciones Atlas por tenant",
 			Buckets: []float64{0.5, 1, 2, 5, 10, 30, 60, 120},
 		}, []string{"tenant_id", "status"}),
+		requestPanics: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "appitools_request_panics_total",
+			Help: "Panics recovered by the request-chain Recoverer (handler panic → clean 500, process survives)",
+		}),
+		goroutinePanics: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "appitools_goroutine_panics_total",
+			Help: "Panics recovered inside Ctx.SafeGo (a raw goroutine panic would crash the whole process)",
+		}),
 	}
 	m.reg.MustRegister(
 		m.requestsTotal,
 		m.requestDuration,
 		m.activeTenants,
 		m.migrationDuration,
+		m.requestPanics,
+		m.goroutinePanics,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
 	return m
 }
+
+// IncRequestPanic records one panic recovered by the request-chain Recoverer.
+func (m *Metrics) IncRequestPanic() { m.requestPanics.Inc() }
+
+// IncGoroutinePanic records one panic recovered inside a Ctx.SafeGo goroutine.
+func (m *Metrics) IncGoroutinePanic() { m.goroutinePanics.Inc() }
 
 // Handler returns the Prometheus exposition handler scoped to this registry.
 // It carries no auth of its own — mount it behind the admin-key middleware.

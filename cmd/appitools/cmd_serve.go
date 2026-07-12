@@ -6,9 +6,6 @@ import (
 	"log"
 	"os"
 	"runtime"
-	"runtime/debug"
-	"strconv"
-	"strings"
 
 	_ "go.uber.org/automaxprocs"
 
@@ -32,17 +29,9 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Levanta el servidor HTTP multi-tenant",
 	Run: func(cmd *cobra.Command, args []string) {
-		// GOGC / GOMEMLIMIT from env (process-level knobs, set before the engine).
-		if v := os.Getenv("GOGC"); v != "" {
-			if pct, err := strconv.Atoi(v); err == nil {
-				debug.SetGCPercent(pct)
-			}
-		}
-		if v := os.Getenv("GOMEMLIMIT"); v != "" {
-			if bytes, err := parseMemLimit(v); err == nil {
-				debug.SetMemoryLimit(bytes)
-			}
-		}
+		// GOMAXPROCS is set by the automaxprocs blank import (cgroup-aware). GOGC /
+		// GOMEMLIMIT are applied inside appitools.New (applyRuntimeLimits), in the
+		// library, so a custom-handler binary gets the same soft memory ceiling.
 		log.Printf("GOMAXPROCS=%d NumCPU=%d", runtime.GOMAXPROCS(0), runtime.NumCPU())
 
 		schemaFile, _ := cmd.Flags().GetString("schema")
@@ -75,22 +64,4 @@ func init() {
 	serveCmd.Flags().Int("port", 8080, "HTTP port to listen on")
 	serveCmd.Flags().Int("control-port", 0, "control-plane port (0 = APPITOOLS_CONTROL_PORT, then 9090)")
 	rootCmd.AddCommand(serveCmd)
-}
-
-// parseMemLimit parses strings like "512MiB", "1GiB", "1073741824" into bytes.
-func parseMemLimit(s string) (int64, error) {
-	units := map[string]int64{
-		"GiB": 1 << 30, "MiB": 1 << 20, "KiB": 1 << 10,
-		"GB": 1e9, "MB": 1e6, "KB": 1e3,
-	}
-	for suffix, mult := range units {
-		if strings.HasSuffix(s, suffix) {
-			n, err := strconv.ParseInt(strings.TrimSuffix(s, suffix), 10, 64)
-			if err != nil {
-				return 0, err
-			}
-			return n * mult, nil
-		}
-	}
-	return strconv.ParseInt(s, 10, 64)
 }

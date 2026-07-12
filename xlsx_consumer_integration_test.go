@@ -52,7 +52,7 @@ func newFileJobApp(t *testing.T) *httptest.Server {
 		t.Fatalf("New(filejob): %v", err)
 	}
 	t.Cleanup(func() { app.pool.Close() })
-	srv := httptest.NewServer(app.buildRouter())
+	srv := httptest.NewServer(app.buildRouter(app.bootSurface()))
 	t.Cleanup(srv.Close)
 	return srv
 }

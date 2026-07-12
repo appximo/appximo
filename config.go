@@ -136,6 +136,13 @@ type Config struct {
 	// 0 falls back to APPITOOLS_AUTH_MIN_PASSWORD, then to 8.
 	AuthMinPasswordLength int
 
+	// SafeGoTimeoutSeconds bounds a Ctx.SafeGo goroutine's context
+	// (LIBRARY-HARDEN-S1): the context is cancelled after this (fn must honor
+	// cancellation to actually stop — a deadline cannot forcibly kill a
+	// goroutine). 0 falls back to APPITOOLS_SAFEGO_TIMEOUT (seconds), then to 30s.
+	// It does not affect the request-goroutine deadline, which is Route.Timeout.
+	SafeGoTimeoutSeconds int
+
 	// PublicRouteRPS / PublicRouteBurst tune the DEDICATED rate limit applied
 	// to PUBLIC custom routes (Route.Public — LIBRARY-EXTEND-S1), per
 	// (tenant, client IP), on top of the per-tenant limiter. Zero falls back to

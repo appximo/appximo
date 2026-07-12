@@ -46,7 +46,7 @@ func newCreateSecApp(t *testing.T) *httptest.Server {
 		t.Fatalf("New(createsec): %v", err)
 	}
 	t.Cleanup(func() { app.pool.Close() })
-	srv := httptest.NewServer(app.buildRouter())
+	srv := httptest.NewServer(app.buildRouter(app.bootSurface()))
 	t.Cleanup(srv.Close)
 	return srv
 }

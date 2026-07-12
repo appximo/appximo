@@ -1,0 +1,57 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "courses-api",
+  "resources": {
+    "students": {
+      "fields": {
+        "user_id":   { "type": "uuid",   "unique": true },
+        "full_name": { "type": "string", "required": true, "maxLength": 120 },
+        "country":   { "type": "string" },
+        "plan":      { "type": "string", "enum": ["free", "pro"], "default": "free" },
+        "created_at":{ "type": "time",   "auto": true }
+      },
+      "indexes": [{ "fields": ["user_id"] }]
+    },
+    "courses": {
+      "fields": {
+        "title":     { "type": "string",  "required": true, "maxLength": 200 },
+        "price":     { "type": "float64", "min": 0 },
+        "published": { "type": "bool",    "default": false }
+      },
+      "indexes": [{ "fields": ["published"] }]
+    },
+    "enrollments": {
+      "fields": {
+        "user_id":     { "type": "uuid" },
+        "course_id":   { "type": "uuid",   "relation": "courses", "on_delete": "restrict" },
+        "amount":      { "type": "float64", "min": 0 },
+        "external_ref":{ "type": "string",  "unique": true },
+        "status": {
+          "type": "string",
+          "enum": ["active", "refunded"],
+          "default": "active",
+          "state_machine": {
+            "initial": "active",
+            "transitions": { "active": ["refunded"], "refunded": [] }
+          }
+        },
+        "created_at":  { "type": "time", "auto": true }
+      },
+      "events": ["create"],
+      "indexes": [{ "fields": ["user_id"] }]
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": { "resources": "*", "actions": ["*"] },
+      "student": {
+        "permissions": {
+          "students":    { "actions": ["read", "update"], "conditions": { "field": "user_id", "op": "eq", "val": "$user_id" } },
+          "courses":     { "actions": ["read"] },
+          "enrollments": { "actions": ["read", "create"], "conditions": { "field": "user_id", "op": "eq", "val": "$user_id" } }
+        }
+      }
+    }
+  }
+}

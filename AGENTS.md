@@ -95,6 +95,17 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   validator-guided loop as `ai-generate` but on YOUR subscription, zero product
   API cost. SAME grammar source as the internal loop (`pkg/aigen` `GrammarCore`,
   divergence pinned by `spec_test.go`); the flow: docs/SCHEMA_SPEC_LLM.md),
+  `backend-spec` (LIBRARY-HARDEN-S1: the COMPANION to `spec` for building a
+  COMPLETE backend, not just the schema. Prints docs/BACKEND_SPEC_LLM.md
+  (embedded via `//go:embed` in `backendspec.go`, single source): the
+  decision framework — schema vs hook vs custom Go handler vs job (SafeGo /
+  outbox) vs external service — the whole `Ctx` surface with COMPILING examples
+  (mirrored by examples/backend-guide/), the Phase-0 safety RULES (never a raw
+  `go` — always `Ctx.SafeGo`; external side effects post-commit; public-route
+  hardening; the tenant tx is a single non-concurrent connection), hooks, auth,
+  and the async model. Paste `spec` + `backend-spec` into your own Claude
+  Code/Cursor and the agent can write handlers/hooks/jobs safely — the
+  in-process power made agent-accessible),
   `blueprints list` (lists schema files in a local `blueprints/` dir),
   `version` (prints the ldflags-injected build version; "dev" on a plain
   local build — releases and published images carry their tag),

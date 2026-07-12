@@ -134,7 +134,7 @@ func newTestApp(t *testing.T) *httptest.Server {
 		return ctx.JSON(200, map[string]any{"ok": true})
 	}})
 
-	srv := httptest.NewServer(app.buildRouter())
+	srv := httptest.NewServer(app.buildRouter(app.bootSurface()))
 	t.Cleanup(srv.Close)
 	return srv
 }

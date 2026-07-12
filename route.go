@@ -41,6 +41,16 @@ type Route struct {
 	// from the policy when its path segment matches a policy rule.
 	RequireRole string
 
+	// Timeout bounds this endpoint's execution (LIBRARY-HARDEN-S1). When > 0 the
+	// handler's context — and the tenant transaction opened for it — is cancelled
+	// after Timeout: a slow query or a hung outbound call is aborted (the deadline
+	// propagates to pgx and to any downstream that honours the context), the
+	// transaction rolls back, and the caller gets a 500 instead of the request
+	// pinning a connection indefinitely. 0 uses the engine default (5s). It bounds
+	// the REQUEST goroutine only; a Ctx.SafeGo goroutine outlives the request and
+	// carries its own independent deadline.
+	Timeout time.Duration
+
 	// Public marks this route as PRE-AUTHENTICATION (LIBRARY-EXTEND-S1): the
 	// JWT and path-RBAC middlewares skip it by EXACT method+path match, so a
 	// caller needs no Bearer token — the seam for a custom registration/webhook
@@ -62,6 +72,11 @@ type Route struct {
 	// marked Public skip auth; every other route keeps deny-by-default.
 	Public bool
 }
+
+// defaultRouteTimeout bounds a custom handler that does not set Route.Timeout —
+// the same 5s ceiling the library has always applied to a custom route's tenant
+// transaction (LIBRARY-HARDEN-S1 made it per-route-overridable).
+const defaultRouteTimeout = 5 * time.Second
 
 var (
 	validMethods   = map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true}
@@ -164,7 +179,11 @@ func (a *App) customHandler(rt Route) http.HandlerFunc {
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		timeout := rt.Timeout
+		if timeout <= 0 {
+			timeout = defaultRouteTimeout
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
 
 		tx, err := a.pool.Begin(ctx)
@@ -188,7 +207,7 @@ func (a *App) customHandler(rt Route) http.HandlerFunc {
 			return
 		}
 
-		rc := &requestCtx{w: w, r: r, tx: tx, eng: a.eng, tc: tc, cl: cl}
+		rc := &requestCtx{w: w, r: r, ctx: ctx, tx: tx, eng: a.eng, tc: tc, cl: cl}
 		if herr := rt.Handler(rc); herr != nil {
 			a.writeHandlerError(w, rc, rt, herr)
 			return // rollback runs via defer

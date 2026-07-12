@@ -186,6 +186,11 @@ func New(cfg Config) (*App, error) {
 
 	logging.Init(cfg.Env)
 
+	// Phase-0 runtime backpressure (LIBRARY-HARDEN-S1): apply GOMEMLIMIT/GOGC from
+	// the env here, in the library, so EVERY appitools.New binary — a custom
+	// backend included — gets the same soft memory ceiling, not just `serve`.
+	applyRuntimeLimits()
+
 	s, err := loadAndValidateSchema(cfg.SchemaPath)
 	if err != nil {
 		// Self-restart rollback (UI-F4-S2): if this boot follows a self-restart
@@ -700,7 +705,22 @@ func New(cfg Config) (*App, error) {
 	if ctxMinPw <= 0 {
 		ctxMinPw = 8 // the same default userauth.NewService applies
 	}
-	app.eng = &engineRefs{schema: s, validators: validators, policy: &rbacPolicy, users: authStore, minPassword: ctxMinPw}
+	// SafeGo goroutine deadline (LIBRARY-HARDEN-S1): Config wins, then
+	// APPITOOLS_SAFEGO_TIMEOUT (seconds), then the 30s default.
+	safeGoTimeout := defaultSafeGoTimeout
+	if cfg.SafeGoTimeoutSeconds > 0 {
+		safeGoTimeout = time.Duration(cfg.SafeGoTimeoutSeconds) * time.Second
+	} else if v := os.Getenv("APPITOOLS_SAFEGO_TIMEOUT"); v != "" {
+		if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
+			safeGoTimeout = time.Duration(n) * time.Second
+		}
+	}
+	app.eng = &engineRefs{
+		schema: s, validators: validators, policy: &rbacPolicy, users: authStore,
+		minPassword:      ctxMinPw,
+		safeGoTimeout:    safeGoTimeout,
+		onGoroutinePanic: app.metrics.IncGoroutinePanic,
+	}
 
 	return app, nil
 }
@@ -1006,7 +1026,29 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 		a.errStore.Record(tenantID, fmt.Errorf("jwt: %s", reason))
 	}))
 	r.Use(rbac.RBACMiddlewareWithPublic(mustMarshal(surf.schema.RBAC), isPublic))
-	r.Use(chimiddleware.Recoverer)
+	// Request-chain panic recovery (LIBRARY-HARDEN-S1): a panic in ANY downstream
+	// handler (custom or generated CRUD) becomes a clean masked 500 — the process
+	// stays up serving every other tenant. Replaces chi's Recoverer (same zero
+	// steady-state cost — one deferred recover) to add the request_panics_total
+	// metric, the tenant/trace structured log, and a JSON body. The GOROUTINE
+	// half of the model is Ctx.SafeGo: recover() cannot reach a child goroutine,
+	// so a raw `go func(){panic()}()` is NOT saved by this — SafeGo is mandatory.
+	r.Use(appmiddleware.Recoverer(func(req *http.Request, recovered any, stack []byte) {
+		a.metrics.IncRequestPanic()
+		tenantID := ""
+		if tc := tenant.FromCtx(req.Context()); tc != nil {
+			tenantID = tc.ID
+		}
+		a.errStore.Record(tenantID, fmt.Errorf("panic: %v", recovered))
+		logging.Log.Error().
+			Str("tenant_id", tenantID).
+			Str("request_id", chimiddleware.GetReqID(req.Context())).
+			Str("method", req.Method).
+			Str("path", req.URL.Path).
+			Interface("panic", recovered).
+			Bytes("stack", stack).
+			Msg("recovered panic in request handler")
+	}))
 
 	if a.cfg.Env == "development" {
 		// Dev-only pprof. The port was ":6060" hardcoded until MT-STRUCT-S1;

@@ -296,6 +296,17 @@ Code, Cursor) — `appitools spec` prints the LLM-distilled grammar so *your*
 subscription generates it and self-corrects against `appitools validate --json`,
 at zero API cost. The flow: [docs/SCHEMA_SPEC_LLM.md](docs/SCHEMA_SPEC_LLM.md).
 
+And you don't have to stop at the schema. For the logic a schema can't express —
+custom endpoints with the tenant transaction + RBAC in-process, hooks, auth
+flows, background jobs — `appitools backend-spec` prints the **agent guide for
+building a complete backend**: the decision framework for where each piece of
+logic goes, the whole custom-handler surface with **compiling examples**, and the
+safety rules that keep the in-process model robust (a panicking background
+goroutine can never take the process down). Paste `spec` + `backend-spec` into
+your agent and it can build the whole backend. The guide, with its runnable
+example: [docs/BACKEND_SPEC_LLM.md](docs/BACKEND_SPEC_LLM.md) +
+[examples/backend-guide/](examples/backend-guide/).
+
 ## Configuration
 
 | Setting | Kind | Required | Description |
