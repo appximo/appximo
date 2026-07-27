@@ -42,6 +42,14 @@ is a `todo-api` starter you replace later) `--port` (internal, default 8090)
 When it finishes it prints your API URL, the generated `ADMIN_KEY`/`JWT_SECRET`,
 and the exact command to register your first tenant.
 
+If DNS for your domain isn't pointing at the box yet, the installer **still
+finishes successfully** — the engine is up locally — and prints a warning;
+Caddy issues the certificate automatically the moment DNS resolves here and
+ports 80/443 are reachable. It never hangs or rolls back on a pending
+certificate. Run it again any time (it's idempotent, reuses your secrets);
+`--uninstall` reverses it for a clean retry (add `--purge` to also drop the
+database). Validated end-to-end on Ubuntu 22.04 and Debian 12.
+
 ### Option B — manual (the same steps, by hand)
 
 If you'd rather not run a script, `docs/DEPLOY.md` Level 3 walks the identical
@@ -108,9 +116,16 @@ sudo bash /opt/appitools/scripts/deploy-update.sh --binary=/tmp/appitools
 
 It backs up the live binary to `<dir>-rollback/`, renames the new one over it
 (atomic — the running process keeps its old inode), `systemctl restart`s, and
-polls `/healthz` + `/readyz`. If they don't come green it restores the backup and
-restarts. Re-running the **installer** with `--binary=` does the same swap +
-restart (and reuses your existing secrets), so either path is a safe upgrade.
+polls `/healthz` + `/readyz`. If they don't come green it **restores the backup
+and restarts** automatically (verified: a binary that won't boot rolls back and
+the old one is serving again in ~1 s). Re-running the **installer** with
+`--binary=` does the same swap + restart (and reuses your existing secrets), so
+either path is a safe upgrade.
+
+> `deploy-update.sh` and `backup.sh` are placed in `/opt/appitools/scripts/` by
+> the installer **when you run it from a checkout** (they sit next to
+> `install.sh`). Under `curl | bash` there are no sibling files to copy, so fetch
+> them from the repo into that directory when you need them.
 
 **What activates when.** A per-tenant migration (new column) is live immediately.
 Anything compiled at boot — new resources, validation rules, GraphQL fields,
