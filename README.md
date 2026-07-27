@@ -259,13 +259,33 @@ Full capability inventory (and the honest not-yet list): [docs/CAPABILITIES.md](
 
 ## Production deploy
 
-Three paths, walked through in [docs/DEPLOY.md](docs/DEPLOY.md):
+**The official path — an empty VPS to a live HTTPS API in one command**
+([docs/PRODUCTION.md](docs/PRODUCTION.md)). The stack is native PostgreSQL + the
+engine under systemd + Caddy (automatic Let's Encrypt TLS); Docker would eat
+300–400 MB on a 1 GB box, so it's a documented variant, not the default.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/miguel09acosta/appitools/main/scripts/install.sh \
+  | sudo bash -s -- --domain api.example.com --email you@example.com
+```
+
+The installer asks one thing — your domain — then generates every secret, writes
+the systemd unit + Caddyfile, installs PostgreSQL and Caddy, and brings the API
+up on HTTPS. Updates are one script ([`scripts/deploy-update.sh`](scripts/deploy-update.sh),
+atomic swap + auto-rollback), backups another
+([`scripts/backup.sh`](scripts/backup.sh), `pg_dump` + rotation).
+
+Prefer containers or a PaaS? The Docker paths still work:
 
 | Goal | Path |
 |---|---|
 | **Try it** in ~9 s | `docker compose up` — the [quick start](#quick-start-30-s-with-the-image-pull) above |
-| **Production, simple** | `docker-compose.prod.yml` + Caddy: automatic Let's Encrypt TLS, tenant subdomains, engine and Postgres on the internal network only |
-| **Production, max throughput** | native binary (from [GitHub Releases](https://github.com/miguel09acosta/appitools/releases), SHA256-checksummed) + dockerized Postgres + reverse proxy with upstream keepalive — the configuration the benchmark measured |
+| **Production, Docker** | `docker-compose.prod.yml` + Caddy: automatic Let's Encrypt TLS, engine and Postgres on the internal network only |
+| **Production, native (max throughput)** | the installer above, or [docs/PRODUCTION.md](docs/PRODUCTION.md) / [docs/DEPLOY.md](docs/DEPLOY.md) Level 3 by hand — the configuration the benchmark measured |
+
+Full guide — updates, backups, framework mode, serving your frontend, the
+complete env-var table, security checklist, troubleshooting:
+[**docs/PRODUCTION.md**](docs/PRODUCTION.md).
 
 ## Status — what's real and what's missing
 

@@ -15,11 +15,36 @@
 # `worker` keyword (compose `command: ["worker"]`) to run the worker instead — no
 # second image, no duplicated base layers.
 
+# ── Stages 1 & 2: build the embedded SPAs (Appitools Studio at /editor, admin
+# panel at /admin). Their hashed assets are gitignored — only the placeholder
+# index.html is committed — so the IMAGE must build them, or a clean checkout
+# ships empty shells (this is exactly what shipped before: the CI checkout has no
+# assets and the old Dockerfile ran no `npm`). Same `npm install` the Makefile's
+# editor-ui / admin-ui targets use. node:22-slim (glibc) matches the committed
+# package-lock's platform, avoiding the musl/rollup optional-dep pitfall. These
+# stages are discarded — nothing here lands in the final image but the built JS.
+FROM node:22-slim AS editor-ui
+WORKDIR /web
+COPY pkg/editorui/web/ ./
+RUN npm install --no-audit --no-fund && npm run build   # → /web/build (vite base=/editor/)
+
+FROM node:22-slim AS admin-ui
+WORKDIR /web
+COPY pkg/adminui/web/ ./
+RUN npm install --no-audit --no-fund && npm run build    # → /web/dist (vite base=/admin/)
+
 FROM golang:1.25-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+# Overlay the freshly-built SPA bundles BEFORE the Go build: the gitignored
+# build/dist assets are absent from the context, so `//go:embed all:web/build`
+# (editorui) and `//go:embed web/dist` (adminui) would otherwise capture only the
+# committed placeholder index.html. Copying the real bundles in makes the embed —
+# and therefore /editor and /admin in the shipped binary — real.
+COPY --from=editor-ui /web/build/ pkg/editorui/web/build/
+COPY --from=admin-ui  /web/dist/  pkg/adminui/web/dist/
 # VERSION/REVISION land in `appitools version` and /health via -X (CI injects
 # the tag/SHA; local builds report "dev" — no .git in the build context).
 # The build command itself lives in scripts/build-engine.sh — the ONE

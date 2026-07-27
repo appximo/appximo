@@ -993,9 +993,19 @@ sequential (safe on a small box).
 
 Fastest path is the published Docker image — the four copy-paste
 commands (register tenant → mint JWT → POST → filtered GET) are in the
-[README quick start](README.md#quick-start-30-s-with-the-image-pull);
-the production/TLS path is [docs/DEPLOY.md](docs/DEPLOY.md). Don't
-re-derive those commands — they are verified verbatim.
+[README quick start](README.md#quick-start-30-s-with-the-image-pull).
+The **official production path** is the one-command installer
+`scripts/install.sh` (empty VPS → HTTPS app: native PostgreSQL + systemd +
+Caddy — Docker is a documented variant, not the default), fully walked in
+[docs/PRODUCTION.md](docs/PRODUCTION.md); updates are
+`scripts/deploy-update.sh` (atomic swap + auto-rollback), backups
+`scripts/backup.sh`. The lower-level three-tier path (compose / native by
+hand) is [docs/DEPLOY.md](docs/DEPLOY.md). Two production facts worth
+knowing: `appitools serve` **self-bootstraps the control-plane tables** on a
+fresh empty database (no manual `migrations/001_control_plane.sql`), and
+`GOMEMLIMIT` auto-detects an explicit cgroup limit (90%) when unset — set it
+explicitly on a bare small box (the installer does). Don't re-derive the
+first-call commands — they are verified verbatim.
 
 Facts agents most often get wrong:
 

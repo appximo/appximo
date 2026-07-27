@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/miguelangel/appitools/migrations"
 	"github.com/miguelangel/appitools/pkg/adminui"
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/cache"
@@ -217,6 +218,25 @@ func New(cfg Config) (*App, error) {
 		return nil, fmt.Errorf("appitools: connect db: %w", err)
 	}
 	app.pool = pool
+
+	// Control-plane bootstrap (PROD-PATH-BUILD-S1): ensure public.tenants,
+	// tenant_policies, migration_log and the schema_updated trigger exist. The
+	// compose paths apply this via the db's initdb, and the fleet via
+	// fleet.BootstrapControlPlane — but a plain single-engine `serve` against a
+	// FRESH Postgres had nobody applying it, so the first tenant registration
+	// failed ("no public.tenants"). Running it here makes `serve` self-sufficient:
+	// point it at an empty database and it comes up ready to register tenants, no
+	// manual SQL. Idempotent (IF NOT EXISTS / OR REPLACE), so it is a true no-op on
+	// an already-initialized database — the DDL is THE canonical file
+	// (migrations.ControlPlane), the same one the fleet and compose apply. No bind
+	// args ⇒ pgx uses the simple protocol, required for the multi-statement +
+	// plpgsql DDL. The engine user already needs CREATE (it provisions a schema per
+	// tenant), so no new privilege is assumed.
+	if _, err := pool.Exec(context.Background(), migrations.ControlPlane); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("appitools: bootstrap control plane: %w", err)
+	}
+	log.Println("control plane: public.tenants schema ready")
 
 	if err := outbox.EnsureTable(context.Background(), pool); err != nil {
 		pool.Close()
