@@ -156,19 +156,28 @@ preflight() {
 	if [ "$DRY_RUN" != "yes" ] && [ "$(id -u)" != "0" ]; then
 		die "must run as root (sudo). Re-run: sudo bash $0 $ORIG_ARGS"
 	fi
-	# Detect RAM → a soft memory ceiling on small boxes. On the single-box stack
-	# Postgres shares the RAM, so we size GOMEMLIMIT to a conservative fraction
-	# rather than 90 %-of-total (which would starve Postgres). Bigger boxes are
-	# left to the engine's own cgroup-aware auto-detect.
+	# Detect RAM → a soft memory ceiling. On the single-box stack PostgreSQL shares
+	# the RAM, so GOMEMLIMIT must be a conservative FRACTION, never ~90 %-of-total
+	# (which would starve Postgres).
+	#
+	# 30 % is measured, not guessed (scripts/verify-production): with a million rows
+	# and live traffic the engine's own anonymous memory stays in the tens of MB, so
+	# 30 % is generous headroom while still leaving PostgreSQL its 25 % shared_buffers
+	# plus room for the page cache. The earlier 1536 MiB on a 2 GB box was worse than
+	# useless — a soft ceiling above what the machine can actually give means the GC
+	# never tightens before the box is already dead.
 	local mem_kb; mem_kb="$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || echo 0)"
 	MEM_MB=$(( mem_kb / 1024 ))
 	GOMEMLIMIT_VAL=""
-	if [ "$MEM_MB" -gt 0 ] && [ "$MEM_MB" -le 1280 ]; then
-		GOMEMLIMIT_VAL="512MiB"
-		warn "small box (~${MEM_MB} MiB RAM) — setting GOMEMLIMIT=${GOMEMLIMIT_VAL} to protect against OOM"
-	elif [ "$MEM_MB" -gt 1280 ] && [ "$MEM_MB" -le 2560 ]; then
-		GOMEMLIMIT_VAL="1536MiB"
-		info "~${MEM_MB} MiB RAM — setting GOMEMLIMIT=${GOMEMLIMIT_VAL}"
+	if [ "$MEM_MB" -gt 0 ]; then
+		local lim=$(( MEM_MB * 30 / 100 ))
+		[ "$lim" -lt 256 ] && lim=256
+		GOMEMLIMIT_VAL="${lim}MiB"
+		if [ "$MEM_MB" -le 1280 ]; then
+			warn "small box (~${MEM_MB} MiB RAM) — setting GOMEMLIMIT=${GOMEMLIMIT_VAL} (30 % of RAM) to protect against OOM"
+		else
+			info "~${MEM_MB} MiB RAM — setting GOMEMLIMIT=${GOMEMLIMIT_VAL} (30 % of RAM, leaving room for PostgreSQL)"
+		fi
 	fi
 }
 
@@ -278,8 +287,12 @@ install_packages() {
 # minutes (PROD-PATH-GOLD-S1), while the binary downloads in <1s and works on any
 # distro. AmbientCapabilities lets the non-root caddy user bind 80/443.
 install_caddy() {
-	if command -v caddy >/dev/null 2>&1; then info "caddy already installed — keeping it"; return; fi
-	if [ "$DRY_RUN" = "yes" ]; then printf '  [dry-run] download Caddy static binary + create caddy user + systemd unit\n'; return; fi
+	if command -v caddy >/dev/null 2>&1; then
+		info "caddy already installed — keeping it"
+		ensure_caddy_restart_policy
+		return
+	fi
+	if [ "$DRY_RUN" = "yes" ]; then printf '  [dry-run] download Caddy static binary + create caddy user + systemd unit (Restart=always)\n'; return; fi
 	local ver="2.8.4"
 	local url="https://github.com/caddyserver/caddy/releases/download/v${ver}/caddy_${ver}_linux_${ARCH}.tar.gz"
 	info "installing Caddy ${ver} (official static binary)…"
@@ -293,6 +306,7 @@ Description=Caddy
 Documentation=https://caddyserver.com/docs/
 After=network.target network-online.target
 Requires=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=notify
@@ -300,6 +314,8 @@ User=caddy
 Group=caddy
 ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
 ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
+Restart=always
+RestartSec=2s
 TimeoutStopSec=5s
 LimitNOFILE=1048576
 PrivateTmp=true
@@ -308,8 +324,39 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target"
+	ensure_caddy_restart_policy
 	systemctl daemon-reload
-	ok "Caddy ${ver} installed (static binary + systemd unit)"
+	ok "Caddy ${ver} installed (static binary + systemd unit, Restart=always)"
+}
+
+# ensure_caddy_restart_policy: guarantee Caddy comes back if it ever dies.
+#
+# This is not hypothetical. Measured (scripts/verify-production/chaos.sh): with the
+# stock unit, SIGKILLing Caddy took the site down PERMANENTLY — every subsequent
+# request was connection-refused until a human intervened, because neither the
+# upstream packaged unit nor our own set `Restart=`. The engine had `Restart=always`
+# and recovered by itself in seconds; the front door did not.
+#
+# Written as a systemd DROP-IN rather than by editing the unit, so it applies
+# whether Caddy came from our static-binary install or from the distro package,
+# and survives a package upgrade replacing the unit file. StartLimitIntervalSec=0
+# disables the start-rate limiter — without it systemd stops trying after 5
+# restarts in 10 s, which is exactly the situation you need it to keep trying.
+ensure_caddy_restart_policy() {
+	[ "$DRY_RUN" = "yes" ] && { printf '  [dry-run] ensure caddy.service Restart=always via a systemd drop-in\n'; return 0; }
+	local dir="/etc/systemd/system/caddy.service.d"
+	mkdir -p "$dir"
+	write_file "$dir/10-appitools-restart.conf" "# Managed by the Appitools installer.
+# Caddy is the front door: if it dies and does not come back, the site is down
+# even though the engine is healthy. See docs/BENCHMARKS.md (resilience).
+[Unit]
+StartLimitIntervalSec=0
+
+[Service]
+Restart=always
+RestartSec=2s"
+	systemctl daemon-reload >/dev/null 2>&1 || true
+	ok "caddy restart policy ensured (Restart=always)"
 }
 
 # ── Service user + directories ───────────────────────────────────────────────
@@ -348,6 +395,8 @@ install_companion_scripts() {
 setup_postgres() {
 	if [ "$DRY_RUN" = "yes" ]; then
 		printf '  [dry-run] create role %s + database appitools (if absent)\n' "$SERVICE_USER"
+		printf '  [dry-run] tune postgresql for this box: shared_buffers=%sMB effective_cache_size=%sMB max_connections=%s\n' \
+			"$(( MEM_MB / 4 ))" "$(( MEM_MB * 55 / 100 ))" "$([ "$MEM_MB" -ge 4096 ] && echo 100 || echo 50)"
 		return
 	fi
 	systemctl enable --now postgresql >/dev/null 2>&1 || die "postgresql did not start (systemctl status postgresql). Re-run after fixing."
@@ -363,7 +412,71 @@ setup_postgres() {
 	if [ "$($psql -c "SELECT 1 FROM pg_database WHERE datname='appitools'")" != "1" ]; then
 		$psql -c "CREATE DATABASE appitools OWNER ${SERVICE_USER}" || die "could not create the appitools database"
 	fi
+	tune_postgres
 	ok "postgresql role + database ready (control plane is bootstrapped by the engine on boot)"
+}
+
+# tune_postgres: size PostgreSQL for THIS box instead of leaving the packaged
+# defaults, which are calibrated for a machine much smaller than a modern VPS.
+#
+# Two of the defaults are actively wrong on a small box and were measured as such
+# (scripts/verify-production, docs/BENCHMARKS.md):
+#
+#   shared_buffers        ships at 128 MB regardless of the machine. A real
+#                         dataset outgrows it immediately and scans fall back to
+#                         re-reading through the OS cache.
+#   effective_cache_size  ships at 4 GB regardless of the machine. On a 2 GB box
+#                         the planner is told about cache that cannot exist, and
+#                         prices plans against a fiction. It allocates NOTHING —
+#                         it is purely a hint — so correcting it is free.
+#
+# The values are deliberately conservative: this stack shares the box with the
+# engine and Caddy, so 25 % shared_buffers (the standard starting point), a modest
+# per-operation work_mem (it is per SORT, not per connection — the classic way to
+# OOM a small box), and a connection ceiling in proportion to the engine's own
+# small pool.
+#
+# Written to conf.d as a separate file so it is obvious, revertible (delete the
+# file) and never fights the package's own postgresql.conf. Idempotent.
+tune_postgres() {
+	local conf_file conf_dir
+	conf_file="$(runuser -u postgres -- psql -tAX -c 'SHOW config_file' 2>/dev/null | head -1 || true)"
+	[ -n "$conf_file" ] || { warn "could not locate postgresql.conf — skipping PostgreSQL tuning (defaults kept)"; return 0; }
+	conf_dir="$(dirname "$conf_file")/conf.d"
+	mkdir -p "$conf_dir"
+
+	# conf.d is only read if postgresql.conf includes it (Debian/Ubuntu packages do).
+	if ! grep -qE "^[[:space:]]*include_dir[[:space:]]*=[[:space:]]*'conf\.d'" "$conf_file"; then
+		printf "\n# added by the Appitools installer\ninclude_dir = 'conf.d'\n" >> "$conf_file"
+	fi
+
+	local sb ecs wm mwm mc
+	sb=$(( MEM_MB / 4 ))
+	ecs=$(( MEM_MB * 55 / 100 ))
+	wm=4; [ "$MEM_MB" -ge 4096 ] && wm=8
+	mwm=$(( MEM_MB / 16 )); [ "$mwm" -lt 64 ] && mwm=64
+	mc=50; [ "$MEM_MB" -ge 4096 ] && mc=100
+	# Below ~700 MiB the derived shared_buffers would drop under PostgreSQL's own
+	# default; leave the packaged config alone rather than making things worse.
+	if [ "$sb" -lt 128 ]; then
+		info "tiny box (~${MEM_MB} MiB) — keeping PostgreSQL's packaged defaults"
+		return 0
+	fi
+
+	write_file "$conf_dir/99-appitools-tuning.conf" "# Appitools — PostgreSQL sizing for this box (${MEM_MB} MiB RAM, $(nproc) vCPU).
+# Written by scripts/install.sh. Delete this file and restart PostgreSQL to
+# return to the packaged defaults. See docs/BENCHMARKS.md for the measurements.
+shared_buffers = ${sb}MB
+effective_cache_size = ${ecs}MB
+work_mem = ${wm}MB
+maintenance_work_mem = ${mwm}MB
+max_connections = ${mc}"
+	chown postgres:postgres "$conf_dir/99-appitools-tuning.conf" 2>/dev/null || true
+	# shared_buffers and max_connections need a full restart, not a reload.
+	systemctl restart postgresql >/dev/null 2>&1 \
+		|| warn "PostgreSQL did not restart after tuning — check journalctl -u postgresql (remove $conf_dir/99-appitools-tuning.conf to revert)"
+	local i; for i in $(seq 1 20); do runuser -u postgres -- psql -tAc 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
+	ok "postgresql tuned for this box (shared_buffers=${sb}MB, effective_cache_size=${ecs}MB, work_mem=${wm}MB, max_connections=${mc})"
 }
 
 # ── Engine binary ────────────────────────────────────────────────────────────
