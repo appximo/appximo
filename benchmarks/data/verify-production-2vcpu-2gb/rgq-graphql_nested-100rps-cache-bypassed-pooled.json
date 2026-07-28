@@ -1,0 +1,130 @@
+{
+  "part": "B-load",
+  "scenario": "graphql_nested",
+  "rate_requested": 100,
+  "cache_bust": true,
+  "url": "https://api.appitools.com",
+  "target": "https://api.appitools.com",
+  "colocated_loader": false,
+  "cdn_detected": "cloudflare",
+  "origin_ip": "PROD-VPS",
+  "runs": 3,
+  "per_run": [
+    {
+      "scenario": "graphql_nested",
+      "target": "https://api.appitools.com",
+      "cache_bust": true,
+      "origin_ip": "PROD-VPS",
+      "per_page": 20,
+      "rate_requested": 100,
+      "duration": "20s",
+      "requests": 2001,
+      "rps_achieved": 99.99,
+      "dropped_iterations": 0,
+      "iterations": 2001,
+      "error_rate": 0,
+      "latency_ms": {
+        "min": 6.595421,
+        "p50": 11.292431,
+        "p90": 25.034639,
+        "p95": 36.572531,
+        "p99": 71.056738,
+        "max": 202.232168,
+        "avg": 15.46674538980507
+      },
+      "waiting_ms": {
+        "p50": 9.985882,
+        "p95": 27.221164,
+        "avg": 12.891626557221388
+      },
+      "tls_handshake_ms": {
+        "avg": 0.29753709895052477
+      },
+      "bytes_received": 23315371,
+      "bytes_sent": 555594,
+      "bytes_per_request": 11652
+    },
+    {
+      "scenario": "graphql_nested",
+      "target": "https://api.appitools.com",
+      "cache_bust": true,
+      "origin_ip": "PROD-VPS",
+      "per_page": 20,
+      "rate_requested": 100,
+      "duration": "20s",
+      "requests": 1998,
+      "rps_achieved": 99.85,
+      "dropped_iterations": 3,
+      "iterations": 1998,
+      "error_rate": 0,
+      "latency_ms": {
+        "min": 7.13488,
+        "p50": 11.9580235,
+        "p90": 20.4069377,
+        "p95": 26.26536814999998,
+        "p99": 83.76280161999992,
+        "max": 164.312998,
+        "avg": 14.960236309309314
+      },
+      "waiting_ms": {
+        "p50": 10.073592,
+        "p95": 20.609154049999994,
+        "avg": 12.4885416856857
+      },
+      "tls_handshake_ms": {
+        "avg": 1.3106071496496496
+      },
+      "bytes_received": 23289928,
+      "bytes_sent": 556173,
+      "bytes_per_request": 11657
+    },
+    {
+      "scenario": "graphql_nested",
+      "target": "https://api.appitools.com",
+      "cache_bust": true,
+      "origin_ip": "PROD-VPS",
+      "per_page": 20,
+      "rate_requested": 100,
+      "duration": "20s",
+      "requests": 2001,
+      "rps_achieved": 100,
+      "dropped_iterations": 0,
+      "iterations": 2001,
+      "error_rate": 0,
+      "latency_ms": {
+        "min": 6.961295,
+        "p50": 10.271227,
+        "p90": 15.775297,
+        "p95": 19.039062,
+        "p99": 30.380928,
+        "max": 80.694268,
+        "avg": 11.466750605197406
+      },
+      "waiting_ms": {
+        "p50": 9.361993,
+        "p95": 17.389949,
+        "avg": 10.482447572213925
+      },
+      "tls_handshake_ms": {
+        "avg": 0.1601070349825087
+      },
+      "bytes_received": 23315051,
+      "bytes_sent": 555594,
+      "bytes_per_request": 11652
+    }
+  ],
+  "totals": {
+    "requests": 6000,
+    "dropped_iterations": 3,
+    "rps_achieved_mean": 99.95,
+    "error_rate_max": 0,
+    "bytes_per_request": 11652,
+    "p50_per_run": [
+      11.292431,
+      11.9580235,
+      10.271227
+    ],
+    "waiting_p50_mean": 9.807,
+    "p50_cv": 0.0621
+  }
+}

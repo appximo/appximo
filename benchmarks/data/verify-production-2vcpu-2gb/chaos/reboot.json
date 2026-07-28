@@ -1,0 +1,28 @@
+{
+  "part": "C-chaos",
+  "case": "reboot",
+  "notes": "reboot the whole box \u2014 do all three services come back with no human?",
+  "probe_rate_rps": 20.0,
+  "probe_path": "/healthz",
+  "requests_before_fault": 127,
+  "requests_after_fault": 2913,
+  "requests_failed_after_fault": 468,
+  "failure_codes": {
+    "refused": 369,
+    "timeout": 94,
+    "502": 5
+  },
+  "time_to_first_error_s": 0.062,
+  "outage_s": 27.795,
+  "time_to_recovery_from_fault_s": 27.857,
+  "recovered": true,
+  "user_impact": "468 requests failed over 27.8s",
+  "baseline_latency_ms": {
+    "p50": 6223.05,
+    "p95": 7094.2
+  },
+  "post_recovery_latency_ms": {
+    "p50": 4747.41,
+    "p95": 10301.65
+  }
+}

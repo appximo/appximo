@@ -1,0 +1,26 @@
+{
+  "part": "C-chaos",
+  "case": "engine-kill",
+  "notes": "SIGKILL the engine \u2014 does systemd's Restart=always bring it back, and what does Caddy return meanwhile?",
+  "probe_rate_rps": 20.0,
+  "probe_path": "/healthz",
+  "requests_before_fault": 202,
+  "requests_after_fault": 896,
+  "requests_failed_after_fault": 90,
+  "failure_codes": {
+    "502": 90
+  },
+  "time_to_first_error_s": 0.002,
+  "outage_s": 4.531,
+  "time_to_recovery_from_fault_s": 4.534,
+  "recovered": true,
+  "user_impact": "90 requests failed over 4.5s",
+  "baseline_latency_ms": {
+    "p50": 210.87,
+    "p95": 367.17
+  },
+  "post_recovery_latency_ms": {
+    "p50": 2537.58,
+    "p95": 5312.16
+  }
+}

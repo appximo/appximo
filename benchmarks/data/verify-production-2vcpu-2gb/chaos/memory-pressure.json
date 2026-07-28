@@ -1,0 +1,24 @@
+{
+  "part": "C-chaos",
+  "case": "memory-pressure",
+  "notes": "large concurrent result sets \u2014 does GOMEMLIMIT hold the heap, or does the OOM killer fire?",
+  "probe_rate_rps": 20.0,
+  "probe_path": "/api/orders?per_page=1",
+  "requests_before_fault": 195,
+  "requests_after_fault": 729,
+  "requests_failed_after_fault": 0,
+  "failure_codes": {},
+  "time_to_first_error_s": null,
+  "outage_s": null,
+  "time_to_recovery_from_fault_s": null,
+  "recovered": true,
+  "user_impact": "none \u2014 no failed request",
+  "baseline_latency_ms": {
+    "p50": 1644.51,
+    "p95": 2759.3
+  },
+  "post_recovery_latency_ms": {
+    "p50": 4453.74,
+    "p95": 6153.12
+  }
+}

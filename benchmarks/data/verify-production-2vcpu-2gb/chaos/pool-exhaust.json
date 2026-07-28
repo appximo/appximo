@@ -1,0 +1,24 @@
+{
+  "part": "C-chaos",
+  "case": "pool-exhaust",
+  "notes": "offer far more concurrency than the pgx pool is wide \u2014 graceful degradation or collapse?",
+  "probe_rate_rps": 20.0,
+  "probe_path": "/api/orders?per_page=1",
+  "requests_before_fault": 207,
+  "requests_after_fault": 891,
+  "requests_failed_after_fault": 0,
+  "failure_codes": {},
+  "time_to_first_error_s": null,
+  "outage_s": null,
+  "time_to_recovery_from_fault_s": null,
+  "recovered": true,
+  "user_impact": "none \u2014 no failed request",
+  "baseline_latency_ms": {
+    "p50": 1243.81,
+    "p95": 1466.45
+  },
+  "post_recovery_latency_ms": {
+    "p50": 3949.69,
+    "p95": 5068.59
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "part": "B-ladder",
+  "scenario": "read",
+  "cache_bust": true,
+  "levels": [
+    "100",
+    "250",
+    "500",
+    "750",
+    "1000"
+  ],
+  "knee_rps": 750,
+  "highest_clean_rps": 500
+}

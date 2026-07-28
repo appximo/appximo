@@ -93,10 +93,12 @@ internet ──443──▶ Caddy  (TLS: automatic Let's Encrypt, Host header pr
   talks to it over a small persistent pool, so there is no benefit to
   containerizing it and real setup/upgrade cost avoided.
 
-**Measured cost of the layers** (on the benchmark hardware, `docs/DEPLOY.md §
-Measured overhead`): the Docker bridge would add ~0.05 ms p50 and a proxy hop
-~0.48 ms p50. The native + Caddy stack pays only the proxy hop — the engine
-itself is the same binary that benchmarked **2,000 req/s at p50 1.58 ms**.
+**Measured cost of the layers** — decomposed on a real 2 vCPU / 2 GB box against
+a live HTTPS endpoint ([docs/BENCHMARKS.md](BENCHMARKS.md)): the Caddy reverse
+proxy adds **+0.71 ms** p50 and TLS a further **+0.26 ms**, so the whole
+production stack costs about **+1 ms** over the bare engine. With a million rows
+and every request reaching PostgreSQL it sustains **500 req/s** (knee at 750),
+and a filtered, sorted, paginated page answers in **4.4 ms** end to end.
 
 **Why `mv` + SIGTERM, not blue/green.** Updates swap the binary atomically and
 `systemctl restart`; Caddy retries the upstream during the ~1 s restart and
@@ -280,7 +282,7 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `JWT_SECRET` | **yes** | — | HS256 signing secret, ≥ 32 chars (`openssl rand -hex 32`). |
 | `ADMIN_KEY` | **yes** | — | `X-Admin-Key` for the control plane, `/metrics`, `/debug`, `/admin`. |
 | `APPITOOLS_ENV` | no | (prod) | `development` enables pprof (:6060) + GraphQL introspection + GraphiQL. **Leave unset/`production`** in prod. |
-| `GOMEMLIMIT` | no | auto | Soft heap ceiling. Unset → the engine uses 90 % of an explicit **cgroup** limit if present, else warns on a small box. **Set it on a bare small box** (the installer does): e.g. `512MiB` on 1 GB. Never derived from total RAM (Postgres shares the box). |
+| `GOMEMLIMIT` | no | auto | Soft heap ceiling. Unset → the engine uses 90 % of an explicit **cgroup** limit if present, else warns on a small box. **Set it on a bare small box** — the installer sets **30 % of RAM** (measured: the engine's own anonymous memory peaks in the tens of MB even at 1M rows, and PostgreSQL needs the rest). Never derived from total RAM as if the engine were alone on the box. |
 | `GOMAXPROCS` | no | auto | cgroup-aware (automaxprocs). |
 | `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | no | 1000 / 100 | Per-tenant token bucket. |
 | `OBS_DB_PATH` | no | `/var/lib/appitools/obs/obs.db` | Trace/snapshot history (SQLite). Keep it on a persistent path. |
@@ -339,3 +341,34 @@ per-field docs are in [config.go](../config.go) and the README config table.
 Health endpoints for a probe/monitor (all unauthenticated): `/healthz`
 (liveness), `/readyz` (readiness — 503 while draining), `/health` (JSON +
 version). `/metrics` and `/debug/*` need `X-Admin-Key`.
+
+---
+
+## 11. Verify your own deploy
+
+Don't take our numbers — measure yours.
+[`scripts/verify-production/`](../scripts/verify-production/) is a repeatable
+suite that measures **this exact stack on your box**: the RAM/CPU footprint per
+service, the load it sustains and where its knee is, what TLS and the proxy
+really cost, how it behaves at 100K/1M rows, REST vs GraphQL, and — optionally —
+how it recovers when you kill the engine, kill Caddy, stop PostgreSQL, deploy
+under load, or reboot the machine.
+
+```bash
+# from a machine that is NOT your server (a loader must not share the server's CPU)
+bash scripts/verify-production/run-all.sh \
+  --target=https://api.example.com \
+  --server-ssh=root@YOUR.SERVER.IP
+```
+
+It writes a Markdown report plus the raw JSON behind every number. Two traps it
+catches for you, because both silently invalidate a benchmark:
+
+- **a CDN in front of your domain** — the name resolves to the edge, so you would
+  be measuring Cloudflare, not your server (pass `--origin-ip` to measure the
+  origin);
+- **the engine's response cache** — every read is reported in both arms, cached
+  and bypassed, so nobody quotes the cache as if it were the database.
+
+Reference numbers from a 2 vCPU / 2 GB droplet, and the tuning that came out of
+them: [docs/BENCHMARKS.md](BENCHMARKS.md).

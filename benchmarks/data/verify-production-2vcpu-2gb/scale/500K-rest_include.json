@@ -1,0 +1,35 @@
+{
+  "scenario": "rest_include",
+  "target": "https://api.appitools.com",
+  "cache_bust": true,
+  "origin_ip": "PROD-VPS",
+  "per_page": 20,
+  "rate_requested": 100,
+  "duration": "20s",
+  "requests": 2001,
+  "rps_achieved": 100,
+  "dropped_iterations": 0,
+  "iterations": 2001,
+  "error_rate": 0,
+  "latency_ms": {
+    "min": 5.578217,
+    "p50": 7.128376,
+    "p90": 8.248858,
+    "p95": 9.027881,
+    "p99": 13.31048,
+    "max": 31.117793,
+    "avg": 7.388424811094456
+  },
+  "waiting_ms": {
+    "p50": 5.694072,
+    "p95": 7.210662,
+    "avg": 5.914059972013989
+  },
+  "tls_handshake_ms": {
+    "avg": 0.17300397251374314
+  },
+  "bytes_received": 32203309,
+  "bytes_sent": 373154,
+  "bytes_per_request": 16094,
+  "dataset": "500K orders"
+}

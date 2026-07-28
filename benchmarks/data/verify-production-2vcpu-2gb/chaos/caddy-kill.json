@@ -1,0 +1,26 @@
+{
+  "part": "C-chaos",
+  "case": "caddy-kill",
+  "notes": "SIGKILL Caddy \u2014 the TLS front door disappears; how long until it is answering again?",
+  "probe_rate_rps": 20.0,
+  "probe_path": "/healthz",
+  "requests_before_fault": 223,
+  "requests_after_fault": 636,
+  "requests_failed_after_fault": 6,
+  "failure_codes": {
+    "refused": 6
+  },
+  "time_to_first_error_s": 0.482,
+  "outage_s": 0.981,
+  "time_to_recovery_from_fault_s": 1.462,
+  "recovered": true,
+  "user_impact": "6 requests failed over 1.0s",
+  "baseline_latency_ms": {
+    "p50": 1100.51,
+    "p95": 2692.48
+  },
+  "post_recovery_latency_ms": {
+    "p50": 4121.56,
+    "p95": 12731.52
+  }
+}

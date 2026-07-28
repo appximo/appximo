@@ -1,0 +1,21 @@
+{
+  "part": "E-rest-vs-graphql",
+  "arms": [
+    {
+      "name": "REST \u2014 `?include=customer,items` (1 request)",
+      "round_trips": 1,
+      "p50": 6.8861,
+      "p95": 9.8358,
+      "bytes_per_request": 18628
+    },
+    {
+      "name": "GraphQL \u2014 one nested query (1 request)",
+      "round_trips": 1,
+      "p50": 11.0057,
+      "p95": 27.0404,
+      "bytes_per_request": 11652
+    }
+  ],
+  "verdict": "**REST is 4.12 ms faster at the median (6.89 vs 11.01 ms); GraphQL sends 37% fewer bytes (11,652 vs 18,628 per request).**\n\nBoth fetch the nested data in ONE request and ONE database round trip \u2014 `?include=` and the GraphQL resolver share the same `LATERAL` query \u2014 so the usual argument for GraphQL, *fewer round trips*, does not apply here: REST already collapses them. What GraphQL genuinely buys is **field selection**: REST's `?include=` returns every column of the parent and its relations, while the GraphQL query names exactly the fields it wants. That is the 37% payload difference, and it is paid for with ~60% more server latency (parse, validate and resolve the document).\n\n**Recommendation for a frontend:** default to REST with `?include=` \u2014 it is faster, simpler to cache (it is a GET, so the engine's response cache serves it; GraphQL POSTs are never cached), and easier to debug. Reach for GraphQL when payload size actually matters (mobile, poor networks) or when different views need very different field sets from a wide resource.",
+  "conditions": "100 rps, response cache bypassed on BOTH arms (a GET would otherwise be cached and a POST never is), 1M orders, measured against the origin over real TLS"
+}

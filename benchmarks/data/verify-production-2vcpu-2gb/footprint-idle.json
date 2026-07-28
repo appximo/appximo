@@ -1,0 +1,59 @@
+{
+  "cpu_window_ms": 1425,
+  "gomemlimit_env": "1536MiB",
+  "label": "idle",
+  "nproc": 2,
+  "part": "A-footprint",
+  "samples": 1,
+  "services": {
+    "appitools": {
+      "anon_mib": 67.6,
+      "cgroup_mib": 95.2,
+      "cpu": {
+        "cpu_usec": 0,
+        "pct_box": 0.0,
+        "pct_one_core": 0.0
+      },
+      "open_fds": 50,
+      "processes": 1,
+      "pss_mib": 85.3,
+      "unit": "appitools.service"
+    },
+    "caddy": {
+      "anon_mib": 22.1,
+      "cgroup_mib": 31.8,
+      "cpu": {
+        "cpu_usec": 223,
+        "pct_box": 0.01,
+        "pct_one_core": 0.02
+      },
+      "open_fds": 46,
+      "processes": 1,
+      "pss_mib": 47.1,
+      "unit": "caddy.service"
+    },
+    "postgresql": {
+      "anon_mib": 19.4,
+      "cgroup_mib": 1205.3,
+      "cpu": {
+        "cpu_usec": 1421,
+        "pct_box": 0.05,
+        "pct_one_core": 0.1
+      },
+      "open_fds": 452,
+      "processes": 16,
+      "pss_mib": 175.1,
+      "unit": "postgresql@18-main.service"
+    }
+  },
+  "stack_anon_mib": 109.0,
+  "stack_pss_mib": 307.5,
+  "system": {
+    "mem_available_mib": 1263.4,
+    "mem_free_mib": 89.0,
+    "mem_total_mib": 1963.6,
+    "mem_used_mib": 700.2,
+    "page_cache_mib": 1392.7,
+    "pct_used": 35.7
+  }
+}

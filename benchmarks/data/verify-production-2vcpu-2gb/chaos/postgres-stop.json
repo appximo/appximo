@@ -1,0 +1,26 @@
+{
+  "part": "C-chaos",
+  "case": "postgres-stop",
+  "notes": "stop PostgreSQL for 15s, then start it \u2014 does the engine survive the loss and reconnect by itself?",
+  "probe_rate_rps": 20.0,
+  "probe_path": "/api/orders?per_page=1",
+  "requests_before_fault": 204,
+  "requests_after_fault": 1169,
+  "requests_failed_after_fault": 227,
+  "failure_codes": {
+    "500": 227
+  },
+  "time_to_first_error_s": 0.0,
+  "outage_s": 11.913,
+  "time_to_recovery_from_fault_s": 11.913,
+  "recovered": true,
+  "user_impact": "227 requests failed over 11.9s",
+  "baseline_latency_ms": {
+    "p50": 443.52,
+    "p95": 745.53
+  },
+  "post_recovery_latency_ms": {
+    "p50": 4965.7,
+    "p95": 9347.71
+  }
+}

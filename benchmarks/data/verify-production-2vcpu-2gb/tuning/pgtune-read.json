@@ -1,0 +1,50 @@
+{
+  "part": "F-tuning",
+  "name": "PostgreSQL sizing for the box \u2014 read workload",
+  "hypothesis": "PostgreSQL ships shared_buffers=128MB and effective_cache_size=4GB regardless of the machine. On a 2 GB box the first is small for a 673 MiB dataset and the second describes cache that cannot exist.",
+  "applied_via": "scripts/verify-production/tune.sh --apply (conf.d drop-in + engine GOMEMLIMIT)",
+  "comparison": {
+    "verdict": "no_change",
+    "label_a": "postgres defaults",
+    "label_b": "tuned (shared_buffers 25%, effective_cache_size 55%)",
+    "p_value": 0.0,
+    "u": 102525090.0,
+    "significant": true,
+    "material": false,
+    "delta_p50_ms": 0.0414,
+    "delta_pct": 0.9,
+    "gate": "|delta| >= max(0.5ms, 3%)",
+    "a": {
+      "n": 14968,
+      "min": 2.9647,
+      "p50": 4.6167,
+      "p90": 7.4467,
+      "p95": 10.03,
+      "p99": 66.04,
+      "max": 276.6248,
+      "mean": 6.7211,
+      "stdev": 13.1482,
+      "cv": 1.9563,
+      "ci95_median": [
+        4.6045,
+        4.6332
+      ]
+    },
+    "b": {
+      "n": 14560,
+      "min": 2.8316,
+      "p50": 4.6581,
+      "p90": 15.6869,
+      "p95": 47.6989,
+      "p99": 425.4865,
+      "max": 1562.887,
+      "mean": 16.6862,
+      "stdev": 67.8892,
+      "cv": 4.0686,
+      "ci95_median": [
+        4.6349,
+        4.6823
+      ]
+    }
+  }
+}

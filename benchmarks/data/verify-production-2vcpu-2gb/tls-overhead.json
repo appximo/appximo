@@ -1,0 +1,44 @@
+{
+  "verdict": "regression",
+  "label_a": "direct-engine-http",
+  "label_b": "public-https-via-caddy",
+  "p_value": 0.0,
+  "u": 8022096.5,
+  "significant": true,
+  "material": true,
+  "delta_p50_ms": 1.2656,
+  "delta_pct": 50.56,
+  "gate": "|delta| >= max(0.5ms, 3%)",
+  "a": {
+    "n": 6003,
+    "min": 1.4135,
+    "p50": 2.5031,
+    "p90": 6.5617,
+    "p95": 8.3587,
+    "p99": 14.6263,
+    "max": 58.072,
+    "mean": 3.5887,
+    "stdev": 3.1711,
+    "cv": 0.8836,
+    "ci95_median": [
+      2.4615,
+      2.556
+    ]
+  },
+  "b": {
+    "n": 6003,
+    "min": 2.3346,
+    "p50": 3.7687,
+    "p90": 18.0491,
+    "p95": 26.2602,
+    "p99": 53.9621,
+    "max": 113.4996,
+    "mean": 8.3289,
+    "stdev": 10.3061,
+    "cv": 1.2374,
+    "ci95_median": [
+      3.7215,
+      3.8284
+    ]
+  }
+}

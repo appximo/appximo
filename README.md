@@ -128,6 +128,17 @@ treatment (Mann-Whitney, bootstrap CIs), and raw per-run data — in
 [`benchmark-lab/`](benchmark-lab/) + `make bench-protocol`. PRs that make the
 baseline faster are welcome; we'll publish updated numbers.
 
+That benchmark measures the **engine**. For the **whole production stack** —
+Caddy terminating real Let's Encrypt TLS → the engine under systemd → native
+PostgreSQL, with a million rows — see [**docs/BENCHMARKS.md**](docs/BENCHMARKS.md):
+the production layers cost about **+1 ms** p50, the box sustains **500 req/s**
+with every request reaching PostgreSQL (knee at 750), a filtered page over 1M
+rows answers in **4.4 ms**, the stack owns **~109 MiB** of memory, and the
+resilience matrix (kill the engine, kill Caddy, stop PostgreSQL, deploy under
+load, reboot) is measured rather than asserted. Better still, **don't take those
+numbers**: [`scripts/verify-production/`](scripts/verify-production/) runs the
+same suite against *your* server and prints *your* report.
+
 ## What's in the box (all verified by the test suite)
 
 - **CRUD**: list/get/create/replace/patch/delete per resource; typed filters

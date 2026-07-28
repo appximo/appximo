@@ -1,0 +1,50 @@
+{
+  "part": "F-tuning",
+  "name": "composite index (status, created_at) on orders",
+  "hypothesis": "A filtered+sorted list uses the SORT index and filters rows out; as non-matching rows accumulate at the top of the sort order the scan gets longer. A composite (filter, sort) index makes it a range scan.",
+  "applied_via": "the product's own migration path (PUT /tenants/{id}/schema), on a live 1M-row table, in 2.2 s",
+  "comparison": {
+    "verdict": "improvement",
+    "label_a": "3 separate indexes (status, created_at)",
+    "label_b": "composite index (status, created_at)",
+    "p_value": 0.0,
+    "u": 41064.5,
+    "significant": true,
+    "material": true,
+    "delta_p50_ms": -17.0269,
+    "delta_pct": -79.5,
+    "gate": "|delta| >= max(0.5ms, 3%)",
+    "a": {
+      "n": 5977,
+      "min": 12.9493,
+      "p50": 21.4183,
+      "p90": 152.7044,
+      "p95": 296.884,
+      "p99": 478.2333,
+      "max": 584.7553,
+      "mean": 59.8837,
+      "stdev": 95.0252,
+      "cv": 1.5868,
+      "ci95_median": [
+        21.1889,
+        21.7073
+      ]
+    },
+    "b": {
+      "n": 6003,
+      "min": 2.9804,
+      "p50": 4.3914,
+      "p90": 5.2201,
+      "p95": 5.9495,
+      "p99": 9.9208,
+      "max": 34.007,
+      "mean": 4.6347,
+      "stdev": 1.3338,
+      "cv": 0.2878,
+      "ci95_median": [
+        4.3793,
+        4.4083
+      ]
+    }
+  }
+}
