@@ -7,10 +7,10 @@ systemd + Caddy** (automatic Let's Encrypt TLS). Docker is a documented
 
 > **Why not Docker by default?** On a 1 GB VPS — the box this product is designed
 > for — the Docker daemon alone resident-sets **300–400 MB**, a third of the
-> machine, before your app runs. Native binaries + systemd cost ~0. The engine is
-> a single static CGO-free binary; PostgreSQL and Caddy are one `apt install`
-> each. This is the same choice PocketBase, Miniflux and Caddy itself make for
-> small-box self-hosting.
+> machine, before your app runs. Native binaries + systemd cost ~0. The engine
+> and Caddy are single static binaries; PostgreSQL is one `apt install`. This is
+> the same choice PocketBase, Miniflux and Caddy itself make for small-box
+> self-hosting.
 
 ---
 
@@ -48,7 +48,14 @@ Caddy issues the certificate automatically the moment DNS resolves here and
 ports 80/443 are reachable. It never hangs or rolls back on a pending
 certificate. Run it again any time (it's idempotent, reuses your secrets);
 `--uninstall` reverses it for a clean retry (add `--purge` to also drop the
-database). Validated end-to-end on Ubuntu 22.04 and Debian 12.
+database). Validated end-to-end on Ubuntu 22.04 and Debian 12, and on a real
+2 GB DigitalOcean droplet where it issued a genuine Let's Encrypt certificate
+for a public domain and served the full API + `/editor` + `/admin` over HTTPS.
+
+> **If the box already has a firewall** (a `ufw` or a cloud firewall — common on
+> DigitalOcean/AWS), open **80 and 443** or the Let's Encrypt HTTP-01 challenge
+> can't reach Caddy. `--harden` does this for you (it detects and keeps your SSH
+> port first); or manually: `ufw allow 80/tcp && ufw allow 443/tcp` (22 stays).
 
 ### Option B — manual (the same steps, by hand)
 

@@ -259,27 +259,57 @@ load_or_generate_secrets() {
 
 # ── System packages ──────────────────────────────────────────────────────────
 install_packages() {
-	info "installing packages (postgresql, caddy, prerequisites)…"
-	export DEBIAN_FRONTEND=noninteractive
-	run apt-get update -qq
-	run apt-get install -y -qq ca-certificates curl gnupg openssl postgresql \
+	info "installing packages (postgresql, prerequisites)…"
+	# NEEDRESTART_* keeps Ubuntu's needrestart from prompting / slowly deferring
+	# service restarts mid-install (observed on a fresh box in PROD-PATH-GOLD-S1).
+	export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
+	# `apt-get update` is NON-fatal: a single slow/broken THIRD-PARTY repo left on
+	# the box (e.g. a stale docker/cloudsmith list) must not block installing
+	# postgresql from the working Ubuntu mirrors. The install below still guards.
+	run apt-get -o Acquire::Retries=3 update -qq \
+		|| warn "apt-get update had an issue (a slow extra repo?); continuing — postgresql installs from the base mirrors"
+	run apt-get install -y -qq -o Acquire::Retries=3 ca-certificates curl gnupg openssl tar postgresql \
 		|| die "apt-get install failed. Check network/apt sources, then re-run this installer (it resumes safely)."
-	# Caddy from its official apt repository (per the Caddy docs).
-	if [ "$DRY_RUN" = "yes" ]; then
-		printf '  [dry-run] add caddy apt repo + apt-get install caddy\n'
-	elif command -v caddy >/dev/null 2>&1; then
-		info "caddy already installed — keeping it"
-	else
-		curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-			| gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
-			|| die "could not fetch the Caddy signing key (network?). Re-run to retry."
-		curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-			> /etc/apt/sources.list.d/caddy-stable.list \
-			|| die "could not add the Caddy apt repo. Re-run to retry."
-		apt-get update -qq
-		apt-get install -y -qq caddy || die "apt-get install caddy failed. Re-run to retry."
-	fi
 	ok "packages ready"
+}
+
+# install_caddy: the official Caddy STATIC BINARY + a systemd unit — NOT the
+# cloudsmith apt repo. On a fresh box that repo made `apt-get update` hang for
+# minutes (PROD-PATH-GOLD-S1), while the binary downloads in <1s and works on any
+# distro. AmbientCapabilities lets the non-root caddy user bind 80/443.
+install_caddy() {
+	if command -v caddy >/dev/null 2>&1; then info "caddy already installed — keeping it"; return; fi
+	if [ "$DRY_RUN" = "yes" ]; then printf '  [dry-run] download Caddy static binary + create caddy user + systemd unit\n'; return; fi
+	local ver="2.8.4"
+	local url="https://github.com/caddyserver/caddy/releases/download/v${ver}/caddy_${ver}_linux_${ARCH}.tar.gz"
+	info "installing Caddy ${ver} (official static binary)…"
+	curl -fsSL -m 90 "$url" -o /tmp/caddy.tgz || die "could not download Caddy ($url). Check network and re-run."
+	tar -xzf /tmp/caddy.tgz -C /tmp caddy || die "the Caddy download was not a valid tarball — re-run to retry."
+	install -m 0755 /tmp/caddy /usr/bin/caddy; rm -f /tmp/caddy.tgz /tmp/caddy
+	id caddy >/dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/caddy --shell /usr/sbin/nologin caddy
+	mkdir -p /etc/caddy
+	write_file /etc/systemd/system/caddy.service "[Unit]
+Description=Caddy
+Documentation=https://caddyserver.com/docs/
+After=network.target network-online.target
+Requires=network-online.target
+
+[Service]
+Type=notify
+User=caddy
+Group=caddy
+ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
+ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+PrivateTmp=true
+ProtectSystem=full
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target"
+	systemctl daemon-reload
+	ok "Caddy ${ver} installed (static binary + systemd unit)"
 }
 
 # ── Service user + directories ───────────────────────────────────────────────
@@ -322,8 +352,8 @@ setup_postgres() {
 	fi
 	systemctl enable --now postgresql >/dev/null 2>&1 || die "postgresql did not start (systemctl status postgresql). Re-run after fixing."
 	# Wait for the socket (fresh installs take a moment to accept connections).
-	local i; for i in $(seq 1 15); do sudo -u postgres psql -tAc 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
-	local psql="sudo -u postgres psql -tAX"
+	local i; for i in $(seq 1 15); do runuser -u postgres -- psql -tAc 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
+	local psql="runuser -u postgres -- psql -tAX"
 	if [ "$($psql -c "SELECT 1 FROM pg_roles WHERE rolname='${SERVICE_USER}'")" != "1" ]; then
 		$psql -c "CREATE ROLE ${SERVICE_USER} LOGIN PASSWORD '${DB_PASS}'" || die "could not create the postgres role"
 	else
@@ -473,7 +503,9 @@ start_services() {
 	systemctl daemon-reload
 	systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
 	systemctl restart "$SERVICE_NAME" || { journalctl -u "$SERVICE_NAME" -n 30 --no-pager 2>/dev/null || true; die "the engine failed to start — see the log above (journalctl -u $SERVICE_NAME -f)"; }
-	# Caddy is a system service after apt install; hand it the new Caddyfile.
+	# Caddy (installed by install_caddy): enable for reboot, then (re)start with the
+	# new Caddyfile. reload fails if it isn't running yet → restart cold-starts it.
+	systemctl enable caddy >/dev/null 2>&1 || true
 	systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null \
 		|| warn "could not (re)start caddy — check: caddy validate --config $CADDYFILE ; journalctl -u caddy -f"
 	ok "services started (appitools + caddy)"
@@ -550,8 +582,8 @@ uninstall() {
 	ok "service, unit, binary and config removed"
 	if [ "$PURGE" = "yes" ]; then
 		warn "purging the database + data dir (destructive)"
-		sudo -u postgres psql -tAX -c "DROP DATABASE IF EXISTS appitools" >/dev/null 2>&1 || true
-		sudo -u postgres psql -tAX -c "DROP ROLE IF EXISTS ${SERVICE_USER}" >/dev/null 2>&1 || true
+		runuser -u postgres -- psql -tAX -c "DROP DATABASE IF EXISTS appitools" >/dev/null 2>&1 || true
+		runuser -u postgres -- psql -tAX -c "DROP ROLE IF EXISTS ${SERVICE_USER}" >/dev/null 2>&1 || true
 		rm -rf "$VARLIB"
 		ok "database, role and data dir dropped"
 	else
@@ -608,6 +640,7 @@ main() {
 	preflight_conflicts
 	load_or_generate_secrets
 	install_packages
+	install_caddy
 	setup_user_dirs
 	setup_postgres
 	install_binary
