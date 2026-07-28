@@ -85,3 +85,7 @@ pkg/editorui/web/node_modules/
 /fleet-secrets/
 /fleet-data/
 /schemas/
+
+# Per-run output of scripts/verify-production (curated evidence lives in
+# benchmarks/data/verify-production-2vcpu-2gb/).
+verify-results/

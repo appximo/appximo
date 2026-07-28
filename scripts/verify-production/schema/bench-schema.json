@@ -1,0 +1,169 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "verify-production",
+  "resources": {
+    "customers": {
+      "fields": {
+        "name": {
+          "type": "string",
+          "required": true,
+          "maxLength": 120
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "city": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "tier": {
+          "type": "string",
+          "enum": [
+            "free",
+            "pro",
+            "enterprise"
+          ]
+        },
+        "created_at": {
+          "type": "time",
+          "auto": true
+        }
+      },
+      "relations": {
+        "orders": {
+          "type": "has_many",
+          "target": "orders",
+          "fk": "customer_id",
+          "limit": 10
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "tier"
+          ]
+        },
+        {
+          "fields": [
+            "city"
+          ]
+        }
+      ]
+    },
+    "orders": {
+      "fields": {
+        "customer_id": {
+          "type": "uuid",
+          "relation": "customers",
+          "on_delete": "cascade"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "paid",
+            "shipped",
+            "delivered",
+            "cancelled"
+          ]
+        },
+        "region": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "total": {
+          "type": "float64"
+        },
+        "created_at": {
+          "type": "time",
+          "auto": true
+        }
+      },
+      "relations": {
+        "customer": {
+          "type": "belongs_to",
+          "target": "customers",
+          "fk": "customer_id"
+        },
+        "items": {
+          "type": "has_many",
+          "target": "order_items",
+          "fk": "order_id",
+          "limit": 10
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "status",
+            "created_at"
+          ]
+        },
+        {
+          "fields": [
+            "status"
+          ]
+        },
+        {
+          "fields": [
+            "status",
+            "region"
+          ]
+        },
+        {
+          "fields": [
+            "created_at"
+          ]
+        }
+      ]
+    },
+    "order_items": {
+      "fields": {
+        "order_id": {
+          "type": "uuid",
+          "relation": "orders",
+          "on_delete": "cascade"
+        },
+        "product": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "qty": {
+          "type": "int"
+        },
+        "price": {
+          "type": "float64"
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "product"
+          ]
+        }
+      ]
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": {
+        "resources": "*",
+        "actions": [
+          "*"
+        ]
+      },
+      "viewer": {
+        "resources": [
+          "customers",
+          "orders",
+          "order_items"
+        ],
+        "actions": [
+          "read"
+        ]
+      }
+    }
+  }
+}
