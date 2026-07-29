@@ -105,18 +105,23 @@
           ]
         },
         "user": {
-          "resources": [
-            "entries",
-            "accounts"
-          ],
-          "actions": [
-            "read",
-            "create"
-          ],
-          "conditions": {
-            "field": "user_id",
-            "op": "eq",
-            "val": "$user_id"
+          "permissions": {
+            "entries": {
+              "actions": [
+                "read",
+                "create"
+              ],
+              "conditions": {
+                "field": "user_id",
+                "op": "eq",
+                "val": "$user_id"
+              }
+            },
+            "accounts": {
+              "actions": [
+                "read"
+              ]
+            }
           }
         }
       }

@@ -209,7 +209,7 @@ func TestValidateRBAC_RoleGlobalFieldExistence(t *testing.T) {
         "conditions": { "field":"autor_id","op":"eq","val":"$user_id" }
       } } }
     }`
-	if !hasError(schema.Validate(parseSchema(t, condTypo)), "does not exist on any of the role's resources") {
+	if !hasError(schema.Validate(parseSchema(t, condTypo)), `condition field "autor_id" does not exist on 'posts'`) {
 		t.Fatalf("expected role-global condition-field typo rejection, got: %v", schema.Validate(parseSchema(t, condTypo)))
 	}
 

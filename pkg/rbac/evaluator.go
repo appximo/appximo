@@ -34,6 +34,16 @@ func (p *Policy) Evaluate(evalCtx EvalContext, resource, action string) EvalResu
 		return EvalResult{Allowed: false}
 	}
 
+	// Custom-route grants (LIBRARY-GAPS-S1): a VIRTUAL segment, not a table. The
+	// result therefore never carries a Condition or a field allowlist — there are no
+	// rows to filter and no columns to project, and injecting a WHERE for a
+	// non-existent table is exactly the runtime failure this design forbids. What the
+	// handler does with real resources is authorized separately, by Ctx.Query/Insert/
+	// Update, which re-evaluate the role against those resources.
+	if grant, isRoute := routeGrantFor(&rp, resource); isRoute {
+		return EvalResult{Allowed: actionAllowed(grant.Actions, action)}
+	}
+
 	// Per-resource form (G2): the role's permissions map is the sole source of
 	// truth. A resource absent from the map is denied (deny-by-default), and the
 	// matched entry carries its OWN condition/allowlist.

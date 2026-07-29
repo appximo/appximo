@@ -77,9 +77,14 @@
         "actions": ["read", "create", "update"]
       },
       "operario": {
-        "resources": ["guides", "dispatches", "incidents"],
-        "actions": ["read", "create", "update"],
-        "conditions": { "field": "operator_id", "op": "eq", "val": "$user_id" }
+        "permissions": {
+          "guides":     { "actions": ["read", "create", "update"],
+                          "conditions": { "field": "operator_id", "op": "eq", "val": "$user_id" } },
+          "dispatches": { "actions": ["read", "create", "update"],
+                          "conditions": { "field": "operator_id", "op": "eq", "val": "$user_id" } },
+          "incidents":  { "actions": ["read", "create", "update"],
+                          "conditions": { "field": "reported_by", "op": "eq", "val": "$user_id" } }
+        }
       },
       "tercero": {
         "resources": ["guides"],

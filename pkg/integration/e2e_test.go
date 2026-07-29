@@ -74,11 +74,20 @@ func e2eSchema() *schema.APISchema {
 					Resources: json.RawMessage(`"*"`),
 					Actions:   []string{"*"},
 				},
+				// Per-resource permissions, not a role-global condition: only `guides`
+				// has an operator_id, and a role-global condition is injected into
+				// EVERY listed resource — which is why that shape is now rejected at
+				// load (LIBRARY-GAPS-S1). dispatches/incidents are unscoped here.
 				"operario": {
-					Resources: json.RawMessage(`["guides","dispatches","incidents"]`),
-					Actions:   []string{"read", "create", "update"},
-					Conditions: &schema.Condition{
-						Field: "operator_id", Op: "eq", Val: "$user_id",
+					Permissions: map[string]schema.ResourcePermission{
+						"guides": {
+							Actions: []string{"read", "create", "update"},
+							Conditions: &schema.Condition{
+								Field: "operator_id", Op: "eq", Val: "$user_id",
+							},
+						},
+						"dispatches": {Actions: []string{"read", "create", "update"}},
+						"incidents":  {Actions: []string{"read", "create", "update"}},
 					},
 				},
 				"public": {

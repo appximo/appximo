@@ -33,6 +33,20 @@ type RolePolicy struct {
 	// Permissions is the per-resource form: resource name → its grant. Empty for a
 	// legacy role (omitempty keeps the marshalled legacy policy byte-identical).
 	Permissions map[string]ResourcePermission `json:"permissions,omitempty"`
+
+	// Routes grants CUSTOM-ROUTE segments (LIBRARY-GAPS-S1) — the virtual resource
+	// the middleware derives from a custom endpoint's first /api/ segment. Mirrors
+	// schema.RolePolicy.Routes so the schema→rbac.Policy JSON round-trip is lossless.
+	// Orthogonal to Resources/Permissions (different namespace: registered endpoints,
+	// not tables) and carries NO condition or field allowlist — a virtual segment has
+	// no rows. Empty for every pre-S1 role, so the evaluation path is unchanged.
+	Routes map[string]RouteGrant `json:"routes,omitempty"`
+}
+
+// RouteGrant is one role's grant on one custom-route segment: the allowed actions,
+// nothing else. See schema.RouteGrant / ADR-021.
+type RouteGrant struct {
+	Actions []string `json:"actions"`
 }
 
 // ResourcePermission is one role's grant on ONE resource (G2): the actions allowed,
@@ -62,6 +76,11 @@ func (p *Policy) Allows(role, resource, action string) bool {
 	if !ok {
 		return false
 	}
+	// Custom-route grants (LIBRARY-GAPS-S1) are checked first and are authoritative
+	// for the segments they name — see routeGrantFor.
+	if grant, isRoute := routeGrantFor(&rp, resource); isRoute {
+		return actionAllowed(grant.Actions, action)
+	}
 	// Per-resource form: the resource must be listed AND grant the action.
 	if len(rp.Permissions) > 0 {
 		perm, ok := rp.Permissions[resource]
@@ -72,6 +91,32 @@ func (p *Policy) Allows(role, resource, action string) bool {
 		return false
 	}
 	return actionAllowed(rp.Actions, action)
+}
+
+// routeGrantFor returns the role's grant on name when name is one of its declared
+// CUSTOM-ROUTE segments (LIBRARY-GAPS-S1), and whether it is one at all.
+//
+// Two properties make this safe to sit on the authorization hot path:
+//
+//   - It is AUTHORITATIVE but never widening. A segment listed here is decided
+//     here (so what you wrote is what applies — the engine's "declared == applied"
+//     rule); a segment NOT listed falls through to the role's normal
+//     resources/permissions evaluation, so deny-by-default is untouched and no
+//     role gains access to anything it did not declare.
+//   - It cannot shadow a real resource: schema validation rejects a `routes` key
+//     that names a declared resource, so the two namespaces are disjoint.
+//
+// Cost for the overwhelming majority of roles (no routes at all): one len() on a
+// nil map. rp is taken BY POINTER deliberately — RolePolicy is a wide struct (a
+// RawMessage, three slices, a pointer and two maps), and copying it per call on
+// the authorization path is measurable (it showed up as a ~8 ns regression on the
+// microbenchmark before this was a pointer).
+func routeGrantFor(rp *RolePolicy, name string) (RouteGrant, bool) {
+	if len(rp.Routes) == 0 {
+		return RouteGrant{}, false
+	}
+	g, ok := rp.Routes[name]
+	return g, ok
 }
 
 // actionAllowed reports whether the action list grants action ("*" grants all).
