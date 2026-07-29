@@ -106,8 +106,16 @@ var (
 		"time":    true,
 		"text":    true,
 		"json":    true,
+		"jsonb":   true,
 		"file":    true,
 	}
+
+	// jsonTypes are the two document types. They differ in ONE way that matters:
+	// `json` is stored as TEXT (exact round-trip of the bytes you sent, no
+	// indexable structure), `jsonb` is a real Postgres jsonb column (binary,
+	// containment `@>`, and a GIN index — the only type an `indexes` entry may
+	// declare "method": "gin" over). Prefer jsonb for anything you query.
+	jsonTypes = map[string]bool{"json": true, "jsonb": true}
 )
 
 func Validate(s *APISchema) []ValidationError {
@@ -176,7 +184,7 @@ func Validate(s *APISchema) []ValidationError {
 					Got:      field.Type,
 					Expected: types,
 					Message:  fmt.Sprintf("unknown field type %q: must be one of %s", field.Type, joinQuoted(types)),
-					Fix:      "set type to one of the valid field types (e.g. 'string' for short text, 'text' for long text, 'int'/'int64'/'float64' for numbers, 'time' for timestamps, 'bool', 'uuid', 'json', 'file' for a reference to an uploaded file)",
+					Fix:      "set type to one of the valid field types (e.g. 'string' for short text, 'text' for long text, 'int'/'int64'/'float64' for numbers, 'time' for timestamps, 'bool', 'uuid', 'jsonb' for a queryable document, 'file' for a reference to an uploaded file)",
 				})
 			}
 
@@ -384,7 +392,7 @@ func Validate(s *APISchema) []ValidationError {
 		}
 
 		errs = append(errs, validateRelations(resPrefix, resName, res, s)...)
-		errs = append(errs, validateIndexes(resPrefix, res)...)
+		errs = append(errs, validateIndexes(resPrefix, resName, res)...)
 		errs = append(errs, validateForeignKeys(resPrefix, res, s)...)
 
 		for hookName, hook := range res.Hooks {
@@ -462,6 +470,12 @@ func validateRBAC(s *APISchema) []ValidationError {
 	var errs []ValidationError
 	for roleName, role := range s.RBAC.Roles {
 		rolePrefix := "rbac.roles." + roleName
+
+		// Custom-route grants (LIBRARY-GAPS-S1) are orthogonal to BOTH forms — they
+		// name registered endpoints, not tables — so they are validated for every
+		// role, before the form-specific checks below.
+		errs = append(errs, validateRouteGrants(rolePrefix, role, s)...)
+
 		if len(role.Permissions) == 0 {
 			// Role-global (legacy) form (SEC-AUDIT-V1): the legacy form used to skip
 			// validation entirely. It now gets the SAME guarantees as the per-resource
@@ -593,6 +607,71 @@ func validateRBAC(s *APISchema) []ValidationError {
 	return errs
 }
 
+// routeSegmentRe matches a custom-route segment a role may grant: the first path
+// element after /api/. Hyphens are allowed (a route path is a URL, not a GraphQL
+// identifier — /api/product-attributes is a legitimate endpoint), unlike resource
+// names.
+var routeSegmentRe = regexp.MustCompile(`^[a-z][a-z0-9_\-]*$`)
+
+// validateRouteGrants checks a role's `routes` block (LIBRARY-GAPS-S1) — the grant
+// on CUSTOM-ROUTE segments — at SCHEMA level: a well-formed segment, at least one
+// known action, and no collision with a real resource (that namespace belongs to
+// `resources`/`permissions`, which carry conditions and field allowlists a virtual
+// segment cannot have).
+//
+// What this level CANNOT check is whether the segment is actually served — a schema
+// is validated standalone (`appitools validate`, Studio, the AI loop) with no Go
+// program in sight. That check is the boot's (appitools.validateRouteGrants against
+// the registered routes), which is where the route set exists. Two layers, each
+// checking what it can see.
+func validateRouteGrants(rolePrefix string, role RolePolicy, s *APISchema) []ValidationError {
+	var errs []ValidationError
+	for segment, grant := range role.Routes {
+		p := rolePrefix + ".routes." + segment
+
+		if !routeSegmentRe.MatchString(segment) {
+			errs = append(errs, ValidationError{
+				Field:   p,
+				Rule:    "invalid_route_segment",
+				Got:     segment,
+				Message: fmt.Sprintf("invalid custom-route segment %q: must match ^[a-z][a-z0-9_\\-]*$ — it is the FIRST path element after /api/ (for POST /api/checkout the segment is \"checkout\")", segment),
+				Fix:     "use only the first path segment of the custom route, without slashes or the /api/ prefix",
+			})
+		}
+		if _, isResource := s.Resources[segment]; isResource {
+			errs = append(errs, ValidationError{
+				Field:   p,
+				Rule:    "route_shadows_resource",
+				Got:     segment,
+				Message: fmt.Sprintf("%q is a declared resource, not a custom route — the generated /api/%s routes own that path", segment, segment),
+				Fix:     fmt.Sprintf("grant %q through \"permissions\" (or the role-global \"resources\" list) instead; \"routes\" is only for endpoints a Go backend registers", segment),
+			})
+		}
+
+		if len(grant.Actions) == 0 {
+			errs = append(errs, ValidationError{
+				Field:   p + ".actions",
+				Rule:    "missing_actions",
+				Message: "at least one action is required (read, create, update, delete, or *)",
+				Fix:     "list the actions matching the route's HTTP methods: GET→read, POST→create, PUT/PATCH→update, DELETE→delete",
+			})
+		}
+		for _, a := range grant.Actions {
+			if !validRBACActions[a] {
+				errs = append(errs, ValidationError{
+					Field:    p + ".actions",
+					Rule:     "unknown_action",
+					Got:      a,
+					Expected: []string{"read", "create", "update", "delete", "*"},
+					Message:  fmt.Sprintf("unknown action %q: must be one of read, create, update, delete, *", a),
+					Fix:      "use one of read, create, update, delete (or '*' for all)",
+				})
+			}
+		}
+	}
+	return errs
+}
+
 // validConditionOps is the set of operators an RBAC row condition may DECLARE. The
 // row-level condition is enforced as EQUALITY everywhere it is built (the list /
 // aggregate WHERE, query.AppendRowCondition for get/update/delete, and the
@@ -617,16 +696,26 @@ func validateConditionOp(prefix string, cond *Condition) []ValidationError {
 }
 
 // validateRoleGlobal validates the legacy role-global RBAC form (SEC-AUDIT-V1
-// Hallazgo 1 + 3). A role with neither a condition nor a field allowlist (e.g. a
-// wildcard admin) has nothing to validate against resources and is unchanged. For a
-// role that DOES carry a condition or allowlist, the condition operator must be
-// eq-only, and conditions.field / each allowlist field must exist on at least one of
-// the resources the role applies to — a field that exists on NONE is a typo (dead
-// config that would error at runtime). The condition is checked against the union of
-// the role's resources (not each) because the role-global allowlist is itself a
-// union across them; a condition field present on some-but-not-all resources is a
-// fail-closed correctness concern, not a security leak, and is left as a documented
-// limitation rather than rejecting several shipped schemas.
+// Hallazgo 1 + 3, tightened in LIBRARY-GAPS-S1). A role with neither a condition nor
+// a field allowlist (e.g. a wildcard admin) has nothing to validate against
+// resources and is unchanged. For a role that DOES carry a condition or allowlist,
+// the condition operator must be eq-only, and conditions.field / each allowlist
+// field must exist on the role's resources.
+//
+// The condition is now checked against EVERY resource the role lists, not just one
+// (the old "exists on any" was documented as a limitation and it was the wrong
+// trade): at runtime a role-global condition is injected into the WHERE of EVERY
+// resource the role reads, so a column present on only some of them produced a
+// schema that VALIDATED and then failed with a Postgres "column does not exist" the
+// first time the other resource was queried. Fail closed at load, naming exactly
+// which resources lack the column — and pointing at the two shapes that actually
+// express the intent (per-resource `permissions`, or `routes` for a virtual
+// custom-route segment, which is skipped here because it is not a table).
+//
+// The ALLOWLIST keeps the union rule: `fields` is a projection filter — a field
+// missing from a resource simply projects nothing there, which is fail-closed
+// already, and requiring every listed field on every resource would break the
+// legitimate "one allowlist across several shapes" use.
 func validateRoleGlobal(rolePrefix string, role RolePolicy, s *APISchema) []ValidationError {
 	if role.Conditions == nil && len(role.Fields) == 0 {
 		return nil
@@ -643,15 +732,17 @@ func validateRoleGlobal(rolePrefix string, role RolePolicy, s *APISchema) []Vali
 				Message: "condition field is required",
 				Fix:     "set conditions.field to a column present on the role's resources (commonly an owner column like user_id)",
 			})
-		} else if !fieldExistsOnAny(role.Conditions.Field, resources, s) {
-			avail := unionFieldNames(resources, s)
+		} else if missing := resourcesMissingField(role.Conditions.Field, resources, s); len(missing) > 0 {
+			sort.Strings(missing)
 			errs = append(errs, ValidationError{
 				Field:    rolePrefix + ".conditions.field",
-				Rule:     "unknown_field",
+				Rule:     "condition_field_missing_on_resource",
 				Got:      role.Conditions.Field,
-				Expected: avail,
-				Message:  fmt.Sprintf("condition field %q does not exist on any of the role's resources — available fields: %s", role.Conditions.Field, joinQuoted(avail)),
-				Fix:      "set conditions.field to a field present on the role's resources (listed above)",
+				Expected: unionFieldNames(resources, s),
+				Message: fmt.Sprintf("condition field %q does not exist on %s — a role-global condition is applied to EVERY resource the role lists, so a resource without the column fails at request time",
+					role.Conditions.Field, joinQuoted(missing)),
+				Fix: fmt.Sprintf("add %q to %s, drop those resources from this role, or use per-resource \"permissions\" so each resource is scoped by its own column",
+					role.Conditions.Field, joinQuoted(missing)),
 			})
 		}
 	}
@@ -727,6 +818,25 @@ func fieldExistsOnAny(field string, resources []string, s *APISchema) bool {
 		}
 	}
 	return false
+}
+
+// resourcesMissingField returns the named resources that do NOT have field as a
+// column — the fail-closed check for a role-global row condition, which the engine
+// injects into every one of them (LIBRARY-GAPS-S1). Unknown names are skipped: a
+// role-global `resources` list may legitimately carry a VIRTUAL custom-route segment
+// (the pre-`routes` way of granting one), which is not a table and has no columns.
+func resourcesMissingField(field string, resources []string, s *APISchema) []string {
+	var missing []string
+	for _, rn := range resources {
+		res, ok := s.Resources[rn]
+		if !ok {
+			continue
+		}
+		if !rbacFieldExists(res, field) {
+			missing = append(missing, rn)
+		}
+	}
+	return missing
 }
 
 // rbacFieldExists reports whether name is a column the resource exposes: a declared
@@ -837,7 +947,12 @@ func validateRelations(resPrefix, resName string, res ResourceSchema, s *APISche
 // checked against information_schema at tenant migration (a warning, since
 // columns can be added to the live table at runtime — the DB stays the source of
 // truth, same pattern as relation FK indexes).
-func validateIndexes(resPrefix string, res ResourceSchema) []ValidationError {
+//
+// It also gates the access METHOD and operator class (LIBRARY-GAPS-S1) at LOAD:
+// an unknown method, a GIN index over a column that is not `jsonb`, a unique GIN
+// index, or an opclass outside the method's allowlist all reject the schema —
+// never a Postgres syntax/type error during a tenant migration.
+func validateIndexes(resPrefix, resName string, res ResourceSchema) []ValidationError {
 	var errs []ValidationError
 	for i, idx := range res.Indexes {
 		idxPrefix := fmt.Sprintf("%s.indexes[%d]", resPrefix, i)
@@ -856,8 +971,85 @@ func validateIndexes(resPrefix string, res ResourceSchema) []ValidationError {
 				})
 			}
 		}
+
+		if idx.Method != "" && !validIndexMethods[idx.Method] {
+			methods := sortedSetKeys(validIndexMethods)
+			errs = append(errs, ValidationError{
+				Field:    idxPrefix + ".method",
+				Rule:     "invalid_index_method",
+				Got:      idx.Method,
+				Expected: methods,
+				Message:  fmt.Sprintf("unknown index method %q: must be one of %s", idx.Method, joinQuoted(methods)),
+				Fix:      "omit method for the default btree, or use \"gin\" over a jsonb column for containment (@>) queries",
+			})
+			continue // the method-specific checks below assume a known method
+		}
+
+		if idx.Method == IndexMethodGIN {
+			if idx.Unique {
+				errs = append(errs, ValidationError{
+					Field:   idxPrefix,
+					Rule:    "invalid_index_method",
+					Message: "a gin index cannot be unique (GIN does not enforce uniqueness) — drop \"unique\" or use the default btree method",
+					Fix:     "remove \"unique\": true from this gin index",
+				})
+			}
+			// GIN is only wired for jsonb columns: gin over text/varchar needs the
+			// pg_trgm extension (not assumed to exist), and gin over a scalar has no
+			// default operator class at all. Catch it here, not as a Postgres error
+			// halfway through a tenant migration.
+			for _, f := range idx.Fields {
+				fd, ok := res.Fields[f]
+				if !ok {
+					continue // unknown column: reported by the migration's existence check
+				}
+				if fd.Type != "jsonb" {
+					errs = append(errs, ValidationError{
+						Field:    idxPrefix + ".method",
+						Rule:     "gin_requires_jsonb",
+						Got:      fd.Type,
+						Expected: []string{"jsonb"},
+						Message:  fmt.Sprintf("a gin index requires jsonb columns, but %s.%s is %q", resName, f, fd.Type),
+						Fix:      fmt.Sprintf("change %s.%s to \"type\": \"jsonb\", or drop \"method\": \"gin\" for the default btree", resName, f),
+					})
+				}
+			}
+		}
+
+		if idx.Opclass != "" {
+			allowed, methodKnown := validIndexOpclasses[idx.Method]
+			switch {
+			case !methodKnown:
+				errs = append(errs, ValidationError{
+					Field:   idxPrefix + ".opclass",
+					Rule:    "invalid_index_opclass",
+					Got:     idx.Opclass,
+					Message: fmt.Sprintf("opclass is not supported for index method %q (only gin takes one)", coalesceMethod(idx.Method)),
+					Fix:     "remove opclass, or set \"method\": \"gin\" over a jsonb column",
+				})
+			case !allowed[idx.Opclass]:
+				opts := sortedSetKeys(allowed)
+				errs = append(errs, ValidationError{
+					Field:    idxPrefix + ".opclass",
+					Rule:     "invalid_index_opclass",
+					Got:      idx.Opclass,
+					Expected: opts,
+					Message:  fmt.Sprintf("unknown opclass %q for method %q: must be one of %s", idx.Opclass, idx.Method, joinQuoted(opts)),
+					Fix:      "use jsonb_path_ops when the index only answers containment (@>) — smaller and faster — or jsonb_ops (the default) when you also need key-existence (?)",
+				})
+			}
+		}
 	}
 	return errs
+}
+
+// coalesceMethod renders an index method for an error message, naming the implicit
+// default when none was declared.
+func coalesceMethod(m string) string {
+	if m == "" {
+		return IndexMethodBtree + " (the default)"
+	}
+	return m
 }
 
 // validateForeignKeys checks each resource-level COMPOSITE foreign key (MIG-F1-S5):
@@ -985,6 +1177,10 @@ func pgKindForAPIType(t string) string {
 	switch t {
 	case "string", "text", "json":
 		return "text"
+	case "jsonb":
+		// A real jsonb column: its own class, so it can never be FK-joined to a
+		// TEXT column (Postgres would reject the constraint anyway).
+		return "jsonb"
 	case "int":
 		return "integer"
 	case "int64":
@@ -1089,8 +1285,8 @@ func validateDefault(fieldPrefix string, fd FieldDef) []ValidationError {
 		if _, ok := fd.Default.(string); !ok {
 			return bad(`default must be a string (an RFC3339 timestamp, or "now" for the insert moment)`)
 		}
-	case "json":
-		// Any JSON value is acceptable for a json column.
+	case "json", "jsonb":
+		// Any JSON value is acceptable for a json/jsonb column.
 	}
 	return nil
 }

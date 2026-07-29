@@ -1452,8 +1452,10 @@ func validateFieldValue(name string, fd schema.FieldDef, v any) (string, bool) {
 		}
 		// The exact timestamp format is validated by Postgres on write; accepting any
 		// string here keeps the handler lenient (documented deviation).
-	case "json":
-		// Any JSON value is acceptable for a json column.
+	case "json", "jsonb":
+		// Any JSON value is acceptable for a json/jsonb column. A jsonb column
+		// takes the decoded value straight through to pgx (which encodes a Go
+		// map/slice as jsonb natively) — no stringification.
 	}
 	return "", true
 }

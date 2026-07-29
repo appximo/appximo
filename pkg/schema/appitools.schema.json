@@ -64,7 +64,7 @@
       "additionalProperties": false,
       "required": ["type"],
       "properties": {
-        "type": { "enum": ["string", "text", "int", "int64", "float64", "bool", "uuid", "time", "json", "file"] },
+        "type": { "enum": ["string", "text", "int", "int64", "float64", "bool", "uuid", "time", "json", "jsonb", "file"] },
         "required": { "type": "boolean" },
         "unique": { "type": "boolean" },
         "auto": { "type": "boolean" },
@@ -143,8 +143,20 @@
       "required": ["fields"],
       "properties": {
         "fields": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ident" } },
-        "unique": { "type": "boolean" }
-      }
+        "unique": { "type": "boolean" },
+        "method": { "enum": ["btree", "gin"] },
+        "opclass": { "enum": ["jsonb_ops", "jsonb_path_ops"] }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["opclass"] },
+          "then": { "required": ["method"], "properties": { "method": { "const": "gin" } } }
+        },
+        {
+          "if": { "required": ["method"], "properties": { "method": { "const": "gin" } } },
+          "then": { "properties": { "unique": { "const": false } } }
+        }
+      ]
     },
 
     "hooks": {
@@ -224,6 +236,11 @@
         "permissions": {
           "type": "object",
           "additionalProperties": { "$ref": "#/$defs/permission" }
+        },
+        "routes": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_\\-]*$" },
+          "additionalProperties": { "$ref": "#/$defs/routeGrant" }
         }
       },
       "oneOf": [
@@ -242,6 +259,19 @@
           "not": { "required": ["permissions"] }
         }
       ]
+    },
+
+    "routeGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actions"],
+      "properties": {
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["read", "create", "update", "delete", "*"] }
+        }
+      }
     },
 
     "permission": {

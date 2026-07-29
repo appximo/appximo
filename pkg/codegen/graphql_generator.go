@@ -50,6 +50,11 @@ type PageLinks {
 func GenerateGraphQL(s *schema.APISchema) string {
 	var sb strings.Builder
 	sb.WriteString(graphqlSharedTypes)
+	// The JSON scalar is declared only when the schema actually has a jsonb
+	// field, so an SDL for a schema without one is byte-identical to before.
+	if schemaHasJSONB(s) {
+		sb.WriteString("scalar JSON\n\n")
+	}
 
 	names := sortedResourceKeys(s)
 
@@ -140,6 +145,19 @@ func GenerateGraphQL(s *schema.APISchema) string {
 	return sb.String()
 }
 
+// schemaHasJSONB reports whether any resource declares a `jsonb` field — the
+// condition for emitting the JSON scalar into the SDL.
+func schemaHasJSONB(s *schema.APISchema) bool {
+	for _, res := range s.Resources {
+		for _, fd := range res.Fields {
+			if fd.Type == "jsonb" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func gqlFieldType(fd schema.FieldDef) string {
 	switch fd.Type {
 	case "int", "int64":
@@ -150,6 +168,11 @@ func gqlFieldType(fd schema.FieldDef) string {
 		return "Boolean"
 	case "uuid", "file":
 		return "ID"
+	case "jsonb":
+		// A jsonb column is an arbitrary document — the JSON scalar carries it
+		// through unchanged (pkg/graphql.jsonScalar). `json` (TEXT-backed) stays
+		// String, so every pre-existing schema's SDL is byte-unchanged.
+		return "JSON"
 	default: // string, text, time, json
 		return "String"
 	}

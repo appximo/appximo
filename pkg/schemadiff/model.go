@@ -273,6 +273,14 @@ type Index struct {
 	Unique    bool
 	Method    string // access method: btree, gin, …
 	Predicate string
+
+	// Opclass is the operator class applied to every column when the index is
+	// CREATED (e.g. "jsonb_path_ops" on a GIN index). It is DELIBERATELY not part
+	// of indexKey: the introspector reads an index's key columns from
+	// pg_index.indkey, which carries no opclass, so an opclass can never be read
+	// back. Excluding it from the diff key is what keeps a declared opclass from
+	// churning (drop+recreate) on every migration. Rendered, never compared.
+	Opclass string
 }
 
 // EnumType is a Postgres enum type with its labels in sort order. Appitools' own

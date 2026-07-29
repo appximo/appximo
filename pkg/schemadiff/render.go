@@ -132,7 +132,7 @@ func renderOne(op Operation) ([]Statement, error) {
 		if o.Index.Method != "" && o.Index.Method != "btree" {
 			s += " USING " + o.Index.Method
 		}
-		s += " (" + identCols(o.Index.Columns) + ")"
+		s += " (" + identColsWithOpclass(o.Index.Columns, o.Index.Opclass) + ")"
 		if o.Index.Predicate != "" {
 			s += " WHERE " + o.Index.Predicate
 		}
@@ -234,6 +234,22 @@ func identCols(cols []string) string {
 	parts := make([]string, len(cols))
 	for i, c := range cols {
 		parts[i] = ident(c)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// identColsWithOpclass renders an index's key list, appending the operator class
+// to EVERY column when one is set (`"atributos" jsonb_path_ops`). The opclass is
+// never user free-form text — the schema validator accepts it only from a closed
+// per-method allowlist (schema.validIndexOpclasses) — so it is safe to emit
+// verbatim; identifiers are still quoted.
+func identColsWithOpclass(cols []string, opclass string) string {
+	if opclass == "" {
+		return identCols(cols)
+	}
+	parts := make([]string, len(cols))
+	for i, c := range cols {
+		parts[i] = ident(c) + " " + opclass
 	}
 	return strings.Join(parts, ", ")
 }

@@ -49,9 +49,10 @@ func aggFieldTypeOK(fn, fieldType string) bool {
 
 // groupByTypeOK reports whether a field of fieldType can be a GROUP BY key.
 func groupByTypeOK(fieldType string) bool {
-	// json is stored as TEXT but grouping by a blob is meaningless; everything
-	// else (string/text/int/int64/float64/bool/time/uuid) groups fine.
-	return fieldType != "json"
+	// json is stored as TEXT and jsonb is a document — grouping by either is
+	// meaningless (and jsonb has no default btree sort class in every case);
+	// everything else (string/text/int/int64/float64/bool/time/uuid) groups fine.
+	return fieldType != "json" && fieldType != "jsonb"
 }
 
 func splitCSV(s string) []string {

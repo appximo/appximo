@@ -172,6 +172,11 @@ func TypeForAPIType(apiType string) Type {
 		return Type{Base: BaseTimestamptz}
 	case "json":
 		return Type{Base: BaseText}
+	case "jsonb":
+		// A REAL jsonb column (LIBRARY-GAPS-S1) — the one type that supports
+		// containment (@>) and a GIN index. Deliberately distinct from "json",
+		// which stays TEXT so every existing tenant column is unchanged.
+		return Type{Base: BaseJSONB}
 	default:
 		return Type{Base: BaseText}
 	}

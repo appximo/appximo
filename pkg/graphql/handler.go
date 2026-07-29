@@ -1453,6 +1453,8 @@ func scalarOutput(fd schema.FieldDef) gql.Output {
 		return gql.Boolean
 	case "uuid", "file":
 		return gql.ID
+	case "jsonb":
+		return jsonScalar
 	default:
 		return gql.String
 	}
@@ -1468,8 +1470,65 @@ func scalarInput(fd schema.FieldDef) gql.Input {
 		return gql.Boolean
 	case "uuid", "file":
 		return gql.ID
+	case "jsonb":
+		return jsonScalar
 	default:
 		return gql.String
+	}
+}
+
+// jsonScalar is the GraphQL scalar for a `jsonb` field (LIBRARY-GAPS-S1): an
+// arbitrary JSON document, passed through unchanged in both directions. pgx
+// decodes a jsonb column into a Go map/slice, so serializing it as gql.String
+// would print Go syntax (`map[marca:Acme]`) — a lie about the contract. The
+// scalar carries the real document instead.
+//
+// `json` (the TEXT-backed type) deliberately stays gql.String: its column value
+// IS a string, so every existing schema's SDL is byte-unchanged.
+var jsonScalar = gql.NewScalar(gql.ScalarConfig{
+	Name:         "JSON",
+	Description:  "An arbitrary JSON document (a jsonb column), passed through unchanged.",
+	Serialize:    func(v any) any { return v },
+	ParseValue:   func(v any) any { return v }, // a variable already carries real JSON
+	ParseLiteral: parseJSONLiteral,
+})
+
+// parseJSONLiteral converts an inline GraphQL literal into the Go value a jsonb
+// column takes (map / slice / scalar). Inline literals are the awkward half of a
+// JSON scalar — a variable is the normal path — but supporting them means
+// `createProduct(input: {attrs: {brand: "Acme"}})` works as written.
+func parseJSONLiteral(v ast.Value) any {
+	switch val := v.(type) {
+	case *ast.ObjectValue:
+		out := make(map[string]any, len(val.Fields))
+		for _, f := range val.Fields {
+			out[f.Name.Value] = parseJSONLiteral(f.Value)
+		}
+		return out
+	case *ast.ListValue:
+		out := make([]any, 0, len(val.Values))
+		for _, item := range val.Values {
+			out = append(out, parseJSONLiteral(item))
+		}
+		return out
+	case *ast.StringValue:
+		return val.Value
+	case *ast.BooleanValue:
+		return val.Value
+	case *ast.IntValue:
+		if n, err := strconv.ParseInt(val.Value, 10, 64); err == nil {
+			return n
+		}
+		return val.Value
+	case *ast.FloatValue:
+		if f, err := strconv.ParseFloat(val.Value, 64); err == nil {
+			return f
+		}
+		return val.Value
+	case *ast.EnumValue:
+		return val.Value
+	default: // NullValue and anything else
+		return nil
 	}
 }
 

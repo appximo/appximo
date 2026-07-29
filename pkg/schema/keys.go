@@ -75,14 +75,14 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 				"type", "target", "fk", "through", "target_fk", "limit")
 		}
 
-		// indexes: array of {fields, unique}. Strict-key each entry so a typo
-		// (e.g. "field" instead of "fields", or "uniqe") is rejected, not silently
-		// dropped — same contract as every other level.
+		// indexes: array of {fields, unique, method, opclass}. Strict-key each entry
+		// so a typo (e.g. "field" instead of "fields", or "uniqe") is rejected, not
+		// silently dropped — same contract as every other level.
 		var idxArr []json.RawMessage
 		if res["indexes"] != nil && json.Unmarshal(res["indexes"], &idxArr) == nil {
 			for i, rawIdx := range idxArr {
 				idxPath := fmt.Sprintf("%s.indexes[%d]", resPath, i)
-				addUnknown(idxPath, object(idxPath, rawIdx), "fields", "unique")
+				addUnknown(idxPath, object(idxPath, rawIdx), "fields", "unique", "method", "opclass")
 			}
 		}
 
@@ -120,9 +120,29 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 	for roleName, rawRole := range object("rbac.roles", rbac["roles"]) {
 		rolePath := "rbac.roles." + roleName
 		role := object(rolePath, rawRole)
-		addUnknown(rolePath, role, "resources", "actions", "conditions", "fields", "permissions")
+		addUnknown(rolePath, role, "resources", "actions", "conditions", "fields", "permissions", "routes")
 		if cond := object(rolePath+".conditions", role["conditions"]); cond != nil {
 			addUnknown(rolePath+".conditions", cond, "field", "op", "val")
+		}
+		// Custom-route grants (LIBRARY-GAPS-S1): each entry is keyed by a route
+		// SEGMENT and carries ONLY actions. `conditions`/`fields` are called out
+		// explicitly rather than left to the generic unknown-key message, because
+		// their absence is a deliberate design decision worth explaining: a virtual
+		// segment has no rows to filter and no columns to project.
+		for segment, rawGrant := range object(rolePath+".routes", role["routes"]) {
+			grantPath := rolePath + ".routes." + segment
+			grant := object(grantPath, rawGrant)
+			for _, k := range []string{"conditions", "fields"} {
+				if _, present := grant[k]; present {
+					errs = append(errs, ValidationError{
+						Field: grantPath + "." + k,
+						Message: fmt.Sprintf("%q is not valid on a custom-route grant: the segment is a registered endpoint, not a table — "+
+							"it has no rows to filter and no columns to project. Authorize the DATA the handler touches through "+
+							"\"permissions\" on the real resources (Ctx.Query/Insert/Update re-evaluate the role against them)", k),
+					})
+				}
+			}
+			addUnknown(grantPath, grant, "actions")
 		}
 		// Per-resource permissions (G2): each entry is keyed by a resource name and
 		// has its own fixed key set, including a nested condition.

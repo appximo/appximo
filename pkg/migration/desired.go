@@ -341,12 +341,28 @@ func addDeclaredIndexes(ds *schemadiff.Schema, s *schema.APISchema, names []stri
 			if idx.Unique {
 				prefix = "uniq"
 			}
+			// The access method (LIBRARY-GAPS-S1): empty means btree, so an index
+			// declared before `method` existed diffs byte-identical. The opclass
+			// (e.g. jsonb_path_ops) is rendered into the CREATE but excluded from
+			// the diff key — the introspector cannot read one back.
+			method := idx.Method
+			if method == "" {
+				method = schema.IndexMethodBtree
+			}
 			idxName := prefix + "_" + resName + "_" + strings.Join(idx.Fields, "_")
+			if method != schema.IndexMethodBtree {
+				// Suffix non-btree indexes so a gin index and a btree index over the
+				// SAME column are two distinct indexes (different name, different diff
+				// key) instead of colliding in the map. btree names are unsuffixed, so
+				// every pre-existing index keeps its exact name — zero churn.
+				idxName += "_" + method
+			}
 			tbl.Indexes[idxName] = &schemadiff.Index{
 				Name:    idxName,
 				Columns: append([]string(nil), idx.Fields...),
 				Unique:  idx.Unique,
-				Method:  "btree",
+				Method:  method,
+				Opclass: idx.Opclass,
 			}
 		}
 	}

@@ -349,6 +349,46 @@ type HookConfig struct {
 type IndexDef struct {
 	Fields []string `json:"fields"`
 	Unique bool     `json:"unique,omitempty"`
+
+	// Method is the Postgres access method (LIBRARY-GAPS-S1): "btree" (the
+	// default, and what every pre-S1 index used) or "gin". EMPTY MEANS BTREE, so
+	// adding this key to an existing schema generates zero churn — the introspector
+	// reads pg_am.amname back, and an unchanged index diffs identical.
+	//
+	// "gin" is the index that makes jsonb containment (`@>`) an index lookup
+	// instead of a sequential scan; it is accepted ONLY over `jsonb` columns
+	// (validated at load, never a runtime surprise) and never with unique (GIN
+	// cannot enforce uniqueness).
+	Method string `json:"method,omitempty"`
+
+	// Opclass is the operator class applied to EVERY listed column, e.g.
+	// "jsonb_path_ops" for a GIN index that only ever answers `@>` (smaller and
+	// faster than the default jsonb_ops, at the cost of key-existence `?`
+	// queries). Only valid with an explicit method, and only a value from the
+	// method's closed allowlist (validIndexOpclasses) — it is rendered into DDL,
+	// so it is never free-form text. Invisible to the diff (the introspector
+	// cannot read an opclass back from the index key list), which is exactly why
+	// declaring one causes no migration churn.
+	Opclass string `json:"opclass,omitempty"`
+}
+
+// Index access methods (LIBRARY-GAPS-S1). Empty defaults to btree — the historical
+// behavior — so an existing schema is byte-identical.
+const (
+	IndexMethodBtree = "btree"
+	IndexMethodGIN   = "gin"
+)
+
+// validIndexMethods is the closed set accepted for IndexDef.Method.
+var validIndexMethods = map[string]bool{
+	IndexMethodBtree: true,
+	IndexMethodGIN:   true,
+}
+
+// validIndexOpclasses is the closed per-method allowlist for IndexDef.Opclass. The
+// value goes verbatim into DDL, so it may only ever be one of these literals.
+var validIndexOpclasses = map[string]map[string]bool{
+	IndexMethodGIN: {"jsonb_ops": true, "jsonb_path_ops": true},
 }
 
 // RBACPolicy holds all role definitions for a resource set.
@@ -377,6 +417,42 @@ type RolePolicy struct {
 	// a legacy role; omitempty keeps the marshalled legacy policy byte-identical so the
 	// schema→rbac.Policy round-trip is unchanged for every existing schema.
 	Permissions map[string]ResourcePermission `json:"permissions,omitempty"`
+
+	// Routes grants access to CUSTOM ROUTES — endpoints a Go backend registers with
+	// (*App).Register, whose first /api/ segment the engine authorizes as a VIRTUAL
+	// resource (LIBRARY-GAPS-S1). It is keyed by that segment, with its own actions:
+	//
+	//	"routes": { "checkout": { "actions": ["create"] } }   → POST /api/checkout
+	//
+	// It is ORTHOGONAL to resources/permissions — a role may declare both, because
+	// they govern different namespaces (real tables vs registered endpoints). That
+	// is the whole point: before this key, a role using per-resource `permissions`
+	// could not reach ANY custom route (every permissions key is checked against a
+	// real resource), so "owner-scoped end users + a custom action endpoint" — a
+	// customer with their own orders AND a checkout — was inexpressible.
+	//
+	// SEMANTICS, deliberately narrow:
+	//   - AUTHORITATIVE: for a segment listed here, this entry decides. It can only
+	//     narrow a wildcard role, never widen one — a segment NOT listed falls
+	//     through to the role's normal resources/permissions evaluation, so
+	//     deny-by-default is untouched.
+	//   - NO conditions, NO field allowlist. A virtual segment has no rows and no
+	//     columns; a row filter would be injected into SQL for a table that does not
+	//     exist. Declaring either is a LOAD error, never a silent no-op.
+	//   - Validated at BOOT against the REGISTERED routes: a grant for a segment no
+	//     route serves (or an action no registered method provides) fails the boot
+	//     with a clear message, instead of a confusing 403 at request time.
+	// See docs/adr/ADR-021-custom-route-authorization.md.
+	Routes map[string]RouteGrant `json:"routes,omitempty"`
+}
+
+// RouteGrant is one role's grant on ONE custom-route segment (LIBRARY-GAPS-S1).
+// Actions are the same vocabulary as everywhere else (read/create/update/delete/*),
+// mapped from the HTTP method the middleware already derives: GET→read, POST→create,
+// PUT|PATCH→update, DELETE→delete. There is deliberately no conditions/fields key —
+// see RolePolicy.Routes.
+type RouteGrant struct {
+	Actions []string `json:"actions"`
 }
 
 // ResourcePermission is one role's grant on one resource (G2). Mirrors

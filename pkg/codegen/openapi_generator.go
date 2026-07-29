@@ -685,6 +685,12 @@ func oaFieldType(fd schema.FieldDef) map[string]any {
 			"description": "id of an uploaded file (POST /api/files) attached to this record"}
 	case "time":
 		return map[string]any{"type": "string", "format": "date-time"}
+	case "jsonb":
+		// An arbitrary JSON document (a real jsonb column): no fixed shape, and
+		// clients send/receive the document itself, not a serialized string.
+		return map[string]any{
+			"description": "an arbitrary JSON document (jsonb column)",
+		}
 	default:
 		return map[string]any{"type": "string"}
 	}
