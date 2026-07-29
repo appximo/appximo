@@ -1,0 +1,165 @@
+package appitools
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/miguelangel/appitools/pkg/schema"
+)
+
+// LIBRARY-GAPS-S1 / ADR-021 — the BOOT half of custom-route authorization: the
+// schema's `routes` grants cross-checked against the routes this binary actually
+// registered. This is the layer that turns dead authorization config into a boot
+// failure instead of an inexplicable 403 at request time.
+
+// schemaGranting builds the tasks schema with a `customer` role granting the given
+// route segments.
+func schemaGranting(routes map[string]schema.RouteGrant) *schema.APISchema {
+	s := tasksSchema()
+	s.RBAC.Roles["customer"] = schema.RolePolicy{
+		Permissions: map[string]schema.ResourcePermission{
+			"tasks": {Actions: []string{"read"}},
+		},
+		Routes: routes,
+	}
+	return s
+}
+
+func TestValidateRouteGrants_AcceptsARegisteredSegment(t *testing.T) {
+	s := schemaGranting(map[string]schema.RouteGrant{
+		"checkout": {Actions: []string{"create"}},
+	})
+	routes := []Route{{Method: "POST", Path: "/api/checkout", Handler: noopHandler}}
+	if err := validateRouteGrants(s, routes); err != nil {
+		t.Fatalf("a grant matching a registered route must pass, got: %v", err)
+	}
+}
+
+func TestValidateRouteGrants_AcceptsANestedPathSegment(t *testing.T) {
+	// The middleware authorizes by the FIRST /api/ segment, so a grant on
+	// "webhooks" covers POST /api/webhooks/wompi.
+	s := schemaGranting(map[string]schema.RouteGrant{
+		"webhooks": {Actions: []string{"create"}},
+	})
+	routes := []Route{{Method: "POST", Path: "/api/webhooks/wompi", Handler: noopHandler}}
+	if err := validateRouteGrants(s, routes); err != nil {
+		t.Fatalf("a nested path's first segment must match, got: %v", err)
+	}
+}
+
+func TestValidateRouteGrants_RejectsAnUnregisteredSegment(t *testing.T) {
+	s := schemaGranting(map[string]schema.RouteGrant{
+		"chekout": {Actions: []string{"create"}}, // typo
+	})
+	routes := []Route{{Method: "POST", Path: "/api/checkout", Handler: noopHandler}}
+	err := validateRouteGrants(s, routes)
+	if err == nil {
+		t.Fatal("a grant for a segment nothing serves must fail the boot")
+	}
+	if !strings.Contains(err.Error(), "no custom route is registered under /api/chekout") ||
+		!strings.Contains(err.Error(), "registered segments: checkout") {
+		t.Fatalf("the error must name the typo and list what IS registered, got: %v", err)
+	}
+}
+
+func TestValidateRouteGrants_RejectsAnActionNoMethodProvides(t *testing.T) {
+	s := schemaGranting(map[string]schema.RouteGrant{
+		"checkout": {Actions: []string{"create", "read"}}, // no GET is registered
+	})
+	routes := []Route{{Method: "POST", Path: "/api/checkout", Handler: noopHandler}}
+	err := validateRouteGrants(s, routes)
+	if err == nil {
+		t.Fatal("granting an action no registered method provides is dead config and must fail")
+	}
+	if !strings.Contains(err.Error(), `action "read" is granted but no registered route`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRouteGrants_WildcardAcceptsWhateverTheSegmentServes(t *testing.T) {
+	s := schemaGranting(map[string]schema.RouteGrant{
+		"checkout": {Actions: []string{"*"}},
+	})
+	routes := []Route{{Method: "POST", Path: "/api/checkout", Handler: noopHandler}}
+	if err := validateRouteGrants(s, routes); err != nil {
+		t.Fatalf("a wildcard grant must not require every method to exist, got: %v", err)
+	}
+}
+
+// A schema with no `routes` at all — every schema before this feature — must skip
+// the check entirely, including in the pure binary (zero registered routes).
+func TestValidateRouteGrants_NoGrantsIsANoOp(t *testing.T) {
+	if err := validateRouteGrants(tasksSchema(), nil); err != nil {
+		t.Fatalf("a schema without routes must never fail this check, got: %v", err)
+	}
+}
+
+// The PURE binary (no custom routes) booting a schema that grants one is dead
+// config — fail loudly rather than serve a policy that can never match.
+func TestValidateRouteGrants_PureBinaryRejectsGrants(t *testing.T) {
+	s := schemaGranting(map[string]schema.RouteGrant{"checkout": {Actions: []string{"create"}}})
+	err := validateRouteGrants(s, nil)
+	if err == nil || !strings.Contains(err.Error(), "registered segments: none") {
+		t.Fatalf("expected a clear failure naming an empty route set, got: %v", err)
+	}
+}
+
+func TestFirstAPISegment(t *testing.T) {
+	cases := map[string]string{
+		"/api/checkout":         "checkout",
+		"/api/webhooks/wompi":   "webhooks",
+		"/api/reports/x/y":      "reports",
+		"/api/product-attrs":    "product-attrs",
+		"/health":               "",
+		"/api/":                 "",
+		"/apifoo/bar":           "",
+		"/api/a/{id}/something": "a",
+	}
+	for path, want := range cases {
+		if got := firstAPISegment(path); got != want {
+			t.Errorf("firstAPISegment(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+// actionForMethod must stay in lockstep with rbac.actionFromMethod — the boot
+// check would otherwise validate a mapping the middleware does not apply.
+func TestActionForMethodMatchesMiddlewareMapping(t *testing.T) {
+	want := map[string]string{
+		"GET": "read", "POST": "create", "PUT": "update",
+		"PATCH": "update", "DELETE": "delete", "HEAD": "",
+	}
+	for method, action := range want {
+		if got := actionForMethod(method); got != action {
+			t.Errorf("actionForMethod(%s) = %q, want %q", method, got, action)
+		}
+	}
+}
+
+// The deploy path (POST /admin/engine/schema) applies the SAME cross-check, so a
+// bad grant is a clean 422 instead of a persist → restart → rollback cycle.
+func TestPersistBootSchema_RejectsUnregisteredRouteGrant(t *testing.T) {
+	app := &App{schema: tasksSchema()}
+	if err := app.Register(Route{Method: "POST", Path: "/api/checkout", Handler: noopHandler}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"$schema": "https://appitools.dev/schema/v1", "version": "1", "name": "x",
+		"resources": map[string]any{"tasks": map[string]any{
+			"fields": map[string]any{"title": map[string]any{"type": "string"}}}},
+		"rbac": map[string]any{"roles": map[string]any{
+			"customer": map[string]any{
+				"permissions": map[string]any{"tasks": map[string]any{"actions": []string{"read"}}},
+				"routes":      map[string]any{"nonexistent": map[string]any{"actions": []string{"create"}}},
+			}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// SchemaPath is empty: the check must reject BEFORE any file is touched.
+	if err := app.persistBootSchema(raw); err == nil ||
+		!strings.Contains(err.Error(), "no custom route is registered under /api/nonexistent") {
+		t.Fatalf("expected the deploy to be rejected on the route grant, got: %v", err)
+	}
+}

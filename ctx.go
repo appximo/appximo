@@ -1,6 +1,7 @@
 package appitools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,8 +27,15 @@ import (
 )
 
 // maxBodyBytes caps a custom handler's request body, matching the generated
-// REST/GraphQL handlers' 1 MiB limit (OWASP API4).
+// REST/GraphQL handlers' 1 MiB limit (OWASP API4). Exported as MaxBodyBytes so a
+// handler can size its own buffers to the engine's real limit instead of
+// guessing (or re-implementing) it.
 const maxBodyBytes = 1 << 20
+
+// MaxBodyBytes is the request-body cap Ctx.Bind / Ctx.BindResource / Ctx.RawBody
+// enforce on a custom route — the same 1 MiB the generated REST and GraphQL
+// handlers use. A body over it fails with ErrBodyTooLarge (→ 413).
+const MaxBodyBytes = maxBodyBytes
 
 // Claims is the authenticated identity the middleware chain already resolved
 // from the request's JWT — a Class-1 handler never re-parses or re-verifies it.
@@ -91,6 +99,23 @@ type Ctx interface {
 	// for resource (the same rule engine REST and GraphQL use).
 	Bind(dst any) error
 	BindResource(resource string, dst any) error
+
+	// RawBody returns the request body's EXACT bytes, under the SAME 1 MiB cap
+	// Bind applies (MaxBodyBytes) — the handler never re-implements the limit.
+	//
+	// USE IT FOR WEBHOOKS. A gateway signature (Stripe, Wompi, GitHub…) is
+	// computed over the bytes as sent: parse-then-reserialize changes key order
+	// and whitespace and breaks every signature, so Bind is the WRONG tool for a
+	// signed payload. Verify over RawBody FIRST, then Bind (or unmarshal the same
+	// bytes) once the signature checks out — parsing before verifying is the #1
+	// documented payment-integration bug.
+	//
+	// The body is read ONCE and buffered: RawBody and Bind may be used together
+	// in any order and both see the whole body (a plain io.ReadAll on
+	// Request().Body would leave Bind an empty reader). The returned slice is the
+	// engine's buffer — treat it as read-only. A body over the cap returns
+	// ErrBodyTooLarge, which the middleware maps to 413 if the handler returns it.
+	RawBody() ([]byte, error)
 
 	// Enqueue writes an outbox job inside the current transaction (atomic with
 	// the business write). A Handler error rolls back the enqueue too.
@@ -166,6 +191,9 @@ var (
 	ErrWeakPassword = errors.New("appitools: password too short")
 	// ErrUnknownRole: the role is not declared in the schema RBAC.
 	ErrUnknownRole = errors.New("appitools: role not declared in the schema RBAC")
+	// ErrBodyTooLarge: the request body exceeded MaxBodyBytes. Returned by
+	// RawBody/Bind/BindResource; returning it from a Handler yields a 413.
+	ErrBodyTooLarge = errors.New("appitools: request body too large")
 )
 
 // engineRefs is the read-only engine state shared by every requestCtx: the
@@ -208,6 +236,14 @@ type requestCtx struct {
 	eng *engineRefs
 	tc  *tenant.TenantCtx
 	cl  *auth.Claims
+
+	// Buffered request body (LIBRARY-GAPS-S1): read once, served to RawBody AND
+	// Bind/BindResource so a webhook handler can verify a signature over the exact
+	// bytes and still decode them. bodyRead is the "already consumed" flag; a
+	// cap violation is memoized as ErrBodyTooLarge in bodyErr.
+	bodyBuf  []byte
+	bodyErr  error
+	bodyRead bool
 
 	// Buffered response (flushed by the middleware around commit).
 	status int
@@ -431,9 +467,42 @@ func (c *requestCtx) queryOne(q string, args []any) (map[string]any, error) {
 
 // --- request binding --------------------------------------------------------
 
-func (c *requestCtx) Bind(dst any) error {
+// readBody reads the request body ONCE, under the engine's cap, and memoizes it
+// (bytes and error). Every binder goes through here, which is what makes
+// RawBody + Bind composable in any order: an http.Request body is a
+// single-use stream, so the pre-RawBody idiom (io.ReadAll on Request().Body)
+// silently left Bind with nothing to decode.
+func (c *requestCtx) readBody() ([]byte, error) {
+	if c.bodyRead {
+		return c.bodyBuf, c.bodyErr
+	}
+	c.bodyRead = true
+	// MaxBytesReader with the ResponseWriter so an over-cap body also stops the
+	// connection from being reused — the same protection the generated handlers get.
 	c.r.Body = http.MaxBytesReader(c.w, c.r.Body, maxBodyBytes)
-	return json.NewDecoder(c.r.Body).Decode(dst)
+	c.bodyBuf, c.bodyErr = io.ReadAll(c.r.Body)
+	if c.bodyErr != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(c.bodyErr, &mbe) {
+			// A typed, matchable error instead of net/http's internal one, so a
+			// handler can `errors.Is(err, appitools.ErrBodyTooLarge)` and the
+			// middleware can map a returned one to 413.
+			c.bodyErr = ErrBodyTooLarge
+		}
+	}
+	return c.bodyBuf, c.bodyErr
+}
+
+func (c *requestCtx) RawBody() ([]byte, error) { return c.readBody() }
+
+func (c *requestCtx) Bind(dst any) error {
+	b, err := c.readBody()
+	if err != nil {
+		return err
+	}
+	// A Decoder (not json.Unmarshal) over the buffered bytes keeps Bind's decoding
+	// semantics byte-identical to the pre-buffer implementation.
+	return json.NewDecoder(bytes.NewReader(b)).Decode(dst)
 }
 
 func (c *requestCtx) BindResource(resource string, dst any) error {
@@ -441,8 +510,7 @@ func (c *requestCtx) BindResource(resource string, dst any) error {
 	if rv == nil {
 		return fmt.Errorf("appitools: unknown resource %q", resource)
 	}
-	c.r.Body = http.MaxBytesReader(c.w, c.r.Body, maxBodyBytes)
-	b, err := io.ReadAll(c.r.Body)
+	b, err := c.readBody()
 	if err != nil {
 		return err
 	}

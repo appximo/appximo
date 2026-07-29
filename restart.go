@@ -149,7 +149,19 @@ func recoverBootSchema(path string, loadErr error) bool {
 func clearBootMarker(path string) { os.Remove(bootMarkerPath(path)) } //nolint:errcheck
 
 // persistBootSchema is the App-level persist (closure the admin API calls).
+//
+// It adds the one gate persistBootSchemaFile cannot do on its own: the incoming
+// schema's custom-route grants are cross-checked against THIS binary's registered
+// routes (LIBRARY-GAPS-S1). Without it, deploying a schema that grants an
+// unregistered route segment would persist, restart, fail to boot, and come back
+// via the .bak rollback — safe, but a terrible way to learn about a typo. Here it
+// is a clean 422 with nothing written.
 func (a *App) persistBootSchema(raw json.RawMessage) error {
+	if s, err := schema.LoadFromBytes(raw); err == nil {
+		if gerr := validateRouteGrants(s, a.routes); gerr != nil {
+			return fmt.Errorf("%w: %v", platformadmin.ErrSchemaRejected, gerr)
+		}
+	}
 	return persistBootSchemaFile(a.cfg.SchemaPath, raw)
 }
 

@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/miguelangel/appitools/pkg/resilience"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/tenant"
 )
@@ -51,6 +53,27 @@ type Route struct {
 	// carries its own independent deadline.
 	Timeout time.Duration
 
+	// RateLimit overrides this endpoint's dedicated throttle, per (tenant, client
+	// IP) — the same bucket shape the public-route limiter uses, sized for THIS
+	// route (LIBRARY-GAPS-S1).
+	//
+	// The engine's default for a Public route (5 rps / burst 10) is calibrated for
+	// a public WRITE endpoint — a registration or a webhook, where 5 rps is
+	// generous and abuse is the real risk. A public READ endpoint (a storefront
+	// catalogue) has the opposite profile: legitimate traffic is bursty and much
+	// higher. That mismatch is what this field fixes, without touching the
+	// conservative default everyone else inherits.
+	//
+	//	{Method: "GET", Path: "/api/catalogue", Public: true,
+	//	 RateLimit: &appitools.RateLimit{RPS: 200, Burst: 400}}
+	//
+	// Nil (the default) keeps today's behavior EXACTLY: a Public route uses the
+	// shared public-route limiter, a non-public route has no dedicated limit (only
+	// the per-tenant one). Set on a NON-public route, it adds a per-(tenant, IP)
+	// limit on top of the per-tenant limiter — useful for an expensive
+	// authenticated endpoint (a report, an export).
+	RateLimit *RateLimit
+
 	// Public marks this route as PRE-AUTHENTICATION (LIBRARY-EXTEND-S1): the
 	// JWT and path-RBAC middlewares skip it by EXACT method+path match, so a
 	// caller needs no Bearer token — the seam for a custom registration/webhook
@@ -71,6 +94,15 @@ type Route struct {
 	// with RequireRole (a role implies authentication). Only routes explicitly
 	// marked Public skip auth; every other route keeps deny-by-default.
 	Public bool
+}
+
+// RateLimit is one route's token-bucket budget (Route.RateLimit): RPS sustained
+// requests per second with Burst instantaneous, counted per (tenant, client IP).
+// Both must be > 0 — a zero value is rejected at Register, so a half-filled
+// struct can never silently disable the throttle.
+type RateLimit struct {
+	RPS   float64
+	Burst int
 }
 
 // defaultRouteTimeout bounds a custom handler that does not set Route.Timeout —
@@ -104,6 +136,13 @@ func validateRoute(rt Route, s *schema.APISchema, seen map[string]bool) error {
 		return fmt.Errorf("route %s: registered twice", key)
 	}
 
+	// A partially-filled RateLimit would silently mean "unlimited" (rate.Limiter
+	// with burst 0 rejects everything, RPS 0 the same) — reject it at boot instead.
+	if rl := rt.RateLimit; rl != nil && (rl.RPS <= 0 || rl.Burst <= 0) {
+		return fmt.Errorf("route %s %s: RateLimit requires RPS > 0 and Burst > 0 (got %g rps, burst %d)",
+			method, rt.Path, rl.RPS, rl.Burst)
+	}
+
 	if rt.Public {
 		// The JWT/RBAC skip is an EXACT method+path match — a chi pattern like
 		// /api/x/{id} would route but never match the skip, yielding a public
@@ -132,6 +171,153 @@ func validateRoute(rt Route, s *schema.APISchema, seen map[string]bool) error {
 	return nil
 }
 
+// validateRouteGrants is the BOOT half of custom-route authorization
+// (LIBRARY-GAPS-S1, ADR-021): it cross-checks every `routes` grant in the schema's
+// RBAC against the routes actually REGISTERED in this binary.
+//
+// The schema validator checks what a standalone schema can be checked for (segment
+// shape, known actions, no collision with a real resource); only here does the set
+// of registered endpoints exist. A grant for a segment nothing serves — or for an
+// action no registered method provides — is DEAD CONFIG, and dead authorization
+// config is exactly the thing that later reads as "the RBAC says they can, so why
+// the 403?". It fails the boot with the registered segments listed, instead of
+// surfacing as a confusing runtime denial.
+//
+// It is deliberately about EXISTENCE, never about widening: nothing here grants
+// anything. A schema with no `routes` (every schema before this key) returns nil
+// after one map length check.
+func validateRouteGrants(s *schema.APISchema, routes []Route) error {
+	if !schemaHasRouteGrants(s) {
+		return nil
+	}
+	// segment → the set of actions its registered routes provide.
+	served := make(map[string]map[string]bool, len(routes))
+	for _, rt := range routes {
+		seg := firstAPISegment(rt.Path)
+		if seg == "" {
+			continue
+		}
+		if served[seg] == nil {
+			served[seg] = make(map[string]bool, 4)
+		}
+		if a := actionForMethod(rt.Method); a != "" {
+			served[seg][a] = true
+		}
+	}
+
+	var problems []string
+	for _, roleName := range sortedMapKeys(s.RBAC.Roles) {
+		role := s.RBAC.Roles[roleName]
+		for _, seg := range sortedMapKeys(role.Routes) {
+			actions, ok := served[seg]
+			if !ok {
+				problems = append(problems, fmt.Sprintf(
+					"rbac.roles.%s.routes.%s: no custom route is registered under /api/%s (registered segments: %s)",
+					roleName, seg, seg, listOrNone(sortedMapKeys(served))))
+				continue
+			}
+			for _, a := range role.Routes[seg].Actions {
+				if a == "*" {
+					continue // grants whatever the segment serves, now and later
+				}
+				if !actions[a] {
+					problems = append(problems, fmt.Sprintf(
+						"rbac.roles.%s.routes.%s: action %q is granted but no registered route on /api/%s uses the matching method (%s); the segment serves: %s",
+						roleName, seg, a, seg, methodsForAction(a), listOrNone(sortedSetKeys(actions))))
+				}
+			}
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("appitools: RBAC grants custom routes that are not registered:\n  %s",
+			strings.Join(problems, "\n  "))
+	}
+	return nil
+}
+
+// schemaHasRouteGrants reports whether any role declares a `routes` block.
+func schemaHasRouteGrants(s *schema.APISchema) bool {
+	for _, role := range s.RBAC.Roles {
+		if len(role.Routes) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// firstAPISegment returns the first path element after "/api/" — the VIRTUAL
+// resource the RBAC middleware authorizes a custom route by (rbac.resourceFromPath
+// derives the same value from the live request path).
+func firstAPISegment(path string) string {
+	rest := strings.TrimPrefix(path, "/api/")
+	if rest == path { // no /api/ prefix (rejected at Register anyway)
+		return ""
+	}
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		return rest[:i]
+	}
+	return rest
+}
+
+// actionForMethod mirrors rbac.actionFromMethod — the SAME mapping the middleware
+// applies at request time, so the boot check validates what will actually be
+// evaluated.
+func actionForMethod(method string) string {
+	switch strings.ToUpper(method) {
+	case http.MethodGet:
+		return "read"
+	case http.MethodPost:
+		return "create"
+	case http.MethodPut, http.MethodPatch:
+		return "update"
+	case http.MethodDelete:
+		return "delete"
+	default:
+		return ""
+	}
+}
+
+// methodsForAction is actionForMethod backwards, for the error message.
+func methodsForAction(action string) string {
+	switch action {
+	case "read":
+		return "GET"
+	case "create":
+		return "POST"
+	case "update":
+		return "PUT/PATCH"
+	case "delete":
+		return "DELETE"
+	default:
+		return "?"
+	}
+}
+
+func sortedMapKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sortedSetKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func listOrNone(ss []string) string {
+	if len(ss) == 0 {
+		return "none"
+	}
+	return strings.Join(ss, ", ")
+}
+
 // publicRoutePaths returns the "METHOD /path" set of routes registered Public,
 // or nil when there are none (the common case — the middlewares then skip the
 // lookup entirely).
@@ -149,6 +335,21 @@ func (a *App) publicRoutePaths() map[string]bool {
 	return out
 }
 
+// routeLimiter picks the throttle for rt (LIBRARY-GAPS-S1): an own limiter when
+// the route declares RateLimit, the shared conservative public-route limiter for
+// a Public route that does not, and nil for an authenticated route with no
+// declaration (unchanged — only the per-tenant limiter applies). Each declaring
+// route gets its OWN limiter instance, so two routes never share a bucket.
+func (a *App) routeLimiter(rt Route) *resilience.TenantLimiter {
+	if rl := rt.RateLimit; rl != nil {
+		return resilience.NewConfiguredLimiter(resilience.RateLimitConfig{RPS: rl.RPS, Burst: rl.Burst})
+	}
+	if rt.Public {
+		return a.publicLimiter
+	}
+	return nil
+}
+
 // customHandler wraps a Route's Handler in the withTenantTx pattern (ADR-016
 // Decision 4): it runs AFTER the shared middleware chain (so identity, tenant
 // and RBAC are already resolved), opens a transaction scoped to the tenant
@@ -156,18 +357,24 @@ func (a *App) publicRoutePaths() map[string]bool {
 // and commits on nil / rolls back on error. It never re-implements JWT, rate
 // limiting, or path-based RBAC — those are inherited from the chain.
 func (a *App) customHandler(rt Route) http.HandlerFunc {
+	// Resolve this route's throttle ONCE, at boot: its own limiter when
+	// Route.RateLimit is set, else the shared public-route limiter for a Public
+	// route, else none (an authenticated route keeps only the per-tenant limit —
+	// byte-identical to before). The request path just nil-checks a captured
+	// pointer; no per-request configuration lookup.
+	limiter := a.routeLimiter(rt)
 	return func(w http.ResponseWriter, r *http.Request) {
 		tc := tenant.FromCtx(r.Context())
 		if tc == nil || !pgSchemaNameRe.MatchString(tc.PGSchema) {
 			writeErr(w, http.StatusBadRequest, "invalid tenant")
 			return
 		}
-		if rt.Public {
-			// Dedicated public-route throttle, per (tenant, client IP), far
-			// tighter than the per-tenant limiter that already ran — an
-			// anonymous endpoint must not be a free abuse vector. Before the
-			// transaction, so a throttled burst never touches the pool.
-			if !a.publicLimiter.Allow(tc.ID+"|"+remoteIP(r), "") {
+		if limiter != nil {
+			// Per (tenant, client IP), on top of the per-tenant limiter that
+			// already ran — an anonymous endpoint must not be a free abuse
+			// vector. Before the transaction, so a throttled burst never touches
+			// the pool.
+			if !limiter.Allow(tc.ID+"|"+remoteIP(r), "") {
 				w.Header().Set("Retry-After", "1")
 				writeErr(w, http.StatusTooManyRequests, "too many requests")
 				return
@@ -256,6 +463,13 @@ func (a *App) writeHandlerError(w http.ResponseWriter, rc *requestCtx, rt Route,
 	var fe *forbiddenError
 	if errors.As(err, &fe) {
 		writeErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	// An over-cap body is a client error, not a server fault: a handler that just
+	// returns the error from RawBody/Bind gets the right status for free
+	// (LIBRARY-GAPS-S1).
+	if errors.Is(err, ErrBodyTooLarge) {
+		writeErr(w, http.StatusRequestEntityTooLarge, "request body too large")
 		return
 	}
 	if db.IsUnavailable(err) {

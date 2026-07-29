@@ -11,7 +11,13 @@
 // versions. Treat `grep UnsafeTx` as the complete audit of RBAC-bypass sites.
 package appitools
 
-import "github.com/miguelangel/appitools/pkg/userauth"
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/miguelangel/appitools/pkg/userauth"
+)
 
 // Config configures a New engine. SchemaPath and DSN are the only required
 // fields; everything else falls back to the same defaults and environment
@@ -115,6 +121,27 @@ type Config struct {
 	// (the observability phantom-tenant bug, FLEET-CONSOLE-S2). Empty (the
 	// single-engine default) leaves the middleware byte-identical to before.
 	BareDomains []string
+
+	// BeforeStart runs ONCE at Start, after the engine is fully constructed (pool
+	// open, control-plane tables ensured, schema loaded and compiled) and BEFORE
+	// the data-plane listener accepts a single request — the seam framework-mode
+	// backends need for boot work (LIBRARY-GAPS-S1): their own DDL for what the
+	// schema grammar cannot express (a CHECK constraint, a generated column),
+	// seeds, or a cache warm-up.
+	//
+	// It receives the ENGINE'S OWN pool (the same *pgxpool.Pool as App.Pool()), so
+	// a backend no longer parses DATABASE_URL and opens a second pool that can
+	// drift from the engine's configuration. The pool is NOT tenant-scoped: set
+	// the search_path yourself, transaction-locally, exactly as the engine does —
+	//
+	//	tx.Exec(ctx, "SELECT set_config('search_path', $1, true)", pgSchema)
+	//
+	// — never by string concatenation.
+	//
+	// A non-nil error ABORTS the boot: Start returns it and the listener never
+	// opens, so a backend whose invariants failed to install never serves traffic.
+	// The context is cancelled on SIGINT/SIGTERM, so a hung hook still drains.
+	BeforeStart func(ctx context.Context, pool *pgxpool.Pool) error
 
 	// Version is reported by /health and the synthetic monitor. Empty reports
 	// "dev"; the cmd binary passes its ldflags-injected build version.

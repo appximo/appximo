@@ -769,6 +769,23 @@ func (a *App) Register(rt Route) error {
 // Routes returns the registered custom routes (read-only view, for OpenAPI/tests).
 func (a *App) Routes() []Route { return append([]Route(nil), a.routes...) }
 
+// Pool returns the engine's own PostgreSQL pool (LIBRARY-GAPS-S1) — the seam a
+// framework-mode backend needs for boot-time work (its own DDL, seeds, a
+// warm-up) without opening a SECOND pool from a DSN it re-parses itself, which
+// can drift from the engine's configuration.
+//
+// It is deliberately the raw pool, so it is NOT tenant-scoped and carries no
+// RBAC: inside a request, use Ctx (whose transaction already has the tenant's
+// search_path and the role's row filter). Outside a request, set the search_path
+// transaction-locally as DATA, never by string concatenation:
+//
+//	tx.Exec(ctx, "SELECT set_config('search_path', $1, true)", pgSchema)
+//
+// Do NOT Close it — the pool's lifetime belongs to the App (closed on shutdown).
+// For the common case (boot DDL) prefer Config.BeforeStart, which hands you this
+// same pool at exactly the right moment and fails the boot on error.
+func (a *App) Pool() *pgxpool.Pool { return a.pool }
+
 // logf logs through the structured logger if initialized, else the std logger.
 func (a *App) logf(format string, args ...any) { log.Printf(format, args...) }
 
@@ -781,8 +798,25 @@ func (a *App) Start() error {
 		return errors.New("appitools: Start called twice")
 	}
 
+	// Custom-route authorization (LIBRARY-GAPS-S1, ADR-021): every `routes` grant
+	// in the schema must name a route this binary actually registered. Checked here
+	// — the first moment BOTH halves exist (Register is done, the listener is not
+	// open) — so dead authorization config fails the boot instead of reading as an
+	// inexplicable 403 later.
+	if err := validateRouteGrants(a.schema, a.routes); err != nil {
+		return err
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// BeforeStart (LIBRARY-GAPS-S1): the framework-mode boot seam. It runs with
+	// the engine fully constructed but BEFORE any listener or background service,
+	// so a backend's own DDL/seed is guaranteed in place for the first request —
+	// and an error aborts the boot loudly instead of serving a half-provisioned app.
+	if err := a.runBeforeStart(ctx); err != nil {
+		return err
+	}
 
 	a.startBackground(ctx)
 
@@ -814,6 +848,20 @@ func (a *App) Start() error {
 	// schema. On success execRestart never returns.
 	if a.restartRequested.Load() {
 		a.execRestart()
+	}
+	return nil
+}
+
+// runBeforeStart invokes Config.BeforeStart with the engine's own pool, wrapping
+// a failure so the operator sees WHICH stage aborted the boot. A nil hook (the
+// default, and the pure binary) is a no-op — so `serve` and the in-process fleet,
+// whose Configs are built from a manifest rather than user code, are unaffected.
+func (a *App) runBeforeStart(ctx context.Context) error {
+	if a.cfg.BeforeStart == nil {
+		return nil
+	}
+	if err := a.cfg.BeforeStart(ctx, a.pool); err != nil {
+		return fmt.Errorf("appitools: BeforeStart: %w", err)
 	}
 	return nil
 }
