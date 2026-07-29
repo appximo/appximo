@@ -767,6 +767,35 @@ class EditorStore {
 		if (!index) return;
 		if (on) index.unique = true;
 		else delete index.unique;
+		if (on) {
+			// A gin index cannot be unique (the engine rejects it at load), so
+			// choosing unique drops back to the default btree.
+			delete index.method;
+			delete index.opclass;
+		}
+		this.bump();
+	}
+	// The access method (LIBRARY-GAPS-S1). '' means the engine default (btree) and
+	// is stored as an ABSENT key, so an untouched index serializes byte-identically.
+	// gin is only valid over jsonb columns and never unique — mirrored here so the
+	// editor can only produce schemas the validator accepts.
+	setIndexMethod(entityId: string, idx: number, method: string) {
+		const index = this.entityIndexes(entityId)?.[idx];
+		if (!index) return;
+		if (method === 'gin') {
+			index.method = 'gin';
+			delete index.unique;
+		} else {
+			delete index.method;
+			delete index.opclass; // an opclass is only meaningful with gin
+		}
+		this.bump();
+	}
+	setIndexOpclass(entityId: string, idx: number, opclass: string) {
+		const index = this.entityIndexes(entityId)?.[idx];
+		if (!index || index.method !== 'gin') return;
+		if (opclass) index.opclass = opclass as 'jsonb_ops' | 'jsonb_path_ops';
+		else delete index.opclass;
 		this.bump();
 	}
 

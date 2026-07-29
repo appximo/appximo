@@ -15,17 +15,21 @@
     },
     "courses": {
       "fields": {
-        "title":     { "type": "string",  "required": true, "maxLength": 200 },
-        "price":     { "type": "float64", "min": 0 },
-        "published": { "type": "bool",    "default": false }
+        "title":       { "type": "string", "required": true, "maxLength": 200 },
+        "price_cents": { "type": "int64",  "min": 0 },
+        "published":   { "type": "bool",   "default": false },
+        "metadata":    { "type": "jsonb",  "default": {} }
       },
-      "indexes": [{ "fields": ["published"] }]
+      "indexes": [
+        { "fields": ["published"] },
+        { "fields": ["metadata"], "method": "gin", "opclass": "jsonb_path_ops" }
+      ]
     },
     "enrollments": {
       "fields": {
         "user_id":     { "type": "uuid" },
         "course_id":   { "type": "uuid",   "relation": "courses", "on_delete": "restrict" },
-        "amount":      { "type": "float64", "min": 0 },
+        "amount_cents":{ "type": "int64",   "min": 0 },
         "external_ref":{ "type": "string",  "unique": true },
         "status": {
           "type": "string",
@@ -40,6 +44,14 @@
       },
       "events": ["create"],
       "indexes": [{ "fields": ["user_id"] }]
+    },
+    "webhook_events": {
+      "fields": {
+        "event_id":   { "type": "string", "required": true, "unique": true, "maxLength": 160 },
+        "provider":   { "type": "string", "required": true, "maxLength": 40 },
+        "payload":    { "type": "text" },
+        "created_at": { "type": "time", "auto": true }
+      }
     }
   },
   "rbac": {
@@ -50,7 +62,8 @@
           "students":    { "actions": ["read", "update"], "conditions": { "field": "user_id", "op": "eq", "val": "$user_id" } },
           "courses":     { "actions": ["read"] },
           "enrollments": { "actions": ["read", "create"], "conditions": { "field": "user_id", "op": "eq", "val": "$user_id" } }
-        }
+        },
+        "routes": { "checkout": { "actions": ["create"] } }
       }
     }
   }

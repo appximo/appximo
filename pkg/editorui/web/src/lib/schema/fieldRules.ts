@@ -38,6 +38,8 @@ export function pgKind(t: string): string {
 		case 'text':
 		case 'json':
 			return 'text';
+		case 'jsonb':
+			return 'jsonb';
 		case 'int':
 			return 'integer';
 		case 'int64':
@@ -121,7 +123,8 @@ export function defaultIssues(def: FieldDef): string[] {
 				? []
 				: ['default must be a string (an RFC3339 timestamp, or "now")'];
 		case 'json':
-			return []; // any JSON value is acceptable for a json column
+		case 'jsonb':
+			return []; // any JSON value is acceptable for a json/jsonb column
 		case 'file':
 			// Mirror of validateDefault: file ids are minted per tenant at upload
 			// time, so a schema-level default would dangle everywhere.

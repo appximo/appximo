@@ -26,7 +26,12 @@ in names. Do NOT name a resource "transaction" or start one with "auth_" (reserv
 Every resource has an implicit "id" UUID primary key — do NOT declare "id".
 
 FIELD TYPES (exact set — nothing else; "number" is INVALID):
-  string, text, int, int64, float64, bool, uuid, time, json, file
+  string, text, int, int64, float64, bool, uuid, time, json, jsonb, file
+  - MONEY: use "int64" in the currency's MINOR unit (cents) and name the field so
+    the unit is unmissable (price_cents, total_cents). There is NO decimal/money
+    type, and float64 money is a rounding bug waiting to happen.
+  - DOCUMENTS: prefer "jsonb" (a real jsonb column: containment "@>" and a GIN
+    index) over "json" (stored as TEXT — exact bytes, but not queryable).
 
 FIELD KEYS (all optional unless noted):
   "type" (required), "required": true, "unique": true,
@@ -53,6 +58,11 @@ RELATIONS (optional per-resource "relations" block, sibling of "fields", for nes
   - "target" must be a declared resource.
 
 INDEXES (optional per-resource "indexes" array): [ { "fields": ["status"], "unique": true } ]
+  Optional "method": "btree" (default) | "gin". A gin index is ONLY valid over
+  jsonb columns and never unique; it is what makes containment ("attributes @>
+  {...}") an index lookup. Optional "opclass" (gin only): "jsonb_ops" (default)
+  or "jsonb_path_ops" (smaller/faster, indexes ONLY containment):
+    { "fields": ["attributes"], "method": "gin", "opclass": "jsonb_path_ops" }
 
 RBAC (optional). Actions are exactly: read, create, update, delete, or "*".
 A role is EITHER role-global OR per-resource — never both keys.
@@ -62,6 +72,9 @@ A role is EITHER role-global OR per-resource — never both keys.
   Optional "conditions": { "field": "owner_id", "op": "eq", "val": "$user_id" }
     - "op" MUST be "eq" (or omitted). "val" may be "$user_id" or a literal.
     - "conditions.field" and every "fields" entry must be a REAL column of the resource.
+    - A role-global condition is injected into EVERY resource the role lists, so
+      the column must exist on ALL of them. When resources are scoped by DIFFERENT
+      columns, use the per-resource "permissions" form instead.
 
 CANONICAL EXAMPLE (a valid schema — follow this shape exactly):
 {

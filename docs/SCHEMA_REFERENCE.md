@@ -385,7 +385,7 @@ default sort/keyset key (see the query section).
 
 ### 3.2 The field type set
 
-`type` is required and must be one of exactly ten values from `validFieldTypes`
+`type` is required and must be one of exactly eleven values from `validFieldTypes`
 (`pkg/schema/validator.go`). Any other value — notably `number` — rejects the
 schema with `unknown field type "<type>"` (`validator.go`). The Postgres
 column type is fixed by `TypeForAPIType` (`pkg/schemadiff/parsetype.go`), and
@@ -403,6 +403,7 @@ the filter operators a type accepts are fixed by `operatorsForType`
 | `uuid` | UUID | `UUID` | `eq` |
 | `time` | timestamp with time zone | `TIMESTAMPTZ` | `eq`, `gt`, `gte`, `lt`, `lte`, `after` (→ `>`), `before` (→ `<`) |
 | `json` | JSON stored as text | `TEXT` | `eq` only (see §3.7 finding) |
+| `jsonb` | a real JSON document (LIBRARY-GAPS-S1) | `JSONB` | `eq` only |
 | `file` | reference to an uploaded file (FILES-LINK-S1) | `UUID` + a real FK to the tenant's `files(id)` | `eq` |
 
 Notes verified in code:
@@ -414,6 +415,24 @@ Notes verified in code:
   (`numericTypes = {int, int64, float64}`, `validator.go`).
 - `after`/`before` on `time` are aliases: `filterToSQL` maps `after`→`>`,
   `before`→`<` (`builder.go`).
+- **`json` vs `jsonb`** — two different storage decisions, both kept:
+  - `json` maps to **TEXT** (`TypeForAPIType`): the bytes you sent come back
+    unchanged, but Postgres sees an opaque string. Not indexable as a document, no
+    containment. Every pre-LIBRARY-GAPS-S1 column stays exactly as it was.
+  - `jsonb` maps to **JSONB**: a parsed, binary document. It is the only type a
+    `gin` index may cover (`{"fields":["attrs"],"method":"gin"}` — §9.1), which is
+    what makes `attrs @> '{"brand":"Acme"}'` an index lookup instead of a
+    sequential scan. pgx decodes it into a Go `map[string]any` on read and encodes
+    a Go map (or a pre-encoded JSON string) on write.
+  - **Prefer `jsonb`** for anything you may query. Reach for `json` only when the
+    exact byte representation matters (a stored signature payload).
+  - Neither can be a `group_by` key (`groupByTypeOK`, `pkg/query/aggregate.go`),
+    and both filter with `eq` only. In GraphQL a `jsonb` field is the `JSON`
+    scalar (the document, passed through); `json` stays `String`.
+- **Money has no type of its own.** There is no `decimal`/`money`; `float64` money
+  is a rounding bug. Use `int64` in the currency's MINOR unit and name the field
+  for it (`price_cents`, `total_cents`) — the industry-standard representation, and
+  the one most payment APIs already speak.
 - A `file` field stores the `file_id` that `POST /api/files` returns and carries a
   REAL foreign key to the tenant's own `files` table (`buildDesiredSchema`,
   `pkg/migration/desired.go`): a write whose value references no file of the tenant
@@ -1055,11 +1074,15 @@ The `rbac` block declares the authorization policy. It is the schema's only acce
 
 `rbac` is an object with exactly one valid key: `roles` (`pkg/schema/keys.go`). `roles` is a map from role name → role policy. The JWT `role` claim selects which policy applies; an unknown role is denied (`Evaluate` returns `Allowed:false` when the role is absent — `pkg/rbac/evaluator.go`).
 
-A role is expressed in **one of two mutually-exclusive forms**.
+A role is expressed in **one of two mutually-exclusive forms**, plus an
+independent `routes` block (below) that either form may carry.
 
 **Role-global (legacy) form** — keys (strict-checked, `pkg/schema/keys.go`): `resources`, `actions`, `conditions`, `fields`. The single `conditions` and `fields` apply to **every** resource the role lists.
 
 **Per-resource form** — one key: `permissions`, a map from resource name → grant. Each grant has the strict key set `actions`, `conditions`, `condition_actions`, `fields` (`pkg/schema/keys.go`). Each resource is scoped by its **own** condition and field allowlist.
+
+**`routes` (custom-route grants, LIBRARY-GAPS-S1)** — a map from custom-route
+SEGMENT → `{ "actions": [...] }`, orthogonal to both forms (see §7.9).
 
 A nested `conditions` object (in either form) has exactly the keys `field`, `op`, `val` (`pkg/schema/keys.go`).
 
@@ -1117,15 +1140,23 @@ For the **role-global form** (`validateRoleGlobal`), a role that carries a condi
 or a `fields` allowlist is checked against the resources it applies to (a wildcard
 admin with neither is unaffected):
 
-- **Condition field exists** on at least one applicable resource, else
-  `condition field "<f>" does not exist on any of the role's resources` (empty →
-  `condition field is required`).
+- **Condition field exists on EVERY applicable resource** (tightened in
+  LIBRARY-GAPS-S1), else
+  `condition field "<f>" does not exist on '<res1>', '<res2>' — a role-global condition is applied to EVERY resource the role lists, so a resource without the column fails at request time`
+  (empty → `condition field is required`). This is the fail-closed fix for a real
+  latent bug: the condition IS injected into the WHERE of every listed resource, so
+  a column present on only some of them produced a schema that validated and then
+  broke the first time another resource was queried. The `Fix` points at the shape
+  that expresses the intent — per-resource `permissions`, where each resource is
+  scoped by its own column. Names in the role's `resources` list that are not
+  declared resources are skipped: a role-global list may legitimately carry a
+  VIRTUAL custom-route segment (the pre-`routes` way of granting one).
 - **Allowlist fields exist** on at least one applicable resource, else
-  `field "<f>" does not exist on any of the role's resources`.
-- The check is **union** (a field on ≥1 of the role's resources is accepted),
-  matching how a role-global allowlist spans several resources; a field present on
-  some-but-not-all is a fail-closed runtime concern, not a load error (see the
-  finding in Appendix A.7).
+  `field "<f>" does not exist on any of the role's resources`. The allowlist keeps
+  the **union** rule deliberately: `fields` is a projection filter, so a field
+  missing on one resource simply projects nothing there (fail-closed already), and
+  requiring every field on every resource would break the legitimate "one allowlist
+  across several shapes" use.
 
 For a role that declares `permissions` (per-resource form), the following are
 enforced (exact messages):
@@ -1175,7 +1206,60 @@ Richer RBAC row operators would require the same binding and are a future increm
   - the condition field is **forced** to the caller's resolved value; if the body supplies a *different* non-null value for it, the create is **rejected with 403** `field "<f>" must match the authenticated principal` (`builder.go`). So an owner-scoped role can only create rows attributed to itself.
 - **Relation embeds** (`?include=`) are governed by the target's `read` permission, field allowlist, and condition — the same `Evaluate` result.
 
-### 7.9 Deny-by-default
+### 7.9 `routes` — granting CUSTOM routes (LIBRARY-GAPS-S1)
+
+A **custom route** is an endpoint a Go backend registers with `appitools.Route`
+(the library model, ADR-016) — it has no table. The middleware authorizes it by its
+**first `/api/` segment**, treated as a VIRTUAL resource, with the action derived
+from the HTTP method (`GET`→read, `POST`→create, `PUT`/`PATCH`→update,
+`DELETE`→delete): `POST /api/checkout` is "create on `checkout`".
+
+`routes` is how a role grants one:
+
+```json
+"customer": {
+  "permissions": {
+    "orders": { "actions": ["read"],
+                "conditions": { "field": "user_id", "op": "eq", "val": "$user_id" } }
+  },
+  "routes": { "checkout": { "actions": ["create"] } }
+}
+```
+
+**It is orthogonal to `resources`/`permissions`** — a different namespace
+(registered endpoints, not tables) — so a role may declare it alongside either
+form. That is the point: before this key, a role using per-resource `permissions`
+could not reach ANY custom route (every `permissions` key is validated against a
+real resource), which made "owner-scoped end users + a custom action endpoint"
+inexpressible. See [ADR-021](adr/ADR-021-custom-route-authorization.md).
+
+Key set: a grant has **exactly one** key, `actions` (`pkg/schema/keys.go`).
+
+**No `conditions`, no `fields`** — a virtual segment has no rows to filter and no
+columns to project. Declaring either is a load error that explains why, rather than
+a silently ignored key. The DATA a handler touches is authorized separately:
+`Ctx.Query`/`Insert`/`Update` re-evaluate the role against the **real** resources,
+condition and allowlist included.
+
+**Two validation layers:**
+
+| Layer | Where | Checks |
+|---|---|---|
+| schema | `validateRouteGrants`, `pkg/schema/validator.go` | segment matches `^[a-z][a-z0-9_\-]*$` (hyphens allowed — a route path is a URL, not a GraphQL identifier); at least one known action; the segment is **not** a declared resource (`"<x>" is a declared resource, not a custom route`) |
+| boot | `validateRouteGrants`, `route.go` (in `Start`, and on `POST /admin/engine/schema`) | the segment is **registered** by this binary, and every concrete action has a registered method — else the boot fails, listing the registered segments |
+
+The boot layer is what a standalone schema cannot check: `appitools validate`,
+Studio and the AI loop see no Go program. Consequence: the pure `appitools serve`
+binary registers no custom routes, so it **refuses to boot** a schema with a
+`routes` grant — deliberately, since such a policy could never match.
+
+**Evaluation** (`routeGrantFor`, `pkg/rbac/policy.go`): a segment listed in
+`routes` is decided by that entry (it can only NARROW a wildcard role, never widen
+one); a segment not listed falls through to the role's normal
+`resources`/`permissions` evaluation, so deny-by-default is untouched. A role
+without `routes` pays one `len()` on a nil map — the hot path measured `no_change`.
+
+### 7.10 Deny-by-default
 
 No matching policy → **403**:
 
@@ -1185,7 +1269,7 @@ No matching policy → **403**:
 
 A row excluded by an applicable condition reads as **404** (it matches no row), not 403.
 
-### 7.10 Examples
+### 7.11 Examples
 
 **Role-global, owner-scoped** — `operator` may read and update tasks, sees only `id`/`title`/`status`, and is restricted to rows it owns (`operator_id = $user_id`). The condition applies to **every** listed resource and **both** granted actions:
 
@@ -1469,8 +1553,39 @@ This section covers the remaining resource-level blocks (`indexes`, `events`), t
 |---|---|---|---|
 | `fields` | array of strings | yes | the column(s) the index covers, in order |
 | `unique` | bool | no (default `false`) | `true` ⇒ a `UNIQUE` index |
+| `method` | string | no (default `btree`) | access method: `btree` or `gin` (LIBRARY-GAPS-S1) |
+| `opclass` | string | no | operator class applied to every column; `gin` only: `jsonb_ops` (default) or `jsonb_path_ops` |
 
-`fields` and `unique` are the **only** accepted keys; any other key (e.g. `field`, `uniqe`) rejects the schema with `unknown key "<key>" (valid keys: fields, unique)` — every index entry is strict-key-checked (`pkg/schema/keys.go`).
+Those four are the **only** accepted keys; any other key (e.g. `field`, `uniqe`, `using`) rejects the schema with `unknown key "<key>" (valid keys: fields, unique, method, opclass)` — every index entry is strict-key-checked (`pkg/schema/keys.go`).
+
+**`method`: `gin` — the jsonb index.** A `gin` index is what makes containment
+(`attrs @> '{"brand":"Acme"}'`) an index lookup. It is accepted **only over `jsonb`
+columns** and **never with `unique`** (GIN cannot enforce uniqueness); both are
+load errors, never a Postgres failure mid-migration. `opclass` is rendered verbatim
+into the DDL, so it is restricted to a closed allowlist — `jsonb_path_ops` is
+smaller and faster but indexes ONLY containment (no key-existence `?` queries);
+`jsonb_ops` (the default) covers more operators at a larger size.
+
+```json
+"indexes": [
+  { "fields": ["status"] },
+  { "fields": ["attributes"], "method": "gin", "opclass": "jsonb_path_ops" }
+]
+```
+
+A non-btree index gets a **method suffix** in its derived name
+(`idx_products_attributes_gin`), so a gin and a btree index over the same column
+coexist. btree names are unsuffixed, so every pre-existing index keeps its exact
+name — adding `method` to a schema causes zero migration churn. The opclass is
+deliberately excluded from the diff key: the introspector reads an index's key
+columns from `pg_index.indkey`, which carries no opclass, so comparing it would
+drop and recreate the index on every migration.
+
+**What is NOT supported: a partial index (`WHERE` predicate).** Postgres normalizes
+predicate text (`estado = 'activa'` is stored as `(estado = 'activa'::text)`), so
+round-tripping one through the diff would churn the index on every migration.
+Create a partial index in your own boot DDL (`Config.BeforeStart`) instead; the
+additive migration leaves it alone.
 
 #### Load-time validation (`validateIndexes`, `pkg/schema/validator.go`)
 

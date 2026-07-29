@@ -8,6 +8,9 @@
 	const fks = $derived(entity.extras.foreign_keys ?? []);
 	const indexes = $derived(entity.extras.indexes ?? []);
 	const fieldNames = $derived(entity.fields.map((f) => f.name));
+	// gin is only valid over jsonb columns (schema.validateIndexes) — the panel
+	// mirrors that so the editor can only author schemas the validator accepts.
+	const jsonbFields = $derived(entity.fields.filter((f) => f.def.type === 'jsonb').map((f) => f.name));
 	const sourceCols = $derived(['id', ...fieldNames]);
 
 	function refCols(target: string): string[] {
@@ -53,8 +56,41 @@
 				{/each}
 				{#if fieldNames.length === 0}<span class="muted">add fields first</span>{/if}
 			</div>
+			<div class="grid2">
+				<div>
+					<div class="lbl">method</div>
+					<select
+						class="field-select"
+						value={idx.method ?? ''}
+						onchange={(e) => editor.setIndexMethod(entity.id, i, e.currentTarget.value)}
+					>
+						<option value="">btree (default)</option>
+						<option value="gin">gin (jsonb containment)</option>
+					</select>
+				</div>
+				{#if idx.method === 'gin'}
+					<div>
+						<div class="lbl">opclass</div>
+						<select
+							class="field-select"
+							value={idx.opclass ?? ''}
+							onchange={(e) => editor.setIndexOpclass(entity.id, i, e.currentTarget.value)}
+						>
+							<option value="">jsonb_ops (default)</option>
+							<option value="jsonb_path_ops">jsonb_path_ops (@> only)</option>
+						</select>
+					</div>
+				{/if}
+			</div>
+			{#if idx.method === 'gin' && idx.fields.some((f) => !jsonbFields.includes(f))}
+				<div class="err">gin requires every column to be jsonb</div>
+			{/if}
 			{#if idx.fields.length > 0}
-				<div class="summary mono">{idx.unique ? 'UNIQUE ' : ''}({idx.fields.join(', ')})</div>
+				<div class="summary mono">
+					{idx.unique ? 'UNIQUE ' : ''}{idx.method === 'gin' ? 'USING gin ' : ''}({idx.fields.join(', ')}{idx.opclass
+						? ' ' + idx.opclass
+						: ''})
+				</div>
 			{:else}
 				<div class="err">choose at least one column</div>
 			{/if}

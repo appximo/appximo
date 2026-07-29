@@ -161,6 +161,10 @@ same suite against *your* server and prints *your* report.
   an initial state, update only along a declared transition, a terminal state is
   immutable (append-only). Enforced race-safely in the UPDATE itself, on REST,
   GraphQL, and inside a transaction
+- **Queryable documents**: a `jsonb` field is a real Postgres document — declare
+  `{"fields":["attributes"],"method":"gin","opclass":"jsonb_path_ops"}` and
+  containment (`attributes @> {...}`) is an index lookup, not a sequential scan.
+  Merchant-defined attributes without EAV, and without hand-written DDL
 - **Declarative validation**: required/enum/type rules compiled from the schema;
   one `422` lists every failing field; field `default` values applied on insert
   (literals + `"now"` for time); a `unique`/composite-unique collision is a clean
@@ -199,7 +203,10 @@ same suite against *your* server and prints *your* report.
   each resource by its **own** column (`projects.owner_id`, `documents.created_by`),
   leave some resources unscoped, and even "read all, write own" via
   `condition_actions` — unlocking workspace/owner scoping that role-global
-  conditions couldn't express
+  conditions couldn't express. A `routes` block grants the **custom endpoints** a
+  Go backend registers (a virtual segment, boot-validated against the routes that
+  actually exist), so "owner-scoped end users **plus** a custom action like
+  checkout" is expressible at last
 - **Auth (password identity)**: in-engine signup/login/refresh (`POST /auth/*`),
   multi-tenant-aware — users live in the tenant's own schema, so **email is unique
   per tenant, not globally** (the same email is a distinct account in two tenants).

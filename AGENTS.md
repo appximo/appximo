@@ -105,7 +105,14 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   hardening; the tenant tx is a single non-concurrent connection), hooks, auth,
   and the async model. Paste `spec` + `backend-spec` into your own Claude
   Code/Cursor and the agent can write handlers/hooks/jobs safely — the
-  in-process power made agent-accessible),
+  in-process power made agent-accessible; LIBRARY-GAPS-S1 added the four seams a
+  REAL backend needed — `Ctx.RawBody()` (the exact request bytes under the engine's
+  own cap, for verifying a webhook signature BEFORE parsing; composes with Bind
+  because the body is buffered once), `Config.BeforeStart` + `App.Pool()` (boot DDL
+  / seeds on the ENGINE'S pool, before the listener opens; an error aborts the
+  boot), `Route.RateLimit` (a per-endpoint throttle — the public default of 5 rps
+  is right for a registration endpoint and wrong for a catalogue), and the RBAC
+  `routes` grant),
   `blueprints list` (lists schema files in a local `blueprints/` dir),
   `version` (prints the ldflags-injected build version; "dev" on a plain
   local build — releases and published images carry their tag),
@@ -417,7 +424,20 @@ silently dead config.
 | `uuid` | UUID | `eq` |
 | `bool` | BOOLEAN | `eq` |
 | `json` | TEXT (stored as text) | `eq` only (exact match on the stored text) |
+| `jsonb` | JSONB (a real document) | `eq` only — but `@>` containment via a `gin` index |
 | `file` | UUID + a real FK to the tenant's `files` table | `eq` |
+
+**`json` vs `jsonb`** (LIBRARY-GAPS-S1): `json` is stored as TEXT — exact bytes,
+nothing queryable. `jsonb` is a real Postgres document: it is the only type a `gin`
+index may cover (`{"fields":["attrs"],"method":"gin","opclass":"jsonb_path_ops"}`),
+which turns `attrs @> '{"brand":"Acme"}'` into an index lookup. **Prefer `jsonb`**
+for anything you might query; pgx decodes it into a Go map and encodes one back.
+Neither can be a `group_by` key. In GraphQL `jsonb` is the `JSON` scalar (the
+document itself), `json` stays `String`.
+
+**Money has no type of its own** — and shouldn't: use `int64` in the currency's
+MINOR unit with the unit in the name (`price_cents`, `total_cents`). `float64`
+money is a rounding bug, and most payment APIs already speak minor units.
 
 A **`file` field** (FILES-LINK-S1) attaches an uploaded file to a RECORD,
 first-class: it stores the `file_id` that `POST /api/files` returns, and the
@@ -747,6 +767,54 @@ grant:
   additive and the legacy serialization is byte-unchanged. Measured `no_change` on
   the RBAC read+write hot path. Example: [examples/model-lab/rbac-per-resource.json](examples/model-lab/rbac-per-resource.json).
 
+#### A role-global condition must exist on EVERY listed resource (LIBRARY-GAPS-S1)
+
+A role-global `conditions` is injected into the WHERE of **every** resource the
+role lists. Validation used to accept a column present on only ONE of them (a
+documented limitation), so this validated and then broke at request time on the
+resource that lacked it — the engine's own shipped `testdata/logistics` fixture
+carried exactly that bug (`operario` scoped by `operator_id` over `incidents`,
+which has no such column → `GET /api/incidents` answered `422 unknown_field`,
+blaming the CALLER for a schema misconfiguration). It is now a **load error**
+naming the resources that lack the column, with the fix pointing at per-resource
+`permissions`. A virtual custom-route segment in the list is skipped (not a table).
+The `fields` allowlist keeps the union rule — it is a projection filter, so a field
+missing on one resource simply projects nothing there.
+
+#### Granting CUSTOM routes: the `routes` block (LIBRARY-GAPS-S1, ADR-021)
+
+A custom route (an endpoint a Go backend registers with `appitools.Route`) is
+authorized by its **first `/api/` segment** as a VIRTUAL resource. A role grants one
+with `routes`, a map of segment → `{actions}`:
+
+```json
+"cliente": {
+  "permissions": { "ordenes": { "actions": ["read"],
+      "conditions": { "field": "user_id", "op": "eq", "val": "$user_id" } } },
+  "routes": { "checkout": { "actions": ["create"] } }
+}
+```
+
+- **Orthogonal to `resources`/`permissions`** (a different namespace: endpoints,
+  not tables), so a role may declare both. That is the whole point — before it, a
+  role using per-resource `permissions` could reach NO custom route, making
+  "owner-scoped end users + a custom action endpoint" inexpressible.
+- **No `conditions`, no `fields`** — a segment has no rows and no columns;
+  declaring either is a load error explaining why. The DATA a handler touches is
+  authorized separately (`Ctx.Query`/`Insert`/`Update` re-evaluate the role against
+  the real resources).
+- **Authoritative but never widening:** a listed segment is decided by its entry
+  (so it can NARROW a wildcard role); an unlisted one falls through to normal
+  evaluation, so deny-by-default is intact.
+- **Boot-validated against the REGISTERED routes:** a grant for a segment nothing
+  serves — or an action no registered method provides — fails the boot with the
+  registered segments listed (also checked on `POST /admin/engine/schema`, so a
+  Studio deploy gets a clean 422 instead of a restart+rollback). Consequence: the
+  pure `serve` binary, which registers no custom routes, refuses to boot a schema
+  that grants one.
+- Hot path: one `len()` on a nil map for every role without `routes` — measured
+  `no_change`.
+
 ### Hooks (lifecycle extensions)
 
 Declared per resource under `hooks`. Events are exactly
@@ -847,7 +915,19 @@ index over one or more columns (composite when more than one), optionally
 
 - Materialized at tenant registration as `CREATE [UNIQUE] INDEX IF NOT EXISTS`
   over the listed columns (idempotent). The index name is derived from the table
-  and columns (`idx_<table>_<cols>` / `uniq_<table>_<cols>`).
+  and columns (`idx_<table>_<cols>` / `uniq_<table>_<cols>`), with a method suffix
+  for a non-btree index (`idx_<table>_<cols>_gin`).
+- **`method`** (LIBRARY-GAPS-S1): `btree` (default — an omitted key is
+  byte-identical to before) or `gin`. A `gin` index is accepted ONLY over `jsonb`
+  columns and NEVER with `unique`; both are rejected at load, never a Postgres
+  error mid-migration. **`opclass`** (gin only, closed allowlist): `jsonb_ops`
+  (default) or `jsonb_path_ops` (smaller/faster, indexes ONLY containment). The
+  opclass is excluded from the migration diff (it cannot be introspected back), so
+  declaring one causes no churn.
+- A partial index (a `WHERE` predicate) does NOT exist and is deliberate: Postgres
+  normalizes predicate text, so round-tripping one would drop+recreate the index on
+  every migration. Create it in your own boot DDL (`Config.BeforeStart`); the
+  additive migration leaves it alone.
 - Every referenced column's existence is checked against `information_schema`
   first; an index naming a column that does not exist (yet) is **logged and
   skipped**, never a hard failure (columns can be added to the live table at
@@ -1669,6 +1749,11 @@ is a JSON snapshot, not a stream).
 
 - Field type `number` → schema rejected; use `int`, `int64` or
   `float64` (the full type set is the table above — nothing else).
+- A `decimal`/`money` type. Money is `int64` in the currency's MINOR unit
+  (`price_cents`) — documented, deliberate, and what payment APIs speak.
+- A PARTIAL index (an `indexes` entry with a `WHERE` predicate), or an index method
+  beyond `btree`/`gin`. The predicate is left out because Postgres normalizes its
+  text, so the diff would churn the index on every migration.
 - Unknown schema keys → schema rejected listing the valid keys (e.g.
   `webhooks` instead of `hooks`, `secret` instead of `hmac_secret_env`).
   Nothing is silently ignored anymore.

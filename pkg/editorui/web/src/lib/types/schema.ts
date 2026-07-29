@@ -21,6 +21,7 @@ export const FIELD_TYPES = [
 	'uuid',
 	'time',
 	'json',
+	'jsonb',
 	'file'
 ] as const;
 export type FieldType = (typeof FIELD_TYPES)[number];
@@ -92,10 +93,22 @@ export interface RelationDef {
 	limit?: number;
 }
 
+/** Index access methods (LIBRARY-GAPS-S1). Empty/absent means btree. */
+export const INDEX_METHODS = ['btree', 'gin'] as const;
+export type IndexMethod = (typeof INDEX_METHODS)[number];
+
+/** Operator classes a gin index may declare (schema.validIndexOpclasses). */
+export const GIN_OPCLASSES = ['jsonb_ops', 'jsonb_path_ops'] as const;
+export type IndexOpclass = (typeof GIN_OPCLASSES)[number];
+
 /** One index over one or more columns. Mirrors schema.IndexDef. */
 export interface IndexDef {
 	fields: string[];
 	unique?: boolean;
+	/** btree (default) | gin — gin only over jsonb columns, never unique. */
+	method?: IndexMethod;
+	/** Operator class applied to every column; gin only. */
+	opclass?: IndexOpclass;
 }
 
 /** Resource-level composite foreign key (MIG-F1-S5). Mirrors schema.ForeignKeyDef. */

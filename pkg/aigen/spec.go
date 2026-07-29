@@ -64,6 +64,25 @@ actions/fields — mutually exclusive with the role-global keys):
     write own"); every entry must also be in "actions".
   - "conditions.field" must be a real column of THAT resource; "op" must be "eq".
 
+RBAC CUSTOM-ROUTE grants (only when a Go backend registers custom endpoints with
+appitools.Route — the pure binary has none, and a grant for a route that is not
+registered FAILS THE BOOT):
+  "customer": {
+    "permissions": { "orders": { "actions": ["read"],
+                     "conditions": { "field": "user_id", "op": "eq", "val": "$user_id" } } },
+    "routes": { "checkout": { "actions": ["create"] } }
+  }
+  - The key is the FIRST path segment after /api/ (POST /api/checkout → "checkout";
+    POST /api/webhooks/stripe → "webhooks"). Actions map from the HTTP method:
+    GET→read, POST→create, PUT/PATCH→update, DELETE→delete.
+  - "routes" is ORTHOGONAL to resources/permissions and may be combined with
+    either — it grants ENDPOINTS, not tables. This is the ONLY way a role using
+    per-resource "permissions" can reach a custom route.
+  - NO "conditions" and NO "fields": a route segment has no rows and no columns
+    (declaring either is rejected at load). The data a handler touches is
+    authorized separately, against the real resources.
+  - A key that names a declared RESOURCE is rejected — use "permissions" for that.
+
 FOREIGN-KEY EXTRAS (on a relation field):
   - "references": "<column>" — point the FK at a target column other than "id";
     it must be "id" or a "unique" column of the target, type-compatible.

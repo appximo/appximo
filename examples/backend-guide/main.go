@@ -19,15 +19,21 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/miguelangel/appitools"
 )
@@ -45,6 +51,13 @@ func main() {
 		SchemaPath: *schemaPath,
 		Port:       *port,
 		// DSN / JWTSecret / AdminKey / Env fall back to the standard env vars.
+
+		// BeforeStart runs with the engine fully built (pool open, schema
+		// compiled) but BEFORE the listener accepts anything — the seam for boot
+		// work: your own DDL for what the schema grammar cannot express, seeds, a
+		// warm-up. It hands you the ENGINE'S OWN pool, so you never parse
+		// DATABASE_URL and open a second one. An error here ABORTS the boot.
+		BeforeStart: ensureInvariants,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -86,12 +99,13 @@ func main() {
 		Method: "POST", Path: "/api/register", Public: true, Timeout: 15 * time.Second,
 		Handler: func(ctx appitools.Ctx) error {
 			var body struct {
-				Email    string  `json:"email"`
-				Password string  `json:"password"`
-				FullName string  `json:"full_name"`
-				License  string  `json:"license"`
-				CourseID string  `json:"course_id"`
-				Amount   float64 `json:"amount"`
+				Email    string `json:"email"`
+				Password string `json:"password"`
+				FullName string `json:"full_name"`
+				License  string `json:"license"`
+				CourseID string `json:"course_id"`
+				// Money is int64 MINOR UNITS (cents), never a float — see schema.json.
+				AmountCents int64 `json:"amount_cents"`
 			}
 			if err := ctx.Bind(&body); err != nil {
 				return ctx.Error(400, "invalid body", err)
@@ -148,8 +162,8 @@ func main() {
 				return ctx.Error(500, "profile creation failed", err)
 			}
 			if _, err := ctx.UnsafeTx().Exec(ctx.Context(),
-				`INSERT INTO enrollments (user_id, course_id, amount, external_ref) VALUES ($1, $2, $3, $4)`,
-				user.ID, body.CourseID, body.Amount, "lic-"+body.License); err != nil {
+				`INSERT INTO enrollments (user_id, course_id, amount_cents, external_ref) VALUES ($1, $2, $3, $4)`,
+				user.ID, body.CourseID, body.AmountCents, "lic-"+body.License); err != nil {
 				return ctx.Error(500, "enrollment failed", err)
 			}
 
@@ -231,9 +245,263 @@ func main() {
 		},
 	})
 
+	register(app, appitools.Route{
+		// POST /api/checkout — an AUTHENTICATED custom route reachable by a role
+		// that uses per-resource `permissions` (the "student" role owner-scopes
+		// each resource by its own column). That combination is only expressible
+		// because the role declares a `routes` grant in the schema:
+		//
+		//   "student": { "permissions": {...}, "routes": { "checkout": {"actions":["create"]} } }
+		//
+		// Without it the middleware would deny-by-default: a custom route's first
+		// segment is a VIRTUAL resource, and `permissions` keys must be real ones.
+		// See ADR-021.
+		Method: "POST", Path: "/api/checkout", Timeout: 10 * time.Second,
+		Handler: func(ctx appitools.Ctx) error {
+			var body struct {
+				CourseID string `json:"course_id"`
+			}
+			if err := ctx.Bind(&body); err != nil {
+				return ctx.Error(400, "invalid body", err)
+			}
+			if body.CourseID == "" {
+				return ctx.Error(422, "course_id is required", nil)
+			}
+			// Money is int64 MINOR UNITS everywhere (see schema.json price_cents):
+			// never float. The read goes through ctx.Query, which re-evaluates the
+			// caller's role against the REAL resource — a route grant authorizes the
+			// ENDPOINT, never the data.
+			courses, err := ctx.Query("courses", appitools.QueryOpts{
+				Filters: map[string]any{"id": body.CourseID}, Limit: 1,
+			})
+			if err != nil {
+				return ctx.Error(403, "not allowed to read courses", err)
+			}
+			if len(courses) == 0 {
+				return ctx.Error(404, "course not found", nil)
+			}
+			priceCents, _ := courses[0]["price_cents"].(int64)
+
+			// The enrollment is created with the caller's OWN user_id: the role's
+			// row condition on `enrollments` forces it anyway (mass-assignment is
+			// blocked at the engine level), so this cannot attribute a purchase to
+			// somebody else.
+			row, err := ctx.Insert("enrollments", map[string]any{
+				"user_id":      ctx.Claims().UserID,
+				"course_id":    body.CourseID,
+				"amount_cents": priceCents,
+				"external_ref": "chk-" + ctx.Claims().UserID + "-" + body.CourseID,
+			})
+			if err != nil {
+				return ctx.Error(409, "could not enroll", err)
+			}
+			return ctx.JSON(201, map[string]any{"enrollment": row, "amount_cents": priceCents})
+		},
+	})
+
+	register(app, appitools.Route{
+		// POST /api/webhooks/payments — THE security-critical handler most products
+		// write, and the one shape it is easiest to get wrong. Six rules, in order:
+		//
+		//  1. VERIFY THE SIGNATURE OVER THE RAW BYTES, BEFORE PARSING. ctx.RawBody()
+		//     returns the body exactly as sent, under the engine's own 1 MiB cap
+		//     (nothing to re-implement), and Bind still works afterwards. Parsing
+		//     first and re-serializing changes key order and whitespace and breaks
+		//     every signature — the #1 documented payment-integration bug.
+		//  2. IDEMPOTENCY IS A UNIQUE CONSTRAINT, not an `if`. Gateways deliver
+		//     at-least-once and retries arrive CONCURRENTLY; "SELECT then INSERT"
+		//     races with itself. Insert first, let the DB reject the duplicate.
+		//  3. THE WEBHOOK IS THE SOURCE OF TRUTH — not the browser redirect (the
+		//     customer may close the tab; some methods settle minutes later).
+		//  4. RESPOND 200 ONLY AFTER THE STATE IS COMMITTED. A 200 tells the
+		//     gateway to stop retrying, so it must mean "recorded", not "received".
+		//     The engine buffers ctx.JSON until AFTER the commit — a commit failure
+		//     becomes a 500, never a false 200 — which is exactly this rule.
+		//  5. HANDLE OUT-OF-ORDER EVENTS: compare the gateway's own timestamp, not
+		//     arrival order, before overwriting newer state.
+		//  6. NEVER RETRY BUSINESS LOGIC ON A TERMINAL DECLINE. A decline is final;
+		//     release what you held and stop.
+		//
+		// Public (a gateway has no JWT), so the caller is hostile: every input is
+		// validated, and the engine's conservative public-route rate limit applies.
+		Method: "POST", Path: "/api/webhooks/payments", Public: true, Timeout: 15 * time.Second,
+		Handler: func(ctx appitools.Ctx) error {
+			// Rule 1 — raw bytes first.
+			raw, err := ctx.RawBody()
+			if err != nil {
+				if errors.Is(err, appitools.ErrBodyTooLarge) {
+					return ctx.Error(413, "payload too large", err)
+				}
+				return ctx.Error(400, "unreadable body", err)
+			}
+			if !validSignature(raw, ctx.Request().Header.Get("X-Signature")) {
+				return ctx.Error(401, "invalid signature", nil)
+			}
+
+			// Only NOW is it safe to interpret the bytes.
+			var event struct {
+				ID     string `json:"id"`
+				Type   string `json:"type"`
+				Ref    string `json:"external_ref"`
+				Status string `json:"status"`
+			}
+			if err := json.Unmarshal(raw, &event); err != nil {
+				return ctx.Error(400, "invalid event", err)
+			}
+			if event.ID == "" || event.Ref == "" {
+				return ctx.Error(422, "id and external_ref are required", nil)
+			}
+
+			// Rule 2 — the DATABASE decides whether this is a duplicate.
+			tag, err := ctx.UnsafeTx().Exec(ctx.Context(),
+				`INSERT INTO webhook_events (event_id, provider, payload)
+				 VALUES ($1, 'payments', $2) ON CONFLICT (event_id) DO NOTHING`,
+				event.ID, string(raw))
+			if err != nil {
+				return ctx.Error(500, "could not record the event", err)
+			}
+			if tag.RowsAffected() == 0 {
+				// Already applied. 200 so the gateway stops retrying: this is a
+				// success, not an error.
+				return ctx.JSON(200, map[string]any{"status": "duplicate", "event_id": event.ID})
+			}
+
+			// Rules 3 + 6 — apply the state change in THIS transaction. The guard in
+			// the WHERE makes the transition race-safe and makes a terminal state
+			// impossible to revive.
+			if event.Status == "refunded" {
+				if _, err := ctx.UnsafeTx().Exec(ctx.Context(),
+					`UPDATE enrollments SET status = 'refunded'
+					  WHERE external_ref = $1 AND status = 'active'`, event.Ref); err != nil {
+					return ctx.Error(500, "could not apply the refund", err)
+				}
+			}
+
+			// Side effects go to the OUTBOX, not an inline call: enqueued in the same
+			// transaction (it exists iff the event was recorded) and delivered by the
+			// worker, so a slow provider can never hold this transaction open.
+			if _, err := ctx.Enqueue("email.send", map[string]any{
+				"template": "payment_" + event.Status, "external_ref": event.Ref,
+			}); err != nil {
+				return ctx.Error(500, "enqueue failed", err)
+			}
+			// Rule 4 — the 200 is flushed after the commit, by the engine.
+			return ctx.JSON(200, map[string]any{"status": "processed", "event_id": event.ID})
+		},
+	})
+
+	register(app, appitools.Route{
+		// GET /api/catalogue — a PUBLIC READ endpoint, and the reason
+		// Route.RateLimit exists. The public-route default (5 rps / burst 10) is
+		// calibrated for a public WRITE endpoint like /api/register above; a
+		// catalogue is bursty and read-only, and would trip it under ordinary
+		// traffic. Declaring the budget HERE beats raising
+		// APPITOOLS_PUBLIC_ROUTE_RPS process-wide, which would also loosen the
+		// registration and webhook endpoints that want the strict default.
+		Method: "GET", Path: "/api/catalogue", Public: true,
+		RateLimit: &appitools.RateLimit{RPS: 200, Burst: 400},
+		Handler: func(ctx appitools.Ctx) error {
+			// No identity on a public route, so the RBAC helpers fail closed: this
+			// is a deliberate, greppable UnsafeTx, and the handler owns the filter
+			// (only published courses are ever exposed). Tenant isolation still
+			// holds — the tx carries the tenant's search_path.
+			rows, err := ctx.UnsafeTx().Query(ctx.Context(),
+				`SELECT id, title, price_cents, metadata FROM courses
+				  WHERE published = true ORDER BY title LIMIT 50`)
+			if err != nil {
+				return ctx.Error(500, "catalogue unavailable", err)
+			}
+			defer rows.Close()
+			out := []map[string]any{}
+			for rows.Next() {
+				var id, title string
+				var priceCents int64
+				var metadata map[string]any // a jsonb column decodes straight into Go
+				if err := rows.Scan(&id, &title, &priceCents, &metadata); err != nil {
+					return ctx.Error(500, "catalogue row", err)
+				}
+				out = append(out, map[string]any{
+					"id": id, "title": title, "price_cents": priceCents, "metadata": metadata,
+				})
+			}
+			return ctx.JSON(200, map[string]any{"data": out})
+		},
+	})
+
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// ensureInvariants is the Config.BeforeStart hook: the DDL the schema grammar
+// cannot express. Everything the grammar CAN express — columns, indexes (btree and
+// gin), foreign keys, unique constraints — belongs in schema.json, where the
+// migration engine owns it. What is left is genuinely non-declarative: CHECK
+// constraints, generated columns, partial indexes.
+//
+// It runs on the ENGINE'S OWN pool, which is NOT tenant-scoped: set the search_path
+// yourself, transaction-locally, as DATA — never by string concatenation.
+func ensureInvariants(ctx context.Context, pool *pgxpool.Pool) error {
+	rows, err := pool.Query(ctx, `SELECT pg_schema FROM public.tenants ORDER BY id`)
+	if err != nil {
+		return fmt.Errorf("list tenants: %w", err)
+	}
+	var schemas []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			rows.Close()
+			return err
+		}
+		schemas = append(schemas, s)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, pgSchema := range schemas {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "SELECT set_config('search_path', $1, true)", pgSchema); err != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("set search_path %s: %w", pgSchema, err)
+		}
+		// A money invariant the schema's min:0 cannot enforce at the DB level.
+		if _, err := tx.Exec(ctx,
+			`ALTER TABLE courses DROP CONSTRAINT IF EXISTS chk_courses_price_nonneg`); err != nil {
+			_ = tx.Rollback(ctx)
+			return err
+		}
+		if _, err := tx.Exec(ctx,
+			`ALTER TABLE courses ADD CONSTRAINT chk_courses_price_nonneg
+			   CHECK (price_cents IS NULL OR price_cents >= 0)`); err != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("price check on %s: %w", pgSchema, err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return err
+		}
+	}
+	log.Printf("boot: invariants ensured for %d tenant(s)", len(schemas))
+	return nil
+}
+
+// validSignature verifies an HMAC-SHA256 signature over the RAW request bytes.
+// WEBHOOK_SECRET unset → the example runs standalone by accepting any signature;
+// a real deployment must fail closed instead.
+func validSignature(raw []byte, header string) bool {
+	secret := os.Getenv("WEBHOOK_SECRET")
+	if secret == "" {
+		return true // stub for the standalone example — NEVER do this in production
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(raw)
+	want := hex.EncodeToString(mac.Sum(nil))
+	// Constant time: a byte-by-byte compare leaks the signature through timing.
+	return hmac.Equal([]byte(strings.TrimPrefix(header, "sha256=")), []byte(want))
 }
 
 // register aborts boot on a bad route — a registration error is a programming

@@ -22,8 +22,9 @@ appitools spec > appitools-spec.md
 ```
 
 Prints the distilled schema grammar for an LLM: the closed type set, strict-key
-rule, naming, relations (all 3 kinds), the `file` field, state machines, hooks,
-events, both RBAC forms, full FK coverage — plus **two worked examples that are
+rule, naming, relations (all 3 kinds), the `file` field, `jsonb` + gin indexes,
+state machines, hooks, events, both RBAC forms (plus `routes` grants for custom
+endpoints), full FK coverage — plus **two worked examples that are
 validated against the engine in CI** (the spec can never teach a shape the
 validator rejects) and the correction-loop instructions.
 
@@ -65,7 +66,7 @@ Example of what the oracle reports (a `"type": "number"` typo):
 {
   "path": "resources.productos.fields.precio.type",
   "rule": "invalid_enum_value",
-  "expected": ["string", "text", "int", "int64", "float64", "bool", "uuid", "time", "json", "file"],
+  "expected": ["string", "text", "int", "int64", "float64", "bool", "uuid", "time", "json", "jsonb", "file"],
   "fix": "use one of the allowed values listed in expected"
 }
 ```

@@ -73,6 +73,41 @@ custom handler for plain CRUD; write one only for logic the schema can't express
 Custom routes may not live under a resource's `/api/<resource>` prefix (it's
 owned by the generated routes — a collision is rejected at boot).
 
+Four schema facts that change how you write handlers:
+
+**Generated reads are `SELECT *`.** The list/get path selects every column of the
+table, not the declared field list. That is load-bearing: a column that exists in
+the database but *not* in the schema still comes back on `GET /api/products`.
+Writes are the opposite — an undeclared key is rejected `422 unknown_field` — so
+an undeclared column is **readable but only writable from your own SQL**. This
+used to be the escape hatch for anything the grammar couldn't express (see
+"undeclared columns" below).
+
+**Money is `int64` in minor units.** There is no `decimal`/`money` type, and
+`float64` money is a rounding bug on a timer. Store cents (or the currency's
+smallest unit) in an `int64` and put the unit in the name — `price_cents`,
+`total_cents` — so it is impossible to misread at a call site. Most payment APIs
+(Stripe, Wompi, Adyen) speak minor units too, so money never converts. Format for
+display at the edge, never in the database.
+
+**Documents go in `jsonb`, not `json`.** `jsonb` is a real Postgres jsonb column:
+containment (`@>`) works and an `indexes` entry can declare
+`"method": "gin"` (with `"opclass": "jsonb_path_ops"` when the index only ever
+answers `@>`). `json` is stored as TEXT — exact bytes preserved, but nothing you
+can query or index. Use `jsonb` for merchant-defined attributes, settings blobs,
+raw webhook payloads you may need to search. pgx decodes a `jsonb` column straight
+into a Go `map[string]any` and encodes a Go map back — no manual marshalling.
+
+**Undeclared columns: still supported, no longer the default answer.** Creating
+your own column with `BeforeStart` DDL works — the engine's migration is additive
+and reports a column it does not know about as `gated_drops` (drift) rather than
+dropping it. Reach for it only for what the grammar genuinely cannot express:
+**CHECK constraints, generated columns, partial indexes** (an index `WHERE`
+predicate is deliberately absent — Postgres normalizes predicate text, so
+round-tripping one through the diff would churn the index on every migration).
+Anything the grammar *can* express — columns, btree/gin indexes, foreign keys,
+unique constraints — belongs in `schema.json`, where the migration engine owns it.
+
 ---
 
 ## 3. Custom handlers in Go — the core
@@ -121,6 +156,41 @@ func main() {
 `New` → `Register` (any number, **before** `Start`) → `Start`. `Register` after
 `Start` is an error (routes are wired at boot).
 
+**Boot work — `Config.BeforeStart`.** For anything that must be true before the
+first request (your own DDL, seeds, a warm-up), use the boot hook rather than
+opening a second pool from `DATABASE_URL` — which drifts from the engine's own
+configuration:
+
+```go
+app, err := appitools.New(appitools.Config{
+	SchemaPath: "schema.json",
+	// Runs after the pool is open and the schema compiled, BEFORE the listener
+	// accepts anything. A non-nil error ABORTS the boot — an app whose invariants
+	// failed to install must not serve traffic.
+	BeforeStart: func(ctx context.Context, pool *pgxpool.Pool) error {
+		// The pool is NOT tenant-scoped: set the search_path yourself,
+		// transaction-locally, as DATA — never by string concatenation.
+		tx, err := pool.Begin(ctx)
+		if err != nil { return err }
+		defer tx.Rollback(ctx) //nolint:errcheck
+		if _, err := tx.Exec(ctx, "SELECT set_config('search_path', $1, true)", pgSchema); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `ALTER TABLE variants ADD CONSTRAINT chk_stock
+		    CHECK (reserved >= 0 AND reserved <= stock)`); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	},
+})
+```
+
+`app.Pool()` exposes the same pool if you need it outside the hook. Do **not**
+close it — its lifetime belongs to the App. Inside a request, always prefer `Ctx`
+(whose transaction already carries the tenant's search_path and the role's row
+filter). See [examples/backend-guide/main.go](../examples/backend-guide/main.go)
+`ensureInvariants` for the full loop over tenants.
+
 ### 3.2 The `Route`
 
 ```go
@@ -132,6 +202,7 @@ type Route struct {
 	RequireRole string        // optional: demand this exact JWT role (else 403)
 	Public      bool          // optional: skip JWT + path-RBAC (pre-auth endpoint)
 	Timeout     time.Duration // optional: per-endpoint deadline (default 5s)
+	RateLimit   *RateLimit    // optional: this endpoint's own throttle {RPS, Burst}
 }
 ```
 
@@ -147,6 +218,16 @@ type Route struct {
   check on top of path-RBAC below).
 - **`Public`** — see §3.5. Public + RequireRole is a contradiction (rejected at
   boot); a Public path must be literal (no `{param}`).
+- **`RateLimit`** — this endpoint's own bucket, per (tenant, client IP). A public
+  route with no declaration gets the engine's conservative default (5 rps / burst
+  10), which is right for a public **write** endpoint (registration, a webhook)
+  and far too low for a public **read** one: a storefront catalogue trips it under
+  ordinary traffic. Declare `&appitools.RateLimit{RPS: 200, Burst: 400}` on that
+  route instead of raising `APPITOOLS_PUBLIC_ROUTE_RPS` process-wide, which would
+  also loosen the endpoints that want the strict default. Both values must be > 0
+  (a half-filled struct is rejected at boot). Set on an authenticated route, it
+  adds a per-(tenant, IP) limit on top of the per-tenant one — useful for an
+  expensive report or export.
 
 ### 3.3 The `Ctx` — every method
 
@@ -189,13 +270,24 @@ row, err := ctx.Insert("students", map[string]any{"full_name": "Ana"})
 row, err := ctx.Update("students", id, map[string]any{"country": "MX"})
 ```
 
-**Request binding** (1 MiB cap, like the generated routes):
+**Request binding** (1 MiB cap — `appitools.MaxBodyBytes` — like the generated
+routes):
 
 ```go
 var body struct{ Msg string `json:"msg"` }
 err := ctx.Bind(&body)                 // JSON-decode the body
 err := ctx.BindResource("students", &dst) // + validate against the schema rules → *ValidationError (422)
+
+raw, err := ctx.RawBody()              // the EXACT bytes, same cap. USE THIS FOR WEBHOOKS.
 ```
+
+`RawBody` returns the body byte-for-byte as sent. **A signature is computed over
+those bytes**: parsing and re-serializing changes key order and whitespace and
+breaks every signature, so `Bind` is the wrong tool for a signed payload — verify
+over `RawBody` first, then decode. The body is buffered once, so `RawBody` and
+`Bind` compose in any order (a plain `io.ReadAll(ctx.Request().Body)` would leave
+`Bind` with an empty stream, and would make you re-implement the size cap). Over
+the cap → `appitools.ErrBodyTooLarge`, which maps to `413` if you return it.
 
 **Outbox** — enqueue a durable job **inside the current transaction** (atomic
 with your write; a handler error rolls it back too):
@@ -271,46 +363,124 @@ in every handler you write:
    `ctx.Tx()` queries concurrently (not even reads). Parallelise external I/O or
    CPU with `SafeParallel`; serialise DB work on the tx.
 
-### 3.5 Custom routes and RBAC (read this before you wire auth)
+### 3.5 RBAC — the biggest design force in this document
 
-A custom route is authorized at **two** layers — understand both:
+**Read this before you write a line of schema.** RBAC shape decides your data
+model, not just your auth code: get it wrong and you discover, three resources in,
+that the only way to express "customers see their own orders *and* can check out"
+is to denormalize a column onto every table. Everything else in this guide is
+recoverable; this is the one that isn't.
 
-**Layer 1 — path RBAC (the middleware).** The engine treats the route's **first
-`/api/` segment as a virtual resource** and evaluates the caller's role against
-it with the HTTP-method action (`GET`→read, `POST`→create, `PUT`/`PATCH`→update,
-`DELETE`→delete). Consequences:
+#### The three role shapes
 
-- A **wildcard role** (`{"resources":"*","actions":["*"]}` — typically `admin`)
-  reaches **every** custom route.
-- A **restricted role** reaches a custom route only if its policy grants that
-  segment. You grant it by listing the segment in the role's **role-global**
-  `resources` array as a *virtual resource* (no schema table needed):
-  `{"resources":["students","reports"],"actions":["read"]}` lets that role
-  `GET /api/reports/...`. **The per-resource `permissions` form cannot grant a
-  virtual segment** (it validates every key against real resources), so a role
-  that uses `permissions` for fine-grained per-resource scoping cannot also be
-  granted a custom route. Design accordingly:
-  - **End users** read/write their own data through the **generated** routes
-    (`GET /api/students` etc.), which the engine owner-scopes via the role's row
-    condition — no custom route needed.
-  - **Custom authenticated routes are for admin/ops/service roles** (wildcard or
-    role-global), or are **Public**.
-- A **`Public: true`** route skips path RBAC and JWT entirely — for pre-auth
-  endpoints (registration, webhooks). Inside, `Claims()` is empty and the
-  RBAC-aware helpers fail closed; anonymous writes go through `CreateUser` (which
-  carries its own rules) or a deliberate `UnsafeTx`.
+| Shape | Looks like | Use it for |
+|---|---|---|
+| **wildcard** | `{"resources":"*","actions":["*"]}` | admins/ops. Reaches every resource **and every custom route**. |
+| **role-global** | `{"resources":["a","b"],"actions":["read"],"conditions":{…}}` | one rule across a set of resources that share the *same* ownership column. |
+| **per-resource** | `{"permissions":{"orders":{…},"invoices":{…}}}` | the realistic case: each resource scoped by **its own** column. |
 
-**Layer 2 — data RBAC (inside the handler).** `ctx.Query`/`Insert`/`Update`
-re-evaluate the role against the **real** resource they touch, applying the row
-condition and field allowlist. So even an admin handler reads exactly what the
-role permits; a restricted role calling `ctx.Query("students", …)` gets only its
-own rows.
+**Role-global carries ONE condition across every resource it lists.** That
+condition is injected into the WHERE of *each* of them, so the column must exist on
+**all** of them — the engine now rejects the schema at load if it doesn't, naming
+the offending resources. If your resources are owned through different columns
+(`projects.owner_id`, `documents.created_by`), role-global cannot express it; use
+`permissions`.
 
-> If a custom route returns `403` unexpectedly, it's almost always Layer 1: the
-> caller's role doesn't grant the route's first path segment. Grant the segment
-> (role-global), make the route `Public`, or call it with a wildcard role.
+```json
+"member": {
+  "permissions": {
+    "projects":  { "actions": ["read","create","update"],
+                   "conditions": { "field": "owner_id",   "op": "eq", "val": "$user_id" } },
+    "documents": { "actions": ["read","update"],
+                   "conditions": { "field": "created_by", "op": "eq", "val": "$user_id" } },
+    "tags":      { "actions": ["read"] },
+    "posts":     { "actions": ["read","update","delete"],
+                   "conditions": { "field": "author_id", "op": "eq", "val": "$user_id" },
+                   "condition_actions": ["update","delete"] }
+  }
+}
+```
+
+`tags` is unscoped (every row). `posts` is "read all, write own" via
+`condition_actions`. A resource absent from `permissions` is **denied**.
+
+**A row condition is single-column equality — there are no joins.** `op` must be
+`eq`. So "a customer may read the LINES of their own orders" is not expressible as
+`order_lines JOIN orders ON …`; the ownership column has to be **on the row being
+filtered**. Denormalizing `user_id` onto the child table is the correct answer, not
+a hack — it is how the filter becomes an index lookup instead of a join the
+authorizer would have to plan. Budget for it in the data model.
+
+#### Custom routes: the `routes` grant
+
+A custom route is authorized by its **first `/api/` segment**, treated as a
+*virtual resource*, with the action derived from the method (`GET`→read,
+`POST`→create, `PUT`/`PATCH`→update, `DELETE`→delete). `POST /api/checkout` is
+"create on `checkout`".
+
+A role grants it with a **`routes`** block, which is **orthogonal** to
+`resources`/`permissions` — different namespace (registered endpoints, not tables),
+so a role may declare both:
+
+```json
+"customer": {
+  "permissions": {
+    "orders":      { "actions": ["read"], "conditions": { "field": "user_id", "op": "eq", "val": "$user_id" } },
+    "order_lines": { "actions": ["read"], "conditions": { "field": "user_id", "op": "eq", "val": "$user_id" } }
+  },
+  "routes": { "checkout": { "actions": ["create"] } }
+}
+```
+
+**This is the shape for "owner-scoped end users + a custom action endpoint"** — a
+customer with their own orders *and* `POST /api/checkout`. It is the single most
+common real requirement, and before the `routes` block it was inexpressible: a
+`permissions` role could not reach any custom route.
+
+Rules worth knowing before you use it:
+
+- **No `conditions`, no `fields`.** A route segment has no rows and no columns;
+  declaring either is a load error. The **data** a handler touches is authorized
+  separately — `ctx.Query`/`Insert`/`Update` re-evaluate the role against the real
+  resources (Layer 2 below).
+- **Boot-validated.** A grant for a segment no route registers — or an action no
+  registered method provides — **fails the boot**, with the registered segments
+  listed. Dead authorization config never becomes a mystery 403.
+- **Authoritative for the segments it names**: adding `routes` to a wildcard role
+  *narrows* those segments. A segment it doesn't name falls through to the role's
+  normal evaluation, so deny-by-default is untouched.
+- A key that names a real resource is rejected — use `permissions` for that.
+- The **pure `appitools serve` binary registers no custom routes**, so a schema
+  with a `routes` grant only boots in the binary that registers them.
+
+Full rationale, alternatives considered, and the security tests:
+[ADR-021](adr/ADR-021-custom-route-authorization.md).
+
+#### Layer 2 — data RBAC inside the handler
+
+`ctx.Query`/`Insert`/`Update` re-evaluate the caller's role against the **real**
+resource they touch, applying its row condition and field allowlist. A route grant
+opens the **endpoint**, never the data: a customer calling
+`ctx.Query("orders", …)` inside `/api/checkout` still gets only their own rows, and
+`ctx.Insert` still forces the condition column to their own id (no
+mass-assignment). Two independent layers, and you want both.
+
+#### `Public: true` — no layer at all
+
+Skips JWT and path RBAC entirely, for pre-auth endpoints (registration, webhooks,
+a storefront). Inside, `Claims()` is empty and the RBAC-aware helpers fail closed;
+anonymous work goes through `CreateUser` (which carries its own rules) or a
+deliberate, greppable `UnsafeTx`. Treat every input as hostile — §3.4 rule 3.
+
+> **Debugging a 403 on a custom route:** it is almost always the grant. Check, in
+> order: does the role declare the segment under `routes`? Is the action right for
+> the method? Is the role wildcard (then it should already work)? Is the route
+> `Public` (then RBAC isn't involved at all)?
 
 ### 3.6 Worked examples (all compile — see examples/backend-guide/)
+
+(a) an admin-scoped route · (b) a public registration in one transaction ·
+(c) bounded parallel fan-out · **(d) a payment webhook** · (e) fire-and-forget.
 
 **(a) An authenticated, admin-scoped route** — cross-resource read; `ctx.Query`
 still enforces RBAC on the real resources.
@@ -451,7 +621,111 @@ app.Register(appitools.Route{
 })
 ```
 
-**(d) Fire-and-forget with `SafeGo`** — a best-effort external ping off the
+**(d) A payment webhook** — the single most security-sensitive handler most
+products ever write, and the one shape that is easiest to get wrong. Six rules, in
+this order:
+
+1. **Verify the signature over the RAW bytes, BEFORE parsing.** `ctx.RawBody()`
+   gives them under the engine's own cap. Parsing first and re-serializing changes
+   key order and whitespace — the #1 documented payment-integration bug.
+2. **Idempotency is a UNIQUE constraint, not an `if`.** Gateways deliver
+   at-least-once and retries arrive *concurrently*; "SELECT then INSERT" races with
+   itself. Insert first, let the database reject the duplicate.
+3. **The webhook is the source of truth**, not the browser redirect (the customer
+   closes the tab; some methods settle minutes later).
+4. **Answer 200 only after the state is committed.** A 200 tells the gateway to
+   stop retrying, so it must mean "recorded". `ctx.JSON` is buffered until *after*
+   the commit — a commit failure becomes a 500, never a false 200. That is this
+   rule, enforced by the engine.
+5. **Handle out-of-order events**: compare the gateway's own timestamp, not arrival
+   order, before overwriting newer state.
+6. **Never retry business logic on a terminal decline.** Release what you held and
+   stop; the customer starts a new payment.
+
+```go
+app.Register(appitools.Route{
+	Method: "POST", Path: "/api/webhooks/payments", Public: true, Timeout: 15 * time.Second,
+	Handler: func(ctx appitools.Ctx) error {
+		// Rule 1 — raw bytes first, cap enforced by the engine.
+		raw, err := ctx.RawBody()
+		if err != nil {
+			if errors.Is(err, appitools.ErrBodyTooLarge) {
+				return ctx.Error(413, "payload too large", err)
+			}
+			return ctx.Error(400, "unreadable body", err)
+		}
+		if !validSignature(raw, ctx.Request().Header.Get("X-Signature")) {
+			return ctx.Error(401, "invalid signature", nil)
+		}
+
+		// Only NOW is it safe to interpret the bytes.
+		var event struct {
+			ID     string `json:"id"`
+			Ref    string `json:"external_ref"`
+			Status string `json:"status"`
+		}
+		if err := json.Unmarshal(raw, &event); err != nil {
+			return ctx.Error(400, "invalid event", err)
+		}
+		if event.ID == "" || event.Ref == "" {
+			return ctx.Error(422, "id and external_ref are required", nil)
+		}
+
+		// Rule 2 — the DATABASE decides whether this is a duplicate.
+		// webhook_events.event_id is `"unique": true` in the schema.
+		tag, err := ctx.UnsafeTx().Exec(ctx.Context(),
+			`INSERT INTO webhook_events (event_id, provider, payload)
+			 VALUES ($1, 'payments', $2) ON CONFLICT (event_id) DO NOTHING`,
+			event.ID, string(raw))
+		if err != nil {
+			return ctx.Error(500, "could not record the event", err)
+		}
+		if tag.RowsAffected() == 0 {
+			// Already applied — 200 so the gateway stops retrying. A success, not an error.
+			return ctx.JSON(200, map[string]any{"status": "duplicate", "event_id": event.ID})
+		}
+
+		// Rules 3 + 6 — apply the change in THIS transaction. The guard in the
+		// WHERE makes the transition race-safe and a terminal state unrevivable.
+		if event.Status == "refunded" {
+			if _, err := ctx.UnsafeTx().Exec(ctx.Context(),
+				`UPDATE enrollments SET status = 'refunded'
+				  WHERE external_ref = $1 AND status = 'active'`, event.Ref); err != nil {
+				return ctx.Error(500, "could not apply the refund", err)
+			}
+		}
+
+		// Side effects go to the OUTBOX, never an inline call: enqueued in the same
+		// transaction (it exists iff the event was recorded), delivered by the
+		// worker — so a slow provider can't hold this transaction open.
+		if _, err := ctx.Enqueue("email.send", map[string]any{
+			"template": "payment_" + event.Status, "external_ref": event.Ref,
+		}); err != nil {
+			return ctx.Error(500, "enqueue failed", err)
+		}
+		// Rule 4 — flushed after the commit, by the engine.
+		return ctx.JSON(200, map[string]any{"status": "processed", "event_id": event.ID})
+	},
+})
+```
+
+The signature check itself must be **constant-time** — a byte-by-byte compare
+leaks the signature through timing:
+
+```go
+func validSignature(raw []byte, header string) bool {
+	mac := hmac.New(sha256.New, []byte(os.Getenv("WEBHOOK_SECRET")))
+	mac.Write(raw)
+	want := hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(strings.TrimPrefix(header, "sha256=")), []byte(want))
+}
+```
+
+Two more things a real integration needs: **compare the amount** the event reports
+against what you charged (a correctly-signed event for the wrong amount is a
+misroute or tampering — refuse it), and **record rejected events** for audit.
+
+**(e) Fire-and-forget with `SafeGo`** — a best-effort external ping off the
 response path. The goroutine gets a fresh context (no request values) with its
 own deadline, which `fn` must honor; a panic is recovered, never a crash. This is
 at-most-once — for durable work, `Enqueue` instead.
@@ -584,6 +858,59 @@ Rules:
 - **Long operations** (a report over minutes): return `202 Accepted` with a job
   id from `Enqueue`, let the worker do the work and write the result back through
   the engine API, and have the client poll a status resource.
+
+### 6.1 The worker, in framework mode
+
+`Enqueue` writes the job; a **separate process** drains it. Separate on purpose: a
+slow or crashing consumer must never hold a request open, pin a pool connection, or
+take the API down. You do not need the shipped `appitools-worker` binary —
+`pkg/worker` is a library and a consumer is ~40 lines
+([examples/backend-guide/worker/main.go](../examples/backend-guide/worker/main.go)):
+
+```go
+func main() {
+	log := zerolog.New(os.Stderr).With().Timestamp().Logger()
+	dsn := os.Getenv("DATABASE_URL")
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// DEDICATED connections, never a pool: a LISTEN connection must be permanent,
+	// and a pool would rotate it out from under the listener.
+	connect := func(ctx context.Context) (*pgx.Conn, error) { return pgx.Connect(ctx, dsn) }
+
+	// A Router dispatches by topic — ONE worker, N event types.
+	router := consumers.NewRouter(log)
+	router.Handle("email.send", worker.ProcessorFunc(sendEmail))
+	router.Handle("enrollments.created", worker.ProcessorFunc(onEnrollmentCreated))
+
+	if err := worker.New(connect, router, worker.Config{}, log).Run(ctx); err != nil && ctx.Err() == nil {
+		log.Fatal().Err(err).Msg("worker exited")
+	}
+}
+```
+
+The rules that decide whether a consumer is correct:
+
+- **Compose a `Router`, don't run two single-topic workers.** A worker ACKs topics
+  it does not own, so two *different* single-topic workers against one outbox
+  silently drop each other's events under `SKIP LOCKED`. Scale by running **N
+  identical** copies of the same Router instead — the drain uses
+  `SELECT … FOR UPDATE SKIP LOCKED`, so instances never collide on a row.
+- **Delivery is at-least-once ⇒ Processors must be idempotent.** Make the side
+  effect idempotent at the destination (a provider idempotency key, an upsert on a
+  unique column), not with an `if already_done` that races with itself.
+- **`return nil` ACKs; `return err` retries with backoff.** Return an error only
+  for *transient* failures. A permanent one (a malformed payload, a rejected
+  address) should be recorded and acked — otherwise it is retried until it
+  exhausts `max_attempts`, burning the queue on a job that can never succeed.
+- **Write results back through the ENGINE API** (`worker.NewEngineClient` mints a
+  short-lived, scoped service JWT), not straight into the tenant's tables — that
+  way the write inherits the engine's validation and RBAC instead of bypassing
+  both. Never `admin`; give the worker a minimal role in the schema.
+- **Schema events cost no handler code**: `"events": ["create"]` on a resource
+  makes the engine write `<resource>.created` to the outbox inside the same
+  transaction as the INSERT. The payload is lean (`{id, tenant_id, resource,
+  action}`) — a consumer that needs the row reads it back.
 
 ---
 
