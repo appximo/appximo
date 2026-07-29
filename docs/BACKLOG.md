@@ -147,6 +147,20 @@ engine's roadmap depends on what building it revealed).
   10 minutes on CI hardware, and the gate added to `ci.yml`. Not done now because
   annotating 50 sites is churn that would bury this session's diff.
 
+### OPS-4 — The deployed binary is not traceable to a commit
+- **Origin:** this session, while bootstrapping the admin account on the 58.
+  `/health` reports `"version":"dev"` and `appitools version` says
+  `commit unknown` — the live binary was built without the ldflags the canonical
+  build (`scripts/build-engine.sh`) injects.
+- **Impact:** Medium for operations. Nobody can tell from outside WHICH build is
+  serving `api.appitools.com`, and the DevHub deploy pipeline's smoke check
+  (`/health` version == pushed SHA) cannot pass, so a deploy's own verification
+  step is degraded. It also makes a rollback decision guesswork.
+- **Ready:** every path that produces a shipped binary (the installer's download,
+  `deploy-update.sh`, the Docker image, a manual build documented in
+  PRODUCTION.md) goes through `scripts/build-engine.sh`, and `/health` on the 58
+  reports a real SHA. Related to the release tag (see "Requires Miguel" below).
+
 ### COMMERCE-1 — Credit notes (fiscally correct refunds)
 - **Origin:** COMMERCE-CORE-S1 report; the DIAN interface (`docs/DIAN.md`).
 - **Impact:** **High for a Colombian merchant.** A refund today reverses the
@@ -192,6 +206,16 @@ engine's roadmap depends on what building it revealed).
 
 ---
 
+## Requires a decision from Miguel (not technical blockers)
+
+| Item | Why it needs him |
+|---|---|
+| **Cloudflare proxy on `api.appitools.com`** | It resolves to Cloudflare IPs (104.21.x / 172.67.x), which buys DDoS protection and caching but contaminates direct measurement — PROD-VERIFY-SUITE measured 9.75 ms through it vs 2.78 ms at the origin. Keep it and measure the origin directly, or drop it for the demo domain. |
+| **Cut the first release tag** | `RELEASE_VERSION=""` in `scripts/install.sh` and zero `v*` tags, so the documented "download the binary from GitHub Releases" path cannot work yet, and OPS-4 (version traceability) partly depends on it. |
+| **Rotate the 58's PostgreSQL password** | It was exposed in a session transcript on 2026-07-29 (a masking pattern that missed `DATABASE_URL`). Not known to be leaked further, but it is a live credential on a public box. `ALTER USER appitools WITH PASSWORD …` + update `/etc/appitools/appitools.env` + `systemctl restart appitools`. |
+
+---
+
 ## DONE in LOOSE-ENDS-SWEEP-S1
 
 | ID | Item | Verification |
@@ -200,4 +224,5 @@ engine's roadmap depends on what building it revealed).
 | ENG-S2 | **503 instead of 500 when the database cannot serve** (connection failures, SQLSTATE class 08/53, 57P01-03) + `Retry-After` | `pkg/db/unavailable_test.go` — 21 unavailable causes and 11 that must NOT be reclassified (40001/40P01 stay caller errors) |
 | OPS-S1 | Stale ufw rules on the 58 (8080, 3000, from the retired NestJS benchmark) closed | `ufw status` now 22/80/443 only; `api.appitools.com` still 200 with a valid certificate; 8080 refused from outside |
 | DOC-S1 | False claims corrected in ESTADO_Y_PLAN_MAESTRO (a dead droplet listed as live, "everything pushed" with commits queued, six shipped features listed as missing) | Each verified against reality before editing |
+| OPS-S2 | A stale 46 MB binary from 13 Jun (commit `507f846`, predating the whole `/admin` API) sat in `/root/appitools/` on the 58, next to the git checkout — the obvious-looking one to run, and the wrong one | Verified nothing referenced it (systemd, cron, scripts) and that the live process's `/proc/PID/exe` pointed at `/opt/appitools/bin/appitools`; deleted the file only. Service kept the same PID; site still 200 |
 | COMMERCE-S1 | **The reservation sweeper is scheduled** — an abandoned cart no longer holds stock forever | Live: a hold expired, swept within one tick, `stock_reservado` 3 → 0, reservation `liberada`, logged |
