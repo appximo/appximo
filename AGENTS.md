@@ -229,8 +229,27 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   bench/cert targets (`api-cert.sh` and `tests/performance/erp_*.js` default
   to nimbus; `sustained_2krps.js` defaults to acme).
 
+## The open-item rule (non-negotiable)
+
+**[docs/BACKLOG.md](docs/BACKLOG.md) is the single register of open items.** A
+session that leaves anything undone — a deferred feature, a known limitation, a
+decision not to build something — **records it there** with its origin, its
+impact, and either a "ready" criterion (OPEN) or a written justification plus the
+condition to reconsider (CLOSED, normally an ADR).
+
+An item never lives only in a chat report. That is how the project accumulated a
+dozen "I left it on purpose" notes scattered across sessions, each re-litigated
+from memory, until LOOSE-ENDS-SWEEP-S1 had to consolidate them. There are exactly
+three states — OPEN, CLOSED, DONE. "Pending, we'll see" is not one of them.
+
+Before starting work, read the backlog: the item you are about to build may
+already have a decision, and the reasoning may be the thing you need.
+
 ## Boundaries — do not
 
+- **Never leave an item undone without recording it in docs/BACKLOG.md.** A
+  finding that exists only in a session report is a finding the next session will
+  rediscover from scratch (see The open-item rule above).
 - **Never pin a security-relevant dependency downward.** CI runs
   govulncheck and blocks the build. Real incident: x/crypto pinned to
   v0.48 reintroduced GO-2026-5013 and broke the release.

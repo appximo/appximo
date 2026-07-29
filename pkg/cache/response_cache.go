@@ -71,6 +71,11 @@ type ResponseCache struct {
 	// a token validated by another in-process app never short-circuits here.
 	// Empty (the test default) matches claims seeded with an empty secret.
 	jwtSecret string
+
+	// bypassStatic reports paths that never enter the cache (see
+	// SetBypassMatcher). Set once at boot, read-only afterwards; nil for every
+	// app that declares no static mount, so the hot path pays one nil check.
+	bypassStatic func(path string) bool
 }
 
 // SetJWTSecret scopes the cache's claims-cache lookups to the app's JWT secret
@@ -80,6 +85,16 @@ func (rc *ResponseCache) SetJWTSecret(s string) { rc.jwtSecret = s }
 // roleGate wraps the cacheability predicate so it can live behind an
 // atomic.Pointer (a bare func value is not atomically swappable).
 type roleGate struct{ fn func(role string) bool }
+
+// SetBypassMatcher declares which paths the cache must never buffer or store
+// (LOOSE-ENDS-SWEEP-S1) — user-declared static mounts. A frontend's assets are
+// already cached by the browser (immutable hashed filenames) and range-served by
+// http.ServeContent; putting them through captureWriter would buffer every JS
+// chunk and image into RAM, per tenant, for nothing. Same reasoning as the
+// built-in /api/files/ and /admin/ bypasses, but a mount is per-app (and a root
+// mount is not expressible as a prefix), so it is a predicate set at boot.
+// nil — the default — leaves the hot path byte-identical.
+func (rc *ResponseCache) SetBypassMatcher(fn func(path string) bool) { rc.bypassStatic = fn }
 
 // SetRoleCacheGate installs a predicate that decides, per role, whether the
 // response cache may store and serve that role's responses. Roles that fail the
@@ -159,6 +174,13 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 		// — including the files manager's binary downloads (UI-F5-S1). Never cache
 		// nor buffer them.
 		if strings.HasPrefix(r.URL.Path, "/admin/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// User-declared static mounts (LOOSE-ENDS-SWEEP-S1): a frontend's bundles
+		// are browser-cached by content hash and range-served; buffering them here
+		// would put every chunk in RAM per tenant for no benefit.
+		if rc.bypassStatic != nil && rc.bypassStatic(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}

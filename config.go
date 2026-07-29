@@ -143,6 +143,17 @@ type Config struct {
 	// The context is cancelled on SIGINT/SIGTERM, so a hung hook still drains.
 	BeforeStart func(ctx context.Context, pool *pgxpool.Pool) error
 
+	// Static serves one or more file trees from THIS binary — the seam that makes
+	// "one binary = backend + frontend + admin + docs" real (LOOSE-ENDS-SWEEP-S1).
+	// Each mount is served outside /api/, with no tenant transaction, no RBAC
+	// evaluation and no response-cache buffering; a collision with an
+	// engine-owned prefix, a missing index document or a duplicated path is a
+	// BOOT error. See StaticMount for the full contract (including the PCI note
+	// on keeping a checkout page free of third-party scripts).
+	//
+	// Empty (the default, and the pure binary) mounts nothing and costs nothing.
+	Static []StaticMount
+
 	// Version is reported by /health and the synthetic monitor. Empty reports
 	// "dev"; the cmd binary passes its ldflags-injected build version.
 	Version string

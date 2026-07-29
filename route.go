@@ -473,6 +473,8 @@ func (a *App) writeHandlerError(w http.ResponseWriter, rc *requestCtx, rt Route,
 		return
 	}
 	if db.IsUnavailable(err) {
+		// Transient: the database could not serve this, the request is not broken.
+		w.Header().Set("Retry-After", "1")
 		writeErr(w, http.StatusServiceUnavailable, "service unavailable")
 		return
 	}

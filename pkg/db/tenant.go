@@ -4,13 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"regexp"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/puddle/v2"
 	"github.com/sony/gobreaker"
 
 	"github.com/miguelangel/appitools/pkg/resilience"
@@ -22,8 +27,13 @@ import (
 // fast instead of hanging.
 const queryTimeout = 5 * time.Second
 
-// ErrUnavailable is returned when the database cannot serve the query: the
-// queryTimeout elapsed or the circuit breaker is open. Handlers map it to 503.
+// ErrUnavailable is returned when the database cannot SERVE the query (as opposed
+// to rejecting it): the queryTimeout elapsed, the circuit breaker is open, the
+// connection failed, or PostgreSQL reported that it cannot take the work
+// (connection_exception, insufficient_resources, shutting down). Handlers map it
+// to 503 + Retry-After — "retry later", not "your request is broken". See
+// isUnavailableCause for the exact classification and what is deliberately
+// excluded.
 var ErrUnavailable = errors.New("database unavailable")
 
 // IsUnavailable reports whether err signals an unreachable database.
@@ -211,18 +221,88 @@ func (tdb *TenantDB) exec(fn func() (any, error)) (any, error) {
 	return tdb.breaker.Execute(fn)
 }
 
-// classify maps timeout and breaker errors to ErrUnavailable so handlers can
-// answer 503; other errors pass through unchanged.
+// classify maps "the database cannot serve this right now" errors to
+// ErrUnavailable so handlers answer 503; everything else passes through
+// unchanged (and is masked as 500).
+//
+// The distinction is not cosmetic. A 500 tells a client "this request is broken,
+// do not retry"; a 503 tells it "I am saturated or down, retry later" — which is
+// what a load balancer, a retrying SDK and an on-call human all need to react
+// correctly. Only the timeout and breaker cases were classified before, so the
+// production-stack benchmark recorded PostgreSQL being stopped for 15 s as a run
+// of clean 500s ("one honest wart", docs/BENCHMARKS.md §6) when the truthful
+// answer was 503.
 func classify(err error) error {
 	if err == nil {
 		return nil
 	}
+	if isUnavailableCause(err) {
+		// BOTH wrapped (%w twice): the sentinel drives the 503, and the original
+		// cause stays unwrappable so the operator log keeps the SQLSTATE and the
+		// other classifiers still see what actually happened.
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	return err
+}
+
+// isUnavailableCause reports whether err means the database could not serve the
+// request, as opposed to rejecting it. Three families:
+//
+//   - The engine's own backpressure: the query deadline elapsed, or the circuit
+//     breaker is open / probing.
+//   - The connection failed: nothing to talk to (refused, reset, EOF mid-query,
+//     DNS/dial failure), or PostgreSQL reported a class-08 connection_exception.
+//   - PostgreSQL is up but cannot take the work: class 53 insufficient_resources
+//     (too_many_connections, out_of_memory, disk_full) or 57P01/02/03
+//     (admin shutdown, crash shutdown, cannot_connect_now — e.g. a standby still
+//     recovering).
+//
+// Deliberately NOT here: 40001 serialization_failure and 40P01 deadlock_detected.
+// Those mean "your transaction lost a race" — a retry of THAT statement is the
+// caller's decision, and a 503 would tell a load balancer to shed traffic that is
+// perfectly serveable.
+func isUnavailableCause(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, gobreaker.ErrOpenState) ||
 		errors.Is(err, gobreaker.ErrTooManyRequests) {
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return true
 	}
-	return err
+	// A PostgreSQL-reported condition (the server answered, then said it cannot).
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch {
+		case strings.HasPrefix(pgErr.Code, "08"): // connection_exception
+			return true
+		case strings.HasPrefix(pgErr.Code, "53"): // insufficient_resources
+			return true
+		case pgErr.Code == "57P01", pgErr.Code == "57P02", pgErr.Code == "57P03":
+			return true
+		}
+		// Any other SQLSTATE is a real error about the statement — never a 503.
+		return false
+	}
+	// The transport failed before/while talking to PostgreSQL.
+	var connErr *pgconn.ConnectError
+	if errors.As(err, &connErr) {
+		return true
+	}
+	var netErr *net.OpError
+	if errors.As(err, &netErr) {
+		return true
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ENETUNREACH) ||
+		errors.Is(err, syscall.EPIPE) {
+		return true
+	}
+	// pgx surfaces a connection that died mid-query as io.ErrUnexpectedEOF (or a
+	// bare EOF from the wire), and a pool whose every connection is broken as
+	// ErrClosedPool.
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) ||
+		errors.Is(err, puddle.ErrClosedPool) {
+		return true
+	}
+	return false
 }
 
 var schemaNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)

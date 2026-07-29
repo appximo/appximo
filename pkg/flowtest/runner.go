@@ -284,7 +284,7 @@ func evalAssert(a Assert, doc any, docOK bool, vars map[string]string) string {
 		if !docOK || !found {
 			return fmt.Sprintf("assert %s len %q: field not found", a.Path, want)
 		}
-		n := -1
+		var n int
 		switch x := val.(type) {
 		case []any:
 			n = len(x)

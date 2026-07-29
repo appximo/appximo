@@ -1,0 +1,20 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "todo-api",
+  "resources": {
+    "tasks": {
+      "fields": {
+        "title":  { "type": "string", "required": true },
+        "status": { "type": "string", "enum": ["open", "done"] },
+        "due":    { "type": "time" }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin":  { "resources": "*", "actions": ["*"] },
+      "viewer": { "resources": ["tasks"], "actions": ["read"], "fields": ["id", "title", "status"] }
+    }
+  }
+}

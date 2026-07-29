@@ -151,10 +151,8 @@ func (p *patternSrc) Read(b []byte) (int, error) {
 func patternReader(n int64) io.Reader { return io.LimitReader(&patternSrc{}, n) }
 
 func TestLocalPut_Streaming50MB_BoundedBuffer(t *testing.T) {
-	if testing.Short() {
-		// Still runs under `-short` (make test): 50 MiB stream is ~sub-second and the
-		// whole point is to prove memory stays bounded, so we do NOT skip it.
-	}
+	// Deliberately NOT skipped under `-short` (make test): the 50 MiB stream is
+	// sub-second and proving memory stays bounded is exactly what this asserts.
 	const size = int64(50 << 20) // 50 MiB
 
 	// Expected hash from an independent identical stream.

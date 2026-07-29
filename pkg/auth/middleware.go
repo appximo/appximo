@@ -82,6 +82,21 @@ func JWTMiddleware(secret string, onError ...func(tenantID, reason string)) func
 	return JWTMiddlewareWithPublic(secret, nil, onError...)
 }
 
+// JWTMiddlewareWithStatic is JWTMiddlewareWithPublic plus a PER-APP predicate for
+// user-declared static mounts (appitools.Config.Static, LOOSE-ENDS-SWEEP-S1). A
+// frontend's HTML/JS loads before any token exists — exactly like /editor and
+// /admin, which are in the fixed skipJWT list — but a user mount is only known at
+// boot, so it is passed in rather than hardcoded.
+//
+// It is a PREDICATE rather than a prefix because a root-mounted SPA cannot be
+// expressed as a prefix (the prefix "/" would disable authentication for /api),
+// and a PARAMETER rather than package state so two apps in one fleet process
+// never inherit each other's mounts. nil behaves byte-identically to
+// JWTMiddlewareWithPublic.
+func JWTMiddlewareWithStatic(secret string, isPublic PublicMatcher, isStatic func(path string) bool, onError ...func(tenantID, reason string)) func(http.Handler) http.Handler {
+	return jwtMiddleware(secret, isPublic, isStatic, onError...)
+}
+
 // JWTMiddlewareWithPublic is JWTMiddleware plus an exact-match skip for the
 // custom routes explicitly registered as Public (appitools.Route{Public: true}).
 // A skipped (public) request carries NO claims — the handler sees Claims() zero
@@ -89,6 +104,10 @@ func JWTMiddleware(secret string, onError ...func(tenantID, reason string)) func
 // matched by isPublic keeps the full Bearer enforcement: deny-by-default is
 // unchanged for every other route.
 func JWTMiddlewareWithPublic(secret string, isPublic PublicMatcher, onError ...func(tenantID, reason string)) func(http.Handler) http.Handler {
+	return jwtMiddleware(secret, isPublic, nil, onError...)
+}
+
+func jwtMiddleware(secret string, isPublic PublicMatcher, isStatic func(path string) bool, onError ...func(tenantID, reason string)) func(http.Handler) http.Handler {
 	var recordErr func(tenantID, reason string)
 	if len(onError) > 0 {
 		recordErr = onError[0]
@@ -123,6 +142,12 @@ func JWTMiddlewareWithPublic(secret string, isPublic PublicMatcher, onError ...f
 					next.ServeHTTP(w, r)
 					return
 				}
+			}
+			// Per-app static mounts (LOOSE-ENDS-SWEEP-S1). nil for every app that
+			// declares none — one nil check on the hot path.
+			if isStatic != nil && isStatic(r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
 			}
 
 			header := r.Header.Get("Authorization")

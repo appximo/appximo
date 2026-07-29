@@ -196,12 +196,9 @@ outbox worker, if you run one, is a second systemd unit (see
 ## 6. Serving your frontend
 
 The Appitools binary serves an **API** (plus its own built-in UIs at `/editor`,
-`/admin`, `/docs`, `/graphiql`). It does **not** serve an arbitrary third-party
-SPA today — a custom route (`App.Register`) must live under `/api/` and runs
-inside a per-request tenant transaction, which is wrong for static files, and
-there is no static-mount/`--static-dir` hook. *(This is a known limitation, not a
-recommended pattern to work around; a future `StaticDir`/mount hook would close
-it.)* So serve your frontend one of these three ways:
+`/admin`, `/docs`, `/graphiql`) **and, in framework mode, your own frontend**
+(`Config.Static` — LOOSE-ENDS-SWEEP-S1). Three ways to serve it, in the order you
+should consider them:
 
 **(a) Caddy serves the static build, proxies the API (recommended).** One box,
 one origin, no CORS needed:
@@ -242,10 +239,58 @@ CORS is off by default and scoped to `/api`,`/auth`,`/graphql`,`/openapi` only
 (never the control plane or `/admin`). Details in
 [docs/DEPLOY.md § CORS](DEPLOY.md#cors--configurable-for-browser-spas-on-another-origin).
 
-**(c) Embed it in a custom binary — not yet.** Compiling your SPA into your own
-binary via `go:embed` is the natural fit, but the library exposes no seam to
-mount a static file tree at `/` yet (see the limitation above). Until it does,
-use (a) or (b). If you want this, it's a small engine feature — open an issue.
+**(c) Embed it in your binary — ONE artifact, one deploy.** If you already build
+a custom binary (framework mode, §5), compile the SPA into it with `go:embed` and
+mount it with `Config.Static`. One file to ship, one process to run, one origin —
+no CORS, no second deploy target, no proxy rule to keep in sync:
+
+```go
+//go:embed all:web/dist
+var frontend embed.FS
+
+dist, _ := fs.Sub(frontend, "web/dist")
+app, err := appitools.New(appitools.Config{
+    SchemaPath: "schema.json",
+    Static: []appitools.StaticMount{{Path: "/", FS: dist, SPA: true}},
+})
+```
+
+What the engine does for you:
+
+- **`/` and client-side deep links** (`/orders/42`) serve `index.html` when
+  `SPA: true`; a missing **file** (anything with an extension) still 404s, so a
+  deleted bundle never comes back as HTML.
+- **Caching is right by default**: content-hashed bundles (`assets/`, `_app/`,
+  `static/`) get `immutable, max-age=31536000`; `index.html` is always
+  `no-cache` — it names the current bundles, so a cached copy would point at
+  files your next deploy deleted.
+- **It cannot shadow the engine.** `/api`, `/auth`, `/admin`, `/editor`, `/docs`,
+  `/graphql`, `/graphiql`, `/openapi`, `/metrics`, `/debug`, `/healthz`,
+  `/readyz`, `/health`, `/files` and `/fleet` stay the engine's; mounting on one
+  is a **boot error**, and an unknown `/api/…` path keeps its honest 404 instead
+  of returning your shell.
+- **No tenant transaction, no RBAC evaluation, no response-cache buffering** for
+  an asset — a `.js` file needs no database.
+- **Path traversal is impossible by construction**: the tree is an `fs.FS`, and
+  `io/fs` cannot open outside its root.
+
+Serve from disk instead of embedding with `os.DirFS("/var/www/app")` — useful if
+the frontend is deployed on its own cadence.
+
+> ⚠ **PCI (SAQ A) if you take card payments.** Keep the **checkout** page free of
+> third-party scripts — analytics, chat widgets, tag managers. One extra script
+> on the page that hosts the payment iframe moves the merchant from SAQ A to
+> SAQ A-EP, a materially heavier compliance burden, because that script could
+> reach the cardholder data entry surface. Put marketing tags on the pages that
+> never touch payment.
+
+Multi-app note: in `appitools fleet serve` (N apps in one process) a static mount
+belongs to the **app that declares it**. The manifest-driven fleet configures
+none, so no app serves static files there — a custom multi-app binary sets them
+per app. Fail-closed: nothing is served unless it was declared.
+
+The complete contract is in [BACKEND_SPEC_LLM.md](BACKEND_SPEC_LLM.md) §3.7, with
+a runnable binary at [examples/fullstack/](../examples/fullstack/).
 
 ---
 

@@ -147,6 +147,12 @@ type App struct {
 
 	routes  []Route
 	started bool
+
+	// static holds the compiled Config.Static mounts (LOOSE-ENDS-SWEEP-S1),
+	// validated in New so a bad mount fails the boot. Nil for the pure binary and
+	// for every app that declares none — buildRouter then registers nothing and
+	// the middlewares pay a single len() check.
+	static []*staticHandler
 }
 
 // New builds an engine from cfg. SchemaPath is required; the DSN, JWT secret,
@@ -735,6 +741,22 @@ func New(cfg Config) (*App, error) {
 			safeGoTimeout = time.Duration(n) * time.Second
 		}
 	}
+	// Static mounts (LOOSE-ENDS-SWEEP-S1): compiled and collision-checked HERE, at
+	// construction, so a frontend that would shadow /api or /admin — or a build
+	// that never ran, leaving no index.html — fails the boot with the reason
+	// instead of serving a surprise.
+	if app.static, err = validateStaticMounts(cfg.Static); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	for _, h := range app.static {
+		at := h.prefix
+		if at == "" {
+			at = "/ (root; API and engine paths keep their own 404)"
+		}
+		log.Printf("static: serving an embedded file tree at %s (spa_fallback=%t)", at, h.mount.SPA)
+	}
+
 	app.eng = &engineRefs{
 		schema: s, validators: validators, policy: &rbacPolicy, users: authStore,
 		minPassword:      ctxMinPw,
@@ -1090,7 +1112,15 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 	if publicPaths := a.publicRoutePaths(); len(publicPaths) > 0 {
 		isPublic = func(method, path string) bool { return publicPaths[method+" "+path] }
 	}
-	r.Use(auth.JWTMiddlewareWithPublic(a.cfg.JWTSecret, isPublic, func(tenantID, reason string) {
+	// Static mounts are pre-authentication by nature: a frontend's HTML/JS loads
+	// before any token exists, exactly like /editor and /admin (LOOSE-ENDS-SWEEP-S1).
+	// The prefixes are per-app (not the package-level skipJWT list) so two apps in
+	// one fleet process never inherit each other's mounts. A root mount contributes
+	// nothing here — it is served through the NotFound path, which the API
+	// middlewares have already run past.
+	isStatic := staticMatcher(a.static)
+	a.responseCache.SetBypassMatcher(isStatic)
+	r.Use(auth.JWTMiddlewareWithStatic(a.cfg.JWTSecret, isPublic, isStatic, func(tenantID, reason string) {
 		a.errStore.Record(tenantID, fmt.Errorf("jwt: %s", reason))
 	}))
 	r.Use(rbac.RBACMiddlewareWithPublic(mustMarshal(surf.schema.RBAC), isPublic))
@@ -1228,6 +1258,14 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 		r.With(appmiddleware.PermissiveCSP).Handle("/graphiql", gqlhandler.PlaygroundHandler("/graphql"))
 		log.Println("GraphiQL playground enabled at /graphiql (APPITOOLS_ENV=development or APPITOOLS_GRAPHQL_PLAYGROUND=on)")
 	}
+
+	// User static mounts (LOOSE-ENDS-SWEEP-S1) — registered BEFORE the group that
+	// mounts the generated API router at "/", because chi copies the parent's
+	// NotFound handler into a subrouter at Mount time. That ordering is what lets a
+	// ROOT mount ("/") answer the paths neither the engine nor the API claims,
+	// while /api/… keeps its own honest 404 (serveRoot refuses engine-owned
+	// prefixes). A sub-path mount ("/app") is a plain route and needs no ordering.
+	registerStatic(r, a.static)
 
 	r.Group(func(sub chi.Router) {
 		sub.Use(appmiddleware.StrictCSP)

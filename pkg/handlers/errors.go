@@ -85,6 +85,10 @@ func WriteDBError(w http.ResponseWriter, err error) {
 	case db.IsUnavailable(err):
 		status = http.StatusServiceUnavailable
 		msg = "service unavailable"
+		// Tell the client this is transient and roughly when to come back. A 503
+		// WITHOUT Retry-After leaves an SDK guessing (most default to an immediate
+		// retry, which is exactly what a saturated database does not need).
+		w.Header().Set("Retry-After", "1")
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

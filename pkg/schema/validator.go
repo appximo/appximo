@@ -109,13 +109,6 @@ var (
 		"jsonb":   true,
 		"file":    true,
 	}
-
-	// jsonTypes are the two document types. They differ in ONE way that matters:
-	// `json` is stored as TEXT (exact round-trip of the bytes you sent, no
-	// indexable structure), `jsonb` is a real Postgres jsonb column (binary,
-	// containment `@>`, and a GIN index — the only type an `indexes` entry may
-	// declare "method": "gin" over). Prefer jsonb for anything you query.
-	jsonTypes = map[string]bool{"json": true, "jsonb": true}
 )
 
 func Validate(s *APISchema) []ValidationError {

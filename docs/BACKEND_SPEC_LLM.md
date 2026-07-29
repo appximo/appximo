@@ -103,8 +103,10 @@ your own column with `BeforeStart` DDL works — the engine's migration is addit
 and reports a column it does not know about as `gated_drops` (drift) rather than
 dropping it. Reach for it only for what the grammar genuinely cannot express:
 **CHECK constraints, generated columns, partial indexes** (an index `WHERE`
-predicate is deliberately absent — Postgres normalizes predicate text, so
-round-tripping one through the diff would churn the index on every migration).
+predicate is deliberately absent: it is arbitrary SQL rendered into DDL, and the
+schema is also written by `ai-generate` and edited in Studio — see
+[ADR-022](adr/ADR-022-declarative-surface-boundaries.md) for the full reasoning
+and the structured-predicate design that would reopen it).
 Anything the grammar *can* express — columns, btree/gin indexes, foreign keys,
 unique constraints — belongs in `schema.json`, where the migration engine owns it.
 
@@ -744,6 +746,46 @@ app.Register(appitools.Route{
 	},
 })
 ```
+
+### 3.7 Serving your frontend from the same binary
+
+`Config.Static` mounts a file tree — one binary that is backend **and** frontend
+**and** admin **and** docs. It is NOT a `Route`: a Route must live under `/api/`
+and runs inside a per-request tenant transaction, which is exactly wrong for a
+`.js` file.
+
+```go
+//go:embed all:web/dist
+var frontend embed.FS
+
+dist, _ := fs.Sub(frontend, "web/dist")
+app, err := appitools.New(appitools.Config{
+	SchemaPath: "schema.json",
+	Static: []appitools.StaticMount{{
+		Path: "/",   // or "/app"
+		FS:   dist,  // or os.DirFS("/var/www/app")
+		SPA:  true,  // client-side routing: /orders/42 → index.html
+	}},
+})
+```
+
+| Behaviour | Rule |
+|---|---|
+| the index | always `no-cache` — it names the current hashed bundles |
+| `assets/`, `_app/`, `static/` | `immutable, max-age=31536000` (override with `ImmutablePrefixes`) |
+| a missing file **with** an extension | `404` — never the shell, so a deleted bundle can't return HTML |
+| an unknown client route | the shell, but ONLY with `SPA: true` (opt-in: a static site should 404) |
+| `/api/…`, `/admin`, `/editor`, `/docs`, … | always the engine's — mounting on one is a **boot error** |
+| a tenant transaction / RBAC / response cache | none of them run for an asset |
+| path traversal | impossible: the tree is an `fs.FS`, which cannot open outside its root |
+
+⚠ **PCI (SAQ A):** if the app takes card payments through a hosted widget or
+iframe, keep the **checkout** page free of third-party scripts (analytics, chat,
+tag managers). One extra script there moves the merchant from SAQ A to SAQ A-EP.
+
+In the in-process fleet a mount belongs to the app that declares it; the
+manifest-driven fleet declares none. Runnable example:
+[examples/fullstack/](../examples/fullstack/).
 
 ---
 
