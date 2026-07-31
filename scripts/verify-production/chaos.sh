@@ -419,6 +419,12 @@ info "target=$TARGET case=$CASE probe=${RATE}rps out=$OUT_DIR"
 # db_probe_path: the endpoint used for faults whose whole point is the DATABASE.
 # Requires a token (it is a real, authorized, RBAC-checked read).
 db_probe_path() {
+	# VP_DB_PROBE_PATH: a DB-touching path on THIS deploy. The default assumes the
+	# verify-production schema (/api/orders), which only exists on a bare-engine
+	# bench install — a consumer binary (e.g. a commerce app with a public,
+	# DB-backed /api/catalogo) has no /api/orders, so the database cases probed
+	# /healthz and could not show database impact (found in PROD-JOURNEY-1B).
+	if [ -n "${VP_DB_PROBE_PATH:-}" ]; then printf '%s' "$VP_DB_PROBE_PATH"; return; fi
 	if [ -n "$TOKEN" ]; then printf '/api/orders?per_page=1'; else
 		warn "  no --token: falling back to /healthz, which never touches PostgreSQL — this case cannot show database impact"
 		printf '/healthz'
