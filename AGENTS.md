@@ -245,11 +245,46 @@ three states — OPEN, CLOSED, DONE. "Pending, we'll see" is not one of them.
 Before starting work, read the backlog: the item you are about to build may
 already have a decision, and the reasoning may be the thing you need.
 
+## The handoff-package rule (non-negotiable)
+
+**`nuevo_chat_web/` is a LIVING artifact, not a snapshot.** It is the
+strategic context — the plan, the decisions and their reasoning, the current phase,
+the architect's role and tone, the servers — that lives in the *conversation* and
+therefore evaporates when a chat gets too long. HANDOFF-PACKAGE-S1 captured it into
+files precisely because it had already been lost once.
+
+**At the end of EVERY session the agent MUST:**
+
+1. Update **`nuevo_chat_web/04_ESTADO_ACTUAL.md`** — what this session did,
+   what changed state, what the next session should pick up.
+2. Update **`docs/BACKLOG.md`** — items opened, closed, or moved to DONE (the
+   open-item rule above already requires this; it is restated because the two
+   files are updated together or not at all).
+3. Update **`nuevo_chat_web/03_DECISIONES_Y_PORQUE.md`** *if and only if* an
+   architectural decision was made, reversed, or its reasoning changed — with the
+   **why**, not just the what. A decision recorded without its reasoning gets
+   re-litigated by the next chat, which is the exact failure this package prevents.
+4. Bump the "última actualización" date in
+   **`nuevo_chat_web/00_LEEME_PRIMERO.md`**.
+
+`nuevo_chat_web/_COMO_MANTENER.md` maps change-type → which file to touch.
+Skipping this is the same class of error as leaving an open item out of the
+backlog: it does not fail today, it fails the next session silently.
+
+The package lives **inside the repo**, so it is versioned with the code: it ships in
+the session's own commit, it pushes with everything else, and
+`git log -p -- nuevo_chat_web/` is the history of how the project's strategic context
+evolved, session by session. Update it in the same diff as the work it describes —
+not as a separate chore.
+
 ## Boundaries — do not
 
 - **Never leave an item undone without recording it in docs/BACKLOG.md.** A
   finding that exists only in a session report is a finding the next session will
   rediscover from scratch (see The open-item rule above).
+- **Never end a session without updating the handoff package** (see The
+  handoff-package rule above). Strategic context that exists only in the chat is
+  context that will be lost when that chat ages out — it already was, once.
 - **Never pin a security-relevant dependency downward.** CI runs
   govulncheck and blocks the build. Real incident: x/crypto pinned to
   v0.48 reintroduced GO-2026-5013 and broke the release.
