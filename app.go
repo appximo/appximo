@@ -932,7 +932,7 @@ func (a *App) startBackground(ctx context.Context) {
 		log.Println("Migration worker started")
 	}
 
-	go startCacheInvalidator(ctx, a.pool, a.responseCache)
+	go startCacheInvalidator(ctx, a.pool, a.responseCache, a.schemaCache)
 	auth.StartClaimsCacheGC(ctx)
 }
 
@@ -1540,8 +1540,15 @@ func remoteIP(r *http.Request) string {
 }
 
 // startCacheInvalidator LISTENs on the "schema_updated" NOTIFY channel and
-// invalidates the named tenant's cached responses on each notification.
-func startCacheInvalidator(ctx context.Context, pool *pgxpool.Pool, rc *cache.ResponseCache) {
+// invalidates the named tenant's cached responses AND its cached schema on each
+// notification. The schema-cache half is DOC-1 (CONSUMER-PATH-S1): every
+// persisting deploy path (control-plane PUT, editor, fan-out, CLI migrate)
+// fires this trigger, and write-key validation reads the tenant's cached
+// schema — invalidating only the response cache left the write path validating
+// against the PREVIOUS schema, so a freshly migrated field answered 422 until
+// the explicit /reload endpoint (or a restart). One notification, both caches:
+// the next request lazily reloads the schema from the tenant row.
+func startCacheInvalidator(ctx context.Context, pool *pgxpool.Pool, rc *cache.ResponseCache, sc *tenant.SchemaCache) {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		log.Printf("cache invalidator: acquire conn: %v", err)
@@ -1565,6 +1572,7 @@ func startCacheInvalidator(ctx context.Context, pool *pgxpool.Pool, rc *cache.Re
 			return
 		}
 		rc.Invalidate(n.Payload)
-		log.Printf("cache invalidator: invalidated tenant %q (pg_notify)", n.Payload)
+		sc.Invalidate(n.Payload)
+		log.Printf("cache invalidator: invalidated tenant %q (responses + schema, pg_notify)", n.Payload)
 	}
 }
