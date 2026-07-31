@@ -49,14 +49,13 @@ re-verified against reality on that date, not carried forward on trust.
 - **Impact:** Medium. `deploy-update.sh` does SIGTERM → wait → start, measured at
   **0.47 s** of 502s under live traffic (docs/BENCHMARKS.md). Acceptable for a
   single box; visible for an API with a strict SLO.
-- **Consumer number (PROD-JOURNEY-1B, 2026-07-31):** the commerce binary on the
-  58 measured **0.58 s of 502s (48/3001 requests at 50 rps)** per deploy — same
-  order as the engine. A deliberately BROKEN deploy auto-rolled-back in 35 s,
-  during which users saw **30.7 s of 502s**: the dominant cost is the fixed
-  30×1 s health wait, and the rollback path exits without re-verifying health.
-  Two cheap tooling wins before any SO_REUSEPORT work: fail fast when systemd
-  reports the unit exited (don't wait the full 30 s), and health-check after
-  the rollback restart.
+- **Consumer numbers (re-measured in CONSUMER-PATH-S1, 2026-07-31):** with the
+  reworked deploy-update.sh (250 ms health polling; crash-loop detection via
+  NRestarts — `Restart=always` never reaches systemd's "failed" state; the
+  rollback branch VERIFIES recovery), a normal deploy costs **0.28 s of 502s
+  (15/3001 at 50 rps)** — was 0.58 s — and a BROKEN deploy rolls back verified
+  in **17 s end-to-end with 10.75 s user-visible** — was 35 s / 30.7 s. The
+  cheap tooling wins are done; what remains is the actual zero-downtime work.
 - **Ready:** a deploy costs **zero** failed requests under 500 rps, verified by
   the chaos suite. Candidates: socket hand-off (`SO_REUSEPORT`) between old and
   new process, or a symlink + blue/green pair behind the existing `/readyz` drain.
@@ -89,78 +88,18 @@ re-verified against reality on that date, not carried forward on trust.
 
 
 
-### ENG-8 — Consumer boot DDL never reaches tenants created AFTER boot
-- **Origin:** PROD-JOURNEY-1B (commerce GAPS 3-6). `Config.BeforeStart` runs
-  once, at boot, over the tenants that exist THEN; the production bootstrap
-  order is install → boot → register tenant, so the fresh tenant lacked the
-  consumer's residual DDL (generated column, CHECKs) and `/api/catalogo`
-  answered 500 until a manual restart re-ran it.
-- **Impact:** Medium-high for framework mode: every consumer with boot DDL hits
-  it on their FIRST tenant, with an opaque 500.
-- **Ready:** a per-tenant provisioning seam (`Config.OnTenantProvisioned(ctx,
-  pool, tenantSchema)` or BeforeStart re-run on registration), covered by an
-  integration test that registers a tenant after boot and asserts the DDL ran.
-
-### ENG-9 — The migration diff reads consumer-owned DDL as permanent drift/gated drops
-- **Origin:** PROD-JOURNEY-1B (commerce GAPS 3-7). Every `migrate --dry-run`
-  against the tienda reports the consumer's generated column as a GATED
-  DESTRUCTIVE DROP ("12 of 12 rows lost") plus 4 drift lines. The gate holds,
-  but the noise is permanent and trains operators to approve scary output.
-- **Impact:** Medium. Cosmetic until an operator approves the suggested drop of
-  a column the app needs — then it is an outage.
-- **Ready:** consumer-owned objects can be declared out of the diff (schema
-  annotation or ignore-list), a dry-run over a consumer app with boot DDL is
-  clean, and an ignored object can never appear as an approvable drop.
-
-### ENG-10 — Custom handlers bypass the honest-503 DB-unavailable classification
-- **Origin:** PROD-JOURNEY-1B chaos postgres-stop (commerce GAPS 3-14): the
-  generated routes answer 503+Retry-After when PostgreSQL is down (ENG-S2);
-  the commerce catalogue (custom route) answered its own 500 for 8.88 s.
-- **Impact:** Low-medium. Consumers can hand-classify, but each one must know to.
-- **Ready:** `Ctx.Error` (or a helper the spec documents) classifies
-  DB-unavailable errors the same way the generated path does, so a custom
-  handler's `ctx.Error(500, msg, err)` degrades to the honest 503 automatically.
-
-### OPS-7 — The consumer deploy contract (build, CLI, ops tooling)
-- **Origin:** PROD-JOURNEY-1B parts A/B (commerce GAPS 3-1..3-5). The official
-  tooling implicitly assumes "the binary is the engine": install.sh
-  identity-checks `<bin> version`, the unit runs `serve --schema --port`, no
-  consumer build script exists (version-less "dev" binaries), the consumer
-  binary ships no ops CLI (admin create / tenant / migrate / token), the
-  installer summary prints the wrong control-plane port for a consumer, and
-  secrets go to stdout. Commerce now implements the contract
-  (`scripts/build.sh`, version/serve handling, `Config.Version`) — every OTHER
-  consumer would rediscover all five.
-- **Impact:** High for the framework-mode story; it is the top of the
-  "what a third party hits" list (GAPS 3-17).
-- **Ready:** the contract documented in BACKEND_SPEC (or exported as
-  `appitools.RunCLI`), install.sh installs the engine CLI as a companion next
-  to any `--binary`, the summary reads the real control port, and secrets are
-  printed as paths by default.
-
-### OPS-8 — Acceptance + verify-production only measure the bare engine
-- **Origin:** PROD-JOURNEY-1B part C/D (commerce GAPS 3-10/3-12).
-  `acceptance-test.sh` drives quickstart `tasks`/`admin`/`viewer` (23 PASS /
-  18 FAIL against the tienda, all 18 the same cause); `load.sh` pre-flights
-  `/api/orders` and refuses a consumer app; chaos.sh's DB probe assumed the
-  bench schema (fixed this session with `VP_DB_PROBE_PATH`, own commit).
-- **Impact:** Medium. A consumer deploy cannot run the official acceptance or
-  load suites — the journey used k6 by hand instead.
-- **Ready:** resource/role/path parametrization on both (the same treatment the
-  commerce suites got in GAPS 3-9), verified by a green run against a consumer
-  deploy.
-
-### DOC-1 — Two stale/missing production-doc claims
-- **Origin:** PROD-JOURNEY-1B (commerce GAPS 3-8/3-11). (a) AGENTS.md +
-  docs/MENTAL_MODEL.md still claim a migrated column is readable/writable
-  before restart — measured FALSE (422 unknown_field until restart; strict
-  compiled validation is the current, correct behavior). (b) PRODUCTION.md
-  never states that the installed Caddyfile serves ONE tenant domain — more
-  tenants need more site blocks / a wildcard.
-- **Impact:** Medium: (a) actively misleads anyone planning a live migration.
-- **Ready:** both docs corrected to the measured model ("a schema change
-  activates only on restart; `migrate` prepares the tables"), and the
-  multi-tenant-domain note added to PRODUCTION.md.
+### OPS-9 — bench-protocol.sh assumes a retired dev fixture
+- **Origin:** CONSUMER-PATH-S1 (commerce GAPS 4-2), while measuring itself: the
+  default `ENDPOINT` is `/api/guides…` (a schema that no longer ships) and the
+  minted token uses role `super_admin` (no current example declares it) — the
+  same "assumes the bare-engine fixture" class OPS-8 fixed in the verification
+  suites, in the DEV measurement path. The `ENDPOINT`/`BENCH_TOKEN` overrides
+  exist and carried this session's measurement.
+- **Impact:** Low — a papercut for whoever runs `make bench-protocol` on a
+  fresh setup (100 % error rate, "no datapoints", twice this session).
+- **Ready:** defaults derived from the SERVED schema (first resource +
+  first role, like acceptance-test does), or a hard, actionable pre-flight
+  failure naming the overrides.
 
 ### SCHEMA-1 — Computed / derived fields
 - **Origin:** docs/MODEL_LAB.md G7 ("order totals as a computed field").
@@ -341,6 +280,17 @@ All three were **re-verified as still open on 2026-07-29**.
 | **Give `/root/commerce` a remote** | The technical fix is trivial; the decision (which account, public or private, whether the commerce platform is a product or a demo) is his. See **OPS-5** — until then the field report lives on one disk. |
 
 ---
+
+## DONE in CONSUMER-PATH-S1 (2026-07-31)
+
+| ID | Item | Verification |
+|---|---|---|
+| OPS-7 | **The deployable-binary contract** ([ADR-023](adr/ADR-023-deployable-binary-contract.md)): `appitools.ParseServeArgs` (version/serve/fail-loud — the silent flag-discard trap is a hard error), install.sh's behavioral identity check with the contract named in the error, `--cli` installs the engine CLI as the ops companion (`appitools-cli`, symlinked automatically when the binary IS the engine), control-plane port DETECTED from the live service, secrets printed as a PATH (`--show-secrets` to opt in), and `scripts/build-consumer.sh` as the canonical consumer build (SPA + ldflags identity; commerce's build.sh is now a 3-line wrapper resolved from the module graph). The two-artifact truth (serve + operate) documented in PRODUCTION §5 + BACKEND_SPEC. | `cli_test.go` (contract incl. both leftover-arg traps); Parte E of the session: the demo recreated from the runbook alone with the new tooling |
+| OPS-8 | **Every verification suite points at ANY instance**: acceptance-test detects the served surface (`/openapi.json` + schema) — generic checks run everywhere (401/deny-by-default/strict-keys over the schema's own first resource, `ADMIN_ROLE` names the broad role), quickstart-contract checks SKIP with a stated reason (a FAIL means broken, never "another app"), and the smoke DELETES the tenants it created; `load.sh --path` for the read arm; `VP_DB_PROBE_PATH` for the chaos DB cases (prev. session); commerce `verify.sh` sweeps its ~5000 BULK products + its own orders. Interface documented in ONE place: verify-production/README §Pointing the verification at ANY instance. | Acceptance vs the tienda: **22 PASS / 0 FAIL / 8 INFO** (was 23/18/2 — every FAIL was spurious); its smoke tenants deleted by the run itself, `tenant list` = tiendita only |
+| ENG-8 | **`Config.OnTenantProvisioned`** — the per-tenant twin of BeforeStart, run inside every registration (control plane + /admin, one Service), all-or-nothing on error. Commerce wires it; a fresh tenant's `/api/catalogo` answers 200 with NO restart. | `provision_hook_test.go` (DDL ran after engine tables; failure rolls the whole registration back, id reusable); live on the 58 in Parte E |
+| ENG-9 | **Consumer-owned objects are EXTERNAL drift, never proposed drops.** Ownership = "declared by ANY deployed schema version" (schema_history + current json_schema): schema-owned removals stay fully approvable (incl. declined-now-approve-later), never-declared objects are reported as External (preview/outcome/CLI), never approvable (their key → unmatched). Standalone use (no control plane) keeps legacy behavior byte-identical. The rule "never drop drift" is intact. | `external_integration_test.go` (generated column + side table protected even when explicitly "approved"; historical field stays approvable and droppable); dry-run on the 58 shows attr_marca under EXTERNAL, zero destructive (Parte E) |
+| ENG-10 | **Custom handlers inherit the honest 503**: `db.IsUnavailable` recognizes raw unclassified causes, and `Ctx.Error` reclassifies a ≥500 with a DB-unavailable cause to 503+Retry-After (message kept; 4xx never overridden). `/readyz` stays process-readiness by design (a DB blip must not amplify into load-balancer ejection — the per-request 503 is the dependency signal). | `ctx_unavailable_test.go` (raw ECONNREFUSED → 503+Retry-After; classified sentinel; 4xx/non-DB-500/nil-cause kept); postgres-stop on the 58: catalogue answers 503, not 500 (Parte E) |
+| DOC-1 | **The migrate/restart model is now one truth, half by CODE**: the single-tenant CLI `migrate` PERSISTS the applied schema (+history, +pg_notify) like the PUT/fan-out paths — a new FIELD serves hot; a new RESOURCE still needs the restart. AGENTS.md, MENTAL_MODEL §4, PRODUCTION §5 corrected to the measured model ("write keys follow the tenant's DEPLOYED schema", not "the DB is the source of truth"). | `TestExternal_HistoricalFieldStaysApprovable` exercises PersistTenantSchema; live hot-field check via CLI migrate in Parte E |
 
 ## DONE in PROD-JOURNEY-1B (2026-07-31)
 
