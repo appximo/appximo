@@ -26,6 +26,9 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
+**Last reviewed: 2026-07-29 (HANDOFF-PACKAGE-S1)** — every OPEN item below was
+re-verified against reality on that date, not carried forward on trust.
+
 ---
 
 ## OPEN
@@ -69,6 +72,51 @@ engine's roadmap depends on what building it revealed).
   measured `no_change` when it is off (the reason it has not shipped: the SDK's
   weight must not reach the request path by default).
 
+### ENG-5 — `Config.Static` root mount ships the API's CSP → a real SPA renders BLANK
+- **Origin:** COMMERCE-1B-S1, the first browser consumer of `Config.Static`.
+  Commerce `docs/GAPS.md` **1B-1** has the full diagnosis.
+- **Impact:** **High — the flagship "one binary = backend + frontend" case is
+  browser-broken.** A root mount (`Path:"/"`) is chi's NotFound handler, which
+  chi copies into the API subrouter mounted INSIDE the `StrictCSP` group
+  (`app.go` `sub.Use(StrictCSP); … sub.Mount("/", …)`), so the SPA shell ships
+  `Content-Security-Policy: default-src 'none'` and every browser blocks its own
+  same-origin scripts. Invisible to curl (curl does not enforce CSP) — which is
+  why the `examples/fullstack` live matrix passed. A SUB-PATH mount takes the
+  other path and gets NO CSP at all — both forms are wrong, differently.
+  Companion papercut: `validateStaticMounts` demands an `index.html` even on a
+  pure asset mount (commerce's `/_app` needed a dummy one).
+- **Workaround (running in commerce):** one sub-path mount per app segment +
+  a script-free meta-refresh shell at "/" → home lives at `/inicio`.
+- **Ready:** the static handler sets its OWN document CSP for BOTH mount forms
+  (the `pkg/adminui.cspAdmin` shape is right), overridable via `StaticMount.CSP`;
+  an assets-only mount needs no index; and the regression test asserts the
+  header on the served DOCUMENT (or runs a real browser) — never curl-only.
+
+### ENG-6 — `Route.Public` ignores a presented token ("optionally authenticated" inexpressible)
+- **Origin:** COMMERCE-1B-S1; commerce `docs/GAPS.md` **1B-3**.
+- **Impact:** Medium. A checkout that serves guests AND recognized customers
+  needs two routes sharing one core (`/api/checkout-invitado` Public +
+  `/api/checkout` granted); every "public but personalizable" endpoint pays the
+  same split, and the client must pick the door.
+- **Ready:** on a Public route, a PRESENT and VALID Bearer populates `Claims()`;
+  absent or invalid stays zero-Claims and never 401s. Negative tests: an expired
+  token on a Public route must not turn into a 401.
+
+### ENG-7 — `Ctx.Update` bypasses the schema's state machine
+- **Origin:** COMMERCE-1B-S1; commerce `docs/GAPS.md` **1B-4** (the cost report
+  of the ADR-022-D3 custom-route pattern).
+- **Impact:** Medium. A custom route that moves a `state_machine` field has NO
+  engine path that keeps transition enforcement: `Ctx.Update` runs the
+  declarative field rules but not the transition CAS, and raw SQL obviously
+  doesn't — so commerce re-states the transition table in Go (two sources of
+  truth). This is the melting-point fix that makes the documented
+  per-transition-RBAC pattern cheap: with it, a transition route is ~10 lines
+  and only "who may move" stays app-side.
+- **Ready:** `Ctx.Update` (and the batch path it shares) enforces
+  `state_machine` transitions inside the UPDATE's WHERE exactly like the
+  generated PATCH; a violating move returns the same 422/409 contract; measured
+  `no_change` for resources without a state machine.
+
 ### SCHEMA-1 — Computed / derived fields
 - **Origin:** docs/MODEL_LAB.md G7 ("order totals as a computed field").
 - **Impact:** Medium. Totals, counts and balances are recomputed by the client or
@@ -96,6 +144,11 @@ engine's roadmap depends on what building it revealed).
 - **Ready:** enforced identically on REST, GraphQL **and** inside
   `POST /api/transaction`, expressible in Studio's state-machine designer and in
   the LLM grammar, benchmarked `no_change` on the update path.
+- **Evidence from 1-B (2026-07-30):** the pattern carried the real case
+  (empleado despacha / solo dueño reembolsa) but cost three things — `empleado`
+  lost `update` on `ordenes` entirely, the transition table is re-stated in Go,
+  and two authorization surfaces must stay in sync. See commerce
+  `docs/GAPS.md` 1B-4 and **ENG-7** (the cheap fix that keeps this deferred).
 
 ### SCHEMA-4 — GraphQL keyset pagination
 - **Origin:** docs/SCHEMA_REFERENCE.md §GraphQL ("no keyset cursors — a
@@ -161,6 +214,23 @@ engine's roadmap depends on what building it revealed).
   PRODUCTION.md) goes through `scripts/build-engine.sh`, and `/health` on the 58
   reports a real SHA. Related to the release tag (see "Requires Miguel" below).
 
+### OPS-5 — `/root/commerce` has no git remote (its only copy is one disk)
+- **Origin:** this session, checking the repo state for the handoff package.
+  `git remote -v` in `/root/commerce` is **empty**; its 3 commits
+  (`a685cc6` commerce core, `3541b31` native migration, `178d46f` sweeper) exist
+  ONLY on the 105's disk.
+- **Impact:** **High, and it is not a code problem.** That repo holds slice 1 of
+  the commerce platform AND `docs/GAPS.md` — the field report that drove
+  LIBRARY-GAPS-S1 and the most valuable artifact the project has produced, because
+  it came from building something real. A disk failure or a rebuilt droplet loses
+  it with no way to reconstruct it. Every OTHER asset (the engine, its docs, its
+  ADRs) is pushed to GitHub; this one is not.
+- **Ready:** a remote exists (private GitHub repo, or at minimum a bundle pushed
+  off-box), the 3 commits are pushed, and `docs/GAPS.md` is reachable from
+  somewhere that is not the 105. Note the repo carries a `replace` directive to the
+  local engine path — the remote must document how to build it (or the replace
+  becomes a broken clone for anyone else).
+
 ### COMMERCE-1 — Credit notes (fiscally correct refunds)
 - **Origin:** COMMERCE-CORE-S1 report; the DIAN interface (`docs/DIAN.md`).
 - **Impact:** **High for a Colombian merchant.** A refund today reverses the
@@ -177,14 +247,6 @@ engine's roadmap depends on what building it revealed).
 - **Ready:** a tax category per product type resolving a rate at checkout, with
   exempt (0 %) and excluded (no tax) distinguished, and the reconciliation report
   broken down by rate.
-
-### COMMERCE-3 — Shipping addresses in the checkout
-- **Origin:** COMMERCE-CORE-S1 report. `direcciones` exists; the checkout does
-  not take one and shipping is always 0.
-- **Impact:** Medium — product scope. Blocks a real storefront, not the engine.
-- **Ready:** the checkout accepts an address (new or existing), computes a
-  shipping cost through a pluggable strategy, and includes it in the order total
-  and the invoice.
 
 ### COMMERCE-4 — A real DIAN Proveedor Tecnológico adapter
 - **Origin:** `docs/DIAN.md` (the interface exists; the implementation is a stub).
@@ -208,13 +270,26 @@ engine's roadmap depends on what building it revealed).
 
 ## Requires a decision from Miguel (not technical blockers)
 
+All three were **re-verified as still open on 2026-07-29**.
+
 | Item | Why it needs him |
 |---|---|
-| **Cloudflare proxy on `api.appitools.com`** | It resolves to Cloudflare IPs (104.21.x / 172.67.x), which buys DDoS protection and caching but contaminates direct measurement — PROD-VERIFY-SUITE measured 9.75 ms through it vs 2.78 ms at the origin. Keep it and measure the origin directly, or drop it for the demo domain. |
-| **Cut the first release tag** | `RELEASE_VERSION=""` in `scripts/install.sh` and zero `v*` tags, so the documented "download the binary from GitHub Releases" path cannot work yet, and OPS-4 (version traceability) partly depends on it. |
+| **Cloudflare proxy on `api.appitools.com`** | Still proxied — confirmed this session: `dig` returns Cloudflare IPs (104.21.77.140 / 172.67.208.233) and the response carries `server: cloudflare` + a `cf-ray` header. It buys DDoS protection and caching but contaminates direct measurement — PROD-VERIFY-SUITE measured 9.75 ms through it vs 2.78 ms at the origin. Keep it and always measure the origin directly, or drop it for the demo domain. |
+| **Cut the first release tag** | Still zero tags (`git tag` is empty) and `RELEASE_VERSION=""` at `scripts/install.sh:33`, so the documented "download the binary from GitHub Releases" path cannot work yet, and OPS-4 (version traceability) partly depends on it. |
 | **Rotate the 58's PostgreSQL password** | It was exposed in a session transcript on 2026-07-29 (a masking pattern that missed `DATABASE_URL`). Not known to be leaked further, but it is a live credential on a public box. `ALTER USER appitools WITH PASSWORD …` + update `/etc/appitools/appitools.env` + `systemctl restart appitools`. |
+| **Give `/root/commerce` a remote** | The technical fix is trivial; the decision (which account, public or private, whether the commerce platform is a product or a demo) is his. See **OPS-5** — until then the field report lives on one disk. |
 
 ---
+
+## DONE in COMMERCE-1B-S1 (2026-07-30)
+
+| ID | Item | Verification |
+|---|---|---|
+| COMMERCE-5 | **Slice 1-B: the storefront + mobile back-office** — SvelteKit `adapter-static` SPA compiled into the commerce binary (`Config.Static`, same origin), storefront (vitrina → variante → carrito → checkout invitado con dirección+envío → pasarela mock → confirmación pending→paid) + `/panel` (login real `/auth/login`, tablero, productos+variantes CRUD, órdenes con transiciones por rol, envío). All error states handled (loading/vacío/red/422 multi-campo/409 sin-stock/decline). | `scripts/e2e-1b.sh` **27/27** (incl. 10-way concurrent no-oversell, decline, pending→paid, RBAC 401/403 matrix) + Playwright móvil **16/16** with screenshots; regression: `verify.sh` 18/18, `verify-webhook.sh` 21/21, `e2e.sh` full |
+| COMMERCE-3 | **Shipping address in the checkout** — `envio_config` resource (retiro + tarifa plana, dueño-editable from `/panel/envio`), checkout takes `envio_metodo` + `direccion` (real `direcciones` row linked via `ordenes.direccion_id`), server computes the fee (never the client), included in the total. | e2e-1b case 2 (envio $12.000 sumado + dirección en la confirmación); zones/carriers stay rebanada 2 |
+
+The frontend field report is **commerce `docs/GAPS.md` PART TWO (1B-1..1B-7)** —
+it spawned ENG-5/ENG-6/ENG-7 above and is the input FRONTEND_SPEC/FASE 3 needed.
 
 ## DONE in LOOSE-ENDS-SWEEP-S1
 
@@ -226,3 +301,13 @@ engine's roadmap depends on what building it revealed).
 | DOC-S1 | False claims corrected in ESTADO_Y_PLAN_MAESTRO (a dead droplet listed as live, "everything pushed" with commits queued, six shipped features listed as missing) | Each verified against reality before editing |
 | OPS-S2 | A stale 46 MB binary from 13 Jun (commit `507f846`, predating the whole `/admin` API) sat in `/root/appitools/` on the 58, next to the git checkout — the obvious-looking one to run, and the wrong one | Verified nothing referenced it (systemd, cron, scripts) and that the live process's `/proc/PID/exe` pointed at `/opt/appitools/bin/appitools`; deleted the file only. Service kept the same PID; site still 200 |
 | COMMERCE-S1 | **The reservation sweeper is scheduled** — an abandoned cart no longer holds stock forever | Live: a hold expired, swept within one tick, `stock_reservado` 3 → 0, reservation `liberada`, logged |
+
+---
+
+## DONE in HANDOFF-PACKAGE-S1
+
+| ID | Item | Verification |
+|---|---|---|
+| DOC-S2 | **The handoff package `nuevo_chat_web/`** — the strategic context (role, tone, decisions and their reasoning, phase, operations, research index) captured in versioned files instead of living only in a chat that ages out | 8 package files + 2 maintenance files written, cross-checked against the repo, and read back end-to-end as if by a new architect with no conversation history |
+| DOC-S3 | **The permanent pattern** — AGENTS.md §The handoff-package rule makes updating the package (and the backlog) a session obligation, so the context cannot silently rot again | The rule sits next to the open-item rule it mirrors; `_COMO_MANTENER.md` maps change-type → file to touch |
+| DOC-S4 | **Stale state claims swept from ESTADO_Y_PLAN_MAESTRO** — the headline "⚠ HAY COLA DE PUSH" was false (`git ls-remote` shows remote `main` == local `HEAD` == `9e1b529`); the memory footprint conflated the 1M-rows-idle figure with the under-load one; the 4-phase strategic plan was missing entirely; the commerce resource count was wrong (12, not 13) | Each corrected figure re-measured or re-read from `docs/BENCHMARKS.md` / the live repo before editing |
