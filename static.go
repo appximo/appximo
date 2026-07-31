@@ -97,11 +97,24 @@ type StaticMount struct {
 	CSP string
 }
 
-// DefaultStaticCSP is the policy a StaticMount serves when CSP is unset: strict
-// same-origin, no framing — right for the common self-contained SPA (external
-// module scripts, component-library inline styles, data: images).
+// DefaultStaticCSP is the policy a StaticMount serves when CSP is unset:
+// same-origin everything, no framing, no external script/connect targets.
+//
+// script-src carries 'unsafe-inline' DELIBERATELY: SvelteKit's adapter-static
+// shell boots hydration from an INLINE <script> (so do Next export and Astro
+// islands), and the first strict draft of this default (script-src 'self',
+// copied from the embedded admin UI, whose Vite build emits only external
+// modules) blanked a SvelteKit app exactly the way the original ENG-5 bug did
+// — caught by the commerce browser suite, invisible to curl. A default must
+// run the mainstream bundlers' output; an app whose bundle has no inline
+// scripts should tighten per mount:
+//
+//	StaticMount{CSP: strings.Replace(appitools.DefaultStaticCSP, "script-src 'self' 'unsafe-inline'", "script-src 'self'", 1)}
+//
+// The load-bearing protections remain: no external script sources, no
+// external connect targets (exfil), no framing, no foreign form action.
 const DefaultStaticCSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
-	"script-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+	"script-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 
 // CSPOff is the StaticMount.CSP sentinel that disables the header entirely.
 const CSPOff = "off"
