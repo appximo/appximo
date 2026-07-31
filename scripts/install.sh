@@ -33,8 +33,9 @@ readonly REPO="miguel09acosta/appitools"
 readonly RELEASE_VERSION=""
 
 # ── Defaults (overridable by flags) ──────────────────────────────────────────
-DOMAIN=""; EMAIL=""; BINARY=""; SCHEMA=""; PORT="8090"
+DOMAIN=""; EMAIL=""; BINARY=""; CLI=""; SCHEMA=""; PORT="8090"
 ASSUME_YES="no"; HARDEN="no"; DRY_RUN="no"; PREFIX=""; UNINSTALL="no"; PURGE="no"
+SHOW_SECRETS="no"
 
 # ── Output helpers ───────────────────────────────────────────────────────────
 if [ -t 1 ]; then C_G=$'\033[0;32m'; C_Y=$'\033[1;33m'; C_R=$'\033[0;31m'; C_B=$'\033[1;34m'; C_N=$'\033[0m'
@@ -63,12 +64,21 @@ Usage: sudo bash install.sh --domain DOMAIN --email EMAIL --binary PATH [options
 Required (until public releases exist):
   --domain=DOMAIN      public domain pointing at this box (A/AAAA record)
   --email=EMAIL        Let's Encrypt account email
-  --binary=PATH        the appitools binary to install (build with scripts/build-engine.sh)
+  --binary=PATH        the binary to install — the engine, OR any consumer app
+                       honoring the deployable contract (docs/adr/ADR-023):
+                       `<bin> version` exits 0, `<bin> serve --schema --port` runs it
 
 Options:
+  --cli=PATH           the engine CLI to install as the OPS COMPANION at
+                       /opt/appitools/bin/appitools-cli (tenant, migrate, token,
+                       admin create). When --binary IS the engine it is symlinked
+                       automatically and this flag is unnecessary; a consumer
+                       binary serves but cannot operate its database (ADR-023)
   --schema=PATH        boot schema JSON (default: a todo-api starter you replace later)
   --port=PORT          internal engine port Caddy proxies to        [default 8090]
   --yes                non-interactive (don't prompt to confirm)
+  --show-secrets       print the generated secret VALUES in the summary (default:
+                       only their path — transcripts and CI logs are forever)
   --harden             also apply ufw (SSH+80+443) + fail2ban + unattended-upgrades
   --dry-run            generate every config file + print the plan, run NO system steps
   --root=DIR           prefix all paths with DIR (for --dry-run testing only)
@@ -86,7 +96,9 @@ parse_args() {
 			--domain=*) DOMAIN="${arg#*=}" ;;
 			--email=*)  EMAIL="${arg#*=}" ;;
 			--binary=*) BINARY="${arg#*=}" ;;
+			--cli=*)    CLI="${arg#*=}" ;;
 			--schema=*) SCHEMA="${arg#*=}" ;;
+			--show-secrets) SHOW_SECRETS="yes" ;;
 			--port=*)   PORT="${arg#*=}" ;;
 			--root=*)   PREFIX="${arg#*=}" ;;
 			--yes|-y)   ASSUME_YES="yes" ;;
@@ -226,11 +238,21 @@ gather_input() {
 	if [ -n "$BINARY" ]; then
 		[ -f "$BINARY" ] || die "--binary '$BINARY' not found"
 		[ -x "$BINARY" ] || die "--binary '$BINARY' is not executable (chmod +x it)"
-		# Confirm it's really an appitools binary of the right arch — its own version
-		# subcommand must run AND name appitools (so /bin/true or a wrong ELF is
-		# rejected, not just a non-exec). Runs on the target, so same arch as deploy.
-		"$BINARY" version 2>/dev/null | grep -qi appitools \
-			|| die "--binary '$BINARY' is not an appitools binary (or wrong architecture) — 'appitools version' did not identify it"
+		# The deployable-binary contract (docs/adr/ADR-023): `<bin> version` must
+		# RUN (right arch, real executable) and print an identity line. Behavioral,
+		# not branding — the engine and ANY consumer app both qualify; /bin/true
+		# and a wrong-arch ELF both fail. The systemd unit will invoke
+		# `<bin> serve --schema … --port …`, which the same contract guarantees.
+		BIN_ID="$("$BINARY" version 2>/dev/null | head -1)"
+		[ -n "$BIN_ID" ] \
+			|| die "--binary '$BINARY' does not honor the deployable contract: '<binary> version' must exit 0 and print an identity line (wrong architecture? not an Appitools engine/consumer build?). If it is YOUR app on the appitools framework, wire appitools.ParseServeArgs in main() — see docs/adr/ADR-023-deployable-binary-contract.md"
+		ok "binary identifies as: $BIN_ID"
+	fi
+	if [ -n "$CLI" ]; then
+		[ -f "$CLI" ] || die "--cli '$CLI' not found"
+		[ -x "$CLI" ] || die "--cli '$CLI' is not executable (chmod +x it)"
+		"$CLI" version 2>/dev/null | grep -qi appitools \
+			|| die "--cli '$CLI' is not the appitools engine CLI ('version' did not identify it) — build it with scripts/build-engine.sh"
 	fi
 
 	echo
@@ -484,6 +506,7 @@ install_binary() {
 	if [ -n "$BINARY" ]; then
 		info "installing engine binary from $BINARY"
 		run install -m 0755 "$BINARY" "$BIN_PATH"
+		install_ops_cli
 	else
 		# Ready for when releases exist (RELEASE_VERSION set): download + checksum.
 		local base="https://github.com/${REPO}/releases/download/${RELEASE_VERSION}"
@@ -498,6 +521,30 @@ install_binary() {
 		run install -m 0755 /tmp/appitools "$BIN_PATH"
 	fi
 	ok "engine installed at $BIN_PATH"
+}
+
+# install_ops_cli: the OPS COMPANION (ADR-023). A production deploy is the app
+# binary (serves) plus the engine CLI (operates: tenant, migrate, token, admin
+# create). When the installed binary IS the engine, appitools-cli is a symlink
+# to it — one documented invocation works on every box. A consumer binary has no
+# ops subcommands (its `version`-contract error even says so), so --cli installs
+# the real engine CLI beside it; without --cli the gap is NAMED, not silent.
+install_ops_cli() {
+	local cli_path="$OPT_DIR/bin/appitools-cli"
+	if [ -n "$CLI" ]; then
+		run install -m 0755 "$CLI" "$cli_path"
+		ok "ops CLI installed at ${cli_path#"$PREFIX"} (tenant / migrate / token / admin create)"
+		return
+	fi
+	[ "$DRY_RUN" = "yes" ] && { printf '  [dry-run] detect ops subcommands; symlink appitools-cli if the binary is the engine\n'; return; }
+	# Detect: the engine's CLI answers `tenant --help`; a consumer binary refuses
+	# any subcommand but version/serve (per the contract).
+	if "$BIN_PATH" tenant --help >/dev/null 2>&1; then
+		ln -sfn "$BIN_PATH" "$cli_path"
+		ok "ops CLI: this binary IS the engine — appitools-cli symlinked to it"
+	else
+		warn "this is a CONSUMER binary (serves, but has no ops subcommands). To operate its database (register tenants, migrate, mint tokens, create the super-admin) install the engine CLI: re-run with --cli=/path/to/appitools (build: scripts/build-engine.sh) — see docs/adr/ADR-023"
+	fi
 }
 
 # ── Boot schema ──────────────────────────────────────────────────────────────
@@ -706,8 +753,24 @@ uninstall() {
 	ok "Appitools uninstalled."
 }
 
+# detect_control_port: read the CONTROL-PLANE port from the LIVE service's
+# listening sockets instead of assuming the engine's 9090 — a consumer binary
+# picks its own (ADR-023: detected, never assumed; commerce uses 9099 and the
+# old summary printed a dead endpoint). The control port is "whatever the
+# service listens on that is not the data port". Falls back to 9090 with a note.
+detect_control_port() {
+	CONTROL_PORT=""
+	[ "$DRY_RUN" = "yes" ] && { CONTROL_PORT="9090"; return; }
+	local pid; pid="$(systemctl show -p MainPID --value "$SERVICE_NAME" 2>/dev/null)"
+	if [ -n "$pid" ] && [ "$pid" != "0" ]; then
+		CONTROL_PORT="$(ss -ltnpH 2>/dev/null | grep "pid=$pid," | grep -oE ':[0-9]+ ' | tr -d ': ' | grep -v "^$PORT$" | sort -u | head -1)"
+	fi
+	[ -n "$CONTROL_PORT" ] || CONTROL_PORT="9090"
+}
+
 # ── Summary ──────────────────────────────────────────────────────────────────
 summary() {
+	detect_control_port
 	echo
 	ok "Appitools is installed."
 	echo
@@ -715,16 +778,26 @@ summary() {
 	printf '  %sdocs%s       https://%s/docs   %seditor%s https://%s/editor   %sadmin%s https://%s/admin\n' \
 		"$C_B" "$C_N" "$DOMAIN" "$C_B" "$C_N" "$DOMAIN" "$C_B" "$C_N" "$DOMAIN"
 	echo
-	printf '  %sAdmin key%s  %s\n' "$C_B" "$C_N" "$ADMIN_KEY"
-	printf '  %sJWT secret%s %s\n' "$C_B" "$C_N" "$JWT_SECRET"
-	printf '             (both saved in %s — 0600)\n' "${ENV_FILE#"$PREFIX"}"
+	# Secrets live in the 0600 env file, and ONLY there by default: an install
+	# driven by an agent or logged by CI would otherwise burn them into a
+	# transcript forever (it happened — PROD-JOURNEY-1B rotated them on the spot).
+	if [ "$SHOW_SECRETS" = "yes" ]; then
+		printf '  %sAdmin key%s  %s\n' "$C_B" "$C_N" "$ADMIN_KEY"
+		printf '  %sJWT secret%s %s\n' "$C_B" "$C_N" "$JWT_SECRET"
+		printf '             (both saved in %s — 0600)\n' "${ENV_FILE#"$PREFIX"}"
+	else
+		printf '  %sSecrets%s    generated and saved in %s (0600 — values not printed; --show-secrets to print)\n' \
+			"$C_B" "$C_N" "${ENV_FILE#"$PREFIX"}"
+	fi
 	echo
-	printf '  Register your first tenant (control plane is localhost-only):\n'
-	printf '    curl -X POST http://127.0.0.1:9090/tenants -H "X-Admin-Key: %s" \\\n' "$ADMIN_KEY"
+	printf '  Register your first tenant (control plane on 127.0.0.1:%s — detected from the live service):\n' "$CONTROL_PORT"
+	printf '    set -a; . %s; set +a\n' "${ENV_FILE#"$PREFIX"}"
+	printf '    curl -X POST http://127.0.0.1:%s/tenants -H "X-Admin-Key: $ADMIN_KEY" \\\n' "$CONTROL_PORT"
 	printf '      -H "Content-Type: application/json" \\\n'
 	printf '      -d "{\\"tenant_id\\":\\"acme\\",\\"display_name\\":\\"Acme\\",\\"email\\":\\"a@acme.com\\",\\"plan\\":\\"free\\",\\"schema\\":$(cat %s)}"\n' "${SCHEMA_FILE#"$PREFIX"}"
 	echo
 	printf '  Logs     journalctl -u %s -f\n' "$SERVICE_NAME"
+	printf '  Ops CLI  %s/bin/appitools-cli  (tenant / migrate / token / admin create)\n' "${OPT_DIR#"$PREFIX"}"
 	printf '  Update   build a new binary → scp up → sudo bash %s --binary=/path --domain=%s --email=%s --yes\n' "$0" "$DOMAIN" "${EMAIL:-you@example.com}"
 	printf '  Remove   sudo bash %s --uninstall   (add --purge to also drop the database)\n' "$0"
 	printf '  Guide    docs/PRODUCTION.md\n'

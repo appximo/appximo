@@ -1,38 +1,45 @@
 #!/usr/bin/env bash
 #
-# Appitools — update an installed engine to a new binary, safely.
+# Appitools — update an installed binary (engine OR consumer app) to a new one, safely.
 #
 # Run this ON the production box, after copying the new binary up (scp). It backs
 # up the live binary, swaps atomically, restarts the systemd service, and
-# health-checks — rolling back automatically if the new binary fails to come up.
-# The mirror of the DevHub deploy pipeline, standalone (no DevHub needed).
+# health-checks — rolling back automatically if the new binary fails to come up,
+# AND verifying the rollback actually recovered (a rollback that does not
+# re-check health is a report, not a recovery — CONSUMER-PATH-S1).
 #
 # The full official flow (from your dev machine):
 #   1. build:  ./scripts/build-engine.sh /tmp/appitools "$(git rev-parse --short HEAD)" "$(git rev-parse HEAD)"
+#              (consumer apps: scripts/build-consumer.sh — same flags, plus the SPA)
 #   2. copy:   scp /tmp/appitools you@server:/tmp/appitools
 #   3. swap:   ssh you@server 'sudo bash /opt/appitools/scripts/deploy-update.sh --binary=/tmp/appitools'
 #
-# Caddy keeps answering during the ~1s systemd restart (it retries the upstream),
-# and /readyz flips to 503 while the old process drains — so no request is lost
-# mid-flight. This is the state of the art for this profile; blue/green is
-# deliberately NOT used (see docs/PRODUCTION.md).
+# Health is POLLED every 250 ms with an early exit — the wait costs what the boot
+# costs, not a fixed 30 s (the old fixed loop made a failed deploy's rollback take
+# 30+ s of user-visible 502s; measured in PROD-JOURNEY-1B). A unit systemd reports
+# as failed short-circuits the wait immediately.
 #
 # Flags:
-#   --binary=PATH   the new engine binary to install                 [required]
-#   --service=NAME  systemd unit name                                [default appitools]
-#   --dest=PATH     installed binary path                            [default /opt/appitools/bin/appitools]
-#   --port=PORT     engine port for the health check                 [default 8090]
+#   --binary=PATH        the new binary to install                     [required]
+#   --cli=PATH           also update the ops companion (appitools-cli) [optional]
+#   --service=NAME       systemd unit name                             [default appitools]
+#   --dest=PATH          installed binary path                         [default /opt/appitools/bin/appitools]
+#   --port=PORT          engine port for the health check              [default 8090]
+#   --health-timeout=S   max seconds to wait for health                [default 30]
 #   --help
 set -euo pipefail
 
-BINARY=""; SERVICE="appitools"; DEST="/opt/appitools/bin/appitools"; PORT="8090"
+BINARY=""; CLI=""; SERVICE="appitools"; DEST="/opt/appitools/bin/appitools"; PORT="8090"
+HEALTH_TIMEOUT="30"
 for arg in "$@"; do
 	case "$arg" in
 		--binary=*)  BINARY="${arg#*=}" ;;
+		--cli=*)     CLI="${arg#*=}" ;;
 		--service=*) SERVICE="${arg#*=}" ;;
 		--dest=*)    DEST="${arg#*=}" ;;
 		--port=*)    PORT="${arg#*=}" ;;
-		--help|-h)   sed -n '3,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		--health-timeout=*) HEALTH_TIMEOUT="${arg#*=}" ;;
+		--help|-h)   sed -n '3,31p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "unknown flag: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -46,8 +53,31 @@ die() { printf '%s✗%s %s\n' "$R" "$N" "$*" >&2; exit 1; }
 [ -f "$BINARY" ] || die "--binary '$BINARY' not found"
 command -v systemctl >/dev/null || die "systemctl not found (this box is not systemd-managed)"
 
-# Sanity: the new file must be a runnable appitools binary of the right kind.
-"$BINARY" version >/dev/null 2>&1 || die "'$BINARY' does not run 'appitools version' — wrong file?"
+# Sanity: the deployable contract (docs/adr/ADR-023) — `version` must run and
+# print an identity line. Engine and consumer binaries both qualify; a wrong
+# file or wrong arch fails HERE, before anything is touched.
+NEW_ID="$("$BINARY" version 2>/dev/null | head -1)"
+[ -n "$NEW_ID" ] || die "'$BINARY' does not honor the deployable contract ('<binary> version' must exit 0 and print identity) — wrong file/arch? See docs/adr/ADR-023"
+ok "deploying: $NEW_ID"
+
+# wait_healthy TIMEOUT_S — poll /healthz + /readyz every 250 ms; early exit on
+# success, early exit if systemd already declared the unit failed (no point
+# waiting out the clock on a binary that exited at boot).
+wait_healthy() {
+	local timeout_s="$1" waited=0
+	while :; do
+		if curl -fsS -m 2 "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1 \
+			&& curl -fsS -m 2 "http://127.0.0.1:${PORT}/readyz" >/dev/null 2>&1; then
+			return 0
+		fi
+		if systemctl is-failed --quiet "$SERVICE" 2>/dev/null; then
+			return 1 # crashed at boot — fail fast, do not wait out the timeout
+		fi
+		waited=$((waited + 1))
+		[ $((waited / 4)) -ge "$timeout_s" ] && return 1
+		sleep 0.25
+	done
+}
 
 BACKUP_DIR="$(dirname "$DEST")-rollback"
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -68,30 +98,36 @@ install -m 0755 "$BINARY" "$DEST.new"
 mv -f "$DEST.new" "$DEST"
 ok "swapped in new binary at $DEST"
 
-# 3 — restart + health check.
-systemctl restart "$SERVICE"
-ok "restarted $SERVICE — waiting for health…"
-healthy="no"
-for _ in $(seq 1 30); do
-	if curl -fsS "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1 \
-		&& curl -fsS "http://127.0.0.1:${PORT}/readyz" >/dev/null 2>&1; then
-		healthy="yes"; break
-	fi
-	sleep 1
-done
+# 2b — optionally update the ops companion (skipped when it is a symlink to the
+# engine binary itself — already updated by the swap above).
+if [ -n "$CLI" ]; then
+	[ -f "$CLI" ] || die "--cli '$CLI' not found"
+	install -m 0755 "$CLI" "$(dirname "$DEST")/appitools-cli"
+	ok "ops CLI updated"
+fi
 
-if [ "$healthy" = "yes" ]; then
+# 3 — restart + health check (polling, early exit).
+systemctl restart "$SERVICE"
+ok "restarted $SERVICE — waiting for health (poll 250 ms, timeout ${HEALTH_TIMEOUT}s)…"
+if wait_healthy "$HEALTH_TIMEOUT"; then
 	VER="$("$DEST" version 2>/dev/null | tail -1 || true)"
 	ok "healthy — now running: ${VER:-unknown}"
 	exit 0
 fi
 
-# 4 — rollback: the new binary never became healthy.
+# 4 — rollback: the new binary never became healthy. Restore, restart, and
+# VERIFY the recovery — "rolled back" only means something if the old binary is
+# actually answering again.
 printf '%s! new binary unhealthy — rolling back%s\n' "$Y" "$N" >&2
 LATEST="$(ls -1t "$BACKUP_DIR/$(basename "$DEST")".* 2>/dev/null | head -1 || true)"
-if [ -n "$LATEST" ]; then
-	install -m 0755 "$LATEST" "$DEST.new" && mv -f "$DEST.new" "$DEST"
-	systemctl restart "$SERVICE"
-	die "rolled back to $LATEST and restarted. Investigate: journalctl -u $SERVICE -n 60"
+[ -n "$LATEST" ] || die "no rollback backup available. Investigate: journalctl -u $SERVICE -n 60"
+install -m 0755 "$LATEST" "$DEST.new" && mv -f "$DEST.new" "$DEST"
+systemctl reset-failed "$SERVICE" >/dev/null 2>&1 || true
+systemctl restart "$SERVICE"
+if wait_healthy "$HEALTH_TIMEOUT"; then
+	VER="$("$DEST" version 2>/dev/null | tail -1 || true)"
+	printf '%s!%s rolled back to %s and VERIFIED healthy — again serving: %s\n' "$Y" "$N" "$LATEST" "${VER:-unknown}" >&2
+	printf '%s!%s the NEW binary failed to boot. Investigate: journalctl -u %s -n 60\n' "$Y" "$N" "$SERVICE" >&2
+	exit 1
 fi
-die "no rollback backup available. Investigate: journalctl -u $SERVICE -n 60"
+die "ROLLBACK DID NOT RECOVER: restored $LATEST but the service is still unhealthy — the box needs a human NOW. journalctl -u $SERVICE -n 80"
