@@ -54,6 +54,10 @@ type Preview struct {
 	// UnmatchedApprovals are supplied approval tokens that matched no destructive op
 	// in this plan (a typo, or an already-applied drop).
 	UnmatchedApprovals []string `json:"unmatched_approvals,omitempty"`
+	// External are consumer-owned objects (no deployed schema version ever declared
+	// them — ENG-9): present in the database, out of migration scope, never proposed
+	// as drops and never approvable. Informative only.
+	External []string `json:"external,omitempty"`
 }
 
 // HasDestructive reports whether the preview contains any data-losing drop (whether
@@ -85,6 +89,18 @@ func PreviewTenantMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema st
 		return nil, err
 	}
 	pv := &Preview{PGSchema: pgSchema}
+	// ENG-9: consumer-owned objects (never declared by any deployed schema
+	// version) are surfaced as External — informative, NEVER approvable. Without
+	// this, a consumer's generated column was proposed as a scary data-losing
+	// drop on EVERY dry-run, forever.
+	if owned, ok := loadOwnedObjects(ctx, pool, pgSchema); ok {
+		var external []schemadiff.Operation
+		plan, external = splitExternalDrops(plan, owned)
+		for _, op := range external {
+			pv.External = append(pv.External,
+				op.String()+" — consumer-owned (no schema version ever declared it); out of migration scope, left untouched")
+		}
+	}
 	if plan.Empty() {
 		pv.Empty = true
 		return pv, nil

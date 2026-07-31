@@ -109,6 +109,17 @@ func runSingleTenant(ctx context.Context, pool *pgxpool.Pool, s *schema.APISchem
 	if err != nil {
 		fatal("Migration failed: " + err.Error())
 	}
+	// Persist the applied schema to the tenant record + history — the same
+	// contract as the fan-out and the control-plane PUT (DOC-1): the UPDATE
+	// fires pg_notify(schema_updated), so a running engine serves the new
+	// FIELDS hot (new resources/routes still need a restart).
+	tenantID := strings.TrimPrefix(pgSchema, "tenant_")
+	if perr := migration.PersistTenantSchema(ctx, pool, tenantID, s); perr != nil {
+		fmt.Printf("  ⚠ schema applied but NOT persisted to the tenant record (%v)\n"+
+			"    the running engine keeps validating against the previous schema — re-run, or deploy via the control plane\n", perr)
+	} else {
+		fmt.Println("  ✓ schema persisted to the tenant record (running engine notified — new fields serve hot; a NEW resource still needs a restart)")
+	}
 	tables := make([]string, 0, len(s.Resources))
 	for name := range s.Resources {
 		tables = append(tables, name)
@@ -230,6 +241,9 @@ func printPreview(pgSchema string, pv *migration.Preview) {
 	fmt.Printf("Dry-run for schema %q — NOTHING was applied.\n\n", pgSchema)
 	if pv.Empty {
 		fmt.Println("  ✓ already converged — no changes.")
+		for _, e := range pv.External {
+			fmt.Printf("  · external (consumer-owned, untouched): %s\n", e)
+		}
 		return
 	}
 
@@ -265,6 +279,14 @@ func printPreview(pgSchema string, pv *migration.Preview) {
 		fmt.Printf("CONCERNS on existing data:\n")
 		for _, c := range pv.Concerns {
 			fmt.Printf("  ⚠ %s\n", c)
+		}
+		fmt.Println()
+	}
+
+	if len(pv.External) > 0 {
+		fmt.Printf("EXTERNAL — consumer-owned objects (never declared by any schema version; out of migration scope, left untouched):\n")
+		for _, e := range pv.External {
+			fmt.Printf("  · %s\n", e)
 		}
 		fmt.Println()
 	}

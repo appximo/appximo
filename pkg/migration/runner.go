@@ -83,6 +83,10 @@ type ApplyOutcome struct {
 	AppliedDrops       []string // destructive keys applied (explicitly approved)
 	GatedDrops         []string // destructive keys present but NOT approved (drift)
 	UnmatchedApprovals []string // approved keys that matched no destructive op
+	// ExternalDrift are consumer-owned objects (no schema version ever declared
+	// them — ENG-9) present in the database but out of migration scope: never
+	// proposed as drops, never approvable, left untouched.
+	ExternalDrift []string
 	// NoChange is true when NO DDL was applied — the schema was already converged, or
 	// the only pending operations were gated drops. It is the noop signal the
 	// multi-tenant orchestrator uses to distinguish an "already up to date" tenant
@@ -130,8 +134,21 @@ func applyMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s 
 		return nil, err
 	}
 	outcome := &ApplyOutcome{}
+	// ENG-9: objects no deployed schema version ever declared are consumer-owned —
+	// reported as external drift, never proposed or approvable (see external.go).
+	if owned, ok := loadOwnedObjects(ctx, pool, pgSchema); ok {
+		var external []schemadiff.Operation
+		plan, external = splitExternalDrops(plan, owned)
+		logExternal(pgSchema, external)
+		for _, op := range external {
+			outcome.ExternalDrift = append(outcome.ExternalDrift, op.String())
+		}
+	}
 	if plan.Empty() {
 		outcome.NoChange = true
+		// Approval keys with nothing to match (including keys naming EXTERNAL
+		// objects, which are out of the plan by design) are reported, not lost.
+		outcome.UnmatchedApprovals = append(outcome.UnmatchedApprovals, approved...)
 		return outcome, nil // converged — nothing to do
 	}
 

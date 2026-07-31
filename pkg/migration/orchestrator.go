@@ -332,6 +332,10 @@ func withTenantLock(ctx context.Context, pool *pgxpool.Pool, pgSchema string, fn
 // history mirrors json_schema on EVERY persist path; a fan-out re-run over a
 // converged tenant is an unchanged-hash no-op, so resuming never spams versions.
 func persistTenantSchema(ctx context.Context, pool *pgxpool.Pool, tenantID string, s *schema.APISchema, runID string) error {
+	return persistTenantSchemaSource(ctx, pool, tenantID, s, schemahistory.SourceFanout, runID)
+}
+
+func persistTenantSchemaSource(ctx context.Context, pool *pgxpool.Pool, tenantID string, s *schema.APISchema, source, runID string) error {
 	b, err := json.Marshal(s)
 	if err != nil {
 		return err
@@ -341,10 +345,27 @@ func persistTenantSchema(ctx context.Context, pool *pgxpool.Pool, tenantID strin
 		tenantID, b); err != nil {
 		return err
 	}
-	if _, _, histErr := schemahistory.Append(ctx, pool, tenantID, b, schemahistory.SourceFanout, runID); histErr != nil {
-		log.Printf("WARNING: schema history append for tenant %q (fan-out %s) failed: %v", tenantID, runID, histErr)
+	if _, _, histErr := schemahistory.Append(ctx, pool, tenantID, b, source, runID); histErr != nil {
+		log.Printf("WARNING: schema history append for tenant %q (%s %s) failed: %v", tenantID, source, runID, histErr)
 	}
 	return nil
+}
+
+// PersistTenantSchema records an APPLIED schema on the tenant's control-plane
+// row + version history, exactly as the fan-out and the control-plane PUT do.
+// The UPDATE on public.tenants fires the schema_updated trigger
+// (migrations/001_control_plane.sql → pg_notify), so a RUNNING engine
+// invalidates its per-tenant caches and starts serving the new columns hot.
+//
+// DOC-1 (CONSUMER-PATH-S1): the single-tenant CLI `migrate --tenant` applied
+// the DDL but never persisted the schema, so the live engine kept validating
+// against the OLD one — a freshly migrated field answered `422 unknown_field`
+// until a restart, while the SAME change through the control-plane PUT worked
+// hot. One migrate path, one persistence contract. Best-effort at the call
+// site: the DDL is already applied; a persistence failure is reported, never
+// rolls the DDL back.
+func PersistTenantSchema(ctx context.Context, pool *pgxpool.Pool, tenantID string, s *schema.APISchema) error {
+	return persistTenantSchemaSource(ctx, pool, tenantID, s, schemahistory.SourceDeploy, "migrate-cli")
 }
 
 // logFanout records one tenant's fan-out outcome in public.migration_log (the
