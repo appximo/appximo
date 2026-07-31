@@ -32,6 +32,20 @@ type Config struct {
 	// Port is the data-plane HTTP port. 0 falls back to 8080.
 	Port int
 
+	// Host is the data-plane bind address. Empty keeps the historical default
+	// (all interfaces). Set "127.0.0.1" for a loopback-only deployment — a dev
+	// box reached through an SSH tunnel, or a binary that only ever sits behind
+	// a local reverse proxy (LIBRARY-GAPS-S2, from the 105's port-exposure
+	// review: a public box's firewall should be the SECOND line, not the only
+	// one).
+	Host string
+
+	// ControlHost is the control-plane bind address. Empty keeps the historical
+	// default (all interfaces — relies on the firewall/AGENTS rule that :9090
+	// never reaches the internet). "127.0.0.1" enforces localhost-only at the
+	// socket, which is what the control plane's own documentation assumes.
+	ControlHost string
+
 	// ControlPort is the control-plane HTTP port (tenant registration,
 	// X-Admin-Key-gated — keep it off the internet). 0 falls back to
 	// APPITOOLS_CONTROL_PORT, then 9090 (the historical fixed value, so a

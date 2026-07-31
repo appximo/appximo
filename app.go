@@ -414,7 +414,7 @@ func New(cfg Config) (*App, error) {
 	cpRouter := controlplane.NewControlPlaneRouter(app.cpSvc, adminKey)
 	cpRouter.Mount("/", app.obsServer.Router(adminKey))
 	app.cpSrv = &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.ControlPort),
+		Addr:              fmt.Sprintf("%s:%d", cfg.ControlHost, cfg.ControlPort),
 		Handler:           cpRouter,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       20 * time.Second,
@@ -850,7 +850,7 @@ func (a *App) Start() error {
 	// the dispatch exists so S3 can load N apps and S4 can hot-swap one).
 	a.registry = NewRegistry(&compiledApp{name: a.schema.Name, handler: r}, nil)
 
-	addr := fmt.Sprintf(":%d", a.cfg.Port)
+	addr := fmt.Sprintf("%s:%d", a.cfg.Host, a.cfg.Port)
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           a.registry,
