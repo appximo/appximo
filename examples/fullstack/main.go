@@ -16,6 +16,15 @@
 //	GET /api/nope             a real 404           (never the shell — see below)
 //	GET /admin, /editor, /docs, /graphiql, /healthz … the engine's own routes
 //
+// Headers worth asserting when verifying this live (LIBRARY-GAPS-S2, ENG-5 —
+// and assert them with a BROWSER or an explicit header check, never a bare
+// curl status: CSP failures render a blank page that still returns 200):
+//
+//	GET /            Content-Security-Policy: appitools.DefaultStaticCSP
+//	                 (same-origin SPA policy — NOT the API's default-src 'none';
+//	                 override per mount with StaticMount.CSP, disable with CSPOff)
+//	GET /api/tasks   Content-Security-Policy: default-src 'none'; … (the API keeps its own)
+//
 // Run it:
 //
 //	DATABASE_URL=… JWT_SECRET=… ADMIN_KEY=… \

@@ -74,7 +74,37 @@ type StaticMount struct {
 	// the index document is ALWAYS no-cache — it names the current hashed
 	// bundles, so a stale copy would point at files a deploy already deleted.
 	ImmutablePrefixes []string
+
+	// CSP is this mount's Content-Security-Policy (LIBRARY-GAPS-S2, ENG-5).
+	//
+	// The static handler OWNS the header on everything it serves, for BOTH
+	// mount forms. Before this, the two forms diverged invisibly: a root mount
+	// is chi's NotFound handler, which chi copies into the API subrouter that
+	// lives inside the StrictCSP group — so the SPA shell shipped the API's
+	// `default-src 'none'` and every browser blocked the app's own scripts
+	// (a blank page curl can never see, because curl does not enforce CSP);
+	// a sub-path mount bypassed the group and shipped NO policy at all.
+	//
+	//   ""  (default) → DefaultStaticCSP: a same-origin SPA policy (the shape
+	//        the engine's own embedded UIs use — external self scripts, inline
+	//        styles allowed for component libraries, no framing).
+	//   any other string → emitted verbatim, replacing the default (e.g. add
+	//        img-src for a CDN).
+	//   CSPOff ("off") → NO Content-Security-Policy header at all: the handler
+	//        DELETES any policy inherited from the chain, so opting out is the
+	//        same on a root and a sub-path mount. For apps that set their own
+	//        policy via <meta http-equiv>.
+	CSP string
 }
+
+// DefaultStaticCSP is the policy a StaticMount serves when CSP is unset: strict
+// same-origin, no framing — right for the common self-contained SPA (external
+// module scripts, component-library inline styles, data: images).
+const DefaultStaticCSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
+	"script-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+
+// CSPOff is the StaticMount.CSP sentinel that disables the header entirely.
+const CSPOff = "off"
 
 // reservedStaticPrefixes are the URL prefixes the engine itself serves. A
 // StaticMount may not take one — the boot check below rejects it with the list,
@@ -95,9 +125,23 @@ var defaultImmutablePrefixes = []string{"assets/", "_app/", "static/"}
 type staticHandler struct {
 	mount    StaticMount
 	prefix   string // normalized, no trailing slash ("" for root)
-	index    []byte
+	index    []byte // nil for an assets-only mount (no index, SPA off)
 	indexTag string
 	immutabl []string
+	csp      string // resolved policy; "" means emit nothing (CSPOff)
+}
+
+// setCSP stamps the mount's policy on a response about to be served. It runs on
+// EVERY static response (documents are where CSP matters; on assets it is inert
+// but keeps the surface uniform), and it OVERRIDES whatever the middleware chain
+// left — that inherited header is exactly the bug this fixes. CSPOff deletes it
+// so "no policy" is achievable on a root mount too.
+func (h *staticHandler) setCSP(w http.ResponseWriter) {
+	if h.csp == "" {
+		w.Header().Del("Content-Security-Policy")
+		return
+	}
+	w.Header().Set("Content-Security-Policy", h.csp)
 }
 
 // validateStaticMounts checks every declared mount at BOOT and compiles it.
@@ -143,20 +187,34 @@ func validateStaticMounts(mounts []StaticMount) ([]*staticHandler, error) {
 		if idxName == "" {
 			idxName = "index.html"
 		}
+		// An assets-only mount (SPA off) may have no index document — its root
+		// simply 404s (1B-2: a tree of hashed bundles has nothing to index).
+		// The SPA fallback NEEDS the index (it IS the fallback), so there a
+		// missing one stays a boot error.
 		idx, err := fs.ReadFile(m.FS, idxName)
 		if err != nil {
-			return nil, fmt.Errorf("appitools: %s: cannot read %q from the mounted FS: %w "+
-				"(did the frontend build run before `go build`?)", where, idxName, err)
+			if m.SPA {
+				return nil, fmt.Errorf("appitools: %s: cannot read %q from the mounted FS: %w "+
+					"(did the frontend build run before `go build`? An SPA mount needs its index — it is the fallback document)", where, idxName, err)
+			}
+			idx = nil
 		}
 
 		imm := m.ImmutablePrefixes
 		if len(imm) == 0 {
 			imm = defaultImmutablePrefixes
 		}
+		csp := m.CSP
+		switch csp {
+		case "":
+			csp = DefaultStaticCSP
+		case CSPOff:
+			csp = ""
+		}
 		m.Index = idxName
 		out = append(out, &staticHandler{
 			mount: m, prefix: prefix, index: idx,
-			indexTag: staticETag(idx), immutabl: imm,
+			indexTag: staticETag(idx), immutabl: imm, csp: csp,
 		})
 	}
 	// Longest prefix first so "/app/admin-ui" is matched before "/app".
@@ -265,6 +323,12 @@ func isEngineOwnedPath(p string) bool {
 }
 
 func (h *staticHandler) serveIndex(w http.ResponseWriter, r *http.Request) {
+	if h.index == nil {
+		// Assets-only mount: there is no document to serve at the root.
+		http.NotFound(w, r)
+		return
+	}
+	h.setCSP(w)
 	// The index names the current hashed bundles: a cached copy would point at
 	// files the next deploy deletes. Always revalidate.
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -308,6 +372,7 @@ func (h *staticHandler) serve(w http.ResponseWriter, r *http.Request, rel string
 		// A directory request serves its index if there is one, else the SPA
 		// fallback / 404 — never a directory listing (which would leak the tree).
 		if idx, ierr := fs.ReadFile(h.mount.FS, path.Join(rel, h.mount.Index)); ierr == nil {
+			h.setCSP(w)
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			http.ServeContent(w, r, h.mount.Index, time.Time{}, bytes.NewReader(idx))
@@ -317,6 +382,7 @@ func (h *staticHandler) serve(w http.ResponseWriter, r *http.Request, rel string
 		return
 	}
 
+	h.setCSP(w)
 	if ct := staticMIME[path.Ext(rel)]; ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}

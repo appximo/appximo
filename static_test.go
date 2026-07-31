@@ -220,7 +220,10 @@ func TestStaticMount_BootValidation(t *testing.T) {
 		{"collides with /admin", StaticMount{Path: "/admin", FS: spaFS()}, "collides with the engine"},
 		{"collides with /editor", StaticMount{Path: "/editor", FS: spaFS()}, "collides with the engine"},
 		{"collides with /health", StaticMount{Path: "/health", FS: spaFS()}, "collides with the engine"},
-		{"no index in the FS", StaticMount{Path: "/app", FS: fstest.MapFS{"a.js": {Data: []byte("x")}}}, "cannot read"},
+		// 1B-2 (LIBRARY-GAPS-S2): a missing index is an error only when SPA is
+		// on — the index IS the fallback document. An assets-only mount without
+		// one is valid (covered in static_csp_test.go).
+		{"no index in an SPA FS", StaticMount{Path: "/app", SPA: true, FS: fstest.MapFS{"a.js": {Data: []byte("x")}}}, "cannot read"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
