@@ -31,6 +31,9 @@
 #   --warmup=T           warmup hold (0 to skip)                        [default 45s]
 #   --cooldown=SEC       idle seconds between runs                      [default 10]
 #   --per-page=N         page size for list reads                       [default 20]
+#   --path=P             read-arm endpoint incl. query (?…) — REQUIRED for a
+#                        consumer app, whose surface has no /api/orders
+#                        (e.g. --path='/api/catalogo?per_page=20')
 #   --cache-bust         make every request URI unique (bypass the response cache)
 #   --both-cache-arms    run the scenario twice: cached and bypassed
 #   --ladder="A B C"     climb these rates, stop at saturation (the knee finder)
@@ -52,6 +55,7 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCENARIO="read"; RATE=200; DURATION="30s"; RUNS=3; WARMUP="45s"; COOLDOWN=10
 PER_PAGE=20; CACHE_BUST=0; BOTH_ARMS="no"; LADDER=""; COMPARE_TLS="no"
 ENGINE_URL="http://127.0.0.1:${ENGINE_PORT}"; LABEL=""; ORIGIN_IP=
+READ_PATH=""   # --path: the read arm's endpoint on a CONSUMER app (OPS-8)
 
 for arg in "$@"; do
 	case "$arg" in
@@ -65,6 +69,7 @@ for arg in "$@"; do
 		--warmup=*)     WARMUP="${arg#*=}" ;;
 		--cooldown=*)   COOLDOWN="${arg#*=}" ;;
 		--per-page=*)   PER_PAGE="${arg#*=}" ;;
+		--path=*)       READ_PATH="${arg#*=}" ;;
 		--cache-bust)   CACHE_BUST=1 ;;
 		--both-cache-arms) BOTH_ARMS="yes" ;;
 		--ladder=*)     LADDER="${arg#*=}" ;;
@@ -126,7 +131,11 @@ preflight() {
 			body="$(curl -sg "${RA[@]}" -w '\n%{http_code}' "$TARGET/api/orders?include=customer,items&per_page=2" \
 				-H "Authorization: Bearer $TOKEN")" ;;
 		*)
-			body="$(curl -sg "${RA[@]}" -w '\n%{http_code}' "$TARGET/api/orders?filter[status][eq]=paid&per_page=2" \
+			# The read arm honors --path (OPS-8): the default /api/orders shape only
+			# exists on a bare-engine bench install; a consumer app names its own
+			# read endpoint (e.g. --path='/api/catalogo?per_page=20').
+			local rp="${READ_PATH:-/api/orders?filter[status][eq]=paid&per_page=2}"
+			body="$(curl -sg "${RA[@]}" -w '\n%{http_code}' "$TARGET$rp" \
 				-H "Authorization: Bearer $TOKEN")" ;;
 	esac
 	code="$(printf '%s' "$body" | tail -1)"
@@ -181,7 +190,7 @@ detect_cdn() {
 # so a result can never silently be "we benchmarked the cache".
 cache_state() {
 	local hdr_out
-	hdr_out="$(curl -sg -o /dev/null -D - "$TARGET/api/orders?filter[status][eq]=paid&per_page=$PER_PAGE" \
+	hdr_out="$(curl -sg -o /dev/null -D - "$TARGET${READ_PATH:-/api/orders?filter[status][eq]=paid&per_page=$PER_PAGE}" \
 		-H "Authorization: Bearer $TOKEN" 2>/dev/null | grep -i '^x-cache:' | tr -d '\r' || true)"
 	printf '%s' "${hdr_out:-X-Cache: (miss/absent)}"
 }
@@ -203,7 +212,7 @@ run_once() {
 	local origin_for_run=""
 	case "$url" in *"$(host_of "$TARGET")"*) origin_for_run="$ORIGIN_IP" ;; esac
 	SCENARIO="$scen" RATE="$rate" DURATION="$dur" TARGET_URL="$url" TOKEN="$TOKEN" \
-	PER_PAGE="$PER_PAGE" CACHE_BUST="$bust" HOST_HEADER="$(host_of "$TARGET")" \
+	PER_PAGE="$PER_PAGE" READ_PATH="$READ_PATH" CACHE_BUST="$bust" HOST_HEADER="$(host_of "$TARGET")" \
 	ORIGIN_IP="$origin_for_run" SUMMARY_OUT="$prefix-summary.json" \
 		k6 run --quiet --no-usage-report "${k6_out[@]}" "$K6_SCRIPT" >"$prefix-k6.log" 2>&1 || {
 			warn "k6 exited non-zero for $prefix (see $prefix-k6.log) — keeping whatever it produced"

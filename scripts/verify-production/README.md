@@ -208,3 +208,33 @@ Measured on a $16/mo 2 vCPU / 2 GB droplet: see
 [docs/BENCHMARKS.md](../../docs/BENCHMARKS.md). Use them as a sanity check, not
 a target — your hardware, network, schema and data are different, which is the
 entire reason this suite exists.
+
+## Pointing the verification at ANY instance (engine or consumer app)
+
+This is the single declared interface (OPS-8, CONSUMER-PATH-S1). Every suite in
+this repo takes the same idea: **name the target explicitly; nothing assumes
+"the binary is the engine" or "the schema is the bench schema".**
+
+| Knob | Used by | Meaning |
+|---|---|---|
+| `--target=URL` | `load.sh`, `chaos.sh`, `run-all.sh` | the public base URL under test (HTTP or HTTPS) |
+| `--server-ssh=HOST` + `VP_SSH_OPTS` | `chaos.sh`, `run-all.sh` | where faults are injected; extra ssh options (e.g. a ControlPath) via the env var |
+| `--path='/api/…?…'` | `load.sh` | the READ endpoint on a **consumer** app (the default `/api/orders` only exists on the bench schema; the pre-flight refuses a 404 instead of measuring it) |
+| `VP_DB_PROBE_PATH='/api/…'` | `chaos.sh` | a **DB-touching** path on this deploy, so the database cases (postgres-stop, pool-exhaust) measure real user impact — on a consumer app `/healthz` proves nothing |
+| `--token=JWT` | `load.sh`, `chaos.sh` | auth for the probed endpoints (mint with `appitools-cli token`) |
+| `--origin-ip=IP` | `load.sh`, `chaos.sh` | pin the hostname past a CDN/proxy in front |
+| `footprint.sh` | (runs ON the server) | needs `lib.sh` beside it; `--service=NAME` if the unit is not `appitools` |
+
+The **acceptance smoke** (`scripts/acceptance-test.sh`, repo root) follows the
+same rule with env vars: `BASE` / `ADMIN` (data/control plane), `APPITOOLS_CLI`
+(how to invoke the ops CLI), `SCHEMA_FILE` (the schema the app actually
+serves), `ADMIN_ROLE` (the broad role that schema declares — a consumer app has
+no `admin`), `PSQL_CMD` (optional physical checks), `TENANT_A`/`TENANT_B`
+(smoke tenants — **created-by-the-run tenants are deleted at the end**, a suite
+never leaves residue on a demo). Checks that require the quickstart contract
+(`tasks` + `admin`/`viewer`) detect the served surface via `/openapi.json` and
+report **INFO/SKIP with the reason** when it is absent: a FAIL always means
+"broken", never "it is a different app".
+
+The commerce regression suites (`/root/commerce/scripts/*`) use the same shape:
+`BASE`, `HOST`, `TENANT`, `PSQL_CMD`, `TOKEN`.

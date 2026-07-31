@@ -140,9 +140,17 @@ function bust(url) {
 // ── The request shapes ───────────────────────────────────────────────────────
 // Each returns the k6 response so the caller can check + record it.
 
+// READ_PATH parameterizes the read arm's endpoint (OPS-8): the default drives
+// the verify-production bench schema (/api/orders), which only exists on a
+// bare-engine bench install — a CONSUMER app points it at its own read surface
+// (e.g. READ_PATH='/api/catalogo?per_page=20'). Must include its query `?` so
+// the cache-bust suffix appends correctly.
+const READ_PATH = __ENV.READ_PATH ||
+  `/api/orders?filter[status][eq]=paid&sort=created_at&order=desc&per_page=${PER_PAGE}`;
+
 function doRead() {
   // The single most common real request: a filtered, sorted, paginated list.
-  const url = `${TARGET}/api/orders?filter[status][eq]=paid&sort=created_at&order=desc&per_page=${PER_PAGE}`;
+  const url = `${TARGET}${READ_PATH}`;
   return http.get(bust(url), { headers: headers(), tags: { arm: 'read' } });
 }
 
