@@ -406,6 +406,17 @@ func (a *App) customHandler(rt Route) http.HandlerFunc {
 
 		tx, err := a.pool.Begin(ctx)
 		if err != nil {
+			// With PostgreSQL down the failure happens HERE — before the handler
+			// ever runs — so this path needs the same honest classification the
+			// handler's own errors get (ENG-10): 503 "down, retry later", never a
+			// 500 that reads like an application bug. Measured live: the whole
+			// postgres-stop window surfaced through this branch.
+			if db.IsUnavailable(err) {
+				w.Header().Set("Retry-After", "1")
+				writeErr(w, http.StatusServiceUnavailable, "service unavailable")
+				return
+			}
+			a.logf("custom route %s %s: begin tx: %v", rt.Method, rt.Path, err)
 			writeErr(w, http.StatusInternalServerError, "internal error")
 			return
 		}
