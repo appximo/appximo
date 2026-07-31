@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/rbac"
@@ -65,7 +66,7 @@ func TestJWTMiddleware_PublicExactMatchOnly(t *testing.T) {
 	isPublic := func(method, path string) bool { return method == "POST" && path == "/api/_register" }
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if c := auth.ClaimsFromCtx(r.Context()); c != nil {
-			t.Error("a public request must carry NO claims")
+			t.Error("a tokenless public request must carry NO claims")
 		}
 		w.WriteHeader(http.StatusOK)
 	})
@@ -128,6 +129,65 @@ func TestCreateUser_RoleValidatedBeforeAnyIO(t *testing.T) {
 	}
 	if _, err := c.CreateUser("a@b.com", "short", "viewer"); !errors.Is(err, ErrWeakPassword) {
 		t.Fatalf("short password: want ErrWeakPassword, got %v", err)
+	}
+}
+
+// LIBRARY-GAPS-S2 (ENG-6): a Public route is OPTIONALLY authenticated. The
+// three branches, pinned:
+//   absent token   → 200, Claims nil (anonymous — behavior unchanged)
+//   valid token    → 200, Claims POPULATED (identity as input)
+//   invalid token  → 401 (garbage never silently degrades to anonymous)
+func TestJWTMiddleware_PublicOptionalAuth(t *testing.T) {
+	const secret = "test-secret-test-secret-test-secret!"
+	isPublic := func(method, path string) bool { return method == "POST" && path == "/api/checkout" }
+
+	var gotClaims *auth.Claims
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotClaims = auth.ClaimsFromCtx(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+	h := auth.JWTMiddlewareWithPublic(secret, isPublic)(next)
+
+	do := func(authorization string) (int, *auth.Claims) {
+		gotClaims = nil
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/api/checkout", nil)
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
+		}
+		h.ServeHTTP(rec, req)
+		return rec.Code, gotClaims
+	}
+
+	// 1. Absent → anonymous.
+	if code, c := do(""); code != http.StatusOK || c != nil {
+		t.Errorf("absent token: code %d claims %v, want 200 + nil claims", code, c)
+	}
+
+	// 2. Valid → populated.
+	tok, err := auth.GenerateToken(auth.Claims{UserID: "u-1", Role: "cliente", TenantID: "acme"}, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, c := do("Bearer " + tok); code != http.StatusOK || c == nil || c.UserID != "u-1" || c.Role != "cliente" {
+		t.Errorf("valid token: code %d claims %+v, want 200 with UserID u-1 / role cliente", code, c)
+	}
+
+	// 3a. Garbage → 401 (never anonymous).
+	if code, c := do("Bearer not-a-jwt"); code != http.StatusUnauthorized || c != nil {
+		t.Errorf("garbage token: code %d claims %v, want 401 and the handler never invoked", code, c)
+	}
+	// 3b. Expired → 401.
+	expired, err := auth.GenerateTokenWithTTL(auth.Claims{UserID: "u-1", Role: "cliente", TenantID: "acme"}, secret, -time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := do("Bearer " + expired); code != http.StatusUnauthorized {
+		t.Errorf("expired token: code %d, want 401", code)
+	}
+	// 3c. Wrong scheme → 401.
+	if code, _ := do("Basic dXNlcjpwd2Q="); code != http.StatusUnauthorized {
+		t.Errorf("non-Bearer Authorization: code %d, want 401", code)
 	}
 }
 
