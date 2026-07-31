@@ -193,6 +193,37 @@ close it — its lifetime belongs to the App. Inside a request, always prefer `C
 filter). See [examples/backend-guide/main.go](../examples/backend-guide/main.go)
 `ensureInvariants` for the full loop over tenants.
 
+**Per-tenant work — `Config.OnTenantProvisioned`.** `BeforeStart` covers the
+tenants that exist AT BOOT; a tenant registered while the app is LIVE (the
+normal flow of a multi-tenant SaaS) needs the same DDL. Set the per-tenant twin
+— it runs inside every registration, after the engine provisions the tenant's
+tables, all-or-nothing (your error rolls the registration back):
+
+```go
+OnTenantProvisioned: func(ctx context.Context, pool *pgxpool.Pool, tenantID, pgSchema string) error {
+	return applyMyDDL(ctx, pool, pgSchema) // same idempotent DDL BeforeStart applies
+},
+```
+
+Without it, a fresh tenant is missing your DDL until a restart — a 500 on any
+endpoint that depends on it (the exact bug PROD-JOURNEY-1B measured).
+
+**The deployable contract — `appitools.ParseServeArgs`.** For the binary to be
+installable/updatable by the official production tooling (ADR-023), main()
+starts with:
+
+```go
+var version, revision = "dev", "unknown" // -ldflags -X main.version=… (scripts/build-consumer.sh)
+
+args := appitools.ParseServeArgs("myapp", version, revision,
+	appitools.ServeArgs{Port: 8099, ControlPort: 9099})
+// wire args.SchemaPath/args.Port/args.ControlPort + Version: version into Config
+```
+
+It implements `myapp version` (the installer's identity check), accepts the
+unit's `serve --schema … --port …`, and fails LOUD on any misplaced argument
+(plain `flag.Parse` silently discards everything after a bare word).
+
 ### 3.2 The `Route`
 
 ```go

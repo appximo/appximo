@@ -1176,10 +1176,14 @@ Facts agents most often get wrong:
 - **One API structure, N tenants with isolated data.** Routes, GraphQL types,
   RBAC, validators, hooks and `/docs` are compiled ONCE from the boot `--schema`
   and are identical for every tenant; only the DATA (and each tenant's physical
-  table set, via per-tenant migrations) is per-tenant. A deploy migrates ONE
-  tenant's tables live — new columns are readable/writable immediately (the DB is
-  the source of truth for write keys) — but validation rules, filters, GraphQL
-  fields, `/docs` and NEW resources activate only on a restart with the new
+  table set, via per-tenant migrations) is per-tenant. A deploy (editor, control-
+  plane `PUT`, or `migrate` — since CONSUMER-PATH-S1 ALL three persist the schema
+  and notify the running engine) migrates ONE tenant's tables live, and a new
+  FIELD becomes writable/readable hot — write keys follow the tenant's DEPLOYED
+  schema (per-tenant cache, pg_notify-invalidated), so a field the deploy didn't
+  persist is a 422 `unknown_field`, not a silent write. Everything derived from
+  the schema DEFINITION — validation rules, filters, GraphQL fields, `/docs`,
+  RBAC, hooks, and NEW resources — activates only on a restart with the new
   schema — one click from the editor since UI-F4-S2 (graceful self-restart via
   `POST /admin/engine/schema`). The full verified model:
   [docs/MENTAL_MODEL.md](docs/MENTAL_MODEL.md).

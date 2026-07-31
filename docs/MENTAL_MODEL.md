@@ -71,21 +71,24 @@ the same *route surface*.
 ## 4. The change cycle — what a deploy activates live, and what needs a restart
 
 A deploy (editor "Deploy", control-plane `PUT /tenants/{id}/schema`, or
-`appitools migrate`) does four things: persists the schema to
-`public.tenants.json_schema`, **appends it to the tenant's version history**
-(`public.schema_history`, append-only — the base of "roll back to vN"; see
-pkg/schemahistory), runs the **real migration** against that tenant's
-tables (diff → production-safe DDL), and fires `pg_notify(schema_updated)`
-which only **invalidates the response cache** (app.go `startCacheInvalidator`).
-It never recompiles routes, GraphQL, RBAC, validators or hooks.
+`appitools migrate` — since CONSUMER-PATH-S1 the single-tenant CLI persists
+too; before, it applied the DDL and left the record stale, so the new field
+answered 422 until a restart — the PROD-JOURNEY-1B finding) does four things:
+persists the schema to `public.tenants.json_schema`, **appends it to the
+tenant's version history** (`public.schema_history`, append-only — the base of
+"roll back to vN"; see pkg/schemahistory), runs the **real migration** against
+that tenant's tables (diff → production-safe DDL), and fires
+`pg_notify(schema_updated)`, which **invalidates the response cache and the
+per-tenant schema cache**. It never recompiles routes, GraphQL, RBAC,
+validators or hooks.
 
 The consequences, **verified live** (engine booted with one schema, a tenant
-migrated to a schema with a new column `notas`, then probed without restart):
+deployed a schema with a new column, then probed without restart):
 
 | After deploying, without restart… | Live? | Why |
 |---|---|---|
 | New/renamed **table or column** exists in the tenant DB | ✅ | the migration engine ran |
-| **Write** the new column (POST/PUT/PATCH, REST) | ✅ | the insert/update is body-driven; keys are NOT whitelisted against the boot schema — the DB is the source of truth, an unknown column's 42703 maps to a clean 422 `unknown_field` (the insert error path in `codegen.BuildRouter` → handlers/errors.go `WriteDBError`) |
+| **Write** the new column (POST/PUT/PATCH, REST) | ✅ | write keys follow the tenant's DEPLOYED schema (the per-tenant schema cache, refreshed on the deploy's pg_notify / `POST /admin/tenants/{id}/reload`) — a key outside it is a clean 422 `unknown_field`. This is why the deploy MUST persist the schema: DDL alone (the old CLI-migrate behavior) left the cache on the previous schema and the new column 422'd |
 | **Read** the new column (GET list/get, REST) | ✅ | `SELECT *` returns whatever columns the tenant table has |
 | Declarative **validation** of the new column (`maxLength`, `pattern`, …) | ❌ | validators are boot-compiled — a 300-char value passed a deployed `maxLength: 200` in the live test |
 | `filter[new_column]` | ❌ | the query builder validates filter fields against the boot resource (400 `unknown filter field`) |

@@ -174,21 +174,64 @@ a backup on the same disk as the database is one failure away from gone.
 
 When you build a custom backend (import `appitools`, register handlers — see
 [docs/BACKEND_SPEC_LLM.md](BACKEND_SPEC_LLM.md)), **the production path is
-identical**. Your `main.go` compiles to the same kind of static binary; build it
-with the same flags and install it exactly as above:
+identical** — provided your binary honors the **deployable contract**
+([ADR-023](adr/ADR-023-deployable-binary-contract.md)): `<bin> version` prints
+its identity, and `<bin> serve --schema <path> --port <n>` starts it, failing
+LOUD on misplaced arguments. The library gives you both in one call:
+
+```go
+var version, revision = "dev", "unknown"   // injected by the build below
+
+func main() {
+    args := appitools.ParseServeArgs("myapp", version, revision,
+        appitools.ServeArgs{Port: 8099, ControlPort: 9099})
+    app, err := appitools.New(appitools.Config{
+        SchemaPath: args.SchemaPath, Port: args.Port,
+        ControlPort: args.ControlPort, Version: version, // /health reports it
+    })
+    // …
+}
+```
+
+Build with the canonical consumer build (it compiles your SPA first — hashed
+assets are conventionally gitignored, so a bare `go build` embeds an EMPTY
+shell — and injects the git version so `/health` and a rollback decision see a
+real SHA):
 
 ```bash
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" \
-  -o /tmp/myapp ./cmd/myapp
+# from your app repo; resolves the script out of your engine dependency
+bash "$(go list -m -f '{{.Dir}}' github.com/miguelangel/appitools)/scripts/build-consumer.sh" /tmp/myapp
 scp /tmp/myapp you@server:/tmp/myapp
-sudo bash install.sh --domain api.example.com --email you@example.com --binary=/tmp/myapp
-# or, on an already-installed box:
+sudo bash install.sh --domain api.example.com --email you@example.com \
+  --binary=/tmp/myapp --cli=/tmp/appitools --schema=/tmp/myschema.json
+# updates later:
 sudo bash /opt/appitools/scripts/deploy-update.sh --binary=/tmp/myapp
 ```
 
-The systemd unit, Caddy, PostgreSQL and the env file don't change — your binary
-serves the same `/api`, `/auth`, `/graphql`, health probes and control plane. The
-outbox worker, if you run one, is a second systemd unit (see
+**Production is two artifacts for a consumer app** (the honest version of the
+"one binary" story): your binary SERVES everything — API, auth, GraphQL, your
+frontend, health, control plane — and the engine CLI OPERATES it (register
+tenants, `migrate --dry-run`, mint tokens, create the super-admin). Pass it via
+`--cli` (build with `scripts/build-engine.sh`) and it lands at
+`/opt/appitools/bin/appitools-cli`; when the installed binary IS the engine the
+installer symlinks it automatically, so `appitools-cli …` is the one documented
+invocation on every box. The systemd unit, Caddy, PostgreSQL and the env file
+don't change. The installer prints WHERE the generated secrets live, never the
+values (`--show-secrets` to opt in), and detects your control-plane port from
+the live service.
+
+Two more facts a consumer deploy should know:
+
+- **One Caddy site = one tenant domain.** The installer writes a Caddyfile for
+  exactly the `--domain` you gave; the tenant resolves from the Host header, so
+  serving MORE tenants publicly means more site blocks (or a wildcard cert) in
+  `/etc/caddy/Caddyfile` — each proxying to the same engine port.
+- **Consumer boot DDL** belongs in `Config.BeforeStart` (tenants existing at
+  boot) **plus `Config.OnTenantProvisioned`** (tenants registered while live) —
+  with only the former, a freshly registered tenant is missing your DDL until a
+  restart.
+
+The outbox worker, if you run one, is a second systemd unit (see
 [docs/DEPLOY.md § Background worker](DEPLOY.md)).
 
 ---
