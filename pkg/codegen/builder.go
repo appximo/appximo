@@ -1197,7 +1197,7 @@ func RunUpdate(ctx context.Context, tdb *db.TenantDB, res *schema.ResourceSchema
 	// State-machine transition guard (G5): a row whose current state does not allow
 	// the requested transition matches zero rows → no write (race-safe). No-op for a
 	// resource without a state machine on an updated field.
-	q, args, err = appendStateTransitionGuard(q, args, res, sets)
+	q, args, err = AppendStateTransitionGuard(q, args, res, sets)
 	if err != nil {
 		return nil, err
 	}
@@ -1245,7 +1245,7 @@ func RunDelete(ctx context.Context, tdb *db.TenantDB, tbl, name, tenantID, pgSch
 	return tdb.ExecTenant(ctx, pgSchema, q, args...)
 }
 
-// appendStateTransitionGuard appends, for each state-machine field being SET, a
+// AppendStateTransitionGuard appends, for each state-machine field being SET, a
 // race-safe transition guard to an UPDATE's WHERE: the row's CURRENT state must
 // either already equal the new value (a no-op self-set, so a full-object PUT/PATCH
 // that re-sends the unchanged state still succeeds) OR be a state from which the new
@@ -1254,7 +1254,11 @@ func RunDelete(ctx context.Context, tdb *db.TenantDB, tbl, name, tenantID, pgSch
 // nothing, with no read-modify-write race. It appends NO clause for an update that
 // touches no state-machine field, so a resource without one is byte-identical (the
 // gate). The new value and the origin set are always bound parameters.
-func appendStateTransitionGuard(sql string, args []any, res *schema.ResourceSchema, sets map[string]any) (string, []any, error) {
+//
+// Exported (LIBRARY-GAPS-S2, ENG-7): it is the ONE place transitions become SQL,
+// shared by the REST/GraphQL update core, the batch transaction path AND
+// Ctx.Update — a custom route no longer re-states the transition table.
+func AppendStateTransitionGuard(sql string, args []any, res *schema.ResourceSchema, sets map[string]any) (string, []any, error) {
 	fields := make([]string, 0, len(sets))
 	for f := range sets {
 		fields = append(fields, f)
@@ -1317,7 +1321,55 @@ func ExplainTransitionFailure(ctx context.Context, tdb *db.TenantDB, pgSchema, t
 		return http.StatusNotFound, "not found" // row vanished (race)
 	}
 	vals, err := rows.Values()
-	if err != nil || len(vals) != len(stateFields) {
+	if err != nil {
+		return http.StatusConflict, "the resource changed during the update; retry"
+	}
+	return classifyTransitionFailure(vals, stateFields, sets)
+}
+
+// ExplainTransitionFailureTx is ExplainTransitionFailure for a caller holding an
+// OPEN transaction — Ctx.Update (LIBRARY-GAPS-S2, ENG-7). Same read, same
+// classification, plus the role's row condition on the SELECT: the explain must
+// never reveal the state of a row the failed UPDATE itself could not touch
+// (a row-condition-excluded row stays a plain 404, not a 422 that leaks its
+// current state).
+func ExplainTransitionFailureTx(ctx context.Context, tx pgx.Tx, tbl, id string,
+	res *schema.ResourceSchema, sets map[string]any, cond *rbac.WhereCondition) (int, string) {
+	stateFields := stateFieldsUpdated(res, sets)
+	if len(stateFields) == 0 {
+		return http.StatusNotFound, "not found"
+	}
+	cols := make([]string, len(stateFields))
+	for i, f := range stateFields {
+		cols[i] = pgx.Identifier{f}.Sanitize()
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s WHERE id = $1", strings.Join(cols, ", "), tbl)
+	args := []any{id}
+	q, args, err := query.AppendRowCondition(q, args, cond)
+	if err != nil {
+		return http.StatusNotFound, "not found"
+	}
+	rows, err := tx.Query(ctx, q, args...)
+	if err != nil {
+		return http.StatusNotFound, "not found"
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return http.StatusNotFound, "not found" // no such row (or excluded by the row condition)
+	}
+	vals, err := rows.Values()
+	if err != nil {
+		return http.StatusConflict, "the resource changed during the update; retry"
+	}
+	return classifyTransitionFailure(vals, stateFields, sets)
+}
+
+// classifyTransitionFailure is the shared verdict on the values read back after a
+// 0-row guarded UPDATE: the first state field whose current value differs from the
+// requested one names the rejected transition (422, the exact generated-path
+// message); all-equal means a concurrent change, not a bad move (409).
+func classifyTransitionFailure(vals []any, stateFields []string, sets map[string]any) (int, string) {
+	if len(vals) != len(stateFields) {
 		return http.StatusConflict, "the resource changed during the update; retry"
 	}
 	for i, f := range stateFields {

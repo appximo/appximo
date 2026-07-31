@@ -416,7 +416,7 @@ func buildUpdateSQL(res *schema.ResourceSchema, tbl, id string, sets map[string]
 	// State-machine transition guard (G5) — same race-safe predicate the single-op
 	// RunUpdate appends, so a batched update enforces transitions identically.
 	var serr error
-	if q, args, serr = appendStateTransitionGuard(q, args, res, sets); serr != nil {
+	if q, args, serr = AppendStateTransitionGuard(q, args, res, sets); serr != nil {
 		return "", nil, &txError{status: http.StatusUnprocessableEntity, msg: serr.Error()}
 	}
 	return q + " RETURNING *", args, nil

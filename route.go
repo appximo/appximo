@@ -86,13 +86,24 @@ type Route struct {
 	// APPITOOLS_PUBLIC_ROUTE_RPS/BURST, default 5 rps / burst 10 → 429) is
 	// enforced before the handler runs. Everything else is the handler's
 	// responsibility: validate EVERY input, and treat the caller as hostile.
-	// Inside the handler Claims() is zero (no identity), so the RBAC-aware
-	// helpers (Query/Insert/Update) fail closed with forbidden — anonymous
-	// writes go through the APIs that carry their own rules (CreateUser) or
-	// through a deliberate, greppable UnsafeTx. Public routes must use literal
-	// paths (no chi {params} — the skip is an exact match) and cannot combine
-	// with RequireRole (a role implies authentication). Only routes explicitly
-	// marked Public skip auth; every other route keeps deny-by-default.
+	//
+	// Authentication is OPTIONAL, not ignored (LIBRARY-GAPS-S2, ENG-6): with no
+	// Authorization header the handler sees Claims() zero (anonymous — the
+	// RBAC-aware helpers fail closed with forbidden; anonymous writes go
+	// through CreateUser or a deliberate, greppable UnsafeTx). With a VALID
+	// Bearer, Claims() is populated — one endpoint can serve guests and
+	// recognized users (a checkout that links the order to a logged-in
+	// customer). A present-but-invalid/expired/foreign-tenant Bearer is a 401:
+	// sent credentials never silently degrade to anonymous, so the client
+	// knows to re-authenticate or retry deliberately without the token. The
+	// path-RBAC still skips a Public route entirely — a populated Claims is
+	// input for the handler, never a new gate.
+	//
+	// Public routes must use literal paths (no chi {params} — the match is
+	// exact) and cannot combine with RequireRole (use Claims().Role in the
+	// handler if a public route wants to branch on identity). Only routes
+	// explicitly marked Public relax auth; every other route keeps
+	// deny-by-default.
 	Public bool
 }
 
@@ -470,6 +481,17 @@ func (a *App) writeHandlerError(w http.ResponseWriter, rc *requestCtx, rt Route,
 	// (LIBRARY-GAPS-S1).
 	if errors.Is(err, ErrBodyTooLarge) {
 		writeErr(w, http.StatusRequestEntityTooLarge, "request body too large")
+		return
+	}
+	// A state-machine refusal from Ctx.Update → the same 422 the generated
+	// PATCH answers; a concurrent-change conflict → 409 (LIBRARY-GAPS-S2, ENG-7).
+	var ite *InvalidTransitionError
+	if errors.As(err, &ite) {
+		writeErr(w, http.StatusUnprocessableEntity, ite.Message)
+		return
+	}
+	if errors.Is(err, ErrUpdateConflict) {
+		writeErr(w, http.StatusConflict, "the resource changed during the update; retry")
 		return
 	}
 	if db.IsUnavailable(err) {

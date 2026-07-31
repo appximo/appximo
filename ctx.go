@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/miguelangel/appitools/pkg/codegen"
 	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
 	"github.com/miguelangel/appitools/pkg/outbox"
 	"github.com/miguelangel/appitools/pkg/query"
@@ -194,7 +195,21 @@ var (
 	// ErrBodyTooLarge: the request body exceeded MaxBodyBytes. Returned by
 	// RawBody/Bind/BindResource; returning it from a Handler yields a 413.
 	ErrBodyTooLarge = errors.New("appitools: request body too large")
+	// ErrUpdateConflict: a Ctx.Update matched zero rows because the row changed
+	// concurrently (its state fields already equal the requested values, so the
+	// guard, not a bad transition, is what fired). Returning it from a Handler
+	// yields a 409 — the caller should re-read and retry.
+	ErrUpdateConflict = errors.New("appitools: the resource changed during the update; retry")
 )
+
+// InvalidTransitionError is returned by Ctx.Update when a schema-declared
+// state machine refused the move (LIBRARY-GAPS-S2, ENG-7) — the same verdict,
+// message and race-safety the generated PATCH produces. Returning it from a
+// Handler yields the identical 422 response; branch on it with errors.As to
+// customize.
+type InvalidTransitionError struct{ Message string }
+
+func (e *InvalidTransitionError) Error() string { return e.Message }
 
 // engineRefs is the read-only engine state shared by every requestCtx: the
 // loaded schema, the validators compiled once at boot, the RBAC policy, and
@@ -403,7 +418,8 @@ func (c *requestCtx) Insert(resource string, data map[string]any) (map[string]an
 }
 
 func (c *requestCtx) Update(resource, id string, data map[string]any) (map[string]any, error) {
-	if _, ok := c.eng.schema.Resources[resource]; !ok {
+	res, ok := c.eng.schema.Resources[resource]
+	if !ok {
 		return nil, fmt.Errorf("appitools: unknown resource %q", resource)
 	}
 	eval := c.eng.policy.Evaluate(c.evalCtx(), resource, "update")
@@ -436,12 +452,34 @@ func (c *requestCtx) Update(resource, id string, data map[string]any) (map[strin
 	if err != nil {
 		return nil, err
 	}
+	// State-machine transition guard (LIBRARY-GAPS-S2, ENG-7) — the SAME
+	// function the generated PATCH/PUT, GraphQL update and batch transaction
+	// use, so a custom route can no longer bypass a declared lifecycle (and
+	// never needs to re-state the transition table). Race-safe: the move is
+	// allowed only if the row's CURRENT state permits it, inside the UPDATE's
+	// WHERE. No-op for updates that touch no state-machine field.
+	q, args, err = codegen.AppendStateTransitionGuard(q, args, &res, data)
+	if err != nil {
+		return nil, err
+	}
 	q += " RETURNING *"
 	row, err := c.queryOne(q, args)
 	if err != nil {
 		return nil, err
 	}
 	if row == nil {
+		// Zero rows: not found / row-condition excluded (→ nil, nil — the
+		// historical contract) — or the transition guard refused the move.
+		// The explain read runs the row condition too, so a hidden row stays
+		// indistinguishable from a missing one.
+		status, msg := codegen.ExplainTransitionFailureTx(c.ctx, c.tx,
+			pgx.Identifier{resource}.Sanitize(), id, &res, data, eval.Condition)
+		switch status {
+		case http.StatusUnprocessableEntity:
+			return nil, &InvalidTransitionError{Message: msg}
+		case http.StatusConflict:
+			return nil, ErrUpdateConflict
+		}
 		return nil, nil // id not found, or excluded by the row condition
 	}
 	return pkghandlers.FilterFields(row, eval.AllowedFields), nil
