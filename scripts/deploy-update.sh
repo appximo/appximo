@@ -61,10 +61,17 @@ NEW_ID="$("$BINARY" version 2>/dev/null | head -1)"
 ok "deploying: $NEW_ID"
 
 # wait_healthy TIMEOUT_S — poll /healthz + /readyz every 250 ms; early exit on
-# success, early exit if systemd already declared the unit failed (no point
-# waiting out the clock on a binary that exited at boot).
+# success, early exit on a binary that cannot boot. Two crash signals, because
+# units with Restart=always (ours) NEVER enter systemd's "failed" state while
+# crash-looping — systemd just keeps relaunching them (measured: the is-failed
+# check alone let a broken deploy wait out the full 30 s):
+#   1. is-failed        — covers units without auto-restart
+#   2. NRestarts +2     — two AUTOMATIC restarts since we began means the new
+#                         binary is dying at boot; decide now, not at timeout
 wait_healthy() {
 	local timeout_s="$1" waited=0
+	local restarts0 r
+	restarts0="$(systemctl show -p NRestarts --value "$SERVICE" 2>/dev/null || echo "")"
 	while :; do
 		if curl -fsS -m 2 "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1 \
 			&& curl -fsS -m 2 "http://127.0.0.1:${PORT}/readyz" >/dev/null 2>&1; then
@@ -72,6 +79,12 @@ wait_healthy() {
 		fi
 		if systemctl is-failed --quiet "$SERVICE" 2>/dev/null; then
 			return 1 # crashed at boot — fail fast, do not wait out the timeout
+		fi
+		if [ -n "$restarts0" ]; then
+			r="$(systemctl show -p NRestarts --value "$SERVICE" 2>/dev/null || echo "")"
+			if [ -n "$r" ] && [ "$r" -ge $((restarts0 + 2)) ] 2>/dev/null; then
+				return 1 # crash-looping under Restart=always — the binary is dead on boot
+			fi
 		fi
 		waited=$((waited + 1))
 		[ $((waited / 4)) -ge "$timeout_s" ] && return 1
