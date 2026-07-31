@@ -115,14 +115,36 @@ func rollbackFailedRegistration(ctx context.Context, pool *pgxpool.Pool, tenantI
 	return nil
 }
 
+// TenantProvisionHook is a consumer's per-tenant provisioning seam (ENG-8,
+// CONSUMER-PATH-S1): it runs INSIDE tenant registration, after the engine has
+// provisioned the tenant's tables, so consumer-owned DDL (generated columns,
+// CHECK constraints, partial indexes — the things Config.BeforeStart applies at
+// boot) reaches tenants created while the app is LIVE. Before this seam existed,
+// the normal SaaS flow — install → boot → register tenant — produced a tenant
+// missing the consumer's DDL, and a core endpoint answered 500 until a manual
+// restart re-ran BeforeStart (measured on the 58, commerce GAPS 3-6).
+//
+// The hook is part of the registration's all-or-nothing contract: an error rolls
+// the whole registration back (no tenant is left half-provisioned) and is
+// returned to the caller. It MUST be idempotent — BeforeStart typically re-runs
+// the same DDL over all tenants at every boot.
+type TenantProvisionHook func(ctx context.Context, pool *pgxpool.Pool, tenantID, pgSchema string) error
+
 // RegisterTenant onboards a new tenant in 10 atomic steps:
 //  1. Validate tenantID format.
 //  2. Verify no duplicate in public.tenants.
 //     3-7. Transaction: INSERT tenant + CREATE SCHEMA + INSERT policy → COMMIT.
-//  8. ApplyTenantMigration: CREATE TABLE for each resource.
+//  8. ApplyTenantMigration: CREATE TABLE for each resource (+ the optional
+//     TenantProvisionHook — consumer DDL — via RegisterTenantWithHook).
 //  9. pg_notify('schema_updated', tenantID).
 //  10. Return the created Tenant.
 func RegisterTenant(ctx context.Context, pool *pgxpool.Pool, req RegisterRequest) (*Tenant, error) {
+	return RegisterTenantWithHook(ctx, pool, req, nil)
+}
+
+// RegisterTenantWithHook is RegisterTenant with a consumer provisioning hook
+// (nil = identical to RegisterTenant). See TenantProvisionHook.
+func RegisterTenantWithHook(ctx context.Context, pool *pgxpool.Pool, req RegisterRequest, hook TenantProvisionHook) (*Tenant, error) {
 	// Step 1 — validate tenantID BEFORE touching the DB. The id becomes the
 	// Postgres schema (tenant_<id>) and the Host subdomain, so anything the
 	// data path would refuse must be rejected here, with the fix in the error.
@@ -230,6 +252,17 @@ func RegisterTenant(ctx context.Context, pool *pgxpool.Pool, req RegisterRequest
 	// Step 8 — apply migrations (CREATE TABLE per resource, idempotent).
 	migStart := time.Now().UTC()
 	migErr := applyTenantMigration(ctx, pool, pgSchema, req.Schema)
+
+	// Step 8b — the consumer's provisioning hook (ENG-8), only after the engine's
+	// own tables exist. Its failure is a registration failure: the all-or-nothing
+	// rollback below runs, so a tenant is never left half-provisioned (engine
+	// tables present, consumer DDL missing → the exact 500-until-restart failure
+	// this seam eliminates).
+	if migErr == nil && hook != nil {
+		if hookErr := hook(ctx, pool, req.TenantID, pgSchema); hookErr != nil {
+			migErr = fmt.Errorf("tenant provisioning hook (consumer DDL): %w", hookErr)
+		}
+	}
 
 	migStatus, migErrStr := "ok", ""
 	if migErr != nil {

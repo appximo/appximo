@@ -62,18 +62,33 @@ type RollbackResult struct {
 
 // pgService is the production implementation backed by pgxpool + optional Redis.
 type pgService struct {
-	pool  *pgxpool.Pool
-	redis *redis.Client // nil when REDIS_URL is not set
+	pool          *pgxpool.Pool
+	redis         *redis.Client // nil when REDIS_URL is not set
+	provisionHook TenantProvisionHook
+}
+
+// ServiceOption configures NewService (variadic so existing call sites are
+// untouched).
+type ServiceOption func(*pgService)
+
+// WithProvisionHook wires the consumer's per-tenant provisioning seam (ENG-8)
+// into every registration this Service performs. See TenantProvisionHook.
+func WithProvisionHook(h TenantProvisionHook) ServiceOption {
+	return func(s *pgService) { s.provisionHook = h }
 }
 
 // NewService creates a production Service. redisClient may be nil — in that case
 // schema updates are written to the DB only and pg_notify handles cache invalidation.
-func NewService(pool *pgxpool.Pool, redisClient *redis.Client) Service {
-	return &pgService{pool: pool, redis: redisClient}
+func NewService(pool *pgxpool.Pool, redisClient *redis.Client, opts ...ServiceOption) Service {
+	s := &pgService{pool: pool, redis: redisClient}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 func (s *pgService) Register(ctx context.Context, req RegisterRequest) (*Tenant, error) {
-	return RegisterTenant(ctx, s.pool, req)
+	return RegisterTenantWithHook(ctx, s.pool, req, s.provisionHook)
 }
 
 func (s *pgService) GetByID(ctx context.Context, id string) (*Tenant, error) {

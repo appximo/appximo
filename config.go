@@ -157,6 +157,22 @@ type Config struct {
 	// The context is cancelled on SIGINT/SIGTERM, so a hung hook still drains.
 	BeforeStart func(ctx context.Context, pool *pgxpool.Pool) error
 
+	// OnTenantProvisioned runs INSIDE every tenant registration this app
+	// performs (control plane :9090/:9099 and the /admin API — both funnel
+	// through the same Service), after the engine has provisioned the tenant's
+	// tables (ENG-8, CONSUMER-PATH-S1). It is the per-tenant twin of
+	// BeforeStart: BeforeStart covers the tenants that exist AT BOOT; this hook
+	// covers every tenant created while the app is live — the normal flow of a
+	// multi-tenant SaaS. Without it, consumer DDL (generated columns, CHECKs,
+	// partial indexes) was missing from post-boot tenants until a restart.
+	//
+	// Same contract as BeforeStart: the engine's own pool, not tenant-scoped —
+	// scope the search_path transaction-locally. MUST be idempotent (BeforeStart
+	// typically re-applies the same DDL at every boot). An error FAILS the
+	// registration all-or-nothing: the tenant is rolled back, never left
+	// half-provisioned.
+	OnTenantProvisioned func(ctx context.Context, pool *pgxpool.Pool, tenantID, pgSchema string) error
+
 	// Static serves one or more file trees from THIS binary — the seam that makes
 	// "one binary = backend + frontend + admin + docs" real (LOOSE-ENDS-SWEEP-S1).
 	// Each mount is served outside /api/, with no tenant transaction, no RBAC

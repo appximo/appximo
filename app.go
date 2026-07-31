@@ -410,7 +410,12 @@ func New(cfg Config) (*App, error) {
 		cfg.ControlPort = 9090
 	}
 	app.cfg.ControlPort = cfg.ControlPort
-	app.cpSvc = controlplane.NewService(pool, app.redisClient)
+	var cpOpts []controlplane.ServiceOption
+	if cfg.OnTenantProvisioned != nil {
+		cpOpts = append(cpOpts, controlplane.WithProvisionHook(
+			controlplane.TenantProvisionHook(cfg.OnTenantProvisioned)))
+	}
+	app.cpSvc = controlplane.NewService(pool, app.redisClient, cpOpts...)
 	cpRouter := controlplane.NewControlPlaneRouter(app.cpSvc, adminKey)
 	cpRouter.Mount("/", app.obsServer.Router(adminKey))
 	app.cpSrv = &http.Server{
