@@ -72,50 +72,8 @@ re-verified against reality on that date, not carried forward on trust.
   measured `no_change` when it is off (the reason it has not shipped: the SDK's
   weight must not reach the request path by default).
 
-### ENG-5 — `Config.Static` root mount ships the API's CSP → a real SPA renders BLANK
-- **Origin:** COMMERCE-1B-S1, the first browser consumer of `Config.Static`.
-  Commerce `docs/GAPS.md` **1B-1** has the full diagnosis.
-- **Impact:** **High — the flagship "one binary = backend + frontend" case is
-  browser-broken.** A root mount (`Path:"/"`) is chi's NotFound handler, which
-  chi copies into the API subrouter mounted INSIDE the `StrictCSP` group
-  (`app.go` `sub.Use(StrictCSP); … sub.Mount("/", …)`), so the SPA shell ships
-  `Content-Security-Policy: default-src 'none'` and every browser blocks its own
-  same-origin scripts. Invisible to curl (curl does not enforce CSP) — which is
-  why the `examples/fullstack` live matrix passed. A SUB-PATH mount takes the
-  other path and gets NO CSP at all — both forms are wrong, differently.
-  Companion papercut: `validateStaticMounts` demands an `index.html` even on a
-  pure asset mount (commerce's `/_app` needed a dummy one).
-- **Workaround (running in commerce):** one sub-path mount per app segment +
-  a script-free meta-refresh shell at "/" → home lives at `/inicio`.
-- **Ready:** the static handler sets its OWN document CSP for BOTH mount forms
-  (the `pkg/adminui.cspAdmin` shape is right), overridable via `StaticMount.CSP`;
-  an assets-only mount needs no index; and the regression test asserts the
-  header on the served DOCUMENT (or runs a real browser) — never curl-only.
 
-### ENG-6 — `Route.Public` ignores a presented token ("optionally authenticated" inexpressible)
-- **Origin:** COMMERCE-1B-S1; commerce `docs/GAPS.md` **1B-3**.
-- **Impact:** Medium. A checkout that serves guests AND recognized customers
-  needs two routes sharing one core (`/api/checkout-invitado` Public +
-  `/api/checkout` granted); every "public but personalizable" endpoint pays the
-  same split, and the client must pick the door.
-- **Ready:** on a Public route, a PRESENT and VALID Bearer populates `Claims()`;
-  absent or invalid stays zero-Claims and never 401s. Negative tests: an expired
-  token on a Public route must not turn into a 401.
 
-### ENG-7 — `Ctx.Update` bypasses the schema's state machine
-- **Origin:** COMMERCE-1B-S1; commerce `docs/GAPS.md` **1B-4** (the cost report
-  of the ADR-022-D3 custom-route pattern).
-- **Impact:** Medium. A custom route that moves a `state_machine` field has NO
-  engine path that keeps transition enforcement: `Ctx.Update` runs the
-  declarative field rules but not the transition CAS, and raw SQL obviously
-  doesn't — so commerce re-states the transition table in Go (two sources of
-  truth). This is the melting-point fix that makes the documented
-  per-transition-RBAC pattern cheap: with it, a transition route is ~10 lines
-  and only "who may move" stays app-side.
-- **Ready:** `Ctx.Update` (and the batch path it shares) enforces
-  `state_machine` transitions inside the UPDATE's WHERE exactly like the
-  generated PATCH; a violating move returns the same 422/409 contract; measured
-  `no_change` for resources without a state machine.
 
 ### SCHEMA-1 — Computed / derived fields
 - **Origin:** docs/MODEL_LAB.md G7 ("order totals as a computed field").
@@ -168,6 +126,22 @@ re-verified against reality on that date, not carried forward on trust.
 - **Ready:** a real case that neither covers; then `in`/`neq`/`is_null` permitted
   **only** on actions listed in `condition_actions` that exclude `create`,
   type-validated at load, with negative tests and an ABBA benchmark.
+
+### OPS-6 — Orphan ufw ALLOW rules on the 105 (2375/2376 = Docker API without TLS)
+- **Origin:** LIBRARY-GAPS-S2 Parte 0, the port-exposure review. `ufw status`
+  on the 105 shows ALLOW rules for **2375/tcp and 2376/tcp** (the Docker daemon
+  API — 2375 is the UNENCRYPTED variant, root-equivalent if anything ever
+  listens there), plus 5678 and 8000. **Nothing listens on any of them today**,
+  so they are landmines, not active holes. Deliberately NOT touched this
+  session: they may belong to a workflow of Miguel's (a remote docker context,
+  n8n on 5678?), and firewall edits on a box he works on are his call.
+- **Impact:** Low today, high the day something binds those ports. The rest of
+  the review landed: commerce now binds 127.0.0.1 (data + control plane) via
+  the new `Config.Host`/`ControlHost`, and ufw's default-deny covers
+  8099/9099/3099.
+- **Ready:** Miguel confirms whether anything needs 2375/2376/5678/8000; the
+  unneeded rules are deleted; `ufw status` on the 105 is re-verified and
+  recorded in `05_SERVIDORES_Y_OPERATIVA.md`.
 
 ### OPS-1 — A measurement box without CPU steal
 - **Origin:** ESTADO_Y_PLAN_MAESTRO "DEUDA TÉCNICA CONOCIDA"; reconfirmed by
@@ -280,6 +254,19 @@ All three were **re-verified as still open on 2026-07-29**.
 | **Give `/root/commerce` a remote** | The technical fix is trivial; the decision (which account, public or private, whether the commerce platform is a product or a demo) is his. See **OPS-5** — until then the field report lives on one disk. |
 
 ---
+
+## DONE in LIBRARY-GAPS-S2 (2026-07-31)
+
+| ID | Item | Verification |
+|---|---|---|
+| ENG-5 | **Static mounts own their CSP** — both forms serve `DefaultStaticCSP` (override `StaticMount.CSP`, disable `CSPOff`); the API keeps `default-src 'none'`; assets-only mounts need no index (1B-2). Includes the browser-suite-forced correction: the default carries `script-src 'unsafe-inline'` because SvelteKit/Next/Astro boot from an inline script — the strict first draft re-created the blank-page bug. | `static_csp_test.go` asserts the DOCUMENT header through a production-faithful router (StrictCSP group included); commerce runs ONE root mount again, Playwright 16/16 |
+| ENG-6 | **`Route.Public` optionally authenticated** — absent→anonymous, valid→Claims populated, invalid/expired/foreign-tenant→401 (never a silent downgrade). One shared `resolveClaims` with the enforced path. | `TestJWTMiddleware_PublicOptionalAuth` (5 branches); commerce collapsed its twin checkouts into one `POST /api/checkout`; e2e-1b 28/28 incl. the garbage-token 401 case |
+| ENG-7 | **`Ctx.Update` enforces declared state machines** — `codegen.AppendStateTransitionGuard` exported (ONE place transitions become SQL: REST/GraphQL/batch/Ctx), `ExplainTransitionFailureTx` + shared classifier (+ row condition on the explain SELECT — no state leak), `*InvalidTransitionError` (identical 422) / `ErrUpdateConflict` (409). | Integration test: illegal move via Ctx.Update == generated PATCH byte for byte, terminal immutable, self-set no-op; commerce deleted its `opTransitions` table |
+| — | **`Config.Host`/`ControlHost`** bind addresses (defaults unchanged); commerce on 127.0.0.1 both planes. Credentials rotated (super-admin pwd + ADMIN_KEY, values only in `.env.dev` 0600). Carried docs committed apart. | `ss -ltnp`: commerce on `127.0.0.1:8099/9099`; bench A/B `no_change` (MWU p=0.064, Δp50 +18µs ≪ max(0.5ms,3%) gate); `make test` green; acceptance 38 PASS / 0 FAIL |
+
+The residue of the per-transition pattern (coarse loss of `update` grant, two
+auth surfaces) remains **SCHEMA-3**'s case — still correctly deferred, now
+cheap: the handler decides WHO, the engine owns WHAT moves exist.
 
 ## DONE in COMMERCE-1B-S1 (2026-07-30)
 
