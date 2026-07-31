@@ -49,20 +49,34 @@ re-verified against reality on that date, not carried forward on trust.
 - **Impact:** Medium. `deploy-update.sh` does SIGTERM → wait → start, measured at
   **0.47 s** of 502s under live traffic (docs/BENCHMARKS.md). Acceptable for a
   single box; visible for an API with a strict SLO.
+- **Consumer number (PROD-JOURNEY-1B, 2026-07-31):** the commerce binary on the
+  58 measured **0.58 s of 502s (48/3001 requests at 50 rps)** per deploy — same
+  order as the engine. A deliberately BROKEN deploy auto-rolled-back in 35 s,
+  during which users saw **30.7 s of 502s**: the dominant cost is the fixed
+  30×1 s health wait, and the rollback path exits without re-verifying health.
+  Two cheap tooling wins before any SO_REUSEPORT work: fail fast when systemd
+  reports the unit exited (don't wait the full 30 s), and health-check after
+  the rollback restart.
 - **Ready:** a deploy costs **zero** failed requests under 500 rps, verified by
   the chaos suite. Candidates: socket hand-off (`SO_REUSEPORT`) between old and
   new process, or a symlink + blue/green pair behind the existing `/readyz` drain.
 
-### ENG-3 — Restore command + scheduled backups
+### ENG-3 — Restore command + scheduled backups (NARROWED — the drill now exists and passed)
 - **Origin:** PROD_PATH_AUDIT §1.5 / §2.8; docs/CAPABILITIES.md ("Backup has no
   restore command and no scheduling").
-- **Impact:** **High for an operator.** `scripts/backup.sh` and
-  `POST /admin/backup` produce dumps; nothing verifies one can be restored, and
-  an unverified backup is not a backup.
-- **Ready:** `appitools restore --tenant X --from <dump>` exists, a scheduled
-  backup is part of the installer (a systemd timer), and a **restore drill** runs
-  in `scripts/verify-production/` — dump, drop into a scratch database, restore,
-  diff the row counts.
+- **Impact:** was **High**; now Medium. PROD-JOURNEY-1B (2026-07-31) wrote and
+  EXECUTED a restore on the 58 with real data: commerce `scripts/restore.sh`
+  (stop engine → drop/recreate DB → `pg_restore --exit-on-error` → re-own
+  schemas/tables/sequences/**functions** → health-wait → row counts). The drill
+  caught a real bug theory couldn't: restored functions owned by `postgres`
+  crash-loop the engine's bootstrap (`CREATE OR REPLACE notify_schema_updated`,
+  SQLSTATE 42501). Full cycle verified: backup → DROP SCHEMA CASCADE → restore
+  1.8 s → identical counts → pre-backup order retrievable → NEW purchase
+  completed. A nightly `appitools-backup.timer` (03:30) is installed on the 58
+  by hand — the installer still doesn't provide it.
+- **Ready (what remains):** `appitools restore` as a first-class engine command
+  (per-tenant selective restore included), the backup timer written by
+  `install.sh`, and the restore drill wired into `scripts/verify-production/`.
 
 ### ENG-4 — OTLP / OpenTelemetry export
 - **Origin:** README "Known limits"; docs/CAPABILITIES.md.
@@ -74,6 +88,79 @@ re-verified against reality on that date, not carried forward on trust.
 
 
 
+
+### ENG-8 — Consumer boot DDL never reaches tenants created AFTER boot
+- **Origin:** PROD-JOURNEY-1B (commerce GAPS 3-6). `Config.BeforeStart` runs
+  once, at boot, over the tenants that exist THEN; the production bootstrap
+  order is install → boot → register tenant, so the fresh tenant lacked the
+  consumer's residual DDL (generated column, CHECKs) and `/api/catalogo`
+  answered 500 until a manual restart re-ran it.
+- **Impact:** Medium-high for framework mode: every consumer with boot DDL hits
+  it on their FIRST tenant, with an opaque 500.
+- **Ready:** a per-tenant provisioning seam (`Config.OnTenantProvisioned(ctx,
+  pool, tenantSchema)` or BeforeStart re-run on registration), covered by an
+  integration test that registers a tenant after boot and asserts the DDL ran.
+
+### ENG-9 — The migration diff reads consumer-owned DDL as permanent drift/gated drops
+- **Origin:** PROD-JOURNEY-1B (commerce GAPS 3-7). Every `migrate --dry-run`
+  against the tienda reports the consumer's generated column as a GATED
+  DESTRUCTIVE DROP ("12 of 12 rows lost") plus 4 drift lines. The gate holds,
+  but the noise is permanent and trains operators to approve scary output.
+- **Impact:** Medium. Cosmetic until an operator approves the suggested drop of
+  a column the app needs — then it is an outage.
+- **Ready:** consumer-owned objects can be declared out of the diff (schema
+  annotation or ignore-list), a dry-run over a consumer app with boot DDL is
+  clean, and an ignored object can never appear as an approvable drop.
+
+### ENG-10 — Custom handlers bypass the honest-503 DB-unavailable classification
+- **Origin:** PROD-JOURNEY-1B chaos postgres-stop (commerce GAPS 3-14): the
+  generated routes answer 503+Retry-After when PostgreSQL is down (ENG-S2);
+  the commerce catalogue (custom route) answered its own 500 for 8.88 s.
+- **Impact:** Low-medium. Consumers can hand-classify, but each one must know to.
+- **Ready:** `Ctx.Error` (or a helper the spec documents) classifies
+  DB-unavailable errors the same way the generated path does, so a custom
+  handler's `ctx.Error(500, msg, err)` degrades to the honest 503 automatically.
+
+### OPS-7 — The consumer deploy contract (build, CLI, ops tooling)
+- **Origin:** PROD-JOURNEY-1B parts A/B (commerce GAPS 3-1..3-5). The official
+  tooling implicitly assumes "the binary is the engine": install.sh
+  identity-checks `<bin> version`, the unit runs `serve --schema --port`, no
+  consumer build script exists (version-less "dev" binaries), the consumer
+  binary ships no ops CLI (admin create / tenant / migrate / token), the
+  installer summary prints the wrong control-plane port for a consumer, and
+  secrets go to stdout. Commerce now implements the contract
+  (`scripts/build.sh`, version/serve handling, `Config.Version`) — every OTHER
+  consumer would rediscover all five.
+- **Impact:** High for the framework-mode story; it is the top of the
+  "what a third party hits" list (GAPS 3-17).
+- **Ready:** the contract documented in BACKEND_SPEC (or exported as
+  `appitools.RunCLI`), install.sh installs the engine CLI as a companion next
+  to any `--binary`, the summary reads the real control port, and secrets are
+  printed as paths by default.
+
+### OPS-8 — Acceptance + verify-production only measure the bare engine
+- **Origin:** PROD-JOURNEY-1B part C/D (commerce GAPS 3-10/3-12).
+  `acceptance-test.sh` drives quickstart `tasks`/`admin`/`viewer` (23 PASS /
+  18 FAIL against the tienda, all 18 the same cause); `load.sh` pre-flights
+  `/api/orders` and refuses a consumer app; chaos.sh's DB probe assumed the
+  bench schema (fixed this session with `VP_DB_PROBE_PATH`, own commit).
+- **Impact:** Medium. A consumer deploy cannot run the official acceptance or
+  load suites — the journey used k6 by hand instead.
+- **Ready:** resource/role/path parametrization on both (the same treatment the
+  commerce suites got in GAPS 3-9), verified by a green run against a consumer
+  deploy.
+
+### DOC-1 — Two stale/missing production-doc claims
+- **Origin:** PROD-JOURNEY-1B (commerce GAPS 3-8/3-11). (a) AGENTS.md +
+  docs/MENTAL_MODEL.md still claim a migrated column is readable/writable
+  before restart — measured FALSE (422 unknown_field until restart; strict
+  compiled validation is the current, correct behavior). (b) PRODUCTION.md
+  never states that the installed Caddyfile serves ONE tenant domain — more
+  tenants need more site blocks / a wildcard.
+- **Impact:** Medium: (a) actively misleads anyone planning a live migration.
+- **Ready:** both docs corrected to the measured model ("a schema change
+  activates only on restart; `migrate` prepares the tables"), and the
+  multi-tenant-domain note added to PRODUCTION.md.
 
 ### SCHEMA-1 — Computed / derived fields
 - **Origin:** docs/MODEL_LAB.md G7 ("order totals as a computed field").
@@ -248,12 +335,19 @@ All three were **re-verified as still open on 2026-07-29**.
 
 | Item | Why it needs him |
 |---|---|
-| **Cloudflare proxy on `api.appitools.com`** | Still proxied — confirmed this session: `dig` returns Cloudflare IPs (104.21.77.140 / 172.67.208.233) and the response carries `server: cloudflare` + a `cf-ray` header. It buys DDoS protection and caching but contaminates direct measurement — PROD-VERIFY-SUITE measured 9.75 ms through it vs 2.78 ms at the origin. Keep it and always measure the origin directly, or drop it for the demo domain. |
+| **Cloudflare proxy on `api.appitools.com`** | Still proxied (dig → Cloudflare IPs), but since PROD-JOURNEY-1B the 58 no longer serves that domain: Caddy's only site is `tiendita.appitools.com` (direct A record, measured clean), so `api.appitools.com` now dead-ends at the proxy. Decide: retire the DNS entry, point it somewhere real, or leave it dark. |
 | **Cut the first release tag** | Still zero tags (`git tag` is empty) and `RELEASE_VERSION=""` at `scripts/install.sh:33`, so the documented "download the binary from GitHub Releases" path cannot work yet, and OPS-4 (version traceability) partly depends on it. |
-| **Rotate the 58's PostgreSQL password** | It was exposed in a session transcript on 2026-07-29 (a masking pattern that missed `DATABASE_URL`). Not known to be leaked further, but it is a live credential on a public box. `ALTER USER appitools WITH PASSWORD …` + update `/etc/appitools/appitools.env` + `systemctl restart appitools`. |
+| ~~**Rotate the 58's PostgreSQL password**~~ | **RESOLVED by PROD-JOURNEY-1B (2026-07-31):** the wipe (`--uninstall --purge`) dropped the role and database; the reinstall generated a fresh password (plus fresh JWT/admin secrets, rotated again on-box after the installer printed them to stdout — see OPS-7). The exposed credential no longer exists. |
 | **Give `/root/commerce` a remote** | The technical fix is trivial; the decision (which account, public or private, whether the commerce platform is a product or a demo) is his. See **OPS-5** — until then the field report lives on one disk. |
 
 ---
+
+## DONE in PROD-JOURNEY-1B (2026-07-31)
+
+| ID | Item | Verification |
+|---|---|---|
+| — | **The full consumer lifecycle walked on the 58**: wipe (old bare-engine demo inventoried + removed; nestjs-bench harness archived to the 105) → official install of the COMMERCE binary → live-data migration (0 loss, counts verified) → redeploy (6.6 s) → measured downtime (0.58 s @50 rps) → auto-rollback drill (35 s, 30.7 s user-visible) → destructive gate held → 4 regression suites green against prod (28+18+21+16) → 7-case chaos matrix (reboot 38 s, full self-recovery) → **restore drill EXECUTED** (1.8 s, functional verification incl. a new purchase). The tienda is the new public demo: https://tiendita.appitools.com | commerce `docs/GAPS.md` PART THREE (18 findings with numbers); commerce commits 438c39a…4a8bd3a; engine commit for `VP_DB_PROBE_PATH` |
+| OPS-S3 | The 58's exposed PostgreSQL password eliminated (purge + fresh secrets, re-rotated after install printed them) | Requires-Miguel table row closed above |
 
 ## DONE in LIBRARY-GAPS-S2 (2026-07-31)
 
