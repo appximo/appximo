@@ -272,6 +272,23 @@ row, err := ctx.Insert("students", map[string]any{"full_name": "Ana"})
 row, err := ctx.Update("students", id, map[string]any{"country": "MX"})
 ```
 
+`Update` also enforces a declared **state machine**, with the exact semantics of
+the generated PATCH (the guard lives in the UPDATE's WHERE — race-safe, terminal
+states immutable, re-sending the current value is a no-op). An illegal move
+returns `*appitools.InvalidTransitionError` (→ the same 422 if you return it);
+a concurrent-change conflict returns `appitools.ErrUpdateConflict` (→ 409). So a
+custom route that advances a lifecycle needs NO transition table of its own —
+restrict WHO may move (per-transition RBAC) in the handler, and let the engine
+own WHAT moves exist:
+
+```go
+row, err := ctx.Update("orders", id, map[string]any{"status": "shipped"})
+var ite *appitools.InvalidTransitionError
+if errors.As(err, &ite) {
+	return ctx.Error(409, "ese pedido ya no puede pasar a enviado: "+ite.Message, err)
+}
+```
+
 **Request binding** (1 MiB cap — `appitools.MaxBodyBytes` — like the generated
 routes):
 
@@ -467,12 +484,22 @@ opens the **endpoint**, never the data: a customer calling
 `ctx.Insert` still forces the condition column to their own id (no
 mass-assignment). Two independent layers, and you want both.
 
-#### `Public: true` — no layer at all
+#### `Public: true` — no token REQUIRED, identity still welcome
 
-Skips JWT and path RBAC entirely, for pre-auth endpoints (registration, webhooks,
-a storefront). Inside, `Claims()` is empty and the RBAC-aware helpers fail closed;
-anonymous work goes through `CreateUser` (which carries its own rules) or a
-deliberate, greppable `UnsafeTx`. Treat every input as hostile — §3.4 rule 3.
+For pre-auth endpoints (registration, webhooks, a storefront). Path RBAC skips
+the route entirely, and authentication is **optional, not ignored** — three
+branches, exactly:
+
+| The request carries… | The handler sees |
+|---|---|
+| no `Authorization` header | `Claims()` zero — anonymous; the RBAC-aware helpers fail closed |
+| a **valid** Bearer | `Claims()` **populated** — identity as *input* (personalize, link the write to the user); data RBAC (`ctx.Query`/`Insert`/`Update`) applies the role normally |
+| a present but invalid / expired / wrong-tenant Bearer | nothing — the request is **401**ed before the handler (sent credentials never silently degrade to anonymous) |
+
+So ONE public checkout serves both guests and logged-in customers: branch on
+`ctx.Claims().UserID == ""`. Anonymous work goes through `CreateUser` (which
+carries its own rules) or a deliberate, greppable `UnsafeTx`. Treat every input
+as hostile — §3.4 rule 3.
 
 > **Debugging a 403 on a custom route:** it is almost always the grant. Check, in
 > order: does the role declare the segment under `routes`? Is the action right for
@@ -747,6 +774,51 @@ app.Register(appitools.Route{
 })
 ```
 
+**(f) The guest-order lookup (the storefront confirmation page)** — every
+storefront needs it, and the generated reads can never serve it: a guest's
+order has no `user_id`, so the owner-scoped `GET /api/orders` is structurally
+blind to its own buyer. Yet the confirmation page must answer "did my payment
+land?" — and it POLLS, because the gateway confirms asynchronously by webhook.
+The pattern (proven in the commerce reference app):
+
+1. **Composite lookup key, both parts required**: the human-visible order
+   number (printed on screens, shared over WhatsApp — NOT a bearer secret) plus
+   the email typed at checkout. Either one alone is unusable.
+2. **Uniform 404** for every miss — wrong number, right number + wrong email,
+   no such order. No oracle for "that order exists but the email is wrong".
+3. **`Public: true` + a polling-sized `RateLimit`** (a confirmation page polls
+   every ~2 s for a couple of minutes; ~30 rps per tenant+IP covers a family on
+   one Wi-Fi without opening an enumeration lane).
+4. **Return a lean projection**, not the row: status, totals, line summaries,
+   the latest payment attempt's state. The page narrates pending → paid →
+   (or declined) from exactly this.
+
+```go
+app.Register(appitools.Route{
+	Method: "GET", Path: "/api/order-status",
+	Public:    true,
+	RateLimit: &appitools.RateLimit{RPS: 30, Burst: 60},
+	Handler: func(ctx appitools.Ctx) error {
+		q := ctx.Request().URL.Query()
+		number, email := q.Get("number"), q.Get("email")
+		if number == "" || email == "" {
+			return ctx.Error(422, "number and email are required", nil)
+		}
+		var status string
+		var total int64
+		err := ctx.UnsafeTx().QueryRow(ctx.Context(), `
+			SELECT o.status, o.total_cents
+			  FROM orders o JOIN customers c ON c.id = o.customer_id
+			 WHERE o.number = $1 AND lower(c.email) = lower($2)`, number, email).
+			Scan(&status, &total)
+		if err != nil { // pgx.ErrNoRows and everything else: ONE uniform miss
+			return ctx.Error(404, "order not found", nil)
+		}
+		return ctx.JSON(200, map[string]any{"number": number, "status": status, "total_cents": total})
+	},
+})
+```
+
 ### 3.7 Serving your frontend from the same binary
 
 `Config.Static` mounts a file tree — one binary that is backend **and** frontend
@@ -778,6 +850,8 @@ app, err := appitools.New(appitools.Config{
 | `/api/…`, `/admin`, `/editor`, `/docs`, … | always the engine's — mounting on one is a **boot error** |
 | a tenant transaction / RBAC / response cache | none of them run for an asset |
 | path traversal | impossible: the tree is an `fs.FS`, which cannot open outside its root |
+| Content-Security-Policy | the mount OWNS it, both forms: `appitools.DefaultStaticCSP` (same-origin SPA policy) unless overridden per mount with `CSP:` (verbatim) or disabled with `CSP: appitools.CSPOff` — the API keeps its own strict policy |
+| `index.html` | required only with `SPA: true` (it IS the fallback); an assets-only mount needs none (its root 404s) |
 
 ⚠ **PCI (SAQ A):** if the app takes card payments through a hosted widget or
 iframe, keep the **checkout** page free of third-party scripts (analytics, chat,

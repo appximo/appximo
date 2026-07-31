@@ -112,7 +112,20 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   / seeds on the ENGINE'S pool, before the listener opens; an error aborts the
   boot), `Route.RateLimit` (a per-endpoint throttle — the public default of 5 rps
   is right for a registration endpoint and wrong for a catalogue), and the RBAC
-  `routes` grant),
+  `routes` grant. LIBRARY-GAPS-S2 closed the 1-B frontend field report:
+  **static mounts own their CSP** (both forms serve `DefaultStaticCSP` — a
+  same-origin SPA policy; override per mount with `StaticMount.CSP`, disable
+  with `CSPOff`; before, a root mount inherited the API's `default-src 'none'`
+  and a real SPA rendered BLANK in every browser, invisible to curl — and an
+  assets-only non-SPA mount no longer requires an index.html), **`Route.Public`
+  is optionally authenticated** (no token → Claims zero; valid Bearer → Claims
+  POPULATED, identity as input, path-RBAC still skipped; invalid/expired/
+  foreign-tenant Bearer → 401, never a silent downgrade to anonymous), and
+  **`Ctx.Update` enforces declared state machines** via the SAME
+  `codegen.AppendStateTransitionGuard` the generated PATCH/GraphQL/batch paths
+  use (illegal move → `*InvalidTransitionError`, the identical 422; concurrent
+  change → `ErrUpdateConflict`, 409 — a custom transition route re-states no
+  table),
   `blueprints list` (lists schema files in a local `blueprints/` dir),
   `version` (prints the ldflags-injected build version; "dev" on a plain
   local build — releases and published images carry their tag),
@@ -594,7 +607,11 @@ no longer a free label the client advances arbitrarily.
 - **Out of scope (documented):** per-transition RBAC ("only role X may move to
   shipped") — today the transition is validated structurally and the normal `update`
   RBAC governs WHO may update; in-place value rewriting is a transition, not arbitrary
-  math. The single-op update path without a state machine is unchanged (measured
+  math. The documented pattern is a custom route per privileged transition (granted
+  via the RBAC `routes` block), and since LIBRARY-GAPS-S2 that route is CHEAP:
+  `Ctx.Update` enforces the declared state machine itself (same guard, same 422),
+  so the handler only decides WHO may move — never re-states WHAT moves exist.
+  The single-op update path without a state machine is unchanged (measured
   `no_change`). Example: [examples/model-lab/state-machine.json](examples/model-lab/state-machine.json).
 
 ### Relations
