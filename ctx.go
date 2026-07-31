@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/codegen"
 	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
 	"github.com/miguelangel/appitools/pkg/outbox"
@@ -264,6 +265,9 @@ type requestCtx struct {
 	status int
 	body   []byte
 	set    bool
+	// retryAfter marks a response reclassified to 503 (DB unavailable) so flush
+	// adds the Retry-After header the generated routes already send (ENG-10).
+	retryAfter bool
 }
 
 // --- typed errors mapped to HTTP status by the middleware -------------------
@@ -630,6 +634,17 @@ func (c *requestCtx) JSON(status int, v any) error {
 }
 
 func (c *requestCtx) Error(status int, msg string, cause error) error {
+	// ENG-10 (CONSUMER-PATH-S1): a handler that wraps a DB-unavailable cause in a
+	// 5xx gets the HONEST 503 + Retry-After automatically — the same
+	// classification the generated routes apply. Measured live: with PostgreSQL
+	// stopped, custom routes answered 151×500 ("looks like a bug") while the
+	// generated surface said 503 ("down, retry later"). The handler's message is
+	// kept; only the status/semantics are corrected. A 4xx choice is deliberate
+	// (the handler classified a CALLER problem) and is never overridden.
+	if status >= 500 && cause != nil && db.IsUnavailable(cause) {
+		status = http.StatusServiceUnavailable
+		c.retryAfter = true
+	}
 	b, _ := json.Marshal(map[string]string{"error": msg})
 	c.status, c.body, c.set = status, b, true
 	return &handledError{cause: cause, msg: msg}

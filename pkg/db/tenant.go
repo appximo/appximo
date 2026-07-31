@@ -36,8 +36,16 @@ const queryTimeout = 5 * time.Second
 // excluded.
 var ErrUnavailable = errors.New("database unavailable")
 
-// IsUnavailable reports whether err signals an unreachable database.
-func IsUnavailable(err error) bool { return errors.Is(err, ErrUnavailable) }
+// IsUnavailable reports whether err signals an unreachable database. It matches
+// both the classified sentinel (errors wrapped by this package's classify) AND a
+// RAW unclassified cause (a bare pgconn/net error a CUSTOM handler got from its
+// own SQL on the tenant tx) — CONSUMER-PATH-S1 (ENG-10): custom handlers never
+// pass through classify, so with the sentinel-only check a stopped PostgreSQL
+// surfaced as 500 "internal error" on every custom route while the generated
+// routes answered the honest 503. Error-path only — never on the hot path.
+func IsUnavailable(err error) bool {
+	return errors.Is(err, ErrUnavailable) || isUnavailableCause(err)
+}
 
 // IsMissingTenant reports whether err is a "schema/relation does not exist"
 // Postgres error (SQLSTATE 42P01 undefined_table or 3F000 invalid_schema_name).

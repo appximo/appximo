@@ -447,6 +447,11 @@ func (c *requestCtx) flush(w http.ResponseWriter) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	if c.retryAfter {
+		// The response was reclassified to 503 by Ctx.Error (DB unavailable,
+		// ENG-10) — same retry signal the generated routes send.
+		w.Header().Set("Retry-After", "1")
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(c.status)
 	_, _ = w.Write(c.body)
