@@ -62,9 +62,17 @@ export function setup() {
 // RESOURCE selects which schema this bench writes against: 'guides' (the
 // logistics fixture, default — S44 baseline) or 'tasks' (the quickstart
 // todo-api). Same script either way so pre/post comparisons stay symmetric.
-const RESOURCE = __ENV.RESOURCE || 'guides';
+const RESOURCE = __ENV.RESOURCE || 'items';   // canonical fixture; 'guides' is RETIRED
 
 function buildPayload(data) {
+  if (RESOURCE === 'items') {
+    // examples/blank/schema.json — the CANONICAL bench fixture (one string
+    // field), the same one the read protocol uses. Without this branch a write
+    // bench against the canonical tenant posted the `guides` payload, every
+    // request 422'd on unknown fields, and k6 aborted with zero datapoints —
+    // which reads exactly like a failed run rather than a misconfigured one.
+    return { name: `bench ${data.seed}-${__VU}-${__ITER}` };
+  }
   if (RESOURCE === 'tasks') {
     return {
       title:  `bench ${data.seed}-${__VU}-${__ITER}`,

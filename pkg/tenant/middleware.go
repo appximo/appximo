@@ -15,10 +15,22 @@ import (
 // rejected (RFC 9110 §4.2.3) — see the fold in MiddlewareWithBareHosts.
 var tenantRe = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{0,28}[a-z0-9]$`)
 
-// tenantRuleHint states tenantRe in words for the 400 body. It is kept next to
-// the regex so the two cannot drift: an error that describes a rule the code no
-// longer enforces is worse than no error at all.
-const tenantRuleHint = "2-30 characters of lowercase letters, digits or hyphens, starting and ending with a letter or digit"
+// tenantRuleHint describes the rule that can actually produce a WORKING tenant,
+// which is NOT this file's regex.
+//
+// tenantRe is the DNS-label alphabet: it tolerates hyphens and a leading digit,
+// because the middleware's job is only to reject something that cannot be a host
+// label. But a tenant is registrable only under the control plane's stricter
+// ^[a-z][a-z0-9]{1,29}$ — the INTERSECTION of the DNS label and the Postgres
+// schema name. The first version of this hint recited tenantRe and so told the
+// caller that `my-shop` and `7eleven` were fine; registration refuses both.
+//
+// That is exactly the two-alphabet trap ENG-11 documented, where the damage was
+// that Studio recommended an id that could never work. An error message that
+// suggests an invalid fix is worse than one that suggests nothing, so this states
+// the registrable rule and the middleware stays deliberately more permissive than
+// what it describes.
+const tenantRuleHint = "2-30 characters, starting with a lowercase letter and continuing with lowercase letters or digits (no hyphens, underscores or uppercase)"
 
 // isValidSubdomain reports whether s is a syntactically valid tenant subdomain.
 // The Host header is fully client-controlled, so this MUST NOT memoize results in
@@ -102,17 +114,26 @@ func MiddlewareWithBareHosts(bare []string) func(http.Handler) http.Handler {
 			subdomain := host[:dotIdx]
 
 			if !isValidSubdomain(subdomain) {
-				// Name the offending label AND the rule (ADR-024). "invalid
-				// tenant" alone left the caller to guess which of the host, the
-				// token and the tenant was wrong — and the rule is not
-				// guessable: an underscore is legal in a Postgres schema name
-				// and illegal in a DNS label, which is exactly the trap ENG-11
+				// Name the offending label AND the rule (ADR-024). A bare
+				// "invalid tenant" left the caller to guess which of the host,
+				// the token and the tenant was wrong — and the rule is not
+				// guessable: an underscore is legal in a Postgres schema name and
+				// illegal in a DNS label, which is exactly the trap ENG-11
 				// documented.
+				//
+				// But echo the LABEL only, truncated, never the whole host. This
+				// path is PRE-AUTH and un-rate-limited, and the Host is entirely
+				// client-controlled up to Go's 1 MiB header limit, so reflecting
+				// it — twice, as the first version of this did — turns a 27-byte
+				// constant response into a ~2 MiB amplifier any anonymous client
+				// can drive in a loop. The diagnostic value is in the rule plus
+				// the first characters of the label; the caller already knows
+				// what they sent.
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
 				json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-					"error": fmt.Sprintf("invalid tenant %q in host %q: a tenant subdomain must match %s",
-						subdomain, host, tenantRuleHint),
+					"error": fmt.Sprintf("invalid tenant %q: a tenant subdomain must match %s",
+						truncateLabel(subdomain), tenantRuleHint),
 				})
 				return
 			}
@@ -125,4 +146,20 @@ func MiddlewareWithBareHosts(bare []string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// maxEchoedLabel bounds how much of a client-controlled host label is reflected
+// in an error body. A valid tenant is at most 30 characters, so anything longer
+// is already invalid and its tail carries no diagnostic value.
+const maxEchoedLabel = 32
+
+// truncateLabel returns s bounded to maxEchoedLabel runes, marking that it was
+// cut. It is rune-safe so a multi-byte label cannot be sliced mid-character into
+// invalid UTF-8 in the response body.
+func truncateLabel(s string) string {
+	r := []rune(s)
+	if len(r) <= maxEchoedLabel {
+		return s
+	}
+	return string(r[:maxEchoedLabel]) + "…"
 }

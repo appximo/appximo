@@ -314,6 +314,47 @@ re-verified against reality on that date, not carried forward on trust.
   hostname and confirm `https://api.appitools.com/healthz` → 200 from outside.
   **Miguel's call** — it is also fair to retire the hostname if the demo has moved.
 
+### ENG-30 — Empty `page`/`per_page`/`sort`/`order` values are still silently ignored
+- **Origin:** adversarial review of the ADR-024 work, 2026-08-01. This session made
+  an empty FILTER value a named 400 and a non-positive page a named 400, but the
+  adjacent parameters on the same function still take `params.Get(x) != ""` as
+  their gate, so `?page=&per_page=` — what an empty form field produces — is
+  silently defaulted. Same function, same request, two policies.
+- **Impact:** Low. The effect is the documented default rather than a wrong
+  result, and `meta` reports what was used. It is listed because a policy applied
+  to two of four sibling parameters is the kind of half-conversion the audit
+  document exists to prevent from being forgotten.
+- **Ready:** an empty value for a parameter the engine owns is either rejected by
+  the same rule as its siblings, or the exception is written down here.
+
+### ENG-31 — The `file` field type is not covered by the create type check
+- **Origin:** adversarial review, 2026-08-01. `validateFieldValue` has no `file`
+  case, so it falls through to "valid" — a non-string `file` value bypasses the
+  new create check entirely. It still fails downstream (the FK, or a Postgres cast
+  surfaced as a 400 by the widened `IsBadInput`), so this is a missing named
+  message rather than a hole: `file` is a uuid column and a caller sends it as a
+  string, which constraint 3 skips anyway.
+- **Ready:** `validateFieldValue` treats `file` like `uuid`, with a test.
+
+### ENG-29 — Create and update answer a type error in two different shapes
+- **Origin:** adversarial review of the ADR-024 create fix, measured 2026-08-01.
+  A wrongly-typed value returns the S44 form on create —
+  `{"error":"validation_failed","fields":[{"field":"amount","rule":"type",…}]}` —
+  and a single flat string on update: `{"error":"field \"amount\" must be an
+  integer"}`. Both are 422. A client cannot parse them with one code path, and a
+  generated OpenAPI client that models the documented `ValidationErrorResponse`
+  fails validation on every PATCH type error.
+- **Related asymmetry, deliberate and documented:** a JSON string is accepted on
+  create (deferred to Postgres) and rejected on update. That one is not a bug —
+  the create path has always been the more permissive of the two, and narrowing it
+  would break form-encoded clients (see ENG-25 for why matching Postgres exactly is
+  its own piece of work).
+- **Impact:** Medium for anyone writing a client against both verbs; it is also a
+  documented-contract mismatch, which is the class ADR-024 covers.
+- **Ready:** the update path emits the same `fields[]` shape (it already knows the
+  field name — `validateFieldValue` returns it), with the OpenAPI response schema
+  and the AGENTS.md paragraph updated in the same change.
+
 ### ENG-25 — A wrongly-typed filter value is a 400 that names nothing
 - **Origin:** SILENT-FAILURE-S1 follow-up, verified live 2026-08-01.
   `?filter[amount][gt]=abc` answers `400 {"error":"invalid request"}` — no field, no

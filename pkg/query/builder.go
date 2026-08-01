@@ -189,7 +189,12 @@ func BuildQuery(
 		// rejects it. Being stricter than the database would break working
 		// clients, so the wider check is a separate, evidence-backed decision
 		// (backlog ENG-25).
-		if vals[0] == "" && fd.Type != "string" && fd.Type != "text" {
+		// `json` counts as text here: it is stored as TEXT (the type table says so
+		// two sections away), so an empty value is a legitimate exact match on the
+		// empty string, and a working query would otherwise start returning 400
+		// with no alternative syntax — there is no IS-NULL/IS-EMPTY operator to
+		// fall back on (SCHEMA-6). `jsonb` is a real document and cannot take one.
+		if vals[0] == "" && fd.Type != "string" && fd.Type != "text" && fd.Type != "json" {
 			return nil, fmt.Errorf("filter[%s][%s]: empty value is not valid for a %s field", field, op, fd.Type)
 		}
 

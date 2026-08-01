@@ -446,17 +446,22 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 
 			// Declarative validation: BEFORE the before_create hook and the
 			// INSERT. Create requires every required non-auto field (S44 #2).
-			if verrs := wrv.ValidateWrite(body, true); len(verrs) > 0 {
-				markSpan(req, "validate")
-				writeValidationErrs(w, verrs)
-				return
-			}
-			// Value TYPES (ADR-024). ValidateWrite above checks presence and the
-			// declared rules; a field with no declared rule had nothing checking
-			// its value at all, so POST silently truncated 1.9 to 1 on an int64
-			// column and answered 201 while PATCH answered a clean 422 for the
-			// same value. See validateCreateTypes.
-			if verrs := validateCreateTypes(wres, body); len(verrs) > 0 {
+			// Declared rules AND value types are collected together, then reported
+			// in ONE response. Running them as two phases would break the
+			// "422 with every failing field at once" contract: a form UI would
+			// mark two fields, the user would fix them, resubmit, and get two
+			// DIFFERENT fields marked — the multi-round-trip loop the S44 shape
+			// exists to remove.
+			//
+			// ValidateWrite checks presence and the declared rules
+			// (enum/min/max/pattern/format); validateCreateTypes checks the value
+			// against the declared TYPE, which nothing on the create path did
+			// before — so POST silently truncated 1.9 to 1 on an int64 column and
+			// answered 201, while PATCH answered a clean 422 for the same value
+			// (ADR-024).
+			verrs := wrv.ValidateWrite(body, true)
+			verrs = append(verrs, validateCreateTypes(wres, body)...)
+			if len(verrs) > 0 {
 				markSpan(req, "validate")
 				writeValidationErrs(w, verrs)
 				return

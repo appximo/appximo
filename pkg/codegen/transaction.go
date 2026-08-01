@@ -242,7 +242,20 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 		}
 		data := cloneData(op.Data)
 		ref.validator.ApplyDefaults(data)
-		if verrs := ref.validator.ValidateWrite(data, true); len(verrs) > 0 {
+		// Declared rules AND value types, collected and reported together —
+		// byte-identical to the single-op create handler (ADR-024).
+		//
+		// The type half was missing here, so the batch path stayed a hole in the
+		// fix that closed the silent truncation: `{"amount": 1.9}` returned 200
+		// and stored 1 while the standalone POST returned 422, meaning a caller
+		// who hit that 422 and moved to the documented atomic endpoint got the
+		// corruption instead. It also made two shipped claims false at once — the
+		// promise above that a batch op is "validated EXACTLY like its single-op
+		// counterpart", and ADR-024's own rule that two paths accepting the same
+		// input must answer it the same way.
+		verrs := ref.validator.ValidateWrite(data, true)
+		verrs = append(verrs, validateCreateTypes(&ref.res, data)...)
+		if len(verrs) > 0 {
 			return nil, &txError{status: http.StatusUnprocessableEntity, op: op.Op, resource: op.Resource, msg: "validation_failed", fields: verrs}
 		}
 		if verrs := ref.validator.ValidateInitialStates(data); len(verrs) > 0 { // G5: create in an initial state

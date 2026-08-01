@@ -296,6 +296,57 @@ boolean and Go's `strconv.ParseBool` does not. Being wrong in the safe direction
 is still being wrong (ENG-25). The `per_page` over-cap clamp also stays: it is
 documented, and `meta` reports the effective value.
 
+## What the adversarial review caught in the FIX
+
+The second-pass fix was reviewed by independent lenses told to REFUTE "this change
+is safe". The regression lens returned **BROKEN**, and it was right. Recorded here
+because the failures are more instructive than the successes:
+
+**The fix violated the ADR's own rule, in the same commit that wrote it.**
+`validateCreateTypes` rejected `{"amount": "7"}` — a JSON string for an `int64`.
+Measured against the pre-fix binary: that returned `201` with `7` stored
+*correctly*. Form-encoded clients, spreadsheet importers and several HTTP
+libraries send every scalar as a string, so this was an un-versioned break of the
+create contract, shipped under a rule that says **do not become stricter than the
+layer you are protecting**. The rule had been applied carefully to filters (which
+is why ENG-25 was deferred) and then broken on the write path two files away. A
+string now defers to Postgres; what stays caught is the JSON *number* with a
+fractional part, which is the case Postgres silently coerces.
+
+**The fix left a hole exactly where the ADR says to look.** `POST /api/transaction`
+had no type check, so `{"amount": 1.9}` still returned `200` and stored `1` — the
+corruption, still open on the batch path, in the commit that closed it on the
+single-op path. Worse, it made two shipped claims false at once: the promise in
+`transaction.go` that a batch op is "validated EXACTLY like its single-op
+counterpart", and ADR-024 rule 9, added in that same diff. A caller who hit the
+new 422 and reached for the batch endpoint would have got the corruption instead.
+
+**A safety justification was written on a false premise.** The admin `decode()`
+began echoing the JSON decoder's message, justified by a comment asserting "this
+route is already authenticated". It is not — `decode()` also serves
+`/admin/auth/login` and the MFA challenge, reachable with no credentials, and
+`encoding/json`'s type errors carry Go struct field names and declared types. Only
+the `unknown field "rol"` form is surfaced now: it echoes a key the caller just
+sent, which is the whole operator value, and discloses nothing.
+
+**A better error message became a DoS amplifier.** The new tenant 400 reflected
+the client-controlled Host *twice*. That path is pre-auth and un-rate-limited, and
+Go accepts a 1 MiB header, so a 27-byte constant response became a ~2 MiB
+amplifier drivable in a loop by an anonymous client. The label is now echoed
+alone, truncated to 32 runes.
+
+**And one fix was simply too strict.** `?count&sum=` was a working request
+returning a count; the empty `sum=` made it a hard 400. The distinction that
+matters for this ADR is **visibility**: a dropped filter is invisible (rows come
+back and the caller cannot tell they are unfiltered), while a dropped aggregate
+function is plain in the response, which has no `sum` key. Silence is only the
+defect when the caller cannot see it. The empty value is now named only when the
+request has nothing left to aggregate.
+
+Two of these — the string scalars and the batch hole — were found by *diffing an
+old binary against a new one across ~340 paired requests*, not by reading. That is
+the technique worth keeping.
+
 ## The independent sweep, and what it says about the fix
 
 A second, independent sweep ran over the same ten surfaces without access to this

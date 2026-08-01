@@ -27,7 +27,7 @@ import (
 // produced a masked 500 — an engine fault logged and billed against the SLO for
 // what is plainly a caller mistake).
 //
-// TWO CONSTRAINTS, both deliberate:
+// FOUR CONSTRAINTS, all deliberate:
 //
 //  1. A key that is NOT a declared field is SKIPPED, never rejected. That is the
 //     ENG-12 contract: a migration can add a column without rebuilding the
@@ -38,6 +38,30 @@ import (
 //  2. An explicit null is SKIPPED. `{"amount": null}` means "no value", which is
 //     a legitimate write to a nullable column; `required` already governs
 //     whether that is allowed.
+//
+//  3. A JSON **string** is SKIPPED for every type, and this one is subtle. The
+//     first version of this check did not skip it, and an adversarial regression
+//     pass caught the result: `{"amount": "7"}` used to return 201 with 7 stored
+//     correctly, and started returning 422. Form-encoded clients, spreadsheet
+//     importers and several HTTP libraries send every scalar as a string, so that
+//     was an un-versioned break of the create contract — shipped, ironically,
+//     under a rule that says DO NOT BECOME STRICTER THAN THE LAYER YOU ARE
+//     PROTECTING (ADR-024). Postgres parses "7" into a bigint happily; the engine
+//     has no business refusing it.
+//
+//     A string therefore defers to Postgres exactly as before. One that does NOT
+//     parse (`{"amount": "nope"}`) is still rejected — by Postgres, as a 400 —
+//     which is what shipped for years. Naming that value in a 422 means
+//     reproducing Postgres's accepted set per type (wider than Go's: `yes` is a
+//     boolean, integers may carry whitespace, floats may be `Infinity`), tracked
+//     with its evidence as ENG-25 rather than guessed at here.
+//
+//     What stays caught is the case Postgres would silently ACCEPT AND CORRUPT: a
+//     JSON *number* with a fractional part written to an integer column.
+//
+//  4. A value that could NOT have come from a JSON body is SKIPPED — it is
+//     engine-injected, not caller input. See fromJSONBody; this one was a total
+//     outage for a documented feature and is the sharpest lesson of the set.
 //
 // The check lives here rather than inside ValidateWrite so it costs the PATCH
 // path nothing — PATCH already type-checks through CollectUpdate, and adding it
@@ -55,6 +79,12 @@ func validateCreateTypes(res *schema.ResourceSchema, body map[string]any) []sche
 		if !ok {
 			continue // not a declared field — see constraint 1
 		}
+		if !fromJSONBody(v) {
+			continue // see constraint 4 — engine-injected, not caller input
+		}
+		if _, isStr := v.(string); isStr {
+			continue // see constraint 3
+		}
 		if msg, valid := validateFieldValue(k, fd, v); !valid {
 			errs = append(errs, schema.FieldRuleError{Field: k, Rule: "type", Message: msg})
 		}
@@ -64,4 +94,30 @@ func validateCreateTypes(res *schema.ResourceSchema, body map[string]any) []sche
 	// is untestable and unreadable in a log.
 	sort.Slice(errs, func(i, j int) bool { return errs[i].Field < errs[j].Field })
 	return errs
+}
+
+// fromJSONBody reports whether v could have been produced by decoding a JSON
+// request body into map[string]any. encoding/json yields exactly these Go types
+// — string, float64, bool, map[string]any, []any and nil — so anything else in
+// the body map was put there by the ENGINE, not the caller.
+//
+// This matters because validateCreateTypes runs AFTER ApplyDefaults, which
+// injects values for omitted fields. A `{"type":"time","default":"now"}` field —
+// a documented engine feature — gets a Go time.Time, and validateFieldValue's
+// time case requires a string. Without this guard EVERY create that omitted such
+// a field was answered 422 "field \"fecha\" must be a timestamp string",
+// blaming the caller for a field they never sent and breaking the endpoint
+// outright for any schema using the feature (the repo's own working schema.json
+// uses it in two resources).
+//
+// It shipped green because the test that covers it, TestSchemaDefaultsOnInsert,
+// is behind the integration tag and skipped by the -short unit lane — which is
+// the more useful lesson: a check added after a transform must validate what the
+// CALLER sent, not what the pipeline has since put in the map.
+func fromJSONBody(v any) bool {
+	switch v.(type) {
+	case string, float64, bool, map[string]any, []any, nil:
+		return true
+	}
+	return false
 }

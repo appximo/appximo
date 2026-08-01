@@ -106,13 +106,22 @@ func BuildAggregate(
 		aq.count = true
 	}
 
+	var emptyFuncs []string
 	for _, fn := range aggFuncs {
-		// A function present with an EMPTY value (`?count&sum=`) used to be
-		// dropped without a word, and the caller got either a silent absence or
-		// the generic catch-all below — neither of which mentions `sum`
-		// (ADR-024).
+		// A function present with an EMPTY value (`?sum=`) is recorded and
+		// reported only if the request ends up with NOTHING to aggregate.
+		//
+		// The first version rejected it outright, and an adversarial review was
+		// right to push back: `?count&sum=` was a working request that returned a
+		// count, and a form-built client that always emits every function key
+		// would have started getting a hard 400 for a parameter it never intended
+		// to use. The distinction that matters for ADR-024 is VISIBILITY — a
+		// dropped filter is invisible (rows come back and the caller cannot tell
+		// they are unfiltered), whereas a dropped aggregate function is plain in
+		// the response, which simply has no `sum` key. Silence is only the defect
+		// when the caller cannot see it.
 		if _, present := params[fn]; present && len(splitCSV(params.Get(fn))) == 0 {
-			return nil, fmt.Errorf("aggregate %s: no field given (use %s=<field>[,<field>…])", fn, fn)
+			emptyFuncs = append(emptyFuncs, fn)
 		}
 		for _, f := range splitCSV(params.Get(fn)) {
 			fd, ok := res.Fields[f]
@@ -152,6 +161,10 @@ func BuildAggregate(
 	// without rejecting the unknown top-level parameters the policy
 	// deliberately tolerates.
 	if !aq.count && len(aq.metrics) == 0 {
+		if len(emptyFuncs) > 0 {
+			return nil, fmt.Errorf("aggregate %s: no field given (use %s=<field>[,<field>…])",
+				strings.Join(emptyFuncs, ", "), emptyFuncs[0])
+		}
 		if len(aq.groupBy) > 0 {
 			return nil, fmt.Errorf("group_by needs an aggregate function: add count, or one of sum, avg, min, max")
 		}
@@ -161,18 +174,36 @@ func BuildAggregate(
 	return aq, nil
 }
 
+// maxEchoedParams / maxEchoedParamLen bound what receivedParamNames reflects.
+// A query string is caller-controlled and can be very long, so echoing it back
+// unbounded is a response amplifier — the same defect that was fixed in the
+// tenant middleware's 400, and it would have been inconsistent to guard one and
+// not the other. A typo is visible in the first handful of names.
+const (
+	maxEchoedParams   = 12
+	maxEchoedParamLen = 40
+)
+
 // receivedParamNames lists the query parameter names a request carried, sorted,
 // for an error message. It echoes only the caller's own parameter NAMES (never
-// values), so a typo like `summ` becomes visible next to the valid set.
+// values), so a typo like `summ` becomes visible next to the valid set — bounded
+// in both count and length.
 func receivedParamNames(params url.Values) string {
 	if len(params) == 0 {
 		return "no parameters"
 	}
 	names := make([]string, 0, len(params))
 	for k := range params {
+		if r := []rune(k); len(r) > maxEchoedParamLen {
+			k = string(r[:maxEchoedParamLen]) + "…"
+		}
 		names = append(names, k)
 	}
 	sort.Strings(names)
+	if len(names) > maxEchoedParams {
+		return strings.Join(names[:maxEchoedParams], ", ") +
+			fmt.Sprintf(", … (%d more)", len(names)-maxEchoedParams)
+	}
 	return strings.Join(names, ", ")
 }
 

@@ -574,15 +574,32 @@ a file field. In GraphQL the field is an `ID`.
 A write that violates rules returns **422 with every failing field at
 once**: `{"error":"validation_failed","fields":[{"field":"title","rule":"required","message":"is required"}]}`.
 
-Values are also **type-checked against the declared type on create as well as
-update** (`rule":"type"`), and the two verbs answer identically. Before ADR-024
-only update did: `POST {"amount": 1.9}` on an `int64` field returned **201** and
-stored `1` — silent truncation reported as success — while `PATCH` with the same
-value returned a clean 422. A key that is **not** a declared field still passes
-through to Postgres (so a column added by a migration is writable without a
-restart, ENG-12) and comes back as the `unknown_field` 422; an explicit `null` is
-governed by `required`, not by the type check. `time` values remain validated by
-Postgres rather than in Go (a documented leniency, identical on both verbs).
+Values are **type-checked against the declared type on create as well as update**
+(`"rule":"type"`), reported together with the declared-rule failures so one
+response still carries every failing field. Before ADR-024 only update was
+checked: `POST {"amount": 1.9}` on an `int64` field returned **201** and stored
+`1` — silent truncation reported as success — while `PATCH` with the same value
+returned a clean 422.
+
+The two verbs are **not** identical, and the differences are deliberate:
+
+- **A JSON string defers to Postgres on create, and is rejected on update.**
+  `POST {"amount": "7"}` → `201` (Postgres parses it; form-encoded and
+  spreadsheet-derived clients send every scalar this way, and refusing them would
+  be stricter than the database — ADR-024). `PATCH {"amount": "7"}` → `422`. The
+  create path has always been the more permissive of the two; the type check
+  preserved that rather than widening or narrowing it.
+- **The bodies differ in shape.** Create answers the S44 form
+  (`{"error":"validation_failed","fields":[…]}`); update answers a single
+  `{"error":"field \"amount\" must be an integer"}`. A client cannot parse both
+  with one code path (backlog ENG-29).
+
+A key that is **not** a declared field still passes through to Postgres (so a
+column added by a migration is writable without a restart, ENG-12) and comes back
+as the `unknown_field` 422; an explicit `null` is governed by `required`, not by
+the type check. `time` values remain validated by Postgres rather than in Go — a
+documented leniency, and the one place the two verbs genuinely agree on a
+wrongly-typed value (both `400`).
 
 #### State machines (`state_machine`, G5)
 
@@ -1211,7 +1228,7 @@ Facts agents most often get wrong:
 - **Tenant = Host header.** Every data-plane request needs
   `Host: acme.localhost` (or a real subdomain). Host of a different
   tenant → 401 `token tenant mismatch`; Host with no subdomain (bare
-  IP/`localhost`) → 500 with empty body. The host is matched
+  IP/`localhost`) → 500. The host is matched
   **case-insensitively** (RFC 9110 §4.2.3), so `ACME.localhost` resolves to the
   same tenant and the same `tenant_acme` schema; an invalid label is a 400 that
   names the label, the host and the rule (ADR-024 — it used to be a bare
@@ -1436,8 +1453,13 @@ likewise share the REST create/delete cores (`codegen.RunInsert` / `RunDelete`):
 resource with `events:["create"]` / `["delete"]` emits `<resource>.created` /
 `<resource>.deleted` from the mutation, byte-for-byte identical to REST POST /
 DELETE (same topic + lean payload, same tx). With `update<Singular>`, **all three
-GraphQL write mutations emit identically to their REST counterparts**. GraphQL always answers **HTTP 200**:
-check the `errors` array in the body, never the status code. Validation
+GraphQL write mutations emit identically to their REST counterparts**. GraphQL answers **HTTP 200 for anything it can execute** — check the `errors`
+array in the body, not the status code. The exceptions are transport-level and
+cannot produce a GraphQL response at all: a body that is not valid JSON is a
+**400** `{"error":"invalid JSON body"}` and one over the 1 MiB cap is a **413**
+(before ADR-024 both were a 413, so an 18-byte malformed body was reported as
+too large). Those carry an `error` string and NO `errors` array, so a client
+that only inspects `body.errors` must still check for a non-2xx status. Validation
 failures arrive as `errors[].extensions.fields` (same rule engine as
 REST). Introspection is disabled in production (the `__schema`/`__type`
 fields are rejected outside development; `__typename` is allowed);

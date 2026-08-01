@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -379,10 +380,24 @@ func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 		// key, malformed syntax and an oversized body. The operator is left to
 		// diff their request against the docs by eye (ADR-024).
 		//
-		// The decoder's message is safe to surface here: it describes the
-		// caller's OWN body, and this route is already authenticated as a
-		// platform super-admin or the admin key.
-		status, msg := http.StatusBadRequest, "invalid JSON body: "+err.Error()
+		// Name the offending KEY, and only the key.
+		//
+		// The first version of this echoed err.Error() unconditionally, justified
+		// by a comment claiming "this route is already authenticated". That was
+		// false: decode() also serves /admin/auth/login and the MFA challenge,
+		// which are reachable with no credentials at all. And encoding/json's
+		// OTHER messages carry Go struct field names and declared types
+		// ("cannot unmarshal string into Go struct field X.y of type int") — real
+		// internal structure, handed to an anonymous caller.
+		//
+		// The unknown-field message is different in kind: `json: unknown field
+		// "rol"` echoes a key the CALLER just sent, which is exactly the operator
+		// value we wanted (a typo is invisible otherwise) and discloses nothing.
+		// So that one is surfaced and every other decode failure stays terse.
+		status, msg := http.StatusBadRequest, "invalid JSON body"
+		if e := err.Error(); strings.HasPrefix(e, "json: unknown field ") {
+			msg += ": " + e
+		}
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			status, msg = http.StatusRequestEntityTooLarge, "request body too large"

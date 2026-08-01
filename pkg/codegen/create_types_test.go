@@ -42,7 +42,7 @@ func TestValidateCreateTypes_CatchesTheSilentCoercion(t *testing.T) {
 // Every failing field at once — the S44 contract the rest of create validation
 // already honours — and in a STABLE order, since map iteration is random.
 func TestValidateCreateTypes_ReportsEveryFieldStably(t *testing.T) {
-	body := map[string]any{"amount": "nope", "done": 1.0, "ratio": true}
+	body := map[string]any{"amount": true, "done": 1.0, "ratio": []any{1}}
 	first := validateCreateTypes(typeTestResource(), body)
 	if len(first) != 3 {
 		t.Fatalf("got %d errors, want 3: %+v", len(first), first)
@@ -104,5 +104,96 @@ func TestValidateCreateTypes_NilSafe(t *testing.T) {
 	}
 	if errs := validateCreateTypes(typeTestResource(), nil); errs != nil {
 		t.Errorf("nil body must be a no-op, got %+v", errs)
+	}
+}
+
+// The regression an adversarial review caught, and the reason constraint 3
+// exists. A JSON STRING must reach Postgres untouched, because Postgres parses
+// it and the engine must not be stricter than the layer it protects (ADR-024).
+//
+// Measured against the pre-fix binary: all three of these returned 201 with the
+// value stored CORRECTLY, and the first version of validateCreateTypes turned
+// them into 422s — an un-versioned break of the create contract, shipped inside
+// the commit whose whole point was to stop silent corruption. Form-encoded
+// clients, spreadsheet importers and several HTTP libraries send every scalar
+// this way.
+func TestValidateCreateTypes_StringEncodedScalarsDeferToPostgres(t *testing.T) {
+	for _, body := range []map[string]any{
+		{"amount": "7"},       // int64 as a string  → Postgres parses it
+		{"ratio": "1.5"},      // float64 as a string
+		{"done": "true"},      // bool as a string
+		{"done": "yes"},       // Postgres accepts this; strconv.ParseBool does not
+		{"amount": "  42  "},  // Postgres tolerates surrounding whitespace
+		{"due": "2026-08-01"}, // date-only, one of many spellings Postgres takes
+		{"amount": "nope"},    // does NOT parse — Postgres rejects it as a 400, as before
+	} {
+		if errs := validateCreateTypes(typeTestResource(), body); len(errs) != 0 {
+			t.Errorf("body %v was rejected in Go; a string value must defer to Postgres: %+v", body, errs)
+		}
+	}
+}
+
+// …while the corruption case stays closed. These are JSON values Postgres would
+// either coerce silently or fail on with a masked 500, and none of them can be
+// mistaken for a caller encoding a scalar as text.
+func TestValidateCreateTypes_StillCatchesNonStringTypeErrors(t *testing.T) {
+	for _, tc := range []struct {
+		body  map[string]any
+		field string
+	}{
+		{map[string]any{"amount": 1.9}, "amount"},      // THE corruption: stored as 1
+		{map[string]any{"amount": true}, "amount"},     // was a masked 500
+		{map[string]any{"done": 1.0}, "done"},          // was a masked 500
+		{map[string]any{"ratio": true}, "ratio"},       // bool into a numeric column
+		{map[string]any{"title": 12345.0}, "title"},    // number into a text column
+		{map[string]any{"amount": []any{1}}, "amount"}, // array into a scalar column
+		{map[string]any{"amount": map[string]any{}}, "amount"},
+	} {
+		errs := validateCreateTypes(typeTestResource(), tc.body)
+		if len(errs) == 0 {
+			t.Errorf("body %v was accepted; it must be a named 422", tc.body)
+			continue
+		}
+		if errs[0].Field != tc.field {
+			t.Errorf("body %v: error names %q, want %q", tc.body, errs[0].Field, tc.field)
+		}
+	}
+}
+
+// Constraint 4, and the most damaging bug this checker ever had.
+//
+// validateCreateTypes runs AFTER ApplyDefaults. A `{"type":"time","default":
+// "now"}` field — documented in AGENTS.md as "the one dynamic default" — is
+// filled with a Go time.Time, and validateFieldValue's time case requires a
+// string. The first version therefore answered EVERY create that omitted such a
+// field with 422 `field "fecha" must be a timestamp string`, naming a field the
+// caller never sent: a total outage of POST for any schema using the feature.
+// The repo's own working schema.json uses it in two resources.
+//
+// It passed `make test` because the integration test that covers it is skipped by
+// the -short unit lane. The guard is therefore written against the TYPE SYSTEM
+// rather than against the one symptom: encoding/json can only produce string,
+// float64, bool, map, slice or nil, so anything else was put in the map by the
+// engine and is not the caller's to be blamed for.
+func TestValidateCreateTypes_EngineInjectedDefaultsAreNotCallerInput(t *testing.T) {
+	res := &schema.ResourceSchema{Fields: map[string]schema.FieldDef{
+		"fecha":  {Type: "time", Default: "now"},
+		"amount": {Type: "int64"},
+	}}
+	body := map[string]any{}
+	schema.CompileRules(res).ApplyDefaults(body)
+
+	if _, ok := body["fecha"]; !ok {
+		t.Fatal("ApplyDefaults did not inject the default — the test no longer exercises the bug")
+	}
+	if _, isString := body["fecha"].(string); isString {
+		t.Fatal("ApplyDefaults now injects a string; re-check whether this guard is still needed")
+	}
+	if errs := validateCreateTypes(res, body); len(errs) != 0 {
+		t.Errorf("an engine-injected default was reported as a caller type error: %+v", errs)
+	}
+	// A caller-supplied value on the same field is still checked.
+	if errs := validateCreateTypes(res, map[string]any{"amount": 1.9}); len(errs) != 1 {
+		t.Errorf("the guard must not disable checking of real caller input: %+v", errs)
 	}
 }
