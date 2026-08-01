@@ -33,9 +33,10 @@
 #   endpoint: AUTO-DERIVED from the served /openapi.json → /api/items?per_page=20
 #   rate:     100 rps · 30 s · RUNS=10   (the shared 105 is unreliable above ~100)
 #   role:     admin                  (BENCH_ROLE to override)
-# Series anchor (2026-07-31, CONSUMER-PATH-S1, this fixture at 100 rps):
-#   p50 ≈ 0.61–0.66 ms · base-vs-base control drift ≈ ±3 % (MWU p=0.14) — deltas
-#   inside that band are host noise, not code. The old default endpoint
+# Series anchor (re-run 2026-08-01, AI-JOURNEY-S1, this exact fixture at 100 rps):
+#   p50 ≈ 0.60–0.66 ms · base-vs-base control: Δp50 +0.5 %, MWU p=0.73 (arm vs
+#   arm) · between-run CV WITHIN an arm 8.7–10.4 % — the 105's real floor. A
+#   delta needs to clear BOTH the max(0.5ms,3%) gate and that floor to be code. The old default endpoint
 #   (/api/guides, role super_admin) was a RETIRED fixture: 100 % errors, zero
 #   datapoints, twice. Defaults now derive from the SERVED surface and the
 #   pre-flight refuses to measure a broken endpoint, loudly.
