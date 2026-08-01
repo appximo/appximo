@@ -254,3 +254,31 @@ grammar, and benchmarked `no_change` on the update path. Backlog: `SCHEMA-3`.
 - The pattern each decision points at is a feature that already ships
   (per-resource `permissions`, `routes` grants, `BeforeStart`), which is the test
   of whether a "no" is honest: it must leave the user with a way to do the thing.
+
+---
+
+## Decision 5 — `is_null` is not a filter operator (yet), and the 400 must say so
+
+**Added 2026-08-01 (SILENT-FAILURE-S1).** Closing ENG-14 turned
+`?filter[x][is_null]=true` from "200 with the whole table" into a clean `400`, which
+forced the question this ADR is the place for: should the operator exist?
+
+**Not in that session, and the reason is scope rather than principle.** Adding an
+operator is a capability: the type×operator matrix, GraphQL parity, the reference,
+the LLM grammar that teaches generated schemas, and the AGENTS/CAPABILITIES tables
+all move together. A pass whose subject was closing a defect class is the wrong
+place to grow the surface — that is exactly the scope creep the class-closing
+discipline exists to avoid.
+
+**What is NOT decided here is that null-filtering should not exist.** Unlike this
+ADR's other boundaries — row-condition operators (Decision 1), index predicates
+(Decision 2), per-transition RBAC (Decision 3) — where the answer is *no, use this
+other shape*, here **there is no other shape**: the declarative surface cannot
+express "rows where this column is null" at all. The workaround is framework mode,
+which today needs an unpublished module.
+
+So this is a **deferral with a debt attached**, tracked as SCHEMA-6, and the
+condition to revisit is simply the next session that can carry a capability. Until
+then the rejection message should name the limitation rather than only listing the
+operators that do exist — a `400` that closes a door without pointing anywhere is
+half of the very problem ADR-024 is about.
