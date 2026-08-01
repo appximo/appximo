@@ -46,6 +46,7 @@ source} ] } an AI (or any tool) can parse and auto-correct from. Exit 1 when inv
 		errs := schema.Validate(s)
 		if len(errs) == 0 {
 			fmt.Println("Schema válido ✓")
+			printSchemaWarnings(s)
 			return
 		}
 
@@ -54,6 +55,25 @@ source} ] } an AI (or any tool) can parse and auto-correct from. Exit 1 when inv
 		}
 		os.Exit(1)
 	},
+}
+
+// printSchemaWarnings reports the findings that do NOT make a schema invalid but
+// almost certainly make it behave differently from what its author meant (SCHEMA-5).
+// "Valid" and "does what you asked" are different questions, and only one of them
+// had an answer before.
+func printSchemaWarnings(s *schema.APISchema) {
+	warns := schema.Warnings(s)
+	if len(warns) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Printf("%d warning(s) — the schema is valid, but this will probably not do what you meant:\n", len(warns))
+	for _, w := range warns {
+		fmt.Printf("\n  ⚠ %s\n    %s\n", w.Field, w.Message)
+		if w.Fix != "" {
+			fmt.Printf("    → %s\n", w.Fix)
+		}
+	}
 }
 
 func init() {

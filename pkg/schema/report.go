@@ -30,6 +30,11 @@ type StructuredError struct {
 type ValidationReport struct {
 	Valid  bool              `json:"valid"`
 	Errors []StructuredError `json:"errors"`
+	// Warnings are findings that do NOT make the schema invalid but almost always
+	// mean it will not do what its author intended (SCHEMA-5). They are reported in
+	// the same shape as errors so the AI correction loop can act on them with the
+	// same code path, and `valid` stays true — a warning never blocks a deploy.
+	Warnings []StructuredError `json:"warnings,omitempty"`
 }
 
 // ValidateReport runs BOTH validators over raw schema bytes and returns a unified,
@@ -53,6 +58,7 @@ func ValidateReport(raw []byte) ValidationReport {
 	// Semantic (Go) — only if the JSON parses into the schema struct. Unknown keys
 	// are dropped by json.Unmarshal (the meta-schema already flagged them), so the
 	// semantic pass runs over the well-formed remainder.
+	var warnings []StructuredError
 	var s APISchema
 	if err := json.Unmarshal(raw, &s); err == nil {
 		for _, e := range Validate(&s) {
@@ -61,6 +67,11 @@ func ValidateReport(raw []byte) ValidationReport {
 				continue // same problem already reported structurally
 			}
 			out = append(out, se)
+		}
+		// Warnings are computed on the same parsed schema but kept OUT of Errors, so
+		// `valid` is unaffected (SCHEMA-5).
+		for _, w := range Warnings(&s) {
+			warnings = append(warnings, semanticErrorToStructured(w))
 		}
 	} else if len(out) == 0 {
 		// Malformed JSON and the meta-schema somehow said nothing — surface the parse error.
@@ -77,7 +88,7 @@ func ValidateReport(raw []byte) ValidationReport {
 		}
 		return out[i].Source < out[j].Source
 	})
-	return ValidationReport{Valid: len(out) == 0, Errors: out}
+	return ValidationReport{Valid: len(out) == 0, Errors: out, Warnings: warnings}
 }
 
 // semanticErrorToStructured maps a Go ValidationError to the structured form, using

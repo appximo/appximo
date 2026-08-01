@@ -82,12 +82,25 @@ func parseAndValidateSchema(raw json.RawMessage) (*schema.APISchema, []string) {
 	return &s, nil
 }
 
-// schemaWarnings returns non-fatal notices for a VALID schema — keys that parse
-// (forward compatibility) but do not act yet. `indexes` are now materialized at
-// migration (BUGS-V1) so they no longer warn; the hook is kept (returns nil) so
-// a future parsed-but-dead key can warn here without re-wiring the responses.
-func schemaWarnings(_ *schema.APISchema) []string {
-	return nil
+// schemaWarnings returns non-fatal notices for a VALID schema: findings that do not
+// block the deploy but almost certainly mean the schema will not behave as intended
+// (schema.Warnings — SCHEMA-5). They ride in the deploy response so the caller
+// (Studio, the CLI, an AI agent) sees them at the moment of the change, which is the
+// only moment they are actionable.
+func schemaWarnings(s *schema.APISchema) []string {
+	warns := schema.Warnings(s)
+	if len(warns) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(warns))
+	for _, w := range warns {
+		msg := w.Field + ": " + w.Message
+		if w.Fix != "" {
+			msg += " → " + w.Fix
+		}
+		out = append(out, msg)
+	}
+	return out
 }
 
 func handleCreateTenant(svc Service) http.HandlerFunc {

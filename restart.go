@@ -56,6 +56,11 @@ func loadAndValidateSchema(path string) (*schema.APISchema, error) {
 		}
 		return nil, fmt.Errorf("appitools: invalid schema:\n  %s", strings.Join(msgs, "\n  "))
 	}
+	// A VALID schema can still be a wrong one in ways nothing else reports (SCHEMA-5).
+	// Boot is the last moment before those become "the app shows me nothing".
+	for _, w := range schema.Warnings(s) {
+		log.Printf("WARNING [%s]: %s\n  → %s", w.Field, w.Message, w.Fix)
+	}
 	return s, nil
 }
 
