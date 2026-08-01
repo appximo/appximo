@@ -104,6 +104,61 @@ if [ -z "${BENCH_TOKEN:-}" ]; then
 fi
 export BENCH_TOKEN
 
+# ── Fixture self-heal (OPS-9, CERTIFY-S1) ───────────────────────────────────
+# The canonical baseline tenant has now been deleted TWICE by routine session
+# cleanups, and each time the historical series was cut: the run before and the
+# run after are not comparable because the fixture in between was recreated by
+# hand, differently. A documented "do not delete this tenant" rule already
+# existed and did not survive contact with reality.
+#
+# So the durable fix is not a rule, it is idempotence: if the bench tenant is
+# missing, recreate it — from the schema the TARGET ENGINE ACTUALLY SERVES
+# (GET /editor/current-schema, the byte-faithful boot schema), so the fixture is
+# correct by construction for whatever app is under test, not just the blank one.
+#
+# Deliberately conservative: it only ever CREATES a missing tenant. It never
+# migrates, never deletes, never touches an existing one — a bench script must
+# not be able to mutate a real app. Set BENCH_NO_AUTOFIX=1 to disable.
+ensure_bench_tenant() {
+  [ "${BENCH_NO_AUTOFIX:-0}" = "1" ] && return 0
+  local control="${CONTROL_URL:-http://localhost:9090}"
+  # shellcheck disable=SC1090
+  [ -z "${ADMIN_KEY:-}" ] && [ -f "$SECRETS" ] && source "$SECRETS"
+  [ -z "${ADMIN_KEY:-}" ] && return 0   # no admin key → cannot check or create
+
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' -m 5 "$control/tenants/$TENANT" \
+          -H "X-Admin-Key: $ADMIN_KEY" 2>/dev/null || echo 000)"
+  case "$code" in
+    200) return 0 ;;                       # fixture present — nothing to do
+    404) : ;;                              # missing → recreate below
+    *)   return 0 ;;                       # no reachable control plane → let the pre-flight speak
+  esac
+
+  echo "  [0] fixture ausente: el tenant \"$TENANT\" no existe — recreándolo (OPS-9 auto-heal)…"
+  local schema
+  schema="$(curl -fsS -m 5 "$TARGET_URL/editor/current-schema" 2>/dev/null || true)"
+  if [ -z "$schema" ]; then
+    echo "      ✗ no pude leer el schema servido ($TARGET_URL/editor/current-schema)." >&2
+    echo "        Creá el tenant a mano o pasá TENANT_ID= de uno existente." >&2
+    return 0
+  fi
+  local body resp
+  body="$(TENANT="$TENANT" python3 -c '
+import json,os,sys
+print(json.dumps({"tenant_id":os.environ["TENANT"],"display_name":"Bench baseline",
+                  "email":"bench@example.com","plan":"free",
+                  "schema":json.loads(sys.stdin.read())}))' <<<"$schema")"
+  resp="$(curl -s -X POST "$control/tenants" -H "X-Admin-Key: $ADMIN_KEY" \
+          -H 'Content-Type: application/json' -d "$body")"
+  if grep -q '"pg_schema"' <<<"$resp"; then
+    echo "      ✓ tenant \"$TENANT\" recreado desde el schema servido — la serie histórica sigue siendo comparable"
+  else
+    echo "      ✗ no se pudo recrear: $(head -c 200 <<<"$resp")" >&2
+  fi
+}
+ensure_bench_tenant
+
 # Pre-flight (OPS-9): ONE real request before measuring anything. A broken
 # endpoint used to produce 10 silent runs of 100% errors and "no datapoints".
 PF_CODE="$(curl -gs -o /tmp/bench-preflight.body -w '%{http_code}' -m 5   "$TARGET_URL$ENDPOINT" -H "Authorization: Bearer $BENCH_TOKEN" -H "Host: ${TENANT}.localhost")"
@@ -213,6 +268,60 @@ if len(p50s) >= 2:
 else:
     print(f"  CV entre-runs (p50): n/a (se necesita >=2 runs; hay {len(rows)})")
 PY
+
+# ── The historical measurement log (CERTIFY-S1) ──────────────────────────────
+# Every protocol run appends ONE line to benchmarks/history.tsv: date, commit,
+# label, fixture, rate, duration, runs, and the resulting p50/p95 medians. It
+# exists because the project has twice published a number whose measurement
+# conditions were reconstructed from memory afterwards — a series only exists if
+# something writes it down at the moment of measuring.
+#
+# Append-only by contract: a wrong line is corrected by appending a new one, the
+# same rule the schema history follows.
+HIST_FILE="${BENCH_HISTORY:-$REPO_ROOT/benchmarks/history.tsv}"
+mkdir -p "$(dirname "$HIST_FILE")"
+if [ ! -f "$HIST_FILE" ]; then
+  printf 'date\tcommit\tlabel\ttarget\ttenant\tendpoint\tscript\trate\tduration\truns\tp50_median_ms\tp95_median_ms\tcv_between_pct\terr_rate\tnote\n' >"$HIST_FILE"
+fi
+python3 - "$RESULTS" "$HIST_FILE" "$LABEL" "$TARGET_URL" "$TENANT" "$ENDPOINT" "$K6_SCRIPT" "$RATE" "$DURATION" "$RUNS" "${BENCH_NOTE:-}" <<'PY2'
+import json, sys, math, subprocess, datetime
+res, hist, label, target, tenant, endpoint, script, rate, dur, runs, note = sys.argv[1:12]
+rows = []
+for line in open(res):
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        d = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if "run_id" in d:
+        rows.append(d)
+if not rows:
+    sys.exit(0)
+def med(v):
+    v = sorted(v)
+    n = len(v)
+    return v[n//2] if n % 2 else (v[n//2-1]+v[n//2])/2
+p50 = med([r.get("p50_ms", 0.0) or 0.0 for r in rows])
+p95 = med([r.get("p95_ms", 0.0) or 0.0 for r in rows])
+errs = max((r.get("error_rate", 0.0) or 0.0) for r in rows)
+ps = [r.get("p50_ms", 0.0) or 0.0 for r in rows]
+cvb = 0.0
+if len(ps) >= 2:
+    m = sum(ps)/len(ps)
+    cvb = (math.sqrt(sum((x-m)**2 for x in ps)/(len(ps)-1))/m*100) if m else 0.0
+try:
+    sha = subprocess.check_output(["git","rev-parse","--short","HEAD"], text=True).strip()
+except Exception:
+    sha = "unknown"
+day = datetime.datetime.now().strftime("%Y-%m-%d")
+with open(hist, "a") as f:
+    f.write("\t".join([day, sha, label, target, tenant, endpoint, script, rate, dur,
+                       str(len(rows)), f"{p50:.3f}", f"{p95:.3f}", f"{cvb:.1f}",
+                       f"{errs:.4f}", note]) + "\n")
+print(f"  ✓ registrado en {hist} ({day} {sha} {label}: p50 {p50:.3f} ms, p95 {p95:.3f} ms)")
+PY2
 echo "────────────────────────────────────────────────────────"
 echo "✓ protocolo completo. Comparar con: "
 echo "  curl -s -X POST $DEVHUB_URL/api/bench/compare -H 'Content-Type: application/json' -d '{\"run_a\":A,\"run_b\":B}'"
