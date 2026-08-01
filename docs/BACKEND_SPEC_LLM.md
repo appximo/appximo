@@ -114,6 +114,67 @@ unique constraints — belongs in `schema.json`, where the migration engine owns
 
 ## 3. Custom handlers in Go — the core
 
+### 3.0 Getting the dependency — READ THIS FIRST
+
+**The Appitools module is not published.** `github.com/miguelangel/appitools` is a
+private repository with no release tag, so `go get github.com/miguelangel/appitools`
+and a bare `go mod tidy` **fail** — there is no version to fetch. An agent that
+guesses a version (`v0.1.0`) will produce a project that does not build, which is
+exactly what happened the first time this document was used
+(docs/AUTHORING_JOURNEY.md 5-7).
+
+**The recipe that works today** is a local checkout plus a `replace`:
+
+```bash
+git clone <your-appitools-checkout> /path/to/appitools   # or use the one you already have
+mkdir mybackend && cd mybackend
+go mod init example.com/mybackend
+```
+
+```go.mod
+module example.com/mybackend
+
+go 1.25
+
+require github.com/miguelangel/appitools v0.0.0
+
+replace github.com/miguelangel/appitools => /path/to/appitools
+```
+
+```bash
+go mod tidy      # now resolves: the replace points at real source on disk
+go build -o mybackend .
+```
+
+What this costs you, stated plainly:
+
+- **The path is absolute and machine-specific.** The project builds on the machine
+  that holds the checkout and nowhere else — not on a teammate's laptop, not in CI,
+  not in a plain `docker build` (the checkout is outside the build context).
+- The Appitools checkout must be on the SAME Go version line (1.25) as your project.
+- `v0.0.0` is a placeholder: the `replace` wins, so the version string is never
+  resolved. Do not spend effort choosing it.
+
+**When the module is published** (a public repo, or a private one plus
+`GOPRIVATE`), the recipe collapses to the normal one and the `replace` line is
+deleted:
+
+```bash
+go get github.com/miguelangel/appitools@v1.0.0   # a real tag
+```
+
+with, for a private repo:
+
+```bash
+export GOPRIVATE=github.com/miguelangel/*
+git config --global url."git@github.com:".insteadOf "https://github.com/"
+```
+
+Nothing else in this document changes: the import path, the API and every example
+below are already written against the final path. This section is the only part of
+the 10 % path that is blocked on a decision rather than on code — it is tracked as
+**DOC-2** in `docs/BACKLOG.md`.
+
 ### 3.1 The program shape
 
 A backend is a `main` that imports `github.com/miguelangel/appitools`, builds the
@@ -297,11 +358,24 @@ rows, err := ctx.Query("students", appitools.QueryOpts{
 	Limit:   50, OrderBy: "created_at", Desc: true,
 })
 
+// Get: ONE row by id, with the role's row condition applied and its field
+// allowlist projected. (nil, nil) when the row is absent OR hidden from this
+// role — the two are indistinguishable on purpose.
+row, err := ctx.Get("students", id)
+
 // Insert / Update: declarative validation + field allowlist + row condition,
 // exactly like the generated POST / PATCH. Update is PATCH semantics.
 row, err := ctx.Insert("students", map[string]any{"full_name": "Ana"})
 row, err := ctx.Update("students", id, map[string]any{"country": "MX"})
 ```
+
+> **`QueryOpts.Filters` takes DECLARED FIELDS ONLY — `id` is not one of them.**
+> The implicit primary key is not a declared field, so
+> `ctx.Query("students", QueryOpts{Filters: map[string]any{"id": x}})` fails with
+> `unknown filter field: id`. **Use `ctx.Get(resource, id)`** — it is the
+> sanctioned lookup-by-id and keeps the row rule. Reaching for `ctx.UnsafeTx()`
+> and a hand-written `SELECT … WHERE id = $1` is the wrong fix: it silently drops
+> the role's row condition, so a caller can read a row the REST API would hide.
 
 `Update` also enforces a declared **state machine**, with the exact semantics of
 the generated PATCH (the guard lives in the UPDATE's WHERE — race-safe, terminal

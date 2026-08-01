@@ -64,6 +64,25 @@ INDEXES (optional per-resource "indexes" array): [ { "fields": ["status"], "uniq
   or "jsonb_path_ops" (smaller/faster, indexes ONLY containment):
     { "fields": ["attributes"], "method": "gin", "opclass": "jsonb_path_ops" }
 
+STATE MACHINES — whenever the description says things move through STEPS ("first
+requested, then confirmed, then attended or cancelled", "draft → sent → paid"),
+model it as a state machine, NOT as a bare enum. A bare enum lets any value become
+any other value, so "the system must not let steps be skipped" would not hold:
+  "status": {
+    "type": "string", "enum": ["requested","confirmed","attended","cancelled"],
+    "default": "requested",
+    "state_machine": {
+      "initial": "requested",
+      "transitions": { "requested": ["confirmed","cancelled"], "confirmed": ["attended","cancelled"],
+                       "attended": [], "cancelled": [] }
+    }
+  }
+  - "initial" (string or array) = the state(s) a row may be CREATED in; a "default"
+    must be an initial state.
+  - "transitions" maps each state to the states it may move to; [] = terminal
+    (that row can never change state again). Only on string/text fields; every
+    state must also be an enum member when an enum is declared.
+
 RBAC (optional). Actions are exactly: read, create, update, delete, or "*".
 A role is EITHER role-global OR per-resource — never both keys.
   Role-global form:
@@ -75,6 +94,31 @@ A role is EITHER role-global OR per-resource — never both keys.
     - A role-global condition is injected into EVERY resource the role lists, so
       the column must exist on ALL of them. When resources are scoped by DIFFERENT
       columns, use the per-resource "permissions" form instead.
+  Per-resource form (each resource scoped by its OWN condition/actions/fields):
+    "member": { "permissions": {
+      "projects": { "actions": ["read","create","update","delete"],
+                    "conditions": { "field": "owner_id", "op": "eq", "val": "$user_id" } },
+      "tags":     { "actions": ["read"] },
+      "posts":    { "actions": ["read","update"],
+                    "conditions": { "field": "author_id", "op": "eq", "val": "$user_id" },
+                    "condition_actions": ["update"] } } }
+    - A resource absent from "permissions" is DENIED (deny by default).
+    - "condition_actions" limits the condition to those actions ("read all, write
+      own"); every entry must also be in "actions".
+
+  "$user_id" IS THE ID OF THE LOGIN, NOT A ROW IN ANOTHER TABLE. This is the most
+  damaging mistake possible here, because it is VALID and silently returns zero
+  rows forever. If "each vet sees only their own appointments" and appointments
+  carry "veterinarian_id" (a relation to "veterinarians"), comparing that column
+  to "$user_id" matches NOTHING — a veterinarian row's id is not a login id. Give
+  the catalogue resource a "user_id" column (uuid, unique) that holds the login id
+  and point the relation at it:
+    "veterinarians": { "fields": { "name": {"type":"string"},
+                                   "user_id": {"type":"uuid","unique":true} } },
+    "appointments":  { "fields": { "veterinarian_id":
+                         {"type":"uuid","relation":"veterinarians","references":"user_id"} } }
+  Rule of thumb: a "$user_id" condition may only name a column that stores a LOGIN
+  id — either a plain uuid column, or a relation whose "references" is such a column.
 
 CANONICAL EXAMPLE (a valid schema — follow this shape exactly):
 {

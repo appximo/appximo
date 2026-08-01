@@ -33,36 +33,8 @@ is silently ignored).
 const specAdvanced = `
 ## Advanced grammar (optional blocks)
 
-STATE MACHINES — a string field with an enum can enforce a lifecycle:
-  "estado": {
-    "type": "string", "enum": ["pendiente", "pagada", "anulada"], "default": "pendiente",
-    "state_machine": {
-      "initial": "pendiente",
-      "transitions": { "pendiente": ["pagada", "anulada"], "pagada": [], "anulada": [] }
-    }
-  }
-  - "initial" (string or array) = the state(s) a row may be CREATED in; a
-    "default" must be an initial state.
-  - "transitions" maps each state to the states it may move to; [] = terminal
-    (immutable). Only on string/text fields; states must be enum members when
-    an enum is declared.
-
-RBAC PER-RESOURCE form (a role scopes each resource with its OWN condition/
-actions/fields — mutually exclusive with the role-global keys):
-  "member": {
-    "permissions": {
-      "projects":  { "actions": ["read","create","update","delete"],
-                     "conditions": { "field": "owner_id", "op": "eq", "val": "$user_id" } },
-      "tags":      { "actions": ["read"] },
-      "posts":     { "actions": ["read","update"],
-                     "conditions": { "field": "author_id", "op": "eq", "val": "$user_id" },
-                     "condition_actions": ["update"] }
-    }
-  }
-  - A resource absent from "permissions" is DENIED (deny by default).
-  - "condition_actions" limits the condition to those actions ("read all,
-    write own"); every entry must also be in "actions".
-  - "conditions.field" must be a real column of THAT resource; "op" must be "eq".
+(State machines and the per-resource RBAC form are in the core grammar above —
+they are the two constructs a business description most often implies.)
 
 RBAC CUSTOM-ROUTE grants (only when a Go backend registers custom endpoints with
 appitools.Route — the pure binary has none, and a grant for a route that is not

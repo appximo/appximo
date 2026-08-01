@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/miguelangel/appitools/pkg/aigen"
+	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/spf13/cobra"
 )
 
@@ -172,6 +173,20 @@ func printReport(res *aigen.Result, verbose bool) {
 		fmt.Fprintf(w, "  errores restantes (%d):\n", len(res.RemainingErrors))
 		for _, e := range res.RemainingErrors {
 			fmt.Fprintf(w, "    - %s: %s\n", e.Path, strings.TrimSpace(e.Message))
+		}
+	}
+	// A schema can be valid and still not do what was asked. The validator answers
+	// "may this run?"; these answer "will it behave as you meant?" (SCHEMA-5) — and
+	// this is the one moment the person who wrote the description is still reading.
+	if len(res.Schema) > 0 {
+		if rep := schema.ValidateReport(res.Schema); len(rep.Warnings) > 0 {
+			fmt.Fprintf(w, "  ⚠ revisá esto (%d) — el schema es válido, pero probablemente no hace lo que pediste:\n", len(rep.Warnings))
+			for _, warn := range rep.Warnings {
+				fmt.Fprintf(w, "    - %s\n      %s\n", warn.Path, strings.TrimSpace(warn.Message))
+				if warn.Fix != "" {
+					fmt.Fprintf(w, "      → %s\n", strings.TrimSpace(warn.Fix))
+				}
+			}
 		}
 	}
 	fmt.Fprintln(w, "─────────────────────────────────────────────────")

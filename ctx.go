@@ -17,8 +17,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/codegen"
+	"github.com/miguelangel/appitools/pkg/db"
 	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
 	"github.com/miguelangel/appitools/pkg/outbox"
 	"github.com/miguelangel/appitools/pkg/query"
@@ -93,6 +93,21 @@ type Ctx interface {
 	// RBAC-aware helpers — apply the role's row filter, validate against the
 	// compiled schema rules, and project the permitted fields. Use by default.
 	Query(resource string, opts QueryOpts) ([]map[string]any, error)
+	// Get loads ONE row by id, with the role's row-level condition applied and
+	// the role's field allowlist projected — the read counterpart of Update.
+	//
+	// It exists because `id` is NOT a filterable field: QueryOpts.Filters is
+	// validated against the resource's DECLARED fields, and the implicit primary
+	// key is not one of them, so `Query(r, QueryOpts{Filters: {"id": x}})` fails
+	// with `unknown filter field: id`. That cost a real integration a debugging
+	// round (docs/AUTHORING_JOURNEY.md 5-7), and the workaround people reach for —
+	// UnsafeTx plus a hand-written SELECT — silently drops the row rule.
+	//
+	// A row the role may not see is indistinguishable from one that does not
+	// exist: both return (nil, nil) — never a 403 — which is the same
+	// anti-enumeration contract Ctx.Update and the generated GET/PATCH/DELETE
+	// follow. A role denied `read` on the resource entirely is a forbidden error.
+	Get(resource, id string) (map[string]any, error)
 	Insert(resource string, data map[string]any) (map[string]any, error)
 	Update(resource, id string, data map[string]any) (map[string]any, error)
 
@@ -390,6 +405,35 @@ func (c *requestCtx) Query(resource string, opts QueryOpts) ([]map[string]any, e
 	}
 	projectAll(out, eval.AllowedFields)
 	return out, nil
+}
+
+// Get implements Ctx.Get: SELECT one row by id, under the role's row-level
+// condition, projected to the role's allowlist.
+//
+// It reuses the same building blocks the generated GET-by-id uses — the policy
+// evaluation, query.AppendRowCondition and the field projection — so a custom route
+// cannot see a row (or a column) the REST API would hide from the same caller.
+func (c *requestCtx) Get(resource, id string) (map[string]any, error) {
+	if _, ok := c.eng.schema.Resources[resource]; !ok {
+		return nil, fmt.Errorf("appitools: unknown resource %q", resource)
+	}
+	eval := c.eng.policy.Evaluate(c.evalCtx(), resource, "read")
+	if !eval.Allowed {
+		return nil, &forbiddenError{"forbidden"}
+	}
+	q := fmt.Sprintf("SELECT * FROM %s WHERE id = $1", pgx.Identifier{resource}.Sanitize())
+	args := []any{id}
+	q, args, err := query.AppendRowCondition(q, args, eval.Condition)
+	if err != nil {
+		return nil, err
+	}
+	row, err := c.queryOne(q, args)
+	if err != nil || row == nil {
+		return nil, err // (nil, nil) = absent, or hidden by the row rule
+	}
+	out := []map[string]any{row}
+	projectAll(out, eval.AllowedFields)
+	return out[0], nil
 }
 
 func (c *requestCtx) Insert(resource string, data map[string]any) (map[string]any, error) {
