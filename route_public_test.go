@@ -134,9 +134,10 @@ func TestCreateUser_RoleValidatedBeforeAnyIO(t *testing.T) {
 
 // LIBRARY-GAPS-S2 (ENG-6): a Public route is OPTIONALLY authenticated. The
 // three branches, pinned:
-//   absent token   → 200, Claims nil (anonymous — behavior unchanged)
-//   valid token    → 200, Claims POPULATED (identity as input)
-//   invalid token  → 401 (garbage never silently degrades to anonymous)
+//
+//	absent token   → 200, Claims nil (anonymous — behavior unchanged)
+//	valid token    → 200, Claims POPULATED (identity as input)
+//	invalid token  → 401 (garbage never silently degrades to anonymous)
 func TestJWTMiddleware_PublicOptionalAuth(t *testing.T) {
 	const secret = "test-secret-test-secret-test-secret!"
 	isPublic := func(method, path string) bool { return method == "POST" && path == "/api/checkout" }
