@@ -292,7 +292,10 @@ editor-ui: ## Build the embedded Studio SPA (required before go build)
 	cd pkg/editorui/web && npm install --no-audit --no-fund && npm run build
 
 # Protocolo de benchmark científico: N runs + warmup + cooldown + import a SQLite
-# Uso: make bench-protocol RUNS=10 LABEL=baseline-s42 [RATE=500] [DURATION=30s] [SCRIPT=tests/performance/sustained_writes.js]
+# Línea base canónica (OPS-9): make dev-fast (examples/blank) + tenant acme +
+# RATE=100 (el 105 compartido no es confiable por encima de ~100) — el endpoint
+# se deriva solo de la superficie servida. Ver el header de bench-protocol.sh.
+# Uso: make bench-protocol RUNS=10 LABEL=mi-cambio [RATE=100] [DURATION=30s] [SCRIPT=…]
 bench-protocol:
 	@test -n "$(LABEL)" || (echo "Uso: make bench-protocol RUNS=10 LABEL=nombre" && exit 1)
-	bash scripts/bench-protocol.sh $(or $(RUNS),10) $(LABEL) $(or $(RATE),500) $(or $(DURATION),30s) $(or $(SCRIPT),tests/performance/sustained_2krps.js)
+	bash scripts/bench-protocol.sh $(or $(RUNS),10) $(LABEL) $(or $(RATE),100) $(or $(DURATION),30s) $(or $(SCRIPT),tests/performance/sustained_2krps.js)

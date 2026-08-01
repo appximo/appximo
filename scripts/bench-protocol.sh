@@ -21,11 +21,25 @@
 # injects scheduling noise that the (correctly powerful) Mann-Whitney test then
 # flags as false "significance" between two identical runs. At RATE=50 the runs
 # are reproducible and same-system comparisons land on no_change as they should.
+#
+# ── THE CANONICAL BASELINE (OPS-9, AI-JOURNEY-S1) ────────────────────────────
+# The comparable series every future session measures against:
+#   engine:   make dev-fast          (serves examples/blank/schema.json on :8080)
+#   tenant:   acme                   (provision it with the blank schema if absent)
+#   endpoint: AUTO-DERIVED from the served /openapi.json → /api/items?per_page=20
+#   rate:     100 rps · 30 s · RUNS=10   (the shared 105 is unreliable above ~100)
+#   role:     admin                  (BENCH_ROLE to override)
+# Series anchor (2026-07-31, CONSUMER-PATH-S1, this fixture at 100 rps):
+#   p50 ≈ 0.61–0.66 ms · base-vs-base control drift ≈ ±3 % (MWU p=0.14) — deltas
+#   inside that band are host noise, not code. The old default endpoint
+#   (/api/guides, role super_admin) was a RETIRED fixture: 100 % errors, zero
+#   datapoints, twice. Defaults now derive from the SERVED surface and the
+#   pre-flight refuses to measure a broken endpoint, loudly.
 set -euo pipefail
 
 RUNS="${1:?Uso: bench-protocol.sh <RUNS> <LABEL> [RATE] [DURATION] [SCRIPT]}"
 LABEL="${2:?LABEL requerido — Uso: bench-protocol.sh <RUNS> <LABEL> [RATE] [DURATION] [SCRIPT]}"
-RATE="${3:-500}"
+RATE="${3:-100}"
 DURATION="${4:-30s}"
 SCRIPT_ARG="${5:-}"
 
@@ -35,7 +49,18 @@ cd "$REPO_ROOT"
 DEVHUB_URL="${DEVHUB_URL:-http://localhost:3099}"
 TARGET_URL="${TARGET_URL:-http://localhost:8080}"
 TENANT="${TENANT_ID:-acme}"
-ENDPOINT="${ENDPOINT:-/api/guides?filter[status][eq]=pending&per_page=20}"
+BENCH_ROLE="${BENCH_ROLE:-admin}"
+# ENDPOINT: derived from the SERVED surface (first /api/{resource} in
+# /openapi.json) unless overridden — never a hardcoded fixture (OPS-9).
+if [ -z "${ENDPOINT:-}" ]; then
+  FIRST_RES="$(curl -fsS -m 5 "$TARGET_URL/openapi.json" 2>/dev/null     | python3 -c "import json,sys;paths=json.load(sys.stdin).get('paths',{});cands=sorted(p.split('/')[2] for p in paths if p.startswith('/api/') and p.count('/')==2 and '{' not in p and p not in ('/api/files','/api/transaction'));print(cands[0] if cands else '')" 2>/dev/null || true)"
+  if [ -z "$FIRST_RES" ]; then
+    echo "ERROR: no pude derivar un endpoint de $TARGET_URL/openapi.json (¿el motor está corriendo?)." >&2
+    echo "  Levantalo (make dev-fast) o pasá ENDPOINT='/api/<recurso>?per_page=20' explícito." >&2
+    exit 1
+  fi
+  ENDPOINT="/api/${FIRST_RES}?per_page=20"
+fi
 # 5th positional arg wins over the K6_SCRIPT env var; default is the read bench.
 K6_SCRIPT="${SCRIPT_ARG:-${K6_SCRIPT:-tests/performance/sustained_2krps.js}}"
 if [ ! -f "$K6_SCRIPT" ]; then
@@ -63,10 +88,30 @@ if [ -z "${BENCH_TOKEN:-}" ]; then
     echo "ERROR: BENCH_TOKEN no seteado y no hay JWT_SECRET en $SECRETS" >&2
     exit 1
   fi
-  BIN="./appitools-dev"; [ -x "$BIN" ] || BIN="./appitools"
-  BENCH_TOKEN="$("$BIN" token --tenant "$TENANT" --secret "$JWT_SECRET" --role super_admin 2>/dev/null | tail -1)"
+  BIN="./appitools-dev"
+  [ -x "$BIN" ] || BIN="./appitools"
+  if [ ! -x "$BIN" ]; then
+    echo "ERROR: no hay binario para mintear el token (./appitools-dev ni ./appitools)." >&2
+    echo "  Compilá uno (go build -o appitools ./cmd/appitools) o pasá BENCH_TOKEN directo." >&2
+    exit 1
+  fi
+  BENCH_TOKEN="$("$BIN" token --tenant "$TENANT" --secret "$JWT_SECRET" --role "$BENCH_ROLE" 2>/dev/null | tail -1)"
 fi
 export BENCH_TOKEN
+
+# Pre-flight (OPS-9): ONE real request before measuring anything. A broken
+# endpoint used to produce 10 silent runs of 100% errors and "no datapoints".
+PF_CODE="$(curl -gs -o /tmp/bench-preflight.body -w '%{http_code}' -m 5   "$TARGET_URL$ENDPOINT" -H "Authorization: Bearer $BENCH_TOKEN" -H "Host: ${TENANT}.localhost")"
+case "$PF_CODE" in
+  2*) : ;;
+  *)
+    echo "ERROR: pre-flight HTTP $PF_CODE en $TARGET_URL$ENDPOINT (tenant=$TENANT rol=$BENCH_ROLE)" >&2
+    echo "  body: $(head -c 200 /tmp/bench-preflight.body)" >&2
+    echo "  Ajustá: ENDPOINT= (recurso que la app SIRVE) · TENANT_ID= (tenant existente)" >&2
+    echo "          BENCH_ROLE= (rol declarado en el schema servido) · o BENCH_TOKEN= directo" >&2
+    exit 1 ;;
+esac
+echo "  pre-flight OK: $ENDPOINT → $PF_CODE (tenant=$TENANT rol=$BENCH_ROLE)"
 
 # run_k6 <output.json> <logfile> — never aborts the protocol on a k6 non-zero
 # exit (the SLO thresholds in the script use abortOnFail; here we only want the
