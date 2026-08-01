@@ -19,14 +19,36 @@ const (
 	MaxPage        = 10_000
 )
 
-// filterParamRe matches filter[field] or filter[field][op]
-var filterParamRe = regexp.MustCompile(`^filter\[([a-z][a-z0-9_]*)\](?:\[([a-z]+)\])?$`)
+// filterParamRe matches filter[field] or filter[field][op].
+//
+// Both groups are DELIBERATELY permissive (`[^\[\]]+`, anything but a bracket)
+// and the strictness lives in the validation below. It used to be the other way
+// round — `[a-z][a-z0-9_]*` for the field and `[a-z]+` for the op — and that was
+// ENG-14: a parameter the regex did not match was skipped by the parse loop with
+// NO error, so `?filter[title][is_null]=true` (an underscore in the op) and
+// `?filter[Title][eq]=x` (a capital in the field) both answered **200 with the
+// full, unfiltered list**. The caller believed it had filtered and was shown
+// everything.
+//
+// A pattern that decides what is VALID silently discards what it does not match.
+// A pattern that decides only what is a FILTER hands everything else to code that
+// can produce an error naming the problem. See ADR-024.
+var filterParamRe = regexp.MustCompile(`^filter\[([^\[\]]+)\](?:\[([^\[\]]+)\])?$`)
+
+// filterParamPrefix identifies a query parameter the caller MEANT as a filter.
+// Anything starting with it must parse as one or be rejected — never dropped.
+const filterParamPrefix = "filter["
 
 // uuidRe validates cursor values passed to ?after and ?before.
 var uuidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // orderParamRe matches order[field]=asc|desc
-var orderParamRe = regexp.MustCompile(`^order\[([a-z][a-z0-9_]*)\]$`)
+// Permissive by the same reasoning as filterParamRe: the pattern decides what is
+// an ORDER parameter, the validation below decides whether it is a valid one.
+var orderParamRe = regexp.MustCompile(`^order\[([^\[\]]+)\]$`)
+
+// orderParamPrefix identifies a parameter the caller MEANT as a sort direction.
+const orderParamPrefix = "order["
 
 // conditionFieldRe validates RBAC WhereCondition.Field before SQL interpolation.
 var conditionFieldRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
@@ -113,10 +135,21 @@ func BuildQuery(
 	}
 
 	// filters: filter[field]=value or filter[field][op]=value
+	//
+	// ENG-14 / ADR-024: a parameter that ANNOUNCES ITSELF as a filter is either
+	// understood or rejected. It is never skipped, because skipping it returns an
+	// unfiltered list under a 200 — the caller cannot tell the difference between
+	// "no rows matched your filter" and "your filter was thrown away".
 	for key, vals := range params {
-		m := filterParamRe.FindStringSubmatch(key)
-		if m == nil || len(vals) == 0 {
+		if !strings.HasPrefix(key, filterParamPrefix) {
 			continue
+		}
+		m := filterParamRe.FindStringSubmatch(key)
+		if m == nil {
+			return nil, fmt.Errorf("malformed filter parameter %q: expected filter[field] or filter[field][op]", key)
+		}
+		if len(vals) == 0 {
+			return nil, fmt.Errorf("filter parameter %q has no value", key)
 		}
 		field := m[1]
 		op := "eq"
@@ -126,7 +159,7 @@ func BuildQuery(
 
 		fd, ok := res.Fields[field]
 		if !ok {
-			return nil, fmt.Errorf("unknown filter field: %s", field)
+			return nil, fmt.Errorf("unknown filter field: %s (available: %s)", field, availableFieldNames(res))
 		}
 
 		if err := validateFilterOp(op, fd.Type); err != nil {
@@ -144,32 +177,48 @@ func BuildQuery(
 	})
 
 	// old sort syntax: ?sort=campo&order=asc|desc
+	//
+	// ADR-024: an unknown sort field used to be dropped, which returned rows in an
+	// arbitrary order under a 200 — the caller had no way to tell their sort was
+	// discarded, and the docs had to warn "verify result order, don't trust the
+	// param". A sort that cannot be honored is now an error.
 	if sf := params.Get("sort"); sf != "" {
-		if _, ok := res.Fields[sf]; ok {
-			qb.sortField = sf
-			qb.sortOrder = "ASC"
-			if strings.ToLower(params.Get("order")) == "desc" {
-				qb.sortOrder = "DESC"
+		if _, ok := res.Fields[sf]; !ok && sf != "id" {
+			return nil, fmt.Errorf("unknown sort field: %s (available: %s)", sf, availableFieldNames(res))
+		}
+		qb.sortField = sf
+		qb.sortOrder = "ASC"
+		if dir := params.Get("order"); dir != "" {
+			d, err := sortDirection(dir)
+			if err != nil {
+				return nil, err
 			}
+			qb.sortOrder = d
 		}
 	}
 
 	// new order syntax: ?order[campo]=asc|desc (overrides old if both present)
 	for key, vals := range params {
-		m := orderParamRe.FindStringSubmatch(key)
-		if m == nil || len(vals) == 0 {
+		if !strings.HasPrefix(key, orderParamPrefix) {
 			continue
 		}
+		m := orderParamRe.FindStringSubmatch(key)
+		if m == nil {
+			return nil, fmt.Errorf("malformed order parameter %q: expected order[field]=asc|desc", key)
+		}
+		if len(vals) == 0 {
+			return nil, fmt.Errorf("order parameter %q has no value", key)
+		}
 		field := m[1]
-		if _, ok := res.Fields[field]; !ok {
-			continue // silently ignore unknown order fields
+		if _, ok := res.Fields[field]; !ok && field != "id" {
+			return nil, fmt.Errorf("unknown sort field: %s (available: %s)", field, availableFieldNames(res))
 		}
 		qb.sortField = field
-		if strings.ToLower(vals[0]) == "desc" {
-			qb.sortOrder = "DESC"
-		} else {
-			qb.sortOrder = "ASC"
+		d, err := sortDirection(vals[0])
+		if err != nil {
+			return nil, err
 		}
+		qb.sortOrder = d
 		break // first valid order param wins
 	}
 
@@ -427,5 +476,36 @@ func filterToSQL(op string) string {
 		return "<"
 	default:
 		return "="
+	}
+}
+
+// availableFieldNames lists a resource's filterable columns, sorted, for the
+// "unknown filter field" error. Naming the alternatives is the difference
+// between an error a caller can act on and one they have to go read the schema
+// for — the same contract the schema loader's strict-key errors already keep
+// (ADR-024).
+func availableFieldNames(res *schema.ResourceSchema) string {
+	names := make([]string, 0, len(res.Fields)+1)
+	names = append(names, "id")
+	for n := range res.Fields {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
+// sortDirection maps a client's ?order= value to SQL. An unrecognised direction
+// is an ERROR rather than a silent fall-back to ASC: `?order=descending` used to
+// sort ascending and say nothing, which is the same defect class as a dropped
+// filter — the caller reads the first page and believes it is the newest
+// (ADR-024).
+func sortDirection(v string) (string, error) {
+	switch strings.ToLower(v) {
+	case "asc":
+		return "ASC", nil
+	case "desc":
+		return "DESC", nil
+	default:
+		return "", fmt.Errorf("invalid sort direction %q: use asc or desc", v)
 	}
 }

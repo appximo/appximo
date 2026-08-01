@@ -71,8 +71,11 @@ func (s *Service) handleUpdateTenantSchema(w http.ResponseWriter, r *http.Reques
 		DryRun        bool            `json:"dry_run"`
 		ApprovedDrops []string        `json:"approved_drops"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+	// ADR-024: strict — a misspelled `dry_run` must not silently become an apply.
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 		return
 	}
 	parsed, errs := parseSchema(body.Schema)

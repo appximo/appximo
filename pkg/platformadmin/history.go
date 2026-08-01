@@ -84,7 +84,10 @@ func (s *Service) handleSchemaRollback(w http.ResponseWriter, r *http.Request) {
 		DryRun        bool     `json:"dry_run"`
 		ApprovedDrops []string `json:"approved_drops"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	// ADR-024: strict — a rollback is a deploy, and its dry_run is a safety flag.
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}

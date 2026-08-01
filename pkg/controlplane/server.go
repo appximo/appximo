@@ -193,8 +193,15 @@ func handleUpdateSchema(svc Service) http.HandlerFunc {
 			DryRun        bool            `json:"dry_run"`
 			ApprovedDrops []string        `json:"approved_drops"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		// ADR-024: the bodies that carry a SAFETY FLAG are decoded strictly. A
+		// misspelled `dry_run` ("dryrun", "dry-run") used to decode to false and turn
+		// a PREVIEW into a real migration — the operator asked to look and the engine
+		// applied. Rejecting the unknown key is the difference between a typo and an
+		// unintended deploy.
+		dec := json.NewDecoder(r.Body)
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 			return
 		}
 		parsed, errs := parseAndValidateSchema(body.Schema)

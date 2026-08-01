@@ -28,6 +28,17 @@ var debugTracesHTML []byte
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Levanta el servidor HTTP multi-tenant",
+	// ADR-024: `serve` takes NO positional arguments. It used to accept and
+	// silently ignore them, so `appitools serve myapp.json` booted whatever
+	// ./schema.json happened to be in the working directory — the operator pointed
+	// at one app and the engine served another, with nothing said. The schema is
+	// named with --schema; anything else is a mistake worth stopping for.
+	Args: func(_ *cobra.Command, args []string) error {
+		if len(args) > 0 {
+			return fmt.Errorf("serve takes no positional arguments (got %q) — name the schema with --schema %s", args[0], args[0])
+		}
+		return nil
+	},
 	Run: func(cmd *cobra.Command, args []string) {
 		// GOMAXPROCS is set by the automaxprocs blank import (cgroup-aware). GOGC /
 		// GOMEMLIMIT are applied inside appitools.New (applyRuntimeLimits), in the

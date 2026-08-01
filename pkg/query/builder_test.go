@@ -251,12 +251,37 @@ func TestBuildQuery_OrderBracketSyntax(t *testing.T) {
 	}
 }
 
-func TestBuildQuery_SortUnknownFieldFallsBackToDefault(t *testing.T) {
+// ADR-024 / ENG-14: an unknown sort field is REJECTED, not silently dropped.
+//
+// This test previously asserted the opposite — that `?sort=password` fell back to
+// `ORDER BY id ASC` — and that fallback was the defect: the caller asked for an
+// order, got a different one, and the response was a 200 with no way to tell.
+// The docs had to carry the warning "verify result order, don't trust the param".
+// Rejecting is also the stronger answer for the original intent of this case
+// (a caller probing for a column that is not in the schema).
+func TestBuildQuery_SortUnknownFieldIsRejected(t *testing.T) {
 	params := url.Values{"sort": {"password"}}
-	qb := mustBuild(t, testResource(), params, nil)
-	selectQ, _, _, _ := qb.SQL()
-	if !strings.Contains(selectQ, "ORDER BY id ASC") {
-		t.Errorf("unknown sort field should fall back to id ASC: %q", selectQ)
+	_, err := BuildQuery("guides", testResource(), params, nil)
+	if err == nil {
+		t.Fatal("an unknown sort field must be an error, not a silent fallback")
+	}
+	if !strings.Contains(err.Error(), "password") {
+		t.Errorf("the error must name the offending field, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "available:") {
+		t.Errorf("the error must list the valid alternatives (ADR-024), got: %v", err)
+	}
+}
+
+// The direction is validated too: `?order=descending` used to sort ASCENDING and
+// say nothing.
+func TestBuildQuery_InvalidSortDirectionIsRejected(t *testing.T) {
+	_, err := BuildQuery("guides", testResource(), url.Values{"sort": {"title"}, "order": {"descending"}}, nil)
+	if err == nil {
+		t.Fatal("an invalid sort direction must be an error, not a silent fallback to ASC")
+	}
+	if !strings.Contains(err.Error(), "asc") || !strings.Contains(err.Error(), "desc") {
+		t.Errorf("the error must name the valid directions, got: %v", err)
 	}
 }
 
@@ -370,5 +395,66 @@ func TestBuildQuery_AfterTakesPrecedenceOverBefore(t *testing.T) {
 	}
 	if strings.Contains(selectQ, "id < $") {
 		t.Errorf("before must be ignored when after is present: %s", selectQ)
+	}
+}
+
+// ADR-024 — the guarantee for the input layer.
+//
+// This is the query-parameter equivalent of TestIntegration_DeclaredEqualsApplied:
+// it does not enumerate every way input can be wrong, it pins the contract that
+// being wrong must be AUDIBLE. Each case is an input the parser used to drop with
+// no error, returning a 200 the caller could not distinguish from a real result.
+func TestBuildQuery_UnrecognizedInputIsAlwaysRejected(t *testing.T) {
+	cases := []struct {
+		name   string
+		params url.Values
+		// mustName is a substring the error MUST contain: an error that does not
+		// name the offending input is only half the fix.
+		mustName string
+	}{
+		{"op with an underscore (ENG-14)", url.Values{"filter[title][is_null]": {"true"}}, "is_null"},
+		{"op with an underscore, negated", url.Values{"filter[title][not_null]": {"true"}}, "not_null"},
+		{"uppercase operator", url.Values{"filter[title][EQ]": {"x"}}, "EQ"},
+		{"uppercase field", url.Values{"filter[Title][eq]": {"x"}}, "Title"},
+		{"unknown operator", url.Values{"filter[title][in]": {"a,b"}}, "in"},
+		{"unknown field", url.Values{"filter[ghost][eq]": {"x"}}, "ghost"},
+		{"malformed filter, three levels", url.Values{"filter[a][b][c]": {"1"}}, "malformed"},
+		{"unknown sort field", url.Values{"sort": {"ghost"}}, "ghost"},
+		{"unknown order field", url.Values{"order[ghost]": {"desc"}}, "ghost"},
+		{"invalid sort direction", url.Values{"sort": {"title"}, "order": {"descending"}}, "descending"},
+		{"invalid order[] direction", url.Values{"order[title]": {"sideways"}}, "sideways"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := BuildQuery("guides", testResource(), tc.params, nil)
+			if err == nil {
+				t.Fatalf("%v was ACCEPTED — unrecognized input must never be silently dropped (ADR-024)", tc.params)
+			}
+			if !strings.Contains(err.Error(), tc.mustName) {
+				t.Errorf("the error does not name the offending input %q: %v", tc.mustName, err)
+			}
+		})
+	}
+}
+
+// The other half of the contract: the fix must not have made VALID input fail.
+func TestBuildQuery_ValidInputStillWorks(t *testing.T) {
+	ok := []url.Values{
+		{"filter[title][eq]": {"x"}},
+		{"filter[title]": {"x"}}, // implicit eq
+		{"filter[title][partial]": {"x"}},
+		{"filter[title][start]": {"x"}},
+		{"filter[precio][gte]": {"10"}},
+		{"filter[created_at][after]": {"2020-01-01T00:00:00Z"}},
+		{"sort": {"title"}, "order": {"desc"}},
+		{"sort": {"title"}, "order": {"DESC"}}, // case-insensitive
+		{"order[title]": {"asc"}},
+		{"sort": {"id"}},               // the implicit primary key
+		{"utm_source": {"newsletter"}}, // an unknown TOP-LEVEL param stays tolerated
+	}
+	for _, p := range ok {
+		if _, err := BuildQuery("guides", testResource(), p, nil); err != nil {
+			t.Errorf("valid input %v was rejected: %v", p, err)
+		}
 	}
 }

@@ -29,6 +29,10 @@ type inMemService struct {
 	lastApprovedDrops []string
 	lastPreviewDrops  []string
 	previewCalled     bool
+	// updateCalled records whether the APPLY path ran, so a dry-run test can
+	// assert it did not — which is the actual contract, and is not provable by
+	// comparing the stored schema (the fixture seeds the same one).
+	updateCalled bool
 	// Optional override: when set, PreviewSchema returns this (so a test can shape the
 	// dry-run response). Otherwise a minimal empty preview is returned.
 	previewResult *migration.Preview
@@ -83,6 +87,7 @@ func (m *inMemService) UpdateSchemaApproved(_ context.Context, id string, s *sch
 	}
 	m.schemas[id] = s
 	m.lastApprovedDrops = approvedDrops
+	m.updateCalled = true
 	// Echo the approvals as "applied" so a handler test can assert wiring.
 	return &migration.ApplyOutcome{AppliedDrops: approvedDrops}, nil
 }
@@ -290,9 +295,14 @@ func TestControlPlane_UpdateSchema_DryRun(t *testing.T) {
 	if !svc.previewCalled {
 		t.Errorf("dry_run must call PreviewSchema, not UpdateSchema")
 	}
-	if svc.schemas["dr"] != nil && len(svc.schemas["dr"].Resources) != len(validSchema().Resources) {
-		// A dry-run must NOT persist a changed schema — but seeding stored validSchema,
-		// so just assert the apply path was NOT taken (lastApprovedDrops untouched).
+	// A dry-run must NOT take the apply path at all. The seeded schema is
+	// validSchema, so comparing the stored resources proves nothing on its own —
+	// what proves it is that the apply path never ran.
+	if svc.updateCalled {
+		t.Errorf("dry_run must NOT call UpdateSchema — the apply path was taken")
+	}
+	if svc.lastApprovedDrops != nil {
+		t.Errorf("dry_run must not record approved drops, got %v", svc.lastApprovedDrops)
 	}
 	var got map[string]any
 	json.NewDecoder(resp.Body).Decode(&got)
