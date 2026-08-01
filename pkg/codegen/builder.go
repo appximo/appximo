@@ -433,21 +433,26 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				return
 			}
 
+			// ENG-12: validate against the tenant's DEPLOYED schema when it has one,
+			// so a column a deploy just added is writable without a restart — the
+			// read path already returns it. Falls back to the boot surface.
+			_, wrv := writeSurface(req.Context(), tc.ID, name, &res, rv)
+
 			// Schema defaults (SCHEMA-CLOSE-V1): fill omitted fields that declare a
 			// default BEFORE validation, so a required field with a default is
 			// satisfied by it. No-op (one length check) for a resource with no
 			// defaults — the create gate.
-			rv.ApplyDefaults(body)
+			wrv.ApplyDefaults(body)
 
 			// Declarative validation: BEFORE the before_create hook and the
 			// INSERT. Create requires every required non-auto field (S44 #2).
-			if verrs := rv.ValidateWrite(body, true); len(verrs) > 0 {
+			if verrs := wrv.ValidateWrite(body, true); len(verrs) > 0 {
 				markSpan(req, "validate")
 				writeValidationErrs(w, verrs)
 				return
 			}
 			// State-machine (G5): a row may only be CREATED in an initial state.
-			if verrs := rv.ValidateInitialStates(body); len(verrs) > 0 {
+			if verrs := wrv.ValidateInitialStates(body); len(verrs) > 0 {
 				markSpan(req, "validate")
 				writeValidationErrs(w, verrs)
 				return
@@ -705,10 +710,15 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					return
 				}
 
+				// ENG-12: the write is validated against the tenant's DEPLOYED
+				// schema when there is one — a column added by a deploy is writable
+				// with no restart, matching the read path. Boot surface otherwise.
+				wres, wrv := writeSurface(req.Context(), tc.ID, name, &res, rv)
+
 				// Declarative validation: BEFORE the before_update hook and the
 				// UPDATE. PUT (full replace) enforces required fields; PATCH only
 				// validates the fields present in the body (S44 #4).
-				if verrs := rv.ValidateWrite(body, put); len(verrs) > 0 {
+				if verrs := wrv.ValidateWrite(body, put); len(verrs) > 0 {
 					markSpan(req, "validate")
 					writeValidationErrs(w, verrs)
 					return
@@ -726,7 +736,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				}
 
 				// Validate against the schema and collect the columns to set.
-				sets, status, msg := CollectUpdate(&res, body, put, writable)
+				sets, status, msg := CollectUpdate(wres, body, put, writable)
 				if status != 0 {
 					markSpan(req, "validate")
 					writeJSONErr(w, status, msg)

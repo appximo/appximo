@@ -75,6 +75,7 @@ type App struct {
 	rbacPolicy  *rbac.Policy
 
 	schemaCache   *tenant.SchemaCache
+	deployed      *deployedSurfaces // ENG-12: per-tenant deployed write surfaces
 	responseCache *cache.ResponseCache
 	eventsHub     *events.Hub
 	tenantLimiter *resilience.TenantLimiter
@@ -351,6 +352,8 @@ func New(cfg Config) (*App, error) {
 	}
 
 	app.schemaCache = tenant.NewSchemaCache()
+	// ENG-12: the per-tenant DEPLOYED write surface (see deployed_surface.go).
+	app.deployed = newDeployedSurfaces(app.pool, app.schemaCache, s)
 
 	// Observability stack.
 	app.hist = observability.NewTenantHistogram()
@@ -932,7 +935,7 @@ func (a *App) startBackground(ctx context.Context) {
 		log.Println("Migration worker started")
 	}
 
-	go startCacheInvalidator(ctx, a.pool, a.responseCache, a.schemaCache)
+	go startCacheInvalidator(ctx, a.pool, a.responseCache, a.schemaCache, a.deployed)
 	auth.StartClaimsCacheGC(ctx)
 }
 
@@ -1129,6 +1132,17 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 		a.errStore.Record(tenantID, fmt.Errorf("jwt: %s", reason))
 	}))
 	r.Use(rbac.RBACMiddlewareWithPublic(mustMarshal(surf.schema.RBAC), isPublic))
+	// ENG-12: hand the generated write handlers the tenant's DEPLOYED write
+	// surface, so a column a deploy just added is writable with no restart (the
+	// read path already returns it). One context value per request; the handlers
+	// only consult it on create/update, and fall back to the boot surface.
+	if ds := a.deployed; ds != nil {
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				next.ServeHTTP(w, req.WithContext(codegen.WithDeployedProvider(req.Context(), ds)))
+			})
+		})
+	}
 	// Request-chain panic recovery (LIBRARY-HARDEN-S1): a panic in ANY downstream
 	// handler (custom or generated CRUD) becomes a clean masked 500 — the process
 	// stays up serving every other tenant. Replaces chi's Recoverer (same zero
@@ -1218,6 +1232,9 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 	// showing reality instead of a frontend sample. Same thin/read-only class
 	// as /editor/validate (JWT-skipped via the /editor prefix, off hot path).
 	r.Get("/editor/current-schema", a.serveCurrentSchema)
+	// DOC-2: the "copy AI context" payload — `appitools spec` + this app's schema,
+	// so the owner can paste one block into their own assistant.
+	r.Get("/editor/ai-context", a.serveAIContext)
 
 	r.Get("/healthz", a.ss.HealthzHandler)
 	r.Get("/readyz", a.ss.ReadyzHandler)
@@ -1270,6 +1287,12 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 	// ROOT mount ("/") answer the paths neither the engine nor the API claims,
 	// while /api/… keeps its own honest 404 (serveRoot refuses engine-owned
 	// prefixes). A sub-path mount ("/app") is a plain route and needs no ordering.
+	// ENG-12 (the other half): a resource this process was NOT booted with has no
+	// routes, so it 404s — and "not found" is the wrong story for something the
+	// owner just deployed. Registered BEFORE registerStatic on purpose: a root
+	// static mount installs its own NotFound and keeps winning, so an SPA is
+	// untouched; without one, an /api/… miss can explain itself.
+	r.NotFound(a.apiNotFound)
 	registerStatic(r, a.static)
 
 	r.Group(func(sub chi.Router) {
@@ -1548,7 +1571,7 @@ func remoteIP(r *http.Request) string {
 // against the PREVIOUS schema, so a freshly migrated field answered 422 until
 // the explicit /reload endpoint (or a restart). One notification, both caches:
 // the next request lazily reloads the schema from the tenant row.
-func startCacheInvalidator(ctx context.Context, pool *pgxpool.Pool, rc *cache.ResponseCache, sc *tenant.SchemaCache) {
+func startCacheInvalidator(ctx context.Context, pool *pgxpool.Pool, rc *cache.ResponseCache, sc *tenant.SchemaCache, ds *deployedSurfaces) {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		log.Printf("cache invalidator: acquire conn: %v", err)
@@ -1573,6 +1596,9 @@ func startCacheInvalidator(ctx context.Context, pool *pgxpool.Pool, rc *cache.Re
 		}
 		rc.Invalidate(n.Payload)
 		sc.Invalidate(n.Payload)
+		if ds != nil {
+			ds.Invalidate(n.Payload) // ENG-12: recompile this tenant's write surface
+		}
 		log.Printf("cache invalidator: invalidated tenant %q (responses + schema, pg_notify)", n.Payload)
 	}
 }
