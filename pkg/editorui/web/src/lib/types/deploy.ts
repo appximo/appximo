@@ -71,4 +71,8 @@ export interface CreatedTenant {
 	email: string;
 	plan: string;
 	created_at: string;
+	/** Where this tenant will actually answer: <id>.<domain> (ENG-11). */
+	reachable_at?: string;
+	/** Set when the id does not match the address this app is served at. */
+	warning?: string;
 }

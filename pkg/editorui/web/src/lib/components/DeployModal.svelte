@@ -173,7 +173,10 @@
 							</p>
 						{:else}
 							<p class="hint-sm" id="d-tid-hint">
-								Lowercase letter first, then lowercase letters, digits or '_' (2–30) — no hyphens, uppercase or spaces.
+								Lowercase letters and digits only, starting with a letter (2–30). This name becomes
+								the first part of your app's address, so it can't contain spaces, hyphens,
+								underscores or capitals — and it must match the address you'll use:
+								<b class="mono">petfriendly</b> is reached at <b class="mono">petfriendly.yourdomain.com</b>.
 							</p>
 						{/if}
 						<div class="grid2">
@@ -366,6 +369,11 @@
 					</div>
 				{:else if deploy.step === 'result' && deploy.result}
 					<!-- ── RESULT ── -->
+					{#if deploy.result.warning}
+						<!-- ENG-11: the tenant id must equal the first part of the address that
+						     serves the app, or every request answers "token tenant mismatch". -->
+						<div class="warn-box" data-testid="deploy-warning">⚠ {deploy.result.warning}</div>
+					{/if}
 					<div class="result-hero">
 						<div class="rh-badge">✓</div>
 						<div>
@@ -688,6 +696,16 @@
 		padding: 10px 0;
 	}
 
+	.warn-box {
+		border-radius: var(--radius-sm);
+		padding: 10px 12px;
+		margin-bottom: 12px;
+		font-size: 12.5px;
+		line-height: 1.5;
+		background: color-mix(in srgb, var(--warn, #b45309) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--warn, #b45309) 40%, transparent);
+		color: var(--warn, #b45309);
+	}
 	.banner {
 		border-radius: var(--radius-sm);
 		padding: 9px 12px;

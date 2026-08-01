@@ -341,7 +341,12 @@ func TestRegisterTenant_OrphanSchema(t *testing.T) {
 }
 
 // TestRegisterTenant_InvalidIDSuggestsFix: the 400 must carry the corrected id,
-// not just the rule — "punto-gafas-v1" → try "punto_gafas_v1".
+// not just the rule — "punto-gafas-v1" → try "puntogafasv1".
+//
+// ENG-11: separators are DROPPED, not turned into '_'. The id has to work as BOTH a
+// Postgres schema (no hyphens) and a DNS label (no underscores), so the old
+// "punto_gafas_v1" suggestion was itself unusable — it registered and then answered
+// 400 on every request.
 func TestRegisterTenant_InvalidIDSuggestsFix(t *testing.T) {
 	pool, cleanup := startPostgres(t)
 	defer cleanup()
@@ -357,7 +362,7 @@ func TestRegisterTenant_InvalidIDSuggestsFix(t *testing.T) {
 	if !errors.Is(err, controlplane.ErrInvalidInput) {
 		t.Errorf("must wrap ErrInvalidInput (HTTP 400), got: %v", err)
 	}
-	if !containsAny(err.Error(), `"punto_gafas_v1"`) {
+	if !containsAny(err.Error(), `"puntogafasv1"`) {
 		t.Errorf("error must suggest the corrected id, got: %v", err)
 	}
 }

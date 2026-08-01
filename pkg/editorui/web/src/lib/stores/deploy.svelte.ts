@@ -23,6 +23,10 @@ export interface DeployResult {
 	// --schema) — their tables exist but the API is 403 until the engine restarts with
 	// a schema that includes them. Snapshotted at deploy time so the result is honest.
 	restartResources?: string[];
+	// A warning the engine attached to the creation (ENG-11): most often that the
+	// tenant id does not match the address this app is served at, so the new tenant
+	// would answer "token tenant mismatch" on every request. Shown on the result step.
+	warning?: string;
 }
 
 export interface Endpoints {
@@ -38,16 +42,23 @@ export interface Endpoints {
 // uppercase and spaces are NOT allowed — the old rule here accepted hyphens and
 // let a tenant register that then failed every data access (the
 // "punto-gafas-v1" zombie bug).
-export const TENANT_ID_RE = /^[a-z][a-z0-9_]{1,29}$/;
+// ENG-11 — the id is used BOTH as the Postgres schema `tenant_<id>` (no hyphens)
+// AND as the first label of the web address (no underscores), so the rule is the
+// INTERSECTION. This file used to recommend '_', which registered fine and then
+// answered 400 on every request. Mirrors controlplane.tenantIDRe exactly.
+export const TENANT_ID_RE = /^[a-z][a-z0-9]{1,29}$/;
 
 /** Why an id is invalid ('' / null when it's fine) — shown live under the field. */
 export function tenantIdIssue(raw: string): string | null {
 	if (raw === '') return null; // empty = untouched, the button is disabled anyway
 	if (/[A-Z]/.test(raw)) return 'Uppercase is not allowed — use lowercase.';
-	if (/[-\s.]/.test(raw)) return "Hyphens, spaces and dots are not allowed — use '_'.";
+	if (/_/.test(raw))
+		return 'Underscores are not allowed — a web address cannot contain one, so the app would never answer.';
+	if (/[-\s.]/.test(raw))
+		return 'Hyphens, spaces and dots are not allowed — the database name cannot contain them.';
 	if (!/^[a-z]/.test(raw)) return 'Must start with a lowercase letter.';
 	if (raw.length < 2 || raw.length > 30) return 'Must be 2–30 characters.';
-	if (!TENANT_ID_RE.test(raw)) return "Only lowercase letters, digits and '_'.";
+	if (!TENANT_ID_RE.test(raw)) return 'Only lowercase letters and digits.';
 	return null;
 }
 
@@ -55,8 +66,7 @@ export function tenantIdIssue(raw: string): string | null {
 export function suggestTenantId(raw: string): string {
 	let s = raw
 		.toLowerCase()
-		.replace(/[-\s.]/g, '_')
-		.replace(/[^a-z0-9_]/g, '')
+		.replace(/[^a-z0-9]/g, '')
 		.replace(/^[^a-z]+/, '')
 		.slice(0, 30);
 	return TENANT_ID_RE.test(s) ? s : '';
@@ -468,13 +478,18 @@ class DeployStore {
 					plan: this.newPlan.trim() || 'free',
 					schema: editor.toSchema()
 				};
-				await adminApi.createTenant(this.token!, body);
+				const created = await adminApi.createTenant(this.token!, body);
 				// The tenant was provisioned with the CURRENT names — re-anchor the
 				// rename baselines so the next rename chains from what is now live
 				// (UI-F4-S1). Same after a successful migration below (renames are
 				// safe ops, always applied on success).
 				editor.commitBaselines();
-				this.result = { tenantId: id, created: true, restartResources: this.newResources };
+				this.result = {
+					tenantId: id,
+					created: true,
+					restartResources: this.newResources,
+					warning: created?.warning
+				};
 				this.step = 'result';
 				await this.refreshTenants();
 			} else {

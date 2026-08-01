@@ -146,7 +146,20 @@ func (s *Service) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusCreated, t)
+		// ENG-11: the tenant id must EQUAL the first label of the domain that serves
+		// it — a tenant named after the clinic on a box served at
+		// petfriendly.example.com answers `401 token tenant mismatch` on every
+		// request, and nothing said so at the one moment both facts were known. This
+		// request arrived at the app's real domain, so they are known HERE.
+		resp := map[string]any{
+			"id": t.ID, "pg_schema": t.PGSchema, "display_name": t.DisplayName,
+			"email": t.Email, "plan": t.Plan, "created_at": t.CreatedAt,
+			"reachable_at": t.ID + "." + parentDomain(r.Host),
+		}
+		if warn := hostMismatchWarning(r.Host, t.ID); warn != "" {
+			resp["warning"] = warn
+		}
+		writeJSON(w, http.StatusCreated, resp)
 	case errors.Is(err, controlplane.ErrAlreadyExists):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 	case errors.Is(err, controlplane.ErrInvalidInput):
@@ -412,3 +425,44 @@ func msgStrings(errs []schema.ValidationError) []string {
 // through the user-management methods.
 func isEmailTaken(err error) bool   { return errors.Is(err, userauth.ErrEmailTaken) }
 func isUserNotFound(err error) bool { return errors.Is(err, userauth.ErrUserNotFound) }
+
+// parentDomain returns a host minus its port and minus its FIRST DNS label — the
+// domain a tenant's subdomain is prefixed to. A bare host with one or two labels
+// (localhost, example.com) is returned as-is: there is no subdomain to strip.
+func parentDomain(host string) string {
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	if strings.Count(host, ".") >= 2 {
+		if i := strings.IndexByte(host, '.'); i >= 0 {
+			return host[i+1:]
+		}
+	}
+	return host
+}
+
+// hostMismatchWarning tells the caller, at creation time, that the tenant they just
+// registered will not be reachable at the address they are using (ENG-11).
+//
+// The tenant is resolved from the first label of the request's Host, so a box served
+// at petfriendly.example.com serves ONLY tenant "petfriendly": registering "clinica"
+// there produces a tenant whose every request answers `401 token tenant mismatch`.
+// Both facts — the id and the domain — are known right here, so this is the moment
+// to say it. Empty when the host carries no subdomain (a local or bare-domain setup,
+// where any tenant is reachable by adding one).
+func hostMismatchWarning(host, tenantID string) string {
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	if strings.Count(host, ".") < 2 {
+		return "" // no subdomain in play — nothing to contradict
+	}
+	first := host[:strings.IndexByte(host, '.')]
+	if first == tenantID {
+		return ""
+	}
+	return "you are using " + host + ", which serves the tenant \"" + first + "\" — this app reads the tenant from the " +
+		"first part of the address. The tenant \"" + tenantID + "\" you just created will only answer at " +
+		tenantID + "." + host[strings.IndexByte(host, '.')+1:] + ". If that address is not set up, create the tenant as \"" +
+		first + "\" instead, or point the address at this app."
+}

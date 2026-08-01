@@ -137,18 +137,19 @@ export function Tenants() {
 // THE tenant id rule — the UX mirror of the backend authority (controlplane):
 // the id becomes the Postgres schema tenant_<id> and the Host subdomain, so
 // hyphens/uppercase/spaces are refused up front (the "punto-gafas-v1" bug).
-const TENANT_ID_RE = /^[a-z][a-z0-9_]{1,29}$/
+const TENANT_ID_RE = /^[a-z][a-z0-9]{1,29}$/ // ENG-11: schema alphabet ∩ DNS-label alphabet
 function tenantIdIssue(raw) {
   if (raw === "") return null
   if (/[A-Z]/.test(raw)) return "Uppercase is not allowed — use lowercase."
-  if (/[-\s.]/.test(raw)) return "Hyphens, spaces and dots are not allowed — use '_'."
+  if (/_/.test(raw)) return "Underscores are not allowed — a web address cannot contain one, so the app would never answer."
+  if (/[-\s.]/.test(raw)) return "Hyphens, spaces and dots are not allowed — the database name cannot contain them."
   if (!/^[a-z]/.test(raw)) return "Must start with a lowercase letter."
   if (raw.length < 2 || raw.length > 30) return "Must be 2–30 characters."
-  if (!TENANT_ID_RE.test(raw)) return "Only lowercase letters, digits and '_'."
+  if (!TENANT_ID_RE.test(raw)) return "Only lowercase letters and digits."
   return null
 }
 function suggestTenantId(raw) {
-  const s = raw.toLowerCase().replace(/[-\s.]/g, "_").replace(/[^a-z0-9_]/g, "").replace(/^[^a-z]+/, "").slice(0, 30)
+  const s = raw.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/^[^a-z]+/, "").slice(0, 30)
   return TENANT_ID_RE.test(s) ? s : ""
 }
 

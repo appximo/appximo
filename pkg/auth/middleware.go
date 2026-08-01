@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -148,8 +149,17 @@ func jwtMiddleware(secret string, isPublic PublicMatcher, isStatic func(path str
 		}
 		// Reject tokens whose TenantID does not match the request tenant.
 		// TenantMiddleware must run before JWTMiddleware for this check to fire.
+		// The message names BOTH sides and where each came from (ENG-11). The bare
+		// "token tenant mismatch" was measured in the field as a dead end: it names
+		// neither the cause nor the fix, and the usual cause is not a wrong token —
+		// it is a tenant registered under a name that is not the first label of the
+		// domain serving it, which nothing warns about at registration time.
 		if tc := tenant.FromCtx(r.Context()); tc != nil && claims.TenantID != "" && claims.TenantID != tc.ID {
-			return nil, "token tenant mismatch"
+			return nil, fmt.Sprintf(
+				"token tenant mismatch: this request arrived at host %q, so it is for tenant %q, but the token was issued for tenant %q. "+
+					"The tenant is taken from the FIRST part of the address (%q → tenant %q), so a tenant only works at <tenant-id>.<your-domain>. "+
+					"Either use a token for %q, or register/reach the app at %s.%s",
+				r.Host, tc.ID, claims.TenantID, r.Host, tc.ID, tc.ID, claims.TenantID, domainOf(r.Host))
 		}
 		return claims, ""
 	}
@@ -229,4 +239,18 @@ func writeJSON401(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// domainOf returns the host minus its first DNS label (and minus any port) — the
+// part a tenant subdomain is prefixed to. It exists so a tenant-mismatch error can
+// show the caller the address their token WOULD work at, instead of describing the
+// rule in the abstract.
+func domainOf(host string) string {
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	if i := strings.IndexByte(host, '.'); i >= 0 {
+		return host[i+1:]
+	}
+	return host
 }

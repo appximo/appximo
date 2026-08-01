@@ -17,31 +17,41 @@ import (
 	"github.com/miguelangel/appitools/pkg/schemahistory"
 )
 
-// tenantIDRe is THE tenant id rule, aligned with what the rest of the engine
-// actually enforces: the id becomes the Postgres schema `tenant_<id>` — and the
-// data path (pkg/db ValidateSchemaName) refuses any schema outside
-// ^[a-z][a-z0-9_]*$ on EVERY query. The old rule here accepted hyphens, so a
-// hyphenated tenant registered fine and then failed every data access
-// ("invalid schema name") — a zombie by construction. One rule, three layers:
-// this backend check (the authority), the Studio/admin UIs (live UX mirror),
-// and the docs.
-var tenantIDRe = regexp.MustCompile(`^[a-z][a-z0-9_]{1,29}$`)
+// tenantIDRe is THE tenant id rule: the INTERSECTION of the two alphabets the id
+// has to survive, because it is used as both at once.
+//
+//	Postgres schema `tenant_<id>` — the data path (pkg/db ValidateSchemaName)
+//	  refuses any schema outside ^[a-z][a-z0-9_]*$ on EVERY query: no hyphens.
+//	Host subdomain — the tenant resolver (pkg/tenant) matches a DNS label,
+//	  ^[a-z0-9][a-z0-9-]*[a-z0-9]$: no underscores.
+//
+// Accepting either alphabet alone produced a tenant that registered and then did
+// not work, in two different ways. A hyphenated id failed every data access
+// ("invalid schema name"). An id with an UNDERSCORE was worse: it registered, its
+// tables were created, and every request answered 400 "invalid tenant" because no
+// DNS label may contain one — measured in AI-JOURNEY-S1 with `bench_blank`, while
+// Studio's deploy modal was actively RECOMMENDING underscores. So the rule is the
+// intersection: lowercase letters and digits, starting with a letter. One rule,
+// three layers: this backend check (the authority), the Studio/admin UIs (live UX
+// mirror), and the docs.
+var tenantIDRe = regexp.MustCompile(`^[a-z][a-z0-9]{1,29}$`)
 
-// SuggestTenantID converts a rejected id into the closest VALID one (lowercase;
-// hyphens/spaces → '_'; other characters dropped; leading non-letters trimmed;
-// capped at 30). Returns "" when nothing salvageable remains — callers append
-// it to the validation error so the user gets an actionable fix, not just a rule.
+// SuggestTenantID converts a rejected id into the closest VALID one: lowercased,
+// with every separator and any other character DROPPED (mi-clinica → miclinica),
+// leading non-letters trimmed, capped at 30. Separators are dropped rather than
+// replaced because the replacement used to be '_', which the id rule no longer
+// accepts — the suggestion has to be something that actually works. Returns "" when
+// nothing salvageable remains; callers append it to the validation error so the user
+// gets an actionable fix, not just a rule.
 func SuggestTenantID(raw string) string {
 	var b []rune
 	for _, r := range raw {
 		switch {
 		case r >= 'A' && r <= 'Z':
 			r += 'a' - 'A'
-		case r == '-' || r == ' ' || r == '.':
-			r = '_'
 		}
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
-			// A schema name must start with a letter: trim leading digits/underscores.
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			// The id must start with a letter: trim leading digits.
 			if len(b) == 0 && !(r >= 'a' && r <= 'z') {
 				continue
 			}
@@ -149,7 +159,9 @@ func RegisterTenantWithHook(ctx context.Context, pool *pgxpool.Pool, req Registe
 	// Postgres schema (tenant_<id>) and the Host subdomain, so anything the
 	// data path would refuse must be rejected here, with the fix in the error.
 	if !tenantIDRe.MatchString(req.TenantID) {
-		msg := fmt.Sprintf("invalid tenant id %q: must match ^[a-z][a-z0-9_]{1,29}$ — start with a lowercase letter, then lowercase letters, digits or '_' (2-30 chars); hyphens, uppercase and spaces are not allowed (the id becomes the tenant's Postgres schema and subdomain)", req.TenantID)
+		msg := fmt.Sprintf("invalid tenant id %q: must match ^[a-z][a-z0-9]{1,29}$ — a lowercase letter, then lowercase letters or digits (2-30 characters). "+
+			"No hyphens, underscores, uppercase or spaces: the id is used BOTH as the database schema (which forbids hyphens) AND as the first part of the web address (which forbids underscores), "+
+			"so only what works as both is accepted. It must also match the address the app is served at: a tenant \"acme\" is only reachable at acme.<your-domain>", req.TenantID)
 		if s := SuggestTenantID(req.TenantID); s != "" && s != req.TenantID {
 			msg += fmt.Sprintf("; try %q", s)
 		}

@@ -13,6 +13,23 @@
 	let importError = $state<string | null>(null);
 	let copied = $state(false);
 	let menuOpen = $state(false);
+	// DOC-2: "Copy AI context" — `appitools spec` + this app's schema, the exact
+	// block to paste into your own AI assistant so it can change the app. The
+	// product's most effective feature was, until now, undiscoverable.
+	let aiCopied = $state<'idle' | 'busy' | 'done' | 'error'>('idle');
+
+	async function copyAIContext() {
+		aiCopied = 'busy';
+		try {
+			const res = await fetch('/editor/ai-context');
+			if (!res.ok) throw new Error(String(res.status));
+			await navigator.clipboard.writeText(await res.text());
+			aiCopied = 'done';
+		} catch {
+			aiCopied = 'error';
+		}
+		setTimeout(() => (aiCopied = 'idle'), 2500);
+	}
 
 	const exportJSON = $derived(showExport ? editor.toJSON() : '');
 
@@ -125,6 +142,20 @@
 
 	<div class="group">
 		<button class="btn" onclick={() => editor.addEntity()}>+ Entity</button>
+		<button
+			class="btn"
+			data-testid="copy-ai-context"
+			onclick={copyAIContext}
+			title="Copy everything your AI assistant needs to change this app: the schema grammar + this app's current schema. Paste it into Claude Code, Cursor or any chat, then ask for the change in your own words."
+		>
+			{aiCopied === 'done'
+				? '✓ Copied'
+				: aiCopied === 'error'
+					? 'Copy failed'
+					: aiCopied === 'busy'
+						? 'Copying…'
+						: 'Copy AI context'}
+		</button>
 		<button class="btn" onclick={() => editor.autoLayout()} title="Auto-layout (dagre)">Auto-layout</button>
 		<button class="btn" onclick={() => (ui.rbacOpen = true)} title="Roles & permissions (RBAC)">
 			<svg class="bi" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
