@@ -357,7 +357,7 @@ func TestApproval_AdditivePath_NoOrphanDrops(t *testing.T) {
 	shrunk := mkSchema(map[string]schema.ResourceSchema{
 		"a": {Fields: map[string]schema.FieldDef{"x": {Type: "string"}}},
 	})
-	plan, err := diffTenant(ctx, pool, pg, shrunk, false) // includeOrphans=false (additive)
+	plan, _, err := diffTenant(ctx, pool, pg, shrunk, false) // includeOrphans=false (additive)
 	if err != nil {
 		t.Fatalf("additive diff: %v", err)
 	}

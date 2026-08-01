@@ -62,7 +62,7 @@ func TestIntegration_RenameColumn_PreservesData(t *testing.T) {
 
 	// Re-provision with renamed_from STILL present → no-op (intent is inert once
 	// applied; the old column no longer exists).
-	plan, err := diffTenant(ctx, pool, pg, renamed, false)
+	plan, _, err := diffTenant(ctx, pool, pg, renamed, false)
 	if err != nil {
 		t.Fatalf("re-diff: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestIntegration_RenameColumn_PreservesFKAndUnique(t *testing.T) {
 
 	// Re-provision is a no-op — proves the FK/unique/index did not churn (no spurious
 	// duplicate constraint on the renamed columns).
-	plan, err := diffTenant(ctx, pool, pg, renamed, false)
+	plan, _, err := diffTenant(ctx, pool, pg, renamed, false)
 	if err != nil {
 		t.Fatalf("re-diff: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestIntegration_RenameTable_PreservesData(t *testing.T) {
 		t.Errorf("old table customers should be gone after rename")
 	}
 
-	plan, err := diffTenant(ctx, pool, pg, renamed, false)
+	plan, _, err := diffTenant(ctx, pool, pg, renamed, false)
 	if err != nil {
 		t.Fatalf("re-diff: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestIntegration_NoRenamedFrom_IdenticalBehavior(t *testing.T) {
 	if err := ApplyTenantMigration(ctx, pool, pg, s); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
-	plan, err := diffTenant(ctx, pool, pg, s, false)
+	plan, _, err := diffTenant(ctx, pool, pg, s, false)
 	if err != nil {
 		t.Fatalf("re-diff: %v", err)
 	}

@@ -27,6 +27,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -142,6 +143,37 @@ func Append(ctx context.Context, pool *pgxpool.Pool, tenantID string, schemaJSON
 		return 0, false, fmt.Errorf("schemahistory: append: %w", err)
 	}
 	return 0, false, fmt.Errorf("schemahistory: append for %q kept losing the version race: %w", tenantID, err)
+}
+
+// EnsureSeeded records the tenant's CURRENT schema as version 1 when it has no
+// history at all — the same backfill the engine does at boot, done lazily right
+// before a schema is overwritten.
+//
+// It exists because the history is not just a timeline: it is the record of which
+// database objects the SCHEMA ever declared, and ENG-9 uses it to tell an
+// operator's removed field (an approvable destructive drop) from a consumer's own
+// column (external, never proposed). Overwriting json_schema without that record
+// ERASES the only evidence that a now-removed column was ever declared — after
+// which the drop is classified external and can never be approved, and an
+// `--approve-drops` run reports "no-op" while the column stays. Seeding first keeps
+// the evidence.
+//
+// Best-effort by contract: it is called on the persist path, where failing the
+// deploy over a bookkeeping row would be worse than the gap it prevents.
+func EnsureSeeded(ctx context.Context, pool *pgxpool.Pool, tenantID string) {
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM public.schema_history WHERE tenant_id = $1`, tenantID).Scan(&n); err != nil || n > 0 {
+		return
+	}
+	var current []byte
+	if err := pool.QueryRow(ctx,
+		`SELECT json_schema FROM public.tenants WHERE id = $1`, tenantID).Scan(&current); err != nil || len(current) == 0 {
+		return
+	}
+	if _, _, err := Append(ctx, pool, tenantID, current, SourceBackfill, "seeded before an overwrite"); err != nil {
+		log.Printf("WARNING: schemahistory: could not seed tenant %q's current schema as version 1: %v", tenantID, err)
+	}
 }
 
 // List returns one page of a tenant's history, newest first. Resource names

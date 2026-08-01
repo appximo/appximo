@@ -67,7 +67,7 @@ func TestIntegration_ForeignKeys_CreatedIdempotentAndEnforced(t *testing.T) {
 	}
 
 	// Idempotent: re-diff is empty (FKs match by structure + action).
-	plan, err := diffTenant(ctx, pool, pg, s, false)
+	plan, _, err := diffTenant(ctx, pool, pg, s, false)
 	if err != nil {
 		t.Fatalf("re-diff: %v", err)
 	}

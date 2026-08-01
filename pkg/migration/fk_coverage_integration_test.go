@@ -105,7 +105,7 @@ func TestIntegration_FKCoverage_AllThreeForms(t *testing.T) {
 	}
 
 	// CRITICAL no-churn property: re-provision is a true no-op.
-	plan, err := diffTenant(ctx, pool, pg, s, false)
+	plan, _, err := diffTenant(ctx, pool, pg, s, false)
 	if err != nil {
 		t.Fatalf("re-diff: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestIntegration_FKCoverage_AddOnUpdateNoChurn(t *testing.T) {
 		t.Fatalf("provision: %v", err)
 	}
 	// Re-diff with the SAME schema (the S5 code path is now live) → must be empty.
-	plan, err := diffTenant(ctx, pool, pg, s, false)
+	plan, _, err := diffTenant(ctx, pool, pg, s, false)
 	if err != nil {
 		t.Fatalf("re-diff: %v", err)
 	}

@@ -87,12 +87,34 @@ type ApplyOutcome struct {
 	// them — ENG-9) present in the database but out of migration scope: never
 	// proposed as drops, never approvable, left untouched.
 	ExternalDrift []string
+	// Unapplied lists DECLARED operations that are STILL PENDING after the apply,
+	// computed by RE-INTROSPECTING the live database — never by trusting the
+	// executor's own log (ENG-13). A non-empty Unapplied means declared and applied
+	// have DIVERGED and the apply is PARTIAL: it must never be reported as success.
+	//
+	// This is the class-level guard, not a per-operation one: whatever the reason an
+	// operation did not land (a tolerated foreign-key failure, a rename skipped
+	// because its target already existed, a future tolerant path nobody has written
+	// yet), the verification sees the DATABASE and reports the gap.
+	Unapplied []string
+	// UnvalidatedFKs lists foreign keys that were added but left NOT VALID because
+	// pre-existing rows violate them. They DO protect every new write; the historical
+	// rows need fixing, then a manual VALIDATE. Not a divergence (the constraint
+	// exists), so it does not make the apply partial — but it is reported, never
+	// only logged.
+	UnvalidatedFKs []string
 	// NoChange is true when NO DDL was applied — the schema was already converged, or
 	// the only pending operations were gated drops. It is the noop signal the
 	// multi-tenant orchestrator uses to distinguish an "already up to date" tenant
 	// from one it actually migrated.
 	NoChange bool
 }
+
+// Partial reports whether the apply left DECLARED changes unapplied — i.e. the
+// tenant's schema now claims a shape the database does not have. Every reporter
+// (CLI, control plane, admin API, fan-out) must treat a partial apply as a
+// FAILURE, never as ✓.
+func (o *ApplyOutcome) Partial() bool { return o != nil && len(o.Unapplied) > 0 }
 
 // ApplyTenantMigrationApproved is the APPROVAL-AWARE apply: it converges pgSchema to
 // the desired schema and, for the data-losing drops (DropTable / DropColumn), applies
@@ -129,11 +151,17 @@ func applyMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s 
 			return nil, fmt.Errorf("ensure files table for %s: %w", pgSchema, err)
 		}
 	}
-	plan, err := diffTenant(ctx, pool, pgSchema, s, includeOrphans)
+	plan, blockedRenames, err := diffTenant(ctx, pool, pgSchema, s, includeOrphans)
 	if err != nil {
 		return nil, err
 	}
 	outcome := &ApplyOutcome{}
+	// A rename the database cannot take (both names already present) is reported as
+	// a divergence, not swallowed: the schema says the values moved, and they did not.
+	for _, w := range blockedRenames {
+		log.Printf("migration[%s]: RENAME NOT DONE — %s", pgSchema, w)
+	}
+	outcome.Unapplied = append(outcome.Unapplied, blockedRenames...)
 	// ENG-9: objects no deployed schema version ever declared are consumer-owned —
 	// reported as external drift, never proposed or approvable (see external.go).
 	if owned, ok := loadOwnedObjects(ctx, pool, pgSchema); ok {
@@ -193,14 +221,51 @@ func applyMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s 
 	// over pre-existing data. The remaining ops go through the standard executor
 	// (which fails atomically, as it must). FKs reference tables created by the
 	// non-FK plan, so they are applied AFTER it.
-	nonFK, fkAdds := splitForeignKeyAdds(applyPlan)
+	nonFK, fkAdds := splitForeignKeyOps(applyPlan)
 
 	ex := &schemadiff.Executor{Pool: pool, Schema: pgSchema}
 	if err := ex.Apply(ctx, nonFK); err != nil {
 		return nil, fmt.Errorf("apply migration %s: %w", pgSchema, err)
 	}
-	applyForeignKeys(ctx, ex, pgSchema, fkAdds)
+	outcome.UnvalidatedFKs = applyForeignKeys(ctx, ex, pgSchema, fkAdds)
+
+	// ENG-13: verify against the DATABASE, not against the executor's log. Anything
+	// declared that is still pending after the apply is a divergence — reported here
+	// so no caller can print ✓ over it.
+	outcome.Unapplied = verifyApplied(ctx, pool, pgSchema, s, includeOrphans)
+	for _, u := range outcome.Unapplied {
+		log.Printf("migration[%s]: NOT APPLIED — the schema declares this and the database does NOT have it (declared ≠ applied): %s", pgSchema, u)
+	}
 	return outcome, nil
+}
+
+// verifyApplied re-introspects the live database after an apply and returns the
+// DECLARED operations that are still pending — the "declared == applied" guarantee.
+//
+// It is deliberately blind to HOW the migration ran: it re-computes the same diff
+// from the real database and keeps every NON-drop operation left in it. A drop that
+// remains is expected (v1 is additive: unapproved drops stay as drift by design), so
+// drops are excluded; anything else means the engine claimed a change it did not
+// make.
+//
+// A verification that cannot run (introspection error) returns nothing rather than a
+// false alarm — the apply itself already succeeded, and inventing a divergence would
+// be its own kind of lie. The failure is logged.
+func verifyApplied(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *schema.APISchema, includeOrphans bool) []string {
+	plan, blockedRenames, err := diffTenant(ctx, pool, pgSchema, s, includeOrphans)
+	if err != nil {
+		log.Printf("migration[%s]: post-apply verification could not run (%v) — the apply itself succeeded; re-run to verify", pgSchema, err)
+		return nil
+	}
+	pendingRenames := blockedRenames
+	pending := pendingRenames
+	for _, op := range plan.Ops {
+		if isDropOp(op.Kind()) {
+			continue // additive policy: an unapproved drop stays as drift, by design
+		}
+		pending = append(pending, op.String())
+	}
+	return pending
 }
 
 // appliedSetHas reports whether key is in keys (small slices; linear is fine).
@@ -213,19 +278,70 @@ func appliedSetHas(keys []string, key string) bool {
 	return false
 }
 
-// splitForeignKeyAdds separates AddForeignKey ops from the rest of a plan so the
-// FKs can be applied with the transition-tolerant policy while everything else
-// goes through the standard (fail-atomic) executor.
-func splitForeignKeyAdds(plan *schemadiff.Plan) (nonFK *schemadiff.Plan, fkAdds []schemadiff.Operation) {
+// fkApply is one foreign key to put in place: the ADD, plus — when the FK is being
+// REPLACED because its definition changed (ref column, ref table, referential
+// action) — the DROP of the old constraint it supersedes. The two halves of a
+// replacement are applied together, atomically (ENG-13).
+type fkApply struct {
+	add  schemadiff.Operation  // AddForeignKey
+	drop *schemadiff.Operation // the DropForeignKey it replaces, if any
+}
+
+// splitForeignKeyOps separates the foreign-key work from the rest of a plan so the
+// FKs can be applied with the transition-tolerant policy while everything else goes
+// through the standard (fail-atomic) executor.
+//
+// It also PAIRS each add with the drop it replaces, matching on (table, columns): a
+// relation is identified by the column(s) it constrains, so an add and a drop over
+// the same columns are the two halves of ONE change of shape, not two independent
+// operations. Pairing them matters twice: the drop must run in the same transaction
+// (or a failed add would leave the table unprotected), and it must run BEFORE the
+// add (Postgres derives both constraint names from the table and columns, so the new
+// one collides with the old — the exact `42710 constraint already exists` that made
+// a `references` change a silent no-op).
+func splitForeignKeyOps(plan *schemadiff.Plan) (nonFK *schemadiff.Plan, fkOps []fkApply) {
+	// Index the plan's FK drops by (table, columns) so an add can claim its pair.
+	drops := map[string]schemadiff.Operation{}
+	for _, op := range plan.Ops {
+		if d, ok := op.(schemadiff.DropForeignKey); ok {
+			drops[fkColumnsKey(d.Table, d.FK.Columns)] = op
+		}
+	}
+	claimed := map[string]bool{}
+	for _, op := range plan.Ops {
+		a, ok := op.(schemadiff.AddForeignKey)
+		if !ok {
+			continue
+		}
+		item := fkApply{add: op}
+		key := fkColumnsKey(a.Table, a.FK.Columns)
+		if d, has := drops[key]; has && !claimed[key] {
+			claimed[key] = true
+			paired := d
+			item.drop = &paired
+		}
+		fkOps = append(fkOps, item)
+	}
+
 	keep := make([]schemadiff.Operation, 0, len(plan.Ops))
 	for _, op := range plan.Ops {
-		if op.Kind() == schemadiff.OpAddForeignKey {
-			fkAdds = append(fkAdds, op)
-			continue
+		switch d := op.(type) {
+		case schemadiff.AddForeignKey:
+			continue // handled by applyForeignKeys
+		case schemadiff.DropForeignKey:
+			if claimed[fkColumnsKey(d.Table, d.FK.Columns)] {
+				continue // the drop half of a replacement — applied with its add
+			}
 		}
 		keep = append(keep, op)
 	}
-	return &schemadiff.Plan{Ops: keep}, fkAdds
+	return &schemadiff.Plan{Ops: keep}, fkOps
+}
+
+// fkColumnsKey identifies a relation by the table and column(s) it constrains — the
+// identity under which a foreign key is REPLACED rather than removed and re-added.
+func fkColumnsKey(table string, cols []string) string {
+	return table + "(" + strings.Join(cols, ",") + ")"
 }
 
 // applyForeignKeys adds each foreign key with a policy made for the transition of
@@ -239,18 +355,42 @@ func splitForeignKeyAdds(plan *schemadiff.Plan) (nonFK *schemadiff.Plan, fkAdds 
 //     it still guards forward, the drift is logged for an operator to fix (then VALIDATE
 //     manually), and provisioning is NOT broken.
 //
+// A REPLACEMENT (an FK whose definition changed — ENG-13) carries its old
+// constraint's DROP, and the drop + the `ADD … NOT VALID` run in ONE transaction:
+// either the relation ends up with the new shape or it keeps the old one. It can
+// never end up with neither.
+//
 // This is the documented v1 policy. A hard failure of the ADD itself (not a VALIDATE
 // failure) is logged and skipped so one problematic FK never aborts the whole
-// migration of the rest of the schema.
-func applyForeignKeys(ctx context.Context, ex *schemadiff.Executor, pgSchema string, fkAdds []schemadiff.Operation) {
-	for _, op := range fkAdds {
+// migration of the rest of the schema — but it is NOT silent: the post-apply
+// verification (verifyApplied) sees the missing constraint in the database and marks
+// the whole apply PARTIAL, so no caller reports it as success.
+//
+// It returns the foreign keys left NOT VALID (added, protecting new writes, with
+// pre-existing rows that violate them) so the outcome can report them.
+func applyForeignKeys(ctx context.Context, ex *schemadiff.Executor, pgSchema string, fkOps []fkApply) (unvalidated []string) {
+	for _, item := range fkOps {
+		op := item.add
 		stmts, err := schemadiff.Render(&schemadiff.Plan{Ops: []schemadiff.Operation{op}})
 		if err != nil || len(stmts) == 0 {
 			log.Printf("migration[%s]: foreign key render failed, skipped: %s: %v", pgSchema, op.String(), err)
 			continue
 		}
 		// stmts[0] = ADD CONSTRAINT … NOT VALID ; stmts[1] = VALIDATE CONSTRAINT.
-		if err := ex.Exec(ctx, stmts[0].SQL); err != nil {
+		// A replacement drops the superseded constraint in the SAME transaction, so
+		// the constraint name is free when the ADD runs and a failure rolls back to
+		// the old foreign key rather than leaving the column unprotected.
+		add := []string{stmts[0].SQL}
+		if item.drop != nil {
+			dropStmts, derr := schemadiff.Render(&schemadiff.Plan{Ops: []schemadiff.Operation{*item.drop}})
+			if derr != nil || len(dropStmts) == 0 {
+				log.Printf("migration[%s]: foreign key replace render failed, skipped: %s: %v", pgSchema, (*item.drop).String(), derr)
+				continue
+			}
+			add = append([]string{dropStmts[0].SQL}, add...)
+			log.Printf("migration[%s]: REPLACING foreign key (its definition changed — the old constraint is dropped and the new one added atomically; no row data is lost): %s", pgSchema, op.String())
+		}
+		if err := ex.ExecBatch(ctx, add...); err != nil {
 			log.Printf("migration[%s]: foreign key add failed, skipped (schema unprotected for this relation): %s: %v", pgSchema, op.String(), err)
 			continue
 		}
@@ -258,9 +398,11 @@ func applyForeignKeys(ctx context.Context, ex *schemadiff.Executor, pgSchema str
 			if err := ex.Exec(ctx, st.SQL); err != nil {
 				log.Printf("migration[%s]: foreign key left NOT VALID — pre-existing rows violate it (NEW writes ARE protected; fix the orphan data then VALIDATE manually): %s: %v",
 					pgSchema, op.String(), err)
+				unvalidated = append(unvalidated, op.String())
 			}
 		}
 	}
+	return unvalidated
 }
 
 // diffTenant computes the typed plan that converges pgSchema to s: introspect the
@@ -274,22 +416,25 @@ func applyForeignKeys(ctx context.Context, ex *schemadiff.Executor, pgSchema str
 // behavior); true for the approval-aware path (so the table can be previewed and,
 // with explicit consent, dropped). The engine's own auth_*/files tables are NEVER
 // brought in, in either mode (isEngineManagedTable).
-func diffTenant(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *schema.APISchema, includeOrphans bool) (*schemadiff.Plan, error) {
+func diffTenant(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *schema.APISchema, includeOrphans bool) (*schemadiff.Plan, []string, error) {
 	real, err := schemadiff.Introspect(ctx, pool, pgSchema)
 	if err != nil {
-		return nil, fmt.Errorf("introspect %s: %w", pgSchema, err)
+		return nil, nil, fmt.Errorf("introspect %s: %w", pgSchema, err)
 	}
 	desired := buildDesiredSchema(pgSchema, s)
 	// Reconcile rename intent against the live DB BEFORE diffing: keep a rename only
 	// while it is pending (old name present, new absent), and remember the table
-	// rename sources so managedSubset does not drop them.
-	keepSources := resolveRenames(desired, real)
+	// rename sources so managedSubset does not drop them. A rename that CANNOT run
+	// (both names already exist) comes back as a blocked-rename warning instead of
+	// being dropped in silence — the schema would otherwise claim the data moved
+	// while it sat in the old column (ENG-13's class).
+	keepSources, blockedRenames := resolveRenames(desired, real)
 	current := managedSubset(real, desired, keepSources, includeOrphans)
 	plan, err := schemadiff.Diff(desired, current)
 	if err != nil {
-		return nil, fmt.Errorf("diff %s: %w", pgSchema, err)
+		return nil, nil, fmt.Errorf("diff %s: %w", pgSchema, err)
 	}
-	return plan, nil
+	return plan, blockedRenames, nil
 }
 
 // resolveRenames reconciles the declared rename intent (RenamedFrom, set by
@@ -308,12 +453,19 @@ func diffTenant(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *sch
 //
 // This makes a renamed_from declaration safe to LEAVE in the schema after it is
 // applied: re-provisioning is a clean no-op.
-func resolveRenames(desired, real *schemadiff.Schema) (keepSources map[string]bool) {
+func resolveRenames(desired, real *schemadiff.Schema) (keepSources map[string]bool, blocked []string) {
 	keepSources = make(map[string]bool)
 	for _, dt := range desired.Tables {
 		if dt.RenamedFrom != "" {
 			_, oldExists := real.Tables[dt.RenamedFrom]
 			_, newExists := real.Tables[dt.Name]
+			if oldExists && newExists {
+				// Both names exist: the rename cannot run, and staying quiet would
+				// leave the rows in the OLD table while the schema says they moved.
+				blocked = append(blocked, fmt.Sprintf(
+					"table %q was to be renamed to %q, but %q already exists — the rename was NOT done and the data is still in %q",
+					dt.RenamedFrom, dt.Name, dt.Name, dt.RenamedFrom))
+			}
 			if oldExists && !newExists {
 				keepSources[dt.RenamedFrom] = true // pending table rename
 				// Postgres rewrites every FK that targets a renamed table, so align
@@ -341,6 +493,11 @@ func resolveRenames(desired, real *schemadiff.Schema) (keepSources map[string]bo
 			}
 			_, oldCol := realTbl.Columns[col.RenamedFrom]
 			_, newCol := realTbl.Columns[col.Name]
+			if oldCol && newCol {
+				blocked = append(blocked, fmt.Sprintf(
+					"column %q.%q was to be renamed to %q, but %q already exists — the rename was NOT done and the values are still in %q",
+					realTbl.Name, col.RenamedFrom, col.Name, col.Name, col.RenamedFrom))
+			}
 			if oldCol && !newCol {
 				// Pending column rename. Postgres preserves the column's FK / unique /
 				// index through ALTER RENAME COLUMN, so rewrite the real model's
@@ -352,7 +509,7 @@ func resolveRenames(desired, real *schemadiff.Schema) (keepSources map[string]bo
 			}
 		}
 	}
-	return keepSources
+	return keepSources, blocked
 }
 
 // rewriteRefTable repoints every foreign key in s that REFERENCES table old to
@@ -444,21 +601,33 @@ func isEngineManagedTable(name string) bool {
 //   - A DESTRUCTIVE drop (DropTable/DropColumn, schemadiff.DestructiveKey) applies
 //     ONLY if its key is in `approved`; otherwise it is gated (drift). This is the
 //     fail-safe default: without enumerated consent, nothing is dropped.
-//   - A SAFE drop (index/constraint/FK) is gated as additive drift — EXCEPT a foreign
-//     key whose referenced table is itself an APPROVED table drop: that FK must be
-//     removed for the DROP TABLE to succeed, and dropping an FK loses no data, so it
-//     is applied as a necessary, safe CONSEQUENCE of the approved table drop (never an
-//     independent constraint removal). This keeps an approved table drop self-coherent
-//     even when a still-present table kept the referencing column.
+//   - A SAFE drop (index/constraint/FK) is gated as additive drift — EXCEPT two
+//     foreign-key cases, both of which lose no row data and both of which are a
+//     CONSEQUENCE of a change already decided, never an independent loss of integrity:
+//     (a) an FK whose referenced table is itself an APPROVED table drop — the FK must
+//     go for the DROP TABLE to succeed, keeping an approved table drop self-coherent
+//     even when a still-present table kept the referencing column; and
+//     (b) an FK that the SAME plan re-adds over the same (table, columns) — the
+//     relation is being RE-POINTED (a changed `references` / `on_delete` /
+//     `on_update`), so the drop is the first half of a replacement (ENG-13). Gating it
+//     was the bug: the add then collided with the surviving constraint's name, failed
+//     with `42710 constraint already exists`, and the change silently never happened
+//     while the tenant's recorded schema claimed it had.
 func partitionByPolicyApproved(plan *schemadiff.Plan, approved map[string]bool) (apply *schemadiff.Plan, gated []schemadiff.Operation, appliedKeys []string) {
 	// Which tables are being dropped by explicit approval — needed to un-gate the
 	// incoming foreign keys that would otherwise block their DROP TABLE.
 	approvedDropTables := make(map[string]bool)
+	// Which (table, columns) the plan re-adds a foreign key over — the relations
+	// being REPLACED rather than removed.
+	replacedFKs := make(map[string]bool)
 	for _, op := range plan.Ops {
 		if dt, ok := op.(schemadiff.DropTable); ok {
 			if key, _ := schemadiff.DestructiveKey(op); approved[key] {
 				approvedDropTables[dt.Table.Name] = true
 			}
+		}
+		if a, ok := op.(schemadiff.AddForeignKey); ok {
+			replacedFKs[fkColumnsKey(a.Table, a.FK.Columns)] = true
 		}
 	}
 
@@ -478,10 +647,13 @@ func partitionByPolicyApproved(plan *schemadiff.Plan, approved map[string]bool) 
 			continue
 		}
 		// Safe drop: kept as drift, unless it is an incoming FK to an approved table
-		// drop (a required, data-safe consequence — see the doc comment).
-		if dfk, ok := op.(schemadiff.DropForeignKey); ok && approvedDropTables[dfk.FK.RefTable] {
-			keep = append(keep, op)
-			continue
+		// drop, or the drop half of an FK replacement (both required, data-safe
+		// consequences — see the doc comment).
+		if dfk, ok := op.(schemadiff.DropForeignKey); ok {
+			if approvedDropTables[dfk.FK.RefTable] || replacedFKs[fkColumnsKey(dfk.Table, dfk.FK.Columns)] {
+				keep = append(keep, op)
+				continue
+			}
 		}
 		gated = append(gated, op)
 	}

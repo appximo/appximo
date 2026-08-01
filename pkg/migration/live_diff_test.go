@@ -38,7 +38,7 @@ func TestLiveDiff_NimbusIsNoop(t *testing.T) {
 		t.Fatalf("load erp schema: %v", err)
 	}
 
-	plan, err := diffTenant(ctx, pool, pgSchema, s, false)
+	plan, _, err := diffTenant(ctx, pool, pgSchema, s, false)
 	if err != nil {
 		t.Fatalf("diffTenant: %v", err)
 	}

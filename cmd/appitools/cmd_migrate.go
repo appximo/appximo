@@ -109,6 +109,22 @@ func runSingleTenant(ctx context.Context, pool *pgxpool.Pool, s *schema.APISchem
 	if err != nil {
 		fatal("Migration failed: " + err.Error())
 	}
+	// ENG-13: a PARTIAL apply — the database does not have everything the schema
+	// declares — is a FAILURE, not a ✓ with a footnote. Report it before anything
+	// else, do NOT persist a schema the database cannot back, and exit non-zero.
+	if outcome.Partial() {
+		fmt.Println()
+		fmt.Println("✗ PARTIAL MIGRATION — the database does NOT have everything this schema declares.")
+		fmt.Println("  These changes were NOT applied (verified by reading the database, not the migration log):")
+		for _, u := range outcome.Unapplied {
+			fmt.Printf("    · %s\n", u)
+		}
+		fmt.Println()
+		fmt.Println("  The schema was NOT saved to the tenant record, so the engine keeps serving the")
+		fmt.Println("  previous one — declared and applied stay in agreement. Fix the cause above and")
+		fmt.Println("  re-run the same command.")
+		os.Exit(1)
+	}
 	// Persist the applied schema to the tenant record + history — the same
 	// contract as the fan-out and the control-plane PUT (DOC-1): the UPDATE
 	// fires pg_notify(schema_updated), so a running engine serves the new
@@ -327,6 +343,10 @@ func printOutcome(o *migration.ApplyOutcome) {
 	}
 	for _, k := range o.UnmatchedApprovals {
 		fmt.Printf("  · approval %q matched nothing (typo, or already applied)\n", k)
+	}
+	for _, fk := range o.UnvalidatedFKs {
+		fmt.Printf("  ⚠ %s — added, but rows that already existed break it. New writes ARE checked;\n"+
+			"      the old rows are not. Fix them, then re-run to finish checking.\n", fk)
 	}
 }
 

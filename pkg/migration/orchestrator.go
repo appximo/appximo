@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -211,6 +212,14 @@ func applyToTenant(ctx context.Context, pool *pgxpool.Pool, t tenantRow, opts Fa
 		if err != nil {
 			return err
 		}
+		// ENG-13: a PARTIAL apply is a FAILED tenant, not an applied one. The
+		// schema is NOT persisted (so the tenant record keeps matching its real
+		// database), the tenant is recorded as failed, and the fan-out continues
+		// with the rest — a re-run retries exactly this tenant, like any failure.
+		if o.Partial() {
+			return fmt.Errorf("PARTIAL — the database does not have everything the schema declares; NOT applied: %s",
+				strings.Join(o.Unapplied, "; "))
+		}
 		// Persist the applied schema so the tenant record reflects it (and the
 		// schema_updated trigger invalidates its cache) — only AFTER a successful
 		// migration, so a failed tenant keeps its old record, consistent with its
@@ -340,6 +349,10 @@ func persistTenantSchemaSource(ctx context.Context, pool *pgxpool.Pool, tenantID
 	if err != nil {
 		return err
 	}
+	// Keep the schema being replaced in the history before overwriting it — it is
+	// the record of what the schema ever declared, which a later dry-run needs to
+	// tell an approvable drop from a consumer-owned object (schemahistory.EnsureSeeded).
+	schemahistory.EnsureSeeded(ctx, pool, tenantID)
 	if _, err = pool.Exec(ctx,
 		`UPDATE public.tenants SET json_schema = $2, updated_at = now() WHERE id = $1`,
 		tenantID, b); err != nil {

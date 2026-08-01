@@ -84,11 +84,16 @@ func (p *Preview) PendingDestructive() bool {
 func PreviewTenantMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s *schema.APISchema, approved []string) (*Preview, error) {
 	// The preview always includes orphan (removed-resource) tables so they are visible
 	// as approvable DropTables.
-	plan, err := diffTenant(ctx, pool, pgSchema, s, true)
+	plan, blockedRenames, err := diffTenant(ctx, pool, pgSchema, s, true)
 	if err != nil {
 		return nil, err
 	}
 	pv := &Preview{PGSchema: pgSchema}
+	// A rename that cannot run is shown BEFORE applying, alongside the other risks —
+	// the dry-run's job is to say what will really happen.
+	for _, w := range blockedRenames {
+		pv.Concerns = append(pv.Concerns, "[blocked] "+w)
+	}
 	// ENG-9: consumer-owned objects (never declared by any deployed schema
 	// version) are surfaced as External — informative, NEVER approvable. Without
 	// this, a consumer's generated column was proposed as a scary data-losing

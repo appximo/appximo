@@ -380,6 +380,28 @@ func (e *Executor) Exec(ctx context.Context, sql string) error {
 	return e.runTxnBatch(ctx, []Statement{{SQL: sql}})
 }
 
+// ExecBatch runs several DDL statements in ONE transaction, atomically: either all
+// of them land or none does. Same safety wrapper as Exec (search_path, lock_timeout,
+// retry-on-lock-timeout).
+//
+// It exists for operations that are only correct as a PAIR — above all replacing a
+// foreign key whose definition changed (ENG-13): dropping the old constraint and
+// adding the new one must not be separable, or a failure of the second half would
+// leave the table with no foreign key at all.
+func (e *Executor) ExecBatch(ctx context.Context, sqls ...string) error {
+	if e.Pool == nil || e.Schema == "" {
+		return errors.New("schemadiff: Executor needs Pool and Schema")
+	}
+	if len(sqls) == 0 {
+		return nil
+	}
+	batch := make([]Statement, 0, len(sqls))
+	for _, s := range sqls {
+		batch = append(batch, Statement{SQL: s})
+	}
+	return e.runTxnBatch(ctx, batch)
+}
+
 // runTxnBatch runs a contiguous group of transactional statements in ONE
 // transaction (atomic: any failure rolls back the whole batch), under a short
 // lock_timeout, retrying the whole batch with backoff on a lock-timeout.

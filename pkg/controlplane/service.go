@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -126,6 +127,19 @@ func (s *pgService) updateSchemaSourced(ctx context.Context, id string, apiSchem
 	if err != nil {
 		return nil, 0, fmt.Errorf("marshal schema: %w", err)
 	}
+	// Keep the schema the tenant is on RIGHT NOW: if the migration does not fully
+	// land, the record is restored to it. The engine's contract is that a tenant's
+	// recorded schema describes its real database — a deploy that half-applies must
+	// not leave the record claiming a shape the tables do not have (ENG-13).
+	var previous []byte
+	_ = s.pool.QueryRow(ctx,
+		`SELECT json_schema FROM public.tenants WHERE id = $1`, id).Scan(&previous)
+	// Before overwriting, make sure the schema being replaced is IN the history —
+	// it is what tells a later dry-run that a now-removed column was once declared
+	// (and is therefore an approvable drop, not a consumer's own column). See
+	// schemahistory.EnsureSeeded.
+	schemahistory.EnsureSeeded(ctx, s.pool, id)
+
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE public.tenants SET json_schema = $2, updated_at = now() WHERE id = $1`,
 		id, b,
@@ -137,25 +151,35 @@ func (s *pgService) updateSchemaSourced(ctx context.Context, id string, apiSchem
 		return nil, 0, fmt.Errorf("tenant %q: %w", id, ErrNotFound)
 	}
 
-	// Version history (VERSION-S1): the history mirrors json_schema, so append in
-	// the same flow as the persist above (a no-op when the schema is unchanged).
-	// Best-effort AFTER the authoritative write — a history failure is logged
-	// loudly, never blocks the deploy that already persisted.
-	version, appended, histErr := schemahistory.Append(ctx, s.pool, id, b, source, note)
-	if histErr != nil {
-		log.Printf("WARNING: schema history append for tenant %q failed (the deploy itself succeeded): %v", id, histErr)
-		version = 0
-	} else if !appended {
-		version = 0 // unchanged schema — no new version recorded
-	}
-
 	// Apply the DDL synchronously so a schema change takes effect even when the async
 	// Redis migration worker is not running. This is the ONLY place destructive drops
 	// are applied, and only the ones explicitly approved (approvedDrops); every other
 	// drop stays gated as drift.
 	outcome, err := migration.ApplyTenantMigrationApproved(ctx, s.pool, "tenant_"+id, apiSchema, approvedDrops)
 	if err != nil {
-		return nil, version, fmt.Errorf("apply migration: %w", err)
+		s.restoreSchema(ctx, id, previous, "the migration failed")
+		return nil, 0, fmt.Errorf("apply migration: %w", err)
+	}
+	// A PARTIAL apply is a failed deploy: the database does not have everything the
+	// new schema declares, so the record goes back to the schema the database DOES
+	// have. Reporting it as applied is the exact failure ENG-13 named.
+	if outcome.Partial() {
+		s.restoreSchema(ctx, id, previous, "the migration did not fully apply")
+		return nil, 0, fmt.Errorf("apply migration: PARTIAL — the database does not have everything this schema declares, "+
+			"so it was NOT saved (the tenant keeps the previous one). Not applied: %s",
+			strings.Join(outcome.Unapplied, "; "))
+	}
+
+	// Version history (VERSION-S1): the history mirrors json_schema, and is appended
+	// only once the migration ACTUALLY applied — a version in the trail is a version
+	// the database really took. Best-effort: a history failure is logged loudly,
+	// never blocks the deploy that already persisted and applied.
+	version, appended, histErr := schemahistory.Append(ctx, s.pool, id, b, source, note)
+	if histErr != nil {
+		log.Printf("WARNING: schema history append for tenant %q failed (the deploy itself succeeded): %v", id, histErr)
+		version = 0
+	} else if !appended {
+		version = 0 // unchanged schema — no new version recorded
 	}
 
 	// Enqueue async migration to Redis Stream (best-effort — don't fail the request).
@@ -173,6 +197,25 @@ func (s *pgService) updateSchemaSourced(ctx context.Context, id string, apiSchem
 	// Notify in-process caches to reload this tenant's schema.
 	s.pool.Exec(ctx, "SELECT pg_notify('schema_updated', $1)", id) //nolint:errcheck
 	return outcome, version, nil
+}
+
+// restoreSchema puts the tenant's recorded schema back to what it was before a
+// deploy that did not fully apply, and re-notifies the in-process caches — so the
+// running engine goes on serving the schema the DATABASE actually has. Best-effort
+// and loudly logged: if even the restore fails, the operator is told exactly what
+// diverged and how to put it back.
+func (s *pgService) restoreSchema(ctx context.Context, id string, previous []byte, why string) {
+	if previous == nil {
+		return // the tenant had no schema recorded — nothing to go back to
+	}
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE public.tenants SET json_schema = $2, updated_at = now() WHERE id = $1`, id, previous); err != nil {
+		log.Printf("CRITICAL: tenant %q — %s, and restoring its previous schema ALSO failed (%v). "+
+			"The tenant record now claims a schema its database does not have; re-deploy the previous schema to realign.", id, why, err)
+		return
+	}
+	log.Printf("tenant %q: %s — the recorded schema was rolled back to the previous one, so it keeps matching the database", id, why)
+	s.pool.Exec(ctx, "SELECT pg_notify('schema_updated', $1)", id) //nolint:errcheck
 }
 
 func (s *pgService) PreviewSchema(ctx context.Context, id string, apiSchema *schema.APISchema, approvedDrops []string) (*migration.Preview, error) {
