@@ -71,9 +71,8 @@ the same *route surface*.
 ## 4. The change cycle — what a deploy activates live, and what needs a restart
 
 A deploy (editor "Deploy", control-plane `PUT /tenants/{id}/schema`, or
-`appitools migrate` — since CONSUMER-PATH-S1 the single-tenant CLI persists
-too; before, it applied the DDL and left the record stale, so the new field
-answered 422 until a restart — the PROD-JOURNEY-1B finding) does four things:
+`appitools migrate` — since CONSUMER-PATH-S1 the single-tenant CLI persists the
+schema too, so all three paths record the same thing) does four things:
 persists the schema to `public.tenants.json_schema`, **appends it to the
 tenant's version history** (`public.schema_history`, append-only — the base of
 "roll back to vN"; see pkg/schemahistory), runs the **real migration** against
@@ -88,7 +87,7 @@ deployed a schema with a new column, then probed without restart):
 | After deploying, without restart… | Live? | Why |
 |---|---|---|
 | New/renamed **table or column** exists in the tenant DB | ✅ | the migration engine ran |
-| **Write** the new column (POST/PUT/PATCH, REST) | ✅ | write keys follow the tenant's DEPLOYED schema (the per-tenant schema cache, refreshed on the deploy's pg_notify / `POST /admin/tenants/{id}/reload`) — a key outside it is a clean 422 `unknown_field`. This is why the deploy MUST persist the schema: DDL alone (the old CLI-migrate behavior) left the cache on the previous schema and the new column 422'd |
+| **Write** the new column (POST/PUT/PATCH, REST) | ❌ | **MEASURED 2026-08-01 (AI-JOURNEY-S1): `422 unknown field`.** The write path validates the body against the resource captured from the BOOT schema (`codegen.CollectUpdate` / `CollectInsert` close over it), so a column the running process did not boot with is rejected — regardless of the tenant's deployed schema or the schema cache. Two earlier claims in this table were wrong: the original "keys are NOT whitelisted" (true before strict unknown-field validation shipped) and CONSUMER-PATH-S1's "write keys follow the DEPLOYED schema" (verified against a field that was already in the boot schema — an invalid test). Studio is honest about this: its deploy result says the definition change "needs an engine restart" and offers the one-click restart |
 | **Read** the new column (GET list/get, REST) | ✅ | `SELECT *` returns whatever columns the tenant table has |
 | Declarative **validation** of the new column (`maxLength`, `pattern`, …) | ❌ | validators are boot-compiled — a 300-char value passed a deployed `maxLength: 200` in the live test |
 | `filter[new_column]` | ❌ | the query builder validates filter fields against the boot resource (400 `unknown filter field`) |
@@ -99,10 +98,14 @@ deployed a schema with a new column, then probed without restart):
 | A **new resource** (routes, GraphQL type, /docs entry) | ❌ | no route exists at all — the editor detects this via `/admin/served-resources` and shows the restart banner (UI-F3-S1) |
 
 So the honest one-liner is: **the migration is live; the definition is
-compiled.** Raw CRUD of new columns works immediately (by design — the DB is
-the source of truth for write keys); everything *derived from the schema
-definition* (validation, filters, GraphQL, docs, RBAC, hooks, routes) is the
-boot snapshot until the process restarts with the new schema.
+compiled.** A new column is READABLE immediately (`SELECT *` returns whatever
+the table has), but everything *derived from the schema definition* — including
+**write validation**, filters, GraphQL, docs, RBAC, hooks and routes — is the
+boot snapshot until the process restarts with the new schema. In practice that
+means: **a schema change is usable only after the restart** (one click in
+Studio). Making writes hot is a real, tractable improvement (validate against
+the tenant's deployed schema, which the per-tenant cache already holds) — it is
+backlog **ENG-12**, not current behavior.
 
 **To see your change in `/docs`:** restart the engine with the edited schema —
 **one click from the editor** since UI-F4-S2: the deploy result's "Restart

@@ -1179,10 +1179,13 @@ Facts agents most often get wrong:
   table set, via per-tenant migrations) is per-tenant. A deploy (editor, control-
   plane `PUT`, or `migrate` — since CONSUMER-PATH-S1 ALL three persist the schema
   and notify the running engine) migrates ONE tenant's tables live, and a new
-  FIELD becomes writable/readable hot — write keys follow the tenant's DEPLOYED
-  schema (per-tenant cache, pg_notify-invalidated), so a field the deploy didn't
-  persist is a 422 `unknown_field`, not a silent write. Everything derived from
-  the schema DEFINITION — validation rules, filters, GraphQL fields, `/docs`,
+  column becomes **readable** hot (`SELECT *`). **Writing it needs a restart**:
+  the write path validates the body against the BOOT-compiled resource
+  (`codegen.CollectUpdate`/`CollectInsert`), so a column the running process was
+  not booted with is a `422 unknown field` — MEASURED in AI-JOURNEY-S1 (an
+  earlier claim in this file that writes were hot was verified against a field
+  that happened to be in the boot schema; it was wrong). Everything derived from
+  the schema DEFINITION — write validation, filters, GraphQL fields, `/docs`,
   RBAC, hooks, and NEW resources — activates only on a restart with the new
   schema — one click from the editor since UI-F4-S2 (graceful self-restart via
   `POST /admin/engine/schema`). The full verified model:
