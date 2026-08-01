@@ -155,6 +155,9 @@ re-verified against reality on that date, not carried forward on trust.
 - **Impact:** Medium. The response does not merely omit the caller's intent, it
   ASSERTS something false: a client paginating with a cursor reads `meta.page` and
   believes it is on that page.
+- **Also on this surface:** `?after=A&before=B` (two contradictory cursors) emits
+  `WHERE id > $1` — `before` is dropped without a word. Verified 2026-08-01:
+  `after=1111…&before=2222…` builds the identical SQL as `after=1111…` alone.
 - **Ready:** combining a cursor with an incompatible parameter is a `400` naming the
   conflict, or the parameter is honored; either way `meta` never reports a page the
   query did not use.
@@ -250,6 +253,39 @@ re-verified against reality on that date, not carried forward on trust.
 - **Impact:** Medium-high for the GET path (a filter that silently does not apply).
 - **Ready:** parse `variables` on GET, or reject a GET carrying it; resolve variables
   inside jsonb literals or reject them.
+
+### ENG-23 — The list `?count=true` flag is presence-only, and vanishes on two paths
+- **Origin:** SILENT-FAILURE-S1 audit, confirmed after the session's fixes landed
+  (`pkg/codegen/builder.go:295,340,342`). Three shapes of one flag:
+  `?count=false` and `?count=0` turn the total **ON** (the test is
+  `if _, want := query["count"]; want` — presence, never the value); `?count=true`
+  combined with `?include=` is dropped entirely (the embed path returns before the
+  count block); and when the `COUNT(*)` itself errors, `if … cerr == nil` swallows it
+  and a `200` goes out with `meta.total` simply missing.
+- **Impact:** Medium. A caller cannot distinguish "the total is absent because you
+  used `include`", "…because the COUNT failed" and "…because you asked for
+  `count=false`" — all three are a `200` with no total. It is also the exact
+  boolean-flag shape ADR-024 §4 names.
+- **Ready:** `count` takes a real boolean (`false` means off); asking for a total on
+  the `include` path either works or is a `400` saying it is unsupported; a failed
+  `COUNT(*)` is an error, not an omission. Same treatment as the aggregate half in
+  **ENG-18** — fix them together, they are one flag.
+
+### ENG-24 — The aggregate path validates parameters it then throws away
+- **Origin:** SILENT-FAILURE-S1 audit (`pkg/query/aggregate.go:98,109`), verified
+  2026-08-01. `BuildAggregate` delegates to `BuildQuery`, so `page`/`per_page`/
+  `sort`/`order`/`after`/`before` are fully parsed and validated — and then never
+  used, because an aggregate has no page. Post-ADR-024 this produces a genuinely
+  confusing pair: `?count&sort=ghost` now answers `400 unknown sort field: ghost`,
+  while `?count&sort=status` is accepted and silently ignored. Rejecting the typo in
+  a parameter the endpoint does not honor at all is honest about the wrong thing.
+  Related: an empty entry in a CSV list (`?count&sum=`) is dropped without a word, in
+  REST and in the GraphQL aggregate (`pkg/graphql/handler.go:765`).
+- **Impact:** Low-medium, but it is a wart this session created the visible half of —
+  worth closing while the reasoning is fresh.
+- **Ready:** the aggregate rejects the parameters it cannot honor with a message that
+  says so (`sort is not supported on the aggregate endpoint`), rather than validating
+  them against a schema it will not use; an empty CSV entry is a `400`.
 
 ### SCHEMA-6 — Filtering by NULL has no declarative surface
 - **Origin:** SILENT-FAILURE-S1. Closing ENG-14 forced the question explicitly: now

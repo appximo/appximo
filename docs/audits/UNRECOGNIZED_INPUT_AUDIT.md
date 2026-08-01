@@ -166,6 +166,16 @@ returns the **unfiltered** result. A variable nested inside a `jsonb` inline lit
 is written as `null`. A multi-field `order` argument keeps one field,
 nondeterministically.
 
+### The `count` flag and the aggregate's discarded parameters (ENG-23, ENG-24)
+Added after the fixes landed, from the independent sweep's confirmed set (below).
+`?count=false` and `?count=0` turn the total **on** — the flag is tested for
+presence, never for value — on the list path and the aggregate path alike; `?count`
+with `?include=` is dropped entirely; and a failed `COUNT(*)` is swallowed, so the
+`200` simply has no total. Separately, the aggregate endpoint parses and validates
+`page`/`per_page`/`sort`/`order`/cursors through `BuildQuery` and then discards
+them, which after F-2 means `?count&sort=ghost` now `400`s over a parameter the
+endpoint would never have honored.
+
 ### Schema values (SCHEMA-7)
 Keys are strict; **values and key×type combinations are not**. `auto: true`
 discards the declared `type` and creates a TIMESTAMPTZ. `enum` on a non-string
@@ -191,6 +201,31 @@ every layer and read by no code.
   executor. Listed as an exception in ADR-024 with the condition to revisit.
 
 ---
+
+## The independent sweep, and what it says about the fix
+
+A second, independent sweep ran over the same ten surfaces without access to this
+document, and its confirmed set was reconciled against the findings above on
+2026-08-01. Two results are worth recording, because they are the ones that would
+have been embarrassing to miss:
+
+**The ENG-14 fix reached the aggregate endpoint, and it was not a coincidence.**
+The sweep reported the same silent-filter defect a second time, at
+`pkg/query/aggregate.go`, as a separate finding. It is not separate:
+`BuildAggregate` delegates to `BuildQuery` before doing anything of its own, so the
+one fix covers both paths. Verified rather than assumed —
+`?count&filter[status][is_null]=true` on the aggregate path returns the same
+`400 … operator "is_null" not allowed for type "string" (allowed: eq, partial, start)`
+as the list path. This is the difference the session was about: the fix changed
+where validation happens, so every caller of that code inherited it, and no second
+patch was needed.
+
+**Nine confirmed findings were not in the first pass**, and are now recorded —
+ENG-23, ENG-24, and the `?after`+`?before` conflict folded into ENG-15. None
+changes a conclusion here; all are the same class in surfaces the first pass
+sampled rather than exhausted. That is the honest scope of this document: it is a
+sweep, not a proof of absence, and the checklist above is what makes the next pass
+cheaper than this one.
 
 ## The guarantee
 
