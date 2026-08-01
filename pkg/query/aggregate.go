@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/miguelangel/appitools/pkg/rbac"
@@ -106,6 +107,13 @@ func BuildAggregate(
 	}
 
 	for _, fn := range aggFuncs {
+		// A function present with an EMPTY value (`?count&sum=`) used to be
+		// dropped without a word, and the caller got either a silent absence or
+		// the generic catch-all below — neither of which mentions `sum`
+		// (ADR-024).
+		if _, present := params[fn]; present && len(splitCSV(params.Get(fn))) == 0 {
+			return nil, fmt.Errorf("aggregate %s: no field given (use %s=<field>[,<field>…])", fn, fn)
+		}
 		for _, f := range splitCSV(params.Get(fn)) {
 			fd, ok := res.Fields[f]
 			if !ok {
@@ -135,10 +143,37 @@ func BuildAggregate(
 		aq.groupBy = append(aq.groupBy, f)
 	}
 
+	// One message used to cover four different mistakes — a legitimate request
+	// missing a function, an unknown function (`?median=x`), a typo'd one
+	// (`?summ=x`) and an empty value — and it named none of them, so the caller
+	// could not tell which they had made (ADR-024). The empty-value and
+	// group_by-alone cases are now distinguished, and the generic case echoes
+	// what the request actually carried, which is what makes a typo visible
+	// without rejecting the unknown top-level parameters the policy
+	// deliberately tolerates.
 	if !aq.count && len(aq.metrics) == 0 {
-		return nil, fmt.Errorf("aggregate requires at least one of: count, sum, avg, min, max")
+		if len(aq.groupBy) > 0 {
+			return nil, fmt.Errorf("group_by needs an aggregate function: add count, or one of sum, avg, min, max")
+		}
+		return nil, fmt.Errorf("aggregate requires at least one of: count, sum, avg, min, max (received: %s)",
+			receivedParamNames(params))
 	}
 	return aq, nil
+}
+
+// receivedParamNames lists the query parameter names a request carried, sorted,
+// for an error message. It echoes only the caller's own parameter NAMES (never
+// values), so a typo like `summ` becomes visible next to the valid set.
+func receivedParamNames(params url.Values) string {
+	if len(params) == 0 {
+		return "no parameters"
+	}
+	names := make([]string, 0, len(params))
+	for k := range params {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 // HasCount reports whether COUNT(*) was requested.

@@ -68,6 +68,48 @@ Concretely, for code written from today:
    rule ADR-013's migration-honesty work established and it generalizes: being
    permissive is a legitimate design choice; being permissive *and quiet* is not.
 
+## The second axis: rejecting is not enough if the error says nothing
+
+The rule above has two halves, and the first pass only enforced one. A follow-up
+sweep found a whole population of surfaces that **reject correctly and then throw
+the evidence away** — and one that was worse than either:
+
+| Surface | Rejected? | Named? |
+|---|---|---|
+| `Authorization: Basic …` | yes, 401 | "invalid token" — the caller sent no token, and goes off to debug one |
+| an invalid tenant host | yes, 400 | "invalid tenant" — not the label, not the host, not the rule |
+| a mistyped key on `/admin/*` | yes, 400 | the decoder had produced `json: unknown field "rol"`; it was replaced with "invalid JSON body" |
+| an aggregate request | yes, 400 | one message for four different mistakes |
+| a wrongly-typed filter value | yes, 400 | "invalid request" — with three filters, which one? |
+| **a wrongly-typed CREATE value** | **no — `201`** | the value was silently truncated and stored |
+
+The last row is the one that reframes the policy. `POST {"amount": 1.9}` on an
+`int64` field returned **201 Created** and stored `1`, while `PATCH` with the same
+value returned a clean `422` naming the field. That is not a message defect: it is
+silent data corruption, produced by the same instinct — accept, adjust, continue.
+
+Three sharper statements of the same rule came out of that sweep:
+
+7. **An error must name what is actually wrong, not what is merely nearby.**
+   "invalid token" for a `Basic` credential is not terse, it is *misleading*: it
+   points at the token, so the caller rotates credentials instead of reading their
+   own header.
+8. **When the engine states a rule, it must enforce that rule.** `?page=abc` had
+   always answered *"must be a positive integer"* — and `?page=0` was silently
+   served as page 1. The engine's own error message described the contract its
+   silent path broke. Wherever a message and a code path disagree, one of them is
+   a bug; find out which.
+9. **Two paths that accept the same input must answer it the same way.** Create and
+   update, REST and GraphQL, list and aggregate. An asymmetry is a bug in whichever
+   path is wrong, and it is discovered by comparing them, not by reading either.
+
+And a limit worth writing down, because it is the reason one obvious fix was NOT
+made: **do not become stricter than the layer you are protecting.** Rejecting a
+wrongly-typed filter value in Go would reject `?filter[done][eq]=yes`, which
+returns `200` today because Postgres accepts `yes` as a boolean and
+`strconv.ParseBool` does not. Being wrong in the safe direction is still being
+wrong (backlog ENG-25).
+
 ## The exceptions, each with its reason
 
 An exception with no written reason is forbidden by this ADR. These are the ones

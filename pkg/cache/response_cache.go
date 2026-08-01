@@ -243,11 +243,10 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		hdr := r.Header.Get("Authorization")
-		tokenStr := ""
-		if strings.HasPrefix(hdr, "Bearer ") {
-			tokenStr = strings.TrimPrefix(hdr, "Bearer ")
-		}
+		// Must use the SAME parser as the JWT middleware. When these disagree the
+		// cache silently stops working for whatever the middleware accepts and this
+		// does not — a pure performance cliff with no error anywhere (ADR-024).
+		tokenStr, _ := auth.BearerToken(r.Header.Get("Authorization"))
 
 		// Serve from response cache only when this token was recently validated by JWT.
 		// No Authorization header → no short-circuit (JWT will reject protected paths).

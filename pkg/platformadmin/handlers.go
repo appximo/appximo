@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/controlplane"
 	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/miguelangel/appitools/pkg/userauth"
@@ -384,10 +385,11 @@ func (s *Service) authorizeObs(r *http.Request, tenantID string) bool {
 	}
 	// Tenant admin → its own tenant only.
 	h := r.Header.Get("Authorization")
-	if !strings.HasPrefix(h, "Bearer ") {
+	tok, ok := auth.BearerToken(h)
+	if !ok {
 		return false
 	}
-	claims, err := validateTenantToken(strings.TrimPrefix(h, "Bearer "), s.cfg.JWTSecret)
+	claims, err := validateTenantToken(tok, s.cfg.JWTSecret)
 	if err != nil || claims.TenantID != tenantID {
 		return false
 	}

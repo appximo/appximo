@@ -83,10 +83,21 @@ func BuildHandler(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunn
 			params.OperationName = r.URL.Query().Get("operationName")
 		} else {
 			if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-				// MaxBytesReader sets a specific error when the limit is exceeded.
+				// The comment here used to say "MaxBytesReader sets a specific
+				// error when the limit is exceeded" — and then never looked at
+				// err, so EVERY decode failure was answered 413 "request body
+				// too large". Measured before the fix: an 18-byte malformed body
+				// got an oversize-body error, sending the caller to raise a limit
+				// that was never the problem (ADR-024). Now the error is asked
+				// which of the two it is.
+				status, msg := http.StatusBadRequest, "invalid JSON body"
+				var tooLarge *http.MaxBytesError
+				if errors.As(err, &tooLarge) {
+					status, msg = http.StatusRequestEntityTooLarge, "request body too large"
+				}
 				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusRequestEntityTooLarge)
-				json.NewEncoder(w).Encode(map[string]string{"error": "request body too large"}) //nolint:errcheck
+				w.WriteHeader(status)
+				json.NewEncoder(w).Encode(map[string]string{"error": msg}) //nolint:errcheck
 				return
 			}
 		}

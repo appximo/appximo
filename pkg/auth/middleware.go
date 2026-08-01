@@ -180,11 +180,12 @@ func jwtMiddleware(secret string, isPublic PublicMatcher, isStatic func(path str
 					next.ServeHTTP(w, r)
 					return
 				}
-				if !strings.HasPrefix(header, "Bearer ") {
-					reject(w, r, "invalid token")
+				tok, ok := BearerToken(header)
+				if !ok {
+					reject(w, r, errUnsupportedScheme)
 					return
 				}
-				claims, reason := resolveClaims(r, strings.TrimPrefix(header, "Bearer "))
+				claims, reason := resolveClaims(r, tok)
 				if claims == nil {
 					reject(w, r, reason)
 					return
@@ -214,13 +215,13 @@ func jwtMiddleware(secret string, isPublic PublicMatcher, isStatic func(path str
 				return
 			}
 
-			const prefix = "Bearer "
-			if !strings.HasPrefix(header, prefix) {
-				reject(w, r, "invalid token")
+			tok, ok := BearerToken(header)
+			if !ok {
+				reject(w, r, errUnsupportedScheme)
 				return
 			}
 
-			claims, reason := resolveClaims(r, strings.TrimPrefix(header, prefix))
+			claims, reason := resolveClaims(r, tok)
 			if claims == nil {
 				reject(w, r, reason)
 				return

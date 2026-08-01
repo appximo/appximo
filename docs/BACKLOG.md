@@ -216,7 +216,12 @@ re-verified against reality on that date, not carried forward on trust.
   listing the known variables. There is no legitimate reason to compare a column
   against a literal dollar-prefixed string.
 
-### OPS-13 — Nineteen config values fall back silently when they fail to parse
+### OPS-13 — Fifteen config values fall back silently when they fail to parse
+- **Count corrected 2026-08-01** (was "nineteen"): a dedicated re-count found **15
+  numeric env vars across 18 code sites**, and — the number that actually matters —
+  **8 of them print nothing at all afterwards**. Those 8 are the fully silent class;
+  the other 10 at least log the effective value, so an operator who reads the boot
+  log can notice the discrepancy. Split the fix accordingly: the 8 silent ones first.
 - **Origin:** SILENT-FAILURE-S1 audit + measured live. Booting with
   `RATE_LIMIT_RPS=abc RATE_LIMIT_BURST=oops` logs `rate limiter: 1000 RPS / 100 burst
   per tenant` and never says the operator's values were rejected. The same shape in
@@ -286,6 +291,103 @@ re-verified against reality on that date, not carried forward on trust.
 - **Ready:** the aggregate rejects the parameters it cannot honor with a message that
   says so (`sort is not supported on the aggregate endpoint`), rather than validating
   them against a schema it will not use; an empty CSV entry is a `400`.
+
+### OPS-14 — `api.appitools.com` (the gold-path demo) is down: Cloudflare 525
+- **Origin:** observed 2026-08-01 while checking server state at the end of
+  SILENT-FAILURE-S1. NOT caused by this session — nothing was deployed to the 58.
+- **Evidence:** `GET https://api.appitools.com/healthz` → **525** on 3/3 attempts,
+  `server: cloudflare`. The host resolves to a **Cloudflare** address
+  (`2606:4700:3030::6815:4d8c`), while the two live apps resolve **directly** to the
+  origin (`PROD-VPS`) and both answer `/healthz` → **200**. A 525 is
+  "Cloudflare could not complete the TLS handshake to the origin".
+- **Impact:** the public demo URL from PROD-PATH-GOLD-S1 — the one that proved the
+  official install path end to end with a real Let's Encrypt certificate — is dead
+  from the internet, while the newer apps (added later with direct DNS) are fine.
+  Anyone following that write-up hits an error page.
+- **Likely cause, to confirm before touching anything:** the origin's Caddy no
+  longer holds a certificate for `api.appitools.com` (the host was probably dropped
+  from the Caddyfile when tiendita/petfriendly were set up with direct DNS), so
+  Cloudflare's strict origin check fails. Alternatively the Cloudflare SSL mode was
+  changed.
+- **Ready:** either point the DNS record directly at the origin like the other two
+  apps (matching what already works), or restore the origin certificate for that
+  hostname and confirm `https://api.appitools.com/healthz` → 200 from outside.
+  **Miguel's call** — it is also fair to retire the hostname if the demo has moved.
+
+### ENG-25 — A wrongly-typed filter value is a 400 that names nothing
+- **Origin:** SILENT-FAILURE-S1 follow-up, verified live 2026-08-01.
+  `?filter[amount][gt]=abc` answers `400 {"error":"invalid request"}` — no field, no
+  value, no expected type. With three filters and two of them wrong, the caller
+  cannot tell which was rejected. (The *status* is now always a 400: this session
+  widened `db.IsBadInput`, so the same request used to be a **500** on a `time` or
+  overflowing numeric field.)
+- **Why it was NOT fixed here, with the measurement:** the obvious fix — type-check
+  the value in `BuildQuery`, where the schema type is known — risks being STRICTER
+  THAN POSTGRES and rejecting requests that work today. Measured:
+  `?filter[done][eq]=yes` returns **200** on the live engine, because Postgres
+  accepts `yes` as a boolean and Go's `strconv.ParseBool` does not. The same gap
+  exists for whitespace-padded integers, `Infinity`/`NaN` floats, and the very wide
+  set of timestamp spellings Postgres accepts. A correct fix must reproduce
+  Postgres's accepted set per type, not Go's, and that is a piece of work with its
+  own test matrix — not a line in an audit.
+- **Ready:** `validateFilterValue(op, fieldType, value)` as a sibling of
+  `validateFilterOp`, called before any SQL is built (so the "Postgres errors are
+  masked" property holds by construction — the message comes from the SCHEMA, never
+  from a `pgconn.PgError`), with a per-type conformance test asserting it accepts
+  everything Postgres accepts. Message shape: `filter[amount][gt]: "abc" is not a
+  valid int64 value`.
+
+### ENG-26 — `?filter[id]` is not supported, though `?sort=id` is
+- **Origin:** found while fixing the self-contradicting error message this session.
+  `id` is the implicit primary key: it is NOT in `res.Fields`, so the filter lookup
+  rejects it, while the sort path special-cases it and accepts it. Keyset pagination
+  (`?after=`/`?before=`) is also built on `id`. So two of the three places that take
+  a field name accept `id` and one does not.
+- **Impact:** Low, but it is a real capability gap — `?filter[id][eq]=<uuid>` is a
+  natural request, and unlike `GET /{id}` it composes with other filters.
+- **Ready:** the filter field lookup accepts `id` as a `uuid` field (its only legal
+  op is already `eq` via `operatorsForType`), with a test, and
+  `availableFieldNames(res, true)` at that call site once it does.
+
+### ENG-27 — An undeclared JWT role is indistinguishable from a denied one
+- **Origin:** SILENT-FAILURE-S1 follow-up, verified live 2026-08-01. A token whose
+  `role` names a role NO schema declares, and a token whose role is real but not
+  permitted, produce **byte-identical** `403 {"error":"forbidden"}` (same md5). The
+  role name appears nowhere — not the engine log, not the access log, not the deep
+  observability trace (which records the caller's IP, browser and OS but not the
+  role). `appitools token` mints an undeclared role with no warning, takes no
+  `--schema`, and defaults to `super_admin`, which the canonical quickstart schema
+  does not declare.
+- **The security judgement, because it decides the shape of the fix:** echoing the
+  role back to the CALLER leaks nothing — a JWT is base64, not encrypted, and the
+  caller already holds the claim. But distinguishing "role not declared" from "role
+  declared but not permitted" **in the response body** turns the endpoint into an
+  enumeration oracle over the schema's role namespace. So the fix is asymmetric:
+  the response body stays exactly as it is, and the SERVER LOG gains the
+  distinction. That is where the operator looks and the attacker cannot.
+- **Ready:** a log line at the RBAC deny naming the role and whether it is declared;
+  `appitools token` warns (or takes `--schema` and refuses) on a role the schema does
+  not declare.
+
+### ENG-28 — GraphQL fragment spreads bypass the selection cap (~46×)
+- **Origin:** SILENT-FAILURE-S1 follow-up, measured 2026-08-01. `analyzeQuery`
+  counts a fragment's body ONCE globally, but the executor resolves it at every
+  distinct root alias. Measured: a document the analyzer counts at exactly **2000**
+  (the advertised cap) resolved **~92,500** schema-level selections — **21.4 MB in
+  ~2.0 s** from one request. AGENTS.md advertises "at most 2000 total selections
+  across the whole document"; the real ceiling is ~46× that.
+- **The claim's stated mechanism was REFUTED and the real one is different** — worth
+  recording so the fix targets the right thing. `{ ...F ...F ...F }` does NOT
+  amplify: the executor merges by response key, so repeated same-alias spreads
+  collapse to a single resolution. The amplification comes from reusing one fragment
+  across up to 50 DISTINCT root aliases.
+- **Impact:** Medium. It needs a valid JWT and the per-tenant rate limiter still
+  applies, so it is amplification rather than an open door — but it is a documented
+  limit that does not hold, which is the class this ADR is about.
+- **Ready:** `analyzeQuery` charges a fragment's true cost at each spread site
+  (memoized `fragmentCost(name)` with a visiting-set cycle guard, summing the
+  fragment's own fields plus nested spreads) instead of `+1`, so counted == resolved;
+  and the AGENTS.md number is re-verified against the fixed counter.
 
 ### SCHEMA-6 — Filtering by NULL has no declarative surface
 - **Origin:** SILENT-FAILURE-S1. Closing ENG-14 forced the question explicitly: now

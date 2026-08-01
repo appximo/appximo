@@ -59,14 +59,55 @@ func IsMissingTenant(err error) bool {
 	return false
 }
 
+// badInputCodes are the Postgres "data exception" (class 22) SQLSTATEs that a
+// CLIENT can trigger with a badly-typed value — a filter, a cursor, or a write
+// body. They are caller errors, so handlers answer 400 rather than a 500.
+//
+// 22P02 alone was not enough (ADR-024). Measured on the live engine: only a bad
+// INTEGER took the 400 path, because integers fail with 22P02; every other type
+// raises a different code in the same class and fell through to "internal
+// error" — a 500 for a typo:
+//
+//	?filter[due][gt]=notadate      → 22007  invalid_datetime_format
+//	?filter[due][gt]=2026-13-45    → 22008  datetime_field_overflow
+//	?filter[amount][gt]=<24 nines> → 22003  numeric_value_out_of_range
+//	POST {"due":"not-a-date"}      → 22007  (the same gap on the write path)
+//
+// A 500 here is worse than a bad message: it is logged as an engine fault, it
+// burns the SLO error budget, and it pages someone — all of which any
+// authenticated caller could trigger at will with a single typo'd parameter.
+// The class is bounded and every member means the same thing ("your value does
+// not fit this column"), so it is matched by class rather than enumerating
+// codes one incident at a time.
+func badInputCode(code string) bool {
+	switch code {
+	case "22P02", // invalid_text_representation  (int, uuid, bool, json)
+		"22007", // invalid_datetime_format       (time)
+		"22008", // datetime_field_overflow       (time, e.g. month 13)
+		"22003": // numeric_value_out_of_range    (int64/float64 overflow)
+		return true
+	}
+	return false
+}
+
+// Deliberately NOT in the set: 22001 string_data_right_truncation. It was in the
+// first draft of this fix and removed before commit — every one of the four
+// above was OBSERVED being returned to a client as a 500 during this session,
+// and 22001 was not. The engine declares string/text columns as unbounded TEXT
+// and enforces length with the declarative `maxLength` rule (a 422 long before
+// any SQL), so there is no measured path that reaches it from client input.
+// Adding a code on the theory that it might fire would make a genuine engine
+// fault answer 400 — which is the same "guessing instead of measuring" this ADR
+// exists to stop. If it is ever observed, add it WITH the reproduction.
+
 // IsBadInput reports whether err is a client-supplied value that Postgres could
-// not parse for a column type (SQLSTATE 22P02 invalid_text_representation, e.g.
-// a non-UUID user_id substituted into a UUID condition, or a bad filter value).
-// These are caller errors, so handlers answer 400 instead of leaking a 500.
+// not parse or store for a column type. These are caller errors, so handlers
+// answer 400 instead of leaking a 500. See badInputCodes for the exact set and
+// why it is wider than the 22P02 it started as.
 func IsBadInput(err error) bool {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
-		return pgErr.Code == "22P02"
+		return badInputCode(pgErr.Code)
 	}
 	return false
 }

@@ -108,30 +108,36 @@ func BuildQuery(
 		condition: condition,
 	}
 
+	// ADR-024. `?page=abc` has always answered "must be a positive integer" —
+	// and `?page=0` and `?page=-4` were then silently served as page 1. The
+	// engine's own error message stated the rule its silent path broke. A
+	// non-positive page is now rejected with that same message, so the contract
+	// the message describes is the contract the code enforces.
+	//
+	// The over-max CLAMP is deliberately NOT rejected: "max 100" is a documented
+	// part of the contract, and the response REPORTS the effective value in
+	// meta.per_page / meta.page, which is the "tolerance must be reported" half
+	// of the policy (ADR-024 §5) rather than a silent substitution.
 	if pageStr := params.Get("page"); pageStr != "" {
 		p, err := strconv.Atoi(pageStr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid page parameter: must be a positive integer")
+		if err != nil || p <= 0 {
+			return nil, fmt.Errorf("invalid page parameter %q: must be a positive integer", pageStr)
 		}
-		if p > 0 {
-			if p > MaxPage {
-				p = MaxPage
-			}
-			qb.page = p
+		if p > MaxPage {
+			p = MaxPage
 		}
+		qb.page = p
 	}
 
 	if ppStr := params.Get("per_page"); ppStr != "" {
 		pp, err := strconv.Atoi(ppStr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid per_page parameter: must be a positive integer")
+		if err != nil || pp <= 0 {
+			return nil, fmt.Errorf("invalid per_page parameter %q: must be a positive integer", ppStr)
 		}
-		if pp > 0 {
-			if pp > MaxPerPage {
-				pp = MaxPerPage
-			}
-			qb.perPage = pp
+		if pp > MaxPerPage {
+			pp = MaxPerPage
 		}
+		qb.perPage = pp
 	}
 
 	// filters: filter[field]=value or filter[field][op]=value
@@ -159,11 +165,32 @@ func BuildQuery(
 
 		fd, ok := res.Fields[field]
 		if !ok {
-			return nil, fmt.Errorf("unknown filter field: %s (available: %s)", field, availableFieldNames(res))
+			return nil, fmt.Errorf("unknown filter field: %s (available: %s)", field, availableFieldNames(res, false))
 		}
 
 		if err := validateFilterOp(op, fd.Type); err != nil {
 			return nil, fmt.Errorf("filter[%s][%s]: %s", field, op, err.Error())
+		}
+
+		// An EMPTY value is only meaningful for a text column, where it asks for
+		// the empty string. On any other type it is not a value at all: it used
+		// to be bound verbatim, and Postgres answered with a data-exception that
+		// surfaced as an opaque 400 (or, for a time column, a 500). Rejecting it
+		// here — in code that knows the field's declared type — names the field
+		// without exposing anything about the database (ADR-024; the
+		// "Postgres errors are masked" property is preserved because this check
+		// runs BEFORE any SQL is built).
+		//
+		// Deliberately narrow: this rejects the EMPTY value only, not every
+		// wrongly-typed one. A full type check would have to reproduce
+		// Postgres's own accepted set exactly, and it does not match Go's —
+		// measured on the live engine, `?filter[done][eq]=yes` returns 200 today
+		// because Postgres accepts "yes" as a boolean while strconv.ParseBool
+		// rejects it. Being stricter than the database would break working
+		// clients, so the wider check is a separate, evidence-backed decision
+		// (backlog ENG-25).
+		if vals[0] == "" && fd.Type != "string" && fd.Type != "text" {
+			return nil, fmt.Errorf("filter[%s][%s]: empty value is not valid for a %s field", field, op, fd.Type)
 		}
 
 		qb.filters = append(qb.filters, filterClause{field: field, op: op, value: vals[0]})
@@ -184,7 +211,7 @@ func BuildQuery(
 	// param". A sort that cannot be honored is now an error.
 	if sf := params.Get("sort"); sf != "" {
 		if _, ok := res.Fields[sf]; !ok && sf != "id" {
-			return nil, fmt.Errorf("unknown sort field: %s (available: %s)", sf, availableFieldNames(res))
+			return nil, fmt.Errorf("unknown sort field: %s (available: %s)", sf, availableFieldNames(res, true))
 		}
 		qb.sortField = sf
 		qb.sortOrder = "ASC"
@@ -211,7 +238,7 @@ func BuildQuery(
 		}
 		field := m[1]
 		if _, ok := res.Fields[field]; !ok && field != "id" {
-			return nil, fmt.Errorf("unknown sort field: %s (available: %s)", field, availableFieldNames(res))
+			return nil, fmt.Errorf("unknown sort field: %s (available: %s)", field, availableFieldNames(res, true))
 		}
 		qb.sortField = field
 		d, err := sortDirection(vals[0])
@@ -484,9 +511,24 @@ func filterToSQL(op string) string {
 // between an error a caller can act on and one they have to go read the schema
 // for — the same contract the schema loader's strict-key errors already keep
 // (ADR-024).
-func availableFieldNames(res *schema.ResourceSchema) string {
+// availableFieldNames lists the fields a caller may name, for an error message.
+//
+// withID must mirror what the CALLING path actually accepts. Sorting accepts the
+// implicit primary key (`?sort=id` is explicitly allowed); filtering does not,
+// because `id` is not in res.Fields. Passing the same list to both produced a
+// message that contradicted itself —
+//
+//	unknown filter field: id (available: amount, done, due, id, ratio, …)
+//
+// naming `id` as available in the very sentence that rejected it. That is worse
+// than the terse message it replaced: a caller who believes an error message
+// will retry the same request. (Whether `?filter[id]` SHOULD work is a real gap,
+// tracked separately as ENG-26; this makes the message true about today.)
+func availableFieldNames(res *schema.ResourceSchema, withID bool) string {
 	names := make([]string, 0, len(res.Fields)+1)
-	names = append(names, "id")
+	if withID {
+		names = append(names, "id")
+	}
 	for n := range res.Fields {
 		names = append(names, n)
 	}

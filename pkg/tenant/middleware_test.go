@@ -42,11 +42,34 @@ func TestMiddleware_ValidTenant(t *testing.T) {
 	}
 }
 
-// "ACME.localhost" → 400 (mayúsculas)
-func TestMiddleware_UppercaseTenant(t *testing.T) {
-	rec, _ := runMiddleware("ACME.localhost")
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected 400 for uppercase tenant, got %d", rec.Code)
+// "ACME.localhost" → 200, resolving to the SAME tenant as "acme.localhost".
+//
+// This assertion is INVERTED from the original, deliberately (ADR-024). RFC 9110
+// §4.2.3 makes the host case-insensitive and DNS resolves both spellings to the
+// same server, so the old 400 rejected a legal request for a real tenant. The
+// test now pins the property that makes folding safe rather than merely lenient:
+// the upper-case host must resolve to the SAME id and the SAME Postgres schema,
+// never to a second, parallel tenant namespace.
+func TestMiddleware_UppercaseTenantFoldsToSameTenant(t *testing.T) {
+	rec, tc := runMiddleware("ACME.localhost")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for an upper-case host (RFC 9110 §4.2.3), got %d", rec.Code)
+	}
+	if tc == nil {
+		t.Fatal("expected TenantCtx for ACME.localhost, got nil")
+	}
+	if tc.ID != "acme" || tc.PGSchema != "tenant_acme" {
+		t.Errorf("ACME.localhost resolved to {ID:%q PGSchema:%q}, want {acme tenant_acme} — "+
+			"case folding must map onto the existing tenant, never create a parallel one",
+			tc.ID, tc.PGSchema)
+	}
+}
+
+// A mixed-case host folds the same way.
+func TestMiddleware_MixedCaseTenantFoldsToSameTenant(t *testing.T) {
+	_, tc := runMiddleware("AcMe.LocalHost")
+	if tc == nil || tc.ID != "acme" {
+		t.Errorf("AcMe.LocalHost did not fold to tenant acme: %+v", tc)
 	}
 }
 

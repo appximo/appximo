@@ -202,6 +202,100 @@ every layer and read by no code.
 
 ---
 
+## Second pass — the naming axis, and the worst finding of the audit
+
+The first pass asked "is it rejected?". The second asked "does the error say what
+was wrong?", and found a population of surfaces that reject correctly and then
+discard the evidence — plus one that does not reject at all. Everything below was
+verified against a running engine before AND after the change.
+
+### F-5 — A wrongly-typed CREATE value was silently coerced and reported as success
+
+The headline. On an `int64` field, with the same value, on the same engine:
+
+```
+POST  /api/notes {"amount": 1.9}   → 201 Created      (stored: 1)
+PATCH /api/notes/{id} {"amount": 1.9} → 422 field "amount" must be an integer
+```
+
+`schema.ValidateWrite` only enforces presence and the DECLARED rules
+(enum/min/max/pattern/format), so a field with no declared rule had nothing
+checking its value; the create handler had also discarded the resource schema
+(`_, wrv := writeSurface(...)`), so it structurally had no types to check
+against. Siblings were loud in the wrong way: `{"amount": true}` and `{"done": 1}`
+both produced a masked **500**.
+
+Now `validateCreateTypes` runs the same `validateFieldValue` the update path uses,
+reporting every offending field at once in the S44 shape. Two constraints are
+pinned by tests: an **undeclared** key still passes through to Postgres (the
+ENG-12 contract — a migration can add a column without rebuilding the router), and
+an explicit `null` is governed by `required`, not by the type check.
+
+### F-6 — Four client typos returned 500 `internal error`
+
+`db.IsBadInput` classified only SQLSTATE `22P02`, so only a bad *integer* took the
+400 path. Measured, all as 500s from one mistyped query parameter:
+
+| request | SQLSTATE | before | after |
+|---|---|---|---|
+| `?filter[due][gt]=notadate` | 22007 | 500 | 400 |
+| `?filter[due][gt]=2026-13-45` | 22008 | 500 | 400 |
+| `?filter[amount][gt]=<24 nines>` | 22003 | 500 | 400 |
+| `?filter[ratio][gt]=1e999` | 22003 | 500 | 400 |
+| `POST {"due":"not-a-date"}` | 22007 | 500 | 400 |
+
+A 500 is worse than a bad message: it is logged as an engine fault, it burns the
+SLO error budget, and any authenticated caller could trigger it at will. The set
+is deliberately bounded to codes that were **observed** — `22001` was in the first
+draft and removed before commit precisely because it was not.
+
+### F-7 — Two RFC-legal requests were refused
+
+`Authorization: bearer <valid token>` → `401 invalid token`, though RFC 9110 §11.1
+makes the auth-scheme case-insensitive **and the engine's own generated OpenAPI
+advertises `"scheme": "bearer"`**. And `Host: ACME.localhost` → `400 invalid
+tenant`, though RFC 9110 §4.2.3 makes the host case-insensitive.
+
+The Bearer fix is one shared `auth.BearerToken` replacing the same three lines
+copy-pasted at **eight** call sites, because they had drifted in what they *did*
+with a miss: `/api/*` answered 401, `/auth/refresh` answered **400**, `/auth/mfa/*`
+answered a third wording, `/admin/observability` answered **403 "not authorized
+for this tenant's observability"** — an authorization verdict flipping on header
+capitalisation — and the response cache silently missed. Fixing only the visible
+401 would have traded a loud bug for a silent cache cliff.
+
+### F-8 — Rejected, but the error named nothing
+
+`Basic …` → "invalid token" (the caller sent no token and is sent off to debug
+one). An invalid tenant host → "invalid tenant" (not the label, not the rule).
+A mistyped admin key → "invalid JSON body", discarding the decoder's own
+`json: unknown field "rol"`. The aggregate's catch-all → one message for four
+distinct mistakes. `?page=0` → served silently as page 1, while `?page=abc` had
+always answered *"must be a positive integer"*: the engine's own message stated
+the rule its silent path broke.
+
+### A contradiction introduced by the FIRST pass, and removed by this one
+
+The `available:` list added to the sort error last session was reused on the
+filter error, where `id` is not accepted:
+
+```
+unknown filter field: id (available: amount, done, due, id, ratio, secret, status, title)
+```
+
+— naming `id` as available in the very sentence rejecting it. A caller who
+believes an error message retries the same request. `availableFieldNames` now
+takes the calling path's actual vocabulary. Whether `?filter[id]` *should* work is
+a real gap, tracked as ENG-26 rather than fixed silently here.
+
+### Deliberately not fixed, with the measurement that decided it
+
+A full filter-value type check would be **stricter than Postgres**:
+`?filter[done][eq]=yes` returns 200 today because Postgres accepts `yes` as a
+boolean and Go's `strconv.ParseBool` does not. Being wrong in the safe direction
+is still being wrong (ENG-25). The `per_page` over-cap clamp also stays: it is
+documented, and `meta` reports the effective value.
+
 ## The independent sweep, and what it says about the fix
 
 A second, independent sweep ran over the same ten surfaces without access to this

@@ -436,7 +436,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// ENG-12: validate against the tenant's DEPLOYED schema when it has one,
 			// so a column a deploy just added is writable without a restart — the
 			// read path already returns it. Falls back to the boot surface.
-			_, wrv := writeSurface(req.Context(), tc.ID, name, &res, rv)
+			wres, wrv := writeSurface(req.Context(), tc.ID, name, &res, rv)
 
 			// Schema defaults (SCHEMA-CLOSE-V1): fill omitted fields that declare a
 			// default BEFORE validation, so a required field with a default is
@@ -447,6 +447,16 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// Declarative validation: BEFORE the before_create hook and the
 			// INSERT. Create requires every required non-auto field (S44 #2).
 			if verrs := wrv.ValidateWrite(body, true); len(verrs) > 0 {
+				markSpan(req, "validate")
+				writeValidationErrs(w, verrs)
+				return
+			}
+			// Value TYPES (ADR-024). ValidateWrite above checks presence and the
+			// declared rules; a field with no declared rule had nothing checking
+			// its value at all, so POST silently truncated 1.9 to 1 on an int64
+			// column and answered 201 while PATCH answered a clean 422 for the
+			// same value. See validateCreateTypes.
+			if verrs := validateCreateTypes(wres, body); len(verrs) > 0 {
 				markSpan(req, "validate")
 				writeValidationErrs(w, verrs)
 				return

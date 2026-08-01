@@ -14,3 +14,10 @@ date	commit	label	target	tenant	endpoint	script	rate	duration	runs	p50_median_ms
 2026-08-01	9856a1e	sf-new-2	http://localhost:8080	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	5	0.616	0.932	13.5	0.0000	SILENT-FAILURE-S1 hot-path ABBA arm
 2026-08-01	9856a1e	sf-base-2	http://localhost:8080	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	5	0.583	0.876	3.1	0.6452	SILENT-FAILURE-S1 hot-path ABBA arm
 2026-08-01	9856a1e	sf-base-2	http://localhost:8080	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	5	0.593	1.026	14.1	0.0000	SILENT-FAILURE-S1 hot-path ABBA arm
+2026-08-01	c9b23d6	A1-base	http://localhost:8080	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	6	0.597	0.893	12.9	0.0000	
+2026-08-01	c9b23d6	B2-new	http://localhost:8080	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	6	0.579	0.831	6.3	0.0000	
+2026-08-01	c9b23d6	A1-base	http://localhost:8080	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	5	0.591	0.868	15.5	0.0000	
+2026-08-01	c9b23d6	A1-base	http://localhost:8080	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	5	0.619	1.087	14.1	0.0000	
+2026-08-01	c9b23d6	B1-new	http://localhost:8080	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	5	0.629	1.048	8.1	0.0000	
+2026-08-01	c9b23d6	B2-new	http://localhost:8080	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	5	0.619	0.883	14.3	0.0000	
+2026-08-01	c9b23d6	A2-base	http://localhost:8080	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	5	0.623	0.876	4.5	0.0000	

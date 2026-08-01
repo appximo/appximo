@@ -574,6 +574,16 @@ a file field. In GraphQL the field is an `ID`.
 A write that violates rules returns **422 with every failing field at
 once**: `{"error":"validation_failed","fields":[{"field":"title","rule":"required","message":"is required"}]}`.
 
+Values are also **type-checked against the declared type on create as well as
+update** (`rule":"type"`), and the two verbs answer identically. Before ADR-024
+only update did: `POST {"amount": 1.9}` on an `int64` field returned **201** and
+stored `1` — silent truncation reported as success — while `PATCH` with the same
+value returned a clean 422. A key that is **not** a declared field still passes
+through to Postgres (so a column added by a migration is writable without a
+restart, ENG-12) and comes back as the `unknown_field` 422; an explicit `null` is
+governed by `required`, not by the type check. `time` values remain validated by
+Postgres rather than in Go (a documented leniency, identical on both verbs).
+
 #### State machines (`state_machine`, G5)
 
 A string status field can declare a **lifecycle**: which states a row may be created
@@ -1201,7 +1211,17 @@ Facts agents most often get wrong:
 - **Tenant = Host header.** Every data-plane request needs
   `Host: acme.localhost` (or a real subdomain). Host of a different
   tenant → 401 `token tenant mismatch`; Host with no subdomain (bare
-  IP/`localhost`) → 500 with empty body.
+  IP/`localhost`) → 500 with empty body. The host is matched
+  **case-insensitively** (RFC 9110 §4.2.3), so `ACME.localhost` resolves to the
+  same tenant and the same `tenant_acme` schema; an invalid label is a 400 that
+  names the label, the host and the rule (ADR-024 — it used to be a bare
+  `invalid tenant`, and an upper-case host was refused outright).
+- **`Authorization: Bearer <token>` — the scheme is case-insensitive**
+  (RFC 9110 §11.1), so `bearer`/`BEARER` are accepted, as is more than one space
+  before the token. This matters because the engine's own generated OpenAPI
+  advertises `"scheme": "bearer"`, and a lowercase scheme used to be answered
+  `401 invalid token`. A header carrying a *different* scheme (`Basic …`) now says
+  so instead of blaming the token.
 - **Tenant id rule: `^[a-z][a-z0-9]{1,29}$`** — a lowercase letter, then lowercase
   letters or digits, 2–30 chars. **No hyphens, underscores, uppercase or spaces.** It
   is the INTERSECTION of two alphabets because the id is used as both at once: the
@@ -1277,7 +1297,17 @@ subroutes.
   non-deterministically (backlog ENG-16).
 - **Pagination**: keyset — `?after=<uuid>` / `?before=<uuid>` with
   `?per_page=` (default 20, max 100). `?page=` exists but is
-  OFFSET-based; prefer keyset.
+  OFFSET-based; prefer keyset. A **non-positive** `page`/`per_page` is a **400
+  naming the value** — `?page=0` and `?page=-4` used to be served silently as
+  page 1, even though the engine's own message for `?page=abc` already said
+  *"must be a positive integer"* (ADR-024). Over the cap it still **clamps**,
+  because "max 100" is documented and `meta` reports the effective value —
+  reported tolerance, not silence.
+- **Filter values**: an empty value on a non-text field
+  (`?filter[amount][gte]=`) is a **400 naming the field and its type**; it is
+  legitimate on `string`/`text` (it asks for the empty string). A wrongly-typed
+  value is a 400 that does **not** yet name the field (backlog ENG-25) — but it
+  is now always a 400: a bad `time` or an overflowing number used to be a **500**.
 - **Total count (opt-in)**: `?count=true` on a list adds `meta.total` +
   `meta.total_pages` (a `COUNT(*)` over the SAME filtered + RBAC-scoped set).
   **Off by default** — the plain list pays nothing and is byte-identical; turn it

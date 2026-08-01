@@ -59,10 +59,11 @@ func (s *Service) Router() http.Handler {
 // tenant. Returns nil when there is no valid, tenant-matching token.
 func (s *Service) authClaims(r *http.Request, tenantID string) *auth.Claims {
 	h := r.Header.Get("Authorization")
-	if !strings.HasPrefix(h, "Bearer ") {
+	tok, ok := auth.BearerToken(h)
+	if !ok {
 		return nil
 	}
-	claims, err := auth.ValidateToken(strings.TrimPrefix(h, "Bearer "), s.cfg.JWTSecret)
+	claims, err := auth.ValidateToken(tok, s.cfg.JWTSecret)
 	if err != nil || claims.UserID == "" {
 		return nil
 	}
@@ -510,8 +511,8 @@ func (s *Service) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	_ = decodeBodyAllowEmpty(w, r, &req)
 	tokenStr := req.Token
 	if tokenStr == "" {
-		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-			tokenStr = strings.TrimPrefix(h, "Bearer ")
+		if bt, ok := auth.BearerToken(r.Header.Get("Authorization")); ok {
+			tokenStr = bt
 		}
 	}
 	if tokenStr == "" {

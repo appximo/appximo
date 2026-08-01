@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -196,10 +195,11 @@ func (s *Service) handleEngineSchema(w http.ResponseWriter, r *http.Request) {
 // Authorization header. Returns nil when absent/invalid.
 func (s *Service) platformClaimsFromRequest(r *http.Request) *PlatformClaims {
 	h := r.Header.Get("Authorization")
-	if !strings.HasPrefix(h, "Bearer ") {
+	tok, ok := auth.BearerToken(h)
+	if !ok {
 		return nil
 	}
-	c, err := parsePlatformToken(strings.TrimPrefix(h, "Bearer "), s.cfg.JWTSecret)
+	c, err := parsePlatformToken(tok, s.cfg.JWTSecret)
 	if err != nil {
 		return nil
 	}
@@ -274,8 +274,8 @@ func (s *Service) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	_ = decodeAllowEmpty(w, r, &req)
 	tok := req.Token
 	if tok == "" {
-		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-			tok = strings.TrimPrefix(h, "Bearer ")
+		if bt, ok := auth.BearerToken(r.Header.Get("Authorization")); ok {
+			tok = bt
 		}
 	}
 	if tok == "" {
@@ -372,7 +372,22 @@ func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		// This is the one operator surface that already got the policy right —
+		// and then threw the evidence away. encoding/json had produced
+		// `json: unknown field "rol"`, naming the exact typo, and it was replaced
+		// with a flat "invalid JSON body" that reads identically for a typo'd
+		// key, malformed syntax and an oversized body. The operator is left to
+		// diff their request against the docs by eye (ADR-024).
+		//
+		// The decoder's message is safe to surface here: it describes the
+		// caller's OWN body, and this route is already authenticated as a
+		// platform super-admin or the admin key.
+		status, msg := http.StatusBadRequest, "invalid JSON body: "+err.Error()
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			status, msg = http.StatusRequestEntityTooLarge, "request body too large"
+		}
+		writeJSON(w, status, map[string]string{"error": msg})
 		return false
 	}
 	return true

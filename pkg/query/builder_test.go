@@ -320,11 +320,47 @@ func TestBuildQuery_RBACConditionCombinedWithFilter(t *testing.T) {
 	}
 }
 
-func TestBuildQuery_PageZeroFallsToDefault(t *testing.T) {
-	params := url.Values{"page": {"0"}}
-	qb := mustBuild(t, testResource(), params, nil)
-	if qb.Page() != DefaultPage {
-		t.Errorf("page=0 should fall back to default %d, got %d", DefaultPage, qb.Page())
+// A non-positive page is REJECTED, not silently served as page 1.
+//
+// This assertion is INVERTED from the original (ADR-024). The engine has always
+// answered `?page=abc` with "must be a positive integer" — and then accepted
+// `?page=0` and `?page=-4` and served page 1. The error message stated the rule
+// that the silent path broke, which is the strongest possible evidence that the
+// silence was an oversight rather than a contract. A 0-indexed client is the
+// case that matters: it sends page=0 and page=1 and is served page 1 twice,
+// silently skipping nothing and duplicating everything, with no way to notice.
+func TestBuildQuery_NonPositivePageIsRejected(t *testing.T) {
+	for _, v := range []string{"0", "-1", "-4"} {
+		_, err := BuildQuery("notes", testResource(), url.Values{"page": {v}}, nil)
+		if err == nil {
+			t.Errorf("page=%s was accepted; a non-positive page must be rejected", v)
+			continue
+		}
+		if !strings.Contains(err.Error(), v) {
+			t.Errorf("page=%s: error %q does not name the offending value", v, err)
+		}
+	}
+	for _, v := range []string{"0", "-1"} {
+		_, err := BuildQuery("notes", testResource(), url.Values{"per_page": {v}}, nil)
+		if err == nil {
+			t.Errorf("per_page=%s was accepted; a non-positive per_page must be rejected", v)
+			continue
+		}
+		if !strings.Contains(err.Error(), v) {
+			t.Errorf("per_page=%s: error %q does not name the offending value", v, err)
+		}
+	}
+}
+
+// The over-max CLAMP stays: "max 100" is documented and the response reports the
+// effective value in meta, which is reported tolerance rather than silence.
+func TestBuildQuery_OverMaxIsClampedNotRejected(t *testing.T) {
+	qb, err := BuildQuery("notes", testResource(), url.Values{"per_page": {"5000"}}, nil)
+	if err != nil {
+		t.Fatalf("per_page over the cap must be clamped, not rejected: %v", err)
+	}
+	if qb.PerPage() != MaxPerPage {
+		t.Errorf("per_page = %d, want the documented cap %d", qb.PerPage(), MaxPerPage)
 	}
 }
 
@@ -456,5 +492,65 @@ func TestBuildQuery_ValidInputStillWorks(t *testing.T) {
 		if _, err := BuildQuery("guides", testResource(), p, nil); err != nil {
 			t.Errorf("valid input %v was rejected: %v", p, err)
 		}
+	}
+}
+
+// ADR-024 second axis: an EMPTY value on a typed column is not a value. It used
+// to be bound verbatim, which Postgres answered with a data exception — an opaque
+// 400 on an int column and, before db.IsBadInput was widened, a 500 on a time
+// column. The check runs before any SQL is built, so the error names the field
+// and its declared type without consulting a Postgres error at all (the "Postgres
+// errors are masked" property holds by construction).
+func TestBuildQuery_EmptyValueOnTypedFieldIsRejected(t *testing.T) {
+	res := &schema.ResourceSchema{Fields: map[string]schema.FieldDef{
+		"title":  {Type: "string"},
+		"body":   {Type: "text"},
+		"amount": {Type: "int64"},
+		"due":    {Type: "time"},
+		"done":   {Type: "bool"},
+	}}
+	for _, f := range []string{"amount", "due", "done"} {
+		_, err := BuildQuery("notes", res, url.Values{"filter[" + f + "][eq]": {""}}, nil)
+		if err == nil {
+			t.Errorf("filter[%s][eq]= was accepted; an empty value is not valid for that type", f)
+			continue
+		}
+		if !strings.Contains(err.Error(), f) {
+			t.Errorf("filter[%s]: error %q does not name the field", f, err)
+		}
+	}
+	// An empty value on a TEXT column is legitimate — it asks for the empty
+	// string — and must keep working.
+	for _, f := range []string{"title", "body"} {
+		if _, err := BuildQuery("notes", res, url.Values{"filter[" + f + "][eq]": {""}}, nil); err != nil {
+			t.Errorf("filter[%s][eq]= must remain valid on a text column: %v", f, err)
+		}
+	}
+}
+
+// The message must not contradict itself. availableFieldNames used to be shared
+// between the filter and sort errors, so rejecting `filter[id]` produced
+// "unknown filter field: id (available: …, id, …)" — naming id as available in
+// the very sentence that rejected it. A caller who believes an error message
+// retries the same request.
+func TestBuildQuery_FilterErrorDoesNotClaimIDIsAvailable(t *testing.T) {
+	res := &schema.ResourceSchema{Fields: map[string]schema.FieldDef{"title": {Type: "string"}}}
+	_, err := BuildQuery("notes", res, url.Values{"filter[id][eq]": {"x"}}, nil)
+	if err == nil {
+		t.Fatal("filter[id] is not supported today and must be rejected (see backlog ENG-26)")
+	}
+	if strings.Contains(err.Error(), "available: ") && strings.Contains(err.Error(), "id") {
+		// "id" may not appear in the available list of a FILTER error.
+		after := err.Error()[strings.Index(err.Error(), "available: "):]
+		for _, n := range strings.Split(strings.TrimSuffix(strings.TrimPrefix(after, "available: "), ")"), ", ") {
+			if strings.TrimSpace(n) == "id" {
+				t.Errorf("the filter error lists id as available while rejecting it: %q", err)
+			}
+		}
+	}
+	// Sorting DOES accept id, so its error must keep listing it.
+	_, serr := BuildQuery("notes", res, url.Values{"sort": {"ghost"}}, nil)
+	if serr == nil || !strings.Contains(serr.Error(), "id") {
+		t.Errorf("the sort error must still list id, which sorting accepts: %v", serr)
 	}
 }
