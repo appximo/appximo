@@ -1,5 +1,12 @@
 # Production benchmarks — the whole stack, on a real server
 
+> **Re-certification status (CERTIFY-S1, 2026-08-01).** Partially re-measured. The
+> layer cost and the 1 M-row read path were re-run and are consistent (§3, §4); the
+> **whole-stack footprint** and the **750 rps knee** could NOT be reproduced, because
+> the reference box now serves two production apps and the API path would need a new
+> Caddy site on it. Those two tables are historical, valid as of the date above them.
+> Details: [CERTIFICATION_2026-08-01.md](CERTIFICATION_2026-08-01.md) §2.4.
+
 > **Don't take these numbers. [Run the suite](../scripts/verify-production/) against
 > your own server and get your own.**
 
@@ -119,8 +126,15 @@ Measured externally, decomposed one layer at a time against the same endpoint
 | \+ Cloudflare edge | 9.75 ms | +6.97 ms *(not ours)* |
 
 **Running the production stack instead of the bare engine costs ~0.97 ms at the
-median.** That is the price of automatic HTTPS, and it confirms the ~0.5 ms
-estimate `docs/DEPLOY.md` carried without measurement.
+median** (2026-06-10). That is the price of automatic HTTPS, and it confirms the
+~0.5 ms estimate `docs/DEPLOY.md` carried without measurement.
+
+> **Re-measured 2026-08-01 (CERTIFY-S1): +1.22 ms.** Engine direct 1.829 ms →
+> through Caddy + TLS 3.052 ms, on the same box now serving two apps. The two live
+> apps agreed to 0.01 ms with each other, so the figure is stable; it is simply a
+> slightly higher layer cost than the original run measured. Both numbers stand,
+> each with its date and condition — see
+> [CERTIFICATION_2026-08-01.md](CERTIFICATION_2026-08-01.md) §2.4.
 
 Two hypotheses were tested and **rejected** — neither made a measurable difference,
 so neither is recommended:

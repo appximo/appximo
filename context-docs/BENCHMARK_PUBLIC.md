@@ -1,5 +1,15 @@
 # Appitools vs NestJS — Public Comparative Benchmark (S46)
 
+> **Re-certification status (CERTIFY-S1, 2026-08-01).** The **Appitools** figures in
+> this document were RE-MEASURED on the same hardware and reproduced: 2000 rps →
+> p50 1.600 ms CI95 [1.568, 1.665], **0 errors in 597,461 requests**; 500 rps →
+> 1.532 ms; cache bypassed → 2.436 ms (better than the 2.756 ms below, because
+> today's PostgreSQL is uncapped where the original was capped to 0.5 vCPU).
+> The **NestJS** figures were **NOT re-verified** — that baseline's conditions (Node
+> 22 + pm2 + Docker-capped PostgreSQL on a dedicated box) no longer exist. Every
+> comparative ratio below is therefore historical, valid as of 2026-06-10.
+> See [docs/CERTIFICATION_2026-08-01.md](../docs/CERTIFICATION_2026-08-01.md) §2.
+
 **Date:** 2026-06-10 · **Appitools version:** HEAD `bb6cc9f` (S44 declarative validation + S45 SSE subscriptions, the launch build) · **Status:** every claim below is backed by the raw run exports in [`benchmarks/data/s46-pub-runs.csv`](../benchmarks/data/s46-pub-runs.csv).
 
 ---
@@ -198,7 +208,9 @@ JWT_SECRET=… DATABASE_URL='postgresql://…?connection_limit=10' NODE_ENV=prod
   pm2 start ecosystem.config.js                          # cluster ×2
 
 # 1. On the LOADER (never on the SUT) — one stack at a time:
-BENCH_TOKEN=$(appitools token --tenant 10 --secret "$JWT_SECRET" --role super_admin) \
+# NOTE (2026-08-01): tenant id "10" is NO LONGER REGISTRABLE. ENG-11 tightened the
+# rule to ^[a-z][a-z0-9]{1,29}$ — it must start with a letter. Use e.g. "bench10".
+BENCH_TOKEN=$(appitools token --tenant bench10 --secret "$JWT_SECRET" --role admin) \
   bash benchmark-lab/run-pub-bench.sh appitools http://SUT:8080
 BENCH_TOKEN=<jwt for the NestJS secret> \
   bash benchmark-lab/run-pub-bench.sh nestjs http://SUT:3000

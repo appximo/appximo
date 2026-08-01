@@ -1,7 +1,7 @@
 # Appitools
 
 > **A JSON schema in. A production multi-tenant REST + GraphQL + OpenAPI server out.**
-> One ~60 MB static Go binary, on your own server. Apache 2.0.
+> One ~64 MB static Go binary, on your own server. Apache 2.0.
 
 [![CI](https://github.com/miguel09acosta/appitools/actions/workflows/ci.yml/badge.svg)](https://github.com/miguel09acosta/appitools/actions/workflows/ci.yml)
 [![Docker](https://img.shields.io/docker/v/neodevtrix/appitools-engine?label=docker&color=2496ED&logo=docker)](https://hub.docker.com/r/neodevtrix/appitools-engine)
@@ -116,11 +116,24 @@ and enforced from a schema file.**
 
 On a $16/mo 2-vCPU droplet with JWT + RBAC + multi-tenancy + validation + rate
 limiting all active, measured from an external load generator over a real network:
-**2,000 req/s sustained, p50 1.58 ms (CI95 [1.52, 1.62]), 0 errors in 600k requests** —
-server-side, 99.98% of requests completed in under 5 ms. Head-to-head against a
-deliberately lean NestJS+Prisma baseline on the same box: **~4.8× faster at the
-median** (with Appitools' default response cache), **~2.7× with the cache fully
-bypassed**; the NestJS baseline saturates between 500 and 750 req/s.
+**2,000 req/s sustained, p50 1.60 ms (CI95 [1.57, 1.67]), 0 errors in 597k requests**
+— re-measured 2026-08-01 on the same hardware and reproducing the original figure
+(1.58 ms [1.52, 1.62], 2026-06-10). With the response cache **fully bypassed**, every
+request reaching PostgreSQL: **p50 2.44 ms at 500 req/s**.
+
+> **Read this before reproducing it.** 2,000 req/s against a *single tenant* needs
+> the per-tenant rate limiter raised — `RATE_LIMIT_RPS=3000 RATE_LIMIT_BURST=300`,
+> the configuration the benchmark declares. On the **defaults (1000 rps / 100
+> burst)** roughly half of a 2,000 rps single-tenant load is answered `429`, by
+> design. The limit is per tenant, so real multi-tenant traffic is not affected the
+> same way.
+
+A head-to-head against a deliberately lean NestJS+Prisma baseline measured **~4.8×
+faster at the median** (with the response cache) and **~2.7× bypassed**, with the
+NestJS baseline saturating between 500 and 750 req/s. **That comparison was last
+measured on 2026-06-10 and has *not* been re-verified since** — the baseline's
+measurement conditions (a dedicated box, Node 22 + pm2, PostgreSQL CPU-capped via
+Docker) no longer exist on that server. Treat it as historical until it is re-run.
 
 Full methodology — including every limitation, the cache asymmetry, statistical
 treatment (Mann-Whitney, bootstrap CIs), and raw per-run data — in

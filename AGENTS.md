@@ -1885,7 +1885,12 @@ is a JSON snapshot, not a stream).
   (not a 500, not silently dropped).
 - Hook events other than the four listed (no `on_create`, no
   `before_delete`/`after_delete`).
-- Filter ops `neq`, `in`, `like`, `is_null` → 400.
+- Filter ops `neq`, `in`, `nin`, `like`, `ilike` → 400 (verified live 2026-08-01).
+  **`is_null` is the exception and it is a BUG, not a feature (ENG-14):** the op
+  pattern in `pkg/query/builder.go` (`filterParamRe`) matches `[a-z]+` only, so an
+  op containing `_` makes the whole `filter[...]` parameter fail to match and it is
+  **dropped without an error** — `?filter[x][is_null]=true` answers `200` with the
+  FULL unfiltered list. Do not use it; do not document it as rejected.
 - Multi-field sort or `sort=field:desc` → silently ignored.
 - Aggregation BEYOND `count`/`sum`/`avg`/`min`/`max` + `group_by` (e.g. `HAVING`,
   `DISTINCT`, expression aggregates, window functions) — the

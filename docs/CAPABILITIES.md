@@ -132,7 +132,9 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 
 ## What it does NOT do
 
-The capability list above without these limits would be marketing; together they're engineering.
+The capability list above without these limits would be marketing; together they're
+engineering. Re-verified against the running engine and the field reports on
+2026-08-01 — see [CERTIFICATION_2026-08-01.md](CERTIFICATION_2026-08-01.md) §4.
 
 - **Rollback is honest, not magic.** The engine keeps an append-only schema
   version history (`public.schema_history`, VERSION-S1) and "roll back to vN" is
@@ -141,15 +143,38 @@ The capability list above without these limits would be marketing; together they
   measured rows lost; each drop must be enumerated), and data already destroyed
   by an approved forward drop is NOT recoverable (physics, not policy). A
   rollback appends a new version; the trail is never rewritten.
-- **No `neq`/`in`/`like`/`is_null` filter ops** — unsupported ops → 400.
+- **No `neq`/`in`/`nin`/`like`/`ilike` filter ops** — unsupported ops → 400.
+  (`is_null` is a known BUG, not a supported op: it is accepted, silently ignored,
+  and returns the FULL unfiltered list — backlog **ENG-14**. Do not use it.)
 - **Multi-field sort and `sort=field:desc` are silently ignored** — verify result order.
 - **No delete hooks** — only `before`/`after_create` and `before`/`after_update`.
 - **`workflows` block parses but has no executor.**
 - **No shipped WASM business module** — only a test identity module; DIAN logic is a JS built-in, not WASM.
 - **Webhooks can't reach localhost/LAN** — HTTPS-only + SSRF guard, always.
 - **No OTLP/OpenTelemetry export** — Prometheus `/metrics` + an internal trace ring.
-- **Backup has no restore command and no scheduling.**
+- **Backup has no restore command and no scheduling.** `scripts/backup.sh` dumps;
+  restoring is a documented `pg_restore` procedure a human runs, not an engine
+  subcommand (backlog **ENG-3**). The drill has been rehearsed on a real box (1.8 s),
+  but it is a runbook, not a feature.
+- **No zero-downtime binary upgrade** (backlog **ENG-2**). `deploy-update.sh` swaps
+  the binary atomically and auto-rolls-back, but the restart costs a measured ~0.5 s
+  of `502`s under live traffic. There is no socket handover.
 - **Single node** — no HA/clustering; scale is vertical.
+- **The Go module is not published.** Writing custom handlers (the "10 %" path)
+  requires a local checkout plus a `replace` directive in your `go.mod`: `go get
+  github.com/miguelangel/appitools` does not work, so a project using the framework
+  mode does not build on a teammate's machine or in CI. This is a publishing
+  decision, not a code gap — see `docs/BACKEND_SPEC_LLM.md` §3.0.
+- **The platform super-admin is created from a terminal only** (`appitools admin
+  create`, needs `DATABASE_URL`). Studio's deploy flow requires one and says so, but
+  cannot create it — so the visual path stops at the moment it becomes useful.
+- **`install.sh --app=NAME` (several apps on one box) has never run on a real
+  multi-app server.** It is verified in the installer's staged dry-run mode only
+  (backlog **OPS-11**); the migration of an existing monolithic Caddyfile is the
+  untested part.
+- **The default per-tenant rate limit is 1000 rps / 100 burst.** Not a limitation so
+  much as a default worth knowing: a single-tenant load test above it gets `429`s.
+  Raise it with `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST`.
 - **No hosted/SaaS version** — self-hosted only, by design.
 
 (Former limits now closed and documented elsewhere: declarative relations + real
