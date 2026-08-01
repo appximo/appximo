@@ -25,17 +25,25 @@
 set -euo pipefail
 
 # ── Constants ────────────────────────────────────────────────────────────────
-readonly SERVICE_USER="appitools"
-readonly SERVICE_NAME="appitools"
+# OPS-10 — every path this installer writes used to be a FIXED constant, so a
+# second install.sh run on a box that already served an app REPLACED its unit,
+# OVERWROTE its secrets (invalidating its JWTs and pointing it at another
+# database) and REWROTE the whole Caddyfile — taking the running app down. The
+# app name now namespaces all of it: unit, service user, /etc, /opt, /var/lib,
+# database, role, control port and the Caddy site. --app is unset by default, so
+# a single-app box behaves byte-identically to before.
+APP_NAME="appitools"
+SERVICE_USER="appitools"   # derived from APP_NAME in derive_paths
+SERVICE_NAME="appitools"   # derived from APP_NAME in derive_paths
 readonly REPO="miguel09acosta/appitools"
 # Set to a published tag (e.g. "v0.1.0") to enable the download path. Empty means
 # "no public release" → the installer requires --binary.
 readonly RELEASE_VERSION=""
 
 # ── Defaults (overridable by flags) ──────────────────────────────────────────
-DOMAIN=""; EMAIL=""; BINARY=""; CLI=""; SCHEMA=""; PORT="8090"
+DOMAIN=""; EMAIL=""; BINARY=""; CLI=""; SCHEMA=""; PORT="8090"; CONTROL_PORT=""
 ASSUME_YES="no"; HARDEN="no"; DRY_RUN="no"; PREFIX=""; UNINSTALL="no"; PURGE="no"
-SHOW_SECRETS="no"
+SHOW_SECRETS="no"; APP_EXPLICIT="no"
 
 # ── Output helpers ───────────────────────────────────────────────────────────
 if [ -t 1 ]; then C_G=$'\033[0;32m'; C_Y=$'\033[1;33m'; C_R=$'\033[0;31m'; C_B=$'\033[1;34m'; C_N=$'\033[0m'
@@ -76,13 +84,24 @@ Options:
                        binary serves but cannot operate its database (ADR-023)
   --schema=PATH        boot schema JSON (default: a todo-api starter you replace later)
   --port=PORT          internal engine port Caddy proxies to        [default 8090]
+  --app=NAME           install as a SEPARATE app on this box (OPS-10). Namespaces
+                       everything: unit <NAME>.service, /etc/<NAME>, /opt/<NAME>,
+                       /var/lib/<NAME>, the postgres role+database, the control
+                       port, and its own Caddy site file — so a second app never
+                       touches the first. Default "appitools" (unchanged behavior).
+                       Lowercase letters, digits and '-', starting with a letter.
+  --control-port=PORT  internal control-plane port (localhost only). Default 9090
+                       for the default app, 9090+offset derived from --app for a
+                       named one — two apps cannot share it.
   --yes                non-interactive (don't prompt to confirm)
   --show-secrets       print the generated secret VALUES in the summary (default:
                        only their path — transcripts and CI logs are forever)
   --harden             also apply ufw (SSH+80+443) + fail2ban + unattended-upgrades
   --dry-run            generate every config file + print the plan, run NO system steps
   --root=DIR           prefix all paths with DIR (for --dry-run testing only)
-  --uninstall          stop + remove the appitools service, unit, files, and Caddyfile
+  --uninstall          stop + remove THIS app's service, unit, files and Caddy site
+                       (combine with --app=NAME to remove a specific app; other
+                       apps on the box are never touched)
   --purge              with --uninstall: ALSO drop the database + data dir (destructive)
   --help
 EOF
@@ -100,6 +119,8 @@ parse_args() {
 			--schema=*) SCHEMA="${arg#*=}" ;;
 			--show-secrets) SHOW_SECRETS="yes" ;;
 			--port=*)   PORT="${arg#*=}" ;;
+			--app=*)    APP_NAME="${arg#*=}"; APP_EXPLICIT="yes" ;;
+			--control-port=*) CONTROL_PORT="${arg#*=}" ;;
 			--root=*)   PREFIX="${arg#*=}" ;;
 			--yes|-y)   ASSUME_YES="yes" ;;
 			--harden)   HARDEN="yes" ;;
@@ -120,15 +141,52 @@ parse_args() {
 	if [ -n "$PREFIX" ] && [ "$DRY_RUN" != "yes" ]; then
 		die "--root is only for --dry-run testing (it stages files under a prefix systemctl won't read)"
 	fi
-	# Derived paths (PREFIX lets --dry-run stage them under a test root).
-	ETC_DIR="$PREFIX/etc/appitools"
-	ENV_FILE="$ETC_DIR/appitools.env"
+	valid_app_name "$APP_NAME" || die "invalid --app '$APP_NAME': use lowercase letters, digits and '-', starting with a letter (it becomes a systemd unit, a unix user, a directory and a postgres role)"
+	# Every path is namespaced by the app name (OPS-10). With the default name the
+	# values are IDENTICAL to the historical constants, so an existing single-app
+	# box is untouched. PREFIX lets --dry-run stage them under a test root.
+	SERVICE_USER="$APP_NAME"
+	SERVICE_NAME="$APP_NAME"
+	DB_NAME="$(printf '%s' "$APP_NAME" | tr '-' '_')"   # postgres identifiers take no hyphen
+	DB_ROLE="$DB_NAME"
+	ETC_DIR="$PREFIX/etc/$APP_NAME"
+	ENV_FILE="$ETC_DIR/${APP_NAME}.env"
 	SCHEMA_FILE="$ETC_DIR/schema.json"
-	OPT_DIR="$PREFIX/opt/appitools"
-	BIN_PATH="$OPT_DIR/bin/appitools"
-	VARLIB="$PREFIX/var/lib/appitools"
+	OPT_DIR="$PREFIX/opt/$APP_NAME"
+	BIN_PATH="$OPT_DIR/bin/$APP_NAME"
+	VARLIB="$PREFIX/var/lib/$APP_NAME"
 	CADDYFILE="$PREFIX/etc/caddy/Caddyfile"
+	# Each app owns ONE site file; the main Caddyfile only imports the directory,
+	# so installing an app APPENDS a site and can never erase a sibling's.
+	CADDY_SITES_DIR="$PREFIX/etc/caddy/sites"
+	CADDY_SITE_FILE="$CADDY_SITES_DIR/${APP_NAME}.caddy"
 	UNIT_FILE="$PREFIX/etc/systemd/system/${SERVICE_NAME}.service"
+	[ -n "$CONTROL_PORT" ] || CONTROL_PORT="$(default_control_port "$APP_NAME")"
+}
+
+# valid_app_name: what can simultaneously be a systemd unit, a unix user, a
+# directory and (after '-'→'_') a postgres identifier.
+valid_app_name() {
+	case "$1" in
+		[a-z]*) : ;;
+		*) return 1 ;;
+	esac
+	case "$1" in *[!a-z0-9-]*) return 1 ;; esac
+	[ "${#1}" -le 32 ]
+}
+
+# default_control_port: the control plane is localhost-only, but two apps on one
+# box still cannot share a port. The default app keeps 9090 (unchanged); a named
+# app gets a stable, name-derived port in 9091-9189 so re-running the installer
+# always picks the same one.
+default_control_port() {
+	if [ "$1" = "appitools" ]; then printf '9090'; return; fi
+	local sum=0 i c
+	for i in $(seq 1 ${#1}); do
+		c=$(printf '%s' "$1" | cut -c"$i")
+		sum=$(( (sum * 31 + $(printf '%d' "'$c")) % 99 ))
+	done
+	printf '%d' $(( 9091 + sum ))
 }
 
 # ── Validators ───────────────────────────────────────────────────────────────
@@ -144,6 +202,44 @@ valid_domain() {
 # valid_email: something before '@' and a dotted domain after. Deliberately loose
 # (real validation is Let's Encrypt accepting it), just catches paste garbage.
 valid_email() { case "$1" in ?*@?*.?*) return 0 ;; *) return 1 ;; esac; }
+
+# guard_existing_app REFUSES to install a DIFFERENT app over a live one (OPS-10).
+#
+# The installer used to write six fixed paths, so a second run on a box that
+# already served an app replaced its unit, overwrote its secrets (invalidating its
+# JWTs and pointing it at another database) and rewrote the Caddyfile — killing the
+# running app, with only the PORT guarded. The scenario is the normal one: one VPS,
+# two ideas.
+#
+# The rule: if this app name is already installed for a DIFFERENT domain, stop and
+# explain. Re-installing/upgrading the SAME app on the SAME domain is the intended
+# idempotent path and proceeds untouched.
+guard_existing_app() {
+	[ -f "$ENV_FILE" ] || return 0
+	local existing=""
+	[ -f "$CADDY_SITE_FILE" ] && existing="$(awk '/^[a-z0-9.-]+ \{/{sub(/ \{.*/,""); print; exit}' "$CADDY_SITE_FILE" 2>/dev/null || true)"
+	if [ -z "$existing" ] && [ -f "$CADDYFILE" ]; then
+		existing="$(awk '/^[a-z0-9.-]+\.[a-z]+ \{/{sub(/ \{.*/,""); print; exit}' "$CADDYFILE" 2>/dev/null || true)"
+	fi
+	[ -z "$existing" ] && return 0
+	[ "$existing" = "$DOMAIN" ] && return 0
+	local suggestion; suggestion="$(printf '%s' "${DOMAIN%%.*}" | tr -cd 'a-z0-9-')"
+	[ -z "$suggestion" ] && suggestion="app2"
+	die "this box already runs the app \"$APP_NAME\" on $existing, and you asked to install $DOMAIN under the SAME name.
+
+Continuing would replace its systemd unit, overwrite its secrets (breaking every token
+it issued and pointing it at another database) and take $existing OFFLINE.
+
+Install the new app SIDE BY SIDE with its own name instead:
+
+  sudo bash $0 --app=$suggestion --domain=$DOMAIN --email=$EMAIL --binary=... --port=<free port>
+
+That gives it its own unit, /etc/$suggestion, /opt/$suggestion, /var/lib/$suggestion,
+database, control port and Caddy site — and never touches $existing.
+
+To genuinely MOVE \"$APP_NAME\" to $DOMAIN, remove the old site first
+(rm ${CADDY_SITE_FILE#"$PREFIX"}) and re-run."
+}
 
 # ── OS / arch detection ──────────────────────────────────────────────────────
 detect_os() {
@@ -285,7 +381,7 @@ load_or_generate_secrets() {
 	JWT_SECRET="${JWT_SECRET:-$(rand_hex 32)}"
 	ADMIN_KEY="${ADMIN_KEY:-$(rand_hex 24)}"
 	DB_PASS="${DB_PASS:-$(rand_hex 16)}"
-	DATABASE_URL="postgres://${SERVICE_USER}:${DB_PASS}@localhost:5432/appitools?sslmode=disable"
+	DATABASE_URL="postgres://${DB_ROLE}:${DB_PASS}@localhost:5432/${DB_NAME}?sslmode=disable"
 }
 
 # ── System packages ──────────────────────────────────────────────────────────
@@ -416,7 +512,7 @@ install_companion_scripts() {
 # ── PostgreSQL: role + database (idempotent) ─────────────────────────────────
 setup_postgres() {
 	if [ "$DRY_RUN" = "yes" ]; then
-		printf '  [dry-run] create role %s + database appitools (if absent)\n' "$SERVICE_USER"
+		printf '  [dry-run] create role %s + database %s (if absent)\n' "$DB_ROLE" "$DB_NAME"
 		printf '  [dry-run] tune postgresql for this box: shared_buffers=%sMB effective_cache_size=%sMB max_connections=%s\n' \
 			"$(( MEM_MB / 4 ))" "$(( MEM_MB * 55 / 100 ))" "$([ "$MEM_MB" -ge 4096 ] && echo 100 || echo 50)"
 		return
@@ -425,14 +521,14 @@ setup_postgres() {
 	# Wait for the socket (fresh installs take a moment to accept connections).
 	local i; for i in $(seq 1 15); do runuser -u postgres -- psql -tAc 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
 	local psql="runuser -u postgres -- psql -tAX"
-	if [ "$($psql -c "SELECT 1 FROM pg_roles WHERE rolname='${SERVICE_USER}'")" != "1" ]; then
-		$psql -c "CREATE ROLE ${SERVICE_USER} LOGIN PASSWORD '${DB_PASS}'" || die "could not create the postgres role"
+	if [ "$($psql -c "SELECT 1 FROM pg_roles WHERE rolname='${DB_ROLE}'")" != "1" ]; then
+		$psql -c "CREATE ROLE ${DB_ROLE} LOGIN PASSWORD '${DB_PASS}'" || die "could not create the postgres role"
 	else
 		# Re-run realigns the password to the (reused) env file, so they never drift.
-		$psql -c "ALTER ROLE ${SERVICE_USER} WITH PASSWORD '${DB_PASS}'" || die "could not align the postgres role password"
+		$psql -c "ALTER ROLE ${DB_ROLE} WITH PASSWORD '${DB_PASS}'" || die "could not align the postgres role password"
 	fi
-	if [ "$($psql -c "SELECT 1 FROM pg_database WHERE datname='appitools'")" != "1" ]; then
-		$psql -c "CREATE DATABASE appitools OWNER ${SERVICE_USER}" || die "could not create the appitools database"
+	if [ "$($psql -c "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'")" != "1" ]; then
+		$psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_ROLE}" || die "could not create the ${DB_NAME} database"
 	fi
 	tune_postgres
 	ok "postgresql role + database ready (control plane is bootstrapped by the engine on boot)"
@@ -597,6 +693,7 @@ DATABASE_URL=${DATABASE_URL}
 JWT_SECRET=${JWT_SECRET}
 ADMIN_KEY=${ADMIN_KEY}
 APPITOOLS_ENV=production
+APPITOOLS_CONTROL_PORT=${CONTROL_PORT}
 APPITOOLS_FILES_DIR=${VARLIB#"$PREFIX"}/files
 OBS_DB_PATH=${VARLIB#"$PREFIX"}/obs/obs.db"
 	[ -n "$GOMEMLIMIT_VAL" ] && body="${body}
@@ -609,7 +706,7 @@ GOMEMLIMIT=${GOMEMLIMIT_VAL}"
 
 write_systemd_unit() {
 	write_file "$UNIT_FILE" "[Unit]
-Description=Appitools engine
+Description=Appitools app ${APP_NAME}
 Documentation=https://github.com/${REPO}/blob/main/docs/PRODUCTION.md
 Wants=network-online.target
 After=network-online.target postgresql.service
@@ -619,7 +716,7 @@ Type=simple
 User=${SERVICE_USER}
 Group=${SERVICE_USER}
 EnvironmentFile=${ENV_FILE#"$PREFIX"}
-ExecStart=${BIN_PATH#"$PREFIX"} serve --schema ${SCHEMA_FILE#"$PREFIX"} --port ${PORT}
+ExecStart=${BIN_PATH#"$PREFIX"} serve --schema ${SCHEMA_FILE#"$PREFIX"} --port ${PORT} --control-port ${CONTROL_PORT}
 Restart=always
 RestartSec=5
 LimitNOFILE=4096
@@ -628,7 +725,7 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=${VARLIB#"$PREFIX"}
-StateDirectory=appitools
+StateDirectory=${APP_NAME}
 
 [Install]
 WantedBy=multi-user.target"
@@ -641,17 +738,57 @@ write_caddyfile() {
 	# it). request_body caps uploads at 25MB at the edge; the engine also enforces
 	# its own APPITOOLS_FILES_MAX_BYTES. SSE (text/event-stream) is auto-flushed by
 	# reverse_proxy, so /api/*/events works with no extra config.
-	write_file "$CADDYFILE" "{
-	email ${EMAIL}
-}
-
+	#
+	# OPS-10: this app's site lives in ITS OWN file under /etc/caddy/sites, and the
+	# main Caddyfile only IMPORTS that directory. Installing a second app appends a
+	# file; it can never erase the first app's site — which is exactly what the
+	# previous wholesale overwrite did.
+	write_file "$CADDY_SITE_FILE" "# Appitools app: ${APP_NAME}  (managed by scripts/install.sh — edits are overwritten on re-run)
 ${DOMAIN} {
 	request_body {
 		max_size 25MB
 	}
 	reverse_proxy 127.0.0.1:${PORT}
 }"
-	ok "wrote $CADDYFILE"
+	ok "wrote $CADDY_SITE_FILE"
+	ensure_caddy_imports
+}
+
+# ensure_caddy_imports guarantees /etc/caddy/Caddyfile pulls in the per-app site
+# files. It is deliberately ADDITIVE on an existing file: a box that already had a
+# hand-written or previously-generated Caddyfile keeps every line it had, and only
+# gains the import — so upgrading an existing install never drops a site.
+ensure_caddy_imports() {
+	local import_line="import sites/*.caddy"
+	if [ ! -f "$CADDYFILE" ]; then
+		write_file "$CADDYFILE" "{
+	email ${EMAIL}
+}
+
+${import_line}"
+		ok "wrote $CADDYFILE (global options + per-app site imports)"
+		return
+	fi
+	if grep -qF "$import_line" "$CADDYFILE" 2>/dev/null; then
+		return
+	fi
+	if [ "$DRY_RUN" = "yes" ]; then
+		printf '  [dry-run] append %s to %s (existing content preserved)\n' "$import_line" "$CADDYFILE"
+		return
+	fi
+	local bak; bak="${CADDYFILE}.pre-${APP_NAME}.$(date +%Y%m%d-%H%M%S)"
+	cp -p "$CADDYFILE" "$bak"
+	# A pre-OPS-10 Caddyfile has this app's site inline; the site file now owns it,
+	# so drop the inline block to avoid Caddy refusing a duplicate site address.
+	if grep -qE "^[[:space:]]*${DOMAIN//./\\.}[[:space:]]*\{" "$CADDYFILE"; then
+		awk -v d="$DOMAIN" '
+			$0 ~ "^[[:space:]]*" d "[[:space:]]*\\{" { skip=1; depth=0 }
+			skip { depth += gsub(/\{/,"{"); depth -= gsub(/\}/,"}"); if (depth<=0) skip=0; next }
+			{ print }' "$bak" > "$CADDYFILE"
+		info "moved the inline ${DOMAIN} block into ${CADDY_SITE_FILE#"$PREFIX"} (backup: $bak)"
+	fi
+	printf '\n%s\n' "$import_line" >> "$CADDYFILE"
+	ok "Caddyfile now imports per-app sites (backup: $bak)"
 }
 
 # ── Start / reload ───────────────────────────────────────────────────────────
@@ -720,7 +857,7 @@ maybe_harden() {
 
 # ── Uninstall ────────────────────────────────────────────────────────────────
 uninstall() {
-	info "uninstalling Appitools…"
+	info "uninstalling the app \"$APP_NAME\"…"
 	if [ "$DRY_RUN" = "yes" ]; then
 		printf '  [dry-run] stop+disable %s; rm %s %s %s; rm Caddyfile; %s\n' \
 			"$SERVICE_NAME" "$UNIT_FILE" "$OPT_DIR" "$ETC_DIR" \
@@ -731,26 +868,33 @@ uninstall() {
 	systemctl disable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
 	rm -f "$UNIT_FILE"; systemctl daemon-reload >/dev/null 2>&1 || true
 	rm -rf "$OPT_DIR" "$ETC_DIR"
-	# Restore the pre-appitools Caddyfile if we backed one up, else remove ours.
-	local bak; bak="$(ls -1t "${CADDYFILE}".pre-appitools.* 2>/dev/null | head -1 || true)"
-	if [ -n "$bak" ]; then
-		mv -f "$bak" "$CADDYFILE"; systemctl reload caddy 2>/dev/null || true
-		ok "restored the pre-appitools Caddyfile"
-	elif [ -f "$CADDYFILE" ] && grep -q "127.0.0.1:${PORT}" "$CADDYFILE" 2>/dev/null; then
-		rm -f "$CADDYFILE"; systemctl reload caddy 2>/dev/null || systemctl stop caddy 2>/dev/null || true
+	# OPS-10: removing an app removes ITS site file and nothing else — a sibling
+	# app's site (and the shared Caddyfile) survive untouched.
+	if [ -f "$CADDY_SITE_FILE" ]; then
+		rm -f "$CADDY_SITE_FILE"; systemctl reload caddy 2>/dev/null || true
+		ok "removed this app's Caddy site ($CADDY_SITE_FILE)"
+	else
+		# Pre-OPS-10 layout: this app's block lived inline in the Caddyfile.
+		local bak; bak="$(ls -1t "${CADDYFILE}".pre-appitools.* 2>/dev/null | head -1 || true)"
+		if [ -n "$bak" ]; then
+			mv -f "$bak" "$CADDYFILE"; systemctl reload caddy 2>/dev/null || true
+			ok "restored the pre-appitools Caddyfile"
+		elif [ -f "$CADDYFILE" ] && grep -q "127.0.0.1:${PORT}" "$CADDYFILE" 2>/dev/null; then
+			rm -f "$CADDYFILE"; systemctl reload caddy 2>/dev/null || systemctl stop caddy 2>/dev/null || true
+		fi
 	fi
 	ok "service, unit, binary and config removed"
 	if [ "$PURGE" = "yes" ]; then
 		warn "purging the database + data dir (destructive)"
-		runuser -u postgres -- psql -tAX -c "DROP DATABASE IF EXISTS appitools" >/dev/null 2>&1 || true
-		runuser -u postgres -- psql -tAX -c "DROP ROLE IF EXISTS ${SERVICE_USER}" >/dev/null 2>&1 || true
+		runuser -u postgres -- psql -tAX -c "DROP DATABASE IF EXISTS ${DB_NAME}" >/dev/null 2>&1 || true
+		runuser -u postgres -- psql -tAX -c "DROP ROLE IF EXISTS ${DB_ROLE}" >/dev/null 2>&1 || true
 		rm -rf "$VARLIB"
 		ok "database, role and data dir dropped"
 	else
 		info "database + data dir kept (they hold your data). To also drop them: --uninstall --purge"
 	fi
 	info "postgresql and caddy packages were left installed (they may be shared). Remove with apt if unused."
-	ok "Appitools uninstalled."
+	ok "the app \"$APP_NAME\" was uninstalled (other apps on this box are untouched)."
 }
 
 # detect_control_port: read the CONTROL-PLANE port from the LIVE service's
@@ -759,13 +903,14 @@ uninstall() {
 # old summary printed a dead endpoint). The control port is "whatever the
 # service listens on that is not the data port". Falls back to 9090 with a note.
 detect_control_port() {
-	CONTROL_PORT=""
-	[ "$DRY_RUN" = "yes" ] && { CONTROL_PORT="9090"; return; }
+	# Keep the CONFIGURED port as the fallback (OPS-10: a named app is not on 9090).
+	local configured="$CONTROL_PORT" detected=""
+	[ "$DRY_RUN" = "yes" ] && return
 	local pid; pid="$(systemctl show -p MainPID --value "$SERVICE_NAME" 2>/dev/null)"
 	if [ -n "$pid" ] && [ "$pid" != "0" ]; then
-		CONTROL_PORT="$(ss -ltnpH 2>/dev/null | grep "pid=$pid," | grep -oE ':[0-9]+ ' | tr -d ': ' | grep -v "^$PORT$" | sort -u | head -1)"
+		detected="$(ss -ltnpH 2>/dev/null | grep "pid=$pid," | grep -oE ':[0-9]+ ' | tr -d ': ' | grep -v "^$PORT$" | sort -u | head -1)"
 	fi
-	[ -n "$CONTROL_PORT" ] || CONTROL_PORT="9090"
+	CONTROL_PORT="${detected:-${configured:-9090}}"
 }
 
 # ── Summary ──────────────────────────────────────────────────────────────────
@@ -823,6 +968,7 @@ main() {
 	trap on_install_exit EXIT
 	preflight
 	gather_input
+	guard_existing_app   # OPS-10: never clobber a DIFFERENT app that is already live
 	preflight_conflicts
 	load_or_generate_secrets
 	install_packages

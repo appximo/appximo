@@ -25,11 +25,16 @@
 #        installer's /etc/appitools/appitools.env), --dir=PATH, --keep=N.
 set -euo pipefail
 
+# OPS-10: --app=NAME points the backup at THAT app's env file and its own backup
+# directory, so a box running several apps backs each one up separately instead of
+# silently dumping the same database twice.
+APP_NAME=""
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/appitools}"
 BACKUP_KEEP="${BACKUP_KEEP:-14}"
 ENV_FILE=""
 for arg in "$@"; do
 	case "$arg" in
+		--app=*)      APP_NAME="${arg#*=}" ;;
 		--env-file=*) ENV_FILE="${arg#*=}" ;;
 		--dir=*)      BACKUP_DIR="${arg#*=}" ;;
 		--keep=*)     BACKUP_KEEP="${arg#*=}" ;;
@@ -37,6 +42,12 @@ for arg in "$@"; do
 		*) echo "unknown flag: $arg" >&2; exit 1 ;;
 	esac
 done
+
+# --app derives this app's env file + its own backup directory (OPS-10).
+if [ -n "$APP_NAME" ]; then
+	[ -n "$ENV_FILE" ] || ENV_FILE="/etc/$APP_NAME/$APP_NAME.env"
+	[ "$BACKUP_DIR" = "/var/backups/appitools" ] && BACKUP_DIR="/var/backups/$APP_NAME"
+fi
 
 if [ -n "$ENV_FILE" ]; then
 	[ -f "$ENV_FILE" ] || { echo "env file '$ENV_FILE' not found" >&2; exit 1; }
@@ -47,7 +58,7 @@ command -v pg_dump >/dev/null || { echo "pg_dump not found (apt-get install post
 
 mkdir -p "$BACKUP_DIR"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-OUT="$BACKUP_DIR/appitools-$STAMP.dump"
+OUT="$BACKUP_DIR/${APP_NAME:-appitools}-$STAMP.dump"
 TMP="$OUT.partial"
 
 # Dump to a .partial then rename, so a crashed run never leaves a truncated file

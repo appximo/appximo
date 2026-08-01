@@ -106,6 +106,58 @@ and a filtered, sorted, paginated page answers in **4.4 ms** end to end.
 (a single box, a stateless engine in front of Postgres) that is the state of the
 art — `tableflip`/blue-green/socket-handoff add moving parts with nothing to buy.
 
+### 2b. Several apps on one box (`--app`)
+
+One VPS, two ideas is the normal case. Every path the installer writes is
+namespaced by an **app name**, so a second app is one flag:
+
+```bash
+# first app — unchanged, no flag needed (the name defaults to "appitools")
+sudo bash install.sh --domain=tienda.example.com --email=you@example.com --binary=./appitools
+
+# second app on the SAME box, fully separate
+sudo bash install.sh --app=vetapp --domain=petfriendly.example.com \
+     --email=you@example.com --binary=./vetapp --port=8091
+```
+
+What `--app=NAME` namespaces — everything an app owns, so two apps share nothing
+but the machine, PostgreSQL and Caddy:
+
+| | default app | `--app=vetapp` |
+|---|---|---|
+| systemd unit | `appitools.service` | `vetapp.service` |
+| service user | `appitools` | `vetapp` |
+| config + boot schema | `/etc/appitools/` | `/etc/vetapp/` |
+| binary | `/opt/appitools/bin/appitools` | `/opt/vetapp/bin/vetapp` |
+| data (files, obs) | `/var/lib/appitools/` | `/var/lib/vetapp/` |
+| database + role | `appitools` | `vetapp` |
+| secrets (JWT, admin key) | its own | its own — never shared |
+| control plane (localhost) | `:9090` | a stable port derived from the name (`--control-port` to pin it) |
+| Caddy site | `/etc/caddy/sites/appitools.caddy` | `/etc/caddy/sites/vetapp.caddy` |
+
+**The Caddyfile is never overwritten.** Each app owns one file under
+`/etc/caddy/sites/`, and the main `Caddyfile` only carries the global options plus
+`import sites/*.caddy`. Installing an app APPENDS a site; removing one removes only
+its own file.
+
+**The installer refuses to clobber a live app.** Running it for a *different*
+domain without `--app` stops before touching anything and prints the exact
+side-by-side command to run instead — the failure mode this replaced was a second
+install replacing the first app's unit, secrets and Caddyfile and taking it offline.
+
+The companion scripts take the same flag:
+
+```bash
+sudo bash /opt/vetapp/scripts/deploy-update.sh --app=vetapp --binary=/tmp/vetapp
+sudo bash /opt/vetapp/scripts/backup.sh --app=vetapp        # its own DB → /var/backups/vetapp
+sudo bash install.sh --uninstall --app=vetapp               # removes ONLY vetapp
+```
+
+Note the **ports**: the data port is yours to choose (`--port`), and two apps
+cannot share one — the pre-flight checks it. The control port is derived from the
+app name so re-running the installer always picks the same one; pin it with
+`--control-port` if you prefer.
+
 ---
 
 ## 3. Updates & redeploys

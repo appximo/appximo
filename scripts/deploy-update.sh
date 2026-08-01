@@ -22,6 +22,8 @@
 # Flags:
 #   --binary=PATH        the new binary to install                     [required]
 #   --cli=PATH           also update the ops companion (appitools-cli) [optional]
+#   --app=NAME           the app to update on a multi-app box (OPS-10): sets
+#                        --service=NAME and --dest=/opt/NAME/bin/NAME
 #   --service=NAME       systemd unit name                             [default appitools]
 #   --dest=PATH          installed binary path                         [default /opt/appitools/bin/appitools]
 #   --port=PORT          engine port for the health check              [default 8090]
@@ -30,11 +32,16 @@
 set -euo pipefail
 
 BINARY=""; CLI=""; SERVICE="appitools"; DEST="/opt/appitools/bin/appitools"; PORT="8090"
+# OPS-10: --app=NAME derives the unit and the installed path for a box running
+# several apps, so you never have to spell both out (and never point one app's
+# deploy at another app's binary).
+APP_NAME=""
 HEALTH_TIMEOUT="30"
 for arg in "$@"; do
 	case "$arg" in
 		--binary=*)  BINARY="${arg#*=}" ;;
 		--cli=*)     CLI="${arg#*=}" ;;
+		--app=*)     APP_NAME="${arg#*=}" ;;
 		--service=*) SERVICE="${arg#*=}" ;;
 		--dest=*)    DEST="${arg#*=}" ;;
 		--port=*)    PORT="${arg#*=}" ;;
@@ -43,6 +50,12 @@ for arg in "$@"; do
 		*) echo "unknown flag: $arg" >&2; exit 1 ;;
 	esac
 done
+
+# --app derives the unit + destination unless they were given explicitly (OPS-10).
+if [ -n "$APP_NAME" ]; then
+	[ "$SERVICE" = "appitools" ] && SERVICE="$APP_NAME"
+	[ "$DEST" = "/opt/appitools/bin/appitools" ] && DEST="/opt/$APP_NAME/bin/$APP_NAME"
+fi
 
 if [ -t 1 ]; then G=$'\033[0;32m'; R=$'\033[0;31m'; Y=$'\033[1;33m'; N=$'\033[0m'; else G=""; R=""; Y=""; N=""; fi
 ok()  { printf '%s✓%s %s\n' "$G" "$N" "$*"; }
