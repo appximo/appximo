@@ -36,6 +36,20 @@ func cspRouter(hs []*staticHandler) *chi.Mux {
 	return r
 }
 
+// expectedStaticCSP is the policy a DEFAULT mount actually resolves to for a given
+// shell. Since SEC-2 the default is HARDENED per mount — inline scripts pinned by
+// sha256, or `script-src 'self'` when there are none — so these tests compare
+// against what the mount resolved, not against the DefaultStaticCSP constant. What
+// they are actually pinning is unchanged and is the ENG-5 contract: the STATIC
+// mount's policy is what ships, never the API's `default-src 'none'`.
+func expectedStaticCSP(index []byte) string {
+	policy, _ := hardenedStaticCSP(DefaultStaticCSP, index)
+	return policy
+}
+
+// spaIndex is the fixture shell's index.html (see spaFS in static_test.go).
+var spaIndex = []byte("<!doctype html><div id=app>")
+
 func cspOf(t *testing.T, h http.Handler, path string) (string, int) {
 	t.Helper()
 	rec := httptest.NewRecorder()
@@ -51,8 +65,8 @@ func TestStaticCSP_RootMountOverridesTheAPIPolicy(t *testing.T) {
 		if code != 200 {
 			t.Fatalf("GET %s = %d, want 200", p, code)
 		}
-		if csp != DefaultStaticCSP {
-			t.Errorf("GET %s CSP = %q, want the static default (the API's default-src 'none' must NOT leak onto the document)", p, csp)
+		if csp != expectedStaticCSP(spaIndex) {
+			t.Errorf("GET %s CSP = %q, want the static mount's own policy (the API's default-src 'none' must NOT leak onto the document)", p, csp)
 		}
 	}
 
@@ -78,8 +92,8 @@ func TestStaticCSP_SubPathMountGetsTheSamePolicy(t *testing.T) {
 		if code != 200 {
 			t.Fatalf("GET %s = %d, want 200", p, code)
 		}
-		if csp != DefaultStaticCSP {
-			t.Errorf("GET %s CSP = %q, want the static default (a sub-path mount used to ship NO policy at all)", p, csp)
+		if csp != expectedStaticCSP(spaIndex) {
+			t.Errorf("GET %s CSP = %q, want the static mount's own policy (a sub-path mount used to ship NO policy at all)", p, csp)
 		}
 	}
 }
@@ -104,7 +118,7 @@ func TestStaticCSP_PerMountOverride(t *testing.T) {
 func TestStaticCSP_AssetsAreStampedToo(t *testing.T) {
 	h := cspRouter(mustCompile(t, StaticMount{Path: "/", FS: spaFS(), SPA: true}))
 	csp, code := cspOf(t, h, "/assets/app-abc123.js")
-	if code != 200 || csp != DefaultStaticCSP {
+	if code != 200 || csp != expectedStaticCSP(spaIndex) {
 		t.Errorf("asset: code %d CSP %q — the mount's policy applies uniformly (never the API's)", code, csp)
 	}
 }

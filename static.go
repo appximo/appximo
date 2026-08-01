@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net/http"
 	"path"
 	"sort"
@@ -220,7 +221,15 @@ func validateStaticMounts(mounts []StaticMount) ([]*staticHandler, error) {
 		csp := m.CSP
 		switch csp {
 		case "":
-			csp = DefaultStaticCSP
+			// SEC-2: the DEFAULT policy is hardened per mount by hashing the
+			// shell's inline scripts, so `'unsafe-inline'` is only kept when the
+			// document genuinely cannot be covered — and then the reason is
+			// logged, never assumed.
+			var note string
+			csp, note = hardenedStaticCSP(DefaultStaticCSP, idx)
+			if note != "" {
+				log.Printf("static mount %q: %s", prefixLabel(prefix), note)
+			}
 		case CSPOff:
 			csp = ""
 		}

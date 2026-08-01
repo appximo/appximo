@@ -33,10 +33,53 @@ type cacheItem struct {
 	status      int
 	contentType string
 	etag        string
-	plain       []byte
-	gzipped     []byte
-	gzipLen     string // strconv.Itoa(len(gzipped)), precomputed once for the Content-Length header
-	expiresAt   time.Time
+	// secHeaders are the SECURITY headers captured from the handler chain, so a
+	// cache HIT carries the same posture as a MISS (SEC-1).
+	//
+	// The engine's chain sets security headers in two places: SecurityHeaders
+	// runs OUTSIDE the cache (so its headers are re-applied on every request and
+	// survive a hit for free), while StrictCSP runs INSIDE the cached group — so
+	// before this, a cached response silently lost its Content-Security-Policy.
+	// The header was present on a `Cache-Control: no-cache` bypass and absent on
+	// every cached read: the same URL answered with two different security
+	// postures depending on cache state.
+	//
+	// An ALLOWLIST, not the whole header set, and that is deliberate: replaying
+	// every captured header would replay per-request values too. `X-Trace-Id` is
+	// the clear example — serving one request's trace id to a thousand later
+	// callers would corrupt the trace ring and make an incident unreadable.
+	// Content-Length/Encoding/Vary are recomputed per encoding, and Date must be
+	// the response's own. So the cache replays exactly the headers whose whole
+	// purpose is to be identical for every caller.
+	secHeaders []headerKV
+	plain      []byte
+	gzipped    []byte
+	gzipLen    string // strconv.Itoa(len(gzipped)), precomputed once for the Content-Length header
+	expiresAt  time.Time
+}
+
+// headerKV is one captured header. A slice of pairs rather than an http.Header
+// map: it is built once per cached item, read on every hit, and never mutated —
+// so the flat form is both cheaper to range over and impossible to alias.
+type headerKV struct{ k, v string }
+
+// cachedSecurityHeaders is the allowlist replayed onto a cache hit. It is the
+// security-header family: every one of them is a property of the RESPONSE'S
+// CONTENT, identical for every caller of the same URI, which is exactly what
+// makes them safe to cache. Adding a header here is a deliberate act; anything
+// per-request must NOT be added (see the note on cacheItem.secHeaders).
+var cachedSecurityHeaders = []string{
+	"Content-Security-Policy",
+	"Content-Security-Policy-Report-Only",
+	"X-Content-Type-Options",
+	"X-Frame-Options",
+	"Referrer-Policy",
+	"Strict-Transport-Security",
+	"Permissions-Policy",
+	"Cross-Origin-Opener-Policy",
+	"Cross-Origin-Embedder-Policy",
+	"Cross-Origin-Resource-Policy",
+	"X-Xss-Protection",
 }
 
 // ResponseCache is a thread-safe in-memory response cache keyed by
@@ -313,6 +356,7 @@ func (rc *ResponseCache) buildItem(status int, header http.Header, plain []byte)
 		status:      status,
 		contentType: header.Get("Content-Type"),
 		etag:        header.Get("Etag"),
+		secHeaders:  captureSecurityHeaders(header),
 		plain:       plain,
 		expiresAt:   time.Now().Add(rc.ttl),
 	}
@@ -336,6 +380,12 @@ func writeItem(w http.ResponseWriter, r *http.Request, item *cacheItem, hit bool
 	}
 	if item.etag != "" {
 		h.Set("Etag", item.etag)
+	}
+	// SEC-1: re-apply the security headers the handler chain set, so a HIT and a
+	// MISS answer with the same posture. Set (not Add) so re-applying a header the
+	// outer SecurityHeaders middleware already wrote is idempotent.
+	for _, kv := range item.secHeaders {
+		h.Set(kv.k, kv.v)
 	}
 	if hit {
 		h.Set("X-Cache", "HIT")
@@ -492,4 +542,18 @@ func (b *bufferedResponse) Write(p []byte) (int, error) {
 		b.WriteHeader(http.StatusOK)
 	}
 	return b.body.Write(p)
+}
+
+// captureSecurityHeaders extracts the allowlisted security headers from a
+// handler's response so they can be replayed on a cache hit (SEC-1). Returns nil
+// when none are present, so a cached item costs nothing extra on a chain that
+// sets none.
+func captureSecurityHeaders(header http.Header) []headerKV {
+	var out []headerKV
+	for _, k := range cachedSecurityHeaders {
+		if v := header.Get(k); v != "" {
+			out = append(out, headerKV{k, v})
+		}
+	}
+	return out
 }
