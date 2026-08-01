@@ -3,6 +3,7 @@ package rbac
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -56,8 +57,16 @@ func RBACMiddlewareWithPublic(policyJSON []byte, isPublic func(method, path stri
 
 			action := actionFromMethod(r.Method)
 
-			result := policy.Evaluate(EvalContextFromRequest(r), resource, action)
+			evalCtx := EvalContextFromRequest(r)
+			result := policy.Evaluate(evalCtx, resource, action)
 			if !result.Allowed {
+				// ENG-27: the deny reason goes to the SERVER LOG, never the body.
+				// Both deny variants (undeclared role / declared-but-denied) run
+				// the same code from here on — same lookup, same log write, same
+				// response bytes — so neither the body, the status, the response
+				// length nor the timing distinguishes them for the caller.
+				log.Printf("rbac: denied %s %s — %s (user_id=%q)",
+					r.Method, r.URL.Path, policy.DenyDetail(evalCtx.Role, resource, action), evalCtx.UserID)
 				// Mark the rbac stage so a persisted 403 trace shows it reached
 				// (and was stopped at) RBAC (no stack — 403 is a client error).
 				if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {

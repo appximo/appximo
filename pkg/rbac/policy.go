@@ -2,6 +2,7 @@ package rbac
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 )
 
@@ -67,6 +68,29 @@ type Condition struct {
 	Field string `json:"field"`
 	Op    string `json:"op"`  // "eq", "neq", "in", etc.
 	Val   string `json:"val"` // may be "$user_id", "$external_client_id", or a literal
+}
+
+// DenyDetail returns the operator-facing explanation of a deny: whether the
+// caller's role is not declared by any schema role at all, or is declared but
+// lacks the grant. SERVER LOG ONLY — deliberately asymmetric (ENG-27):
+//
+//   - The RESPONSE stays the byte-identical `403 {"error":"forbidden"}` for both
+//     cases. Distinguishing them in the body would turn every endpoint into an
+//     enumeration oracle over the schema's role namespace (an attacker minting
+//     tokens could probe which role names exist).
+//   - The LOG gains the distinction, because that is where the operator looks
+//     and the attacker cannot. Before this, a token carrying a typo'd or forged
+//     role produced a deny indistinguishable from a legitimate one anywhere —
+//     not the engine log, not the access log, not the trace.
+//
+// Echoing the role name in the log leaks nothing to the caller (they hold the
+// JWT; its claims are base64, not encrypted). Same family as SEC-5: a defence
+// must not leak through its own error channel.
+func (p *Policy) DenyDetail(role, resource, action string) string {
+	if _, declared := p.Roles[role]; !declared {
+		return fmt.Sprintf("role %q is not declared by any schema role", role)
+	}
+	return fmt.Sprintf("role %q is declared but not permitted %q on %q", role, action, resource)
 }
 
 // Allows reports whether role may perform action on resource.
