@@ -25,11 +25,11 @@
 # ── THE CANONICAL BASELINE (OPS-9, AI-JOURNEY-S1) ────────────────────────────
 # The comparable series every future session measures against:
 #   engine:   make dev-fast          (serves examples/blank/schema.json on :8080)
-#   tenant:   bench_blank            (DEDICATED, permanent — never piggyback on
+#   tenant:   benchblank            (DEDICATED, permanent — never piggyback on
 #                                     acme/nimbus, whose tables belong to other
 #                                     fixtures; create it once:
 #                                     curl -X POST localhost:9090/tenants -H "X-Admin-Key: $ADMIN_KEY" \
-#                                       -d '{"tenant_id":"bench_blank","display_name":"Bench","email":"b@x.co","plan":"free","schema":'"$(cat examples/blank/schema.json)"'}' )
+#                                       -d '{"tenant_id":"benchblank","display_name":"Bench","email":"b@x.co","plan":"free","schema":'"$(cat examples/blank/schema.json)"'}' )
 #   endpoint: AUTO-DERIVED from the served /openapi.json → /api/items?per_page=20
 #   rate:     100 rps · 30 s · RUNS=10   (the shared 105 is unreliable above ~100)
 #   role:     admin                  (BENCH_ROLE to override)
@@ -52,7 +52,7 @@ cd "$REPO_ROOT"
 
 DEVHUB_URL="${DEVHUB_URL:-http://localhost:3099}"
 TARGET_URL="${TARGET_URL:-http://localhost:8080}"
-TENANT="${TENANT_ID:-bench_blank}"
+TENANT="${TENANT_ID:-benchblank}"
 BENCH_ROLE="${BENCH_ROLE:-admin}"
 # ENDPOINT: derived from the SERVED surface (first /api/{resource} in
 # /openapi.json) unless overridden — never a hardcoded fixture (OPS-9).
