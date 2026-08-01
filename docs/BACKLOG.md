@@ -101,6 +101,102 @@ re-verified against reality on that date, not carried forward on trust.
   first role, like acceptance-test does), or a hard, actionable pre-flight
   failure naming the overrides.
 
+### ENG-11 — A tenant id the control plane accepts can be UNROUTABLE
+- **Origin:** AI-JOURNEY-S1, creating the bench baseline tenant. The control
+  plane's rule is `^[a-z][a-z0-9_]{1,29}$` (underscore allowed — it becomes the
+  Postgres schema), but the Host-subdomain matcher (`pkg/tenant` `tenantRe`) is
+  `^[a-z0-9][a-z0-9\-]{0,28}[a-z0-9]$` (underscore NOT allowed, hyphen allowed —
+  the DNS alphabet). `bench_blank` registered fine and then answered **400
+  "invalid tenant" on every request**. Worse, **Studio's deploy modal advertises
+  the wrong alphabet**: "Lowercase letter first, then lowercase letters, digits
+  or '_' … no hyphens" — it tells a non-programmer to type exactly what breaks.
+- **Impact:** Medium-high for a first-time user: the failure is silent at
+  creation and total at use, with an error ("invalid tenant") that names neither
+  the cause nor the fix. Every existing tenant is unaffected (none use `_`).
+- **Ready:** ONE alphabet across the control plane, the Host matcher, Studio and
+  the admin console — the intersection `^[a-z][a-z0-9]{1,29}$` is the honest
+  choice (a Postgres schema cannot take a hyphen; a Host label cannot take an
+  underscore); registration rejects the rest with the suggested fix it already
+  computes, and Studio's helper text matches.
+
+### ENG-12 — A newly deployed column is readable but NOT writable until restart
+- **Origin:** AI-JOURNEY-S1, measured end to end on a live app (Studio deploy of
+  `pets.weight_kg`): `GET` returns the column, `PATCH` answers **422 "unknown
+  field"** until the process restarts. The write path validates the body against
+  the resource captured from the BOOT schema (`codegen.CollectUpdate` /
+  `CollectInsert` close over it); the tenant's deployed schema and the
+  `tenant.SchemaCache` have no say. Two rounds of documentation claimed
+  otherwise and both are now corrected (see the commit "correct the hot-write
+  claim"); Studio was always honest ("needs an engine restart" + one click).
+- **Impact:** Medium. The restart exists and is one click, so this is friction,
+  not breakage — but it makes "deploy a field and start using it" a two-act
+  operation, and it is the single most-repeated wrong claim in the docs.
+- **Ready:** the write path validates against the TENANT'S deployed schema (the
+  per-tenant cache the deploy already invalidates) with the boot schema as the
+  fallback; a field added by a deploy is writable with no restart; validation
+  rules for it still compile at boot (documented); benchmarked `no_change` on
+  the write path, which is a hot path — this one must be measured carefully.
+
+### OPS-10 — A second app on an already-installed server destroys the first
+- **Origin:** AI-JOURNEY-S1 Part B, measuring gap 3-11 with precision. Every
+  path `install.sh` writes is a FIXED constant: unit `appitools.service`, env
+  `/etc/appitools/appitools.env`, schema `/etc/appitools/schema.json`, binary
+  `/opt/appitools/bin/appitools`, data `/var/lib/appitools`, and the WHOLE
+  `/etc/caddy/Caddyfile`. On the 58 (which serves the tienda) all six are
+  occupied, so a second `install.sh` run would replace the unit, overwrite the
+  secrets (invalidating the first app's JWTs and pointing it at another
+  database) and rewrite the Caddyfile — taking the FIRST app down. The
+  pre-flight only guards the PORT and backs the Caddyfile up; nothing warns
+  that the install is destructive for an existing DIFFERENT app.
+- **Impact:** **High for the "aprovechá tu VPS" story** — the normal case for
+  anyone with one server and two ideas. Today the only safe path is manual:
+  a second unit file, a second env/schema dir, a second Caddy site block, all
+  hand-written (i.e. exactly the tribal knowledge the product is trying to
+  remove).
+- **Ready:** `install.sh --app=NAME` (default `appitools` — byte-identical
+  behavior for the existing single-app case) namespacing unit/env/schema/binary/
+  data dir, plus a Caddy site block APPENDED (or a `conf.d`-style include)
+  instead of a wholesale overwrite; a pre-flight that detects a different
+  existing app and refuses rather than clobbering; `--uninstall --app=NAME`
+  removing only that app. Verified by installing two apps on one box and
+  killing/updating one without touching the other.
+
+### DOC-2 — The authoring cycle's discoverability + generation gaps
+- **Origin:** AI-JOURNEY-S1, `docs/AUTHORING_JOURNEY.md` (field report PART
+  FIVE). Three findings that are documentation/UX, not engine:
+  (a) **`ai-generate` never emits a state machine** — the compact grammar in
+  `pkg/aigen/prompt.go` does not teach the construct, so a user who describes a
+  lifecycle ("first requested, then confirmed…") gets a plain enum and no
+  warning, no matter how they rephrase (verified twice, 2 and 3 iterations);
+  (b) **nothing tells a user that `appitools spec` is the context to paste into
+  their own AI** — the flow that makes "my assistant edits my app" work is
+  documented only in a doc they have no reason to read;
+  (c) **`backend-spec` never says how to OBTAIN the module** — an agent given
+  only the doc guessed a version, `go mod tidy` failed against the private repo,
+  and the project built only after a human added a local `replace`.
+- **Impact:** High for adoption: (a) ships silently wrong business rules,
+  (c) blocks the 10 % path entirely for anyone outside this machine.
+- **Ready:** the generation grammar covers state machines + per-resource
+  `permissions` and the generator reports what it could NOT express; Studio has
+  a one-click "copy AI context" (spec + current schema); `backend-spec` opens
+  with a working dependency recipe (a published module/tag, or the documented
+  `replace` for a local checkout) — and a generated project builds from the doc
+  alone on a fresh machine.
+
+### SCHEMA-5 — A row condition against a relation column is a silent zero-rows app
+- **Origin:** AI-JOURNEY-S1 (AUTHORING_JOURNEY 5-1). The generated schema scoped
+  vets with `{field: "veterinarian_id", op: "eq", val: "$user_id"}` —
+  `veterinarian_id` is a FK to `veterinarians`, a different id space from the JWT
+  subject. It validates, deploys, and returns **zero rows forever**, with no
+  error at any layer.
+- **Impact:** Medium-high and nasty: the app looks broken ("I see nothing")
+  with nothing to grep for. Any AI-generated schema is prone to it, and so is a
+  human using Studio's row-filter picker (which lists every column).
+- **Ready:** load-time WARNING (not an error — the pattern is legal when the FK
+  genuinely holds auth user ids) when a `$user_id` condition targets a column
+  declared as a `relation`, naming the likely fix (an `auth_user_id` column, or
+  the identity resource being the target); Studio's picker shows the same hint.
+
 ### SCHEMA-1 — Computed / derived fields
 - **Origin:** docs/MODEL_LAB.md G7 ("order totals as a computed field").
 - **Impact:** Medium. Totals, counts and balances are recomputed by the client or
