@@ -470,6 +470,19 @@ without them). A complete, working example:
 }
 ```
 
+**Validation answers "may this run?"; WARNINGS answer "will this do what you meant?"**
+(SCHEMA-5). `schema.Warnings` is a separate, NON-BLOCKING layer for schemas that are
+valid, deployable and almost certainly wrong. Its first rule: a row condition
+comparing `$user_id` (or `$external_client_id`) against a column declared as a
+`relation` — the JWT subject and a foreign key to another resource are different id
+spaces, so the rule matches **zero rows forever** with no error at any layer (measured
+in production: the app just shows nothing). It is a warning, not an error, because the
+pattern is legal when the FK genuinely holds login ids — and it is SUPPRESSED when the
+relation points at a column named `user_id`/`auth_user_id`/`login_id`, i.e. once you
+apply the suggested fix. Warnings surface in `appitools validate`, `validate --json`
+(`warnings[]`, with `valid` untouched, so the AI correction loop can act on them), the
+control-plane / `/admin` deploy response, engine boot, and `ai-generate`'s report.
+
 Naming rules (enforced at load): resource **and** field names both match
 `^[a-z][a-z0-9_]*$` — lowercase, start with a letter, `_` for multi-word names
 (`order_items`). **`-` is NOT allowed in a resource name** (it is not a valid
@@ -1069,6 +1082,31 @@ Guarantees:
 - An approved table drop also removes any foreign key that still references it (a
   required, data-safe consequence), so the `DROP TABLE` succeeds rather than failing on
   a dangling reference.
+- **DECLARED == APPLIED, verified against the DATABASE (ENG-13).** After every apply
+  the engine RE-INTROSPECTS the live schema and re-diffs: anything the schema declares
+  that the database does not have comes back in `ApplyOutcome.Unapplied`, and
+  `Partial()` is true. **A partial apply is a FAILURE in every surface** — the CLI
+  prints what did not land and exits non-zero WITHOUT persisting the schema, the
+  control plane / `/admin` PUT restores the tenant's previous schema and answers 422,
+  and the fan-out marks the tenant failed (so a re-run retries it). The migrator never
+  grades its own work: the verdict comes from the catalog, not the log.
+- **An FK whose DEFINITION changed is a REPLACEMENT, not a drop.** Changing
+  `references` / `on_delete` / `on_update` on an EXISTING relation emits a
+  DropForeignKey + AddForeignKey over the same `(table, columns)`; the drop is un-gated
+  (dropping a constraint loses no row data) and both halves run in ONE transaction, so
+  a failure rolls back to the old constraint and the column is never left unprotected.
+  Before this, the drop was gated as drift and the add collided with the surviving
+  constraint's generated name (`42710`) — the change was a **silent no-op** while the
+  tenant's recorded schema claimed the new shape, and the stale FK then BLOCKED the
+  data migration the new schema required. The whole class is audited in
+  [docs/audits/MIGRATION_HONESTY_AUDIT.md](docs/audits/MIGRATION_HONESTY_AUDIT.md).
+- **A `renamed_from` that cannot run is reported, not swallowed.** When BOTH the old
+  and new names already exist the rename cannot happen; it now surfaces as a blocked
+  rename (a `[blocked]` concern in the dry-run, and `Unapplied` on apply) instead of
+  leaving the values in the old column while the schema claims they moved.
+- **An FK left `NOT VALID`** (added over rows that already violate it — new writes ARE
+  checked, historical rows are not) is reported in `ApplyOutcome.UnvalidatedFKs` and
+  printed by the CLI in plain language, not only logged.
 
 #### Version history + rollback (VERSION-S1)
 
@@ -1164,13 +1202,20 @@ Facts agents most often get wrong:
   `Host: acme.localhost` (or a real subdomain). Host of a different
   tenant → 401 `token tenant mismatch`; Host with no subdomain (bare
   IP/`localhost`) → 500 with empty body.
-- **Tenant id rule: `^[a-z][a-z0-9_]{1,29}$`** — a lowercase letter first, then
-  lowercase letters, digits or `_`, 2–30 chars. **No hyphens/uppercase/spaces**:
-  the id becomes the Postgres schema `tenant_<id>`, which the data path only
-  accepts as `^[a-z][a-z0-9_]*$` — a hyphenated id used to register and then
-  fail every query. One rule, three layers: the control plane rejects it with a
-  400 + suggested fix, Studio's deploy modal and the admin console validate it
-  live. And tenant creation is **all-or-nothing**: if any step fails (including
+- **Tenant id rule: `^[a-z][a-z0-9]{1,29}$`** — a lowercase letter, then lowercase
+  letters or digits, 2–30 chars. **No hyphens, underscores, uppercase or spaces.** It
+  is the INTERSECTION of two alphabets because the id is used as both at once: the
+  Postgres schema `tenant_<id>` (which forbids hyphens — a hyphenated id used to
+  register and then fail every query) and the **Host subdomain** (which forbids
+  underscores — an underscored id used to register, create its tables, and then answer
+  `400 invalid tenant` on every request, while Studio's modal actively recommended
+  one). One rule, three layers: the control plane rejects it with a 400 + a suggested
+  fix that is itself valid, and Studio's deploy modal and the admin console mirror it
+  live. **The id must also EQUAL the first label of the domain that serves the app** —
+  a tenant `acme` is only reachable at `acme.<your-domain>`; creating one through
+  `/admin` warns when it does not match, and a mismatched token now gets a `401` that
+  names the host that arrived, the tenant it implies, the tenant the token carries and
+  the address the token would work at. And tenant creation is **all-or-nothing**: if any step fails (including
   the migration, which runs after the registration tx), everything is rolled
   back — a failed create leaves no zombie tenant behind.
 - **One API structure, N tenants with isolated data.** Routes, GraphQL types,

@@ -312,7 +312,8 @@ the fix → verify — **does close**. It just needs SQL in the middle.
 
 ---
 
-## The verdict: where the promise breaks
+## The verdict: where the promise breaks (as written on 2026-08-01, BEFORE the fixes below)
+
 
 The promise under test is *"anyone with little can take advantage of it"* — the
 90 % declarative, the 10 % in code, an AI doing most of the typing.
@@ -349,3 +350,95 @@ success while silently skipping the change is worse than a migration that
 fails, because it is invisible until someone reads `pg_constraint`. That is the
 shape of the work the master guide (Phase 3) has to either fix or teach —
 and it is now enumerated, with IDs, in `docs/BACKLOG.md`.
+
+---
+
+# PART FIVE-B — how each finding closed (AUTHORING-GAPS-S1, 2026-08-01)
+
+The session that answered this report treated it as **one pattern, not eight
+findings**: *the engine accepts and carries on in silence.* Every fix had to turn a
+"valid and wrong" into a "loud and actionable", worded for someone who knows
+neither SQL nor Go. What follows is item by item, with what was measured.
+
+| # | Finding | How it closed |
+|---|---|---|
+| **5-1** | The generated schema silently misses the business RULES | **Closed, measured.** The generation grammar now teaches **state machines** and the per-resource RBAC form, plus the identity-vs-foreign-key rule. Same original Spanish paragraph, 3 runs per arm: **before 0/3 produced a state machine** (2–3 iterations, ~$0.035); **after 3/3** (1–2 iterations, ~$0.016). Teaching the construct made the loop *cheaper*, because it stopped needing correction rounds. The identity bug the generator still makes is now **named** rather than shipped (below). |
+| **5-2** | Nobody answers "does this model what I asked?" | **Partly closed.** The engine cannot yet read a schema back in plain language (still open — Studio's job), but the single most damaging silent-wrong case now *does* have an answer: `schema.Warnings` is a layer whose question is "will this do what you meant?", separate from the validator's "may this run?". It fires in five places, and the message is written in the owner's terms, not the engine's. |
+| **5-3** | A second app on one server = 8 manual steps | **Closed.** `install.sh --app=NAME` namespaces unit, service user, `/etc`, `/opt`, `/var/lib`, database + role, control port and a per-app Caddy **site file** the main Caddyfile only imports — so installing an app appends a site instead of overwriting the box's. Default unchanged. And a second install for a different domain WITHOUT `--app` now refuses, printing the exact side-by-side command. Verified with two apps staged side by side; a live third-app install on the 58 is deliberately not done (**OPS-11**). |
+| **5-3b** | The tenant id must equal the domain's first label | **Closed.** One alphabet everywhere (`^[a-z][a-z0-9]{1,29}$` — the intersection of what Postgres and DNS each accept), and `401 token tenant mismatch` now names the host that arrived, the tenant it implies, the tenant the token carries and the address the token WOULD work at. Creating a tenant through `/admin` warns when the id does not match the app's domain — the moment both facts are known. |
+| **5-4** | `spec` works; the user is never told it exists | **Closed.** Studio has a **"Copy AI context"** button (`GET /editor/ai-context`): `appitools spec` plus this app's current schema, one click, ready to paste into any assistant. |
+| **5-5** | Studio is good; three specific costs | **Partly closed.** The deploy modal no longer teaches the broken tenant-id rule — it teaches the one that works, and shows the address the tenant will answer at. The English-only interface and the discoverability of "+ add" are untouched. |
+| **5-6** | A new column is readable but NOT writable until restart | **Closed, and the test was designed so it could not repeat the earlier self-deception.** The write path now validates against the tenant's DEPLOYED schema merged with the boot one (a union — a deploy can only ever *add* to what was accepted). Verified live on a field asserted ABSENT from the file the process booted with: `PATCH pets.weight_kg` → **200, same PID, no restart**. A NEW RESOURCE still needs a restart — and now says so (`resource_not_loaded`, with the reason and the fix) instead of a bare 404. |
+| **5-7** | The 10 %: the module cannot be obtained; `ctx.Get` missing | **Half closed, half escalated.** `Ctx.Get(resource, id)` exists, keeps the row rule, and the doc now states that `QueryOpts.Filters` takes declared fields only — the round the agent lost is gone. The dependency is now documented **honestly** at the top of `backend-spec` (the local checkout + `replace`, its costs spelled out, and exactly what changes when the module is published) — but it remains a **product blocker**, escalated to the decisions Miguel owns. No amount of documentation makes a private module fetchable. |
+| **5-8** | A change the engine ACCEPTED and silently did not apply | **Closed, and generalized.** An FK whose definition changed is now a **replacement**: its drop is un-gated and runs in the same transaction as the new constraint, so the name collision that made the change a no-op cannot occur, and a failure rolls back to the old FK rather than leaving the column unprotected. More important than the instance: **the migrator no longer gets to grade its own work.** After every apply the engine re-introspects the database and reports anything declared-but-missing; a partial apply is a failure in every surface (the CLI exits non-zero and does not persist the schema, the control plane restores the previous one, the fan-out marks the tenant failed). The audit that produced this found **three more members of the same class**, all fixed — including one that was live in the repo's own test suite as a red test. See [docs/audits/MIGRATION_HONESTY_AUDIT.md](audits/MIGRATION_HONESTY_AUDIT.md). |
+
+## The journey, re-walked (the proof)
+
+The critical stretch was executed again end to end, on a live app with data, using
+only the product:
+
+1. `ai-generate` from the **original Spanish paragraph** → a valid schema **with the
+   state machine**, and the engine printing the identity warning next to it.
+2. The tenant id with an underscore was **refused at registration**, with the working
+   id suggested.
+3. Boot: the warning again, in the log.
+4. Seeded 2 appointments for a vet → the vet saw **0 of 2** (the bug, reproduced).
+5. Applied the fix the warning itself describes (`references: "user_id"`), plus a
+   brand-new field, and deployed with `appitools migrate`.
+6. The dry-run listed the FK replacement; the apply **actually applied it** —
+   confirmed by reading `pg_constraint`, not the migrator's log — and reported
+   honestly that the constraint was left unvalidated over pre-existing rows.
+7. The backfill that used to be **blocked by the stale FK** went through the API.
+8. `PATCH` on the brand-new field: **200, no restart**.
+9. The vet sees **2 of 2**. The state machine holds: `requested→attended` 422,
+   `requested→confirmed→attended` 200/200, `attended→requested` 422.
+
+**Zero `psql` was needed to make anything work.** The only SQL in the run was the
+`pg_constraint` query used to *verify* — the measuring instrument, not the fix.
+
+---
+
+## The verdict, updated (2026-08-01)
+
+The promise under test is *"anyone with little can take advantage of it"*.
+
+**The middle of the journey held before, and it still does** — but the two ends
+moved. Of the three break points this report named:
+
+1. **"The generated schema is silently incomplete on business RULES."**
+   **Substantially fixed.** The lifecycle is produced (3/3, and cheaper than
+   before), and the ownership rule — the failure that produced an app showing
+   nothing, with no error anywhere — is now *named at five layers*, in the owner's
+   words, with the fix spelled out. What remains is the plain-language read-back
+   (5-2): a schema can still be wrong in ways nothing checks. But the specific,
+   measured, silent-zero-rows failure no longer reaches production unannounced.
+
+2. **"The first and last miles need a terminal — and the middle can too."**
+   **The middle is fixed; the miles are shorter, not gone.** The worst case — a
+   change the engine accepted and silently did not apply, recoverable only with raw
+   SQL — is closed, along with three siblings the audit found, and the engine no
+   longer grades its own homework. A second app on one server is one flag instead of
+   eight manual steps. The tenant id has one alphabet and the 401 explains itself.
+   What still needs a terminal: creating the first super-admin, and **obtaining the
+   Go module** — which is not a code problem but a publishing decision, and is now
+   the single hardest wall left in the whole journey.
+
+3. **"The product's best asset is undiscoverable."**
+   **Fixed for the schema half.** One click in Studio copies `spec` + the current
+   schema. `backend-spec` is still something you have to know to run.
+
+**Where the promise breaks today**, in order of damage:
+
+1. **The 10 % path is unreachable off this machine.** Not a gap in the docs — the
+   docs are now honest — but a private module nobody else can fetch. Everything else
+   in this report was fixable in code; this one is a decision.
+2. **Nobody reads the schema back to the owner in her own words.** The engine can now
+   catch one specific class of "valid but wrong". It cannot yet say, in a paragraph,
+   what the app it just built actually does — which is the only review a
+   non-programmer can perform.
+3. **The last manual steps of the first mile.** Creating the platform super-admin is
+   still a terminal command with a database URL, at exactly the moment the visual
+   tool becomes useful.
+
+Everything above is enumerated, with IDs and Ready criteria, in
+[docs/BACKLOG.md](BACKLOG.md).

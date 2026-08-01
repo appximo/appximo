@@ -26,7 +26,7 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-07-29 (HANDOFF-PACKAGE-S1)** — every OPEN item below was
+**Last reviewed: 2026-08-01 (AUTHORING-GAPS-S1)** — every OPEN item below was
 re-verified against reality on that date, not carried forward on trust.
 
 ---
@@ -101,141 +101,54 @@ re-verified against reality on that date, not carried forward on trust.
   first role, like acceptance-test does), or a hard, actionable pre-flight
   failure naming the overrides.
 
-### ENG-11 — A tenant id the control plane accepts can be UNROUTABLE
-- **Origin:** AI-JOURNEY-S1, creating the bench baseline tenant. The control
-  plane's rule is `^[a-z][a-z0-9_]{1,29}$` (underscore allowed — it becomes the
-  Postgres schema), but the Host-subdomain matcher (`pkg/tenant` `tenantRe`) is
-  `^[a-z0-9][a-z0-9\-]{0,28}[a-z0-9]$` (underscore NOT allowed, hyphen allowed —
-  the DNS alphabet). `bench_blank` registered fine and then answered **400
-  "invalid tenant" on every request**. Worse, **Studio's deploy modal advertises
-  the wrong alphabet**: "Lowercase letter first, then lowercase letters, digits
-  or '_' … no hyphens" — it tells a non-programmer to type exactly what breaks.
-- **Impact:** Medium-high for a first-time user: the failure is silent at
-  creation and total at use, with an error ("invalid tenant") that names neither
-  the cause nor the fix. Every existing tenant is unaffected (none use `_`).
-- **Second half of the same problem (AI-JOURNEY-S1, measured):** the tenant id
-  must EQUAL the first DNS label of the domain that serves it. Registering
-  `clinica` on a box whose domain is `petfriendly.appitools.com` succeeded, and
-  every request then answered **`401 token tenant mismatch`** — a message that
-  names neither the cause nor the fix, at a moment when both facts (the id and
-  the configured domain) are already known to the box.
-- **Ready:** ONE alphabet across the control plane, the Host matcher, Studio and
-  the admin console — the intersection `^[a-z][a-z0-9]{1,29}$` is the honest
-  choice (a Postgres schema cannot take a hyphen; a Host label cannot take an
-  underscore); registration rejects the rest with the suggested fix it already
-  computes; Studio's helper text matches; and registration WARNS when the new id
-  does not match any label of the app's configured domains ("this tenant will
-  only be reachable at clinica.<domain>").
 
-### ENG-12 — A newly deployed column is readable but NOT writable until restart
-- **Origin:** AI-JOURNEY-S1, measured end to end on a live app (Studio deploy of
-  `pets.weight_kg`): `GET` returns the column, `PATCH` answers **422 "unknown
-  field"** until the process restarts. The write path validates the body against
-  the resource captured from the BOOT schema (`codegen.CollectUpdate` /
-  `CollectInsert` close over it); the tenant's deployed schema and the
-  `tenant.SchemaCache` have no say. Two rounds of documentation claimed
-  otherwise and both are now corrected (see the commit "correct the hot-write
-  claim"); Studio was always honest ("needs an engine restart" + one click).
-- **Impact:** Medium. The restart exists and is one click, so this is friction,
-  not breakage — but it makes "deploy a field and start using it" a two-act
-  operation, and it is the single most-repeated wrong claim in the docs.
-- **Ready:** the write path validates against the TENANT'S deployed schema (the
-  per-tenant cache the deploy already invalidates) with the boot schema as the
-  fallback; a field added by a deploy is writable with no restart; validation
-  rules for it still compile at boot (documented); benchmarked `no_change` on
-  the write path, which is a hot path — this one must be measured carefully.
 
-### OPS-10 — A second app on an already-installed server destroys the first
-- **Origin:** AI-JOURNEY-S1 Part B, measuring gap 3-11 with precision. Every
-  path `install.sh` writes is a FIXED constant: unit `appitools.service`, env
-  `/etc/appitools/appitools.env`, schema `/etc/appitools/schema.json`, binary
-  `/opt/appitools/bin/appitools`, data `/var/lib/appitools`, and the WHOLE
-  `/etc/caddy/Caddyfile`. On the 58 (which serves the tienda) all six are
-  occupied, so a second `install.sh` run would replace the unit, overwrite the
-  secrets (invalidating the first app's JWTs and pointing it at another
-  database) and rewrite the Caddyfile — taking the FIRST app down. The
-  pre-flight only guards the PORT and backs the Caddyfile up; nothing warns
-  that the install is destructive for an existing DIFFERENT app.
-- **Impact:** **High for the "aprovechá tu VPS" story** — the normal case for
-  anyone with one server and two ideas. **Measured by doing it** (AI-JOURNEY-S1,
-  a second app now live on the 58 next to the tienda): **8 manual steps** —
-  database+role, dirs+service user, binary+schema, a 9-line env with its own
-  secrets AND its own control port, a 25-line systemd unit copied and edited, a
-  Caddy block APPENDED (never overwritten) + validate + reload, tenant
-  registration against its own control plane, and `admin create` with a CLI that
-  was only on the box because the FIRST app had installed it. It works and
-  coexists (each app with its own cert, DB, secrets; the tienda verified
-  untouched with a full purchase) — but every step is tribal knowledge.
-- **Ready:** `install.sh --app=NAME` (default `appitools` — byte-identical
-  behavior for the existing single-app case) namespacing unit/env/schema/binary/
-  data dir, plus a Caddy site block APPENDED (or a `conf.d`-style include)
-  instead of a wholesale overwrite; a pre-flight that detects a different
-  existing app and refuses rather than clobbering; `--uninstall --app=NAME`
-  removing only that app. Verified by installing two apps on one box and
-  killing/updating one without touching the other.
 
-### DOC-2 — The authoring cycle's discoverability + generation gaps
-- **Origin:** AI-JOURNEY-S1, `docs/AUTHORING_JOURNEY.md` (field report PART
-  FIVE). Three findings that are documentation/UX, not engine:
-  (a) **`ai-generate` never emits a state machine** — the compact grammar in
-  `pkg/aigen/prompt.go` does not teach the construct, so a user who describes a
-  lifecycle ("first requested, then confirmed…") gets a plain enum and no
-  warning, no matter how they rephrase (verified twice, 2 and 3 iterations);
-  (b) **nothing tells a user that `appitools spec` is the context to paste into
-  their own AI** — the flow that makes "my assistant edits my app" work is
-  documented only in a doc they have no reason to read;
-  (c) **`backend-spec` never says how to OBTAIN the module** — an agent given
-  only the doc guessed a version, `go mod tidy` failed against the private repo,
-  and the project built only after a human added a local `replace`.
-- **Impact:** High for adoption: (a) ships silently wrong business rules,
-  (c) blocks the 10 % path entirely for anyone outside this machine.
-- **Ready:** the generation grammar covers state machines + per-resource
-  `permissions` and the generator reports what it could NOT express; Studio has
-  a one-click "copy AI context" (spec + current schema); `backend-spec` opens
-  with a working dependency recipe (a published module/tag, or the documented
-  `replace` for a local checkout) — and a generated project builds from the doc
-  alone on a fresh machine.
 
-### SCHEMA-5 — A row condition against a relation column is a silent zero-rows app
-- **Origin:** AI-JOURNEY-S1 (AUTHORING_JOURNEY 5-1). The generated schema scoped
-  vets with `{field: "veterinarian_id", op: "eq", val: "$user_id"}` —
-  `veterinarian_id` is a FK to `veterinarians`, a different id space from the JWT
-  subject. It validates, deploys, and returns **zero rows forever**, with no
-  error at any layer.
-- **Impact:** Medium-high and nasty: the app looks broken ("I see nothing")
-  with nothing to grep for. Any AI-generated schema is prone to it, and so is a
-  human using Studio's row-filter picker (which lists every column).
-- **Ready:** load-time WARNING (not an error — the pattern is legal when the FK
-  genuinely holds auth user ids) when a `$user_id` condition targets a column
-  declared as a `relation`, naming the likely fix (an `auth_user_id` column, or
-  the identity resource being the target); Studio's picker shows the same hint.
 
-### ENG-13 — A `references` / `on_delete` change on an EXISTING relation is silently skipped
-- **Origin:** AI-JOURNEY-S1, on a LIVE app with data (AUTHORING_JOURNEY 5-8). A
-  deploy repointed `appointments.veterinarian_id` from `veterinarians(id)` to
-  `veterinarians(user_id)`. The dry-run listed the ADD FOREIGN KEY, the apply
-  printed ✓ for every table and ✓ "schema persisted" — and the database kept the
-  OLD foreign key. Root cause in the migration's own log: the additive policy
-  leaves `DROP FOREIGN KEY …` as drift (it never drops), so the new FK is added
-  under the SAME generated name and Postgres refuses with `42710 constraint
-  already exists`; `applyForeignKeys` logs `foreign key add failed, skipped` and
-  continues (deliberate — one bad FK must not abort a migration). Net effect: the
-  tenant's RECORDED schema claims the new shape while the database keeps the old
-  one, with a success report in between.
-- **Impact:** **High.** It is the only known path where the engine reports a
-  change as applied and it is not — invisible until someone reads
-  `pg_constraint`. Worse, the stale FK then BLOCKS the data migration the new
-  schema requires (measured: the backfill failed with a FK violation), so the
-  user's fix becomes impossible without raw SQL — `ALTER TABLE … DROP CONSTRAINT`
-  by hand, which is exactly what the target user cannot do.
-- **Ready:** an FK whose DEFINITION changed (ref column, ref table, on_delete,
-  on_update) is treated as a REPLACE — dropping a constraint loses no row data,
-  so it belongs with the FK-drop-as-consequence exception the approval gate
-  already has for approved table drops (`partitionByPolicyApproved`), not with
-  gated drift. Until then, a failed FK add must at minimum surface in the CLI's
-  OUTCOME (not only the log) and mark the apply as PARTIAL, never ✓. Verified by
-  an integration test that changes `references` on a populated table and asserts
-  the live constraint afterwards.
+
+### MIG-1 — A gin index's `opclass` change is a silent no-op
+- **Origin:** AUTHORING-GAPS-S1, the ENG-13 class audit
+  ([docs/audits/MIGRATION_HONESTY_AUDIT.md](audits/MIGRATION_HONESTY_AUDIT.md)
+  finding "Left open"). An index's `opclass` (`jsonb_ops` → `jsonb_path_ops`) is
+  DELIBERATELY excluded from the diff key because the introspector cannot read one
+  back, so declaring a different opclass on an EXISTING index does nothing — and,
+  like ENG-13, says nothing.
+- **Impact:** Low and narrow (one optional key on gin indexes only), but it is the
+  last known member of the "declared ≠ applied, silently" class the session closed.
+  The post-apply verification cannot catch it: the desired model has no opclass to
+  compare against.
+- **Ready:** either the declared opclass is recorded (a comment on the index, or a
+  side table) so a change can be detected and applied as drop+recreate, or the
+  validator REFUSES to change the opclass of an index that already exists, naming
+  the manual `DROP INDEX` + re-apply. Silence is the one option ruled out.
+
+### MIG-2 — A `schema_history` append failure is log-only
+- **Origin:** AUTHORING-GAPS-S1, the ENG-13 class audit. `schemahistory.Append` is
+  best-effort at every call site: on failure the deploy proceeds and a WARNING goes
+  to the log, so the version trail silently gains a gap. `EnsureSeeded` (this
+  session) reduces the blast radius — the schema being REPLACED is now always
+  recorded first — but the write itself still has no signal to the caller.
+- **Impact:** Low today. The trail is used by ENG-9's ownership classifier and by
+  Studio's History/rollback; a gap degrades a dry-run's drop classification and
+  removes a rollback target, both quietly.
+- **Ready:** the deploy response carries a `history_warning` when the append fails
+  (the deploy still succeeds — the DDL is applied and the record is authoritative),
+  and Studio's History view shows it. Not an error: failing a correct deploy over a
+  bookkeeping row would be worse than the gap.
+
+### OPS-11 — `install.sh --app` has not been run on a real multi-app box
+- **Origin:** AUTHORING-GAPS-S1. The two-app isolation, the refuse-to-clobber guard
+  and the per-app Caddy site were verified in staged `--dry-run --root` mode. The
+  live path — systemd units, the postgres role/database per app, and above all the
+  **migration of an existing monolithic `/etc/caddy/Caddyfile` to `import
+  sites/*.caddy`** — has not run on a real box.
+- **Impact:** Medium. The migration only strips the block for the domain being
+  installed and backs the file up first, so the failure mode is "Caddy refuses to
+  reload", not data loss — but it would be an outage on a box serving live apps.
+- **Ready:** install a third, ephemeral app on the 58 with `--app`, confirm the
+  tienda and petfriendly do not blink (a purchase + a CRUD call through each), then
+  `--uninstall --app=<that app>` and confirm the two survivors are untouched.
 
 ### SCHEMA-1 — Computed / derived fields
 - **Origin:** docs/MODEL_LAB.md G7 ("order totals as a computed field").
@@ -413,9 +326,52 @@ All three were **re-verified as still open on 2026-07-29**.
 | **Cloudflare proxy on `api.appitools.com`** | Still proxied (dig → Cloudflare IPs), but since PROD-JOURNEY-1B the 58 no longer serves that domain: Caddy's only site is `tiendita.appitools.com` (direct A record, measured clean), so `api.appitools.com` now dead-ends at the proxy. Decide: retire the DNS entry, point it somewhere real, or leave it dark. |
 | **Cut the first release tag** | Still zero tags (`git tag` is empty) and `RELEASE_VERSION=""` at `scripts/install.sh:33`, so the documented "download the binary from GitHub Releases" path cannot work yet, and OPS-4 (version traceability) partly depends on it. |
 | ~~**Rotate the 58's PostgreSQL password**~~ | **RESOLVED by PROD-JOURNEY-1B (2026-07-31):** the wipe (`--uninstall --purge`) dropped the role and database; the reinstall generated a fresh password (plus fresh JWT/admin secrets, rotated again on-box after the installer printed them to stdout — see OPS-7). The exposed credential no longer exists. |
+| **Publish the Go module (the 10 % path is blocked on it)** | `github.com/miguelangel/appitools` is private with no tag, so `go get` / `go mod tidy` FAIL for anyone building a custom backend: the only recipe that works is a local checkout plus an absolute-path `replace`, which does not build on a teammate's machine, in CI, or in a plain `docker build`. This is now written honestly at the top of `backend-spec` §3.0 (with exactly what changes once it is published), but it is a **product blocker, not a doc gap** — the framework half of the product is unreachable outside this machine until the repo is public or a tagged private module + `GOPRIVATE` is set up. Part of **DOC-2**, which is otherwise DONE. |
 | **Give `/root/commerce` a remote** | The technical fix is trivial; the decision (which account, public or private, whether the commerce platform is a product or a demo) is his. See **OPS-5** — until then the field report lives on one disk. |
 
 ---
+
+## DONE in AUTHORING-GAPS-S1 (2026-08-01)
+
+The session's subject was not six bugs: it was ONE pattern — **the engine accepts
+and carries on in silence**. Each item below turned a "valid and wrong" into a
+"loud and actionable", with a message written for someone who knows neither SQL
+nor Go.
+
+| ID | What shipped | Verified by |
+|---|---|---|
+| **ENG-13** | An FK whose DEFINITION changed is a **replacement**, not a gated drop: the drop is un-gated and runs in the SAME transaction as the `ADD … NOT VALID`, so the `42710` collision that made a `references` change a silent no-op cannot happen, and a failure rolls back to the old constraint instead of leaving the column unprotected. Plus the class-level guard: **`verifyApplied` re-introspects the database after every apply** and reports anything declared-but-missing in `ApplyOutcome.Unapplied`; a PARTIAL apply is a FAILURE everywhere (the CLI exits non-zero and does NOT persist the schema, the control plane restores the previous one, the fan-out marks the tenant failed). | `TestIntegration_ENG13_ReferencesChangeActuallyApplies` / `…_OnDeleteChangeActuallyApplies` (both asserting against `pg_constraint`, never the log) + `TestIntegration_DeclaredEqualsApplied`; and live: the veterinary app's relation repointed for real, with the backfill that used to be blocked going through (§Part G) |
+| **ENG-13 (audit)** | The **class**, not the instance: [docs/audits/MIGRATION_HONESTY_AUDIT.md](audits/MIGRATION_HONESTY_AUDIT.md) enumerates every place the migrator could report success and be wrong. It found three more, all fixed — a blocked `renamed_from` discarded in silence (values stayed in the old column while the schema claimed they moved), the control plane persisting a schema BEFORE the DDL (a failed migration left the record describing a database it did not have), and a gated drop erasing its own approvability (which was live on `main` as a FAILING test: `--approve-drops` reported `no-op` and the column stayed). | `TestIntegration_BlockedRenameIsReported`; `TestFanout_DestructiveGatedThenMassApproved` (red on `main` before this session, green after) |
+| **SCHEMA-5** | `schema.Warnings` — a new, non-blocking layer answering "will this do what you meant?" next to the validator's "may this run?". Its first rule catches a `$user_id` row condition pointed at a **relation** column: valid, deployable, **zero rows forever**, no error at any layer. Surfaced in FIVE places: `appitools validate`, `validate --json` (`warnings[]`, `valid` untouched — so the AI correction loop can act on it), the control-plane/Studio deploy response, engine boot, and `ai-generate`'s report. It is a **warning**, not an error: the pattern is legal when the FK genuinely holds login ids — and applying the suggested fix silences it. | `pkg/schema/warnings_test.go` (5 cases incl. no-false-positives and fix-silences-it); live on the exact generated schema |
+| **ENG-12** | The write path validates against the tenant's **DEPLOYED** schema, merged with the boot one (a UNION — a deploy can only ever ADD to what was accepted, so a tenant whose record lags the boot file behaves exactly as before). Compiled once per tenant per `pg_notify` invalidation; a request costs one RWMutex read. A field added by a deploy is now **writable with no restart**. And the other half: a resource that genuinely needs a restart answers `resource_not_loaded` **explaining itself**, never a bare 404 or "unknown field". | Live, designed so it could not self-deceive (the previous claim was verified against a field already in the boot schema): `pets.weight_kg` was asserted ABSENT from the file the process booted with, then `PATCH`ed → 200, same PID |
+| **ENG-11** | ONE tenant-id alphabet — `^[a-z][a-z0-9]{1,29}$`, the **intersection** of the Postgres-schema alphabet (no hyphens) and the DNS-label alphabet (no underscores) — in the control plane, Studio and the admin console, with the suggestion helper now producing something the engine actually accepts (`mi-clinica` → `miclinica`, not the `mi_clinica` it used to recommend). `401 token tenant mismatch` now names the host that arrived, the tenant it implies, the tenant the token carries, and the address the token WOULD work at. Creating a tenant through `/admin` warns when the id does not match the domain serving the app — the moment both facts are known. | Live: `vet_journey` refused at registration with the fix suggested; the 401 read in full; `pkg/controlplane/tenant_id_test.go` asserts every suggestion satisfies the rule |
+| **DOC-2** | (a) The generation grammar now teaches **state machines** and the **per-resource RBAC form**, plus the identity-vs-foreign-key rule — measured on the original Spanish description, 3 runs per arm: **before 0/3 state machines, 2–3 iterations, ~$0.035; after 3/3, 1–2 iterations, ~$0.016** (richer grammar ⇒ correct AND 55 % cheaper, because it stops needing correction rounds). (b) **"Copy AI context"** in Studio + `GET /editor/ai-context` — `appitools spec` plus this app's schema, one click, so the product's most effective feature stops being undiscoverable. (c) `backend-spec` now OPENS with the real dependency recipe (the local checkout + `replace`, its costs stated) and exactly what changes when the module is published. (d) `Ctx.Get(resource, id)` — the sanctioned lookup-by-id that keeps the row rule, with the doc stating that `QueryOpts.Filters` takes declared fields only. | 3 live generation runs per arm with costs; `pkg/aigen` tests; the module recipe is the honest state, and the publishing decision is Miguel's (see below) |
+| **OPS-10** | `install.sh --app=NAME` namespaces **everything**: unit, service user, `/etc`, `/opt`, `/var/lib`, database + role, control port, and a per-app Caddy **site file** (`/etc/caddy/sites/<app>.caddy`) that the main Caddyfile only `import`s — so installing an app APPENDS a site and can never erase a sibling's. Default unchanged (`appitools`), so a single-app box is byte-identical. A second install for a DIFFERENT domain without `--app` now **refuses** and prints the exact side-by-side command. `deploy-update.sh`, `backup.sh` and `--uninstall` take the same flag. | Two apps staged side by side (`--dry-run --root`): separate secrets, database, control port (9090 vs 9183), files dir, unit and site; the guard refused the clobbering run; the idempotent re-run proceeded with app 1's config unchanged |
+
+**OPS-9 stays OPEN, with new evidence.** The canonical `benchblank` tenant did not
+exist (a previous session's cleanup took it), so the pre-flight failed — but it
+failed *well*: it named the endpoint, the tenant, the role and the overrides, which
+is half of OPS-9's own Ready criterion. It was recreated per the documented recipe.
+The remaining half (defaults derived from the SERVED schema, so a fresh box needs no
+overrides at all) is untouched.
+
+**Measured:** `make bench-protocol RUNS=10 LABEL=authoring-gaps-s1`, canonical
+baseline (dev-fast + `examples/blank` + tenant `benchblank` + 100 rps / 30 s),
+against a 10-run control arm built from the pre-session binary in the same
+session: baseline median p50 **0.5885 ms**, session median p50 **0.5915 ms** →
+**Δ +0.003 ms (+0.51 %), Mann-Whitney p = 0.571 → `no_change`** (gate:
+max(0.5 ms, 3 %)). The write path (ENG-12's one RWMutex read per create/update)
+and the RBAC read path are both inside the measured surface.
+
+**Not verified live, and deliberately so:** OPS-10's third-app install was
+exercised in the installer's staged `--dry-run --root` mode, not on the 58. The 58
+runs two production assets (the tienda and petfriendly) and the session's value did
+not require putting them at risk; the Caddy migration path is written to be
+additive (it strips only the block for the domain being installed) and was read
+line by line, but a REAL third-app install on a box with a pre-OPS-10 monolithic
+Caddyfile has not been executed. Anyone doing it first should snapshot
+`/etc/caddy/Caddyfile` — see **OPS-11**.
+
 
 ## DONE in CONSUMER-PATH-S1 (2026-07-31)
 
