@@ -113,11 +113,19 @@ re-verified against reality on that date, not carried forward on trust.
 - **Impact:** Medium-high for a first-time user: the failure is silent at
   creation and total at use, with an error ("invalid tenant") that names neither
   the cause nor the fix. Every existing tenant is unaffected (none use `_`).
+- **Second half of the same problem (AI-JOURNEY-S1, measured):** the tenant id
+  must EQUAL the first DNS label of the domain that serves it. Registering
+  `clinica` on a box whose domain is `petfriendly.appitools.com` succeeded, and
+  every request then answered **`401 token tenant mismatch`** — a message that
+  names neither the cause nor the fix, at a moment when both facts (the id and
+  the configured domain) are already known to the box.
 - **Ready:** ONE alphabet across the control plane, the Host matcher, Studio and
   the admin console — the intersection `^[a-z][a-z0-9]{1,29}$` is the honest
   choice (a Postgres schema cannot take a hyphen; a Host label cannot take an
   underscore); registration rejects the rest with the suggested fix it already
-  computes, and Studio's helper text matches.
+  computes; Studio's helper text matches; and registration WARNS when the new id
+  does not match any label of the app's configured domains ("this tenant will
+  only be reachable at clinica.<domain>").
 
 ### ENG-12 — A newly deployed column is readable but NOT writable until restart
 - **Origin:** AI-JOURNEY-S1, measured end to end on a live app (Studio deploy of
@@ -149,10 +157,15 @@ re-verified against reality on that date, not carried forward on trust.
   pre-flight only guards the PORT and backs the Caddyfile up; nothing warns
   that the install is destructive for an existing DIFFERENT app.
 - **Impact:** **High for the "aprovechá tu VPS" story** — the normal case for
-  anyone with one server and two ideas. Today the only safe path is manual:
-  a second unit file, a second env/schema dir, a second Caddy site block, all
-  hand-written (i.e. exactly the tribal knowledge the product is trying to
-  remove).
+  anyone with one server and two ideas. **Measured by doing it** (AI-JOURNEY-S1,
+  a second app now live on the 58 next to the tienda): **8 manual steps** —
+  database+role, dirs+service user, binary+schema, a 9-line env with its own
+  secrets AND its own control port, a 25-line systemd unit copied and edited, a
+  Caddy block APPENDED (never overwritten) + validate + reload, tenant
+  registration against its own control plane, and `admin create` with a CLI that
+  was only on the box because the FIRST app had installed it. It works and
+  coexists (each app with its own cert, DB, secrets; the tienda verified
+  untouched with a full purchase) — but every step is tribal knowledge.
 - **Ready:** `install.sh --app=NAME` (default `appitools` — byte-identical
   behavior for the existing single-app case) namespacing unit/env/schema/binary/
   data dir, plus a Caddy site block APPENDED (or a `conf.d`-style include)
@@ -196,6 +209,33 @@ re-verified against reality on that date, not carried forward on trust.
   genuinely holds auth user ids) when a `$user_id` condition targets a column
   declared as a `relation`, naming the likely fix (an `auth_user_id` column, or
   the identity resource being the target); Studio's picker shows the same hint.
+
+### ENG-13 — A `references` / `on_delete` change on an EXISTING relation is silently skipped
+- **Origin:** AI-JOURNEY-S1, on a LIVE app with data (AUTHORING_JOURNEY 5-8). A
+  deploy repointed `appointments.veterinarian_id` from `veterinarians(id)` to
+  `veterinarians(user_id)`. The dry-run listed the ADD FOREIGN KEY, the apply
+  printed ✓ for every table and ✓ "schema persisted" — and the database kept the
+  OLD foreign key. Root cause in the migration's own log: the additive policy
+  leaves `DROP FOREIGN KEY …` as drift (it never drops), so the new FK is added
+  under the SAME generated name and Postgres refuses with `42710 constraint
+  already exists`; `applyForeignKeys` logs `foreign key add failed, skipped` and
+  continues (deliberate — one bad FK must not abort a migration). Net effect: the
+  tenant's RECORDED schema claims the new shape while the database keeps the old
+  one, with a success report in between.
+- **Impact:** **High.** It is the only known path where the engine reports a
+  change as applied and it is not — invisible until someone reads
+  `pg_constraint`. Worse, the stale FK then BLOCKS the data migration the new
+  schema requires (measured: the backfill failed with a FK violation), so the
+  user's fix becomes impossible without raw SQL — `ALTER TABLE … DROP CONSTRAINT`
+  by hand, which is exactly what the target user cannot do.
+- **Ready:** an FK whose DEFINITION changed (ref column, ref table, on_delete,
+  on_update) is treated as a REPLACE — dropping a constraint loses no row data,
+  so it belongs with the FK-drop-as-consequence exception the approval gate
+  already has for approved table drops (`partitionByPolicyApproved`), not with
+  gated drift. Until then, a failed FK add must at minimum surface in the CLI's
+  OUTCOME (not only the log) and mark the apply as PARTIAL, never ✓. Verified by
+  an integration test that changes `references` on a populated table and asserts
+  the live constraint afterwards.
 
 ### SCHEMA-1 — Computed / derived fields
 - **Origin:** docs/MODEL_LAB.md G7 ("order totals as a computed field").

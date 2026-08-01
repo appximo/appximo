@@ -80,30 +80,54 @@ render it: "Appointments move: requested → confirmed → attended. A vet can o
 see rows where veterinarian_id equals their user id."). Reading a paragraph in
 their own words is the only review a non-programmer can actually perform.
 
-## 5-3. Deploying a SECOND app on a server that already has one destroys the first
+## 5-3. Deploying a SECOND app on a server that already has one: 8 manual steps
 
-Measured statically on the 58 (which serves the tienda) rather than by breaking
-it: **every path `install.sh` writes is a fixed constant** — the unit
+**Executed** on the 58, which already serves the tienda, for
+`petfriendly.appitools.com` (A record straight to the box). The installer could
+NOT be used: **every path it writes is a fixed constant** — the unit
 `appitools.service`, `/etc/appitools/appitools.env`, `/etc/appitools/schema.json`,
 `/opt/appitools/bin/appitools`, `/var/lib/appitools`, and the **whole**
-`/etc/caddy/Caddyfile`. On that box all six are occupied by the first app. A
-second `install.sh` run would replace the unit, overwrite the secrets (breaking
-the first app's JWTs and pointing it at another database) and rewrite the
-Caddyfile — **taking the running app down**. The pre-flight only guards the
-port; it backs the Caddyfile up but never warns that the install is destructive
-for a *different* app.
+`/etc/caddy/Caddyfile` — and on that box all six belong to the first app. Running
+it again would have replaced the unit, overwritten the secrets (breaking the
+tienda's JWTs and pointing it at another database) and rewritten the Caddyfile,
+**taking the running shop down**. Its pre-flight guards only the PORT.
 
-So "one VPS, two apps" — the normal case for anyone with a server and two ideas
-— has **no supported path today**: it is a hand-written second unit, second env
-dir, second Caddy block. That is tribal knowledge, and it is now
-backlog **OPS-10** with a concrete shape (`install.sh --app=NAME` namespacing
-everything, a Caddy block appended instead of overwritten, and an uninstall
-scoped to one app).
+So the second app went in by hand. The exact cost, counted:
 
-*(The live HTTPS deployment of the generated app is the one part of this journey
-that did not run: it needs a DNS A record that did not exist during the session.
-Everything else was exercised against a real, running instance of the generated
-app.)*
+| # | Step the installer would have done | What it took by hand |
+|---|---|---|
+| 1 | database + role | `CREATE ROLE vetapp` + `CREATE DATABASE vetapp` |
+| 2 | dirs + service user | `/etc/vetapp`, `/opt/vetapp/bin`, `/var/lib/vetapp/{files,obs}`, `useradd vetapp`, chown |
+| 3 | binary + boot schema | `install -m0755` ×2 |
+| 4 | env file with its OWN secrets | 9-line env written by hand (JWT, admin key, DB URL, files dir, obs path, GOMEMLIMIT, **its own control port 9098**), `chmod 600` |
+| 5 | systemd unit | 25-line unit copied from the tienda's and edited (user, env file, port 8091, ReadWritePaths) |
+| 6 | Caddy site | **append** a second block (the installer overwrites) + `caddy validate` + `systemctl reload` |
+| 7 | tenant registration | `curl` to its own control plane `:9098` |
+| 8 | platform super-admin | `appitools-cli admin create` — using the CLI that was on the box **only because the tienda had installed it** |
+
+**Result: it works and it coexists.** `petfriendly.appitools.com` got its own
+**real Let's Encrypt certificate** (issuer `C = US, O = Let's Encrypt`, subject
+`CN = petfriendly.appitools.com`) within ~12 s of the Caddy reload, both apps
+serve on 443 with separate binaries, databases, secrets and control planes, and
+the tienda never blinked — verified at the end with a **complete purchase**
+(catalogue → checkout → mock payment → `pagada`) plus `/`, `/panel`, `/editor`,
+`/admin` all 200.
+
+But the eight steps are exactly the tribal knowledge the product exists to
+remove, and step 8 is worse than it looks: a first-time user on a fresh box
+would not have `appitools-cli` at all. Backlog **OPS-10**.
+
+## 5-3b. The tenant id is not a name — it is the domain's first label
+
+Registering the tenant as `clinica` (the clinic's name) on a box whose domain is
+`petfriendly.appitools.com` produced, at request time, **`401 token tenant
+mismatch`** — a message that names neither the cause nor the fix. The tenant id
+must EQUAL the first DNS label of the domain that serves it. Nothing warns at
+registration, when both facts (the tenant id and the Caddy site) are already
+known. Merged into **ENG-11** (the tenant-id alphabet item): the same
+registration call could check the box's configured domains and say
+*"this tenant will only be reachable at clinica.<domain>; your configured domain
+is petfriendly.appitools.com"*.
 
 ## 5-4. Modification by AI: one round, and the friction is the CONTEXT, not the model
 
@@ -237,6 +261,54 @@ The **cost of the jump to framework mode** is otherwise low and worth stating:
 one `go.mod`, one `main.go` of ~40 lines, `build-consumer.sh` for the binary —
 the app keeps its schema, its Studio, its `/docs`. The jump is not conceptual,
 it is **logistical**: you need Go installed and the module fetchable.
+## 5-8. The change that the engine ACCEPTED and silently did not apply
+
+The most serious finding of the session, and it only appeared because the whole
+cycle ran **on a live app with data**.
+
+Asked to fix the zero-rows bug (5-1), the owner's assistant produced a correct
+plan: add `veterinarians.user_id` (unique) as the catalogue↔login bridge, and
+repoint the FK with `"references": "user_id"` on `appointments.veterinarian_id`
+and `vaccinations.veterinarian_id`. Valid schema, sound reasoning, and it even
+warned about the data backfill.
+
+What happened when it was deployed to production (`appitools-cli migrate`):
+
+- The dry-run **listed the four operations** including
+  `ADD FOREIGN KEY appointments (veterinarian_id) -> veterinarians (user_id)`,
+  and flagged three backfill concerns.
+- The apply printed **✓ for every table and ✓ "schema persisted"**.
+- The database still had `FOREIGN KEY (veterinarian_id) REFERENCES
+  veterinarians(id)`. **The FK change never happened.**
+
+Root cause, from the migration's own log: the additive policy leaves
+`DROP FOREIGN KEY …veterinarian_id` as drift (it never drops), so the new FK is
+added **under the same generated name** and Postgres refuses with
+`42710 constraint already exists`; the engine logs
+`foreign key add failed, skipped (schema unprotected for this relation)` and
+**continues** — deliberate behavior (one bad FK must not abort a migration), but
+the net effect is that a `references`/`on_delete` change on an EXISTING relation
+is a **silent no-op**, while the tenant's recorded schema now claims the new
+shape. Declared and applied have diverged, invisibly.
+
+The consequence for the owner is not academic: her fix became **impossible to
+complete**. Backfilling `appointments.veterinarian_id` to the login id failed
+with `violates foreign key constraint … Key (veterinarian_id)=(…) is not present
+in table "veterinarians"` — the stale FK actively blocks the data change the new
+schema requires. Unblocking it took raw SQL (`ALTER TABLE … DROP CONSTRAINT`
+twice), then the migration re-run cleanly created the correct FK.
+
+**Backlog ENG-13.** And note what saved the day here was a human with psql — the
+exact resource the target user does not have.
+
+**The end state, verified in production** (after the manual unblock, the
+backfill and one restart): the vet logs in and sees **2 of 2** of her
+appointments (was 0 of 2), and the state machine is enforced — `requested →
+attended` is `422 invalid transition`, `requested → confirmed → attended` both
+`200`, and `attended → requested` is `422` (terminal). The authoring loop
+— describe in Spanish → generate → deploy → discover a bug → ask the AI → deploy
+the fix → verify — **does close**. It just needs SQL in the middle.
+
 
 ---
 
@@ -259,16 +331,21 @@ handler. None of that is hypothetical: it all ran.
    the two things a non-technical owner is most likely to describe and least
    likely to verify. And a `$user_id` condition pointed at a foreign key
    produces an app that returns nothing, with no error anywhere.
-2. **The first and last miles need a terminal.** Creating the deploy
-   super-admin, obtaining the Go module, running the installer — the visual tool
-   stops precisely where the user cannot continue alone. And a second app on the
-   same server has no supported path at all (5-3, OPS-10).
+2. **The first and last miles need a terminal — and now we know the middle can
+   too.** Creating the deploy super-admin, obtaining the Go module, the eight
+   hand-written steps for a second app on one server (5-3), the tenant id that
+   must equal the DNS label (5-3b) — and, worst of all, a schema change the
+   engine ACCEPTS and silently does not apply, whose recovery needs raw SQL
+   (5-8). Anywhere on the path, a moment can arrive where only psql helps.
 3. **The product's best asset is undiscoverable.** `spec`/`backend-spec` are
    what make "your own AI edits your app" real, and nothing in the product tells
    the user they exist.
 
-**None of this is architectural.** The gaps are a prompt that must teach state
-machines, a read-back in plain language, a "copy AI context" button, one
-installer flag, one alphabet for tenant ids, and a published module. That is the
+**Almost none of this is architectural.** The gaps are a prompt that must teach
+state machines, a read-back in plain language, a "copy AI context" button, one
+installer flag, one alphabet for tenant ids, and a published module. The one
+exception — and the one to fix first — is **ENG-13**: a migration that reports
+success while silently skipping the change is worse than a migration that
+fails, because it is invisible until someone reads `pg_constraint`. That is the
 shape of the work the master guide (Phase 3) has to either fix or teach —
 and it is now enumerated, with IDs, in `docs/BACKLOG.md`.
