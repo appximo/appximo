@@ -233,6 +233,23 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
 - Performance-sensitive engine changes are measured, not eyeballed:
   `make bench-protocol RUNS=10 LABEL=my-change` (warmup + N runs +
   statistical verdict; see `scripts/bench-protocol.sh`).
+- **Every change to the data path is verified with the binary-diff gate,
+  because `make test` green is NOT a guarantee for it.** Proven 2026-08-01: a
+  create-path type check that rejected the engine's own `default:"now"`
+  injection — every POST omitting the field answered 422 for a field the caller
+  never sent — shipped with `make test` green, because the DB-backed test
+  covering it is skipped by the `-short` unit lane (CI's full lane runs it; the
+  local fast lane does not). Two of that commit's four defects were found by
+  DIFFING the old binary against the new one over paired requests, not by
+  reading code. The technique is now infrastructure:
+  `scripts/binary-diff-gate.sh <base-bin> <new-bin>` boots both binaries on
+  scratch DBs, fires `scripts/binary-diff/corpus.jsonl` (a growable DATA file —
+  add a case per contract you touch) at both, and reports every behavioral
+  difference. **Every reported DIFF must be explained in the session report,
+  case by case — an unexplained diff is a defect.** The bar for a data-path
+  change is: unit test + the full lane (`go test ./...` without `-short`, or
+  `make test-all`) + this gate. `make test` alone is the fast inner loop, not
+  the verdict.
 - **Verification sessions clean up their tenants.** A tenant created to probe
   a feature is deleted when the session ends: `appitools tenant delete <id>
   --yes` (DROP SCHEMA CASCADE + every control-plane row — history, flows,
@@ -431,7 +448,9 @@ Conventional Commits, one logical change per commit: `feat:` `fix:`
 [CONTRIBUTING.md](CONTRIBUTING.md)). License is Apache 2.0; contributions
 are licensed under it — no separate CLA/DCO. PR gate: `go build ./...`,
 `make test`, golangci-lint clean, and schema changes validated with
-`appitools validate`.
+`appitools validate`. **A change to the data path additionally requires the
+full lane (no `-short`) and the binary-diff gate** — see the convention above;
+`make test` green has already shipped a broken POST once.
 
 ---
 
@@ -581,7 +600,16 @@ checked: `POST {"amount": 1.9}` on an `int64` field returned **201** and stored
 `1` — silent truncation reported as success — while `PATCH` with the same value
 returned a clean 422.
 
-The two verbs are **not** identical, and the differences are deliberate:
+Update answers the **same S44 shape** (ENG-29): a PATCH/PUT violation — wrong
+type, unknown field, `id`/auto field in the body, missing required on PUT — is
+`{"error":"validation_failed","fields":[…]}` with every offending field at once
+(rules: `type`, `unknown_field`, `read_only`, `required`), identical on REST,
+the GraphQL `update…` mutation (in `errors[].extensions.fields`) and a batch
+transaction op. It used to be a single flat string, so a client could not parse
+both verbs with one code path and the documented `ValidationErrorResponse` was
+false for updates.
+
+The one remaining create/update difference is deliberate:
 
 - **A JSON string defers to Postgres on create, and is rejected on update.**
   `POST {"amount": "7"}` → `201` (Postgres parses it; form-encoded and
@@ -589,10 +617,6 @@ The two verbs are **not** identical, and the differences are deliberate:
   be stricter than the database — ADR-024). `PATCH {"amount": "7"}` → `422`. The
   create path has always been the more permissive of the two; the type check
   preserved that rather than widening or narrowing it.
-- **The bodies differ in shape.** Create answers the S44 form
-  (`{"error":"validation_failed","fields":[…]}`); update answers a single
-  `{"error":"field \"amount\" must be an integer"}`. A client cannot parse both
-  with one code path (backlog ENG-29).
 
 A key that is **not** a declared field still passes through to Postgres (so a
 column added by a migration is writable without a restart, ENG-12) and comes back
@@ -1275,6 +1299,13 @@ Facts agents most often get wrong:
 - **JWT**: HS256 only, `exp` required, `role` claim must match a schema
   role. Mint dev tokens with
   `appitools token --secret "$JWT_SECRET" --tenant acme --role admin`.
+  Add `--schema <file>` and the command **refuses a role the schema does not
+  declare**, listing the declared ones (ENG-27) — an undeclared role is denied
+  everything with the SAME `403 forbidden` a permitted-but-denied role gets
+  (deliberately: naming the difference in the response would be a role-
+  enumeration oracle), and the distinction appears only in the server log
+  (`rbac: denied … role %q is not declared by any schema role`). Note the
+  default `--role super_admin` is a convention many schemas do not declare.
 - **Two ports**: data plane `:8080`; control plane `:9090` (tenant
   registration via `X-Admin-Key`) — internal only, never proxied.
 - **Health probes (all unauthenticated)**: `/healthz` (liveness, never
@@ -1296,7 +1327,9 @@ subroutes.
 
 - **Filters**: `?filter[field]=v` (implies `eq`) or
   `?filter[field][op]=v` with ops from the type table above. Unknown
-  field or type-incompatible op → 400.
+  field or type-incompatible op → 400. **`id` (the implicit primary key) is
+  filterable** — `?filter[id][eq]=<uuid>`, `eq` only — consistent with
+  `?sort=id` and the cursors (ENG-26).
 - **Search**: `?search=term` runs a case-insensitive substring match
   (`ILIKE %term%`, `%`/`_` escaped) across **only** the resource's
   `string` and `text` fields, OR-ed together and AND-ed with any
@@ -1309,22 +1342,32 @@ subroutes.
   sent. An unknown sort field, or a direction that is not `asc`/`desc`, is a
   **400 naming it** (ADR-024) — both used to be silently ignored, which is why
   this line carried a "verify result order, don't trust the param" warning. The
-  warning is gone because the behavior that needed it is gone. Multi-field sort is
-  still unsupported, and two `order[…]` parameters currently pick a winner
-  non-deterministically (backlog ENG-16).
+  warning is gone because the behavior that needed it is gone. An **empty**
+  `?sort=`/`?order=`, and `?order=desc` with no `?sort=` (a direction naming no
+  field), are also named 400s now (ENG-30) — they used to default silently.
+  Multi-field sort is still unsupported, and two `order[…]` parameters currently
+  pick a winner non-deterministically (backlog ENG-16).
 - **Pagination**: keyset — `?after=<uuid>` / `?before=<uuid>` with
   `?per_page=` (default 20, max 100). `?page=` exists but is
   OFFSET-based; prefer keyset. A **non-positive** `page`/`per_page` is a **400
   naming the value** — `?page=0` and `?page=-4` used to be served silently as
   page 1, even though the engine's own message for `?page=abc` already said
-  *"must be a positive integer"* (ADR-024). Over the cap it still **clamps**,
+  *"must be a positive integer"* (ADR-024). An **empty** `?page=`/`?per_page=` —
+  what an empty form field produces — is the same named 400 (ENG-30); it used to
+  be silently served as the default. Over the cap it still **clamps**,
   because "max 100" is documented and `meta` reports the effective value —
   reported tolerance, not silence.
 - **Filter values**: an empty value on a non-text field
   (`?filter[amount][gte]=`) is a **400 naming the field and its type**; it is
   legitimate on `string`/`text` (it asks for the empty string). A wrongly-typed
-  value is a 400 that does **not** yet name the field (backlog ENG-25) — but it
-  is now always a 400: a bad `time` or an overflowing number used to be a **500**.
+  value is a **400 naming the parameter, the value and the expected type**
+  (ENG-25): `filter[amount][gt]: "abc" is not a valid int64 value`. The
+  acceptors reproduce **Postgres's** input grammar, never Go's — `yes` is a
+  boolean, integers tolerate whitespace/sign/PG16 literal forms, floats accept
+  `Infinity`/`NaN` — pinned by a live conformance test so no working request is
+  rejected. The one type NOT validated in Go is **`time`** (its Postgres grammar
+  is too wide to reproduce safely): a garbage time value stays an anonymous 400,
+  the documented exception.
 - **Total count (opt-in)**: `?count=true` on a list adds `meta.total` +
   `meta.total_pages` (a `COUNT(*)` over the SAME filtered + RBAC-scoped set).
   **Off by default** — the plain list pays nothing and is byte-identical; turn it
@@ -1467,7 +1510,13 @@ GraphiQL only runs with `APPITOOLS_ENV=development`. The query analyzer
 also bounds document size as an alias-amplification guard: at most **50
 root selections** per operation and **2000 total selections** across the
 whole document — over either limit the request is rejected (there is no
-separate nesting-depth counter).
+separate nesting-depth counter). A **fragment's cost is charged at every
+spread site** (ENG-28): the counter used to walk each fragment body once
+globally, so one 45-field fragment spread across 50 root aliases counted ~95
+while the executor resolved a measured **~46× the cap** (~92,500 selections,
+21.4 MB from one request). Counted ≥ resolved now — the 2000 number holds —
+at the price of over-counting repeated same-alias spreads, which the executor
+merges (the safe direction).
 
 **GraphiQL — the visual explorer (GRAPHQL-EXPLORER-S1).** `/graphiql` is the
 GraphQL equivalent of REST's `/docs`: schema browser (introspection-driven),

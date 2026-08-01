@@ -113,7 +113,17 @@ chore: upgrade pgx to v5.9.2
 
 - [ ] `make fmt-check` passes (gofmt — CI gates on it)
 - [ ] `go build ./...` passes
-- [ ] `go test ./...` passes
+- [ ] `go test ./...` passes — the FULL lane, without `-short`. The `-short`
+      unit lane (`make test`) skips every DB-backed test, and that lane green
+      has already shipped a broken POST once (a create check rejecting the
+      engine's own `default:"now"` injection, 2026-08-01) — CI runs the full
+      lane; run it locally before trusting a data-path change
+- [ ] Data-path changes (query building, write validation, auth, tenant
+      resolution, response shaping) additionally ran
+      `scripts/binary-diff-gate.sh <old-binary> <new-binary>` and **every
+      reported DIFF is explained in the PR description**, case by case. Add a
+      corpus row (`scripts/binary-diff/corpus.jsonl`) for each contract you
+      touched
 - [ ] No new linter warnings (`golangci-lint run`)
 - [ ] Schema changes validated with `appitools validate`
 - [ ] If template changed: `appitools generate testdata/logistics/schema.json` regenerated

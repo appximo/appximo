@@ -26,8 +26,9 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-01 (SILENT-FAILURE-S1)** — every OPEN item below was
-re-verified against reality on that date, not carried forward on trust.
+**Last reviewed: 2026-08-01 (INPUT-CLASS-CLOSE-S1)** — ENG-25…ENG-31 closed
+(see DONE); the remaining OPEN items were last re-verified against reality on
+2026-08-01 (SILENT-FAILURE-S1), not carried forward on trust.
 
 ---
 
@@ -86,9 +87,6 @@ re-verified against reality on that date, not carried forward on trust.
   weight must not reach the request path by default).
 
 
-
-
-
 ### MIG-1 — A gin index's `opclass` change is a silent no-op
 - **Origin:** AUTHORING-GAPS-S1, the ENG-13 class audit
   ([docs/audits/MIGRATION_HONESTY_AUDIT.md](audits/MIGRATION_HONESTY_AUDIT.md)
@@ -131,8 +129,6 @@ re-verified against reality on that date, not carried forward on trust.
 - **Ready:** install a third, ephemeral app on the 58 with `--app`, confirm the
   tienda and petfriendly do not blink (a purchase + a CRUD call through each), then
   `--uninstall --app=<that app>` and confirm the two survivors are untouched.
-
-
 
 
 ### OPS-12 — The NestJS comparative benchmark cannot be re-run
@@ -314,121 +310,6 @@ re-verified against reality on that date, not carried forward on trust.
   hostname and confirm `https://api.appitools.com/healthz` → 200 from outside.
   **Miguel's call** — it is also fair to retire the hostname if the demo has moved.
 
-### ENG-30 — Empty `page`/`per_page`/`sort`/`order` values are still silently ignored
-- **Origin:** adversarial review of the ADR-024 work, 2026-08-01. This session made
-  an empty FILTER value a named 400 and a non-positive page a named 400, but the
-  adjacent parameters on the same function still take `params.Get(x) != ""` as
-  their gate, so `?page=&per_page=` — what an empty form field produces — is
-  silently defaulted. Same function, same request, two policies.
-- **Impact:** Low. The effect is the documented default rather than a wrong
-  result, and `meta` reports what was used. It is listed because a policy applied
-  to two of four sibling parameters is the kind of half-conversion the audit
-  document exists to prevent from being forgotten.
-- **Ready:** an empty value for a parameter the engine owns is either rejected by
-  the same rule as its siblings, or the exception is written down here.
-
-### ENG-31 — The `file` field type is not covered by the create type check
-- **Origin:** adversarial review, 2026-08-01. `validateFieldValue` has no `file`
-  case, so it falls through to "valid" — a non-string `file` value bypasses the
-  new create check entirely. It still fails downstream (the FK, or a Postgres cast
-  surfaced as a 400 by the widened `IsBadInput`), so this is a missing named
-  message rather than a hole: `file` is a uuid column and a caller sends it as a
-  string, which constraint 3 skips anyway.
-- **Ready:** `validateFieldValue` treats `file` like `uuid`, with a test.
-
-### ENG-29 — Create and update answer a type error in two different shapes
-- **Origin:** adversarial review of the ADR-024 create fix, measured 2026-08-01.
-  A wrongly-typed value returns the S44 form on create —
-  `{"error":"validation_failed","fields":[{"field":"amount","rule":"type",…}]}` —
-  and a single flat string on update: `{"error":"field \"amount\" must be an
-  integer"}`. Both are 422. A client cannot parse them with one code path, and a
-  generated OpenAPI client that models the documented `ValidationErrorResponse`
-  fails validation on every PATCH type error.
-- **Related asymmetry, deliberate and documented:** a JSON string is accepted on
-  create (deferred to Postgres) and rejected on update. That one is not a bug —
-  the create path has always been the more permissive of the two, and narrowing it
-  would break form-encoded clients (see ENG-25 for why matching Postgres exactly is
-  its own piece of work).
-- **Impact:** Medium for anyone writing a client against both verbs; it is also a
-  documented-contract mismatch, which is the class ADR-024 covers.
-- **Ready:** the update path emits the same `fields[]` shape (it already knows the
-  field name — `validateFieldValue` returns it), with the OpenAPI response schema
-  and the AGENTS.md paragraph updated in the same change.
-
-### ENG-25 — A wrongly-typed filter value is a 400 that names nothing
-- **Origin:** SILENT-FAILURE-S1 follow-up, verified live 2026-08-01.
-  `?filter[amount][gt]=abc` answers `400 {"error":"invalid request"}` — no field, no
-  value, no expected type. With three filters and two of them wrong, the caller
-  cannot tell which was rejected. (The *status* is now always a 400: this session
-  widened `db.IsBadInput`, so the same request used to be a **500** on a `time` or
-  overflowing numeric field.)
-- **Why it was NOT fixed here, with the measurement:** the obvious fix — type-check
-  the value in `BuildQuery`, where the schema type is known — risks being STRICTER
-  THAN POSTGRES and rejecting requests that work today. Measured:
-  `?filter[done][eq]=yes` returns **200** on the live engine, because Postgres
-  accepts `yes` as a boolean and Go's `strconv.ParseBool` does not. The same gap
-  exists for whitespace-padded integers, `Infinity`/`NaN` floats, and the very wide
-  set of timestamp spellings Postgres accepts. A correct fix must reproduce
-  Postgres's accepted set per type, not Go's, and that is a piece of work with its
-  own test matrix — not a line in an audit.
-- **Ready:** `validateFilterValue(op, fieldType, value)` as a sibling of
-  `validateFilterOp`, called before any SQL is built (so the "Postgres errors are
-  masked" property holds by construction — the message comes from the SCHEMA, never
-  from a `pgconn.PgError`), with a per-type conformance test asserting it accepts
-  everything Postgres accepts. Message shape: `filter[amount][gt]: "abc" is not a
-  valid int64 value`.
-
-### ENG-26 — `?filter[id]` is not supported, though `?sort=id` is
-- **Origin:** found while fixing the self-contradicting error message this session.
-  `id` is the implicit primary key: it is NOT in `res.Fields`, so the filter lookup
-  rejects it, while the sort path special-cases it and accepts it. Keyset pagination
-  (`?after=`/`?before=`) is also built on `id`. So two of the three places that take
-  a field name accept `id` and one does not.
-- **Impact:** Low, but it is a real capability gap — `?filter[id][eq]=<uuid>` is a
-  natural request, and unlike `GET /{id}` it composes with other filters.
-- **Ready:** the filter field lookup accepts `id` as a `uuid` field (its only legal
-  op is already `eq` via `operatorsForType`), with a test, and
-  `availableFieldNames(res, true)` at that call site once it does.
-
-### ENG-27 — An undeclared JWT role is indistinguishable from a denied one
-- **Origin:** SILENT-FAILURE-S1 follow-up, verified live 2026-08-01. A token whose
-  `role` names a role NO schema declares, and a token whose role is real but not
-  permitted, produce **byte-identical** `403 {"error":"forbidden"}` (same md5). The
-  role name appears nowhere — not the engine log, not the access log, not the deep
-  observability trace (which records the caller's IP, browser and OS but not the
-  role). `appitools token` mints an undeclared role with no warning, takes no
-  `--schema`, and defaults to `super_admin`, which the canonical quickstart schema
-  does not declare.
-- **The security judgement, because it decides the shape of the fix:** echoing the
-  role back to the CALLER leaks nothing — a JWT is base64, not encrypted, and the
-  caller already holds the claim. But distinguishing "role not declared" from "role
-  declared but not permitted" **in the response body** turns the endpoint into an
-  enumeration oracle over the schema's role namespace. So the fix is asymmetric:
-  the response body stays exactly as it is, and the SERVER LOG gains the
-  distinction. That is where the operator looks and the attacker cannot.
-- **Ready:** a log line at the RBAC deny naming the role and whether it is declared;
-  `appitools token` warns (or takes `--schema` and refuses) on a role the schema does
-  not declare.
-
-### ENG-28 — GraphQL fragment spreads bypass the selection cap (~46×)
-- **Origin:** SILENT-FAILURE-S1 follow-up, measured 2026-08-01. `analyzeQuery`
-  counts a fragment's body ONCE globally, but the executor resolves it at every
-  distinct root alias. Measured: a document the analyzer counts at exactly **2000**
-  (the advertised cap) resolved **~92,500** schema-level selections — **21.4 MB in
-  ~2.0 s** from one request. AGENTS.md advertises "at most 2000 total selections
-  across the whole document"; the real ceiling is ~46× that.
-- **The claim's stated mechanism was REFUTED and the real one is different** — worth
-  recording so the fix targets the right thing. `{ ...F ...F ...F }` does NOT
-  amplify: the executor merges by response key, so repeated same-alias spreads
-  collapse to a single resolution. The amplification comes from reusing one fragment
-  across up to 50 DISTINCT root aliases.
-- **Impact:** Medium. It needs a valid JWT and the per-tenant rate limiter still
-  applies, so it is amplification rather than an open door — but it is a documented
-  limit that does not hold, which is the class this ADR is about.
-- **Ready:** `analyzeQuery` charges a fragment's true cost at each spread site
-  (memoized `fragmentCost(name)` with a visiting-set cycle guard, summing the
-  fragment's own fields plus nested spreads) instead of `+1`, so counted == resolved;
-  and the AGENTS.md number is re-verified against the fixed counter.
 
 ### SCHEMA-6 — Filtering by NULL has no declarative surface
 - **Origin:** SILENT-FAILURE-S1. Closing ENG-14 forced the question explicitly: now
@@ -646,6 +527,35 @@ All three were **re-verified as still open on 2026-07-29**.
 | **Give `/root/commerce` a remote** | The technical fix is trivial; the decision (which account, public or private, whether the commerce platform is a product or a demo) is his. See **OPS-5** — until then the field report lives on one disk. |
 
 ---
+
+## DONE in INPUT-CLASS-CLOSE-S1 (2026-08-01)
+
+The seven items the adversarial review opened (ENG-25…ENG-31, ENG-27 first —
+it is security), closed under ADR-024, **plus the session's real deliverable:
+the technique that found what the tests did not — diffing two binaries over a
+paired corpus — baked into the repo as `scripts/binary-diff-gate.sh`**. Every
+fix below was verified by unit test + the full lane (no `-short`) + that gate
+(63 cases, base = pre-session HEAD; diff set stable across runs; every DIFF
+mapped to an intended change in the session report). Details:
+[UNRECOGNIZED_INPUT_AUDIT §INPUT-CLASS-CLOSE-S1](audits/UNRECOGNIZED_INPUT_AUDIT.md).
+
+| ID | What shipped | Verified by |
+|---|---|---|
+| **ENG-27** | The deliberate asymmetry: an RBAC deny logs `rbac: denied … role %q is not declared by any schema role` vs `…declared but not permitted %q on %q` (`Policy.DenyDetail`, at the REST middleware + transaction per-op + GraphQL denies) while the RESPONSE stays byte-identical `403 forbidden` for both (an enumeration oracle otherwise; same family as SEC-5). Both deny paths do the same work — no timing/length channel. `appitools token --schema <file>` refuses an undeclared role listing the declared set. | `TestDeny_UndeclaredRoleIndistinguishableToClient` (bodies byte-equal + logs distinguish + logs never cross); gate rows `rbac-undeclared-role` / `rbac-declared-denied`; live CLI probe |
+| **ENG-25** | `validateFilterValue` — a wrongly-typed filter value is a 400 naming the parameter, value and type, BEFORE any SQL exists. Acceptors reproduce **Postgres's grammar, never Go's** (`yes` is a bool, unique prefixes, whitespace, `Infinity`/`NaN`, PG16 literal forms). **`time` is the written exception** (grammar too wide to reproduce safely — stays an anonymous 400, in the audit + visible in the gate corpus). Reached the aggregate path for free (`BuildAggregate` delegates) — verified, not assumed. | `TestFilterValue_PostgresConformance` (unit corpus) + `TestFilterValueLivePostgresConformance` (**asks a real Postgres** per value, asserts PG-accepts ⇒ engine-accepts); gate rows incl. `filter-bool-yes-still-works`, `agg-filter-wrong-typed` |
+| **ENG-26** | `?filter[id][eq]=<uuid>` works — the implicit PK filters as the uuid it is (`eq` only), consistent with `?sort=id` and the cursors; the `available:` list names `id` truthfully again. Inherited by the aggregate path (verified). | `TestBuildQuery_FilterByID`; gate rows `filter-by-id`, `agg-filter-by-id` |
+| **ENG-28** | `analyzeQuery` charges a fragment's cost at EVERY spread site (memoized, cycle-guarded); the measured ~46× bypass document (50 aliases × 45-field fragment: counted ~95, resolved ~92,500) is rejected. Counted ≥ resolved — over-counts repeated same-alias spreads, the safe direction. The AGENTS 2000-selection claim re-verified against the fixed counter. | `TestAnalyzeQuery_FragmentSpreadCharged` (bypass doc rejected, under-cap passes, cycles safe, introspection in unused fragments still detected); gate row `graphql-fragment-amplified` |
+| **ENG-29** | `CollectUpdate` returns the S44 `fields[]` shape — EVERY violation at once (`type`/`unknown_field`/`read_only`/`required`), sorted — and all three callers emit it: REST PUT/PATCH (`writeValidationErrs`), GraphQL `update…` (`errors[].extensions.fields`), batch transaction op. One 422 contract for both verbs; the OpenAPI `ValidationErrorResponse` is now TRUE for updates (no spec change needed — the fix made the existing claim honest). AGENTS.md's "bodies differ in shape" paragraph replaced. | `TestCollectUpdate_S44Shape` (all 6 violations in one response, deterministic order); gate rows `update-*`, `tx-update-decimal-to-int`, `graphql-update-bad-uuid`, `update-multi-errors-at-once` |
+| **ENG-30** | Presence, not non-emptiness, gates `page`/`per_page`/`sort`/`order`: `?page=` (an empty form field) is the same named 400 as `?page=0`; `?sort=` names the empty value + available fields; `?order=` with sort → `use asc or desc`; and `?order=desc` with NO sort — read by nothing before — is a 400 explaining it requires sort. Absent parameters still default silently (presence is the gate). | `TestBuildQuery_EmptyOwnedParamsAreRejected`; gate rows `page-empty`, `per-page-empty`, `sort-empty`, `order-empty-with-sort`, `order-without-sort` |
+| **ENG-31** | `validateFieldValue` treats `file` as the uuid column it is (`file_not_found` stays the FK's job — this checks the SHAPE); a wrongly-typed file value names the field instead of dying downstream as an unnamed FK/cast error. | `TestValidateFieldValue_File`; covered on update/guard paths via `CollectUpdate` |
+| **Part B — the gate** | `scripts/binary-diff-gate.sh` + `scripts/binary-diff/corpus.jsonl` (63 cases: the previous session's before/after table, ADR-024's staples, one row per fix above, and rows that PIN OPEN ITEMS — ENG-15's discarded sort, ENG-17's first-value-wins — so a change to them gets noticed). Kills only its own PIDs, refuses busy ports, compares list bodies as SETS (random-uuid order differs between correct instances — measured), excludes cache hit/miss markers as volatile (measured flipping between identical binaries). Documented in AGENTS §Conventions + CONTRIBUTING checklist. | Run 6× this session; diff set stable at 23, all intended; the harness's own two nondeterminism bugs were found by running it twice |
+| **The `make test` decision** | Unambiguous: the lying lane is LOCAL `make test` (`-short`); CI's full lane already runs `pkg/integration` (Short-gated, not build-tag-gated — verified in ci.yml). (a) The `default:"now"` class is now covered IN the unit lane (`TestValidateCreateTypes_EngineInjectedDefaultsAreNotCallerInput`, real `ApplyDefaults`, no DB); (b) `make test` demoted in AGENTS + CONTRIBUTING to the fast inner loop — a data-path change's bar is unit + full lane + the binary-diff gate. | the test exists and runs in `-short`; docs updated |
+
+**Contract changes shipped (breaking for silent-reliance clients, per ADR-024
+§Consequences):** empty `page`/`per_page`/`sort`/`order` and bare `order` now
+400; wrongly-typed filter values now name themselves; update's 422 body changed
+shape from flat string to `validation_failed`+`fields[]`; `filter[id]` is new
+surface; fragment-heavy GraphQL documents above the true cap are rejected.
 
 ## DONE in SILENT-FAILURE-S1 (2026-08-01)
 

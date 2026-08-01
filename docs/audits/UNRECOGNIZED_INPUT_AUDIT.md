@@ -372,6 +372,77 @@ sampled rather than exhausted. That is the honest scope of this document: it is 
 sweep, not a proof of absence, and the checklist above is what makes the next pass
 cheaper than this one.
 
+## INPUT-CLASS-CLOSE-S1 (2026-08-01) — the seven review items closed, and the gate baked in
+
+The adversarial review of the previous session's fix opened seven items
+(ENG-25…ENG-31). This session closed all seven and converted the technique that
+found the worst defects — diffing two binaries over paired requests — into repo
+infrastructure. Everything below was verified by unit test, the full lane, AND
+the binary-diff gate (63-case corpus, base = pre-session HEAD vs new; the diff
+set was **stable across repeated runs** and every DIFF maps to an intended
+change, enumerated in the session report).
+
+- **ENG-27 (security, first).** An undeclared JWT role and a denied one now
+  DIFFER IN THE SERVER LOG (`rbac.Policy.DenyDetail`, logged at the REST
+  middleware, the transaction per-op deny and the GraphQL deny) and remain
+  **byte-identical to the caller** — same status, body, content-type, and the
+  same work on both deny paths (no timing/length channel). Naming the
+  difference in the response would be a role-enumeration oracle (same family as
+  SEC-5: a defence must not leak through its own error channel). A test pins
+  both halves. `appitools token --schema <file>` now REFUSES an undeclared
+  role, listing the declared set — the place the typo can be told the truth.
+- **ENG-25.** `validateFilterValue` rejects, BEFORE any SQL exists, a filter
+  value Postgres could not cast — naming the parameter, the value and the type.
+  The acceptors reproduce **Postgres's grammar, never Go's** (`yes` is a bool;
+  unique prefixes; whitespace; `Infinity`/`NaN`; PG16 literal forms), pinned in
+  the conformance direction that matters (PG accepts ⇒ engine accepts) by a
+  unit corpus AND a live cross-check against a real Postgres
+  (`pkg/integration/filtervalue_conformance_test.go`, which ASKS the server).
+  **`time` is the written exception**: its Postgres grammar (dozens of formats,
+  `now`, `infinity`, `allballs`…) is not safely reproducible, so a garbage time
+  filter stays an anonymous 400 — recorded here, visible in the gate corpus as
+  `filter-time-garbage-documented-gap`.
+- **ENG-26.** `?filter[id][eq]=<uuid>` works (the implicit PK filters as the
+  uuid it is, `eq` only), closing the sort-accepts/filter-rejects asymmetry;
+  `availableFieldNames` lists `id` truthfully again — the flag that existed
+  only to keep the message honest is gone.
+- **ENG-28.** `analyzeQuery` charges a fragment's cost at EVERY spread site
+  (memoized, cycle-guarded). The measured ~46× bypass document is in the gate
+  corpus and is now rejected; counted ≥ resolved (repeated same-alias spreads
+  over-count — the safe direction). The AGENTS 2000 claim holds again.
+- **ENG-29.** `CollectUpdate` returns the S44 `fields[]` shape — every
+  violation at once (`type`/`unknown_field`/`read_only`/`required`), sorted —
+  and all three callers (REST PUT/PATCH, GraphQL `update…`, batch op) emit it.
+  One 422 contract for both verbs; the OpenAPI `ValidationErrorResponse` was
+  already claiming this and is now true.
+- **ENG-30.** Presence, not non-emptiness, gates `page`/`per_page`/`sort`/
+  `order`: `?page=` (an empty form field) is the same named 400 as `?page=0`,
+  and `?order=desc` with no `?sort=` — a direction naming no field, read by
+  nothing — says so instead of vanishing.
+- **ENG-31.** `validateFieldValue` treats `file` as the uuid column it is; a
+  wrongly-typed file value names the field instead of surfacing as an unnamed
+  FK/cast error downstream.
+
+**The gate (Part B).** `scripts/binary-diff-gate.sh` + the growable corpus
+`scripts/binary-diff/corpus.jsonl` (63 cases: the previous session's
+before/after table, ADR-024's staples, one row per fix above, and rows that
+deliberately pin OPEN items — ENG-15's discarded sort, ENG-17's first-value-
+wins — so a future change to them is noticed). Harness lessons baked in: list
+bodies are compared as SETS (the default `id ASC` order over random uuids
+differs between two CORRECT instances), and cache hit/miss markers
+(`cache-control`, `x-cache`) are excluded as volatile — both were measured
+flipping between identical binaries.
+
+**The `make test` decision (unambiguous).** The lane that lied is the LOCAL
+`-short` unit lane: `pkg/integration` is gated by `testing.Short()`, so CI's
+full `go test ./... -race` DOES run it — the defect shipped because sessions
+treat `make test` as the verdict and nothing pushed had run CI. Resolution:
+(a) the specific class is now covered IN the unit lane
+(`TestValidateCreateTypes_EngineInjectedDefaultsAreNotCallerInput` exercises
+the real `ApplyDefaults` pipeline with no DB), and (b) `make test` is
+demoted in AGENTS.md and CONTRIBUTING.md to the fast inner loop: the bar for a
+data-path change is unit + full lane + the binary-diff gate.
+
 ## The guarantee
 
 `pkg/query/builder_test.go` now holds the pattern every future surface should copy:

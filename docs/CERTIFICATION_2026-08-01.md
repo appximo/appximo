@@ -19,6 +19,31 @@
 > The claims this session's fixes changed (the "silently ignored" sort/filter
 > behavior in AGENTS/CAPABILITIES/SCHEMA_REFERENCE) are corrected in those files.
 
+> **Second follow-up (INPUT-CLASS-CLOSE-S1, same day).** The seven items the
+> adversarial review of SILENT-FAILURE-S1's own fix opened (ENG-25…ENG-31) are
+> **CLOSED** — see [BACKLOG §DONE in INPUT-CLASS-CLOSE-S1](BACKLOG.md) and
+> [UNRECOGNIZED_INPUT_AUDIT §INPUT-CLASS-CLOSE-S1](audits/UNRECOGNIZED_INPUT_AUDIT.md).
+> Claims in THIS report that changed under it:
+>
+> - **The GraphQL "2000 total selections" cap now holds.** At certification time
+>   it was advertised but bypassable ~46× through fragment spreads (found after
+>   this report, tracked as ENG-28); the analyzer now charges a fragment's cost
+>   at every spread site, re-verified by test and by the binary-diff gate.
+> - **A wrongly-typed filter value is a named 400** (`filter[amount][gt]: "abc"
+>   is not a valid int64 value`), no longer the anonymous `invalid request` —
+>   with a live-Postgres conformance test guaranteeing the check is never
+>   stricter than the database. `time` values remain the documented exception.
+> - **Update's 422 changed shape** to the same `validation_failed` + `fields[]`
+>   contract create uses (REST, GraphQL and batch identically), so the OpenAPI
+>   `ValidationErrorResponse` model is now true for every write verb.
+> - **New rejections (contract changes):** empty `page`/`per_page`/`sort`/
+>   `order`, and `?order=` without `?sort=`, are named 400s; `?filter[id][eq]=`
+>   is new, working surface.
+> - **Verification infrastructure:** every claim above was checked by the new
+>   **binary-diff gate** (`scripts/binary-diff-gate.sh`, 63 paired requests,
+>   base-vs-new, stable diff set fully explained) — the technique that found
+>   what `make test` green did not, now a repo gate.
+
 
 **Session:** CERTIFY-S1 · **Commit under test:** `be876f4` · **Method:** everything
 below was executed against a **running engine** built from that commit. No figure was
