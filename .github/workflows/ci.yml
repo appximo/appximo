@@ -91,6 +91,28 @@ jobs:
       - name: 'Integration · observability metrics (tags integration)'
         run: go test -tags integration -race -count=1 ./tests/integration/...
 
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # OPS-3: the gate exists so `make lint` is enforced, not merely available.
+      # Before this job, golangci-lint ran only when somebody remembered to, with
+      # stock defaults, reporting 62 findings and exiting 1 — while the README
+      # implied audited quality. The policy (and every exclusion's reason) lives in
+      # .golangci.yml; this job is what makes it binding.
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.12.2
+          args: --timeout=10m
+
   govulncheck:
     name: vet + govulncheck
     runs-on: ubuntu-latest

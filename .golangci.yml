@@ -1,0 +1,151 @@
+version: "2"
+
+# Appitools lint policy (OPS-3).
+#
+# This file exists so `make lint` is a GATE, not a suggestion box. Before it,
+# golangci-lint ran with its stock defaults, reported 62 findings, exited 1, and
+# was not wired into CI — while the README implied audited quality. A linter
+# nobody can pass is a linter nobody runs.
+#
+# The rule for this file: **every exclusion states why.** An exclusion without a
+# written reason is the same failure mode as a silently ignored input — it looks
+# like a decision and is actually an absence of one.
+
+linters:
+  # The stock set: errcheck, govet, ineffassign, staticcheck, unused.
+  # Nothing extra is enabled — this gate is about holding a line, not about
+  # adopting new opinions in the same pass that turns it on.
+  default: standard
+
+  settings:
+    errcheck:
+      # errcheck is kept ON for everything that can actually fail in a way the
+      # program could respond to. The exclusions below are the calls where there
+      # is provably nothing to do with the error.
+      exclude-functions:
+        # --- Writing to an ALREADY-FAILING HTTP response --------------------
+        # These encode an error body onto a ResponseWriter. If the write fails,
+        # the client is gone or the socket is broken: there is no second channel
+        # to report it on, and the handler has already decided the request
+        # failed. The repo already annotates many of these `//nolint:errcheck`;
+        # this makes the policy uniform instead of per-site.
+        - (*encoding/json.Encoder).Encode
+        - (net/http.ResponseWriter).Write
+
+        # --- CLI / SSE output to an io.Writer -------------------------------
+        # `fmt.Fprint*` to os.Stdout/os.Stderr in a cobra command, and the SSE
+        # writer in pkg/codegen. A failed write to stdout means the pipe closed
+        # (the user hit `| head`); a failed SSE frame is handled by the stream
+        # ending, not by an error return.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*os.File).Write
+
+        # --- Deferred transaction rollback ----------------------------------
+        # `defer tx.Rollback(ctx)` after a possible Commit is the canonical pgx
+        # pattern: on the happy path it is a documented no-op returning
+        # ErrTxClosed. Checking it would mean reporting an error that means
+        # "the commit you wanted already happened".
+        - (github.com/jackc/pgx/v5.Tx).Rollback
+
+        # --- Cobra flag wiring ----------------------------------------------
+        # MarkFlagRequired only errors when the named flag does not exist — a
+        # programming mistake that panics the test suite immediately, not a
+        # runtime condition.
+        - (*github.com/spf13/pflag.FlagSet).MarkFlagRequired
+        - (*github.com/spf13/cobra.Command).MarkFlagRequired
+
+        # --- Deferred resource cleanup --------------------------------------
+        # `defer x.Close()` on a response body, a pgx Rows, or a LISTEN/drain
+        # connection. The work is already done or already failed by the time the
+        # defer runs; the error has no consumer and no recovery. Go's own stdlib
+        # documents this shape. Listed per-type rather than as a blanket
+        # "anything named Close" so a Close that DOES matter (a file being
+        # written, where a failed close means data loss) is still caught.
+        - (io.ReadCloser).Close
+        - (*net/http.Response).Body.Close
+        - (github.com/jackc/pgx/v5.Rows).Close
+        - (*database/sql.Rows).Close
+        - (*github.com/jackc/pgx/v5/pgxpool.Conn).Close
+        - (*github.com/jackc/pgx/v5.Conn).Close
+
+        # --- Goja VM global binding -----------------------------------------
+        # `vm.Set(name, value)` on a freshly created Goja runtime while wiring the
+        # JS sandbox's built-ins. It can only fail if the value is not convertible
+        # — a compile-time-shaped mistake that the sandbox tests catch on the
+        # first hook execution, not a runtime condition a handler could act on.
+        - (*github.com/dop251/goja.Runtime).Set
+
+        # --- Best-effort notification + temp cleanup ------------------------
+        # pg_notify for cache invalidation (the write it follows is committed; a
+        # missed notification degrades to one stale TTL) and os.Remove of a temp
+        # file already superseded. Failing the caller over either would be worse
+        # than the condition itself.
+        - (*github.com/jackc/pgx/v5/pgxpool.Pool).Exec
+        - os.Remove
+
+    staticcheck:
+      # SA* (real bug patterns), S1* (simplifications) and ST* (style) stay ON.
+      # QF* are "quickfix" refactors — De Morgan's law, Fprintf instead of
+      # WriteString(Sprintf(...)), merging a declaration with its assignment.
+      # They are editor suggestions, not defects, and enforcing them would churn
+      # code whose current shape is often the more readable one. Excluded as a
+      # class, deliberately, rather than silenced site by site.
+      # This list is golangci-lint's DEFAULT staticcheck set (which already
+      # excludes the ST1xxx naming/comment opinions) minus the QF quickfixes.
+      # Turning on "all" would additionally enable ST1000 & friends — 107 findings
+      # of "this package needs a doc comment" — which is a different decision
+      # from "hold the line on correctness", and not one to make in the same pass
+      # that first turns the gate on.
+      checks:
+        - "all"
+        - "-ST1000"  # package comment required — a docs decision, not a defect
+        - "-ST1003"  # naming conventions (initialisms) — churn on existing API
+        - "-ST1016"  # consistent receiver names
+        - "-ST1020"  # comment on exported function form
+        - "-ST1021"  # comment on exported type form
+        - "-ST1022"  # comment on exported var form
+        - "-ST1023"  # redundant type in variable declaration
+        - "-QF1001"  # could apply De Morgan's law
+        - "-QF1003"  # could convert if/else-if chain to tagged switch
+        - "-QF1007"  # could merge conditional assignment into declaration
+        - "-QF1008"  # could remove embedded field from selector
+        - "-QF1012"  # Fprintf instead of Write([]byte(Sprintf(...)))
+
+  exclusions:
+    # golangci-lint's own presets for generated files and common test noise.
+    generated: lax
+    rules:
+      # --- Test cleanup ----------------------------------------------------
+      # `defer resp.Body.Close()`, `defer ctr.Terminate(ctx)`, a Rollback in a
+      # fixture: in a test, a failed cleanup surfaces as the NEXT assertion
+      # failing, which is the signal you want. Requiring `_ =` on every one adds
+      # noise to the files that are read most often.
+      - path: _test\.go
+        linters: [errcheck]
+
+      # --- Integration-test containers -------------------------------------
+      # testcontainers' Terminate in a defer, same reasoning as above, in the
+      # non-_test helper files that host the fixtures.
+      - source: "\\.Terminate\\(ctx\\)"
+        linters: [errcheck]
+
+      # --- pg_notify best-effort -------------------------------------------
+      # Cache-invalidation notifications are explicitly best-effort: the write
+      # they follow is already committed, and a missed notification degrades to
+      # a stale cache for one TTL. Failing the request over it would be worse
+      # than the staleness. Each site carries a `//nolint` comment explaining
+      # this; the rule makes the intent greppable in one place.
+      - source: "pg_notify"
+        linters: [errcheck]
+
+issues:
+  # Report everything, every time — a gate that hides repeats is a gate that
+  # lets a regression through on its second occurrence.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
