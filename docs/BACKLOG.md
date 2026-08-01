@@ -26,7 +26,7 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-01 (AUTHORING-GAPS-S1)** — every OPEN item below was
+**Last reviewed: 2026-08-01 (CERTIFY-S1)** — every OPEN item below was
 re-verified against reality on that date, not carried forward on trust.
 
 ---
@@ -88,24 +88,6 @@ re-verified against reality on that date, not carried forward on trust.
 
 
 
-### OPS-9 — bench-protocol.sh assumes a retired dev fixture
-- **Origin:** CONSUMER-PATH-S1 (commerce GAPS 4-2), while measuring itself: the
-  default `ENDPOINT` is `/api/guides…` (a schema that no longer ships) and the
-  minted token uses role `super_admin` (no current example declares it) — the
-  same "assumes the bare-engine fixture" class OPS-8 fixed in the verification
-  suites, in the DEV measurement path. The `ENDPOINT`/`BENCH_TOKEN` overrides
-  exist and carried this session's measurement.
-- **Impact:** Low — a papercut for whoever runs `make bench-protocol` on a
-  fresh setup (100 % error rate, "no datapoints", twice this session).
-- **Ready:** defaults derived from the SERVED schema (first resource +
-  first role, like acceptance-test does), or a hard, actionable pre-flight
-  failure naming the overrides.
-
-
-
-
-
-
 
 ### MIG-1 — A gin index's `opclass` change is a silent no-op
 - **Origin:** AUTHORING-GAPS-S1, the ENG-13 class audit
@@ -149,6 +131,86 @@ re-verified against reality on that date, not carried forward on trust.
 - **Ready:** install a third, ephemeral app on the 58 with `--app`, confirm the
   tienda and petfriendly do not blink (a purchase + a CRUD call through each), then
   `--uninstall --app=<that app>` and confirm the two survivors are untouched.
+
+### SEC-1 — The CSP header is dropped on cached API responses
+- **Origin:** CERTIFY-S1 (2026-08-01), measured live. `StrictCSP` sets
+  `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'` on `/api/*`,
+  but the response cache does not preserve it: `pkg/cache/response_cache.go`
+  `buildItem` stores only `Content-Type` and `Etag`, and `writeItem` replays only
+  those. `SecurityHeaders` runs OUTSIDE the cache so its four headers survive;
+  `StrictCSP` runs INSIDE the cached group, so its header is lost.
+- **Evidence:** `GET /api/notes` → no CSP. The same URL with `Cache-Control:
+  no-cache` (a full cache bypass) → CSP present.
+- **Impact:** **Low, no exploit.** The affected bodies are `application/json` served
+  with `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and HSTS still
+  present; CSP on a JSON response is defence-in-depth, not the control that stops an
+  attack. It is a real deviation from the documented posture, and the same mechanism
+  would silently drop ANY future header set inside the cached group — that is the
+  part worth fixing.
+- **Ready:** the cache stores and replays the full header set it captured (or at
+  minimum an explicit allowlist that includes CSP), with a test asserting a cache HIT
+  and a cache MISS carry byte-identical security headers.
+
+### SEC-2 — The default static CSP allows inline scripts
+- **Origin:** CERTIFY-S1. `DefaultStaticCSP` carries `'unsafe-inline'` on
+  **`script-src`** (not only `style-src`). If an attacker achieves HTML injection in
+  a served SPA shell, an inline `<script>` executes — the primary protection CSP
+  exists to give is off. What still holds: no external script sources, no external
+  `connect-src` (the exfiltration step), no framing, no foreign `form-action`.
+- **Why it is there:** SvelteKit's `adapter-static` (and Next export, Astro islands)
+  boots hydration from an inline `<script>`; the first strict draft blanked a real
+  SPA in every browser, invisible to curl. Permissive by NECESSITY, not by design —
+  now documented as such.
+- **Impact:** Medium for anyone serving a frontend from the engine. Mitigated today
+  only by the operator overriding `StaticMount.CSP` per mount.
+- **Ready:** hash-based CSP — at boot, compute the sha256 of each inline
+  `<script>`/`<style>` in the mount's `index.html` and emit `'sha256-…'` instead of
+  `'unsafe-inline'`. That keeps the mainstream bundlers working AND restores the XSS
+  protection. Verified with a real SvelteKit build in a browser, not with curl.
+
+### SEC-3 — `Route.Public` optional authentication has no live test
+- **Origin:** CERTIFY-S1. ENG-6 (LIBRARY-GAPS-S2) changed the auth surface: a
+  `Route.Public` endpoint is now OPTIONALLY authenticated (no token → anonymous;
+  valid Bearer → Claims populated; invalid/expired/foreign-tenant Bearer → 401). It
+  is covered by `route_public_test.go` at the unit level and was **not** exercised
+  against a running engine during this certification.
+- **Why not:** the pure `serve` binary registers no custom routes, so a live test
+  needs a consumer binary; the two on the 58 are production assets and probing their
+  public routes means writing to them.
+- **Impact:** Low today (unit coverage exists) but this is the most recently moved
+  auth surface, and it is the one an external caller reaches without credentials.
+- **Ready:** a throwaway consumer binary in the cert environment with one public
+  route, exercising the three branches live, added to the certification battery.
+
+### ENG-14 — A filter operator containing `_` is silently ignored
+- **Origin:** CERTIFY-S1, measured live. `?filter[title][is_null]=true` returns
+  **`200` with the FULL unfiltered list** — the documentation says unsupported ops
+  return `400`, and `neq`/`in`/`nin`/`like`/`ilike` correctly do.
+- **Root cause:** `filterParamRe` in `pkg/query/builder.go` is
+  `^filter\[([a-z][a-z0-9_]*)\](?:\[([a-z]+)\])?$` — the OP group is `[a-z]+`, so
+  any op containing `_` fails to match the whole parameter, which is then skipped by
+  the parse loop **without an error**. `filter[title][totalnonsense]` matches and is
+  correctly rejected with 400; `filter[title][is_null]` never reaches validation.
+- **Impact:** Medium. A client filtering `?filter[x][is_null]=true` believes it is
+  seeing null rows and is shown EVERY row. RBAC still applies, so it is not a
+  cross-tenant or authorization issue — it is a correctness issue of exactly the
+  "accepts and continues in silence" class AUTHORING-GAPS-S1 set out to remove.
+- **Ready:** the op group accepts `[a-z_]+` so unknown ops reach `validateFilterOp`
+  and get their `400`; a test asserting `is_null`, `not_null` and any other
+  underscore-bearing op are REJECTED, not ignored. Docs corrected already.
+
+### OPS-12 — The NestJS comparative benchmark cannot be re-run
+- **Origin:** CERTIFY-S1. The harness survives (`benchmark-lab/nestjs-baseline/`
+  with `dist/` + `node_modules`, plus `/root/archives-58/nestjs-bench-58-20260731.tgz`),
+  but the published measurement's conditions are gone: the 58 has no Node, no pm2 and
+  no Docker (so no 0.5-vCPU PostgreSQL cap, which was a declared, symmetric condition
+  of the original), and it now serves two production apps.
+- **Impact:** **High for publication.** "~4.8× faster than NestJS" is the most
+  quotable claim the project has, and it is currently unverifiable. It is marked as
+  historical (2026-06-10) in the README and the benchmark doc.
+- **Ready:** a dedicated, disposable SUT with both stacks installed and PostgreSQL
+  constrained identically for both arms, run through the existing ABBA protocol —
+  then the claim is restored with a fresh date, or dropped.
 
 ### SCHEMA-1 — Computed / derived fields
 - **Origin:** docs/MODEL_LAB.md G7 ("order totals as a computed field").
@@ -330,6 +392,28 @@ All three were **re-verified as still open on 2026-07-29**.
 | **Give `/root/commerce` a remote** | The technical fix is trivial; the decision (which account, public or private, whether the commerce platform is a product or a demo) is his. See **OPS-5** — until then the field report lives on one disk. |
 
 ---
+
+## DONE in CERTIFY-S1 (2026-08-01)
+
+A certification pass: no engine behavior was changed. Everything below is a
+measurement, a corrected claim, or measurement infrastructure. Full evidence in
+[docs/CERTIFICATION_2026-08-01.md](CERTIFICATION_2026-08-01.md).
+
+| ID | What | Verified by |
+|---|---|---|
+| **OPS-9** | **Closed.** `bench-protocol.sh` now **self-heals its fixture**: a missing bench tenant is recreated from the schema the target engine actually serves (`GET /editor/current-schema`), so a routine cleanup can no longer cut the historical series — it had done so twice. It only ever CREATES a missing tenant. Plus **`benchmarks/history.tsv`**, an append-only log every protocol run writes to (date, commit, label, fixture, rate, p50/p95, CV, error rate, condition note). | The tenant was deleted and the next run recreated it and measured with no intervention; this session's runs are the log's first entries |
+| **Flagship benchmark re-certified** | 2000 rps → p50 **1.600 ms** CI95 [1.568, 1.665], **0 errors in 597,461 requests** — reproducing the published 1.58 ms [1.52, 1.62]. 500 rps → 1.532 ms. Cache bypassed → 2.436 ms (better than published; today's PG is uncapped). **New caveat found:** on engine DEFAULTS (1000 rps/tenant) a 2000 rps single-tenant load is ~50 % `429` — 10,080 × 200 / 9,921 × 429 / 0 × 5xx | 10-run protocol per arm on the original hardware, external loader |
+| **Security posture re-certified** | All **9 original OWASP findings** still fixed, verified live. **24 live isolation/RBAC probes** clean: cross-tenant across REST/GraphQL/search/filter/aggregate/SSE/files, BOLA by direct id (404, never 403), deny-by-default, field allowlist on REST *and* GraphQL, row conditions scoping lists *and* aggregates, the mass-assignment block, and an empty `$user_id` failing CLOSED. `UnsafeTx` is still a complete grep audit (9 hits, none in request-handling code) | inline in the report §3 |
+| **Documentation claims audited** | 34 verified, **6 corrected**, 4 not verifiable — binary size (~60 → ~64 MB release), the 2000 rps limiter caveat, the NestJS ratio re-dated as historical, the `is_null` claim, the `--tenant 10` reproduction recipe (ENG-11 made it unregistrable), and the layer cost (+0.97 → +1.22 ms) | each against the running engine |
+| **CAPABILITIES' honest list completed** | Five real limits from the field reports were missing and are now listed: no zero-downtime upgrade, no restore command, `install.sh --app` untested live, the unpublished Go module, and the terminal-only super-admin | re-read against PARTS ONE–FIVE |
+
+**Findings opened, not fixed** (this session certifies; a dedicated pass fixes):
+**SEC-1**, **SEC-2**, **SEC-3**, **ENG-14**, **OPS-12** — all above with evidence.
+
+**Toolchain state, measured:** `go vet` and `gofmt` clean; `make test` and the
+integration lane green; **`golangci-lint` 62 issues / exit 1 and NOT wired into CI**
+(OPS-3, now with a number); **`govulncheck` could not run** on the 105 (OOM-killed,
+exit 137, even scoped to one package) — the CI gate remains the authority.
 
 ## DONE in AUTHORING-GAPS-S1 (2026-08-01)
 
