@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -215,40 +216,88 @@ func analyzeQuery(queryStr string, isGet, isDev bool) (string, bool) {
 		return "", true
 	}
 
-	total := 0
 	introspection := false
 	// Detect introspection by FIELD NAME anywhere in the document. The "__" prefix is
 	// reserved, so __schema/__type can only be introspection (and __typename, which we
 	// deliberately allow). Walking every selection — not just operation roots — closes
 	// the fragment-spread bypass (`query{...f} fragment f on Query{__schema{…}}`).
-	var walk func(ss *ast.SelectionSet)
-	walk = func(ss *ast.SelectionSet) {
-		if ss == nil {
-			return
-		}
-		for _, sel := range ss.Selections {
-			total++
-			if f, ok := sel.(*ast.Field); ok && f.Name != nil &&
-				(f.Name.Value == "__schema" || f.Name.Value == "__type") {
-				introspection = true
-			}
-			walk(sel.GetSelectionSet())
+	//
+	// COUNTING (ENG-28): a fragment's cost is charged AT EVERY SPREAD SITE, not
+	// once globally. The old counter walked each fragment's body once, so a
+	// document it counted at exactly 2000 — the advertised cap — resolved a
+	// measured ~92,500 schema-level selections (~46×, 21.4 MB in ~2 s): the
+	// executor expands the fragment at every DISTINCT root alias, and 50 aliases
+	// × one 40-field fragment cost the analyzer 40, not 2000. (Repeating the
+	// SAME spread — `{...F ...F}` — does NOT amplify: the executor merges by
+	// response key. Charging per spread therefore over-counts that shape, which
+	// is the safe direction: counted >= resolved, so the advertised cap holds.)
+	frags := map[string]*ast.FragmentDefinition{}
+	for _, def := range doc.Definitions {
+		if fd, ok := def.(*ast.FragmentDefinition); ok && fd.Name != nil {
+			frags[fd.Name.Value] = fd
 		}
 	}
+	fragCost := make(map[string]int, len(frags))
+	visiting := map[string]bool{}
+	var costOf func(name string) int
+	var walkCost func(ss *ast.SelectionSet) int
+	walkCost = func(ss *ast.SelectionSet) int {
+		if ss == nil {
+			return 0
+		}
+		c := 0
+		for _, sel := range ss.Selections {
+			c++
+			switch s := sel.(type) {
+			case *ast.Field:
+				if s.Name != nil && (s.Name.Value == "__schema" || s.Name.Value == "__type") {
+					introspection = true
+				}
+				c += walkCost(s.GetSelectionSet())
+			case *ast.FragmentSpread:
+				if s.Name != nil {
+					c += costOf(s.Name.Value)
+				}
+			default: // inline fragment
+				c += walkCost(sel.GetSelectionSet())
+			}
+		}
+		return c
+	}
+	costOf = func(name string) int {
+		if c, done := fragCost[name]; done {
+			return c
+		}
+		frag, ok := frags[name]
+		if !ok || visiting[name] {
+			// Unknown fragment or a spread cycle — both are validation errors
+			// the executor reports precisely; cost 0 lets that error surface.
+			return 0
+		}
+		visiting[name] = true
+		c := walkCost(frag.SelectionSet)
+		delete(visiting, name)
+		fragCost[name] = c
+		return c
+	}
 
+	total := 0
 	for _, def := range doc.Definitions {
-		switch d := def.(type) {
-		case *ast.OperationDefinition:
+		if d, ok := def.(*ast.OperationDefinition); ok {
 			if isGet && d.Operation == "mutation" {
 				return "mutations must use POST", false
 			}
 			if d.SelectionSet != nil && len(d.SelectionSet.Selections) > maxRootSelections {
 				return "query too complex", false
 			}
-			walk(d.SelectionSet)
-		case *ast.FragmentDefinition:
-			walk(d.SelectionSet)
+			total += walkCost(d.SelectionSet)
 		}
+	}
+	// Fragments nothing spreads cost the executor nothing, but are still walked
+	// so introspection hidden in an unused fragment stays detected (and so the
+	// old counter's coverage is not reduced).
+	for name := range frags {
+		costOf(name)
 	}
 	if total > maxTotalSelections {
 		return "query too complex", false
@@ -1270,9 +1319,12 @@ func updateResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 			}
 			writable = func(f string) bool { _, ok := allow[f]; return ok }
 		}
-		sets, status, msg := codegen.CollectUpdate(res, norm, false, writable)
-		if status != 0 {
-			return nil, fmt.Errorf("%s", msg)
+		// A violation carries the S44 fields[] into errors[].extensions — the
+		// same shape ValidateWrite failures already use, and the same contract
+		// REST's 422 answers (ENG-29).
+		sets, cerrs := codegen.CollectUpdate(res, norm, false, writable)
+		if len(cerrs) > 0 {
+			return nil, &validationError{fields: cerrs}
 		}
 
 		// before_update hook (same contract as REST / GraphQL create).
@@ -1400,6 +1452,10 @@ func checkRBAC(ctx context.Context, policy *rbac.Policy, resource, action string
 
 	result := policy.Evaluate(evalCtx, resource, action)
 	if !result.Allowed {
+		// ENG-27: log whether the role exists at all — the GraphQL error stays
+		// the bare "forbidden" (same asymmetry as the REST middleware).
+		log.Printf("rbac: denied graphql %s %s — %s (user_id=%q)",
+			action, resource, policy.DenyDetail(evalCtx.Role, resource, action), evalCtx.UserID)
 		return nil, fmt.Errorf("forbidden")
 	}
 	return &result, nil

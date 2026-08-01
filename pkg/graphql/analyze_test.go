@@ -67,3 +67,62 @@ func TestSafeDBErr_MasksInternals(t *testing.T) {
 		t.Fatalf("bad-input mapping: got %q", got)
 	}
 }
+
+// TestAnalyzeQuery_FragmentSpreadCharged pins ENG-28: a fragment's cost is
+// charged at EVERY spread site, so counted >= resolved. The old counter walked
+// each fragment body once globally, and the measured bypass — one 40-field
+// fragment spread across 50 distinct root aliases — passed the analyzer at a
+// count of ~90 while the executor resolved ~46× the advertised 2000-selection
+// cap (measured: ~92,500 selections, 21.4 MB from one request).
+func TestAnalyzeQuery_FragmentSpreadCharged(t *testing.T) {
+	// Fragment with 45 fields, spread across 50 root aliases: true cost
+	// 50×(1+45) = 2300 > 2000. The old counter saw 50 + 45 = 95 and passed it.
+	var frag strings.Builder
+	frag.WriteString("fragment F on Guide {")
+	for i := 0; i < 45; i++ {
+		frag.WriteString(" f" + strconv.Itoa(i))
+	}
+	frag.WriteString(" }")
+
+	var q strings.Builder
+	q.WriteString("query {")
+	for i := 0; i < 50; i++ {
+		q.WriteString(" a" + strconv.Itoa(i) + ":guides{...F}")
+	}
+	q.WriteString(" } ")
+	q.WriteString(frag.String())
+
+	if reason, ok := analyzeQuery(q.String(), false, false); ok {
+		t.Fatalf("fragment-amplified document must be rejected, got ok (reason=%q)", reason)
+	}
+
+	// The same shape UNDER the cap keeps working: 10 aliases × 46 = 460.
+	var small strings.Builder
+	small.WriteString("query {")
+	for i := 0; i < 10; i++ {
+		small.WriteString(" a" + strconv.Itoa(i) + ":guides{...F}")
+	}
+	small.WriteString(" } ")
+	small.WriteString(frag.String())
+	if reason, ok := analyzeQuery(small.String(), false, false); !ok {
+		t.Fatalf("under-cap fragment document must pass, got %q", reason)
+	}
+
+	// Nested fragments are charged transitively.
+	nested := `query { a1:guides{...A} a2:guides{...A} } fragment A on Guide { x ...B } fragment B on Guide { y z }`
+	if _, ok := analyzeQuery(nested, false, false); !ok {
+		t.Fatal("small nested fragment doc must pass")
+	}
+
+	// A fragment CYCLE must not hang or panic — the executor reports it.
+	cycle := `query { a:guides{...A} } fragment A on Guide { ...B } fragment B on Guide { ...A }`
+	if _, ok := analyzeQuery(cycle, false, false); !ok {
+		t.Fatal("cyclic fragments are the executor's error to report, not the analyzer's")
+	}
+
+	// Introspection hidden in an UNUSED fragment is still detected.
+	unused := `query { __typename } fragment Z on Query { __schema { types { name } } }`
+	if reason, ok := analyzeQuery(unused, false, false); ok || !strings.Contains(reason, "introspection") {
+		t.Fatalf("introspection in unused fragment must stay blocked, got ok=%v reason=%q", ok, reason)
+	}
+}

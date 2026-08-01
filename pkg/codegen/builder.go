@@ -751,10 +751,12 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				}
 
 				// Validate against the schema and collect the columns to set.
-				sets, status, msg := CollectUpdate(wres, body, put, writable)
-				if status != 0 {
+				// A violation answers the SAME S44 fields[] shape as create
+				// (ENG-29) — one parseable 422 contract for both verbs.
+				sets, cerrs := CollectUpdate(wres, body, put, writable)
+				if len(cerrs) > 0 {
 					markSpan(req, "validate")
-					writeJSONErr(w, status, msg)
+					writeValidationErrs(w, cerrs)
 					return
 				}
 
@@ -1412,8 +1414,19 @@ func classifyTransitionFailure(vals []any, stateFields []string, sets map[string
 
 // CollectUpdate validates body against the resource schema for an update and
 // returns the columns→values to write (excluding the auto updated_at, which
-// RunUpdate forces to NOW()). On a validation failure it returns a non-zero HTTP
-// status (always 422 here) and a client-safe message.
+// RunUpdate forces to NOW()). On a validation failure it returns the violations
+// in the SAME S44 fields[] shape the create path reports — every offending
+// field at once, each with its rule.
+//
+// It used to return a single flat message (`{"error":"field \"amount\" must be
+// an integer"}`) while create answered the structured
+// `{"error":"validation_failed","fields":[…]}` for the same mistake — two
+// shapes for one error class, so a client could not parse both verbs with one
+// code path, and a generated OpenAPI client modelling the documented
+// ValidationErrorResponse failed on every PATCH type error (ENG-29, ADR-024
+// rule 9: two paths that accept the same input must answer it the same way).
+// All three callers — REST PUT/PATCH, the GraphQL update mutation, and a batch
+// transaction update op — emit the shared shape now.
 //
 //   - PUT (put=true): every non-auto required field must be present and non-null;
 //     optional fields absent from the body are written as NULL (full replacement).
@@ -1423,27 +1436,31 @@ func classifyTransitionFailure(vals []any, stateFields []string, sets map[string
 // Both reject "id" and any auto-managed field appearing in the body, reject unknown
 // fields, type-check values, and validate enums. Fields the role may not write
 // (per writable) are silently dropped from the result.
-func CollectUpdate(res *schema.ResourceSchema, body map[string]any, put bool, writable func(string) bool) (map[string]any, int, string) {
+func CollectUpdate(res *schema.ResourceSchema, body map[string]any, put bool, writable func(string) bool) (map[string]any, []schema.FieldRuleError) {
+	var errs []schema.FieldRuleError
 	// Reject id / unknown / auto-managed keys, then type-check each present value.
 	for k, v := range body {
 		if k == "id" {
-			return nil, http.StatusUnprocessableEntity, `field "id" cannot be set`
+			errs = append(errs, schema.FieldRuleError{Field: "id", Rule: "read_only", Message: `field "id" cannot be set`})
+			continue
 		}
 		fd, known := res.Fields[k]
 		if !known {
-			return nil, http.StatusUnprocessableEntity, fmt.Sprintf("unknown field: %q", k)
+			errs = append(errs, schema.FieldRuleError{Field: k, Rule: "unknown_field", Message: fmt.Sprintf("unknown field: %q", k)})
+			continue
 		}
 		if fd.Auto {
-			return nil, http.StatusUnprocessableEntity, fmt.Sprintf("field %q is set automatically and cannot be written", k)
+			errs = append(errs, schema.FieldRuleError{Field: k, Rule: "read_only", Message: fmt.Sprintf("field %q is set automatically and cannot be written", k)})
+			continue
 		}
 		if v == nil {
 			if fd.Required {
-				return nil, http.StatusUnprocessableEntity, fmt.Sprintf("field %q is required and cannot be null", k)
+				errs = append(errs, schema.FieldRuleError{Field: k, Rule: "required", Message: fmt.Sprintf("field %q is required and cannot be null", k)})
 			}
 			continue // null on an optional field → NULL in DB
 		}
 		if msg, ok := validateFieldValue(k, fd, v); !ok {
-			return nil, http.StatusUnprocessableEntity, msg
+			errs = append(errs, schema.FieldRuleError{Field: k, Rule: "type", Message: msg})
 		}
 	}
 
@@ -1453,10 +1470,25 @@ func CollectUpdate(res *schema.ResourceSchema, body map[string]any, put bool, wr
 			if fd.Auto || !fd.Required {
 				continue
 			}
-			if v, present := body[name]; !present || v == nil {
-				return nil, http.StatusUnprocessableEntity, fmt.Sprintf("missing required field: %q", name)
+			if v, present := body[name]; !present {
+				errs = append(errs, schema.FieldRuleError{Field: name, Rule: "required", Message: fmt.Sprintf("missing required field: %q", name)})
+			} else if v == nil {
+				// Already reported by the null check above — no duplicate row.
+				continue
 			}
 		}
+	}
+
+	if len(errs) > 0 {
+		// Map iteration is random; a response that reshuffles between identical
+		// requests is untestable (same rule as validateCreateTypes).
+		sort.Slice(errs, func(i, j int) bool {
+			if errs[i].Field != errs[j].Field {
+				return errs[i].Field < errs[j].Field
+			}
+			return errs[i].Rule < errs[j].Rule
+		})
+		return nil, errs
 	}
 
 	sets := make(map[string]any)
@@ -1477,7 +1509,7 @@ func CollectUpdate(res *schema.ResourceSchema, body map[string]any, put bool, wr
 			sets[name] = v
 		}
 	}
-	return sets, 0, ""
+	return sets, nil
 }
 
 // validateFieldValue checks a single decoded JSON value against a field definition.
@@ -1509,6 +1541,20 @@ func validateFieldValue(name string, fd schema.FieldDef, v any) (string, bool) {
 		}
 		if _, err := uuid.Parse(s); err != nil {
 			return fmt.Sprintf("field %q must be a uuid", name), false
+		}
+	case "file":
+		// ENG-31: a `file` field's column IS a uuid (the file_id POST /api/files
+		// returned — FILES-LINK-S1). Without this case the switch fell through to
+		// "valid", so a wrongly-typed file value bypassed the type check and
+		// surfaced downstream as an unnamed FK/cast error instead of naming the
+		// field. Whether the id references a real file of the tenant stays the
+		// FK's job (422 file_not_found) — this only checks the SHAPE.
+		s, ok := v.(string)
+		if !ok {
+			return fmt.Sprintf("field %q must be a file id (a uuid)", name), false
+		}
+		if _, err := uuid.Parse(s); err != nil {
+			return fmt.Sprintf("field %q must be a file id (a uuid)", name), false
 		}
 	case "int", "int64":
 		f, ok := v.(float64)

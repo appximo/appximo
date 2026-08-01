@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"regexp"
@@ -232,6 +233,9 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 	// + field allowlist from G2 are carried in eval and applied below).
 	eval := policy.Evaluate(evalCtx, op.Resource, action)
 	if !eval.Allowed {
+		// ENG-27: log whether the role exists at all — body stays "forbidden".
+		log.Printf("rbac: denied transaction op %s %s — %s (user_id=%q)",
+			op.Op, op.Resource, policy.DenyDetail(evalCtx.Role, op.Resource, action), evalCtx.UserID)
 		return nil, &txError{status: http.StatusForbidden, op: op.Op, resource: op.Resource, msg: "forbidden"}
 	}
 
@@ -296,9 +300,9 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 			return nil, &txError{status: http.StatusUnprocessableEntity, op: op.Op, resource: op.Resource, msg: "validation_failed", fields: verrs}
 		}
 		writable := writableFn(eval.AllowedFields)
-		sets, st, msg := CollectUpdate(&ref.res, op.Data, false, writable)
-		if st != 0 {
-			return nil, &txError{status: st, op: op.Op, resource: op.Resource, msg: msg}
+		sets, cerrs := CollectUpdate(&ref.res, op.Data, false, writable)
+		if len(cerrs) > 0 {
+			return nil, &txError{status: http.StatusUnprocessableEntity, op: op.Op, resource: op.Resource, msg: "validation_failed", fields: cerrs}
 		}
 		if hc, has := ref.res.Hooks["before_update"]; has {
 			c := hc

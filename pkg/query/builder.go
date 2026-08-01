@@ -118,7 +118,12 @@ func BuildQuery(
 	// part of the contract, and the response REPORTS the effective value in
 	// meta.per_page / meta.page, which is the "tolerance must be reported" half
 	// of the policy (ADR-024 §5) rather than a silent substitution.
-	if pageStr := params.Get("page"); pageStr != "" {
+	// The gate is PRESENCE, not non-emptiness (ENG-30). `?page=` — what an empty
+	// form field produces — used to be silently served as page 1 while `?page=0`
+	// was a named 400: the same function applied two policies to sibling
+	// parameters. An empty value now fails the same "must be a positive integer"
+	// check its non-empty siblings do.
+	if pageStr, present := firstValue(params, "page"); present {
 		p, err := strconv.Atoi(pageStr)
 		if err != nil || p <= 0 {
 			return nil, fmt.Errorf("invalid page parameter %q: must be a positive integer", pageStr)
@@ -129,7 +134,7 @@ func BuildQuery(
 		qb.page = p
 	}
 
-	if ppStr := params.Get("per_page"); ppStr != "" {
+	if ppStr, present := firstValue(params, "per_page"); present {
 		pp, err := strconv.Atoi(ppStr)
 		if err != nil || pp <= 0 {
 			return nil, fmt.Errorf("invalid per_page parameter %q: must be a positive integer", ppStr)
@@ -165,7 +170,17 @@ func BuildQuery(
 
 		fd, ok := res.Fields[field]
 		if !ok {
-			return nil, fmt.Errorf("unknown filter field: %s (available: %s)", field, availableFieldNames(res, false))
+			// ENG-26: `id` is the implicit primary key — not in res.Fields, but
+			// `?sort=id` and the keyset cursors are built on it, so two of the
+			// three places that take a field name accepted it and this one did
+			// not. It filters as the uuid column it is (only legal op: eq, via
+			// operatorsForType), and `?filter[id][eq]=<uuid>` composes with
+			// other filters in a way `GET /{id}` cannot.
+			if field == "id" {
+				fd = schema.FieldDef{Type: "uuid"}
+			} else {
+				return nil, fmt.Errorf("unknown filter field: %s (available: %s)", field, availableFieldNames(res))
+			}
 		}
 
 		if err := validateFilterOp(op, fd.Type); err != nil {
@@ -198,6 +213,17 @@ func BuildQuery(
 			return nil, fmt.Errorf("filter[%s][%s]: empty value is not valid for a %s field", field, op, fd.Type)
 		}
 
+		// ENG-25: a value Postgres could not cast is named HERE, before any SQL
+		// exists — `?filter[amount][gt]=abc` used to be an anonymous
+		// `400 invalid request` from the masked database error. The acceptors
+		// reproduce Postgres's input grammar (never Go's) so no working request
+		// is rejected; see validateFilterValue.
+		if vals[0] != "" {
+			if err := validateFilterValue(field, op, fd.Type, vals[0]); err != nil {
+				return nil, err
+			}
+		}
+
 		qb.filters = append(qb.filters, filterClause{field: field, op: op, value: vals[0]})
 	}
 	// sort for deterministic SQL output
@@ -214,19 +240,30 @@ func BuildQuery(
 	// arbitrary order under a 200 — the caller had no way to tell their sort was
 	// discarded, and the docs had to warn "verify result order, don't trust the
 	// param". A sort that cannot be honored is now an error.
-	if sf := params.Get("sort"); sf != "" {
+	// Presence-gated like page/per_page (ENG-30): `?sort=` used to be silently
+	// ignored while `?sort=ghost` was a named 400 — two policies on one param.
+	if sf, present := firstValue(params, "sort"); present {
+		if sf == "" {
+			return nil, fmt.Errorf("sort parameter has an empty value (available: %s)", availableFieldNames(res))
+		}
 		if _, ok := res.Fields[sf]; !ok && sf != "id" {
-			return nil, fmt.Errorf("unknown sort field: %s (available: %s)", sf, availableFieldNames(res, true))
+			return nil, fmt.Errorf("unknown sort field: %s (available: %s)", sf, availableFieldNames(res))
 		}
 		qb.sortField = sf
 		qb.sortOrder = "ASC"
-		if dir := params.Get("order"); dir != "" {
+		if dir, dirPresent := firstValue(params, "order"); dirPresent {
 			d, err := sortDirection(dir)
 			if err != nil {
 				return nil, err
 			}
 			qb.sortOrder = d
 		}
+	} else if dir, present := firstValue(params, "order"); present {
+		// `?order=desc` with no `?sort=` names a direction but no field — it
+		// used to be read by nothing and dropped without a word, the exact
+		// sibling of the dropped sort field (ENG-30). Saying so costs one map
+		// lookup on requests that carry the parameter.
+		return nil, fmt.Errorf("order parameter %q requires sort (use ?sort=field&order=asc|desc, or ?order[field]=asc|desc)", dir)
 	}
 
 	// new order syntax: ?order[campo]=asc|desc (overrides old if both present)
@@ -243,7 +280,7 @@ func BuildQuery(
 		}
 		field := m[1]
 		if _, ok := res.Fields[field]; !ok && field != "id" {
-			return nil, fmt.Errorf("unknown sort field: %s (available: %s)", field, availableFieldNames(res, true))
+			return nil, fmt.Errorf("unknown sort field: %s (available: %s)", field, availableFieldNames(res))
 		}
 		qb.sortField = field
 		d, err := sortDirection(vals[0])
@@ -511,34 +548,37 @@ func filterToSQL(op string) string {
 	}
 }
 
-// availableFieldNames lists a resource's filterable columns, sorted, for the
-// "unknown filter field" error. Naming the alternatives is the difference
-// between an error a caller can act on and one they have to go read the schema
-// for — the same contract the schema loader's strict-key errors already keep
-// (ADR-024).
-// availableFieldNames lists the fields a caller may name, for an error message.
+// availableFieldNames lists the fields a caller may name — the declared columns
+// plus the implicit `id` primary key — sorted, for an error message. Naming the
+// alternatives is the difference between an error a caller can act on and one
+// they have to go read the schema for (ADR-024).
 //
-// withID must mirror what the CALLING path actually accepts. Sorting accepts the
-// implicit primary key (`?sort=id` is explicitly allowed); filtering does not,
-// because `id` is not in res.Fields. Passing the same list to both produced a
-// message that contradicted itself —
-//
-//	unknown filter field: id (available: amount, done, due, id, ratio, …)
-//
-// naming `id` as available in the very sentence that rejected it. That is worse
-// than the terse message it replaced: a caller who believes an error message
-// will retry the same request. (Whether `?filter[id]` SHOULD work is a real gap,
-// tracked separately as ENG-26; this makes the message true about today.)
-func availableFieldNames(res *schema.ResourceSchema, withID bool) string {
+// The list must mirror what the calling paths actually accept. It once took a
+// withID flag because filtering rejected `id` while sorting accepted it, and
+// sharing one list produced a message that contradicted itself (`unknown filter
+// field: id (available: …, id, …)`). ENG-26 closed that gap — filter, sort and
+// the cursors all accept `id` now — so every caller wants the same list again.
+func availableFieldNames(res *schema.ResourceSchema) string {
 	names := make([]string, 0, len(res.Fields)+1)
-	if withID {
-		names = append(names, "id")
-	}
+	names = append(names, "id")
 	for n := range res.Fields {
 		names = append(names, n)
 	}
 	sort.Strings(names)
 	return strings.Join(names, ", ")
+}
+
+// firstValue reports whether a parameter was SENT, separately from its value —
+// url.Values.Get collapses "absent" and "empty" into "", which is exactly the
+// distinction ENG-30 is about: `?page=` is a sent parameter with an empty
+// value, and treating it as absent silently applied the default. (A repeated
+// parameter still keeps its first value here — that is ENG-17, tracked apart.)
+func firstValue(params url.Values, key string) (string, bool) {
+	vals, present := params[key]
+	if !present || len(vals) == 0 {
+		return "", false
+	}
+	return vals[0], true
 }
 
 // sortDirection maps a client's ?order= value to SQL. An unrecognised direction
