@@ -26,7 +26,7 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-01 (CERTIFY-S1)** — every OPEN item below was
+**Last reviewed: 2026-08-01 (SILENT-FAILURE-S1)** — every OPEN item below was
 re-verified against reality on that date, not carried forward on trust.
 
 ---
@@ -132,72 +132,8 @@ re-verified against reality on that date, not carried forward on trust.
   tienda and petfriendly do not blink (a purchase + a CRUD call through each), then
   `--uninstall --app=<that app>` and confirm the two survivors are untouched.
 
-### SEC-1 — The CSP header is dropped on cached API responses
-- **Origin:** CERTIFY-S1 (2026-08-01), measured live. `StrictCSP` sets
-  `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'` on `/api/*`,
-  but the response cache does not preserve it: `pkg/cache/response_cache.go`
-  `buildItem` stores only `Content-Type` and `Etag`, and `writeItem` replays only
-  those. `SecurityHeaders` runs OUTSIDE the cache so its four headers survive;
-  `StrictCSP` runs INSIDE the cached group, so its header is lost.
-- **Evidence:** `GET /api/notes` → no CSP. The same URL with `Cache-Control:
-  no-cache` (a full cache bypass) → CSP present.
-- **Impact:** **Low, no exploit.** The affected bodies are `application/json` served
-  with `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and HSTS still
-  present; CSP on a JSON response is defence-in-depth, not the control that stops an
-  attack. It is a real deviation from the documented posture, and the same mechanism
-  would silently drop ANY future header set inside the cached group — that is the
-  part worth fixing.
-- **Ready:** the cache stores and replays the full header set it captured (or at
-  minimum an explicit allowlist that includes CSP), with a test asserting a cache HIT
-  and a cache MISS carry byte-identical security headers.
 
-### SEC-2 — The default static CSP allows inline scripts
-- **Origin:** CERTIFY-S1. `DefaultStaticCSP` carries `'unsafe-inline'` on
-  **`script-src`** (not only `style-src`). If an attacker achieves HTML injection in
-  a served SPA shell, an inline `<script>` executes — the primary protection CSP
-  exists to give is off. What still holds: no external script sources, no external
-  `connect-src` (the exfiltration step), no framing, no foreign `form-action`.
-- **Why it is there:** SvelteKit's `adapter-static` (and Next export, Astro islands)
-  boots hydration from an inline `<script>`; the first strict draft blanked a real
-  SPA in every browser, invisible to curl. Permissive by NECESSITY, not by design —
-  now documented as such.
-- **Impact:** Medium for anyone serving a frontend from the engine. Mitigated today
-  only by the operator overriding `StaticMount.CSP` per mount.
-- **Ready:** hash-based CSP — at boot, compute the sha256 of each inline
-  `<script>`/`<style>` in the mount's `index.html` and emit `'sha256-…'` instead of
-  `'unsafe-inline'`. That keeps the mainstream bundlers working AND restores the XSS
-  protection. Verified with a real SvelteKit build in a browser, not with curl.
 
-### SEC-3 — `Route.Public` optional authentication has no live test
-- **Origin:** CERTIFY-S1. ENG-6 (LIBRARY-GAPS-S2) changed the auth surface: a
-  `Route.Public` endpoint is now OPTIONALLY authenticated (no token → anonymous;
-  valid Bearer → Claims populated; invalid/expired/foreign-tenant Bearer → 401). It
-  is covered by `route_public_test.go` at the unit level and was **not** exercised
-  against a running engine during this certification.
-- **Why not:** the pure `serve` binary registers no custom routes, so a live test
-  needs a consumer binary; the two on the 58 are production assets and probing their
-  public routes means writing to them.
-- **Impact:** Low today (unit coverage exists) but this is the most recently moved
-  auth surface, and it is the one an external caller reaches without credentials.
-- **Ready:** a throwaway consumer binary in the cert environment with one public
-  route, exercising the three branches live, added to the certification battery.
-
-### ENG-14 — A filter operator containing `_` is silently ignored
-- **Origin:** CERTIFY-S1, measured live. `?filter[title][is_null]=true` returns
-  **`200` with the FULL unfiltered list** — the documentation says unsupported ops
-  return `400`, and `neq`/`in`/`nin`/`like`/`ilike` correctly do.
-- **Root cause:** `filterParamRe` in `pkg/query/builder.go` is
-  `^filter\[([a-z][a-z0-9_]*)\](?:\[([a-z]+)\])?$` — the OP group is `[a-z]+`, so
-  any op containing `_` fails to match the whole parameter, which is then skipped by
-  the parse loop **without an error**. `filter[title][totalnonsense]` matches and is
-  correctly rejected with 400; `filter[title][is_null]` never reaches validation.
-- **Impact:** Medium. A client filtering `?filter[x][is_null]=true` believes it is
-  seeing null rows and is shown EVERY row. RBAC still applies, so it is not a
-  cross-tenant or authorization issue — it is a correctness issue of exactly the
-  "accepts and continues in silence" class AUTHORING-GAPS-S1 set out to remove.
-- **Ready:** the op group accepts `[a-z_]+` so unknown ops reach `validateFilterOp`
-  and get their `400`; a test asserting `is_null`, `not_null` and any other
-  underscore-bearing op are REJECTED, not ignored. Docs corrected already.
 
 ### OPS-12 — The NestJS comparative benchmark cannot be re-run
 - **Origin:** CERTIFY-S1. The harness survives (`benchmark-lab/nestjs-baseline/`
@@ -211,6 +147,159 @@ re-verified against reality on that date, not carried forward on trust.
 - **Ready:** a dedicated, disposable SUT with both stacks installed and PostgreSQL
   constrained identically for both arms, run through the existing ABBA protocol —
   then the claim is restored with a fresh date, or dropped.
+
+### ENG-15 — A keyset cursor silently discards sort/order/page, and `meta.page` lies
+- **Origin:** SILENT-FAILURE-S1 audit (`pkg/query/builder.go:232`). With `?after=` or
+  `?before=`, the builder drops `?sort`, `?order[…]` and `?page` — and the response's
+  `meta.page` still echoes the page number it ignored.
+- **Impact:** Medium. The response does not merely omit the caller's intent, it
+  ASSERTS something false: a client paginating with a cursor reads `meta.page` and
+  believes it is on that page.
+- **Ready:** combining a cursor with an incompatible parameter is a `400` naming the
+  conflict, or the parameter is honored; either way `meta` never reports a page the
+  query did not use.
+
+### ENG-16 — Two `order[…]` parameters: the winner is Go map iteration order
+- **Origin:** SILENT-FAILURE-S1 audit (`pkg/query/builder.go:158`). With two
+  `order[field]` parameters, the loop takes whichever the map yields first and
+  `break`s — measured 174/26 across 200 builds of the SAME URL.
+- **Impact:** Medium, and unusual: the same request returns rows in a different
+  order between calls. It is non-determinism visible to a client, which is worse
+  than a wrong-but-stable answer because it defeats caching and reproduction.
+- **Ready:** more than one sort field is either a `400` (one sort field is the
+  documented surface) or an ordered multi-sort; never a coin flip. Same for the
+  GraphQL `order` argument (`pkg/graphql/handler.go:1425`).
+
+### ENG-17 — A repeated query parameter keeps only the first value
+- **Origin:** SILENT-FAILURE-S1 audit (`pkg/query/builder.go:136`). `vals[0]`
+  everywhere: `?per_page=20&per_page=100` serves 20, `?filter[x][eq]=a&filter[x][eq]=b`
+  filters on `a`, and the aggregate functions do the same.
+- **Impact:** Low-medium. The common cause is a client appending a corrected value;
+  the engine serves the stale one.
+- **Ready:** a repeated parameter is a `400` naming it, per ADR-024.
+
+### ENG-18 — Unknown aggregate functions are never looked at
+- **Origin:** SILENT-FAILURE-S1 audit (`pkg/query/aggregate.go:104-124`).
+  `?count&median=amount` returns `200` with the metric simply absent; `?count=false`
+  turns COUNT **on** (presence-only, and REST disagrees with GraphQL here); an empty
+  `group_by` silently changes the response SHAPE from `{"groups":[…]}` to a flat
+  object.
+- **Impact:** Medium. A dashboard reads a total that is not the one it asked for.
+- **Ready:** an unknown function key under the aggregate path is a `400` listing
+  `count,sum,avg,min,max,group_by`; `count` takes a boolean value; an empty
+  `group_by` is a `400`, not a shape change.
+
+### ENG-19 — A `before_*` webhook hook is validated and never dispatched
+- **Origin:** SILENT-FAILURE-S1 audit (`pkg/extensions/hook_runner.go:91`). The
+  validator ACCEPTS `hooks.before_create = {type: "webhook", url: …}` and requires
+  the URL — and the runner never calls it. This is the exact mirror of SEC-AUDIT-V2
+  Hallazgo A, which closed the after-hook half of the same asymmetry (a js/wasm
+  after-hook is now rejected at load); the before-half was left open.
+- **Impact:** Medium. A schema declares a validation webhook, the schema validates,
+  and nothing ever runs — the same "accepted and silent" shape, at the layer people
+  reach for when they want a guard rail.
+- **Ready:** either reject a `webhook` before-hook at load (naming js/wasm as the
+  before-hook types, symmetrical to the after-hook rule), or dispatch it. Rejecting
+  is the smaller change and matches the existing decision.
+
+### ENG-20 — An unrecognized `$variable` in a row condition becomes a string literal
+- **Origin:** SILENT-FAILURE-S1 audit (`pkg/rbac/evaluator.go:110`). Only `$user_id`
+  and `$external_client_id` are substituted; `$userid`, `$user`, `$tenant_id` are
+  compared as the LITERAL text `"$userid"`, matching nothing.
+- **Impact:** **High, and it is authorization.** One typo produces the exact "the app
+  shows zero rows forever" failure SCHEMA-5 exists to warn about — and the warning
+  cannot see it, because `warnings.go` only fires on an exact `$user_id`.
+- **Ready:** a `val` beginning with `$` that is not a known variable is a LOAD ERROR
+  listing the known variables. There is no legitimate reason to compare a column
+  against a literal dollar-prefixed string.
+
+### OPS-13 — Nineteen config values fall back silently when they fail to parse
+- **Origin:** SILENT-FAILURE-S1 audit + measured live. Booting with
+  `RATE_LIMIT_RPS=abc RATE_LIMIT_BURST=oops` logs `rate limiter: 1000 RPS / 100 burst
+  per tenant` and never says the operator's values were rejected. The same shape in
+  `APPITOOLS_AUTH_MIN_PASSWORD`, `APPITOOLS_CONTROL_PORT`, `APPITOOLS_FILES_MAX_BYTES`,
+  `DB_MAX_CONNS`, `APPITOOLS_MAX_TX_OPS`, the fleet's per-app `envInt`, and more.
+  `envTruthy` maps ANY unrecognized value to false — including
+  `APPITOOLS_AUTH_REQUIRE_VERIFIED`, a security toggle. And there is **no inventory
+  of the 60+ `APPITOOLS_*` variables**, so a misspelled one is never read at all.
+- **Impact:** Medium-high for operators: the box runs with a configuration nobody
+  chose, and the only evidence is a log line stating the default as if it were the
+  request.
+- **Ready:** one `envInt`/`envBool`/`envDuration` helper that logs
+  `WARNING: RATE_LIMIT_RPS="abc" is not a number — using 1000`, plus a boot-time
+  inventory that warns on an unknown `APPITOOLS_*` variable (the fleet already has
+  the pattern for per-app keys).
+
+### ENG-21 — No write body uses `DisallowUnknownFields`
+- **Origin:** SILENT-FAILURE-S1 audit. The engine already uses it in `pkg/userauth`,
+  `pkg/platformadmin` and `pkg/fleet` — the discipline exists and was never applied
+  to the data plane. Unknown keys in the `/api/transaction` envelope, in an
+  operation, and in a `guard` are dropped. Worse, the `422 unknown_field` guarantee
+  on CREATE is not a key check at all — it is a side effect of Postgres `42703`, so
+  it evaporates for a role with a `fields` allowlist (the key is deleted before the
+  DB sees it) and for a drift column the additive migration left behind.
+- **Impact:** Medium. This session fixed the operator bodies that carry a safety
+  flag; the data-plane bodies are a wider contract change.
+- **Ready:** strict decode on the transaction envelope/op/guard, and a real key check
+  on CREATE that does not depend on the database's error code.
+
+### ENG-22 — GraphQL drops variables and nested jsonb values
+- **Origin:** SILENT-FAILURE-S1 audit. `GET /graphql` never reads the `variables`
+  query parameter, so a filtered query returns the UNFILTERED result. A variable
+  nested inside a `jsonb` inline literal is written as `null`.
+- **Impact:** Medium-high for the GET path (a filter that silently does not apply).
+- **Ready:** parse `variables` on GET, or reject a GET carrying it; resolve variables
+  inside jsonb literals or reject them.
+
+### SCHEMA-6 — Filtering by NULL has no declarative surface
+- **Origin:** SILENT-FAILURE-S1. Closing ENG-14 forced the question explicitly: now
+  that `?filter[x][is_null]=true` returns a clean `400` instead of the whole table,
+  **should the operator exist at all?**
+- **The decision this session made: NOT NOW, deliberately.** The session's mandate
+  was to close a defect class, and adding a filter operator is a capability, not a
+  fix: it touches the type×operator matrix, the GraphQL filter arguments (which must
+  stay in parity), `SCHEMA_REFERENCE.md`, the LLM grammar in `pkg/aigen` (so
+  generated schemas learn it), the AGENTS table and `CAPABILITIES.md`. Shipping that
+  inside an audit pass is the scope creep the audit exists to prevent.
+- **But the gap is real, and this is the honest part:** there is currently **no way
+  to filter by null in the declarative surface at all**. The veterinary app hit it.
+  The workarounds are a custom Go handler (framework mode, which needs the
+  unpublished module — DOC-2) or modelling the column as non-nullable with a
+  sentinel. So the clean `400` is, today, a dead end rather than a redirection.
+- **Impact:** Medium. "Show me the rows with no assigned vet / no invoice / no
+  closing date" is an ordinary business question.
+- **Ready:** `is_null` (and its negation) as a real operator on every nullable type,
+  rendering `IS NULL` / `IS NOT NULL` — value ignored or restricted to `true`/`false`
+  — with REST and GraphQL parity, a test per type, and the doc + LLM-grammar updates
+  that make it discoverable. Until then the `400` should name the limitation rather
+  than only listing the operators that do exist.
+
+### SCHEMA-7 — Schema KEYS are strict; VALUES and key×type combinations are not
+- **Origin:** SILENT-FAILURE-S1 audit. The strict-key claim was verified and HOLDS at
+  all 17 levels. One level down it does not: `auto: true` silently discards the
+  field's declared `type` and creates a TIMESTAMPTZ; `enum` on a non-string field
+  loads and makes the field permanently unwritable; role-global `actions` are the
+  only action list the meta-schema does not enumerate, so a typo becomes a permission
+  that grants nothing; `hooks.<event>.timeout` is accepted at every layer and read by
+  no code.
+- **Impact:** Medium. Each is a schema that validates and then behaves differently
+  from what it says.
+- **Ready:** each combination validated at load with an error naming the conflict —
+  the mechanism already exists (`validateFilterOp` is the model), it simply has not
+  been applied to these pairs.
+
+### SEC-5 — (details delivered to the maintainer directly)
+- **Origin:** SILENT-FAILURE-S1 audit, verified live by the session.
+- **Class:** the same unrecognized-input family with the sign flipped — input that is
+  [redacted while open]
+- **Handling:** it is an exploitable information-disclosure vector, so per the
+  session's rule the reproduction was reported directly to the maintainer and is
+  deliberately NOT written in this file, in the audit document, or in any commit
+  message. Ask Miguel for the detail before working on it.
+- **Impact:** High. [redacted while open]
+- **Ready:** [redacted while open]
+  [redacted while open]
+  neighbouring file.
 
 ### SCHEMA-1 — Computed / derived fields
 - **Origin:** docs/MODEL_LAB.md G7 ("order totals as a computed field").
@@ -296,20 +385,6 @@ re-verified against reality on that date, not carried forward on trust.
 - **Ready:** a push runs the protocol against a stable baseline and fails on a
   verdict of `CHANGED` beyond max(0.5 ms, 3 %). Depends on OPS-1.
 
-### OPS-3 — `golangci-lint` in CI (and the errcheck policy)
-- **Origin:** this session. CI runs `make fmt-check`, `go build`, `go vet` and
-  the test suites — **not** `golangci-lint`, despite `make lint` existing.
-- **Impact:** Low. The full run (installed and executed this session) reports
-  **64** findings: **50 errcheck**, almost all `json.NewEncoder(w).Encode(...)`
-  on an error response and `defer Close()` in tests — writing an error response
-  has no recovery path, which is why the repo already annotates many of them
-  `//nolint:errcheck`; plus 12 staticcheck style suggestions (`QF*`). The three
-  substantive ones were **fixed this session** (an unused var, an ineffectual
-  assignment, an empty branch).
-- **Ready:** a `.golangci.yml` that encodes the decision (errcheck exempted for
-  response-writing and test cleanup, or the sites annotated), the run under
-  10 minutes on CI hardware, and the gate added to `ci.yml`. Not done now because
-  annotating 50 sites is churn that would bury this session's diff.
 
 ### OPS-4 — The deployed binary is not traceable to a commit
 - **Origin:** this session, while bootstrapping the admin account on the 58.
@@ -392,6 +467,32 @@ All three were **re-verified as still open on 2026-07-29**.
 | **Give `/root/commerce` a remote** | The technical fix is trivial; the decision (which account, public or private, whether the commerce platform is a product or a demo) is his. See **OPS-5** — until then the field report lives on one disk. |
 
 ---
+
+## DONE in SILENT-FAILURE-S1 (2026-08-01)
+
+The session's subject was not `is_null`. It was that **in several layers the engine
+accepts an input it does not recognize and continues in silence** — a class with four
+production instances behind it. The audit
+([UNRECOGNIZED_INPUT_AUDIT](audits/UNRECOGNIZED_INPUT_AUDIT.md)) swept ten input
+surfaces; the policy is [ADR-024](adr/ADR-024-unrecognized-input.md).
+
+| ID | What shipped | Verified by |
+|---|---|---|
+| **ENG-14 + the class** | A pattern now decides what an input **is**, never what is **valid** — validation moved into code that can produce an error. Any parameter under a prefix the engine owns (`filter[`, `order[`) must parse or `400`. Measured live: five spellings of one intent used to give **one 400 and four full-table 200s**; all five now name the offending input and list the alternatives. `?sort=ghost`, `?order[ghost]=`, `?order=descending` (which sorted ASCENDING) all rejected. A test that asserted the old fallback was removing the very contract — rewritten. | `TestBuildQuery_UnrecognizedInputIsAlwaysRejected` (11 cases, each asserting the message NAMES the input) + `…_ValidInputStillWorks` (11 valid shapes unchanged); live probes on a running engine |
+| **Two more instances, found by the audit** | A misspelled **`dry_run`** (`dryrun`, `dry-run`) decoded to false and turned a PREVIEW into a real migration — measured live against the control plane. The three bodies carrying that flag now decode strictly. And **`appitools serve <path>` served a different app than the one named** (it booted `./schema.json`), now a clean error pointing at `--schema`. | live control-plane probes; CLI output |
+| **SEC-1** | Security headers survive the response cache. The cache stored only `Content-Type`/`Etag`, so a cached `/api/*` read lost its CSP while a `no-cache` bypass kept it — the same URL answering with two postures depending on cache state. An **allowlist**, deliberately: replaying every captured header would replay `X-Trace-Id` too, poisoning the trace ring. | `TestSecurityHeadersSurviveTheCache`, `TestPerRequestHeadersAreNotReplayed`, `TestNoSecurityHeadersCostsNothing` |
+| **SEC-2** | **Hash-based CSP.** At boot the engine parses each static mount's `index.html`, computes the sha256 of every inline `<script>`, and emits `'sha256-…'` instead of `'unsafe-inline'` — so the bundler's shell still runs and injected script does not. No inline scripts → `script-src 'self'` (strictest). Anything a hash cannot cover (an `onclick=` attribute) keeps the permissive policy **and logs why**. `style-src` keeps `'unsafe-inline'` on purpose: component libraries inject styles at runtime, where no boot-time hash can reach. | **Real browser, with a control arm**: legacy policy → injected script EXECUTED; hardened → bootstrap still ran, external module still ran, **injected script blocked**, 1 CSP violation logged. Plus 8 unit tests incl. the engine's own built shells |
+| **SEC-3** | `Route.Public`'s optional authentication, exercised **live** through a booted App over real HTTP: no token → 200 anonymous; valid token → 200 with claims populated; garbage / wrong-secret / expired / foreign-tenant → **401, never a silent downgrade to anonymous**. Plus the exact-match check (a sibling path and another method are not public). | `route_public_live_integration_test.go` (7 subtests) |
+| **OPS-3** | `.golangci.yml` with **every exclusion stating why**, and the gate wired into CI next to fmt-check/vet/tests/govulncheck. `make lint` goes from 62 findings / exit 1 to **0 issues / exit 0**. The QF* quickfixes are excluded as a class (editor suggestions, not defects); ST1xxx would have been 107 "add a package comment" findings — a different decision from "hold the line on correctness", not one to make in the pass that first turns the gate on. Two real findings were fixed, not silenced: an empty branch that had been hollowed out (now the assertion it was meant to be) and the `rows.Close` sites. | `golangci-lint run ./...` → `0 issues`; `.github/workflows/ci.yml` job `lint` |
+
+**Measured (the filter parser is in the hot path):** ABBA, four windows alternating
+pre-session and session binaries, canonical baseline (dev-fast + `examples/blank` +
+`benchblank` + 100 rps/30 s). **Δ p50 +0.017 ms (+2.87 %), Mann-Whitney p = 0.437 →
+`no_change`.** The control arm — the two BASELINE windows against each other — moved
+**−3.30 %**, so the host's own drift is larger than the measured delta. All runs are
+in `benchmarks/history.tsv`.
+
+**`is_null` was NOT added** — see the note under SCHEMA-6.
 
 ## DONE in CERTIFY-S1 (2026-08-01)
 

@@ -1,5 +1,25 @@
 # Certification report — 2026-08-01
 
+> **Follow-up status (SILENT-FAILURE-S1, same day).** Four of the five findings this
+> report opened are **CLOSED**, and the fifth is superseded by a wider policy:
+>
+> | Finding | Status |
+> |---|---|
+> | **ENG-14** (`is_null` silently ignored) | **CLOSED** — and generalized: the audit found the same shape across ten input surfaces, so the fix is a policy ([ADR-024](adr/ADR-024-unrecognized-input.md)) plus [an audit](audits/UNRECOGNIZED_INPUT_AUDIT.md), not a regex patch. Two more instances were found and fixed: a misspelled `dry_run` turned a PREVIEW into a real migration, and `appitools serve <path>` served a different app than the one named. |
+> | **SEC-1** (CSP lost on cached responses) | **CLOSED** — security headers now survive the cache, by allowlist (replaying every header would replay `X-Trace-Id` too). |
+> | **SEC-2** (`'unsafe-inline'` on script-src) | **CLOSED** — hash-based CSP, verified in a real browser with a control arm: legacy → injected script executed; hardened → the shell still boots and the injected script is blocked. |
+> | **SEC-3** (`Route.Public` untested live) | **CLOSED** — all three branches exercised through a booted App over real HTTP. |
+> | **OPS-3** (`golangci-lint` not in CI) | **CLOSED** — `.golangci.yml` with every exclusion justified; `make lint` 62 findings → **0**; gate wired into CI. |
+>
+> **One NEW finding of the same class was escalated privately** and is tracked as
+> **SEC-5** by ID only — it is an exploitable information-disclosure vector, so per
+> the session rule the reproduction went to the maintainer directly and is not
+> written in the repository.
+>
+> The claims this session's fixes changed (the "silently ignored" sort/filter
+> behavior in AGENTS/CAPABILITIES/SCHEMA_REFERENCE) are corrected in those files.
+
+
 **Session:** CERTIFY-S1 · **Commit under test:** `be876f4` · **Method:** everything
 below was executed against a **running engine** built from that commit. No figure was
 copied from a previous document.

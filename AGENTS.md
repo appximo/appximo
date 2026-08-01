@@ -1269,8 +1269,12 @@ subroutes.
   search engine.
 - **Sort**: `?sort=field&order=asc|desc` — **one field only**. The
   alternative `?order[field]=desc` also works and wins when both are
-  sent. Anything else (`sort=field:desc`, multi-field) is **silently
-  ignored** — verify result order, don't trust the param.
+  sent. An unknown sort field, or a direction that is not `asc`/`desc`, is a
+  **400 naming it** (ADR-024) — both used to be silently ignored, which is why
+  this line carried a "verify result order, don't trust the param" warning. The
+  warning is gone because the behavior that needed it is gone. Multi-field sort is
+  still unsupported, and two `order[…]` parameters currently pick a winner
+  non-deterministically (backlog ENG-16).
 - **Pagination**: keyset — `?after=<uuid>` / `?before=<uuid>` with
   `?per_page=` (default 20, max 100). `?page=` exists but is
   OFFSET-based; prefer keyset.
@@ -1885,13 +1889,19 @@ is a JSON snapshot, not a stream).
   (not a 500, not silently dropped).
 - Hook events other than the four listed (no `on_create`, no
   `before_delete`/`after_delete`).
-- Filter ops `neq`, `in`, `nin`, `like`, `ilike` → 400 (verified live 2026-08-01).
-  **`is_null` is the exception and it is a BUG, not a feature (ENG-14):** the op
-  pattern in `pkg/query/builder.go` (`filterParamRe`) matches `[a-z]+` only, so an
-  op containing `_` makes the whole `filter[...]` parameter fail to match and it is
-  **dropped without an error** — `?filter[x][is_null]=true` answers `200` with the
-  FULL unfiltered list. Do not use it; do not document it as rejected.
-- Multi-field sort or `sort=field:desc` → silently ignored.
+- Filter ops beyond the type table → **400 naming the operator and listing the
+  allowed set** (`neq`, `in`, `nin`, `like`, `ilike`, `is_null`, an uppercase
+  `EQ`, a malformed `filter[a][b][c]` — all of them, verified live 2026-08-01).
+  ENG-14 used to make some of these silent: the op pattern matched `[a-z]+`, so an
+  op containing `_` failed the regex and the WHOLE parameter was dropped with no
+  error. That is fixed — the pattern now decides only what IS a filter, and
+  validation produces the error (ADR-024).
+  **There is still NO way to filter by NULL** in the declarative surface; the 400 is
+  honest but it is a dead end (backlog SCHEMA-6, ADR-022 Decision 5).
+- Multi-field sort (`sort=a,b`) or `sort=field:desc` → **400 naming the value and
+  listing the sortable fields** (`unknown sort field: title:desc (available: …)`).
+  Neither syntax exists; since ADR-024 the engine says so instead of ignoring it
+  and returning an arbitrary order. Use `?sort=field&order=desc`.
 - Aggregation BEYOND `count`/`sum`/`avg`/`min`/`max` + `group_by` (e.g. `HAVING`,
   `DISTINCT`, expression aggregates, window functions) — the
   [Aggregation](#aggregation-g3) surface is exactly those functions over schema

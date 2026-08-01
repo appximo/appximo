@@ -143,10 +143,15 @@ engineering. Re-verified against the running engine and the field reports on
   measured rows lost; each drop must be enumerated), and data already destroyed
   by an approved forward drop is NOT recoverable (physics, not policy). A
   rollback appends a new version; the trail is never rewritten.
-- **No `neq`/`in`/`nin`/`like`/`ilike` filter ops** — unsupported ops → 400.
-  (`is_null` is a known BUG, not a supported op: it is accepted, silently ignored,
-  and returns the FULL unfiltered list — backlog **ENG-14**. Do not use it.)
-- **Multi-field sort and `sort=field:desc` are silently ignored** — verify result order.
+- **No `neq`/`in`/`nin`/`like`/`ilike` filter ops** — an unsupported operator is a
+  400 that names it and lists the allowed set (ADR-024).
+- **No way to filter by NULL.** `is_null` is rejected cleanly, but nothing replaces
+  it: the declarative surface cannot express "rows where this column is empty".
+  Deferred deliberately, with the debt written down — backlog **SCHEMA-6**,
+  ADR-022 Decision 5.
+- **No multi-field sort.** One sort field only; an unknown field or an invalid
+  direction is a 400. Two `order[…]` parameters currently pick a winner
+  non-deterministically (backlog **ENG-16**).
 - **No delete hooks** — only `before`/`after_create` and `before`/`after_update`.
 - **`workflows` block parses but has no executor.**
 - **No shipped WASM business module** — only a test identity module; DIAN logic is a JS built-in, not WASM.
