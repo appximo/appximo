@@ -1,0 +1,35 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "binary-diff-gate",
+  "resources": {
+    "notes": {
+      "fields": {
+        "title":  { "type": "string", "required": true, "maxLength": 200 },
+        "status": {
+          "type": "string",
+          "enum": ["open", "paid", "done"],
+          "default": "open",
+          "state_machine": {
+            "initial": "open",
+            "transitions": { "open": ["paid"], "paid": ["done"], "done": [] }
+          }
+        },
+        "amount": { "type": "int64" },
+        "ratio":  { "type": "float64" },
+        "done":   { "type": "bool" },
+        "due":    { "type": "time" },
+        "fecha":  { "type": "time", "default": "now" },
+        "code":   { "type": "string", "unique": true },
+        "ref":    { "type": "uuid" },
+        "attrs":  { "type": "jsonb" }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin":  { "resources": "*", "actions": ["*"] },
+      "viewer": { "resources": ["notes"], "actions": ["read"], "fields": ["id", "title", "status"] }
+    }
+  }
+}
