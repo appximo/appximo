@@ -1116,6 +1116,11 @@ A `conditions` object is `{ "field", "op", "val" }` (`pkg/schema/types.go`).
   - `$user_id` → the JWT subject (`EvalContext.UserID`),
   - `$external_client_id` → `EvalContext.ExternalClientID`,
   - anything else → used **as a literal** (e.g. `"published"` for a public-read role).
+  - **Any OTHER `$…` val is rejected at load** (ENG-20, `validateConditionVal`):
+    `$userid`, `$tenant_id` etc. would be compared as the literal dollar-prefixed
+    text — matching zero rows forever with no error at any layer — so a `$`
+    announces intent and must resolve. A bare `user_id` (the `$` forgotten) stays
+    legal as a literal but raises the `bare_condition_variable` WARNING.
 - `op` — **must be `"eq"` (or omitted).** Row conditions are enforced as equality; a non-eq operator is **rejected at load** (SEC-AUDIT-V1) so the schema can only declare what the engine applies. See §7.7.
 
 When a condition applies, a row excluded by it reads as **404, not 403** (the row simply isn't in the result set / matches no row).
@@ -1380,7 +1385,13 @@ Note: the validator only enforces the **presence** of the type-appropriate key. 
 after_create hooks of type "js" are not supported — a sandboxed hook running after the commit cannot change the row or reach an external system; use a "webhook" after-hook to notify externally, or a before_create/before_update hook to transform the write
 ```
 
-So: `js`/`wasm` belong on `before_create` / `before_update` (where they transform/validate the write); `webhook` is the only meaningful after-hook (external notification).
+**Before-hooks must be `js` or `wasm` (ENG-19)** — the exact mirror. A `webhook` hook on `before_create` / `before_update` is **rejected at load**: it used to validate (the URL was even required) while the runner never dispatched it — a declared guard rail that silently never ran. A before-hook must decide the write synchronously, which an async signed POST cannot:
+
+```
+before_create hooks of type "webhook" are not supported — the engine never dispatched a before-webhook (it was accepted and silently did nothing): a before-hook must decide the write synchronously, so use a "js" or "wasm" before-hook to validate/transform the write, and a "webhook" AFTER-hook (or the events outbox) to notify an external system
+```
+
+So: `js`/`wasm` belong on `before_create` / `before_update` (where they transform/validate the write); `webhook` is the only after-hook type (external notification) — each event family accepts exactly the types that can do real work there.
 
 ### 8.3 The full `HookConfig` key set
 

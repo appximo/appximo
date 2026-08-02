@@ -391,17 +391,23 @@ is YOUR bug, not the user's: fix the request.
 clamps and `meta` reports the effective value). Drive it from
 `meta.has_next` + the last row's `id`.
 
-Two honest caveats, verified live: **a cursor currently ignores `sort`/`order`**
-(rows come in the default order and `meta.page` stays 1) — so paginate
-user-sorted tables with `?page=` (offset-based, exists, fine at back-office
-scale) and keep `after` cursors for default-order feeds. And `?page=0`,
-negative, or empty `page`/`per_page` are named 400s.
+The rules, all named 400s when broken: **a cursor cannot combine with
+`sort`/`order`, `page`, `count`, or the other cursor** — cursor pagination
+orders by `id`, so paginate user-sorted tables with `?page=` (offset-based,
+exists, fine at back-office scale) and keep `after` cursors for default-order
+feeds. A cursor response's `meta` carries **`per_page` + `has_next` only — no
+`page`/`has_prev`** (a cursor request has no page number; code the pager off
+`has_next`, not `page`). `?page=0`, negative, or empty `page`/`per_page` are
+named 400s. **A repeated parameter is a 400** (`?per_page=20&per_page=100` —
+send each parameter once; watch out for URL-building code that appends instead
+of replacing).
 
 **Count**: `?count=true` on a list adds `meta.total` + `meta.total_pages` (a
-real COUNT over the same filtered, RBAC-scoped set). The flag is
-**presence-based — `count=false` still turns it on**; omit the parameter
-entirely when you don't want the count. Don't rely on it combined with
-`?include=` (it currently vanishes on that path).
+real COUNT over the same filtered, RBAC-scoped set). The flag is read **by
+value**: `count=false`/`count=0` (and omitting it) mean OFF, bare `?count` and
+`count=true`/`1` mean ON, anything else is a named 400. It composes with
+`?include=`; it does NOT combine with a cursor (named 400 — the total would
+cover only the rows past the cursor).
 
 ### 4.5 Embedded relations — `?include=`
 

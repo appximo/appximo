@@ -122,10 +122,57 @@ that exist:
 | **`workflows`** in the schema | Documented as parsed-for-forward-compatibility with no executor (ADR-012). It is a promise about a future version, and the promise is written down in the capability list. Reconsider when the executor ships: then an unknown key inside it becomes a normal strict-key error. |
 | **`state_machine.transitions` keys and `workflows.*.steps[].config`** | Genuinely user-defined name spaces — the states are the author's vocabulary, and a step's config belongs to the step type. Both are cross-checked where a check is possible (`transitions` states against `enum`). |
 | **Opclass on an existing gin index** (MIG-1) | Postgres cannot introspect it back, so the engine cannot tell "unchanged" from "changed". Already tracked as a known, documented gap rather than silently accepted — the distinction this ADR cares about. |
+| **Multipart form fields other than `file`** on `POST /api/files` (NIGHT-SWEEP-S1) | The upload is a browser-form surface: HTML forms legitimately carry extra fields (CSRF tokens, framework metadata), the same intermediary argument as unknown top-level query params. The engine never inspects them. What is NOT tolerated: a SECOND `file` part — that was data loss behind a 201, and it is now a named 400. |
+| **Duplicate keys in one JSON object** (`{"op":"create","op":"delete"}`) | Go's `encoding/json` takes the last value, per the ecosystem-wide convention (ECMA-404 leaves it undefined; virtually every parser does last-wins). Detecting duplicates requires a token-level rescan of every body on the hot path, for a shape no real client emits. Reconsider only with evidence of a real client hitting it. |
 
 **Not an exception, deliberately:** "we have always been permissive here" and "a
 client might be relying on it". Those are consequences to stage (below), not
 reasons to keep silence.
+
+## NIGHT-SWEEP-S1 extensions (2026-08-02) — the class, finished on the query surface
+
+The session that closed ENG-15…20/23/24/34 added three rules that generalize the
+decision, and one deliberate narrowing of an exception:
+
+10. **One parameter, one meaning.** A repeated engine-owned parameter
+    (`?per_page=20&per_page=100`) is a 400 naming it — `vals[0]` silently served
+    the FIRST value, so a client appending a corrected value was served the
+    stale one (ENG-17). Identical duplicates are rejected too: the engine does
+    not adjudicate duplicates, it refuses to guess.
+11. **Conflicting parameters are named, never adjudicated.** `after`+`before`,
+    cursor+`sort`, cursor+`page`, cursor+`count`, two `order[…]` keys — each
+    used to pick a silent winner (in ENG-16's case, by Go map iteration order:
+    nondeterminism visible to the client). The engine cannot know which intent
+    was meant, so it says so (ENG-15/16).
+12. **`meta` states only what the query did.** A cursor response carries no
+    `page`/`has_prev` — `meta.page` used to echo a page the SQL never used, and
+    `count`+cursor would have reported a "total" that silently meant "rows past
+    the cursor" (ENG-15/23). The response envelope is subject to the same
+    honesty rule as the status code.
+
+**The narrowed exception — the aggregate endpoint owns its whole query-parameter
+namespace (ENG-18/24).** The general unknown-top-level tolerance exists for
+decorated LINKS: utm tags and cache-busters that browsers and mail clients
+append to page URLs. On `/api/{resource}/aggregate` the parameter NAME is the
+enumerated value (the function requested), an authenticated aggregate XHR is
+never a decorated link, and the measured failure was a dashboard reading a
+total that was not the one it asked for (`?count&median=x` → 200 with the
+metric silently absent). So on this one endpoint every parameter must be
+recognized — unknown names 400 listing the valid set, and the list parameters
+an aggregate cannot honor (`page`, `sort`, `order`, cursors, `include`) are
+rejected BY NAME with the reason, instead of being validated against a schema
+the endpoint never uses and then thrown away (ENG-24's wart). The wholly-empty
+function value (`?count&sum=`) keeps its reviewed visibility tolerance; an
+empty ENTRY in an active list (`sum=a,`) is named.
+
+Load-time members of the same class closed in the same session: an
+unrecognized `$variable` in an RBAC condition `val` (ENG-20 — one typo from
+"zero rows forever", invisible to the SCHEMA-5 warning) and a `webhook`
+before-hook (ENG-19 — validated, URL required, never dispatched) are schema
+LOAD errors now. And the boot's own success message obeys the rule too
+(ENG-34): "serving on :PORT" prints only AFTER the bind — a message that
+reports success before the fact is the same defect as a 200 for a dropped
+filter.
 
 ## Consequences
 

@@ -223,9 +223,11 @@ func main() {
 > **Replacing a running binary in dev:** the graceful drain holds the LISTENER
 > for a few seconds after SIGTERM (in-flight requests finish; `/readyz` flips
 > to 503), so `kill <pid> && ./new-binary` races the port: the new process can
-> fail `bind: address already in use` — and today it prints
-> `serving on :PORT` BEFORE the bind error, so a chained start looks alive
-> while the OLD binary keeps answering `/health`. Wait for the port to free
+> fail `bind: address already in use`. Since ENG-34 the engine **binds first
+> and announces after**, so a lost race prints ONLY the bind error — never a
+> `serving on :PORT` for a port it does not hold (it used to, and a chained
+> start looked alive while the OLD binary kept answering `/health`). Still:
+> wait for the port to free
 > (`until ! ss -ltn | grep -q :8620; do sleep 0.3; done`) before starting the
 > replacement, and verify you're on the new build via `/health`'s version.
 > (Production has this solved: `deploy-update.sh` does the atomic swap.)

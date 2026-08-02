@@ -875,7 +875,12 @@ a row condition reads as 404 (not 403).
 
 `fields` is a response allowlist; `conditions` filters rows, with
 `$user_id` resolving to the JWT subject (or `$external_client_id`, or a
-literal). The JWT `role` claim selects the policy.
+literal). The JWT `role` claim selects the policy. **Those are the only two
+variables**: any other `$…` val (`$userid`, `$tenant_id`) **rejects the schema
+at load** listing them (ENG-20 — it used to be compared as the literal text, so
+one typo produced "zero rows forever" with no error anywhere, invisible even to
+the SCHEMA-5 warning). A bare `user_id`/`external_client_id` (the `$`
+forgotten) is legal — a literal — but raises a WARNING suggesting the variable.
 
 A row `condition`'s **`op` must be `eq`** (or omitted) — row conditions are
 enforced as equality, so a non-eq operator is **rejected at schema load**
@@ -1012,8 +1017,13 @@ are **no delete hooks**, and any other event name is rejected at
 validation. **After-hooks (`after_create`/`after_update`) must be `webhook`**:
 a `js`/`wasm` after-hook is rejected at load (a sandboxed hook runs post-commit
 with no way to change the row or reach out — it would be a silent no-op; put
-js/wasm logic in a `before_*` hook). Three hook types (all fields below verified
-against `pkg/schema/types.go`):
+js/wasm logic in a `before_*` hook). **Before-hooks must be `js` or `wasm`** —
+the exact mirror (ENG-19): a `webhook` before-hook used to VALIDATE (its URL was
+even required) while the runner never dispatched it — a declared guard rail that
+silently never ran. A before-hook must decide the write synchronously, which an
+async signed POST cannot, so the type is rejected at load; notify externally
+with an after-webhook or the events outbox. Three hook types (all fields below
+verified against `pkg/schema/types.go`):
 
 ```json
 "hooks": {
@@ -1399,11 +1409,26 @@ subroutes.
   warning is gone because the behavior that needed it is gone. An **empty**
   `?sort=`/`?order=`, and `?order=desc` with no `?sort=` (a direction naming no
   field), are also named 400s now (ENG-30) — they used to default silently.
-  Multi-field sort is still unsupported, and two `order[…]` parameters currently
-  pick a winner non-deterministically (backlog ENG-16).
+  Multi-field sort is still unsupported, and **two `order[…]` parameters are a
+  400 naming both** (ENG-16 — the winner used to be Go map iteration order,
+  measured flipping 174/26 between identical requests; same rule on the GraphQL
+  `order` argument).
+- **A repeated engine-owned parameter is a 400 naming it** (ENG-17):
+  `?per_page=20&per_page=100` used to serve 20 — the FIRST value won and the
+  caller's appended correction was silently dropped. Applies to every parameter
+  the engine reads (`page`, `per_page`, `sort`, `order`, `order[…]`,
+  `filter[…]`, `search`, `after`, `before`, `count`, `include`, the aggregate
+  functions); unknown top-level parameters keep their tolerance.
 - **Pagination**: keyset — `?after=<uuid>` / `?before=<uuid>` with
   `?per_page=` (default 20, max 100). `?page=` exists but is
-  OFFSET-based; prefer keyset. A **non-positive** `page`/`per_page` is a **400
+  OFFSET-based; prefer keyset. **A cursor request owns its shape** (ENG-15):
+  `after`+`before` together, cursor+`sort`/`order[…]`, cursor+`page` and
+  cursor+`count` are each a **400 naming the conflict** (they used to be
+  silently discarded — and `meta.page` still echoed the page it ignored), and an
+  empty `?after=`/`?before=` is a named 400 instead of a silent full list. A
+  cursor response's `meta` carries `per_page` + `has_next` only — **no
+  `page`/`has_prev`** (a cursor request has no page number; meta never reports a
+  page the query did not use). A **non-positive** `page`/`per_page` is a **400
   naming the value** — `?page=0` and `?page=-4` used to be served silently as
   page 1, even though the engine's own message for `?page=abc` already said
   *"must be a positive integer"* (ADR-024). An **empty** `?page=`/`?per_page=` —
@@ -1425,7 +1450,14 @@ subroutes.
 - **Total count (opt-in)**: `?count=true` on a list adds `meta.total` +
   `meta.total_pages` (a `COUNT(*)` over the SAME filtered + RBAC-scoped set).
   **Off by default** — the plain list pays nothing and is byte-identical; turn it
-  on only when you need the total. GraphQL matches this: its `meta.total` /
+  on only when you need the total. The flag is read **by value** (ENG-23):
+  `count=false`/`count=0` are OFF (they used to turn the total ON — the test was
+  presence-only), bare `?count` and `count=true`/`1` are ON, anything else is a
+  400 naming the value. It **works with `?include=`** (the embed path used to
+  drop it), a **failed COUNT is an error response**, never a 200 with the total
+  silently missing, and count+cursor is a named 400 (the COUNT would cover only
+  the rows past the cursor — a total that silently means something else).
+  GraphQL matches this: its `meta.total` /
   `meta.total_pages` are **lazy** — the `COUNT(*)` runs only when those fields are
   selected (SEC-AUDIT-V2), so a GraphQL list that doesn't ask for the total pays no
   COUNT either.
@@ -1445,10 +1477,25 @@ allowlist **cannot be aggregated** (→ `403`, no leak via aggregates).
 GET /api/orders/aggregate?count&sum=total,tax&avg=total&min=created&max=created&group_by=status&filter[status][eq]=paid
 ```
 
-- **Functions** (a fixed allowlist — never arbitrary SQL): `count` (presence
-  flag → `COUNT(*)`); `sum` / `avg` (numeric fields only); `min` / `max` (numeric
+- **Functions** (a fixed allowlist — never arbitrary SQL): `count` (bare
+  `?count`, or by value — `count=false` is OFF → `COUNT(*)`); `sum` / `avg`
+  (numeric fields only); `min` / `max` (numeric
   **or** `time`). Each of `sum`/`avg`/`min`/`max` takes a comma-separated field
   list. `group_by` is a comma-separated field list (anything but `json`).
+- **The aggregate endpoint owns its query-parameter namespace** (ENG-18/24,
+  ADR-024): here the parameter NAME is the requested function, so an unknown
+  one (`?median=x`, `?summ=x`) is a **400 listing the valid set** — it used to
+  answer 200 with the metric silently absent. The list parameters an aggregate
+  cannot honor (`page`, `per_page`, `sort`, `order`, `order[…]`, `after`,
+  `before`, `include`) are a 400 saying so — they used to be VALIDATED and then
+  thrown away, so `?count&sort=ghost` 400'd over a parameter the endpoint never
+  honors while `?count&sort=status` was accepted-and-ignored. The general
+  unknown-top-level tolerance (utm tags, cache-busters) does NOT apply on this
+  endpoint — an authenticated aggregate XHR is never a decorated link. An empty
+  `?group_by=` is a 400 (it used to silently change the response SHAPE), and an
+  empty entry in an active field list (`sum=a,`) names the extra comma; the
+  wholly empty `?count&sum=` keeps its reviewed tolerance (visible in the
+  response, which simply has no `sum` key).
 - Field and `group_by` names are validated against the schema; an unknown field,
   a function applied to an incompatible type, or no function requested → `400`.
 - **Response — without `group_by`** (one overall object, only the requested keys):
