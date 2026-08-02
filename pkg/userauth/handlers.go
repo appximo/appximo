@@ -3,6 +3,7 @@ package userauth
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -385,8 +386,17 @@ func (s *Service) handleVerifyConfirm(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" && r.Method == http.MethodPost {
 		var req tokenRequest
-		_ = decodeBodyAllowEmpty(w, r, &req)
+		if !decodeBodyAllowEmpty(w, r, &req) {
+			return
+		}
 		token = req.Token
+	}
+	if token == "" {
+		// NIGHT-SWEEP-S1: a MISSING/empty token used to be answered "invalid or
+		// expired token" — misleading (the caller sent no token and goes off to
+		// debug one; the F-8 naming axis). Say what is actually wrong.
+		writeAuthErr(w, http.StatusBadRequest, "missing token: pass ?token=… on GET, or {\"token\":\"…\"} in the POST body")
+		return
 	}
 	err := s.ConfirmVerify(r.Context(), tc.ID, token)
 	switch {
@@ -506,12 +516,22 @@ func (s *Service) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The token to refresh may come from the Authorization: Bearer header or the
-	// JSON body's "token" field.
+	// JSON body's "token" field. A body that is SENT must parse
+	// (decodeBodyAllowEmpty tolerates only the truly-empty body — it used to
+	// swallow every decode error, so a misspelled key silently fell through to
+	// the header); and when BOTH carry a token they must AGREE — the body used
+	// to win silently, the conflicting-parameters class (ADR-024 rule 11).
 	var req refreshRequest
-	_ = decodeBodyAllowEmpty(w, r, &req)
+	if !decodeBodyAllowEmpty(w, r, &req) {
+		return
+	}
 	tokenStr := req.Token
-	if tokenStr == "" {
-		if bt, ok := auth.BearerToken(r.Header.Get("Authorization")); ok {
+	if bt, ok := auth.BearerToken(r.Header.Get("Authorization")); ok {
+		if tokenStr != "" && tokenStr != bt {
+			writeAuthErr(w, http.StatusBadRequest, "two different tokens were sent (Authorization header and body): send one, or the same one")
+			return
+		}
+		if tokenStr == "" {
 			tokenStr = bt
 		}
 	}
@@ -536,24 +556,51 @@ func (s *Service) handleRefresh(w http.ResponseWriter, r *http.Request) {
 
 // decodeBody reads a JSON body (capped, unknown fields rejected) into dst,
 // writing a 400 and returning false on any decode error.
+//
+// NIGHT-SWEEP-S1: the flat "invalid JSON body" used to discard the decoder's
+// own `json: unknown field "emial"` — the exact F-8 defect ADR-024's sweep
+// fixed on /admin (platformadmin.decode) and left here. Same rule, same
+// security reasoning: these routes are PRE-AUTH, so only the unknown-field
+// form is surfaced (it echoes a key the CALLER just sent and discloses
+// nothing); every other decode message can carry Go struct internals and
+// stays terse.
 func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
-		writeAuthErr(w, http.StatusBadRequest, "invalid JSON body")
+		writeAuthErr(w, http.StatusBadRequest, authDecodeMsg(err))
 		return false
 	}
 	return true
 }
 
-// decodeBodyAllowEmpty is decodeBody but tolerates an empty body (refresh can
-// carry its token in the Authorization header instead).
+// authDecodeMsg maps a body-decode error to the safe client message (see
+// decodeBody).
+func authDecodeMsg(err error) string {
+	msg := "invalid JSON body"
+	if e := err.Error(); strings.HasPrefix(e, "json: unknown field ") {
+		msg += ": " + e
+	}
+	return msg
+}
+
+// decodeBodyAllowEmpty is decodeBody but tolerates a genuinely EMPTY body
+// (refresh can carry its token in the Authorization header instead).
+//
+// ONLY the empty body is tolerated (io.EOF before any JSON value). It used to
+// swallow EVERY decode error — nullifying DisallowUnknownFields on the one
+// route that used this helper: a misspelled {"tok": …} fell through to the
+// header in silence (NIGHT-SWEEP-S1). A body that IS sent must parse.
 func decodeBodyAllowEmpty(w http.ResponseWriter, r *http.Request, dst any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
+		if errors.Is(err, io.EOF) {
+			return true // no body at all — the tolerated case
+		}
+		writeAuthErr(w, http.StatusBadRequest, authDecodeMsg(err))
 		return false
 	}
 	return true

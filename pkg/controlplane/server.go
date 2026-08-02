@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/miguelangel/appitools/pkg/schema"
@@ -117,8 +118,19 @@ func handleCreateTenant(svc Service) http.HandlerFunc {
 			Plan        string          `json:"plan"`
 			Schema      json.RawMessage `json:"schema"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		// Strict decode (NIGHT-SWEEP-S1): this was the one operator body on the
+		// control plane still decoding leniently — a misspelled envelope key
+		// ("scheme" for "schema", "tenantid") was silently dropped while the
+		// schema INSIDE the envelope was strict-key-checked. Same F-3/F-8
+		// treatment as every other operator body: reject, name the key.
+		dec := json.NewDecoder(r.Body)
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&raw); err != nil {
+			msg := "invalid JSON"
+			if e := err.Error(); strings.HasPrefix(e, "json: unknown field ") {
+				msg += ": " + e + " (valid keys: tenant_id, display_name, email, plan, schema)"
+			}
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 			return
 		}
 		// Require and validate the schema BEFORE provisioning. Without this,

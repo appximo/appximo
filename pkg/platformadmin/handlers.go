@@ -132,8 +132,18 @@ func (s *Service) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 		Plan        string          `json:"plan"`
 		Schema      json.RawMessage `json:"schema"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+	// Strict decode (NIGHT-SWEEP-S1): this was the one /admin body bypassing
+	// the strict decode() helper (it decodes the schema as RawMessage first) —
+	// a misspelled envelope key was silently dropped. Same contract as decode():
+	// unknown key named, everything else terse.
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&raw); err != nil {
+		msg := "invalid JSON"
+		if e := err.Error(); strings.HasPrefix(e, "json: unknown field ") {
+			msg += ": " + e + " (valid keys: tenant_id, display_name, email, plan, schema)"
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		return
 	}
 	parsed, errs := parseSchema(raw.Schema)
