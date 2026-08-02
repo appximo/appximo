@@ -26,7 +26,13 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-02 (NIGHT-SWEEP-S1)** — the accepted-and-silent class
+**Last reviewed: 2026-08-02 (PHASE3-GUIDE-S1)** — the Phase-3 public-material
+pass: `docs/GUIDE.md` (the third-party master guide, distilled from the five
+field journeys) and `site/` (the official page, every number condition-attached)
+written and browser-verified; the zero-to-API path re-executed live; three stale
+claims corrected in CAPABILITIES and the internal pitch base (see the
+certification's PHASE3-GUIDE-S1 addendum). No engine change. Previous review:
+NIGHT-SWEEP-S1 (same day) — the accepted-and-silent class
 EXHAUSTED on the known input surfaces: ENG-15/16/17/18/19/20/23/24/34 and UI-1
 closed and moved to DONE, the UNRECOGNIZED_INPUT_AUDIT checklist run to
 completion (19 probe/verify agents over 9 surfaces against a live engine), six
@@ -485,8 +491,27 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Rotate the 58's PostgreSQL password**~~ | **RESOLVED by PROD-JOURNEY-1B (2026-07-31):** the wipe (`--uninstall --purge`) dropped the role and database; the reinstall generated a fresh password (plus fresh JWT/admin secrets, rotated again on-box after the installer printed them to stdout — see OPS-7). The exposed credential no longer exists. |
 | **Publish the Go module (the 10 % path is blocked on it)** | `github.com/miguelangel/appitools` is private with no tag, so `go get` / `go mod tidy` FAIL for anyone building a custom backend: the only recipe that works is a local checkout plus an absolute-path `replace`, which does not build on a teammate's machine, in CI, or in a plain `docker build`. This is now written honestly at the top of `backend-spec` §3.0 (with exactly what changes once it is published), but it is a **product blocker, not a doc gap** — the framework half of the product is unreachable outside this machine until the repo is public or a tagged private module + `GOPRIVATE` is set up. Part of **DOC-2**, which is otherwise DONE. |
 | **Give `/root/commerce` a remote** | The technical fix is trivial; the decision (which account, public or private, whether the commerce platform is a product or a demo) is his. See **OPS-5** — until then the field report lives on one disk. |
+| **Pick the canonical repo URL** (PHASE3-GUIDE-S1) | Two names coexist today: the README badges and installer point at `github.com/miguel09acosta/appitools`; the Go module path — and therefore every import, the served OpenAPI `info.description` and the specs — says `github.com/miguelangel/appitools`. Publishing under either makes the other wrong; a module-path change is a breaking edit to every consumer `go.mod`. The page (`site/`) ships the repo link as an explicit placeholder until this is decided. |
+| **Where `site/` lives** (PHASE3-GUIDE-S1) | The official page is finished, self-contained and browser-verified, with the repo/Releases/domain spots as dashed placeholders. Publishing venue (GitHub Pages over the repo, `appitools.dev`, or a host) is his call; `site/README.md` documents what each choice changes (the relative `../docs/` links). |
 
 ---
+
+## DONE in PHASE3-GUIDE-S1 (2026-08-02)
+
+Phase 3 delivered: the public entry material, written FROM the five field
+journeys with every claim tied to the certification. Docs/page/assets only —
+zero engine-behavior change (`git diff` is docs + site + handoff).
+
+| What shipped | Verified by |
+|---|---|
+| **`docs/GUIDE.md`** — the third-party master guide: 10 chapters ordered by "what a newcomer hits" (GAPS 3-17/4-4 + the Cancha Ya frictions as the index); "who it is NOT for" as a chapter; the today-honest availability state (no release tag, module unpublished); every number with condition + date; ends with "verify everything yourself" | the §2 zero-to-API path EXECUTED live on a fresh DB (scratch :8501, outputs pasted real); every figure traced to CERTIFICATION_2026-08-01 |
+| **`site/`** — the official page: one self-contained `index.html` (no build, no runtime deps, system fonts, inline CSS) + 5 REAL screenshots (tiendita mobile, Studio ERD, /docs, /admin, petfriendly /docs); numbers table with a Condition column (limiter caveat inline); "who it's NOT for" section; honest comparison (no NestJS figures); repo/Releases/domain as dashed placeholders | Playwright: mobile 390×844 + desktop 1440×900 — no horizontal scroll, 5/5 images, zero console errors |
+| **Claim corrections** — CAPABILITIES (~45 MB → certified sizes; stale ENG-16 line; GraphQL `update` mutation missing from the list) and 02_QUE_ES §1/§6 (pre-certification numbers, NestJS in present tense) | certification addendum §PHASE3-GUIDE-S1 lists each |
+| **Certification addendum** — the functional front-door claims re-verified live 2026-08-02 (self-bootstrap, tenant, token refusal, 422/400 shapes, docs/openapi, signup 403, specs trilogy, plain build 85.2 MB) | the addendum itself |
+
+New rows above in "Requires a decision from Miguel": the canonical repo URL
+(miguel09acosta vs miguelangel — the page ships it as a placeholder) and where
+`site/` gets published.
 
 ## DONE in NIGHT-SWEEP-S1 (2026-08-02, overnight)
 
