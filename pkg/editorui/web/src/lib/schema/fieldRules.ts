@@ -222,6 +222,16 @@ export function stateMachineIssues(def: FieldDef): string[] {
  * validateFieldRules + validateDefault (+ validateStateMachine). Each string is a
  * human-readable, panel-ready message. Empty means the engine would accept the field.
  */
+/** FILES-1 accept families the engine recognizes (pkg/schema types.go
+ * acceptFamilies + the "pdf" alias); anything else must be an exact "a/b". */
+const FILE_ACCEPT_FAMILIES = ['image', 'audio', 'video', 'text', 'pdf'];
+
+/** acceptEntries normalizes the two engine shapes (string | string[]) to a list. */
+function acceptEntries(a: FieldDef['accept']): string[] {
+	if (!a) return [];
+	return Array.isArray(a) ? a : [a];
+}
+
 export function fieldDefIssues(def: FieldDef): string[] {
 	const out: string[] = [];
 	const isStr = isStringType(def.type);
@@ -273,6 +283,22 @@ export function fieldDefIssues(def: FieldDef): string[] {
 		if (def.required && def.on_delete === 'set_null') {
 			out.push('on_delete set_null requires a nullable column, but this field is required');
 		}
+		// UI-1 (FILES-1): the attach policy, mirroring pkg/schema's file-policy
+		// validation — a family from the closed set, the alias pdf, or an exact
+		// type ("a/b"); max_bytes > 0.
+		for (const entry of acceptEntries(def.accept)) {
+			if (!FILE_ACCEPT_FAMILIES.includes(entry) && !entry.includes('/')) {
+				out.push(
+					`accept "${entry}" is neither a family (${FILE_ACCEPT_FAMILIES.join(', ')}) nor an exact content type like "application/zip"`
+				);
+			}
+		}
+		if (def.max_bytes !== undefined && def.max_bytes <= 0) {
+			out.push('max_bytes must be > 0');
+		}
+	}
+	if (def.type !== 'file' && (def.accept !== undefined || def.max_bytes !== undefined)) {
+		out.push('accept/max_bytes only apply to file fields');
 	}
 
 	// format (string/text only; from the closed set)

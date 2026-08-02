@@ -53,7 +53,39 @@
 			if (field.def.on_delete === 'cascade') {
 				editor.patchFieldDef(entity.id, field.id, 'on_delete', undefined);
 			}
+		} else {
+			// accept/max_bytes are file-field-only (FILES-1) — the validator rejects
+			// them elsewhere, so switching AWAY from file must clear them.
+			editor.patchFieldDef(entity.id, field.id, 'accept', undefined);
+			editor.patchFieldDef(entity.id, field.id, 'max_bytes', undefined);
 		}
+	}
+	// UI-1 (FILES-1): the file field's attach policy. `accept` round-trips the
+	// engine's two shapes faithfully — a single value stays a STRING, several
+	// become an array (both are valid; a JSON-declared policy survives edits).
+	function acceptText(): string {
+		const a = field?.def.accept;
+		if (!a) return '';
+		return Array.isArray(a) ? a.join(', ') : a;
+	}
+	function setAccept(raw: string) {
+		if (!entity || !field) return;
+		const arr = raw
+			.split(',')
+			.map((s) => s.trim())
+			.filter(Boolean);
+		const v = arr.length === 0 ? undefined : arr.length === 1 ? arr[0] : arr;
+		editor.patchFieldDef(entity.id, field.id, 'accept', v);
+	}
+	function setMaxBytes(raw: string) {
+		if (!entity || !field) return;
+		const n = Number(raw);
+		editor.patchFieldDef(
+			entity.id,
+			field.id,
+			'max_bytes',
+			raw.trim() === '' || Number.isNaN(n) || n <= 0 ? undefined : Math.floor(n)
+		);
 	}
 	function toggleFlag(key: 'required' | 'unique' | 'auto', on: boolean) {
 		if (entity && field) editor.patchFieldDef(entity.id, field.id, key, on ? true : undefined);
@@ -261,6 +293,30 @@
 					<option value="restrict">restrict — the file cannot be deleted while attached</option>
 					<option value="set_null">set_null — deleting the file detaches it from the record</option>
 				</select>
+				<!-- UI-1 (FILES-1): the per-field attach policy — enforced at attach time
+				     against the STORED (sniffed) metadata, 422 file_policy on violation. -->
+				<label class="lbl" for="f-accept">accept <span class="muted">(what may be attached; empty = anything)</span></label>
+				<input
+					id="f-accept"
+					class="field-input"
+					placeholder="image  ·  or: image,application/pdf"
+					value={acceptText()}
+					onchange={(e) => setAccept(e.currentTarget.value)}
+				/>
+				<div class="rule-note muted">
+					A family (image, audio, video, text), the alias pdf, or an exact type like
+					application/zip — comma-separate to allow several.
+				</div>
+				<label class="lbl" for="f-maxbytes">max_bytes <span class="muted">(max attachable size; empty = no field cap)</span></label>
+				<input
+					id="f-maxbytes"
+					class="field-input"
+					type="number"
+					min="1"
+					placeholder="5242880 (5 MiB)"
+					value={field.def.max_bytes ?? ''}
+					onchange={(e) => setMaxBytes(e.currentTarget.value)}
+				/>
 			</section>
 		{:else}
 		<!-- Relation (foreign key) -->

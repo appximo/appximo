@@ -81,6 +81,11 @@ export interface FieldDef {
 	pattern?: string;
 	format?: FieldFormat;
 	state_machine?: StateMachine;
+	/** file fields only (FILES-1): attach policy — a content-type family
+	 * (image|audio|video|text), the alias pdf, or an exact type; string or array. */
+	accept?: string | string[];
+	/** file fields only (FILES-1): max stored size in bytes, enforced at attach. */
+	max_bytes?: number;
 }
 
 /** Declarative relation (served via ?include=). Mirrors schema.RelationDef. */
