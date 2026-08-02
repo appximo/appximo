@@ -443,6 +443,43 @@ the real `ApplyDefaults` pipeline with no DB), and (b) `make test` is
 demoted in AGENTS.md and CONTRIBUTING.md to the fast inner loop: the bar for a
 data-path change is unit + full lane + the binary-diff gate.
 
+## NIGHT-SWEEP-S1 (2026-08-02) — the checklist run to completion
+
+This document closed with "it is a sweep, not a proof of absence, and the
+checklist above is what makes the next pass cheaper than this one." This session
+ran that next pass to the END: **19 agents (9 surface probers + adversarial
+verifiers for every non-trivial new claim) probed a LIVE pre-session engine**,
+every probe an executable request with its recorded response, every new SILENT
+claim independently re-verified before being believed. In the same night, the
+nine open ENG items of the class (ENG-15/16/17/18/19/20/23/24 + ENG-34) were
+closed, and every CONFIRMED new same-class finding was fixed. The per-surface
+verdicts, so the next reader knows what is VERIFIED rather than sampled:
+
+| Surface | Verdict after this pass |
+|---|---|
+| **List query params** (filters/sort/page/cursors/count/search/include) | **CLEAN.** ENG-15/16/17/18/23/24 closed; plus this pass's own finds fixed: empty/`,,,` `?include=`, search on a text-less resource, the unknown-relation error now lists alternatives. The builder refuses to guess: conflicts named, repeats named, meta states only what the query did. |
+| **Single-record + subroute + SSE routes** | **CLEAN (was the pass's biggest new find, CONFIRMED).** They silently discarded the same engine-owned params the list route names (`GET /{id}?filter[…]` returned the row REGARDLESS — a caller could believe a conditional read). All now reject by name. |
+| **Aggregate** | **CLEAN.** Owns its whole parameter namespace (the written exception-to-the-exception in ADR-024): unknown functions named with the set, unhonorable list params named with the reason, empty group_by/CSV entries named. |
+| **Auth bodies** (`/auth/*`) | **CLEAN on the axes probed.** Strict decode held everywhere; the NAMING axis was the failure (flat "invalid JSON body" discarding the decoder's evidence — the same F-8 defect fixed on /admin and left here) — fixed, plus refresh's swallow-everything decode and the silent body-vs-header token conflict. LOW residue in OPS-16 (trailing JSON, MFA wording). |
+| **Operator bodies** (control plane + /admin) | **CLEAN.** F-3's strict decode held on every body it claimed; the ONE lenient body left (tenant REGISTER, on both planes) is now strict. `plan` accepting anything is OPS-16(b) — a product decision, not a patch. |
+| **Transaction** | **NARROWED.** Declared-but-irrelevant keys (guard on create, data on delete) and the masked-500 non-uuid id are fixed; the remaining hole is exactly ENG-21 (unknown keys in envelope/op/guard), re-probed and re-filed with fresh evidence. |
+| **Files multipart** | **CLEAN.** The duplicate-`file`-part data loss (stored the first, 201, never read the second) is a named 400 with rollback; extra form fields are a WRITTEN exception now (browser forms carry them; same reasoning as unknown top-level query params). |
+| **GraphQL** | **Structurally the best surface** (typed inputs name everything). Envelope unknown-key claim REFUTED by the verifier (GraphQL-over-HTTP tolerance). Remaining: ENG-22 (GET `variables` drop — re-verified live, exactly as filed) + NEW **ENG-35** (String variables coerce any scalar while Int variables are strict) — one GraphQL value-handling pass, deferred with the reason written. |
+| **CLI arguments** | **The most compliant surface probed** (17/18 named rejections, 0 silent). One real find: no JWT-secret floor anywhere (`serve` boots on a 5-char secret while the docs say 32) — **SEC-6**, a product decision. |
+| **The nine ENG items** | All nine reproduced on the frozen base binary exactly as filed (the before-table), and all nine verified CLOSED on the new binary — live probes, the 92-row gate corpus (31 intended DIFFs), unit + integration tests. |
+
+**The honest scope, updated:** the known input surfaces have now been probed to
+their checklists' end, with adversarial verification — this is no longer a
+sample. What it still is NOT: a proof about surfaces that do not exist yet. The
+guarantee below is what keeps a NEW surface honest, and ADR-024's NIGHT-SWEEP
+extensions (one parameter one meaning; conflicts named, never adjudicated; meta
+states only what the query did; the aggregate namespace rule) are now part of
+the pattern a new surface must copy.
+
+Deferred residue, each with its reason written: ENG-21, ENG-22+ENG-35 (contract
+changes wider than a sweep), SEC-6 and OPS-16 (product decisions / LOW wording
+items), OPS-13 and SCHEMA-7 (unchanged, still open).
+
 ## The guarantee
 
 `pkg/query/builder_test.go` now holds the pattern every future surface should copy:

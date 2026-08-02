@@ -26,43 +26,64 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-02 (THIRD-PARTY-READY-S1)** — the five third-party
-blockers (ENG-33/ENG-32/FILES-1/FILES-2/COMMERCE-6) closed and moved to DONE;
-two new OPEN (UI-1: Studio authoring of the file-field policy keys; ENG-34:
-the serving log prints before the bind — the fresh-agent experiment's one
-product gap).
+**Last reviewed: 2026-08-02 (NIGHT-SWEEP-S1)** — the accepted-and-silent class
+EXHAUSTED on the known input surfaces: ENG-15/16/17/18/19/20/23/24/34 and UI-1
+closed and moved to DONE, the UNRECOGNIZED_INPUT_AUDIT checklist run to
+completion (19 probe/verify agents over 9 surfaces against a live engine), six
+CONFIRMED new same-class findings fixed in the same night, and the deferred
+residue filed below with evidence (ENG-35, SEC-6, OPS-16; ENG-21/22 evidence
+refreshed).
 
 ---
 
 ## OPEN
 
-### UI-1 — Studio cannot author the file-field policy keys (accept/max_bytes)
-- **Origin:** THIRD-PARTY-READY-S1 (FILES-1). The schema gained `accept` +
-  `max_bytes` on file fields; the visual editor's field panel does not offer
-  them, re-opening (by two keys) the 100%-parity claim UI-F4-S3 closed.
-- **Impact:** Low — the ROUND-TRIP is safe (the editor imports a field def by
-  spread and preserves unknown keys on export, verified by reading
-  transform.ts), so a policy declared in JSON survives Studio edits; it just
-  cannot be CREATED or CHANGED visually.
-- **Ready:** the file-field panel offers accept (family multi-select + free
-  exact types) and max_bytes, validated like the engine; round-trip pinned.
+### ENG-35 — GraphQL String-typed variables silently coerce any scalar
+- **Origin:** NIGHT-SWEEP-S1 audit (GraphQL surface), CONFIRMED adversarially.
+  A `query($t: String!)` executed with `variables: {"t": 5}` runs — the library
+  coerces the Int to `"5"` instead of raising the spec-required request error —
+  while Int-typed variables ARE strict (a string is rejected). Asymmetric
+  coercion inside graphql-go, not our resolvers.
+- **Impact:** Medium. A client bug (wrong variable type) executes with a
+  stringified value instead of failing loudly; the same bug on an Int variable
+  fails correctly. Same family as ENG-22 (GraphQL value handling) — fix them in
+  one GraphQL-coercion pass.
+- **Why deferred:** changing variable coercion is a library-level contract wider
+  than a sweep session (the audit's own precedent: "GraphQL argument coercion
+  changes a contract wider than one release").
+- **Ready:** a wrongly-typed variable for ANY declared type is a request error
+  naming the variable and both types, or the tolerance is documented per type.
 
-### ENG-34 — "Appitools serving on :PORT" is printed BEFORE the bind is confirmed
-- **Origin:** THIRD-PARTY-READY-S1's fresh-agent experiment (friction #2, the
-  costliest of its run). The agent killed the old binary and chain-started the
-  new one; the new process printed `Appitools serving on :8620 — Ctrl+C to
-  stop` and THEN died with `bind: address already in use` (the old process was
-  still in its graceful drain, and kept answering /health) — so the agent ran a
-  whole browser e2e against the STALE binary. Code: app.go prints the line
-  before `a.ss.Run(ctx, srv, …)` ever calls Listen.
-- **Impact:** Low-medium — dev-loop only (prod uses deploy-update.sh's atomic
-  swap), but it is a success message for something that has not happened, the
-  exact "reports success and is wrong" class ADR-024 exists for.
-- **Mitigation shipped now:** backend-spec documents the drain+log-order trap
-  and the wait-for-port recipe.
-- **Ready:** the line prints AFTER a successful net.Listen (bind first, then
-  announce; Serve on the live listener), on both the single app and the fleet;
-  a failed bind prints only the error.
+### SEC-6 — No JWT-secret strength floor anywhere
+- **Origin:** NIGHT-SWEEP-S1 audit (CLI surface). `appitools token --secret
+  short` mints, and `serve` BOOTS, with a 5-character HS256 secret — while every
+  doc says "at least 32 characters". Rule 8 of ADR-024: when the engine states a
+  rule it must enforce it.
+- **Impact:** Medium (security posture). A weak secret makes every tenant's JWTs
+  forgeable; nothing warns.
+- **Why deferred:** a boot-refusal is a breaking change for dev setups and the
+  right floor (warn vs refuse, 32 chars vs entropy) is a product decision —
+  Miguel's call.
+- **Ready:** `serve` refuses (or at minimum WARNS loudly at boot) below a
+  documented floor; `token` warns; docs and the floor agree.
+
+### OPS-16 — Small named-rejection residue from the NIGHT-SWEEP audit
+- **Origin:** NIGHT-SWEEP-S1 audit, all LOW, verified live, none silent-harmful
+  enough to fix at 4 a.m.:
+  (a) fleet manifest unknown-key error surfaces the raw decoder message (names
+  the field, lists no valid keys); (b) control-plane `plan` accepts any value
+  and is read by nothing — an enumerated-looking field with no set (needs a
+  product decision on what plan means); (c) trailing data after the first JSON
+  value is ignored on /auth bodies (`{}garbage` parses — needs a dec.More()
+  check per body or a written exception); (d) MFA session endpoints answer
+  "authentication required" to a VALID engine token that carries no user
+  identity (message could name the real problem); (e) a tx create HONORS a
+  caller-supplied `id` in data (echoed — reported tolerance) while update's own
+  error calls id read_only — decide and write the create-id contract.
+- **Impact:** Low each; they are message-quality/contract-wording items, not
+  silences (everything silent got fixed in the session).
+- **Ready:** each sub-item either fixed with a test or written down as an
+  ADR-024 exception with its reason.
 
 ### ENG-1 — Embed cache for `?include=` relations
 - **Origin:** ADR-019 §cache invalidation; carried in ESTADO_Y_PLAN_MAESTRO as
@@ -174,74 +195,6 @@ product gap).
   constrained identically for both arms, run through the existing ABBA protocol —
   then the claim is restored with a fresh date, or dropped.
 
-### ENG-15 — A keyset cursor silently discards sort/order/page, and `meta.page` lies
-- **Origin:** SILENT-FAILURE-S1 audit (`pkg/query/builder.go:232`). With `?after=` or
-  `?before=`, the builder drops `?sort`, `?order[…]` and `?page` — and the response's
-  `meta.page` still echoes the page number it ignored.
-- **Impact:** Medium. The response does not merely omit the caller's intent, it
-  ASSERTS something false: a client paginating with a cursor reads `meta.page` and
-  believes it is on that page.
-- **Also on this surface:** `?after=A&before=B` (two contradictory cursors) emits
-  `WHERE id > $1` — `before` is dropped without a word. Verified 2026-08-01:
-  `after=1111…&before=2222…` builds the identical SQL as `after=1111…` alone.
-- **Ready:** combining a cursor with an incompatible parameter is a `400` naming the
-  conflict, or the parameter is honored; either way `meta` never reports a page the
-  query did not use.
-
-### ENG-16 — Two `order[…]` parameters: the winner is Go map iteration order
-- **Origin:** SILENT-FAILURE-S1 audit (`pkg/query/builder.go:158`). With two
-  `order[field]` parameters, the loop takes whichever the map yields first and
-  `break`s — measured 174/26 across 200 builds of the SAME URL.
-- **Impact:** Medium, and unusual: the same request returns rows in a different
-  order between calls. It is non-determinism visible to a client, which is worse
-  than a wrong-but-stable answer because it defeats caching and reproduction.
-- **Ready:** more than one sort field is either a `400` (one sort field is the
-  documented surface) or an ordered multi-sort; never a coin flip. Same for the
-  GraphQL `order` argument (`pkg/graphql/handler.go:1425`).
-
-### ENG-17 — A repeated query parameter keeps only the first value
-- **Origin:** SILENT-FAILURE-S1 audit (`pkg/query/builder.go:136`). `vals[0]`
-  everywhere: `?per_page=20&per_page=100` serves 20, `?filter[x][eq]=a&filter[x][eq]=b`
-  filters on `a`, and the aggregate functions do the same.
-- **Impact:** Low-medium. The common cause is a client appending a corrected value;
-  the engine serves the stale one.
-- **Ready:** a repeated parameter is a `400` naming it, per ADR-024.
-
-### ENG-18 — Unknown aggregate functions are never looked at
-- **Origin:** SILENT-FAILURE-S1 audit (`pkg/query/aggregate.go:104-124`).
-  `?count&median=amount` returns `200` with the metric simply absent; `?count=false`
-  turns COUNT **on** (presence-only, and REST disagrees with GraphQL here); an empty
-  `group_by` silently changes the response SHAPE from `{"groups":[…]}` to a flat
-  object.
-- **Impact:** Medium. A dashboard reads a total that is not the one it asked for.
-- **Ready:** an unknown function key under the aggregate path is a `400` listing
-  `count,sum,avg,min,max,group_by`; `count` takes a boolean value; an empty
-  `group_by` is a `400`, not a shape change.
-
-### ENG-19 — A `before_*` webhook hook is validated and never dispatched
-- **Origin:** SILENT-FAILURE-S1 audit (`pkg/extensions/hook_runner.go:91`). The
-  validator ACCEPTS `hooks.before_create = {type: "webhook", url: …}` and requires
-  the URL — and the runner never calls it. This is the exact mirror of SEC-AUDIT-V2
-  Hallazgo A, which closed the after-hook half of the same asymmetry (a js/wasm
-  after-hook is now rejected at load); the before-half was left open.
-- **Impact:** Medium. A schema declares a validation webhook, the schema validates,
-  and nothing ever runs — the same "accepted and silent" shape, at the layer people
-  reach for when they want a guard rail.
-- **Ready:** either reject a `webhook` before-hook at load (naming js/wasm as the
-  before-hook types, symmetrical to the after-hook rule), or dispatch it. Rejecting
-  is the smaller change and matches the existing decision.
-
-### ENG-20 — An unrecognized `$variable` in a row condition becomes a string literal
-- **Origin:** SILENT-FAILURE-S1 audit (`pkg/rbac/evaluator.go:110`). Only `$user_id`
-  and `$external_client_id` are substituted; `$userid`, `$user`, `$tenant_id` are
-  compared as the LITERAL text `"$userid"`, matching nothing.
-- **Impact:** **High, and it is authorization.** One typo produces the exact "the app
-  shows zero rows forever" failure SCHEMA-5 exists to warn about — and the warning
-  cannot see it, because `warnings.go` only fires on an exact `$user_id`.
-- **Ready:** a `val` beginning with `$` that is not a known variable is a LOAD ERROR
-  listing the known variables. There is no legitimate reason to compare a column
-  against a literal dollar-prefixed string.
-
 ### OPS-13 — Fifteen config values fall back silently when they fail to parse
 - **Count corrected 2026-08-01** (was "nineteen"): a dedicated re-count found **15
   numeric env vars across 18 code sites**, and — the number that actually matters —
@@ -272,8 +225,13 @@ product gap).
   on CREATE is not a key check at all — it is a side effect of Postgres `42703`, so
   it evaporates for a role with a `fields` allowlist (the key is deleted before the
   DB sees it) and for a drift column the additive migration left behind.
-- **Impact:** Medium. This session fixed the operator bodies that carry a safety
-  flag; the data-plane bodies are a wider contract change.
+- **Impact:** Medium. SILENT-FAILURE-S1 fixed the operator bodies that carry a
+  safety flag; the data-plane bodies are a wider contract change.
+- **Narrowed by NIGHT-SWEEP-S1:** the DECLARED-but-irrelevant keys are no longer
+  silent — `guard` on a create and `data` on a delete are named 400s, a tx
+  create with a non-uuid id is the same 400 as single-op (was a masked 500), and
+  the envelope was re-probed live: `{"atomic": false}` and a misspelled
+  `"operation"` are still dropped (the remaining hole is exactly UNKNOWN keys).
 - **Ready:** strict decode on the transaction envelope/op/guard, and a real key check
   on CREATE that does not depend on the database's error code.
 
@@ -282,41 +240,13 @@ product gap).
   query parameter, so a filtered query returns the UNFILTERED result. A variable
   nested inside a `jsonb` inline literal is written as `null`.
 - **Impact:** Medium-high for the GET path (a filter that silently does not apply).
+- **Re-verified by NIGHT-SWEEP-S1** (live, base binary): the GET `variables`
+  drop reproduces exactly as filed. The audit also REFUTED a related claim (an
+  unknown POST-body key like a misspelled `variables` — the GraphQL-over-HTTP
+  envelope tolerance applies); and split off the String-variable coercion
+  asymmetry as **ENG-35** (fix the two together — one GraphQL value-handling pass).
 - **Ready:** parse `variables` on GET, or reject a GET carrying it; resolve variables
   inside jsonb literals or reject them.
-
-### ENG-23 — The list `?count=true` flag is presence-only, and vanishes on two paths
-- **Origin:** SILENT-FAILURE-S1 audit, confirmed after the session's fixes landed
-  (`pkg/codegen/builder.go:295,340,342`). Three shapes of one flag:
-  `?count=false` and `?count=0` turn the total **ON** (the test is
-  `if _, want := query["count"]; want` — presence, never the value); `?count=true`
-  combined with `?include=` is dropped entirely (the embed path returns before the
-  count block); and when the `COUNT(*)` itself errors, `if … cerr == nil` swallows it
-  and a `200` goes out with `meta.total` simply missing.
-- **Impact:** Medium. A caller cannot distinguish "the total is absent because you
-  used `include`", "…because the COUNT failed" and "…because you asked for
-  `count=false`" — all three are a `200` with no total. It is also the exact
-  boolean-flag shape ADR-024 §4 names.
-- **Ready:** `count` takes a real boolean (`false` means off); asking for a total on
-  the `include` path either works or is a `400` saying it is unsupported; a failed
-  `COUNT(*)` is an error, not an omission. Same treatment as the aggregate half in
-  **ENG-18** — fix them together, they are one flag.
-
-### ENG-24 — The aggregate path validates parameters it then throws away
-- **Origin:** SILENT-FAILURE-S1 audit (`pkg/query/aggregate.go:98,109`), verified
-  2026-08-01. `BuildAggregate` delegates to `BuildQuery`, so `page`/`per_page`/
-  `sort`/`order`/`after`/`before` are fully parsed and validated — and then never
-  used, because an aggregate has no page. Post-ADR-024 this produces a genuinely
-  confusing pair: `?count&sort=ghost` now answers `400 unknown sort field: ghost`,
-  while `?count&sort=status` is accepted and silently ignored. Rejecting the typo in
-  a parameter the endpoint does not honor at all is honest about the wrong thing.
-  Related: an empty entry in a CSV list (`?count&sum=`) is dropped without a word, in
-  REST and in the GraphQL aggregate (`pkg/graphql/handler.go:765`).
-- **Impact:** Low-medium, but it is a wart this session created the visible half of —
-  worth closing while the reasoning is fresh.
-- **Ready:** the aggregate rejects the parameters it cannot honor with a message that
-  says so (`sort is not supported on the aggregate endpoint`), rather than validating
-  them against a schema it will not use; an empty CSV entry is a `400`.
 
 ### OPS-14 — `api.appitools.com` (the gold-path demo) is down: Cloudflare 525
 - **Origin:** observed 2026-08-01 while checking server state at the end of
@@ -557,6 +487,31 @@ All three were **re-verified as still open on 2026-07-29**.
 | **Give `/root/commerce` a remote** | The technical fix is trivial; the decision (which account, public or private, whether the commerce platform is a product or a demo) is his. See **OPS-5** — until then the field report lives on one disk. |
 
 ---
+
+## DONE in NIGHT-SWEEP-S1 (2026-08-02, overnight)
+
+The session's subject was the CLASS — "the engine inspects an input, does not
+recognize it, and continues in silence" — run to exhaustion on the known input
+surfaces: the audit checklist completed (19 probe/verify agents, 9 surfaces,
+every SILENT claim adversarially re-verified), the nine open ENG items of the
+family closed, and every CONFIRMED new same-class finding fixed the same night.
+Every fix: unit test + full lane + binary-diff gate (92-row corpus: 61 SAME,
+31 DIFF — all 31 intended and enumerated in the session report) + live
+before/after probes; the hot path measured `no_change` (ABBA ×4 windows,
+Δp50 −1.42 %, MWU p=0.880, both controls moved MORE than the effect).
+
+| ID | What shipped | Verified by |
+|---|---|---|
+| **ENG-20** (authorization, first) | A `$…` condition val that is not `$user_id`/`$external_client_id` REJECTS the schema at load listing both (it was compared as the literal text — zero rows forever, invisible to SCHEMA-5); a bare `user_id`/`external_client_id` (forgotten `$`) raises the new `bare_condition_variable` WARNING suggesting the variable. GrammarCore/spec updated so the LLM loop knows the closed set. | validator + warnings tests; live CLI probe base-accepts vs new-rejects |
+| **ENG-19** | A `webhook` before-hook is rejected at LOAD in both validators (semantic + formal meta-schema) — it validated, required a URL, and was never dispatched. Studio no longer offers webhook for before events; grammar + SCHEMA_REFERENCE updated; the runner branch is documented defense-in-depth. | validator + meta-schema parity tests; live probe: base boots the schema, new names the hook |
+| **ENG-15** | A cursor request owns its shape: `after`+`before`, cursor+`sort`/`order[…]`, cursor+`page`, cursor+`count` are named 400s (each used to discard one side silently — and `meta.page` echoed the page it ignored); empty `?after=` is a named 400; a cursor response's meta carries `per_page`+`has_next` ONLY (no page/has_prev). OpenAPI PaginationMeta updated to match. | unit + integration (meta shape) + 6 corpus rows + live probes |
+| **ENG-16** | Two `order[…]` parameters are a 400 naming both (the winner was Go map-iteration order — measured 174/26); same rule on the GraphQL `order` argument (>1 field → error naming them). | unit tests both surfaces + corpus row |
+| **ENG-17** | A repeated engine-owned parameter is a 400 naming it and the count, everywhere the engine reads one (page/per_page/sort/order/order[…]/filter[…]/search/after/before/count/include + the aggregate functions). Identical duplicates rejected too — one parameter, one meaning. | unit + integration + 4 corpus rows |
+| **ENG-18 + ENG-23** (one flag) | `count` is read BY VALUE on REST (false/0 = off; bare `?count` and true/1 = on; garbage = named 400) matching GraphQL's Boolean; it WORKS with `?include=` (the embed path dropped it); a failed COUNT(*) is an error response, never a 200 missing its total; count+cursor is a named 400 (the total would mean "rows past the cursor"). Unknown aggregate functions are named 400s listing the set; empty `group_by` is a 400 instead of a silent shape change. | unit + integration + 7 corpus rows + live probes |
+| **ENG-24** | The aggregate endpoint OWNS its parameter namespace (the written ADR-024 exception-to-the-exception): list params it cannot honor (`page`/`sort`/`order`/cursors/`include`) are rejected BY NAME with the reason instead of validated-then-discarded; an empty entry in an active CSV list (`sum=a,`) names the extra comma (REST and GraphQL — stringList keeps empties so one validator serves both). | unit + integration + 5 corpus rows |
+| **ENG-34** | Bind FIRST, announce after: `shutdown.Listen` + `Serve` split; the data plane, control plane, fleet proxy, fleet status API and in-process fleet all announce only AFTER a successful bind; a lost bind race prints ONLY the error. Live-proven: base printed `serving on :8590` then died; new prints only `cannot listen`. backend-spec's trap note updated. | shutdown unit tests ×3; live busy-port probe both binaries |
+| **UI-1** | Studio authors `accept`/`max_bytes` on file fields (family list or exact types; both engine shapes round-trip — single value stays a string), clears them when a field stops being `file`, and mirrors the engine's policy validation in live issues. | svelte-check 0 errors; transform round-trip proof (string + array forms) |
+| **Audit findings (CONFIRMED, fixed same night)** | (1) single-record routes (GET/{id}, PUT/PATCH/DELETE/{id}, relation subroute) and the SSE stream reject the engine-owned list params they used to silently discard; (2) empty/`,,,` `?include=` named 400s and the unknown-relation error lists the available relations; (3) `?search=` on a text-less resource is a named 400 (was a silent full list); (4) 405 carries the JSON error contract (body suppressed on HEAD per RFC); (5) /auth bodies name the unknown key (mirror of the /admin fix) and refresh no longer swallows decode errors nor lets body/header tokens conflict silently; a missing verify token is named; (6) tenant-REGISTER bodies strict-decode on BOTH operator planes; (7) tx: guard-on-create / data-on-delete are named 400s, non-uuid create id is the same 400 as single-op (was a masked 500); (8) a second multipart "file" part is a named 400 with rollback (was data loss behind a 201) and the extra-form-fields tolerance is a written ADR-024 exception. | unit tests per fix + full lane + 8 corpus rows + live probes; multipart rollback verified (0 rows after the 400) |
 
 ## DONE in THIRD-PARTY-READY-S1 (2026-08-02)
 

@@ -535,3 +535,35 @@ base-vs-base control moving 3× more than the effect):
 No previously certified performance or security claim is invalidated; the
 flagship numbers were not re-measured (nothing on the read path changed — the
 gate shows every read-path corpus case SAME).
+
+## Addendum — post-certification contract changes (NIGHT-SWEEP-S1, 2026-08-02 overnight)
+
+The accepted-and-silent class was closed on the query surface, and several
+certified-adjacent REQUEST contracts changed — every one from "silently
+discarded" to "named 400", none from working to broken (a request that was
+HONORED before behaves identically; the 92-row binary-diff corpus shows 61 SAME
+and 31 DIFFs, all enumerated as intended in the session report; read-path ABBA
+×4 windows `no_change`: Δp50 −1.42 %, MWU p=0.880, both controls moved more
+than the effect):
+
+- **Cursor requests own their shape** (ENG-15): cursor+sort/page/count,
+  after+before, and empty cursors are named 400s; a cursor response's `meta`
+  no longer carries `page`/`has_prev` (OpenAPI PaginationMeta updated).
+- **Repeated engine-owned parameters and two `order[…]`** are named 400s
+  (ENG-16/17) — the winner used to be first-value / map-iteration order.
+- **`count` is read by value** (ENG-18/23): `count=false` is OFF (it used to
+  turn the total ON), it works with `?include=`, a failed COUNT is an error.
+- **The aggregate endpoint owns its parameter namespace** (ENG-18/24): unknown
+  functions and unhonorable list params are named 400s.
+- **Single-record routes, subroutes and the SSE stream** reject the list
+  params they used to silently discard (audit finding, CONFIRMED).
+- **Load-time**: an unknown `$variable` in an RBAC condition and a `webhook`
+  before-hook now REJECT the schema (ENG-20/19) — both were accepted-and-dead.
+- **Boot**: "serving on :PORT" prints only AFTER the bind (ENG-34).
+- Operator/auth **bodies name the unknown key** (register strict on both
+  planes; /auth mirrors /admin); a duplicate multipart `file` part is a named
+  400 with rollback (was data loss behind a 201).
+
+No certified performance or security claim is invalidated. The audit checklist
+this certification pointed at is now COMPLETE — see
+docs/audits/UNRECOGNIZED_INPUT_AUDIT.md §NIGHT-SWEEP-S1.
