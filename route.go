@@ -105,6 +105,23 @@ type Route struct {
 	// explicitly marked Public relax auth; every other route keeps
 	// deny-by-default.
 	Public bool
+
+	// ByteServing declares that this route streams a binary body (Ctx.ServeFile
+	// — a file download, a public product image) instead of buffered JSON
+	// (FRONTEND-SPEC-S1). It routes the response AROUND two wrappers that are
+	// right for JSON and wrong for a stream: the response cache (which would
+	// buffer the whole blob in RAM and strip Content-Disposition/Accept-Ranges
+	// on a hit) and the Compress middleware (whose writer lacks io.ReaderFrom
+	// and suppressed sendfile zero-copy — the FILES-BENCH finding, fixed for
+	// the engine's own file routes by the same bypass this flag extends to
+	// custom routes).
+	//
+	// Constraints (validated at Register): GET only, literal path (no chi
+	// {params}/wildcards — the bypass, like the Public skip, matches the exact
+	// path; pass the file id as a query parameter). Ctx.ServeFile refuses to
+	// run on a route without this flag. Everything else about the route is
+	// unchanged: auth/RBAC (or Public), RateLimit, Timeout, the tenant tx.
+	ByteServing bool
 }
 
 // RateLimit is one route's token-bucket budget (Route.RateLimit): RPS sustained
@@ -165,6 +182,19 @@ func validateRoute(rt Route, s *schema.APISchema, seen map[string]bool) error {
 		// is a contradiction (an anonymous request has no role).
 		if rt.RequireRole != "" {
 			return fmt.Errorf("route %s %s: Public and RequireRole are mutually exclusive (a public route has no authenticated role)", method, rt.Path)
+		}
+	}
+
+	if rt.ByteServing {
+		// The cache/compression bypass is an exact-path match computed at boot
+		// (same shape as the Public auth skip) — a {param} would route but never
+		// match the bypass, silently reintroducing the buffered/compressed
+		// stream this flag exists to prevent. And a stream is a GET by nature.
+		if method != "GET" {
+			return fmt.Errorf("route %s %s: ByteServing is for GET download routes (got %s)", method, rt.Path, method)
+		}
+		if strings.ContainsAny(rt.Path, "{*") {
+			return fmt.Errorf("route %s %s: a ByteServing route must use a literal path (no chi {params}/wildcards — the cache/compression bypass matches the exact path; pass the id as a query parameter)", method, rt.Path)
 		}
 	}
 
@@ -346,6 +376,24 @@ func (a *App) publicRoutePaths() map[string]bool {
 	return out
 }
 
+// byteServingRoutePaths returns the set of paths registered ByteServing (all
+// GET by validation), or nil when there are none — the common case, in which
+// the compress/cache predicates pay exactly what they paid before this field
+// existed (a nil check).
+func (a *App) byteServingRoutePaths() map[string]bool {
+	var out map[string]bool
+	for _, rt := range a.routes {
+		if !rt.ByteServing {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]bool)
+		}
+		out[rt.Path] = true
+	}
+	return out
+}
+
 // routeLimiter picks the throttle for rt (LIBRARY-GAPS-S1): an own limiter when
 // the route declares RateLimit, the shared conservative public-route limiter for
 // a Public route that does not, and nil for an authenticated route with no
@@ -436,7 +484,7 @@ func (a *App) customHandler(rt Route) http.HandlerFunc {
 			return
 		}
 
-		rc := &requestCtx{w: w, r: r, ctx: ctx, tx: tx, eng: a.eng, tc: tc, cl: cl}
+		rc := &requestCtx{w: w, r: r, ctx: ctx, tx: tx, eng: a.eng, tc: tc, cl: cl, byteServing: rt.ByteServing}
 		if herr := rt.Handler(rc); herr != nil {
 			a.writeHandlerError(w, rc, rt, herr)
 			return // rollback runs via defer
@@ -452,9 +500,16 @@ func (a *App) customHandler(rt Route) http.HandlerFunc {
 }
 
 // flush writes the response the Handler buffered via Ctx.JSON / Ctx.Error. A
-// Handler that wrote nothing and returned nil yields 204 No Content.
+// Handler that wrote nothing and returned nil yields 204 No Content. A file
+// registered via Ctx.ServeFile streams here — after the commit, like every
+// other response; a buffered JSON/Error (c.set) always wins over it, so the
+// error path keeps its response even if ServeFile had already run.
 func (c *requestCtx) flush(w http.ResponseWriter) {
 	if !c.set {
+		if c.serveFileID != "" {
+			c.serveRegisteredFile(w)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -508,6 +563,13 @@ func (a *App) writeHandlerError(w http.ResponseWriter, rc *requestCtx, rt Route,
 	}
 	if errors.Is(err, ErrUpdateConflict) {
 		writeErr(w, http.StatusConflict, "the resource changed during the update; retry")
+		return
+	}
+	// Ctx.ServeFile's uniform miss (malformed/unknown/foreign file id): a
+	// handler that just `return ctx.ServeFile(id)` answers the same 404 the
+	// engine's own download routes do (FRONTEND-SPEC-S1).
+	if errors.Is(err, ErrFileNotFound) {
+		writeErr(w, http.StatusNotFound, "not found")
 		return
 	}
 	if db.IsUnavailable(err) {

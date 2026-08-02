@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -14,11 +15,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/miguelangel/appitools/pkg/auth"
 	"github.com/miguelangel/appitools/pkg/codegen"
 	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/miguelangel/appitools/pkg/files"
 	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
 	"github.com/miguelangel/appitools/pkg/outbox"
 	"github.com/miguelangel/appitools/pkg/query"
@@ -177,6 +180,31 @@ type Ctx interface {
 	// request input, and why every input must be validated by the handler.
 	CreateUser(email, password, role string) (CreatedUser, error)
 
+	// ServeFile streams one of THIS tenant's stored files (the engine file
+	// store, pkg/files — the same store /api/files/{id} serves) as the route's
+	// response: stored Content-Type, strong content-hash ETag (If-None-Match →
+	// 304), Range → 206, and on the local backend sendfile zero-copy
+	// (FRONTEND-SPEC-S1). It is the seam for a PUBLIC or custom-authorized
+	// download route — the handler decides WHO may fetch the file (e.g. "it is
+	// the image of an active product"), the engine moves the bytes safely.
+	//
+	// Contract:
+	//   - The route MUST declare ByteServing: true (rejected loudly otherwise):
+	//     that flag is what routes the response around the response cache and
+	//     the compression wrapper, which would otherwise buffer the whole blob
+	//     in RAM, drop Content-Disposition/Range headers on a cache hit, and
+	//     suppress sendfile.
+	//   - Call it once, INSTEAD of JSON/Error, and return its error. The bytes
+	//     are streamed after the transaction commits (same flush discipline as
+	//     JSON). ctx.Error before it still works (the error response wins).
+	//   - fileID must be one of this tenant's file ids. A malformed id, an
+	//     unknown id, or ANOTHER tenant's id all yield the same uniform 404
+	//     (ErrFileNotFound — isolation is structural: the metadata lives in the
+	//     tenant's own schema).
+	//   - The lookup reads committed state (the engine pool), not the handler's
+	//     transaction: a file uploaded inside THIS tx is not yet servable.
+	ServeFile(fileID string) error
+
 	// JSON buffers a success response flushed AFTER the transaction commits, so
 	// a commit failure becomes a 500 rather than a false 200. Error buffers an
 	// error response and returns a non-nil error so the Handler can
@@ -216,6 +244,11 @@ var (
 	// guard, not a bad transition, is what fired). Returning it from a Handler
 	// yields a 409 — the caller should re-read and retry.
 	ErrUpdateConflict = errors.New("appitools: the resource changed during the update; retry")
+	// ErrFileNotFound: Ctx.ServeFile's uniform miss — a malformed id, an unknown
+	// id and another tenant's id are deliberately indistinguishable (no
+	// enumeration oracle on a download route). Returning it from a Handler
+	// yields a 404 {"error":"not found"}.
+	ErrFileNotFound = files.ErrNotFound
 )
 
 // InvalidTransitionError is returned by Ctx.Update when a schema-declared
@@ -236,6 +269,10 @@ type engineRefs struct {
 	validators map[string]*schema.ResourceValidator
 	policy     *rbac.Policy
 	users      *userauth.Store
+	// files is the engine's content-addressable file store (the SAME instance
+	// /api/files is served from — backend, upload policy and metadata identical
+	// by construction), for Ctx.ServeFile. Never nil in a New()-built App.
+	files *files.Store
 	// minPassword is the engine's configured minimum password length
 	// (Config.AuthMinPasswordLength / APPITOOLS_AUTH_MIN_PASSWORD, default 8) —
 	// Ctx.CreateUser enforces the same bar as signup and the admin API.
@@ -283,6 +320,16 @@ type requestCtx struct {
 	// retryAfter marks a response reclassified to 503 (DB unavailable) so flush
 	// adds the Retry-After header the generated routes already send (ENG-10).
 	retryAfter bool
+
+	// byteServing mirrors Route.ByteServing so Ctx.ServeFile can refuse, loudly
+	// and at first use, a route that did not opt out of the cache/compression
+	// wrappers (a stream through them is buffered, header-stripped and
+	// sendfile-dead — a silent correctness bug, so it is an error instead).
+	byteServing bool
+	// serveFileID is the file registered by Ctx.ServeFile; flush streams it
+	// AFTER the commit (same discipline as the JSON buffer — the response never
+	// races the transaction). Empty = no file response.
+	serveFileID string
 }
 
 // --- typed errors mapped to HTTP status by the middleware -------------------
@@ -667,6 +714,62 @@ func (c *requestCtx) CreateUser(email, password, role string) (CreatedUser, erro
 }
 
 // --- response ---------------------------------------------------------------
+
+// ServeFile registers this tenant's file fileID as the route's response; the
+// stream itself runs in flush, AFTER the transaction commits (the same
+// discipline as the JSON buffer — a response never races its transaction, and
+// a not-found discovered at serve time can still answer a clean 404 because
+// nothing has been written yet).
+func (c *requestCtx) ServeFile(fileID string) error {
+	// Misuse is a loud error, not a degraded stream: without ByteServing the
+	// response cache buffers the whole blob in RAM (and strips
+	// Content-Disposition/Range headers on a hit) and the compression wrapper
+	// suppresses sendfile — a silent correctness bug measured in FILES-BENCH.
+	if !c.byteServing {
+		return fmt.Errorf("appitools: Ctx.ServeFile requires the route to declare ByteServing: true (the response must bypass the response cache and compression)")
+	}
+	if c.set {
+		return fmt.Errorf("appitools: Ctx.ServeFile called after JSON/Error already buffered a response")
+	}
+	if c.serveFileID != "" {
+		return fmt.Errorf("appitools: Ctx.ServeFile called twice (one response per request)")
+	}
+	// Malformed ids get the SAME uniform miss as unknown/foreign ids — a
+	// download route must not be a format oracle. (Store.Serve would surface a
+	// raw Postgres cast error for a non-uuid, which is why the shape is checked
+	// here, exactly like the engine's own /api/files/{id} handler does.)
+	if _, err := uuid.Parse(strings.TrimSpace(fileID)); err != nil {
+		return ErrFileNotFound
+	}
+	c.serveFileID = strings.TrimSpace(fileID)
+	return nil
+}
+
+// serveRegisteredFile streams the file ServeFile registered. Called by flush
+// after commit; nothing has been written yet, so every failure can still
+// produce a clean status: unknown/foreign id → the uniform 404, anything else
+// → a masked 500 (logged), mirroring the engine's own download handlers.
+func (c *requestCtx) serveRegisteredFile(w http.ResponseWriter) {
+	if c.eng == nil || c.eng.files == nil {
+		log.Printf("appitools: ServeFile: no file store wired (test-built ctx?)")
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	// The route's deadline (Route.Timeout) bounds the metadata lookup and an
+	// S3 proxy read; http.ServeContent on the local backend is not
+	// context-aware, but its work is a disk sendfile bounded by the server's
+	// own write deadlines.
+	err := c.eng.files.Serve(w, c.r.WithContext(c.ctx), c.tc.ID, c.serveFileID)
+	if err == nil {
+		return
+	}
+	if errors.Is(err, files.ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	log.Printf("appitools: ServeFile %s (tenant %s): %v", c.serveFileID, c.tc.ID, err)
+	writeErr(w, http.StatusInternalServerError, "download failed")
+}
 
 func (c *requestCtx) JSON(status int, v any) error {
 	b, err := json.Marshal(v)

@@ -767,6 +767,7 @@ func New(cfg Config) (*App, error) {
 
 	app.eng = &engineRefs{
 		schema: s, validators: validators, policy: &rbacPolicy, users: authStore,
+		files:            app.files,
 		minPassword:      ctxMinPw,
 		safeGoTimeout:    safeGoTimeout,
 		onGoroutinePanic: app.metrics.IncGoroutinePanic,
@@ -1012,8 +1013,15 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 	// ~5.5× the CPU/byte); binaries were never compressible anyway. JSON —
 	// including the file store's /url + listing responses — stays compressed.
 	// Same bypass shape as the response cache's (pkg/cache).
+	// Custom routes registered ByteServing (Ctx.ServeFile) join the same bypass:
+	// an exact-path set built once at boot, nil when no route declares it (the
+	// common case pays one nil check — byte-identical to before the field).
+	byteServingPaths := a.byteServingRoutePaths()
 	r.Use(appmiddleware.SelectiveCompress(
-		func(req *http.Request) bool { return files.IsByteServingPath(req.Method, req.URL.Path) },
+		func(req *http.Request) bool {
+			return files.IsByteServingPath(req.Method, req.URL.Path) ||
+				(byteServingPaths != nil && req.Method == http.MethodGet && byteServingPaths[req.URL.Path])
+		},
 		5, "application/json", "application/graphql+json"))
 	r.Use(chimiddleware.RequestID)
 	// With BareDomains set (fleet: the app's own manifest domains), a request to
@@ -1127,7 +1135,20 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 	// nothing here — it is served through the NotFound path, which the API
 	// middlewares have already run past.
 	isStatic := staticMatcher(a.static)
-	a.responseCache.SetBypassMatcher(isStatic)
+	// ByteServing custom routes must ALSO never enter the response cache: a
+	// cached stream would sit whole in the LRU and replay without its
+	// Content-Disposition/Accept-Ranges headers (the cache replicates only the
+	// JSON-shaped header allowlist). Same composition rule as the static
+	// matcher: nil stays nil so an app with neither pays nothing.
+	cacheBypass := isStatic
+	if byteServingPaths != nil {
+		bs := byteServingPaths
+		prev := isStatic
+		cacheBypass = func(path string) bool {
+			return bs[path] || (prev != nil && prev(path))
+		}
+	}
+	a.responseCache.SetBypassMatcher(cacheBypass)
 	r.Use(auth.JWTMiddlewareWithStatic(a.cfg.JWTSecret, isPublic, isStatic, func(tenantID, reason string) {
 		a.errStore.Record(tenantID, fmt.Errorf("jwt: %s", reason))
 	}))
