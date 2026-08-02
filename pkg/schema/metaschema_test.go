@@ -100,6 +100,8 @@ func TestMetaSchema_RejectsInvalid(t *testing.T) {
 		"unknown hook event":                                `{"$schema":"x","version":"1","resources":{"t":{"hooks":{"on_create":{"type":"js","script":"x"}}}}}`,
 		"js after_create hook":                              `{"$schema":"x","version":"1","resources":{"t":{"hooks":{"after_create":{"type":"js","script":"x"}}}}}`,
 		"wasm after_update hook":                            `{"$schema":"x","version":"1","resources":{"t":{"hooks":{"after_update":{"type":"wasm","wasm_module":"m"}}}}}`,
+		"webhook before_create hook":                        `{"$schema":"x","version":"1","resources":{"t":{"hooks":{"before_create":{"type":"webhook","url":"https://x.example/h"}}}}}`,
+		"webhook before_update hook":                        `{"$schema":"x","version":"1","resources":{"t":{"hooks":{"before_update":{"type":"webhook","url":"https://x.example/h"}}}}}`,
 		"js hook missing script":                            `{"$schema":"x","version":"1","resources":{"t":{"hooks":{"before_create":{"type":"js"}}}}}`,
 		"bad event value":                                   `{"$schema":"x","version":"1","resources":{"t":{"events":["created"]}}}`,
 		"duplicate events":                                  `{"$schema":"x","version":"1","resources":{"t":{"events":["create","create"]}}}`,

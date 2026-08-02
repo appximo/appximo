@@ -25,7 +25,56 @@ func Warnings(s *APISchema) []ValidationError {
 	if s == nil {
 		return nil
 	}
-	return identityConditionWarnings(s)
+	out := identityConditionWarnings(s)
+	out = append(out, bareVariableConditionWarnings(s)...)
+	return out
+}
+
+// bareVariableNames maps a condition `val` that is a known variable MINUS its `$`
+// to the variable the author almost certainly meant. The dollar-PREFIXED typos
+// ($userid, $tenant_id) are load ERRORS since ENG-20 — a `$` announces intent, so
+// an unresolvable one rejects the schema. The bare form cannot be an error: a
+// literal condition val is legitimate (`val: "published"`), and "user_id" IS a
+// possible literal. But a column holding the string "user_id" is vanishingly
+// rare, while a forgotten `$` produces the exact zero-rows-forever failure
+// SCHEMA-5 exists to warn about — so it meets the warning bar: legal, almost
+// always a mistake, invisible in production.
+var bareVariableNames = map[string]string{
+	"user_id":            "$user_id",
+	"external_client_id": "$external_client_id",
+}
+
+// bareVariableConditionWarnings flags row conditions whose literal val is a known
+// dynamic variable's name without the `$` (ENG-20's warning half).
+func bareVariableConditionWarnings(s *APISchema) []ValidationError {
+	var out []ValidationError
+	warn := func(path string, cond *Condition) {
+		if cond == nil {
+			return
+		}
+		meant, ok := bareVariableNames[cond.Val]
+		if !ok {
+			return
+		}
+		out = append(out, ValidationError{
+			Field: path + ".val",
+			Rule:  "bare_condition_variable",
+			Got:   cond.Val,
+			Message: fmt.Sprintf(
+				"val %q is the LITERAL string %q, not the dynamic variable %s — rows would only match if the column literally contains the text %q, which almost certainly means the rule matches NO rows, ever, with no error anywhere.",
+				cond.Val, cond.Val, meant, cond.Val),
+			Fix: fmt.Sprintf("if you meant the id of the caller, write %q (with the dollar sign); if you really compare against the literal text %q, ignore this warning", meant, cond.Val),
+		})
+	}
+	for _, roleName := range sortedNames(s.RBAC.Roles) {
+		role := s.RBAC.Roles[roleName]
+		prefix := "rbac.roles." + roleName
+		warn(prefix+".conditions", role.Conditions)
+		for _, resName := range sortedNames(role.Permissions) {
+			warn(fmt.Sprintf("%s.permissions.%s.conditions", prefix, resName), role.Permissions[resName].Conditions)
+		}
+	}
+	return out
 }
 
 // identityColumnNames are the column names that conventionally hold the id of the

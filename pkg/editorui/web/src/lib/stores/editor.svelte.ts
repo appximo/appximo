@@ -972,9 +972,11 @@ class EditorStore {
 	isAfterEvent(event: string): boolean {
 		return event === 'after_create' || event === 'after_update';
 	}
-	/** Hook types valid for an event: after ⇒ webhook only; before ⇒ js/webhook/wasm. */
+	/** Hook types valid for an event: after ⇒ webhook only; before ⇒ js/wasm only
+	 * (ENG-19 — a webhook before-hook validated and was never dispatched; the
+	 * engine now rejects it at load, so Studio must not offer it). */
 	hookTypesFor(event: string): Array<'js' | 'webhook' | 'wasm'> {
-		return this.isAfterEvent(event) ? ['webhook'] : ['js', 'webhook', 'wasm'];
+		return this.isAfterEvent(event) ? ['webhook'] : ['js', 'wasm'];
 	}
 	/** Events not yet used by a hook on this entity (a map allows one hook per event). */
 	unusedHookEvents(entityId: string): HookEvent[] {

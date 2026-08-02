@@ -179,13 +179,12 @@
 
     "beforeHook": {
       "type": "object",
+      "description": "before_create/before_update hooks must be js or wasm (a before-hook decides the write synchronously; a webhook before-hook was never dispatched — rejected at load, ENG-19).",
       "additionalProperties": false,
       "required": ["type"],
       "properties": {
-        "type": { "enum": ["js", "webhook", "wasm"] },
+        "type": { "enum": ["js", "wasm"] },
         "script": { "type": "string" },
-        "url": { "type": "string" },
-        "hmac_secret_env": { "type": "string" },
         "wasm_module": { "type": "string" },
         "wasm_fn": { "type": "string" },
         "timeout": { "type": "string" }
@@ -193,8 +192,6 @@
       "allOf": [
         { "if": { "required": ["type"], "properties": { "type": { "const": "js" } } },
           "then": { "required": ["script"], "properties": { "script": { "minLength": 1 } } } },
-        { "if": { "required": ["type"], "properties": { "type": { "const": "webhook" } } },
-          "then": { "required": ["url"], "properties": { "url": { "minLength": 1 } } } },
         { "if": { "required": ["type"], "properties": { "type": { "const": "wasm" } } },
           "then": { "required": ["wasm_module"], "properties": { "wasm_module": { "minLength": 1 } } } }
       ]

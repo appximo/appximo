@@ -147,3 +147,44 @@ func TestWarnings_RoleGlobalFormToo(t *testing.T) {
 		t.Fatalf("role-global form must warn too, got: %v", warns)
 	}
 }
+
+// TestWarnings_BareVariableVal — ENG-20's warning half: a condition val that is a
+// known variable's name WITHOUT the `$` ("user_id") is legal (a literal), almost
+// always a forgotten dollar sign, and produces the zero-rows-forever failure —
+// so it warns, suggesting the variable, on both RBAC forms. A real literal
+// ("published") stays silent.
+func TestWarnings_BareVariableVal(t *testing.T) {
+	raw := `{
+      "$schema":"x","version":"1","name":"x",
+      "resources": { "posts": { "fields": { "author_id": { "type": "string" }, "status": { "type": "string" } } } },
+      "rbac": { "roles": {
+        "owner": { "resources": ["posts"], "actions": ["read"],
+                   "conditions": { "field":"author_id","op":"eq","val":"user_id" } },
+        "pub":   { "permissions": { "posts": { "actions": ["read"],
+                   "conditions": { "field":"status","op":"eq","val":"published" } } } }
+      } }
+    }`
+	var s APISchema
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if errs := Validate(&s); len(errs) != 0 {
+		t.Fatalf("schema must stay VALID (warning, not error), got: %v", errs)
+	}
+	warns := Warnings(&s)
+	var hit bool
+	for _, w := range warns {
+		if w.Rule == "bare_condition_variable" {
+			hit = true
+			if !strings.Contains(w.Message, "$user_id") && !strings.Contains(w.Fix, "$user_id") {
+				t.Fatalf("warning must suggest $user_id, got: %+v", w)
+			}
+		}
+		if strings.Contains(w.Field, "pub.") {
+			t.Fatalf("literal \"published\" must not warn, got: %+v", w)
+		}
+	}
+	if !hit {
+		t.Fatalf("expected bare_condition_variable warning, got: %v", warns)
+	}
+}

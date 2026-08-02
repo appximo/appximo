@@ -41,8 +41,9 @@
 		</div>
 	</div>
 	<div class="hint muted">
-		Lifecycle logic. A <b>before</b> hook can transform/validate the write; an
-		<b>after</b> hook must be a <b>webhook</b> (a sandboxed hook can't act post-commit).
+		Lifecycle logic. A <b>before</b> hook must be <b>js</b> or <b>wasm</b> (it decides
+		the write synchronously; a webhook can't); an <b>after</b> hook must be a
+		<b>webhook</b> (a sandboxed hook can't act post-commit).
 	</div>
 
 	{#if hooks.length === 0}

@@ -336,3 +336,54 @@ func TestValidateRBAC_BuiltinFilesGrant(t *testing.T) {
 		t.Fatalf("a real resource named files must keep normal validation, got: %v", errs)
 	}
 }
+
+// ── ENG-20 ──────────────────────────────────────────────────────────────────
+
+// TestValidateRBAC_UnknownConditionVariable proves a condition val that LOOKS
+// like a dynamic variable but is not one the engine substitutes ($userid,
+// $tenant_id…) is a LOAD error on BOTH forms, listing the valid variables. It
+// used to be compared as the literal text "$userid" — matching zero rows
+// forever, silently, and invisible to the SCHEMA-5 warning (ENG-20, ADR-024).
+func TestValidateRBAC_UnknownConditionVariable(t *testing.T) {
+	perResource := `{
+      "$schema":"x","version":"1","name":"x",
+      "resources": { "posts": { "fields": { "author_id": { "type": "uuid" } } } },
+      "rbac": { "roles": { "member": { "permissions": {
+        "posts": { "actions": ["read"], "conditions": { "field":"author_id","op":"eq","val":"$userid" } }
+      } } } }
+    }`
+	errs := schema.Validate(parseSchema(t, perResource))
+	if !hasError(errs, "unknown condition variable \"$userid\"") {
+		t.Fatalf("per-resource: expected unknown-variable rejection naming $userid, got: %v", errs)
+	}
+	if !hasError(errs, "$user_id") || !hasError(errs, "$external_client_id") {
+		t.Fatalf("the error must list the valid variables, got: %v", errs)
+	}
+
+	roleGlobal := `{
+      "$schema":"x","version":"1","name":"x",
+      "resources": { "posts": { "fields": { "author_id": { "type": "uuid" } } } },
+      "rbac": { "roles": { "owner": {
+        "resources": ["posts"], "actions": ["read"],
+        "conditions": { "field":"author_id","op":"eq","val":"$tenant_id" }
+      } } }
+    }`
+	if errs := schema.Validate(parseSchema(t, roleGlobal)); !hasError(errs, "unknown condition variable \"$tenant_id\"") {
+		t.Fatalf("role-global: expected unknown-variable rejection, got: %v", errs)
+	}
+
+	// The two real variables and a plain literal stay valid.
+	for _, val := range []string{"$user_id", "$external_client_id", "published"} {
+		ok := `{
+          "$schema":"x","version":"1","name":"x",
+          "resources": { "posts": { "fields": { "author_id": { "type": "string" } } } },
+          "rbac": { "roles": { "owner": {
+            "resources": ["posts"], "actions": ["read"],
+            "conditions": { "field":"author_id","op":"eq","val":"` + val + `" }
+          } } }
+        }`
+		if errs := schema.Validate(parseSchema(t, ok)); len(errs) != 0 {
+			t.Fatalf("val %q should be valid, got: %v", val, errs)
+		}
+	}
+}

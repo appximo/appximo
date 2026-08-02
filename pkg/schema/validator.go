@@ -439,6 +439,23 @@ func Validate(s *APISchema) []ValidationError {
 				continue
 			}
 
+			// The MIRROR of the rule above (ENG-19, ADR-024): a `webhook` BEFORE-hook
+			// was validated — its URL was even required — and the runner NEVER
+			// dispatched it (RunBeforeHook returned Proceed:true without touching the
+			// dispatcher). A schema declared a guard rail, validated, and nothing ever
+			// ran — the exact "accepted and silent" shape, at the layer people reach
+			// for when they want validation. A before-hook must decide the write
+			// synchronously, which an async signed POST cannot do, so the type is
+			// rejected at load rather than dispatched: the smaller change, symmetric
+			// with the after-hook decision (SEC-AUDIT-V2 Hallazgo A).
+			if (hookName == "before_create" || hookName == "before_update") && hook.Type == "webhook" {
+				errs = append(errs, ValidationError{
+					Field:   hookPrefix + ".type",
+					Message: fmt.Sprintf("%s hooks of type \"webhook\" are not supported — the engine never dispatched a before-webhook (it was accepted and silently did nothing): a before-hook must decide the write synchronously, so use a \"js\" or \"wasm\" before-hook to validate/transform the write, and a \"webhook\" AFTER-hook (or the events outbox) to notify an external system", hookName),
+				})
+				continue
+			}
+
 			switch hook.Type {
 			case "js":
 				if hook.Script == "" {
@@ -598,6 +615,7 @@ func validateRBAC(s *APISchema) []ValidationError {
 
 			if perm.Conditions != nil {
 				errs = append(errs, validateConditionOp(permPrefix+".conditions", perm.Conditions)...)
+				errs = append(errs, validateConditionVal(permPrefix+".conditions", perm.Conditions)...)
 				if perm.Conditions.Field == "" {
 					errs = append(errs, ValidationError{
 						Field:   permPrefix + ".conditions.field",
@@ -760,6 +778,35 @@ func validateConditionOp(prefix string, cond *Condition) []ValidationError {
 	}}
 }
 
+// conditionVariables is the closed set of dynamic variables a row condition's
+// `val` may name. The evaluator substitutes exactly these (rbac.resolveVar);
+// anything else passes through as the literal text it is.
+var conditionVariables = map[string]bool{"$user_id": true, "$external_client_id": true}
+
+// validateConditionVal rejects a `val` that LOOKS like a dynamic variable but is
+// not one the engine substitutes (ENG-20, ADR-024). `$userid`, `$user`,
+// `$tenant_id` used to be compared as the LITERAL strings they are — a column
+// never holds a dollar-prefixed value, so the condition matched ZERO ROWS
+// FOREVER, with no error at any layer and invisible to the SCHEMA-5 warning
+// (which fires only on the two real variables). It is authorization: one typo
+// silently emptied the app. There is no legitimate reason to compare a column
+// against a dollar-prefixed literal, so the `$` prefix is treated as announced
+// intent — it either resolves to a known variable or rejects the schema naming
+// the valid set.
+func validateConditionVal(prefix string, cond *Condition) []ValidationError {
+	if cond == nil || !strings.HasPrefix(cond.Val, "$") || conditionVariables[cond.Val] {
+		return nil
+	}
+	return []ValidationError{{
+		Field:    prefix + ".val",
+		Rule:     "unknown_condition_variable",
+		Got:      cond.Val,
+		Expected: []string{"$user_id", "$external_client_id"},
+		Message:  fmt.Sprintf("unknown condition variable %q: a val starting with \"$\" must be a variable the engine substitutes — $user_id (the logged-in user's id) or $external_client_id. As written it would be compared as the literal text %q, which no column ever holds, so the condition would match ZERO rows forever with no error anywhere", cond.Val, cond.Val),
+		Fix:      "use \"$user_id\" or \"$external_client_id\", or drop the \"$\" if you really mean the literal string",
+	}}
+}
+
 // validateRoleGlobal validates the legacy role-global RBAC form (SEC-AUDIT-V1
 // Hallazgo 1 + 3, tightened in LIBRARY-GAPS-S1). A role with neither a condition nor
 // a field allowlist (e.g. a wildcard admin) has nothing to validate against
@@ -790,6 +837,7 @@ func validateRoleGlobal(rolePrefix string, role RolePolicy, s *APISchema) []Vali
 
 	if role.Conditions != nil {
 		errs = append(errs, validateConditionOp(rolePrefix+".conditions", role.Conditions)...)
+		errs = append(errs, validateConditionVal(rolePrefix+".conditions", role.Conditions)...)
 		if role.Conditions.Field == "" {
 			errs = append(errs, ValidationError{
 				Field:   rolePrefix + ".conditions.field",

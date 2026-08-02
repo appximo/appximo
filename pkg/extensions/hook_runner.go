@@ -89,7 +89,11 @@ func (hr *HookRunner) RunBeforeHook(
 	case "wasm":
 		return hr.runWasmBeforeHook(ctx, hook, payload, userCtx)
 	case "webhook":
-		// before_create webhooks are fire-and-forget notifications; they never block the request.
+		// Unreachable from a validated schema: a `webhook` before-hook is rejected
+		// at load (ENG-19 — this branch used to claim "fire-and-forget
+		// notifications" while dispatching NOTHING, the accepted-and-silent shape).
+		// Kept as a fail-open no-op for defense in depth: a hook type that cannot
+		// run must not block writes if it somehow reaches here.
 		return &HookResult{Proceed: true, Data: payload}, nil
 	default:
 		return &HookResult{Proceed: true, Data: payload}, nil

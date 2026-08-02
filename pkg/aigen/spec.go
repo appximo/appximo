@@ -83,6 +83,9 @@ after_create, before_update, after_update — there are NO delete hooks):
       "hmac_secret_env": "WEBHOOK_SECRET" }
   }
   - after_* hooks MUST be type "webhook" (js/wasm after-hooks are rejected).
+  - before_* hooks MUST be type "js" or "wasm" (a webhook before-hook is
+    rejected: a before-hook decides the write synchronously, which an async
+    POST cannot).
   - webhook: "hmac_secret_env" is the NAME of an env var, never the secret;
     HTTPS-only. js: sandboxed, "data" is the record, set result.proceed=false
     + result.error to reject. wasm: "wasm_module" (+ optional "wasm_fn").
@@ -110,7 +113,8 @@ RELATIONS extra key: "limit": <n> bounds embedded children per parent (default 5
   that is not a declared resource.
 - "enum" / "default" / "relation" / "auto" on a "file" field; "cascade" as a
   file field's "on_delete" (only restrict | set_null).
-- A js/wasm hook on after_create/after_update (webhook only).
+- A js/wasm hook on after_create/after_update (webhook only), or a webhook
+  hook on before_create/before_update (js/wasm only).
 - "events" values other than create | update | delete.
 - A "default" that is not a literal of the field's type, not an enum member, or
   not an initial state of its state machine.

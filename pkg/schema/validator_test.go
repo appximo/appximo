@@ -311,6 +311,35 @@ func TestValidate_AfterHookType(t *testing.T) {
 	}
 }
 
+// TestValidate_BeforeWebhookHookRejected proves ENG-19 — the exact MIRROR of
+// TestValidate_AfterHookType: a before_create/before_update hook of type
+// "webhook" is rejected at load. It used to VALIDATE (the URL was even
+// required) while the runner never dispatched it — a declared guard rail that
+// silently never ran. The error must name the working alternatives (js/wasm
+// before, webhook after).
+func TestValidate_BeforeWebhookHookRejected(t *testing.T) {
+	mk := func(event string) *schema.APISchema {
+		return &schema.APISchema{
+			Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+			Resources: map[string]schema.ResourceSchema{
+				"tasks": {
+					Fields: map[string]schema.FieldDef{"title": {Type: "string"}},
+					Hooks:  map[string]schema.HookConfig{event: {Type: "webhook", URL: "https://example.com/hook"}},
+				},
+			},
+		}
+	}
+	for _, event := range []string{"before_create", "before_update"} {
+		errs := schema.Validate(mk(event))
+		if !hasError(errs, "not supported") {
+			t.Errorf("%s of type webhook must be rejected, got: %v", event, errs)
+		}
+		if !hasError(errs, "never dispatched") || !hasError(errs, "AFTER-hook") {
+			t.Errorf("%s error must explain the silence and name the alternatives, got: %v", event, errs)
+		}
+	}
+}
+
 func hasError(errs []schema.ValidationError, substr string) bool {
 	for _, e := range errs {
 		if strings.Contains(e.Field, substr) || strings.Contains(e.Message, substr) {
