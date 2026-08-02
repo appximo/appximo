@@ -174,8 +174,18 @@ fire() { # $1=port $2=seeded-id $3=case-json  → writes status/headers/body fil
   host=$(echo "$c" | jq -r '.host // ""'); [ -z "$host" ] && host="$HOST_DEFAULT"
   body=$(echo "$c" | jq -c 'if has("body") then .body else null end' | sed "s/{{ID}}/$id/g")
 
-  local -a args=( -s -g -o "$out.body" -D "$out.hdr" -w '%{http_code}' -X "$method"
+  # HEAD needs curl --head, never `-X HEAD`: with -X curl still WAITS for the
+  # announced Content-Length body a HEAD response never carries, and hangs into
+  # curl-error (a harness lesson, like the uuid-order and cache-marker ones —
+  # found when the 405 handler gained a JSON body and HEAD started announcing
+  # its length, which is RFC-correct).
+  local -a args=( -s -g -o "$out.body" -D "$out.hdr" -w '%{http_code}'
                   -H "Host: $host" "http://127.0.0.1:$port$path" )
+  if [ "$method" = "HEAD" ]; then
+    args+=( --head )
+  else
+    args+=( -X "$method" )
+  fi
   local tok=""
   case "$auth" in
     admin)  tok=$TOKEN_ADMIN ;;
