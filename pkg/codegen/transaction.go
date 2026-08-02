@@ -251,6 +251,16 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 		if len(op.Data) == 0 {
 			return nil, &txError{status: http.StatusBadRequest, op: op.Op, resource: op.Resource, msg: "create requires a non-empty data object"}
 		}
+		// NIGHT-SWEEP-S1: keys DECLARED on the op struct but meaningless for this
+		// op kind used to be silently ignored — a caller sending a guard on a
+		// create believed they had a conditional insert. Same class as an
+		// unrecognized parameter: inspected (decoded), not honored, nothing said.
+		if op.ID != "" {
+			return nil, &txError{status: http.StatusBadRequest, op: op.Op, resource: op.Resource, msg: "create does not take \"id\": the row does not exist yet (the engine generates the id)"}
+		}
+		if len(op.Guard) > 0 {
+			return nil, &txError{status: http.StatusBadRequest, op: op.Op, resource: op.Resource, msg: "guard is not supported on create: a guard compares an EXISTING row's values, and there is no row yet (guards apply to update and delete)"}
+		}
 		data := cloneData(op.Data)
 		ref.validator.ApplyDefaults(data)
 		// Declared rules AND value types, collected and reported together —
@@ -341,6 +351,11 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 	default: // delete
 		if err := validateOpID(op.ID); err != nil {
 			return nil, &txError{status: http.StatusBadRequest, op: op.Op, resource: op.Resource, msg: err.Error()}
+		}
+		// NIGHT-SWEEP-S1: `data` on a delete was decoded and silently ignored —
+		// a caller could believe it a conditional or partial delete.
+		if len(op.Data) > 0 {
+			return nil, &txError{status: http.StatusBadRequest, op: op.Op, resource: op.Resource, msg: "delete does not take \"data\": it removes the row by id (to change values use update; to make the delete conditional use guard)"}
 		}
 		q := fmt.Sprintf("DELETE FROM %s WHERE id = $1", ref.tbl)
 		args := []any{op.ID}
@@ -516,6 +531,14 @@ func dbTxError(err error) *txError {
 	// — the same clean 409 as the single-op path (previously a masked 500).
 	if fkMsg, ok := db.ForeignKeyViolation(err); ok {
 		return &txError{status: http.StatusConflict, msg: fkMsg}
+	}
+	// Caller-supplied bad input (the F-6 SQLSTATE class — e.g. a non-uuid id in a
+	// create's data) — the same 400 the single-op path answers
+	// (handlers.WriteDBError). NIGHT-SWEEP-S1: this was a masked 500 on the batch
+	// path only — a client typo logged as an engine fault, burning the SLO error
+	// budget, and a create/create asymmetry with the standalone POST.
+	if db.IsBadInput(err) {
+		return &txError{status: http.StatusBadRequest, msg: "invalid request"}
 	}
 	return &txError{status: http.StatusInternalServerError, msg: "internal error", fields: dbUnavailableMarker(err)}
 }

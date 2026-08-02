@@ -2,6 +2,7 @@ package files
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -198,5 +199,55 @@ func TestIsByteServingPath(t *testing.T) {
 		if IsByteServingPath(c[0], c[1]) {
 			t.Errorf("IsByteServingPath(%s %s) = true, want false", c[0], c[1])
 		}
+	}
+}
+
+// TestHTTP_Upload_DuplicateFilePartRejected — NIGHT-SWEEP-S1: a body with TWO
+// "file" parts used to store the FIRST and answer 201 without ever reading the
+// second — data loss behind a success status. It is now a named 400, and the
+// first store is rolled back (no orphan metadata row).
+func TestHTTP_Upload_DuplicateFilePartRejected(t *testing.T) {
+	ms := newMemStore()
+	l := NewLocal(t.TempDir(), ms)
+	srv := filesTestServer(t, l, DefaultMaxUploadBytes, "acme")
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for i, content := range []string{"first file", "second file"} {
+		h := make(textproto.MIMEHeader)
+		h.Set("Content-Disposition", `form-data; name="file"; filename="f`+string(rune('a'+i))+`.txt"`)
+		h.Set("Content-Type", "text/plain")
+		pw, err := mw.CreatePart(h)
+		if err != nil {
+			t.Fatalf("create part: %v", err)
+		}
+		if _, err := pw.Write([]byte(content)); err != nil {
+			t.Fatalf("write part: %v", err)
+		}
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("close mw: %v", err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/files", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (used to be 201 with the second part lost)", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !bytes.Contains(body, []byte("more than one")) {
+		t.Fatalf("error must name the duplicate, got: %s", body)
+	}
+	// Rollback: the first store must not survive as an orphan row.
+	metas, _, err := ms.list(context.Background(), "acme", 100, 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(metas) != 0 {
+		t.Fatalf("rollback failed: %d metadata rows survive the 400", len(metas))
 	}
 }

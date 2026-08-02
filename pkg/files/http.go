@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -95,6 +96,16 @@ func ProcessUpload(store *Store, maxBytes int64, tenantID string, w http.Respons
 		writeErr(w, http.StatusBadRequest, "expected multipart/form-data")
 		return
 	}
+	// One "file" part, exactly. Other field names are tolerated (a browser form
+	// legitimately carries extra fields — the same reasoning as ADR-024's
+	// unknown-top-level-query-param exception, written down in the ADR). What is
+	// NOT tolerated is a SECOND "file" part (NIGHT-SWEEP-S1): the handler used
+	// to store the first and answer 201 without ever reading the second — DATA
+	// LOSS behind a success status, the worst shape of the class. The scan now
+	// continues after the first store; a duplicate rolls the stored file back
+	// (metadata row removed; the content-addressed blob only if unreferenced)
+	// and names the problem.
+	var stored *Meta
 	for {
 		part, err := mr.NextPart()
 		if errors.Is(err, io.EOF) {
@@ -111,6 +122,14 @@ func ProcessUpload(store *Store, maxBytes int64, tenantID string, w http.Respons
 		if part.FormName() != "file" {
 			_ = part.Close()
 			continue
+		}
+		if stored != nil {
+			_ = part.Close()
+			if derr := store.Delete(r.Context(), tenantID, stored.ID); derr != nil {
+				log.Printf("files: upload rollback of %s failed: %v", stored.ID, derr)
+			}
+			writeErr(w, http.StatusBadRequest, `multipart body carries more than one "file" part: send exactly one file per upload (the second used to be silently discarded behind a 201)`)
+			return
 		}
 
 		meta, perr := store.Put(r.Context(), tenantID, part, PutMeta{
@@ -129,14 +148,17 @@ func ProcessUpload(store *Store, maxBytes int64, tenantID string, w http.Respons
 			}
 			return
 		}
-		writeJSON(w, http.StatusCreated, map[string]any{
-			"file_id": meta.ID,
-			"sha256":  meta.SHA256,
-			"size":    meta.Size,
-		})
+		stored = &meta
+	}
+	if stored == nil {
+		writeErr(w, http.StatusBadRequest, `no "file" part in multipart body`)
 		return
 	}
-	writeErr(w, http.StatusBadRequest, `no "file" part in multipart body`)
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"file_id": stored.ID,
+		"sha256":  stored.SHA256,
+		"size":    stored.Size,
+	})
 }
 
 // DownloadHandler serves a stored file through the backend's strategy: the
