@@ -962,6 +962,18 @@ app.Register(appitools.Route{
 })
 ```
 
+### 3.6b Write the contract sheet — your custom routes are invisible otherwise
+
+The engine's `/openapi.json` covers every **generated** route; it does NOT list
+the routes you register here. A frontend agent (see `appitools frontend-spec`
+§0) cannot discover them — probing answers `401`, not `404` — so every custom
+route you add goes into a short **contract sheet** the frontend consumes: per
+route, the method/path, params, body and response shapes, whether it is
+`Public`, and its rate budget; plus the role matrix, any state machines, and
+the upload limits. The reference storefront keeps this as `STOREFRONT_API.md`
+next to the code, updated in the same commit as the route it describes. Ten
+minutes of writing here saves the frontend a day of reverse-engineering 422s.
+
 ### 3.7 Serving your frontend from the same binary
 
 `Config.Static` mounts a file tree — one binary that is backend **and** frontend

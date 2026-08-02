@@ -31,6 +31,41 @@ surface: if an endpoint, parameter or operator is not listed here or in
 
 ---
 
+## 0. Step zero — inventory what YOUR backend serves (before any code)
+
+An external-agent dry run of this document found one failure mode that beats
+everything else: **guessing the surface**. Do this first, in order:
+
+1. **`GET /openapi.json`** on the running backend — the machine contract for
+   every *generated* route, `/auth/*` and `/api/files`. ⚠ **It does NOT list
+   custom routes** (the backend's registered Go handlers — typically the whole
+   anonymous storefront surface). A missing path there does not mean a missing
+   endpoint, and probing is useless: an unknown `/api/...` answers `401`, not
+   `404`, so you cannot distinguish "doesn't exist" from "exists,
+   authenticated".
+2. **Get the backend's contract sheet.** For everything `/openapi.json` cannot
+   tell you, the backend author (human or agent) must hand you, in writing:
+   - the **custom routes** — method, path, params, body and response shapes,
+     which are `Public` (the reference storefront keeps exactly this as a
+     `STOREFRONT_API.md`; `backend-spec` tells the backend agent to write one);
+   - the **role matrix** — which roles exist and what each may do (drives
+     which buttons you render; the JWT only tells you the caller's own role);
+   - any **state machines** — states + legal transitions per status field
+     (you mirror them in the UI, §6.6; they are not in the OpenAPI);
+   - the **upload limits** (max bytes, allowed extensions — §7.4) and the
+     **public rate budgets** (§9.5).
+3. **Get working dev credentials.** Public signup is DISABLED by default
+   (`POST /auth/signup` → 403), so on most backends you cannot mint your own
+   first user: ask the operator to create one (they have an admin API/CLI for
+   it), or to set `APPITOOLS_AUTH_SIGNUP_ROLE` in the dev instance. Without a
+   session you cannot exercise anything authenticated — including §11's
+   acceptance run.
+
+If you cannot obtain the contract sheet, say so and stop: every hour spent
+reverse-engineering shapes from 422s is an hour the sheet would have saved.
+
+---
+
 ## 1. Where does the frontend live? (the first decision)
 
 Two deployment shapes. **Default to embedded** unless you have a named reason.
@@ -248,9 +283,10 @@ export async function papi(path, opts = {}) {          // panel/authenticated ap
 
 **Signup** — `POST /auth/signup` `{"email","password"}` → `201 {user, token}`
 (auto-login). It answers `403` when the instance has not enabled public signup
-(`APPITOOLS_AUTH_SIGNUP_ROLE` unset) — build the screen only if the product
-enables it. Duplicate email in this tenant → `409`. A `role` you send is
-ignored.
+(`APPITOOLS_AUTH_SIGNUP_ROLE` unset) — **which is the default**: build the
+screen only if the product enables it, and get your own dev credentials
+through the operator (§0.3), never by assuming signup works.
+Duplicate email in this tenant → `409`. A `role` you send is ignored.
 
 **Password reset / email verification** (all tenant-aware, all uniform-response
 anti-enumeration): `POST /auth/reset/request {"email"}` → always `200` "if that
@@ -299,9 +335,11 @@ export const cop = (cents) =>
 
 **Discover the surface, don't guess it**: `GET /openapi.json` (unauthenticated)
 is the machine contract for every generated route + `/auth/*` + `/api/files`;
-`/docs` is its Swagger UI. Custom routes the backend registered are documented
-by the backend's own docs (they are under `/api/<segment>` where `<segment>` is
-not a resource name).
+`/docs` is its Swagger UI. **Custom routes are NOT in it** — they come from the
+backend's contract sheet (§0.2). On a storefront, the anonymous surface is
+usually ALL custom routes: the generated CRUD is authenticated, so the public
+catalogue/checkout/order-status endpoints are registered handlers whose shapes
+only the backend author can tell you.
 
 ### 4.4 Filters, search, sort, pagination — the exact grammar
 
@@ -602,6 +640,11 @@ The engine returns **every** failing field at once — surface them all in one
 pass (mark inputs + per-field message + summary + scroll to first), don't drip
 them one request at a time. Nested field names arrive dotted
 (`direccion.linea1`) — key your error map by the same strings.
+
+And remember the empty-form trap from §4.6: an empty text input submits `""`,
+which **passes** `required` — a form that relies on the server catching blanks
+needs the schema to declare `minLength: 1`, or must strip empty-string keys
+from the payload before sending (omitting the key is what triggers `required`).
 
 ### 6.5 Waiting for the world — polling pending → confirmed
 
@@ -904,6 +947,13 @@ accept the consequence (trap #2).
 Dev loop options: Vite dev server + proxy with a tenant Host (§3), or rebuild
 & run the binary and open `http://<tenant>.localhost:<port>` (production-
 faithful; what the reference e2e suites use).
+
+**If you don't own the backend's Go project** (you were handed a running
+binary, not a repo): your deliverable is the built static tree (`web/build/`)
+plus the `Config.Static` snippet from §1 — the backend agent embeds it and
+rebuilds. Alternatively the served-apart shape (§1) with the operator setting
+`APPITOOLS_CORS_ORIGINS` (§4.10). State which one you're producing; don't
+silently assume you can recompile the binary.
 
 ---
 

@@ -26,13 +26,91 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-01 (INPUT-CLASS-CLOSE-S1)** — ENG-25…ENG-31 closed
-(see DONE); the remaining OPEN items were last re-verified against reality on
-2026-08-01 (SILENT-FAILURE-S1), not carried forward on trust.
+**Last reviewed: 2026-08-02 (FRONTEND-SPEC-S1)** — three new OPEN items from
+the first real frontend consuming the file stack (FILES-1/FILES-2/ENG-32, plus
+COMMERCE-6); the seam + grant that session shipped are in DONE.
 
 ---
 
 ## OPEN
+
+### FILES-1 — Upload constraints are per-instance; the need is per-FIELD
+- **Origin:** FRONTEND-SPEC-S1 — commerce GAPS **5C-3**. Product images wanted
+  "images only, ≤5 MB"; the only knobs are `APPITOOLS_FILES_MAX_BYTES` +
+  `APPITOOLS_FILES_ALLOWED_EXT`, process-wide. Works while a shop uses files
+  for exactly one thing; breaks the day invoices-as-PDF (≤20 MB, `pdf`) arrive
+  and the two uses fight over one knob.
+- **Impact:** Medium — the first thing a SECOND file-using feature trips on.
+- **Design note (from the field):** the upload endpoint is field-agnostic, so
+  the per-field check belongs at **ATTACH time**: a `file` field declaring e.g.
+  `"accept": "image"` / `"max_bytes": N` validates the referenced file's stored
+  metadata (sniffed content-type family + size) on create/update → the same
+  `422 fields[]` shape (`rule: file_policy`). The instance env stays the outer
+  bound at upload.
+- **Probe:** attach a 6 MB PDF's file_id to a field declared `accept: image` →
+  today a 201; ready when it is a named 422.
+- **Ready:** the `file` field accepts the two policy keys (validated at load,
+  strict-key), attach enforces them on REST/GraphQL/batch, spec + grammar
+  updated, and the tiendita's `imagen_id` declares them (replacing the
+  instance-wide workaround noted in its `.env.dev`).
+
+### FILES-2 — A ServeFile response cannot carry app-chosen cache headers
+- **Origin:** FRONTEND-SPEC-S1 — commerce GAPS **5C-4**. The public product
+  image URL is stable and content-addressed (immutable by construction), but
+  `Ctx.ServeFile` sets no cache policy, so browsers revalidate per view. The
+  304s are cheap; `Cache-Control: public, max-age=31536000, immutable` would
+  make them zero round-trips.
+- **Impact:** Low (measured shape: one conditional request per image per
+  page view).
+- **Ready:** a handler can declare response cache headers that the post-commit
+  serve respects (options on ServeFile, or headers pre-set through the Ctx),
+  documented in backend-spec/frontend-spec; the commerce image route uses it.
+
+### ENG-32 — HEAD on a custom GET route answers as if the route did not exist
+- **Origin:** FRONTEND-SPEC-S1 — commerce GAPS **5C-5**, found probing the
+  image route with `curl -I`.
+- **Impact:** Low. chi registers the exact method and the Public/ByteServing
+  matchers are method-exact, so `HEAD /api/catalogo-imagen` is a 401 (or the
+  SPA shell on an unauthenticated path) instead of headers-only. Browsers
+  never HEAD an `<img>`; link unfurlers and some CDNs do.
+- **Probe:** `curl -I -H "Host: tiendita.localhost" :8099/api/catalogo-imagen?id=<live id>`
+  → today 401; ready when it answers 200 with the GET's headers and no body
+  (RFC 9110 §9.3.2), at least for ByteServing routes.
+- **Ready:** HEAD is served for custom GET routes (or documented as
+  deliberately unsupported, with the reason).
+
+### ENG-33 — Registered custom routes are invisible to the served OpenAPI
+- **Origin:** FRONTEND-SPEC-S1's external-read pass: an agent given ONLY
+  `frontend-spec` + a running backend could not enumerate the anonymous
+  storefront surface — `/openapi.json` lists only generated routes, an unknown
+  `/api/...` answers `401` (not 404, so probing can't distinguish "absent"
+  from "authenticated"), and the whole public half of a storefront is custom
+  routes. It found the reference shop's routes only because the doc's examples
+  happen to name them.
+- **Impact:** Medium — it is the FIRST wall an external frontend agent hits.
+  Mitigated today by convention (the contract sheet: frontend-spec §0.2 +
+  backend-spec §3.6b), but the engine KNOWS the registered routes at boot
+  (`App.Routes()`: method, path, Public, RateLimit) and could serve at least
+  their existence.
+- **Probe:** `GET /openapi.json` on the commerce binary → today zero custom
+  paths; ready when `/api/catalogo` et al. appear (path + method + a
+  `x-public` marker; request/response schemas stay the author's job — Go
+  handlers have no declared shapes).
+- **Ready:** registered routes appear in the served OpenAPI as path items
+  (summary from a new optional `Route.Description`, marked public where
+  `Public`), documented in backend-spec; the contract sheet remains the
+  authority for SHAPES.
+
+### COMMERCE-6 — e2e-browser.mjs leaves residue on the shop it runs against
+- **Origin:** FRONTEND-SPEC-S1 — commerce GAPS **5C-7**. Every run strands a
+  stamped product (`GOR-TRU-<stamp>`), its orders/clients, and now a photo
+  blob; two strays had already buried the seed products on the 105's vitrina.
+  The 3-9 rule ("suites that run against production clean up") reached
+  verify.sh and e2e-1b, never the browser suite.
+- **Impact:** Low-medium — pollution on DEMO shops is user-visible.
+- **Ready:** the suite deletes what it created (the order-first dance e2e-1b
+  already does, via the same PSQL_CMD parameterization so the remote-run mode
+  survives), verified by two consecutive runs leaving identical counts.
 
 ### ENG-1 — Embed cache for `?include=` relations
 - **Origin:** ADR-019 §cache invalidation; carried in ESTADO_Y_PLAN_MAESTRO as
@@ -527,6 +605,16 @@ All three were **re-verified as still open on 2026-07-29**.
 | **Give `/root/commerce` a remote** | The technical fix is trivial; the decision (which account, public or private, whether the commerce platform is a product or a demo) is his. See **OPS-5** — until then the field report lives on one disk. |
 
 ---
+
+## DONE in FRONTEND-SPEC-S1 (2026-08-02)
+
+| Item | What shipped | Proof |
+|---|---|---|
+| **The agent trilogy closes** | `docs/FRONTEND_SPEC_LLM.md` + `appitools frontend-spec` (embedded, single source) — the frontend guide distilled from the SHIPPED tiendita, not theory: embedded-vs-apart, the stack argument (adapter-static SPA, the cheap-AI criterion), the full API contract (incl. the live-verified cursor⊘sort caveat and the count presence-flag), errors→screen-states, the six mandatory states, the files pattern end to end, the browser-only traps (incl. the empty-string-passes-`required` form trap found by this session's own browser run). Registered in README/CAPABILITIES/AGENTS. | `appitools frontend-spec` prints it; an external-read pass (agent given ONLY the doc) ran as the acceptance act |
+| **`Ctx.ServeFile` + `Route.ByteServing`** | Custom routes can stream tenant files through the engine store (Range/strong ETag→304/sendfile; uniform 404 malformed/unknown/foreign; stream runs AFTER commit; buffered Error wins). ByteServing (GET-only, literal path) bypasses the response cache AND compression — both proven landmines (RAM-buffered blobs, stripped `Content-Disposition`, dead sendfile). Nil-cost when undeclared. | unit + integration (bytes/ETag/304/206/cross-tenant/compression/cache asserted); binary-diff gate **63/63 SAME**; ABBA+2 controls **`no_change`** (Δp50 +0.49 %, MWU p=0.821, both controls louder) |
+| **`permissions` can grant the built-in `files` store** | The ADR-021 asymmetry, alive on `/api/files`: scoped roles could not upload. Now a known key, ACTIONS ONLY (conditions/fields = dead config, rejected at load with the reason); a schema with its OWN `files` resource keeps normal validation. | validator tests + runtime integration (scoped upload 201 / read 200 / delete 403); live: the tiendita's empleado uploads |
+| **`examples/frontend-guide/`** | One binary, no-build vanilla SPA: login/signup, multi-field 422 mapped in place, upload→attach→display, the public-image route. | 6/6 in a real mobile-viewport browser, console-error-strict |
+| **The tiendita has product photos** (first real front on the file stack) | Public byte-serving image route (authorize-by-relationship), panel upload with XHR progress + signed-URL preview, storefront `<img>`+placeholder, idempotent photo seed. Official migration path: dry-run clean, counts identical. | commerce e2e-1b **40/40** · browser **21/21** · verify 18/18 · webhook 21/21 · isolation probe 6/6 · field report **PARTE CINCO** |
 
 ## DONE in INPUT-CLASS-CLOSE-S1 (2026-08-01)
 

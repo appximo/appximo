@@ -31,3 +31,7 @@ date	commit	label	target	tenant	endpoint	script	rate	duration	runs	p50_median_ms
 2026-08-01	c026468	icc-B1	http://localhost:8080	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	5	0.633	1.031	14.3	0.0000	
 2026-08-01	c026468	icc-B2	http://localhost:8080	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	5	0.607	0.886	4.2	0.0000	
 2026-08-01	c026468	icc-A2	http://localhost:8080	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	5	0.620	0.930	11.0	0.0000	
+2026-08-02	e2ef990	fsp-A1	http://127.0.0.1:8580	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	5	0.615	1.131	10.4	0.0000	
+2026-08-02	e2ef990	fsp-B1	http://127.0.0.1:8580	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	5	0.611	0.957	4.1	0.0000	
+2026-08-02	e2ef990	fsp-B2	http://127.0.0.1:8580	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	5	0.619	1.037	1.9	0.0000	
+2026-08-02	e2ef990	fsp-A2	http://127.0.0.1:8580	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	5	0.600	0.909	2.9	0.0000	
