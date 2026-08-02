@@ -1,0 +1,39 @@
+/* Token-based, no framework — the spec §2's recommendation at example scale. */
+:root {
+  --bg: #faf7f2; --surface: #fff; --ink: #26211c; --ink-2: #6f645a; --line: #e7ddd2;
+  --accent: #1f6f8b; --accent-soft: #e3f0f4; --ok: #1a7f4e; --bad: #b3261e; --bad-soft: #fbe7e5;
+  --radius: 12px; --font: ui-sans-serif, system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font); line-height: 1.5; }
+header, main { max-width: 720px; margin: 0 auto; padding: 16px; }
+header h1 { font-size: 24px; }
+.sub { color: var(--ink-2); font-size: 14px; margin: 4px 0 8px; }
+h2 { font-size: 16px; margin-bottom: 10px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 14px; }
+label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+input, textarea { display: block; width: 100%; margin-top: 4px; padding: 10px; font-size: 16px; /* 16px = no iOS zoom */
+  border: 1.5px solid var(--line); border-radius: 8px; font-family: inherit; }
+input.invalid, textarea.invalid { border-color: var(--bad); background: #fffafa; }
+.field-error { color: var(--bad); font-size: 13px; font-weight: 400; }
+button { min-height: 44px; padding: 0 18px; font-size: 15px; font-weight: 600; border: 0; border-radius: 9px;
+  background: var(--accent); color: #fff; cursor: pointer; }
+button:disabled { opacity: 0.6; }
+button.ghost { background: transparent; color: var(--accent); border: 1.5px solid var(--line); }
+.row { display: flex; gap: 8px; }
+.error { background: var(--bad-soft); color: var(--bad); border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-top: 10px; }
+.error button { min-height: 32px; margin-left: 8px; background: var(--bad); }
+.empty { color: var(--ink-2); text-align: center; padding: 28px 0; }
+.skel { height: 72px; border-radius: var(--radius); background: var(--line); opacity: 0.5; margin-bottom: 10px;
+  animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.25; } }
+.post { display: flex; gap: 12px; align-items: flex-start; }
+.thumb { width: 84px; height: 84px; flex: none; border-radius: 8px; background: var(--accent-soft);
+  display: flex; align-items: center; justify-content: center; color: var(--ink-2); font-size: 22px; overflow: hidden; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; }
+.post h3 { font-size: 15px; display: inline; margin-right: 6px; }
+.muted { color: var(--ink-2); font-size: 13.5px; margin: 4px 0 8px; }
+.badge { font-size: 11.5px; font-weight: 700; border: 1px solid var(--line); border-radius: 99px; padding: 2px 8px; color: var(--ink-2); }
+.badge.ok { color: var(--ok); border-color: var(--ok); }
+progress { width: 100%; }
+#upload-state { margin-bottom: 10px; font-size: 13px; color: var(--ink-2); }

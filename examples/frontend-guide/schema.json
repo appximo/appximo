@@ -1,0 +1,21 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "frontend-guide",
+  "resources": {
+    "posts": {
+      "fields": {
+        "title": { "type": "string", "required": true, "minLength": 1, "maxLength": 120 },
+        "body": { "type": "text" },
+        "photo": { "type": "file", "on_delete": "set_null" },
+        "published": { "type": "bool", "default": false },
+        "created_at": { "type": "time", "auto": true }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "editor": { "resources": ["posts", "files"], "actions": ["*"] }
+    }
+  }
+}

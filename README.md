@@ -358,6 +358,20 @@ your agent and it can build the whole backend. The guide, with its runnable
 example: [docs/BACKEND_SPEC_LLM.md](docs/BACKEND_SPEC_LLM.md) +
 [examples/backend-guide/](examples/backend-guide/).
 
+The trilogy closes with the part users touch: `appitools frontend-spec` prints
+the **agent guide for building a production frontend** — where the frontend
+lives (embedded in the same binary via `Config.Static` by default: one
+artifact, same origin, no CORS), the recommended stack and why (SvelteKit +
+`adapter-static` as a pure SPA — no Node at runtime), the exact API contract a
+UI consumes, the error→screen-state mapping (the multi-field 422, the
+work-preserving 409, the honest 503), the files/images pattern end to end
+(upload with progress → attach via a `file` field → display, including PUBLIC
+images through a byte-serving custom route), and the traps only a real browser
+reveals. Distilled from a production storefront, with a runnable no-build
+example: [docs/FRONTEND_SPEC_LLM.md](docs/FRONTEND_SPEC_LLM.md) +
+[examples/frontend-guide/](examples/frontend-guide/). Give an agent all three
+— `spec`, `backend-spec`, `frontend-spec` — and it can build the full stack.
+
 ## Configuration
 
 | Setting | Kind | Required | Description |

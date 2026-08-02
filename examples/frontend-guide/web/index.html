@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>frontend-guide — Appitools</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>frontend-guide</h1>
+    <p class="sub">The runnable companion to <code>appitools frontend-spec</code> — auth, CRUD with the 422 contract, and the full files pattern.</p>
+    <div id="session"></div>
+  </header>
+
+  <main>
+    <section class="card" id="auth-card">
+      <h2>Session</h2>
+      <form id="auth-form" novalidate>
+        <label>Email <input id="email" type="email" autocomplete="email" /></label>
+        <label>Password <input id="password" type="password" autocomplete="current-password" /></label>
+        <div class="row">
+          <button type="submit" data-mode="login">Log in</button>
+          <button type="button" id="signup-btn" class="ghost">Sign up</button>
+        </div>
+        <div id="auth-error" class="error" role="alert" hidden></div>
+      </form>
+    </section>
+
+    <section class="card" id="create-card" hidden>
+      <h2>New post</h2>
+      <form id="create-form" novalidate>
+        <label>Title <input id="title" /><span class="field-error" data-for="title"></span></label>
+        <label>Body <textarea id="body" rows="2"></textarea><span class="field-error" data-for="body"></span></label>
+        <label class="file-label">Photo (optional)
+          <input id="photo-file" type="file" accept="image/*" />
+        </label>
+        <div id="upload-state" hidden>
+          <progress id="upload-bar" max="1" value="0"></progress>
+          <span id="upload-msg"></span>
+        </div>
+        <button type="submit" id="create-btn">Create</button>
+        <div id="create-error" class="error" role="alert" hidden></div>
+      </form>
+    </section>
+
+    <section id="posts-section" hidden>
+      <h2>Posts</h2>
+      <div id="posts"></div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

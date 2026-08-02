@@ -126,6 +126,37 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   use (illegal move → `*InvalidTransitionError`, the identical 422; concurrent
   change → `ErrUpdateConflict`, 409 — a custom transition route re-states no
   table),
+  `frontend-spec` (FRONTEND-SPEC-S1: the THIRD doc of the agent trilogy —
+  `spec` teaches the schema, `backend-spec` the handlers, this one the
+  FRONTEND. Prints docs/FRONTEND_SPEC_LLM.md (embedded via `//go:embed` in
+  `frontendspec.go`, single source), distilled from the shipped commerce
+  storefront, not theory: the embedded-vs-apart decision (default: `go:embed`
+  + `Config.Static`, one binary, same origin, no CORS), the recommended stack
+  WITH its argument (SvelteKit + adapter-static as a pure SPA, `ssr=false` —
+  SSR breaks the one-binary model; the real criterion is what a cheap AI
+  writes correctly first try), the complete API contract a UI consumes
+  (tenant = Host, auth incl. the `mfa_required` branch, the EXACT filter
+  grammar with the does-not-exist list, keyset pagination + the cursor⊘sort
+  caveat, `?include=`, aggregates as the dashboard endpoint, SSE via fetch-
+  reader because EventSource can't send Authorization), the error→screen-state
+  contract (the multi-field 422 with scroll-to-first, the work-preserving 409,
+  401 vs 403, the honest 503+Retry-After, network=status 0), the six mandatory
+  screen states, the FILES pattern (upload with XHR progress → attach via the
+  `file` field → display: signed URLs for authed screens because `<img>` can't
+  send headers, and PUBLIC serving via a `ByteServing` route + `Ctx.ServeFile`
+  that authorizes by relationship), the empty-string-passes-`required` form
+  trap (declare `minLength: 1`), and the browser-only traps (CSP blank-200,
+  the gitignored-hashed-assets empty shell, `go:embed all:`). Runnable proof:
+  examples/frontend-guide/ — a no-build vanilla SPA + one ServeFile route,
+  verified 6/6 in a real mobile-viewport browser. The same session added the
+  library seam the pattern needs: **`Ctx.ServeFile(fileID)`** (streams a
+  tenant file through the SAME `files.Store` as `/api/files/{id}` — Range,
+  strong ETag/304, sendfile; uniform 404 for malformed/unknown/foreign ids —
+  DELIVERED AFTER COMMIT like every custom-route response) + **`Route.
+  ByteServing`** (GET-only, literal path; routes the response around the
+  response cache AND the compression wrapper, which would otherwise buffer
+  the blob in RAM, strip Content-Disposition/Accept-Ranges on a hit, and
+  suppress sendfile — ServeFile refuses to run without it, loudly)),
   `blueprints list` (lists schema files in a local `blueprints/` dir),
   `version` (prints the ldflags-injected build version; "dev" on a plain
   local build — releases and published images carry their tag),
@@ -1632,7 +1663,11 @@ and upload validation are IDENTICAL on both. Full doc + setups:
   when no other upload references the same content. RBAC: `delete` on `files`.
 
 All inherit the normal chain (tenant Host → JWT → RBAC), so a role needs the
-`files` resource in its policy (`"resources": ["files", …]` or `"*"`). Local
+`files` resource in its policy — `"resources": ["files", …]`, `"*"`, or a
+per-resource `permissions` entry `"files": { "actions": ["read","create"] }`
+(actions only — conditions/fields on the built-in store are rejected at load;
+FRONTEND-SPEC-S1 closed the asymmetry where only the role-global form could
+grant it). Local
 blobs live under `APPITOOLS_FILES_DIR` (default `/var/lib/appitools/files`),
 created lazily on first upload. Use a `file_id` as a filejob's `file_ref` to
 feed the async XLSX consumer (`APPITOOLS_FILES_DIR` must be set on the worker,

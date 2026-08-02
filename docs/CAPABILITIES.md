@@ -101,6 +101,10 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 - JS built-in helpers — `isValidEmail`, `formatMoney`, plus Colombian DIAN `validateNIT` (mod-11) and `calculateCUFE` (SHA-384).
 - WASM hooks — Wazero, no CGO, 16 MiB limit, `transform` entrypoint over a pre-loaded module.
 - Hooks are compiled at boot — changing them via the control plane requires a restart (reload warns).
+- Custom byte-serving routes — `Route.ByteServing` + `Ctx.ServeFile(fileID)`: a handler
+  streams a tenant file (public product image, authorized download) through the same
+  store as `/api/files/{id}` — Range/strong ETag/sendfile — with the response cache and
+  compression bypassed, and a uniform 404 for malformed/unknown/foreign ids.
 
 ## Observability
 
@@ -129,6 +133,11 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 - `serve`, `validate` (`--json` for the unified report), `validate-schema`, `meta-schema`,
   `token`, `openapi`, `graphql` (SDL), `generate`, `migrate`, `backup`, `init`,
   `ai-generate`, `ai-eval`, `blueprints`, `admin`, `fleet`, `version`.
+- The agent-doc trilogy — `spec` (the schema grammar for an LLM), `backend-spec`
+  (handlers/hooks/auth/jobs) and `frontend-spec` (the UI: stack, API contract,
+  error→screen-state mapping, files/images incl. public serving, browser-only
+  traps — distilled from the production storefront). Paste all three into your
+  own agent and it can build the full stack at zero product API cost.
 
 ## What it does NOT do
 

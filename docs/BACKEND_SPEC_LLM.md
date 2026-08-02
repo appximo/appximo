@@ -297,6 +297,7 @@ type Route struct {
 	Public      bool          // optional: skip JWT + path-RBAC (pre-auth endpoint)
 	Timeout     time.Duration // optional: per-endpoint deadline (default 5s)
 	RateLimit   *RateLimit    // optional: this endpoint's own throttle {RPS, Burst}
+	ByteServing bool          // optional: this GET streams a file (Ctx.ServeFile) — see below
 }
 ```
 
@@ -322,6 +323,14 @@ type Route struct {
   (a half-filled struct is rejected at boot). Set on an authenticated route, it
   adds a per-(tenant, IP) limit on top of the per-tenant one — useful for an
   expensive report or export.
+- **`ByteServing`** — declares a GET route that streams a binary body via
+  `Ctx.ServeFile` (a public product image, an authorized file download). It
+  routes the response AROUND the response cache and the compression wrapper —
+  which would otherwise buffer the whole blob in RAM, strip
+  Content-Disposition/Accept-Ranges on a cache hit, and suppress sendfile.
+  GET only; literal path (pass the file id as a query parameter). See
+  `Ctx.ServeFile` below and the public-image worked example in
+  `appitools frontend-spec` §7.5.
 
 ### 3.3 The `Ctx` — every method
 
@@ -436,6 +445,35 @@ case errors.Is(err, appitools.ErrInvalidEmail),
 case errors.Is(err, appitools.ErrUnknownRole):    // role not in the schema RBAC
 }
 ```
+
+**Serve a stored file** — stream one of THIS tenant's files (the engine file
+store — the same one `/api/files/{id}` serves) as the response, with Range,
+strong ETag/304 and sendfile. The route must declare `ByteServing: true`
+(ServeFile refuses otherwise, loudly). The handler decides WHO may fetch —
+this is how a storefront serves product images to ANONYMOUS visitors while
+every other file stays private (authorize by relationship, then serve):
+
+```go
+app.Register(appitools.Route{
+	Method: "GET", Path: "/api/catalogo-imagen",
+	Public: true, ByteServing: true,
+	RateLimit: &appitools.RateLimit{RPS: 200, Burst: 400}, // image-sized budget
+	Handler: func(ctx appitools.Ctx) error {
+		id := ctx.Request().URL.Query().Get("id")
+		var ok bool
+		if err := ctx.UnsafeTx().QueryRow(ctx.Context(),
+			`SELECT EXISTS(SELECT 1 FROM productos WHERE imagen_id = $1 AND estado = 'activo')`,
+			id).Scan(&ok); err != nil || !ok {
+			return ctx.Error(404, "not found", err) // uniform miss — no oracle
+		}
+		return ctx.ServeFile(id) // streamed AFTER commit; malformed/unknown/foreign id → the same 404
+	},
+})
+```
+
+Facts: call it once, INSTEAD of `JSON` (an `Error` before it still wins — the
+error path keeps its response); the metadata lookup reads committed state, not
+the handler's tx; `ErrFileNotFound` is the exported uniform-miss sentinel.
 
 **Safe goroutine** — the ONLY sanctioned way to start a goroutine (§6):
 
