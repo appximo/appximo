@@ -37,23 +37,32 @@ An external-agent dry run of this document found one failure mode that beats
 everything else: **guessing the surface**. Do this first, in order:
 
 1. **`GET /openapi.json`** on the running backend — the machine contract for
-   every *generated* route, `/auth/*` and `/api/files`. ⚠ **It does NOT list
-   custom routes** (the backend's registered Go handlers — typically the whole
-   anonymous storefront surface). A missing path there does not mean a missing
-   endpoint, and probing is useless: an unknown `/api/...` answers `401`, not
-   `404`, so you cannot distinguish "doesn't exist" from "exists,
-   authenticated".
+   the WHOLE served surface: every generated route, `/auth/*`, `/api/files`,
+   **and the backend's registered custom routes** (typically the whole
+   anonymous storefront surface). A custom route appears as a normal path item
+   flagged `x-appitools-custom-route: true`, carrying its method, its auth mode
+   (`x-public: true` ⇒ no token needed, a valid one is recognized; otherwise
+   Bearer + the RBAC grant named in its description), `x-required-role` when
+   the route demands one, `x-byte-serving` for binary streams (images,
+   downloads), and the author's one-line summary. What the OpenAPI does NOT
+   carry for custom routes is request/response **shapes** — a Go handler
+   declares none; shapes come from the contract sheet (step 2).
+   ⚠ Probing is still not discovery: an unknown `/api/...` answers `401`, not
+   `404` (auth runs before routing, deliberately) — the contract, not the
+   probe, is the authority for what exists.
 2. **Get the backend's contract sheet.** For everything `/openapi.json` cannot
    tell you, the backend author (human or agent) must hand you, in writing:
-   - the **custom routes** — method, path, params, body and response shapes,
-     which are `Public` (the reference storefront keeps exactly this as a
-     `STOREFRONT_API.md`; `backend-spec` tells the backend agent to write one);
+   - the **custom routes' shapes** — params, body and response per route (the
+     OpenAPI names the routes; the sheet gives them shapes — the reference
+     storefront keeps exactly this as a `STOREFRONT_API.md`; `backend-spec`
+     §3.6b tells the backend agent to write one);
    - the **role matrix** — which roles exist and what each may do (drives
      which buttons you render; the JWT only tells you the caller's own role);
    - any **state machines** — states + legal transitions per status field
      (you mirror them in the UI, §6.6; they are not in the OpenAPI);
-   - the **upload limits** (max bytes, allowed extensions — §7.4) and the
-     **public rate budgets** (§9.5).
+   - the **upload limits** (instance-wide max bytes/extensions AND any
+     per-field `accept`/`max_bytes` policies — §7.4) and the **public rate
+     budgets** (§9.5).
 3. **Get working dev credentials.** Public signup is DISABLED by default
    (`POST /auth/signup` → 403), so on most backends you cannot mint your own
    first user: ask the operator to create one (they have an admin API/CLI for
@@ -774,16 +783,28 @@ img.src = url;                                        // no auth header needed o
 Mint per render, never persist the URL (it expires); batch-mint for a list
 view. Any invalid/expired signed URL is a uniform `404`.
 
-### 7.4 The upload limits are instance-wide
+### 7.4 The upload limits — instance-wide at upload, per-field at attach
 
-The max size (`APPITOOLS_FILES_MAX_BYTES`, default 256 MiB) and the extension
-allowlist are the backend operator's config, not per-field — a product-images
-app typically tightens both (e.g. 5 MiB, images only). Ask the backend what
-they are, mirror them client-side for a friendly early error (check
-`file.size` before uploading), and still handle the server's `413`/`422` (the
-server is the authority; content sniffing happens there — a `.jpg` that isn't
-a JPEG is rejected regardless of its name, and the client's Content-Type is
-never trusted).
+Two layers, both the server's authority:
+
+- **At upload** (`POST /api/files`): the instance-wide max size
+  (`APPITOOLS_FILES_MAX_BYTES`, default 256 MiB → `413`) and extension
+  allowlist (→ `422`) — the backend operator's config.
+- **At attach** (setting the file's id in a record's `file` field): the
+  field's own declared policy (FILES-1) — `accept` (content-type families or
+  exact types, checked against the SNIFFED stored type) and `max_bytes`. A
+  violating attach is the standard `422 validation_failed` with
+  `fields[{field, rule: "file_policy", message}]` — the message says exactly
+  what the field accepts; surface it on the field like any other 422 (§6.4).
+  Consequence for the UI: an upload can SUCCEED and the attach still fail —
+  do the upload and the record write as one flow and map the attach 422 back
+  to the file input.
+
+Ask the backend for both layers (contract sheet, §0.2), mirror them
+client-side for a friendly early error (check `file.size` and `file.type`
+before uploading), and still handle the server's `413`/`422` (content sniffing
+happens server-side — a `.jpg` that isn't a JPEG is rejected regardless of its
+name, and the client's Content-Type is never trusted).
 
 ### 7.5 PUBLIC images — the storefront pattern
 
@@ -809,17 +830,22 @@ app.Register(appitools.Route{
             id).Scan(&ok); err != nil || !ok {
             return ctx.Error(404, "imagen no encontrada", err) // uniform miss — no oracle
         }
-        return ctx.ServeFile(id)                        // Range/ETag/Content-Type, tenant-scoped
+        // Content-addressed store ⇒ this id's bytes can never change: the URL
+        // may be cached for a year with zero revalidation (FILES-2).
+        return ctx.ServeFile(id, appitools.WithCacheControl(appitools.CacheControlImmutable))
     },
 })
 ```
 
 Frontend side: `<img src="/api/catalogo-imagen?id={imagen_id}">` — a stable
-URL (browser-cacheable, strong ETag revalidation), no token. The security
-property to preserve: only files referenced by PUBLIC records are reachable;
-a draft product's image, or any unattached upload, stays 404 to the world.
-Public paths must be literal (no `{param}` on a Public route) — hence the
-query parameter.
+URL, no token. With the immutable cache policy above the browser fetches each
+image ONCE (no per-view revalidation; a changed image is a new file id and
+therefore a new URL — bust nothing by hand). Without it, the strong ETag still
+makes revalidation a cheap 304. The route also answers `HEAD` (headers only —
+link unfurlers, CDNs). The security property to preserve: only files
+referenced by PUBLIC records are reachable; a draft product's image, or any
+unattached upload, stays 404 to the world. Public paths must be literal (no
+`{param}` on a Public route) — hence the query parameter.
 
 ### 7.6 The image element — always with a fallback
 

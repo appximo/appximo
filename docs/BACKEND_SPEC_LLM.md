@@ -21,7 +21,11 @@ Two companion documents; keep them straight:
 |---|---|---|
 | **`appitools spec`** / [SCHEMA_SPEC_LLM.md](SCHEMA_SPEC_LLM.md) | the **schema** (declarative surface) | `appitools spec` |
 | **this doc** / `appitools backend-spec` | the **backend** (handlers + hooks + auth + jobs) | `appitools backend-spec` |
+| **`appitools frontend-spec`** / [FRONTEND_SPEC_LLM.md](FRONTEND_SPEC_LLM.md) | the **frontend** (the API contract a UI consumes, screen states, files) | `appitools frontend-spec` |
 | [SCHEMA_REFERENCE.md](SCHEMA_REFERENCE.md) | the complete human reference | — |
+
+(`appitools specs` prints all three at once — one paste gives an agent the
+whole contract.)
 
 Everything below is audited against the engine source and demonstrated by a
 compiling, runnable example: **[examples/backend-guide/](../examples/backend-guide/)**
@@ -293,6 +297,7 @@ type Route struct {
 	Path    string        // must begin with "/api/"
 	Handler func(Ctx) error
 
+	Description string        // optional: one-line summary published in /openapi.json
 	RequireRole string        // optional: demand this exact JWT role (else 403)
 	Public      bool          // optional: skip JWT + path-RBAC (pre-auth endpoint)
 	Timeout     time.Duration // optional: per-endpoint deadline (default 5s)
@@ -304,6 +309,18 @@ type Route struct {
 - **`Path` must start with `/api/`** so it flows through the same middleware
   chain as generated routes (tenant → rate limit → JWT → RBAC). The first
   segment after `/api/` must **not** be a schema resource name.
+- **Every registered route is published in the served `/openapi.json`**
+  (ENG-33) — method, path, auth mode (`x-public: true` for a Public route,
+  otherwise Bearer + the RBAC segment/action it demands), `x-required-role`,
+  `x-byte-serving` — flagged `x-appitools-custom-route: true`. **`Description`**
+  is the one thing only you can add: a one-line summary shown in the contract
+  and in `/docs`. Set it on every route — it costs a string and it is what an
+  external agent reads first. Shapes (request/response bodies) are deliberately
+  NOT published — a Go handler declares none; they live in your contract sheet
+  (§3.6b).
+- **Every custom GET also serves HEAD** (ENG-32): same auth, same RBAC
+  (read), headers only. `Ctx.ServeFile` answers HEAD natively (Content-Length,
+  ETag, no byte copy) — link unfurlers and CDNs probe with HEAD before GET.
 - **`Timeout`** bounds the handler: its context (and the tenant transaction) is
   cancelled after `Timeout`, so a slow query or hung outbound call is aborted and
   the tx rolls back. Default 5s. Set it higher for legitimately long work, lower
@@ -466,7 +483,10 @@ app.Register(appitools.Route{
 			id).Scan(&ok); err != nil || !ok {
 			return ctx.Error(404, "not found", err) // uniform miss — no oracle
 		}
-		return ctx.ServeFile(id) // streamed AFTER commit; malformed/unknown/foreign id → the same 404
+		// The store is content-addressed: this id's BYTES can never change, so
+		// a URL that embeds the id may be cached forever (FILES-2). A changed
+		// image is a new id — and a new URL.
+		return ctx.ServeFile(id, appitools.WithCacheControl(appitools.CacheControlImmutable))
 	},
 })
 ```
@@ -474,6 +494,14 @@ app.Register(appitools.Route{
 Facts: call it once, INSTEAD of `JSON` (an `Error` before it still wins — the
 error path keeps its response); the metadata lookup reads committed state, not
 the handler's tx; `ErrFileNotFound` is the exported uniform-miss sentinel.
+Cache policy (FILES-2): no option ⇒ no Cache-Control (browsers revalidate —
+cheap 304s via the strong ETag); `WithCacheControl(...)` declares one, sent
+ONLY on the successful stream (never on the 404 path).
+`CacheControlImmutable` (`public, max-age=31536000, immutable`) is safe
+whenever the URL embeds the file id; do NOT use it on a URL that can start
+serving a DIFFERENT file (a mutable `/api/logo` pointer) — there the default
+revalidation is correct. HEAD on the route answers headers-only for free
+(ENG-32).
 
 **Safe goroutine** — the ONLY sanctioned way to start a goroutine (§6):
 
@@ -962,17 +990,22 @@ app.Register(appitools.Route{
 })
 ```
 
-### 3.6b Write the contract sheet — your custom routes are invisible otherwise
+### 3.6b Write the contract sheet — the OpenAPI names your routes, the sheet gives them shapes
 
-The engine's `/openapi.json` covers every **generated** route; it does NOT list
-the routes you register here. A frontend agent (see `appitools frontend-spec`
-§0) cannot discover them — probing answers `401`, not `404` — so every custom
-route you add goes into a short **contract sheet** the frontend consumes: per
-route, the method/path, params, body and response shapes, whether it is
-`Public`, and its rate budget; plus the role matrix, any state machines, and
-the upload limits. The reference storefront keeps this as `STOREFRONT_API.md`
-next to the code, updated in the same commit as the route it describes. Ten
-minutes of writing here saves the frontend a day of reverse-engineering 422s.
+The served `/openapi.json` lists every route the app serves — generated AND
+custom (ENG-33): a frontend agent can enumerate your endpoints, see which are
+`Public`, which role/action each demands, and read your `Route.Description`.
+What it can NOT see is **shapes**: a Go handler declares no request/response
+schema, and the engine refuses to publish a guess. So every custom route still
+goes into a short **contract sheet** the frontend consumes — per route, the
+params, body and response shapes, and its rate budget; plus the role matrix,
+any state machines, and the upload limits (none of which fit in an OpenAPI the
+engine can derive). The reference storefront keeps this as `STOREFRONT_API.md`
+next to the code, updated in the same commit as the route it describes. The
+division of labor: **/openapi.json is the authority for EXISTENCE, the sheet is
+the authority for SHAPES.** Ten minutes of writing here saves the frontend a
+day of reverse-engineering 422s. (Probing is still not discovery: an unknown
+`/api/...` answers `401` — auth runs before routing, deliberately.)
 
 ### 3.7 Serving your frontend from the same binary
 

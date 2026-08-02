@@ -138,6 +138,11 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
   error→screen-state mapping, files/images incl. public serving, browser-only
   traps — distilled from the production storefront). Paste all three into your
   own agent and it can build the full stack at zero product API cost.
+  `specs` prints the whole trilogy in one stream (one paste); the root
+  `--help`, the README, `/docs` and the installer's closing summary all point
+  at it, and a running app's `/openapi.json` lists its REGISTERED custom
+  routes too (method/path/auth mode/`x-public`; shapes stay in the app's
+  contract sheet).
 
 ## What it does NOT do
 

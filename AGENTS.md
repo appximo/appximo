@@ -156,7 +156,17 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   ByteServing`** (GET-only, literal path; routes the response around the
   response cache AND the compression wrapper, which would otherwise buffer
   the blob in RAM, strip Content-Disposition/Accept-Ranges on a hit, and
-  suppress sendfile — ServeFile refuses to run without it, loudly)),
+  suppress sendfile — ServeFile refuses to run without it, loudly; FILES-2:
+  `ServeFile(id, WithCacheControl(...))` declares the response cache policy —
+  `CacheControlImmutable` is safe whenever the URL embeds the file id, because
+  the store is content-addressed; sent only on the success path, never on the
+  404)),
+  `specs` (THIRD-PARTY-READY-S1: prints the WHOLE trilogy —
+  spec + backend-spec + frontend-spec — in one stream with banners, for the
+  one-paste agent priming; pure concatenation of the three single sources, so
+  it can never diverge. The root `appitools --help` and each spec's header now
+  name the trilogy — the discoverability fix: nobody has to be told the three
+  commands exist),
   `blueprints list` (lists schema files in a local `blueprints/` dir),
   `version` (prints the ldflags-injected build version; "dev" on a plain
   local build — releases and published images carry their tag),
@@ -581,6 +591,19 @@ still-attached file is a 409) or `set_null` (deleting the file nulls the field);
 `cascade` is rejected at load. Deleting the RECORD never deletes the file.
 `relation`/`references`/`on_update`/`enum`/`default`/`auto` are all rejected on
 a file field. In GraphQL the field is an `ID`.
+
+A file field may declare a **per-field attach policy** (FILES-1,
+THIRD-PARTY-READY-S1): `accept` (a content-type family `image`|`audio`|`video`|
+`text`, the alias `pdf`, or an exact type like `application/zip`; a single
+string or an array) and `max_bytes` (> 0). Enforced at **attach time** on
+REST create/update, GraphQL mutations, `/api/transaction` and `Ctx.Insert/
+Update` — the referenced file's STORED metadata (magic-byte-sniffed content
+type + size, never the client's declaration) is checked, and a violation is
+the standard 422 with `rule: "file_policy"` naming what the field accepts.
+Both keys are file-field-only (rejected elsewhere); existence stays the FK's
+verdict (`file_not_found`); the instance env knobs remain the outer bound at
+upload. A resource with no policy-declaring file field pays a field scan and
+zero queries.
 
 ### Field keys
 
@@ -1577,6 +1600,26 @@ plus an interactive explorer — no flag needed:
   (`{error, fields[]}`); list responses advertise `meta` only (no `links` — the
   live engine returns `{data, meta:{page,per_page,has_next,has_prev}}`, COUNT was
   dropped for performance).
+- **The served spec also lists every REGISTERED CUSTOM ROUTE** (ENG-33,
+  THIRD-PARTY-READY-S1): method, path, the optional `Route.Description` as
+  summary, auth mode (`x-public: true` + `security: []` for a Public route;
+  otherwise Bearer + the RBAC segment/action named in the description),
+  `x-required-role`, `x-byte-serving`, all flagged
+  `x-appitools-custom-route: true`. Request/response SHAPES are deliberately
+  NOT published (a Go handler declares none — the app's contract sheet stays
+  the authority for shapes; the OpenAPI is the authority for EXISTENCE). The
+  CLI `appitools openapi <schema>` prints the schema-derived half only (a
+  schema file has no registered routes); the RUNNING app's /openapi.json is
+  the complete surface. The probe semantics are deliberate and unchanged: an
+  unknown `/api/...` still answers 401 (auth runs before routing) — with the
+  contract now public, the probe is no longer the discovery mechanism, and
+  re-ordering auth after a second route-matching pass would be a drift-prone
+  duplicate of the router for zero information the contract doesn't already
+  give.
+- Every custom **GET** route also answers **HEAD** (ENG-32): same handler, same
+  auth (a Public GET's HEAD skips auth too), RBAC maps HEAD→read,
+  `http.ServeContent` serves HEAD natively (headers + Content-Length/ETag, no
+  body). Generated routes are unchanged (GET-only, as before).
 - `GET /docs` — Swagger UI (loaded from a pinned CDN) pointed at `/openapi.json`,
   for interactive "Try it out" against the same origin.
 - The CLI still prints the spec: `appitools openapi schema.json` (YAML) — same

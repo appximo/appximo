@@ -92,6 +92,27 @@ To serve **your own** model, mount your schema over `/etc/appitools/schema.json`
 (or `--schema yours.json` on the binary). Tenants are addressed by Host
 subdomain: `acme.localhost` → Postgres schema `tenant_acme`.
 
+## Building with an AI agent? Start with three commands
+
+The engine prints its own agent-facing contract — no repo access needed:
+
+```bash
+appitools spec           # 1. the schema grammar (the declarative 90% of an app)
+appitools backend-spec   # 2. custom Go handlers, hooks, auth, background jobs
+appitools frontend-spec  # 3. the API contract a UI consumes, errors→screens, files
+appitools specs          # …or all three at once (one paste = the whole contract)
+```
+
+Paste them into your own Claude Code / Cursor **in that order** (schema →
+backend → frontend), describe your app, and the agent generates against the
+real grammar, self-correcting with `appitools validate --json <schema>` as the
+oracle. A running app additionally serves its complete live surface —
+generated **and** custom routes — at `/openapi.json` (interactive at `/docs`).
+The long-form docs behind each command:
+[SCHEMA_SPEC_LLM](docs/SCHEMA_SPEC_LLM.md) ·
+[BACKEND_SPEC_LLM](docs/BACKEND_SPEC_LLM.md) ·
+[FRONTEND_SPEC_LLM](docs/FRONTEND_SPEC_LLM.md).
+
 ## Where it sits
 
 Honest comparison — these are different tools that overlap on "I need an API":
@@ -370,7 +391,8 @@ images through a byte-serving custom route), and the traps only a real browser
 reveals. Distilled from a production storefront, with a runnable no-build
 example: [docs/FRONTEND_SPEC_LLM.md](docs/FRONTEND_SPEC_LLM.md) +
 [examples/frontend-guide/](examples/frontend-guide/). Give an agent all three
-— `spec`, `backend-spec`, `frontend-spec` — and it can build the full stack.
+— `spec`, `backend-spec`, `frontend-spec` (or `appitools specs`, which prints
+the trilogy in one stream) — and it can build the full stack.
 
 ## Configuration
 

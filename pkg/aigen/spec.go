@@ -24,6 +24,13 @@ definition. This document is the complete distilled grammar; the engine's
 validator is STRICT (any key outside this grammar rejects the schema, nothing
 is silently ignored).
 
+This is one of THREE companion documents the CLI prints — together they cover a
+complete app: this one (` + "`appitools spec`" + `) teaches the SCHEMA;
+` + "`appitools backend-spec`" + ` teaches custom Go handlers, hooks, auth and
+background jobs; ` + "`appitools frontend-spec`" + ` teaches the frontend (the
+API contract a UI consumes, error→screen-state mapping, files/images).
+` + "`appitools specs`" + ` prints all three at once.
+
 ## Core grammar
 `
 
