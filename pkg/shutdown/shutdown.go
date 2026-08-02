@@ -3,6 +3,7 @@ package shutdown
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -43,13 +44,40 @@ func (s *State) ReadyzHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte(`{"status":"ready"}`)) //nolint:errcheck
 }
 
-// Run starts srv and blocks until ctx is cancelled, then executes the shutdown
-// sequence in the mandated order:
+// Run binds srv.Addr and serves on it, blocking until ctx is cancelled, then
+// executes the shutdown sequence in the mandated order:
 //
 //	ready=0  →  sleep drainDelay  →  srv.Shutdown(10s)  →  each onClose()
 //
 // drainDelay should be ~5 s in production (LB drain time) and 0 in tests.
+//
+// Callers that want to ANNOUNCE the server ("serving on :PORT") must bind
+// first with Listen and pass the live listener to Serve — printing before the
+// bind is ENG-34: the old single call forced the announcement before
+// ListenAndServe ever ran, so a process could declare itself serving and then
+// die on `bind: address already in use` while a draining predecessor still
+// answered on the port (a client then talks to the STALE binary believing it
+// is the new one — measured costing a fresh agent 10 minutes).
 func (s *State) Run(ctx context.Context, srv *http.Server, drainDelay time.Duration, onClose ...func()) error {
+	ln, err := Listen(srv.Addr)
+	if err != nil {
+		return err
+	}
+	return s.Serve(ctx, srv, ln, drainDelay, onClose...)
+}
+
+// Listen binds addr (":8080", "127.0.0.1:9090") and returns the live listener.
+// A failed bind returns the error UNANNOUNCED — nothing may claim to serve yet.
+func Listen(addr string) (net.Listener, error) {
+	return net.Listen("tcp", addr)
+}
+
+// Serve runs srv on an ALREADY-BOUND listener and blocks until ctx is
+// cancelled, then executes the same shutdown sequence as Run. The split exists
+// so the boot can bind → announce → serve, in that order: once Listen has
+// returned, the port is truly held and the kernel queues connections, so a
+// "serving on" line printed between Listen and Serve is a statement of fact.
+func (s *State) Serve(ctx context.Context, srv *http.Server, ln net.Listener, drainDelay time.Duration, onClose ...func()) error {
 	go func() {
 		<-ctx.Done()
 		s.MarkShuttingDown()
@@ -67,7 +95,7 @@ func (s *State) Run(ctx context.Context, srv *http.Server, drainDelay time.Durat
 		}
 	}()
 
-	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+	if err := srv.Serve(ln); err != http.ErrServerClosed {
 		return err
 	}
 	return nil

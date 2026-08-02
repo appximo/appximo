@@ -150,13 +150,18 @@ func ServeFleet(mf *fleet.Manifest, version string, debugTracesHTML []byte) erro
 		IdleTimeout:       120 * time.Second,
 	}
 
+	// ENG-34: bind first, announce after — same contract as the single app.
+	ln, err := shutdown.Listen(mf.Listen)
+	if err != nil {
+		return fmt.Errorf("fleet serve: cannot listen on %s: %w", mf.Listen, err)
+	}
 	fmt.Printf("Appitools fleet serving %d app(s) IN-PROCESS on %s — Ctrl+C to stop\n", len(apps), mf.Listen)
 	cleanup := func() {
 		for _, app := range apps {
 			app.cleanup()
 		}
 	}
-	if err := fleetSS.Run(ctx, srv, 5*time.Second, cleanup); err != nil {
+	if err := fleetSS.Serve(ctx, srv, ln, 5*time.Second, cleanup); err != nil {
 		return err
 	}
 	log.Println("fleet serve: shut down cleanly")

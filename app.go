@@ -869,8 +869,19 @@ func (a *App) Start() error {
 		IdleTimeout:       120 * time.Second,
 	}
 
+	// ENG-34: BIND FIRST, announce after. This line used to print before
+	// ListenAndServe ever called Listen, so a boot could declare "serving on
+	// :PORT" and then die on `bind: address already in use` while the draining
+	// predecessor still answered — a client (or a fresh agent's e2e) then talked
+	// to the STALE binary believing it was the new one. Once Listen returns the
+	// port is held and the kernel queues connections, so the announcement is a
+	// statement of fact; a failed bind prints only the error.
+	ln, err := shutdown.Listen(addr)
+	if err != nil {
+		return fmt.Errorf("appitools: cannot listen on %s: %w", addr, err)
+	}
 	fmt.Printf("Appitools serving on %s — Ctrl+C to stop\n", addr)
-	if err := a.ss.Run(ctx, srv, 5*time.Second, a.cleanup); err != nil {
+	if err := a.ss.Serve(ctx, srv, ln, 5*time.Second, a.cleanup); err != nil {
 		return err
 	}
 	log.Println("server shut down cleanly")
@@ -924,8 +935,14 @@ func (a *App) startBackground(ctx context.Context) {
 	}
 
 	go func() {
+		// ENG-34: same bind-then-announce order as the data plane.
+		ln, err := shutdown.Listen(a.cpSrv.Addr)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Control plane error:", err)
+			return
+		}
 		fmt.Println("Control plane serving on " + a.cpSrv.Addr)
-		if err := a.cpSrv.ListenAndServe(); err != nil {
+		if err := a.cpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			fmt.Fprintln(os.Stderr, "Control plane error:", err)
 		}
 	}()

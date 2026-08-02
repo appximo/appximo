@@ -66,8 +66,14 @@ var fleetRunCmd = &cobra.Command{
 
 		statusSrv := &http.Server{Addr: mf.StatusAddr, Handler: fleet.StatusHandler(sup), ReadHeaderTimeout: 5 * time.Second}
 		go func() {
+			// ENG-34: bind first, announce after (see shutdown.Listen).
+			ln, err := net.Listen("tcp", mf.StatusAddr)
+			if err != nil {
+				log.Printf("fleet: status server: %v", err)
+				return
+			}
 			log.Printf("fleet: status/control API on %s (internal — GET /fleet/status)", mf.StatusAddr)
-			if err := statusSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := statusSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 				log.Printf("fleet: status server: %v", err)
 			}
 		}()
@@ -80,8 +86,16 @@ var fleetRunCmd = &cobra.Command{
 			IdleTimeout: 120 * time.Second,
 		}
 		go func() {
+			// ENG-34: bind first, announce after — the proxy is the process's
+			// public face, so a pre-bind announcement here is exactly the
+			// stale-binary trap app.go documents.
+			ln, err := net.Listen("tcp", mf.Listen)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "fleet: proxy:", err)
+				return
+			}
 			fmt.Printf("Fleet proxy serving on %s — %d app(s) — Ctrl+C to stop\n", mf.Listen, len(mf.Apps))
-			if err := proxySrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := proxySrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 				fmt.Fprintln(os.Stderr, "fleet: proxy:", err)
 			}
 		}()

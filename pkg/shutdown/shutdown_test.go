@@ -134,3 +134,80 @@ func TestGracefulShutdown_InFlightRequestsComplete(t *testing.T) {
 		t.Errorf("server error: %v", err)
 	}
 }
+
+// ── ENG-34: bind first, announce after ──────────────────────────────────────
+
+// TestListen_BusyPortFails — half one of ENG-34's contract: the bind is a REAL
+// operation that can fail (a draining predecessor still holds the port), which
+// is exactly why "serving on :PORT" must come after it. A second Listen on a
+// held port errors immediately, unannounced.
+func TestListen_BusyPortFails(t *testing.T) {
+	ln, err := shutdown.Listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("first listen: %v", err)
+	}
+	defer ln.Close()
+
+	if _, err := shutdown.Listen(ln.Addr().String()); err == nil {
+		t.Fatal("second Listen on a held port must fail — this is the failure the announcement used to precede")
+	}
+}
+
+// TestServe_ServesOnBoundListener — half two: between Listen and Serve the
+// port is truly held (the kernel queues connections), so an announcement
+// printed there is a statement of fact; and Serve still runs the normal
+// graceful drain on ctx cancellation.
+func TestServe_ServesOnBoundListener(t *testing.T) {
+	ln, err := shutdown.Listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	s := shutdown.New()
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok")) //nolint:errcheck
+	})}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Serve(ctx, srv, ln, 0) }()
+
+	resp, err := http.Get("http://" + ln.Addr().String() + "/")
+	if err != nil {
+		t.Fatalf("request against the bound listener: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Serve returned error on graceful shutdown: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("Serve did not return after ctx cancellation")
+	}
+	if s.IsReady() {
+		t.Fatal("state must be not-ready after shutdown")
+	}
+}
+
+// TestRun_BusyPortReturnsBindError — Run (bind + Serve) surfaces the bind
+// failure as its return value, so the caller's error path — not its success
+// announcement — is what runs.
+func TestRun_BusyPortReturnsBindError(t *testing.T) {
+	ln, err := shutdown.Listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	s := shutdown.New()
+	srv := &http.Server{Addr: ln.Addr().String(), Handler: http.NewServeMux()}
+	if err := s.Run(context.Background(), srv, 0); err == nil {
+		t.Fatal("Run on a busy port must return the bind error")
+	}
+}
