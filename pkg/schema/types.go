@@ -3,6 +3,7 @@ package schema
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 )
 
 // APISchema is the top-level contract for an Appitools project.
@@ -153,6 +154,25 @@ type FieldDef struct {
 	Pattern   string   `json:"pattern,omitempty"`   // string/text: RE2 regex, len <= MaxPatternLength
 	Format    string   `json:"format,omitempty"`    // string/text: email | uuid | url | date
 
+	// Accept (FILES-1) — file fields only — is the per-FIELD upload policy: the
+	// content types this field will attach. Entries are matched against the
+	// file's STORED (magic-byte-sniffed at upload, never client-declared)
+	// content type: a bare family name ("image", "audio", "video", "text")
+	// matches the whole family (image/*…), "pdf" is a convenience alias for
+	// application/pdf, and an entry containing "/" matches that exact type
+	// ("application/zip"). JSON accepts a single string or an array. Enforced
+	// at ATTACH time (create/update on REST, GraphQL and batch — the upload
+	// endpoint is field-agnostic, so the field's policy applies when a record
+	// references the file): a violating file_id is a 422 `file_policy` naming
+	// what the field accepts. The instance-wide env knobs
+	// (APPITOOLS_FILES_MAX_BYTES / _ALLOWED_EXT) remain the outer bound at
+	// upload.
+	Accept StringList `json:"accept,omitempty"`
+	// MaxBytes (FILES-1) — file fields only — caps the size of a file this
+	// field will attach, in bytes (checked against the stored size at attach
+	// time, same 422 file_policy). Must be > 0 when declared.
+	MaxBytes int64 `json:"max_bytes,omitempty"`
+
 	// StateMachine (G5) declares the allowed lifecycle transitions of a string
 	// status field: which states a row may be CREATED in (Initial) and which moves
 	// are permitted between states (Transitions). The engine forces it on create
@@ -161,6 +181,86 @@ type FieldDef struct {
 	// immutable). A field without StateMachine is a free string (unchanged). Only
 	// string/text fields; coherent with `enum` if both are declared.
 	StateMachine *StateMachine `json:"state_machine,omitempty"`
+}
+
+// StringList is a []string that additionally accepts a single JSON string
+// ("image" ⇒ ["image"]) — the same author-friendly flexibility as
+// state_machine's `initial`.
+type StringList []string
+
+// UnmarshalJSON accepts a string or an array of strings.
+func (sl *StringList) UnmarshalJSON(data []byte) error {
+	var single string
+	if err := json.Unmarshal(data, &single); err == nil {
+		*sl = StringList{single}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(data, &many); err != nil {
+		return err
+	}
+	*sl = StringList(many)
+	return nil
+}
+
+// acceptFamilies are the bare accept entries that match a whole content-type
+// family (entry "image" matches "image/…"). "pdf" is the one alias — the field
+// report's second file use-case was invoices-as-PDF, and application/pdf is
+// what everyone means by it.
+var acceptFamilies = map[string]bool{"image": true, "audio": true, "video": true, "text": true}
+
+const acceptPDFAlias = "pdf"
+
+// validAcceptEntry reports whether one `accept` entry is expressible: a family,
+// the pdf alias, or an exact type/subtype.
+func validAcceptEntry(entry string) bool {
+	if acceptFamilies[entry] || entry == acceptPDFAlias {
+		return true
+	}
+	i := strings.IndexByte(entry, '/')
+	return i > 0 && i < len(entry)-1 && !strings.ContainsAny(entry, " \t")
+}
+
+// HasFilePolicy reports whether this file field declares a per-field attach
+// policy (FILES-1) — the gate the write paths check before paying any lookup.
+func (fd *FieldDef) HasFilePolicy() bool {
+	return fd.Type == "file" && (len(fd.Accept) > 0 || fd.MaxBytes > 0)
+}
+
+// FileAcceptMatches reports whether a stored (sniffed) content type satisfies
+// this field's accept list. An empty list accepts everything. An EMPTY stored
+// content type fails a non-empty list closed: a file whose type could not be
+// determined is not evidence it is an image.
+func (fd *FieldDef) FileAcceptMatches(contentType string) bool {
+	if len(fd.Accept) == 0 {
+		return true
+	}
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	// Strip any ;charset=… parameter — the stored type may carry one.
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+	if ct == "" {
+		return false
+	}
+	for _, entry := range fd.Accept {
+		e := strings.ToLower(entry)
+		switch {
+		case acceptFamilies[e]:
+			if strings.HasPrefix(ct, e+"/") {
+				return true
+			}
+		case e == acceptPDFAlias:
+			if ct == "application/pdf" {
+				return true
+			}
+		default: // exact type/subtype
+			if ct == e {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // StateMachine is the declarative lifecycle of a status field (G5). Initial is the

@@ -240,6 +240,39 @@ func Validate(s *APISchema) []ValidationError {
 						Message: "on_delete cascade is not valid on a file field (deleting a file would silently delete the records that attached it) — use restrict (default: the file cannot be deleted while referenced) or set_null (deleting the file detaches it)",
 					})
 				}
+				// accept / max_bytes (FILES-1): the per-field attach policy.
+				for _, entry := range field.Accept {
+					if !validAcceptEntry(entry) {
+						errs = append(errs, ValidationError{
+							Field: fieldPrefix + ".accept",
+							Message: fmt.Sprintf("invalid accept entry %q: use a content-type family (image, audio, video, text), the alias pdf, or an exact type like application/zip",
+								entry),
+						})
+					}
+				}
+				if field.MaxBytes < 0 {
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".max_bytes",
+						Message: fmt.Sprintf("max_bytes must be > 0 bytes (got %d)", field.MaxBytes),
+					})
+				}
+			}
+
+			// accept / max_bytes only mean something on a file field — anywhere
+			// else they are dead config, rejected like every other key misuse.
+			if field.Type != "file" {
+				if len(field.Accept) > 0 {
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".accept",
+						Message: fmt.Sprintf("accept is only valid on a file field, not type %q", field.Type),
+					})
+				}
+				if field.MaxBytes != 0 {
+					errs = append(errs, ValidationError{
+						Field:   fieldPrefix + ".max_bytes",
+						Message: fmt.Sprintf("max_bytes is only valid on a file field, not type %q", field.Type),
+					})
+				}
 			}
 
 			// on_delete (MIG-F1-S1): the FK's referential action. Only valid on a

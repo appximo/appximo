@@ -50,6 +50,13 @@ func newByteServingApp(t *testing.T, filesDir string) *httptest.Server {
 	if err := app.Register(Route{Method: "GET", Path: "/api/blob-auth", ByteServing: true, Handler: serve}); err != nil {
 		t.Fatalf("register auth blob route: %v", err)
 	}
+	// FILES-2: same shape, immutable cache policy declared by the handler.
+	serveCached := func(ctx Ctx) error {
+		return ctx.ServeFile(ctx.Request().URL.Query().Get("id"), WithCacheControl(CacheControlImmutable))
+	}
+	if err := app.Register(Route{Method: "GET", Path: "/api/blob-cached", Public: true, ByteServing: true, Handler: serveCached}); err != nil {
+		t.Fatalf("register cached blob route: %v", err)
+	}
 	t.Cleanup(func() { app.pool.Close() })
 	srv := httptest.NewServer(app.buildRouter(app.bootSurface()))
 	t.Cleanup(srv.Close)
@@ -128,6 +135,42 @@ func TestServeFile_PublicRoute_StreamsWithETagRangeAnd404s(t *testing.T) {
 			t.Fatalf("miss %q status = %d, want 404", id, r.StatusCode)
 		}
 		r.Body.Close()
+	}
+
+	// ENG-32: HEAD on the custom GET route answers 200 with the GET's headers
+	// and no body (http.ServeContent handles HEAD natively; the public-route
+	// auth skip covers the HEAD alias).
+	headReq, _ := http.NewRequest(http.MethodHead, srv.URL+"/api/blob?id="+fileID, nil)
+	headReq.Host = "bsrv.localhost"
+	headResp, err := (&http.Client{}).Do(headReq)
+	if err != nil {
+		t.Fatalf("HEAD: %v", err)
+	}
+	defer headResp.Body.Close()
+	if headResp.StatusCode != http.StatusOK {
+		t.Fatalf("HEAD status = %d, want 200 (ENG-32)", headResp.StatusCode)
+	}
+	if hb, _ := io.ReadAll(headResp.Body); len(hb) != 0 {
+		t.Fatalf("HEAD carried a %d-byte body", len(hb))
+	}
+	if headResp.Header.Get("ETag") != etag {
+		t.Fatalf("HEAD ETag = %q, want %q", headResp.Header.Get("ETag"), etag)
+	}
+
+	// FILES-2: the handler-declared cache policy rides the stream…
+	respC := getBlob(t, srv, "/api/blob-cached?id="+fileID, "bsrv.localhost", "", nil)
+	defer respC.Body.Close()
+	if cc := respC.Header.Get("Cache-Control"); cc != CacheControlImmutable {
+		t.Fatalf("Cache-Control = %q, want %q", cc, CacheControlImmutable)
+	}
+	// …and is NOT sent on the 404 path (a cached miss would pin forever).
+	respMiss := getBlob(t, srv, "/api/blob-cached?id=2f0c8a4e-8f7f-4f0e-9f0a-1a2b3c4d5e6f", "bsrv.localhost", "", nil)
+	defer respMiss.Body.Close()
+	if respMiss.StatusCode != http.StatusNotFound {
+		t.Fatalf("cached-route miss status = %d, want 404", respMiss.StatusCode)
+	}
+	if cc := respMiss.Header.Get("Cache-Control"); cc != "" {
+		t.Fatalf("404 carried Cache-Control %q — a cacheable miss", cc)
 	}
 }
 

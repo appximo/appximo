@@ -57,6 +57,8 @@ func TestSpecCoversAdvancedGrammar(t *testing.T) {
 		"state_machine", "permissions", "condition_actions", "foreign_keys",
 		"references", "on_update", "hooks", "hmac_secret_env", "events",
 		"renamed_from", "validate --json",
+		// FILES-1: the per-field file attach policy must stay teachable.
+		"max_bytes", "file_policy",
 	} {
 		if !strings.Contains(spec, needle) {
 			t.Errorf("Spec() lost coverage of %q", needle)

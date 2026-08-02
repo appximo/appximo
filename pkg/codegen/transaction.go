@@ -103,6 +103,13 @@ type preparedOp struct {
 	emit     bool
 	allowed  []string // field allowlist applied to the returned row
 	id       string   // delete: the id (for the result + the emitted event)
+
+	// FILES-1: when the resource declares a per-field file policy, the final
+	// written values are re-checked on the SHARED tx just before the op runs
+	// (prepare happens outside the tx). nil for every other resource — zero
+	// cost on the common path.
+	filePolicyRes  *schema.ResourceSchema
+	filePolicyVals map[string]any
 }
 
 // registerTransactionRoute mounts POST /api/transaction (G4): an atomic
@@ -277,14 +284,18 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 			return nil, &txError{status: st, op: op.Op, resource: op.Resource, msg: msg}
 		}
 		cols, ph, args := pkghandlers.BuildInsertArgs(data)
-		return &preparedOp{
+		pop := &preparedOp{
 			kind:     "create",
 			sql:      fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", ref.tbl, cols, ph),
 			args:     args,
 			resource: op.Resource,
 			emit:     ref.emitCreate,
 			allowed:  eval.AllowedFields,
-		}, nil
+		}
+		if resourceHasFilePolicy(&ref.res) {
+			pop.filePolicyRes, pop.filePolicyVals = &ref.res, data
+		}
+		return pop, nil
 
 	case "update":
 		if err := validateOpID(op.ID); err != nil {
@@ -321,7 +332,11 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 			terr.op, terr.resource = op.Op, op.Resource
 			return nil, terr
 		}
-		return &preparedOp{kind: "update", sql: q, args: args, resource: op.Resource, emit: ref.emitUpdate, allowed: eval.AllowedFields}, nil
+		pop := &preparedOp{kind: "update", sql: q, args: args, resource: op.Resource, emit: ref.emitUpdate, allowed: eval.AllowedFields}
+		if resourceHasFilePolicy(&ref.res) {
+			pop.filePolicyRes, pop.filePolicyVals = &ref.res, sets
+		}
+		return pop, nil
 
 	default: // delete
 		if err := validateOpID(op.ID); err != nil {
@@ -362,6 +377,18 @@ func execPreparedOp(ctx context.Context, tx pgx.Tx, tenantID string, p *prepared
 			}
 		}
 		return map[string]any{"deleted": true, "id": p.id}, nil
+	}
+
+	// FILES-1: per-field file attach policy, on the shared tx (same 422 shape
+	// as the single-op counterpart; a violation fails the WHOLE transaction).
+	if p.filePolicyRes != nil {
+		fpErrs, fpErr := CheckFilePoliciesTx(ctx, tx, p.filePolicyRes, p.filePolicyVals)
+		if fpErr != nil {
+			return nil, dbTxError(fpErr)
+		}
+		if len(fpErrs) > 0 {
+			return nil, &txError{status: http.StatusUnprocessableEntity, op: p.kind, resource: p.resource, msg: "validation_failed", fields: fpErrs}
+		}
 	}
 
 	rows, err := tx.Query(ctx, p.sql, p.args...)

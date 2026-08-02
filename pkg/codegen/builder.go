@@ -516,6 +516,19 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				return
 			}
 
+			// Per-field file attach policy (FILES-1): checked on the FINAL body
+			// (post-hook, post-RBAC) so what is checked is what is inserted. A
+			// resource with no policy-declaring file field pays a field scan and
+			// no query.
+			if fpErrs, fpErr := CheckFilePoliciesTenant(req.Context(), tdb, tc.PGSchema, wres, body); fpErr != nil {
+				writeDBErr(w, req, fpErr)
+				return
+			} else if len(fpErrs) > 0 {
+				markSpan(req, "validate")
+				writeValidationErrs(w, fpErrs)
+				return
+			}
+
 			// NOTE: column identifiers are quoted by BuildInsertArgs so a client
 			// key cannot break out of the identifier position (SQL injection). We do
 			// NOT whitelist keys against res.Fields here: the schema can evolve at
@@ -819,6 +832,17 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 							sets[col] = nv
 						}
 					}
+				}
+
+				// Per-field file attach policy (FILES-1) on the final SET values —
+				// same check, same 422 shape as create.
+				if fpErrs, fpErr := CheckFilePoliciesTenant(req.Context(), tdb, tc.PGSchema, wres, sets); fpErr != nil {
+					writeDBErr(w, req, fpErr)
+					return
+				} else if len(fpErrs) > 0 {
+					markSpan(req, "validate")
+					writeValidationErrs(w, fpErrs)
+					return
 				}
 
 				// Build + run the UPDATE via the shared core (SET clauses, auto

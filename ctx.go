@@ -203,7 +203,19 @@ type Ctx interface {
 	//     tenant's own schema).
 	//   - The lookup reads committed state (the engine pool), not the handler's
 	//     transaction: a file uploaded inside THIS tx is not yet servable.
-	ServeFile(fileID string) error
+	//   - Cache policy (FILES-2): by default no Cache-Control is set (browsers
+	//     revalidate — cheap 304s via the strong ETag). Pass
+	//     appitools.WithCacheControl(...) to declare one; the store is
+	//     content-addressed, so a given file id's BYTES can never change —
+	//     appitools.CacheControlImmutable ("public, max-age=31536000,
+	//     immutable") is safe for any route whose URL embeds the file id (a
+	//     product image, an avatar): a different image is a different id, so a
+	//     stale cache is structurally impossible. Do NOT use it when the SAME
+	//     URL can start serving a DIFFERENT file (e.g. /api/logo that follows a
+	//     mutable pointer) — there, the default revalidation is the correct
+	//     policy. The header is only sent on a successful stream, never on the
+	//     404/error paths.
+	ServeFile(fileID string, opts ...ServeFileOption) error
 
 	// JSON buffers a success response flushed AFTER the transaction commits, so
 	// a commit failure becomes a 500 rather than a false 200. Error buffers an
@@ -250,6 +262,29 @@ var (
 	// yields a 404 {"error":"not found"}.
 	ErrFileNotFound = files.ErrNotFound
 )
+
+// ServeFileOption tunes one Ctx.ServeFile response (FILES-2). Options are
+// applied at serve time (post-commit), and only on the success path.
+type ServeFileOption func(*serveFileOpts)
+
+type serveFileOpts struct {
+	cacheControl string
+}
+
+// WithCacheControl sets the Cache-Control header on the streamed response.
+// The engine deliberately does not default this: it cannot know whether the
+// ROUTE's URL is stable-per-content (immutable-safe) or a mutable pointer
+// (must revalidate) — that is the handler's knowledge. For the common
+// content-addressed case use CacheControlImmutable.
+func WithCacheControl(value string) ServeFileOption {
+	return func(o *serveFileOpts) { o.cacheControl = value }
+}
+
+// CacheControlImmutable is the aggressive-but-safe policy for a URL that
+// embeds the file id: the store is content-addressed (an id's bytes never
+// change), so a browser may cache it for a year and never revalidate. A
+// changed image arrives under a NEW id — and therefore a new URL.
+const CacheControlImmutable = "public, max-age=31536000, immutable"
 
 // InvalidTransitionError is returned by Ctx.Update when a schema-declared
 // state machine refused the move (LIBRARY-GAPS-S2, ENG-7) — the same verdict,
@@ -328,8 +363,10 @@ type requestCtx struct {
 	byteServing bool
 	// serveFileID is the file registered by Ctx.ServeFile; flush streams it
 	// AFTER the commit (same discipline as the JSON buffer — the response never
-	// races the transaction). Empty = no file response.
-	serveFileID string
+	// races the transaction). Empty = no file response. serveFileOpts carries
+	// the per-response options (FILES-2: cache policy).
+	serveFileID   string
+	serveFileOpts serveFileOpts
 }
 
 // --- typed errors mapped to HTTP status by the middleware -------------------
@@ -501,6 +538,15 @@ func (c *requestCtx) Insert(resource string, data map[string]any) (map[string]an
 	if len(data) == 0 {
 		return nil, &ValidationError{Fields: []schema.FieldRuleError{{Rule: "empty", Message: "no writable fields"}}}
 	}
+	// Per-field file attach policy (FILES-1) — same check as REST/GraphQL/batch,
+	// on the handler's tx.
+	if res, ok := c.eng.schema.Resources[resource]; ok {
+		if fpErrs, fpErr := codegen.CheckFilePoliciesTx(c.ctx, c.tx, &res, data); fpErr != nil {
+			return nil, fpErr
+		} else if len(fpErrs) > 0 {
+			return nil, &ValidationError{Fields: fpErrs}
+		}
+	}
 
 	cols, ph, args := pkghandlers.BuildInsertArgs(data)
 	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *",
@@ -530,6 +576,12 @@ func (c *requestCtx) Update(resource, id string, data map[string]any) (map[strin
 	data = applyWriteAllowlist(data, eval.AllowedFields)
 	if len(data) == 0 {
 		return nil, &ValidationError{Fields: []schema.FieldRuleError{{Rule: "empty", Message: "no writable fields"}}}
+	}
+	// Per-field file attach policy (FILES-1) — same check as REST/GraphQL/batch.
+	if fpErrs, fpErr := codegen.CheckFilePoliciesTx(c.ctx, c.tx, &res, data); fpErr != nil {
+		return nil, fpErr
+	} else if len(fpErrs) > 0 {
+		return nil, &ValidationError{Fields: fpErrs}
 	}
 
 	keys := sortedKeys(data)
@@ -720,7 +772,7 @@ func (c *requestCtx) CreateUser(email, password, role string) (CreatedUser, erro
 // discipline as the JSON buffer — a response never races its transaction, and
 // a not-found discovered at serve time can still answer a clean 404 because
 // nothing has been written yet).
-func (c *requestCtx) ServeFile(fileID string) error {
+func (c *requestCtx) ServeFile(fileID string, opts ...ServeFileOption) error {
 	// Misuse is a loud error, not a degraded stream: without ByteServing the
 	// response cache buffers the whole blob in RAM (and strips
 	// Content-Disposition/Range headers on a hit) and the compression wrapper
@@ -742,6 +794,9 @@ func (c *requestCtx) ServeFile(fileID string) error {
 		return ErrFileNotFound
 	}
 	c.serveFileID = strings.TrimSpace(fileID)
+	for _, opt := range opts {
+		opt(&c.serveFileOpts)
+	}
 	return nil
 }
 
@@ -755,6 +810,13 @@ func (c *requestCtx) serveRegisteredFile(w http.ResponseWriter) {
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	// Handler-declared cache policy (FILES-2). Set BEFORE Serve (headers must
+	// precede the first body write) and REMOVED on every failure path below —
+	// a cached 404 with a year-long immutable policy would pin the miss in
+	// every browser that saw it.
+	if cc := c.serveFileOpts.cacheControl; cc != "" {
+		w.Header().Set("Cache-Control", cc)
+	}
 	// The route's deadline (Route.Timeout) bounds the metadata lookup and an
 	// S3 proxy read; http.ServeContent on the local backend is not
 	// context-aware, but its work is a disk sendfile bounded by the server's
@@ -763,6 +825,7 @@ func (c *requestCtx) serveRegisteredFile(w http.ResponseWriter) {
 	if err == nil {
 		return
 	}
+	w.Header().Del("Cache-Control")
 	if errors.Is(err, files.ErrNotFound) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return

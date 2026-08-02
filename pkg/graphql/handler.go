@@ -1227,6 +1227,14 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 			return nil, fmt.Errorf("%s", msg)
 		}
 
+		// Per-field file attach policy (FILES-1) — same check, same S44 fields
+		// as the REST create (a violation lands in errors[].extensions.fields).
+		if fpErrs, fpErr := codegen.CheckFilePoliciesTenant(p.Context, tdb, tc.PGSchema, res, body); fpErr != nil {
+			return nil, safeDBErr(fpErr)
+		} else if len(fpErrs) > 0 {
+			return nil, &validationError{fields: fpErrs}
+		}
+
 		// Shared create core: the SAME codegen.RunInsert the REST POST handler uses,
 		// so a resource with events:["create"] emits an IDENTICAL {resource}.created
 		// event (same topic + lean payload) atomically with the insert — closing the
@@ -1342,6 +1350,14 @@ func updateResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 					sets[col] = nv
 				}
 			}
+		}
+
+		// Per-field file attach policy (FILES-1) on the final SET values — same
+		// check, same S44 fields as the REST update.
+		if fpErrs, fpErr := codegen.CheckFilePoliciesTenant(p.Context, tdb, tc.PGSchema, res, sets); fpErr != nil {
+			return nil, safeDBErr(fpErr)
+		} else if len(fpErrs) > 0 {
+			return nil, &validationError{fields: fpErrs}
 		}
 
 		var cond *rbac.WhereCondition

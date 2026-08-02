@@ -45,7 +45,11 @@ FIELD KEYS (all optional unless noted):
     optional "on_delete": "restrict" | "cascade" | "set_null"
   a "file" field attaches an uploaded file to the record (stores a file_id with
     referential integrity); optional "on_delete": "restrict" | "set_null" only —
-    no relation/references/enum/default/auto on it
+    no relation/references/enum/default/auto on it. Optional per-field attach
+    policy: "accept" (a content-type family "image"|"audio"|"video"|"text", the
+    alias "pdf", or an exact type like "application/zip"; string or array) and
+    "max_bytes" (> 0) — a write attaching a file that violates them is a 422
+    naming the field (rule "file_policy"). Both keys are file-field-only.
 
 RELATIONS (optional per-resource "relations" block, sibling of "fields", for nested reads):
   "relations": {
