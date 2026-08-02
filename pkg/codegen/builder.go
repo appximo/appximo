@@ -74,13 +74,47 @@ func makeRelationRBAC(policy *rbac.Policy, req *http.Request) query.RelationRBAC
 // writeIncludeList writes the {"data":[...],"meta":{...}} envelope for a
 // list-with-embeds response. data is the raw JSON array built by Postgres — it is
 // written verbatim, never re-marshalled (the low-overhead direct-bytes path).
-func writeIncludeList(w http.ResponseWriter, data []byte, page, perPage, n int) {
+// meta is built by listMeta so the include path and the flat path always report
+// the same shape (a cursor request carries no page — ENG-15; an opt-in total
+// rides along — ENG-23).
+func writeIncludeList(w http.ResponseWriter, data []byte, meta map[string]any) {
 	if len(data) == 0 {
 		data = []byte("[]")
 	}
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"data":%s,"meta":{"page":%d,"per_page":%d,"has_next":%t,"has_prev":%t}}`,
-		data, page, perPage, n == perPage, page > 1)
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		metaJSON = []byte("{}")
+	}
+	fmt.Fprintf(w, `{"data":%s,"meta":%s}`, data, metaJSON)
+}
+
+// listMeta builds the meta object for a list response — ONE builder for the
+// flat and include paths so they cannot drift.
+//
+// A CURSOR request (?after/?before) reports NO page and NO has_prev (ENG-15):
+// keyset pagination has no page number, and meta.page used to echo the default
+// (or a sent page the SQL ignored — that combination is a 400 now), actively
+// asserting a page the query never used. per_page and has_next stay — both are
+// real (the LIMIT, and "the window came back full").
+//
+// total/totalPages are attached when the caller opted in with ?count (ENG-23);
+// nil means "not requested" — a FAILED count is an error response upstream,
+// never a silently missing key.
+func listMeta(qb *query.QueryBuilder, n int, total, totalPages *int64) map[string]any {
+	meta := map[string]any{
+		"per_page": qb.PerPage(),
+		"has_next": n == qb.PerPage(),
+	}
+	if !qb.UsesCursor() {
+		meta["page"] = qb.Page()
+		meta["has_prev"] = qb.Page() > 1
+	}
+	if total != nil {
+		meta["total"] = *total
+		meta["total_pages"] = *totalPages
+	}
+	return meta
 }
 
 // CacheInvalidator drops a tenant's cached GET responses. *cache.ResponseCache
@@ -228,6 +262,16 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 
 	r := chi.NewMux()
 
+	// NIGHT-SWEEP-S1: chi's default 405 sends the correct Allow header with an
+	// EMPTY body — the one engine 4xx a body.error-parsing client got nothing
+	// from. The Allow header (chi sets it before invoking this handler) stays;
+	// the body joins the engine's JSON error contract.
+	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]string{"error": "method " + req.Method + " not allowed on this route (see the Allow header)"}) //nolint:errcheck
+	})
+
 	// RELATIONS-V1: policy for evaluating read access to relation TARGET resources
 	// at request time. Built once here (boot), so the per-request closure is just
 	// a bound Evaluate call. nil-safe: a schema with no relations never uses it.
@@ -273,11 +317,64 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				return
 			}
 
+			// Opt-in total (G3 + ENG-23): the flag is read by VALUE (count=false is
+			// OFF — it used to turn the total ON, presence-only, disagreeing with
+			// GraphQL's real Boolean), and it is parsed BEFORE the include branch so
+			// ?count=true&include=… works instead of being silently dropped (the
+			// embed path used to return before the count block ever ran).
+			wantCount, cerr := query.ParseCountFlag(req.URL.Query())
+			if cerr != nil {
+				writeJSONErr(w, http.StatusBadRequest, cerr.Error())
+				return
+			}
+			if wantCount && qb.UsesCursor() {
+				// The cursor is part of the WHERE, so the COUNT would return the
+				// rows REMAINING after the cursor — not the total the caller
+				// means by ?count — and total_pages describes pages a cursor
+				// request does not have. Naming the conflict beats serving a
+				// number that silently means something else (ENG-15/ENG-23).
+				writeJSONErr(w, http.StatusBadRequest, "count cannot be combined with a cursor: with ?after/?before the COUNT would cover only the rows past the cursor, not the total — ask for the total on a page request, or via /aggregate?count")
+				return
+			}
+			runCount := func() (total, totalPages *int64, ok bool) {
+				if !wantCount {
+					return nil, nil, true
+				}
+				_, countQ, _, countArgs := qb.SQL()
+				t, qerr := tdb.QueryScalarDirect(req.Context(), tc.PGSchema, name, countQ, countArgs...)
+				if qerr != nil {
+					// ENG-23: a failed COUNT(*) used to be swallowed — the 200 went
+					// out with meta.total simply missing, indistinguishable from
+					// "you didn't ask". The caller asked; failing to answer is an
+					// error, not an omission.
+					markSpan(req, "query")
+					writeDBErr(w, req, qerr)
+					return nil, nil, false
+				}
+				per := int64(qb.PerPage())
+				tp := (t + per - 1) / per
+				if tp == 0 {
+					tp = 1
+				}
+				return &t, &tp, true
+			}
+
 			// RELATIONS-V1: opt-in nested embedding. WITHOUT ?include= this branch
 			// is skipped entirely and the SQL below is byte-identical to before (the
 			// no-regression gate). WITH it, one json_agg+LATERAL query serves the
 			// whole nested tree in a single round-trip (no N+1), RBAC-compiled.
-			if include := req.URL.Query().Get("include"); query.HasInclude(include) {
+			include, incPresent, ierr := query.SingleParam(req.URL.Query(), "include")
+			if ierr != nil {
+				writeJSONErr(w, http.StatusBadRequest, ierr.Error())
+				return
+			}
+			if incPresent && !query.HasInclude(include) {
+				// ENG-30's rule on this parameter too: `?include=` (an empty form
+				// field) used to be silently treated as absent.
+				writeJSONErr(w, http.StatusBadRequest, "include has an empty value (use include=relation[,relation.child])")
+				return
+			}
+			if query.HasInclude(include) {
 				baseSelect, _, baseArgs, _ := qb.SQL()
 				of, od := qb.EffectiveOrder()
 				incSQL, incArgs, ierr := query.BuildListInclude(name, include, baseSelect, baseArgs, of, od, s, schema.DefaultMaxIncludeDepth, makeRelationRBAC(policy, req))
@@ -291,8 +388,12 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					writeDBErr(w, req, qerr)
 					return
 				}
+				total, totalPages, ok := runCount()
+				if !ok {
+					return
+				}
 				markSpan(req, "query")
-				writeIncludeList(w, data, qb.Page(), qb.PerPage(), int(n))
+				writeIncludeList(w, data, listMeta(qb, int(n), total, totalPages))
 				markSpan(req, "serialize")
 				return
 			}
@@ -323,37 +424,21 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				data = []map[string]any{}
 			}
 
-			hasNext := len(data) == qb.PerPage()
-			hasPrev := qb.Page() > 1
-
-			meta := map[string]any{
-				"page":     qb.Page(),
-				"per_page": qb.PerPage(),
-				"has_next": hasNext,
-				"has_prev": hasPrev,
-			}
 			// Opt-in total (G3): ?count=true runs a COUNT(*) over the SAME filtered,
 			// RBAC-scoped set and adds total + total_pages. Off by default, so the
 			// plain list path is byte-identical (and free of the extra COUNT) — the
 			// no-regression gate. Closes the REST↔GraphQL asymmetry (GraphQL already
-			// returns total).
-			if _, want := req.URL.Query()["count"]; want {
-				_, countQ, _, countArgs := qb.SQL()
-				if total, cerr := tdb.QueryScalarDirect(req.Context(), tc.PGSchema, name, countQ, countArgs...); cerr == nil {
-					per := int64(qb.PerPage())
-					tp := (total + per - 1) / per
-					if tp == 0 {
-						tp = 1
-					}
-					meta["total"] = total
-					meta["total_pages"] = tp
-				}
+			// returns total). Flag semantics + the failed-COUNT contract: see
+			// runCount/ParseCountFlag above (ENG-23).
+			total, totalPages, ok := runCount()
+			if !ok {
+				return
 			}
 
 			w.Header().Set("Content-Type", "application/json")
 			pkghandlers.WriteJSON(w, map[string]any{ //nolint:errcheck
 				"data": data,
-				"meta": meta,
+				"meta": listMeta(qb, len(data), total, totalPages),
 			})
 			markSpan(req, "serialize")
 		}))
@@ -596,6 +681,13 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				json.NewEncoder(w).Encode(map[string]string{"error": "invalid id format"})
 				return
 			}
+			// NIGHT-SWEEP-S1: a list parameter on a single-record route used to be
+			// silently discarded — GET /{id}?filter[status][eq]=paid returned the
+			// row REGARDLESS, while the same parameter on the list is a named 400.
+			if err := query.RejectListParams(req.URL.Query(), "a single-record route (use /api/"+name+" to filter)", false); err != nil {
+				writeJSONErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
 			// Enforce the row-level RBAC condition (if any) so a restricted role
 			// cannot read another principal's row by guessing its id.
 			evalResult := rbac.EvalResultFromCtx(req.Context())
@@ -612,7 +704,18 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// RELATIONS-V1: get-by-id with embeds. Opt-in; without ?include= the
 			// path below is unchanged. The base select (q/args, row-cond applied)
 			// is wrapped so the embed cannot resurrect a row the base WHERE excluded.
-			if include := req.URL.Query().Get("include"); query.HasInclude(include) {
+			include, incPresent, ierr := query.SingleParam(req.URL.Query(), "include")
+			if ierr != nil {
+				writeJSONErr(w, http.StatusBadRequest, ierr.Error())
+				return
+			}
+			if incPresent && !query.HasInclude(include) {
+				// ENG-30's rule on this parameter too: `?include=` (an empty form
+				// field) used to be silently treated as absent.
+				writeJSONErr(w, http.StatusBadRequest, "include has an empty value (use include=relation[,relation.child])")
+				return
+			}
+			if query.HasInclude(include) {
 				incSQL, incArgs, ierr := query.BuildGetInclude(name, include, q, args, s, schema.DefaultMaxIncludeDepth, makeRelationRBAC(policy, req))
 				if ierr != nil {
 					writeJSONErr(w, ierr.Status, ierr.Msg)
@@ -671,6 +774,10 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				json.NewEncoder(w).Encode(map[string]string{"error": "invalid id format"})
 				return
 			}
+			if err := query.RejectListParams(req.URL.Query(), "a single-record route (a delete is by id — a conditional delete is the transaction guard)", true); err != nil {
+				writeJSONErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
 			// Enforce the row-level RBAC condition (if any) so a restricted role
 			// cannot delete another principal's row by guessing its id.
 			evalResult := rbac.EvalResultFromCtx(req.Context())
@@ -705,7 +812,19 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		// is deliberately NOT wrapped in CachedGet (a stream is never cacheable).
 		// JWT + RBAC run in the middleware chain exactly like the list endpoint
 		// (read permission on the resource = permission to subscribe).
-		r.Get("/api/"+name+"/events", sseHandler(name, hub))
+		// NIGHT-SWEEP-S1: the stream used to silently discard the ENTIRE query
+		// string, including filter[…] — a caller subscribing to "paid orders only"
+		// got every event and could not tell. Filtered delivery does not exist, so
+		// the engine-owned parameters are rejected by name (delivery-time RBAC
+		// filtering — fields/rows by ROLE — is unchanged and unrelated).
+		sse := sseHandler(name, hub)
+		r.Get("/api/"+name+"/events", func(w http.ResponseWriter, req *http.Request) {
+			if err := query.RejectListParams(req.URL.Query(), "the event stream (events are delivered unfiltered — filter client-side)", true); err != nil {
+				writeJSONErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			sse(w, req)
+		})
 
 		// --- Update (PUT = full replace, PATCH = partial) ---
 		// RBAC action="update" is enforced by RBACMiddleware before the handler runs
@@ -718,6 +837,10 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				id := chi.URLParam(req, "id")
 				if _, err := uuid.Parse(id); err != nil {
 					writeJSONErr(w, http.StatusBadRequest, "invalid id format")
+					return
+				}
+				if err := query.RejectListParams(req.URL.Query(), "a single-record route (an update is by id — a conditional update is the transaction guard)", true); err != nil {
+					writeJSONErr(w, http.StatusBadRequest, err.Error())
 					return
 				}
 				evalResult := rbac.EvalResultFromCtx(req.Context())
@@ -929,6 +1052,12 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusBadRequest)
 					json.NewEncoder(w).Encode(map[string]string{"error": "invalid id format"})
+					return
+				}
+				// NIGHT-SWEEP-S1: same contract as get-by-id — the subroute used to
+				// silently discard filter[/sort while the list route names them.
+				if err := query.RejectListParams(req.URL.Query(), "a relation subroute (it returns the referenced record — filter on /api/"+relResource+")", true); err != nil {
+					writeJSONErr(w, http.StatusBadRequest, err.Error())
 					return
 				}
 

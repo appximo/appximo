@@ -491,18 +491,21 @@ func buildOAComponents(s *schema.APISchema) map[string]any {
 				"fields": map[string]any{"type": "array", "items": oaSchemaRef("ValidationError")},
 			},
 		},
-		// Matches the actual list response meta: page/per_page/has_next/has_prev. No
-		// total/total_pages — COUNT(*) was removed from the list handler for
-		// performance, so the response never carries row totals; and no `links`
-		// object — the live engine emits meta only (keyset pages via ?after=<last id>).
+		// Matches the actual list response meta. page/has_prev are ABSENT on a
+		// cursor (?after/?before) request — keyset pagination has no page number,
+		// and meta must not invent one (ENG-15). total/total_pages appear only
+		// when the caller opted in with ?count=true (ENG-23); no `links` object —
+		// the live engine emits meta only (keyset pages via ?after=<last id>).
 		"PaginationMeta": map[string]any{
 			"type":     "object",
-			"required": []string{"page", "per_page", "has_next", "has_prev"},
+			"required": []string{"per_page", "has_next"},
 			"properties": map[string]any{
-				"page":     map[string]any{"type": "integer"},
-				"per_page": map[string]any{"type": "integer"},
-				"has_next": map[string]any{"type": "boolean", "description": "more rows exist after this page (continue with ?after=<last item's id>)"},
-				"has_prev": map[string]any{"type": "boolean"},
+				"page":        map[string]any{"type": "integer", "description": "absent on a cursor (?after/?before) request — a cursor request has no page number"},
+				"per_page":    map[string]any{"type": "integer"},
+				"has_next":    map[string]any{"type": "boolean", "description": "more rows exist after this page (continue with ?after=<last item's id>)"},
+				"has_prev":    map[string]any{"type": "boolean", "description": "absent on a cursor request"},
+				"total":       map[string]any{"type": "integer", "description": "present only with ?count=true — the COUNT(*) over the same filtered, RBAC-scoped set"},
+				"total_pages": map[string]any{"type": "integer", "description": "present only with ?count=true"},
 			},
 		},
 	}

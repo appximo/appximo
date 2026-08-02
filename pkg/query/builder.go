@@ -108,6 +108,49 @@ func BuildQuery(
 		condition: condition,
 	}
 
+	// Cursor pagination is parsed FIRST because it changes what the other
+	// parameters may mean (ENG-15). Three silences used to live here:
+	//   - `?after=A&before=B` kept `after` and dropped `before` without a word
+	//     (two contradictory directions, one silently discarded);
+	//   - `?after=…&sort=x` / `&page=7` dropped the sort and the page — and the
+	//     response's meta.page still ECHOED the page it ignored, actively
+	//     asserting something false;
+	//   - `?after=` (an empty cursor — what an empty form field produces) was
+	//     treated as absent, the same presence-vs-empty split ENG-30 closed for
+	//     page/sort.
+	// A cursor request now owns its shape: one direction, no page, no sort
+	// (cursor pagination orders by id — that is what makes the cursor total),
+	// and meta reports no page number (see UsesCursor).
+	afterVal, afterPresent, err := singleValue(params, "after")
+	if err != nil {
+		return nil, err
+	}
+	beforeVal, beforePresent, err := singleValue(params, "before")
+	if err != nil {
+		return nil, err
+	}
+	if afterPresent && beforePresent {
+		return nil, fmt.Errorf("conflicting cursors: after and before cannot be combined — a request paginates in one direction, send one of them")
+	}
+	if afterPresent {
+		if !uuidRe.MatchString(afterVal) {
+			return nil, fmt.Errorf("invalid after cursor: must be a lowercase UUID")
+		}
+		qb.afterID = afterVal
+	}
+	if beforePresent {
+		if !uuidRe.MatchString(beforeVal) {
+			return nil, fmt.Errorf("invalid before cursor: must be a lowercase UUID")
+		}
+		qb.beforeID = beforeVal
+	}
+	cursorParam := ""
+	if afterPresent {
+		cursorParam = "after"
+	} else if beforePresent {
+		cursorParam = "before"
+	}
+
 	// ADR-024. `?page=abc` has always answered "must be a positive integer" —
 	// and `?page=0` and `?page=-4` were then silently served as page 1. The
 	// engine's own error message stated the rule its silent path broke. A
@@ -123,9 +166,14 @@ func BuildQuery(
 	// was a named 400: the same function applied two policies to sibling
 	// parameters. An empty value now fails the same "must be a positive integer"
 	// check its non-empty siblings do.
-	if pageStr, present := firstValue(params, "page"); present {
-		p, err := strconv.Atoi(pageStr)
-		if err != nil || p <= 0 {
+	if pageStr, present, err := singleValue(params, "page"); err != nil {
+		return nil, err
+	} else if present {
+		if cursorParam != "" {
+			return nil, fmt.Errorf("page cannot be combined with the %s cursor: cursor pagination has no page number — remove page (size the window with per_page)", cursorParam)
+		}
+		p, perr := strconv.Atoi(pageStr)
+		if perr != nil || p <= 0 {
 			return nil, fmt.Errorf("invalid page parameter %q: must be a positive integer", pageStr)
 		}
 		if p > MaxPage {
@@ -134,9 +182,11 @@ func BuildQuery(
 		qb.page = p
 	}
 
-	if ppStr, present := firstValue(params, "per_page"); present {
-		pp, err := strconv.Atoi(ppStr)
-		if err != nil || pp <= 0 {
+	if ppStr, present, err := singleValue(params, "per_page"); err != nil {
+		return nil, err
+	} else if present {
+		pp, perr := strconv.Atoi(ppStr)
+		if perr != nil || pp <= 0 {
 			return nil, fmt.Errorf("invalid per_page parameter %q: must be a positive integer", ppStr)
 		}
 		if pp > MaxPerPage {
@@ -161,6 +211,9 @@ func BuildQuery(
 		}
 		if len(vals) == 0 {
 			return nil, fmt.Errorf("filter parameter %q has no value", key)
+		}
+		if len(vals) > 1 {
+			return nil, repeatedParamErr(key, len(vals))
 		}
 		field := m[1]
 		op := "eq"
@@ -242,7 +295,16 @@ func BuildQuery(
 	// param". A sort that cannot be honored is now an error.
 	// Presence-gated like page/per_page (ENG-30): `?sort=` used to be silently
 	// ignored while `?sort=ghost` was a named 400 — two policies on one param.
-	if sf, present := firstValue(params, "sort"); present {
+	if sf, present, err := singleValue(params, "sort"); err != nil {
+		return nil, err
+	} else if present {
+		if cursorParam != "" {
+			// ENG-15: a keyset cursor orders by id — that ordering is what makes
+			// "rows after X" well-defined — so a sort cannot be honored with one.
+			// It used to be silently dropped: the caller asked for newest-first
+			// and read an id-ordered page believing it was sorted.
+			return nil, fmt.Errorf("sort cannot be combined with the %s cursor: cursor pagination orders by id — remove sort, or paginate with page instead of a cursor", cursorParam)
+		}
 		if sf == "" {
 			return nil, fmt.Errorf("sort parameter has an empty value (available: %s)", availableFieldNames(res))
 		}
@@ -251,14 +313,18 @@ func BuildQuery(
 		}
 		qb.sortField = sf
 		qb.sortOrder = "ASC"
-		if dir, dirPresent := firstValue(params, "order"); dirPresent {
-			d, err := sortDirection(dir)
-			if err != nil {
-				return nil, err
+		if dir, dirPresent, derr := singleValue(params, "order"); derr != nil {
+			return nil, derr
+		} else if dirPresent {
+			d, serr := sortDirection(dir)
+			if serr != nil {
+				return nil, serr
 			}
 			qb.sortOrder = d
 		}
-	} else if dir, present := firstValue(params, "order"); present {
+	} else if dir, present, err := singleValue(params, "order"); err != nil {
+		return nil, err
+	} else if present {
 		// `?order=desc` with no `?sort=` names a direction but no field — it
 		// used to be read by nothing and dropped without a word, the exact
 		// sibling of the dropped sort field (ENG-30). Saying so costs one map
@@ -266,17 +332,39 @@ func BuildQuery(
 		return nil, fmt.Errorf("order parameter %q requires sort (use ?sort=field&order=asc|desc, or ?order[field]=asc|desc)", dir)
 	}
 
-	// new order syntax: ?order[campo]=asc|desc (overrides old if both present)
-	for key, vals := range params {
-		if !strings.HasPrefix(key, orderParamPrefix) {
-			continue
+	// new order syntax: ?order[campo]=asc|desc (overrides ?sort= if both present —
+	// deterministic and documented, unlike the case below).
+	//
+	// ENG-16: with TWO order[…] parameters the loop used to take whichever key Go's
+	// map iteration yielded first and break — measured 174/26 across 200 builds of
+	// the SAME URL, a coin flip visible to the client. The keys are now collected
+	// and sorted first: one is the documented surface, more than one is an error
+	// naming them all (multi-field sort does not exist — see AGENTS "Does not
+	// exist"), and the single-key path is byte-identical SQL to before.
+	var orderKeys []string
+	for key := range params {
+		if strings.HasPrefix(key, orderParamPrefix) {
+			orderKeys = append(orderKeys, key)
 		}
+	}
+	sort.Strings(orderKeys)
+	if len(orderKeys) > 1 {
+		return nil, fmt.Errorf("multiple order parameters (%s): one sort field is supported — multi-field sort does not exist", strings.Join(orderKeys, ", "))
+	}
+	for _, key := range orderKeys {
+		vals := params[key]
 		m := orderParamRe.FindStringSubmatch(key)
 		if m == nil {
 			return nil, fmt.Errorf("malformed order parameter %q: expected order[field]=asc|desc", key)
 		}
 		if len(vals) == 0 {
 			return nil, fmt.Errorf("order parameter %q has no value", key)
+		}
+		if len(vals) > 1 {
+			return nil, repeatedParamErr(key, len(vals))
+		}
+		if cursorParam != "" {
+			return nil, fmt.Errorf("%s cannot be combined with the %s cursor: cursor pagination orders by id — remove it, or paginate with page instead of a cursor", key, cursorParam)
 		}
 		field := m[1]
 		if _, ok := res.Fields[field]; !ok && field != "id" {
@@ -288,26 +376,42 @@ func BuildQuery(
 			return nil, err
 		}
 		qb.sortOrder = d
-		break // first valid order param wins
 	}
 
-	qb.search = params.Get("search")
-
-	// Cursor pagination — mutually exclusive; ?after takes precedence if both given.
-	if after := params.Get("after"); after != "" {
-		if !uuidRe.MatchString(after) {
-			return nil, fmt.Errorf("invalid after cursor: must be a lowercase UUID")
+	if search, _, err := singleValue(params, "search"); err != nil {
+		return nil, err
+	} else if search != "" {
+		// NIGHT-SWEEP-S1: search scans only string/text columns, so on a
+		// resource with none it used to be a silent no-op — the full unfiltered
+		// list under a 200, indistinguishable from "everything matched". The
+		// documented tolerance was reported nowhere; ADR-024 §5 says tolerance
+		// must be reported, and here the honest report is a rejection naming why.
+		if !resourceHasTextField(res) {
+			return nil, fmt.Errorf("search is not supported on this resource: it has no string/text fields (search scans only text columns), so the term %q could never match anything", search)
 		}
-		qb.afterID = after
-	} else if before := params.Get("before"); before != "" {
-		if !uuidRe.MatchString(before) {
-			return nil, fmt.Errorf("invalid before cursor: must be a lowercase UUID")
-		}
-		qb.beforeID = before
+		qb.search = search
 	}
 
 	return qb, nil
 }
+
+// resourceHasTextField reports whether the resource has at least one column
+// ?search= could scan.
+func resourceHasTextField(res *schema.ResourceSchema) bool {
+	for _, fd := range res.Fields {
+		if fd.Type == "string" || fd.Type == "text" {
+			return true
+		}
+	}
+	return false
+}
+
+// UsesCursor reports whether this query paginates by keyset cursor (?after/
+// ?before) rather than by page/offset. The list handlers use it to shape meta:
+// a cursor request has NO page number, so meta must not invent one (ENG-15 —
+// meta.page used to echo the default or even a sent-and-ignored page, actively
+// asserting a page the query never used).
+func (qb *QueryBuilder) UsesCursor() bool { return qb.afterID != "" || qb.beforeID != "" }
 
 // EffectiveOrder returns the column and direction (ASC|DESC) that SQL() orders
 // the base rows by — so the include path (RELATIONS-V1) can re-impose the SAME
@@ -568,17 +672,108 @@ func availableFieldNames(res *schema.ResourceSchema) string {
 	return strings.Join(names, ", ")
 }
 
-// firstValue reports whether a parameter was SENT, separately from its value —
+// singleValue reports whether a parameter was SENT, separately from its value —
 // url.Values.Get collapses "absent" and "empty" into "", which is exactly the
 // distinction ENG-30 is about: `?page=` is a sent parameter with an empty
-// value, and treating it as absent silently applied the default. (A repeated
-// parameter still keeps its first value here — that is ENG-17, tracked apart.)
-func firstValue(params url.Values, key string) (string, bool) {
+// value, and treating it as absent silently applied the default.
+//
+// A REPEATED parameter is an error (ENG-17, ADR-024): vals[0] used to serve the
+// FIRST value everywhere, so a client appending a corrected value
+// (`?per_page=20&per_page=100`) was served the stale one with nothing said —
+// silent last-write-loses, except it was first-write-wins, which nobody
+// expects either. Identical duplicates are rejected too: the check is about
+// one parameter carrying one meaning, not about adjudicating which duplicate
+// was intended.
+func singleValue(params url.Values, key string) (string, bool, error) {
 	vals, present := params[key]
 	if !present || len(vals) == 0 {
-		return "", false
+		return "", false, nil
 	}
-	return vals[0], true
+	if len(vals) > 1 {
+		return "", true, repeatedParamErr(key, len(vals))
+	}
+	return vals[0], true, nil
+}
+
+// repeatedParamErr names a parameter that arrived more than once — the engine
+// cannot know which value was meant, so it refuses to guess (ENG-17).
+func repeatedParamErr(key string, n int) error {
+	return fmt.Errorf("parameter %q was sent %d times: send it once — the engine will not guess which value you meant", key, n)
+}
+
+// SingleParam is singleValue for callers OUTSIDE this package that read an
+// engine-owned parameter directly (codegen's ?include=): same ENG-17 contract —
+// present-or-not plus a named rejection when repeated.
+func SingleParam(params url.Values, key string) (string, bool, error) {
+	return singleValue(params, key)
+}
+
+// listOnlyParams are the engine-owned parameters that only mean something on a
+// LIST read: they select, order and window a result SET.
+var listOnlyParams = []string{"page", "per_page", "sort", "order", "after", "before", "search", "count"}
+
+// RejectListParams returns a named error when params carry an engine-owned LIST
+// parameter (or a filter[/order[ prefix) on a route that would silently discard
+// it (NIGHT-SWEEP-S1 audit finding, the ENG-14/ADR-024 class on the
+// single-record and SSE surfaces): GET /api/notes/{id}?filter[status][eq]=paid
+// used to return the row REGARDLESS of the filter — the caller believed they
+// performed a conditional read — while the identical parameter on the list
+// route is a named 400. route names the surface for the message
+// ("a single-record route", "the event stream"); alsoInclude adds ?include= to
+// the rejected set (the event stream embeds nothing). Unknown top-level
+// parameters keep their ADR-024 tolerance — only what the engine OWNS is
+// checked.
+func RejectListParams(params url.Values, route string, alsoInclude bool) error {
+	for key := range params {
+		owned := strings.HasPrefix(key, filterParamPrefix) || strings.HasPrefix(key, orderParamPrefix)
+		if !owned {
+			for _, p := range listOnlyParams {
+				if key == p {
+					owned = true
+					break
+				}
+			}
+		}
+		if !owned && alsoInclude && key == "include" {
+			owned = true
+		}
+		if owned {
+			return fmt.Errorf("%s is not supported on %s: filters, sort, search and pagination select rows on the LIST route — here they would be silently ignored, so they are rejected instead", key, route)
+		}
+	}
+	return nil
+}
+
+// countFlagValues maps the accepted ?count= spellings to on/off. Bare `?count`
+// (no value — the documented aggregate syntax) is ON and handled by the caller.
+var countFlagValues = map[string]bool{
+	"true": true, "1": true,
+	"false": false, "0": false,
+}
+
+// ParseCountFlag reads the ?count flag by VALUE (ENG-23/ENG-18, ADR-024 §4).
+// The flag used to be tested for presence only — `?count=false` and `?count=0`
+// turned the total ON — and REST disagreed with GraphQL, whose count argument
+// is a real Boolean. Accepted: bare `?count` / `?count=` (on — the documented
+// syntax), true/1 (on), false/0 (off), case-insensitive; anything else is an
+// error naming the value and the accepted set. Absent ⇒ off. A repeated count
+// is rejected like every other engine-owned parameter.
+func ParseCountFlag(params url.Values) (bool, error) {
+	v, present, err := singleValue(params, "count")
+	if err != nil {
+		return false, err
+	}
+	if !present {
+		return false, nil
+	}
+	if v == "" {
+		return true, nil // bare ?count — presence as a switch, the documented form
+	}
+	on, ok := countFlagValues[strings.ToLower(v)]
+	if !ok {
+		return false, fmt.Errorf("invalid count value %q: use count, count=true or count=false (also 1/0)", v)
+	}
+	return on, nil
 }
 
 // sortDirection maps a client's ?order= value to SQL. An unrecognised direction

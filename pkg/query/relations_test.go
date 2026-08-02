@@ -58,7 +58,10 @@ func mustList(t *testing.T, base, include string, baseArgs []any, rb RelationRBA
 }
 
 func TestParseIncludeTree(t *testing.T) {
-	root := parseIncludeTree("lines.product,customer")
+	root, perr := parseIncludeTree("lines.product,customer")
+	if perr != nil {
+		t.Fatalf("unexpected error: %v", perr)
+	}
 	if _, ok := root.children["lines"]; !ok {
 		t.Fatal("missing lines")
 	}
@@ -67,6 +70,32 @@ func TestParseIncludeTree(t *testing.T) {
 	}
 	if _, ok := root.children["customer"]; !ok {
 		t.Fatal("missing customer")
+	}
+}
+
+// TestParseIncludeTree_EmptyEntriesRejected — NIGHT-SWEEP-S1: empty entries and
+// segments used to be silently dropped (`include=,,,` even switched the
+// response onto the include serialization path with zero embeds).
+func TestParseIncludeTree_EmptyEntriesRejected(t *testing.T) {
+	for _, in := range []string{"lines,", ",lines", ",,,", "lines..product", "lines,,customer"} {
+		if _, perr := parseIncludeTree(in); perr == nil {
+			t.Errorf("parseIncludeTree(%q): expected a named 400, got nil", in)
+		} else if perr.Status != 400 {
+			t.Errorf("parseIncludeTree(%q): status %d", in, perr.Status)
+		}
+	}
+}
+
+// TestInclude_UnknownRelationListsAlternatives — the ADR-024 second axis on the
+// include error: name the offender AND the available set.
+func TestInclude_UnknownRelationListsAlternatives(t *testing.T) {
+	s := relTestSchema()
+	_, _, ierr := BuildListInclude("orders", "ghost", "SELECT * FROM orders", nil, "id", "ASC", s, schema.DefaultMaxIncludeDepth, allowAll)
+	if ierr == nil {
+		t.Fatal("expected unknown-relation error")
+	}
+	if !strings.Contains(ierr.Msg, "ghost") || !strings.Contains(ierr.Msg, "available:") {
+		t.Errorf("error must name the relation and list alternatives, got: %s", ierr.Msg)
 	}
 }
 

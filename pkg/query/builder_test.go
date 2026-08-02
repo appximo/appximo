@@ -419,18 +419,106 @@ func TestBuildQuery_InvalidCursorRejected(t *testing.T) {
 	}
 }
 
-func TestBuildQuery_AfterTakesPrecedenceOverBefore(t *testing.T) {
+// TestBuildQuery_ConflictingCursorsRejected — ENG-15. This test used to be
+// TestBuildQuery_AfterTakesPrecedenceOverBefore, PINNING the silence: `after`
+// won and `before` was dropped without a word (verified 2026-08-01:
+// after+before built SQL identical to after alone). Two contradictory
+// directions in one request is a caller mistake the engine cannot adjudicate,
+// so it now names the conflict instead of guessing.
+func TestBuildQuery_ConflictingCursorsRejected(t *testing.T) {
 	const after = "aaaaaaaa-0000-0000-0000-000000000000"
 	const before = "bbbbbbbb-0000-0000-0000-000000000000"
-	params := url.Values{"after": {after}, "before": {before}}
-	qb := mustBuild(t, testResource(), params, nil)
-	selectQ, _, _, _ := qb.SQL()
-
-	if !strings.Contains(selectQ, "id > $1") {
-		t.Errorf("after must take precedence: %s", selectQ)
+	_, err := BuildQuery("guides", testResource(), url.Values{"after": {after}, "before": {before}}, nil)
+	if err == nil {
+		t.Fatal("after+before must be rejected, was accepted")
 	}
-	if strings.Contains(selectQ, "id < $") {
-		t.Errorf("before must be ignored when after is present: %s", selectQ)
+	for _, want := range []string{"after", "before", "one"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must name the conflict (%q missing): %s", want, err)
+		}
+	}
+}
+
+// TestBuildQuery_CursorRejectsIncompatibleParams — ENG-15's main half: with a
+// cursor, ?sort / ?order[…] / ?page used to be silently DISCARDED while
+// meta.page still echoed the page it ignored. Each combination now names the
+// conflict; per_page (honored — it sizes the window) stays valid.
+func TestBuildQuery_CursorRejectsIncompatibleParams(t *testing.T) {
+	const cur = "aaaaaaaa-0000-0000-0000-000000000000"
+	cases := map[string]url.Values{
+		"after+sort":    {"after": {cur}, "sort": {"title"}},
+		"after+order[]": {"after": {cur}, "order[title]": {"desc"}},
+		"after+page":    {"after": {cur}, "page": {"3"}},
+		"before+sort":   {"before": {cur}, "sort": {"title"}},
+		"before+page":   {"before": {cur}, "page": {"2"}},
+		"empty after":   {"after": {""}},
+		"empty before":  {"before": {""}},
+	}
+	for name, params := range cases {
+		if _, err := BuildQuery("guides", testResource(), params, nil); err == nil {
+			t.Errorf("%s: must be rejected, was accepted", name)
+		} else if !strings.Contains(err.Error(), "cursor") {
+			t.Errorf("%s: error must mention the cursor, got: %s", name, err)
+		}
+	}
+
+	// per_page IS honored with a cursor (it is the LIMIT) — must stay valid.
+	qb := mustBuild(t, testResource(), url.Values{"after": {cur}, "per_page": {"5"}}, nil)
+	if !qb.UsesCursor() || qb.PerPage() != 5 {
+		t.Errorf("cursor+per_page must work: cursor=%v per_page=%d", qb.UsesCursor(), qb.PerPage())
+	}
+	selectQ, _, _, _ := qb.SQL()
+	if !strings.Contains(selectQ, "id > $1") {
+		t.Errorf("after cursor must drive the WHERE: %s", selectQ)
+	}
+}
+
+// TestBuildQuery_MultipleOrderParamsRejected — ENG-16: two order[…] parameters
+// used to pick a winner by Go MAP ITERATION ORDER (measured 174/26 across 200
+// builds of the same URL). The error names every order key sent.
+func TestBuildQuery_MultipleOrderParamsRejected(t *testing.T) {
+	params := url.Values{"order[title]": {"asc"}, "order[likes]": {"desc"}}
+	_, err := BuildQuery("guides", testResource(), params, nil)
+	if err == nil {
+		t.Fatal("two order[…] params must be rejected, was accepted (the winner used to be a coin flip)")
+	}
+	for _, want := range []string{"order[title]", "order[likes]", "one sort field"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must name the offenders and the rule (%q missing): %s", want, err)
+		}
+	}
+	// One order[…] is the documented surface — unchanged.
+	qb := mustBuild(t, testResource(), url.Values{"order[title]": {"desc"}}, nil)
+	if f, d := qb.EffectiveOrder(); f != "title" || d != "DESC" {
+		t.Errorf("single order[] must still work, got %s %s", f, d)
+	}
+}
+
+// TestBuildQuery_RepeatedParamsRejected — ENG-17: a repeated parameter used to
+// keep only the FIRST value, silently serving a stale value when a client
+// appended a corrected one. Every engine-owned parameter now rejects
+// repetition, naming the parameter.
+func TestBuildQuery_RepeatedParamsRejected(t *testing.T) {
+	cases := map[string]url.Values{
+		"per_page":      {"per_page": {"20", "100"}},
+		"page":          {"page": {"1", "2"}},
+		"sort":          {"sort": {"title", "likes"}},
+		"order":         {"sort": {"title"}, "order": {"asc", "desc"}},
+		"filter":        {"filter[title][eq]": {"a", "b"}},
+		"order[]":       {"order[title]": {"asc", "desc"}},
+		"search":        {"search": {"a", "b"}},
+		"after":         {"after": {"aaaaaaaa-0000-0000-0000-000000000000", "bbbbbbbb-0000-0000-0000-000000000000"}},
+		"identical dup": {"page": {"2", "2"}},
+	}
+	for name, params := range cases {
+		_, err := BuildQuery("guides", testResource(), params, nil)
+		if err == nil {
+			t.Errorf("%s: repeated parameter must be rejected, was accepted", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "sent 2 times") && !strings.Contains(err.Error(), "send it once") {
+			t.Errorf("%s: error must say the parameter was repeated, got: %s", name, err)
+		}
 	}
 }
 
@@ -552,5 +640,25 @@ func TestBuildQuery_FilterErrorDoesNotClaimIDIsAvailable(t *testing.T) {
 	_, serr := BuildQuery("notes", res, url.Values{"sort": {"ghost"}}, nil)
 	if serr == nil || !strings.Contains(serr.Error(), "id") {
 		t.Errorf("the sort error must still list id, which sorting accepts: %v", serr)
+	}
+}
+
+// TestBuildQuery_SearchWithoutTextFieldsRejected — NIGHT-SWEEP-S1: ?search= on
+// a resource with no string/text columns was a silent no-op (the full
+// unfiltered list, indistinguishable from "everything matched").
+func TestBuildQuery_SearchWithoutTextFieldsRejected(t *testing.T) {
+	res := &schema.ResourceSchema{Fields: map[string]schema.FieldDef{
+		"qty": {Type: "int"}, "ref": {Type: "uuid"},
+	}}
+	_, err := BuildQuery("lines", res, url.Values{"search": {"zzz"}}, nil)
+	if err == nil {
+		t.Fatal("search on a text-less resource must be rejected, was accepted")
+	}
+	if !strings.Contains(err.Error(), "no string/text fields") {
+		t.Errorf("error must say why, got: %s", err)
+	}
+	// A resource WITH text fields keeps searching.
+	if _, err := BuildQuery("guides", testResource(), url.Values{"search": {"zzz"}}, nil); err != nil {
+		t.Errorf("search on a text resource must keep working: %v", err)
 	}
 }

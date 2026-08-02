@@ -779,7 +779,10 @@ func aggregateResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB
 			allowed = evalResult.AllowedFields
 		}
 
-		params := argsToURLValues(p.Args) // filter (the agg args below are ignored here)
+		params, err := argsToURLValues(p.Args) // filter (the agg args below are ignored here)
+		if err != nil {
+			return nil, err
+		}
 		if b, _ := p.Args["count"].(bool); b {
 			params.Set("count", "true")
 		}
@@ -815,6 +818,10 @@ func aggregateResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB
 }
 
 // stringList coerces a GraphQL [String!] arg ([]any of strings) to []string.
+// Empty strings are KEPT (ENG-24): they used to be silently dropped here, so
+// `sum:["monto",""]` aggregated as if the empty entry had never been sent.
+// Keeping them lets query.splitCSVStrict reject the empty entry BY NAME —
+// one validation site for REST and GraphQL.
 func stringList(v any) []string {
 	lst, ok := v.([]any)
 	if !ok {
@@ -822,7 +829,7 @@ func stringList(v any) []string {
 	}
 	out := make([]string, 0, len(lst))
 	for _, e := range lst {
-		if s, ok := e.(string); ok && s != "" {
+		if s, ok := e.(string); ok {
 			out = append(out, s)
 		}
 	}
@@ -901,7 +908,10 @@ func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, pol
 			return nil, err
 		}
 
-		params := argsToURLValues(p.Args)
+		params, err := argsToURLValues(p.Args)
+		if err != nil {
+			return nil, err
+		}
 		var cond *rbac.WhereCondition
 		if evalResult != nil {
 			cond = evalResult.Condition
@@ -1479,7 +1489,7 @@ func checkRBAC(ctx context.Context, policy *rbac.Policy, resource, action string
 
 // ── arg conversion ────────────────────────────────────────────────────────────
 
-func argsToURLValues(args map[string]any) url.Values {
+func argsToURLValues(args map[string]any) (url.Values, error) {
 	params := url.Values{}
 	if page, ok := args["page"].(int); ok && page > 0 {
 		params.Set("page", strconv.Itoa(page))
@@ -1506,14 +1516,26 @@ func argsToURLValues(args map[string]any) url.Values {
 		}
 	}
 	if orderMap, ok := args["order"].(map[string]any); ok {
+		// ENG-16 (the GraphQL half): the loop used to take whichever field Go's
+		// map iteration yielded first and break — `order:{a:ASC, b:DESC}` sorted
+		// by a DIFFERENT field between identical requests. One field is the
+		// surface; more than one is an error naming them (same contract as
+		// REST's order[…]).
+		if len(orderMap) > 1 {
+			fields := make([]string, 0, len(orderMap))
+			for f := range orderMap {
+				fields = append(fields, f)
+			}
+			sort.Strings(fields)
+			return nil, fmt.Errorf("order names %d fields (%s): one sort field is supported — multi-field sort does not exist", len(orderMap), strings.Join(fields, ", "))
+		}
 		for field, dir := range orderMap {
 			if ds, ok := dir.(string); ok {
 				params.Set("order["+field+"]", ds)
-				break // BuildQuery only supports single-field ordering
 			}
 		}
 	}
-	return params
+	return params, nil
 }
 
 // mapOp maps GraphQL filter op names to BuildQuery op names.

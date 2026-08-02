@@ -48,20 +48,25 @@ type includeNode struct {
 
 func newIncludeNode() *includeNode { return &includeNode{children: map[string]*includeNode{}} }
 
-// parseIncludeTree parses "lines.product,customer" into a tree. Empty segments are
-// ignored; the returned root's children are the top-level includes.
-func parseIncludeTree(include string) *includeNode {
+// parseIncludeTree parses "lines.product,customer" into a tree. An empty entry
+// (`include=a,` — a trailing comma; `include=,,,`; `include=a..b`) is an ERROR
+// naming it (NIGHT-SWEEP-S1): empty segments used to be silently dropped, and a
+// separator-only value even switched the response onto the include
+// serialization path with zero embeds — accepted-and-ignored, the ADR-024
+// class. (A wholly empty/absent ?include= never reaches here — HasInclude
+// gates it in the handlers.)
+func parseIncludeTree(include string) (*includeNode, *IncludeError) {
 	root := newIncludeNode()
 	for _, path := range strings.Split(include, ",") {
 		path = strings.TrimSpace(path)
 		if path == "" {
-			continue
+			return nil, &IncludeError{Status: 400, Msg: "include has an empty entry in " + strconv.Quote(include) + " — remove the extra comma"}
 		}
 		cur := root
 		for _, seg := range strings.Split(path, ".") {
 			seg = strings.TrimSpace(seg)
 			if seg == "" {
-				continue
+				return nil, &IncludeError{Status: 400, Msg: "include has an empty segment in " + strconv.Quote(path) + " — remove the extra dot"}
 			}
 			next, ok := cur.children[seg]
 			if !ok {
@@ -71,7 +76,7 @@ func parseIncludeTree(include string) *includeNode {
 			cur = next
 		}
 	}
-	return root
+	return root, nil
 }
 
 // includeBuilder accumulates the bound args (continuing from the base query's
@@ -111,7 +116,10 @@ func quoteIdent(s string) string { return `"` + s + `"` }
 // QueryBuilder.SQL(); orderField/orderDir from QueryBuilder.EffectiveOrder().
 func BuildListInclude(baseResource, include, baseSelect string, baseArgs []any, orderField, orderDir string, s *schema.APISchema, maxDepth int, rbacFor RelationRBAC) (sql string, args []any, ierr *IncludeError) {
 	b := &includeBuilder{s: s, rbacFor: rbacFor, maxDepth: maxDepth, args: append([]any(nil), baseArgs...)}
-	root := parseIncludeTree(include)
+	root, perr := parseIncludeTree(include)
+	if perr != nil {
+		return "", nil, perr
+	}
 
 	rowObj, joins, e := b.rowObject("_base", baseResource, root, 0)
 	if e != nil {
@@ -141,7 +149,10 @@ func BuildListInclude(baseResource, include, baseSelect string, baseArgs []any, 
 // (→ 404). baseSelect/baseArgs come from the caller's get-by-id SQL.
 func BuildGetInclude(baseResource, include, baseSelect string, baseArgs []any, s *schema.APISchema, maxDepth int, rbacFor RelationRBAC) (sql string, args []any, ierr *IncludeError) {
 	b := &includeBuilder{s: s, rbacFor: rbacFor, maxDepth: maxDepth, args: append([]any(nil), baseArgs...)}
-	root := parseIncludeTree(include)
+	root, perr := parseIncludeTree(include)
+	if perr != nil {
+		return "", nil, perr
+	}
 
 	rowObj, joins, e := b.rowObject("_base", baseResource, root, 0)
 	if e != nil {
@@ -215,7 +226,20 @@ func (b *includeBuilder) rowObject(alias, resource string, node *includeNode, de
 		}
 		rel, ok := res.Relations[relName]
 		if !ok {
-			return "", nil, &IncludeError{Status: 400, Msg: "unknown relation " + relName + " on " + resource}
+			// Name the alternatives (ADR-024's second axis, NIGHT-SWEEP-S1): the
+			// error used to name only the offender, and a resource with NO
+			// relations gave the caller nothing to discover that the feature is
+			// absent there.
+			avail := make([]string, 0, len(res.Relations))
+			for n := range res.Relations {
+				avail = append(avail, n)
+			}
+			sort.Strings(avail)
+			hint := "this resource declares no relations"
+			if len(avail) > 0 {
+				hint = "available: " + strings.Join(avail, ", ")
+			}
+			return "", nil, &IncludeError{Status: 400, Msg: "unknown relation " + relName + " on " + resource + " (" + hint + ")"}
 		}
 		join, valueExpr, e := b.buildEmbed(alias, rel, node.children[relName], childDepth)
 		if e != nil {

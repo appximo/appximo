@@ -125,3 +125,86 @@ func TestAggregate_ForbiddenFieldViaAllowlist(t *testing.T) {
 		t.Fatalf("summing an allowlisted field should work, got: %v", err)
 	}
 }
+
+// ── NIGHT-SWEEP-S1: the aggregate endpoint owns its namespace ────────────────
+
+// aggMustError builds and asserts a named error containing every want fragment.
+func aggMustError(t *testing.T, q string, wants ...string) {
+	t.Helper()
+	vals, _ := url.ParseQuery(q)
+	_, err := BuildAggregate("pagos", aggRes(), vals, nil, nil)
+	if err == nil {
+		t.Fatalf("BuildAggregate(%q): expected an error, got none", q)
+	}
+	for _, w := range wants {
+		if !strings.Contains(err.Error(), w) {
+			t.Errorf("BuildAggregate(%q): error must contain %q, got: %s", q, w, err)
+		}
+	}
+}
+
+// TestAggregate_UnknownFunctionRejected — ENG-18: `?count&median=monto` used to
+// return 200 with the metric simply absent (a dashboard reading a total that is
+// not the one it asked for). The parameter NAME is the enumerated value here,
+// so an unknown one is rejected listing the valid set.
+func TestAggregate_UnknownFunctionRejected(t *testing.T) {
+	aggMustError(t, "count&median=monto", "unknown aggregate parameter", "median", "count, sum, avg, min, max, group_by")
+	aggMustError(t, "summ=monto", "unknown aggregate parameter", "summ")
+	aggMustError(t, "count&utm_source=mail", "unknown aggregate parameter", "utm_source")
+}
+
+// TestAggregate_CountByValue — ENG-18/ENG-23: the flag was presence-only, so
+// count=false and count=0 turned the total ON (and REST disagreed with
+// GraphQL's real Boolean). Bare ?count stays the documented on-switch.
+func TestAggregate_CountByValue(t *testing.T) {
+	if aq := mustAgg(t, "count&sum=monto", nil, nil); !aq.HasCount() {
+		t.Error("bare ?count must be ON")
+	}
+	if aq := mustAgg(t, "count=true&sum=monto", nil, nil); !aq.HasCount() {
+		t.Error("count=true must be ON")
+	}
+	if aq := mustAgg(t, "count=false&sum=monto", nil, nil); aq.HasCount() {
+		t.Error("count=false must be OFF (used to turn the total ON)")
+	}
+	if aq := mustAgg(t, "count=0&sum=monto", nil, nil); aq.HasCount() {
+		t.Error("count=0 must be OFF")
+	}
+	aggMustError(t, "count=maybe&sum=monto", "invalid count value", "maybe")
+	// count=false with nothing else recognized: an explicit request for nothing.
+	aggMustError(t, "count=false", "at least one of")
+}
+
+// TestAggregate_ListParamsNamedUnsupported — ENG-24: page/sort/cursors were
+// fully VALIDATED through BuildQuery and then thrown away, so `?count&sort=ghost`
+// 400'd over a parameter the endpoint never honors while `?count&sort=estado`
+// was accepted-and-ignored. Both now get the same named rejection.
+func TestAggregate_ListParamsNamedUnsupported(t *testing.T) {
+	for _, q := range []string{
+		"count&sort=ghost", "count&sort=estado", "count&page=2", "count&per_page=5",
+		"count&order=desc", "count&order[estado]=asc",
+		"count&after=aaaaaaaa-0000-0000-0000-000000000000", "count&include=lineas",
+	} {
+		aggMustError(t, q, "not supported on the aggregate endpoint")
+	}
+}
+
+// TestAggregate_EmptyGroupByAndCSVEntries — ENG-18/ENG-24: `?group_by=` used to
+// silently change the response SHAPE; a trailing comma in an active list was
+// dropped without a word. `?count&sum=` (wholly empty, caller may not be using
+// it) keeps its written tolerance.
+func TestAggregate_EmptyGroupByAndCSVEntries(t *testing.T) {
+	aggMustError(t, "count&group_by=", "group_by has an empty value")
+	aggMustError(t, "count&sum=monto,", "empty entry", "sum")
+	aggMustError(t, "count&group_by=estado,,dias", "empty entry", "group_by")
+	if aq := mustAgg(t, "count&sum=", nil, nil); !aq.HasCount() || len(aq.Metrics()) != 0 {
+		t.Error("?count&sum= must keep working (the reviewed tolerance)")
+	}
+	aggMustError(t, "sum=", "no field given")
+}
+
+// TestAggregate_RepeatedParamsRejected — ENG-17 on the aggregate surface.
+func TestAggregate_RepeatedParamsRejected(t *testing.T) {
+	aggMustError(t, "sum=monto&sum=dias", "send it once")
+	aggMustError(t, "count&count=true", "send it once")
+	aggMustError(t, "count&group_by=estado&group_by=dias", "send it once")
+}

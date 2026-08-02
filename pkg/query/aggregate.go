@@ -56,14 +56,26 @@ func groupByTypeOK(fieldType string) bool {
 	return fieldType != "json" && fieldType != "jsonb"
 }
 
-func splitCSV(s string) []string {
+// splitCSVStrict splits a CSV field list for a parameter the caller is ACTIVELY using: an
+// empty ENTRY inside the list (`sum=a,` — a trailing comma from a string-join
+// bug, `group_by=x,,y`) is an error naming the parameter, instead of being
+// dropped without a word (ENG-24). The WHOLLY empty value (`sum=`) is not this
+// function's case — the caller may not be using the parameter at all, and that
+// tolerance is decided (with its reason) where emptyFuncs is handled.
+func splitCSVStrict(param, s string) ([]string, error) {
+	if s == "" {
+		return nil, nil
+	}
+	parts := strings.Split(s, ",")
 	var out []string
-	for _, p := range strings.Split(s, ",") {
-		if p = strings.TrimSpace(p); p != "" {
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p == "" {
+			return nil, fmt.Errorf("aggregate %s: empty entry in the field list %q — remove the extra comma", param, s)
+		} else {
 			out = append(out, p)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // fieldAllowed reports whether field is readable under allowlist (empty = all).
@@ -89,6 +101,21 @@ func fieldAllowed(field string, allowlist []string) bool {
 //
 // Syntax (URL params): count (presence) · sum/avg/min/max=<comma-separated
 // fields> · group_by=<comma-separated fields> · filter[...] (same as list).
+// aggUnsupportedListParams are list-endpoint parameters BuildQuery would parse
+// and validate but an aggregate can NEVER honor — an aggregate covers the whole
+// filtered set, so it has no page, no order and no cursor. They used to be
+// fully validated (against a schema the endpoint would not use) and then thrown
+// away, producing the confusing pair `?count&sort=ghost` → 400 while
+// `?count&sort=status` was accepted-and-ignored (ENG-24). They are rejected by
+// NAME now, before BuildQuery ever sees them, with a message that says why.
+var aggUnsupportedListParams = []string{"page", "per_page", "sort", "order", "after", "before", "include"}
+
+// aggOwnedParams is the aggregate endpoint's own vocabulary.
+var aggOwnedParams = map[string]bool{
+	"count": true, "sum": true, "avg": true, "min": true, "max": true,
+	"group_by": true, "search": true,
+}
+
 func BuildAggregate(
 	resource string,
 	res *schema.ResourceSchema,
@@ -96,19 +123,40 @@ func BuildAggregate(
 	condition *rbac.WhereCondition,
 	allowedFields []string,
 ) (*AggregateQuery, error) {
+	// The aggregate endpoint OWNS its query-parameter namespace (ENG-18/ENG-24;
+	// the written exception-to-the-exception in ADR-024): here the parameter
+	// NAME is the enumerated value — the function requested — so an
+	// unrecognized name is a typo'd function (`?median=x`, `?summ=x`), not a
+	// cache-buster, and it used to produce a 200 with the metric silently
+	// missing: a dashboard reading a total that is not the one it asked for.
+	// The general top-level tolerance exists for decorated LINKS (utm tags,
+	// cache-busters browsers and mail clients append); an authenticated
+	// aggregate XHR is never a decorated link, so the tolerance buys nothing
+	// here and hides typos.
+	for key := range params {
+		if aggOwnedParams[key] || strings.HasPrefix(key, filterParamPrefix) {
+			continue
+		}
+		if isAggUnsupportedListParam(key) {
+			return nil, fmt.Errorf("%s is not supported on the aggregate endpoint: an aggregate covers the whole filtered set — it has no page, order or cursor (valid parameters: count, sum, avg, min, max, group_by, filter[...], search)", key)
+		}
+		return nil, fmt.Errorf("unknown aggregate parameter %q (valid: count, sum, avg, min, max, group_by, filter[...], search)", key)
+	}
+
 	qb, err := BuildQuery(resource, res, params, condition)
 	if err != nil {
 		return nil, err
 	}
 	aq := &AggregateQuery{qb: qb}
 
-	if _, ok := params["count"]; ok {
-		aq.count = true
+	aq.count, err = ParseCountFlag(params)
+	if err != nil {
+		return nil, err
 	}
 
 	var emptyFuncs []string
 	for _, fn := range aggFuncs {
-		// A function present with an EMPTY value (`?sum=`) is recorded and
+		// A function present with a WHOLLY EMPTY value (`?sum=`) is recorded and
 		// reported only if the request ends up with NOTHING to aggregate.
 		//
 		// The first version rejected it outright, and an adversarial review was
@@ -119,11 +167,21 @@ func BuildAggregate(
 		// dropped filter is invisible (rows come back and the caller cannot tell
 		// they are unfiltered), whereas a dropped aggregate function is plain in
 		// the response, which simply has no `sum` key. Silence is only the defect
-		// when the caller cannot see it.
-		if _, present := params[fn]; present && len(splitCSV(params.Get(fn))) == 0 {
+		// when the caller cannot see it. (An empty ENTRY in a non-empty list —
+		// `sum=a,` — is different: the caller IS using the parameter, and
+		// splitCSVStrict rejects it by name.)
+		val, present, verr := singleValue(params, fn)
+		if verr != nil {
+			return nil, verr
+		}
+		fields, cerr := splitCSVStrict(fn, val)
+		if cerr != nil {
+			return nil, cerr
+		}
+		if present && len(fields) == 0 {
 			emptyFuncs = append(emptyFuncs, fn)
 		}
-		for _, f := range splitCSV(params.Get(fn)) {
+		for _, f := range fields {
 			fd, ok := res.Fields[f]
 			if !ok {
 				return nil, fmt.Errorf("aggregate %s: unknown field %q", fn, f)
@@ -138,7 +196,22 @@ func BuildAggregate(
 		}
 	}
 
-	for _, f := range splitCSV(params.Get("group_by")) {
+	// group_by is NOT in the emptyFuncs tolerance: an empty `?group_by=` used to
+	// silently change the response SHAPE — the caller asked for {"groups":[…]}
+	// and got the flat object — which is not a visibly-missing key, it is a
+	// different contract served without a word (ENG-18).
+	gbVal, gbPresent, err := singleValue(params, "group_by")
+	if err != nil {
+		return nil, err
+	}
+	gbFields, err := splitCSVStrict("group_by", gbVal)
+	if err != nil {
+		return nil, err
+	}
+	if gbPresent && len(gbFields) == 0 {
+		return nil, fmt.Errorf("group_by has an empty value (use group_by=<field>[,<field>…]) — an empty group_by would silently change the response shape")
+	}
+	for _, f := range gbFields {
 		fd, ok := res.Fields[f]
 		if !ok {
 			return nil, fmt.Errorf("group_by: unknown field %q", f)
@@ -154,12 +227,10 @@ func BuildAggregate(
 
 	// One message used to cover four different mistakes — a legitimate request
 	// missing a function, an unknown function (`?median=x`), a typo'd one
-	// (`?summ=x`) and an empty value — and it named none of them, so the caller
-	// could not tell which they had made (ADR-024). The empty-value and
-	// group_by-alone cases are now distinguished, and the generic case echoes
-	// what the request actually carried, which is what makes a typo visible
-	// without rejecting the unknown top-level parameters the policy
-	// deliberately tolerates.
+	// (`?summ=x`) and an empty value — and it named none of them (ADR-024).
+	// Unknown names are rejected up front now (the namespace scan above), so
+	// what reaches here is a request whose recognized parameters name nothing
+	// to aggregate; each remaining case is distinguished.
 	if !aq.count && len(aq.metrics) == 0 {
 		if len(emptyFuncs) > 0 {
 			return nil, fmt.Errorf("aggregate %s: no field given (use %s=<field>[,<field>…])",
@@ -172,6 +243,21 @@ func BuildAggregate(
 			receivedParamNames(params))
 	}
 	return aq, nil
+}
+
+// isAggUnsupportedListParam reports whether key is a LIST parameter the
+// aggregate endpoint recognizes but cannot honor (page/order/cursor family,
+// including the order[field] form).
+func isAggUnsupportedListParam(key string) bool {
+	if strings.HasPrefix(key, orderParamPrefix) {
+		return true
+	}
+	for _, p := range aggUnsupportedListParams {
+		if key == p {
+			return true
+		}
+	}
+	return false
 }
 
 // maxEchoedParams / maxEchoedParamLen bound what receivedParamNames reflects.
