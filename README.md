@@ -124,14 +124,17 @@ Honest comparison — these are different tools that overlap on "I need an API":
 | Multi-tenancy | first-class: schema-per-tenant isolation, subdomain routing | you build it | you build it (RLS) | one DB per app |
 | Database | your PostgreSQL | any | bundled Postgres (its platform) | embedded SQLite |
 | Runtime | one static Go binary, ~24 MB RSS idle | Node/Ruby + deps | a service fleet (or their cloud) | one Go binary |
-| Custom logic | sandboxed JS (Goja) + WASM (Wazero), watchdog-timed | unlimited (it's your code) | edge functions, triggers | Go/JS hooks |
+| Custom logic | **Go in-process** (framework mode: `appitools.Route` + `Ctx`, same process & transaction) + sandboxed JS/WASM hooks | unlimited (it's your code) | edge functions, triggers | Go/JS hooks |
 
-What they do **better**: frameworks give you unlimited logic — Appitools' escape
-hatches are sandboxed hooks, not a general backend. Supabase has auth providers,
-storage, realtime channels and a massive ecosystem. PocketBase is even simpler to
-run (no Postgres needed). Appitools' lane is: **several isolated tenants on one
-cheap box, talking to a Postgres you control, with the API contract generated
-and enforced from a schema file.**
+What they do **better**: frameworks give you unlimited logic with no ceremony —
+Appitools' custom logic is a bounded framework surface (in-process Go routes
+sharing the engine's transaction and RBAC, plus sandboxed hooks), not an
+anything-goes app server. Supabase has auth providers, storage, realtime
+channels and a massive ecosystem. PocketBase is even simpler to run (no Postgres
+needed). Appitools' lane is: **several isolated tenants on one cheap box,
+talking to a Postgres you control, with the API contract generated and enforced
+from a schema file — plus the custom 10 % as Go in the same process and
+transaction.**
 
 ## Performance
 
@@ -165,13 +168,16 @@ baseline faster are welcome; we'll publish updated numbers.
 That benchmark measures the **engine**. For the **whole production stack** —
 Caddy terminating real Let's Encrypt TLS → the engine under systemd → native
 PostgreSQL, with a million rows — see [**docs/BENCHMARKS.md**](docs/BENCHMARKS.md):
-the production layers cost about **+1 ms** p50, the box sustains **500 req/s**
-with every request reaching PostgreSQL (knee at 750), a filtered page over 1M
-rows answers in **4.4 ms**, the stack owns **~109 MiB** of memory, and the
-resilience matrix (kill the engine, kill Caddy, stop PostgreSQL, deploy under
-load, reboot) is measured rather than asserted. Better still, **don't take those
-numbers**: [`scripts/verify-production/`](scripts/verify-production/) runs the
-same suite against *your* server and prints *your* report.
+the production layers cost about **+1.2 ms** p50 (re-measured 2026-08-01), the
+box sustains **500 req/s** with every request reaching PostgreSQL (knee at 750,
+2026-07), a filtered page over 1M rows answers in **~4.2 ms** end-to-end
+(re-measured 2026-08-01), a real consumer app's whole stack runs at
+**~186 MiB PSS under load** (2026-07-31; the original ~109 MiB idle figure
+predates the box serving two apps and is kept in BENCHMARKS with its date), and
+the resilience matrix (kill the engine, kill Caddy, stop PostgreSQL, deploy
+under load, reboot) is measured rather than asserted. Better still, **don't
+take those numbers**: [`scripts/verify-production/`](scripts/verify-production/)
+runs the same suite against *your* server and prints *your* report.
 
 ## What's in the box (all verified by the test suite)
 

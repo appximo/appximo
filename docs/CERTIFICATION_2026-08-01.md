@@ -567,3 +567,30 @@ than the effect):
 No certified performance or security claim is invalidated. The audit checklist
 this certification pointed at is now COMPLETE — see
 docs/audits/UNRECOGNIZED_INPUT_AUDIT.md §NIGHT-SWEEP-S1.
+
+## Addendum — the public-material pass (PHASE3-GUIDE-S1, 2026-08-02)
+
+The session that wrote the master guide (`docs/GUIDE.md`) and the official page
+(`site/`) re-executed the functional front door **live against a fresh empty
+database** (scratch engine, ports :8501/:9501, DB `phase3guide`, removed after):
+control-plane self-bootstrap on an empty DB, tenant registration (all-or-nothing),
+`token --schema` role refusal, first POST (default applied) and filtered GET,
+multi-field 422, named 400 for an unsupported filter op, `/docs` + `/openapi.json`
+unauthenticated, signup 403 by default, GraphQL query, `validate --json` report
+shape, and `appitools specs` printing the full trilogy (~2,310 lines). A plain
+`go build` measured **85.2 MB** — consistent with C-1's 84.7 MB.
+
+Claim corrections applied to older documents (no engine change):
+
+- `docs/CAPABILITIES.md` said "**~45 MB**" for the binary — now states the C-1
+  figures (~64 MB release / ~85 MB plain); its ENG-16 line ("two `order[…]`
+  parameters pick a winner non-deterministically") predated NIGHT-SWEEP-S1's fix
+  and now states the named-400 behavior; its GraphQL line now includes the
+  `update` mutation the engine has served since SEC-AUDIT-V2.
+- `nuevo_chat_web/02_QUE_ES_APPITOOLS.md` (internal pitch base) carried the
+  pre-certification figures (1.58 ms/600k, "+1 ms", the whole-stack footprint,
+  and the NestJS comparison in present tense) — updated to this report's numbers,
+  conditions and the NOT-re-verified marking.
+
+Every number in `docs/GUIDE.md` and `site/index.html` cites this report's
+figures with their conditions; neither carries a framework comparison.

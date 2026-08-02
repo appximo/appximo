@@ -9,7 +9,7 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 
 - Compiles one JSON schema into a full API at boot — no handlers, models, or migrations.
 - Generates REST per resource — `GET` (list + by id), `POST`, `PUT`, `PATCH`, `DELETE` on `/api/{resource}`.
-- Generates GraphQL from the same schema — queries + `create`/`delete` mutations at `/graphql`.
+- Generates GraphQL from the same schema — queries + `create`/`update`/`delete` mutations at `/graphql`.
 - Generates an OpenAPI **3.0.3** spec — `appitools openapi schema.json`, importable into Swagger/Hoppscotch.
 - Creates the tenant's Postgres tables automatically — idempotent DDL when a tenant registers.
 - `file` field type — attaches an uploaded file to a **record** with real referential
@@ -119,7 +119,7 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 
 ## Operations
 
-- One static Go binary (~45 MB) — no CGO, any Linux, multi-arch (amd64/arm64). ([DEPLOY.md](DEPLOY.md))
+- One static Go binary — ~64 MB release build (`scripts/build-engine.sh`; a plain `go build` is ~85 MB) — no CGO, any Linux, multi-arch (amd64/arm64). ([DEPLOY.md](DEPLOY.md))
 - ~22 MB Docker image — `docker compose up` to a working API in ~9 s.
 - Graceful shutdown — SIGTERM → `/readyz` 503 → drains in-flight requests → exits clean.
 - Per-tenant rate limiting — token bucket (default 1000 RPS / 100 burst), over limit → 429 + `Retry-After`.
@@ -163,9 +163,9 @@ engineering. Re-verified against the running engine and the field reports on
   it: the declarative surface cannot express "rows where this column is empty".
   Deferred deliberately, with the debt written down — backlog **SCHEMA-6**,
   ADR-022 Decision 5.
-- **No multi-field sort.** One sort field only; an unknown field or an invalid
-  direction is a 400. Two `order[…]` parameters currently pick a winner
-  non-deterministically (backlog **ENG-16**).
+- **No multi-field sort.** One sort field only; an unknown field, an invalid
+  direction, or two `order[…]` parameters are each a 400 that names the problem
+  (ENG-16, closed in NIGHT-SWEEP-S1).
 - **No delete hooks** — only `before`/`after_create` and `before`/`after_update`.
 - **`workflows` block parses but has no executor.**
 - **No shipped WASM business module** — only a test identity module; DIAN logic is a JS built-in, not WASM.

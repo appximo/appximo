@@ -1349,16 +1349,22 @@ Facts agents most often get wrong:
   table set, via per-tenant migrations) is per-tenant. A deploy (editor, control-
   plane `PUT`, or `migrate` — since CONSUMER-PATH-S1 ALL three persist the schema
   and notify the running engine) migrates ONE tenant's tables live, and a new
-  column becomes **readable** hot (`SELECT *`). **Writing it needs a restart**:
-  the write path validates the body against the BOOT-compiled resource
-  (`codegen.CollectUpdate`/`CollectInsert`), so a column the running process was
-  not booted with is a `422 unknown field` — MEASURED in AI-JOURNEY-S1 (an
-  earlier claim in this file that writes were hot was verified against a field
-  that happened to be in the boot schema; it was wrong). Everything derived from
-  the schema DEFINITION — write validation, filters, GraphQL fields, `/docs`,
-  RBAC, hooks, and NEW resources — activates only on a restart with the new
-  schema — one click from the editor since UI-F4-S2 (graceful self-restart via
-  `POST /admin/engine/schema`). The full verified model:
+  column becomes **readable** hot (`SELECT *`) **and — since AUTHORING-GAPS-S1
+  (ENG-12) — WRITABLE hot on REST**: the write path resolves the resource from
+  the tenant's DEPLOYED schema (falling back to boot when nothing is deployed —
+  `pkg/codegen/deployed.go`), and the new field's declarative rules are compiled
+  when that schema loads. Verified live on a field asserted absent from the boot
+  file: `PATCH` → 200, same PID, no restart (AI-JOURNEY-S1 had measured the
+  OPPOSITE — the write path then validated only against boot — and that
+  restriction is what AUTHORING-GAPS-S1 removed; docs/AUTHORING_JOURNEY.md 5-6
+  records both halves). **Still restart-gated, and the engine now says so:** a
+  NEW RESOURCE (its routes/GraphQL type/docs don't exist in the process — the
+  API answers `resource_not_loaded` with the reason and the fix, not a bare
+  404), GraphQL input types (a new field is not an argument the boot-compiled
+  mutation parses), and everything else derived from the schema DEFINITION —
+  filters/sort on the new field, `/docs`, RBAC, hooks — activates on a restart
+  with the new schema — one click from the editor since UI-F4-S2 (graceful
+  self-restart via `POST /admin/engine/schema`). The full verified model:
   [docs/MENTAL_MODEL.md](docs/MENTAL_MODEL.md).
 - **JWT**: HS256 only, `exp` required, `role` claim must match a schema
   role. Mint dev tokens with
