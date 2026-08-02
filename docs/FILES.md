@@ -118,7 +118,10 @@ upload is a `422` with the reason:
 
 All `/api/files*` routes flow through the engine's normal chain (tenant Host →
 rate limit → JWT → RBAC deny-by-default): a role needs the `files` resource in
-its policy. File ids are tenant-scoped (no cross-tenant handle) and blobs are
+its policy — role-global (`"resources": ["files", …]` or `"*"`) **or** a
+per-resource `permissions` entry (`"files": {"actions": ["read","create"]}`,
+actions only: file metadata has no owner column for a row condition, and
+downloads are not field-projected — FRONTEND-SPEC-S1). File ids are tenant-scoped (no cross-tenant handle) and blobs are
 tenant-prefixed in storage.
 
 ## Attaching files to records — the `file` field type (FILES-LINK-S1)

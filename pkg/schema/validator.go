@@ -492,6 +492,45 @@ func validateRBAC(s *APISchema) []ValidationError {
 		for resName, perm := range role.Permissions {
 			permPrefix := rolePrefix + ".permissions." + resName
 			res, ok := s.Resources[resName]
+			if !ok && resName == "files" {
+				// The engine's BUILT-IN file store (FRONTEND-SPEC-S1): /api/files
+				// is authorized as resource "files" whenever no schema resource
+				// claims the name, and the role-global form could always grant it
+				// ("resources": ["files", …]) — the per-resource form could not,
+				// which made "a scoped role that can upload files" inexpressible
+				// (the exact asymmetry ADR-021 fixed for custom routes). Grantable
+				// here with ACTIONS ONLY: the store's metadata table has no
+				// owner/tenant-user column, so a row condition could never match
+				// (the zero-rows-forever class), and downloads are not
+				// field-projected, so an allowlist would be dead config.
+				for _, a := range perm.Actions {
+					if !validRBACActions[a] {
+						errs = append(errs, ValidationError{
+							Field:    permPrefix + ".actions",
+							Rule:     "unknown_action",
+							Got:      a,
+							Expected: []string{"read", "create", "update", "delete", "*"},
+							Message:  fmt.Sprintf("unknown action %q: must be one of read, create, update, delete, *", a),
+							Fix:      "use one of read, create, update, delete (or '*' for all)",
+						})
+					}
+				}
+				if len(perm.Actions) == 0 {
+					errs = append(errs, ValidationError{
+						Field:   permPrefix + ".actions",
+						Message: "at least one action is required (read, create, update, delete, or *)",
+					})
+				}
+				if perm.Conditions != nil || len(perm.Fields) > 0 || len(perm.ConditionActions) > 0 {
+					errs = append(errs, ValidationError{
+						Field:   permPrefix,
+						Rule:    "files_grant_actions_only",
+						Message: "the built-in \"files\" grant takes actions only — file metadata has no owner column for a row condition, and downloads are not field-projected, so conditions/fields/condition_actions would be dead config",
+						Fix:     "keep only \"actions\" on the files permission",
+					})
+				}
+				continue
+			}
 			if !ok {
 				avail := resourceNamesList(s)
 				errs = append(errs, ValidationError{
@@ -499,7 +538,7 @@ func validateRBAC(s *APISchema) []ValidationError {
 					Rule:     "unknown_resource",
 					Got:      resName,
 					Expected: avail,
-					Message:  fmt.Sprintf("permission references unknown resource %q — available resources: %s", resName, joinQuoted(avail)),
+					Message:  fmt.Sprintf("permission references unknown resource %q — available resources: %s (or the built-in \"files\" store)", resName, joinQuoted(avail)),
 					Fix:      "key this permission by one of the existing resources above (or define that resource)",
 				})
 				continue

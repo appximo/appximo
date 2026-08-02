@@ -278,3 +278,61 @@ func TestCheckUnknownKeys_PermissionsStrict(t *testing.T) {
 		t.Fatal("strict keys must reject \"condition\" (singular) inside a permission entry")
 	}
 }
+
+// FRONTEND-SPEC-S1: the per-resource form can grant the engine's BUILT-IN
+// "files" store (actions only) — before this, only the role-global form could,
+// so "a scoped role that uploads files" was inexpressible (the same asymmetry
+// ADR-021 fixed for custom routes).
+func TestValidateRBAC_BuiltinFilesGrant(t *testing.T) {
+	valid := `{
+      "$schema":"x","version":"1","name":"x",
+      "resources": { "posts": { "fields": { "title": { "type": "string" } } } },
+      "rbac": { "roles": { "staff": { "permissions": {
+        "posts": { "actions": ["read","create"] },
+        "files": { "actions": ["read","create"] }
+      } } } }
+    }`
+	if errs := schema.Validate(parseSchema(t, valid)); len(errs) != 0 {
+		t.Fatalf("a files grant with actions only must validate, got: %v", errs)
+	}
+
+	// Actions only: a condition over file metadata could never match a user
+	// (no owner column — the zero-rows-forever class), so it is dead config
+	// rejected at load, not silently ignored.
+	withCondition := `{
+      "$schema":"x","version":"1","name":"x",
+      "resources": { "posts": { "fields": { "title": { "type": "string" } } } },
+      "rbac": { "roles": { "staff": { "permissions": {
+        "files": { "actions": ["read"], "conditions": { "field":"id","op":"eq","val":"$user_id" } }
+      } } } }
+    }`
+	if errs := schema.Validate(parseSchema(t, withCondition)); !hasError(errs, "actions only") {
+		t.Fatalf("a files grant with conditions must be rejected, got: %v", errs)
+	}
+
+	// Bad actions are still named.
+	badAction := `{
+      "$schema":"x","version":"1","name":"x",
+      "resources": { "posts": { "fields": { "title": { "type": "string" } } } },
+      "rbac": { "roles": { "staff": { "permissions": {
+        "files": { "actions": ["upload"] }
+      } } } }
+    }`
+	if errs := schema.Validate(parseSchema(t, badAction)); !hasError(errs, "unknown action") {
+		t.Fatalf("an unknown action on the files grant must be rejected, got: %v", errs)
+	}
+
+	// A schema that declares its OWN resource literally named "files" keeps the
+	// normal per-resource validation — the built-in special case only exists
+	// when the name is free (same rule the engine uses to mount /api/files).
+	ownFiles := `{
+      "$schema":"x","version":"1","name":"x",
+      "resources": { "files": { "fields": { "label": { "type": "string" } } } },
+      "rbac": { "roles": { "staff": { "permissions": {
+        "files": { "actions": ["read"], "conditions": { "field":"ghost","op":"eq","val":"$user_id" } }
+      } } } }
+    }`
+	if errs := schema.Validate(parseSchema(t, ownFiles)); !hasError(errs, "does not exist on resource") {
+		t.Fatalf("a real resource named files must keep normal validation, got: %v", errs)
+	}
+}
