@@ -1321,8 +1321,21 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 		// Custom routes mount FIRST (literal paths; collision-checked at Register
 		// so they never overlap the generated routes). They flow through the same
 		// chain established above — no duplicated middleware.
+		//
+		// Every custom GET also serves HEAD (ENG-32, RFC 9110 §9.3.2): same
+		// handler, same auth (a Public GET's HEAD skips auth via the same skip
+		// set), same RBAC (HEAD maps to the read action). net/http discards the
+		// body for a HEAD response, and http.ServeContent (Ctx.ServeFile) handles
+		// HEAD natively — headers incl. Content-Length/ETag, no byte copy. Before
+		// this, `curl -I` on a live download route answered 401/404-shaped
+		// nothing, as if the route did not exist — link unfurlers and CDNs HEAD
+		// first. HEAD is not registrable directly (validateRoute allows five
+		// methods), so the alias can never collide with an app route.
 		for _, rt := range a.routes {
 			sub.Method(rt.Method, rt.Path, a.customHandler(rt))
+			if rt.Method == http.MethodGet {
+				sub.Method(http.MethodHead, rt.Path, a.customHandler(rt))
+			}
 		}
 		// File store routes (FILES-V2): upload/download/delete/signed-URL flow
 		// through the IDENTICAL chain (tenant → JWT → RBAC for the "files"

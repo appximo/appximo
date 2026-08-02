@@ -141,9 +141,12 @@ func resourceFromPath(path string) string {
 }
 
 // actionFromMethod maps HTTP verbs to the CRUD action names used in policies.
+// HEAD is read (ENG-32): a HEAD is a GET without the body — RFC 9110 §9.3.2 —
+// so it is authorized exactly like the GET it mirrors (the router only serves
+// HEAD where a GET exists).
 func actionFromMethod(method string) string {
 	switch method {
-	case http.MethodGet:
+	case http.MethodGet, http.MethodHead:
 		return "read"
 	case http.MethodPost:
 		return "create"

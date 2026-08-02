@@ -46,9 +46,16 @@ const swaggerUIHTML = `<!DOCTYPE html>
 // (MT-STRUCT-S4) rebuilds the router from the new schema, so /openapi.json and
 // /docs reflect the new structure live. Server URL is "/" so a browser's "Try it
 // out" calls the same origin the docs were loaded from.
+//
+// The registered CUSTOM routes are included as path items (ENG-33): a running
+// app's /openapi.json is the authority for what the app SERVES — generated AND
+// custom — because it is the one document an external consumer can fetch
+// without repo access. (The `appitools openapi <schema>` CLI keeps printing the
+// schema-derived half only: a schema file has no registered routes.)
 func (a *App) registerOpenAPIRoutes(r chi.Router, sch *schema.APISchema) {
-	jsonSpec, jerr := codegen.GenerateOpenAPIJSON(sch, "/")
-	yamlSpec, yerr := codegen.GenerateOpenAPI(sch, "/")
+	custom := a.customRouteDescriptors()
+	jsonSpec, jerr := codegen.GenerateOpenAPIJSONWithRoutes(sch, "/", custom)
+	yamlSpec, yerr := codegen.GenerateOpenAPIWithRoutes(sch, "/", custom)
 
 	r.Get("/openapi.json", func(w http.ResponseWriter, req *http.Request) {
 		if jerr != nil || len(jsonSpec) == 0 {

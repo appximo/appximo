@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/miguelangel/appitools/pkg/codegen"
 	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/miguelangel/appitools/pkg/resilience"
 	"github.com/miguelangel/appitools/pkg/schema"
@@ -36,6 +37,19 @@ type Route struct {
 	Method  string // GET | POST | PUT | PATCH | DELETE
 	Path    string // e.g. "/api/declarations/submit"
 	Handler Handler
+
+	// Description is an optional one-line summary published in the served
+	// OpenAPI document (ENG-33). Every registered route appears in
+	// /openapi.json regardless — method, path, auth mode (Public vs Bearer +
+	// the RBAC segment/action it demands), RequireRole and ByteServing are all
+	// facts the engine knows and publishes on its own; Description is the one
+	// thing only the author can add. Request/response SHAPES are deliberately
+	// not declarable here: a Go handler has no declared schema, and the app's
+	// contract sheet (backend-spec §3.6b) stays the authority for shapes — the
+	// OpenAPI is the authority for EXISTENCE. An empty Description publishes a
+	// generic summary; an invisible route was the problem, a tersely-documented
+	// one is not.
+	Description string
 
 	// RequireRole, when non-empty, demands the caller's JWT role equal it
 	// (else 403). This is in ADDITION to the path-based RBAC the middleware
@@ -361,7 +375,10 @@ func listOrNone(ss []string) string {
 
 // publicRoutePaths returns the "METHOD /path" set of routes registered Public,
 // or nil when there are none (the common case — the middlewares then skip the
-// lookup entirely).
+// lookup entirely). A public GET also registers its HEAD alias (ENG-32): the
+// router serves HEAD for every custom GET route, and a HEAD probe of a public
+// route must skip auth exactly like its GET — anything else would answer 401
+// for a route whose GET is anonymous.
 func (a *App) publicRoutePaths() map[string]bool {
 	var out map[string]bool
 	for _, rt := range a.routes {
@@ -372,6 +389,30 @@ func (a *App) publicRoutePaths() map[string]bool {
 			out = make(map[string]bool)
 		}
 		out[rt.Method+" "+rt.Path] = true
+		if rt.Method == http.MethodGet {
+			out[http.MethodHead+" "+rt.Path] = true
+		}
+	}
+	return out
+}
+
+// customRouteDescriptors converts the registered routes into the neutral shape
+// the OpenAPI generator publishes (ENG-33). Pure projection — no handler, no
+// limiter, nothing executable crosses the boundary.
+func (a *App) customRouteDescriptors() []codegen.CustomRoute {
+	if len(a.routes) == 0 {
+		return nil
+	}
+	out := make([]codegen.CustomRoute, 0, len(a.routes))
+	for _, rt := range a.routes {
+		out = append(out, codegen.CustomRoute{
+			Method:      rt.Method,
+			Path:        rt.Path,
+			Summary:     rt.Description,
+			Public:      rt.Public,
+			RequireRole: rt.RequireRole,
+			ByteServing: rt.ByteServing,
+		})
 	}
 	return out
 }
