@@ -507,3 +507,31 @@ bash scripts/verify-production/run-all.sh --target=https://… --server-ssh=root
 
 Findings opened by this session: **SEC-1**, **SEC-2**, **SEC-3**, **ENG-14**,
 **OPS-12** — all in [docs/BACKLOG.md](BACKLOG.md), with the evidence above.
+
+---
+
+## Addendum — post-certification contract changes (THIRD-PARTY-READY-S1, 2026-08-02)
+
+This report certifies the engine as of 2026-08-01. The following session
+changed three certified-adjacent contracts, each measured with the session's
+own gates (binary-diff 64/65 SAME with the single diff being the intended
+change below; write-path ABBA `no_change`, Δp50 +0.055 ms, MWU p=0.096, the
+base-vs-base control moving 3× more than the effect):
+
+- **`/openapi.json` now also lists an app's REGISTERED custom routes**
+  (ENG-33): method/path/auth-mode/`x-public`/`x-required-role`/
+  `x-byte-serving`, summary from the new optional `Route.Description`, and the
+  `info.description` now names the agent trilogy. A pure `serve` binary's
+  document is byte-identical except for that description line (the gate's one
+  diff). The 401-before-routing probe semantics are unchanged and now
+  documented as deliberate.
+- **Custom GET routes answer HEAD** (ENG-32) — was a 401/404-shaped nothing.
+  Generated routes unchanged (pinned by a corpus row, SAME on both binaries).
+- **File fields can declare `accept`/`max_bytes`** (FILES-1, attach-time 422
+  `file_policy`) and **`Ctx.ServeFile` accepts a cache policy** (FILES-2).
+  Additive: schemas and handlers that declare neither behave byte-identically
+  (the whole 63-case data-path corpus is SAME).
+
+No previously certified performance or security claim is invalidated; the
+flagship numbers were not re-measured (nothing on the read path changed — the
+gate shows every read-path corpus case SAME).

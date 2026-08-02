@@ -1020,6 +1020,19 @@ await page.goto('http://acme.localhost:8099/');
 if (errors.length) throw new Error('console errors: ' + errors.join(' | '));
 ```
 
+Two traps a first e2e run hits:
+
+- **The static mount's CSP has no `'unsafe-eval'`** (correctly), and
+  Playwright's string-eval helpers (`page.waitForFunction(...)`,
+  `page.evaluate('...')` with a string) violate it — sometimes only
+  intermittently, which reads as flake. Use selector/locator waits
+  (`waitForSelector`, `expect(locator)`) throughout.
+- **Native HTML `required` masks the server's 422 path**: the browser blocks
+  the empty submit before the request exists, so that form never exercises the
+  §6.4 mapping in your test. Leave native validation attributes off the form
+  whose 422 handling you're asserting (keep the schema's `minLength: 1` — the
+  server stays the authority).
+
 ---
 
 ## 12. References

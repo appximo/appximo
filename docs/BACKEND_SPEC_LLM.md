@@ -220,6 +220,16 @@ func main() {
 }
 ```
 
+> **Replacing a running binary in dev:** the graceful drain holds the LISTENER
+> for a few seconds after SIGTERM (in-flight requests finish; `/readyz` flips
+> to 503), so `kill <pid> && ./new-binary` races the port: the new process can
+> fail `bind: address already in use` — and today it prints
+> `serving on :PORT` BEFORE the bind error, so a chained start looks alive
+> while the OLD binary keeps answering `/health`. Wait for the port to free
+> (`until ! ss -ltn | grep -q :8620; do sleep 0.3; done`) before starting the
+> replacement, and verify you're on the new build via `/health`'s version.
+> (Production has this solved: `deploy-update.sh` does the atomic swap.)
+
 `New` → `Register` (any number, **before** `Start`) → `Start`. `Register` after
 `Start` is an error (routes are wired at boot).
 
@@ -395,6 +405,16 @@ row, err := ctx.Insert("students", map[string]any{"full_name": "Ana"})
 row, err := ctx.Update("students", id, map[string]any{"country": "MX"})
 ```
 
+**Row types** (so you never write defensive converters): every row is a
+`map[string]any` with pgx's native Go values — `uuid` (and the implicit `id`)
+arrives as a canonical **`string`**; `int` as **`int32`**, `int64` as
+**`int64`**, `float64` as `float64`; `bool` as `bool`; `string`/`text` as
+`string`; `time` (and `auto` timestamps) as **`time.Time`**; `jsonb` as a
+decoded **`map[string]any`**; `json` as `string`; a `file` field as its file-id
+`string`; SQL NULL as `nil`. A numeric you'll do arithmetic on: assert the type
+above directly (e.g. `row["precio_hora_centavos"].(int64)` for an `int64`
+field) — no switch needed.
+
 > **`QueryOpts.Filters` takes DECLARED FIELDS ONLY — `id` is not one of them.**
 > The implicit primary key is not a declared field, so
 > `ctx.Query("students", QueryOpts{Filters: map[string]any{"id": x}})` fails with
@@ -405,7 +425,9 @@ row, err := ctx.Update("students", id, map[string]any{"country": "MX"})
 
 `Update` also enforces a declared **state machine**, with the exact semantics of
 the generated PATCH (the guard lives in the UPDATE's WHERE — race-safe, terminal
-states immutable, re-sending the current value is a no-op). An illegal move
+states immutable, re-sending the current value is a no-op — so a transition
+endpoint hit twice answers 200 idempotently; if yours must REJECT "it was
+already in X", read the row first and check the previous state yourself). An illegal move
 returns `*appitools.InvalidTransitionError` (→ the same 422 if you return it);
 a concurrent-change conflict returns `appitools.ErrUpdateConflict` (→ 409). So a
 custom route that advances a lifecycle needs NO transition table of its own —

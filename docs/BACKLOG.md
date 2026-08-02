@@ -26,91 +26,43 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-02 (FRONTEND-SPEC-S1)** — three new OPEN items from
-the first real frontend consuming the file stack (FILES-1/FILES-2/ENG-32, plus
-COMMERCE-6); the seam + grant that session shipped are in DONE.
+**Last reviewed: 2026-08-02 (THIRD-PARTY-READY-S1)** — the five third-party
+blockers (ENG-33/ENG-32/FILES-1/FILES-2/COMMERCE-6) closed and moved to DONE;
+two new OPEN (UI-1: Studio authoring of the file-field policy keys; ENG-34:
+the serving log prints before the bind — the fresh-agent experiment's one
+product gap).
 
 ---
 
 ## OPEN
 
-### FILES-1 — Upload constraints are per-instance; the need is per-FIELD
-- **Origin:** FRONTEND-SPEC-S1 — commerce GAPS **5C-3**. Product images wanted
-  "images only, ≤5 MB"; the only knobs are `APPITOOLS_FILES_MAX_BYTES` +
-  `APPITOOLS_FILES_ALLOWED_EXT`, process-wide. Works while a shop uses files
-  for exactly one thing; breaks the day invoices-as-PDF (≤20 MB, `pdf`) arrive
-  and the two uses fight over one knob.
-- **Impact:** Medium — the first thing a SECOND file-using feature trips on.
-- **Design note (from the field):** the upload endpoint is field-agnostic, so
-  the per-field check belongs at **ATTACH time**: a `file` field declaring e.g.
-  `"accept": "image"` / `"max_bytes": N` validates the referenced file's stored
-  metadata (sniffed content-type family + size) on create/update → the same
-  `422 fields[]` shape (`rule: file_policy`). The instance env stays the outer
-  bound at upload.
-- **Probe:** attach a 6 MB PDF's file_id to a field declared `accept: image` →
-  today a 201; ready when it is a named 422.
-- **Ready:** the `file` field accepts the two policy keys (validated at load,
-  strict-key), attach enforces them on REST/GraphQL/batch, spec + grammar
-  updated, and the tiendita's `imagen_id` declares them (replacing the
-  instance-wide workaround noted in its `.env.dev`).
+### UI-1 — Studio cannot author the file-field policy keys (accept/max_bytes)
+- **Origin:** THIRD-PARTY-READY-S1 (FILES-1). The schema gained `accept` +
+  `max_bytes` on file fields; the visual editor's field panel does not offer
+  them, re-opening (by two keys) the 100%-parity claim UI-F4-S3 closed.
+- **Impact:** Low — the ROUND-TRIP is safe (the editor imports a field def by
+  spread and preserves unknown keys on export, verified by reading
+  transform.ts), so a policy declared in JSON survives Studio edits; it just
+  cannot be CREATED or CHANGED visually.
+- **Ready:** the file-field panel offers accept (family multi-select + free
+  exact types) and max_bytes, validated like the engine; round-trip pinned.
 
-### FILES-2 — A ServeFile response cannot carry app-chosen cache headers
-- **Origin:** FRONTEND-SPEC-S1 — commerce GAPS **5C-4**. The public product
-  image URL is stable and content-addressed (immutable by construction), but
-  `Ctx.ServeFile` sets no cache policy, so browsers revalidate per view. The
-  304s are cheap; `Cache-Control: public, max-age=31536000, immutable` would
-  make them zero round-trips.
-- **Impact:** Low (measured shape: one conditional request per image per
-  page view).
-- **Ready:** a handler can declare response cache headers that the post-commit
-  serve respects (options on ServeFile, or headers pre-set through the Ctx),
-  documented in backend-spec/frontend-spec; the commerce image route uses it.
-
-### ENG-32 — HEAD on a custom GET route answers as if the route did not exist
-- **Origin:** FRONTEND-SPEC-S1 — commerce GAPS **5C-5**, found probing the
-  image route with `curl -I`.
-- **Impact:** Low. chi registers the exact method and the Public/ByteServing
-  matchers are method-exact, so `HEAD /api/catalogo-imagen` is a 401 (or the
-  SPA shell on an unauthenticated path) instead of headers-only. Browsers
-  never HEAD an `<img>`; link unfurlers and some CDNs do.
-- **Probe:** `curl -I -H "Host: tiendita.localhost" :8099/api/catalogo-imagen?id=<live id>`
-  → today 401; ready when it answers 200 with the GET's headers and no body
-  (RFC 9110 §9.3.2), at least for ByteServing routes.
-- **Ready:** HEAD is served for custom GET routes (or documented as
-  deliberately unsupported, with the reason).
-
-### ENG-33 — Registered custom routes are invisible to the served OpenAPI
-- **Origin:** FRONTEND-SPEC-S1's external-read pass: an agent given ONLY
-  `frontend-spec` + a running backend could not enumerate the anonymous
-  storefront surface — `/openapi.json` lists only generated routes, an unknown
-  `/api/...` answers `401` (not 404, so probing can't distinguish "absent"
-  from "authenticated"), and the whole public half of a storefront is custom
-  routes. It found the reference shop's routes only because the doc's examples
-  happen to name them.
-- **Impact:** Medium — it is the FIRST wall an external frontend agent hits.
-  Mitigated today by convention (the contract sheet: frontend-spec §0.2 +
-  backend-spec §3.6b), but the engine KNOWS the registered routes at boot
-  (`App.Routes()`: method, path, Public, RateLimit) and could serve at least
-  their existence.
-- **Probe:** `GET /openapi.json` on the commerce binary → today zero custom
-  paths; ready when `/api/catalogo` et al. appear (path + method + a
-  `x-public` marker; request/response schemas stay the author's job — Go
-  handlers have no declared shapes).
-- **Ready:** registered routes appear in the served OpenAPI as path items
-  (summary from a new optional `Route.Description`, marked public where
-  `Public`), documented in backend-spec; the contract sheet remains the
-  authority for SHAPES.
-
-### COMMERCE-6 — e2e-browser.mjs leaves residue on the shop it runs against
-- **Origin:** FRONTEND-SPEC-S1 — commerce GAPS **5C-7**. Every run strands a
-  stamped product (`GOR-TRU-<stamp>`), its orders/clients, and now a photo
-  blob; two strays had already buried the seed products on the 105's vitrina.
-  The 3-9 rule ("suites that run against production clean up") reached
-  verify.sh and e2e-1b, never the browser suite.
-- **Impact:** Low-medium — pollution on DEMO shops is user-visible.
-- **Ready:** the suite deletes what it created (the order-first dance e2e-1b
-  already does, via the same PSQL_CMD parameterization so the remote-run mode
-  survives), verified by two consecutive runs leaving identical counts.
+### ENG-34 — "Appitools serving on :PORT" is printed BEFORE the bind is confirmed
+- **Origin:** THIRD-PARTY-READY-S1's fresh-agent experiment (friction #2, the
+  costliest of its run). The agent killed the old binary and chain-started the
+  new one; the new process printed `Appitools serving on :8620 — Ctrl+C to
+  stop` and THEN died with `bind: address already in use` (the old process was
+  still in its graceful drain, and kept answering /health) — so the agent ran a
+  whole browser e2e against the STALE binary. Code: app.go prints the line
+  before `a.ss.Run(ctx, srv, …)` ever calls Listen.
+- **Impact:** Low-medium — dev-loop only (prod uses deploy-update.sh's atomic
+  swap), but it is a success message for something that has not happened, the
+  exact "reports success and is wrong" class ADR-024 exists for.
+- **Mitigation shipped now:** backend-spec documents the drain+log-order trap
+  and the wait-for-port recipe.
+- **Ready:** the line prints AFTER a successful net.Listen (bind first, then
+  announce; Serve on the live listener), on both the single app and the fleet;
+  a failed bind prints only the error.
 
 ### ENG-1 — Embed cache for `?include=` relations
 - **Origin:** ADR-019 §cache invalidation; carried in ESTADO_Y_PLAN_MAESTRO as
@@ -605,6 +557,28 @@ All three were **re-verified as still open on 2026-07-29**.
 | **Give `/root/commerce` a remote** | The technical fix is trivial; the decision (which account, public or private, whether the commerce platform is a product or a demo) is his. See **OPS-5** — until then the field report lives on one disk. |
 
 ---
+
+## DONE in THIRD-PARTY-READY-S1 (2026-08-02)
+
+The five items standing between a THIRD PARTY and building alone — the
+discoverable surface, the trilogy that announces itself, and the file-stack
+field-report items — plus the final proof: a fresh agent with NO repo access
+building an app from only the printed specs (verdict recorded in the session
+report and 04_ESTADO_ACTUAL §7).
+
+| Item | What shipped | Proof |
+|---|---|---|
+| **ENG-33 — the served surface is discoverable** | Every registered custom route is published in the running app's `/openapi.json`: method, path, auth mode (`x-public` + `security:[]` / Bearer + the RBAC segment-action in the description), `x-required-role`, `x-byte-serving`, flagged `x-appitools-custom-route`, plus the new optional `Route.Description` as summary. Shapes stay the contract sheet's job (existence vs shapes division, backend-spec §3.6b rewritten). The 401-probe semantics stay DELIBERATELY: with the contract public, probing is not the discovery mechanism, and a pre-auth 404 would need a second route matcher that can only drift. | unit tests (incl. nil-routes byte-identical); the tiendita's `/openapi.json` lists its 12 custom routes; frontend-guide's lists `public-photo`; binary-diff gate 64/65 SAME + the 1 diff = the intended info.description change |
+| **ENG-32 — HEAD on custom GET routes** | Same handler, same auth (Public HEAD rides the same skip), RBAC maps HEAD→read, `http.ServeContent` answers natively. Generated routes unchanged (pinned by a new corpus row: 405 both binaries). | integration test (200 + ETag + empty body); live probe on the tiendita image route: was 401, now 200 headers-only |
+| **FILES-1 — per-FIELD attach policy** | `accept` (family/`pdf`/exact type; string or array) + `max_bytes` on file fields, enforced at ATTACH on all five write shapes (REST create/update, GraphQL ×2, batch, Ctx.Insert/Update) against the SNIFFED stored metadata → 422 `file_policy` naming the policy. Load-validated, meta-schema + LLM grammar updated (pinned). Existence stays the FK's verdict. | schema+core unit tests; live: the tiendita's `imagen_id` declares image/5 MiB, the instance-wide .env.dev workaround RETIRED, and e2e-1b runs the exact backlog probe (6 MB real PNG and a real PDF both upload fine, both fail the attach 422 `file_policy`) — 43/43 |
+| **FILES-2 — declarable ServeFile cache policy** | `ServeFile(id, WithCacheControl(...))` + `CacheControlImmutable` (safe: the store is content-addressed). Sent only on the success path — never on the 404. | integration test (header on stream, absent on miss); live: the tiendita image serves `public, max-age=31536000, immutable` |
+| **Trilogy discoverability (Parte B)** | New `appitools specs` (the three docs in one paste, pure concatenation); root `--help` names the trilogy; README gained a prominent "building with an AI agent" section after the quick start; each spec's header names its siblings; `/docs` shows the pointer via OpenAPI `info.description`; `install.sh`'s summary points at the commands + the live `/openapi.json`. | `appitools --help` / `specs` output; the gate's one explained diff IS the /docs pointer |
+| **COMMERCE-6 — the browser suite cleans up** | `e2e-browser.mjs` deletes its stamped product/photo/orders/clients (order-first dance, PSQL_CMD-parameterized, runs on failure too); the RULE written in commerce `docs/TESTING.md` (a suite that runs against a live shop cleans up or it is broken). | two consecutive runs: counts 12/15/6/5 → 12/15/6/5, 21/21 both |
+
+Session-wide gates: lint 0 · unit + FULL lane green · binary-diff gate 64/65
+SAME (1 diff = intended) · write-path ABBA (the touched hot path): Δp50
++0.055 ms (+2.20 %), MWU p=0.096 → **no_change**, with the base-vs-base
+control moving 3× more (+0.179 ms) than the effect.
 
 ## DONE in FRONTEND-SPEC-S1 (2026-08-02)
 
