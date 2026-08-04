@@ -466,6 +466,23 @@ refreshed).
   sandbox credentials, the CUFE returned and stored, and the failure modes mapped
   to the `facturas` state machine.
 
+### OPS-17 — The live demo domains still carry the pre-rename name
+- **Origin:** RENAME-AND-PUBLISH-PREP-S1 (the rename session). `tiendita.appitools.com`
+  and `petfriendly.appitools.com` were deliberately NOT touched by the rename (live
+  apps, DNS + certs on the production VPS); the README links them with a
+  "moves to appximo.com next" note.
+- **Impact:** Medium (brand coherence).
+- **Ready:** DNS records under `appximo.com` for both demos, Caddy site blocks
+  updated, old domains redirected or retired, README/site links updated.
+
+### OPS-18 — The `appximo/appximo` Docker image does not exist yet
+- **Origin:** RENAME-AND-PUBLISH-PREP-S1. Every doc/compose names
+  `appximo/appximo`; the published image is still the historical pre-rename one.
+- **Impact:** High for the README quick start (the docker path 404s until this
+  lands — the README says so inline).
+- **Ready:** Docker Hub namespace `appximo` + publish secrets set, one green CI
+  on main; `docker pull appximo/appximo` works anonymously.
+
 ---
 
 ## CLOSED (decided, with the reasoning written down)
@@ -490,10 +507,29 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Rotate the 58's PostgreSQL password**~~ | **RESOLVED by PROD-JOURNEY-1B (2026-07-31):** the wipe (`--uninstall --purge`) dropped the role and database; the reinstall generated a fresh password (plus fresh JWT/admin secrets, rotated again on-box after the installer printed them to stdout — see OPS-7). The exposed credential no longer exists. |
 | **Publish the Go module (the 10 % path is blocked on it)** | `github.com/appximo/appximo` is private with no tag, so `go get` / `go mod tidy` FAIL for anyone building a custom backend: the only recipe that works is a local checkout plus an absolute-path `replace`, which does not build on a teammate's machine, in CI, or in a plain `docker build`. This is now written honestly at the top of `backend-spec` §3.0 (with exactly what changes once it is published), but it is a **product blocker, not a doc gap** — the framework half of the product is unreachable outside this machine until the repo is public or a tagged private module + `GOPRIVATE` is set up. Part of **DOC-2**, which is otherwise DONE. |
 | **Give `/root/commerce` a remote** | The technical fix is trivial; the decision (which account, public or private, whether the commerce platform is a product or a demo) is his. See **OPS-5** — until then the field report lives on one disk. |
-| **Pick the canonical repo URL** (PHASE3-GUIDE-S1) | Two names coexist today: the README badges and installer point at `github.com/appximo/appximo`; the Go module path — and therefore every import, the served OpenAPI `info.description` and the specs — says `github.com/appximo/appximo`. Publishing under either makes the other wrong; a module-path change is a breaking edit to every consumer `go.mod`. The page (`site/`) ships the repo link as an explicit placeholder until this is decided. |
+| ~~**Pick the canonical repo URL**~~ (PHASE3-GUIDE-S1) | **RESOLVED by RENAME-AND-PUBLISH-PREP-S1 (2026-08-04):** everything is **`github.com/appximo/appximo`** — module path, imports, OpenAPI description, specs, badges, site. |
 | **Where `site/` lives** (PHASE3-GUIDE-S1) | The official page is finished, self-contained and browser-verified, with the repo/Releases/domain spots as dashed placeholders. Publishing venue (GitHub Pages over the repo, `appximo.com`, or a host) is his call; `site/README.md` documents what each choice changes (the relative `../docs/` links). |
 
 ---
+
+## DONE in RENAME-AND-PUBLISH-PREP-S1 (2026-08-04)
+
+The product renamed **Appitools → Appximo** (a name collision with Applitools —
+same developer-tools space, one letter apart — plus a taken GitHub handle; the
+full reasoning lives in the maintainer's internal decision record). This public
+repository is the filtered result: internal planning material and
+infrastructure identifiers were removed from the entire history before
+publication, and the history's commit messages are otherwise preserved.
+
+| What shipped | Verified by |
+|---|---|
+| **The rename, end to end** — module `github.com/appximo/appximo`, `cmd/appximo{,-worker}`, CLI/binary `appximo`, env prefix `APPXIMO_*`, `$schema` → `https://appximo.com/schema/v1` (the value was never validated — no behavior change), meta-schema `appximo.schema.json`, image name `appximo/appximo`, installer unit `appximo.service` (+ migration note for pre-rename installs, PRODUCTION.md §3), specs/GUIDE/README/site/scripts/CI | binary-diff gate pre↔post rename: **92 cases, 91 SAME + 1 DIFF explained** (OpenAPI `info.description` — the rename itself; byte-diffed, zero structural change); `make test` 0 FAIL; `make test-all` EXIT 0; lint 0 |
+| **The gate's own HEAD flake fixed** — a HEAD case's body file IS a header dump (curl --head), compared raw → the random X-Trace-Id flagged DIFF even between identical binaries; now normalized as headers | control run base-vs-base: **92/92 SAME** |
+| **Public-repo files** — SECURITY.md, CODE_OF_CONDUCT.md, LICENSE/NOTICE copyright named | filtered repo: build OK, `make test` OK, `make test-all` EXIT 0, lint 0 |
+
+New OPEN above: **OPS-17** (demo-domain DNS migration), **OPS-18** (image
+publication). Resolved: the canonical-URL decision (everything is
+`github.com/appximo/appximo`).
 
 ## DONE in PHASE3-GUIDE-S1 (2026-08-02)
 
