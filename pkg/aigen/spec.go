@@ -1,8 +1,8 @@
 package aigen
 
 // JSON-EDITOR-S3: the EXTERNAL-agent pack. Spec() assembles the printable
-// grammar for `appitools spec` — paste it into any agent's context (Claude
-// Code, Cursor, a system prompt) and that agent becomes an Appitools schema
+// grammar for `appximo spec` — paste it into any agent's context (Claude
+// Code, Cursor, a system prompt) and that agent becomes an Appximo schema
 // generator, running the SAME validator-guided loop the internal ai-generate
 // uses, but on the user's own subscription (zero product API cost).
 //
@@ -15,9 +15,9 @@ package aigen
 // a shape the engine rejects.
 
 // specHeader frames the document for the agent that receives it.
-const specHeader = `# Appitools schema grammar — for an LLM/agent
+const specHeader = `# Appximo schema grammar — for an LLM/agent
 
-You are generating an Appitools schema: ONE JSON object that an engine compiles
+You are generating an Appximo schema: ONE JSON object that an engine compiles
 into a multi-tenant REST + GraphQL + OpenAPI server at boot. There are no
 handlers, models, or migrations — the schema is the whole application
 definition. This document is the complete distilled grammar; the engine's
@@ -25,11 +25,11 @@ validator is STRICT (any key outside this grammar rejects the schema, nothing
 is silently ignored).
 
 This is one of THREE companion documents the CLI prints — together they cover a
-complete app: this one (` + "`appitools spec`" + `) teaches the SCHEMA;
-` + "`appitools backend-spec`" + ` teaches custom Go handlers, hooks, auth and
-background jobs; ` + "`appitools frontend-spec`" + ` teaches the frontend (the
+complete app: this one (` + "`appximo spec`" + `) teaches the SCHEMA;
+` + "`appximo backend-spec`" + ` teaches custom Go handlers, hooks, auth and
+background jobs; ` + "`appximo frontend-spec`" + ` teaches the frontend (the
 API contract a UI consumes, error→screen-state mapping, files/images).
-` + "`appitools specs`" + ` prints all three at once.
+` + "`appximo specs`" + ` prints all three at once.
 
 ## Core grammar
 `
@@ -44,7 +44,7 @@ const specAdvanced = `
 they are the two constructs a business description most often implies.)
 
 RBAC CUSTOM-ROUTE grants (only when a Go backend registers custom endpoints with
-appitools.Route — the pure binary has none, and a grant for a route that is not
+appximo.Route — the pure binary has none, and a grant for a route that is not
 registered FAILS THE BOOT):
   "customer": {
     "permissions": { "orders": { "actions": ["read"],
@@ -130,11 +130,11 @@ including an owner-scoped "read all, write own" optometrist.)
 
 `
 
-// SpecExampleAdvanced is the advanced worked example printed by `appitools
+// SpecExampleAdvanced is the advanced worked example printed by `appximo
 // spec` — kept as a standalone const so spec_test.go validates it against the
 // real validator (the spec can never teach an invalid shape).
 const SpecExampleAdvanced = `{
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "optica-crm",
   "resources": {
@@ -227,14 +227,14 @@ const specFooter = `
 
 1. Generate the schema JSON from the app description, following this grammar.
 2. Validate it with the engine's oracle:
-       appitools validate --json schema.json
+       appximo validate --json schema.json
    The output is { "valid", "errors": [ { "path", "rule", "message",
    "expected", "got", "fix" } ] } — machine-readable, one entry per problem.
 3. If invalid: for each error, edit the schema at "path" following "fix"
    (pick from "expected" when given). Re-validate. Repeat until "valid": true.
 4. Deliver ONLY the JSON object (no prose, no markdown fences).
 
-The finished schema can be pasted into Appitools Studio's Code view (/editor →
+The finished schema can be pasted into Appximo Studio's Code view (/editor →
 Code) — the same validator runs live there, errors land on their lines, and a
 gated Apply + Deploy takes it to a running API. Full human-grade reference:
 docs/SCHEMA_REFERENCE.md.

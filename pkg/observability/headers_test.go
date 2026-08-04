@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/observability"
+	"github.com/appximo/appximo/pkg/observability"
 )
 
 func TestFilterHeaders(t *testing.T) {

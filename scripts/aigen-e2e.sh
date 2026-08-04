@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Appitools — AI schema generation end-to-end proof (AI-F0-S3)
+# Appximo — AI schema generation end-to-end proof (AI-F0-S3)
 #
 # Proves the democratization loop for FOUR real app archetypes:
 #   describe (NL)  →  AI generates schema  →  validate --json  →  self-correct
@@ -8,7 +8,7 @@
 #
 # Two modes, auto-selected:
 #   • ANTHROPIC_API_KEY set  → LIVE generation: each description is sent through
-#     `appitools ai-generate` (the real loop on the CHEAP model), and the script
+#     `appximo ai-generate` (the real loop on the CHEAP model), and the script
 #     records the ECONOMIC instrumentation (iterations, tokens, cost) — the data
 #     that validates the thesis. The generated schema is then provisioned + CRUDed.
 #   • no key                 → PROVISION-ONLY demo: uses the committed golden
@@ -21,7 +21,7 @@
 #
 # Usage:
 #   export PATH=$PATH:/usr/local/go/bin
-#   set -a; source /root/.appitools-secrets-dev; set +a   # DATABASE_URL/JWT_SECRET/ADMIN_KEY
+#   set -a; source .env.dev; set +a   # DATABASE_URL/JWT_SECRET/ADMIN_KEY
 #   export ANTHROPIC_API_KEY=sk-ant-...                   # optional (enables live gen)
 #   bash scripts/aigen-e2e.sh
 # ============================================================================
@@ -35,8 +35,8 @@ bad() { FAIL=$((FAIL+1)); echo -e "  ${R}✗${N} $1"; }
 : "${DATABASE_URL:?source the dev secrets first (DATABASE_URL/JWT_SECRET/ADMIN_KEY)}"
 : "${JWT_SECRET:?JWT_SECRET required}"
 : "${ADMIN_KEY:?ADMIN_KEY required}"
-BIN=${APPITOOLS_BIN:-./appitools-dev}
-[ -x "$BIN" ] || { echo "build first: go build -o appitools-dev ./cmd/appitools"; exit 1; }
+BIN=${APPXIMO_BIN:-./appximo-dev}
+[ -x "$BIN" ] || { echo "build first: go build -o appximo-dev ./cmd/appximo"; exit 1; }
 
 LIVE=0
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then LIVE=1; fi

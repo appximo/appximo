@@ -17,11 +17,11 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/userauth"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/userauth"
 )
 
 const itSecret = "platformadmin-integration-secret-32+chars!!"
@@ -29,7 +29,7 @@ const itSecret = "platformadmin-integration-secret-32+chars!!"
 var testPool *pgxpool.Pool
 
 // quickSchema is a minimal valid schema for tenant creation in tests.
-const quickSchema = `{"$schema":"https://appitools.dev/schema/v1","version":"1","name":"todo-api",
+const quickSchema = `{"$schema":"https://appximo.com/schema/v1","version":"1","name":"todo-api",
 "resources":{"tasks":{"fields":{"title":{"type":"string","required":true}}}},
 "rbac":{"roles":{"admin":{"resources":"*","actions":["*"]},
 "viewer":{"resources":["tasks"],"actions":["read"]}}}}`

@@ -20,7 +20,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/xuri/excelize/v2"
 
-	"github.com/miguelangel/appitools/pkg/worker"
+	"github.com/appximo/appximo/pkg/worker"
 )
 
 // XLSXProcessor is the first real consumer (XLSX-CONSUMER-V1): the canonical

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/rbac"
+	"github.com/appximo/appximo/pkg/rbac"
 )
 
 func TestAppendRowCondition(t *testing.T) {

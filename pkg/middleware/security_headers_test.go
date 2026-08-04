@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	appmiddleware "github.com/miguelangel/appitools/pkg/middleware"
+	appmiddleware "github.com/appximo/appximo/pkg/middleware"
 )
 
 var noop = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

@@ -9,7 +9,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/miguelangel/appitools/pkg/worker"
+	"github.com/appximo/appximo/pkg/worker"
 )
 
 // mockSender records every Send and returns its configured error (nil = success).

@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/rbac"
+	"github.com/appximo/appximo/pkg/rbac"
 )
 
 // loadLogisticsPolicy parses the RBAC section from testdata/logistics/schema.json.

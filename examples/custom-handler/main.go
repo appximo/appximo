@@ -1,11 +1,11 @@
 // Command custom-handler is the canonical example of the ADR-016 library model:
-// import appitools, register a Class-1 custom handler, compile a single static
-// CGO-free binary. It is the SAME program as the pure `appitools serve` binary
+// import appximo, register a Class-1 custom handler, compile a single static
+// CGO-free binary. It is the SAME program as the pure `appximo serve` binary
 // plus one registered route — not a different runtime mode.
 //
 // The handler below is the echo endpoint that used to live inline in
 // cmd_serve.go. It now demonstrates the real library surface: a Handler that
-// receives an appitools.Ctx with the tenant + transaction already resolved,
+// receives an appximo.Ctx with the tenant + transaction already resolved,
 // binds the body, enqueues an outbox job IN THE SAME TRANSACTION via
 // ctx.Enqueue, and returns the event id. If the handler returns an error the
 // transaction (and the enqueue) roll back atomically.
@@ -21,7 +21,7 @@ import (
 	"flag"
 	"log"
 
-	"github.com/miguelangel/appitools"
+	"github.com/appximo/appximo"
 )
 
 func main() {
@@ -29,7 +29,7 @@ func main() {
 	port := flag.Int("port", 8080, "HTTP port")
 	flag.Parse()
 
-	app, err := appitools.New(appitools.Config{
+	app, err := appximo.New(appximo.Config{
 		SchemaPath: *schemaPath,
 		Port:       *port,
 		// DSN / JWTSecret / AdminKey / Env fall back to the standard env vars.
@@ -42,10 +42,10 @@ func main() {
 	// (tenant → rate limit → JWT → RBAC) exactly like a generated route; the
 	// transaction handed to the handler is already scoped to the tenant
 	// search_path. "_echo" is not a schema resource, so it does not collide.
-	if err := app.Register(appitools.Route{
+	if err := app.Register(appximo.Route{
 		Method: "POST",
 		Path:   "/api/_echo",
-		Handler: func(ctx appitools.Ctx) error {
+		Handler: func(ctx appximo.Ctx) error {
 			var body struct {
 				Msg string `json:"msg"`
 			}
@@ -81,11 +81,11 @@ func main() {
 	//      below is OUR responsibility to validate: the role is hardcoded
 	//      (never from the request), and CreateUser re-checks it against the
 	//      schema RBAC, normalizes the email, and enforces the password rules.
-	if err := app.Register(appitools.Route{
+	if err := app.Register(appximo.Route{
 		Method: "POST",
 		Path:   "/api/_register",
 		Public: true,
-		Handler: func(ctx appitools.Ctx) error {
+		Handler: func(ctx appximo.Ctx) error {
 			var body struct {
 				Email    string `json:"email"`
 				Password string `json:"password"`
@@ -106,9 +106,9 @@ func main() {
 			user, err := ctx.CreateUser(body.Email, body.Password, "viewer")
 			switch {
 			case err == nil:
-			case errors.Is(err, appitools.ErrEmailTaken):
+			case errors.Is(err, appximo.ErrEmailTaken):
 				return ctx.Error(409, "email already registered", err)
-			case errors.Is(err, appitools.ErrInvalidEmail), errors.Is(err, appitools.ErrWeakPassword):
+			case errors.Is(err, appximo.ErrInvalidEmail), errors.Is(err, appximo.ErrWeakPassword):
 				return ctx.Error(422, err.Error(), err)
 			default:
 				return ctx.Error(500, "registration failed", err)

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/appximo/appximo/pkg/auth"
 )
 
 // bigBody is large and repetitive so gzip is guaranteed to shrink it.

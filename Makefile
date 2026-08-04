@@ -14,13 +14,13 @@ build: ## Compile every package (go build ./...)
 # Same script the Dockerfile, release.yml and the devhub deploy pipeline use —
 # never hand-write `go build` for a deployable engine binary.
 engine: ## Canonical engine binary build (static, version-stamped — scripts/build-engine.sh)
-	./scripts/build-engine.sh appitools
+	./scripts/build-engine.sh appximo
 
-# worker: the CANONICAL worker binary build (cmd/appitools-worker, ADR-016
+# worker: the CANONICAL worker binary build (cmd/appximo-worker, ADR-016
 # §Class 2). Same static/version-stamped flags as `engine`; ships in the same
 # Docker image (run it with the `worker` entrypoint keyword).
-worker: ## Canonical worker binary build (cmd/appitools-worker)
-	./scripts/build-worker.sh appitools-worker
+worker: ## Canonical worker binary build (cmd/appximo-worker)
+	./scripts/build-worker.sh appximo-worker
 
 lint: ## golangci-lint run ./...
 	golangci-lint run ./...
@@ -36,7 +36,7 @@ fmt-check: ## The gofmt gate CI enforces
 	echo "✓ gofmt clean"
 
 run:
-	go run ./cmd/appitools/main.go
+	go run ./cmd/appximo/main.go
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Daily flow (DX-S1) — one command per task. `make help` lists everything.
@@ -47,13 +47,13 @@ run:
 #   make dev SCHEMA=optica.json PORT=9000 # your schema, your port
 # DEV_ENV is the env-file with DATABASE_URL / JWT_SECRET / ADMIN_KEY for the
 # LAUNCHED PROCESS (make can't export into your shell; it loads it for serve).
-DEV_ENV ?= /root/.appitools-secrets-dev
+DEV_ENV ?= .env.dev
 SCHEMA  ?= examples/blank/schema.json
 PORT    ?= 8080
 PREFIX  ?= /usr/local
 
-build-cli: ## Compile the dev CLI/engine binary to ./appitools-dev (no serve)
-	go build -o appitools-dev ./cmd/appitools
+build-cli: ## Compile the dev CLI/engine binary to ./appximo-dev (no serve)
+	go build -o appximo-dev ./cmd/appximo
 
 # dev: correctness over speed — it rebuilds the editor SPA so /editor can never
 # silently serve stale assets. If you haven't touched pkg/editorui/web, use
@@ -78,7 +78,7 @@ dev-serve:
 	@echo "→ serving $(SCHEMA) on :$(PORT)"
 	@echo "  Studio  http://localhost:$(PORT)/editor    admin  http://localhost:$(PORT)/admin"
 	@echo "  docs    http://localhost:$(PORT)/docs      stop with Ctrl+C (or: make stop PORT=$(PORT))"
-	@set -a; . "$(DEV_ENV)"; set +a; exec ./appitools-dev serve --schema "$(SCHEMA)" --port $(PORT)
+	@set -a; . "$(DEV_ENV)"; set +a; exec ./appximo-dev serve --schema "$(SCHEMA)" --port $(PORT)
 
 # ── Fleet (FLEET-CONSOLE-S2): N apps, one command — the `make dev` of fleets ──
 # make fleet-init   → scaffold fleet.json + fleet-secrets/ (gitignored, generated
@@ -94,7 +94,7 @@ fleet-fast: build-cli fleet-serve ## Like fleet but skips the SPA rebuilds (assu
 
 fleet-init: build-cli ## Scaffold a working fleet: manifest + secrets (gitignored) + starter schema + DBs
 	@set -a; test -f "$(DEV_ENV)" && . "$(DEV_ENV)"; set +a; \
-		./appitools-dev fleet init --config "$(FLEET_CONFIG)"
+		./appximo-dev fleet init --config "$(FLEET_CONFIG)"
 
 # fleet-serve: the shared serve step (not meant to be called directly). Loads
 # the fleet-level env file (operator key + operator admin password) into the
@@ -109,18 +109,18 @@ fleet-serve:
 	@echo "  console  http://localhost:$(or $(PORT),8080)/fleet?key=…  (operator key: $(FLEET_ENV))"
 	@echo "  apps     http://<app>.localhost:$(or $(PORT),8080)/editor /admin /docs   stop: make stop PORT=$(or $(PORT),8080)"
 	@set -a; test -f "$(FLEET_ENV)" && . "$(FLEET_ENV)"; set +a; \
-		exec ./appitools-dev fleet serve --config "$(FLEET_CONFIG)" $(if $(PORT),--listen ":$(PORT)",)
+		exec ./appximo-dev fleet serve --config "$(FLEET_CONFIG)" $(if $(PORT),--listen ":$(PORT)",)
 
-spec: build-cli ## Regenerate appitools-spec.md (the LLM grammar pack for your agent)
-	@./appitools-dev spec > appitools-spec.md
-	@echo "✓ appitools-spec.md regenerated ($$(wc -l < appitools-spec.md) lines)"
+spec: build-cli ## Regenerate appximo-spec.md (the LLM grammar pack for your agent)
+	@./appximo-dev spec > appximo-spec.md
+	@echo "✓ appximo-spec.md regenerated ($$(wc -l < appximo-spec.md) lines)"
 	@echo "  Paste it into your agent's context (Claude Code / Cursor) — the flow: docs/SCHEMA_SPEC_LLM.md"
 
-install: ## Install the appitools CLI into PREFIX/bin (default /usr/local/bin; may need sudo)
+install: ## Install the appximo CLI into PREFIX/bin (default /usr/local/bin; may need sudo)
 	@test -w "$(PREFIX)/bin" || { echo "✗ $(PREFIX)/bin is not writable — run: sudo make install   (or: make install PREFIX=$$HOME/.local)"; exit 1; }
-	./scripts/build-engine.sh "$(PREFIX)/bin/appitools"
-	@echo "✓ installed $$($(PREFIX)/bin/appitools version 2>/dev/null | tail -1) at $(PREFIX)/bin/appitools"
-	@echo "  Now 'appitools spec', 'appitools serve', 'appitools validate --json …' work from any directory."
+	./scripts/build-engine.sh "$(PREFIX)/bin/appximo"
+	@echo "✓ installed $$($(PREFIX)/bin/appximo version 2>/dev/null | tail -1) at $(PREFIX)/bin/appximo"
+	@echo "  Now 'appximo spec', 'appximo serve', 'appximo validate --json …' work from any directory."
 
 stop: ## Stop the dev server on PORT (default 8080) by its exact PID — never pkill
 	@pid=$$(ss -ltnp 2>/dev/null | grep ":$(PORT) " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); \
@@ -131,7 +131,7 @@ stop: ## Stop the dev server on PORT (default 8080) by its exact PID — never p
 	fi
 
 help: ## List the annotated targets
-	@echo "Appitools — make targets (daily flow first; see the Makefile for the full test/bench lanes):"
+	@echo "Appximo — make targets (daily flow first; see the Makefile for the full test/bench lanes):"
 	@grep -hE '^[a-zA-Z][a-zA-Z0-9_-]*:.*## ' $(MAKEFILE_LIST) | \
 		awk -F':.*## ' '{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
@@ -165,7 +165,7 @@ test-resilience:
 	go test ./tests/resilience/... -race -count=1 -tags resilience -timeout 120s -v
 
 # test-perf: k6 SLO gate. Exits 99 if p95>=15ms or error_rate>=1%.
-# Requires a running server + BENCH_TOKEN (mint with `appitools token`).
+# Requires a running server + BENCH_TOKEN (mint with `appximo token`).
 # Override RATE/DURATION/TARGET_URL/TENANT_ID via env. See tests/performance/README.md.
 test-perf:
 	k6 run tests/performance/sustained_2krps.js
@@ -194,7 +194,7 @@ bench:
 # collect-profile: sample 30 s of CPU from the running dev server (port 6060)
 # and save it as default.pgo. Run this while the server is under load.
 collect-profile:
-	@echo "Collecting 30s CPU profile from dev server (APPITOOLS_ENV=development)..."
+	@echo "Collecting 30s CPU profile from dev server (APPXIMO_ENV=development)..."
 	curl -sf "http://localhost:6060/pprof/profile?seconds=30" -o default.pgo
 	@echo "Profile saved to default.pgo — now run: make build-pgo"
 
@@ -204,8 +204,8 @@ collect-profile:
 # (~30% smaller binary). The runtime pclntab is kept, so runtime.CallersFrames —
 # and therefore the error trace explorer's symbolized stacks — still work.
 build-pgo: default.pgo
-	go build -pgo=default.pgo -trimpath -ldflags="-s -w" -o appitools ./cmd/appitools/
-	@echo "PGO binary written to ./appitools"
+	go build -pgo=default.pgo -trimpath -ldflags="-s -w" -o appximo ./cmd/appximo/
+	@echo "PGO binary written to ./appximo"
 
 # ─── DEV TOOLS (S41) ─────────────────────────────────────────
 .PHONY: test-watch test-watch-pkg test-watch-integration test-reflex \
@@ -271,7 +271,7 @@ dev-setup:
 # (-tags dev: sin UI embebida, Vite aparte) — pará el servicio antes o el
 # puerto :3099 va a estar tomado.
 devhub-run:
-	APPITOOLS_DIR=$(shell pwd) go run -tags dev ./tools/devhub/
+	APPXIMO_DIR=$(shell pwd) go run -tags dev ./tools/devhub/
 
 devhub-build:
 	cd tools/devhub/web && npm run build
@@ -284,7 +284,7 @@ devhub-build:
 admin-ui: ## Build the embedded admin panel SPA (required before go build)
 	cd pkg/adminui/web && npm install --no-audit --no-fund && npm run build
 
-# editor-ui: build the embedded visual schema editor SPA (Appitools Studio, UI-F0-S1).
+# editor-ui: build the embedded visual schema editor SPA (Appximo Studio, UI-F0-S1).
 # Plain Vite + Svelte 5 → static files in pkg/editorui/web/build. Same gitignore
 # pattern as admin-ui: the hashed assets are gitignored, so this MUST run before
 # `go build` / the release / the Docker image for the editor to be populated.

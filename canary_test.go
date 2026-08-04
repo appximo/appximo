@@ -1,10 +1,10 @@
-package appitools
+package appximo
 
 import (
 	"encoding/json"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 func canarySchema(t *testing.T, rbacJSON string) *schema.APISchema {

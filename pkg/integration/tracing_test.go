@@ -17,16 +17,16 @@ import (
 	chi "github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/cache"
-	"github.com/miguelangel/appitools/pkg/codegen"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/extensions"
-	"github.com/miguelangel/appitools/pkg/logging"
-	"github.com/miguelangel/appitools/pkg/observability"
-	rbacpkg "github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/cache"
+	"github.com/appximo/appximo/pkg/codegen"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/extensions"
+	"github.com/appximo/appximo/pkg/logging"
+	"github.com/appximo/appximo/pkg/observability"
+	rbacpkg "github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
 )
 
 // safeBuf is a mutex-guarded buffer: the server goroutine writes log lines after
@@ -151,7 +151,7 @@ INSERT INTO tenant_acmetest.guides (code, status) VALUES ('A','pending'), ('B','
 	defer func() { logging.Log = saved }()
 
 	s := &schema.APISchema{
-		Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "tracing",
+		Schema: "https://appximo.com/schema/v1", Version: "1", Name: "tracing",
 		Resources: map[string]schema.ResourceSchema{
 			"guides": {
 				Fields: map[string]schema.FieldDef{

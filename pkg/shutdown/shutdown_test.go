@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/shutdown"
+	"github.com/appximo/appximo/pkg/shutdown"
 )
 
 func TestReadyzHandler_Returns200WhenReady(t *testing.T) {

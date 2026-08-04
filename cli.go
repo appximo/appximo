@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"flag"
@@ -8,7 +8,7 @@ import (
 
 // This file is the library half of the DEPLOYABLE-BINARY CONTRACT (ADR-023,
 // CONSUMER-PATH-S1). The official production tooling (scripts/install.sh,
-// deploy-update.sh, the generated systemd unit) drives any Appitools binary —
+// deploy-update.sh, the generated systemd unit) drives any Appximo binary —
 // the engine or a consumer app — through two entry points:
 //
 //	<bin> version                      → identity, exit 0
@@ -35,7 +35,7 @@ type ServeArgs struct {
 // contract (ADR-023):
 //
 //   - `version` (also -v / --version) prints
-//     "<name> <version> (commit <revision>) — built on the appitools framework"
+//     "<name> <version> (commit <revision>) — built on the appximo framework"
 //     and exits 0 — install.sh identity-checks this, deploy-update.sh
 //     sanity-checks it, and /health should report the same string's version
 //     (pass it in Config.Version).
@@ -50,9 +50,9 @@ type ServeArgs struct {
 //	var version, revision = "dev", "unknown"   // ldflags -X main.version=…
 //
 //	func main() {
-//		args := appitools.ParseServeArgs("myapp", version, revision,
-//			appitools.ServeArgs{Port: 8099, ControlPort: 9099})
-//		app, err := appitools.New(appitools.Config{
+//		args := appximo.ParseServeArgs("myapp", version, revision,
+//			appximo.ServeArgs{Port: 8099, ControlPort: 9099})
+//		app, err := appximo.New(appximo.Config{
 //			SchemaPath: args.SchemaPath, Port: args.Port,
 //			ControlPort: args.ControlPort, Version: version,
 //		})
@@ -87,13 +87,13 @@ func parseServeArgs(name, version, revision string, defaults ServeArgs, args []s
 	if len(args) > 0 {
 		switch args[0] {
 		case "version", "-v", "--version":
-			return ServeArgs{}, fmt.Sprintf("%s %s (commit %s) — built on the appitools framework", name, version, revision), nil
+			return ServeArgs{}, fmt.Sprintf("%s %s (commit %s) — built on the appximo framework", name, version, revision), nil
 		case "serve":
 			args = args[1:]
 		default:
 			if len(args[0]) > 0 && args[0][0] != '-' {
 				return ServeArgs{}, "", fmt.Errorf(
-					"unknown subcommand %q — this binary serves one app; it accepts `version`, or `serve --schema <path> --port <n> [--control-port <n>]` (ADR-023). Operational commands (tenant, migrate, token, admin) live in the engine CLI (appitools-cli)",
+					"unknown subcommand %q — this binary serves one app; it accepts `version`, or `serve --schema <path> --port <n> [--control-port <n>]` (ADR-023). Operational commands (tenant, migrate, token, admin) live in the engine CLI (appximo-cli)",
 					args[0])
 			}
 		}

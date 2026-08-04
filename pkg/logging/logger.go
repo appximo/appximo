@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/appximo/appximo/pkg/observability"
+	"github.com/appximo/appximo/pkg/tenant"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	"github.com/miguelangel/appitools/pkg/observability"
-	"github.com/miguelangel/appitools/pkg/tenant"
 	"github.com/rs/zerolog"
 )
 

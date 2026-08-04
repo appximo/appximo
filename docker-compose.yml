@@ -1,14 +1,14 @@
-# Appitools — local / dev quickstart (laptop, Docker Desktop on Win/Mac/Linux).
+# Appximo — local / dev quickstart (laptop, Docker Desktop on Win/Mac/Linux).
 #
 #   cp .env.example .env   # then edit the secrets
 #   docker compose up -d   # pulls the published image + postgres, ~20s
 #
 # Uses the pre-built multi-arch image from Docker Hub — no Go toolchain, no
-# compile. To build from source instead: docker build -t neodevtrix/appitools-engine:latest .
+# compile. To build from source instead: docker build -t appximo/appximo:latest .
 # For PRODUCTION (a VPS with a domain, automatic TLS, tenant subdomains) use
 # docker-compose.prod.yml — see docs/DEPLOY.md.
 #
-# The visual UI is published from the separate `appitools-ui` repository and is
+# The visual UI is published from the separate `appximo-ui` repository and is
 # therefore behind the optional "ui" profile (its image is not on a public
 # registry yet). Enable it with:  docker compose --profile ui up
 #
@@ -18,25 +18,25 @@
 
 services:
   engine:
-    image: neodevtrix/appitools-engine:latest
+    image: appximo/appximo:latest
     environment:
-      DATABASE_URL: postgres://appitools:${DB_PASSWORD:-changeme}@db:5432/appitools?sslmode=disable
+      DATABASE_URL: postgres://appximo:${DB_PASSWORD:-changeme}@db:5432/appximo?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}
       ADMIN_KEY: ${ADMIN_KEY:?ADMIN_KEY is required}
       GOMAXPROCS: "2"
       # Content-addressable file store (FILES-V1). Shared with the worker via the
       # files_data volume so the worker's VFS.Get sees what the engine's VFS.Put wrote.
-      APPITOOLS_FILES_DIR: /var/lib/appitools/files
+      APPXIMO_FILES_DIR: /var/lib/appximo/files
       # Observability store (trace + snapshot history). Pointed at the obs_data
       # volume below so the history SURVIVES a container restart (the default
-      # /var/lib/appitools/obs.db would otherwise sit in the ephemeral layer).
-      OBS_DB_PATH: /var/lib/appitools/obs/obs.db
+      # /var/lib/appximo/obs.db would otherwise sit in the ephemeral layer).
+      OBS_DB_PATH: /var/lib/appximo/obs/obs.db
     ports:
       - "8080:8080" # data plane: REST + GraphQL (public)
       - "9090:9090" # control plane: tenant/schema admin (keep private in prod)
     volumes:
-      - files_data:/var/lib/appitools/files
-      - obs_data:/var/lib/appitools/obs # observability history survives restarts
+      - files_data:/var/lib/appximo/files
+      - obs_data:/var/lib/appximo/obs # observability history survives restarts
     depends_on:
       db:
         condition: service_healthy
@@ -48,25 +48,25 @@ services:
   # `deploy.replicas` or `docker compose up --scale worker=N`) and the N workers
   # claim disjoint rows — never double-processing (proven in WORKER-V1).
   worker:
-    image: neodevtrix/appitools-engine:latest
+    image: appximo/appximo:latest
     command: ["worker"]
     environment:
-      DATABASE_URL: postgres://appitools:${DB_PASSWORD:-changeme}@db:5432/appitools?sslmode=disable
+      DATABASE_URL: postgres://appximo:${DB_PASSWORD:-changeme}@db:5432/appximo?sslmode=disable
       # MUST equal the engine's JWT_SECRET — the worker mints a short-lived,
       # scoped service JWT to write results back through the engine API.
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}
       # echo (default, logs+acks) | writeback (demo PATCH) | xlsx (FileJob consumer).
-      APPITOOLS_WORKER_MODE: ${APPITOOLS_WORKER_MODE:-echo}
-      APPITOOLS_ENGINE_URL: http://engine:8080
+      APPXIMO_WORKER_MODE: ${APPXIMO_WORKER_MODE:-echo}
+      APPXIMO_ENGINE_URL: http://engine:8080
       # Internal Host-header suffix for the engine API call ({tenant}.{suffix});
       # the engine reads the tenant from the SUBDOMAIN, so "localhost" is correct
       # even in prod — it is NOT a DNS name (see DEPLOY.md).
-      APPITOOLS_TENANT_DOMAIN: ${APPITOOLS_TENANT_DOMAIN:-localhost}
-      APPITOOLS_WORKER_ROLE: ${APPITOOLS_WORKER_ROLE:-service_worker}
+      APPXIMO_TENANT_DOMAIN: ${APPXIMO_TENANT_DOMAIN:-localhost}
+      APPXIMO_WORKER_ROLE: ${APPXIMO_WORKER_ROLE:-service_worker}
       # Same CAS root as the engine (xlsx mode resolves file_ref via VFS.Get).
-      APPITOOLS_FILES_DIR: /var/lib/appitools/files
+      APPXIMO_FILES_DIR: /var/lib/appximo/files
     volumes:
-      - files_data:/var/lib/appitools/files
+      - files_data:/var/lib/appximo/files
     depends_on:
       db:
         condition: service_healthy
@@ -75,9 +75,9 @@ services:
     restart: unless-stopped
 
   ui:
-    image: appitools/ui:latest
+    image: appximo/ui:latest
     # opt-in: `docker compose --profile ui up`. The UI image is NOT on a public
-    # registry yet — build it from the appitools-ui repo (or point this at your own
+    # registry yet — build it from the appximo-ui repo (or point this at your own
     # image) before enabling the profile.
     profiles: ["ui"]
     environment:
@@ -97,9 +97,9 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: appitools
+      POSTGRES_USER: appximo
       POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
-      POSTGRES_DB: appitools
+      POSTGRES_DB: appximo
     volumes:
       - pgdata:/var/lib/postgresql/data
     configs:
@@ -107,11 +107,11 @@ services:
       # volume (postgres runs /docker-entrypoint-initdb.d/*.sql once). Without
       # it, registering a tenant on :9090 fails — fresh databases have no
       # public.tenants. Pre-existing volumes: apply it manually once with
-      #   docker compose exec -T db psql -U appitools -d appitools < migrations/001_control_plane.sql
+      #   docker compose exec -T db psql -U appximo -d appximo < migrations/001_control_plane.sql
       - source: control_plane_init
         target: /docker-entrypoint-initdb.d/001_control_plane.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U appitools"]
+      test: ["CMD-SHELL", "pg_isready -U appximo"]
       interval: 5s
       timeout: 5s
       retries: 5

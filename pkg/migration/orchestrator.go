@@ -8,15 +8,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/schemahistory"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/schemahistory"
 )
 
 // This file implements the RESUMABLE MULTI-TENANT MIGRATION ORCHESTRATOR — the
 // fan-out that applies a schema change to N tenants (N Postgres schemas) safely. It
 // is the differentiator over Prisma (no native multi-tenant fan-out) and
-// django-tenants (fragile under partial failure): Appitools is schema-per-tenant
+// django-tenants (fragile under partial failure): Appximo is schema-per-tenant
 // with an IDEMPOTENT diff (re-applying a converged tenant is a no-op) and a
 // per-tenant advisory lock, so the fan-out is resilient and resumable by
 // construction.

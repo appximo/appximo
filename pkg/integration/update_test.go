@@ -9,16 +9,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/cache"
+	"github.com/appximo/appximo/pkg/codegen"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/extensions"
+	rbacpkg "github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
 	chi "github.com/go-chi/chi/v5"
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/cache"
-	"github.com/miguelangel/appitools/pkg/codegen"
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/extensions"
-	rbacpkg "github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
 // updSchema is a logistics-style schema exercising the update paths: guides has a
@@ -27,7 +27,7 @@ import (
 // so the updated_at=NOW() behaviour is covered.
 func updSchema() *schema.APISchema {
 	return &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "logistics-upd",
 		Resources: map[string]schema.ResourceSchema{

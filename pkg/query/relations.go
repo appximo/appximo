@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // RELATIONS-V1 (ADR-019): the ?include= → SQL compiler. Given a base resource and

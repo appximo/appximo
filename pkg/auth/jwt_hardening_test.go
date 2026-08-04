@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/appximo/appximo/pkg/auth"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/miguelangel/appitools/pkg/auth"
 )
 
 const hardeningSecret = "jwt-hardening-test-secret"

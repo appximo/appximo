@@ -26,7 +26,7 @@
 #   scripts/binary-diff-gate.sh <base-binary> <new-binary> [corpus.jsonl]
 #
 #   DATABASE_URL   required — a Postgres superuser URL; the gate creates and
-#                  drops its own scratch databases (appitools_bdg_base/_new).
+#                  drops its own scratch databases (appximo_bdg_base/_new).
 #   BDG_PORT_BASE / BDG_PORT_NEW    data ports (default 8501 / 8502)
 #   BDG_CTRL_BASE / BDG_CTRL_NEW    control ports (default 9501 / 9502)
 #   BDG_KEEP=1     keep the scratch databases after the run (debugging)
@@ -86,8 +86,8 @@ cleanup() {
   done
   wait 2>/dev/null || true
   if [ "${BDG_KEEP:-0}" != "1" ]; then
-    sql "DROP DATABASE IF EXISTS appitools_bdg_base" >/dev/null 2>&1 || true
-    sql "DROP DATABASE IF EXISTS appitools_bdg_new"  >/dev/null 2>&1 || true
+    sql "DROP DATABASE IF EXISTS appximo_bdg_base" >/dev/null 2>&1 || true
+    sql "DROP DATABASE IF EXISTS appximo_bdg_new"  >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -96,11 +96,11 @@ WORK=$(mktemp -d)
 
 # ── boot one side ─────────────────────────────────────────────────────────────
 boot() { # $1=side $2=binary $3=port $4=ctrl
-  local side=$1 bin=$2 port=$3 ctrl=$4 dbname="appitools_bdg_$1"
+  local side=$1 bin=$2 port=$3 ctrl=$4 dbname="appximo_bdg_$1"
   sql "DROP DATABASE IF EXISTS $dbname" >/dev/null
   sql "CREATE DATABASE $dbname" >/dev/null
   DATABASE_URL="$(db_url_for "$dbname")" JWT_SECRET="$JWT_SECRET_GATE" ADMIN_KEY="$ADMIN_KEY_GATE" \
-    APPITOOLS_CONTROL_PORT="$ctrl" APPITOOLS_ENV="" \
+    APPXIMO_CONTROL_PORT="$ctrl" APPXIMO_ENV="" \
     "$bin" serve --schema "$SCHEMA" --port "$port" >"$WORK/$side.log" 2>&1 &
   PIDS+=($!)
   for _ in $(seq 1 100); do
@@ -222,7 +222,15 @@ while IFS= read -r line; do
   fire "$PORT_NEW"  "$ID_NEW"  "$line" "$WORK/n"
 
   bs=$(cat "$WORK/b.status"); ns=$(cat "$WORK/n.status")
-  bb=$(normalize_body <"$WORK/b.body"); nb=$(normalize_body <"$WORK/n.body")
+  # curl --head writes the header block as the OUTPUT (-o), so a HEAD case's
+  # .body file IS a header dump — normalize it as headers, or the random
+  # X-Trace-Id/Date inside it flags DIFF even between identical binaries
+  # (measured: base-vs-base flagged head-generated-list before this).
+  if [ "$(echo "$line" | jq -r '.method // "GET"')" = "HEAD" ]; then
+    bb=$(normalize_headers <"$WORK/b.body"); nb=$(normalize_headers <"$WORK/n.body")
+  else
+    bb=$(normalize_body <"$WORK/b.body"); nb=$(normalize_body <"$WORK/n.body")
+  fi
   bh=$(normalize_headers <"$WORK/b.hdr"); nh=$(normalize_headers <"$WORK/n.hdr")
 
   if [ "$bs" = "$ns" ] && [ "$bb" = "$nb" ] && [ "$bh" = "$nh" ]; then

@@ -6,7 +6,7 @@ import (
 )
 
 // CustomRoute describes one custom endpoint a framework-mode backend registered
-// with (*appitools.App).Register, for publication in the served OpenAPI document
+// with (*appximo.App).Register, for publication in the served OpenAPI document
 // (ENG-33, THIRD-PARTY-READY-S1).
 //
 // Why this exists: before it, the whole custom half of an app's surface — which
@@ -24,7 +24,7 @@ import (
 //     virtual-resource action it demands), an extra RequireRole if declared,
 //     and whether the response is a byte stream (ByteServing).
 //   - The AUTHOR may declare (optional): a one-line Summary
-//     (appitools.Route.Description). Request/response SHAPES stay the author's
+//     (appximo.Route.Description). Request/response SHAPES stay the author's
 //     job — a Go handler has no declared schema, and inventing one here would
 //     publish a guess as a contract. The app's contract sheet (backend-spec
 //     §3.6b) remains the authority for shapes; the OpenAPI is the authority for
@@ -89,11 +89,11 @@ func oaCustomRouteOp(rt CustomRoute) map[string]any {
 	desc.WriteString("Request/response shapes are defined by the application handler — the app's contract sheet is the authority for shapes; this document is the authority for existence.")
 
 	op := map[string]any{
-		"operationId":              customOpID(rt.Method, rt.Path),
-		"summary":                  summary,
-		"description":              desc.String(),
-		"tags":                     []string{seg},
-		"x-appitools-custom-route": true,
+		"operationId":            customOpID(rt.Method, rt.Path),
+		"summary":                summary,
+		"description":            desc.String(),
+		"tags":                   []string{seg},
+		"x-appximo-custom-route": true,
 	}
 	if rt.Public {
 		op["security"] = []any{} // overrides the global bearerAuth requirement

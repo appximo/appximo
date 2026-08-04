@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// APISchema is the top-level contract for an Appitools project.
+// APISchema is the top-level contract for an Appximo project.
 type APISchema struct {
 	Schema    string                    `json:"$schema"`
 	Version   string                    `json:"version"`
@@ -165,7 +165,7 @@ type FieldDef struct {
 	// endpoint is field-agnostic, so the field's policy applies when a record
 	// references the file): a violating file_id is a 422 `file_policy` naming
 	// what the field accepts. The instance-wide env knobs
-	// (APPITOOLS_FILES_MAX_BYTES / _ALLOWED_EXT) remain the outer bound at
+	// (APPXIMO_FILES_MAX_BYTES / _ALLOWED_EXT) remain the outer bound at
 	// upload.
 	Accept StringList `json:"accept,omitempty"`
 	// MaxBytes (FILES-1) — file fields only — caps the size of a file this

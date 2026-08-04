@@ -1,4 +1,4 @@
-# The Appitools guide
+# The Appximo guide
 
 **You have a backend to build and you have never seen this project before. This
 is the document to read.** It was not written from the source code — it was
@@ -34,7 +34,7 @@ references. Nothing below is aspirational.
 
 ## 1. What it is — and who it is NOT for
 
-Appitools compiles **one JSON schema into a multi-tenant REST + GraphQL +
+Appximo compiles **one JSON schema into a multi-tenant REST + GraphQL +
 OpenAPI server at boot**. Go 1.25, no CGO, one static binary (~64 MB release
 build), against a PostgreSQL **you** control. There are no handlers, models or
 migration files to write: routes, SQL, validation, RBAC, OpenAPI docs and the
@@ -78,7 +78,7 @@ declares it; the 2026-08-01 certification re-confirmed it):
   502s** under live traffic (auto-rollback included). If a sub-second blip per
   deploy is unacceptable, look elsewhere (backlog ENG-2).
 - **The simple single-tenant app.** PocketBase wins that on packaging — one
-  process, zero dependencies, embedded SQLite. Appitools needs a PostgreSQL
+  process, zero dependencies, embedded SQLite. Appximo needs a PostgreSQL
   and earns its weight only when isolation, multi-tenancy or in-process custom
   logic matter.
 - **Anyone who refuses to touch a terminal ever.** The visual editor covers
@@ -99,7 +99,7 @@ source.
 > **Availability, honestly.** There is **no release tag yet** — a "download
 > the binary from GitHub Releases" path does not exist today. The two paths
 > that work: **build from a checkout** of the repository, or the **published
-> Docker image** (`neodevtrix/appitools-engine`, multi-arch) with the
+> Docker image** (`appximo/appximo`, multi-arch) with the
 > self-contained `docker-compose.yml` at the repo root. The image itself is
 > public on Docker Hub, but the compose file, the example schema and every doc
 > live in the repository — so until it is published, both paths in practice
@@ -111,8 +111,8 @@ empty database; the outputs shown are real.
 ### 2.1 Build the binary
 
 ```bash
-git clone <the-appitools-repo> && cd appitools
-go build -o appitools ./cmd/appitools     # Go 1.25; ~14 s warm, ~85 MB plain build
+git clone <the-appximo-repo> && cd appximo
+go build -o appximo ./cmd/appximo     # Go 1.25; ~14 s warm, ~85 MB plain build
 ```
 
 (The 64 MB figure is the *release* build — `CGO_ENABLED=0 -trimpath
@@ -130,7 +130,7 @@ Save this as `schema.json` (the name every later command uses):
 
 ```json
 {
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "todo-api",
   "resources": {
@@ -155,7 +155,7 @@ Save this as `schema.json` (the name every later command uses):
 primary key is implicit — never declare it. Check your work:
 
 ```bash
-./appitools validate schema.json   # → "Schema válido ✓"  (the CLI's messages
+./appximo validate schema.json   # → "Schema válido ✓"  (the CLI's messages
                                    #    are Spanish-first today — that's the pass)
 ```
 
@@ -174,7 +174,7 @@ Three environment variables are hard-required; `serve` exits without them:
 DATABASE_URL='postgres://user:pass@localhost:5432/mydb?sslmode=disable' \
 JWT_SECRET='a-secret-of-at-least-32-characters!!' \
 ADMIN_KEY='choose-an-admin-key' \
-  ./appitools serve --schema schema.json --port 8080
+  ./appximo serve --schema schema.json --port 8080
 ```
 
 `serve` runs in the **foreground** — leave it running and open a second
@@ -193,7 +193,7 @@ come up:
 
 ### 2.4 The fact everyone gets wrong: the tenant IS the Host header
 
-Appitools is multi-tenant by construction. Every data request carries a
+Appximo is multi-tenant by construction. Every data request carries a
 `Host:` whose **first label names the tenant**: `acme.example.com` → Postgres
 schema `tenant_acme`. There is no "default tenant" — a Host with no subdomain
 (bare `localhost`, an IP) is an error. So the first real step is registering a
@@ -224,7 +224,7 @@ no zombie tenants.
 Mint a dev token for a role the schema declares, then talk to the API:
 
 ```bash
-TOKEN=$(./appitools token --secret "$JWT_SECRET" --tenant demo --role admin \
+TOKEN=$(./appximo token --secret "$JWT_SECRET" --tenant demo --role admin \
         --schema schema.json | tail -1)
 
 curl -X POST http://localhost:8080/api/tasks \
@@ -269,9 +269,9 @@ With that one schema, the same process is serving — verified live:
 | GraphQL (queries + create/update/delete mutations) | `POST /graphql` | JWT + RBAC |
 | OpenAPI 3.0.3 spec | `/openapi.json`, `/openapi.yaml` | none (contract is public) |
 | Swagger UI ("Try it out") | `/docs` | none to load; requests need the token |
-| GraphiQL explorer | `/graphiql` | only with `APPITOOLS_ENV=development` or `APPITOOLS_GRAPHQL_PLAYGROUND=on` |
+| GraphiQL explorer | `/graphiql` | only with `APPXIMO_ENV=development` or `APPXIMO_GRAPHQL_PLAYGROUND=on` |
 | Visual schema editor (Studio) | `/editor` | canvas opens as-is; deploy actions need the platform super-admin below |
-| Admin panel | `/admin` | platform super-admin — created once, from the terminal: `appitools admin create --email you@x.com --password '…'` (needs `DATABASE_URL` + `JWT_SECRET`; nothing else in this chapter requires it) |
+| Admin panel | `/admin` | platform super-admin — created once, from the terminal: `appximo admin create --email you@x.com --password '…'` (needs `DATABASE_URL` + `JWT_SECRET`; nothing else in this chapter requires it) |
 | Health probes | `/healthz`, `/readyz`, `/health` | none |
 | Prometheus metrics, trace explorer | `/metrics`, `/debug/*` | `X-Admin-Key` |
 
@@ -283,7 +283,7 @@ argon2id hashes, optional email verification, OAuth (Google/GitHub/Microsoft)
 and TOTP MFA. One thing WILL surprise you, so it goes here:
 
 **Public signup is disabled by default.** `POST /auth/signup` answers `403`
-until you set `APPITOOLS_AUTH_SIGNUP_ROLE=<role>` — the role every public
+until you set `APPXIMO_AUTH_SIGNUP_ROLE=<role>` — the role every public
 signup receives (it must exist in the schema's RBAC, or the engine refuses to
 boot). This is a safe default, not a bug; every first-time builder trips on
 it, including the AI agent in the §3 experiment. Login issues the **same JWT
@@ -294,20 +294,20 @@ schema RBAC governs *what you may do*.
 
 ## 3. Building with an AI agent — the intended path
 
-Appitools is designed so that **your own AI agent** (Claude Code, Cursor —
+Appximo is designed so that **your own AI agent** (Claude Code, Cursor —
 whatever you already pay for) can build the app: the schema, any custom Go,
 and the frontend. The engine prints its own agent-facing contract; there is no
 API key to buy from us and no repo access needed:
 
 ```bash
-appitools spec           > spec.md            # 1. the schema grammar
-appitools backend-spec   > backend-spec.md    # 2. custom Go handlers, hooks, jobs, auth
-appitools frontend-spec  > frontend-spec.md   # 3. the API contract a UI consumes
-appitools specs          # …or all three in one stream (~2,300 lines, one paste)
+appximo spec           > spec.md            # 1. the schema grammar
+appximo backend-spec   > backend-spec.md    # 2. custom Go handlers, hooks, jobs, auth
+appximo frontend-spec  > frontend-spec.md   # 3. the API contract a UI consumes
+appximo specs          # …or all three in one stream (~2,300 lines, one paste)
 ```
 
 Paste them into your agent **in that order**, describe your app, and have the
-agent run the correction loop: generate → `appitools validate --json
+agent run the correction loop: generate → `appximo validate --json
 schema.json` → fix what the report names → repeat until `"valid": true`. The
 report gives one machine-readable entry per problem (`path`, `rule`,
 `expected`, `fix`), which is exactly what a model needs to self-correct — it
@@ -351,7 +351,7 @@ things you would otherwise hit, and each is now either fixed or taught:
 
 ### The built-in alternative, measured
 
-If you (or your users) have no agent, `appitools ai-generate "<description>"`
+If you (or your users) have no agent, `appximo ai-generate "<description>"`
 runs the same loop with a cheap hosted model (`ANTHROPIC_API_KEY` required,
 default `claude-haiku-4-5`): measured on a 120-case stratified corpus,
 **~90 % of schemas valid on the first try, 100 % convergence within the loop,
@@ -371,7 +371,7 @@ exports `spec` + the app's current schema, ready to paste into any assistant.
 ## 4. The 90 %: what the schema gives you
 
 This section is the map, not the reference — exact syntax lives in
-[SCHEMA_REFERENCE.md](SCHEMA_REFERENCE.md) and `appitools spec`. What matters
+[SCHEMA_REFERENCE.md](SCHEMA_REFERENCE.md) and `appximo spec`. What matters
 when you model:
 
 ### Types — there are exactly eleven
@@ -494,13 +494,13 @@ separate `routes` block (§5.4).
 When the schema can't express it — a checkout that reserves stock, a webhook
 that must verify a signature, a computed endpoint — you write a normal Go
 `main` that imports the engine as a library, registers routes, and starts it.
-`appitools backend-spec` is the complete contract; this is the shape:
+`appximo backend-spec` is the complete contract; this is the shape:
 
 ```go
-app, err := appitools.New(appitools.Config{Port: 8080, SchemaPath: "schema.json"})
-app.Register(appitools.Route{
+app, err := appximo.New(appximo.Config{Port: 8080, SchemaPath: "schema.json"})
+app.Register(appximo.Route{
     Method: "POST", Path: "/api/checkout",
-    Handler: func(ctx *appitools.Ctx) error {
+    Handler: func(ctx *appximo.Ctx) error {
         // ctx.Claims()  — the verified JWT identity
         // ctx.Tenant()  — resolved from the Host
         // ctx.Tx()      — a pgx transaction ALREADY scoped to this tenant's schema
@@ -524,13 +524,13 @@ exactly one wins, every time.
 
 ### 5.2 The module, honestly (read before `go mod init`)
 
-**The Go module is not published yet.** `go get github.com/miguelangel/appitools`
+**The Go module is not published yet.** `go get github.com/appximo/appximo`
 fails — there is no public repo and no tag. The recipe that works **today** is
 a local checkout plus a `replace`:
 
 ```
-require github.com/miguelangel/appitools v0.0.0
-replace github.com/miguelangel/appitools => /path/to/your/appitools-checkout
+require github.com/appximo/appximo v0.0.0
+replace github.com/appximo/appximo => /path/to/your/appximo-checkout
 ```
 
 This builds on the machine that holds the checkout and **nowhere else** — not
@@ -586,7 +586,7 @@ yours to document — the convention is a contract sheet in your repo
 
 In production, a consumer binary deploys through the same official path as the
 engine (§7) by honoring a 5-line contract
-([ADR-023](adr/ADR-023-deployable-binary-contract.md)): `appitools.ParseServeArgs`
+([ADR-023](adr/ADR-023-deployable-binary-contract.md)): `appximo.ParseServeArgs`
 implements it. A consumer deploy is **two artifacts** — your app binary
 (serves) and the engine CLI (operates: tenants, migrations, tokens,
 super-admin). `install.sh --cli=PATH` places it.
@@ -599,10 +599,10 @@ The engine serves your SPA from the same binary and origin — no second
 deploy, no CORS, no separate web server:
 
 ```go
-appitools.Config{ Static: []appitools.StaticMount{{ Path: "/", Dir: frontendFS }} }
+appximo.Config{ Static: []appximo.StaticMount{{ Path: "/", Dir: frontendFS }} }
 ```
 
-`appitools frontend-spec` is the complete guide (stack recommendation with its
+`appximo frontend-spec` is the complete guide (stack recommendation with its
 argument, the exact API contract a UI consumes, the error→screen-state table,
 files/images, the browser-only traps). The load-bearing facts:
 
@@ -645,12 +645,12 @@ Let's Encrypt certificate:
 
 ```bash
 sudo bash scripts/install.sh --domain=api.example.com --email=you@example.com \
-     --binary=./appitools        # --binary because there is no release tag yet
+     --binary=./appximo        # --binary because there is no release tag yet
 ```
 
 Box-to-HTTPS was walked end-to-end on a real DigitalOcean droplet, twice (the
 engine, then a consumer binary): **~3 minutes**, first try. The summary prints
-where the generated secrets live (`/etc/appitools/appitools.env`, 0600 — not
+where the generated secrets live (`/etc/appximo/appximo.env`, 0600 — not
 to stdout), the *detected* control-plane port, and the register-tenant
 command.
 
@@ -680,7 +680,7 @@ What you must know that the installer cannot decide for you:
    recovery). This is honest sub-second-blip deployment, **not** zero-downtime
    (ENG-2).
 6. **Backups:** `backup.sh` dumps per-app; schedule it (the runbook's
-   `appitools-backup.timer` at 03:30 — the installer does not create it yet,
+   `appximo-backup.timer` at 03:30 — the installer does not create it yet,
    ENG-3), and **rehearse restore**: `restore.sh` exists and the drill was
    executed on the live shop — schema dropped with the catalogue answering
    500, **restored in 1.8 s**, row counts identical, a new purchase completed.
@@ -714,7 +714,7 @@ workload. Engine-only reference numbers are in §9's benchmark note and
 ### Changing a live schema — the model in one paragraph
 
 Deploy a schema change through Studio, `PUT /admin/tenants/{id}/schema`, or
-`appitools migrate` — all three run the same engine: **introspect the live
+`appximo migrate` — all three run the same engine: **introspect the live
 database → diff → apply through a production-safe executor** (lock timeouts +
 retry, `NOT VALID`/`VALIDATE` FKs, `CONCURRENTLY` indexes, data-preserving
 renames via `renamed_from`). The policy is **additive by default: it never
@@ -740,10 +740,10 @@ load). Until then, calls to the new resource get an explanatory
 Actually removing a column or table is a two-step, informed-consent flow:
 
 ```bash
-appitools migrate --tenant acme --schema new.json --dry-run
+appximo migrate --tenant acme --schema new.json --dry-run
 # → the classified plan: safe ops, and each data-losing drop with its impact:
 #   "empleados.telefono — rows_lost: 1,240 of 1,240"
-appitools migrate --tenant acme --schema new.json --approve-drops "empleados.telefono"
+appximo migrate --tenant acme --schema new.json --approve-drops "empleados.telefono"
 # → ONLY the enumerated keys drop; everything else stays gated
 ```
 
@@ -823,7 +823,7 @@ If your project needs one of these today, factor that in *now*:
   the installer creates no backup timer yet (ENG-3).
 - `install.sh --app` (second app on one box) has never run against a real
   multi-app server — staged verification only (OPS-11).
-- The platform super-admin is created from a terminal only (`appitools admin
+- The platform super-admin is created from a terminal only (`appximo admin
   create`).
 - No OTLP/OpenTelemetry export (Prometheus + internal traces only, ENG-4).
 - Webhooks refuse plain HTTP and private/loopback addresses — always

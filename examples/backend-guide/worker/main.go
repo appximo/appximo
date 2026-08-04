@@ -7,7 +7,7 @@
 // the engine on purpose: a slow or crashing consumer must never hold a request
 // open, pin a pool connection, or take the API down with it.
 //
-// You do not need the shipped `appitools-worker` binary to do this — pkg/worker is
+// You do not need the shipped `appximo-worker` binary to do this — pkg/worker is
 // a library, and a consumer is ~40 lines:
 //
 //	DATABASE_URL=... go run ./examples/backend-guide/worker
@@ -27,8 +27,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
 
-	"github.com/miguelangel/appitools/pkg/consumers"
-	"github.com/miguelangel/appitools/pkg/worker"
+	"github.com/appximo/appximo/pkg/consumers"
+	"github.com/appximo/appximo/pkg/worker"
 )
 
 func main() {

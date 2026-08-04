@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"errors"
@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/appximo/appximo/pkg/db"
 )
 
 // ENG-10 (CONSUMER-PATH-S1): a custom handler that wraps a DB-unavailable cause

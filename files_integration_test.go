@@ -10,7 +10,7 @@
 //
 // Reuses the shared Postgres container + control plane from TestMain
 // (library_integration_test.go).
-package appitools
+package appximo
 
 import (
 	"bytes"
@@ -25,10 +25,10 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/xuri/excelize/v2"
 
-	"github.com/miguelangel/appitools/pkg/consumers"
-	"github.com/miguelangel/appitools/pkg/files"
-	"github.com/miguelangel/appitools/pkg/worker"
-	"github.com/miguelangel/appitools/tests/helpers"
+	"github.com/appximo/appximo/pkg/consumers"
+	"github.com/appximo/appximo/pkg/files"
+	"github.com/appximo/appximo/pkg/worker"
+	"github.com/appximo/appximo/tests/helpers"
 )
 
 // newFileJobAppWithFiles builds the filejob app with an explicit CAS root so the

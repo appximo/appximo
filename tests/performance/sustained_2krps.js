@@ -11,7 +11,7 @@
 // Tunables (env):
 //   TARGET_URL   data-plane base URL        (default http://localhost:8080)
 //   TENANT_ID    tenant subdomain           (default acme)  -> Host: <id>.localhost
-//   BENCH_TOKEN  HS256 JWT for that tenant  (REQUIRED; mint with `appitools token`)
+//   BENCH_TOKEN  HS256 JWT for that tenant  (REQUIRED; mint with `appximo token`)
 //   RATE         requests/sec               (default 2000 — the SLO target)
 //   DURATION     hold time                  (default 60s)
 //   ENDPOINT     path + query               (default /api/guides?filter[status][eq]=pending&per_page=20)
@@ -52,7 +52,7 @@ export const options = {
 
 export function setup() {
   if (!TOKEN) {
-    throw new Error('BENCH_TOKEN is required — mint one with: appitools token --tenant <id> --secret <JWT_SECRET> --role super_admin');
+    throw new Error('BENCH_TOKEN is required — mint one with: appximo token --tenant <id> --secret <JWT_SECRET> --role super_admin');
   }
 }
 

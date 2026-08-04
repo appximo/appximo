@@ -1,9 +1,9 @@
-# Appitools Studio — the visual schema editor (frontend architecture)
+# Appximo Studio — the visual schema editor (frontend architecture)
 
-This is the **visual face of Appitools**: a graphical ERD editor where anyone who
+This is the **visual face of Appximo**: a graphical ERD editor where anyone who
 understands an entity-relationship diagram can assemble/disassemble the API
 visually (à la Symfony `make:entity`), with no AI and free to operate. It edits an
-Appitools schema and exports the exact JSON the engine consumes (`appitools
+Appximo schema and exports the exact JSON the engine consumes (`appximo
 validate` accepts the output).
 
 This document explains how it is built and — importantly — **how it grows**. The
@@ -220,7 +220,7 @@ layers, none of which reimplements the validator:
    `codeview/markdown-stub.ts`) — that chain is multi-MB for plain sentences.
 3. **Semantics (diagnostics)** — the buffer is debounce-POSTed (400 ms) to
    `POST /editor/validate` = `schema.ValidateReport`, the SAME unified
-   structural+semantic authority as `appitools validate --json`
+   structural+semantic authority as `appximo validate --json`
    (`codeview/engineLint.ts`). Every error is mapped to its buffer range by
    walking CM's own JSON syntax tree from the report's dot-path
    (`codeview/pathToRange.ts`; `unknown_key` errors refine to the offending
@@ -264,5 +264,5 @@ losslessly; you are just surfacing more of it.
 - `npm run build` → static assets, `npm run check` (svelte-check) → 0 errors / 0
   warnings.
 - Round-trip identity on todo / shop / erp samples; the exported erp-demo passes
-  `appitools validate` (semantic) **and** `appitools validate-schema` (structural).
+  `appximo validate` (semantic) **and** `appximo validate-schema` (structural).
 - The Go embed (`../embed.go`) is unit-tested; the engine `make test` lane is green.

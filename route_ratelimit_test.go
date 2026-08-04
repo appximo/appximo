@@ -1,10 +1,10 @@
-package appitools
+package appximo
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/resilience"
+	"github.com/appximo/appximo/pkg/resilience"
 )
 
 // LIBRARY-GAPS-S1 — Route.RateLimit: a per-endpoint throttle.

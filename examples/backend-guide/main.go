@@ -1,5 +1,5 @@
 // Command backend-guide is the companion example to docs/BACKEND_SPEC_LLM.md —
-// a complete, COMPILING Appitools backend built the library way (ADR-016): a
+// a complete, COMPILING Appximo backend built the library way (ADR-016): a
 // schema (schema.json) for the declarative surface, plus custom Class-1 handlers
 // for the logic a schema can't express (external calls, cross-resource
 // transactions, parallel work). Every handler below is referenced verbatim by
@@ -35,7 +35,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/miguelangel/appitools"
+	"github.com/appximo/appximo"
 )
 
 // httpClient is shared by the outbound integrations. Give it a ceiling of its
@@ -47,7 +47,7 @@ func main() {
 	port := flag.Int("port", 8080, "HTTP port")
 	flag.Parse()
 
-	app, err := appitools.New(appitools.Config{
+	app, err := appximo.New(appximo.Config{
 		SchemaPath: *schemaPath,
 		Port:       *port,
 		// DSN / JWTSecret / AdminKey / Env fall back to the standard env vars.
@@ -63,7 +63,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	register(app, appitools.Route{
+	register(app, appximo.Route{
 		// GET /api/ops/overview — an AUTHENTICATED, admin-scoped custom route.
 		// Path-based RBAC authorizes the first segment ("ops") as a VIRTUAL
 		// resource: a wildcard role (admin) reaches it; a restricted role is 403.
@@ -73,12 +73,12 @@ func main() {
 		// like this cross-resource snapshot.) Inside, ctx.Query still enforces RBAC
 		// on the REAL resources, so an admin sees every row.
 		Method: "GET", Path: "/api/ops/overview", RequireRole: "admin",
-		Handler: func(ctx appitools.Ctx) error {
-			students, err := ctx.Query("students", appitools.QueryOpts{Limit: 1000})
+		Handler: func(ctx appximo.Ctx) error {
+			students, err := ctx.Query("students", appximo.QueryOpts{Limit: 1000})
 			if err != nil {
 				return ctx.Error(500, "students lookup failed", err)
 			}
-			enrollments, err := ctx.Query("enrollments", appitools.QueryOpts{Limit: 1000})
+			enrollments, err := ctx.Query("enrollments", appximo.QueryOpts{Limit: 1000})
 			if err != nil {
 				return ctx.Error(500, "enrollments lookup failed", err)
 			}
@@ -90,14 +90,14 @@ func main() {
 		},
 	})
 
-	register(app, appitools.Route{
+	register(app, appximo.Route{
 		// POST /api/register — the Hotmart pattern: a PUBLIC (pre-auth) endpoint
 		// that runs business logic and creates the user, related records and a
 		// follow-up job ATOMICALLY in one transaction. Any failure rolls back
 		// everything — including the user. This is the differential: no network
 		// hop, one transaction, the engine's own validation + RBAC still in force.
 		Method: "POST", Path: "/api/register", Public: true, Timeout: 15 * time.Second,
-		Handler: func(ctx appitools.Ctx) error {
+		Handler: func(ctx appximo.Ctx) error {
 			var body struct {
 				Email    string `json:"email"`
 				Password string `json:"password"`
@@ -146,9 +146,9 @@ func main() {
 			user, err := ctx.CreateUser(body.Email, body.Password, "student")
 			switch {
 			case err == nil:
-			case errors.Is(err, appitools.ErrEmailTaken):
+			case errors.Is(err, appximo.ErrEmailTaken):
 				return ctx.Error(409, "email already registered", err)
-			case errors.Is(err, appitools.ErrInvalidEmail), errors.Is(err, appitools.ErrWeakPassword):
+			case errors.Is(err, appximo.ErrInvalidEmail), errors.Is(err, appximo.ErrWeakPassword):
 				return ctx.Error(422, err.Error(), err)
 			default:
 				return ctx.Error(500, "registration failed", err)
@@ -180,7 +180,7 @@ func main() {
 		},
 	})
 
-	register(app, appitools.Route{
+	register(app, appximo.Route{
 		// POST /api/reports/ratings — heavy fan-out. Enrich a list of courses with
 		// their external rating IN PARALLEL, bounded and panic-safe. SafeParallel
 		// caps concurrency (backpressure) and turns a task panic into an error, so
@@ -188,7 +188,7 @@ func main() {
 		// the whole batch. The tasks do EXTERNAL I/O only — never the handler tx
 		// (a single connection is not safe for concurrent use).
 		Method: "POST", Path: "/api/reports/ratings", RequireRole: "admin", Timeout: 8 * time.Second,
-		Handler: func(ctx appitools.Ctx) error {
+		Handler: func(ctx appximo.Ctx) error {
 			var body struct {
 				CourseIDs []string `json:"course_ids"`
 			}
@@ -211,7 +211,7 @@ func main() {
 					return nil
 				}
 			}
-			if err := appitools.SafeParallel(ctx.Context(), 8, tasks...); err != nil {
+			if err := appximo.SafeParallel(ctx.Context(), 8, tasks...); err != nil {
 				return ctx.Error(502, "ratings service failed", err)
 			}
 			out := make(map[string]float64, len(ratings))
@@ -222,7 +222,7 @@ func main() {
 		},
 	})
 
-	register(app, appitools.Route{
+	register(app, appximo.Route{
 		// POST /api/track — fire-and-forget. Record nothing durable; just ping an
 		// external analytics service off the response path. SafeGo is the ONLY
 		// sanctioned way to launch that goroutine: its panic is recovered + logged
@@ -230,7 +230,7 @@ func main() {
 		// request values) with its own deadline, which fn must honor. This is
 		// at-most-once — for durable work, Enqueue to the outbox instead.
 		Method: "POST", Path: "/api/track", Public: true,
-		Handler: func(ctx appitools.Ctx) error {
+		Handler: func(ctx appximo.Ctx) error {
 			var body struct {
 				Event string `json:"event"`
 			}
@@ -245,7 +245,7 @@ func main() {
 		},
 	})
 
-	register(app, appitools.Route{
+	register(app, appximo.Route{
 		// POST /api/checkout — an AUTHENTICATED custom route reachable by a role
 		// that uses per-resource `permissions` (the "student" role owner-scopes
 		// each resource by its own column). That combination is only expressible
@@ -257,7 +257,7 @@ func main() {
 		// segment is a VIRTUAL resource, and `permissions` keys must be real ones.
 		// See ADR-021.
 		Method: "POST", Path: "/api/checkout", Timeout: 10 * time.Second,
-		Handler: func(ctx appitools.Ctx) error {
+		Handler: func(ctx appximo.Ctx) error {
 			var body struct {
 				CourseID string `json:"course_id"`
 			}
@@ -271,7 +271,7 @@ func main() {
 			// never float. The read goes through ctx.Query, which re-evaluates the
 			// caller's role against the REAL resource — a route grant authorizes the
 			// ENDPOINT, never the data.
-			courses, err := ctx.Query("courses", appitools.QueryOpts{
+			courses, err := ctx.Query("courses", appximo.QueryOpts{
 				Filters: map[string]any{"id": body.CourseID}, Limit: 1,
 			})
 			if err != nil {
@@ -299,7 +299,7 @@ func main() {
 		},
 	})
 
-	register(app, appitools.Route{
+	register(app, appximo.Route{
 		// POST /api/webhooks/payments — THE security-critical handler most products
 		// write, and the one shape it is easiest to get wrong. Six rules, in order:
 		//
@@ -325,11 +325,11 @@ func main() {
 		// Public (a gateway has no JWT), so the caller is hostile: every input is
 		// validated, and the engine's conservative public-route rate limit applies.
 		Method: "POST", Path: "/api/webhooks/payments", Public: true, Timeout: 15 * time.Second,
-		Handler: func(ctx appitools.Ctx) error {
+		Handler: func(ctx appximo.Ctx) error {
 			// Rule 1 — raw bytes first.
 			raw, err := ctx.RawBody()
 			if err != nil {
-				if errors.Is(err, appitools.ErrBodyTooLarge) {
+				if errors.Is(err, appximo.ErrBodyTooLarge) {
 					return ctx.Error(413, "payload too large", err)
 				}
 				return ctx.Error(400, "unreadable body", err)
@@ -390,17 +390,17 @@ func main() {
 		},
 	})
 
-	register(app, appitools.Route{
+	register(app, appximo.Route{
 		// GET /api/catalogue — a PUBLIC READ endpoint, and the reason
 		// Route.RateLimit exists. The public-route default (5 rps / burst 10) is
 		// calibrated for a public WRITE endpoint like /api/register above; a
 		// catalogue is bursty and read-only, and would trip it under ordinary
 		// traffic. Declaring the budget HERE beats raising
-		// APPITOOLS_PUBLIC_ROUTE_RPS process-wide, which would also loosen the
+		// APPXIMO_PUBLIC_ROUTE_RPS process-wide, which would also loosen the
 		// registration and webhook endpoints that want the strict default.
 		Method: "GET", Path: "/api/catalogue", Public: true,
-		RateLimit: &appitools.RateLimit{RPS: 200, Burst: 400},
-		Handler: func(ctx appitools.Ctx) error {
+		RateLimit: &appximo.RateLimit{RPS: 200, Burst: 400},
+		Handler: func(ctx appximo.Ctx) error {
 			// No identity on a public route, so the RBAC helpers fail closed: this
 			// is a deliberate, greppable UnsafeTx, and the handler owns the filter
 			// (only published courses are ever exposed). Tenant isolation still
@@ -506,7 +506,7 @@ func validSignature(raw []byte, header string) bool {
 
 // register aborts boot on a bad route — a registration error is a programming
 // mistake, caught here, never at request time.
-func register(app *appitools.App, rt appitools.Route) {
+func register(app *appximo.App, rt appximo.Route) {
 	if err := app.Register(rt); err != nil {
 		log.Fatalf("register %s %s: %v", rt.Method, rt.Path, err)
 	}

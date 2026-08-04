@@ -19,7 +19,7 @@ import (
 // converting back to the canonical map the engine consumes. This is live, tested code
 // (the round-trip identity test stays green) — archived from the decode path, not dead.
 //
-// The HONEST limit of AI-F1-S1 (see output_schema.go): the Appitools schema is an
+// The HONEST limit of AI-F1-S1 (see output_schema.go): the Appximo schema is an
 // arbitrary-keyed map (resources keyed by resource name, fields by field name,
 // roles by role name), and the structured-outputs strict subset cannot express a
 // map of arbitrary keys (it forbids patternProperties / additionalProperties-as-
@@ -81,7 +81,7 @@ func asArray(v any) []any {
 	return a
 }
 
-// MapToIR converts a decoded Appitools schema (map form) to the array-IR. It is
+// MapToIR converts a decoded Appximo schema (map form) to the array-IR. It is
 // total and deterministic: arbitrary-keyed maps become arrays sorted by their
 // explicit key; every other value passes through unchanged.
 func MapToIR(doc map[string]any) map[string]any {

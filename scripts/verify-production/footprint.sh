@@ -2,7 +2,7 @@
 #
 # footprint.sh — what does the whole production stack actually COST on this box?
 #
-# RUNS ON THE SERVER. Answers the question that decides whether Appitools fits on
+# RUNS ON THE SERVER. Answers the question that decides whether Appximo fits on
 # a $6 VPS: with Caddy + the engine + PostgreSQL + the OS all running, how much
 # RAM is really used, by which piece, and how much is left?
 #
@@ -25,7 +25,7 @@
 #   --watch=SECONDS  sample repeatedly for this long and keep the peak  [default 0 = one shot]
 #   --interval=SEC   seconds between samples when watching        [default 2]
 #   --out=PATH       write the JSON result here
-#   --service=NAME   engine systemd unit name                     [default appitools]
+#   --service=NAME   engine systemd unit name                     [default appximo]
 #   --help
 set -euo pipefail
 

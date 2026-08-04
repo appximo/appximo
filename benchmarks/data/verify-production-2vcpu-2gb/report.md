@@ -1,9 +1,9 @@
-# Appitools — production verification report
+# Appximo — production verification report
 
 | | |
 |---|---|
 | started utc | `2026-07-28T15:14:23Z` |
-| target | `https://api.appitools.com` |
+| target | `https://api.appximo.com` |
 | origin ip | `PROD-VPS` |
 | cdn detected | `cloudflare` |
 | tenant | `api` |
@@ -22,12 +22,12 @@ under pressure — the number that matters for "does this fit in 1 GB".
 | state | service | PSS MiB | anon MiB | procs | fds | CPU %core |
 |---|---|---:|---:|---:|---:|---:|
 | idle | postgresql | 175.1 | 19.4 | 16 | 452 | 0.1 |
-| idle | appitools | 85.3 | 67.6 | 1 | 50 | 0.0 |
+| idle | appximo | 85.3 | 67.6 | 1 | 50 | 0.0 |
 | idle | caddy | 47.1 | 22.1 | 1 | 46 | 0.0 |
 | idle | **TOTAL STACK** | **307.5** | **109.0** | | | |
 | idle | _system_ | total 1964 | available 1263 | | | used 35.7% |
 | under-load | postgresql | 211.0 | 24.0 | 19 | 331 | 11.6 |
-| under-load | appitools | 138.3 | 107.0 | 1 | 55 | 27.2 |
+| under-load | appximo | 138.3 | 107.0 | 1 | 55 | 27.2 |
 | under-load | caddy | 58.7 | 22.5 | 1 | 102 | 23.0 |
 | under-load | **TOTAL STACK** | **408.1** | **153.5** | | | |
 | under-load | _system_ | total 1964 | available 1290 | | | used 34.3% |

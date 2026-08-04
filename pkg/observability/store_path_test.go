@@ -37,9 +37,9 @@ func TestIsEphemeralPath(t *testing.T) {
 		{"/tmp/obs.db", true},
 		{"/tmp", true},
 		{"/tmp/nested/dir/obs.db", true},
-		{"/var/lib/appitools/obs.db", false},
+		{"/var/lib/appximo/obs.db", false},
 		{"/data/app/obs.db", false},
-		{"/opt/appitools/obs.db", false},
+		{"/opt/appximo/obs.db", false},
 	}
 	for _, c := range cases {
 		if got := isEphemeralPath(c.path); got != c.want {
@@ -95,7 +95,7 @@ func TestOpenStore_UnwritableDirFallsBackNoCrash(t *testing.T) {
 	}
 	defer st.Close()
 
-	fallback := filepath.Join(os.TempDir(), "appitools-obs.db")
+	fallback := filepath.Join(os.TempDir(), "appximo-obs.db")
 	defer cleanupSQLite(fallback)
 	if st.Path() == p {
 		t.Errorf("store used the unwritable path %q; expected the fallback", p)
@@ -110,7 +110,7 @@ func TestOpenStore_UnwritableDirFallsBackNoCrash(t *testing.T) {
 }
 
 func TestPlanObsDBPath_EphemeralWarning(t *testing.T) {
-	dir, err := os.MkdirTemp("/tmp", "appitools-obs-eph-")
+	dir, err := os.MkdirTemp("/tmp", "appximo-obs-eph-")
 	if err != nil {
 		t.Skipf("/tmp unavailable for the ephemeral case: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestPlanObsDBPath_FallbackWarning(t *testing.T) {
 	p := filepath.Join(blocker, "obs.db")
 
 	got, warning := planObsDBPath(p)
-	fallback := filepath.Join(os.TempDir(), "appitools-obs.db")
+	fallback := filepath.Join(os.TempDir(), "appximo-obs.db")
 	if got != fallback {
 		t.Errorf("fallback path = %q, want %q", got, fallback)
 	}
@@ -152,7 +152,7 @@ func TestOpenStore_LogsEphemeralWarning(t *testing.T) {
 	log.SetFlags(0)
 	defer func() { log.SetOutput(oldOut); log.SetFlags(oldFlags) }()
 
-	dir, err := os.MkdirTemp("/tmp", "appitools-obs-log-")
+	dir, err := os.MkdirTemp("/tmp", "appximo-obs-log-")
 	if err != nil {
 		t.Skipf("/tmp unavailable: %v", err)
 	}

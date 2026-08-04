@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/miguelangel/appitools/tools/devhub/secrets"
-	"github.com/miguelangel/appitools/tools/devhub/sshx"
+	"github.com/appximo/appximo/tools/devhub/secrets"
+	"github.com/appximo/appximo/tools/devhub/sshx"
 )
 
 // S47b: encrypted secrets store wiring. Values decrypt only into process

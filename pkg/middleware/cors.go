@@ -13,7 +13,7 @@ import (
 // tenant; the allowed origins are a deployment decision). The zero value (no
 // AllowedOrigins) disables CORS entirely: the engine emits no Access-Control-*
 // header and short-circuits no preflight — the safe default. An operator opts in
-// explicitly by listing origins (APPITOOLS_CORS_ORIGINS), so a browser SPA on
+// explicitly by listing origins (APPXIMO_CORS_ORIGINS), so a browser SPA on
 // another origin never works by accident, only by configuration.
 type CORSConfig struct {
 	// AllowedOrigins is the exact origin allowlist (scheme + host + optional port,

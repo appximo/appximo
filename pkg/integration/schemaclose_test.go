@@ -8,17 +8,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/events"
+	"github.com/appximo/appximo/pkg/extensions"
+	gqlhandler "github.com/appximo/appximo/pkg/graphql"
+	"github.com/appximo/appximo/pkg/outbox"
+	rbacpkg "github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
 	chi "github.com/go-chi/chi/v5"
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/events"
-	"github.com/miguelangel/appitools/pkg/extensions"
-	gqlhandler "github.com/miguelangel/appitools/pkg/graphql"
-	"github.com/miguelangel/appitools/pkg/outbox"
-	rbacpkg "github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
 const scOwnerID = "cccc0000-0000-0000-0000-000000000003"
@@ -27,7 +27,7 @@ const scOwnerID = "cccc0000-0000-0000-0000-000000000003"
 // GraphQL update mutation (RBAC allowlist + row condition + events:["update"]).
 func scSchema() *schema.APISchema {
 	return &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "schemaclose",
 		Resources: map[string]schema.ResourceSchema{

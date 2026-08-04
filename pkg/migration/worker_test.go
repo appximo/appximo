@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/migration"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/migration"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
 	"github.com/redis/go-redis/v9"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -123,7 +123,7 @@ func seedTenant(t *testing.T, pool *pgxpool.Pool, tenantID string) {
 // itemsSchema returns a minimal valid schema JSON string with an "items" resource.
 func itemsSchema() string {
 	s := &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "test",
 		Resources: map[string]schema.ResourceSchema{

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/outbox"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/outbox"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // NIGHT-SWEEP-S1 — the DB-backed halves of ENG-15/16/17/18/23/24: the contracts
@@ -21,7 +21,7 @@ import (
 
 func nsSchema() *schema.APISchema {
 	return &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "nightsweep",
 		Resources: map[string]schema.ResourceSchema{

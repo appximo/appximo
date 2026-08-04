@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/aigen"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/aigen"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 func TestAllGoldsValidate(t *testing.T) {

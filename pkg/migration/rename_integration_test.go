@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // TestIntegration_RenameColumn_PreservesData is the central MIG-F1-S2 proof: a

@@ -18,7 +18,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/miguelangel/appitools/pkg/outbox"
+	"github.com/appximo/appximo/pkg/outbox"
 )
 
 // One throwaway Postgres container is shared by every integration test in this

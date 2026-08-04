@@ -68,7 +68,7 @@ func scrape() {
 
 func parseMetrics(body string) MetricSample {
 	s := MetricSample{}
-	// appitools_request_duration_seconds is a histogram, not a summary, so there is
+	// appximo_request_duration_seconds is a histogram, not a summary, so there is
 	// no quantile="0.95" series. Aggregate the cumulative _bucket counts by upper
 	// bound (le) across every label set — the equivalent of Prometheus
 	// `sum by (le)` — then interpolate p95 from the buckets below.
@@ -80,15 +80,15 @@ func parseMetrics(body string) MetricSample {
 			continue
 		}
 		switch {
-		case strings.HasPrefix(line, "appitools_requests_total{"):
+		case strings.HasPrefix(line, "appximo_requests_total{"):
 			if v, ok := lastFieldFloat(line); ok {
 				s.RequestsTotal += v
 			}
-		case strings.HasPrefix(line, "appitools_active_tenants "):
+		case strings.HasPrefix(line, "appximo_active_tenants "):
 			if v, ok := lastFieldFloat(line); ok {
 				s.ActiveTenants = v
 			}
-		case strings.HasPrefix(line, "appitools_request_duration_seconds_bucket{"):
+		case strings.HasPrefix(line, "appximo_request_duration_seconds_bucket{"):
 			le, ok := labelValue(line, "le")
 			if !ok {
 				continue

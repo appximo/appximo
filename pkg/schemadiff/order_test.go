@@ -3,7 +3,7 @@ package schemadiff_test
 import (
 	"testing"
 
-	sd "github.com/miguelangel/appitools/pkg/schemadiff"
+	sd "github.com/appximo/appximo/pkg/schemadiff"
 )
 
 // linkFK adds a single-column FK (referencing the target's id) to a built table.

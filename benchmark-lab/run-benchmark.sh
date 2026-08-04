@@ -30,7 +30,7 @@ wait_nestjs() {
 }
 
 echo "======================================="
-echo "APPITOOLS vs NestJS — Benchmark Justo"
+echo "APPXIMO vs NestJS — Benchmark Justo"
 echo "======================================="
 
 echo ""
@@ -47,19 +47,19 @@ TENANT_ID="10"
 
 echo ""
 echo "=== Generando JWT firmado para tenant $TENANT_ID ==="
-BENCH_TOKEN=$(docker run --rm appitools-bench:latest token \
+BENCH_TOKEN=$(docker run --rm appximo-bench:latest token \
   --tenant "$TENANT_ID" --role super_admin --user-id bench-user --secret benchsecret)
 echo "Token OK: ${BENCH_TOKEN:0:40}..."
 
 echo ""
-echo "=== RONDA 1: Appitools ==="
-docker compose --profile appitools up -d
-wait_http_200 "http://localhost:8081/health" "Appitools :8081/health"
+echo "=== RONDA 1: Appximo ==="
+docker compose --profile appximo up -d
+wait_http_200 "http://localhost:8081/health" "Appximo :8081/health"
 
 TARGET_URL=http://localhost:8081 TENANT_ID=$TENANT_ID BENCH_TOKEN=$BENCH_TOKEN \
-  k6 run k6-load.js > results/appitools-results.json || true
+  k6 run k6-load.js > results/appximo-results.json || true
 
-docker compose --profile appitools down
+docker compose --profile appximo down
 echo "Pausa de 30s para liberar recursos..."
 sleep 30
 
@@ -79,10 +79,10 @@ echo "======================================="
 echo "=== RESULTADOS FINALES ==="
 echo "======================================="
 echo ""
-echo "--- Appitools ---"
+echo "--- Appximo ---"
 python3 -c "
 import json, sys
-c = open('results/appitools-results.json').read()
+c = open('results/appximo-results.json').read()
 j = json.loads(c[c.rfind('{'):c.rfind('}')+1])
 print(json.dumps(j, indent=2))
 " 2>/dev/null || echo "(sin resultados)"

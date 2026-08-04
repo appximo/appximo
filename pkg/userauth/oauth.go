@@ -463,7 +463,7 @@ func (m *oauthManager) authedGet(ctx context.Context, urlStr, accessToken string
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "appitools") // GitHub's API requires a User-Agent
+	req.Header.Set("User-Agent", "appximo") // GitHub's API requires a User-Agent
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
 		return nil, err

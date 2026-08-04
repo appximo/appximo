@@ -12,8 +12,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/miguelangel/appitools/pkg/consumers"
-	"github.com/miguelangel/appitools/pkg/worker"
+	"github.com/appximo/appximo/pkg/consumers"
+	"github.com/appximo/appximo/pkg/worker"
 )
 
 const testLinkBase = "https://acme.localhost"

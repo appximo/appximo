@@ -26,9 +26,9 @@ and Studio / Swagger / the admin panel served by a scratch engine running the
 
 | Marker | Decision it waits on |
 |---|---|
-| `REPO URL — pending publication` (hero button + footer) | Making the repository public and choosing the canonical URL (README badges say `miguel09acosta/appitools`; the Go module path says `miguelangel/appitools` — pick one). |
+| `REPO URL — pending publication` (hero button + footer) | Making the repository public and choosing the canonical URL (README badges say `appximo/appximo`; the Go module path says `appximo/appximo` — pick one). |
 | `no release tag yet` (footer) | Cutting the first tag (`git tag v0.1.0`) — turns into a Releases link. |
-| `appitools.dev — pending decision` (footer) | Where this page lives. The relative `../docs/...` links assume it is served from the repo (e.g. GitHub Pages over the whole repo, or any host with `docs/` alongside `site/`); if it gets its own domain, point those links at the public repo URLs instead. |
+| `appximo.com — pending decision` (footer) | Where this page lives. The relative `../docs/...` links assume it is served from the repo (e.g. GitHub Pages over the whole repo, or any host with `docs/` alongside `site/`); if it gets its own domain, point those links at the public repo URLs instead. |
 
 ## Verified
 

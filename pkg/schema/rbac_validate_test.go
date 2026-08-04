@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // parseSchema unmarshals a raw schema JSON into an *APISchema for Validate tests
@@ -22,7 +22,7 @@ func parseSchema(t *testing.T, raw string) *schema.APISchema {
 // `member` role scoping projects by workspace_id and messages by conversation_id
 // (a DIFFERENT column), plus read-all/write-own posts.
 const perResourceSchema = `{
-  "$schema": "https://appitools.dev/schema/v1", "version": "1", "name": "lab",
+  "$schema": "https://appximo.com/schema/v1", "version": "1", "name": "lab",
   "resources": {
     "projects": { "fields": { "workspace_id": { "type": "uuid" }, "name": { "type": "string" } } },
     "messages": { "fields": { "conversation_id": { "type": "uuid" }, "body": { "type": "text" } } },

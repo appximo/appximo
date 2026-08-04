@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/query"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/query"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // TestFilterValueLivePostgresConformance is the live half of the ENG-25

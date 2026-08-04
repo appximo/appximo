@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"errors"
@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // LIBRARY-EXTEND-S1: Route.Public validation + the exact-match middleware skip.

@@ -1,12 +1,12 @@
-# Build a complete backend with Appitools — the agent guide
+# Build a complete backend with Appximo — the agent guide
 
 You are an AI coding agent (Claude Code, Cursor, or similar). This document
-teaches you to build a **complete, secure backend** with Appitools: not only the
+teaches you to build a **complete, secure backend** with Appximo: not only the
 declarative schema, but the **custom Go handlers, hooks, auth and background
 jobs** that a real product needs — and to do it **safely**, following the
 in-process safety model the engine enforces.
 
-Appitools is a Go engine that compiles a JSON schema into a multi-tenant
+Appximo is a Go engine that compiles a JSON schema into a multi-tenant
 REST + GraphQL + OpenAPI server at boot. Most of an app is *declarative* (the
 schema). The rest — logic that spans resources, calls external systems, or runs
 in one transaction — is a **custom handler**: plain Go, imported as a library,
@@ -19,12 +19,12 @@ Two companion documents; keep them straight:
 
 | Doc | Teaches | Command |
 |---|---|---|
-| **`appitools spec`** / [SCHEMA_SPEC_LLM.md](SCHEMA_SPEC_LLM.md) | the **schema** (declarative surface) | `appitools spec` |
-| **this doc** / `appitools backend-spec` | the **backend** (handlers + hooks + auth + jobs) | `appitools backend-spec` |
-| **`appitools frontend-spec`** / [FRONTEND_SPEC_LLM.md](FRONTEND_SPEC_LLM.md) | the **frontend** (the API contract a UI consumes, screen states, files) | `appitools frontend-spec` |
+| **`appximo spec`** / [SCHEMA_SPEC_LLM.md](SCHEMA_SPEC_LLM.md) | the **schema** (declarative surface) | `appximo spec` |
+| **this doc** / `appximo backend-spec` | the **backend** (handlers + hooks + auth + jobs) | `appximo backend-spec` |
+| **`appximo frontend-spec`** / [FRONTEND_SPEC_LLM.md](FRONTEND_SPEC_LLM.md) | the **frontend** (the API contract a UI consumes, screen states, files) | `appximo frontend-spec` |
 | [SCHEMA_REFERENCE.md](SCHEMA_REFERENCE.md) | the complete human reference | — |
 
-(`appitools specs` prints all three at once — one paste gives an agent the
+(`appximo specs` prints all three at once — one paste gives an agent the
 whole contract.)
 
 Everything below is audited against the engine source and demonstrated by a
@@ -65,8 +65,8 @@ Two principles decide the ambiguous cases:
 
 ## 2. The schema (declarative surface)
 
-The schema is generated and validated with the **other** flow — run `appitools
-spec`, generate against it, and self-correct with `appitools validate --json`
+The schema is generated and validated with the **other** flow — run `appximo
+spec`, generate against it, and self-correct with `appximo validate --json`
 until valid ([SCHEMA_SPEC_LLM.md](SCHEMA_SPEC_LLM.md)). This doc assumes you have
 a valid schema; it covers only the code that sits on top.
 
@@ -120,8 +120,8 @@ unique constraints — belongs in `schema.json`, where the migration engine owns
 
 ### 3.0 Getting the dependency — READ THIS FIRST
 
-**The Appitools module is not published.** `github.com/miguelangel/appitools` is a
-private repository with no release tag, so `go get github.com/miguelangel/appitools`
+**The Appximo module is not published.** `github.com/appximo/appximo` is a
+private repository with no release tag, so `go get github.com/appximo/appximo`
 and a bare `go mod tidy` **fail** — there is no version to fetch. An agent that
 guesses a version (`v0.1.0`) will produce a project that does not build, which is
 exactly what happened the first time this document was used
@@ -130,7 +130,7 @@ exactly what happened the first time this document was used
 **The recipe that works today** is a local checkout plus a `replace`:
 
 ```bash
-git clone <your-appitools-checkout> /path/to/appitools   # or use the one you already have
+git clone <your-appximo-checkout> /path/to/appximo   # or use the one you already have
 mkdir mybackend && cd mybackend
 go mod init example.com/mybackend
 ```
@@ -140,9 +140,9 @@ module example.com/mybackend
 
 go 1.25
 
-require github.com/miguelangel/appitools v0.0.0
+require github.com/appximo/appximo v0.0.0
 
-replace github.com/miguelangel/appitools => /path/to/appitools
+replace github.com/appximo/appximo => /path/to/appximo
 ```
 
 ```bash
@@ -155,7 +155,7 @@ What this costs you, stated plainly:
 - **The path is absolute and machine-specific.** The project builds on the machine
   that holds the checkout and nowhere else — not on a teammate's laptop, not in CI,
   not in a plain `docker build` (the checkout is outside the build context).
-- The Appitools checkout must be on the SAME Go version line (1.25) as your project.
+- The Appximo checkout must be on the SAME Go version line (1.25) as your project.
 - `v0.0.0` is a placeholder: the `replace` wins, so the version string is never
   resolved. Do not spend effort choosing it.
 
@@ -164,13 +164,13 @@ What this costs you, stated plainly:
 deleted:
 
 ```bash
-go get github.com/miguelangel/appitools@v1.0.0   # a real tag
+go get github.com/appximo/appximo@v1.0.0   # a real tag
 ```
 
 with, for a private repo:
 
 ```bash
-export GOPRIVATE=github.com/miguelangel/*
+export GOPRIVATE=github.com/appximo/*
 git config --global url."git@github.com:".insteadOf "https://github.com/"
 ```
 
@@ -181,8 +181,8 @@ the 10 % path that is blocked on a decision rather than on code — it is tracke
 
 ### 3.1 The program shape
 
-A backend is a `main` that imports `github.com/miguelangel/appitools`, builds the
-engine, registers routes, and starts it. The pure `appitools serve` binary is
+A backend is a `main` that imports `github.com/appximo/appximo`, builds the
+engine, registers routes, and starts it. The pure `appximo serve` binary is
 exactly this with zero registered routes — your custom binary boots identically.
 
 ```go
@@ -191,23 +191,23 @@ package main
 import (
 	"log"
 
-	"github.com/miguelangel/appitools"
+	"github.com/appximo/appximo"
 )
 
 func main() {
-	app, err := appitools.New(appitools.Config{
+	app, err := appximo.New(appximo.Config{
 		SchemaPath: "schema.json",
 		// DSN / JWTSecret / AdminKey / Env / Port fall back to DATABASE_URL /
-		// JWT_SECRET / ADMIN_KEY / APPITOOLS_ENV / 8080. All three secrets are
+		// JWT_SECRET / ADMIN_KEY / APPXIMO_ENV / 8080. All three secrets are
 		// required (from Config or env) or New returns an error.
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	if err := app.Register(appitools.Route{
+	if err := app.Register(appximo.Route{
 		Method: "POST", Path: "/api/hello",
-		Handler: func(ctx appitools.Ctx) error {
+		Handler: func(ctx appximo.Ctx) error {
 			return ctx.JSON(200, map[string]any{"hello": ctx.Tenant()})
 		},
 	}); err != nil {
@@ -241,7 +241,7 @@ opening a second pool from `DATABASE_URL` — which drifts from the engine's own
 configuration:
 
 ```go
-app, err := appitools.New(appitools.Config{
+app, err := appximo.New(appximo.Config{
 	SchemaPath: "schema.json",
 	// Runs after the pool is open and the schema compiled, BEFORE the listener
 	// accepts anything. A non-nil error ABORTS the boot — an app whose invariants
@@ -285,15 +285,15 @@ OnTenantProvisioned: func(ctx context.Context, pool *pgxpool.Pool, tenantID, pgS
 Without it, a fresh tenant is missing your DDL until a restart — a 500 on any
 endpoint that depends on it (the exact bug PROD-JOURNEY-1B measured).
 
-**The deployable contract — `appitools.ParseServeArgs`.** For the binary to be
+**The deployable contract — `appximo.ParseServeArgs`.** For the binary to be
 installable/updatable by the official production tooling (ADR-023), main()
 starts with:
 
 ```go
 var version, revision = "dev", "unknown" // -ldflags -X main.version=… (scripts/build-consumer.sh)
 
-args := appitools.ParseServeArgs("myapp", version, revision,
-	appitools.ServeArgs{Port: 8099, ControlPort: 9099})
+args := appximo.ParseServeArgs("myapp", version, revision,
+	appximo.ServeArgs{Port: 8099, ControlPort: 9099})
 // wire args.SchemaPath/args.Port/args.ControlPort + Version: version into Config
 ```
 
@@ -324,7 +324,7 @@ type Route struct {
 - **Every registered route is published in the served `/openapi.json`**
   (ENG-33) — method, path, auth mode (`x-public: true` for a Public route,
   otherwise Bearer + the RBAC segment/action it demands), `x-required-role`,
-  `x-byte-serving` — flagged `x-appitools-custom-route: true`. **`Description`**
+  `x-byte-serving` — flagged `x-appximo-custom-route: true`. **`Description`**
   is the one thing only you can add: a one-line summary shown in the contract
   and in `/docs`. Set it on every route — it costs a string and it is what an
   external agent reads first. Shapes (request/response bodies) are deliberately
@@ -346,8 +346,8 @@ type Route struct {
   route with no declaration gets the engine's conservative default (5 rps / burst
   10), which is right for a public **write** endpoint (registration, a webhook)
   and far too low for a public **read** one: a storefront catalogue trips it under
-  ordinary traffic. Declare `&appitools.RateLimit{RPS: 200, Burst: 400}` on that
-  route instead of raising `APPITOOLS_PUBLIC_ROUTE_RPS` process-wide, which would
+  ordinary traffic. Declare `&appximo.RateLimit{RPS: 200, Burst: 400}` on that
+  route instead of raising `APPXIMO_PUBLIC_ROUTE_RPS` process-wide, which would
   also loosen the endpoints that want the strict default. Both values must be > 0
   (a half-filled struct is rejected at boot). Set on an authenticated route, it
   adds a per-(tenant, IP) limit on top of the per-tenant one — useful for an
@@ -359,7 +359,7 @@ type Route struct {
   Content-Disposition/Accept-Ranges on a cache hit, and suppress sendfile.
   GET only; literal path (pass the file id as a query parameter). See
   `Ctx.ServeFile` below and the public-image worked example in
-  `appitools frontend-spec` §7.5.
+  `appximo frontend-spec` §7.5.
 
 ### 3.3 The `Ctx` — every method
 
@@ -391,7 +391,7 @@ compiled schema rules, and project the permitted fields. **Prefer these.**
 ```go
 // Query: filters are equality predicates (validated + bound); the role's row
 // condition is ALWAYS applied on top — you cannot widen what the role may see.
-rows, err := ctx.Query("students", appitools.QueryOpts{
+rows, err := ctx.Query("students", appximo.QueryOpts{
 	Filters: map[string]any{"country": "CO"},
 	Limit:   50, OrderBy: "created_at", Desc: true,
 })
@@ -430,21 +430,21 @@ the generated PATCH (the guard lives in the UPDATE's WHERE — race-safe, termin
 states immutable, re-sending the current value is a no-op — so a transition
 endpoint hit twice answers 200 idempotently; if yours must REJECT "it was
 already in X", read the row first and check the previous state yourself). An illegal move
-returns `*appitools.InvalidTransitionError` (→ the same 422 if you return it);
-a concurrent-change conflict returns `appitools.ErrUpdateConflict` (→ 409). So a
+returns `*appximo.InvalidTransitionError` (→ the same 422 if you return it);
+a concurrent-change conflict returns `appximo.ErrUpdateConflict` (→ 409). So a
 custom route that advances a lifecycle needs NO transition table of its own —
 restrict WHO may move (per-transition RBAC) in the handler, and let the engine
 own WHAT moves exist:
 
 ```go
 row, err := ctx.Update("orders", id, map[string]any{"status": "shipped"})
-var ite *appitools.InvalidTransitionError
+var ite *appximo.InvalidTransitionError
 if errors.As(err, &ite) {
 	return ctx.Error(409, "ese pedido ya no puede pasar a enviado: "+ite.Message, err)
 }
 ```
 
-**Request binding** (1 MiB cap — `appitools.MaxBodyBytes` — like the generated
+**Request binding** (1 MiB cap — `appximo.MaxBodyBytes` — like the generated
 routes):
 
 ```go
@@ -461,7 +461,7 @@ breaks every signature, so `Bind` is the wrong tool for a signed payload — ver
 over `RawBody` first, then decode. The body is buffered once, so `RawBody` and
 `Bind` compose in any order (a plain `io.ReadAll(ctx.Request().Body)` would leave
 `Bind` with an empty stream, and would make you re-implement the size cap). Over
-the cap → `appitools.ErrBodyTooLarge`, which maps to `413` if you return it.
+the cap → `appximo.ErrBodyTooLarge`, which maps to `413` if you return it.
 
 **Outbox** — enqueue a durable job **inside the current transaction** (atomic
 with your write; a handler error rolls it back too):
@@ -480,10 +480,10 @@ password-login until a reset). See §5.
 user, err := ctx.CreateUser(email, password, "student") // CreatedUser{ID, Email, Role, EmailVerified}
 switch {
 case err == nil:
-case errors.Is(err, appitools.ErrEmailTaken):     // duplicate in this tenant → your 409
-case errors.Is(err, appitools.ErrInvalidEmail),
-     errors.Is(err, appitools.ErrWeakPassword):   // → your 422
-case errors.Is(err, appitools.ErrUnknownRole):    // role not in the schema RBAC
+case errors.Is(err, appximo.ErrEmailTaken):     // duplicate in this tenant → your 409
+case errors.Is(err, appximo.ErrInvalidEmail),
+     errors.Is(err, appximo.ErrWeakPassword):   // → your 422
+case errors.Is(err, appximo.ErrUnknownRole):    // role not in the schema RBAC
 }
 ```
 
@@ -495,11 +495,11 @@ this is how a storefront serves product images to ANONYMOUS visitors while
 every other file stays private (authorize by relationship, then serve):
 
 ```go
-app.Register(appitools.Route{
+app.Register(appximo.Route{
 	Method: "GET", Path: "/api/catalogo-imagen",
 	Public: true, ByteServing: true,
-	RateLimit: &appitools.RateLimit{RPS: 200, Burst: 400}, // image-sized budget
-	Handler: func(ctx appitools.Ctx) error {
+	RateLimit: &appximo.RateLimit{RPS: 200, Burst: 400}, // image-sized budget
+	Handler: func(ctx appximo.Ctx) error {
 		id := ctx.Request().URL.Query().Get("id")
 		var ok bool
 		if err := ctx.UnsafeTx().QueryRow(ctx.Context(),
@@ -510,7 +510,7 @@ app.Register(appitools.Route{
 		// The store is content-addressed: this id's BYTES can never change, so
 		// a URL that embeds the id may be cached forever (FILES-2). A changed
 		// image is a new id — and a new URL.
-		return ctx.ServeFile(id, appitools.WithCacheControl(appitools.CacheControlImmutable))
+		return ctx.ServeFile(id, appximo.WithCacheControl(appximo.CacheControlImmutable))
 	},
 })
 ```
@@ -560,7 +560,7 @@ in every handler you write:
    crashes the **entire multi-tenant process** (Go's `recover()` cannot reach
    another goroutine). `SafeGo` wraps it in recover + a structured log + a metric,
    so a bad background task is a logged incident, not an outage. (For in-request
-   parallelism use `appitools.SafeParallel` — §6 — which is bounded and
+   parallelism use `appximo.SafeParallel` — §6 — which is bounded and
    panic-safe too.)
 2. **External side effects go after the commit.** Never call an external API
    *inside* the transaction. Durable + retryable → `Enqueue` (outbox). Best-effort
@@ -664,7 +664,7 @@ Rules worth knowing before you use it:
   *narrows* those segments. A segment it doesn't name falls through to the role's
   normal evaluation, so deny-by-default is untouched.
 - A key that names a real resource is rejected — use `permissions` for that.
-- The **pure `appitools serve` binary registers no custom routes**, so a schema
+- The **pure `appximo serve` binary registers no custom routes**, so a schema
   with a `routes` grant only boots in the binary that registers them.
 
 Full rationale, alternatives considered, and the security tests:
@@ -710,14 +710,14 @@ as hostile — §3.4 rule 3.
 still enforces RBAC on the real resources.
 
 ```go
-app.Register(appitools.Route{
+app.Register(appximo.Route{
 	Method: "GET", Path: "/api/ops/overview", RequireRole: "admin",
-	Handler: func(ctx appitools.Ctx) error {
-		students, err := ctx.Query("students", appitools.QueryOpts{Limit: 1000})
+	Handler: func(ctx appximo.Ctx) error {
+		students, err := ctx.Query("students", appximo.QueryOpts{Limit: 1000})
 		if err != nil {
 			return ctx.Error(500, "students lookup failed", err)
 		}
-		enrollments, err := ctx.Query("enrollments", appitools.QueryOpts{Limit: 1000})
+		enrollments, err := ctx.Query("enrollments", appximo.QueryOpts{Limit: 1000})
 		if err != nil {
 			return ctx.Error(500, "enrollments lookup failed", err)
 		}
@@ -735,9 +735,9 @@ the user included. This is the in-process differential: no network hop, one tx,
 the engine's validation + RBAC still in force.
 
 ```go
-app.Register(appitools.Route{
+app.Register(appximo.Route{
 	Method: "POST", Path: "/api/register", Public: true, Timeout: 15 * time.Second,
-	Handler: func(ctx appitools.Ctx) error {
+	Handler: func(ctx appximo.Ctx) error {
 		var body struct {
 			Email, Password, FullName, License, CourseID string
 			Amount                                       float64
@@ -776,9 +776,9 @@ app.Register(appitools.Route{
 		user, err := ctx.CreateUser(body.Email, body.Password, "student")
 		switch {
 		case err == nil:
-		case errors.Is(err, appitools.ErrEmailTaken):
+		case errors.Is(err, appximo.ErrEmailTaken):
 			return ctx.Error(409, "email already registered", err)
-		case errors.Is(err, appitools.ErrInvalidEmail), errors.Is(err, appitools.ErrWeakPassword):
+		case errors.Is(err, appximo.ErrInvalidEmail), errors.Is(err, appximo.ErrWeakPassword):
 			return ctx.Error(422, err.Error(), err)
 		default:
 			return ctx.Error(500, "registration failed", err)
@@ -807,13 +807,13 @@ app.Register(appitools.Route{
 ```
 
 **(c) Heavy compute — bounded, panic-safe parallel fan-out** with
-`appitools.SafeParallel`. The tasks do **external I/O only** (never the tx — a
+`appximo.SafeParallel`. The tasks do **external I/O only** (never the tx — a
 single connection is not concurrency-safe); `Route.Timeout` bounds the batch.
 
 ```go
-app.Register(appitools.Route{
+app.Register(appximo.Route{
 	Method: "POST", Path: "/api/reports/ratings", RequireRole: "admin", Timeout: 8 * time.Second,
-	Handler: func(ctx appitools.Ctx) error {
+	Handler: func(ctx appximo.Ctx) error {
 		var body struct{ CourseIDs []string `json:"course_ids"` }
 		if err := ctx.Bind(&body); err != nil {
 			return ctx.Error(400, "invalid body", err)
@@ -833,7 +833,7 @@ app.Register(appitools.Route{
 		}
 		// At most 8 concurrent (backpressure); a task panic becomes an error, never
 		// a crash; ctx cancellation (Route.Timeout) aborts the rest.
-		if err := appitools.SafeParallel(ctx.Context(), 8, tasks...); err != nil {
+		if err := appximo.SafeParallel(ctx.Context(), 8, tasks...); err != nil {
 			return ctx.Error(502, "ratings service failed", err)
 		}
 		out := make(map[string]float64, len(ratings))
@@ -867,13 +867,13 @@ this order:
    stop; the customer starts a new payment.
 
 ```go
-app.Register(appitools.Route{
+app.Register(appximo.Route{
 	Method: "POST", Path: "/api/webhooks/payments", Public: true, Timeout: 15 * time.Second,
-	Handler: func(ctx appitools.Ctx) error {
+	Handler: func(ctx appximo.Ctx) error {
 		// Rule 1 — raw bytes first, cap enforced by the engine.
 		raw, err := ctx.RawBody()
 		if err != nil {
-			if errors.Is(err, appitools.ErrBodyTooLarge) {
+			if errors.Is(err, appximo.ErrBodyTooLarge) {
 				return ctx.Error(413, "payload too large", err)
 			}
 			return ctx.Error(400, "unreadable body", err)
@@ -955,9 +955,9 @@ own deadline, which `fn` must honor; a panic is recovered, never a crash. This i
 at-most-once — for durable work, `Enqueue` instead.
 
 ```go
-app.Register(appitools.Route{
+app.Register(appximo.Route{
 	Method: "POST", Path: "/api/track", Public: true,
-	Handler: func(ctx appitools.Ctx) error {
+	Handler: func(ctx appximo.Ctx) error {
 		var body struct{ Event string `json:"event"` }
 		if err := ctx.Bind(&body); err != nil {
 			return ctx.Error(400, "invalid body", err)
@@ -989,11 +989,11 @@ The pattern (proven in the commerce reference app):
    (or declined) from exactly this.
 
 ```go
-app.Register(appitools.Route{
+app.Register(appximo.Route{
 	Method: "GET", Path: "/api/order-status",
 	Public:    true,
-	RateLimit: &appitools.RateLimit{RPS: 30, Burst: 60},
-	Handler: func(ctx appitools.Ctx) error {
+	RateLimit: &appximo.RateLimit{RPS: 30, Burst: 60},
+	Handler: func(ctx appximo.Ctx) error {
 		q := ctx.Request().URL.Query()
 		number, email := q.Get("number"), q.Get("email")
 		if number == "" || email == "" {
@@ -1043,9 +1043,9 @@ and runs inside a per-request tenant transaction, which is exactly wrong for a
 var frontend embed.FS
 
 dist, _ := fs.Sub(frontend, "web/dist")
-app, err := appitools.New(appitools.Config{
+app, err := appximo.New(appximo.Config{
 	SchemaPath: "schema.json",
-	Static: []appitools.StaticMount{{
+	Static: []appximo.StaticMount{{
 		Path: "/",   // or "/app"
 		FS:   dist,  // or os.DirFS("/var/www/app")
 		SPA:  true,  // client-side routing: /orders/42 → index.html
@@ -1062,7 +1062,7 @@ app, err := appitools.New(appitools.Config{
 | `/api/…`, `/admin`, `/editor`, `/docs`, … | always the engine's — mounting on one is a **boot error** |
 | a tenant transaction / RBAC / response cache | none of them run for an asset |
 | path traversal | impossible: the tree is an `fs.FS`, which cannot open outside its root |
-| Content-Security-Policy | the mount OWNS it, both forms: `appitools.DefaultStaticCSP` (same-origin SPA policy) unless overridden per mount with `CSP:` (verbatim) or disabled with `CSP: appitools.CSPOff` — the API keeps its own strict policy |
+| Content-Security-Policy | the mount OWNS it, both forms: `appximo.DefaultStaticCSP` (same-origin SPA policy) unless overridden per mount with `CSP:` (verbatim) or disabled with `CSP: appximo.CSPOff` — the API keeps its own strict policy |
 | `index.html` | required only with `SPA: true` (it IS the fallback); an assets-only mount needs none (its root 404s) |
 
 ⚠ **PCI (SAQ A):** if the app takes card payments through a hosted widget or
@@ -1116,7 +1116,7 @@ I/O decides.
 
 ## 5. Auth — the identity model
 
-Appitools ships auth-as-product: signup / login / refresh, password reset +
+Appximo ships auth-as-product: signup / login / refresh, password reset +
 email verification, OAuth social login, and TOTP MFA — all multi-tenant-aware,
 issuing the **same JWT** the engine validates. Full operator detail is in the
 [README auth sections](../README.md#auth-cycle-for-an-api-consumer-api-productiva-v1);
@@ -1132,7 +1132,7 @@ for building a backend, know this:
   (`CreateUser`) and the profile row, atomically.
 - **Three ways to create a user:**
   1. **Public signup** — `POST /auth/signup`, enabled only when
-     `APPITOOLS_AUTH_SIGNUP_ROLE` is set (the role every signup gets). Off by
+     `APPXIMO_AUTH_SIGNUP_ROLE` is set (the role every signup gets). Off by
      default.
   2. **Admin API** — `POST /admin/tenants/{id}/users` (platform super-admin or
      admin key), with an admin-chosen role.
@@ -1148,7 +1148,7 @@ for building a backend, know this:
   and never need to re-verify the token — the chain already did.
 - **MFA / OAuth / reset / verify** are engine features you enable by config; they
   need no handler code. Reset + verify are delivered through the **outbox + email
-  worker** (`APPITOOLS_WORKER_MODE=email`) — the same async pattern your handlers
+  worker** (`APPXIMO_WORKER_MODE=email`) — the same async pattern your handlers
   use for `Enqueue("email.send", …)`.
 
 ---
@@ -1161,7 +1161,7 @@ Two mechanisms, chosen by **durability**:
 |---|---|---|
 | best-effort, post-response side effect (metric, cache warm, notify) — losing it is OK | **`ctx.SafeGo(fn)`** | at-most-once, non-durable, panic-safe, fresh-root context with its own deadline |
 | must survive a crash and be retried (payment capture, provisioning, email) | **`ctx.Enqueue(topic, payload)`** + the worker | at-least-once, durable, transactional (commits with your write) |
-| parallel sub-work the **response needs** (fan-out to N services) | **`appitools.SafeParallel(ctx.Context(), limit, tasks…)`** | bounded concurrency (backpressure), panic-safe, waits for all, returns the first error |
+| parallel sub-work the **response needs** (fan-out to N services) | **`appximo.SafeParallel(ctx.Context(), limit, tasks…)`** | bounded concurrency (backpressure), panic-safe, waits for all, returns the first error |
 
 Rules:
 
@@ -1169,12 +1169,12 @@ Rules:
   work must **not depend on the transaction having committed** and must **not
   touch `ctx.Tx()`** (that tx is closing). Its context is a **fresh root** —
   it carries **no request values** (capture what you need by value), with an
-  independent deadline (`APPITOOLS_SAFEGO_TIMEOUT` / `Config.SafeGoTimeoutSeconds`,
+  independent deadline (`APPXIMO_SAFEGO_TIMEOUT` / `Config.SafeGoTimeoutSeconds`,
   default 30s). Honor that deadline: **`fn` must return once `ctx` is `Done`** —
   the deadline cancels the context, it can't forcibly stop a goroutine, so a task
   that ignores cancellation leaks.
 - **The outbox is the durable path.** `Enqueue` writes a job in *your*
-  transaction and fires a notify on commit; the separate `appitools-worker`
+  transaction and fires a notify on commit; the separate `appximo-worker`
   consumes it (`SELECT … FOR UPDATE SKIP LOCKED`, at-least-once — make processors
   idempotent). This is how you do "after commit, reliably": provision an account,
   charge a card, send a receipt. See [ADR-016](adr/ADR-016-extensibility-pattern.md).
@@ -1191,7 +1191,7 @@ Rules:
 
 `Enqueue` writes the job; a **separate process** drains it. Separate on purpose: a
 slow or crashing consumer must never hold a request open, pin a pool connection, or
-take the API down. You do not need the shipped `appitools-worker` binary —
+take the API down. You do not need the shipped `appximo-worker` binary —
 `pkg/worker` is a library and a consumer is ~40 lines
 ([examples/backend-guide/worker/main.go](../examples/backend-guide/worker/main.go)):
 
@@ -1250,8 +1250,8 @@ The full loop, and the Hotmart case as the worked example:
    user), courses, enrollments with an active→refunded lifecycle; public
    registration that verifies a purchase license; admins see an ops overview;
    fire an analytics event on activity."
-2. **Generate the schema.** Run `appitools spec`, generate against it, and
-   self-correct with `appitools validate --json schema.json` until valid. The
+2. **Generate the schema.** Run `appximo spec`, generate against it, and
+   self-correct with `appximo validate --json schema.json` until valid. The
    result is [examples/backend-guide/schema.json](../examples/backend-guide/schema.json):
    `students` / `courses` / `enrollments` (state machine + `create` event), and
    roles `admin` (wildcard) + `student` (per-resource `permissions`,
@@ -1285,9 +1285,9 @@ every background effect is either durable (outbox) or safely fire-and-forget
 
 ## 8. References
 
-- **Schema:** `appitools spec`, [SCHEMA_SPEC_LLM.md](SCHEMA_SPEC_LLM.md),
+- **Schema:** `appximo spec`, [SCHEMA_SPEC_LLM.md](SCHEMA_SPEC_LLM.md),
   [SCHEMA_REFERENCE.md](SCHEMA_REFERENCE.md).
-- **This doc:** `appitools backend-spec` prints it — paste it into your agent.
+- **This doc:** `appximo backend-spec` prints it — paste it into your agent.
 - **The compiling example:** [examples/backend-guide/](../examples/backend-guide/).
 - **The library contract & extensibility model:**
   [ADR-016](adr/ADR-016-extensibility-pattern.md).

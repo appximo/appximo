@@ -11,10 +11,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/files"
-	"github.com/miguelangel/appitools/pkg/userauth"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/files"
+	"github.com/appximo/appximo/pkg/userauth"
 )
 
 // Sentinel errors mapped to HTTP status by the handlers.
@@ -41,7 +41,7 @@ type Config struct {
 	JWTSecret string
 	// MFAKey encrypts the TOTP secret at rest (falls back to JWTSecret).
 	MFAKey string
-	// MFAIssuer is the authenticator-app label (default "Appitools Platform").
+	// MFAIssuer is the authenticator-app label (default "Appximo Platform").
 	MFAIssuer string
 	// SuperAdminRole is the role stamped on platform admins (default
 	// platform_super_admin). It is a platform marker, not a tenant RBAC role.
@@ -141,14 +141,14 @@ func NewService(store *Store, users *userauth.Store, cp controlplane.Service, po
 		cfg.MinPasswordLength = 12
 	}
 	if cfg.MFAIssuer == "" {
-		cfg.MFAIssuer = "Appitools Platform"
+		cfg.MFAIssuer = "Appximo Platform"
 	}
 	mfaKey := cfg.MFAKey
 	if mfaKey == "" {
 		mfaKey = cfg.JWTSecret
 	}
 	cipher, _ := userauth.NewSecretCipher(mfaKey)
-	dummy, _ := userauth.HashPassword("appitools-platform-anti-enumeration-timing-equalizer")
+	dummy, _ := userauth.HashPassword("appximo-platform-anti-enumeration-timing-equalizer")
 	s := &Service{
 		store:     store,
 		users:     users,

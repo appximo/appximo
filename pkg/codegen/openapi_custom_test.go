@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 func customTestSchema(t *testing.T) *schema.APISchema {
 	t.Helper()
 	s, err := schema.LoadFromBytes([]byte(`{
-		"$schema": "https://appitools.dev/schema/v1",
+		"$schema": "https://appximo.com/schema/v1",
 		"version": "1",
 		"name": "custom-routes-test",
 		"resources": { "tareas": { "fields": { "titulo": { "type": "string" } } } }
@@ -56,8 +56,8 @@ func TestOpenAPIIncludesCustomRoutes(t *testing.T) {
 	if sec, ok := post["security"].([]any); !ok || len(sec) != 0 {
 		t.Errorf("public route must carry security: [] (got %v)", post["security"])
 	}
-	if post["x-appitools-custom-route"] != true {
-		t.Error("custom route not marked x-appitools-custom-route")
+	if post["x-appximo-custom-route"] != true {
+		t.Error("custom route not marked x-appximo-custom-route")
 	}
 
 	rep := paths["/api/reportes/{id}"].(map[string]any)["get"].(map[string]any)

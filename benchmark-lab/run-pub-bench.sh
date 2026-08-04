@@ -13,14 +13,14 @@
 # with labels  pub-<stack>-<level>#<run>.
 #
 # Usage:
-#   BENCH_TOKEN=<jwt> bash benchmark-lab/run-pub-bench.sh appitools http://SUT:8080
+#   BENCH_TOKEN=<jwt> bash benchmark-lab/run-pub-bench.sh appximo http://SUT:8080
 #   BENCH_TOKEN=<jwt> bash benchmark-lab/run-pub-bench.sh nestjs    http://SUT:3000
 #
 # The load generator must be a DIFFERENT machine than the SUT (PRIMER
 # methodology: the loader never competes for CPU with the system under test).
 set -euo pipefail
 
-STACK="${1:?Uso: run-pub-bench.sh <appitools|nestjs> <TARGET_URL>}"
+STACK="${1:?Uso: run-pub-bench.sh <appximo|nestjs> <TARGET_URL>}"
 TARGET="${2:?TARGET_URL requerido}"
 LEVELS="${LEVELS:-250 500 1000 1500 2000 2500}"
 DEVHUB_URL="${DEVHUB_URL:-http://localhost:3099}"

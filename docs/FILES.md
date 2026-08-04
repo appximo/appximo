@@ -54,7 +54,7 @@ FILES-V2 reconciles per driver:
 |---|---|---|
 | `local` | **proxy** — `http.ServeContent`: 200/206 Range, strong ETag (the content hash) → 304 revalidation, `sendfile` zero-copy — measured live on the shipped path (see [Performance](#performance--the-acceptance-benchmark-own-numbers)) | proxying is the only option AND the optimum: the standard library gives Range + conditional + zero-copy for free; the limit is the disk/NIC, never Go |
 | `s3` (default: `redirect`) | **302** to a short-lived presigned URL (Signature v4, same TTL as tokens) | keeps the FILES-V1 contract: the engine authorizes (tenant → JWT → RBAC ran before the redirect) and then gets out of the byte path — zero engine bandwidth, egress straight from the bucket (with R2 that egress is **$0**) |
-| `s3` with `APPITOOLS_FILES_S3_SERVE=proxy` | **proxy** — ServeContent over a lazy-seeking bucket reader (ranged GETs under the hood) | for buckets that must stay fully private / clients that can't follow redirects; the PocketBase trade-off: uniform headers, bytes transit the engine |
+| `s3` with `APPXIMO_FILES_S3_SERVE=proxy` | **proxy** — ServeContent over a lazy-seeking bucket reader (ranged GETs under the hood) | for buckets that must stay fully private / clients that can't follow redirects; the PocketBase trade-off: uniform headers, bytes transit the engine |
 
 Objects are uploaded to S3 **with** their validated `Content-Type` and an
 `attachment` `Content-Disposition`, so a presigned GET replays safe headers
@@ -84,7 +84,7 @@ upload is a `422` with the reason:
 
 1. **Extension allowlist** (never a denylist): default list in
    `files.DefaultAllowedExtensions` (images/docs/office/archives/media/fonts +
-   `bin`); override with `APPITOOLS_FILES_ALLOWED_EXT` (comma-separated; `*`
+   `bin`); override with `APPXIMO_FILES_ALLOWED_EXT` (comma-separated; `*`
    disables the extension check only). `.php`, `.exe`, `.sh`… are simply not
    representable. A file with no extension is accepted (hash-keyed, served
    `attachment` + `nosniff` — inert).
@@ -96,7 +96,7 @@ upload is a `422` with the reason:
    (`application/octet-stream`) never rejects. SVG is exempt from the family
    check (it has no sniff signature — and is served `attachment`+`nosniff`, so
    it never executes in-origin).
-3. **Size cap**: `APPITOOLS_FILES_MAX_BYTES` (default 256 MiB) → `413`.
+3. **Size cap**: `APPXIMO_FILES_MAX_BYTES` (default 256 MiB) → `413`.
 4. **Name sanitization at rest**: the client filename is stored as metadata
    only — basename, control/quote characters stripped, no leading dots, `..`
    collapsed, 200-rune cap. Storage keys are content hashes; the name never
@@ -196,24 +196,24 @@ and tenant-minted tokens can never be replayed across each other's routes.
 
 | Env (Config field) | Default | Meaning |
 |---|---|---|
-| `APPITOOLS_FILES_BACKEND` | `local` | `local` \| `s3` |
-| `APPITOOLS_FILES_DIR` | `/var/lib/appitools/files` | local backend root (lazy-created) |
-| `APPITOOLS_FILES_MAX_BYTES` | 268435456 (256 MiB) | per-upload cap |
-| `APPITOOLS_FILES_TOKEN_TTL` | `180` (seconds) | signed URL/token lifetime (engine tokens AND S3 presigned) |
-| `APPITOOLS_FILES_ALLOWED_EXT` | curated allowlist | comma-separated extensions, or `*` |
-| `APPITOOLS_FILES_S3_BUCKET` | — | **required** with backend=s3 (boot fails loud without it) |
-| `APPITOOLS_FILES_S3_ENDPOINT` | AWS default | provider endpoint URL |
-| `APPITOOLS_FILES_S3_REGION` | `auto` | R2's spelling; harmless elsewhere |
-| `APPITOOLS_FILES_S3_ACCESS_KEY` / `_SECRET_KEY` | — | **required** with backend=s3 |
-| `APPITOOLS_FILES_S3_FORCE_PATH_STYLE` | off | `<endpoint>/<bucket>` addressing — **required for MinIO** |
-| `APPITOOLS_FILES_S3_PREFIX` | `tenants/` | key namespace inside the bucket |
-| `APPITOOLS_FILES_S3_SERVE` | `redirect` | `redirect` \| `proxy` (see reconciliation above) |
+| `APPXIMO_FILES_BACKEND` | `local` | `local` \| `s3` |
+| `APPXIMO_FILES_DIR` | `/var/lib/appximo/files` | local backend root (lazy-created) |
+| `APPXIMO_FILES_MAX_BYTES` | 268435456 (256 MiB) | per-upload cap |
+| `APPXIMO_FILES_TOKEN_TTL` | `180` (seconds) | signed URL/token lifetime (engine tokens AND S3 presigned) |
+| `APPXIMO_FILES_ALLOWED_EXT` | curated allowlist | comma-separated extensions, or `*` |
+| `APPXIMO_FILES_S3_BUCKET` | — | **required** with backend=s3 (boot fails loud without it) |
+| `APPXIMO_FILES_S3_ENDPOINT` | AWS default | provider endpoint URL |
+| `APPXIMO_FILES_S3_REGION` | `auto` | R2's spelling; harmless elsewhere |
+| `APPXIMO_FILES_S3_ACCESS_KEY` / `_SECRET_KEY` | — | **required** with backend=s3 |
+| `APPXIMO_FILES_S3_FORCE_PATH_STYLE` | off | `<endpoint>/<bucket>` addressing — **required for MinIO** |
+| `APPXIMO_FILES_S3_PREFIX` | `tenants/` | key namespace inside the bucket |
+| `APPXIMO_FILES_S3_SERVE` | `redirect` | `redirect` \| `proxy` (see reconciliation above) |
 
 ### Setup 1 — local (the default; everything on your VPS)
 
 ```bash
 # nothing to configure; optionally pin the root:
-APPITOOLS_FILES_DIR=/var/lib/appitools/files
+APPXIMO_FILES_DIR=/var/lib/appximo/files
 ```
 Cost: your disk. Serving: Range/ETag/sendfile, the local ceiling. Back-compat:
 the on-disk layout is byte-identical to FILES-V1 — existing blobs keep working.
@@ -225,12 +225,12 @@ Bogotá/Medellín/Cali/Barranquilla/São Paulo. Create a bucket + an R2 API toke
 (Object Read & Write), then:
 
 ```bash
-APPITOOLS_FILES_BACKEND=s3
-APPITOOLS_FILES_S3_BUCKET=my-app-files
-APPITOOLS_FILES_S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
-APPITOOLS_FILES_S3_REGION=auto
-APPITOOLS_FILES_S3_ACCESS_KEY=…
-APPITOOLS_FILES_S3_SECRET_KEY=…
+APPXIMO_FILES_BACKEND=s3
+APPXIMO_FILES_S3_BUCKET=my-app-files
+APPXIMO_FILES_S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+APPXIMO_FILES_S3_REGION=auto
+APPXIMO_FILES_S3_ACCESS_KEY=…
+APPXIMO_FILES_S3_SECRET_KEY=…
 ```
 Known caveat: R2 has had occasional S3-compat edge bugs (e.g. a `Size() 0` on
 some JSON/SVG objects was reported historically). The engine's compat gate is
@@ -244,18 +244,18 @@ docker run -d --name minio -p 9000:9000 \
   -e MINIO_ROOT_USER=… -e MINIO_ROOT_PASSWORD=… \
   -v /var/lib/minio:/data minio/minio server /data
 
-APPITOOLS_FILES_BACKEND=s3
-APPITOOLS_FILES_S3_BUCKET=appitools
-APPITOOLS_FILES_S3_ENDPOINT=http://127.0.0.1:9000
-APPITOOLS_FILES_S3_REGION=us-east-1
-APPITOOLS_FILES_S3_ACCESS_KEY=…
-APPITOOLS_FILES_S3_SECRET_KEY=…
-APPITOOLS_FILES_S3_FORCE_PATH_STYLE=true
+APPXIMO_FILES_BACKEND=s3
+APPXIMO_FILES_S3_BUCKET=appximo
+APPXIMO_FILES_S3_ENDPOINT=http://127.0.0.1:9000
+APPXIMO_FILES_S3_REGION=us-east-1
+APPXIMO_FILES_S3_ACCESS_KEY=…
+APPXIMO_FILES_S3_SECRET_KEY=…
+APPXIMO_FILES_S3_FORCE_PATH_STYLE=true
 ```
 This exact setup is what the integration suite runs
 (`go test -tags integration -run TestS3 ./pkg/files/`). Note: with a
 localhost-only MinIO, presigned URLs point at the internal endpoint — use
-`APPITOOLS_FILES_S3_SERVE=proxy`, or give MinIO a public endpoint.
+`APPXIMO_FILES_S3_SERVE=proxy`, or give MinIO a public endpoint.
 
 DigitalOcean Spaces works with the same five variables ($5/mo flat: 250 GiB +
 1 TiB egress; endpoint `https://<region>.digitaloceanspaces.com`). AWS S3:

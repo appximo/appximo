@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"fmt"

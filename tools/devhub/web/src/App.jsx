@@ -21,7 +21,7 @@ export default function App() {
   return (
     <div class="min-h-screen flex flex-col">
       <header class="border-b border-slate-800 px-4 py-3 flex items-center gap-3">
-        <span class="text-slate-400 text-xs font-bold tracking-widest">APPITOOLS</span>
+        <span class="text-slate-400 text-xs font-bold tracking-widest">APPXIMO</span>
         <span class="text-slate-600">|</span>
         <span class="text-slate-300 text-sm">DevHub</span>
       </header>

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/appximo/appximo/pkg/db"
 )
 
 // writeDBError maps a database error to an HTTP response without leaking

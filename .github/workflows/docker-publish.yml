@@ -1,12 +1,13 @@
 name: Docker Publish
 
-# Publishes neodevtrix/appitools-engine to Docker Hub — but ONLY for commits whose CI run
+# Publishes appximo/appximo to Docker Hub (historically neodevtrix/appitools-engine,
+# pre-rename) — but ONLY for commits whose CI run
 # (same SHA) finished green: this workflow triggers on the completion of "CI"
 # (workflow_run) instead of directly on push, so an image of a red commit can
 # never be published. CI itself runs on pushes to main and on v* tags.
 #
 # Requires two repo secrets (Settings → Secrets and variables → Actions):
-#   DOCKERHUB_USERNAME   Docker Hub account that owns the appitools namespace
+#   DOCKERHUB_USERNAME   Docker Hub account that owns the appximo namespace
 #   DOCKERHUB_TOKEN      access token with Read & Write scope
 
 on:
@@ -18,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  IMAGE: neodevtrix/appitools-engine
+  IMAGE: appximo/appximo
 
 jobs:
   publish:

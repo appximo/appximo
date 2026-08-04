@@ -1,11 +1,11 @@
 #!/bin/bash
 # Sweep open-model: mide latencia bajo carga controlada (no VUs ilimitados)
-# Uso: TARGET=appitools ./sweep.sh   o   TARGET=nestjs ./sweep.sh
+# Uso: TARGET=appximo ./sweep.sh   o   TARGET=nestjs ./sweep.sh
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
-TARGET_SVC="${TARGET:-appitools}"
+TARGET_SVC="${TARGET:-appximo}"
 
 if [ "$TARGET_SVC" = "nestjs" ]; then
   TARGET_URL="http://localhost:3000"
@@ -13,8 +13,8 @@ if [ "$TARGET_SVC" = "nestjs" ]; then
   BENCH_TOKEN="bench"
 else
   TARGET_URL="http://localhost:8081"
-  # Appitools valida firma JWT — generar token fresco
-  BENCH_TOKEN=$(docker run --rm appitools-bench:latest token \
+  # Appximo valida firma JWT — generar token fresco
+  BENCH_TOKEN=$(docker run --rm appximo-bench:latest token \
     --tenant 10 --role super_admin --user-id bench-user \
     --secret "${JWT_SECRET:-benchsecret}")
 fi

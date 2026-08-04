@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/miguelangel/appitools/pkg/observability"
-	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/appximo/appximo/pkg/observability"
+	"github.com/appximo/appximo/pkg/tenant"
 )
 
 type claimsKey struct{}
@@ -84,7 +84,7 @@ func JWTMiddleware(secret string, onError ...func(tenantID, reason string)) func
 }
 
 // JWTMiddlewareWithStatic is JWTMiddlewareWithPublic plus a PER-APP predicate for
-// user-declared static mounts (appitools.Config.Static, LOOSE-ENDS-SWEEP-S1). A
+// user-declared static mounts (appximo.Config.Static, LOOSE-ENDS-SWEEP-S1). A
 // frontend's HTML/JS loads before any token exists — exactly like /editor and
 // /admin, which are in the fixed skipJWT list — but a user mount is only known at
 // boot, so it is passed in rather than hardcoded.
@@ -99,7 +99,7 @@ func JWTMiddlewareWithStatic(secret string, isPublic PublicMatcher, isStatic fun
 }
 
 // JWTMiddlewareWithPublic is JWTMiddleware plus OPTIONAL authentication for the
-// custom routes explicitly registered as Public (appitools.Route{Public: true}).
+// custom routes explicitly registered as Public (appximo.Route{Public: true}).
 // Public means "no token required", not "identity ignored" (LIBRARY-GAPS-S2,
 // ENG-6): with no Authorization header the request proceeds anonymous (Claims
 // zero / ClaimsFromCtx nil); with a VALID Bearer the claims are populated so a

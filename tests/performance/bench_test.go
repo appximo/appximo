@@ -21,10 +21,10 @@ import (
 
 	chi "github.com/go-chi/chi/v5"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
 )
 
 const benchSecret = "bench-jwt-secret"
@@ -34,7 +34,7 @@ const benchSecret = "bench-jwt-secret"
 // helpers package is build-tagged and unavailable in the default lane).
 func benchSchema() *schema.APISchema {
 	return &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "bench",
 		Resources: map[string]schema.ResourceSchema{

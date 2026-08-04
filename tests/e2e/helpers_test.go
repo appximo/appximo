@@ -10,8 +10,8 @@
 //
 // Design notes / engine truths exercised here (verified against the source, not
 // assumed — see context-docs/TESTING_PLAN.md "Hallazgos S37"):
-//   - Metrics are `appitools_`-prefixed; there is NO `security_blocked_total`. The
-//     attack scenario asserts appitools_requests_total{status="401"} instead.
+//   - Metrics are `appximo_`-prefixed; there is NO `security_blocked_total`. The
+//     attack scenario asserts appximo_requests_total{status="401"} instead.
 //   - The engine uses its own SpanTracker (pkg/observability/span.go), NOT OTel.
 //     The DIAN scenario captures RequestTap.Spans through a span-recording tap.
 //   - helpers.BuildObservableServer wires a JS+webhook-less HookRunner and drops
@@ -42,16 +42,16 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/rs/zerolog"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/codegen"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/extensions"
-	"github.com/miguelangel/appitools/pkg/logging"
-	"github.com/miguelangel/appitools/pkg/observability"
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
-	"github.com/miguelangel/appitools/tests/helpers"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/codegen"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/extensions"
+	"github.com/appximo/appximo/pkg/logging"
+	"github.com/appximo/appximo/pkg/observability"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
+	"github.com/appximo/appximo/tests/helpers"
 )
 
 // testPool is the suite-wide Postgres pool. One container is booted in TestMain

@@ -1,5 +1,5 @@
 /**
- * Appitools benchmark — 3 escenarios secuenciales
+ * Appximo benchmark — 3 escenarios secuenciales
  *
  * Uso:
  *   k6 run -e BENCH_TOKEN="$BENCH_TOKEN" benchmark/k6_script.js
@@ -7,7 +7,7 @@
  * Variables de entorno:
  *   BASE_URL    (default: http://localhost:8080)
  *   TENANT_HOST (default: acme.localhost)
- *   BENCH_TOKEN (required — genera con: appitools token --role super_admin --tenant acme --secret "$JWT_SECRET")
+ *   BENCH_TOKEN (required — genera con: appximo token --role super_admin --tenant acme --secret "$JWT_SECRET")
  */
 import http from 'k6/http';
 import { check } from 'k6';

@@ -1,8 +1,8 @@
 # Model Lab schemas
 
 Six schemas modelling the data patterns of the most common modern app archetypes,
-built to map **what the Appitools engine can and cannot model today**. Each one
-**validates** (`appitools validate`) and **boots** (`serve`). The full diagnostic
+built to map **what the Appximo engine can and cannot model today**. Each one
+**validates** (`appximo validate`) and **boots** (`serve`). The full diagnostic
 — per-archetype verdict, live evidence, the prioritized gap catalog, and the
 recommendation of what to close first — is in
 [**docs/MODEL_LAB.md**](../../docs/MODEL_LAB.md).

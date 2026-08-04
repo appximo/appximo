@@ -37,7 +37,7 @@ export const options = {
 
 export function setup() {
   if (!TOKEN) {
-    throw new Error('BENCH_TOKEN required — mint with: appitools token --tenant nimbus --secret <JWT_SECRET> --role rrhh-admin');
+    throw new Error('BENCH_TOKEN required — mint with: appximo token --tenant nimbus --secret <JWT_SECRET> --role rrhh-admin');
   }
 }
 

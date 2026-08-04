@@ -12,7 +12,7 @@ production.
 **Method (AI-JOURNEY-S1, 2026-08-01).** Everything below was executed. Where the
 user's own AI assistant was part of the flow, it was simulated **honestly**: a
 separate agent with NO access to this repository, given exactly the artifacts a
-real user has (`appitools spec`, `appitools backend-spec`, their own schema) and
+real user has (`appximo spec`, `appximo backend-spec`, their own schema) and
 nothing else. Its mistakes are the product's mistakes. Every time the operator
 had to use knowledge that only comes from reading the source, it is written down
 as friction — that is the point of the exercise.
@@ -27,7 +27,7 @@ appointments with vet and reason, "first requested, then the receptionist
 confirms, then attended or cancelled", each vet seeing only their own
 appointments, vaccination records).
 
-**Got:** `appitools ai-generate` produced a **valid** 5-resource schema in
+**Got:** `appximo ai-generate` produced a **valid** 5-resource schema in
 **2 iterations, 16 s, $0.0234** — well-modelled tables (owners/pets/
 appointments/vaccinations/veterinarians), real FKs with sensible `on_delete`,
 indexes, `relations` for embeds, `format: email`, phone patterns. The generated
@@ -69,7 +69,7 @@ a modelling error and deserves a load-time warning.
 
 ## 5-2. Evaluating the result requires exactly the knowledge the user lacks
 
-`appitools validate` answers *"is this valid?"*. Nobody answers *"does this
+`appximo validate` answers *"is this valid?"*. Nobody answers *"does this
 model what I asked?"* — and the two gaps above were found by an operator who
 knows the grammar by heart. A non-programmer would have deployed a schema that
 looks complete, and discovered the missing lifecycle the first time someone
@@ -85,8 +85,8 @@ their own words is the only review a non-programmer can actually perform.
 **Executed** on the 58, which already serves the tienda, for
 `petfriendly.appitools.com` (A record straight to the box). The installer could
 NOT be used: **every path it writes is a fixed constant** — the unit
-`appitools.service`, `/etc/appitools/appitools.env`, `/etc/appitools/schema.json`,
-`/opt/appitools/bin/appitools`, `/var/lib/appitools`, and the **whole**
+`appximo.service`, `/etc/appximo/appximo.env`, `/etc/appximo/schema.json`,
+`/opt/appximo/bin/appximo`, `/var/lib/appximo`, and the **whole**
 `/etc/caddy/Caddyfile` — and on that box all six belong to the first app. Running
 it again would have replaced the unit, overwritten the secrets (breaking the
 tienda's JWTs and pointing it at another database) and rewritten the Caddyfile,
@@ -103,7 +103,7 @@ So the second app went in by hand. The exact cost, counted:
 | 5 | systemd unit | 25-line unit copied from the tienda's and edited (user, env file, port 8091, ReadWritePaths) |
 | 6 | Caddy site | **append** a second block (the installer overwrites) + `caddy validate` + `systemctl reload` |
 | 7 | tenant registration | `curl` to its own control plane `:9098` |
-| 8 | platform super-admin | `appitools-cli admin create` — using the CLI that was on the box **only because the tienda had installed it** |
+| 8 | platform super-admin | `appximo-cli admin create` — using the CLI that was on the box **only because the tienda had installed it** |
 
 **Result: it works and it coexists.** `petfriendly.appitools.com` got its own
 **real Let's Encrypt certificate** (issuer `C = US, O = Let's Encrypt`, subject
@@ -115,7 +115,7 @@ the tienda never blinked — verified at the end with a **complete purchase**
 
 But the eight steps are exactly the tribal knowledge the product exists to
 remove, and step 8 is worse than it looks: a first-time user on a fresh box
-would not have `appitools-cli` at all. Backlog **OPS-10**.
+would not have `appximo-cli` at all. Backlog **OPS-10**.
 
 ## 5-3b. The tenant id is not a name — it is the domain's first label
 
@@ -131,12 +131,12 @@ is petfriendly.appitools.com"*.
 
 ## 5-4. Modification by AI: one round, and the friction is the CONTEXT, not the model
 
-The owner's assistant (an agent with no repo access, given only `appitools spec`
+The owner's assistant (an agent with no repo access, given only `appximo spec`
 and the current schema) was asked, in the owner's words, to add "reprogramada"
 with a reason and to enforce the lifecycle. It produced a **valid schema in one
 round** — adding the `rescheduled` state, the `reschedule_reason` field, a
 complete and correct `state_machine`, and a `before_update` js hook to force a
-reason. `appitools validate`: **0 errors**.
+reason. `appximo validate`: **0 errors**.
 
 Two observations that matter more than the success:
 
@@ -145,7 +145,7 @@ Two observations that matter more than the success:
   the product.
 - **The user must know to paste it.** Nothing in Studio, in the CLI's output, or
   in the app itself says "when you ask an AI to change your app, give it
-  `appitools spec` first". The whole flow hinges on a step that exists only in
+  `appximo spec` first". The whole flow hinges on a step that exists only in
   `docs/SCHEMA_SPEC_LLM.md` — which the user has no reason to have read.
   A "Copy AI context" button in Studio (spec + current schema, one click) would
   make the product's best feature discoverable.
@@ -192,7 +192,7 @@ best-designed piece of the authoring flow.
   registers and is then **unroutable** (400 on every request — backlog
   **ENG-11**). The one place the product instructs a beginner is wrong.
 - **Deploying requires a platform super-admin that only the CLI can create.**
-  The modal says so honestly ("Bootstrap one with `appitools admin create`"),
+  The modal says so honestly ("Bootstrap one with `appximo admin create`"),
   but that is a terminal command with a database URL — for a non-programmer,
   the visual tool stops at the exact moment it becomes useful.
 
@@ -239,7 +239,7 @@ written**. Atomicity holds.
 **What the document did not give it, in its own words:**
 
 1. **How to obtain the dependency.** `backend-spec` says to import
-   `github.com/miguelangel/appitools` but never says how to get it. The agent
+   `github.com/appximo/appximo` but never says how to get it. The agent
    guessed `v0.1.0`; `go mod tidy` failed (private repo, no release tag), and
    the project only built after an operator added `replace … => /root/appitools`
    — knowledge a third party does not have. **This is the single hardest wall in
@@ -272,7 +272,7 @@ repoint the FK with `"references": "user_id"` on `appointments.veterinarian_id`
 and `vaccinations.veterinarian_id`. Valid schema, sound reasoning, and it even
 warned about the data backfill.
 
-What happened when it was deployed to production (`appitools-cli migrate`):
+What happened when it was deployed to production (`appximo-cli migrate`):
 
 - The dry-run **listed the four operations** including
   `ADD FOREIGN KEY appointments (veterinarian_id) -> veterinarians (user_id)`,
@@ -366,7 +366,7 @@ neither SQL nor Go. What follows is item by item, with what was measured.
 | **5-2** | Nobody answers "does this model what I asked?" | **Partly closed.** The engine cannot yet read a schema back in plain language (still open — Studio's job), but the single most damaging silent-wrong case now *does* have an answer: `schema.Warnings` is a layer whose question is "will this do what you meant?", separate from the validator's "may this run?". It fires in five places, and the message is written in the owner's terms, not the engine's. |
 | **5-3** | A second app on one server = 8 manual steps | **Closed.** `install.sh --app=NAME` namespaces unit, service user, `/etc`, `/opt`, `/var/lib`, database + role, control port and a per-app Caddy **site file** the main Caddyfile only imports — so installing an app appends a site instead of overwriting the box's. Default unchanged. And a second install for a different domain WITHOUT `--app` now refuses, printing the exact side-by-side command. Verified with two apps staged side by side; a live third-app install on the 58 is deliberately not done (**OPS-11**). |
 | **5-3b** | The tenant id must equal the domain's first label | **Closed.** One alphabet everywhere (`^[a-z][a-z0-9]{1,29}$` — the intersection of what Postgres and DNS each accept), and `401 token tenant mismatch` now names the host that arrived, the tenant it implies, the tenant the token carries and the address the token WOULD work at. Creating a tenant through `/admin` warns when the id does not match the app's domain — the moment both facts are known. |
-| **5-4** | `spec` works; the user is never told it exists | **Closed.** Studio has a **"Copy AI context"** button (`GET /editor/ai-context`): `appitools spec` plus this app's current schema, one click, ready to paste into any assistant. |
+| **5-4** | `spec` works; the user is never told it exists | **Closed.** Studio has a **"Copy AI context"** button (`GET /editor/ai-context`): `appximo spec` plus this app's current schema, one click, ready to paste into any assistant. |
 | **5-5** | Studio is good; three specific costs | **Partly closed.** The deploy modal no longer teaches the broken tenant-id rule — it teaches the one that works, and shows the address the tenant will answer at. The English-only interface and the discoverability of "+ add" are untouched. |
 | **5-6** | A new column is readable but NOT writable until restart | **Closed, and the test was designed so it could not repeat the earlier self-deception.** The write path now validates against the tenant's DEPLOYED schema merged with the boot one (a union — a deploy can only ever *add* to what was accepted). Verified live on a field asserted ABSENT from the file the process booted with: `PATCH pets.weight_kg` → **200, same PID, no restart**. A NEW RESOURCE still needs a restart — and now says so (`resource_not_loaded`, with the reason and the fix) instead of a bare 404. |
 | **5-7** | The 10 %: the module cannot be obtained; `ctx.Get` missing | **Half closed, half escalated.** `Ctx.Get(resource, id)` exists, keeps the row rule, and the doc now states that `QueryOpts.Filters` takes declared fields only — the round the agent lost is gone. The dependency is now documented **honestly** at the top of `backend-spec` (the local checkout + `replace`, its costs spelled out, and exactly what changes when the module is published) — but it remains a **product blocker**, escalated to the decisions Miguel owns. No amount of documentation makes a private module fetchable. |
@@ -384,7 +384,7 @@ only the product:
 3. Boot: the warning again, in the log.
 4. Seeded 2 appointments for a vet → the vet saw **0 of 2** (the bug, reproduced).
 5. Applied the fix the warning itself describes (`references: "user_id"`), plus a
-   brand-new field, and deployed with `appitools migrate`.
+   brand-new field, and deployed with `appximo migrate`.
 6. The dry-run listed the FK replacement; the apply **actually applied it** —
    confirmed by reading `pg_constraint`, not the migrator's log — and reported
    honestly that the constraint was left unvalidated over pre-existing rows.

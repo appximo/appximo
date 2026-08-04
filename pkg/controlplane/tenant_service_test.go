@@ -6,10 +6,10 @@ import (
 	"os"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/schema"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -67,7 +67,7 @@ func applyControlPlane(t *testing.T, pool *pgxpool.Pool) {
 // minimalSchema returns a RegisterRequest with the minimal logistics-like schema.
 func minimalSchema() *schema.APISchema {
 	return &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "test-api",
 		Resources: map[string]schema.ResourceSchema{
@@ -221,7 +221,7 @@ func TestRegisterTenant_MultipleResources(t *testing.T) {
 	applyControlPlane(t, pool)
 
 	multiSchema := &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "logistics",
 		Resources: map[string]schema.ResourceSchema{

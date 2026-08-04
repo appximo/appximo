@@ -1,6 +1,6 @@
-# Nimbus ERP — Appitools full-app example (auth + RBAC + relations)
+# Nimbus ERP — Appximo full-app example (auth + RBAC + relations)
 
-The first **complete application** example for Appitools: an HR + operations ERP
+The first **complete application** example for Appximo: an HR + operations ERP
 modeled entirely as a schema, exercising the engine end to end — typed fields,
 declarative validation, all three relation kinds, hooks, outbox events, indexes,
 and a realistic RBAC policy with row-level isolation, wired to the in-engine
@@ -34,7 +34,7 @@ Field types used across the schema: `string`, `text`, `int`, `float64`, `time`,
 
 ## Identity ↔ profile: how `auth_users` connects to `empleados`
 
-Appitools' identity table (`tenant_<id>.auth_users`) is **fixed** — it holds only
+Appximo's identity table (`tenant_<id>.auth_users`) is **fixed** — it holds only
 `email` / `password_hash` / `role` / MFA. The **person's profile** (name, document,
 position, salary, department…) is a normal schema resource, `empleados`, joined to
 the identity by a single column:
@@ -77,8 +77,8 @@ The `empleado` role is row-scoped: an employee sees **only their own** profile a
 ```bash
 # 1. boot the engine WITH this schema (it becomes the served schema)
 set -a; source <your-secrets>; set +a      # DATABASE_URL, JWT_SECRET, ADMIN_KEY
-export APPITOOLS_AUTH_SIGNUP_ROLE=empleado  # enables POST /auth/signup as 'empleado'
-./appitools serve --schema examples/erp-demo/schema.json --port 8080
+export APPXIMO_AUTH_SIGNUP_ROLE=empleado  # enables POST /auth/signup as 'empleado'
+./appximo serve --schema examples/erp-demo/schema.json --port 8080
 
 # 2. register the tenant with the SAME schema (boot ↔ stored must match)
 PAYLOAD=$(jq -n --slurpfile s examples/erp-demo/schema.json \
@@ -87,7 +87,7 @@ curl -X POST http://localhost:9090/tenants -H "X-Admin-Key: $ADMIN_KEY" \
   -H "Content-Type: application/json" -d "$PAYLOAD"
 
 # 3. mint an admin token, write data (Host = tenant subdomain)
-TOKEN=$(./appitools token --secret "$JWT_SECRET" --tenant nimbus --role rrhh-admin | tail -1)
+TOKEN=$(./appximo token --secret "$JWT_SECRET" --tenant nimbus --role rrhh-admin | tail -1)
 curl -X POST http://localhost:8080/api/departamentos \
   -H "Authorization: Bearer $TOKEN" -H "Host: nimbus.localhost" \
   -H "Content-Type: application/json" \

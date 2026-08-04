@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/appximo/appximo/pkg/db"
 )
 
 func TestWriteDBError_MissingTenantIs400(t *testing.T) {

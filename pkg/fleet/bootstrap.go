@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/miguelangel/appitools/migrations"
+	"github.com/appximo/appximo/migrations"
 )
 
 // BootstrapControlPlane applies the canonical control-plane DDL (embedded from

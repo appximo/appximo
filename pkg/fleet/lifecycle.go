@@ -1,7 +1,7 @@
 package fleet
 
 // FLEET-LIFECYCLE-S1 — manifest-side support for the fleet's app lifecycle
-// (`appitools fleet add/remove/list` + the console actions). Two concerns live
+// (`appximo fleet add/remove/list` + the console actions). Two concerns live
 // here, both OFF the engine:
 //
 //   - ValidateNewApp: the SAME rules LoadManifest enforces, applied to ONE

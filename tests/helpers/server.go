@@ -29,17 +29,17 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/codegen"
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/events"
-	"github.com/miguelangel/appitools/pkg/extensions"
-	"github.com/miguelangel/appitools/pkg/logging"
-	"github.com/miguelangel/appitools/pkg/observability"
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/codegen"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/events"
+	"github.com/appximo/appximo/pkg/extensions"
+	"github.com/appximo/appximo/pkg/logging"
+	"github.com/appximo/appximo/pkg/observability"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
 )
 
 // Shared test credentials. These never reach production — they exist only to sign
@@ -75,7 +75,7 @@ func FixtureSchema(t *testing.T, name string) *schema.APISchema {
 // TestMain, where one container is shared across the whole suite.
 func StartPostgres(ctx context.Context) (*pgxpool.Pool, func(), error) {
 	ctr, err := tcpostgres.Run(ctx, "postgres:16-alpine",
-		tcpostgres.WithDatabase("appitools_test"),
+		tcpostgres.WithDatabase("appximo_test"),
 		tcpostgres.WithUsername("test"),
 		tcpostgres.WithPassword("test"),
 		testcontainers.WithWaitStrategy(
@@ -147,7 +147,7 @@ func GenToken(t *testing.T, role, userID, tenantID string) string {
 // instance so callers can scrape/assert real Prometheus series.
 //
 // Unlike pkg/integration's buildDP, this includes the RequestLogger tap that feeds
-// appitools_requests_total / _request_duration_seconds / _active_tenants — the wiring
+// appximo_requests_total / _request_duration_seconds / _active_tenants — the wiring
 // under test. The server reads the per-request Host header (set Req.Host to
 // "<tenant>.localhost"), so a single server can serve multiple tenants.
 func BuildObservableServer(t *testing.T, s *schema.APISchema, pool *pgxpool.Pool) (*httptest.Server, *observability.Metrics) {

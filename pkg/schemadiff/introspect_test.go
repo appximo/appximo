@@ -18,11 +18,11 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	sd "github.com/miguelangel/appitools/pkg/schemadiff"
+	sd "github.com/appximo/appximo/pkg/schemadiff"
 )
 
 // testPool is the shared Postgres handle for the introspector integration tests.
-// It comes from APPITOOLS_TEST_DSN / DATABASE_URL (the dev box's appitools-pg) when
+// It comes from APPXIMO_TEST_DSN / DATABASE_URL (the dev box's appitools-pg) when
 // set, otherwise from a throwaway testcontainer (so CI's `make test-all` works).
 // nil in -short mode, or if setup failed (setupErr then says why and requireDB
 // fails the test loudly rather than crashing the whole binary).
@@ -44,12 +44,12 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// setupDB connects testPool from a DSN (APPITOOLS_TEST_DSN / DATABASE_URL) or, when
+// setupDB connects testPool from a DSN (APPXIMO_TEST_DSN / DATABASE_URL) or, when
 // none is set, from a throwaway testcontainer. On failure it records setupErr and
 // returns nil — requireDB surfaces that to the individual tests.
 func setupDB() func() {
 	ctx := context.Background()
-	dsn := os.Getenv("APPITOOLS_TEST_DSN")
+	dsn := os.Getenv("APPXIMO_TEST_DSN")
 	if dsn == "" {
 		dsn = os.Getenv("DATABASE_URL")
 	}

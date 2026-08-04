@@ -1,4 +1,4 @@
-# ZAP scan rule overrides for the Appitools API scan (security.yml).
+# ZAP scan rule overrides for the Appximo API scan (security.yml).
 # Format (tab-separated): <ruleId>	<action: WARN|FAIL|IGNORE>	<optional comment>
 # No overrides yet — every rule keeps its default action (WARN). Add a line to
 # downgrade a known/accepted finding to IGNORE, or upgrade one to FAIL the build.

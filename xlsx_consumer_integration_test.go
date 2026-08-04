@@ -5,7 +5,7 @@
 // the job, streams + processes the XLSX, and writes {status, result} back through
 // the engine API with a scoped service JWT. Reuses the shared Postgres container
 // + control plane from TestMain in library_integration_test.go.
-package appitools
+package appximo
 
 import (
 	"context"
@@ -20,10 +20,10 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/xuri/excelize/v2"
 
-	"github.com/miguelangel/appitools/pkg/consumers"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/worker"
-	"github.com/miguelangel/appitools/tests/helpers"
+	"github.com/appximo/appximo/pkg/consumers"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/worker"
+	"github.com/appximo/appximo/tests/helpers"
 )
 
 func fileJobFixturePath() string {

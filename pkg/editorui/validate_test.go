@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 func newTestRouter(t *testing.T) *chi.Mux {
@@ -24,7 +24,7 @@ func newTestRouter(t *testing.T) *chi.Mux {
 func TestValidateRouteGoodSchema(t *testing.T) {
 	r := newTestRouter(t)
 	body := `{
-		"$schema": "https://appitools.dev/schema/v1",
+		"$schema": "https://appximo.com/schema/v1",
 		"version": "1",
 		"name": "todo-api",
 		"resources": {
@@ -51,7 +51,7 @@ func TestValidateRouteBadSchema(t *testing.T) {
 	// The JSON-AUDIT-V1 probe schema: an invented resource-level key, an invalid
 	// field type, and a semantic error (m2m relation without through).
 	body := `{
-		"$schema": "https://appitools.dev/schema/v1",
+		"$schema": "https://appximo.com/schema/v1",
 		"version": "1",
 		"name": "probe",
 		"resources": {

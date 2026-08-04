@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/miguelangel/appitools/pkg/aigen"
-	"github.com/miguelangel/appitools/pkg/aigen/eval"
+	"github.com/appximo/appximo/pkg/aigen"
+	"github.com/appximo/appximo/pkg/aigen/eval"
 	"github.com/spf13/cobra"
 )
 
@@ -38,10 +38,10 @@ instrument and is fully reproducible. With --live and ANTHROPIC_API_KEY it measu
 a real model.
 
 Examples:
-  appitools ai-eval                       # simulated demonstration (deterministic)
-  appitools ai-eval --out outcomes.json   # persist the paired outcomes
-  appitools ai-eval --json                # machine-readable analysis
-  appitools ai-eval --live --model claude-haiku-4-5   # measure a real model`,
+  appximo ai-eval                       # simulated demonstration (deterministic)
+  appximo ai-eval --out outcomes.json   # persist the paired outcomes
+  appximo ai-eval --json                # machine-readable analysis
+  appximo ai-eval --live --model claude-haiku-4-5   # measure a real model`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		live, _ := cmd.Flags().GetBool("live")

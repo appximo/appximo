@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"context"
@@ -19,12 +19,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/fleet"
-	"github.com/miguelangel/appitools/pkg/platformadmin"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/shutdown"
-	"github.com/miguelangel/appitools/pkg/userauth"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/fleet"
+	"github.com/appximo/appximo/pkg/platformadmin"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/shutdown"
+	"github.com/appximo/appximo/pkg/userauth"
 )
 
 // ServeFleet is the MT-STRUCT-S3 Option-B runtime: N DISTINCT apps compiled
@@ -114,7 +114,7 @@ func ServeFleet(mf *fleet.Manifest, version string, debugTracesHTML []byte) erro
 	if mf.OperatorKey != "" {
 		log.Println("fleet serve: unified fleet console enabled at /fleet (fleet-operator key required; process-level Host)")
 	} else {
-		log.Println("fleet serve: unified fleet console DISABLED (set operator_key in the manifest or APPITOOLS_FLEET_OPERATOR_KEY to enable /fleet)")
+		log.Println("fleet serve: unified fleet console DISABLED (set operator_key in the manifest or APPXIMO_FLEET_OPERATOR_KEY to enable /fleet)")
 	}
 
 	// Process-level state for the shared listener + the unmatched-Host handler.
@@ -133,7 +133,7 @@ func ServeFleet(mf *fleet.Manifest, version string, debugTracesHTML []byte) erro
 
 	// The app LIFECYCLE (FLEET-LIFECYCLE-S1): hot add/remove of whole apps —
 	// the registry's AddApp/RemoveApp (S4) finally exposed. Reached through the
-	// operator-gated console API (fleetpanel.go) and `appitools fleet
+	// operator-gated console API (fleetpanel.go) and `appximo fleet
 	// add/remove`; every operation keeps the MANIFEST in sync (persistent
 	// source) with the REGISTRY (live state) — no drift.
 	panel.lifecycle = &fleetLifecycle{
@@ -155,7 +155,7 @@ func ServeFleet(mf *fleet.Manifest, version string, debugTracesHTML []byte) erro
 	if err != nil {
 		return fmt.Errorf("fleet serve: cannot listen on %s: %w", mf.Listen, err)
 	}
-	fmt.Printf("Appitools fleet serving %d app(s) IN-PROCESS on %s — Ctrl+C to stop\n", len(apps), mf.Listen)
+	fmt.Printf("Appximo fleet serving %d app(s) IN-PROCESS on %s — Ctrl+C to stop\n", len(apps), mf.Listen)
 	cleanup := func() {
 		for _, app := range apps {
 			app.cleanup()
@@ -208,40 +208,40 @@ func unmatchedApp(ss *shutdown.State, version string, nApps int, panel *fleetPan
 // SLACK_WEBHOOK_URL — use `fleet run` if an app needs those isolated).
 var fleetMappedEnv = map[string]bool{
 	"DATABASE_URL": true, "JWT_SECRET": true, "ADMIN_KEY": true,
-	"OBS_DB_PATH": true, "APPITOOLS_ENV": true,
+	"OBS_DB_PATH": true, "APPXIMO_ENV": true,
 	// files (FILES-V1/V2): local root + the whole S3 backend, per app.
-	"APPITOOLS_FILES_DIR": true, "APPITOOLS_FILES_BACKEND": true,
-	"APPITOOLS_FILES_S3_BUCKET": true, "APPITOOLS_FILES_S3_ENDPOINT": true,
-	"APPITOOLS_FILES_S3_REGION": true, "APPITOOLS_FILES_S3_ACCESS_KEY": true,
-	"APPITOOLS_FILES_S3_SECRET_KEY": true, "APPITOOLS_FILES_S3_FORCE_PATH_STYLE": true,
-	"APPITOOLS_FILES_S3_PREFIX": true, "APPITOOLS_FILES_S3_SERVE": true,
-	"APPITOOLS_FILES_TOKEN_TTL": true, "APPITOOLS_FILES_ALLOWED_EXT": true,
+	"APPXIMO_FILES_DIR": true, "APPXIMO_FILES_BACKEND": true,
+	"APPXIMO_FILES_S3_BUCKET": true, "APPXIMO_FILES_S3_ENDPOINT": true,
+	"APPXIMO_FILES_S3_REGION": true, "APPXIMO_FILES_S3_ACCESS_KEY": true,
+	"APPXIMO_FILES_S3_SECRET_KEY": true, "APPXIMO_FILES_S3_FORCE_PATH_STYLE": true,
+	"APPXIMO_FILES_S3_PREFIX": true, "APPXIMO_FILES_S3_SERVE": true,
+	"APPXIMO_FILES_TOKEN_TTL": true, "APPXIMO_FILES_ALLOWED_EXT": true,
 	// auth-as-product knobs, per app.
-	"APPITOOLS_AUTH_SIGNUP_ROLE": true, "APPITOOLS_AUTH_MIN_PASSWORD": true,
-	"APPITOOLS_AUTH_REQUIRE_VERIFIED": true, "APPITOOLS_AUTH_BASE_URL": true,
+	"APPXIMO_AUTH_SIGNUP_ROLE": true, "APPXIMO_AUTH_MIN_PASSWORD": true,
+	"APPXIMO_AUTH_REQUIRE_VERIFIED": true, "APPXIMO_AUTH_BASE_URL": true,
 	// OAuth social login, per app (each app is a product with its own providers).
-	"APPITOOLS_OAUTH_CALLBACK_URL": true, "APPITOOLS_OAUTH_DEFAULT_ROLE": true,
-	"APPITOOLS_OAUTH_SUCCESS_REDIRECT": true,
+	"APPXIMO_OAUTH_CALLBACK_URL": true, "APPXIMO_OAUTH_DEFAULT_ROLE": true,
+	"APPXIMO_OAUTH_SUCCESS_REDIRECT": true,
 	// MFA key material + issuer label, per app.
-	"APPITOOLS_MFA_KEY": true, "APPITOOLS_MFA_ISSUER": true,
+	"APPXIMO_MFA_KEY": true, "APPXIMO_MFA_ISSUER": true,
 	// CORS, per app.
-	"APPITOOLS_CORS_ORIGINS": true, "APPITOOLS_CORS_METHODS": true,
-	"APPITOOLS_CORS_HEADERS": true, "APPITOOLS_CORS_EXPOSE_HEADERS": true,
-	"APPITOOLS_CORS_CREDENTIALS": true, "APPITOOLS_CORS_MAX_AGE": true,
+	"APPXIMO_CORS_ORIGINS": true, "APPXIMO_CORS_METHODS": true,
+	"APPXIMO_CORS_HEADERS": true, "APPXIMO_CORS_EXPOSE_HEADERS": true,
+	"APPXIMO_CORS_CREDENTIALS": true, "APPXIMO_CORS_MAX_AGE": true,
 	// GraphQL explorer opt-in (GRAPHQL-EXPLORER-S1), per app — one app in the
 	// fleet can expose GraphiQL/introspection for exploration while a sibling
-	// stays locked down, without either needing the broader APPITOOLS_ENV.
-	"APPITOOLS_GRAPHQL_PLAYGROUND": true,
+	// stays locked down, without either needing the broader APPXIMO_ENV.
+	"APPXIMO_GRAPHQL_PLAYGROUND": true,
 }
 
 // warnUnmappedEnv flags manifest env keys that CANNOT be applied per-app in
 // the in-process runtime (they would be process-wide): everything except
 // fleetMappedEnv. Loud, so an operator relying on a per-app RATE_LIMIT_RPS
 // knows it did not take effect. (The OAuth provider client ids/secrets are
-// read per provider at boot — mapped via their APPITOOLS_OAUTH_* prefix.)
+// read per provider at boot — mapped via their APPXIMO_OAUTH_* prefix.)
 func warnUnmappedEnv(app string, env map[string]string) {
 	for k := range env {
-		if fleetMappedEnv[k] || strings.HasPrefix(k, "APPITOOLS_OAUTH_") {
+		if fleetMappedEnv[k] || strings.HasPrefix(k, "APPXIMO_OAUTH_") {
 			continue
 		}
 		log.Printf("fleet serve: WARNING: app %q env %s is NOT applied in-process (process-wide setting; use `fleet run` for full per-app env isolation)", app, k)
@@ -286,10 +286,10 @@ func buildFleetApp(ctx context.Context, mf *fleet.Manifest, spec *fleet.AppSpec,
 		AdminKey:    env["ADMIN_KEY"],
 		Port:        listenPort, // shared data plane (informational: canary/log URLs)
 		ControlPort: cport,
-		Env:         coalesce(env["APPITOOLS_ENV"], os.Getenv("APPITOOLS_ENV")),
+		Env:         coalesce(env["APPXIMO_ENV"], os.Getenv("APPXIMO_ENV")),
 		// Per-app state that must NOT be shared between apps.
 		ObsDBPath: coalesce(env["OBS_DB_PATH"], filepath.Join(appDir, "obs.db")),
-		FilesDir:  coalesce(env["APPITOOLS_FILES_DIR"], filepath.Join(appDir, "files")),
+		FilesDir:  coalesce(env["APPXIMO_FILES_DIR"], filepath.Join(appDir, "files")),
 		// The app's own hostnames: a request to the BARE domain carries no
 		// tenant label — without this, "erp.example.com" recorded a phantom
 		// tenant "erp" in observability (FLEET-CONSOLE-S2 fix b).
@@ -298,34 +298,34 @@ func buildFleetApp(ctx context.Context, mf *fleet.Manifest, spec *fleet.AppSpec,
 		// setting that exists as a Config field is applied per app — files
 		// backend, auth knobs, OAuth, MFA, CORS. Keys outside fleetMappedEnv
 		// stay process-wide and are warned below.
-		FilesBackend:          env["APPITOOLS_FILES_BACKEND"],
-		FilesS3Bucket:         env["APPITOOLS_FILES_S3_BUCKET"],
-		FilesS3Endpoint:       env["APPITOOLS_FILES_S3_ENDPOINT"],
-		FilesS3Region:         env["APPITOOLS_FILES_S3_REGION"],
-		FilesS3AccessKey:      env["APPITOOLS_FILES_S3_ACCESS_KEY"],
-		FilesS3SecretKey:      env["APPITOOLS_FILES_S3_SECRET_KEY"],
-		FilesS3ForcePathStyle: envTruthy(env["APPITOOLS_FILES_S3_FORCE_PATH_STYLE"]),
-		FilesS3Prefix:         env["APPITOOLS_FILES_S3_PREFIX"],
-		FilesS3ServeMode:      env["APPITOOLS_FILES_S3_SERVE"],
-		FilesTokenTTLSeconds:  envInt(env["APPITOOLS_FILES_TOKEN_TTL"]),
-		FilesAllowedExt:       envList(env["APPITOOLS_FILES_ALLOWED_EXT"]),
-		AuthSignupRole:        env["APPITOOLS_AUTH_SIGNUP_ROLE"],
-		AuthMinPasswordLength: envInt(env["APPITOOLS_AUTH_MIN_PASSWORD"]),
-		AuthRequireVerified:   envTruthy(env["APPITOOLS_AUTH_REQUIRE_VERIFIED"]),
-		AuthBaseURL:           env["APPITOOLS_AUTH_BASE_URL"],
-		OAuthCallbackURL:      env["APPITOOLS_OAUTH_CALLBACK_URL"],
-		OAuthDefaultRole:      env["APPITOOLS_OAUTH_DEFAULT_ROLE"],
-		OAuthSuccessRedirect:  env["APPITOOLS_OAUTH_SUCCESS_REDIRECT"],
+		FilesBackend:          env["APPXIMO_FILES_BACKEND"],
+		FilesS3Bucket:         env["APPXIMO_FILES_S3_BUCKET"],
+		FilesS3Endpoint:       env["APPXIMO_FILES_S3_ENDPOINT"],
+		FilesS3Region:         env["APPXIMO_FILES_S3_REGION"],
+		FilesS3AccessKey:      env["APPXIMO_FILES_S3_ACCESS_KEY"],
+		FilesS3SecretKey:      env["APPXIMO_FILES_S3_SECRET_KEY"],
+		FilesS3ForcePathStyle: envTruthy(env["APPXIMO_FILES_S3_FORCE_PATH_STYLE"]),
+		FilesS3Prefix:         env["APPXIMO_FILES_S3_PREFIX"],
+		FilesS3ServeMode:      env["APPXIMO_FILES_S3_SERVE"],
+		FilesTokenTTLSeconds:  envInt(env["APPXIMO_FILES_TOKEN_TTL"]),
+		FilesAllowedExt:       envList(env["APPXIMO_FILES_ALLOWED_EXT"]),
+		AuthSignupRole:        env["APPXIMO_AUTH_SIGNUP_ROLE"],
+		AuthMinPasswordLength: envInt(env["APPXIMO_AUTH_MIN_PASSWORD"]),
+		AuthRequireVerified:   envTruthy(env["APPXIMO_AUTH_REQUIRE_VERIFIED"]),
+		AuthBaseURL:           env["APPXIMO_AUTH_BASE_URL"],
+		OAuthCallbackURL:      env["APPXIMO_OAUTH_CALLBACK_URL"],
+		OAuthDefaultRole:      env["APPXIMO_OAUTH_DEFAULT_ROLE"],
+		OAuthSuccessRedirect:  env["APPXIMO_OAUTH_SUCCESS_REDIRECT"],
 		OAuthProviders:        oauthProvidersFromEnv(env),
-		MFAKey:                env["APPITOOLS_MFA_KEY"],
-		MFAIssuer:             env["APPITOOLS_MFA_ISSUER"],
-		CORSAllowedOrigins:    envList(env["APPITOOLS_CORS_ORIGINS"]),
-		CORSAllowedMethods:    envList(env["APPITOOLS_CORS_METHODS"]),
-		CORSAllowedHeaders:    envList(env["APPITOOLS_CORS_HEADERS"]),
-		CORSExposedHeaders:    envList(env["APPITOOLS_CORS_EXPOSE_HEADERS"]),
-		CORSAllowCredentials:  envTruthy(env["APPITOOLS_CORS_CREDENTIALS"]),
-		CORSMaxAge:            envInt(env["APPITOOLS_CORS_MAX_AGE"]),
-		GraphQLPlayground:     envTruthy(coalesce(env["APPITOOLS_GRAPHQL_PLAYGROUND"], os.Getenv("APPITOOLS_GRAPHQL_PLAYGROUND"))),
+		MFAKey:                env["APPXIMO_MFA_KEY"],
+		MFAIssuer:             env["APPXIMO_MFA_ISSUER"],
+		CORSAllowedOrigins:    envList(env["APPXIMO_CORS_ORIGINS"]),
+		CORSAllowedMethods:    envList(env["APPXIMO_CORS_METHODS"]),
+		CORSAllowedHeaders:    envList(env["APPXIMO_CORS_HEADERS"]),
+		CORSExposedHeaders:    envList(env["APPXIMO_CORS_EXPOSE_HEADERS"]),
+		CORSAllowCredentials:  envTruthy(env["APPXIMO_CORS_CREDENTIALS"]),
+		CORSMaxAge:            envInt(env["APPXIMO_CORS_MAX_AGE"]),
+		GraphQLPlayground:     envTruthy(coalesce(env["APPXIMO_GRAPHQL_PLAYGROUND"], os.Getenv("APPXIMO_GRAPHQL_PLAYGROUND"))),
 		Version:               version,
 		DebugTracesHTML:       debugTracesHTML,
 	}
@@ -383,7 +383,7 @@ func oauthProvidersFromEnv(env map[string]string) map[string]userauth.OAuthProvi
 	out := map[string]userauth.OAuthProviderConfig{}
 	for _, p := range []string{"google", "github", "microsoft"} {
 		up := strings.ToUpper(p)
-		id, secret := env["APPITOOLS_OAUTH_"+up+"_CLIENT_ID"], env["APPITOOLS_OAUTH_"+up+"_CLIENT_SECRET"]
+		id, secret := env["APPXIMO_OAUTH_"+up+"_CLIENT_ID"], env["APPXIMO_OAUTH_"+up+"_CLIENT_SECRET"]
 		if id != "" || secret != "" {
 			out[p] = userauth.OAuthProviderConfig{ClientID: id, ClientSecret: secret}
 		}
@@ -395,7 +395,7 @@ func oauthProvidersFromEnv(env map[string]string) map[string]userauth.OAuthProvi
 }
 
 // ensureOperatorAdmin provisions the fleet-wide operator identity in one app's
-// database (platform super-admin, appitools_system schema) if absent.
+// database (platform super-admin, appximo_system schema) if absent.
 func ensureOperatorAdmin(ctx context.Context, app *App, email, password string) error {
 	store := platformadmin.NewStore(app.pool)
 	if _, err := store.GetAdminByEmail(ctx, email); err == nil {
@@ -637,7 +637,7 @@ func (l *fleetLifecycle) AddApp(spec *fleet.AppSpec, rawSchema []byte, db *dbPro
 
 // EditApp hot-EDITS an existing app's env — the FLEET-EDIT-S1 counterpart to
 // AddApp/RemoveApp: an operator changes/adds env keys (e.g. the
-// APPITOOLS_GRAPHQL_PLAYGROUND opt-in) on an app already in the fleet, without
+// APPXIMO_GRAPHQL_PLAYGROUND opt-in) on an app already in the fleet, without
 // touching its name/domains/schema and without a process restart. Existing
 // SECRET VALUES are never read back to the caller (setEnv/unsetEnv are
 // write-only) — the merge happens server-side against the resolved env this

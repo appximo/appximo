@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // fkSchema: a parent and three child FK columns, one per on_delete action.

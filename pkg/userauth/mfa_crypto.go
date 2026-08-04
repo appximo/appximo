@@ -13,7 +13,7 @@ import (
 // secretCipher encrypts/decrypts a TOTP secret AT REST. A TOTP secret MUST be
 // recoverable (the server re-derives the current code on every verify), so it is
 // ENCRYPTED, not hashed. AES-256-GCM gives confidentiality + integrity; the key is
-// SHA-256(key material) where the material is APPITOOLS_MFA_KEY (or the JWT secret
+// SHA-256(key material) where the material is APPXIMO_MFA_KEY (or the JWT secret
 // as a fallback). The DB alone is therefore useless to an attacker without the key.
 type secretCipher struct {
 	gcm cipher.AEAD

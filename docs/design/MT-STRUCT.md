@@ -10,7 +10,7 @@
 
 ## 0. The question
 
-Today Appitools is **multi-tenant of DATA**: one boot schema compiles one API
+Today Appximo is **multi-tenant of DATA**: one boot schema compiles one API
 structure, and N tenants share it with isolated data (the Shopify shape —
 [docs/MENTAL_MODEL.md](../MENTAL_MODEL.md)). This document asks whether — and how
 — one server can serve **N genuinely DIFFERENT APIs** (the optician's CRM *and*
@@ -172,7 +172,7 @@ the lookup.)
 ### Option A — multi-process, orchestrated (N engines + a supervisor)
 
 N engine processes (one boot schema each, one port each) behind a front router
-(Host → port), plus an **orchestrator** (`appitools fleet`, a new binary mode)
+(Host → port), plus an **orchestrator** (`appximo fleet`, a new binary mode)
 that provisions/starts/stops/restarts apps, assigns ports, and federates the
 surface.
 
@@ -181,7 +181,7 @@ surface.
 - **Almost no engine change.** Each app is today's engine, unmodified. The only
   blockers are the two hardcoded ports (`:9090`, `:6060`) — they must become
   per-app (`--control-port`, and pprof off or per-app). `OBS_DB_PATH`,
-  `APPITOOLS_FILES_DIR` already parameterize per process.
+  `APPXIMO_FILES_DIR` already parameterize per process.
 - **The hot path is untouched by construction** — every app is the same compiled
   engine that the benchmark measured. **No `bench-protocol` needed for the engine
   core.** This is Option A's single biggest advantage.
@@ -374,12 +374,12 @@ touches the hot path** — the project's standing rule.
 
 - **Stage 1 — Option A MVP + isolation escape hatch.** Parameterize the
   control-plane port (`--control-port`, default `:9090`) and make pprof per-app/
-  off; add `appitools fleet` (spawn/stop/restart/health + a port registry) and a
+  off; add `appximo fleet` (spawn/stop/restart/health + a port registry) and a
   front proxy (Host → port). Federated admin is thin (list apps, proxy through).
   *Hot path: untouched (each app is today's engine). No engine `bench-protocol`
   needed.* *Verification: 3 apps up behind the proxy, each serving its own
   schema, one crashing/restarting without touching the others (live).*
-  ✅ **(MT-STRUCT-S1** — `pkg/fleet` + `appitools fleet run|status`, docs/FLEET.md.
+  ✅ **(MT-STRUCT-S1** — `pkg/fleet` + `appximo fleet run|status`, docs/FLEET.md.
   Verified live with 3 apps: per-domain APIs, cross-app JWT rejected (401),
   crash isolation + ~1 s respawn, per-app self-restart with same PID and the
   supervisor untouched, per-app DB auto-bootstrap. Engine diff was ports-only.**)**
@@ -410,7 +410,7 @@ touches the hot path** — the project's standing rule.
   (the auth reorder). *Verification: two different schemas served from one process
   on two Hosts, RBAC/JWT correctly isolated per app (a token for app X rejected on
   app Y), bench green.*
-  ✅ **(MT-STRUCT-S3** — `appitools fleet serve` (`ServeFleet`, multiapp.go): the
+  ✅ **(MT-STRUCT-S3** — `appximo fleet serve` (`ServeFleet`, multiapp.go): the
   SAME fleet.json served IN-PROCESS. Mechanism refinement over this plan's
   sketch: instead of a per-request "app from context" indirection, S3 runs **N
   full `App` instances in one process** — each chain already CLOSES OVER its own
@@ -462,7 +462,7 @@ touches the hot path** — the project's standing rule.
   `no_change` (CI [−26,−8.5] µs, 0 errors) — swapping X does not disturb Y. Suite
   0 FAIL + acceptance 39/0. The registry also gained `AddApp`/`RemoveApp` (hot
   add/remove of an app's domains); wiring those to a live fleet-management command
-  is an S5 increment. **→ Wired in FLEET-LIFECYCLE-S1:** `appitools fleet
+  is an S5 increment. **→ Wired in FLEET-LIFECYCLE-S1:** `appximo fleet
   add/remove/list` + the console's Add/Remove actions expose them — validate
   (ValidateReport + the manifest rules) → hot add/remove, manifest persisted
   first (no live↔manifest drift), remove never touches the app's database.
@@ -483,7 +483,7 @@ touches the hot path** — the project's standing rule.
   keyed by tenant, so the console just namespaces per-app snapshots (verified
   live: the same tenant id `acme` in two apps shows independent counters, 30 vs
   8 requests). **Auth taxonomy decided:** a FLEET-OPERATOR key (manifest
-  `operator_key` / APPITOOLS_FLEET_OPERATOR_KEY) — a level ABOVE the apps,
+  `operator_key` / APPXIMO_FLEET_OPERATOR_KEY) — a level ABOVE the apps,
   validated distinct from every app's ADMIN_KEY/JWT_SECRET at manifest load;
   wrong/missing key ⇒ uniform 404 (unfingerprintable); empty ⇒ console disabled.
   The fleet key opens NO app API (verified: 401 as Bearer, 401 as X-Admin-Key)
@@ -520,7 +520,7 @@ measure). To reproduce:
 
 - **Number 1 (RSS/process):** boot several engines with different
   `examples/*/schema.json` on distinct `--port`s (set `OBS_DB_PATH` per process,
-  `APPITOOLS_ENV=production` to avoid the `:6060`/`:9090` collisions), then read
+  `APPXIMO_ENV=production` to avoid the `:6060`/`:9090` collisions), then read
   `/proc/<pid>/smaps_rollup` (`Pss`, `Private_Dirty`, `Shared_Clean`).
 - **Number 2 (heap/app):** a small program that calls `codegen.BuildRouter` +
   `gqlhandler.BuildHandler` + `codegen.GenerateOpenAPIJSON` + the RBAC

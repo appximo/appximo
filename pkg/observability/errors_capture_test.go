@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/observability"
+	"github.com/appximo/appximo/pkg/observability"
 )
 
 func TestCaptureError_UsefulFrames(t *testing.T) {

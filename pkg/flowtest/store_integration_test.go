@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/db"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/db"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"

@@ -16,11 +16,11 @@ import (
 // defaultObsDBPath is where the observability store lives when OBS_DB_PATH (or the
 // OpenStore arg) is empty. It is a PERSISTENT, standard Linux application-data path
 // (not /tmp) so the trace/snapshot history survives a process or container restart
-// out of the box — the same root the file store uses (/var/lib/appitools). Its
+// out of the box — the same root the file store uses (/var/lib/appximo). Its
 // parent directory is created on open; if it cannot be created or written OpenStore
 // falls back to an ephemeral temp file and logs a WARNING (observability is
 // best-effort — a bad path never crashes the engine).
-const defaultObsDBPath = "/var/lib/appitools/obs.db"
+const defaultObsDBPath = "/var/lib/appximo/obs.db"
 
 // retentionDays bounds how long snapshots are kept; Prune drops anything older.
 const retentionDays = 7
@@ -163,7 +163,7 @@ func resolveObsDBPath(requested string) string {
 func planObsDBPath(requested string) (path string, warning string) {
 	path = resolveObsDBPath(requested)
 	if err := ensureWritableDir(filepath.Dir(path)); err != nil {
-		fallback := filepath.Join(os.TempDir(), "appitools-obs.db")
+		fallback := filepath.Join(os.TempDir(), "appximo-obs.db")
 		_ = ensureWritableDir(filepath.Dir(fallback)) // best effort; the temp dir normally exists
 		return fallback, fmt.Sprintf(
 			"observability store: cannot use %q (%v); falling back to ephemeral %q — "+

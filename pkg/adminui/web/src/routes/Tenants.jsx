@@ -9,7 +9,7 @@ import { setSelectedTenant, bumpTenants } from "../lib/tenantContext"
 import { registerCommands } from "../lib/commands"
 
 const DEFAULT_SCHEMA = JSON.stringify({
-  $schema: "https://appitools.dev/schema/v1",
+  $schema: "https://appximo.com/schema/v1",
   version: "1",
   name: "todo-api",
   resources: { tasks: { fields: { title: { type: "string", required: true } } } },
@@ -77,7 +77,7 @@ export function Tenants() {
       cell: (c) => <span class="num">{c.getValue() ?? 0}</span>,
     },
     {
-      // pg_stat estimate — the same inventory `appitools tenant list` prints.
+      // pg_stat estimate — the same inventory `appximo tenant list` prints.
       accessorKey: "data_rows", header: "Rows(~)",
       size: 85,
       meta: { align: "right" },

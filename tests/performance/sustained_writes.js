@@ -9,7 +9,7 @@
 // Tunables (env):
 //   TARGET_URL   data-plane base URL        (default http://localhost:8080)
 //   TENANT_ID    tenant subdomain           (default acme)  -> Host: <id>.localhost
-//   BENCH_TOKEN  HS256 JWT for that tenant  (REQUIRED; mint with `appitools token`)
+//   BENCH_TOKEN  HS256 JWT for that tenant  (REQUIRED; mint with `appximo token`)
 //   RATE         requests/sec               (default 20 — real INSERTs, keep low on small hosts)
 //   DURATION     hold time                  (default 15s)
 //
@@ -52,7 +52,7 @@ export const options = {
 
 export function setup() {
   if (!TOKEN) {
-    throw new Error('BENCH_TOKEN is required — mint one with: appitools token --tenant <id> --secret <JWT_SECRET> --role super_admin');
+    throw new Error('BENCH_TOKEN is required — mint one with: appximo token --tenant <id> --secret <JWT_SECRET> --role super_admin');
   }
   // Per-run seed: makes `code` (UNIQUE column) collision-free across protocol
   // runs, where __VU/__ITER pairs repeat.

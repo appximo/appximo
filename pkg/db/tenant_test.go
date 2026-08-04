@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/db"
+	"github.com/appximo/appximo/pkg/db"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"

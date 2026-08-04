@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	sd "github.com/miguelangel/appitools/pkg/schemadiff"
+	sd "github.com/appximo/appximo/pkg/schemadiff"
 )
 
 var (

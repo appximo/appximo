@@ -221,8 +221,8 @@ endpoint:
 // POST /api/orders-refund — only a role granted this SEGMENT reaches the handler
 // (ADR-021), and the transition itself stays race-safe because the guard is in
 // the UPDATE's WHERE, exactly as the state machine does it.
-app.Register(appitools.Route{Method: "POST", Path: "/api/orders-refund",
-    Handler: func(ctx appitools.Ctx) error {
+app.Register(appximo.Route{Method: "POST", Path: "/api/orders-refund",
+    Handler: func(ctx appximo.Ctx) error {
         tag, err := ctx.UnsafeTx().Exec(ctx.Context(),
             `UPDATE ordenes SET estado = 'reembolsada'
               WHERE id = $1 AND estado = 'pagada'`, id)   // ← compare-and-set

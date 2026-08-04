@@ -17,9 +17,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/miguelangel/appitools"
-	"github.com/miguelangel/appitools/pkg/fleet"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo"
+	"github.com/appximo/appximo/pkg/fleet"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // fleetCmd is the MT-STRUCT-S1 orchestrator: one server, N DISTINCT apps
@@ -131,7 +131,7 @@ var fleetServeCmd = &cobra.Command{
 		if listen, _ := cmd.Flags().GetString("listen"); listen != "" {
 			mf.Listen = listen
 		}
-		if err := appitools.ServeFleet(mf, version, debugTracesHTML); err != nil {
+		if err := appximo.ServeFleet(mf, version, debugTracesHTML); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -145,7 +145,7 @@ var fleetStatusCmd = &cobra.Command{
 		addr, _ := cmd.Flags().GetString("addr")
 		resp, err := http.Get("http://" + addr + "/fleet/status")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "fleet: cannot reach %s — is `appitools fleet run` running? (%v)\n", addr, err)
+			fmt.Fprintf(os.Stderr, "fleet: cannot reach %s — is `appximo fleet run` running? (%v)\n", addr, err)
 			os.Exit(1)
 		}
 		defer resp.Body.Close() //nolint:errcheck
@@ -238,7 +238,7 @@ func fleetAPI(method, url, key string, body any) (int, map[string]any, error) {
 
 func requireOperatorKey(mf *fleet.Manifest) string {
 	if mf.OperatorKey == "" {
-		fmt.Fprintln(os.Stderr, "fleet: a LIVE fleet is running but no operator key is configured — set operator_key in the manifest (or APPITOOLS_FLEET_OPERATOR_KEY) to manage it hot")
+		fmt.Fprintln(os.Stderr, "fleet: a LIVE fleet is running but no operator key is configured — set operator_key in the manifest (or APPXIMO_FLEET_OPERATOR_KEY) to manage it hot")
 		os.Exit(1)
 	}
 	return mf.OperatorKey

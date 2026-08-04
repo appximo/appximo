@@ -1,4 +1,4 @@
-# `appitools fleet` — one server, N distinct apps
+# `appximo fleet` — one server, N distinct apps
 
 The fleet runs **N different APIs (different schemas) on one server**, from one
 `fleet.json`, in either of two runtimes:
@@ -47,7 +47,7 @@ Then open the **console** (`http://localhost:8080/fleet?key=…` — the operato
 is in `fleet-secrets/fleet.env`) and manage every app from there: inventory,
 one-click Studio//admin//docs per app, add/remove apps. Secrets never enter git:
 the manifest references per-app `env_file`s under the gitignored `fleet-secrets/`.
-Customize the scaffold: `appitools fleet init --app crm --app shop --admin-email you@x.com`.
+Customize the scaffold: `appximo fleet init --app crm --app shop --admin-email you@x.com`.
 
 ## The manifest by hand
 
@@ -57,7 +57,7 @@ Customize the scaffold: `appitools fleet init --app crm --app shop --admin-email
 {
   "listen": ":8080",
   "status_addr": "127.0.0.1:9601",
-  "data_dir": "/var/lib/appitools/fleet",
+  "data_dir": "/var/lib/appximo/fleet",
   "apps": [
     {
       "name": "crm",
@@ -80,8 +80,8 @@ Customize the scaffold: `appitools fleet init --app crm --app shop --admin-email
 ```
 
 ```bash
-appitools fleet run --config fleet.json     # spawns one engine per app + proxy
-appitools fleet status                      # APP PID HEALTH PORT RESTARTS UPTIME DOMAINS
+appximo fleet run --config fleet.json     # spawns one engine per app + proxy
+appximo fleet status                      # APP PID HEALTH PORT RESTARTS UPTIME DOMAINS
 ```
 
 The proxy serves on `listen`; each app's data/control ports are auto-allocated
@@ -94,7 +94,7 @@ internal ports (pin them with `port` / `control_port` if you prefer). Relative
 |---|---|
 | `listen` | proxy's public address (default `:8080`) |
 | `status_addr` | fleet status/control API (default `127.0.0.1:9601`) — **internal**, like the engine control plane; never expose it |
-| `data_dir` | per-app state root (default `/var/lib/appitools/fleet`): `<data_dir>/<app>/obs.db`, `…/files`, `…/backups`, plus `logs/<app>.log` — assigned only when the app's env doesn't set `OBS_DB_PATH` / `APPITOOLS_FILES_DIR` / `BACKUP_DIR` (apps must not share these) |
+| `data_dir` | per-app state root (default `/var/lib/appximo/fleet`): `<data_dir>/<app>/obs.db`, `…/files`, `…/backups`, plus `logs/<app>.log` — assigned only when the app's env doesn't set `OBS_DB_PATH` / `APPXIMO_FILES_DIR` / `BACKUP_DIR` (apps must not share these) |
 | `apps[].name` | `^[a-z][a-z0-9_-]*$`, unique |
 | `apps[].schema` | the app's schema JSON (the engine's `--schema`) |
 | `apps[].domains` | hostnames routed to this app; a request Host matching a domain **or any subdomain of it** routes here (longest domain wins) — subdomain labels stay free for tenant resolution |
@@ -163,13 +163,13 @@ POST /fleet/apps/{name}/start     → start a stopped app
 POST /fleet/apps/{name}/restart   → deliberate stop+start of ONE app
 ```
 
-`appitools fleet status` renders the table. Default bind is loopback; treat it
+`appximo fleet status` renders the table. Default bind is loopback; treat it
 like `:9090`.
 
 ## `fleet serve` — the in-process runtime (MT-STRUCT-S3)
 
 ```bash
-appitools fleet serve --config fleet.json   # N apps, ONE process, one listener
+appximo fleet serve --config fleet.json   # N apps, ONE process, one listener
 ```
 
 Each app is a full engine instance inside the process: its own schema-compiled
@@ -208,10 +208,10 @@ app's validation can never short-circuit another's.
   graceful re-exec of UI-F4-S2 — there are no other apps to protect.)
 - **Per-app env covers the full engine Config surface** (FLEET-CONSOLE-S2 closed
   the old gap): `DATABASE_URL`, `JWT_SECRET`, `ADMIN_KEY`, `OBS_DB_PATH`,
-  `APPITOOLS_ENV`, the whole file store (`APPITOOLS_FILES_*` — local dir or a
-  per-app S3 bucket), the auth knobs (`APPITOOLS_AUTH_*`), **OAuth per app**
-  (`APPITOOLS_OAUTH_*` including per-provider client ids/secrets), **MFA key/
-  issuer** and **CORS** (`APPITOOLS_CORS_*`) — each app is a product with its
+  `APPXIMO_ENV`, the whole file store (`APPXIMO_FILES_*` — local dir or a
+  per-app S3 bucket), the auth knobs (`APPXIMO_AUTH_*`), **OAuth per app**
+  (`APPXIMO_OAUTH_*` including per-provider client ids/secrets), **MFA key/
+  issuer** and **CORS** (`APPXIMO_CORS_*`) — each app is a product with its
   own identity providers, storage and browser origins. What remains
   process-wide (and is **loudly warned** at boot if set per app): the process
   infra — `RATE_LIMIT_*`, `DB_MAX_CONNS`, `GOMAXPROCS`, `REDIS_URL`,
@@ -241,8 +241,8 @@ hot-swap), and the fleet console is the level above them. Sober tokens, light
 and dark.
 
 **Unified operator identity (FLEET-CONSOLE-S2):** set `operator_admin_email` in
-the manifest (or `APPITOOLS_FLEET_ADMIN_EMAIL`) plus the
-`APPITOOLS_FLEET_ADMIN_PASSWORD` env var — the password is deliberately NOT a
+the manifest (or `APPXIMO_FLEET_ADMIN_EMAIL`) plus the
+`APPXIMO_FLEET_ADMIN_PASSWORD` env var — the password is deliberately NOT a
 manifest key, so the manifest stays committable — and the runtime ensures a
 platform super-admin with those credentials exists in **every** app's database
 (idempotent at boot and on hot-add; an existing account is never overwritten).
@@ -253,7 +253,7 @@ of it. Declaring the email without the password env fails the manifest load
 loudly (never a silently-disabled feature).
 
 **Fleet-operator auth (the taxonomy):** the console is gated by
-`operator_key` in the manifest (or `APPITOOLS_FLEET_OPERATOR_KEY`) — the
+`operator_key` in the manifest (or `APPXIMO_FLEET_OPERATOR_KEY`) — the
 credential of the **server owner**, one level above the apps. It is validated
 at manifest load to be distinct from every app's `ADMIN_KEY`/`JWT_SECRET`;
 a missing or wrong key gets a **uniform 404** (the console is not
@@ -324,7 +324,7 @@ maintenance database like `postgres`) lives in the gitignored env-file.
 {
   "operator_admin_email": "operator@fleet.local",
   "db_instances": [
-    { "name": "local", "label": "Local Postgres", "admin_dsn_env": "APPITOOLS_FLEET_DB_LOCAL_ADMIN" }
+    { "name": "local", "label": "Local Postgres", "admin_dsn_env": "APPXIMO_FLEET_DB_LOCAL_ADMIN" }
   ],
   "apps": [ … ]
 }
@@ -332,7 +332,7 @@ maintenance database like `postgres`) lives in the gitignored env-file.
 
 ```bash
 # in fleet-secrets/fleet.env (gitignored) — the privileged DSN, → the postgres db:
-APPITOOLS_FLEET_DB_LOCAL_ADMIN=postgres://appuser:secret@localhost:5432/postgres?sslmode=disable
+APPXIMO_FLEET_DB_LOCAL_ADMIN=postgres://appuser:secret@localhost:5432/postgres?sslmode=disable
 ```
 
 - **`make fleet-init` scaffolds this automatically** when it knows a base
@@ -364,11 +364,11 @@ touched (verified live: an app under continuous load saw 200/200 while a third
 app was added).
 
 ```bash
-appitools fleet list   --config fleet.json     # LIVE inventory (or the manifest, if not running)
-appitools fleet add    --config fleet.json --name optica --schema optica.json \
+appximo fleet list   --config fleet.json     # LIVE inventory (or the manifest, if not running)
+appximo fleet add    --config fleet.json --name optica --schema optica.json \
     --domain optica.example.com \
     --env DATABASE_URL=postgres://… --env JWT_SECRET=… --env ADMIN_KEY=…
-appitools fleet remove --config fleet.json --name optica --yes
+appximo fleet remove --config fleet.json --name optica --yes
 ```
 
 - **Validation before anything goes live** — the same rules a fleet boot
@@ -411,7 +411,7 @@ appitools fleet remove --config fleet.json --name optica --yes
 
 Add app/Remove app cover creating and destroying membership; **Edit env**
 covers the third case — changing an app **already in the fleet** (e.g. adding
-`APPITOOLS_GRAPHQL_PLAYGROUND=on` to one app without touching its siblings),
+`APPXIMO_GRAPHQL_PLAYGROUND=on` to one app without touching its siblings),
 hot, no restart, console-only (no CLI subcommand yet — see the note below).
 
 Each app card in `/fleet` has an **"Edit env"** button: a panel to `set` new/
@@ -451,7 +451,7 @@ rows start blank, and only a key you type is changed.
   manifest entry) — it would write the generated secrets file into that
   external directory. Fixed: the file always lands under
   `<data_dir>/<app>/`, regardless of where the schema lives.
-- **No CLI yet.** `appitools fleet add/remove/list` exist; there is no
+- **No CLI yet.** `appximo fleet add/remove/list` exist; there is no
   `fleet edit` subcommand — env edits are console-only today. A CLI
   counterpart would call the same `PATCH` endpoint and is a natural, small
   follow-up if you want it scripted.

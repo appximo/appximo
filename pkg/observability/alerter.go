@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/extensions"
+	"github.com/appximo/appximo/pkg/extensions"
 )
 
 // Alert levels.

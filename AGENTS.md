@@ -1,15 +1,15 @@
-# AGENTS.md — Appitools
+# AGENTS.md — Appximo
 
 Instructions for AI coding agents. Part 1 is for working **on this repo**
-(contributing to the engine). The [Integration guide](#integration-guide--helping-a-user-adopt-appitools)
-is for the other job: helping a user adopt Appitools in **their** project.
+(contributing to the engine). The [Integration guide](#integration-guide--helping-a-user-adopt-appximo)
+is for the other job: helping a user adopt Appximo in **their** project.
 Every syntax claim in this file is audited against the engine source
 (`pkg/schema`, `pkg/query`, `pkg/graphql`) — do not invent API surface
 beyond what is listed here.
 
 ## What this is
 
-Appitools compiles a JSON schema into a multi-tenant REST + GraphQL +
+Appximo compiles a JSON schema into a multi-tenant REST + GraphQL +
 OpenAPI server **at boot** — Go 1.25, no CGO, one static binary,
 PostgreSQL with schema-per-tenant isolation. There are no handlers,
 models, or migration files to write: routes, SQL, validation, RBAC and
@@ -35,23 +35,23 @@ go test -run 'TestBuildQuery' -race ./pkg/query/   # one test
 Boot the engine locally (needs a reachable Postgres):
 
 ```bash
-go build -o appitools ./cmd/appitools
+go build -o appximo ./cmd/appximo
 DATABASE_URL='postgres://user:pass@localhost:5432/db' \
 JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
-  ./appitools serve --schema examples/quickstart/schema.json --port 8080
+  ./appximo serve --schema examples/quickstart/schema.json --port 8080
 ```
 
 - All three env vars are hard-required — `serve` exits without them.
-- Do NOT use `make run` / `go run ./cmd/appitools/main.go`: passing the
+- Do NOT use `make run` / `go run ./cmd/appximo/main.go`: passing the
   file compiles *only* `main.go`, producing a binary with **zero
   subcommands** (no `serve`). Use the package path:
-  `go run ./cmd/appitools serve …`.
+  `go run ./cmd/appximo serve …`.
 - Other subcommands: `validate <schema>` (SEMANTIC, the Go authority — load +
   cross-reference checks; `--json` emits the UNIFIED LLM-friendly report —
   structural + semantic — with path/rule/message/expected/got/fix/source per error,
   the AI correction loop, see docs/AI_SCHEMA_GENERATION.md), `validate-schema <schema>`
   (STRUCTURAL — validates against the embedded formal JSON Schema meta-schema,
-  `pkg/schema/appitools.schema.json`; engine-free, the deterministic net for
+  `pkg/schema/appximo.schema.json`; engine-free, the deterministic net for
   AI-generated schemas), `meta-schema` (prints that meta-schema for IDE `$schema` /
   tooling), `token` (mint a dev JWT),
   `openapi`, `graphql` (SDL), `generate`, `migrate`, `backup`, `init`,
@@ -164,7 +164,7 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   `specs` (THIRD-PARTY-READY-S1: prints the WHOLE trilogy —
   spec + backend-spec + frontend-spec — in one stream with banners, for the
   one-paste agent priming; pure concatenation of the three single sources, so
-  it can never diverge. The root `appitools --help` and each spec's header now
+  it can never diverge. The root `appximo --help` and each spec's header now
   name the trilogy — the discoverability fix: nobody has to be told the three
   commands exist),
   `blueprints list` (lists schema files in a local `blueprints/` dir),
@@ -194,7 +194,7 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   links into that app's own Studio//admin//docs on its domain) + observability
   by (app, tenant) (each app's per-tenant snapshots namespaced under the app —
   zero obs re-keying, zero hot-path change); gated by the FLEET-OPERATOR key
-  (manifest operator_key / APPITOOLS_FLEET_OPERATOR_KEY, validated distinct
+  (manifest operator_key / APPXIMO_FLEET_OPERATOR_KEY, validated distinct
   from every app credential; wrong/missing key = uniform 404; empty = console
   disabled; the fleet key opens NO app API and vice versa). The editor reads
   `activation: hot_swap|restart` from /admin/served-resources and words the
@@ -211,13 +211,13 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   It is **not part of the engine** — never ship engine features there.
   `make devhub-run` is only for developing the devhub itself (stop the
   service first or :3099 is taken and the stale binary keeps serving).
-- `pkg/editorui/` is the **visual schema editor** (Appitools Studio, UI-F0-S1):
+- `pkg/editorui/` is the **visual schema editor** (Appximo Studio, UI-F0-S1):
   a static Svelte 5 SPA (plain Vite, `pkg/editorui/web/`) `go:embed`-served at
   **`/editor`** — a graphical ERD over the schema, no AI, zero Node in prod. Build
   it with `make editor-ui` BEFORE `go build` (same committed-`index.html` /
   gitignored-assets pattern as the admin UI); a bare build serves an empty shell
   (logged). It edits/exports the same schema JSON the engine consumes (round-trip
-  faithful, `appitools validate`-clean). It is the schema-authoring FACE of the
+  faithful, `appximo validate`-clean). It is the schema-authoring FACE of the
   product — engine features still live in the schema/engine, never in the editor.
   **Deploy from the editor (UI-F1-S1):** a "Deploy" button signs in as a platform
   super-admin (token held in MEMORY only, never persisted) and provisions a new
@@ -292,9 +292,9 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   `make test-all`) + this gate. `make test` alone is the fast inner loop, not
   the verdict.
 - **Verification sessions clean up their tenants.** A tenant created to probe
-  a feature is deleted when the session ends: `appitools tenant delete <id>
+  a feature is deleted when the session ends: `appximo tenant delete <id>
   --yes` (DROP SCHEMA CASCADE + every control-plane row — history, flows,
-  policies, outbox — no orphans; `appitools tenant list` is the inventory).
+  policies, outbox — no orphans; `appximo tenant list` is the inventory).
   Leftover test tenants pollute the editor's deploy modal and read as real
   apps. Do NOT delete `nimbus` or `acme` on the dev box — they are the
   bench/cert targets (`api-cert.sh` and `tests/performance/erp_*.js` default
@@ -411,16 +411,16 @@ One line per layer — navigate the code for the rest:
   [Evolving a schema safely](#evolving-a-schema-safely--the-destructive-approval-gate).
 - `pkg/outbox` — transactional outbox (ADR-016 §Class 2): `Enqueue` writes a job
   in the caller's tx and emits `pg_notify(outbox_notify, <id>)` on commit.
-- `pkg/worker` — the outbox consumer behind the SEPARATE `cmd/appitools-worker`
+- `pkg/worker` — the outbox consumer behind the SEPARATE `cmd/appximo-worker`
   binary (not a goroutine in the engine): LISTEN/NOTIFY wake-up + poll fallback,
   `SELECT … FOR UPDATE SKIP LOCKED`, at-least-once (Processors must be idempotent).
-  Run it with `DATABASE_URL=… go run ./cmd/appitools-worker`; the end-to-end proof
+  Run it with `DATABASE_URL=… go run ./cmd/appximo-worker`; the end-to-end proof
   is `scripts/worker-e2e.sh`. A consumer that writes results BACK does so through
   the engine HTTP API (`worker.EngineClient`), never the tenant DB directly, so the
   write inherits the engine's validation + RBAC. It mints a fresh, SHORT-LIVED
   (60s), SCOPED service JWT per operation (`auth.GenerateTokenWithTTL`, shared
   `JWT_SECRET`) carrying the event's `tenant_id` and a **scoped service role** —
-  never admin. `APPITOOLS_WORKER_WRITEBACK=on` enables the demo consumer (PATCHes
+  never admin. `APPXIMO_WORKER_WRITEBACK=on` enables the demo consumer (PATCHes
   the created row's status); off by default (echo).
 - `pkg/consumers` — real business-logic Processors (kept OUT of `pkg/worker` so the
   core loop stays dependency-light; e.g. excelize lives only here). The first is
@@ -430,7 +430,7 @@ One line per layer — navigate the code for the rest:
   `{status, result}` back via the engine API. A corrupt/invalid file is a PERMANENT
   failure (job → `failed`, event acked — worker never crashes); a transient engine
   error keeps the row pending for retry. Idempotent: a job already terminal is
-  skipped. The `file_ref` is resolved through `pkg/files`: set `APPITOOLS_FILES_DIR`
+  skipped. The `file_ref` is resolved through `pkg/files`: set `APPXIMO_FILES_DIR`
   and the consumer treats `file_ref` as a VFS `file_id`, streaming the
   content-addressed blob via `VFS.Get`; unset, it reads `file_ref` as a local path
   (back-compat). The second consumer is the EMAIL consumer (`EmailProcessor`): on an
@@ -439,7 +439,7 @@ One line per layer — navigate the code for the rest:
   net/smtp + STARTTLS, env-configured — Brevo/Resend/Mailgun/SES) with no engine
   write-back. At-least-once ⇒ a rare double-send is accepted for transactional mail
   (documented), mitigated by a deterministic Message-ID per outbox row. Select
-  consumers via `APPITOOLS_WORKER_MODE=echo|writeback|xlsx|email` (default echo). A
+  consumers via `APPXIMO_WORKER_MODE=echo|writeback|xlsx|email` (default echo). A
   single-mode worker ACKS topics it doesn't own, so DON'T run two different modes
   against one outbox (silent event loss under SKIP LOCKED) — for multiple event
   types compose a `consumers.Router` (topic → Processor) in one dispatching worker
@@ -489,15 +489,15 @@ Conventional Commits, one logical change per commit: `feat:` `fix:`
 [CONTRIBUTING.md](CONTRIBUTING.md)). License is Apache 2.0; contributions
 are licensed under it — no separate CLA/DCO. PR gate: `go build ./...`,
 `make test`, golangci-lint clean, and schema changes validated with
-`appitools validate`. **A change to the data path additionally requires the
+`appximo validate`. **A change to the data path additionally requires the
 full lane (no `-short`) and the binary-diff gate** — see the convention above;
 `make test` green has already shipped a broken POST once.
 
 ---
 
-# Integration guide — helping a user adopt Appitools
+# Integration guide — helping a user adopt Appximo
 
-This half is for when a user wants Appitools to serve **their** API and
+This half is for when a user wants Appximo to serve **their** API and
 you are writing their schema and calling their endpoints. The surface
 below is complete and verified — if something is not listed, the engine
 does not support it (see [Does not exist](#does-not-exist--do-not-invent)).
@@ -509,7 +509,7 @@ without them). A complete, working example:
 
 ```json
 {
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "todo-api",
   "resources": {
@@ -539,7 +539,7 @@ spaces, so the rule matches **zero rows forever** with no error at any layer (me
 in production: the app just shows nothing). It is a warning, not an error, because the
 pattern is legal when the FK genuinely holds login ids — and it is SUPPRESSED when the
 relation points at a column named `user_id`/`auth_user_id`/`login_id`, i.e. once you
-apply the suggested fix. Warnings surface in `appitools validate`, `validate --json`
+apply the suggested fix. Warnings surface in `appximo validate`, `validate --json`
 (`warnings[]`, with `valid` untouched, so the AI correction loop can act on them), the
 control-plane / `/admin` deploy response, engine boot, and `ai-generate`'s report.
 
@@ -977,7 +977,7 @@ missing on one resource simply projects nothing there.
 
 #### Granting CUSTOM routes: the `routes` block (LIBRARY-GAPS-S1, ADR-021)
 
-A custom route (an endpoint a Go backend registers with `appitools.Route`) is
+A custom route (an endpoint a Go backend registers with `appximo.Route`) is
 authorized by its **first `/api/` segment** as a VIRTUAL resource. A role grants one
 with `routes`, a map of segment → `{actions}`:
 
@@ -1044,9 +1044,9 @@ verified against `pkg/schema/types.go`):
   from the JWT claims); setting `result.proceed = false` + `result.error`
   rejects the write with 422. Built-ins available: `validateNIT`,
   `calculateCUFE`, `isValidEmail`, `formatMoney`. (`before_*` only.)
-- `webhook` — async signed POST: headers `X-Appitools-Event` (the real event:
+- `webhook` — async signed POST: headers `X-Appximo-Event` (the real event:
   `after_create` or `after_update`) and
-  `X-Appitools-Signature: sha256=<hmac>`; 3 retries with backoff.
+  `X-Appximo-Signature: sha256=<hmac>`; 3 retries with backoff.
   **`hmac_secret_env` is the NAME of an env var holding the secret**,
   not the secret itself (a `"secret"` key does not exist). Constraints
   that are easy to trip on: the dispatcher is **HTTPS-only and
@@ -1084,7 +1084,7 @@ generated CRUD write by declaring an `events` array at the resource level
   the CRUD write (`pkg/outbox`): if the write rolls back (e.g. a unique
   violation), the event never exists — and vice-versa. The engine fires
   `pg_notify(outbox_notify, <id>)` on commit; the separate
-  `cmd/appitools-worker` consumes it (`SELECT … FOR UPDATE SKIP LOCKED`,
+  `cmd/appximo-worker` consumes it (`SELECT … FOR UPDATE SKIP LOCKED`,
   at-least-once, idempotent).
 - **Topic** is `{resource}.{created|updated|deleted}` — e.g. a POST to
   `tasks` emits `tasks.created`, PUT/PATCH `tasks.updated`, DELETE
@@ -1179,7 +1179,7 @@ gated (`gated_drops`). A key that matches nothing is reported (`unmatched_approv
 never silently assumed. There is **no global "drop everything" flag** — approval must
 name each operation, so you confirm exactly what you understood from the dry-run.
 
-**CLI** mirrors this: `appitools migrate --tenant <id> --schema <file> --dry-run`
+**CLI** mirrors this: `appximo migrate --tenant <id> --schema <file> --dry-run`
 prints the same plan + impact; `--approve-drops "empleados.telefono,proyectos"`
 applies the enumerated drops. Without `--approve-drops`, destructive drops are gated.
 
@@ -1262,9 +1262,9 @@ Everything above migrates ONE tenant. To roll a schema change out to **every** t
 (or a subset), the `migrate` CLI fans out:
 
 ```
-appitools migrate --all-tenants  --schema base.json --dry-run   # plan + AGGREGATE impact, applies nothing
-appitools migrate --all-tenants  --schema base.json             # apply to every tenant
-appitools migrate --tenants a,b  --schema base.json             # apply to a subset
+appximo migrate --all-tenants  --schema base.json --dry-run   # plan + AGGREGATE impact, applies nothing
+appximo migrate --all-tenants  --schema base.json             # apply to every tenant
+appximo migrate --tenants a,b  --schema base.json             # apply to a subset
 ```
 
 It enumerates `public.tenants` and migrates each one **sequentially**, under that
@@ -1305,7 +1305,7 @@ Caddy — Docker is a documented variant, not the default), fully walked in
 `scripts/deploy-update.sh` (atomic swap + auto-rollback), backups
 `scripts/backup.sh`. The lower-level three-tier path (compose / native by
 hand) is [docs/DEPLOY.md](docs/DEPLOY.md). Two production facts worth
-knowing: `appitools serve` **self-bootstraps the control-plane tables** on a
+knowing: `appximo serve` **self-bootstraps the control-plane tables** on a
 fresh empty database (no manual `migrations/001_control_plane.sql`), and
 `GOMEMLIMIT` auto-detects an explicit cgroup limit (90%) when unset — set it
 explicitly on a bare small box (the installer does). Don't re-derive the
@@ -1368,7 +1368,7 @@ Facts agents most often get wrong:
   [docs/MENTAL_MODEL.md](docs/MENTAL_MODEL.md).
 - **JWT**: HS256 only, `exp` required, `role` claim must match a schema
   role. Mint dev tokens with
-  `appitools token --secret "$JWT_SECRET" --tenant acme --role admin`.
+  `appximo token --secret "$JWT_SECRET" --tenant acme --role admin`.
   Add `--schema <file>` and the command **refuses a role the schema does not
   declare**, listing the declared ones (ENG-27) — an undeclared role is denied
   everything with the SAME `403 forbidden` a permitted-but-denied role gets
@@ -1576,7 +1576,7 @@ POST /api/transaction
   a bad `file` reference → `422` `file_not_found`, any other FK violation (bad
   relation reference / RESTRICT delete) → `409`, forbidden → `403`, a bad
   op/resource → `400`.
-- **Limit**: at most **100** operations per request (`APPITOOLS_MAX_TX_OPS`) →
+- **Limit**: at most **100** operations per request (`APPXIMO_MAX_TX_OPS`) →
   `400` over the cap; the 1 MiB body cap also applies.
 - **Reserved**: a schema resource may not be named `transaction` (it would shadow
   this route).
@@ -1613,7 +1613,7 @@ that only inspects `body.errors` must still check for a non-2xx status. Validati
 failures arrive as `errors[].extensions.fields` (same rule engine as
 REST). Introspection is disabled in production (the `__schema`/`__type`
 fields are rejected outside development; `__typename` is allowed);
-GraphiQL only runs with `APPITOOLS_ENV=development`. The query analyzer
+GraphiQL only runs with `APPXIMO_ENV=development`. The query analyzer
 also bounds document size as an alias-amplification guard: at most **50
 root selections** per operation and **2000 total selections** across the
 whole document — over either limit the request is rejected (there is no
@@ -1631,10 +1631,10 @@ autocomplete, run queries/mutations in place, a Headers editor for a real
 `Authorization: Bearer <token>` (every request — including GraphiQL's own
 schema-fetch on load — goes through the same JWT+RBAC chain as any other
 request; there is no anonymous introspection). It is mounted, and
-introspection allowed, in the SAME two cases: `APPITOOLS_ENV=development`,
-or the explicit opt-in `APPITOOLS_GRAPHQL_PLAYGROUND=on` — for exploring
+introspection allowed, in the SAME two cases: `APPXIMO_ENV=development`,
+or the explicit opt-in `APPXIMO_GRAPHQL_PLAYGROUND=on` — for exploring
 GraphQL in production without the broader dev flag (which also enables
-pprof). Both are **per-app** in the in-process fleet (`appitools fleet
+pprof). Both are **per-app** in the in-process fleet (`appximo fleet
 serve`): one app can expose GraphiQL while a sibling in the same process
 stays locked down. The CDN build is version-pinned (`graphiql@3.9.0` — the
 last version shipping a standalone UMD bundle; 4.x+ dropped it for
@@ -1658,10 +1658,10 @@ plus an interactive explorer — no flag needed:
   summary, auth mode (`x-public: true` + `security: []` for a Public route;
   otherwise Bearer + the RBAC segment/action named in the description),
   `x-required-role`, `x-byte-serving`, all flagged
-  `x-appitools-custom-route: true`. Request/response SHAPES are deliberately
+  `x-appximo-custom-route: true`. Request/response SHAPES are deliberately
   NOT published (a Go handler declares none — the app's contract sheet stays
   the authority for shapes; the OpenAPI is the authority for EXISTENCE). The
-  CLI `appitools openapi <schema>` prints the schema-derived half only (a
+  CLI `appximo openapi <schema>` prints the schema-derived half only (a
   schema file has no registered routes); the RUNNING app's /openapi.json is
   the complete surface. The probe semantics are deliberate and unchanged: an
   unknown `/api/...` still answers 401 (auth runs before routing) — with the
@@ -1675,7 +1675,7 @@ plus an interactive explorer — no flag needed:
   body). Generated routes are unchanged (GET-only, as before).
 - `GET /docs` — Swagger UI (loaded from a pinned CDN) pointed at `/openapi.json`,
   for interactive "Try it out" against the same origin.
-- The CLI still prints the spec: `appitools openapi schema.json` (YAML) — same
+- The CLI still prints the spec: `appximo openapi schema.json` (YAML) — same
   document the HTTP routes serve.
 
 ## CORS (API-PRODUCTIVA-V1)
@@ -1684,13 +1684,13 @@ CORS is **configurable instance infrastructure**, NOT a schema key. It is
 **disabled by default** (no `Access-Control-*` headers emitted, no middleware in
 the chain — zero cost). Enable it by listing browser origins:
 
-- `APPITOOLS_CORS_ORIGINS` — comma-separated exact origins, or the single `*`.
+- `APPXIMO_CORS_ORIGINS` — comma-separated exact origins, or the single `*`.
   **Setting it ENABLES CORS**; empty keeps it off.
-- `APPITOOLS_CORS_METHODS` (default `GET,POST,PUT,PATCH,DELETE,OPTIONS`),
-  `APPITOOLS_CORS_HEADERS` (default `Authorization,Content-Type`),
-  `APPITOOLS_CORS_EXPOSE_HEADERS` (default none),
-  `APPITOOLS_CORS_CREDENTIALS` (`true`/`1`/`on`; default false),
-  `APPITOOLS_CORS_MAX_AGE` (preflight cache seconds; default 600).
+- `APPXIMO_CORS_METHODS` (default `GET,POST,PUT,PATCH,DELETE,OPTIONS`),
+  `APPXIMO_CORS_HEADERS` (default `Authorization,Content-Type`),
+  `APPXIMO_CORS_EXPOSE_HEADERS` (default none),
+  `APPXIMO_CORS_CREDENTIALS` (`true`/`1`/`on`; default false),
+  `APPXIMO_CORS_MAX_AGE` (preflight cache seconds; default 600).
 - **Scope**: only the browser-consumed routes — `/api/*`, `/auth/*`, `/graphql`,
   `/openapi*`. The control plane (`:9090`), `/admin`, `/metrics`, `/debug` are
   **never** given CORS (operation surfaces, same-origin / machine callers).
@@ -1707,7 +1707,7 @@ SAME one `/api/*` validates — HS256, 24 h TTL, stateless):
 1. **Log in** — `POST /auth/login {email,password}` → `200 {user, token}` (or
    `{mfa_required, mfa_token}` if TOTP MFA is on → finish at `/auth/mfa/verify`).
    (Public **signup** is `POST /auth/signup`, enabled only when
-   `APPITOOLS_AUTH_SIGNUP_ROLE` is set.)
+   `APPXIMO_AUTH_SIGNUP_ROLE` is set.)
 2. **Use** the token: `Authorization: Bearer <token>` on every `/api/*` call.
 3. **Expiry** — a request with an expired/invalid token gets a clear
    `401 {"error":"invalid token: …"}` (never a 500). That is the client's signal
@@ -1725,10 +1725,10 @@ SAME one `/api/*` validates — HS256, 24 h TTL, stateless):
 
 The engine ships a content-addressable, multi-tenant file store (no schema
 declaration needed — the routes exist whenever no resource is literally named
-`files`). Storage is a **swappable backend**: `APPITOOLS_FILES_BACKEND=local`
-(default — blobs on this VPS under `APPITOOLS_FILES_DIR`, served by the engine
+`files`). Storage is a **swappable backend**: `APPXIMO_FILES_BACKEND=local`
+(default — blobs on this VPS under `APPXIMO_FILES_DIR`, served by the engine
 with Range/ETag/sendfile) or `=s3` (any S3-compatible provider — Cloudflare R2 /
-DO Spaces / MinIO / AWS — via `APPITOOLS_FILES_S3_{BUCKET,ENDPOINT,REGION,
+DO Spaces / MinIO / AWS — via `APPXIMO_FILES_S3_{BUCKET,ENDPOINT,REGION,
 ACCESS_KEY,SECRET_KEY,FORCE_PATH_STYLE,PREFIX,SERVE}`). Tenancy, RBAC, metadata
 and upload validation are IDENTICAL on both. Full doc + setups:
 [docs/FILES.md](docs/FILES.md).
@@ -1736,20 +1736,20 @@ and upload validation are IDENTICAL on both. Full doc + setups:
 - `POST /api/files` — multipart upload (form field `file`). Streamed in 64 KiB
   chunks (never buffered whole), de-duplicated by content hash, and validated
   OWASP-style: extension ALLOWLIST (default curated list; override
-  `APPITOOLS_FILES_ALLOWED_EXT`, `*` disables) + magic-byte check (a `.jpg`
+  `APPXIMO_FILES_ALLOWED_EXT`, `*` disables) + magic-byte check (a `.jpg`
   containing PHP source, or a declared `image/*` that isn't, → `422`; the
   client Content-Type is never trusted) + name sanitized at rest. Returns
-  `201 {"file_id","sha256","size"}`. Body capped by `APPITOOLS_FILES_MAX_BYTES`
+  `201 {"file_id","sha256","size"}`. Body capped by `APPXIMO_FILES_MAX_BYTES`
   (default 256 MiB) → `413`. RBAC action: `create` on `files`.
 - `GET /api/files/{id}` — the blob, with its stored `Content-Type` and
   `attachment` disposition. Local backend: proxied via `http.ServeContent`
   (Range → `206`, strong content-hash `ETag` → `304`). S3 backend: `302` to a
   short-lived presigned URL by default (the engine authorizes, the bucket
-  serves), or streamed through the engine with `APPITOOLS_FILES_S3_SERVE=proxy`.
+  serves), or streamed through the engine with `APPXIMO_FILES_S3_SERVE=proxy`.
   RBAC: `read` on `files`. `404` if the id is unknown to the tenant (ids are
   tenant-scoped — no cross-tenant handle).
 - `GET /api/files/{id}/url` — mints a short-lived signed download URL
-  (`APPITOOLS_FILES_TOKEN_TTL`, default 180 s): `200 {"url","expires_in"}`.
+  (`APPXIMO_FILES_TOKEN_TTL`, default 180 s): `200 {"url","expires_in"}`.
   S3 → native presigned; local → an engine token URL `GET
   /files/signed/{token}` that needs NO Authorization header (for `<img>`/share
   links) — the HMAC token is tenant-bound and role-re-checked at serve, and any
@@ -1764,9 +1764,9 @@ per-resource `permissions` entry `"files": { "actions": ["read","create"] }`
 (actions only — conditions/fields on the built-in store are rejected at load;
 FRONTEND-SPEC-S1 closed the asymmetry where only the role-global form could
 grant it). Local
-blobs live under `APPITOOLS_FILES_DIR` (default `/var/lib/appitools/files`),
+blobs live under `APPXIMO_FILES_DIR` (default `/var/lib/appximo/files`),
 created lazily on first upload. Use a `file_id` as a filejob's `file_ref` to
-feed the async XLSX consumer (`APPITOOLS_FILES_DIR` must be set on the worker,
+feed the async XLSX consumer (`APPXIMO_FILES_DIR` must be set on the worker,
 pointing at the same root — the worker resolves refs through the same VFS).
 
 ## Authentication — password identity core (AUTH-CORE-V1)
@@ -1813,18 +1813,18 @@ per-tenant request limiter.
 **Config.** Public signup is **disabled by default** (safe — no accidental
 self-service accounts):
 
-- `APPITOOLS_AUTH_SIGNUP_ROLE` (or `Config.AuthSignupRole`) — the role assigned
+- `APPXIMO_AUTH_SIGNUP_ROLE` (or `Config.AuthSignupRole`) — the role assigned
   to every public signup. **Setting it ENABLES public signup; leaving it empty
   keeps signup disabled** (`POST /auth/signup` → `403`). The role must be one the
   schema's RBAC declares, or the engine refuses to boot (a typo never becomes a
   silent misconfiguration). Login and refresh work regardless (they operate on
   already-created users).
-- `APPITOOLS_AUTH_MIN_PASSWORD` (or `Config.AuthMinPasswordLength`) — minimum
+- `APPXIMO_AUTH_MIN_PASSWORD` (or `Config.AuthMinPasswordLength`) — minimum
   signup password length (default 8).
 
 ### Password reset + email verification (AUTH-EMAIL-V1)
 
-Built ON the email consumer (`pkg/consumers`, `APPITOOLS_WORKER_MODE=email`) via the
+Built ON the email consumer (`pkg/consumers`, `APPXIMO_WORKER_MODE=email`) via the
 transactional outbox — the first auth↔email integration. A request endpoint writes
 a single-use token AND enqueues an `email.send` event **in one transaction** (token
 and email are atomic); the email is delivered **async** by the worker, so the
@@ -1848,17 +1848,17 @@ in the outbox and goes out when one starts.
 Tokens live in `tenant_<id>.auth_tokens` (per-tenant, isolated — a token of one
 tenant is useless in another). Only the token's **SHA-256 hash** is stored; the
 plain token rides the email link. The link origin is the request's tenant Host by
-default (multi-tenant-correct), or `APPITOOLS_AUTH_BASE_URL` if set.
+default (multi-tenant-correct), or `APPXIMO_AUTH_BASE_URL` if set.
 
 **Config (AUTH-EMAIL-V1):**
 
-- `APPITOOLS_AUTH_REQUIRE_VERIFIED` (`true`/`1`/`on`) — block login for an
+- `APPXIMO_AUTH_REQUIRE_VERIFIED` (`true`/`1`/`on`) — block login for an
   unverified email (`403`). Default off (login unchanged).
-- `APPITOOLS_AUTH_BASE_URL` — override the email-link origin (else derived from the
+- `APPXIMO_AUTH_BASE_URL` — override the email-link origin (else derived from the
   request Host).
-- `APPITOOLS_EMAIL_TOPIC` — outbox topic for the email events (default `email.send`);
-  **must match the email worker's** `APPITOOLS_EMAIL_TOPIC`. Run the deliverer with
-  `APPITOOLS_WORKER_MODE=email` (templates `verification` + `reset` ship built-in).
+- `APPXIMO_EMAIL_TOPIC` — outbox topic for the email events (default `email.send`);
+  **must match the email worker's** `APPXIMO_EMAIL_TOPIC`. Run the deliverer with
+  `APPXIMO_WORKER_MODE=email` (templates `verification` + `reset` ship built-in).
 
 ### Social login — OAuth2 (AUTH-OAUTH-V1)
 
@@ -1876,7 +1876,7 @@ dependency** (no goth/x-oauth2), CGO-free.
 - `GET /auth/oauth/{provider}/callback` — the provider redirects back here with
   `code` + `state`. The engine validates the state, exchanges the code, reads the
   provider's `{provider_user_id, email}`, resolves the user, and returns
-  `200 {user, token}` (or `302` to `APPITOOLS_OAUTH_SUCCESS_REDIRECT#token=…` if set).
+  `200 {user, token}` (or `302` to `APPXIMO_OAUTH_SUCCESS_REDIRECT#token=…` if set).
 
 **Tenant lives in the SIGNED STATE, never the Host.** The callback's Host is the
 fixed callback domain (one registered redirect URI per provider), not the tenant
@@ -1900,17 +1900,17 @@ provider_user_id)` per schema):
 
 **Config (a provider with no client id is simply NOT offered — never a boot error):**
 
-- `APPITOOLS_OAUTH_{GOOGLE,GITHUB,MICROSOFT}_CLIENT_ID` / `…_CLIENT_SECRET` — per
+- `APPXIMO_OAUTH_{GOOGLE,GITHUB,MICROSOFT}_CLIENT_ID` / `…_CLIENT_SECRET` — per
   provider credentials. Register the redirect URI
   `{callback}/auth/oauth/{provider}/callback` with each provider.
-- `APPITOOLS_OAUTH_CALLBACK_URL` — the FIXED public origin the providers redirect
+- `APPXIMO_OAUTH_CALLBACK_URL` — the FIXED public origin the providers redirect
   back to (e.g. `https://auth.example.com`). Empty ⇒ derived from the request
   (fine in dev/single-domain; set it for multi-tenant prod).
-- `APPITOOLS_OAUTH_DEFAULT_ROLE` — role for a user auto-created on first social
-  login; empty falls back to `APPITOOLS_AUTH_SIGNUP_ROLE`. If BOTH are empty, a
+- `APPXIMO_OAUTH_DEFAULT_ROLE` — role for a user auto-created on first social
+  login; empty falls back to `APPXIMO_AUTH_SIGNUP_ROLE`. If BOTH are empty, a
   brand-new social email is rejected (`403`) while existing users still link/login.
   A set role must exist in the schema RBAC (else boot fails).
-- `APPITOOLS_OAUTH_SUCCESS_REDIRECT` — optional; `302` to `<url>#token=<jwt>` for a
+- `APPXIMO_OAUTH_SUCCESS_REDIRECT` — optional; `302` to `<url>#token=<jwt>` for a
   browser SPA instead of returning JSON.
 
 ### Multi-factor auth — TOTP (AUTH-MFA-V1)
@@ -1945,12 +1945,12 @@ social login is gated by the provider.
 
 **Storage / security.** `tenant_<id>.auth_mfa` (per-user, the TOTP secret
 **encrypted at rest** with AES-256-GCM — recoverable because the server re-derives
-each code; key = `APPITOOLS_MFA_KEY` or the JWT secret) and
+each code; key = `APPXIMO_MFA_KEY` or the JWT secret) and
 `tenant_<id>.auth_backup_codes` (hash only, one-time). Per-tenant, isolated — a
 user's MFA in tenant A never affects tenant B. TOTP window is exactly ±1 step.
-**Config:** `APPITOOLS_MFA_KEY` (secret-encryption key; falls back to `JWT_SECRET`
-— rotating it invalidates enrollments), `APPITOOLS_MFA_ISSUER` (authenticator-app
-label; default `Appitools`).
+**Config:** `APPXIMO_MFA_KEY` (secret-encryption key; falls back to `JWT_SECRET`
+— rotating it invalidates enrollments), `APPXIMO_MFA_ISSUER` (authenticator-app
+label; default `Appximo`).
 
 **Auth-as-product is now complete: password (signup/login/refresh) + reset/verify +
 OAuth social login + TOTP MFA.**
@@ -1963,7 +1963,7 @@ control plane, and the observability that already exist. It adds only the one
 thing that did not exist: a **platform super-admin** (above the tenants) plus a
 consolidated, authenticated `/admin/*` API. Two access levels, modelled as roles:
 
-- **Platform super-admin** — lives in a SYSTEM schema (`appitools_system.platform_admins`),
+- **Platform super-admin** — lives in a SYSTEM schema (`appximo_system.platform_admins`),
   ABOVE every tenant. Not a tenant user. Authenticates with the SAME
   auth-as-product (password login + TOTP MFA) but against the system schema, and
   receives a **platform JWT** (claim `scope=platform`, signed with the same
@@ -1983,7 +1983,7 @@ cannot be created by a super-admin that does not yet exist):
 
 ```bash
 DATABASE_URL=… JWT_SECRET=… \
-  appitools admin create --email me@example.com --password 'a-strong-passphrase'
+  appximo admin create --email me@example.com --password 'a-strong-passphrase'
 ```
 
 **Routes** (all under `/admin/*` on the data plane; they do their OWN auth and are
@@ -2042,10 +2042,10 @@ tenant's users (enforced on the non-hot login path); already-issued JWTs live to
 their `exp` (the documented stateless-JWT trade-off). It adds **no per-request
 check to the CRUD/JWT hot path** — the p50 is preserved.
 
-**Config:** `APPITOOLS_PLATFORM_SUPER_ADMIN_ROLE` (platform role marker; default
-`platform_super_admin`), `APPITOOLS_PLATFORM_MFA_ISSUER` (authenticator label;
-default `Appitools Platform`). The platform MFA secret is encrypted at rest with
-`APPITOOLS_MFA_KEY` (falls back to `JWT_SECRET`), same as tenant MFA.
+**Config:** `APPXIMO_PLATFORM_SUPER_ADMIN_ROLE` (platform role marker; default
+`platform_super_admin`), `APPXIMO_PLATFORM_MFA_ISSUER` (authenticator label;
+default `Appximo Platform`). The platform MFA secret is encrypted at rest with
+`APPXIMO_MFA_KEY` (falls back to `JWT_SECRET`), same as tenant MFA.
 
 ### Admin panel UI (ADMIN-UI-V1)
 

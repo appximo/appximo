@@ -3,8 +3,8 @@ package platformadmin
 import (
 	"context"
 
-	"github.com/miguelangel/appitools/pkg/migration"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/migration"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // Schema deploy surface (UI-F1-S1) — the backend of "deploy from the editor". It

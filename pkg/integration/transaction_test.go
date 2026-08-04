@@ -6,11 +6,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/outbox"
+	"github.com/appximo/appximo/pkg/schema"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/outbox"
-	"github.com/miguelangel/appitools/pkg/schema"
 )
 
 // genTokenFor mints a JWT whose tenant claim is tid (genToken uses the fixed
@@ -35,7 +35,7 @@ const (
 
 func txSchema() *schema.APISchema {
 	return &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "tx-lab",
 		Resources: map[string]schema.ResourceSchema{

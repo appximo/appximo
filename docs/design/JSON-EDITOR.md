@@ -1,4 +1,4 @@
-# JSON-AUDIT-V1 — Feasibility map: the Appitools-aware JSON editor + the external-agent schema spec
+# JSON-AUDIT-V1 — Feasibility map: the Appximo-aware JSON editor + the external-agent schema spec
 
 Audit date: 2026-07-09. Every claim verified against the source (symbols named
 per finding) and, where it matters, against a running engine + Studio (live
@@ -72,7 +72,7 @@ one packaging command.
   Probed live: an invented key → `path: "resources.tasks", rule: unknown_key,
   got: bloque_inventado, fix: remove…`; `type: "number"` → `invalid_enum_value`
   with the full expected set. **Today it is reachable only via the CLI
-  (`appitools validate --json`) and `pkg/aigen` — there is NO HTTP route.**
+  (`appximo validate --json`) and `pkg/aigen` — there is NO HTTP route.**
 - **Design consequence:** do NOT chase full mirror parity in TypeScript. The
   JSON editor's semantic layer should be a **debounced call to the engine's own
   `ValidateReport`** (Studio is served same-origin by the engine). The mirror
@@ -80,9 +80,9 @@ one packaging command.
 
 ### §3 Can a formal JSON Schema be generated? **It already EXISTS — hand-written with parity enforced by tests, which beats generation here.**
 
-- `pkg/schema/appitools.schema.json` (Draft 2020-12, 310 lines, AI-F0-S1),
+- `pkg/schema/appximo.schema.json` (Draft 2020-12, 310 lines, AI-F0-S1),
   embedded (`metaschema.go`), used by `validate-schema`, printed by
-  `appitools meta-schema`. It covers the whole grammar: closed type set
+  `appximo meta-schema`. It covers the whole grammar: closed type set
   (including `file`), name `patternProperties`, `additionalProperties: false`
   everywhere (strict keys), both RBAC forms, relations/indexes/FKs/hooks/
   state machines/events.
@@ -116,7 +116,7 @@ one packaging command.
 - **The three-layer architecture:**
   1. **Syntax** — CM6 `lang-json` (parse errors as you type).
   2. **Structure** — `codemirror-json-schema` fed with the SAME
-     `appitools.schema.json` (autocomplete of keys/enums, hover, unknown-key
+     `appximo.schema.json` (autocomplete of keys/enums, hover, unknown-key
      and closed-set diagnostics, offline/instant). Source it from the engine
      (`GET` the meta-schema) or bundle it at build — same binary, same commit;
      serving it via HTTP keeps one runtime source and costs one fetch.
@@ -134,18 +134,18 @@ one packaging command.
 - **The distilled LLM grammar already exists**: `pkg/aigen/prompt.go`
   (~100 lines) — closed sets, strict-keys warning, naming, the canonical
   few-shot, "output only JSON". It is exactly the "system prompt that turns
-  any agent into an Appitools schema generator" — but it is **unexported Go**.
+  any agent into an Appximo schema generator" — but it is **unexported Go**.
 - **The correction oracle already exists and is agent-runnable**:
-  `appitools validate --json` (the same `ValidateReport`). An external Claude
+  `appximo validate --json` (the same `ValidateReport`). An external Claude
   Code session with the repo (or just the binary) can run the SAME
   validator-guided loop `ai-generate` uses — generate → validate → fix from
   path/fix hints — with Miguel's own subscription as the model.
 - `AGENTS.md` (integration half) + `llms.txt` already target agents.
-- **Gap:** one exportable artifact. Plan: `appitools spec` prints the
+- **Gap:** one exportable artifact. Plan: `appximo spec` prints the
   distilled grammar (move the prompt text to an embedded file shared by
   `pkg/aigen` and the command — single source), and a short
   `docs/SCHEMA_SPEC_LLM.md` wrapper documenting the loop for external agents:
-  *paste the spec → generate → `appitools validate --json` → fix → repeat →
+  *paste the spec → generate → `appximo validate --json` → fix → repeat →
   paste into Studio's JSON editor*.
 
 ---
@@ -162,7 +162,7 @@ one packaging command.
   `validate_test.go` (good schema → valid, the probe schema → unknown_key +
   invalid type at their paths, body cap → 413, meta-schema == embedded bytes).
   Zero hot-path impact (new routes).
-- `appitools spec` + the shared embedded grammar file (S3 — pending).
+- `appximo spec` + the shared embedded grammar file (S3 — pending).
 
 **S2 — the JSON view in Studio (the editor): ✅ BUILT (JSON-EDITOR-S2).**
 - The "Code" view (`CodeView.svelte`, Canvas | Code toolbar toggle): CM6 with
@@ -191,7 +191,7 @@ one packaging command.
   Apply → re-export; syntax layer instant; theme computed light/dark.
 
 **S3 — the agent pack: ✅ BUILT (JSON-EDITOR-S3).**
-- `appitools spec` (cmd_spec.go) prints `aigen.Spec()`: the SHARED `GrammarCore`
+- `appximo spec` (cmd_spec.go) prints `aigen.Spec()`: the SHARED `GrammarCore`
   (pkg/aigen/prompt.go — the internal generation prompt is now built by
   concatenation from it, byte-identical to the pre-refactor literal, so
   ai-generate behavior is unchanged) + the advanced blocks the compact internal

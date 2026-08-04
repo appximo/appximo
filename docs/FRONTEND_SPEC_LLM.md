@@ -1,12 +1,12 @@
-# Build a production frontend on Appitools — the agent guide
+# Build a production frontend on Appximo — the agent guide
 
 You are an AI coding agent (Claude Code, Cursor, or similar). This document
-teaches you to build a **production-quality frontend** on an Appitools backend:
+teaches you to build a **production-quality frontend** on an Appximo backend:
 where the frontend lives, what stack to use, the exact API contract you consume,
 how every error maps to a screen state, how files and images work, and the traps
 that only show up in a real browser.
 
-Appitools compiles a JSON schema into a multi-tenant REST + GraphQL + OpenAPI
+Appximo compiles a JSON schema into a multi-tenant REST + GraphQL + OpenAPI
 server at boot. By the time you write a frontend, **the API already exists** —
 generated CRUD with filters/sort/pagination, auth endpoints, a file store, and
 whatever custom routes the backend registered. Your job is the UI. You never
@@ -18,9 +18,9 @@ This is the third document of a trilogy; keep them straight:
 
 | Doc | Teaches | Command |
 |---|---|---|
-| `appitools spec` / SCHEMA_SPEC_LLM.md | the **schema** (the declarative 90 %) | `appitools spec` |
-| `appitools backend-spec` / BACKEND_SPEC_LLM.md | the **backend** (handlers, hooks, auth, jobs — the 10 %) | `appitools backend-spec` |
-| **this doc** | the **frontend** (the part users touch) | `appitools frontend-spec` |
+| `appximo spec` / SCHEMA_SPEC_LLM.md | the **schema** (the declarative 90 %) | `appximo spec` |
+| `appximo backend-spec` / BACKEND_SPEC_LLM.md | the **backend** (handlers, hooks, auth, jobs — the 10 %) | `appximo backend-spec` |
+| **this doc** | the **frontend** (the part users touch) | `appximo frontend-spec` |
 
 Everything below is distilled from a shipped reference storefront (a real
 mobile-first shop + merchant back-office, SvelteKit, embedded in one binary,
@@ -40,7 +40,7 @@ everything else: **guessing the surface**. Do this first, in order:
    the WHOLE served surface: every generated route, `/auth/*`, `/api/files`,
    **and the backend's registered custom routes** (typically the whole
    anonymous storefront surface). A custom route appears as a normal path item
-   flagged `x-appitools-custom-route: true`, carrying its method, its auth mode
+   flagged `x-appximo-custom-route: true`, carrying its method, its auth mode
    (`x-public: true` ⇒ no token needed, a valid one is recognized; otherwise
    Bearer + the RBAC grant named in its description), `x-required-role` when
    the route demands one, `x-byte-serving` for binary streams (images,
@@ -66,7 +66,7 @@ everything else: **guessing the surface**. Do this first, in order:
 3. **Get working dev credentials.** Public signup is DISABLED by default
    (`POST /auth/signup` → 403), so on most backends you cannot mint your own
    first user: ask the operator to create one (they have an admin API/CLI for
-   it), or to set `APPITOOLS_AUTH_SIGNUP_ROLE` in the dev instance. Without a
+   it), or to set `APPXIMO_AUTH_SIGNUP_ROLE` in the dev instance. Without a
    session you cannot exercise anything authenticated — including §11's
    acceptance run.
 
@@ -103,9 +103,9 @@ writes this; shown so you know the contract you are building into):
 var frontendFS embed.FS            // `all:` — bundlers emit _-prefixed dirs the default pattern skips
 
 dist, _ := fs.Sub(frontendFS, "web/build")
-app, _ := appitools.New(appitools.Config{
+app, _ := appximo.New(appximo.Config{
     SchemaPath: "schema.json",
-    Static: []appitools.StaticMount{{
+    Static: []appximo.StaticMount{{
         Path: "/",     // the SPA owns the root; /api, /auth, /admin, /editor, /docs stay the engine's
         FS:   dist,
         SPA:  true,    // unknown CLIENT routes fall back to index.html; /api/nope stays a real 404
@@ -292,7 +292,7 @@ export async function papi(path, opts = {}) {          // panel/authenticated ap
 
 **Signup** — `POST /auth/signup` `{"email","password"}` → `201 {user, token}`
 (auto-login). It answers `403` when the instance has not enabled public signup
-(`APPITOOLS_AUTH_SIGNUP_ROLE` unset) — **which is the default**: build the
+(`APPXIMO_AUTH_SIGNUP_ROLE` unset) — **which is the default**: build the
 screen only if the product enables it, and get your own dev credentials
 through the operator (§0.3), never by assuming signup works.
 Duplicate email in this tenant → `409`. A `role` you send is ignored.
@@ -502,7 +502,7 @@ the same data, validation and RBAC. Anything executable answers **HTTP 200 —
 read `body.errors`**, not the status (fields errors arrive as
 `errors[].extensions.fields`, same shape as REST's 422). A non-JSON body is 400;
 over 1 MiB is 413. Introspection is off in production (enable GraphiQL
-explicitly with `APPITOOLS_GRAPHQL_PLAYGROUND=on`); document size is bounded
+explicitly with `APPXIMO_GRAPHQL_PLAYGROUND=on`); document size is bounded
 (50 root selections / 2000 total). Use it when a screen composes many resources
 in one round trip and `?include=` can't express it; otherwise REST + include is
 simpler to debug.
@@ -510,7 +510,7 @@ simpler to debug.
 ### 4.10 CORS — only for the served-apart shape
 
 Same-origin (embedded) needs none of this. A frontend on another origin needs
-the **backend operator** to set `APPITOOLS_CORS_ORIGINS=https://app.example.com`
+the **backend operator** to set `APPXIMO_CORS_ORIGINS=https://app.example.com`
 (setting it enables CORS; methods/headers have sane defaults; `OPTIONS`
 preflight is answered before auth so it never 401s). Scope: `/api/*`, `/auth/*`,
 `/graphql`, `/openapi*` only. If you see a CORS error in the console against an
@@ -794,7 +794,7 @@ view. Any invalid/expired signed URL is a uniform `404`.
 Two layers, both the server's authority:
 
 - **At upload** (`POST /api/files`): the instance-wide max size
-  (`APPITOOLS_FILES_MAX_BYTES`, default 256 MiB → `413`) and extension
+  (`APPXIMO_FILES_MAX_BYTES`, default 256 MiB → `413`) and extension
   allowlist (→ `422`) — the backend operator's config.
 - **At attach** (setting the file's id in a record's `file` field): the
   field's own declared policy (FILES-1) — `accept` (content-type families or
@@ -823,12 +823,12 @@ engine:
 
 ```go
 // Backend (the backend agent writes this; shown so you can ask for it):
-app.Register(appitools.Route{
+app.Register(appximo.Route{
     Method: "GET", Path: "/api/catalogo-imagen",
     Public:      true,                                  // anonymous — it's a storefront
     ByteServing: true,                                  // stream: bypass response cache + compression
-    RateLimit:   &appitools.RateLimit{RPS: 200, Burst: 400},  // image-sized budget, like the catalogue
-    Handler: func(ctx appitools.Ctx) error {
+    RateLimit:   &appximo.RateLimit{RPS: 200, Burst: 400},  // image-sized budget, like the catalogue
+    Handler: func(ctx appximo.Ctx) error {
         id := ctx.Request().URL.Query().Get("id")
         var ok bool                                     // public IFF an ACTIVE product wears it
         if err := ctx.UnsafeTx().QueryRow(ctx.Context(),
@@ -838,7 +838,7 @@ app.Register(appitools.Route{
         }
         // Content-addressed store ⇒ this id's bytes can never change: the URL
         // may be cached for a year with zero revalidation (FILES-2).
-        return ctx.ServeFile(id, appitools.WithCacheControl(appitools.CacheControlImmutable))
+        return ctx.ServeFile(id, appximo.WithCacheControl(appximo.CacheControlImmutable))
     },
 })
 ```
@@ -984,7 +984,7 @@ faithful; what the reference e2e suites use).
 binary, not a repo): your deliverable is the built static tree (`web/build/`)
 plus the `Config.Static` snippet from §1 — the backend agent embeds it and
 rebuilds. Alternatively the served-apart shape (§1) with the operator setting
-`APPITOOLS_CORS_ORIGINS` (§4.10). State which one you're producing; don't
+`APPXIMO_CORS_ORIGINS` (§4.10). State which one you're producing; don't
 silently assume you can recompile the binary.
 
 ---
@@ -1043,11 +1043,11 @@ Two traps a first e2e run hits:
 
 ## 12. References
 
-- **This doc**: `appitools frontend-spec` prints it — paste into your agent.
+- **This doc**: `appximo frontend-spec` prints it — paste into your agent.
 - **The runnable minimal example**: [examples/frontend-guide/](../examples/frontend-guide/)
   (one binary: schema + backend + a no-build SPA exercising login, CRUD with
   the 422/409 mapping, upload → attach → display with public images).
-- **The schema**: `appitools spec` · **the backend**: `appitools backend-spec`
+- **The schema**: `appximo spec` · **the backend**: `appximo backend-spec`
   (the §7.5 public-image route, `Route`/`Ctx` and `Config.Static` live there).
 - **The machine contract**: `GET /openapi.json` on the running backend; `/docs`
   to browse it.

@@ -1,4 +1,4 @@
-// Package editorui embeds the visual schema editor (Appitools Studio, UI-F0-S1)
+// Package editorui embeds the visual schema editor (Appximo Studio, UI-F0-S1)
 // and serves it from the engine binary under /editor. The compiled SPA lives in
 // web/build; following the admin-UI / DevHub pattern, web/build/index.html is
 // committed (so go:embed always has something) while web/build/assets/ is

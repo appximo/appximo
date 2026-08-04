@@ -31,7 +31,7 @@ bash scripts/verify-production/run-all.sh \
 | Role | Machine |
 |---|---|
 | **Server under test** | DigitalOcean droplet, **2 vCPU / 1963 MiB RAM**, Ubuntu 22.04, $16/mo |
-| Stack | Caddy 2.8.4 (static binary) · Appitools engine (systemd, `GOMAXPROCS=2`) · **PostgreSQL 18.4** (native apt) |
+| Stack | Caddy 2.8.4 (static binary) · Appximo engine (systemd, `GOMAXPROCS=2`) · **PostgreSQL 18.4** (native apt) |
 | TLS | real Let's Encrypt certificate for a public domain |
 | **Load generator** | a separate 1 vCPU droplet, same region · RTT floor **~1.3 ms** |
 | Dataset | 1,000,000 orders · 3,200,000 order_items · 50,000 customers · **673 MiB** on disk |
@@ -47,7 +47,7 @@ numbers if left undetected.
 
 ### A CDN in front of the domain
 
-`api.appitools.com` is proxied by Cloudflare. The public name resolves to
+`api.appximo.com` is proxied by Cloudflare. The public name resolves to
 Cloudflare's edge, so every "HTTPS" measurement crossed the internet twice and was
 terminated by Cloudflare's TLS, not ours. Measured that way the stack looks
 **3.5× slower than it is**:
@@ -278,7 +278,7 @@ max(0.5 ms, 3%)). Everything else is reported as `no_change` and dropped.
 
 ### The composite index — the biggest finding in this document
 
-This is a **schema-design lesson every Appitools user will hit**, and it is
+This is a **schema-design lesson every Appximo user will hit**, and it is
 invisible on a fresh dataset.
 
 The read is `WHERE status = 'paid' ORDER BY created_at DESC LIMIT 20`, with

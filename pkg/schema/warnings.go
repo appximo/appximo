@@ -11,7 +11,7 @@ import (
 // question — "will it do what you meant?" — for the small set of mistakes that are
 // legal, deployable, and produce an app that quietly does nothing.
 //
-// Warnings never block anything: they are printed by `appitools validate`, carried
+// Warnings never block anything: they are printed by `appximo validate`, carried
 // in `validate --json`'s report, returned by the control plane's deploy response and
 // logged at boot. They exist because the failures they catch have NO error at any
 // layer, so the only place they can surface is here.

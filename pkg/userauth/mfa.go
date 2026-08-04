@@ -94,7 +94,7 @@ func (s *Service) EnableMFA(ctx context.Context, tenantID, userID string) (secre
 	}
 	issuer := s.mfaIssuer
 	if issuer == "" {
-		issuer = "Appitools"
+		issuer = "Appximo"
 	}
 	return secret, otpauthURI(issuer+" ("+tenantID+")", user.Email, secret), nil
 }

@@ -10,9 +10,9 @@
 //     lines. Debounce-friendly: pure function of the body, callable per keystroke.
 //
 //   - GET /editor/meta-schema  — the embedded formal JSON Schema meta-schema
-//     (Draft 2020-12, pkg/schema/appitools.schema.json), for the editor's
+//     (Draft 2020-12, pkg/schema/appximo.schema.json), for the editor's
 //     client-side STRUCTURAL layer (CodeMirror autocompletion/hover/diagnostics).
-//     Same bytes as `appitools meta-schema`; cacheable.
+//     Same bytes as `appximo meta-schema`; cacheable.
 package editorui
 
 import (
@@ -20,7 +20,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // validateBodyCap bounds the schema document accepted by POST /editor/validate —

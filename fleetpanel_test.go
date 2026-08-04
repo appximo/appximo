@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"net/http"
@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/shutdown"
+	"github.com/appximo/appximo/pkg/shutdown"
 )
 
 // The fleet console is gated by the fleet-operator key with a UNIFORM 404 on
@@ -41,7 +41,7 @@ func TestFleetConsoleAuthUniform404(t *testing.T) {
 	}
 
 	// The right key opens the console page and the inventory API.
-	if rec := get(enabled, "/fleet", "fleet-op-key-0123456789"); rec.Code != 200 || !strings.Contains(rec.Body.String(), "Appitools — Fleet") {
+	if rec := get(enabled, "/fleet", "fleet-op-key-0123456789"); rec.Code != 200 || !strings.Contains(rec.Body.String(), "Appximo — Fleet") {
 		t.Fatalf("console with key: got %d", rec.Code)
 	}
 	if rec := get(enabled, "/fleet/api/apps", "fleet-op-key-0123456789"); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"fleet_apps":0`) {

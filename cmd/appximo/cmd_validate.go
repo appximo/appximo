@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 	"github.com/spf13/cobra"
 )
 
 var validateCmd = &cobra.Command{
 	Use:   "validate [archivo]",
-	Short: "Valida un schema JSON de Appitools (semántico; --json = reporte unificado LLM-friendly)",
+	Short: "Valida un schema JSON de Appximo (semántico; --json = reporte unificado LLM-friendly)",
 	Long: `Validates a schema file. By default it runs the Go semantic validator (the
 authority) and prints human-readable errors.
 

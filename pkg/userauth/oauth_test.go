@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/tenant"
 )
 
 // fakeProvider is an httptest OAuth provider: a /token endpoint that returns a

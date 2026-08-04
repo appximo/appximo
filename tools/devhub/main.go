@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/miguelangel/appitools/tools/devhub/api"
-	"github.com/miguelangel/appitools/tools/devhub/secrets"
+	"github.com/appximo/appximo/tools/devhub/api"
+	"github.com/appximo/appximo/tools/devhub/secrets"
 )
 
 // benchSchema is the SQLite DDL for the statistics store. Embedded here (db/ is a
@@ -18,7 +18,7 @@ import (
 var benchSchema string
 
 func main() {
-	repoDir := os.Getenv("APPITOOLS_DIR")
+	repoDir := os.Getenv("APPXIMO_DIR")
 	if repoDir == "" {
 		repoDir = "/root/appitools"
 	}

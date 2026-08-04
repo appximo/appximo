@@ -16,8 +16,8 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/outbox"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/outbox"
 )
 
 // startPostgres spins up a throwaway Postgres container for each test run.

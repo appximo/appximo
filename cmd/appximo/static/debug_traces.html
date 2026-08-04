@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Appitools — Trace Explorer</title>
+<title>Appximo — Trace Explorer</title>
 <style>
   :root{--bg:#0f1115;--panel:#171a21;--line:#262b36;--fg:#e6e9ef;--muted:#8b93a7;}
   *{box-sizing:border-box}
@@ -204,8 +204,8 @@ function render(traces){
 async function load(){
   const tenant=$("tenant").value.trim(), key=$("key").value, mode=$("mode").value;
   if(!tenant){ $("status").textContent="enter a tenant"; return; }
-  localStorage.setItem("appitools_admin_key", key);
-  localStorage.setItem("appitools_tenant", tenant);
+  localStorage.setItem("appximo_admin_key", key);
+  localStorage.setItem("appximo_tenant", tenant);
   const url = `/debug/tenant/${encodeURIComponent(tenant)}`+(mode==="slow"?"?traces=slow":"");
   $("status").textContent="loading…";
   try{
@@ -228,8 +228,8 @@ renderLegend();
 // Read the admin key from the URL (?key=...) so the page opens directly in a
 // browser; fall back to the last value used. It feeds every internal fetch.
 const urlKey = new URLSearchParams(location.search).get("key") || "";
-$("key").value = urlKey || localStorage.getItem("appitools_admin_key") || "";
-$("tenant").value = new URLSearchParams(location.search).get("tenant")||localStorage.getItem("appitools_tenant")||"";
+$("key").value = urlKey || localStorage.getItem("appximo_admin_key") || "";
+$("tenant").value = new URLSearchParams(location.search).get("tenant")||localStorage.getItem("appximo_tenant")||"";
 $("load").onclick = load;
 $("mode").onchange = load;
 $("auto").onchange = setAuto;

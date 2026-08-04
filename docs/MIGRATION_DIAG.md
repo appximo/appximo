@@ -35,7 +35,7 @@
 > - **Gate de aprobación de destructivas:** CERRADO (MIG-F1-S3) — ver #6/#7 arriba (dry-run
 >   con impacto + aprobación enumerada explícita; default gateado, worker no auto-aprueba).
 > - **#8 (orquestador multi-tenant):** CERRADO (MIG-F1-S4) — `migration.RunFanout` +
->   `appitools migrate --all-tenants`/`--tenants` aplican un cambio de schema a los N tenants
+>   `appximo migrate --all-tenants`/`--tenants` aplican un cambio de schema a los N tenants
 >   de forma RESILIENTE (un tenant que falla NO aborta a los sanos; se registra en
 >   `public.migration_log` y se reporta) y REANUDABLE (re-correr salta los ya migrados —
 >   diff vacío = no-op — y reintenta los fallidos; el diff idempotente hace que "reanudar"
@@ -80,7 +80,7 @@
 
 ## TL;DR
 
-**Appitools no tiene un sistema de migraciones. Tiene un _convergedor_ de tablas
+**Appximo no tiene un sistema de migraciones. Tiene un _convergedor_ de tablas
 idempotente.** El DDL que aplica al evolucionar un schema se reduce a exactamente dos
 operaciones, ambas aditivas y "si no existe":
 
@@ -413,7 +413,7 @@ reporte de progreso y reanudable (idempotente ⇒ reintentable sin daño).
 nativo** — su datasource es single-schema y aplicar a N tenants es manual/externo (loop +
 reconexión; `multiSchema` cubre solo un set fijo declarado, no un fan-out dinámico por
 tenant); Django lo hace secuencial y pesado (una migración por tenant, orquestada por el
-usuario con django-tenants). Appitools, por diseño, ya es schema-per-tenant
+usuario con django-tenants). Appximo, por diseño, ya es schema-per-tenant
 con DDL convergente — "migrar N tenants de forma segura, idempotente y reanudable" es una
 capacidad que le sale natural y que los ORMs maduros manejan mal.
 
@@ -462,9 +462,9 @@ capacidad que le sale natural y que los ORMs maduros manejan mal.
 
 ## Comparación honesta vs Prisma / Doctrine / Django
 
-**Por debajo de los ORMs maduros (hoy Appitools no compite en migraciones):**
+**Por debajo de los ORMs maduros (hoy Appximo no compite en migraciones):**
 - Sin historial/versionado de migraciones (Prisma `_prisma_migrations`, Django `django_migrations`,
-  Doctrine `migration_versions`). Appitools no recuerda qué se aplicó.
+  Doctrine `migration_versions`). Appximo no recuerda qué se aplicó.
 - Sin _diff_/plan: no genera ni muestra el SQL del cambio antes de aplicarlo.
 - Sin detección de rename, sin _down_/rollback, sin backfill, sin guard de cambios destructivos.
 - Sin FK ni `onDelete`. Sin `DROP COLUMN`, sin `ALTER … TYPE`, sin `RENAME`.
@@ -473,14 +473,14 @@ capacidad que le sale natural y que los ORMs maduros manejan mal.
   en vez de aceptarlo callado.
 
 **A la par:**
-- Agregar una **columna nullable bajo tráfico en vivo** (zero-downtime additive): Appitools lo
+- Agregar una **columna nullable bajo tráfico en vivo** (zero-downtime additive): Appximo lo
   hace limpio e idempotente (`ADD COLUMN IF NOT EXISTS`), igual que los maduros — y su
   idempotencia `IF NOT EXISTS` es de hecho cómoda para convergencia/reintentos.
 
 **Donde podría superarlos:**
 - **Migración multi-tenant** (schema-per-tenant + DDL idempotente + advisory lock per-tenant):
   estructuralmente mejor posicionado que Prisma (sin fan-out multi-tenant nativo; datasource
-  single-schema) y que Django (secuencial/pesado). Es el terreno donde Appitools puede ganar.
+  single-schema) y que Django (secuencial/pesado). Es el terreno donde Appximo puede ganar.
 - **`lock_timeout` + reintento por defecto** en el DDL generado: una protección de producción
   que casi ningún ORM aplica de fábrica, y que aquí sale gratis porque el SQL es generado.
 
@@ -490,9 +490,9 @@ capacidad que le sale natural y que los ORMs maduros manejan mal.
 
 ```bash
 # Engine-2 (plano de datos en :8090; el control plane :9090 lo sirve engine-1, DB compartido)
-set -a; source /root/.appitools-secrets-dev; set +a
-OBS_DB_PATH=/tmp/migdiag/obs2.db APPITOOLS_SYNTHETIC=off APPITOOLS_ENV=production \
-  ./appitools-dev serve --schema /tmp/migdiag/base.json --port 8090 &
+set -a; source .env.dev; set +a
+OBS_DB_PATH=/tmp/migdiag/obs2.db APPXIMO_SYNTHETIC=off APPXIMO_ENV=production \
+  ./appximo-dev serve --schema /tmp/migdiag/base.json --port 8090 &
 
 # Por caso: registrar tenant con base.json vía :9090, poblar vía API :8090,
 # PUT /tenants/{id}/schema con el schema modificado, e inspeccionar con:

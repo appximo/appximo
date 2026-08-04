@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/observability"
+	"github.com/appximo/appximo/pkg/observability"
 )
 
 // The /debug/traces HTML route accepts auth via ?key= OR X-Admin-Key (so it opens

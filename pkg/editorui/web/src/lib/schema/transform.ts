@@ -1,5 +1,5 @@
 // Lossless conversion between the engine's MAP form (APISchema — what the engine
-// consumes and `appitools validate` accepts) and the editor's array-shaped MODEL
+// consumes and `appximo validate` accepts) and the editor's array-shaped MODEL
 // (SchemaModel). This is the conceptual sibling of the engine's MapToIR/IRToMap
 // (pkg/aigen/ir.go): arbitrary-keyed maps (resources, fields, relations) become
 // ordered arrays carrying their key as `name`, so the UI can address them by
@@ -36,7 +36,7 @@ export function schemaToModel(schema: APISchema): SchemaModel {
 		entities.push(resourceToEntity(name, resources[name]));
 	}
 	return {
-		$schema: schema.$schema ?? 'https://appitools.dev/schema/v1',
+		$schema: schema.$schema ?? 'https://appximo.com/schema/v1',
 		version: schema.version ?? '1',
 		name: schema.name ?? 'untitled-api',
 		entities,

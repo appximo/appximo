@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/logging"
-	"github.com/miguelangel/appitools/scripts"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/logging"
+	"github.com/appximo/appximo/scripts"
 	"github.com/spf13/cobra"
 )
 
@@ -17,7 +17,7 @@ var backupCmd = &cobra.Command{
 	Long: `Runs pg_dump --format=custom --compress=9 for one tenant (--tenant) or for
 every tenant listed in public.tenants. Connection comes from DATABASE_URL.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		logging.Init(os.Getenv("APPITOOLS_ENV"))
+		logging.Init(os.Getenv("APPXIMO_ENV"))
 
 		tenantID, _ := cmd.Flags().GetString("tenant")
 		outputDir, _ := cmd.Flags().GetString("out")
@@ -46,6 +46,6 @@ every tenant listed in public.tenants. Connection comes from DATABASE_URL.`,
 
 func init() {
 	backupCmd.Flags().String("tenant", "", "tenant ID to back up (empty = all tenants)")
-	backupCmd.Flags().String("out", "/tmp/appitools-backups", "output directory for dump files")
+	backupCmd.Flags().String("out", "/tmp/appximo-backups", "output directory for dump files")
 	rootCmd.AddCommand(backupCmd)
 }

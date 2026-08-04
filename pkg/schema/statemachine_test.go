@@ -3,7 +3,7 @@ package schema_test
 import (
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // G5 unit tests for the state-machine compile + body checks (no DB). The end-to-end

@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"net/http"
@@ -58,7 +58,7 @@ type compiledApp struct {
 // nil — S2 always has the boot app.
 func NewRegistry(def *compiledApp, domains map[string]*compiledApp) *Registry {
 	if def == nil {
-		panic("appitools: NewRegistry requires a default app")
+		panic("appximo: NewRegistry requires a default app")
 	}
 	if domains == nil {
 		domains = map[string]*compiledApp{}

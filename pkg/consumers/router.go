@@ -6,7 +6,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/miguelangel/appitools/pkg/worker"
+	"github.com/appximo/appximo/pkg/worker"
 )
 
 // Router is the COEXISTENCE mechanism for a shared outbox carrying multiple event

@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/extensions"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/tests/helpers"
+	"github.com/appximo/appximo/pkg/extensions"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/tests/helpers"
 )
 
 // TestWebhookScenario exercises the ERP webhook capa end-to-end. The engine fully
@@ -43,8 +43,8 @@ func TestWebhookScenario(t *testing.T) {
 		b, _ := io.ReadAll(r.Body)
 		mu.Lock()
 		gotBody = b
-		gotSig = r.Header.Get("X-Appitools-Signature")
-		gotEvent = r.Header.Get("X-Appitools-Event")
+		gotSig = r.Header.Get("X-Appximo-Signature")
+		gotEvent = r.Header.Get("X-Appximo-Event")
 		mu.Unlock()
 		select {
 		case received <- struct{}{}:
@@ -56,7 +56,7 @@ func TestWebhookScenario(t *testing.T) {
 
 	// 2. Schema with an after_create webhook → the mock receptor.
 	s := &schema.APISchema{
-		Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "erp-webhook-test",
+		Schema: "https://appximo.com/schema/v1", Version: "1", Name: "erp-webhook-test",
 		Resources: map[string]schema.ResourceSchema{
 			"orders": {
 				Fields: map[string]schema.FieldDef{
@@ -108,7 +108,7 @@ func TestWebhookScenario(t *testing.T) {
 		t.Fatalf("webhook signature mismatch:\n got  %q\n want %q\n body %s", sig, wantSig, string(body))
 	}
 	if event != "after_create" {
-		t.Errorf("X-Appitools-Event = %q, want %q", event, "after_create")
+		t.Errorf("X-Appximo-Event = %q, want %q", event, "after_create")
 	}
 	t.Logf("webhook delivered with valid HMAC-SHA256 (event=%s, %d-byte body)", event, len(body))
 

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/miguelangel/appitools/tools/devhub/sshx"
+	"github.com/appximo/appximo/tools/devhub/sshx"
 )
 
 // Deploy panel (S47): the PRIMER deploy protocol as an SSE pipeline.
@@ -153,22 +153,22 @@ func DeployHandler(repoDir string) http.HandlerFunc {
 			fail("build", "scripts/build-engine.sh not found or not executable — canonical build required (smoke asserts version==SHA; direct go build embeds no version stamp)")
 			return
 		}
-		deployEmit(sw, "build", "scripts/build-engine.sh /tmp/appitools-deploy "+shortSHA+" "+sha)
+		deployEmit(sw, "build", "scripts/build-engine.sh /tmp/appximo-deploy "+shortSHA+" "+sha)
 		build := exec.CommandContext(r.Context(), "sh", "scripts/build-engine.sh",
-			"/tmp/appitools-deploy", shortSHA, sha)
+			"/tmp/appximo-deploy", shortSHA, sha)
 		build.Dir = repoDir
 		build.Env = append(os.Environ(), "GO="+goBin())
 		if out, err := build.CombinedOutput(); err != nil {
 			fail("build", strings.TrimSpace(string(out)))
 			return
 		}
-		fi, _ := os.Stat("/tmp/appitools-deploy")
+		fi, _ := os.Stat("/tmp/appximo-deploy")
 		deployEmit(sw, "build", fmt.Sprintf("✓ binario %0.1f MB", float64(fi.Size())/1024/1024))
 
 		// 3 — push as <binary>.new (mv later: cp over a running binary = ETXTBSY).
 		newPath := srv.BinaryPath + ".new"
 		deployEmit(sw, "push", "push → "+srv.Name+":"+newPath)
-		if err := sshx.Push(&srv.Server, "/tmp/appitools-deploy", newPath); err != nil {
+		if err := sshx.Push(&srv.Server, "/tmp/appximo-deploy", newPath); err != nil {
 			fail("push", err.Error())
 			return
 		}

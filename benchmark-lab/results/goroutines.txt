@@ -25,7 +25,7 @@ goroutine profile: total 28
 #	0x7047c4	net/http.(*conn).serve+0x664				/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.0.linux-amd64/src/net/http/server.go:2109
 
 1 @ 0x48194e 0x416a8e 0x416632 0xf571f4 0x489641
-#	0xf571f3	github.com/miguelangel/appitools/pkg/cache.(*ResponseCache).cleanupLoop+0x93	/root/appitools/pkg/cache/response_cache.go:138
+#	0xf571f3	github.com/appximo/appximo/pkg/cache.(*ResponseCache).cleanupLoop+0x93	/root/appitools/pkg/cache/response_cache.go:138
 
 1 @ 0x48194e 0x4443d7 0x480b25 0x4fbf67 0x4fd259 0x4fd247 0x5c4545 0x5d12a5 0x7a4f4b 0x4d378e 0x75e9b1 0x7671b9 0x8d508b 0x8d51a6 0x8d8625 0x8ee9db 0xfbec38 0x489641
 #	0x480b24	internal/poll.runtime_pollWait+0x84					/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.0.linux-amd64/src/runtime/netpoll.go:351
@@ -42,7 +42,7 @@ goroutine profile: total 28
 #	0x8d51a5	github.com/jackc/pgx/v5/pgconn.(*PgConn).receiveMessage+0x25		/root/go/pkg/mod/github.com/jackc/pgx/v5@v5.9.2/pgconn/pgconn.go:619
 #	0x8d8624	github.com/jackc/pgx/v5/pgconn.(*PgConn).WaitForNotification+0x304	/root/go/pkg/mod/github.com/jackc/pgx/v5@v5.9.2/pgconn/pgconn.go:1112
 #	0x8ee9da	github.com/jackc/pgx/v5.(*Conn).WaitForNotification+0x9a		/root/go/pkg/mod/github.com/jackc/pgx/v5@v5.9.2/conn.go:425
-#	0xfbec37	main.startCacheInvalidator+0x3d7					/root/appitools/cmd/appitools/cmd_serve.go:208
+#	0xfbec37	main.startCacheInvalidator+0x3d7					/root/appitools/cmd/appximo/cmd_serve.go:208
 
 1 @ 0x48194e 0x4443d7 0x480b25 0x4fbf67 0x50138c 0x50137a 0x5c63e9 0x5da39b 0x5d9570 0x70a0ac 0x709c92 0xfbd13f 0xfbd141 0xc06fc7 0xc07925 0xfbf21a 0xfbf20f 0x44bafd 0x489641
 #	0x480b24	internal/poll.runtime_pollWait+0x84			/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.0.linux-amd64/src/runtime/netpoll.go:351
@@ -55,11 +55,11 @@ goroutine profile: total 28
 #	0x70a0ab	net/http.(*Server).Serve+0x30b				/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.0.linux-amd64/src/net/http/server.go:3463
 #	0x709c91	net/http.(*Server).ListenAndServe+0x71			/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.0.linux-amd64/src/net/http/server.go:3389
 #	0xfbd13e	net/http.ListenAndServe+0x197e				/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.0.linux-amd64/src/net/http/server.go:3704
-#	0xfbd140	main.init.func6+0x1980					/root/appitools/cmd/appitools/cmd_serve.go:177
+#	0xfbd140	main.init.func6+0x1980					/root/appitools/cmd/appximo/cmd_serve.go:177
 #	0xc06fc6	github.com/spf13/cobra.(*Command).execute+0xae6		/root/go/pkg/mod/github.com/spf13/cobra@v1.10.2/command.go:1019
 #	0xc07924	github.com/spf13/cobra.(*Command).ExecuteC+0x464	/root/go/pkg/mod/github.com/spf13/cobra@v1.10.2/command.go:1148
 #	0xfbf219	github.com/spf13/cobra.(*Command).Execute+0x19		/root/go/pkg/mod/github.com/spf13/cobra@v1.10.2/command.go:1071
-#	0xfbf20e	main.main+0xe						/root/appitools/cmd/appitools/main.go:16
+#	0xfbf20e	main.main+0xe						/root/appitools/cmd/appximo/main.go:16
 #	0x44bafc	runtime.main+0x29c					/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.0.linux-amd64/src/runtime/proc.go:285
 
 1 @ 0x48194e 0x4443d7 0x480b25 0x4fbf67 0x50138c 0x50137a 0x5c63e9 0x5da39b 0x5d9570 0x70a0ac 0x709c92 0xfbd538 0xfbd539 0x489641
@@ -73,7 +73,7 @@ goroutine profile: total 28
 #	0x70a0ab	net/http.(*Server).Serve+0x30b			/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.0.linux-amd64/src/net/http/server.go:3463
 #	0x709c91	net/http.(*Server).ListenAndServe+0x71		/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.0.linux-amd64/src/net/http/server.go:3389
 #	0xfbd537	net/http.ListenAndServe+0xd7			/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.0.linux-amd64/src/net/http/server.go:3704
-#	0xfbd538	main.init.func6.2+0xd8				/root/appitools/cmd/appitools/cmd_serve.go:149
+#	0xfbd538	main.init.func6.2+0xd8				/root/appitools/cmd/appximo/cmd_serve.go:149
 
 1 @ 0x48194e 0x4443d7 0x480b25 0x4fbf67 0x50138c 0x50137a 0x5c63e9 0x5da39b 0x5d9570 0x70a0ac 0x709c92 0xfbdc45 0xfbdc46 0x489641
 #	0x480b24	internal/poll.runtime_pollWait+0x84		/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.0.linux-amd64/src/runtime/netpoll.go:351
@@ -86,7 +86,7 @@ goroutine profile: total 28
 #	0x70a0ab	net/http.(*Server).Serve+0x30b			/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.0.linux-amd64/src/net/http/server.go:3463
 #	0x709c91	net/http.(*Server).ListenAndServe+0x71		/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.0.linux-amd64/src/net/http/server.go:3389
 #	0xfbdc44	net/http.ListenAndServe+0xa4			/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.25.0.linux-amd64/src/net/http/server.go:3704
-#	0xfbdc45	main.init.func6.1+0xa5				/root/appitools/cmd/appitools/cmd_serve.go:103
+#	0xfbdc45	main.init.func6.1+0xa5				/root/appitools/cmd/appximo/cmd_serve.go:103
 
 1 @ 0x48194e 0x45e925 0x902ba7 0x90173d 0x489641
 #	0x902ba6	github.com/jackc/pgx/v5/pgxpool.(*Pool).backgroundHealthCheck+0xc6	/root/go/pkg/mod/github.com/jackc/pgx/v5@v5.9.2/pgxpool/pool.go:495

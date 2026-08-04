@@ -7,7 +7,7 @@ import "sort"
 //
 // ARCHIVED / EXPERIMENTAL (AI-F2-S4): the real Anthropic strict-outputs subset
 // REJECTS this schema — it caps union-typed (nullable) parameters at 16 and the
-// Appitools field grammar has ~17 optional keys, so the request errors ("too many
+// Appximo field grammar has ~17 optional keys, so the request errors ("too many
 // parameters with union types") → the generator falls back to the plain
 // validator-guided loop (the default). Kept opt-in for measurement and as the record
 // of the boundary; the transforms in ir.go are reused by the visual editor.

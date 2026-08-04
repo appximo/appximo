@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
 	"github.com/redis/go-redis/v9"
 )
 

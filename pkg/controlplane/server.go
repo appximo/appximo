@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/appximo/appximo/pkg/schema"
 	"github.com/go-chi/chi/v5"
-	"github.com/miguelangel/appitools/pkg/schema"
 )
 
 // maxControlPlaneBody caps control-plane request bodies. Schemas are bounded

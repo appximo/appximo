@@ -42,7 +42,7 @@ type AppSpec struct {
 	EnvFile string `json:"env_file,omitempty"`
 	// Env is the app's environment: DATABASE_URL, JWT_SECRET, ADMIN_KEY are
 	// REQUIRED (the engine refuses to boot without them); anything else the
-	// engine reads (APPITOOLS_*, RATE_LIMIT_*, …) may be set per app.
+	// engine reads (APPXIMO_*, RATE_LIMIT_*, …) may be set per app.
 	Env map[string]string `json:"env,omitempty"`
 
 	// mergedEnv is EnvFile+Env resolved at load (Env wins). Not serialized.
@@ -69,7 +69,7 @@ type Manifest struct {
 	StatusAddr string `json:"status_addr,omitempty"`
 	// DataDir roots per-app state the fleet assigns when the app's env does not
 	// set it: <DataDir>/<app>/obs.db, <DataDir>/<app>/files, logs. Default
-	// "/var/lib/appitools/fleet".
+	// "/var/lib/appximo/fleet".
 	DataDir string `json:"data_dir,omitempty"`
 	// OperatorKey is the FLEET-OPERATOR credential (MT-STRUCT-S5): it gates the
 	// unified fleet console (`/fleet` on the in-process runtime's process-level
@@ -78,7 +78,7 @@ type Manifest struct {
 	// ADMIN_KEY/JWT_SECRET: holding one app's keys never reveals the fleet, and
 	// the fleet key opens NO app API (per-app JWT/RBAC/admin auth still applies
 	// underneath — the S3 isolation is not bypassable from the console). Empty
-	// falls back to APPITOOLS_FLEET_OPERATOR_KEY; still empty ⇒ the console is
+	// falls back to APPXIMO_FLEET_OPERATOR_KEY; still empty ⇒ the console is
 	// DISABLED (safe by default).
 	OperatorKey string `json:"operator_key,omitempty"`
 	// OperatorAdminEmail enables the UNIFIED OPERATOR IDENTITY
@@ -87,9 +87,9 @@ type Manifest struct {
 	// never overwriting an existing account), so ONE login works on every
 	// app's /admin — without weakening the S3 isolation (each app keeps its
 	// own admin row, DB and tokens). The PASSWORD is deliberately NOT a
-	// manifest key: it comes from the APPITOOLS_FLEET_ADMIN_PASSWORD env var
+	// manifest key: it comes from the APPXIMO_FLEET_ADMIN_PASSWORD env var
 	// (an env-file, like the app secrets), so the manifest stays committable.
-	// Empty email falls back to APPITOOLS_FLEET_ADMIN_EMAIL; both empty ⇒
+	// Empty email falls back to APPXIMO_FLEET_ADMIN_EMAIL; both empty ⇒
 	// feature off (each app manages its own admins, the pre-S2 behavior).
 	OperatorAdminEmail string `json:"operator_admin_email,omitempty"`
 	// DBInstances declares the Postgres servers the console's Add-app form may
@@ -168,7 +168,7 @@ func (m *Manifest) OperatorAdmin() (string, string) {
 	if m.OperatorAdminEmail == "" {
 		return "", ""
 	}
-	return m.OperatorAdminEmail, os.Getenv("APPITOOLS_FLEET_ADMIN_PASSWORD")
+	return m.OperatorAdminEmail, os.Getenv("APPXIMO_FLEET_ADMIN_PASSWORD")
 }
 
 var appNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
@@ -201,7 +201,7 @@ func LoadManifest(path string) (*Manifest, error) {
 		m.StatusAddr = "127.0.0.1:9601"
 	}
 	if m.DataDir == "" {
-		m.DataDir = "/var/lib/appitools/fleet"
+		m.DataDir = "/var/lib/appximo/fleet"
 	}
 
 	if len(m.Apps) == 0 {
@@ -286,7 +286,7 @@ func LoadManifest(path string) (*Manifest, error) {
 	// the fleet credential must not COINCIDE with any app's credentials (a
 	// shared value would collapse the fleet level into an app level).
 	if m.OperatorKey == "" {
-		m.OperatorKey = os.Getenv("APPITOOLS_FLEET_OPERATOR_KEY")
+		m.OperatorKey = os.Getenv("APPXIMO_FLEET_OPERATOR_KEY")
 	}
 	if m.OperatorKey != "" {
 		for i := range m.Apps {
@@ -302,10 +302,10 @@ func LoadManifest(path string) (*Manifest, error) {
 	// the email without the password would silently disable the provisioning —
 	// fail loud instead, with the fix in the message.
 	if m.OperatorAdminEmail == "" {
-		m.OperatorAdminEmail = os.Getenv("APPITOOLS_FLEET_ADMIN_EMAIL")
+		m.OperatorAdminEmail = os.Getenv("APPXIMO_FLEET_ADMIN_EMAIL")
 	}
-	if m.OperatorAdminEmail != "" && os.Getenv("APPITOOLS_FLEET_ADMIN_PASSWORD") == "" {
-		return nil, fmt.Errorf("fleet: operator_admin_email %q is set but APPITOOLS_FLEET_ADMIN_PASSWORD is not — the operator admin password comes from the environment (an env-file), never the manifest", m.OperatorAdminEmail)
+	if m.OperatorAdminEmail != "" && os.Getenv("APPXIMO_FLEET_ADMIN_PASSWORD") == "" {
+		return nil, fmt.Errorf("fleet: operator_admin_email %q is set but APPXIMO_FLEET_ADMIN_PASSWORD is not — the operator admin password comes from the environment (an env-file), never the manifest", m.OperatorAdminEmail)
 	}
 
 	// DB instances (FLEET-DB-ASSIST): resolve each admin DSN from its env var.

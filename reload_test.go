@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"context"
@@ -11,14 +11,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/cache"
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/migration"
-	"github.com/miguelangel/appitools/pkg/observability"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/schemahistory"
-	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/cache"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/migration"
+	"github.com/appximo/appximo/pkg/observability"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/schemahistory"
+	"github.com/appximo/appximo/pkg/tenant"
 )
 
 // mockCPService is an in-memory controlplane.Service for unit-testing reloadHandler

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Appitools — Acceptance Test (la guía de aprendizaje del droplet, codificada)
+# Appximo — Acceptance Test (la guía de aprendizaje del droplet, codificada)
 # Smoke de aceptación end-to-end contra CUALQUIER instancia corriendo — el
 # motor pelado O una app de consumidor (OPS-8, CONSUMER-PATH-S1).
 #
@@ -21,14 +21,14 @@
 # Uso (instancia arbitraria — binario nativo, consumidor, otro host):
 #   JWT_SECRET=… ADMIN_KEY=… \
 #   BASE=http://host:8080 ADMIN=http://host:9099 \
-#   APPITOOLS_CLI=./appitools-cli SCHEMA_FILE=/etc/appitools/schema.json \
+#   APPXIMO_CLI=./appximo-cli SCHEMA_FILE=/etc/appximo/schema.json \
 #   ADMIN_ROLE=dueno \                                # el rol "ancho" del schema
 #   PSQL_CMD="docker exec -i mi-pg psql -U user -d db" \  # opcional
 #   bash scripts/acceptance-test.sh
 #
 # Overrides:
 #   BASE / ADMIN     data plane / control plane (default localhost:8080/9090)
-#   APPITOOLS_CLI    cómo invocar el CLI appitools (default: via compose exec)
+#   APPXIMO_CLI    cómo invocar el CLI appximo (default: via compose exec)
 #   SCHEMA_FILE      schema local en vez de leerlo del contenedor engine
 #   ADMIN_ROLE       rol de amplios permisos del schema servido [default admin]
 #   TENANT_A/B       tenants del smoke [default acme/globex] — si este run los
@@ -47,8 +47,8 @@ TENANT_A="${TENANT_A:-acme}"      # tenant principal del smoke
 TENANT_B="${TENANT_B:-globex}"    # segundo tenant (aislamiento)
 ADMIN="${ADMIN:-http://localhost:9090}"
 ADMIN_ROLE="${ADMIN_ROLE:-admin}"
-APPITOOLS_CLI="${APPITOOLS_CLI:-docker compose exec -T engine appitools}"
-PSQL_CMD="${PSQL_CMD-docker compose exec -T db psql -U appitools -d appitools}"
+APPXIMO_CLI="${APPXIMO_CLI:-docker compose exec -T engine appximo}"
+PSQL_CMD="${PSQL_CMD-docker compose exec -T db psql -U appximo -d appximo}"
 
 ok()   { PASS=$((PASS+1)); echo -e "${G}✓ PASS${N}  $1"; }
 bad()  { FAIL=$((FAIL+1)); echo -e "${R}✗ FAIL${N}  $1"; }
@@ -61,10 +61,10 @@ hdr "SETUP"
 [ -f .env ] && { set -a; source .env; set +a; }
 : "${JWT_SECRET:?JWT_SECRET requerido (en .env o en el entorno)}"
 : "${ADMIN_KEY:?ADMIN_KEY requerido (en .env o en el entorno)}"
-TOKEN=$($APPITOOLS_CLI token --secret "$JWT_SECRET" --tenant "$TENANT_A" --role "$ADMIN_ROLE" 2>/dev/null | tail -1)
+TOKEN=$($APPXIMO_CLI token --secret "$JWT_SECRET" --tenant "$TENANT_A" --role "$ADMIN_ROLE" 2>/dev/null | tail -1)
 [ -n "$TOKEN" ] && ok "token $ADMIN_ROLE@$TENANT_A minteado" || { bad "no se pudo mintear token"; exit 1; }
 A_AUTH="Authorization: Bearer $TOKEN"; A_HOST="Host: $TENANT_A.localhost"
-if [ -n "${SCHEMA_FILE:-}" ]; then SCH=$(cat "$SCHEMA_FILE"); else SCH=$($APPITOOLS_CLI sh -c 'cat /etc/appitools/schema.json' 2>/dev/null || docker compose exec -T engine cat /etc/appitools/schema.json); fi
+if [ -n "${SCHEMA_FILE:-}" ]; then SCH=$(cat "$SCHEMA_FILE"); else SCH=$($APPXIMO_CLI sh -c 'cat /etc/appximo/schema.json' 2>/dev/null || docker compose exec -T engine cat /etc/appximo/schema.json); fi
 echo "$SCH" | python3 -c "import sys,json;json.load(sys.stdin)" 2>/dev/null && ok "schema fuente legible" || { bad "no pude leer el schema (SCHEMA_FILE o contenedor)"; exit 1; }
 
 # Detección de superficie: ¿la app SERVIDA expone el contrato quickstart?
@@ -158,12 +158,12 @@ hdr "7. SEGURIDAD"
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/$RES")" = "401" ] && ok "sin token → 401 (/api/$RES)" || bad "sin token (/api/$RES)"
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/$RES" -H "$A_AUTH" -H "Host: $TENANT_B.localhost")" = "401" ] && ok "cross-tenant → 401" || bad "cross-tenant"
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/metrics")" = "401" ] && ok "/metrics sin key → 401" || bad "/metrics sin key"
-curl -s -H "X-Admin-Key: $ADMIN_KEY" "$BASE/metrics" | grep -q appitools_requests_total && ok "/metrics con key" || bad "/metrics con key"
+curl -s -H "X-Admin-Key: $ADMIN_KEY" "$BASE/metrics" | grep -q appximo_requests_total && ok "/metrics con key" || bad "/metrics con key"
 
 # ── 8. RBAC: rol viewer (contrato quickstart) ───────────────────────────────
 hdr "8. RBAC VIEWER"
 if [ "$QS" = "yes" ]; then
-TV=$($APPITOOLS_CLI token --secret "$JWT_SECRET" --tenant "$TENANT_A" --role viewer 2>/dev/null | tail -1)
+TV=$($APPXIMO_CLI token --secret "$JWT_SECRET" --tenant "$TENANT_A" --role viewer 2>/dev/null | tail -1)
 V_AUTH="Authorization: Bearer $TV"
 HAS_VIEWER=$(echo "$SCH" | python3 -c "import sys,json;print('yes' if 'viewer' in json.load(sys.stdin).get('rbac',{}).get('roles',{}) else 'no')")
 if [ "$HAS_VIEWER" = "yes" ]; then
@@ -179,7 +179,7 @@ else
 fi
 else
 # El deny-by-default SÍ es verificable genéricamente: un rol inventado → 403.
-TV=$($APPITOOLS_CLI token --secret "$JWT_SECRET" --tenant "$TENANT_A" --role rol_inexistente_$RUN_ID 2>/dev/null | tail -1)
+TV=$($APPXIMO_CLI token --secret "$JWT_SECRET" --tenant "$TENANT_A" --role rol_inexistente_$RUN_ID 2>/dev/null | tail -1)
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/$RES" -H "Authorization: Bearer $TV" -H "$A_HOST")" = "403" ] \
   && ok "deny-by-default: rol fuera del schema → 403 (/api/$RES)" || bad "rol inventado NO dio 403"
 skip_qs "8 (allowlist de campos del rol viewer de tasks)"
@@ -192,7 +192,7 @@ C=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$ADMIN/tenants" -H "X-Admin-
   -d "{\"tenant_id\":\"$TENANT_B\",\"display_name\":\"Globex\",\"email\":\"g@globex.com\",\"plan\":\"free\",\"schema\":$SCH}")
 case "$C" in 200|201) CREATED_B="yes"; ok "tenant $TENANT_B creado (se limpia al final)";; 409) ok "tenant $TENANT_B ya existía (409)";; *) bad "$TENANT_B → $C";; esac
 if [ "$QS" = "yes" ]; then
-TG=$($APPITOOLS_CLI token --secret "$JWT_SECRET" --tenant "$TENANT_B" --role "$ADMIN_ROLE" 2>/dev/null | tail -1)
+TG=$($APPXIMO_CLI token --secret "$JWT_SECRET" --tenant "$TENANT_B" --role "$ADMIN_ROLE" 2>/dev/null | tail -1)
 curl -s -o /dev/null -X POST "$BASE/api/tasks" -H "Authorization: Bearer $TG" -H "Host: $TENANT_B.localhost" -H "Content-Type: application/json" -d "{\"title\":\"isolated-secret-$RUN_ID\",\"status\":\"open\"}"
 BSEES=$(curl -sg "$BASE/api/tasks?filter[title][partial]=isolated-secret-$RUN_ID" -H "Authorization: Bearer $TG" -H "Host: $TENANT_B.localhost" | python3 -c "import sys,json;print(len(json.load(sys.stdin)['data']))" 2>/dev/null)
 [ "$BSEES" = "1" ] || bad "sanity: $TENANT_B no ve su propia fila (test de leak inválido)"
@@ -285,7 +285,7 @@ cleanup_tenant() { # cleanup_tenant ID CREATED_FLAG
     -H "X-Admin-Key: $ADMIN_KEY" -H "Content-Type: application/json" -d "{\"confirm\":\"$1\"}")
   case "$code" in
     200|204) ok "tenant de smoke $1 eliminado (lo creó este run)";;
-    *)       info "no pude borrar el tenant de smoke $1 (HTTP $code) — borralo con: appitools-cli tenant delete $1 --yes";;
+    *)       info "no pude borrar el tenant de smoke $1 (HTTP $code) — borralo con: appximo-cli tenant delete $1 --yes";;
   esac
 }
 cleanup_tenant "$TENANT_A" "$CREATED_A"

@@ -9,13 +9,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/platformadmin"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/platformadmin"
 )
 
 // DEV-CLEANUP-S1: tenant management from the trusted machine context (this CLI
-// with DATABASE_URL — the same trust boundary as `appitools admin create` and
+// with DATABASE_URL — the same trust boundary as `appximo admin create` and
 // the X-Admin-Key). `list` is the inventory (what would the deploy modal
 // show?); `delete` is the SAME destructive path the admin API uses
 // (platformadmin.DeleteTenant: DROP SCHEMA CASCADE + every control-plane row —

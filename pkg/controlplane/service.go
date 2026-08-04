@@ -8,11 +8,11 @@ import (
 	"log"
 	"strings"
 
+	"github.com/appximo/appximo/pkg/migration"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/schemahistory"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/migration"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/schemahistory"
 	"github.com/redis/go-redis/v9"
 )
 

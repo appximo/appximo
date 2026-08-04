@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/schema"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -47,7 +47,7 @@ func startPG(t *testing.T) (*pgxpool.Pool, func()) {
 }
 
 func mkSchema(resources map[string]schema.ResourceSchema) *schema.APISchema {
-	return &schema.APISchema{Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "t", Resources: resources}
+	return &schema.APISchema{Schema: "https://appximo.com/schema/v1", Version: "1", Name: "t", Resources: resources}
 }
 
 // TestIntegration_ProvisionEvolveNoop walks the full safety net:

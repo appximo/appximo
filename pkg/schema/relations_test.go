@@ -8,7 +8,7 @@ import (
 
 func relValidSchema() *APISchema {
 	return &APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "sales",
 		Resources: map[string]ResourceSchema{

@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // ErrAggForbiddenField signals that an aggregate referenced a field the role may

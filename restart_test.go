@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"os"
@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/platformadmin"
+	"github.com/appximo/appximo/pkg/platformadmin"
 
 	"errors"
 )
 
 const validBootSchema = `{
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "restart-test",
   "resources": {
@@ -21,7 +21,7 @@ const validBootSchema = `{
 }`
 
 const validBootSchemaV2 = `{
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "restart-test",
   "resources": {

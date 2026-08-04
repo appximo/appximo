@@ -11,7 +11,7 @@ import (
 // DefaultSignedURLTTL is how long an engine-minted download token (and an S3
 // presigned URL) stays valid. Short by design (OWASP / the PocketBase pattern:
 // a protected-file URL is a capability — it must expire fast); configurable
-// via APPITOOLS_FILES_TOKEN_TTL.
+// via APPXIMO_FILES_TOKEN_TTL.
 const DefaultSignedURLTTL = 180 * time.Second
 
 // ErrBadToken covers every download-token failure — malformed, bad signature,

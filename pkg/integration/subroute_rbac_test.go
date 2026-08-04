@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // SEC-AUDIT-V1 Hallazgo 2: the relation subresource route GET /api/{res}/{id}/{rel}
@@ -23,7 +23,7 @@ import (
 // allowlist that excludes `secret`.
 func subrouteSchema() *schema.APISchema {
 	return &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "subroute-sec",
 		Resources: map[string]schema.ResourceSchema{

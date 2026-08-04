@@ -99,7 +99,7 @@
 					</div>
 					<p class="hint-sm">
 						No super-admin yet? Bootstrap one with
-						<code>appitools admin create</code>.
+						<code>appximo admin create</code>.
 					</p>
 				{:else if deploy.step === 'mfa'}
 					<!-- ── MFA ── -->

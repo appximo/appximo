@@ -8,7 +8,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/miguelangel/appitools/pkg/worker"
+	"github.com/appximo/appximo/pkg/worker"
 )
 
 // DefaultEmailTopic is the outbox topic the EmailProcessor consumes. A producer
@@ -47,7 +47,7 @@ type EmailProcessor struct {
 	sender EmailSender
 	tmpls  *templateSet
 	topic  string
-	domain string // Message-ID domain, e.g. "appitools.local"
+	domain string // Message-ID domain, e.g. "appximo.local"
 	log    zerolog.Logger
 }
 
@@ -59,7 +59,7 @@ func NewEmailProcessor(sender EmailSender, log zerolog.Logger) *EmailProcessor {
 		sender: sender,
 		tmpls:  newBuiltinTemplates(),
 		topic:  DefaultEmailTopic,
-		domain: "appitools.local",
+		domain: "appximo.local",
 		log:    log,
 	}
 }

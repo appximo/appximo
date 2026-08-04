@@ -1,4 +1,4 @@
-# `verify-production` — measure YOUR Appitools deploy
+# `verify-production` — measure YOUR Appximo deploy
 
 > Don't take our numbers. Run this against your own server and get your own.
 
@@ -31,7 +31,7 @@ but the honest numbers come from a second box.
 On the **load generator** (needs `k6`, `python3`, `curl`, and ssh to the server):
 
 ```bash
-git clone <this repo> && cd appitools/scripts/verify-production
+git clone <this repo> && cd appximo/scripts/verify-production
 
 bash run-all.sh \
   --target=https://api.example.com \
@@ -175,7 +175,7 @@ flapping service is not scored as recovered.
 ### `stats.py` / `report.py`
 
 Pure standard library — no numpy, no pip — because the suite has to run on a box
-where you just installed Appitools.
+where you just installed Appximo.
 
 `stats.py` does percentiles, distribution-free bootstrap CIs for the median
 (deterministic seed, so re-analysing the same data gives the same CI), and
@@ -221,12 +221,12 @@ this repo takes the same idea: **name the target explicitly; nothing assumes
 | `--server-ssh=HOST` + `VP_SSH_OPTS` | `chaos.sh`, `run-all.sh` | where faults are injected; extra ssh options (e.g. a ControlPath) via the env var |
 | `--path='/api/…?…'` | `load.sh` | the READ endpoint on a **consumer** app (the default `/api/orders` only exists on the bench schema; the pre-flight refuses a 404 instead of measuring it) |
 | `VP_DB_PROBE_PATH='/api/…'` | `chaos.sh` | a **DB-touching** path on this deploy, so the database cases (postgres-stop, pool-exhaust) measure real user impact — on a consumer app `/healthz` proves nothing |
-| `--token=JWT` | `load.sh`, `chaos.sh` | auth for the probed endpoints (mint with `appitools-cli token`) |
+| `--token=JWT` | `load.sh`, `chaos.sh` | auth for the probed endpoints (mint with `appximo-cli token`) |
 | `--origin-ip=IP` | `load.sh`, `chaos.sh` | pin the hostname past a CDN/proxy in front |
-| `footprint.sh` | (runs ON the server) | needs `lib.sh` beside it; `--service=NAME` if the unit is not `appitools` |
+| `footprint.sh` | (runs ON the server) | needs `lib.sh` beside it; `--service=NAME` if the unit is not `appximo` |
 
 The **acceptance smoke** (`scripts/acceptance-test.sh`, repo root) follows the
-same rule with env vars: `BASE` / `ADMIN` (data/control plane), `APPITOOLS_CLI`
+same rule with env vars: `BASE` / `ADMIN` (data/control plane), `APPXIMO_CLI`
 (how to invoke the ops CLI), `SCHEMA_FILE` (the schema the app actually
 serves), `ADMIN_ROLE` (the broad role that schema declares — a consumer app has
 no `admin`), `PSQL_CMD` (optional physical checks), `TENANT_A`/`TENANT_B`

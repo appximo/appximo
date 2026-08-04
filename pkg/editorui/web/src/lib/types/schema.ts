@@ -1,8 +1,8 @@
 // Engine schema types — a faithful TypeScript mirror of pkg/schema/types.go.
 //
-// These types are the CONTRACT between the editor and the Appitools engine: the
+// These types are the CONTRACT between the editor and the Appximo engine: the
 // editor imports/exports exactly this shape (the "map form" the engine consumes
-// and `appitools validate` accepts). Every key here is audited against types.go
+// and `appximo validate` accepts). Every key here is audited against types.go
 // and the AGENTS.md integration guide. Do NOT invent keys the engine rejects —
 // the validator is strict-key.
 //
@@ -176,7 +176,7 @@ export interface RBACPolicy {
 	roles: Record<string, RolePolicy>;
 }
 
-/** The top-level Appitools schema (map form). Mirrors schema.APISchema. */
+/** The top-level Appximo schema (map form). Mirrors schema.APISchema. */
 export interface APISchema {
 	$schema: string;
 	version: string;
@@ -187,7 +187,7 @@ export interface APISchema {
 	workflows?: Record<string, unknown>;
 }
 
-export const SCHEMA_URL = 'https://appitools.dev/schema/v1';
+export const SCHEMA_URL = 'https://appximo.com/schema/v1';
 
 /** Resource/field identifier rule enforced by the engine at load. */
 export const IDENT_RE = /^[a-z][a-z0-9_]*$/;

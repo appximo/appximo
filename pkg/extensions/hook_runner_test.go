@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/extensions"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/extensions"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 func newRunner() *extensions.HookRunner {

@@ -2,7 +2,7 @@
 // SAME origin the panel is served from, so paths are relative. The platform JWT is
 // attached as a Bearer header. A 401/403 surfaces as an ApiError the caller maps.
 
-const TOKEN_KEY = "appitools_admin_token"
+const TOKEN_KEY = "appximo_admin_token"
 
 export function getToken() {
   try { return localStorage.getItem(TOKEN_KEY) || "" } catch { return "" }

@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"context"
@@ -11,25 +11,25 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/observability"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/observability"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // canaryResolver builds the synthetic monitor's API canary from the LOADED
 // schema instead of hardcoded values: the probed resource is the first resource
-// (sorted) unless APPITOOLS_SYNTHETIC_RESOURCE overrides it, the role is the
-// first schema role that can read it, and the tenant is APPITOOLS_SYNTHETIC_TENANT
+// (sorted) unless APPXIMO_SYNTHETIC_RESOURCE overrides it, the role is the
+// first schema role that can read it, and the tenant is APPXIMO_SYNTHETIC_TENANT
 // or — lazily — the first registered tenant in public.tenants. Until a tenant
 // exists the canary reports "pending"; once found, the tenant is cached and the
 // JWT re-minted at half its 24h life so the canary survives long-running processes.
 func canaryResolver(pool *pgxpool.Pool, s *schema.APISchema, jwtSecret string, port int) func(context.Context) (*observability.Check, string) {
-	resource := os.Getenv("APPITOOLS_SYNTHETIC_RESOURCE")
+	resource := os.Getenv("APPXIMO_SYNTHETIC_RESOURCE")
 	if resource == "" {
 		resource = firstResourceName(s)
 	}
 	role := canaryRole(s, resource)
-	envTenant := os.Getenv("APPITOOLS_SYNTHETIC_TENANT")
+	envTenant := os.Getenv("APPXIMO_SYNTHETIC_TENANT")
 
 	var mu sync.Mutex
 	var tenantID, token string

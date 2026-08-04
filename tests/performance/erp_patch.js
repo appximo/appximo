@@ -35,7 +35,7 @@ export const options = {
 // Create one solicitud and hand its id to every iteration.
 export function setup() {
   if (!TOKEN) {
-    throw new Error('BENCH_TOKEN required — mint with: appitools token --tenant nimbus --secret <JWT_SECRET> --role rrhh-admin');
+    throw new Error('BENCH_TOKEN required — mint with: appximo token --tenant nimbus --secret <JWT_SECRET> --role rrhh-admin');
   }
   const res = http.post(`${TARGET}/api/solicitudes`, JSON.stringify({
     empleado_id: EMPLEADO_ID, tipo: 'vacaciones',

@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/miguelangel/appitools/tools/devhub/sshx"
+	"github.com/appximo/appximo/tools/devhub/sshx"
 )
 
 var (
@@ -118,13 +118,13 @@ func AcceptanceRunHandler(repoDir string) http.HandlerFunc {
 			return
 		}
 
-		// Local appitools binary for CLI operations (token minting only — no
+		// Local appximo binary for CLI operations (token minting only — no
 		// DB needed). Use the engine binary from this devhub box.
-		appitoolsCLI := repoDir + "/appitools"
-		if _, err := os.Stat(appitoolsCLI); err != nil {
-			appitoolsCLI = "/tmp/appitools-deploy"
-			if _, err2 := os.Stat(appitoolsCLI); err2 != nil {
-				abort("no se encontró el binario appitools para CLI (appitools token). Hacé: scripts/build-engine.sh appitools")
+		appximoCLI := repoDir + "/appximo"
+		if _, err := os.Stat(appximoCLI); err != nil {
+			appximoCLI = "/tmp/appximo-deploy"
+			if _, err2 := os.Stat(appximoCLI); err2 != nil {
+				abort("no se encontró el binario appximo para CLI (appximo token). Hacé: scripts/build-engine.sh appximo")
 				return
 			}
 		}
@@ -139,7 +139,7 @@ func AcceptanceRunHandler(repoDir string) http.HandlerFunc {
 			"ADMIN=http://"+adminAddr,
 			"JWT_SECRET="+jwtSecret,
 			"ADMIN_KEY="+adminKey,
-			"APPITOOLS_CLI="+appitoolsCLI,
+			"APPXIMO_CLI="+appximoCLI,
 			"SCHEMA_FILE="+repoDir+"/examples/quickstart/schema.json",
 			"PSQL_CMD=", // disable: no direct Postgres access through the tunnel
 		)

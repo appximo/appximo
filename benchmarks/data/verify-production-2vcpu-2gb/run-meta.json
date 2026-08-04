@@ -1,6 +1,6 @@
 {
   "started_utc": "2026-07-28T15:14:23Z",
-  "target": "https://api.appitools.com",
+  "target": "https://api.appximo.com",
   "origin_ip": "PROD-VPS",
   "cdn_detected": "cloudflare",
   "tenant": "api",

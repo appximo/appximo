@@ -1,10 +1,10 @@
 //go:build integration
 
-// Package appitools integration test (ADR-016 library surface). Exercises the
+// Package appximo integration test (ADR-016 library surface). Exercises the
 // REAL request path: a custom Class-1 route registered via Register, mounted in
 // the same middleware chain the generated routes use, against a real Postgres
 // (testcontainers). Run with: go test -tags integration -race -run TestLibrary .
-package appitools
+package appximo
 
 import (
 	"context"
@@ -23,9 +23,9 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/tests/helpers"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/tests/helpers"
 )
 
 var (
@@ -36,7 +36,7 @@ var (
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 	ctr, err := tcpostgres.Run(ctx, "postgres:16-alpine",
-		tcpostgres.WithDatabase("appitools_test"),
+		tcpostgres.WithDatabase("appximo_test"),
 		tcpostgres.WithUsername("test"),
 		tcpostgres.WithPassword("test"),
 		testcontainers.WithWaitStrategy(

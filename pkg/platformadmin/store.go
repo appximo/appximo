@@ -7,7 +7,7 @@
 //
 //   - auth-as-product (pkg/userauth): the super-admin authenticates with the same
 //     argon2id password + TOTP MFA mechanism a tenant user does — but against a
-//     SYSTEM schema (appitools_system.platform_admins), not a tenant. The reusable
+//     SYSTEM schema (appximo_system.platform_admins), not a tenant. The reusable
 //     primitives are exported from pkg/userauth (see primitives.go).
 //   - schema-per-tenant isolation (search_path / tenant_<id> identifiers): a tenant
 //     admin physically cannot reach another tenant; this is structural, not coded.
@@ -39,7 +39,7 @@ import (
 // ABOVE every tenant_<id> schema: a platform admin is not a tenant user. The name
 // is a fixed identifier (never tenant-derived), so it can never collide with a
 // tenant schema (those are always tenant_<id>).
-const SystemSchema = "appitools_system"
+const SystemSchema = "appximo_system"
 
 // DefaultSuperAdminRole is the role stamped on a platform admin. It is a marker
 // inside the platform JWT (scope=platform), distinct from any tenant RBAC role.

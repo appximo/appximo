@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"hash/fnv"
 
-	"github.com/miguelangel/appitools/pkg/aigen"
+	"github.com/appximo/appximo/pkg/aigen"
 )
 
 // Condition is one arm of the paired ablation — a named treatment plus the
@@ -48,7 +48,7 @@ type Outcome struct {
 	// converged/final attempt — NOT what the condition requested. They differ when
 	// the constrained-decoding request was rejected by the live API and the loop
 	// fell back to plain generation (the live finding: the strict-outputs subset
-	// rejects the Appitools grammar — open objects need additionalProperties:false,
+	// rejects the Appximo grammar — open objects need additionalProperties:false,
 	// and the field grammar exceeds the 16-union-parameter limit — so the structured
 	// and array-IR arms fall back to plain). Surfacing this keeps the instrument
 	// honest: an arm that fell back is measuring plain, not its named treatment.

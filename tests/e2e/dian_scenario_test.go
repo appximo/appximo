@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/miguelangel/appitools/tests/helpers"
+	"github.com/appximo/appximo/tests/helpers"
 )
 
 // TestDIANScenario exercises the Colombian DIAN/CUFE fintech flow with REAL engine

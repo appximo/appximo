@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/extensions"
+	"github.com/appximo/appximo/pkg/extensions"
 )
 
 // FuzzWasmRunner throws (a) arbitrary bytes as a WASM module and (b) arbitrary

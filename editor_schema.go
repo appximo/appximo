@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"encoding/json"
@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/miguelangel/appitools/pkg/aigen"
+	"github.com/appximo/appximo/pkg/aigen"
 )
 
 // EDITOR-BOOT-SYNC — GET /editor/current-schema: the SOURCE schema of the
@@ -39,7 +39,7 @@ func (a *App) serveCurrentSchema(w http.ResponseWriter, _ *http.Request) {
 // serveAIContext — GET /editor/ai-context: the exact text to paste into your own
 // AI assistant so it can change THIS app (DOC-2).
 //
-// `appitools spec` is the cheapest, most effective piece of the product: an agent
+// `appximo spec` is the cheapest, most effective piece of the product: an agent
 // with no repository access, given only that document plus the current schema,
 // produced a correct schema change in one round (docs/AUTHORING_JOURNEY.md 5-4).
 // And nothing in the product said it existed — it was documented only in a file the

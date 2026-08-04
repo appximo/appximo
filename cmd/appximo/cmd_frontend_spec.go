@@ -5,10 +5,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/miguelangel/appitools"
+	"github.com/appximo/appximo"
 )
 
-// FRONTEND-SPEC-S1: `appitools frontend-spec` — the third document of the agent
+// FRONTEND-SPEC-S1: `appximo frontend-spec` — the third document of the agent
 // trilogy (`spec` teaches the schema, `backend-spec` the handlers, this one the
 // FRONTEND). It prints docs/FRONTEND_SPEC_LLM.md (embedded, single source):
 // where the frontend lives (embedded one-binary vs served apart), the
@@ -22,7 +22,7 @@ var frontendSpecCmd = &cobra.Command{
 	Use:   "frontend-spec",
 	Short: "Imprime la guía para construir un FRONTEND productivo (stack/contrato API/errores→UI/archivos) para un agente — pégala en tu Claude Code/Cursor",
 	Long: `Prints the definitive agent guide for building a production frontend on an
-Appitools backend: the embedded-vs-apart decision, the recommended stack
+Appximo backend: the embedded-vs-apart decision, the recommended stack
 (SvelteKit + adapter-static as a pure SPA — and WHY), the complete API contract
 (tenant = Host, auth, the exact filter/sort/pagination grammar, embeds,
 aggregation, SSE), the error contract mapped to screen states (the multi-field
@@ -32,12 +32,12 @@ attach via the file field → display, including PUBLIC images via a ByteServing
 route), and the traps only a real browser reveals (CSP, the empty-shell build
 trap, rate-limit budgets).
 
-This is the third of the trilogy: give an agent 'appitools spec' (the schema),
-'appitools backend-spec' (the handlers) and this doc, and it can build the full
+This is the third of the trilogy: give an agent 'appximo spec' (the schema),
+'appximo backend-spec' (the handlers) and this doc, and it can build the full
 stack. The doc lives at docs/FRONTEND_SPEC_LLM.md; the runnable example at
 examples/frontend-guide/.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(appitools.FrontendSpec())
+		fmt.Println(appximo.FrontendSpec())
 	},
 }
 

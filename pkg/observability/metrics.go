@@ -43,29 +43,29 @@ func NewMetrics() *Metrics {
 		reg:  prometheus.NewRegistry(),
 		seen: make(map[string]struct{}),
 		requestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "appitools_requests_total",
+			Name: "appximo_requests_total",
 			Help: "Total de requests por tenant y endpoint",
 		}, []string{"tenant_id", "method", "path", "status"}),
 		requestDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "appitools_request_duration_seconds",
+			Name:    "appximo_request_duration_seconds",
 			Help:    "Duración de requests",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"tenant_id", "method", "path"}),
 		activeTenants: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "appitools_active_tenants",
+			Name: "appximo_active_tenants",
 			Help: "Número de tenants cargados en cache",
 		}),
 		migrationDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "appitools_migration_duration_seconds",
+			Name:    "appximo_migration_duration_seconds",
 			Help:    "Duración de migraciones Atlas por tenant",
 			Buckets: []float64{0.5, 1, 2, 5, 10, 30, 60, 120},
 		}, []string{"tenant_id", "status"}),
 		requestPanics: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "appitools_request_panics_total",
+			Name: "appximo_request_panics_total",
 			Help: "Panics recovered by the request-chain Recoverer (handler panic → clean 500, process survives)",
 		}),
 		goroutinePanics: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "appitools_goroutine_panics_total",
+			Name: "appximo_goroutine_panics_total",
 			Help: "Panics recovered inside Ctx.SafeGo (a raw goroutine panic would crash the whole process)",
 		}),
 	}

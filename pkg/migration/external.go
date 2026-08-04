@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"log"
 
+	"github.com/appximo/appximo/pkg/schemadiff"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/schemadiff"
 )
 
 // ENG-9 (CONSUMER-PATH-S1) — consumer-owned database objects must never be

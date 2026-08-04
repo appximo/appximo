@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/schemahistory"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/schemahistory"
 )
 
 // ENG-9 (CONSUMER-PATH-S1): objects NO deployed schema version ever declared —

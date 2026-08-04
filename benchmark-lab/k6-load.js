@@ -31,12 +31,12 @@ export default function () {
   const page   = Math.floor(Math.random() * 10) + 1;
 
   const res = http.get(
-    // Sin operador explícito: Appitools defaultea a eq, NestJS recibe string directo
+    // Sin operador explícito: Appximo defaultea a eq, NestJS recibe string directo
     `${TARGET}/api/guides?filter[status]=${status}&page=${page}&per_page=20`,
     {
       headers: {
         'Authorization': `Bearer ${TOKEN}`,
-        'Host':          `${TENANT}.localhost`,   // Appitools: tenant desde subdomain
+        'Host':          `${TENANT}.localhost`,   // Appximo: tenant desde subdomain
         'X-Tenant-ID':  `tenant_${TENANT}`,       // NestJS: tenant desde header
       },
       tags: { endpoint: 'list' },

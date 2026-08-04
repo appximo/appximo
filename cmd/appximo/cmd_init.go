@@ -14,7 +14,7 @@ var starterSchema []byte
 
 var initCmd = &cobra.Command{
 	Use:   "init [nombre]",
-	Short: "Inicializa un nuevo proyecto Appitools",
+	Short: "Inicializa un nuevo proyecto Appximo",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
@@ -45,8 +45,8 @@ var initCmd = &cobra.Command{
 			fmt.Printf("Proyecto %q inicializado.\n", name)
 		}
 		fmt.Println("  → Edita schema.json y corre:")
-		fmt.Println("  → appitools validate schema.json")
-		fmt.Println("  → appitools generate schema.json")
+		fmt.Println("  → appximo validate schema.json")
+		fmt.Println("  → appximo generate schema.json")
 		return nil
 	},
 }
@@ -61,7 +61,7 @@ func resolveSchema(blueprint string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("blueprint %q not found at %s\n  Run 'appitools blueprints list' to see available blueprints", blueprint, path)
+			return nil, fmt.Errorf("blueprint %q not found at %s\n  Run 'appximo blueprints list' to see available blueprints", blueprint, path)
 		}
 		return nil, fmt.Errorf("leer blueprint %q: %w", blueprint, err)
 	}

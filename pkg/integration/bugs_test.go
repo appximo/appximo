@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/schema"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/schema"
 )
 
 // bugsSchema exercises a MULTI-WORD resource name ("order_items" — the supported
@@ -20,7 +20,7 @@ import (
 // index on tasks.title also drives the G6 create-conflict test below.
 func bugsSchema() *schema.APISchema {
 	return &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "bugs",
 		Resources: map[string]schema.ResourceSchema{

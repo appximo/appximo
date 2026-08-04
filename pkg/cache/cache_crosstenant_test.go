@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/appximo/appximo/pkg/auth"
 )
 
 // TestCache_DoesNotServeAcrossTenantToken is a regression test for the critical

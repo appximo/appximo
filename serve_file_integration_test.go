@@ -11,7 +11,7 @@
 // Content-Encoding on the stream), and the response-cache bypass (repeat
 // authenticated GETs keep Content-Disposition — a cache hit would strip it).
 // Reuses the shared Postgres container from TestMain (library_integration_test.go).
-package appitools
+package appximo
 
 import (
 	"bytes"
@@ -23,8 +23,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/tests/helpers"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/tests/helpers"
 )
 
 // newByteServingApp builds the filejob-fixture app with two custom ServeFile
@@ -235,7 +235,7 @@ func TestServeFile_AuthedRoute_BypassesResponseCache(t *testing.T) {
 // reach /api/files.
 func TestFilesGrant_PermissionsFormWorksAtRuntime(t *testing.T) {
 	schemaJSON := `{
-	  "$schema": "https://appitools.dev/schema/v1", "version": "1", "name": "files-grant",
+	  "$schema": "https://appximo.com/schema/v1", "version": "1", "name": "files-grant",
 	  "resources": { "docs": { "fields": { "title": { "type": "string", "required": true } } } },
 	  "rbac": { "roles": {
 	    "admin": { "resources": "*", "actions": ["*"] },

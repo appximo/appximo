@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/appximo/appximo/pkg/auth"
 )
 
 // rbacGate mirrors the production gate: only roles without row-level conditions

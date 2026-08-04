@@ -6,7 +6,7 @@ import (
 	"go/format"
 	"sort"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // GenerateStructs returns a gofmt'd Go source file declaring one typed Row struct

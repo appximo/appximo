@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/schema"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/schema"
 )
 
 // ENG-13 — the migration that reported success and did not apply.

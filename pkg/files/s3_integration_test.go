@@ -28,7 +28,7 @@ import (
 const (
 	minioUser   = "minioadmin"
 	minioPass   = "minioadmin"
-	minioBucket = "appitools-test"
+	minioBucket = "appximo-test"
 )
 
 // startMinIO launches a MinIO container and returns its S3 endpoint.

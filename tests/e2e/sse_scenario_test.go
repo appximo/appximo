@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/tests/helpers"
+	"github.com/appximo/appximo/tests/helpers"
 )
 
 // sseEvent is one parsed SSE message (event name + decoded data payload).

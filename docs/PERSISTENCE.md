@@ -19,9 +19,9 @@ almacenamiento persistente fuera de Postgres que existe en producción.
 
 | Env var | Valor por defecto | Código |
 |---------|-------------------|--------|
-| `OBS_DB_PATH` | `/var/lib/appitools/obs.db` (**persistente**) | [store.go](../pkg/observability/store.go) `defaultObsDBPath` |
+| `OBS_DB_PATH` | `/var/lib/appximo/obs.db` (**persistente**) | [store.go](../pkg/observability/store.go) `defaultObsDBPath` |
 
-Si la var está vacía se usa el default **persistente** `/var/lib/appitools/obs.db`
+Si la var está vacía se usa el default **persistente** `/var/lib/appximo/obs.db`
 — el mismo root que el file store, **no `/tmp`**. El directorio padre se crea al
 abrir (`os.MkdirAll` + sonda de escritura). Si NO se puede crear o escribir (p.ej.
 el proceso no corre como el usuario dueño del path), el store **cae a un archivo
@@ -286,7 +286,7 @@ camino de request del motor.
 
 | Store | Archivo | Tablas | Cuándo escribe | Hot path | Retención | Aislamiento |
 |-------|---------|--------|----------------|----------|-----------|-------------|
-| **Motor — obs snapshots** | `$OBS_DB_PATH` (def. `/var/lib/appitools/obs.db`) | `obs_snapshots` | Goroutine background cada 60 s | **NO** | 7 días | Filas por tenant_id |
+| **Motor — obs snapshots** | `$OBS_DB_PATH` (def. `/var/lib/appximo/obs.db`) | `obs_snapshots` | Goroutine background cada 60 s | **NO** | 7 días | Filas por tenant_id |
 | **Motor — slow traces** | (mismo archivo) | `slow_traces` | Goroutine async post-response (sem 64) | **NO** | 7 días + cap 50 k filas | Filas por tenant_id |
 | **DevHub** | `tools/devhub/db/devhub.db` | 7 tablas de benchmark + ops | Handler HTTP del DevHub (síncrono en el DevHub) | N/A (proceso distinto) | Sin límite | Global (server-scoped) |
 
@@ -301,13 +301,13 @@ contenedor con `tmpfs` o en un sistema con `systemd-tmpfiles` que limpia `/tmp`
 en el arranque, el archivo se perdía con cada restart (sin corrupción, pero con
 pérdida de todo el historial de traces y snapshots).
 
-**Ahora:** el default es **persistente** — `/var/lib/appitools/obs.db` (el mismo
+**Ahora:** el default es **persistente** — `/var/lib/appximo/obs.db` (el mismo
 root que el file store). El directorio se crea al abrir. Si el path resuelto cae
 en `/tmp` o un tmpfs (porque el operador lo configuró así a propósito en dev), el
 motor **loguea un WARNING** al boot avisando que el historial no sobrevivirá un
 restart — visibilidad del riesgo, sin bloquear. En Docker el path persistente se
 monta en el volumen `obs_data` (compose) para que sobreviva al contenedor; en
-systemd nativo `StateDirectory=appitools` crea `/var/lib/appitools` con el dueño
+systemd nativo `StateDirectory=appximo` crea `/var/lib/appximo` con el dueño
 correcto. Ver [docs/DEPLOY.md → OBS_DB_PATH](DEPLOY.md#observability-store-obs_db_path).
 
 ### R2 — Flood de errores puede llenar `/tmp` si OBS_DB_PATH no está configurado ✅ RESUELTO
@@ -317,7 +317,7 @@ velocidad de los requests. El semáforo de 64 goroutines limita la concurrencia
 de escrituras, pero no el volumen acumulado. El cap de 50 000 filas + el Prune
 cada 60 s limitan el tamaño, pero entre Prunes un flood sostenido puede crecer.
 
-**Ahora:** con el default en `/var/lib/appitools` (disco real, no la RAM/cuota
+**Ahora:** con el default en `/var/lib/appximo` (disco real, no la RAM/cuota
 limitada de `/tmp`) el riesgo de OOM/ENOSPC silencioso del caso `/tmp` desaparece
 para la configuración por defecto, y el cap de 50 000 filas + Prune lo mantienen
 acotado (~100 MB cota superior). El riesgo residual de **disco lleno** (cualquier

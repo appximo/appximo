@@ -7,7 +7,7 @@
 // and the outbox row is marked sent. A failing sender drives the failure path:
 // after maxAttempts the row is parked 'failed'. Reuses the shared container from
 // TestMain (library_integration_test.go).
-package appitools
+package appximo
 
 import (
 	"context"
@@ -18,9 +18,9 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/miguelangel/appitools/pkg/consumers"
-	"github.com/miguelangel/appitools/pkg/outbox"
-	"github.com/miguelangel/appitools/pkg/worker"
+	"github.com/appximo/appximo/pkg/consumers"
+	"github.com/appximo/appximo/pkg/outbox"
+	"github.com/appximo/appximo/pkg/worker"
 )
 
 // captureSender implements consumers.EmailSender: it records messages and returns

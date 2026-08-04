@@ -6,7 +6,7 @@
   "part": "A-footprint",
   "samples": 1,
   "services": {
-    "appitools": {
+    "appximo": {
       "anon_mib": 67.6,
       "cgroup_mib": 95.2,
       "cpu": {
@@ -17,7 +17,7 @@
       "open_fds": 50,
       "processes": 1,
       "pss_mib": 85.3,
-      "unit": "appitools.service"
+      "unit": "appximo.service"
     },
     "caddy": {
       "anon_mib": 22.1,

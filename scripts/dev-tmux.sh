@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-SESSION="appitools-dev"
+SESSION="appximo-dev"
 if tmux has-session -t "$SESSION" 2>/dev/null; then
   tmux attach-session -t "$SESSION"; exit 0
 fi

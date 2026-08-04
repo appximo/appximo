@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/miguelangel/appitools/tools/devhub/sshx"
+	"github.com/appximo/appximo/tools/devhub/sshx"
 )
 
 // Remote live metrics (S47). The background 5s scraper + 1h ring stays

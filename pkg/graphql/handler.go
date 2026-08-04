@@ -14,22 +14,22 @@ import (
 	"sync"
 	"time"
 
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/codegen"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/events"
+	"github.com/appximo/appximo/pkg/extensions"
+	pkghandlers "github.com/appximo/appximo/pkg/handlers"
+	"github.com/appximo/appximo/pkg/query"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
 	"github.com/google/uuid"
 	gql "github.com/graphql-go/graphql"
 	"github.com/graphql-go/graphql/language/ast"
 	"github.com/graphql-go/graphql/language/parser"
 	"github.com/graphql-go/graphql/language/source"
 	"github.com/jackc/pgx/v5"
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/codegen"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/events"
-	"github.com/miguelangel/appitools/pkg/extensions"
-	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
-	"github.com/miguelangel/appitools/pkg/query"
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
 type httpReqKey struct{}
@@ -62,7 +62,7 @@ func (f *rbacResultFilter) store(gqlField string, allowed []string) {
 // resolve it PER APP from that app's own env/Config, not the process-wide
 // env (GRAPHQL-EXPLORER-S1 — see app.go buildRouter and multiapp.go
 // buildFleetApp for the resolution: Env=="development" or the explicit
-// APPITOOLS_GRAPHQL_PLAYGROUND opt-in).
+// APPXIMO_GRAPHQL_PLAYGROUND opt-in).
 func BuildHandler(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy, hub *events.Hub, allowIntrospection bool) http.Handler {
 	gqlSchema := buildGQLSchema(s, tdb, hr, policy, hub)
 	isDev := allowIntrospection
@@ -369,7 +369,7 @@ func writeGraphQLError(w http.ResponseWriter, msg string) {
 // in place, a Headers editor for testing with a real Authorization token) —
 // mounted at /graphiql alongside REST's Swagger UI at /docs (API-PRODUCTIVA-V1),
 // only when BuildHandler's introspection gate is open (dev, or the
-// APPITOOLS_GRAPHQL_PLAYGROUND opt-in) — GraphiQL is unusable without it.
+// APPXIMO_GRAPHQL_PLAYGROUND opt-in) — GraphiQL is unusable without it.
 //
 // The CDN build is version-PINNED (same discipline as openapi_serve.go's
 // Swagger UI), not left to resolve "latest": GraphiQL dropped its standalone
@@ -389,14 +389,14 @@ func PlaygroundHandler(endpoint string) http.Handler {
 	// is the honest, actionable signal.
 	defaultQuery := `# Paste a JWT into the Headers tab below to authenticate:
 #   { "Authorization": "Bearer <token>" }
-# Mint one with: appitools token --secret "$JWT_SECRET" --tenant <id> --role <role>
+# Mint one with: appximo token --secret "$JWT_SECRET" --tenant <id> --role <role>
 #
 # Then explore the schema (left panel) and run a query, e.g.:
 #
 # { __typename }
 `
 	page := fmt.Sprintf(`<!DOCTYPE html><html><head>
-<title>GraphiQL — Appitools</title>
+<title>GraphiQL — Appximo</title>
 <link rel="stylesheet" href="https://unpkg.com/graphiql@3.9.0/graphiql.min.css"/>
 </head><body style="margin:0"><div id="graphiql" style="height:100vh"></div>
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
@@ -753,7 +753,7 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 
 	sc, err := gql.NewSchema(gql.SchemaConfig{Query: queryType, Mutation: mutationType})
 	if err != nil {
-		panic("appitools/graphql: failed to build schema: " + err.Error())
+		panic("appximo/graphql: failed to build schema: " + err.Error())
 	}
 	return sc
 }

@@ -10,11 +10,11 @@
 .github
 
 # Compiled binaries & build artifacts (the image builds its own binary)
-/appitools
-appitools_audit
+/appximo
+appximo_audit
 *.pre_*
 *.bundle
-appitools-rollback/
+appximo-rollback/
 coverage.out
 *.out
 *.test
@@ -30,7 +30,7 @@ pkg/editorui/web/build/
 pkg/adminui/web/dist/
 
 # Docs are not needed to compile the binary — EXCEPT the one file backendspec.go
-# embeds (`//go:embed docs/BACKEND_SPEC_LLM.md`, the `appitools backend-spec`
+# embeds (`//go:embed docs/BACKEND_SPEC_LLM.md`, the `appximo backend-spec`
 # source). Excluding docs/ WITHOUT re-including it breaks the build:
 #   pattern docs/BACKEND_SPEC_LLM.md: no matching files found
 *.md

@@ -91,8 +91,8 @@
 					onchange={(e) => editor.patchHook(entity.id, event, 'hmac_secret_env', e.currentTarget.value)}
 				/>
 				<div class="engine-note">
-					The engine signs the POST (<span class="mono">X-Appitools-Signature</span>), sends the
-					real event in <span class="mono">X-Appitools-Event</span>, and includes the actor (JWT
+					The engine signs the POST (<span class="mono">X-Appximo-Signature</span>), sends the
+					real event in <span class="mono">X-Appximo-Event</span>, and includes the actor (JWT
 					claims). 3 retries with backoff.
 				</div>
 			{:else if cfg.type === 'js'}

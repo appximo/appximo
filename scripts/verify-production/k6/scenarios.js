@@ -119,7 +119,7 @@ function headers(extra) {
 
 export function setup() {
   if (!TOKEN) {
-    throw new Error('TOKEN is required — mint one with: appitools token --secret "$JWT_SECRET" --tenant <id> --role admin');
+    throw new Error('TOKEN is required — mint one with: appximo token --secret "$JWT_SECRET" --tenant <id> --role admin');
   }
   return {};
 }

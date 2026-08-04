@@ -3,7 +3,7 @@ package codegen
 import (
 	"sort"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // validateCreateTypes type-checks the values of a CREATE body against the

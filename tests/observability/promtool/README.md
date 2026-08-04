@@ -3,11 +3,11 @@
 `context-docs/TESTING_PLAN.md` lists `slo_test.yml` here *"si reglas SLO existen como
 YAML"* (if SLO rules exist as YAML). **They do not.**
 
-Appitools' SLOs are **not** implemented as Prometheus alerting/recording rules.
+Appximo's SLOs are **not** implemented as Prometheus alerting/recording rules.
 They live as a Go burn-rate engine:
 
 - `pkg/observability/slo.go` — multi-window burn-rate engine (`SLOEngine`), wired in
-  `cmd/appitools/cmd_serve.go` (`NewSLOEngine(...)`, `go sloEngine.Run(ctx)`).
+  `cmd/appximo/cmd_serve.go` (`NewSLOEngine(...)`, `go sloEngine.Run(ctx)`).
 - `pkg/observability/alerter.go` — Slack / Noop / Cooldown alerters.
 - Covered by Go unit tests: `pkg/observability/slo_test.go`, `alerter_test.go`.
 

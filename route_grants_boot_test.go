@@ -1,11 +1,11 @@
-package appitools
+package appximo
 
 import (
 	"encoding/json"
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // LIBRARY-GAPS-S1 / ADR-021 — the BOOT half of custom-route authorization: the
@@ -145,7 +145,7 @@ func TestPersistBootSchema_RejectsUnregisteredRouteGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(map[string]any{
-		"$schema": "https://appitools.dev/schema/v1", "version": "1", "name": "x",
+		"$schema": "https://appximo.com/schema/v1", "version": "1", "name": "x",
 		"resources": map[string]any{"tasks": map[string]any{
 			"fields": map[string]any{"title": map[string]any{"type": "string"}}}},
 		"rbac": map[string]any{"roles": map[string]any{

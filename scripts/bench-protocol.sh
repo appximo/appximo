@@ -14,7 +14,7 @@
 #   SCRIPT: k6 script path (default tests/performance/sustained_2krps.js;
 #           e.g. tests/performance/sustained_writes.js for the write path)
 # Env overrides: DEVHUB_URL TARGET_URL TENANT_ID ENDPOINT BENCH_TOKEN K6_SCRIPT
-#                APPITOOLS_SECRETS WARMUP_DURATION
+#                APPXIMO_SECRETS WARMUP_DURATION
 #
 # NOTE on constrained / shared hosts (e.g. the 1-vCPU dev box): keep RATE low
 # (≤100). Co-locating the k6 load generator with the engine on a single core
@@ -72,7 +72,7 @@ if [ ! -f "$K6_SCRIPT" ]; then
   echo "ERROR: k6 script no existe: $K6_SCRIPT" >&2
   exit 1
 fi
-SECRETS="${APPITOOLS_SECRETS:-/root/.appitools-secrets-dev}"
+SECRETS="${APPXIMO_SECRETS:-.env.dev}"
 # A single warmup of the measurement length isn't enough to reach steady state on
 # a small / shared host (the Postgres buffer cache and the pgx pool keep warming
 # across the first runs, biasing run-1 slow). Warm longer than we measure.
@@ -93,11 +93,11 @@ if [ -z "${BENCH_TOKEN:-}" ]; then
     echo "ERROR: BENCH_TOKEN no seteado y no hay JWT_SECRET en $SECRETS" >&2
     exit 1
   fi
-  BIN="./appitools-dev"
-  [ -x "$BIN" ] || BIN="./appitools"
+  BIN="./appximo-dev"
+  [ -x "$BIN" ] || BIN="./appximo"
   if [ ! -x "$BIN" ]; then
-    echo "ERROR: no hay binario para mintear el token (./appitools-dev ni ./appitools)." >&2
-    echo "  Compilá uno (go build -o appitools ./cmd/appitools) o pasá BENCH_TOKEN directo." >&2
+    echo "ERROR: no hay binario para mintear el token (./appximo-dev ni ./appximo)." >&2
+    echo "  Compilá uno (go build -o appximo ./cmd/appximo) o pasá BENCH_TOKEN directo." >&2
     exit 1
   fi
   BENCH_TOKEN="$("$BIN" token --tenant "$TENANT" --secret "$JWT_SECRET" --role "$BENCH_ROLE" 2>/dev/null | tail -1)"

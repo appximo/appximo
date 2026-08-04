@@ -1,6 +1,6 @@
-# Logistics API — Appitools Example
+# Logistics API — Appximo Example
 
-A real-world multi-tenant logistics API built with Appitools.  
+A real-world multi-tenant logistics API built with Appximo.  
 Models: users, clients, shipment guides, dispatches, incidents.  
 RBAC: super_admin / gerente / operario / tercero / public.
 
@@ -207,7 +207,7 @@ You can replace the hook script in `schema.json` with any JS logic:
 
 Regenerate after schema changes:
 ```bash
-appitools generate schema.json
+appximo generate schema.json
 ```
 
 ---

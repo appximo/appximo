@@ -1,12 +1,12 @@
-# Appitools — Schema Reference
+# Appximo — Schema Reference
 
-> **The complete grammar of the Appitools schema JSON, extracted from the engine
+> **The complete grammar of the Appximo schema JSON, extracted from the engine
 > source.** This is the exhaustive reference that the feature docs (AGENTS.md,
 > README) summarize: every key the schema accepts, at every level, with its exact
 > syntax, valid values, defaults, and the precise condition under which the
 > validator rejects it.
 
-Appitools compiles one JSON file into a multi-tenant REST + GraphQL + OpenAPI
+Appximo compiles one JSON file into a multi-tenant REST + GraphQL + OpenAPI
 server at boot. There are no handlers, models, or migration files — the schema
 *is* the contract. This document specifies that contract precisely enough that a
 human (or an AI generation layer) can author a valid schema from it alone.
@@ -38,7 +38,7 @@ feature is documented elsewhere), it is recorded — not fixed — in
 - **`§N` cross-references** point at another section of this document.
 - A claim of the form *"rejected at load"* means `schema.Validate` (or
   `LoadFromFile`'s strict-key / required-field pass) returns an error and the
-  engine refuses to boot / `appitools validate` fails. *"422 at request time"*
+  engine refuses to boot / `appximo validate` fails. *"422 at request time"*
   means the schema loads but a write violating the rule is rejected per-request.
 
 ## Sections
@@ -61,7 +61,7 @@ feature is documented elsewhere), it is recorded — not fixed — in
 
 ## 1. Root schema structure
 
-An Appitools project is **one JSON file**. It is loaded in two stages and the second only runs if the first succeeds (`app.go`): `schema.LoadFromFile` (parse + strict-key + required-field check) then `schema.Validate` (semantic validation). Both must pass clean for the engine to boot.
+An Appximo project is **one JSON file**. It is loaded in two stages and the second only runs if the first succeeds (`app.go`): `schema.LoadFromFile` (parse + strict-key + required-field check) then `schema.Validate` (semantic validation). Both must pass clean for the engine to boot.
 
 ### 1.1 Top-level keys
 
@@ -69,7 +69,7 @@ The root object is the `APISchema` struct (`pkg/schema/types.go`). Its complete,
 
 | JSON key | Type | Required? | Meaning |
 |---|---|---|---|
-| `$schema` | string | **Yes** — load fails if empty/absent | Schema dialect URL (any non-empty string passes; conventionally `"https://appitools.dev/schema/v1"`). |
+| `$schema` | string | **Yes** — load fails if empty/absent | Schema dialect URL (any non-empty string passes; conventionally `"https://appximo.com/schema/v1"`). |
 | `version` | string | **Yes** — load fails if empty/absent | Schema version string (any non-empty string passes; conventionally `"1"`). |
 | `name` | string | No (structurally optional) | Project name. Parsed but not required by either stage. |
 | `resources` | object (`map[string]ResourceSchema`) | No (structurally optional) | The entity/table definitions, keyed by resource name. See §2. A schema with no resources serves no `/api/*` routes but is not rejected. |
@@ -115,7 +115,7 @@ Note the order: strict-key (step 3) runs **before** the required-field check (st
 
 A non-object value where an object is expected is reported (`must be a JSON object`), not silently ignored (keys.go). The root itself, if not a JSON object, is reported as `schema is not a JSON object: …` (keys.go). Errors are sorted by field path (keys.go).
 
-**Stage 2 — `schema.Validate(s)` (`pkg/schema/validator.go`):** semantic validation over the already-parsed, strict-key-clean struct: identifier regexes, reserved names, type/relation/RBAC/state-machine/default coherence, etc. (covered in the later sections). On the boot path `app.New` joins all returned errors into one message prefixed `appitools: invalid schema:` (app.go). The `appitools validate <schema>` subcommand runs the same two stages.
+**Stage 2 — `schema.Validate(s)` (`pkg/schema/validator.go`):** semantic validation over the already-parsed, strict-key-clean struct: identifier regexes, reserved names, type/relation/RBAC/state-machine/default coherence, etc. (covered in the later sections). On the boot path `app.New` joins all returned errors into one message prefixed `appximo: invalid schema:` (app.go). The `appximo validate <schema>` subcommand runs the same two stages.
 
 Identifier rule relevant at this level: resource and field names both match the regex `^[a-z][a-z0-9_]*$` — lowercase, start with a letter, `_` for multi-word names; `-` is rejected (`pkg/schema/validator.go`). Reserved resource names: any name with the `auth_` prefix and the exact name `transaction` are rejected (validator.go).
 
@@ -123,7 +123,7 @@ Identifier rule relevant at this level: resource and field names both match the 
 
 ```json
 {
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "todo-api",
   "resources": {
@@ -323,7 +323,7 @@ The target `branches` exposes a composite `unique` index over `(region_code, bra
 
 ```json
 {
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "logistics",
   "resources": {
@@ -450,7 +450,7 @@ Example resource exercising the type table:
 
 ```json
 {
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "catalog-api",
   "resources": {
@@ -670,7 +670,7 @@ elsewhere; they are recorded, not fixed.
 
 Every field may carry declarative validation keys. They are checked **at two times**:
 
-1. **Load time** (`schema.Validate` → `validateFieldRules`, `validateDefault`): the *definition* of each rule is checked. A malformed rule (wrong field type, bad regex, `min > max`, etc.) **rejects the whole schema** with a `ValidationError` (`<field-path>: <message>`); the engine refuses to boot / `appitools validate` fails. Nothing is silently ignored.
+1. **Load time** (`schema.Validate` → `validateFieldRules`, `validateDefault`): the *definition* of each rule is checked. A malformed rule (wrong field type, bad regex, `min > max`, etc.) **rejects the whole schema** with a `ValidationError` (`<field-path>: <message>`); the engine refuses to boot / `appximo validate` fails. Nothing is silently ignored.
 2. **Request time** (`ResourceValidator`, built once at load by `CompileRules`; executed by `ApplyDefaults` then `ValidateWrite`): an incoming write body is checked against the precompiled closures and a `422` is returned listing **every** failing field.
 
 The rules below are all **optional**. A field that declares none produces no load errors and adds no runtime cost beyond the create-gate length check.
@@ -775,7 +775,7 @@ GraphQL surfaces the identical engine and field list under `errors[].extensions.
 
 ```json
 {
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "contacts-api",
   "resources": {
@@ -886,7 +886,7 @@ When the guarded UPDATE matches **zero rows**, `ExplainTransitionFailure` (`pkg/
 
 ```json
 {
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "orders-api",
   "resources": {
@@ -1004,7 +1004,7 @@ Note also: `validateRelations` is **structural only** — it does NOT verify tha
 
 ```json
 {
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "shop",
   "resources": {
@@ -1213,7 +1213,7 @@ Richer RBAC row operators would require the same binding and are a future increm
 
 ### 7.9 `routes` — granting CUSTOM routes (LIBRARY-GAPS-S1)
 
-A **custom route** is an endpoint a Go backend registers with `appitools.Route`
+A **custom route** is an endpoint a Go backend registers with `appximo.Route`
 (the library model, ADR-016) — it has no table. The middleware authorizes it by its
 **first `/api/` segment**, treated as a VIRTUAL resource, with the action derived
 from the HTTP method (`GET`→read, `POST`→create, `PUT`/`PATCH`→update,
@@ -1253,8 +1253,8 @@ condition and allowlist included.
 | schema | `validateRouteGrants`, `pkg/schema/validator.go` | segment matches `^[a-z][a-z0-9_\-]*$` (hyphens allowed — a route path is a URL, not a GraphQL identifier); at least one known action; the segment is **not** a declared resource (`"<x>" is a declared resource, not a custom route`) |
 | boot | `validateRouteGrants`, `route.go` (in `Start`, and on `POST /admin/engine/schema`) | the segment is **registered** by this binary, and every concrete action has a registered method — else the boot fails, listing the registered segments |
 
-The boot layer is what a standalone schema cannot check: `appitools validate`,
-Studio and the AI loop see no Go program. Consequence: the pure `appitools serve`
+The boot layer is what a standalone schema cannot check: `appximo validate`,
+Studio and the AI loop see no Go program. Consequence: the pure `appximo serve`
 binary registers no custom routes, so it **refuses to boot** a schema with a
 `routes` grant — deliberately, since such a policy could never match.
 
@@ -1462,8 +1462,8 @@ A `webhook` hook (`pkg/extensions/webhook_dispatcher.go`, `WebhookDispatcher.Dis
 **Request shape** — POST with JSON body (the record / payload), headers:
 
 - `Content-Type: application/json`
-- `X-Appitools-Event: <event>` — the **real lifecycle event** (`after_create` or `after_update`): the runner threads it through `FireAfterHook`→`RunAfterHook`→`Dispatch` (SEC-AUDIT-V2), so an `after_update` webhook sends `X-Appitools-Event: after_update`.
-- `X-Appitools-Signature: sha256=<hmac>` where `<hmac>` is hex `HMAC-SHA256(secret, body)`. The secret is read from the environment variable **named** by `hmac_secret_env` (`os.Getenv(hook.HMACSecretEnv)` — an unset/empty env var simply yields an empty-key HMAC).
+- `X-Appximo-Event: <event>` — the **real lifecycle event** (`after_create` or `after_update`): the runner threads it through `FireAfterHook`→`RunAfterHook`→`Dispatch` (SEC-AUDIT-V2), so an `after_update` webhook sends `X-Appximo-Event: after_update`.
+- `X-Appximo-Signature: sha256=<hmac>` where `<hmac>` is hex `HMAC-SHA256(secret, body)`. The secret is read from the environment variable **named** by `hmac_secret_env` (`os.Getenv(hook.HMACSecretEnv)` — an unset/empty env var simply yields an empty-key HMAC).
 
 **HTTPS-only + SSRF guard** (production dispatcher, `NewWebhookDispatcher`):
 
@@ -1483,7 +1483,7 @@ A `wasm` hook (`pkg/extensions/wasm_runner.go`, `WasmRunner`) runs a pre-loaded 
 - `wasm_fn` — the exported function to call; **defaults to `"transform"`** when empty.
 - **Per-module memory cap: 16 MiB** (`wasmMemoryPages = 256` × 64 KiB) — a guest cannot exhaust host memory.
 - **Timeout:** if the caller's context has no deadline, a default of **500 ms** (`wasmDefaultTimeout`) is applied; a guest that runs past the deadline is aborted (`WithCloseOnContextDone(true)`).
-- **Guest sandbox:** no filesystem, no network, no wall-clock syscalls — only two host functions: `appitools_log(ptr,len)` (bounded to 4096 bytes per message, `wasmMaxLogBytes`) and `appitools_now()` (Unix **milliseconds**). Concurrency bounded to `GOMAXPROCS × 2`.
+- **Guest sandbox:** no filesystem, no network, no wall-clock syscalls — only two host functions: `appximo_log(ptr,len)` (bounded to 4096 bytes per message, `wasmMaxLogBytes`) and `appximo_now()` (Unix **milliseconds**). Concurrency bounded to `GOMAXPROCS × 2`.
 - **ABI:** the module must export `memory`, `alloc(size i32)->ptr i32`, and `wasm_fn` as `(ptr i32, len i32)->(outPtr i32, outLen i32)`; `free(ptr,len)` is called if exported.
 - **`before_*` contract:** the payload is passed to the module as JSON; the module returns the (possibly transformed) payload as JSON, which becomes the new record (`HookResult.Data`). **Any error fails closed** (`proceed:false`) so a broken module never silently lets a write through. (Unlike `js`, a `wasm` `before_*` hook cannot signal a *clean* rejection message — it either returns transformed JSON or errors closed.) The tenant id passed to the module is derived from `userCtx["tenant_id"]`, which is empty on the live CRUD path (the user context is `nil`).
 
@@ -1501,7 +1501,7 @@ A `js` `before_create` hook that validates and normalises the body, rejecting wi
 
 ```json
 {
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "billing-api",
   "resources": {
@@ -1527,7 +1527,7 @@ A `webhook` `after_create` hook (HMAC secret read from env var `WEBHOOK_SECRET_I
 
 ```json
 {
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "billing-api",
   "resources": {
@@ -1548,7 +1548,7 @@ A `webhook` `after_create` hook (HMAC secret read from env var `WEBHOOK_SECRET_I
 }
 ```
 
-The receiver verifies the delivery by recomputing `HMAC-SHA256(os.Getenv("WEBHOOK_SECRET_INVOICES"), rawBody)` and comparing it (hex) against the value after `sha256=` in the `X-Appitools-Signature` header. The `X-Appitools-Event` header carries the real event (`after_create` or `after_update`; see §8.5).
+The receiver verifies the delivery by recomputing `HMAC-SHA256(os.Getenv("WEBHOOK_SECRET_INVOICES"), rawBody)` and comparing it (hex) against the value after `sha256=` in the `X-Appximo-Signature` header. The `X-Appximo-Event` header carries the real event (`after_create` or `after_update`; see §8.5).
 
 ---
 
@@ -1638,7 +1638,7 @@ These auto-indexes exist so the referential `RESTRICT` check and the `?include=`
 
 ```json
 {
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "orders-api",
   "resources": {
@@ -1681,14 +1681,14 @@ These are the **present-tense** RBAC action names. A resource that omits `events
 - **Same transaction.** The event row is written to `public.outbox` in the **same Postgres transaction** as the CRUD write. If the write rolls back (e.g. a unique violation), the event never exists; if the write commits, the event is guaranteed present. On commit the engine fires `pg_notify(outbox_notify, <id>)` (`outbox.NotifyChannel == "outbox_notify"`).
 - **Lean payload.** The event carries only `{id, tenant_id, resource, action}` — the affected row's id plus identity, never the full row. Note the payload's `action` value is the **past-tense suffix** (`created`/`updated`/`deleted`), the same suffix as the topic (`enqueueCRUDEvent`, `pkg/codegen/builder.go`). A consumer that needs more does its own `SELECT` (for a delete the row is already gone, so the id is all that survives).
 - **A delete matching no row emits nothing** (a 404 delete produces no event — `RunDelete` only enqueues when `affected > 0`).
-- **Consumed by the separate worker** (`cmd/appitools-worker`), at-least-once with `SELECT … FOR UPDATE SKIP LOCKED` — processors must be idempotent.
+- **Consumed by the separate worker** (`cmd/appximo-worker`), at-least-once with `SELECT … FOR UPDATE SKIP LOCKED` — processors must be idempotent.
 - **REST, GraphQL, and `POST /api/transaction` all emit identically** — the GraphQL `create`/`update`/`delete` mutations and batch operations enqueue the same topic + lean payload in the same transaction as their REST counterparts.
 
 #### Example
 
 ```json
 {
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "tasks-api",
   "resources": {
@@ -1720,7 +1720,7 @@ Both flow through the identical request chain as generated CRUD (tenant Host →
 WARNING: schema declares a "files" resource — engine file-store routes (/api/files) are disabled for this schema
 ```
 
-So name a resource `files` only if you intend to replace the built-in store with your own CRUD resource. Full file-store detail (size cap, dedup, `APPITOOLS_FILES_DIR`, the VFS) is in §10.
+So name a resource `files` only if you intend to replace the built-in store with your own CRUD resource. Full file-store detail (size cap, dedup, `APPXIMO_FILES_DIR`, the VFS) is in §10.
 
 ### 9.4 Reserved `workflows` block — inert, parse-only
 
@@ -1826,7 +1826,7 @@ Request body:
 - **Op shapes:** `create` = `{op,resource,data}`; `update` = `{op,resource,id,data}` (PATCH/partial semantics); `delete` = `{op,resource,id}`. `id` must be a UUID. Unknown `op` → `400`; unknown `resource` → `400`. An empty `data` on create/update → `400`.
 - **Each op is authorized and validated EXACTLY like its single-op counterpart**: per-resource RBAC, declarative validators, `EnforceCreateRBAC` mass-assignment block, `CollectUpdate`, and `before_create`/`before_update` hooks all run (in Phase 1, outside the tx). Outbox events emit in the SAME tx per op.
 - **`guard` (compare-and-set, update/delete only):** extra `AND <field> <op> $n` predicates the row must satisfy or the op matches zero rows and the whole batch fails. `op` ∈ `eq | ne | gt | gte | lt | lte` (mapped from a fixed allowlist `{eq:"=", ne:"<>", gt:">", gte:">=", lt:"<", lte:"<="}`; never interpolated). The field must be a declared column and the value is type-checked + bound. **This guard is a DIFFERENT mechanism from the RBAC `conditions.op` of §7** (which supports only `eq`); the guard's six operators apply only inside a transaction op and are about optimistic-locking, not authorization.
-- **Limit:** at most `DefaultMaxTxOps` = 100 operations (override `APPITOOLS_MAX_TX_OPS`); over the cap → `400`. The 1 MiB body cap also applies. An empty `operations` array → `400`.
+- **Limit:** at most `DefaultMaxTxOps` = 100 operations (override `APPXIMO_MAX_TX_OPS`); over the cap → `400`. The 1 MiB body cap also applies. An empty `operations` array → `400`.
 - **Failure naming:** any op failure rolls the whole batch back and returns the failing op's status with `{ "error", "failed_operation": <index>, "op", "resource"[, "fields"] }`. Unique collision → `409`; unknown column → `422`; forbidden → `403`; bad op/resource → `400`; an update/delete matching no row → `404` (or `422` when a state-machine transition was the cause). Success returns `200 {"results":[...]}` (each entry is the created/updated row, or `{"deleted":true,"id":…}` for a delete) and invalidates the tenant's response cache.
 
 ### 10.4 GraphQL — `POST /graphql`
@@ -1844,7 +1844,7 @@ One endpoint (`pkg/graphql/handler.go`). Resource names are singularized + Pasca
   - All three write mutations emit outbox events identically to their REST counterparts (`RunInsert`/`RunUpdate`/`RunDelete`).
 - **Always HTTP 200.** Errors (validation, RBAC, DB) arrive in the `errors[]` array, never as a non-200 status — check `errors`, not the HTTP code. Validation failures are `errors[].extensions.fields` (same rule engine as REST 422). DB errors are masked to generic messages (`safeDBErr`); an FK violation surfaces the clear referential message, not "internal error".
 - **Limits:** body capped at 1 MiB (→ `413`); at most **50 root selections** per operation and **2000 total selections** across the document (alias-amplification guard), else the query is rejected with "query too complex". A fragment's cost is charged at EVERY spread site (ENG-28 — the cap used to be bypassable ~46× by spreading one fragment across many root aliases; counted ≥ resolved now). There is no separate depth counter.
-- **Introspection** (`__schema`/`__type`, detected anywhere including fragment definitions — `__typename` is allowed) is rejected with "introspection disabled in production" unless `APPITOOLS_ENV=development`. Mutations over `GET` are rejected ("mutations must use POST"). GraphiQL is served at `/graphiql` only in development.
+- **Introspection** (`__schema`/`__type`, detected anywhere including fragment definitions — `__typename` is allowed) is rejected with "introspection disabled in production" unless `APPXIMO_ENV=development`. Mutations over `GET` are rejected ("mutations must use POST"). GraphiQL is served at `/graphiql` only in development.
 
 ### 10.5 Auth — `/auth/*` (always present, unauthenticated, tenant-aware)
 
@@ -1852,7 +1852,7 @@ Mounted from `pkg/userauth` (`handlers.go`, under `/auth`). Tenant comes from th
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/auth/signup` | Create a user (enabled only when `APPITOOLS_AUTH_SIGNUP_ROLE` is set, else `403`) |
+| `POST` | `/auth/signup` | Create a user (enabled only when `APPXIMO_AUTH_SIGNUP_ROLE` is set, else `403`) |
 | `POST` | `/auth/login` | Password login → `{user, token}` or `{mfa_required, mfa_token}` |
 | `POST` | `/auth/refresh` | Re-mint a fresh token from a still-valid one |
 | `POST` | `/auth/reset/request` | Request a password-reset email (uniform anti-enum response) |
@@ -1875,7 +1875,7 @@ Present whenever no resource is literally named `files` (`app.go`; a `files` res
 
 | Method | Path | Purpose | RBAC |
 |---|---|---|---|
-| `POST` | `/api/files` | Multipart upload (form field `file`), streamed + content-deduplicated → `201 {file_id,sha256,size}`; over `APPITOOLS_FILES_MAX_BYTES` (default 256 MiB) → `413` | `create` on `files` |
+| `POST` | `/api/files` | Multipart upload (form field `file`), streamed + content-deduplicated → `201 {file_id,sha256,size}`; over `APPXIMO_FILES_MAX_BYTES` (default 256 MiB) → `413` | `create` on `files` |
 | `GET` | `/api/files/{id}` | Stream the blob back (`404` if unknown to the tenant) | `read` on `files` |
 
 A role needs `files` in its policy (`"resources":["files", …]` or `"*"`).
@@ -1909,19 +1909,19 @@ The control plane (tenant registration, `X-Admin-Key`) lives on a separate liste
 This section gives ONE complete schema that exercises essentially the entire grammar, and proves it validates. The JSON below was written to a file and run through the engine's own validator:
 
 ```
-$ ./appitools validate schema.json
+$ ./appximo validate schema.json
 Schema válido ✓
 ```
 
-That exact success line — `Schema válido ✓` — is what `cmd/appitools/cmd_validate.go` prints when `schema.Validate` returns zero errors (`cmd_validate.go`); any rule violation instead prints one line per `schema.ValidationError` to stderr (formatted as `<field>: <message>`) and exits non-zero. Everything claimed below was confirmed against the running validator, not from memory.
+That exact success line — `Schema válido ✓` — is what `cmd/appximo/cmd_validate.go` prints when `schema.Validate` returns zero errors (`cmd_validate.go`); any rule violation instead prints one line per `schema.ValidationError` to stderr (formatted as `<field>: <message>`) and exits non-zero. Everything claimed below was confirmed against the running validator, not from memory.
 
 ### 11.1 The validated schema
 
-The following is the exact, comment-free JSON that passed `appitools validate` (JSON forbids comments, so the explanation is in §11.2):
+The following is the exact, comment-free JSON that passed `appximo validate` (JSON forbids comments, so the explanation is in §11.2):
 
 ```json
 {
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "shop-api",
   "resources": {
@@ -2137,14 +2137,14 @@ The following is the exact, comment-free JSON that passed `appitools validate` (
 - `support` is another role-global role with a response `fields` allowlist. Note this allowlist lists `status` even though `customers` has no `status` field — the role-global form is **intentionally not field-checked** by the validator (`validateRBAC` returns early for any role with no `permissions`, `validator.go`), so this passes (see findings).
 - `member` is the **per-resource `permissions`** form, mutually exclusive with the role-global keys. Its `orders` grant shows the **read-all / write-own** pattern: a `conditions` on `owner_id = $user_id` scoped by `condition_actions: ["update", "delete"]`, so reads and creates are unconditional while updates/deletes are restricted to the caller's own rows. Each `condition_actions` entry must be a concrete action present in `actions` (`"*"` is not allowed). The `products` grant is read-only with a per-resource field allowlist. The `customers` grant scopes by the implicit `id` column (allowed because `rbacFieldExists` treats `id` as a real column) so a member can only read/update their own customer record. Every per-resource `conditions.field` is validated to exist on that exact resource.
 
-Together this single schema exercises: all nine field types; `required`/`unique`/`enum`/`min`/`max`/`minLength`/`maxLength`/`pattern`/`format`; literal, enum, and `"now"` defaults; a state machine; field-level relations with `on_delete` + `on_update` + a `references`-to-unique-non-id; a composite `foreign_keys` block against a composite unique index; `has_many`, `belongs_to`, and `many_to_many` relations; plain and composite-unique indexes; outbox `events`; `js` + `webhook` hooks; a `renamed_from`; and both RBAC role forms. It validates clean with `appitools validate`.
+Together this single schema exercises: all nine field types; `required`/`unique`/`enum`/`min`/`max`/`minLength`/`maxLength`/`pattern`/`format`; literal, enum, and `"now"` defaults; a state machine; field-level relations with `on_delete` + `on_update` + a `references`-to-unique-non-id; a composite `foreign_keys` block against a composite unique index; `has_many`, `belongs_to`, and `many_to_many` relations; plain and composite-unique indexes; outbox `events`; `js` + `webhook` hooks; a `renamed_from`; and both RBAC role forms. It validates clean with `appximo validate`.
 
 ---
 
 ## 12. Machine validation — the formal JSON Schema meta-schema
 
 This whole grammar is also published as a **formal JSON Schema (Draft 2020-12)
-meta-schema** — `pkg/schema/appitools.schema.json`, embedded in the binary
+meta-schema** — `pkg/schema/appximo.schema.json`, embedded in the binary
 (AI-F0-S1). It is the **deterministic structural net**: any candidate schema can be
 checked against it instantly, with no engine and no database, which is exactly what
 an AI generation layer (or an editor / IDE) needs — generate JSON, validate it
@@ -2154,7 +2154,7 @@ against the meta-schema, get precise located errors, iterate.
 
 Validation is split in two, and the split is deliberate:
 
-- **Structural (the meta-schema, `appitools.schema.json`).** Everything JSON Schema
+- **Structural (the meta-schema, `appximo.schema.json`).** Everything JSON Schema
   *can* express on its own: the field-type enum, the `on_delete`/`on_update`/
   `format`/`relation type`/RBAC-action/condition-`op` enums, the identifier
   patterns (`^[a-z][a-z0-9_]*$`; the `auth_`/`transaction` resource-name
@@ -2185,10 +2185,10 @@ valid schema in the repo); where they differ, it is always the Go validator bein
 ### 12.2 Using it
 
 ```bash
-appitools validate-schema schema.json   # structural (meta-schema), engine-free
-appitools validate schema.json          # semantic (Go) — the authority, human output
-appitools validate --json schema.json   # UNIFIED LLM-friendly report (structural + semantic)
-appitools meta-schema > appitools.schema.json   # print it (for an IDE's $schema, tooling, or an AI)
+appximo validate-schema schema.json   # structural (meta-schema), engine-free
+appximo validate schema.json          # semantic (Go) — the authority, human output
+appximo validate --json schema.json   # UNIFIED LLM-friendly report (structural + semantic)
+appximo meta-schema > appximo.schema.json   # print it (for an IDE's $schema, tooling, or an AI)
 ```
 
 `validate --json` emits one machine-readable report — `{ "valid", "errors":[ {path,
@@ -2276,10 +2276,10 @@ audit. Knowing these is essential for generating schemas that behave as intended
    *Original finding:* `RunAfterHook` switched only on `"webhook"`; a js/wasm
    after-hook passed validation and did nothing.
 
-5. **The webhook `X-Appitools-Event` header was hard-coded to `after_create`.**
+5. **The webhook `X-Appximo-Event` header was hard-coded to `after_create`.**
    **✅ RESOLVED (SEC-AUDIT-V2):** the runner now threads the real event through
    `FireAfterHook`→`RunAfterHook`→`Dispatch`, so an `after_update` webhook carries
-   `X-Appitools-Event: after_update`. (`pkg/extensions/hook_runner.go`)
+   `X-Appximo-Event: after_update`. (`pkg/extensions/hook_runner.go`)
 
 6. **GraphQL↔REST list asymmetry.**
    **✅ RESOLVED (SEC-AUDIT-V2) — COUNT + has_next:** GraphQL no longer runs
@@ -2370,7 +2370,7 @@ audit. Knowing these is essential for generating schemas that behave as intended
 
 19. **`relations.fk` / `target_fk` column existence is NOT validated at load** —
     `validateRelations` is structural (it only checks `target` is a declared
-    resource). A typo'd FK passes `appitools validate` and surfaces only as a
+    resource). A typo'd FK passes `appximo validate` and surfaces only as a
     logged warning at tenant migration. The same is true of declared `indexes`
     field names (regex-checked only) and FK source columns of the composite
     `foreign_keys` block. (`pkg/schema/validator.go`)

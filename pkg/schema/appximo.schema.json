@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://appitools.dev/meta/appitools.schema.json",
-  "title": "Appitools schema (meta-schema)",
-  "description": "Formal JSON Schema (Draft 2020-12) for an Appitools project schema. It mirrors the STRUCTURAL rules the Go validator (pkg/schema) enforces — types, enums, name patterns, allowed keys (strict), required fields, and the two RBAC forms. It is the deterministic structural net: a document that passes this meta-schema is structurally valid; the Go validator remains the authority for SEMANTIC cross-reference checks JSON Schema cannot express (e.g. a relation/FK target or references column must EXIST and be unique on the target; a condition/allowlist field must exist on the resource; renamed_from must not still be declared). See docs/SCHEMA_REFERENCE.md.",
+  "$id": "https://appximo.com/meta/appximo.schema.json",
+  "title": "Appximo schema (meta-schema)",
+  "description": "Formal JSON Schema (Draft 2020-12) for an Appximo project schema. It mirrors the STRUCTURAL rules the Go validator (pkg/schema) enforces — types, enums, name patterns, allowed keys (strict), required fields, and the two RBAC forms. It is the deterministic structural net: a document that passes this meta-schema is structurally valid; the Go validator remains the authority for SEMANTIC cross-reference checks JSON Schema cannot express (e.g. a relation/FK target or references column must EXIST and be unique on the target; a condition/allowlist field must exist on the resource; renamed_from must not still be declared). See docs/SCHEMA_REFERENCE.md.",
   "type": "object",
   "required": ["$schema", "version"],
   "additionalProperties": false,
   "properties": {
-    "$schema": { "type": "string", "minLength": 1, "description": "Schema dialect URL (any non-empty string; conventionally https://appitools.dev/schema/v1)." },
+    "$schema": { "type": "string", "minLength": 1, "description": "Schema dialect URL (any non-empty string; conventionally https://appximo.com/schema/v1)." },
     "version": { "type": "string", "minLength": 1 },
     "name": { "type": "string" },
     "resources": {

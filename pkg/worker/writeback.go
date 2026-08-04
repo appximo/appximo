@@ -13,7 +13,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog"
 
-	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/appximo/appximo/pkg/auth"
 )
 
 // DefaultServiceTokenTTL is how long a worker's service JWT is valid. Kept SHORT

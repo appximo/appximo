@@ -3,7 +3,7 @@ package schema_test
 import (
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // TestValidate_OnUpdate mirrors the on_delete checks for the MIG-F1-S5 on_update
@@ -11,7 +11,7 @@ import (
 func TestValidate_OnUpdate(t *testing.T) {
 	mk := func(f schema.FieldDef) *schema.APISchema {
 		return &schema.APISchema{
-			Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+			Schema: "https://appximo.com/schema/v1", Version: "1", Name: "test",
 			Resources: map[string]schema.ResourceSchema{
 				"parents": {Fields: map[string]schema.FieldDef{"name": {Type: "string"}}},
 				"kids":    {Fields: map[string]schema.FieldDef{"p": f}},
@@ -43,7 +43,7 @@ func TestValidate_OnUpdate(t *testing.T) {
 func TestValidate_References(t *testing.T) {
 	mk := func(postField schema.FieldDef, userFields map[string]schema.FieldDef) *schema.APISchema {
 		return &schema.APISchema{
-			Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+			Schema: "https://appximo.com/schema/v1", Version: "1", Name: "test",
 			Resources: map[string]schema.ResourceSchema{
 				"users": {Fields: userFields},
 				"posts": {Fields: map[string]schema.FieldDef{"author": postField}},
@@ -84,7 +84,7 @@ func TestValidate_References(t *testing.T) {
 func TestValidate_CompositeForeignKeys(t *testing.T) {
 	mk := func(fks []schema.ForeignKeyDef, orderFields map[string]schema.FieldDef) *schema.APISchema {
 		return &schema.APISchema{
-			Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+			Schema: "https://appximo.com/schema/v1", Version: "1", Name: "test",
 			Resources: map[string]schema.ResourceSchema{
 				"branches": {
 					Fields: map[string]schema.FieldDef{
@@ -118,7 +118,7 @@ func TestValidate_CompositeForeignKeys(t *testing.T) {
 	}
 	// Ref columns not a unique key on the target (drop the unique index).
 	noUnique := &schema.APISchema{
-		Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+		Schema: "https://appximo.com/schema/v1", Version: "1", Name: "test",
 		Resources: map[string]schema.ResourceSchema{
 			"branches": {Fields: map[string]schema.FieldDef{
 				"region_code": {Type: "string"}, "branch_code": {Type: "string"},
@@ -165,7 +165,7 @@ func TestValidate_CompositeForeignKeys(t *testing.T) {
 // entry is rejected (no silent dead config), via the raw strict-key checker.
 func TestValidate_ForeignKeysStrictKeys(t *testing.T) {
 	raw := []byte(`{
-      "$schema": "https://appitools.dev/schema/v1", "version": "1", "name": "t",
+      "$schema": "https://appximo.com/schema/v1", "version": "1", "name": "t",
       "resources": {
         "branches": { "fields": { "code": { "type": "string", "unique": true } } },
         "orders": {

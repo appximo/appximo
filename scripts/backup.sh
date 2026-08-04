@@ -1,35 +1,35 @@
 #!/usr/bin/env bash
 #
-# Appitools — PostgreSQL backup (pg_dump custom format + rotation), for cron.
+# Appximo — PostgreSQL backup (pg_dump custom format + rotation), for cron.
 #
-# Dumps the whole Appitools database — every tenant's schema plus the control
+# Dumps the whole Appximo database — every tenant's schema plus the control
 # plane (public.tenants, …) — as ONE compressed custom-format file, and prunes
 # old dumps. Custom format (-Fc) is compressed and restores selectively with
 # pg_restore. This backs up the DATA plane; the schema definitions also live in
 # public.schema_history, so a restore brings both back.
 #
 # A backup you have never restored is not a backup. Test your restore:
-#   createdb appitools_restore_test
-#   pg_restore -d appitools_restore_test /var/backups/appitools/appitools-<stamp>.dump
-#   # …inspect, then: dropdb appitools_restore_test
+#   createdb appximo_restore_test
+#   pg_restore -d appximo_restore_test /var/backups/appximo/appximo-<stamp>.dump
+#   # …inspect, then: dropdb appximo_restore_test
 #
 # Cron (nightly at 03:30, keep 14 days), as root:
-#   30 3 * * *  DATABASE_URL='postgres://appitools:PASS@localhost:5432/appitools' \
-#               /opt/appitools/scripts/backup.sh >> /var/log/appitools-backup.log 2>&1
+#   30 3 * * *  DATABASE_URL='postgres://appximo:PASS@localhost:5432/appximo' \
+#               /opt/appximo/scripts/backup.sh >> /var/log/appximo-backup.log 2>&1
 #
 # Config (env or flags):
 #   DATABASE_URL       connection string          [or read from --env-file]
-#   BACKUP_DIR         output dir                  [default /var/backups/appitools]
+#   BACKUP_DIR         output dir                  [default /var/backups/appximo]
 #   BACKUP_KEEP        how many dumps to retain    [default 14]
 # Flags: --env-file=PATH (read DATABASE_URL from a KEY=value file, e.g. the
-#        installer's /etc/appitools/appitools.env), --dir=PATH, --keep=N.
+#        installer's /etc/appximo/appximo.env), --dir=PATH, --keep=N.
 set -euo pipefail
 
 # OPS-10: --app=NAME points the backup at THAT app's env file and its own backup
 # directory, so a box running several apps backs each one up separately instead of
 # silently dumping the same database twice.
 APP_NAME=""
-BACKUP_DIR="${BACKUP_DIR:-/var/backups/appitools}"
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/appximo}"
 BACKUP_KEEP="${BACKUP_KEEP:-14}"
 ENV_FILE=""
 for arg in "$@"; do
@@ -46,19 +46,19 @@ done
 # --app derives this app's env file + its own backup directory (OPS-10).
 if [ -n "$APP_NAME" ]; then
 	[ -n "$ENV_FILE" ] || ENV_FILE="/etc/$APP_NAME/$APP_NAME.env"
-	[ "$BACKUP_DIR" = "/var/backups/appitools" ] && BACKUP_DIR="/var/backups/$APP_NAME"
+	[ "$BACKUP_DIR" = "/var/backups/appximo" ] && BACKUP_DIR="/var/backups/$APP_NAME"
 fi
 
 if [ -n "$ENV_FILE" ]; then
 	[ -f "$ENV_FILE" ] || { echo "env file '$ENV_FILE' not found" >&2; exit 1; }
 	DATABASE_URL="$(grep -E '^DATABASE_URL=' "$ENV_FILE" | head -1 | cut -d= -f2-)"
 fi
-: "${DATABASE_URL:?DATABASE_URL is required (set it, or pass --env-file=/etc/appitools/appitools.env)}"
+: "${DATABASE_URL:?DATABASE_URL is required (set it, or pass --env-file=/etc/appximo/appximo.env)}"
 command -v pg_dump >/dev/null || { echo "pg_dump not found (apt-get install postgresql-client)" >&2; exit 1; }
 
 mkdir -p "$BACKUP_DIR"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-OUT="$BACKUP_DIR/${APP_NAME:-appitools}-$STAMP.dump"
+OUT="$BACKUP_DIR/${APP_NAME:-appximo}-$STAMP.dump"
 TMP="$OUT.partial"
 
 # Dump to a .partial then rename, so a crashed run never leaves a truncated file
@@ -70,6 +70,6 @@ echo "$(date -u +%FT%TZ) backup ok: $OUT ($SIZE)"
 
 # Rotation: keep the newest $BACKUP_KEEP dumps.
 # shellcheck disable=SC2012
-ls -1t "$BACKUP_DIR"/appitools-*.dump 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" | while read -r old; do
+ls -1t "$BACKUP_DIR"/appximo-*.dump 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" | while read -r old; do
 	rm -f "$old" && echo "$(date -u +%FT%TZ) pruned old backup: $old"
 done

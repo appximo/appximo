@@ -14,7 +14,7 @@ the *why* lives here.
 
 ## Context and problem
 
-Appitools grew bottom-up: a declarative multi-tenant engine, then an
+Appximo grew bottom-up: a declarative multi-tenant engine, then an
 extensibility model (ADR-016), an outbox + worker tier, a file store, and
 declarative relations (ADR-019). Each layer was measured and shipped, but the
 **commercial north** — the answer to "what is this *against*, and where does it
@@ -26,11 +26,11 @@ competes everywhere and wins nowhere.
 A market-research pass (PocketBase and Supabase as the primary comparables, with
 data and primary sources) closed two questions:
 
-1. **Where Appitools competes.** It is *not* in "simple backend for one app"
+1. **Where Appximo competes.** It is *not* in "simple backend for one app"
    (PocketBase wins that on packaging) and *not* in "massive SaaS with thousands
    of tenants" (the Postgres catalog degrades there). It competes in
    **mid-scale, multi-tenant productive B2B with native observability** — a
-   lane where the specific *combination* of properties Appitools already has is
+   lane where the specific *combination* of properties Appximo already has is
    not matched by either comparable on cheap hardware.
 
 2. **A design thesis about token cost.** The more declarative and validated the
@@ -50,7 +50,7 @@ internals (errors and schema must be LLM-legible; no new layer may degrade p50).
 
 ### 1 — Commercial north: mid-scale, multi-tenant productive B2B
 
-Appitools is the engine for **mid-scale productive B2B backends**: a business
+Appximo is the engine for **mid-scale productive B2B backends**: a business
 group with N companies, a firm running its ERP/HR, a vertical with tens-to-low-
 hundreds of customer-tenants. It is explicitly **not**:
 
@@ -60,7 +60,7 @@ hundreds of customer-tenants. It is explicitly **not**:
   (zero dependencies, embedded SQLite, one process to start). Fighting there is
   losing on packaging.
 
-The front end is **out of scope** (v0 / Lovable solve it). Appitools is the data
+The front end is **out of scope** (v0 / Lovable solve it). Appximo is the data
 + logic + observability engine behind the app, not the app.
 
 ### 2 — Multi-tenancy is an offered *plus* with a declared ceiling
@@ -120,7 +120,7 @@ then has to be debugged.
 
 **Decision:** every choice about the schema, the error messages, and the
 documentation is optimised so a low-cost model understands it in few tokens.
-"What consumes the least is Appitools" is a **design objective**, not a tagline.
+"What consumes the least is Appximo" is a **design objective**, not a tagline.
 This is why the engine already returns multi-field 422s and strict-key errors
 that *list the valid keys* — those are the seeds of an LLM-legible surface.
 
@@ -174,7 +174,7 @@ commitments (FASE 5 in the master plan):
 | Logical (RLS-style) tenant isolation instead of physical schema-per-tenant | Trades the most sellable B2B property ("physically isolated") for a policy layer that can have bugs. It would erase differentiator #1 and put us on Supabase's terms. |
 | Adopt a heavy OTel/Datadog-style observability stack for richer telemetry | Needs 2–8 GB and a sidecar fleet — it doesn't fit the 1–2 GB VPS target and kills differentiator #3. An optional OTLP *export* (no SDK weight on the hot path) is the bounded version we keep. |
 | Build the AI layer by **generating code** (Lovable/v0 model) | Unbounded, Turing-complete output → 40–50 % failure, $15–70 fix-loops. Operating a validated JSON over finite operations is bounded, verifiable, reversible, and runs on cheap models — the whole point of the low-token thesis. |
-| Make the front end a first-class concern | Out of scope by design: v0/Lovable solve it. Appitools is the data + logic + observability engine behind the app. |
+| Make the front end a first-class concern | Out of scope by design: v0/Lovable solve it. Appximo is the data + logic + observability engine behind the app. |
 
 ---
 

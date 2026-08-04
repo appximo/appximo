@@ -76,7 +76,7 @@ func TestCRMScenario(t *testing.T) {
 		JSON().Object().Value("error").String().IsEqual("forbidden")
 
 	// 8. Exactly one 403 was produced this run → the Prometheus counter proves it.
-	assertMetric(t, metrics.Gatherer(), "appitools_requests_total",
+	assertMetric(t, metrics.Gatherer(), "appximo_requests_total",
 		map[string]string{"status": "403"}, 1)
 }
 

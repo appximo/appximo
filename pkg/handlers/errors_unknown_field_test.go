@@ -9,8 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/handlers"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/handlers"
 )
 
 func undefinedColumnErr(col, table string) error {

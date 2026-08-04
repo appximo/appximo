@@ -11,7 +11,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 //go:embed templates/handler.tmpl

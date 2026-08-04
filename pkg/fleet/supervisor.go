@@ -152,11 +152,11 @@ func (s *Supervisor) buildEnv(spec *AppSpec) []string {
 		env[k] = v
 	}
 	appDir := filepath.Join(s.dataDir, spec.Name)
-	if env["OBS_DB_PATH"] == "" || env["OBS_DB_PATH"] == "/var/lib/appitools/obs.db" {
+	if env["OBS_DB_PATH"] == "" || env["OBS_DB_PATH"] == "/var/lib/appximo/obs.db" {
 		env["OBS_DB_PATH"] = filepath.Join(appDir, "obs.db")
 	}
-	if env["APPITOOLS_FILES_DIR"] == "" {
-		env["APPITOOLS_FILES_DIR"] = filepath.Join(appDir, "files")
+	if env["APPXIMO_FILES_DIR"] == "" {
+		env["APPXIMO_FILES_DIR"] = filepath.Join(appDir, "files")
 	}
 	if env["BACKUP_DIR"] == "" {
 		env["BACKUP_DIR"] = filepath.Join(appDir, "backups")

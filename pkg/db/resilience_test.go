@@ -8,7 +8,7 @@ import (
 
 	"github.com/sony/gobreaker"
 
-	"github.com/miguelangel/appitools/pkg/resilience"
+	"github.com/appximo/appximo/pkg/resilience"
 )
 
 func TestClassify_MapsUnavailableErrors(t *testing.T) {

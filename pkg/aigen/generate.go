@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // DefaultMaxIterations bounds the generate→validate→correct loop. AI-F1-S1 lowered
@@ -103,7 +103,7 @@ func Generate(ctx context.Context, client ModelClient, description string, opts 
 	outSchema := pickOutputSchema(useStructured, useIR)
 
 	messages := []Message{
-		{Role: "user", Content: "Generate an Appitools schema for this app:\n\n" + description},
+		{Role: "user", Content: "Generate an Appximo schema for this app:\n\n" + description},
 	}
 
 	for i := 1; i <= maxIter; i++ {

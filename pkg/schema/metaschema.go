@@ -10,7 +10,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// AI-F0-S1: the formal JSON Schema (Draft 2020-12) meta-schema for an Appitools
+// AI-F0-S1: the formal JSON Schema (Draft 2020-12) meta-schema for an Appximo
 // project schema. It is the deterministic STRUCTURAL net for the AI generation
 // stage: a document that passes it is structurally valid (types, enums, name
 // patterns, allowed keys, required fields, the two RBAC forms) without booting the
@@ -21,10 +21,10 @@ import (
 // kept in lockstep with the validator and the parity is enforced by
 // metaschema_test.go.
 //
-//go:embed appitools.schema.json
+//go:embed appximo.schema.json
 var metaSchemaJSON []byte
 
-const metaSchemaURL = "https://appitools.dev/meta/appitools.schema.json"
+const metaSchemaURL = "https://appximo.com/meta/appximo.schema.json"
 
 var (
 	metaSchemaOnce sync.Once
@@ -33,7 +33,7 @@ var (
 )
 
 // MetaSchemaJSON returns the raw bytes of the embedded meta-schema (for the
-// `appitools meta-schema` command, IDE integration, and external tooling).
+// `appximo meta-schema` command, IDE integration, and external tooling).
 func MetaSchemaJSON() []byte {
 	out := make([]byte, len(metaSchemaJSON))
 	copy(out, metaSchemaJSON)

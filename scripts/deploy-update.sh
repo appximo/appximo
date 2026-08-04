@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Appitools — update an installed binary (engine OR consumer app) to a new one, safely.
+# Appximo — update an installed binary (engine OR consumer app) to a new one, safely.
 #
 # Run this ON the production box, after copying the new binary up (scp). It backs
 # up the live binary, swaps atomically, restarts the systemd service, and
@@ -9,10 +9,10 @@
 # re-check health is a report, not a recovery — CONSUMER-PATH-S1).
 #
 # The full official flow (from your dev machine):
-#   1. build:  ./scripts/build-engine.sh /tmp/appitools "$(git rev-parse --short HEAD)" "$(git rev-parse HEAD)"
+#   1. build:  ./scripts/build-engine.sh /tmp/appximo "$(git rev-parse --short HEAD)" "$(git rev-parse HEAD)"
 #              (consumer apps: scripts/build-consumer.sh — same flags, plus the SPA)
-#   2. copy:   scp /tmp/appitools you@server:/tmp/appitools
-#   3. swap:   ssh you@server 'sudo bash /opt/appitools/scripts/deploy-update.sh --binary=/tmp/appitools'
+#   2. copy:   scp /tmp/appximo you@server:/tmp/appximo
+#   3. swap:   ssh you@server 'sudo bash /opt/appximo/scripts/deploy-update.sh --binary=/tmp/appximo'
 #
 # Health is POLLED every 250 ms with an early exit — the wait costs what the boot
 # costs, not a fixed 30 s (the old fixed loop made a failed deploy's rollback take
@@ -21,17 +21,17 @@
 #
 # Flags:
 #   --binary=PATH        the new binary to install                     [required]
-#   --cli=PATH           also update the ops companion (appitools-cli) [optional]
+#   --cli=PATH           also update the ops companion (appximo-cli) [optional]
 #   --app=NAME           the app to update on a multi-app box (OPS-10): sets
 #                        --service=NAME and --dest=/opt/NAME/bin/NAME
-#   --service=NAME       systemd unit name                             [default appitools]
-#   --dest=PATH          installed binary path                         [default /opt/appitools/bin/appitools]
+#   --service=NAME       systemd unit name                             [default appximo]
+#   --dest=PATH          installed binary path                         [default /opt/appximo/bin/appximo]
 #   --port=PORT          engine port for the health check              [default 8090]
 #   --health-timeout=S   max seconds to wait for health                [default 30]
 #   --help
 set -euo pipefail
 
-BINARY=""; CLI=""; SERVICE="appitools"; DEST="/opt/appitools/bin/appitools"; PORT="8090"
+BINARY=""; CLI=""; SERVICE="appximo"; DEST="/opt/appximo/bin/appximo"; PORT="8090"
 # OPS-10: --app=NAME derives the unit and the installed path for a box running
 # several apps, so you never have to spell both out (and never point one app's
 # deploy at another app's binary).
@@ -53,8 +53,8 @@ done
 
 # --app derives the unit + destination unless they were given explicitly (OPS-10).
 if [ -n "$APP_NAME" ]; then
-	[ "$SERVICE" = "appitools" ] && SERVICE="$APP_NAME"
-	[ "$DEST" = "/opt/appitools/bin/appitools" ] && DEST="/opt/$APP_NAME/bin/$APP_NAME"
+	[ "$SERVICE" = "appximo" ] && SERVICE="$APP_NAME"
+	[ "$DEST" = "/opt/appximo/bin/appximo" ] && DEST="/opt/$APP_NAME/bin/$APP_NAME"
 fi
 
 if [ -t 1 ]; then G=$'\033[0;32m'; R=$'\033[0;31m'; Y=$'\033[1;33m'; N=$'\033[0m'; else G=""; R=""; Y=""; N=""; fi
@@ -128,7 +128,7 @@ ok "swapped in new binary at $DEST"
 # engine binary itself — already updated by the swap above).
 if [ -n "$CLI" ]; then
 	[ -f "$CLI" ] || die "--cli '$CLI' not found"
-	install -m 0755 "$CLI" "$(dirname "$DEST")/appitools-cli"
+	install -m 0755 "$CLI" "$(dirname "$DEST")/appximo-cli"
 	ok "ops CLI updated"
 fi
 

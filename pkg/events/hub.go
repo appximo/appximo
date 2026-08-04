@@ -21,7 +21,7 @@ import (
 const subscriberBuffer = 64
 
 // DefaultMaxPerTenant bounds concurrent subscribers per tenant when no explicit
-// limit is configured (APPITOOLS_MAX_SSE_PER_TENANT).
+// limit is configured (APPXIMO_MAX_SSE_PER_TENANT).
 const DefaultMaxPerTenant = 1000
 
 // ErrTenantLimit is returned by Subscribe when the tenant has reached its

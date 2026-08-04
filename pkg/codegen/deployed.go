@@ -3,7 +3,7 @@ package codegen
 import (
 	"context"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // ENG-12 — writing a field the running process was not booted with.

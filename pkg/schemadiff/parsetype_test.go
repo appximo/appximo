@@ -3,7 +3,7 @@ package schemadiff_test
 import (
 	"testing"
 
-	sd "github.com/miguelangel/appitools/pkg/schemadiff"
+	sd "github.com/appximo/appximo/pkg/schemadiff"
 )
 
 // TestParseType_Spellings checks that every Postgres type spelling normalizes to
@@ -158,7 +158,7 @@ func TestType_StringRoundTrip(t *testing.T) {
 	}
 }
 
-// TestTypeForAPIType maps the Appitools schema-JSON type vocabulary to canonical
+// TestTypeForAPIType maps the Appximo schema-JSON type vocabulary to canonical
 // types, mirroring the engine converger's fieldTypeToPG exactly.
 func TestTypeForAPIType(t *testing.T) {
 	cases := map[string]sd.Type{
@@ -181,7 +181,7 @@ func TestTypeForAPIType(t *testing.T) {
 }
 
 // TestTypeForAPIType_MatchesParseType ties the two halves of the canonicalizer
-// together: the canonical type the engine WOULD lay down for an Appitools field
+// together: the canonical type the engine WOULD lay down for an Appximo field
 // (TypeForAPIType) equals the canonical type Introspect WOULD read back from the
 // Postgres column the converger creates (ParseType of fieldTypeToPG's output).
 func TestTypeForAPIType_MatchesParseType(t *testing.T) {

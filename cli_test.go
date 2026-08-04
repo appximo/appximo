@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"strings"
@@ -13,17 +13,17 @@ func TestParseServeArgs_Contract(t *testing.T) {
 
 	// version → identity line, no error.
 	_, line, err := parseServeArgs("myapp", "abc1234", "deadbeef", def, []string{"version"})
-	if err != nil || !strings.Contains(line, "myapp abc1234") || !strings.Contains(line, "appitools framework") {
+	if err != nil || !strings.Contains(line, "myapp abc1234") || !strings.Contains(line, "appximo framework") {
 		t.Fatalf("version: line=%q err=%v", line, err)
 	}
 
 	// The unit's exact invocation: serve + flags.
 	got, line, err := parseServeArgs("myapp", "v", "r", def,
-		[]string{"serve", "--schema", "/etc/appitools/schema.json", "--port", "8090"})
+		[]string{"serve", "--schema", "/etc/appximo/schema.json", "--port", "8090"})
 	if err != nil || line != "" {
 		t.Fatalf("serve: err=%v line=%q", err, line)
 	}
-	if got.SchemaPath != "/etc/appitools/schema.json" || got.Port != 8090 || got.ControlPort != 9099 {
+	if got.SchemaPath != "/etc/appximo/schema.json" || got.Port != 8090 || got.ControlPort != 9099 {
 		t.Fatalf("serve args = %+v", got)
 	}
 
@@ -41,7 +41,7 @@ func TestParseServeArgs_Contract(t *testing.T) {
 
 	// An unknown subcommand fails LOUD with the contract in the message.
 	_, _, err = parseServeArgs("myapp", "v", "r", def, []string{"migrate", "--tenant", "x"})
-	if err == nil || !strings.Contains(err.Error(), "appitools-cli") {
+	if err == nil || !strings.Contains(err.Error(), "appximo-cli") {
 		t.Fatalf("unknown subcommand must fail actionably, got: %v", err)
 	}
 

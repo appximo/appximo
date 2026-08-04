@@ -3,8 +3,8 @@
   "scenario": "graphql_nested",
   "rate_requested": 100,
   "cache_bust": true,
-  "url": "https://api.appitools.com",
-  "target": "https://api.appitools.com",
+  "url": "https://api.appximo.com",
+  "target": "https://api.appximo.com",
   "colocated_loader": false,
   "cdn_detected": "cloudflare",
   "origin_ip": "PROD-VPS",
@@ -12,7 +12,7 @@
   "per_run": [
     {
       "scenario": "graphql_nested",
-      "target": "https://api.appitools.com",
+      "target": "https://api.appximo.com",
       "cache_bust": true,
       "origin_ip": "PROD-VPS",
       "per_page": 20,
@@ -46,7 +46,7 @@
     },
     {
       "scenario": "graphql_nested",
-      "target": "https://api.appitools.com",
+      "target": "https://api.appximo.com",
       "cache_bust": true,
       "origin_ip": "PROD-VPS",
       "per_page": 20,
@@ -80,7 +80,7 @@
     },
     {
       "scenario": "graphql_nested",
-      "target": "https://api.appitools.com",
+      "target": "https://api.appximo.com",
       "cache_bust": true,
       "origin_ip": "PROD-VPS",
       "per_page": 20,

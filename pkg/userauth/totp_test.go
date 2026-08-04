@@ -68,7 +68,7 @@ func TestValidateTOTP_WindowAndDrift(t *testing.T) {
 
 func TestOtpauthURI(t *testing.T) {
 	t.Parallel()
-	uri := otpauthURI("Appitools (acme)", "user@example.com", "ABC234")
+	uri := otpauthURI("Appximo (acme)", "user@example.com", "ABC234")
 	for _, want := range []string{"otpauth://totp/", "secret=ABC234", "algorithm=SHA1", "digits=6", "period=30"} {
 		if !contains(uri, want) {
 			t.Errorf("otpauth uri missing %q: %s", want, uri)

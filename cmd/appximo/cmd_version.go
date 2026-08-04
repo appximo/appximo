@@ -18,9 +18,9 @@ var (
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "Imprime la versión de Appitools",
+	Short: "Imprime la versión de Appximo",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("appitools %s (commit %s)\n", version, revision)
+		fmt.Printf("appximo %s (commit %s)\n", version, revision)
 	},
 }
 

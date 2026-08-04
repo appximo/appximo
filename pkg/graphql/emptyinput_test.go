@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	gqlhandler "github.com/miguelangel/appitools/pkg/graphql"
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
+	gqlhandler "github.com/appximo/appximo/pkg/graphql"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // BUG2: a resource whose fields are ALL uuid generates empty Order/Filter input
@@ -16,7 +16,7 @@ import (
 // schema is built synchronously; resolvers (which use tdb) never run here.
 func TestBuildHandler_OnlyUUIDResource_NoPanic(t *testing.T) {
 	s := &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "bug2",
 		Resources: map[string]schema.ResourceSchema{

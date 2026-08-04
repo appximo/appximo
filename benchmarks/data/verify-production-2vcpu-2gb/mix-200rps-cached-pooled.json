@@ -3,8 +3,8 @@
   "scenario": "mix",
   "rate_requested": 200,
   "cache_bust": false,
-  "url": "https://api.appitools.com",
-  "target": "https://api.appitools.com",
+  "url": "https://api.appximo.com",
+  "target": "https://api.appximo.com",
   "colocated_loader": false,
   "cdn_detected": "cloudflare",
   "origin_ip": "PROD-VPS",
@@ -12,7 +12,7 @@
   "per_run": [
     {
       "scenario": "mix",
-      "target": "https://api.appitools.com",
+      "target": "https://api.appximo.com",
       "cache_bust": false,
       "origin_ip": "PROD-VPS",
       "per_page": 20,
@@ -46,7 +46,7 @@
     },
     {
       "scenario": "mix",
-      "target": "https://api.appitools.com",
+      "target": "https://api.appximo.com",
       "cache_bust": false,
       "origin_ip": "PROD-VPS",
       "per_page": 20,
@@ -80,7 +80,7 @@
     },
     {
       "scenario": "mix",
-      "target": "https://api.appitools.com",
+      "target": "https://api.appximo.com",
       "cache_bust": false,
       "origin_ip": "PROD-VPS",
       "per_page": 20,

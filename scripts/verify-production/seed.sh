@@ -20,7 +20,7 @@
 #   --customers=N        number of customers                    [default orders/20, min 100]
 #   --items-per-order=N  order_items per order                          [default 2]
 #   --reset              TRUNCATE the three tables first (destructive, that tenant only)
-#   --env-file=PATH      installer env file (for DATABASE_URL)  [default /etc/appitools/appitools.env]
+#   --env-file=PATH      installer env file (for DATABASE_URL)  [default /etc/appximo/appximo.env]
 #   --out=PATH           write the JSON result here
 #   --help
 set -euo pipefail
@@ -64,7 +64,7 @@ DBURL="${DATABASE_URL:-}"
 [ -z "$DBURL" ] && DBURL="$(load_env_secret DATABASE_URL || true)"
 psql_run() {
 	if [ -n "$DBURL" ]; then psql -v ON_ERROR_STOP=1 -qtAX -d "$DBURL" "$@"
-	else runuser -u postgres -- psql -v ON_ERROR_STOP=1 -qtAX -d appitools "$@"; fi
+	else runuser -u postgres -- psql -v ON_ERROR_STOP=1 -qtAX -d appximo "$@"; fi
 }
 
 hdr "seed — tenant '$TENANT' ($PGSCHEMA)"

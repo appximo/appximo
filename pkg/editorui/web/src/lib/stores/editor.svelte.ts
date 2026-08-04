@@ -111,7 +111,7 @@ class EditorStore {
 	entities = $state<EntityModel[]>([]);
 	schemaName = $state('untitled-api');
 	version = $state('1');
-	schemaUrl = $state('https://appitools.dev/schema/v1');
+	schemaUrl = $state('https://appximo.com/schema/v1');
 	rbac = $state<RBACPolicy>({ roles: {} });
 	workflows = $state<Record<string, unknown> | undefined>(undefined);
 

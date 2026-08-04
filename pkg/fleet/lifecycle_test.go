@@ -12,7 +12,7 @@ import (
 func writeLifecycleFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	schemaJSON := `{"$schema":"https://appitools.dev/schema/v1","version":"1","name":"x","resources":{"tasks":{"fields":{"title":{"type":"string"}}}}}`
+	schemaJSON := `{"$schema":"https://appximo.com/schema/v1","version":"1","name":"x","resources":{"tasks":{"fields":{"title":{"type":"string"}}}}}`
 	for _, n := range []string{"crm", "shop", "optica"} {
 		if err := os.WriteFile(filepath.Join(dir, n+".json"), []byte(schemaJSON), 0o644); err != nil {
 			t.Fatal(err)

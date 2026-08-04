@@ -1,7 +1,7 @@
-# The Appitools mental model — one schema, many tenants
+# The Appximo mental model — one schema, many tenants
 
 This document answers, with the code as the authority, the two questions every
-new user of Appitools eventually asks:
+new user of Appximo eventually asks:
 
 1. *"If it's multi-tenant, why does `/docs` show one API for everyone?"*
 2. *"I deployed a change from the editor — why do I (sometimes) need a restart?"*
@@ -15,7 +15,7 @@ probed; see [§4](#4-the-change-cycle--what-a-deploy-activates-live-and-what-nee
 
 - **The schema** (`schema.json`) is the *definition of the application*:
   resources, fields, relations, RBAC, hooks, state machines. The visual editor
-  (`/editor`) designs it; `appitools validate` checks it; it is the single input.
+  (`/editor`) designs it; `appximo validate` checks it; it is the single input.
 - **The engine** (the binary) *compiles* that schema at boot into a live server:
   REST routes, GraphQL types, RBAC middleware, validators, hooks, OpenAPI
   (`pkg/codegen.BuildRouter`, called once in `app.go` `buildRouter`).
@@ -71,7 +71,7 @@ the same *route surface*.
 ## 4. The change cycle — what a deploy activates live, and what needs a restart
 
 A deploy (editor "Deploy", control-plane `PUT /tenants/{id}/schema`, or
-`appitools migrate` — since CONSUMER-PATH-S1 the single-tenant CLI persists the
+`appximo migrate` — since CONSUMER-PATH-S1 the single-tenant CLI persists the
 schema too, so all three paths record the same thing) does four things:
 persists the schema to `public.tenants.json_schema`, **appends it to the
 tenant's version history** (`public.schema_history`, append-only — the base of
@@ -130,7 +130,7 @@ created in `tenant_acme` only. `tenant_demo` does not change. (And the
   `400 "invalid tenant"` (42P01/3F000 classified in handlers/errors.go
   `WriteDBError`), never a raw error.
 - Keeping N tenants in structural sync is the CLI's job:
-  `appitools migrate --all-tenants --schema base.json` — the resumable,
+  `appximo migrate --all-tenants --schema base.json` — the resumable,
   partial-failure-tolerant fan-out (`migration.RunFanout`, called from the
   `--all-tenants` branch of cmd_migrate.go). **RunFanout is reachable only from
   the CLI today**;
@@ -185,7 +185,7 @@ precompiled closures — the property the public benchmark rests on. But it is
    consent step, progress (drain → relaunch) and a served-resources
    verification when the engine returns.
 2. **Hot router swap** — **IMPLEMENTED per-app in the in-process fleet
-   (`appitools fleet serve`, MT-STRUCT-S4)**: a deploy rebuilds one app's
+   (`appximo fleet serve`, MT-STRUCT-S4)**: a deploy rebuilds one app's
    `BuildRouter` + GraphQL + RBAC + OpenAPI from the new schema into a fresh
    handler and swaps it behind the registry's `atomic.Pointer` — no process
    restart, the other apps untouched, in-flight requests finishing consistently

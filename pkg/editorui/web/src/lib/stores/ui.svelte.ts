@@ -25,7 +25,7 @@ class UIStore {
 
 	init() {
 		if (typeof localStorage !== 'undefined') {
-			const t = localStorage.getItem('appitools-editor-theme');
+			const t = localStorage.getItem('appximo-editor-theme');
 			if (t === 'dark' || t === 'light') this.theme = t;
 		}
 		this.apply();
@@ -34,7 +34,7 @@ class UIStore {
 	toggle() {
 		this.theme = this.theme === 'light' ? 'dark' : 'light';
 		try {
-			localStorage.setItem('appitools-editor-theme', this.theme);
+			localStorage.setItem('appximo-editor-theme', this.theme);
 		} catch {
 			/* private mode — ignore */
 		}

@@ -1,8 +1,8 @@
-// k6-pub.js — S46 public comparative benchmark (Appitools vs NestJS).
+// k6-pub.js — S46 public comparative benchmark (Appximo vs NestJS).
 //
 // One script drives BOTH stacks so the request shape is provably identical:
 //   GET /api/guides?filter[status]=pending&sort=created_at&order=desc&per_page=20
-//   - Appitools: tenant from the Host subdomain, sort/order honored by the engine
+//   - Appximo: tenant from the Host subdomain, sort/order honored by the engine
 //   - NestJS:    tenant from the verified JWT claim, ORDER BY created_at DESC is
 //                hardcoded in the controller (sort/order params are ignored)
 //   Both return the 20 newest 'pending' rows for tenant 10.
@@ -23,7 +23,7 @@ const TENANT   = __ENV.TENANT_ID || '10';
 const TOKEN    = __ENV.BENCH_TOKEN || '';
 const ENDPOINT = __ENV.ENDPOINT ||
   '/api/guides?filter[status]=pending&sort=created_at&order=desc&per_page=20';
-// NO_CACHE=1 sends Cache-Control: no-cache, which the Appitools response
+// NO_CACHE=1 sends Cache-Control: no-cache, which the Appximo response
 // cache honors as a full bypass (pkg/cache/response_cache.go): every request
 // reaches Postgres. Used for the cache-disabled headline variant (§4.4).
 const NO_CACHE = __ENV.NO_CACHE === '1';

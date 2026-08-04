@@ -7,10 +7,10 @@ import (
 	gql "github.com/graphql-go/graphql"
 	"github.com/graphql-go/graphql/language/ast"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/query"
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/query"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // RELATIONS-V1 for GraphQL (ADR-019 §6): a nested relation field selection compiles

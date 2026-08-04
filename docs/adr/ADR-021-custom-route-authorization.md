@@ -37,7 +37,7 @@ everywhere. A schema shape dictated by an authorization limitation.
 
 Two secondary facts shaped the decision:
 
-1. **A schema is validated standalone.** `appitools validate`, Studio's Code view,
+1. **A schema is validated standalone.** `appximo validate`, Studio's Code view,
    the meta-schema and the AI correction loop all run with no Go program in sight.
    Whatever we add must be checkable *without* the route set — with the parts that
    need the route set checked later, at boot.
@@ -82,7 +82,7 @@ Add a **`routes`** block to a role: a map of **custom-route segment → `{action
 4. **Two validation layers, each checking what it can see.**
    - *Schema* (`schema.Validate`, standalone): segment shape, at least one known
      action, and no collision with a declared resource name.
-   - *Boot* (`appitools.validateRouteGrants`, in `Start` — and in the deploy path
+   - *Boot* (`appximo.validateRouteGrants`, in `Start` — and in the deploy path
      `POST /admin/engine/schema`): every granted segment must be **registered**, and
      every concrete action must correspond to a registered method on it. A grant
      nothing serves is dead authorization config — exactly the thing that later
@@ -100,7 +100,7 @@ Measured: `no_change` (see below).
 
 **(a) Allow an unknown `permissions` key when it matches a registered route.**
 Rejected. It makes the *same* key mean two different things depending on context,
-and it breaks standalone validation: `appitools validate schema.json` would report
+and it breaks standalone validation: `appximo validate schema.json` would report
 `unknown_resource` for a schema that is perfectly valid at boot. The schema is the
 artifact — CLI, Studio, meta-schema and the AI loop all judge it alone. A key whose
 validity depends on a Go program that is not present is not a schema key.
@@ -139,7 +139,7 @@ places. The schema is where "who may do what" lives.
   tests (`pkg/rbac/route_grant_test.go`): a role that does not declare a segment
   gets 403; a wildcard role is unaffected on segments it does not name; a route
   grant never widens resource access.
-- A schema that grants a route is now **binary-specific**: the pure `appitools
+- A schema that grants a route is now **binary-specific**: the pure `appximo
   serve` binary, which registers no custom routes, refuses to boot it. That is
   deliberate — the alternative is a policy that can never match.
 - The `routes` key is authoritative, so adding one to a wildcard role *narrows*

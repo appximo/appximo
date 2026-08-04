@@ -7,7 +7,7 @@
 // Both surfaces are covered: REST POST and the GraphQL create mutation, which share
 // codegen.EnforceCreateRBAC via the codegen.RunInsert core. Reuses the shared
 // Postgres container + control plane from TestMain in library_integration_test.go.
-package appitools
+package appximo
 
 import (
 	"bytes"
@@ -18,8 +18,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/tests/helpers"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/tests/helpers"
 )
 
 const (

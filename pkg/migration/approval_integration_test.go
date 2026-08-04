@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/schema"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/schema"
 )
 
 // These integration tests exercise the DESTRUCTIVE-OPERATION APPROVAL GATE end to

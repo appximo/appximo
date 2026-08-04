@@ -12,14 +12,14 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/tenant"
 )
 
 // DefaultMaxUploadBytes caps a single upload body. It is a disk-exhaustion guard,
 // not a memory one (uploads stream to disk in 64 KiB chunks), so it is generous;
-// override via the engine's APPITOOLS_FILES_MAX_BYTES.
+// override via the engine's APPXIMO_FILES_MAX_BYTES.
 const DefaultMaxUploadBytes int64 = 256 << 20 // 256 MiB
 
 // SignedPathPrefix is where the engine serves signed-token downloads

@@ -40,7 +40,7 @@ export function Login() {
   return (
     <div class="login-wrap">
       <div class="card login-card">
-        <h1>Appitools Admin</h1>
+        <h1>Appximo Admin</h1>
         <Show when={step() === "creds"} fallback={
           <>
             <p class="sub">Enter the 6-digit code from your authenticator (or a backup code).</p>

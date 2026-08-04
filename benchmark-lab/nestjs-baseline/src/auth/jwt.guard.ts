@@ -1,10 +1,10 @@
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
 
-// Same trust model as the Appitools engine (S46 fair-comparison hardening):
+// Same trust model as the Appximo engine (S46 fair-comparison hardening):
 //   - HS256 pinned (alg confusion / "none" rejected by the allowlist)
 //   - signature verified on EVERY request with the shared HMAC secret
-//   - exp claim REQUIRED (Appitools rejects tokens without expiry)
+//   - exp claim REQUIRED (Appximo rejects tokens without expiry)
 //   - tenant taken from the verified tenant_id claim, never from a header
 const SECRET = process.env.JWT_SECRET || '';
 

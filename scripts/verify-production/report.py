@@ -254,7 +254,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", required=True)
     ap.add_argument("--out", default="")
-    ap.add_argument("--title", default="Appitools — production verification report")
+    ap.add_argument("--title", default="Appximo — production verification report")
     args = ap.parse_args()
 
     d = args.dir

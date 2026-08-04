@@ -3,7 +3,7 @@ package codegen
 import (
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 func updRes() *schema.ResourceSchema {

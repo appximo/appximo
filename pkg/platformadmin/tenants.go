@@ -10,9 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/userauth"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/userauth"
 )
 
 // tenantIDRe is the LOOKUP/DELETE-side id guard (defence in depth before
@@ -27,7 +27,7 @@ var tenantIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9\-_]{1,29}$`)
 
 // TenantInfo is the per-tenant summary returned by the tenant list. resource_count
 // is derived from the stored schema (free); data_rows and user_count are pg_stat
-// n_live_tup ESTIMATES (the same inventory `appitools tenant list` prints) — free
+// n_live_tup ESTIMATES (the same inventory `appximo tenant list` prints) — free
 // at list time, never a per-tenant exact COUNT.
 type TenantInfo struct {
 	ID            string    `json:"id"`
@@ -49,7 +49,7 @@ type TenantDetail struct {
 
 // ListTenants returns every registered tenant (newest first) with cheap metadata.
 // Row/user counts come from pg_stat_user_tables estimates (auth_ tables split out
-// of data_rows), exactly like the `appitools tenant list` CLI inventory.
+// of data_rows), exactly like the `appximo tenant list` CLI inventory.
 func (s *Service) ListTenants(ctx context.Context) ([]TenantInfo, error) {
 	if err := s.ensureSuspendCol(ctx); err != nil {
 		return nil, fmt.Errorf("platformadmin: ensure suspended column: %w", err)

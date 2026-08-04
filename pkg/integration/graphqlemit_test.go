@@ -7,19 +7,19 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/events"
+	"github.com/appximo/appximo/pkg/extensions"
+	gqlhandler "github.com/appximo/appximo/pkg/graphql"
+	"github.com/appximo/appximo/pkg/outbox"
+	rbacpkg "github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
+	"github.com/appximo/appximo/pkg/worker"
 	chi "github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/events"
-	"github.com/miguelangel/appitools/pkg/extensions"
-	gqlhandler "github.com/miguelangel/appitools/pkg/graphql"
-	"github.com/miguelangel/appitools/pkg/outbox"
-	rbacpkg "github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
-	"github.com/miguelangel/appitools/pkg/worker"
 )
 
 // emitSchema (BUGS-2/BUGS-3) exercises the REST/GraphQL write-emission consistency
@@ -29,7 +29,7 @@ import (
 //   - "memos" declares NO events — the no-opt-in gate: create/delete must never emit.
 func emitSchema() *schema.APISchema {
 	return &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "graphqlemit",
 		Resources: map[string]schema.ResourceSchema{

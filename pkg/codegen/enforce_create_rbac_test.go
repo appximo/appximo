@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/rbac"
+	"github.com/appximo/appximo/pkg/rbac"
 )
 
 // TestEnforceCreateRBAC covers the shared create-enforcement core (FASE3-SEC

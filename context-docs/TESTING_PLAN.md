@@ -1,4 +1,4 @@
-# APPITOOLS — TESTING PLAN
+# APPXIMO — TESTING PLAN
 > Archivo de contexto para todas las sesiones de testing (S37–S40+).
 > Leer junto a PRIMER.md al inicio de cada sesión de testing.
 > Última actualización: 2026-06-06 · Pre S37
@@ -99,7 +99,7 @@ Entidades: Invoice, Client (con NIT)
 - JWT expirado → 401
 - Body 1.1MB → 413
 - Cross-tenant: token de tenant A contra endpoint de tenant B → 403
-- Verificar: appitools_requests_total{status=401/403/413} se incrementa
+- Verificar: appximo_requests_total{status=401/403/413} se incrementa
   (security_blocked_total NO existe en el motor)
 
 ### Escenario 5 — Carga sostenida (k6, no httpexpect)
@@ -155,7 +155,7 @@ RAM < 100MB    bajo carga (verificación post-k6, no gate automático aún)
    Smoke local 5s c/u = 0 crashers.
 ✅ docker compose dry-run desde clone limpio: build (Go en Docker, scratch) +
    db healthy + engine → /health {"status":"ok"} /healthz 200 /readyz 200. El :8080
-   literal choca con un appitools-verif preexistente en ESTA box (remap host a 18080
+   literal choca con un appximo-verif preexistente en ESTA box (remap host a 18080
    para verificar; NO es bug del Quick Start). Nota compose: `ports` en override se
    MERGEAN (no reemplazan) sin tag !override → editar el clone directo.
 ✅ make test-all redefinido = test + test-integration + test-e2e + test-resilience
@@ -196,7 +196,7 @@ RAM < 100MB    bajo carga (verificación post-k6, no gate automático aún)
    para profiling local pero NO en el gate. `go test ./...-bench=.` del brief se
    acotó a ./tests/performance/... (evita los benchmarks testcontainers de pkg/benchmark).
 ℹ️ ZAP api-scan es ACTIVO (-a manda payloads de ataque) → NUNCA contra prod. La
-   security.yml genera el OpenAPI con `appitools openapi --base-url <TARGET>` y exige
+   security.yml genera el OpenAPI con `appximo openapi --base-url <TARGET>` y exige
    un target staging (rechaza PROD-VPS). Nightly + manual. .zap/rules.tsv creado.
 ℹ️ gotestfmt en ci.yml: el step "Full test suite" ahora hace `go test ./... -json |
    gotestfmt` con `set -o pipefail` (sin pipefail el fallo de un test se perdería en
@@ -227,7 +227,7 @@ RAM < 100MB    bajo carga (verificación post-k6, no gate automático aún)
    webhook usa buildWebhookServer local + dispatcher insecure-transport para llegar
    al receptor loopback. SSRF se asegura directo contra NewSSRFSafeClient (bloquea
    loopback + 169.254.169.254). HMAC = "sha256="+hex(HMAC-SHA256(body, secret)),
-   header X-Appitools-Signature, evento X-Appitools-Event.
+   header X-Appximo-Signature, evento X-Appximo-Event.
 ℹ️ deals.status enum = [pending,won,lost] (el brief decía "closed"): el motor
    valida enums en PATCH (collectUpdate→validateFieldValue) → se usó "won".
 ```
@@ -235,13 +235,13 @@ RAM < 100MB    bajo carga (verificación post-k6, no gate automático aún)
 ### Hallazgos S37 (leer antes de S38)
 
 ```
-✅ Métricas reales (grepeadas): appitools_requests_total{tenant_id,method,path,status},
-   appitools_request_duration_seconds{tenant_id,method,path}, appitools_active_tenants,
-   appitools_migration_duration_seconds{tenant_id,status}. El `path` de listas es el
+✅ Métricas reales (grepeadas): appximo_requests_total{tenant_id,method,path,status},
+   appximo_request_duration_seconds{tenant_id,method,path}, appximo_active_tenants,
+   appximo_migration_duration_seconds{tenant_id,status}. El `path` de listas es el
    patrón estático "/api/guides" (las rutas /{id} sí llevan param). Se añadió
    Metrics.Gatherer() para testutil.GatherAndCompare.
 ⚠️ NO existe `security_blocked_total` (Escenario 4): aseverar sobre
-   appitools_requests_total{status=401/403/413} o el ErrorStore (/debug/tenant/{id}).
+   appximo_requests_total{status=401/403/413} o el ErrorStore (/debug/tenant/{id}).
 ⚠️ NO hay OTel → tracetest.SpanRecorder (Escenario 2) no aplica. El proyecto usa su
    propio SpanTracker (pkg/observability/span.go). Reemplazar esa aserción en S38.
 ⚠️ SLOs son un motor Go (slo.go), no reglas YAML → promtool N/A (ver

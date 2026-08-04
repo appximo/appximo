@@ -72,7 +72,7 @@ func TestAttackScenario(t *testing.T) {
 	// ── Metric evidence: the 401 counter went up ────────────────────────────────
 	// Three distinct paths returned 401 (alg:none, expired, cross-tenant), all under
 	// tenant atktenant. There is NO security_blocked_total in this engine (S37
-	// finding) — we assert appitools_requests_total{status="401"} instead.
-	assertMetricAtLeast(t, metrics.Gatherer(), "appitools_requests_total",
+	// finding) — we assert appximo_requests_total{status="401"} instead.
+	assertMetricAtLeast(t, metrics.Gatherer(), "appximo_requests_total",
 		map[string]string{"status": "401"}, 3)
 }

@@ -18,7 +18,7 @@ import (
 )
 
 // NotifyChannel is the Postgres LISTEN/NOTIFY channel the engine signals after a
-// successful Enqueue and that the worker (cmd/appitools-worker) LISTENs on. The
+// successful Enqueue and that the worker (cmd/appximo-worker) LISTENs on. The
 // NOTIFY is only a wake-up HINT: the worker still polls public.outbox, which is
 // the durable source of truth, because a notification emitted while the worker is
 // down is lost forever (NOTIFY is ephemeral, not queued). Keep this constant the

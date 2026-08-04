@@ -18,7 +18,7 @@ import (
 	"github.com/jackc/puddle/v2"
 	"github.com/sony/gobreaker"
 
-	"github.com/miguelangel/appitools/pkg/resilience"
+	"github.com/appximo/appximo/pkg/resilience"
 )
 
 // queryTimeout bounds every database operation. A paused/unreachable Postgres

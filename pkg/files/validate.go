@@ -17,7 +17,7 @@ var ErrUploadRejected = errors.New("files: upload rejected")
 // DefaultAllowedExtensions is the out-of-the-box upload ALLOWLIST (OWASP: an
 // allowlist, never a denylist — an extension not listed here is rejected, so
 // .php/.exe/.sh are unrepresentable rather than enumerated). Operators extend
-// or replace it via APPITOOLS_FILES_ALLOWED_EXT; the single value "*" disables
+// or replace it via APPXIMO_FILES_ALLOWED_EXT; the single value "*" disables
 // the check. A file with NO extension is always accepted: it cannot be
 // double-click-executed, is stored under a hash key, and is served with
 // attachment + nosniff.

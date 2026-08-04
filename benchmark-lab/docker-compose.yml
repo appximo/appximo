@@ -44,15 +44,15 @@ services:
           memory: 256M
     profiles: ["nestjs"]
 
-  appitools:
-    image: appitools-bench:latest
+  appximo:
+    image: appximo-bench:latest
     environment:
       DATABASE_URL: postgresql://bench:bench@postgres/benchdb
       # Set these in your shell or a local .env before running the benchmark stack.
       # Never commit real secret values (the previous literals were revoked).
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET for the benchmark stack}
       ADMIN_KEY: ${ADMIN_KEY:?set ADMIN_KEY for the benchmark stack}
-      APPITOOLS_ENV: production
+      APPXIMO_ENV: production
     depends_on:
       postgres:
         condition: service_healthy
@@ -64,7 +64,7 @@ services:
         limits:
           cpus: "0.5"
           memory: 256M
-    profiles: ["appitools"]
+    profiles: ["appximo"]
 
   k6:
     image: grafana/k6:latest

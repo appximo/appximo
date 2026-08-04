@@ -10,9 +10,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/flowtest"
-	"github.com/miguelangel/appitools/pkg/schemahistory"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/flowtest"
+	"github.com/appximo/appximo/pkg/schemahistory"
 )
 
 // Flow tests + post-deploy regression (FLOWTEST-S1) — the Studio "Flows" view's

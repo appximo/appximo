@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 func typedResource() *schema.ResourceSchema {

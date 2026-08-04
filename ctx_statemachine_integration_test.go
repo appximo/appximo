@@ -5,7 +5,7 @@
 // truth: codegen.AppendStateTransitionGuard), same race-safety, same 422
 // message. Before this, a custom route had no engine path that kept the
 // lifecycle enforced, so consumers re-stated the transition table in Go.
-package appitools
+package appximo
 
 import (
 	"fmt"
@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/tests/helpers"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/tests/helpers"
 )
 
 func newStateMachineApp(t *testing.T) *httptest.Server {

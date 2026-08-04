@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 const graphqlSharedTypes = `enum OrderDirection { ASC DESC }

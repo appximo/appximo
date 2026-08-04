@@ -6,10 +6,10 @@ import (
 	"log"
 	"strings"
 
+	"github.com/appximo/appximo/pkg/files"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/schemadiff"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/files"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/schemadiff"
 )
 
 // schemaHasFileFields reports whether any resource declares a `file` field

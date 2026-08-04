@@ -1,4 +1,4 @@
-# Deploying Appitools
+# Deploying Appximo
 
 Three ways to run it. Pick by goal:
 
@@ -9,7 +9,7 @@ Three ways to run it. Pick by goal:
 | **Production, max throughput** | [native binary + dockerized Postgres + reverse proxy](#level-3--maximum-performance-native-binary--dockerized-postgres) | Caddy or nginx | the benchmark config |
 
 Levels 1 and 2 use the published multi-arch image
-(`neodevtrix/appitools-engine`, linux/amd64 + linux/arm64 — Apple Silicon works
+(`appximo/appximo`, linux/amd64 + linux/arm64 — Apple Silicon works
 natively). Level 3 runs the engine binary directly on the host — it is the
 stack the [public benchmark](../context-docs/BENCHMARK_PUBLIC.md) numbers come
 from.
@@ -24,9 +24,9 @@ ports on localhost.
 Requirements: Docker Desktop (Windows/Mac) or Docker Engine + compose v2 (Linux).
 
 ```bash
-mkdir appitools && cd appitools
-curl -O https://raw.githubusercontent.com/miguel09acosta/appitools/main/docker-compose.yml
-curl -O https://raw.githubusercontent.com/miguel09acosta/appitools/main/.env.example
+mkdir appximo && cd appximo
+curl -O https://raw.githubusercontent.com/appximo/appximo/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/appximo/appximo/main/.env.example
 cp .env.example .env        # edit: JWT_SECRET (≥32 chars), ADMIN_KEY, DB_PASSWORD
 docker compose up -d        # pulls the image + postgres
 curl localhost:8080/health  # {"status":"ok",...}
@@ -43,10 +43,10 @@ set -a; source .env; set +a
 # 1. register a tenant — creates its isolated Postgres schema + tables
 curl -X POST http://localhost:9090/tenants \
   -H "X-Admin-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
-  -d "{\"tenant_id\":\"acme\",\"display_name\":\"Acme\",\"email\":\"a@acme.com\",\"plan\":\"free\",\"schema\":$(docker compose exec engine cat /etc/appitools/schema.json)}"
+  -d "{\"tenant_id\":\"acme\",\"display_name\":\"Acme\",\"email\":\"a@acme.com\",\"plan\":\"free\",\"schema\":$(docker compose exec engine cat /etc/appximo/schema.json)}"
 
 # 2. mint a JWT for the "admin" role the schema defines (helper ships in the image)
-TOKEN=$(docker compose exec engine appitools token --secret "$JWT_SECRET" --tenant acme --role admin 2>/dev/null | tail -1)
+TOKEN=$(docker compose exec engine appximo token --secret "$JWT_SECRET" --tenant acme --role admin 2>/dev/null | tail -1)
 
 # 3. create a record
 curl -X POST http://localhost:8080/api/tasks \
@@ -73,7 +73,7 @@ baked example:
 services:
   engine:
     volumes:
-      - ./myschema.json:/etc/appitools/schema.json:ro
+      - ./myschema.json:/etc/appximo/schema.json:ro
 ```
 
 ---
@@ -94,10 +94,10 @@ What you need: a VPS (1 vCPU / 1GB is enough to start — the engine idles at
 > [Level 3](#level-3--maximum-performance-native-binary--dockerized-postgres).
 
 ```bash
-mkdir appitools && cd appitools
-curl -O https://raw.githubusercontent.com/miguel09acosta/appitools/main/docker-compose.prod.yml
-curl --create-dirs -o deploy/Caddyfile https://raw.githubusercontent.com/miguel09acosta/appitools/main/deploy/Caddyfile
-curl -O https://raw.githubusercontent.com/miguel09acosta/appitools/main/.env.example
+mkdir appximo && cd appximo
+curl -O https://raw.githubusercontent.com/appximo/appximo/main/docker-compose.prod.yml
+curl --create-dirs -o deploy/Caddyfile https://raw.githubusercontent.com/appximo/appximo/main/deploy/Caddyfile
+curl -O https://raw.githubusercontent.com/appximo/appximo/main/.env.example
 cp .env.example .env        # set DOMAIN, ACME_EMAIL + real secrets
 docker compose -f docker-compose.prod.yml up -d
 curl https://$DOMAIN/health
@@ -122,7 +122,7 @@ internet ──443──▶ Caddy (TLS automático Let's Encrypt)
 ```bash
 docker compose -f docker-compose.prod.yml exec engine sh -c \
   'wget -q -O- --header "X-Admin-Key: $ADMIN_KEY" --header "Content-Type: application/json" \
-   --post-data "{\"tenant_id\":\"acme\",...,\"schema\":$(cat /etc/appitools/schema.json)}" \
+   --post-data "{\"tenant_id\":\"acme\",...,\"schema\":$(cat /etc/appximo/schema.json)}" \
    http://127.0.0.1:9090/tenants'
 ```
 
@@ -145,7 +145,7 @@ Start with A; move to B when adding tenants becomes routine.
 ### Operations
 
 - **Upgrade**: `docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d` (the engine drains in-flight requests on SIGTERM).
-- **Pin a version**: replace `neodevtrix/appitools-engine:latest` with `neodevtrix/appitools-engine:<git-sha>` or a `v*` tag (every image is also pushed under its commit SHA).
+- **Pin a version**: replace `appximo/appximo:latest` with `appximo/appximo:<git-sha>` or a `v*` tag (every image is also pushed under its commit SHA).
 - **Backups**: `pg_dump` from the db container, or `POST /admin/backup?tenant=ID` if you add `postgresql16-client` to the engine image (see Dockerfile note).
 - **Metrics**: `GET /metrics` (Prometheus) is admin-gated with `X-Admin-Key`.
 
@@ -164,7 +164,7 @@ ran the binary directly; this section adds a TLS reverse proxy in front of it
 ```
 internet ──443──▶ Caddy or nginx (TLS, keepalive to upstream)
                     ▼
-                  appitools binary, NATIVE on the host  :8080
+                  appximo binary, NATIVE on the host  :8080
                     ▼ pool of ~10 persistent connections
                   Postgres in DOCKER, volume-backed     127.0.0.1:5432
 ```
@@ -189,7 +189,7 @@ the exact server settings the benchmark ran with: `max_connections=300`,
 `shared_buffers=256MB`, `work_mem=16MB`):
 
 ```bash
-curl -O https://raw.githubusercontent.com/miguel09acosta/appitools/main/docker-compose.db.yml
+curl -O https://raw.githubusercontent.com/appximo/appximo/main/docker-compose.db.yml
 DB_PASSWORD='a-strong-password' docker compose -f docker-compose.db.yml up -d
 ```
 
@@ -198,61 +198,61 @@ exclusively.
 
 ### 3.2 The engine binary
 
-Download from [GitHub Releases](https://github.com/miguel09acosta/appitools/releases)
+Download from [GitHub Releases](https://github.com/appximo/appximo/releases)
 (static, no dependencies — built `CGO_ENABLED=0`, same flags as the Docker
 image) and verify the checksum:
 
 ```bash
 VER=v0.1.0   # pick the release you want
-curl -fLO "https://github.com/miguel09acosta/appitools/releases/download/${VER}/appitools-${VER}-linux-amd64"
-curl -fLO "https://github.com/miguel09acosta/appitools/releases/download/${VER}/checksums.txt"
-sha256sum -c --ignore-missing checksums.txt   # appitools-…-linux-amd64: OK
-install -m 0755 "appitools-${VER}-linux-amd64" /usr/local/bin/appitools
-appitools version    # appitools v0.1.0 (commit <sha>) — traceable to its tag
+curl -fLO "https://github.com/appximo/appximo/releases/download/${VER}/appximo-${VER}-linux-amd64"
+curl -fLO "https://github.com/appximo/appximo/releases/download/${VER}/checksums.txt"
+sha256sum -c --ignore-missing checksums.txt   # appximo-…-linux-amd64: OK
+install -m 0755 "appximo-${VER}-linux-amd64" /usr/local/bin/appximo
+appximo version    # appximo v0.1.0 (commit <sha>) — traceable to its tag
 ```
 
 (Or build it yourself: `CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o
-appitools ./cmd/appitools` from a clone.)
+appximo ./cmd/appximo` from a clone.)
 
 Config: a system user, the schema, and an environment file. **systemd's
 `EnvironmentFile` is not a shell** — plain `KEY=value` lines, no `export`, no
 quotes needed:
 
 ```bash
-useradd --system --no-create-home appitools
-mkdir -p /etc/appitools
+useradd --system --no-create-home appximo
+mkdir -p /etc/appximo
 # your schema (or start from the quickstart example in the repo)
-cp myschema.json /etc/appitools/schema.json
+cp myschema.json /etc/appximo/schema.json
 
-cat > /etc/appitools/engine.env <<'EOF'
-DATABASE_URL=postgres://appitools:a-strong-password@localhost:5432/appitools?sslmode=disable
+cat > /etc/appximo/engine.env <<'EOF'
+DATABASE_URL=postgres://appximo:a-strong-password@localhost:5432/appximo?sslmode=disable
 JWT_SECRET=CHANGE_ME_minimum_32_characters_long_secret
 ADMIN_KEY=CHANGE_ME_admin_key
 GOMAXPROCS=2
 EOF
-chmod 600 /etc/appitools/engine.env
+chmod 600 /etc/appximo/engine.env
 ```
 
-The systemd unit (`/etc/systemd/system/appitools.service`):
+The systemd unit (`/etc/systemd/system/appximo.service`):
 
 ```ini
 [Unit]
-Description=Appitools engine
+Description=Appximo engine
 Wants=network-online.target
 After=network-online.target docker.service
 
 [Service]
-User=appitools
-Group=appitools
-EnvironmentFile=/etc/appitools/engine.env
-ExecStart=/usr/local/bin/appitools serve --schema /etc/appitools/schema.json --port 8080
+User=appximo
+Group=appximo
+EnvironmentFile=/etc/appximo/engine.env
+ExecStart=/usr/local/bin/appximo serve --schema /etc/appximo/schema.json --port 8080
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
 LimitNOFILE=65536
-# Creates /var/lib/appitools owned by the service user before start — used by the
-# observability store (OBS_DB_PATH default) and the file store (APPITOOLS_FILES_DIR).
-StateDirectory=appitools
+# Creates /var/lib/appximo owned by the service user before start — used by the
+# observability store (OBS_DB_PATH default) and the file store (APPXIMO_FILES_DIR).
+StateDirectory=appximo
 
 [Install]
 WantedBy=multi-user.target
@@ -260,7 +260,7 @@ WantedBy=multi-user.target
 
 ```bash
 systemctl daemon-reload
-systemctl enable --now appitools
+systemctl enable --now appximo
 curl localhost:8080/health   # {"status":"ok","version":"v0.1.0"}
 ```
 
@@ -311,7 +311,7 @@ upstream, exactly as below (since 1.29.7 those two are the defaults; keeping
 them is harmless):
 
 ```nginx
-upstream appitools {
+upstream appximo {
     server 127.0.0.1:8080;
     keepalive 64;                      # idle connections kept warm to the engine
 }
@@ -325,7 +325,7 @@ server {
     # ssl_certificate_key /etc/letsencrypt/live/.../privkey.pem;
 
     location / {
-        proxy_pass http://appitools;
+        proxy_pass http://appximo;
         proxy_http_version 1.1;        # ┐ required for upstream keepalive
         proxy_set_header Connection ""; # ┘ (defaults since nginx 1.29.7)
         proxy_set_header Host $host;   # tenant routing — do not drop this
@@ -335,7 +335,7 @@ server {
 
     # SSE streams: don't buffer, don't time out at the default 60s
     location ~ ^/api/[a-z0-9-]+/events$ {
-        proxy_pass http://appitools;
+        proxy_pass http://appximo;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host $host;
@@ -376,18 +376,18 @@ request hot path, and it survives engine restarts.
 safe out of the box). Switch modes in `.env`:
 
 ```bash
-APPITOOLS_WORKER_MODE=xlsx   # echo (default) | writeback | xlsx | email
+APPXIMO_WORKER_MODE=xlsx   # echo (default) | writeback | xlsx | email
 ```
 
 | Env var | Default | Meaning |
 |---|---|---|
 | `DATABASE_URL` | — | the SAME Postgres as the engine (the outbox lives in `public`) |
 | `JWT_SECRET` | — | **must equal the engine's** — the worker mints a short-lived, scoped service JWT to write results back through the engine API (writeback/xlsx; email needs no JWT) |
-| `APPITOOLS_WORKER_MODE` | `echo` | `echo` (log+ack) · `writeback` (demo status PATCH) · `xlsx` (FileJob consumer) · `email` (transactional email) |
-| `APPITOOLS_ENGINE_URL` | `http://engine:8080` | engine data-plane URL the worker calls for write-back |
-| `APPITOOLS_WORKER_ROLE` | `service_worker` | scoped RBAC role the worker assumes — **never admin**; must exist in your schema (writeback/xlsx only) |
-| `APPITOOLS_TENANT_DOMAIN` | `localhost` | internal Host-header suffix (`{tenant}.{suffix}`); the engine reads the **subdomain**, so `localhost` is correct even in prod — it is not a DNS name |
-| `APPITOOLS_FILES_DIR` | `/var/lib/appitools/files` | CAS root for `xlsx` mode — the SAME volume the engine mounts |
+| `APPXIMO_WORKER_MODE` | `echo` | `echo` (log+ack) · `writeback` (demo status PATCH) · `xlsx` (FileJob consumer) · `email` (transactional email) |
+| `APPXIMO_ENGINE_URL` | `http://engine:8080` | engine data-plane URL the worker calls for write-back |
+| `APPXIMO_WORKER_ROLE` | `service_worker` | scoped RBAC role the worker assumes — **never admin**; must exist in your schema (writeback/xlsx only) |
+| `APPXIMO_TENANT_DOMAIN` | `localhost` | internal Host-header suffix (`{tenant}.{suffix}`); the engine reads the **subdomain**, so `localhost` is correct even in prod — it is not a DNS name |
+| `APPXIMO_FILES_DIR` | `/var/lib/appximo/files` | CAS root for `xlsx` mode — the SAME volume the engine mounts |
 
 **Email mode (`email`) — external SMTP.** The email consumer sends transactional
 mail (verification, welcome, reset) asynchronously: a handler enqueues an
@@ -403,7 +403,7 @@ back to the engine, so it needs **no `JWT_SECRET`** — only:
 | `SMTP_PORT` | `587` | STARTTLS submission port |
 | `SMTP_FROM` | — | header/envelope From, e.g. `My App <no-reply@myapp.com>` |
 | `SMTP_USER` / `SMTP_PASS` | — | provider credentials (omit for an open/test relay) |
-| `APPITOOLS_EMAIL_TOPIC` | `email.send` | outbox topic the consumer drains |
+| `APPXIMO_EMAIL_TOPIC` | `email.send` | outbox topic the consumer drains |
 
 The event payload is `{"to","template","subject?","data":{…}}`; `data` fills the
 template variables (`html/template`, auto-escaped). Built-in demo templates:
@@ -416,11 +416,11 @@ redelivery — for transactional email a rare duplicate is the accepted trade-of
 ```yaml
 # An email worker (compose). Coexisting with an xlsx worker? Read the next section.
   worker-email:
-    image: neodevtrix/appitools-engine:latest
+    image: appximo/appximo:latest
     command: ["worker"]
     environment:
-      DATABASE_URL: postgres://appitools:${DB_PASSWORD}@db:5432/appitools?sslmode=disable
-      APPITOOLS_WORKER_MODE: email
+      DATABASE_URL: postgres://appximo:${DB_PASSWORD}@db:5432/appximo?sslmode=disable
+      APPXIMO_WORKER_MODE: email
       SMTP_HOST: ${SMTP_HOST}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_FROM: ${SMTP_FROM}
@@ -434,7 +434,7 @@ redelivery — for transactional email a rare duplicate is the accepted trade-of
 **Shared file volume (xlsx mode).** The XLSX consumer resolves a job's `file_ref`
 to a blob via the content-addressable store (`pkg/files`). The compose files mount
 the **same** named volume `files_data` on both `engine` and `worker` at
-`/var/lib/appitools/files`, so the worker's `VFS.Get` reads exactly what the
+`/var/lib/appximo/files`, so the worker's `VFS.Get` reads exactly what the
 engine's `VFS.Put` wrote. Do **not** give them separate volumes — they must share
 one CAS.
 
@@ -459,7 +459,7 @@ whichever claims a row first acks it, so the other consumer never sees its event
 - **Multiple event types (recommended):** run ONE *dispatching* worker that
   handles all of them, scaled to N identical replicas. Compose the consumers
   behind a `consumers.Router` (topic → consumer) in a small custom `main.go`
-  (the ADR-016 library model — import `appitools`/`pkg/consumers`, build your own
+  (the ADR-016 library model — import `appximo`/`pkg/consumers`, build your own
   worker binary):
 
   ```go
@@ -478,18 +478,18 @@ engine — same binary set, built `CGO_ENABLED=0` (`scripts/build-worker.sh`, or
 `make worker`):
 
 ```ini
-# /etc/systemd/system/appitools-worker.service
+# /etc/systemd/system/appximo-worker.service
 [Unit]
-Description=Appitools outbox worker
-After=network-online.target docker.service appitools.service
+Description=Appximo outbox worker
+After=network-online.target docker.service appximo.service
 
 [Service]
-User=appitools
-Group=appitools
-EnvironmentFile=/etc/appitools/engine.env      # same DATABASE_URL + JWT_SECRET
-Environment=APPITOOLS_WORKER_MODE=echo
-Environment=APPITOOLS_ENGINE_URL=http://127.0.0.1:8080
-ExecStart=/usr/local/bin/appitools-worker
+User=appximo
+Group=appximo
+EnvironmentFile=/etc/appximo/engine.env      # same DATABASE_URL + JWT_SECRET
+Environment=APPXIMO_WORKER_MODE=echo
+Environment=APPXIMO_ENGINE_URL=http://127.0.0.1:8080
+ExecStart=/usr/local/bin/appximo-worker
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
@@ -511,7 +511,7 @@ CGO — full map in [docs/PERSISTENCE.md](PERSISTENCE.md)). It is best-effort: a
 path is logged and degrades to disabled, **never a boot failure**.
 
 - **The default is persistent.** With `OBS_DB_PATH` unset the store lives at
-  `/var/lib/appitools/obs.db` (the same root as the file store), so the history
+  `/var/lib/appximo/obs.db` (the same root as the file store), so the history
   **survives a process or container restart out of the box**. The parent directory
   is created on open.
 - **Ephemeral-path warning.** If the resolved path is under `/tmp` or a tmpfs, the
@@ -522,7 +522,7 @@ path is logged and degrades to disabled, **never a boot failure**.
   (e.g. a stricter user/permission setup), the store falls back to an ephemeral
   temp file and logs a WARNING. Observability is reduced; the engine keeps serving.
 
-**Docker — persist it with a volume.** Inside a container `/var/lib/appitools/obs.db`
+**Docker — persist it with a volume.** Inside a container `/var/lib/appximo/obs.db`
 would live in the ephemeral writable layer and vanish on `docker rm`. The shipped
 compose files therefore put it on a dedicated named volume and point `OBS_DB_PATH`
 at it (engine only — the worker does not write observability):
@@ -531,22 +531,22 @@ at it (engine only — the worker does not write observability):
 services:
   engine:
     environment:
-      OBS_DB_PATH: /var/lib/appitools/obs/obs.db
+      OBS_DB_PATH: /var/lib/appximo/obs/obs.db
     volumes:
-      - obs_data:/var/lib/appitools/obs   # history survives the container
+      - obs_data:/var/lib/appximo/obs   # history survives the container
 volumes:
   obs_data:
 ```
 
-The image pre-creates `/var/lib/appitools/obs` owned by the runtime user, so the
+The image pre-creates `/var/lib/appximo/obs` owned by the runtime user, so the
 named volume inherits that ownership on first init — the same pattern as
 `files_data`.
 
-**Native (systemd).** The Level-3 unit above adds `StateDirectory=appitools`, which
-makes systemd create `/var/lib/appitools` (owned by the service user) before start
+**Native (systemd).** The Level-3 unit above adds `StateDirectory=appximo`, which
+makes systemd create `/var/lib/appximo` (owned by the service user) before start
 — covering both the observability store and the file store. To put the history on a
 different disk, set `OBS_DB_PATH=/your/persistent/path/obs.db` in
-`/etc/appitools/engine.env`.
+`/etc/appximo/engine.env`.
 
 Retention is automatic (a 7-day window plus a 50 000-row cap on slow traces), so
 the file stays bounded (tens of MB in normal operation).
@@ -620,13 +620,13 @@ server-to-server / mobile / curl are unaffected, CORS is a browser concept). An
 operator opts in by listing the browser origins allowed to call the API:
 
 ```bash
-APPITOOLS_CORS_ORIGINS="https://app.example.com,https://admin.example.com"
+APPXIMO_CORS_ORIGINS="https://app.example.com,https://admin.example.com"
 # optional:
-APPITOOLS_CORS_METHODS="GET,POST,PUT,PATCH,DELETE,OPTIONS"   # default shown
-APPITOOLS_CORS_HEADERS="Authorization,Content-Type"          # default shown
-APPITOOLS_CORS_EXPOSE_HEADERS="X-Cache"                      # default: none
-APPITOOLS_CORS_CREDENTIALS=true                              # cookies/Authorization; default false
-APPITOOLS_CORS_MAX_AGE=600                                   # preflight cache seconds; default 600
+APPXIMO_CORS_METHODS="GET,POST,PUT,PATCH,DELETE,OPTIONS"   # default shown
+APPXIMO_CORS_HEADERS="Authorization,Content-Type"          # default shown
+APPXIMO_CORS_EXPOSE_HEADERS="X-Cache"                      # default: none
+APPXIMO_CORS_CREDENTIALS=true                              # cookies/Authorization; default false
+APPXIMO_CORS_MAX_AGE=600                                   # preflight cache seconds; default 600
 ```
 
 Behaviour:
@@ -638,7 +638,7 @@ Behaviour:
 - **Preflight**: `OPTIONS` requests are answered directly (`204`) with the CORS
   headers, before auth runs — a preflight carries no credentials, so it never 401s.
 - **Origins**: an exact allowlist, or the single value `"*"` for any origin. With
-  `APPITOOLS_CORS_CREDENTIALS=true`, a `"*"` allowlist **reflects** the request
+  `APPXIMO_CORS_CREDENTIALS=true`, a `"*"` allowlist **reflects** the request
   origin (the Fetch spec forbids `*` with credentials). A disallowed origin gets
   **no** `Access-Control-Allow-Origin` (the browser blocks the response).
 - **Cost**: the middleware runs only when an `Origin` header is present and the

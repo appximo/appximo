@@ -13,9 +13,9 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/observability"
-	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/observability"
+	"github.com/appximo/appximo/pkg/tenant"
 )
 
 const maxPerTenant = 1000

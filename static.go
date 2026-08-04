@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"bytes"
@@ -18,7 +18,7 @@ import (
 // StaticMount serves a static file tree from the binary (LOOSE-ENDS-SWEEP-S1) —
 // the seam that makes "one binary = backend + frontend + admin + docs" real.
 //
-// Before this, a custom route (appitools.Route) had to live under /api/ AND ran
+// Before this, a custom route (appximo.Route) had to live under /api/ AND ran
 // inside a per-request tenant TRANSACTION, which is exactly wrong for an asset:
 // a .js file needs no database. A StaticMount is therefore NOT a Route — it is
 // mounted like the engine's own embedded UIs (/editor, /admin), outside /api/,
@@ -29,9 +29,9 @@ import (
 //	var frontend embed.FS
 //
 //	sub, _ := fs.Sub(frontend, "web/dist")
-//	app, err := appitools.New(appitools.Config{
+//	app, err := appximo.New(appximo.Config{
 //		SchemaPath: "schema.json",
-//		Static: []appitools.StaticMount{{Path: "/", FS: sub, SPA: true}},
+//		Static: []appximo.StaticMount{{Path: "/", FS: sub, SPA: true}},
 //	})
 //
 // ⚠ PCI / SAQ A (payments): if the app takes card payments through a hosted
@@ -110,7 +110,7 @@ type StaticMount struct {
 // run the mainstream bundlers' output; an app whose bundle has no inline
 // scripts should tighten per mount:
 //
-//	StaticMount{CSP: strings.Replace(appitools.DefaultStaticCSP, "script-src 'self' 'unsafe-inline'", "script-src 'self'", 1)}
+//	StaticMount{CSP: strings.Replace(appximo.DefaultStaticCSP, "script-src 'self' 'unsafe-inline'", "script-src 'self'", 1)}
 //
 // The load-bearing protections remain: no external script sources, no
 // external connect targets (exfil), no framing, no foreign form action.
@@ -172,18 +172,18 @@ func validateStaticMounts(mounts []StaticMount) ([]*staticHandler, error) {
 	for i, m := range mounts {
 		where := fmt.Sprintf("Config.Static[%d]", i)
 		if m.FS == nil {
-			return nil, fmt.Errorf("appitools: %s: FS is required (an embed.FS sub-tree or os.DirFS)", where)
+			return nil, fmt.Errorf("appximo: %s: FS is required (an embed.FS sub-tree or os.DirFS)", where)
 		}
 		if m.Path == "" || !strings.HasPrefix(m.Path, "/") {
-			return nil, fmt.Errorf("appitools: %s: Path must start with \"/\" (got %q); use \"/\" to serve the whole site", where, m.Path)
+			return nil, fmt.Errorf("appximo: %s: Path must start with \"/\" (got %q); use \"/\" to serve the whole site", where, m.Path)
 		}
 		// Normalize: "/app/" and "/app" are the same mount; "/" becomes "".
 		prefix := strings.TrimSuffix(m.Path, "/")
 		if strings.Contains(prefix, "*") || strings.Contains(prefix, "{") {
-			return nil, fmt.Errorf("appitools: %s: Path must be a literal prefix, not a pattern (got %q)", where, m.Path)
+			return nil, fmt.Errorf("appximo: %s: Path must be a literal prefix, not a pattern (got %q)", where, m.Path)
 		}
 		if seen[prefix] {
-			return nil, fmt.Errorf("appitools: %s: Path %q is mounted twice", where, m.Path)
+			return nil, fmt.Errorf("appximo: %s: Path %q is mounted twice", where, m.Path)
 		}
 		seen[prefix] = true
 
@@ -193,7 +193,7 @@ func validateStaticMounts(mounts []StaticMount) ([]*staticHandler, error) {
 		// "/openapi.json" are not.
 		if prefix != "" && isEngineOwnedPath(prefix) {
 			return nil, fmt.Errorf(
-				"appitools: %s: Path %q collides with the engine's own routes — the reserved prefixes are: %s",
+				"appximo: %s: Path %q collides with the engine's own routes — the reserved prefixes are: %s",
 				where, m.Path, strings.Join(reservedStaticPrefixes, " "))
 		}
 
@@ -208,7 +208,7 @@ func validateStaticMounts(mounts []StaticMount) ([]*staticHandler, error) {
 		idx, err := fs.ReadFile(m.FS, idxName)
 		if err != nil {
 			if m.SPA {
-				return nil, fmt.Errorf("appitools: %s: cannot read %q from the mounted FS: %w "+
+				return nil, fmt.Errorf("appximo: %s: cannot read %q from the mounted FS: %w "+
 					"(did the frontend build run before `go build`? An SPA mount needs its index — it is the fallback document)", where, idxName, err)
 			}
 			idx = nil

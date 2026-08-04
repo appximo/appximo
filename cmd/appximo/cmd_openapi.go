@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/miguelangel/appitools/pkg/codegen"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/codegen"
+	"github.com/appximo/appximo/pkg/schema"
 	"github.com/spf13/cobra"
 )
 
@@ -15,9 +15,9 @@ var openapiCmd = &cobra.Command{
 	Long: `Reads schema.json and emits a complete OpenAPI 3.0.3 YAML document to stdout.
 
 Examples:
-  appitools openapi schema.json > openapi.yaml
-  appitools openapi --base-url https://api.myapp.com schema.json > openapi.yaml
-  appitools openapi schema.json | npx @redocly/cli lint /dev/stdin`,
+  appximo openapi schema.json > openapi.yaml
+  appximo openapi --base-url https://api.myapp.com schema.json > openapi.yaml
+  appximo openapi schema.json | npx @redocly/cli lint /dev/stdin`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		baseURL, _ := cmd.Flags().GetString("base-url")

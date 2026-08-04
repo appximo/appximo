@@ -1,13 +1,13 @@
-# Generate Appitools schemas with YOUR OWN agent
+# Generate Appximo schemas with YOUR OWN agent
 
-Appitools has two ways to turn a natural-language app description into a valid
+Appximo has two ways to turn a natural-language app description into a valid
 schema. Both run the **same validator-guided loop** against the **same grammar
 source** — they differ only in *whose* model does the generating:
 
 | Front | Who generates | Cost | For whom |
 |---|---|---|---|
-| **Built-in**: `appitools ai-generate "<description>"` | the engine calls Anthropic (default `claude-haiku-4-5`) | ~$0.006 per schema (measured: ~90% first-try, 100% convergence) | users without their own AI tooling |
-| **External** (this doc): `appitools spec` + your agent | **your** Claude Code / Cursor / Opus — the subscription you already pay | zero product API cost | anyone with an agent |
+| **Built-in**: `appximo ai-generate "<description>"` | the engine calls Anthropic (default `claude-haiku-4-5`) | ~$0.006 per schema (measured: ~90% first-try, 100% convergence) | users without their own AI tooling |
+| **External** (this doc): `appximo spec` + your agent | **your** Claude Code / Cursor / Opus — the subscription you already pay | zero product API cost | anyone with an agent |
 
 The grammar both fronts use is one shared source (`pkg/aigen` `GrammarCore`,
 pinned by test) — your agent generates against exactly the rules the internal
@@ -18,7 +18,7 @@ loop uses, and the same oracle judges both.
 ### 1. Get the grammar
 
 ```bash
-appitools spec > appitools-spec.md
+appximo spec > appximo-spec.md
 ```
 
 Prints the distilled schema grammar for an LLM: the closed type set, strict-key
@@ -30,10 +30,10 @@ validator rejects) and the correction-loop instructions.
 
 ### 2. Give it to your agent, with your app description
 
-Paste `appitools-spec.md` into the agent's context (or drop it in the repo the
+Paste `appximo-spec.md` into the agent's context (or drop it in the repo the
 agent works in). Then ask, for example:
 
-> Using the Appitools grammar above, generate a schema for an optical-store
+> Using the Appximo grammar above, generate a schema for an optical-store
 > app: patients, appointments (with a lifecycle: scheduled → attended /
 > cancelled), prescriptions that carry an uploaded file, products and
 > suppliers, and roles for admin, optometrist (may only update their own
@@ -46,7 +46,7 @@ teaches it the integration surface, and it can run the oracle itself.
 ### 3. The correction loop — validate until green
 
 ```bash
-appitools validate --json optica.json
+appximo validate --json optica.json
 ```
 
 Output: `{ "valid": true|false, "errors": [ { "path", "rule", "message",
@@ -73,18 +73,18 @@ Example of what the oracle reports (a `"type": "number"` typo):
 
 ### 4. Bring it in: paste → Apply → deploy
 
-Open Appitools Studio (`/editor`) → **Code** view → paste the schema. The same
+Open Appximo Studio (`/editor`) → **Code** view → paste the schema. The same
 validator runs live there (three layers: syntax, meta-schema autocompletion/
 hover, and the engine's semantic report with every error on its line), and
 **Apply is gated** — an invalid document never reaches the canvas. From there
 the normal Studio flow deploys it: dry-run migration preview, destructive-
 approval gate, one-click engine restart when a new resource needs it.
 
-No Studio? `appitools serve --schema optica.json` boots the API directly.
+No Studio? `appximo serve --schema optica.json` boots the API directly.
 
 ## Role of each document
 
-- **`appitools spec`** — the distilled grammar for an LLM (this flow). Compact,
+- **`appximo spec`** — the distilled grammar for an LLM (this flow). Compact,
   closed sets, worked examples, the loop.
 - **[docs/SCHEMA_REFERENCE.md](SCHEMA_REFERENCE.md)** — the complete
   human-grade reference (every key, every behavior, every error). Point your

@@ -8,20 +8,20 @@ import (
 	"os"
 	"strings"
 
-	"github.com/miguelangel/appitools/pkg/aigen"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/aigen"
+	"github.com/appximo/appximo/pkg/schema"
 	"github.com/spf13/cobra"
 )
 
 // ai-generate is the AI schema-generation loop as a CLI (AI-F0-S3): a
-// natural-language description in, a VALID Appitools schema out, with the model
+// natural-language description in, a VALID Appximo schema out, with the model
 // self-correcting from the engine's own actionable validation errors. It prints
 // the ECONOMIC instrumentation (iterations, tokens, approximate cost) that is the
 // data point validating the democratization thesis — "a cheap model is enough".
 var aiGenerateCmd = &cobra.Command{
 	Use:   "ai-generate [descripción]",
-	Short: "Genera un schema válido de Appitools desde lenguaje natural (loop generate→validate→corregir con IA)",
-	Long: `Generates an Appitools schema from a natural-language description using an LLM,
+	Short: "Genera un schema válido de Appximo desde lenguaje natural (loop generate→validate→corregir con IA)",
+	Long: `Generates an Appximo schema from a natural-language description using an LLM,
 then self-corrects it against the engine's own validators until it is VALID (or
 the iteration budget is exhausted). This is the AI-F0-S3 democratization loop:
 the AI produces bounded, verifiable JSON; the engine guarantees correctness; the
@@ -33,9 +33,9 @@ command explains how to set it and exits. The default model is the CHEAP one
 
 Examples:
   export ANTHROPIC_API_KEY=sk-ant-...
-  appitools ai-generate "un CRM para una óptica: clientes, citas, ventas"
-  appitools ai-generate "an e-commerce: products, categories, orders with lines" --out shop.json
-  appitools ai-generate "a task board: projects, tasks, statuses" --model claude-sonnet-4-6 --json`,
+  appximo ai-generate "un CRM para una óptica: clientes, citas, ventas"
+  appximo ai-generate "an e-commerce: products, categories, orders with lines" --out shop.json
+  appximo ai-generate "a task board: projects, tasks, statuses" --model claude-sonnet-4-6 --json`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		model, _ := cmd.Flags().GetString("model")

@@ -12,7 +12,7 @@ import (
 
 var blueprintsCmd = &cobra.Command{
 	Use:   "blueprints",
-	Short: "Gestiona blueprints de proyectos Appitools",
+	Short: "Gestiona blueprints de proyectos Appximo",
 }
 
 var blueprintsListCmd = &cobra.Command{

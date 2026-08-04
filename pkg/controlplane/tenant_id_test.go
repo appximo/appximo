@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/controlplane"
 )
 
 // theRule is the id alphabet the engine accepts, duplicated here on purpose: the

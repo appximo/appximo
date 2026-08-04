@@ -1,12 +1,12 @@
-# Generating Appitools schemas with an LLM — the validation feedback loop
+# Generating Appximo schemas with an LLM — the validation feedback loop
 
-This is the contract between an AI (or any tool) and the Appitools validator. It lets
+This is the contract between an AI (or any tool) and the Appximo validator. It lets
 a model generate a schema, get **machine-readable, actionable feedback**, and
 self-correct until the schema is valid — no human in the loop.
 
 The two pieces that make this deterministic:
 
-1. **The formal meta-schema** (`pkg/schema/appitools.schema.json`, Draft 2020-12) —
+1. **The formal meta-schema** (`pkg/schema/appximo.schema.json`, Draft 2020-12) —
    the structural grammar. See [SCHEMA_REFERENCE.md §12](SCHEMA_REFERENCE.md#12-machine-validation--the-formal-json-schema-meta-schema).
 2. **The unified validation report** (this document) — one structured result that
    merges the structural (meta-schema) and semantic (Go) validators.
@@ -14,14 +14,14 @@ The two pieces that make this deterministic:
 ## The loop
 
 ```
-generate schema  →  appitools validate --json schema.json  →  read report
+generate schema  →  appximo validate --json schema.json  →  read report
       ↑                                                            │
       └────────────── apply each error's "fix" ←──────────────────┘
    (repeat until { "valid": true })
 ```
 
 Each round, the model:
-1. runs `appitools validate --json <file>` (exit 0 = valid, 1 = invalid);
+1. runs `appximo validate --json <file>` (exit 0 = valid, 1 = invalid);
 2. for every entry in `errors[]`, edits the schema at `path` per `fix` (using
    `expected` to choose a valid value);
 3. re-validates. The validators are pure and deterministic — the same schema always
@@ -119,7 +119,7 @@ Semantic (`source: "semantic"`): `invalid_type`, `unknown_relation_target`,
   (`resources`/`actions`/`conditions`/`fields`) **or** per-resource (`permissions`),
   never both.
 
-## The generation loop (AI-F0-S3) — `pkg/aigen` + `appitools ai-generate`
+## The generation loop (AI-F0-S3) — `pkg/aigen` + `appximo ai-generate`
 
 The sections above are the *contract* (validate → actionable errors → correct). The
 `aigen` package and the `ai-generate` CLI are that contract **closed into a working
@@ -127,7 +127,7 @@ loop**: a natural-language app description goes in, a VALID schema comes out, wi
 the model self-correcting from the report — no human in the loop.
 
 ```
-appitools ai-generate "un CRM para una óptica: clientes, citas, ventas"
+appximo ai-generate "un CRM para una óptica: clientes, citas, ventas"
 ```
 
 What it does each round (`aigen.Generate`):
@@ -198,7 +198,7 @@ does not work). Two mechanisms, two layers — mirroring this document's
 - **Semantics → the correction loop**, driven by `schema.ValidateReport` (the engine's
   own validator, kept as the final full check too — defense in depth).
 
-**The honest guarantee boundary.** The Appitools schema is an *arbitrary-keyed map*
+**The honest guarantee boundary.** The Appximo schema is an *arbitrary-keyed map*
 (resources keyed by resource name, fields by field name, roles by role name). The
 strict-outputs subset is narrow — every object must be `additionalProperties:false`,
 and it offers no `patternProperties` / `propertyNames` / `additionalProperties`-as-
@@ -253,7 +253,7 @@ Three pieces make it a working mode:
   them to the IR the model produced (`resources[0].fields[1].type`) by resolving
   each named segment to its array index, so the loop's correction round speaks the
   model's own space.
-- **The loop** (`Options.ArrayIR`, `appitools ai-generate --array-ir`) — generate IR
+- **The loop** (`Options.ArrayIR`, `appximo ai-generate --array-ir`) — generate IR
   under `IROutputSchema` → `IRToMap` → validate (the engine's validator, unchanged)
   → translate remaining errors to IR paths → correct. The same graceful fallback as
   the envelope (a rejected structured request or an empty result drops to plain).
@@ -264,7 +264,7 @@ harness arm below — confirmed in *simulation* (0 deep structural errors at att
 
 > ⚠ **Live reality (AI-F2-S3, measured).** Against the **real** Anthropic API the IR
 > schema is **rejected** — the strict-outputs subset has a hard limit of **16
-> union-typed (nullable) parameters**, and the Appitools field grammar has ~17
+> union-typed (nullable) parameters**, and the Appximo field grammar has ~17
 > optional keys, so `IROutputSchema` exceeds it ("too many parameters with union
 > types"). The envelope (`OutputSchema`) is *also* rejected, for a different reason:
 > the subset requires `additionalProperties:false` on **every** object, which cannot
@@ -290,7 +290,7 @@ mock (`ANTHROPIC_BASE_URL`): the request carries `output_config.format` with the
 const-pinned envelope and the cached system block; round 1 reports **0 structural / 1
 semantic** errors (the structural class is gone) and converges on round 2.
 
-### The measurement instrument (AI-F2-S1) — `appitools ai-eval` + `pkg/aigen/eval`
+### The measurement instrument (AI-F2-S1) — `appximo ai-eval` + `pkg/aigen/eval`
 
 Before any *new* generation technique, the research demands the **instrument** to
 judge it: "without this, no later decision is defensible." The loop's real
@@ -338,9 +338,9 @@ Three parts:
      flagged INCONCLUSIVE, never sold as significant.
 
 ```
-appitools ai-eval            # simulated, deterministic — runs all 3 arms
-appitools ai-eval --json     # machine-readable analysis
-appitools ai-eval --live --model claude-haiku-4-5   # measure a real model (temp 0)
+appximo ai-eval            # simulated, deterministic — runs all 3 arms
+appximo ai-eval --json     # machine-readable analysis
+appximo ai-eval --live --model claude-haiku-4-5   # measure a real model (temp 0)
 ```
 
 The simulated 3-arm run (n=24 seed) shows the expected ordering: structural errors
@@ -362,8 +362,8 @@ passes the `map→IR→map` identity round-trip), the client got **retry-with-ba
 gained `--sample N` (stratified subsample to bound a cost-/rate-limited live run):
 
 ```
-appitools ai-eval --live --model claude-haiku-4-5            # full 120-case 3-arm run
-appitools ai-eval --live --model claude-haiku-4-5 --sample 10  # 10/stratum bounded run
+appximo ai-eval --live --model claude-haiku-4-5            # full 120-case 3-arm run
+appximo ai-eval --live --model claude-haiku-4-5 --sample 10  # 10/stratum bounded run
 ```
 
 **Measured live (Haiku, temp 0, 30-case stratified subsample, 90 generations,
@@ -439,7 +439,7 @@ cascade behind the `ModelClient` seam for the residual hard cases.
 
 ## Notes
 
-- `appitools validate` (no `--json`) stays human-readable and is the semantic
+- `appximo validate` (no `--json`) stays human-readable and is the semantic
   authority; `--json` adds the structural layer and the machine format. The engine's
   validation **rules** are identical to either — only the presentation differs.
 - The Go API mirrors the CLI: `schema.ValidateReport(raw []byte) ValidationReport`

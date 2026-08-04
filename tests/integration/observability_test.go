@@ -6,9 +6,9 @@
 // the actual Prometheus collectors, using the official prometheus/testutil
 // comparator and the REAL metric names grepped from pkg/observability/metrics.go:
 //
-//	appitools_requests_total            (counter)
-//	appitools_request_duration_seconds  (histogram)
-//	appitools_active_tenants            (gauge)
+//	appximo_requests_total            (counter)
+//	appximo_request_duration_seconds  (histogram)
+//	appximo_active_tenants            (gauge)
 //
 // One postgres container is shared across the suite via TestMain; each test
 // registers its own tenant and gets a fresh *Metrics so counts are isolated.
@@ -28,7 +28,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/miguelangel/appitools/tests/helpers"
+	"github.com/appximo/appximo/tests/helpers"
 )
 
 var testPool *pgxpool.Pool
@@ -79,21 +79,21 @@ func TestObservability_RequestMetrics(t *testing.T) {
 	const n = 5
 	fireGET(t, srv, tenantID, token, n)
 
-	// appitools_requests_total: exact series + value via the official comparator.
+	// appximo_requests_total: exact series + value via the official comparator.
 	expected := `
-# HELP appitools_requests_total Total de requests por tenant y endpoint
-# TYPE appitools_requests_total counter
-appitools_requests_total{method="GET",path="/api/guides",status="200",tenant_id="obsmetrics"} 5
+# HELP appximo_requests_total Total de requests por tenant y endpoint
+# TYPE appximo_requests_total counter
+appximo_requests_total{method="GET",path="/api/guides",status="200",tenant_id="obsmetrics"} 5
 `
 	if err := testutil.GatherAndCompare(metrics.Gatherer(),
-		strings.NewReader(expected), "appitools_requests_total"); err != nil {
-		t.Fatalf("appitools_requests_total mismatch:\n%v", err)
+		strings.NewReader(expected), "appximo_requests_total"); err != nil {
+		t.Fatalf("appximo_requests_total mismatch:\n%v", err)
 	}
 
-	// appitools_request_duration_seconds: histogram observation count == n.
-	if got := histogramSampleCount(t, metrics.Gatherer(), "appitools_request_duration_seconds",
+	// appximo_request_duration_seconds: histogram observation count == n.
+	if got := histogramSampleCount(t, metrics.Gatherer(), "appximo_request_duration_seconds",
 		map[string]string{"tenant_id": tenantID, "method": "GET", "path": "/api/guides"}); got != n {
-		t.Fatalf("appitools_request_duration_seconds count: got %d want %d", got, n)
+		t.Fatalf("appximo_request_duration_seconds count: got %d want %d", got, n)
 	}
 }
 
@@ -133,12 +133,12 @@ func TestObservability_DeniedByIDPathIsTemplated(t *testing.T) {
 	// The whole requests_total family must be exactly ONE templated 403 series with
 	// value 3 — proving the three random UUIDs did not create three series.
 	expected := `
-# HELP appitools_requests_total Total de requests por tenant y endpoint
-# TYPE appitools_requests_total counter
-appitools_requests_total{method="DELETE",path="/api/guides/{id}",status="403",tenant_id="obscard"} 3
+# HELP appximo_requests_total Total de requests por tenant y endpoint
+# TYPE appximo_requests_total counter
+appximo_requests_total{method="DELETE",path="/api/guides/{id}",status="403",tenant_id="obscard"} 3
 `
 	if err := testutil.GatherAndCompare(metrics.Gatherer(),
-		strings.NewReader(expected), "appitools_requests_total"); err != nil {
+		strings.NewReader(expected), "appximo_requests_total"); err != nil {
 		t.Fatalf("denied by-id path must be templated to {id} (bounded cardinality):\n%v", err)
 	}
 }
@@ -156,13 +156,13 @@ func TestObservability_ActiveTenantsGauge(t *testing.T) {
 	fireGET(t, srv, tb, helpers.GenToken(t, "super_admin", "00000000-0000-0000-0000-000000000002", tb), 3)
 
 	expected := `
-# HELP appitools_active_tenants Número de tenants cargados en cache
-# TYPE appitools_active_tenants gauge
-appitools_active_tenants 2
+# HELP appximo_active_tenants Número de tenants cargados en cache
+# TYPE appximo_active_tenants gauge
+appximo_active_tenants 2
 `
 	if err := testutil.GatherAndCompare(metrics.Gatherer(),
-		strings.NewReader(expected), "appitools_active_tenants"); err != nil {
-		t.Fatalf("appitools_active_tenants mismatch:\n%v", err)
+		strings.NewReader(expected), "appximo_active_tenants"); err != nil {
+		t.Fatalf("appximo_active_tenants mismatch:\n%v", err)
 	}
 }
 
@@ -186,9 +186,9 @@ func TestObservability_MetricsEndpointExposesNames(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	text := string(body)
 	for _, name := range []string{
-		"appitools_requests_total",
-		"appitools_request_duration_seconds",
-		"appitools_active_tenants",
+		"appximo_requests_total",
+		"appximo_request_duration_seconds",
+		"appximo_active_tenants",
 	} {
 		if !strings.Contains(text, name) {
 			t.Errorf("/metrics exposition missing %q", name)

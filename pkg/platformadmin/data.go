@@ -6,9 +6,9 @@ import (
 	"net/url"
 	"sort"
 
-	"github.com/miguelangel/appitools/pkg/db"
-	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
-	"github.com/miguelangel/appitools/pkg/query"
+	"github.com/appximo/appximo/pkg/db"
+	pkghandlers "github.com/appximo/appximo/pkg/handlers"
+	"github.com/appximo/appximo/pkg/query"
 )
 
 // ErrResourceNotFound is returned when a tenant has no such resource (or no schema).

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/observability"
+	"github.com/appximo/appximo/pkg/observability"
 )
 
 func openTempStore(t *testing.T) *observability.ObsStore {

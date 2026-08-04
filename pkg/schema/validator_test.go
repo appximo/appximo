@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 func TestValidate_ValidLogisticsSchema(t *testing.T) {
@@ -23,7 +23,7 @@ func TestValidate_ValidLogisticsSchema(t *testing.T) {
 
 func TestValidate_InvalidFieldType(t *testing.T) {
 	s := &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "test",
 		Resources: map[string]schema.ResourceSchema{
@@ -42,7 +42,7 @@ func TestValidate_InvalidFieldType(t *testing.T) {
 
 func TestValidate_RelationToMissingResource(t *testing.T) {
 	s := &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "test",
 		Resources: map[string]schema.ResourceSchema{
@@ -62,7 +62,7 @@ func TestValidate_RelationToMissingResource(t *testing.T) {
 func TestValidate_OnDelete(t *testing.T) {
 	mk := func(f schema.FieldDef) *schema.APISchema {
 		return &schema.APISchema{
-			Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+			Schema: "https://appximo.com/schema/v1", Version: "1", Name: "test",
 			Resources: map[string]schema.ResourceSchema{
 				"parents": {Fields: map[string]schema.FieldDef{"name": {Type: "string"}}},
 				"kids":    {Fields: map[string]schema.FieldDef{"p": f}},
@@ -97,7 +97,7 @@ func TestValidate_RenamedFrom(t *testing.T) {
 	// Field-level renamed_from.
 	mkField := func(fields map[string]schema.FieldDef) *schema.APISchema {
 		return &schema.APISchema{
-			Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+			Schema: "https://appximo.com/schema/v1", Version: "1", Name: "test",
 			Resources: map[string]schema.ResourceSchema{"r": {Fields: fields}},
 		}
 	}
@@ -129,7 +129,7 @@ func TestValidate_RenamedFrom(t *testing.T) {
 
 	// Resource-level renamed_from.
 	mkRes := func(resources map[string]schema.ResourceSchema) *schema.APISchema {
-		return &schema.APISchema{Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test", Resources: resources}
+		return &schema.APISchema{Schema: "https://appximo.com/schema/v1", Version: "1", Name: "test", Resources: resources}
 	}
 	// Valid: table rename from an absent name.
 	if errs := schema.Validate(mkRes(map[string]schema.ResourceSchema{
@@ -148,7 +148,7 @@ func TestValidate_RenamedFrom(t *testing.T) {
 
 func TestValidate_WebhookWithoutURL(t *testing.T) {
 	s := &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "test",
 		Resources: map[string]schema.ResourceSchema{
@@ -170,7 +170,7 @@ func TestValidate_WebhookWithoutURL(t *testing.T) {
 
 func TestValidate_ResourceNameWithUppercase(t *testing.T) {
 	s := &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "test",
 		Resources: map[string]schema.ResourceSchema{
@@ -192,7 +192,7 @@ func TestValidate_ResourceNameWithUppercase(t *testing.T) {
 // identifier char). It must now be REJECTED at validation, so validate↔boot agree.
 func TestValidate_HyphenatedResourceNameRejected(t *testing.T) {
 	s := &schema.APISchema{
-		Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+		Schema: "https://appximo.com/schema/v1", Version: "1", Name: "test",
 		Resources: map[string]schema.ResourceSchema{
 			"order-items": {Fields: map[string]schema.FieldDef{"sku": {Type: "string"}}},
 		},
@@ -210,7 +210,7 @@ func TestValidate_HyphenatedResourceNameRejected(t *testing.T) {
 // GraphQL identifier and boots end-to-end.
 func TestValidate_UnderscoreResourceNameAccepted(t *testing.T) {
 	s := &schema.APISchema{
-		Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+		Schema: "https://appximo.com/schema/v1", Version: "1", Name: "test",
 		Resources: map[string]schema.ResourceSchema{
 			"order_items": {Fields: map[string]schema.FieldDef{"sku": {Type: "string"}}},
 		},
@@ -224,7 +224,7 @@ func TestValidate_UnderscoreResourceNameAccepted(t *testing.T) {
 // with the per-tenant authentication tables; the "auth_" prefix is reserved.
 func TestValidate_ReservedAuthPrefixRejected(t *testing.T) {
 	s := &schema.APISchema{
-		Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+		Schema: "https://appximo.com/schema/v1", Version: "1", Name: "test",
 		Resources: map[string]schema.ResourceSchema{
 			"auth_users": {Fields: map[string]schema.FieldDef{"email": {Type: "string"}}},
 		},
@@ -234,7 +234,7 @@ func TestValidate_ReservedAuthPrefixRejected(t *testing.T) {
 	}
 	// A name that merely starts with "auth" (no underscore) is fine.
 	ok := &schema.APISchema{
-		Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+		Schema: "https://appximo.com/schema/v1", Version: "1", Name: "test",
 		Resources: map[string]schema.ResourceSchema{
 			"authors": {Fields: map[string]schema.FieldDef{"name": {Type: "string"}}},
 		},
@@ -246,7 +246,7 @@ func TestValidate_ReservedAuthPrefixRejected(t *testing.T) {
 
 func TestValidate_EmptyEnum(t *testing.T) {
 	s := &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "test",
 		Resources: map[string]schema.ResourceSchema{
@@ -279,7 +279,7 @@ func TestValidate_AfterHookType(t *testing.T) {
 			h.URL = "https://example.com/hook"
 		}
 		return &schema.APISchema{
-			Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+			Schema: "https://appximo.com/schema/v1", Version: "1", Name: "test",
 			Resources: map[string]schema.ResourceSchema{
 				"tasks": {
 					Fields: map[string]schema.FieldDef{"title": {Type: "string"}},
@@ -320,7 +320,7 @@ func TestValidate_AfterHookType(t *testing.T) {
 func TestValidate_BeforeWebhookHookRejected(t *testing.T) {
 	mk := func(event string) *schema.APISchema {
 		return &schema.APISchema{
-			Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+			Schema: "https://appximo.com/schema/v1", Version: "1", Name: "test",
 			Resources: map[string]schema.ResourceSchema{
 				"tasks": {
 					Fields: map[string]schema.FieldDef{"title": {Type: "string"}},

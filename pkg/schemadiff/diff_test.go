@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	sd "github.com/miguelangel/appitools/pkg/schemadiff"
+	sd "github.com/appximo/appximo/pkg/schemadiff"
 )
 
 // assertConverges materializes `current` in a fresh ephemeral schema, diffs it to

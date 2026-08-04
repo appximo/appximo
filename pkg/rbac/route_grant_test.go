@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/rbac"
+	"github.com/appximo/appximo/pkg/rbac"
 )
 
 // LIBRARY-GAPS-S1 / ADR-021 — custom-route grants (`routes`).

@@ -348,12 +348,12 @@ func TestLoadManifestOperatorAdmin(t *testing.T) {
 		"apps":                 []any{baseApp(t, dir, "crm", strings.Repeat("a", 32))},
 	})
 
-	t.Setenv("APPITOOLS_FLEET_ADMIN_PASSWORD", "")
-	if _, err := LoadManifest(p); err == nil || !strings.Contains(err.Error(), "APPITOOLS_FLEET_ADMIN_PASSWORD") {
+	t.Setenv("APPXIMO_FLEET_ADMIN_PASSWORD", "")
+	if _, err := LoadManifest(p); err == nil || !strings.Contains(err.Error(), "APPXIMO_FLEET_ADMIN_PASSWORD") {
 		t.Fatalf("email without password env must fail actionably, got: %v", err)
 	}
 
-	t.Setenv("APPITOOLS_FLEET_ADMIN_PASSWORD", "a-strong-passphrase")
+	t.Setenv("APPXIMO_FLEET_ADMIN_PASSWORD", "a-strong-passphrase")
 	m, err := LoadManifest(p)
 	if err != nil {
 		t.Fatalf("valid operator admin rejected: %v", err)
@@ -363,11 +363,11 @@ func TestLoadManifestOperatorAdmin(t *testing.T) {
 		t.Fatalf("OperatorAdmin() = %q/%q", email, pass)
 	}
 
-	// Env fallback for the email too (APPITOOLS_FLEET_ADMIN_EMAIL).
+	// Env fallback for the email too (APPXIMO_FLEET_ADMIN_EMAIL).
 	p2 := writeManifest(t, dir, map[string]any{
 		"apps": []any{baseApp(t, dir, "crm", strings.Repeat("a", 32))},
 	})
-	t.Setenv("APPITOOLS_FLEET_ADMIN_EMAIL", "env@fleet.local")
+	t.Setenv("APPXIMO_FLEET_ADMIN_EMAIL", "env@fleet.local")
 	m2, err := LoadManifest(p2)
 	if err != nil {
 		t.Fatalf("env-fallback email rejected: %v", err)

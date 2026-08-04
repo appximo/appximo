@@ -5,8 +5,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/schema"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/schema"
 )
 
 // TestLiveDiff_NimbusIsNoop is a guarded live check (not part of the normal lanes):

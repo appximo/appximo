@@ -7,17 +7,17 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/events"
+	"github.com/appximo/appximo/pkg/extensions"
+	gqlhandler "github.com/appximo/appximo/pkg/graphql"
+	"github.com/appximo/appximo/pkg/outbox"
+	rbacpkg "github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
 	chi "github.com/go-chi/chi/v5"
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/events"
-	"github.com/miguelangel/appitools/pkg/extensions"
-	gqlhandler "github.com/miguelangel/appitools/pkg/graphql"
-	"github.com/miguelangel/appitools/pkg/outbox"
-	rbacpkg "github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
 // G3 (FIX-G3): aggregation (count/sum/avg/min/max + group_by) on REST and GraphQL,
@@ -29,7 +29,7 @@ const (
 
 func aggSchema() *schema.APISchema {
 	return &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "agg",
 		Resources: map[string]schema.ResourceSchema{

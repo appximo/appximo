@@ -69,8 +69,8 @@ CREATE TABLE IF NOT EXISTS servers (
     host_key      TEXT,                      -- TOFU, first connect
     secrets_path  TEXT DEFAULT '/root/.appitools-secrets', -- remote file fetch-admin-key reads
     start_script  TEXT DEFAULT '/tmp/start_prod.sh',
-    binary_path   TEXT DEFAULT '/root/appitools/appitools',
-    log_path      TEXT DEFAULT '/tmp/appitools.log',
+    binary_path   TEXT DEFAULT '/root/appitools/appximo',
+    log_path      TEXT DEFAULT '/tmp/appximo.log',
     created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -99,4 +99,4 @@ CREATE INDEX IF NOT EXISTS idx_secret_access_server ON secret_access(server_id);
 
 INSERT OR IGNORE INTO baselines (name, rps, notes) VALUES
 ('nestjs-v10-no-auth', 1092, 'NestJS colapsó a 1092 RPS en benchmark S34. Sin JWT/RBAC/multi-tenant.'),
-('appitools-slo', 2000, 'SLO: p95<15ms, error_rate<1% @ 2000 RPS');
+('appximo-slo', 2000, 'SLO: p95<15ms, error_rate<1% @ 2000 RPS');

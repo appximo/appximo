@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/miguelangel/appitools/tools/devhub/sshx"
-	"github.com/miguelangel/appitools/tools/devhub/stats"
+	"github.com/appximo/appximo/tools/devhub/sshx"
+	"github.com/appximo/appximo/tools/devhub/stats"
 
 	_ "modernc.org/sqlite" // CGO-free SQLite driver, registered as "sqlite"
 )
@@ -849,7 +849,7 @@ func mintRemoteBenchToken(s *RegisteredServer, tenant string) (string, error) {
 		return "", fmt.Errorf("invalid tenant %q", tenant)
 	}
 	cmd := `source /root/.appitools-secrets 2>/dev/null || source /root/.appitools-secrets-dev; ` +
-		`cd /root/appitools && BIN=./appitools; [ -x "$BIN" ] || BIN=./appitools-dev; ` +
+		`cd /root/appitools && BIN=./appximo; [ -x "$BIN" ] || BIN=./appximo-dev; ` +
 		`"$BIN" token --tenant ` + tenant + ` --secret "$JWT_SECRET" --role super_admin 2>/dev/null | tail -1`
 	res, err := sshx.Run(&s.Server, cmd, 20*time.Second)
 	if err != nil {

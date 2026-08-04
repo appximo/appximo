@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/observability"
+	"github.com/appximo/appximo/pkg/observability"
 )
 
 // Client context (ip/user_agent/browser/os/country) round-trips through SQLite.

@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"net/http"
@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	appmiddleware "github.com/miguelangel/appitools/pkg/middleware"
+	appmiddleware "github.com/appximo/appximo/pkg/middleware"
 )
 
 // LIBRARY-GAPS-S2 (ENG-5) — the static handler OWNS its Content-Security-Policy.

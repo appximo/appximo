@@ -10,7 +10,7 @@
 //   - Route.Timeout cancels a slow query at the deadline (propagated to pgx);
 //   - the Ctx is tenant-scoped BY CONSTRUCTION — even a raw UnsafeTx query reads
 //     only the request tenant's rows.
-package appitools
+package appximo
 
 import (
 	"context"
@@ -22,7 +22,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/miguelangel/appitools/tests/helpers"
+	"github.com/appximo/appximo/tests/helpers"
 )
 
 // safeGoRan signals that a SafeGo background goroutine started executing, so the
@@ -95,7 +95,7 @@ func TestHarden_SafeGo_PanicSurvives(t *testing.T) {
 	app, srv := newHardenApp(t)
 	token := helpers.GenToken(t, "admin", "u", "safego")
 
-	before := counterValue(t, app.metrics.Gatherer(), "appitools_goroutine_panics_total")
+	before := counterValue(t, app.metrics.Gatherer(), "appximo_goroutine_panics_total")
 
 	resp := do(t, srv, "POST", "/api/_safego_panic", "safego.localhost", token, `{}`)
 	if resp.StatusCode != http.StatusAccepted {
@@ -113,7 +113,7 @@ func TestHarden_SafeGo_PanicSurvives(t *testing.T) {
 	// The metric increments AFTER the panic is recovered — poll for it.
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if counterValue(t, app.metrics.Gatherer(), "appitools_goroutine_panics_total") > before {
+		if counterValue(t, app.metrics.Gatherer(), "appximo_goroutine_panics_total") > before {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -138,7 +138,7 @@ func TestHarden_HandlerPanic_Becomes500(t *testing.T) {
 	app, srv := newHardenApp(t)
 	token := helpers.GenToken(t, "admin", "u", "panicky")
 
-	before := counterValue(t, app.metrics.Gatherer(), "appitools_request_panics_total")
+	before := counterValue(t, app.metrics.Gatherer(), "appximo_request_panics_total")
 
 	resp := do(t, srv, "POST", "/api/_panic", "panicky.localhost", token, `{}`)
 	if resp.StatusCode != http.StatusInternalServerError {
@@ -148,7 +148,7 @@ func TestHarden_HandlerPanic_Becomes500(t *testing.T) {
 	if body["error"] != "internal error" {
 		t.Fatalf("expected masked error body, got %v", body)
 	}
-	if got := counterValue(t, app.metrics.Gatherer(), "appitools_request_panics_total"); got <= before {
+	if got := counterValue(t, app.metrics.Gatherer(), "appximo_request_panics_total"); got <= before {
 		t.Fatalf("request_panics_total did not increment (%v -> %v)", before, got)
 	}
 

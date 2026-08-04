@@ -1,6 +1,6 @@
-# Appitools
+# Appximo
 
-> Appitools is an Apache-2.0 Go engine that compiles a JSON schema into a
+> Appximo is an Apache-2.0 Go engine that compiles a JSON schema into a
 > production multi-tenant REST + GraphQL + OpenAPI server at boot. One
 > static binary (~24 MB RSS idle) on your own server, PostgreSQL with
 > schema-per-tenant isolation, JWT + RBAC deny-by-default, declarative
@@ -23,9 +23,9 @@
   instance — health probes, metrics, trace explorer, per-tenant debug,
   SSE, control plane, laptop access via SSH tunnels
 - [Generate schemas with your agent](docs/SCHEMA_SPEC_LLM.md): paste
-  `appitools spec` (the LLM-distilled grammar) into your own Claude
+  `appximo spec` (the LLM-distilled grammar) into your own Claude
   Code/Cursor, generate the schema, self-correct with
-  `appitools validate --json` (machine-readable errors with path + fix),
+  `appximo validate --json` (machine-readable errors with path + fix),
   then paste into Studio's Code view
 
 - [Public benchmark](context-docs/BENCHMARK_PUBLIC.md): full methodology

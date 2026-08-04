@@ -3,7 +3,7 @@ package schema_test
 import (
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // TestValidate_FileField covers the `file` field type (FILES-LINK-S1): a
@@ -13,7 +13,7 @@ import (
 func TestValidate_FileField(t *testing.T) {
 	mk := func(f schema.FieldDef) *schema.APISchema {
 		return &schema.APISchema{
-			Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "test",
+			Schema: "https://appximo.com/schema/v1", Version: "1", Name: "test",
 			Resources: map[string]schema.ResourceSchema{
 				"pacientes": {Fields: map[string]schema.FieldDef{
 					"nombre":  {Type: "string", Required: true},

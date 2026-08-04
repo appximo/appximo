@@ -17,7 +17,7 @@ The script needs a running server, a registered tenant, and a JWT for that tenan
 Mint the token with the built-in CLI (no secret is hardcoded in the script):
 
 ```bash
-TOKEN=$(./appitools token --tenant acme --role super_admin --secret "$JWT_SECRET")
+TOKEN=$(./appximo token --tenant acme --role super_admin --secret "$JWT_SECRET")
 
 BENCH_TOKEN="$TOKEN" TENANT_ID=acme TARGET_URL=http://localhost:8080 \
   k6 run tests/performance/sustained_2krps.js

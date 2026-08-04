@@ -14,7 +14,7 @@ import "encoding/json"
 //
 // Why only the ENVELOPE. The strict-outputs subset is narrow: every object must
 // declare additionalProperties:false, and it offers no patternProperties /
-// propertyNames / additionalProperties-as-schema. The Appitools schema is an
+// propertyNames / additionalProperties-as-schema. The Appximo schema is an
 // arbitrary-keyed map (resources keyed by resource name, fields by field name,
 // roles by role name) — that shape is simply not expressible in the subset.
 // So this schema constrains the part that IS expressible — the top-level
@@ -58,7 +58,7 @@ func OutputSchema() map[string]any {
 // SchemaURL / SchemaVersion are the two required top-level constants the envelope
 // pins (a frequent source of model error, eliminated by construction).
 const (
-	SchemaURL     = "https://appitools.dev/schema/v1"
+	SchemaURL     = "https://appximo.com/schema/v1"
 	SchemaVersion = "1"
 )
 

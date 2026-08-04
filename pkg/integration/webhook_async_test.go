@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/codegen"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/extensions"
+	rbacpkg "github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
 	chi "github.com/go-chi/chi/v5"
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/codegen"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/extensions"
-	rbacpkg "github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
 // V3 — Webhook async. A create on a resource with an after_create webhook must:
@@ -58,7 +58,7 @@ CREATE TABLE tenant_acmetest.guides (
 	defer hookSrv.Close()
 
 	s := &schema.APISchema{
-		Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "webhook-async",
+		Schema: "https://appximo.com/schema/v1", Version: "1", Name: "webhook-async",
 		Resources: map[string]schema.ResourceSchema{
 			"guides": {
 				Fields: map[string]schema.FieldDef{

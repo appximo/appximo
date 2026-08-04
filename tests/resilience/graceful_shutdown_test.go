@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/shutdown"
+	"github.com/appximo/appximo/pkg/shutdown"
 )
 
 // TestGracefulShutdownUnderLoad drives the SAME drain path the binary uses on

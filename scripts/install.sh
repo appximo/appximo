@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Appitools — official production installer.
+# Appximo — official production installer.
 #
-#   curl -fsSL https://get.appitools.dev/install.sh | sudo bash -s -- --domain api.example.com --email you@example.com
+#   curl -fsSL https://get.appximo.com/install.sh | sudo bash -s -- --domain api.example.com --email you@example.com
 #
 # From an EMPTY Ubuntu/Debian VPS to a live HTTPS API in minutes: native
 # PostgreSQL + the engine under systemd + Caddy for automatic Let's Encrypt TLS.
@@ -19,7 +19,7 @@
 # only swaps the binary + restarts). `--uninstall` reverses it for a clean retry.
 #
 # Binary source: there are no public GitHub Releases yet, so pass --binary=/path
-# to the appitools binary you built/copied (scripts/build-engine.sh, or scp it
+# to the appximo binary you built/copied (scripts/build-engine.sh, or scp it
 # up). The URL-download + checksum path below is written and ready — it activates
 # automatically once RELEASE_VERSION is set to a published tag.
 set -euo pipefail
@@ -32,10 +32,10 @@ set -euo pipefail
 # app name now namespaces all of it: unit, service user, /etc, /opt, /var/lib,
 # database, role, control port and the Caddy site. --app is unset by default, so
 # a single-app box behaves byte-identically to before.
-APP_NAME="appitools"
-SERVICE_USER="appitools"   # derived from APP_NAME in derive_paths
-SERVICE_NAME="appitools"   # derived from APP_NAME in derive_paths
-readonly REPO="miguel09acosta/appitools"
+APP_NAME="appximo"
+SERVICE_USER="appximo"   # derived from APP_NAME in derive_paths
+SERVICE_NAME="appximo"   # derived from APP_NAME in derive_paths
+readonly REPO="appximo/appximo"
 # Set to a published tag (e.g. "v0.1.0") to enable the download path. Empty means
 # "no public release" → the installer requires --binary.
 readonly RELEASE_VERSION=""
@@ -65,7 +65,7 @@ ask() {
 
 usage() {
 	cat <<'EOF'
-Appitools installer — empty Ubuntu/Debian VPS → live HTTPS API.
+Appximo installer — empty Ubuntu/Debian VPS → live HTTPS API.
 
 Usage: sudo bash install.sh --domain DOMAIN --email EMAIL --binary PATH [options]
 
@@ -78,7 +78,7 @@ Required (until public releases exist):
 
 Options:
   --cli=PATH           the engine CLI to install as the OPS COMPANION at
-                       /opt/appitools/bin/appitools-cli (tenant, migrate, token,
+                       /opt/appximo/bin/appximo-cli (tenant, migrate, token,
                        admin create). When --binary IS the engine it is symlinked
                        automatically and this flag is unnecessary; a consumer
                        binary serves but cannot operate its database (ADR-023)
@@ -88,7 +88,7 @@ Options:
                        everything: unit <NAME>.service, /etc/<NAME>, /opt/<NAME>,
                        /var/lib/<NAME>, the postgres role+database, the control
                        port, and its own Caddy site file — so a second app never
-                       touches the first. Default "appitools" (unchanged behavior).
+                       touches the first. Default "appximo" (unchanged behavior).
                        Lowercase letters, digits and '-', starting with a letter.
   --control-port=PORT  internal control-plane port (localhost only). Default 9090
                        for the default app, 9090+offset derived from --app for a
@@ -180,7 +180,7 @@ valid_app_name() {
 # app gets a stable, name-derived port in 9091-9189 so re-running the installer
 # always picks the same one.
 default_control_port() {
-	if [ "$1" = "appitools" ]; then printf '9090'; return; fi
+	if [ "$1" = "appximo" ]; then printf '9090'; return; fi
 	local sum=0 i c
 	for i in $(seq 1 ${#1}); do
 		c=$(printf '%s' "$1" | cut -c"$i")
@@ -294,20 +294,20 @@ preflight() {
 # ones abort with a clear fix) rather than blindly clobbered.
 preflight_conflicts() {
 	[ "$DRY_RUN" = "yes" ] && return 0
-	# Existing appitools install → this is an upgrade; say so (secrets are reused).
+	# Existing appximo install → this is an upgrade; say so (secrets are reused).
 	if [ -f "$ENV_FILE" ] || [ -f "$UNIT_FILE" ]; then
-		info "existing Appitools install detected — upgrading in place (secrets reused)"
+		info "existing Appximo install detected — upgrading in place (secrets reused)"
 	fi
 	# Port already in use by something that ISN'T our own service → refuse.
 	if command -v ss >/dev/null 2>&1 && ss -ltn "( sport = :$PORT )" 2>/dev/null | grep -q ":$PORT "; then
 		if ! systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-			die "port $PORT is already in use by another process (not the appitools service). Free it (ss -ltnp | grep :$PORT) or pass --port=<other>."
+			die "port $PORT is already in use by another process (not the appximo service). Free it (ss -ltnp | grep :$PORT) or pass --port=<other>."
 		fi
 	fi
 	# An existing Caddyfile that isn't ours would be overwritten — back it up first.
 	if [ -f "$CADDYFILE" ] && ! grep -q "127.0.0.1:${PORT}" "$CADDYFILE" 2>/dev/null; then
-		local bak; bak="${CADDYFILE}.pre-appitools.$(date +%Y%m%d-%H%M%S)"
-		warn "an existing Caddyfile is present and is NOT ours — backing it up to ${bak} before writing appitools' config"
+		local bak; bak="${CADDYFILE}.pre-appximo.$(date +%Y%m%d-%H%M%S)"
+		warn "an existing Caddyfile is present and is NOT ours — backing it up to ${bak} before writing appximo' config"
 		cp -p "$CADDYFILE" "$bak"
 	fi
 }
@@ -329,7 +329,7 @@ gather_input() {
 		valid_email "$EMAIL" || die "invalid email '$EMAIL' — want something like you@example.com"
 	fi
 	if [ -z "$BINARY" ] && [ -z "$RELEASE_VERSION" ]; then
-		die "no public release yet — pass --binary=/path/to/appitools (build it with scripts/build-engine.sh and scp it up)"
+		die "no public release yet — pass --binary=/path/to/appximo (build it with scripts/build-engine.sh and scp it up)"
 	fi
 	if [ -n "$BINARY" ]; then
 		[ -f "$BINARY" ] || die "--binary '$BINARY' not found"
@@ -341,22 +341,22 @@ gather_input() {
 		# `<bin> serve --schema … --port …`, which the same contract guarantees.
 		BIN_ID="$("$BINARY" version 2>/dev/null | head -1)"
 		[ -n "$BIN_ID" ] \
-			|| die "--binary '$BINARY' does not honor the deployable contract: '<binary> version' must exit 0 and print an identity line (wrong architecture? not an Appitools engine/consumer build?). If it is YOUR app on the appitools framework, wire appitools.ParseServeArgs in main() — see docs/adr/ADR-023-deployable-binary-contract.md"
+			|| die "--binary '$BINARY' does not honor the deployable contract: '<binary> version' must exit 0 and print an identity line (wrong architecture? not an Appximo engine/consumer build?). If it is YOUR app on the appximo framework, wire appximo.ParseServeArgs in main() — see docs/adr/ADR-023-deployable-binary-contract.md"
 		ok "binary identifies as: $BIN_ID"
 	fi
 	if [ -n "$CLI" ]; then
 		[ -f "$CLI" ] || die "--cli '$CLI' not found"
 		[ -x "$CLI" ] || die "--cli '$CLI' is not executable (chmod +x it)"
-		"$CLI" version 2>/dev/null | grep -qi appitools \
-			|| die "--cli '$CLI' is not the appitools engine CLI ('version' did not identify it) — build it with scripts/build-engine.sh"
+		"$CLI" version 2>/dev/null | grep -qi appximo \
+			|| die "--cli '$CLI' is not the appximo engine CLI ('version' did not identify it) — build it with scripts/build-engine.sh"
 	fi
 
 	echo
-	info "About to install Appitools:"
+	info "About to install Appximo:"
 	printf '    domain        %s\n' "$DOMAIN"
 	printf '    tls email     %s\n' "${EMAIL:-<dry-run>}"
 	printf '    engine        %s (internal port %s)\n' "$BIN_PATH" "$PORT"
-	printf '    postgres      native, database "appitools" (local, generated password)\n'
+	printf '    postgres      native, database "appximo" (local, generated password)\n'
 	printf '    data dir      %s\n' "$VARLIB"
 	printf '    gomemlimit    %s\n' "${GOMEMLIMIT_VAL:-<engine auto/none>}"
 	[ "$HARDEN" = "yes" ] && printf '    hardening     ufw + fail2ban + unattended-upgrades\n'
@@ -464,7 +464,7 @@ ensure_caddy_restart_policy() {
 	[ "$DRY_RUN" = "yes" ] && { printf '  [dry-run] ensure caddy.service Restart=always via a systemd drop-in\n'; return 0; }
 	local dir="/etc/systemd/system/caddy.service.d"
 	mkdir -p "$dir"
-	write_file "$dir/10-appitools-restart.conf" "# Managed by the Appitools installer.
+	write_file "$dir/10-appximo-restart.conf" "# Managed by the Appximo installer.
 # Caddy is the front door: if it dies and does not come back, the site is down
 # even though the engine is healthy. See docs/BENCHMARKS.md (resilience).
 [Unit]
@@ -493,7 +493,7 @@ setup_user_dirs() {
 # this installer — i.e. `bash scripts/install.sh` from a checkout, or scp'd
 # together. Under `curl | bash` there are no sibling files, so it skips with a
 # hint instead of pretending. (Caught in PROD-PATH-HARDEN-S1: the docs pointed at
-# /opt/appitools/scripts but nothing put the scripts there.)
+# /opt/appximo/scripts but nothing put the scripts there.)
 install_companion_scripts() {
 	local self_dir; self_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd)" || { self_dir=""; }
 	local any="no" s
@@ -565,7 +565,7 @@ tune_postgres() {
 
 	# conf.d is only read if postgresql.conf includes it (Debian/Ubuntu packages do).
 	if ! grep -qE "^[[:space:]]*include_dir[[:space:]]*=[[:space:]]*'conf\.d'" "$conf_file"; then
-		printf "\n# added by the Appitools installer\ninclude_dir = 'conf.d'\n" >> "$conf_file"
+		printf "\n# added by the Appximo installer\ninclude_dir = 'conf.d'\n" >> "$conf_file"
 	fi
 
 	local sb ecs wm mwm mc
@@ -581,7 +581,7 @@ tune_postgres() {
 		return 0
 	fi
 
-	write_file "$conf_dir/99-appitools-tuning.conf" "# Appitools — PostgreSQL sizing for this box (${MEM_MB} MiB RAM, $(nproc) vCPU).
+	write_file "$conf_dir/99-appximo-tuning.conf" "# Appximo — PostgreSQL sizing for this box (${MEM_MB} MiB RAM, $(nproc) vCPU).
 # Written by scripts/install.sh. Delete this file and restart PostgreSQL to
 # return to the packaged defaults. See docs/BENCHMARKS.md for the measurements.
 shared_buffers = ${sb}MB
@@ -589,10 +589,10 @@ effective_cache_size = ${ecs}MB
 work_mem = ${wm}MB
 maintenance_work_mem = ${mwm}MB
 max_connections = ${mc}"
-	chown postgres:postgres "$conf_dir/99-appitools-tuning.conf" 2>/dev/null || true
+	chown postgres:postgres "$conf_dir/99-appximo-tuning.conf" 2>/dev/null || true
 	# shared_buffers and max_connections need a full restart, not a reload.
 	systemctl restart postgresql >/dev/null 2>&1 \
-		|| warn "PostgreSQL did not restart after tuning — check journalctl -u postgresql (remove $conf_dir/99-appitools-tuning.conf to revert)"
+		|| warn "PostgreSQL did not restart after tuning — check journalctl -u postgresql (remove $conf_dir/99-appximo-tuning.conf to revert)"
 	local i; for i in $(seq 1 20); do runuser -u postgres -- psql -tAc 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
 	ok "postgresql tuned for this box (shared_buffers=${sb}MB, effective_cache_size=${ecs}MB, work_mem=${wm}MB, max_connections=${mc})"
 }
@@ -606,40 +606,40 @@ install_binary() {
 	else
 		# Ready for when releases exist (RELEASE_VERSION set): download + checksum.
 		local base="https://github.com/${REPO}/releases/download/${RELEASE_VERSION}"
-		local asset="appitools-${RELEASE_VERSION}-linux-${ARCH}"
+		local asset="appximo-${RELEASE_VERSION}-linux-${ARCH}"
 		info "downloading engine ${RELEASE_VERSION} (${ARCH})…"
-		run curl -fLo /tmp/appitools "${base}/${asset}"
-		run curl -fLo /tmp/appitools.checksums "${base}/checksums.txt"
+		run curl -fLo /tmp/appximo "${base}/${asset}"
+		run curl -fLo /tmp/appximo.checksums "${base}/checksums.txt"
 		if [ "$DRY_RUN" != "yes" ]; then
-			( cd /tmp && grep " ${asset}\$" appitools.checksums | sed "s/${asset}/appitools/" | sha256sum -c - ) \
+			( cd /tmp && grep " ${asset}\$" appximo.checksums | sed "s/${asset}/appximo/" | sha256sum -c - ) \
 				|| die "checksum verification failed"
 		fi
-		run install -m 0755 /tmp/appitools "$BIN_PATH"
+		run install -m 0755 /tmp/appximo "$BIN_PATH"
 	fi
 	ok "engine installed at $BIN_PATH"
 }
 
 # install_ops_cli: the OPS COMPANION (ADR-023). A production deploy is the app
 # binary (serves) plus the engine CLI (operates: tenant, migrate, token, admin
-# create). When the installed binary IS the engine, appitools-cli is a symlink
+# create). When the installed binary IS the engine, appximo-cli is a symlink
 # to it — one documented invocation works on every box. A consumer binary has no
 # ops subcommands (its `version`-contract error even says so), so --cli installs
 # the real engine CLI beside it; without --cli the gap is NAMED, not silent.
 install_ops_cli() {
-	local cli_path="$OPT_DIR/bin/appitools-cli"
+	local cli_path="$OPT_DIR/bin/appximo-cli"
 	if [ -n "$CLI" ]; then
 		run install -m 0755 "$CLI" "$cli_path"
 		ok "ops CLI installed at ${cli_path#"$PREFIX"} (tenant / migrate / token / admin create)"
 		return
 	fi
-	[ "$DRY_RUN" = "yes" ] && { printf '  [dry-run] detect ops subcommands; symlink appitools-cli if the binary is the engine\n'; return; }
+	[ "$DRY_RUN" = "yes" ] && { printf '  [dry-run] detect ops subcommands; symlink appximo-cli if the binary is the engine\n'; return; }
 	# Detect: the engine's CLI answers `tenant --help`; a consumer binary refuses
 	# any subcommand but version/serve (per the contract).
 	if "$BIN_PATH" tenant --help >/dev/null 2>&1; then
 		ln -sfn "$BIN_PATH" "$cli_path"
-		ok "ops CLI: this binary IS the engine — appitools-cli symlinked to it"
+		ok "ops CLI: this binary IS the engine — appximo-cli symlinked to it"
 	else
-		warn "this is a CONSUMER binary (serves, but has no ops subcommands). To operate its database (register tenants, migrate, mint tokens, create the super-admin) install the engine CLI: re-run with --cli=/path/to/appitools (build: scripts/build-engine.sh) — see docs/adr/ADR-023"
+		warn "this is a CONSUMER binary (serves, but has no ops subcommands). To operate its database (register tenants, migrate, mint tokens, create the super-admin) install the engine CLI: re-run with --cli=/path/to/appximo (build: scripts/build-engine.sh) — see docs/adr/ADR-023"
 	fi
 }
 
@@ -656,7 +656,7 @@ write_schema() {
 		# A minimal, valid starter so the engine boots immediately. Replace it via
 		# the visual editor (/editor) or re-run with --schema, then restart.
 		write_file "$SCHEMA_FILE" '{
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "starter-api",
   "resources": {
@@ -687,14 +687,14 @@ write_file() {
 }
 
 write_env_file() {
-	local body="# Appitools engine environment (systemd EnvironmentFile — plain KEY=value, no export, no quotes).
+	local body="# Appximo engine environment (systemd EnvironmentFile — plain KEY=value, no export, no quotes).
 # Generated by scripts/install.sh. Secrets are reused on re-run; keep this file 0600.
 DATABASE_URL=${DATABASE_URL}
 JWT_SECRET=${JWT_SECRET}
 ADMIN_KEY=${ADMIN_KEY}
-APPITOOLS_ENV=production
-APPITOOLS_CONTROL_PORT=${CONTROL_PORT}
-APPITOOLS_FILES_DIR=${VARLIB#"$PREFIX"}/files
+APPXIMO_ENV=production
+APPXIMO_CONTROL_PORT=${CONTROL_PORT}
+APPXIMO_FILES_DIR=${VARLIB#"$PREFIX"}/files
 OBS_DB_PATH=${VARLIB#"$PREFIX"}/obs/obs.db"
 	[ -n "$GOMEMLIMIT_VAL" ] && body="${body}
 GOMEMLIMIT=${GOMEMLIMIT_VAL}"
@@ -706,7 +706,7 @@ GOMEMLIMIT=${GOMEMLIMIT_VAL}"
 
 write_systemd_unit() {
 	write_file "$UNIT_FILE" "[Unit]
-Description=Appitools app ${APP_NAME}
+Description=Appximo app ${APP_NAME}
 Documentation=https://github.com/${REPO}/blob/main/docs/PRODUCTION.md
 Wants=network-online.target
 After=network-online.target postgresql.service
@@ -736,14 +736,14 @@ write_caddyfile() {
 	# Caddy terminates TLS (automatic Let's Encrypt) and reverse-proxies to the
 	# engine, passing the Host header through unchanged (tenant routing depends on
 	# it). request_body caps uploads at 25MB at the edge; the engine also enforces
-	# its own APPITOOLS_FILES_MAX_BYTES. SSE (text/event-stream) is auto-flushed by
+	# its own APPXIMO_FILES_MAX_BYTES. SSE (text/event-stream) is auto-flushed by
 	# reverse_proxy, so /api/*/events works with no extra config.
 	#
 	# OPS-10: this app's site lives in ITS OWN file under /etc/caddy/sites, and the
 	# main Caddyfile only IMPORTS that directory. Installing a second app appends a
 	# file; it can never erase the first app's site — which is exactly what the
 	# previous wholesale overwrite did.
-	write_file "$CADDY_SITE_FILE" "# Appitools app: ${APP_NAME}  (managed by scripts/install.sh — edits are overwritten on re-run)
+	write_file "$CADDY_SITE_FILE" "# Appximo app: ${APP_NAME}  (managed by scripts/install.sh — edits are overwritten on re-run)
 ${DOMAIN} {
 	request_body {
 		max_size 25MB
@@ -805,7 +805,7 @@ start_services() {
 	systemctl enable caddy >/dev/null 2>&1 || true
 	systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null \
 		|| warn "could not (re)start caddy — check: caddy validate --config $CADDYFILE ; journalctl -u caddy -f"
-	ok "services started (appitools + caddy)"
+	ok "services started (appximo + caddy)"
 }
 
 # ── Health verification ──────────────────────────────────────────────────────
@@ -875,10 +875,10 @@ uninstall() {
 		ok "removed this app's Caddy site ($CADDY_SITE_FILE)"
 	else
 		# Pre-OPS-10 layout: this app's block lived inline in the Caddyfile.
-		local bak; bak="$(ls -1t "${CADDYFILE}".pre-appitools.* 2>/dev/null | head -1 || true)"
+		local bak; bak="$(ls -1t "${CADDYFILE}".pre-appximo.* 2>/dev/null | head -1 || true)"
 		if [ -n "$bak" ]; then
 			mv -f "$bak" "$CADDYFILE"; systemctl reload caddy 2>/dev/null || true
-			ok "restored the pre-appitools Caddyfile"
+			ok "restored the pre-appximo Caddyfile"
 		elif [ -f "$CADDYFILE" ] && grep -q "127.0.0.1:${PORT}" "$CADDYFILE" 2>/dev/null; then
 			rm -f "$CADDYFILE"; systemctl reload caddy 2>/dev/null || systemctl stop caddy 2>/dev/null || true
 		fi
@@ -917,7 +917,7 @@ detect_control_port() {
 summary() {
 	detect_control_port
 	echo
-	ok "Appitools is installed."
+	ok "Appximo is installed."
 	echo
 	printf '  %sAPI%s        https://%s\n' "$C_B" "$C_N" "$DOMAIN"
 	printf '  %sdocs%s       https://%s/docs   %seditor%s https://%s/editor   %sadmin%s https://%s/admin\n' \
@@ -942,11 +942,11 @@ summary() {
 	printf '      -d "{\\"tenant_id\\":\\"acme\\",\\"display_name\\":\\"Acme\\",\\"email\\":\\"a@acme.com\\",\\"plan\\":\\"free\\",\\"schema\\":$(cat %s)}"\n' "${SCHEMA_FILE#"$PREFIX"}"
 	echo
 	printf '  Logs     journalctl -u %s -f\n' "$SERVICE_NAME"
-	printf '  Ops CLI  %s/bin/appitools-cli  (tenant / migrate / token / admin create)\n' "${OPT_DIR#"$PREFIX"}"
+	printf '  Ops CLI  %s/bin/appximo-cli  (tenant / migrate / token / admin create)\n' "${OPT_DIR#"$PREFIX"}"
 	printf '  Update   build a new binary → scp up → sudo bash %s --binary=/path --domain=%s --email=%s --yes\n' "$0" "$DOMAIN" "${EMAIL:-you@example.com}"
 	printf '  Remove   sudo bash %s --uninstall   (add --purge to also drop the database)\n' "$0"
 	printf '  Guide    docs/PRODUCTION.md\n'
-	printf '  AI agent building on this app?  appitools-cli spec | backend-spec | frontend-spec\n'
+	printf '  AI agent building on this app?  appximo-cli spec | backend-spec | frontend-spec\n'
 	printf '           (or "specs" for all three) — paste into the agent; live contract at https://%s/openapi.json\n' "$DOMAIN"
 	echo
 }
@@ -963,7 +963,7 @@ on_install_exit() {
 main() {
 	ORIG_ARGS="$*"
 	parse_args "$@"
-	printf '%s== Appitools installer ==%s\n\n' "$C_B" "$C_N"
+	printf '%s== Appximo installer ==%s\n\n' "$C_B" "$C_N"
 	detect_os
 	if [ "$UNINSTALL" = "yes" ]; then uninstall; exit 0; fi
 	# A clear message + recovery guidance if any step aborts mid-way.

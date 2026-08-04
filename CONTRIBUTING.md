@@ -1,12 +1,12 @@
-# Contributing to Appitools
+# Contributing to Appximo
 
-Thank you for your interest. Appitools is early-stage — your feedback shapes the roadmap.
+Thank you for your interest. Appximo is early-stage — your feedback shapes the roadmap.
 
 ---
 
 ## Reporting bugs
 
-1. **Search first** — check [open issues](https://github.com/miguel09acosta/appitools/issues) before opening a new one.
+1. **Search first** — check [open issues](https://github.com/appximo/appximo/issues) before opening a new one.
 2. **Minimal reproduction** — include the `schema.json` that triggers the bug and the exact command you ran.
 3. **Environment** — Go version (`go version`), OS, PostgreSQL version if relevant.
 
@@ -34,8 +34,8 @@ make dev          # build Studio + engine, load dev secrets (DEV_ENV env-file),
                   # serve on :8080 — boots a BLANK app; SCHEMA=/PORT= to override
 make dev-fast     # skip the Studio SPA rebuild (when the editor didn't change)
 make stop         # stop the dev server by its exact PID (PORT= to target another)
-make spec         # regenerate appitools-spec.md (the agent grammar pack)
-make install      # version-stamped `appitools` CLI into /usr/local/bin (sudo if needed)
+make spec         # regenerate appximo-spec.md (the agent grammar pack)
+make install      # version-stamped `appximo` CLI into /usr/local/bin (sudo if needed)
 ```
 
 ---
@@ -125,8 +125,8 @@ chore: upgrade pgx to v5.9.2
       corpus row (`scripts/binary-diff/corpus.jsonl`) for each contract you
       touched
 - [ ] No new linter warnings (`golangci-lint run`)
-- [ ] Schema changes validated with `appitools validate`
-- [ ] If template changed: `appitools generate testdata/logistics/schema.json` regenerated
+- [ ] Schema changes validated with `appximo validate`
+- [ ] If template changed: `appximo generate testdata/logistics/schema.json` regenerated
 - [ ] Engine binary built via `scripts/build-engine.sh` (not `go build`), if deploying
 
 ---
@@ -154,7 +154,7 @@ Against any other running instance (native binary, remote host):
 ```bash
 JWT_SECRET=… ADMIN_KEY=… \
 BASE=http://host:8080 ADMIN=http://host:9090 \
-APPITOOLS_CLI=./appitools SCHEMA_FILE=examples/quickstart/schema.json \
+APPXIMO_CLI=./appximo SCHEMA_FILE=examples/quickstart/schema.json \
 TENANT_A=smoke1 TENANT_B=smoke2 \
 bash scripts/acceptance-test.sh
 ```
@@ -177,7 +177,7 @@ git tag v0.1.0 && git push --tags
 
 CI runs the full suite on the tag; only if it finishes green does
 `.github/workflows/release.yml` build the static binaries (linux/darwin ×
-amd64/arm64, version stamped via ldflags — `appitools version` reports the
+amd64/arm64, version stamped via ldflags — `appximo version` reports the
 tag) and attach them with `checksums.txt` to a GitHub Release. The Docker
 image for the tag is published the same way (`docker-publish.yml`, also gated
 on green CI). A red tag publishes nothing.

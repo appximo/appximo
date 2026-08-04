@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 // Graceful self-restart (UI-F4-S2): the mechanism that turns the editor's
 // "needs an engine restart" banner into one click. The deploy persists the new
@@ -32,9 +32,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/platformadmin"
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/platformadmin"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 func bootBackupPath(schemaPath string) string { return schemaPath + ".bak" }
@@ -47,14 +47,14 @@ func bootMarkerPath(schemaPath string) string { return schemaPath + ".selfrestar
 func loadAndValidateSchema(path string) (*schema.APISchema, error) {
 	s, err := schema.LoadFromFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("appitools: read schema: %w", err)
+		return nil, fmt.Errorf("appximo: read schema: %w", err)
 	}
 	if errs := schema.Validate(s); len(errs) > 0 {
 		msgs := make([]string, len(errs))
 		for i, e := range errs {
 			msgs[i] = e.Error()
 		}
-		return nil, fmt.Errorf("appitools: invalid schema:\n  %s", strings.Join(msgs, "\n  "))
+		return nil, fmt.Errorf("appximo: invalid schema:\n  %s", strings.Join(msgs, "\n  "))
 	}
 	// A VALID schema can still be a wrong one in ways nothing else reports (SCHEMA-5).
 	// Boot is the last moment before those become "the app shows me nothing".

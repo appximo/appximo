@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/logging"
-	"github.com/miguelangel/appitools/pkg/platformadmin"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/logging"
+	"github.com/appximo/appximo/pkg/platformadmin"
 )
 
 // adminCmd groups platform-administration commands. The first is the BOOTSTRAP of
@@ -27,16 +27,16 @@ var adminCmd = &cobra.Command{
 var adminCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a platform super-admin (bootstrap the admin panel)",
-	Long: `Creates a platform super-admin in the system schema (appitools_system),
+	Long: `Creates a platform super-admin in the system schema (appximo_system),
 above all tenants. Use this once to bootstrap the admin panel — the super-admin
 then logs in at POST /admin/auth/login and manages everything from there.
 
 DATABASE_URL and JWT_SECRET must be set (the same env the engine uses).
 Example:
   DATABASE_URL=... JWT_SECRET=... \
-    appitools admin create --email me@example.com --password 'a-strong-passphrase'`,
+    appximo admin create --email me@example.com --password 'a-strong-passphrase'`,
 	Run: func(cmd *cobra.Command, args []string) {
-		logging.Init(os.Getenv("APPITOOLS_ENV"))
+		logging.Init(os.Getenv("APPXIMO_ENV"))
 
 		email, _ := cmd.Flags().GetString("email")
 		password, _ := cmd.Flags().GetString("password")
@@ -69,7 +69,7 @@ Example:
 		// system schema; tenant ops are not used).
 		svc := platformadmin.NewService(
 			platformadmin.NewStore(pool), nil, controlplane.NewService(pool, nil), pool,
-			platformadmin.Config{JWTSecret: jwtSecret, MFAKey: os.Getenv("APPITOOLS_MFA_KEY")},
+			platformadmin.Config{JWTSecret: jwtSecret, MFAKey: os.Getenv("APPXIMO_MFA_KEY")},
 		)
 		admin, err := svc.CreateAdmin(ctx, email, password, role)
 		if err != nil {

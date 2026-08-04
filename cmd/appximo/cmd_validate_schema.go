@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 	"github.com/spf13/cobra"
 )
 
@@ -12,7 +12,7 @@ import (
 // meta-schema (AI-F0-S1) — the STRUCTURAL net: types, enums, name patterns,
 // allowed keys, required fields, the two RBAC forms. It is engine-free and fast,
 // the deterministic check an AI (or an IDE) runs to verify a generated schema is
-// structurally valid. `appitools validate` remains the SEMANTIC authority (it also
+// structurally valid. `appximo validate` remains the SEMANTIC authority (it also
 // checks cross-references the meta-schema cannot express).
 var validateSchemaCmd = &cobra.Command{
 	Use:   "validate-schema <schema.json>",
@@ -22,7 +22,7 @@ var validateSchemaCmd = &cobra.Command{
 This is the STRUCTURAL layer — it checks types, enums, identifier patterns, allowed
 keys (strict), required fields, and the two RBAC forms, without booting the engine.
 It is the deterministic net for AI-generated schemas (structurally valid JSON, verified
-instantly). The SEMANTIC authority is ` + "`appitools validate`" + `, which additionally
+instantly). The SEMANTIC authority is ` + "`appximo validate`" + `, which additionally
 checks cross-references the meta-schema cannot express (a relation/FK target or
 references column must EXIST and be unique on the target; a condition/allowlist field
 must exist on the resource; renamed_from must not still be declared; …).`,
@@ -35,7 +35,7 @@ must exist on the resource; renamed_from must not still be declared; …).`,
 		}
 		errs := schema.ValidateAgainstMetaSchema(raw)
 		if len(errs) == 0 {
-			fmt.Println("Schema structurally valid ✓ (meta-schema) — run `appitools validate` for semantic checks")
+			fmt.Println("Schema structurally valid ✓ (meta-schema) — run `appximo validate` for semantic checks")
 			return
 		}
 		fmt.Fprintln(os.Stderr, "Structural errors (meta-schema):")

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"log"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // defaultAfterHookConcurrency bounds the number of after_create webhook
@@ -166,7 +166,7 @@ func (hr *HookRunner) FireAfterHook(hook *schema.HookConfig, event string, recor
 
 // RunAfterHook fires an after-hook synchronously on the calling goroutine. event is
 // the REAL lifecycle event ("after_create" | "after_update") so the webhook carries
-// the correct X-Appitools-Event header (SEC-AUDIT-V2 Hallazgo B). Production code
+// the correct X-Appximo-Event header (SEC-AUDIT-V2 Hallazgo B). Production code
 // should call FireAfterHook (which bounds concurrency and returns immediately);
 // RunAfterHook is the worker it invokes. Only "webhook" after-hooks do anything —
 // js/wasm after-hooks are rejected at schema load (see schema.Validate), so the

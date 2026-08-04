@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"log"
@@ -10,7 +10,7 @@ import (
 
 // applyRuntimeLimits wires the process-level Go runtime knobs from the
 // environment (LIBRARY-HARDEN-S1). It lives in the library — not only the
-// `serve` command — so EVERY binary built on appitools.New (a custom-handler
+// `serve` command — so EVERY binary built on appximo.New (a custom-handler
 // backend included) gets the same memory backpressure.
 //
 //   - GOMEMLIMIT — a soft memory ceiling. Go has no per-goroutine memory bound,

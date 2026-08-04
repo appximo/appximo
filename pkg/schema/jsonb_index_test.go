@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/schemadiff"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/schemadiff"
 )
 
 // LIBRARY-GAPS-S1 — the `jsonb` field type and the index access method.
@@ -13,7 +13,7 @@ import (
 func jsonbSchema(t *testing.T, fieldType, indexJSON string) *schema.APISchema {
 	t.Helper()
 	return parseSchema(t, `{
-      "$schema":"https://appitools.dev/schema/v1","version":"1","name":"x",
+      "$schema":"https://appximo.com/schema/v1","version":"1","name":"x",
       "resources": { "products": {
         "fields": {
           "name":      { "type": "string", "required": true },
@@ -103,7 +103,7 @@ func TestIndexMethod_DefaultUnchanged(t *testing.T) {
 
 func TestIndexMethod_UnknownKeyRejected(t *testing.T) {
 	raw := `{
-      "$schema":"https://appitools.dev/schema/v1","version":"1","name":"x",
+      "$schema":"https://appximo.com/schema/v1","version":"1","name":"x",
       "resources": { "products": {
         "fields": { "atributos": { "type": "jsonb" } },
         "indexes": [ { "fields": ["atributos"], "using": "gin" } ]

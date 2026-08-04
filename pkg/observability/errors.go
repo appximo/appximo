@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/appximo/appximo/pkg/tenant"
 )
 
 // Frame is a single symbolized stack frame.
@@ -198,7 +198,7 @@ func symbolize(pcs []uintptr) []Frame {
 }
 
 // trimGoPath strips the absolute build-time prefix, returning readable paths
-// like pkg/auth/jwt.go or cmd/appitools/cmd_serve.go.
+// like pkg/auth/jwt.go or cmd/appximo/cmd_serve.go.
 func trimGoPath(path string) string {
 	for _, marker := range []string{"/pkg/", "/cmd/", "/internal/"} {
 		if i := strings.Index(path, marker); i >= 0 {

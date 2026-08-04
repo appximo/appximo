@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/logging"
 	"github.com/go-chi/chi/v5"
-	"github.com/miguelangel/appitools/pkg/logging"
 )
 
 func TestRedactWriter_RedactsToken(t *testing.T) {

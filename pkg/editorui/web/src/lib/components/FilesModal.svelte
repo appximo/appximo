@@ -125,7 +125,7 @@
 							</button>
 						</div>
 						<p class="hint-sm">
-							No super-admin yet? Bootstrap one with <code>appitools admin create</code>.
+							No super-admin yet? Bootstrap one with <code>appximo admin create</code>.
 						</p>
 					{/if}
 				{:else}

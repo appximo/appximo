@@ -10,16 +10,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/extensions"
+	gqlhandler "github.com/appximo/appximo/pkg/graphql"
+	"github.com/appximo/appximo/pkg/migration"
+	"github.com/appximo/appximo/pkg/query"
+	rbacpkg "github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/extensions"
-	gqlhandler "github.com/miguelangel/appitools/pkg/graphql"
-	"github.com/miguelangel/appitools/pkg/migration"
-	"github.com/miguelangel/appitools/pkg/query"
-	rbacpkg "github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
 const authTestSecret = "auth-security-test-secret"
@@ -151,7 +151,7 @@ func TestSecurity_GetByID_FieldStripping(t *testing.T) {
 	applyControlPlane(t, pool)
 
 	s := &schema.APISchema{
-		Schema: "https://appitools.dev/schema/v1", Version: "1", Name: "sec",
+		Schema: "https://appximo.com/schema/v1", Version: "1", Name: "sec",
 		Resources: map[string]schema.ResourceSchema{
 			"items": {Fields: map[string]schema.FieldDef{
 				"name":   {Type: "string", Required: true},
@@ -228,7 +228,7 @@ func TestSecurity_Introspection_DisabledInProd(t *testing.T) {
 
 	// nil tdb/hr are safe here: handler exits before any resolver fires.
 	// allowIntrospection=false — the caller's resolved gate (app.go: dev or the
-	// APPITOOLS_GRAPHQL_PLAYGROUND opt-in), exercised directly rather than via
+	// APPXIMO_GRAPHQL_PLAYGROUND opt-in), exercised directly rather than via
 	// env vars now that BuildHandler takes it as an explicit parameter.
 	h := gqlhandler.BuildHandler(s, nil, nil, &policy, nil, false)
 	h = auth.JWTMiddleware(authTestSecret)(h)
@@ -260,7 +260,7 @@ func TestSecurity_Introspection_DisabledInProd(t *testing.T) {
 
 // ── 6b. the explicit opt-in allows introspection outside dev ────────────────
 // (GRAPHQL-EXPLORER-S1) — app.go resolves allowIntrospection as
-// Env=="development" || cfg.GraphQLPlayground || APPITOOLS_GRAPHQL_PLAYGROUND
+// Env=="development" || cfg.GraphQLPlayground || APPXIMO_GRAPHQL_PLAYGROUND
 // (per-app in the in-process fleet, see multiapp.go buildFleetApp), then
 // passes the resolved bool into BuildHandler. This exercises the "opted in"
 // value directly — off by default, see the prod test above.
@@ -286,7 +286,7 @@ func TestSecurity_Introspection_EnabledWhenExplicitlyAllowed(t *testing.T) {
 	var result map[string]any
 	json.NewDecoder(resp.Body).Decode(&result)
 	if errs, _ := result["errors"].([]any); len(errs) > 0 {
-		t.Fatalf("introspection should be allowed with APPITOOLS_GRAPHQL_PLAYGROUND=on, got errors: %v", errs)
+		t.Fatalf("introspection should be allowed with APPXIMO_GRAPHQL_PLAYGROUND=on, got errors: %v", errs)
 	}
 	data, _ := result["data"].(map[string]any)
 	if data["__schema"] == nil {

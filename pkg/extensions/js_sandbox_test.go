@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/appximo/appximo/pkg/extensions"
 	"github.com/dop251/goja"
-	"github.com/miguelangel/appitools/pkg/extensions"
 )
 
 func newSandbox() *extensions.JSSandbox { return extensions.NewJSSandbox() }

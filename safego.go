@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"context"
@@ -9,11 +9,11 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/miguelangel/appitools/pkg/logging"
+	"github.com/appximo/appximo/pkg/logging"
 )
 
 // defaultSafeGoTimeout bounds a Ctx.SafeGo goroutine's CONTEXT when neither
-// Config.SafeGoTimeoutSeconds nor APPITOOLS_SAFEGO_TIMEOUT is set. A
+// Config.SafeGoTimeoutSeconds nor APPXIMO_SAFEGO_TIMEOUT is set. A
 // fire-and-forget background task should be short; 30s is generous. It cancels
 // the context — fn must honor cancellation to stop; a deadline cannot forcibly
 // kill a goroutine that ignores it.
@@ -77,7 +77,7 @@ func SafeParallel(ctx context.Context, limit int, tasks ...func(context.Context)
 		g.Go(func() (err error) {
 			defer func() {
 				if rvr := recover(); rvr != nil {
-					err = fmt.Errorf("appitools: recovered panic in SafeParallel task: %v", rvr)
+					err = fmt.Errorf("appximo: recovered panic in SafeParallel task: %v", rvr)
 					logging.Log.Error().
 						Interface("panic", rvr).
 						Bytes("stack", debug.Stack()).

@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/observability"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/observability"
 )
 
 type evalResultKey struct{}
@@ -22,7 +22,7 @@ func RBACMiddleware(policyJSON []byte) func(http.Handler) http.Handler {
 }
 
 // RBACMiddlewareWithPublic is RBACMiddleware plus an exact-match pass-through
-// for the custom routes explicitly registered as Public (appitools.Route
+// for the custom routes explicitly registered as Public (appximo.Route
 // {Public: true}): an anonymous request has no role, so path-based enforcement
 // would deny-by-default every public route. The pass-through injects NO
 // EvalResult — inside the handler, the Ctx's RBAC-aware helpers (Query/Insert/

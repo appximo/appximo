@@ -13,7 +13,7 @@
 	let importError = $state<string | null>(null);
 	let copied = $state(false);
 	let menuOpen = $state(false);
-	// DOC-2: "Copy AI context" — `appitools spec` + this app's schema, the exact
+	// DOC-2: "Copy AI context" — `appximo spec` + this app's schema, the exact
 	// block to paste into your own AI assistant so it can change the app. The
 	// product's most effective feature was, until now, undiscoverable.
 	let aiCopied = $state<'idle' | 'busy' | 'done' | 'error'>('idle');
@@ -92,7 +92,7 @@
 				<path d="M2 6.25h12M6 6.5v7" stroke="currentColor" stroke-width="1.5" />
 			</svg>
 		</span>
-		<span class="brand-name">Appitools <b>Studio</b></span>
+		<span class="brand-name">Appximo <b>Studio</b></span>
 	</div>
 
 	<div class="sep"></div>
@@ -197,7 +197,7 @@
 	<!-- GraphQL explorer (GRAPHQL-EXPLORER-S1): the GraphQL equivalent of /docs —
 	     schema browser + autocomplete + run queries/mutations with a real
 	     Authorization header. Only mounted in dev or with the operator's explicit
-	     APPITOOLS_GRAPHQL_PLAYGROUND opt-in; a plain 404 elsewhere is expected. -->
+	     APPXIMO_GRAPHQL_PLAYGROUND opt-in; a plain 404 elsewhere is expected. -->
 	<a class="btn subtle console-link" href="/graphiql" target="_blank" rel="noopener" title="GraphiQL — explore and run GraphQL queries/mutations">
 		GraphQL&nbsp;↗
 	</a>
@@ -233,7 +233,7 @@
 			<pre class="code">{exportJSON}</pre>
 			<div class="modal-foot">
 				This is the exact schema the engine consumes — validate it with
-				<code>appitools validate schema.json</code>.
+				<code>appximo validate schema.json</code>.
 			</div>
 		</div>
 	</div>
@@ -262,7 +262,7 @@
 				class="code editable"
 				bind:value={importText}
 				spellcheck="false"
-				placeholder="Paste an Appitools schema JSON here, or choose a file…"
+				placeholder="Paste an Appximo schema JSON here, or choose a file…"
 			></textarea>
 			{#if importError}<div class="import-err">Invalid: {importError}</div>{/if}
 			<div class="modal-foot">

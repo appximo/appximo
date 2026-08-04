@@ -147,7 +147,7 @@ func (s *SMTPSender) buildMessage(m Email) []byte {
 	}
 
 	// multipart/alternative: plaintext first (lowest fidelity), HTML last.
-	boundary := "appitools-" + nonce(m.MessageID)
+	boundary := "appximo-" + nonce(m.MessageID)
 	hdr("Content-Type", "multipart/alternative; boundary=\""+boundary+"\"")
 	b.WriteString("\r\n")
 	fmt.Fprintf(&b, "--%s\r\n", boundary)

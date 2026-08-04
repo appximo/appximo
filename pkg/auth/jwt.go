@@ -7,7 +7,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// Claims is the payload embedded in every Appitools JWT.
+// Claims is the payload embedded in every Appximo JWT.
 type Claims struct {
 	UserID           string `json:"user_id"`
 	Role             string `json:"role"`

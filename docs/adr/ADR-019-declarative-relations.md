@@ -10,7 +10,7 @@ baseline → change → Mann-Whitney verdict on the 105 stack (see
 
 ## Context and problem
 
-Appitools today has no declarative relations. Fields may hold foreign UUIDs
+Appximo today has no declarative relations. Fields may hold foreign UUIDs
 (`customer_id: { type: uuid }`), and a single read-only subroute is emitted
 (`GET /api/orders/{id}/customer`), but the schema has no `ref`/join semantics
 and list endpoints return flat rows only.
@@ -146,7 +146,7 @@ Relations are declared explicitly under a `"relations"` key per resource:
 
 ```json
 {
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "sales-api",
   "resources": {
@@ -199,10 +199,10 @@ Relations are declared explicitly under a `"relations"` key per resource:
 ### Explicit declaration vs. FK inference
 
 PostgREST infers relations from the live FK catalog (`information_schema`).
-Appitools rejects that approach for one structural reason: with schema-per-tenant
+Appximo rejects that approach for one structural reason: with schema-per-tenant
 isolation, introspecting `information_schema` per request requires a catalog
 lookup for every tenant. Postgres catalog performance degrades materially past
-~1 000–2 000 schemas on a single cluster — exactly the workload Appitools is
+~1 000–2 000 schemas on a single cluster — exactly the workload Appximo is
 designed to support.
 
 Explicit declaration (Hasura/Doctrine model) means the relation is compiled
@@ -278,7 +278,7 @@ role is not allowed to see.
 This is the hard problem. Neither PostgREST nor Hasura solves it automatically:
 PostgREST does not cache; Hasura defaults to a 60-second TTL.
 
-Appitools' strategy, in layers:
+Appximo's strategy, in layers:
 
 **Layer 1 — safe default:** short per-tenant TTL (5–30 s). Simple, correct,
 slightly stale under write load.
@@ -385,7 +385,7 @@ conservative; cost grows with embed width but is bounded by the per-embed
 
 | Alternative | Reason discarded |
 |---|---|
-| Infer relations from FK catalog (PostgREST model) | Catalog introspection per tenant degrades past ~1 000–2 000 schemas-per-cluster — exactly the workload Appitools targets. Explicit declaration compiles once at boot. |
+| Infer relations from FK catalog (PostgREST model) | Catalog introspection per tenant degrades past ~1 000–2 000 schemas-per-cluster — exactly the workload Appximo targets. Explicit declaration compiles once at boot. |
 | `jsonb_agg` instead of `json_agg` | `jsonb` pays a binary re-parse on every aggregation. For data serialised once to the client and never indexed, `json` is ~4× faster. |
 | Lazy loading / dataloader as primary strategy | Produces N+1 or at minimum one query per nesting level. `json_agg` delivers the full nested result in one query. A dataloader remains an option only for fields that cannot be expressed as a SQL subquery. |
 | Redis for embed cache | Violates the "no sidecars" constraint. The target deployment is a single VPS running one Go binary + Postgres. |

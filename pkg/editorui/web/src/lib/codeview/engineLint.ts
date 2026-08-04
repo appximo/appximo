@@ -1,6 +1,6 @@
 // Layer 3 — the ENGINE's semantics in the buffer. A debounced CodeMirror lint
 // source that POSTs the document to /editor/validate (schema.ValidateReport —
-// the same unified structural+semantic authority behind `appitools validate
+// the same unified structural+semantic authority behind `appximo validate
 // --json`) and renders every error at its line via the dot-path → syntax-tree
 // mapping. Nothing semantic is reimplemented client-side: the frontend only
 // POSITIONS the report (JSON-AUDIT-V1 §2 design consequence).
@@ -77,7 +77,7 @@ export function engineLinter(onStatus: (s: EngineLintStatus) => void): Extension
 					from: r.from,
 					to: Math.max(r.to, r.from),
 					severity: 'error' as const,
-					source: `appitools · ${e.rule}`,
+					source: `appximo · ${e.rule}`,
 					message: e.message + (e.fix ? ` — fix: ${e.fix}` : ''),
 					renderMessage: renderDiagnostic(e)
 				};

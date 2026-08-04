@@ -12,20 +12,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/events"
+	"github.com/appximo/appximo/pkg/extensions"
+	pkghandlers "github.com/appximo/appximo/pkg/handlers"
+	"github.com/appximo/appximo/pkg/observability"
+	"github.com/appximo/appximo/pkg/outbox"
+	"github.com/appximo/appximo/pkg/query"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/events"
-	"github.com/miguelangel/appitools/pkg/extensions"
-	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
-	"github.com/miguelangel/appitools/pkg/observability"
-	"github.com/miguelangel/appitools/pkg/outbox"
-	"github.com/miguelangel/appitools/pkg/query"
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
 )
 
 // enqueueCRUDEvent writes a transactional outbox event for a generated CRUD
@@ -249,7 +249,7 @@ func applyRowCondition(query string, args []any, cond *rbac.WhereCondition) (str
 }
 
 // BuildRouter creates a chi.Mux with real SQL handlers for every resource in the schema.
-// Used by `appitools serve` — no code generation required. inv (nil-able) is the
+// Used by `appximo serve` — no code generation required. inv (nil-able) is the
 // response-cache invalidator called after a successful PUT/PATCH. hub (nil-able)
 // is the SSE pub/sub hub (S45): when nil, /api/{resource}/events returns 503 and
 // post-commit publishes are no-ops.
@@ -1192,7 +1192,7 @@ func sseHandler(name string, hub *events.Hub) http.HandlerFunc {
 
 		sub, err := hub.Subscribe(tc.ID, name, allowed, condField, condValue)
 		if err != nil {
-			// Per-tenant cap (APPITOOLS_MAX_SSE_PER_TENANT) reached.
+			// Per-tenant cap (APPXIMO_MAX_SSE_PER_TENANT) reached.
 			w.Header().Set("Retry-After", "10")
 			writeJSONErr(w, http.StatusTooManyRequests, "subscriber limit reached")
 			return

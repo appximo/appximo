@@ -14,7 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/appximo/appximo/pkg/auth"
 )
 
 // Runner executes flows against the app's REAL router (the same handler the

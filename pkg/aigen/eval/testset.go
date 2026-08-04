@@ -22,7 +22,7 @@ var corpusFS embed.FS
 var Strata = []string{"simple", "media", "compleja"}
 
 // Case is one curated pair: a natural-language app description and the GOLD schema
-// — a hand-written, validate-clean Appitools schema capturing that intent. The
+// — a hand-written, validate-clean Appximo schema capturing that intent. The
 // gold is correct by construction (a test asserts every gold validates).
 type Case struct {
 	ID          string          `json:"id"`

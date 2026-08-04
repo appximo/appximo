@@ -1,25 +1,25 @@
-# Appitools Blueprints
+# Appximo Blueprints
 
 Blueprints are ready-to-use `schema.json` templates for common API patterns.
-Each blueprint is a fully valid Appitools schema with resources, RBAC roles, and
+Each blueprint is a fully valid Appximo schema with resources, RBAC roles, and
 pre-configured hooks.
 
 ## How to use
 
 ```bash
 # List available blueprints
-appitools blueprints list
+appximo blueprints list
 
 # Create a new project from a blueprint
-appitools init --blueprint fintech mi-fintech-api
+appximo init --blueprint fintech mi-fintech-api
 cd mi-fintech-api
 
 # Validate the schema (already valid out of the box)
-appitools validate schema.json
+appximo validate schema.json
 
 # Generate and deploy
-appitools generate schema.json
-appitools serve --schema schema.json
+appximo generate schema.json
+appximo serve --schema schema.json
 ```
 
 ---
@@ -114,10 +114,10 @@ Ninguno por defecto. Añade hooks en `resources.<nombre>.hooks` según tu lógic
 
 ## Personalización
 
-Cada blueprint es un punto de partida. Después de `appitools init --blueprint <name>`:
+Cada blueprint es un punto de partida. Después de `appximo init --blueprint <name>`:
 
 1. Abre `schema.json` y añade o elimina fields.
 2. Ajusta los roles RBAC para tu modelo de negocio.
 3. Añade hooks JS para validaciones custom.
-4. Ejecuta `appitools validate schema.json` para verificar.
-5. Ejecuta `appitools serve --schema schema.json` para arrancar la API.
+4. Ejecuta `appximo validate schema.json` para verificar.
+5. Ejecuta `appximo serve --schema schema.json` para arrancar la API.

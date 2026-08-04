@@ -11,10 +11,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/migration"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/schemahistory"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/migration"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/schemahistory"
 )
 
 // fakeCP is a controlplane.Service stub: the deploy handlers only delegate to it,
@@ -77,7 +77,7 @@ func (f *fakeCP) RollbackSchema(_ context.Context, _ string, version int, approv
 	return f.rollbackRes, f.rollbackErr
 }
 
-const validSchemaJSON = `{"$schema":"https://appitools.dev/schema/v1","version":"1","name":"todo-api","resources":{"tasks":{"fields":{"title":{"type":"string","required":true}}}}}`
+const validSchemaJSON = `{"$schema":"https://appximo.com/schema/v1","version":"1","name":"todo-api","resources":{"tasks":{"fields":{"title":{"type":"string","required":true}}}}}`
 
 func deployService(cp controlplane.Service, adminKey string) http.Handler {
 	s := NewService(nil, nil, cp, nil, Config{JWTSecret: unitSecret})
@@ -187,7 +187,7 @@ func TestDeployApplyErrorIsActionable(t *testing.T) {
 func TestDeployInvalidSchemaRejected(t *testing.T) {
 	h := deployService(&fakeCP{}, "k")
 	// Unknown field type → schema.Validate rejects it BEFORE any engine call.
-	bad := `{"schema":{"$schema":"https://appitools.dev/schema/v1","version":"1","name":"x","resources":{"t":{"fields":{"f":{"type":"number"}}}}}}`
+	bad := `{"schema":{"$schema":"https://appximo.com/schema/v1","version":"1","name":"x","resources":{"t":{"fields":{"f":{"type":"number"}}}}}}`
 	rr := req(t, h, http.MethodPut, "/admin/tenants/acme/schema", bad, "k")
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("invalid schema: got %d, want 400 (%s)", rr.Code, rr.Body.String())

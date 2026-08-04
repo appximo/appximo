@@ -1,6 +1,6 @@
 {
   "scenario": "aggregate",
-  "target": "https://api.appitools.com",
+  "target": "https://api.appximo.com",
   "cache_bust": true,
   "origin_ip": "PROD-VPS",
   "per_page": 20,

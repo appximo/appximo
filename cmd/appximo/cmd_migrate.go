@@ -7,10 +7,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/migration"
+	"github.com/appximo/appximo/pkg/schema"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/migration"
-	"github.com/miguelangel/appitools/pkg/schema"
 	"github.com/spf13/cobra"
 )
 
@@ -27,13 +27,13 @@ queda GATEADA como drift, sin pérdida de datos. Aplicar un drop requiere ENUMER
 explícitamente con --approve-drops (consentimiento informado — nunca un "sí a todo").
 
 UN tenant:
-    appitools migrate --tenant acme --schema schema.json [--dry-run]
-    appitools migrate --tenant acme --schema schema.json --approve-drops "empleados.telefono"
+    appximo migrate --tenant acme --schema schema.json [--dry-run]
+    appximo migrate --tenant acme --schema schema.json --approve-drops "empleados.telefono"
 
 TODOS los tenants (fan-out reanudable — el diferencial vs Prisma):
-    appitools migrate --all-tenants --schema base.json --dry-run   # plan + impacto AGREGADO
-    appitools migrate --all-tenants --schema base.json             # aplica a los N
-    appitools migrate --tenants acme,globex --schema base.json     # a un subconjunto
+    appximo migrate --all-tenants --schema base.json --dry-run   # plan + impacto AGREGADO
+    appximo migrate --all-tenants --schema base.json             # aplica a los N
+    appximo migrate --tenants acme,globex --schema base.json     # a un subconjunto
 
 El fan-out es RESILIENTE (un tenant que falla no aborta a los sanos; se registra y
 se reporta) y REANUDABLE (re-correrlo salta los ya migrados — diff vacío = no-op — y
@@ -314,7 +314,7 @@ func printPreview(pgSchema string, pv *migration.Preview) {
 
 	if pv.PendingDestructive() {
 		fmt.Println("To apply a destructive drop, re-run without --dry-run and enumerate it:")
-		fmt.Printf("  appitools migrate --tenant <id> --schema <file> --approve-drops \"%s\"\n",
+		fmt.Printf("  appximo migrate --tenant <id> --schema <file> --approve-drops \"%s\"\n",
 			strings.Join(pendingKeys(pv), ","))
 	}
 }

@@ -54,11 +54,11 @@ jobs:
           mkdir -p dist
           # scripts/build-engine.sh is the ONE canonical engine build (same
           # flags as the Docker image and the deploy pipeline); the version
-          # stamp makes `appitools version` on a downloaded binary report its tag.
+          # stamp makes `appximo version` on a downloaded binary report its tag.
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
             os="${target%/*}" arch="${target#*/}"
             GOOS="$os" GOARCH="$arch" \
-              ./scripts/build-engine.sh "dist/appitools-${VERSION}-${os}-${arch}" "$VERSION" "$REVISION"
+              ./scripts/build-engine.sh "dist/appximo-${VERSION}-${os}-${arch}" "$VERSION" "$REVISION"
           done
           ls -lh dist/
 
@@ -67,7 +67,7 @@ jobs:
           VERSION: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
-          OUT="$("dist/appitools-${VERSION}-linux-amd64" version)"
+          OUT="$("dist/appximo-${VERSION}-linux-amd64" version)"
           echo "$OUT"
           echo "$OUT" | grep -F "$VERSION"
 
@@ -86,5 +86,5 @@ jobs:
           set -euo pipefail
           gh release create "$VERSION" dist/* \
             --verify-tag \
-            --title "appitools $VERSION" \
+            --title "appximo $VERSION" \
             --generate-notes

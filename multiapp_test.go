@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"net/http"
@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/shutdown"
+	"github.com/appximo/appximo/pkg/shutdown"
 )
 
 // In the multi-app runtime an unmatched Host must NEVER fall into an

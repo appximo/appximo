@@ -1,4 +1,4 @@
-# ADR-016: Extensibility pattern — Appitools as a Go library, two extension classes
+# ADR-016: Extensibility pattern — Appximo as a Go library, two extension classes
 
 **Status:** Accepted (design) — implementation pending.
 The v1 engine is frozen. Extensibility enters via the standard pipeline:
@@ -25,14 +25,14 @@ The reference model is **API Platform** (PHP/Symfony): a declarative scaffolding
 layer (attributes on entities → full REST/GraphQL API) combined with a clean
 descent to the language when custom logic is needed. State Processors inherit
 the authenticated user, the serialised request, and the database connection —
-already scoped to the right tenant/context. Appitools replicates this pattern
+already scoped to the right tenant/context. Appximo replicates this pattern
 in Go.
 
 ---
 
-## Decision 1: Appitools as a Go library (import, not fork)
+## Decision 1: Appximo as a Go library (import, not fork)
 
-The developer writes their own `main.go`, imports `appitools`, registers custom
+The developer writes their own `main.go`, imports `appximo`, registers custom
 routes and handlers, and compiles a **single static binary** (`CGO_ENABLED=0 go
 build`). They do not fork the engine.
 
@@ -41,11 +41,11 @@ package main
 
 import (
     "log"
-    "appitools"
+    "appximo"
 )
 
 func main() {
-    app, err := appitools.New(appitools.Config{
+    app, err := appximo.New(appximo.Config{
         Schema:   "schema.json",
         Port:     8080,
     })
@@ -54,7 +54,7 @@ func main() {
     }
 
     // Register a custom synchronous handler (Class 1).
-    app.Register(appitools.Route{
+    app.Register(appximo.Route{
         Method:   "POST",
         Path:     "/api/declarations/submit",
         Handler:  SubmitDeclaration,
@@ -92,7 +92,7 @@ The boundary criterion: **does the user wait for the response?**
 
 ### Class 1 — Synchronous, in-process handler
 
-Runs inside the HTTP request/response cycle. Receives an `appitools.Ctx` (see
+Runs inside the HTTP request/response cycle. Receives an `appximo.Ctx` (see
 Decision 3) that already has the tenant, authenticated identity, and a
 transaction scoped to the right search path.
 
@@ -102,7 +102,7 @@ synchronous calculation, a file processed in under a second.
 Analogue: an API Platform **State Processor**.
 
 ```go
-func SubmitDeclaration(ctx appitools.Ctx) error {
+func SubmitDeclaration(ctx appximo.Ctx) error {
     var body DeclarationInput
     if err := ctx.Bind(&body); err != nil {
         return err
@@ -169,9 +169,9 @@ POST /api/declarations/submit
 
 ---
 
-## Decision 3: the `appitools.Ctx` interface (inherited context)
+## Decision 3: the `appximo.Ctx` interface (inherited context)
 
-A Class 1 handler receives one argument — `appitools.Ctx` — which carries the
+A Class 1 handler receives one argument — `appximo.Ctx` — which carries the
 full request context already resolved. The handler never re-authenticates, never
 re-scopes the tenant, never resolves the role.
 
@@ -281,7 +281,7 @@ In **API Platform**, `StateProcessor` implementations call the entity manager
 directly; persisting or loading an entity bypasses security voters unless the
 developer explicitly calls the security layer.
 
-Appitools inverts the default: bypassing RBAC is opt-in and named.
+Appximo inverts the default: bypassing RBAC is opt-in and named.
 `grep UnsafeTx` in a code review is a complete audit of all bypass sites.
 
 ### C — Custom routes in the same middleware chain
@@ -320,7 +320,7 @@ and GraphQL handlers use). For endpoints not tied to a schema resource,
 
 ## Decision 5: semver contract of the extension interface
 
-The public extension surface — `appitools.Ctx`, `Claims`, `Route`, `Config`,
+The public extension surface — `appximo.Ctx`, `Claims`, `Route`, `Config`,
 `Handler`, `New`, `Register` — is **frozen at the major version boundary**.
 Breaking changes require a major version bump.
 
@@ -330,7 +330,7 @@ format, tenant resolver — may change in minor and patch releases.
 **Motivation (PocketBase lesson):** PocketBase broke its hook API in v0.23:
 `OnBeforeServe` → `OnServe`, `echo.Context` → `RequestEvent`. Applications that
 imported PocketBase as a library had to update every hook site on upgrade.
-Appitools must stabilise `Ctx` **before** promoting the library model as stable
+Appximo must stabilise `Ctx` **before** promoting the library model as stable
 in user-facing documentation. Until that point, the library interface is
 `experimental` and the semver guarantee does not apply.
 
@@ -391,8 +391,8 @@ Class 1 handler before merge.
 ## Suggested implementation order (when the engine unfreezes)
 
 1. Extract engine internals into `pkg/engine` with stable exported surface
-   (`appitools.New`, `Config`, `Route`, `Handler`, `Ctx`).
-2. Refactor `cmd/appitools/main.go` to be the zero-handler consumer of the
+   (`appximo.New`, `Config`, `Route`, `Handler`, `Ctx`).
+2. Refactor `cmd/appximo/main.go` to be the zero-handler consumer of the
    library (validates the model; no feature change).
 3. Implement `Ctx` with the full interface — `Tx`, `UnsafeTx`, `Query`,
    `Insert`, `Update`, `Bind`, `BindResource`, `Enqueue`, `JSON`, `Error`.
@@ -441,7 +441,7 @@ Safeguards, in the order a request meets them:
 1. **Tenant still resolves from the Host** — a public route is per-tenant.
 2. The shared **per-tenant rate limit** still applies.
 3. A **dedicated public-route limiter** — per (tenant, client IP),
-   `APPITOOLS_PUBLIC_ROUTE_RPS/BURST` (Config: `PublicRouteRPS/Burst`),
+   `APPXIMO_PUBLIC_ROUTE_RPS/BURST` (Config: `PublicRouteRPS/Burst`),
    default a deliberately conservative 5 rps / burst 10 → `429` with
    `Retry-After` — runs BEFORE the handler and before any transaction is
    opened. Security is the default; the developer opts INTO exposure, never

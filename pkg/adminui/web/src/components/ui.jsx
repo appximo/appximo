@@ -55,7 +55,7 @@ export function StatusBadge(props) {
   )
 }
 
-const STORAGE_THEME = "appitools_admin_theme"
+const STORAGE_THEME = "appximo_admin_theme"
 export function initTheme() {
   let t = "light"
   try { t = localStorage.getItem(STORAGE_THEME) || "light" } catch { /* ignore */ }

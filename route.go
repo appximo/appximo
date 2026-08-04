@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"context"
@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/codegen"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/resilience"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/codegen"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/resilience"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
 )
 
 // Handler is a Class-1 custom endpoint (ADR-016 Decision 2). It receives a Ctx
@@ -79,7 +79,7 @@ type Route struct {
 	// conservative default everyone else inherits.
 	//
 	//	{Method: "GET", Path: "/api/catalogue", Public: true,
-	//	 RateLimit: &appitools.RateLimit{RPS: 200, Burst: 400}}
+	//	 RateLimit: &appximo.RateLimit{RPS: 200, Burst: 400}}
 	//
 	// Nil (the default) keeps today's behavior EXACTLY: a Public route uses the
 	// shared public-route limiter, a non-public route has no dedicated limit (only
@@ -97,7 +97,7 @@ type Route struct {
 	// default — the tenant still resolves from the Host (per-tenant isolation
 	// holds), the shared per-tenant rate limit still applies, and a DEDICATED,
 	// far more aggressive public-route rate limit (per tenant+client IP,
-	// APPITOOLS_PUBLIC_ROUTE_RPS/BURST, default 5 rps / burst 10 → 429) is
+	// APPXIMO_PUBLIC_ROUTE_RPS/BURST, default 5 rps / burst 10 → 429) is
 	// enforced before the handler runs. Everything else is the handler's
 	// responsibility: validate EVERY input, and treat the caller as hostile.
 	//
@@ -284,7 +284,7 @@ func validateRouteGrants(s *schema.APISchema, routes []Route) error {
 		}
 	}
 	if len(problems) > 0 {
-		return fmt.Errorf("appitools: RBAC grants custom routes that are not registered:\n  %s",
+		return fmt.Errorf("appximo: RBAC grants custom routes that are not registered:\n  %s",
 			strings.Join(problems, "\n  "))
 	}
 	return nil

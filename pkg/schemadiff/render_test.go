@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	sd "github.com/miguelangel/appitools/pkg/schemadiff"
+	sd "github.com/appximo/appximo/pkg/schemadiff"
 )
 
 func mustDiff(t *testing.T, desired, current *sd.Schema) *sd.Plan {

@@ -114,7 +114,7 @@ func TestSMTPSender_HTMLOnly(t *testing.T) {
 	}
 
 	err = sender.Send(context.Background(), Email{
-		To: "ana@example.com", Subject: "Hello ✓", HTML: "<p>Hi</p>", MessageID: "<m-1@appitools.local>",
+		To: "ana@example.com", Subject: "Hello ✓", HTML: "<p>Hi</p>", MessageID: "<m-1@appximo.local>",
 	})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
@@ -131,7 +131,7 @@ func TestSMTPSender_HTMLOnly(t *testing.T) {
 	// Headers + body present, Subject RFC2047-encoded (non-ASCII ✓), Message-ID set.
 	for _, want := range []string{
 		"To: ana@example.com",
-		"Message-ID: <m-1@appitools.local>",
+		"Message-ID: <m-1@appximo.local>",
 		"Content-Type: text/html; charset=UTF-8",
 		"<p>Hi</p>",
 		"=?utf-8?q?", // encoded-word subject

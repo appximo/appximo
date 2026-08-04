@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/miguelangel/appitools/tools/devhub/sshx"
+	"github.com/appximo/appximo/tools/devhub/sshx"
 )
 
 // RegisteredServer is a row of the servers table plus its sshx identity. The
@@ -196,10 +196,10 @@ func ServersCreateHandler(w http.ResponseWriter, r *http.Request) {
 		req.StartScript = "/tmp/start_prod.sh"
 	}
 	if req.BinaryPath == "" {
-		req.BinaryPath = "/root/appitools/appitools"
+		req.BinaryPath = "/root/appitools/appximo"
 	}
 	if req.LogPath == "" {
-		req.LogPath = "/tmp/appitools.log"
+		req.LogPath = "/tmp/appximo.log"
 	}
 
 	switch {

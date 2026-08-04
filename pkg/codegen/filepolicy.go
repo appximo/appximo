@@ -9,15 +9,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // FILES-1 — per-FIELD file attach policy.
 //
 // The upload endpoint (POST /api/files) is field-agnostic: at upload time the
 // engine cannot know which record field the file is destined for, so the only
-// upload-time knobs are instance-wide (APPITOOLS_FILES_MAX_BYTES /
+// upload-time knobs are instance-wide (APPXIMO_FILES_MAX_BYTES /
 // _ALLOWED_EXT). The per-field policy a real app needs ("this field takes
 // images ≤ 5 MB, that one PDFs ≤ 20 MB") therefore runs at ATTACH time: when a
 // write references a file_id in a `file` field declaring `accept`/`max_bytes`,

@@ -64,9 +64,9 @@ var fleetInitCmd = &cobra.Command{
 		adminPass := randHex(12)
 		fleetEnv := fmt.Sprintf(
 			"# Fleet-level secrets — NEVER commit this directory (see .gitignore).\n"+
-				"APPITOOLS_FLEET_OPERATOR_KEY=%s\n"+
-				"APPITOOLS_FLEET_ADMIN_EMAIL=%s\n"+
-				"APPITOOLS_FLEET_ADMIN_PASSWORD=%s\n",
+				"APPXIMO_FLEET_OPERATOR_KEY=%s\n"+
+				"APPXIMO_FLEET_ADMIN_EMAIL=%s\n"+
+				"APPXIMO_FLEET_ADMIN_PASSWORD=%s\n",
 			operatorKey, adminEmail, adminPass)
 		// DB-assist (FLEET-DB-ASSIST): when a base DSN is known, declare a
 		// "local" instance so the console can create databases out of the box.
@@ -77,10 +77,10 @@ var fleetInitCmd = &cobra.Command{
 		if baseDSN != "" {
 			// The privileged admin DSN points at the `postgres` maintenance
 			// database (CREATE DATABASE cannot run from inside the target db).
-			fleetEnv += "APPITOOLS_FLEET_DB_LOCAL_ADMIN=" + swapDBName(baseDSN, "postgres") + "\n"
+			fleetEnv += "APPXIMO_FLEET_DB_LOCAL_ADMIN=" + swapDBName(baseDSN, "postgres") + "\n"
 			dbInstancesJSON = `,
   "db_instances": [
-    { "name": "local", "label": "Local Postgres (this box)", "admin_dsn_env": "APPITOOLS_FLEET_DB_LOCAL_ADMIN" }
+    { "name": "local", "label": "Local Postgres (this box)", "admin_dsn_env": "APPXIMO_FLEET_DB_LOCAL_ADMIN" }
   ]`
 		}
 		if err := os.WriteFile(filepath.Join(secretsDir, "fleet.env"), []byte(fleetEnv), 0o600); err != nil {
@@ -102,7 +102,7 @@ var fleetInitCmd = &cobra.Command{
 			schemaPath := filepath.Join(schemasDir, name+".json")
 			if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
 				starter := fmt.Sprintf(`{
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "%s",
   "resources": {
@@ -164,7 +164,7 @@ var fleetInitCmd = &cobra.Command{
 
 Next:
   make fleet                 # build + load secrets + serve everything on :8080
-  open http://localhost:8080/fleet?key=<APPITOOLS_FLEET_OPERATOR_KEY from fleet-secrets/fleet.env>
+  open http://localhost:8080/fleet?key=<APPXIMO_FLEET_OPERATOR_KEY from fleet-secrets/fleet.env>
 
 Operator admin (ONE login for every app's /admin): %s / see fleet-secrets/fleet.env
 Apps serve on <app>.localhost:8080 — Studio /editor, admin /admin, docs /docs per app.

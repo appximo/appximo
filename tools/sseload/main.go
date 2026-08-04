@@ -1,4 +1,4 @@
-// sseload opens N concurrent SSE connections against an Appitools events
+// sseload opens N concurrent SSE connections against an Appximo events
 // endpoint and holds them for a duration, counting received events and
 // heartbeats and reporting dropped connections. Built for the S45 benchmarks
 // (H2: write latency with idle subscribers; H4: RSS under connection load).

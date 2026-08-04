@@ -122,7 +122,7 @@ json.dump({"started_utc": started, "target": target, "origin_ip": origin or None
            "loader": loader}, open(out, "w"), indent=2)
 PY
 
-hdr "Appitools production verification"
+hdr "Appximo production verification"
 dim "  target   $TARGET${ORIGIN_IP:+  (origin $ORIGIN_IP)}"
 dim "  tenant   $TENANT"
 dim "  server   ${SERVER_DESC:-<not reachable — server-side phases skipped>}"

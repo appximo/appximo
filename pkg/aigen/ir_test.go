@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // loadTestSchemas gathers every schema the round-trip property must hold over: the
@@ -123,7 +123,7 @@ func TestIRTransformedSchemasStillValidate(t *testing.T) {
 // arrays in the IR (the whole point — strict can constrain arrays of fixed items).
 func TestIRProducesArrays(t *testing.T) {
 	m := decodeMap(t, []byte(`{
-		"$schema":"https://appitools.dev/schema/v1","version":"1","name":"x",
+		"$schema":"https://appximo.com/schema/v1","version":"1","name":"x",
 		"resources":{"b":{"fields":{"z":{"type":"string"}}},"a":{"fields":{"y":{"type":"int"}}}},
 		"rbac":{"roles":{"admin":{"resources":"*","actions":["*"]}}}
 	}`))
@@ -152,7 +152,7 @@ func TestIRProducesArrays(t *testing.T) {
 // realistic IR document (resources/fields/roles/permissions as arrays).
 func TestTranslateMapPathToIR(t *testing.T) {
 	m := decodeMap(t, []byte(`{
-		"$schema":"https://appitools.dev/schema/v1","version":"1","name":"x",
+		"$schema":"https://appximo.com/schema/v1","version":"1","name":"x",
 		"resources":{
 			"accounts":{"fields":{"name":{"type":"string"}}},
 			"entries":{"fields":{"amount":{"type":"float64"},"status":{"type":"string",
@@ -190,7 +190,7 @@ func TestTranslateMapPathToIR(t *testing.T) {
 // path (so the model corrects in its own space).
 func TestSemanticFaultPathTranslates(t *testing.T) {
 	m := decodeMap(t, []byte(`{
-		"$schema":"https://appitools.dev/schema/v1","version":"1","name":"x",
+		"$schema":"https://appximo.com/schema/v1","version":"1","name":"x",
 		"resources":{"items":{"fields":{"brokenref_id":{"type":"uuid","relation":"nope"}}}}
 	}`))
 	ir := MapToIR(m)

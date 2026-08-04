@@ -4,7 +4,7 @@
 // its HTTP API using a short-lived, scoped service JWT, and the engine enforces
 // tenant + RBAC on it. Reuses the shared Postgres container + control plane from
 // TestMain in library_integration_test.go.
-package appitools
+package appximo
 
 import (
 	"context"
@@ -16,10 +16,10 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/worker"
-	"github.com/miguelangel/appitools/tests/helpers"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/worker"
+	"github.com/appximo/appximo/tests/helpers"
 )
 
 const validUUID = "00000000-0000-0000-0000-000000000001"

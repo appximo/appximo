@@ -703,8 +703,8 @@ var routeSegmentRe = regexp.MustCompile(`^[a-z][a-z0-9_\-]*$`)
 // segment cannot have).
 //
 // What this level CANNOT check is whether the segment is actually served — a schema
-// is validated standalone (`appitools validate`, Studio, the AI loop) with no Go
-// program in sight. That check is the boot's (appitools.validateRouteGrants against
+// is validated standalone (`appximo validate`, Studio, the AI loop) with no Go
+// program in sight. That check is the boot's (appximo.validateRouteGrants against
 // the registered routes), which is where the route set exists. Two layers, each
 // checking what it can see.
 func validateRouteGrants(rolePrefix string, role RolePolicy, s *APISchema) []ValidationError {
@@ -1283,7 +1283,7 @@ func sameStringSet(a, b []string) bool {
 	return true
 }
 
-// pgKindForAPIType maps an Appitools field type to a coarse Postgres compatibility
+// pgKindForAPIType maps an Appximo field type to a coarse Postgres compatibility
 // class for foreign-key type checking. Two columns may be joined by an FK only when
 // their classes match. string/text/json all land on TEXT; the implicit id is uuid.
 func pgKindForAPIType(t string) string {

@@ -10,11 +10,11 @@ consumer app deploys without tribal knowledge.
 ## Context
 
 `install.sh`, `deploy-update.sh` and the systemd unit the installer writes were
-built for `appitools serve`. Concretely they assumed:
+built for `appximo serve`. Concretely they assumed:
 
 1. **Identity:** `install.sh` validated the binary with
-   `<bin> version | grep -qi appitools` — an unexplained grep; a consumer binary
-   without a `version` subcommand was refused with "not an appitools binary".
+   `<bin> version | grep -qi appximo` — an unexplained grep; a consumer binary
+   without a `version` subcommand was refused with "not an appximo binary".
 2. **Invocation:** the unit runs `<bin> serve --schema <path> --port <n>`. Go's
    `flag` package stops parsing at the first non-flag argument, so a consumer
    main using plain `flag.Parse()` **silently discarded every flag** and booted
@@ -35,11 +35,11 @@ built for `appitools serve`. Concretely they assumed:
 |---|---|
 | **Identity** | `<bin> version` exits 0 and prints one line: `<name> <version> (commit <sha>)…`. The installer/deploy check is "does `version` run and print something" — **no name grep**: the contract is behavioral, not branding. |
 | **Serve** | `<bin> serve --schema <path> --port <n> [--control-port <n>]` starts the server. A leading `serve` word is accepted; **any other bare word, and any leftover argument after the flags, aborts loudly (exit ≠ 0) with an actionable message** — never a silent boot with defaults. |
-| **Config** | `DATABASE_URL`, `JWT_SECRET`, `ADMIN_KEY` from the environment (the unit's `EnvironmentFile=/etc/appitools/appitools.env`), plus any `APPITOOLS_*` the engine documents. |
+| **Config** | `DATABASE_URL`, `JWT_SECRET`, `ADMIN_KEY` from the environment (the unit's `EnvironmentFile=/etc/appximo/appximo.env`), plus any `APPXIMO_*` the engine documents. |
 | **Health** | `/healthz` (liveness) and `/health` (`{"status","version"}`) on the data port; the version equals the `version` subcommand's. `/readyz` flips 503 while draining. |
 | **Version** | Injected at build time (`-ldflags -X main.version=…`) and passed to `Config.Version`, so `/health`, the deploy smoke check and the rollback decision see a real SHA. |
 
-The library makes compliance one call: **`appitools.ParseServeArgs(name,
+The library makes compliance one call: **`appximo.ParseServeArgs(name,
 version, revision, defaults)`** implements version/serve/fail-loud parsing, and
 `scripts/build-consumer.sh` is the canonical consumer build (SPA + static build
 + ldflags). A consumer main is ~4 lines of contract code.
@@ -47,9 +47,9 @@ version, revision, defaults)`** implements version/serve/fail-loud parsing, and
 **The ops CLI ships as a companion, explicitly.** In production a consumer
 deploy is **two artifacts**: the app binary (serves) and the engine CLI
 (operates: tenants, migrations, tokens, super-admin). `install.sh --cli=PATH`
-installs it at `/opt/appitools/bin/appitools-cli`; when the installed binary IS
-the engine, the installer symlinks `appitools-cli` to it so ONE documented path
-(`appitools-cli …`) works on every box. The "one binary" claim in
+installs it at `/opt/appximo/bin/appximo-cli`; when the installed binary IS
+the engine, the installer symlinks `appximo-cli` to it so ONE documented path
+(`appximo-cli …`) works on every box. The "one binary" claim in
 README/CAPABILITIES/PRODUCTION is reconciled to this truth: one binary **serves
 everything**; a second, optional binary **operates** it.
 
@@ -58,7 +58,7 @@ reads the service's actual listening sockets (`ss -ltnp` on the unit's PID) and
 prints the real control port in the summary and the register-tenant hint.
 
 **Secrets never go to stdout.** The installer prints WHERE they live
-(`/etc/appitools/appitools.env`, 0600); `--show-secrets` opts into printing
+(`/etc/appximo/appximo.env`, 0600); `--show-secrets` opts into printing
 values for a human on a private terminal.
 
 ## Options considered

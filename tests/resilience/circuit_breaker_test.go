@@ -38,8 +38,8 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/tests/helpers"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/tests/helpers"
 )
 
 func TestCircuitBreakerOpensUnderPostgresLatency(t *testing.T) {
@@ -122,7 +122,7 @@ func TestCircuitBreakerOpensUnderPostgresLatency(t *testing.T) {
 func startPostgresRaw(t *testing.T, ctx context.Context) (connStr, hostPort string, cleanup func()) {
 	t.Helper()
 	ctr, err := tcpostgres.Run(ctx, "postgres:16-alpine",
-		tcpostgres.WithDatabase("appitools_test"),
+		tcpostgres.WithDatabase("appximo_test"),
 		tcpostgres.WithUsername("test"),
 		tcpostgres.WithPassword("test"),
 		testcontainers.WithWaitStrategy(

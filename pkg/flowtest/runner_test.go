@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/auth"
 	"github.com/go-chi/chi/v5"
-	"github.com/miguelangel/appitools/pkg/auth"
 )
 
 // fakeApp is a mini app for runner tests: a login that issues a token, a

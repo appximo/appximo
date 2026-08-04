@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/extensions"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/extensions"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // testDispatcher returns a dispatcher without SSRF/HTTPS enforcement for tests
@@ -46,8 +46,8 @@ func TestWebhookDispatcher_SignatureAndEvent(t *testing.T) {
 	)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotSig = r.Header.Get("X-Appitools-Signature")
-		gotEvent = r.Header.Get("X-Appitools-Event")
+		gotSig = r.Header.Get("X-Appximo-Signature")
+		gotEvent = r.Header.Get("X-Appximo-Event")
 		gotBody, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -67,10 +67,10 @@ func TestWebhookDispatcher_SignatureAndEvent(t *testing.T) {
 	wantSig := expectedHMAC(secret, wantBody)
 
 	if gotSig != wantSig {
-		t.Errorf("X-Appitools-Signature: got %q, want %q", gotSig, wantSig)
+		t.Errorf("X-Appximo-Signature: got %q, want %q", gotSig, wantSig)
 	}
 	if gotEvent != "after_create" {
-		t.Errorf("X-Appitools-Event: got %q, want %q", gotEvent, "after_create")
+		t.Errorf("X-Appximo-Event: got %q, want %q", gotEvent, "after_create")
 	}
 	if !bytes.Equal(gotBody, wantBody) {
 		t.Errorf("body: got %s, want %s", gotBody, wantBody)
@@ -79,12 +79,12 @@ func TestWebhookDispatcher_SignatureAndEvent(t *testing.T) {
 
 // TestRunAfterHook_EventHeaderReflectsRealEvent proves SEC-AUDIT-V2 Hallazgo B: the
 // hook runner threads the REAL lifecycle event through to the webhook, so an
-// after_update hook carries X-Appitools-Event: after_update (previously hard-coded
+// after_update hook carries X-Appximo-Event: after_update (previously hard-coded
 // to after_create).
 func TestRunAfterHook_EventHeaderReflectsRealEvent(t *testing.T) {
 	var gotEvent string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotEvent = r.Header.Get("X-Appitools-Event")
+		gotEvent = r.Header.Get("X-Appximo-Event")
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -93,7 +93,7 @@ func TestRunAfterHook_EventHeaderReflectsRealEvent(t *testing.T) {
 	hook := &schema.HookConfig{Type: "webhook", URL: srv.URL}
 	hr.RunAfterHook(context.Background(), hook, "after_update", map[string]any{"id": "x"}, "t")
 	if gotEvent != "after_update" {
-		t.Fatalf("X-Appitools-Event: got %q, want after_update", gotEvent)
+		t.Fatalf("X-Appximo-Event: got %q, want after_update", gotEvent)
 	}
 }
 

@@ -68,7 +68,7 @@ export function Shell(props) {
       const cur = document.documentElement.getAttribute("data-theme") || "light"
       const next = cur === "dark" ? "light" : "dark"
       document.documentElement.setAttribute("data-theme", next)
-      try { localStorage.setItem("appitools_admin_theme", next) } catch { /* ignore */ }
+      try { localStorage.setItem("appximo_admin_theme", next) } catch { /* ignore */ }
     } })
     cmds.push({ id: "logout", label: "Log out", hint: "Session", run: () => { logout(); navigate("/login") } })
     return cmds
@@ -79,7 +79,7 @@ export function Shell(props) {
   return (
     <div class="shell">
       <aside class="sidebar">
-        <div class="brand"><span class="logo" aria-hidden="true" /><span>Appitools</span></div>
+        <div class="brand"><span class="logo" aria-hidden="true" /><span>Appximo</span></div>
         <For each={NAV}>{(group) => (
           <nav class="navgroup">
             <div class="label">{group.label}</div>

@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/migration"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/schemahistory"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/migration"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/schemahistory"
 )
 
 const testAdminKey = "test-admin-key-abc123"
@@ -139,7 +139,7 @@ func adminReq(method, url string, body any) *http.Request {
 
 func validSchema() *schema.APISchema {
 	return &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "test-api",
 		Resources: map[string]schema.ResourceSchema{
@@ -357,7 +357,7 @@ func TestControlPlane_UpdateSchema_Invalid(t *testing.T) {
 
 	// Schema with invalid field type — schema.Validate() will catch this.
 	invalid := &schema.APISchema{
-		Schema:  "https://appitools.dev/schema/v1",
+		Schema:  "https://appximo.com/schema/v1",
 		Version: "1",
 		Name:    "test",
 		Resources: map[string]schema.ResourceSchema{

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // G4 unit tests for the pure SQL-building + guard safety of the transaction handler

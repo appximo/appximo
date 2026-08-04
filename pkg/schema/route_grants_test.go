@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // LIBRARY-GAPS-S1 / ADR-021 — the SCHEMA half of custom-route authorization.
@@ -13,7 +13,7 @@ import (
 // route_grants_boot_test.go.)
 
 const routeGrantBase = `{
-  "$schema":"https://appitools.dev/schema/v1","version":"1","name":"x",
+  "$schema":"https://appximo.com/schema/v1","version":"1","name":"x",
   "resources": {
     "orders": { "fields": { "user_id": { "type": "uuid" }, "total": { "type": "int64" } } }
   },

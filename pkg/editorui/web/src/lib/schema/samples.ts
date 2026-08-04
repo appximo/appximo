@@ -39,7 +39,7 @@ export const SAMPLES: Sample[] = [
 /** An empty starter schema for "New". */
 export function blankSchema(name = 'my-api'): APISchema {
 	return {
-		$schema: 'https://appitools.dev/schema/v1',
+		$schema: 'https://appximo.com/schema/v1',
 		version: '1',
 		name,
 		resources: {},

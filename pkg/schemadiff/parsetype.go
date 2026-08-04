@@ -143,7 +143,7 @@ func parseIntArgs(s string) []int {
 	return out
 }
 
-// TypeForAPIType maps one Appitools schema-JSON field type to its canonical
+// TypeForAPIType maps one Appximo schema-JSON field type to its canonical
 // Postgres Type, mirroring exactly what the engine's converger lays down
 // (pkg/migration.fieldTypeToPG): string/text → text, int → integer, int64 →
 // bigint, float64 → double precision, bool → boolean, uuid → uuid, time →

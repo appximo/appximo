@@ -1,4 +1,4 @@
-# Exploring a running Appitools
+# Exploring a running Appximo
 
 Everything you can observe in a live instance, and how to reach it.
 Every endpoint, status code and response shape below was captured from a
@@ -26,7 +26,7 @@ convenience behind the same `X-Admin-Key` gate — they answer
 |---|---|---|---|
 | `GET /healthz` | none | `{"status":"alive"}` | **liveness** probe — never touches Postgres |
 | `GET /readyz` | none | `{"status":"ready"}`, **503 during drain/shutdown** | **readiness** — take the node out of rotation |
-| `GET /health` | none | `{"status":"ok","version":"v0.1.0"}` | legacy/manual check (the compose healthcheck uses it); `version` is the build version — the release tag for [GitHub Releases](https://github.com/miguel09acosta/appitools/releases) binaries and published images, `"dev"` for a plain local `go build` |
+| `GET /health` | none | `{"status":"ok","version":"v0.1.0"}` | legacy/manual check (the compose healthcheck uses it); `version` is the build version — the release tag for [GitHub Releases](https://github.com/appximo/appximo/releases) binaries and published images, `"dev"` for a plain local `go build` |
 
 The distinction matters on deploys: on SIGTERM the engine flips `/readyz`
 to 503, drains in-flight requests, then exits — a load balancer watching
@@ -35,16 +35,16 @@ to 503, drains in-flight requests, then exits — a load balancer watching
 ## Metrics (`/metrics`, Prometheus)
 
 ```bash
-curl -s -H "X-Admin-Key: $ADMIN_KEY" localhost:8080/metrics | grep ^appitools
+curl -s -H "X-Admin-Key: $ADMIN_KEY" localhost:8080/metrics | grep ^appximo
 ```
 
 The engine-specific series (plus the standard `go_*` / `process_*` set):
 
 | Metric | Labels | What it tells you |
 |---|---|---|
-| `appitools_requests_total` | `tenant, method, route, status` | traffic + error rate per tenant/route |
-| `appitools_request_duration_seconds` (histogram) | `tenant, method, route` | server-side latency distribution |
-| `appitools_active_tenants` | — | tenants with recent traffic |
+| `appximo_requests_total` | `tenant, method, route, status` | traffic + error rate per tenant/route |
+| `appximo_request_duration_seconds` (histogram) | `tenant, method, route` | server-side latency distribution |
+| `appximo_active_tenants` | — | tenants with recent traffic |
 
 Infra paths (`/metrics`, `/debug`, `/admin`, `/health*`) are excluded
 from the per-tenant series, so dashboards show application traffic only.
@@ -53,7 +53,7 @@ Prometheus 3.x; `secrets:` keeps the key out of Prometheus' own config UI):
 
 ```yaml
 scrape_configs:
-  - job_name: appitools
+  - job_name: appximo
     static_configs: [{ targets: ["your-host:8080"] }]
     http_headers:
       X-Admin-Key:
@@ -120,9 +120,9 @@ Two opt-in query params: `?history=<hours>` appends persisted snapshots
 canary derives from **your** loaded schema (first resource, a role that
 can read it) and probes the first registered tenant; on a fresh install
 it reports `"pending"` — `"no tenant registered yet"` — until one
-exists, instead of failing. Overrides: `APPITOOLS_SYNTHETIC_TENANT` /
-`APPITOOLS_SYNTHETIC_RESOURCE`; disable the monitor entirely with
-`APPITOOLS_SYNTHETIC=off`.
+exists, instead of failing. Overrides: `APPXIMO_SYNTHETIC_TENANT` /
+`APPXIMO_SYNTHETIC_RESOURCE`; disable the monitor entirely with
+`APPXIMO_SYNTHETIC=off`.
 
 ## The generated APIs
 
@@ -158,7 +158,7 @@ cache and sends a comment ping every 25 s to keep proxies from reaping it.
 
 GraphQL is `POST /graphql` — remember it **always answers HTTP 200**;
 errors live in the body's `errors` array. With
-`APPITOOLS_ENV=development` the engine also serves the GraphiQL IDE at
+`APPXIMO_ENV=development` the engine also serves the GraphiQL IDE at
 `/graphiql` (404 in production — verified both ways).
 
 ## OpenAPI — probing the API interactively
@@ -166,9 +166,9 @@ errors live in the body's `errors` array. With
 The spec is generated from your schema, not handwritten:
 
 ```bash
-appitools openapi schema.json > openapi.yaml   # OpenAPI 3.0.3
+appximo openapi schema.json > openapi.yaml   # OpenAPI 3.0.3
 # from the Docker image:
-docker compose exec engine appitools openapi /etc/appitools/schema.json > openapi.yaml
+docker compose exec engine appximo openapi /etc/appximo/schema.json > openapi.yaml
 ```
 
 Load `openapi.yaml` into [Swagger Editor](https://editor.swagger.io) or
@@ -236,6 +236,6 @@ and use `$ADMIN_KEY`).
   `/admin/*` call needs `X-Admin-Key`, even on localhost.
 - **No tenant list endpoint** — the control plane is get-by-id only;
   enumerate via `public.tenants` in Postgres if you need the full list.
-- **pprof** only exists with `APPITOOLS_ENV=development`, on its own
+- **pprof** only exists with `APPXIMO_ENV=development`, on its own
   port: `localhost:6060/pprof/` (note: *not* `/debug/pprof/`). In
   production the port doesn't even listen.

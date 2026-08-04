@@ -1,6 +1,6 @@
 version: "2"
 
-# Appitools lint policy (OPS-3).
+# Appximo lint policy (OPS-3).
 #
 # This file exists so `make lint` is a GATE, not a suggestion box. Before it,
 # golangci-lint ran with its stock defaults, reported 62 findings, exited 1, and

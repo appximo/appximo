@@ -20,7 +20,7 @@
 // and assert them with a BROWSER or an explicit header check, never a bare
 // curl status: CSP failures render a blank page that still returns 200):
 //
-//	GET /            Content-Security-Policy: appitools.DefaultStaticCSP
+//	GET /            Content-Security-Policy: appximo.DefaultStaticCSP
 //	                 (same-origin SPA policy — NOT the API's default-src 'none';
 //	                 override per mount with StaticMount.CSP, disable with CSPOff)
 //	GET /api/tasks   Content-Security-Policy: default-src 'none'; … (the API keeps its own)
@@ -41,7 +41,7 @@ import (
 	"io/fs"
 	"log"
 
-	"github.com/miguelangel/appitools"
+	"github.com/appximo/appximo"
 )
 
 // all: is required — Vite emits hashed chunks whose names the default go:embed
@@ -61,10 +61,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	app, err := appitools.New(appitools.Config{
+	app, err := appximo.New(appximo.Config{
 		SchemaPath: *schemaPath,
 		Port:       *port,
-		Static: []appitools.StaticMount{{
+		Static: []appximo.StaticMount{{
 			Path: "/",
 			FS:   dist,
 			// SPA: unmatched CLIENT routes (/orders/42) serve index.html so the
@@ -80,9 +80,9 @@ func main() {
 
 	// Custom API routes still work exactly as before — they live under /api/ and
 	// get the tenant transaction; the static tree is a different surface entirely.
-	if err := app.Register(appitools.Route{
+	if err := app.Register(appximo.Route{
 		Method: "GET", Path: "/api/ping",
-		Handler: func(ctx appitools.Ctx) error {
+		Handler: func(ctx appximo.Ctx) error {
 			return ctx.JSON(200, map[string]any{"pong": true, "tenant": ctx.Tenant()})
 		},
 	}); err != nil {

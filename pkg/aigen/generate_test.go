@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // scriptedClient is a deterministic ModelClient: it returns the next canned
@@ -39,7 +39,7 @@ func (c *scriptedClient) Complete(_ context.Context, req Request) (Completion, e
 }
 
 const validSchema = `{
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "todo-api",
   "resources": {
@@ -57,7 +57,7 @@ const validSchema = `{
 // SEMANTIC error: a relation to a non-existent target. This is the class the
 // re-architected loop is meant to correct (structure is decode-guaranteed).
 const semanticInvalidSchema = `{
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "todo-api",
   "resources": {
@@ -73,7 +73,7 @@ const semanticInvalidSchema = `{
 // emptyResourcesSchema is structurally valid and the engine accepts it, but it is
 // useless — the guard must reject it and fall back, not "converge".
 const emptyResourcesSchema = `{
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "todo-api",
   "resources": {}

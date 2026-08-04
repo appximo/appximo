@@ -98,7 +98,7 @@ async function doAuth(mode) {
   } catch (e) {
     if (e.status === 401) setError($('#auth-error'), 'Wrong email or password.');
     else if (e.status === 409) setError($('#auth-error'), 'That email already has an account — log in instead.');
-    else if (e.status === 403 && mode === 'signup') setError($('#auth-error'), 'Signup is disabled — run the server with APPITOOLS_AUTH_SIGNUP_ROLE=editor.');
+    else if (e.status === 403 && mode === 'signup') setError($('#auth-error'), 'Signup is disabled — run the server with APPXIMO_AUTH_SIGNUP_ROLE=editor.');
     else if (e.status === 422 || e.status === 400) setError($('#auth-error'), e.body.error || 'Check the fields.');
     else if (e.status === 429) setError($('#auth-error'), 'Too many attempts — wait a moment.');
     else setError($('#auth-error'), e.isNetwork ? e.message : 'Could not sign in. Try again.');

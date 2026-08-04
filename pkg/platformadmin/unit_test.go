@@ -9,7 +9,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/appximo/appximo/pkg/auth"
 )
 
 const unitSecret = "a-platform-admin-unit-test-secret-32+chars!!"
@@ -154,7 +154,7 @@ func TestValidEmail(t *testing.T) {
 }
 
 func TestParseSchema(t *testing.T) {
-	good := json.RawMessage(`{"$schema":"https://appitools.dev/schema/v1","version":"1","name":"t",
+	good := json.RawMessage(`{"$schema":"https://appximo.com/schema/v1","version":"1","name":"t",
 		"resources":{"tasks":{"fields":{"title":{"type":"string"}}}},
 		"rbac":{"roles":{"admin":{"resources":"*","actions":["*"]}}}}`)
 	if sc, errs := parseSchema(good); len(errs) > 0 || sc == nil {

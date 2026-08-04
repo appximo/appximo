@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 func findErr(rep schema.ValidationReport, pathContains string) (schema.StructuredError, bool) {
@@ -28,7 +28,7 @@ func contains(ss []string, want string) bool {
 // TestValidateReport_Valid: a valid schema reports valid with an empty (non-null)
 // errors array.
 func TestValidateReport_Valid(t *testing.T) {
-	raw := []byte(`{"$schema":"https://appitools.dev/schema/v1","version":"1",
+	raw := []byte(`{"$schema":"https://appximo.com/schema/v1","version":"1",
 	  "resources":{"tasks":{"fields":{"title":{"type":"string","required":true}}}},
 	  "rbac":{"roles":{"admin":{"resources":"*","actions":["*"]}}}}`)
 	rep := schema.ValidateReport(raw)
@@ -147,7 +147,7 @@ func TestValidateReport_Actionable(t *testing.T) {
 // LLM self-correct.
 func TestValidateReport_CorrectionLoop(t *testing.T) {
 	// A schema whose only error is a typo'd relation target ("userz" → "users").
-	bad := `{"$schema":"https://appitools.dev/schema/v1","version":"1",
+	bad := `{"$schema":"https://appximo.com/schema/v1","version":"1",
 	  "resources":{
 	    "users":{"fields":{"name":{"type":"string"}}},
 	    "posts":{"fields":{"author_id":{"type":"uuid","relation":"userz"}}}

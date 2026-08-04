@@ -27,10 +27,10 @@ hdr()  { printf '\n%s══ %s ══%s\n' "$C_B" "$*" "$C_N"; }
 : "${OUT_DIR:=}"         # results directory (default: ./verify-results/<stamp>)
 : "${TENANT:=}"          # tenant id; default derived from TARGET's first label
 : "${TOKEN:=}"           # JWT for the data plane
-: "${ENV_FILE:=/etc/appitools/appitools.env}"
+: "${ENV_FILE:=/etc/appximo/appximo.env}"
 : "${ENGINE_PORT:=8090}"
-: "${SERVICE:=appitools}"
-: "${BIN:=/opt/appitools/bin/appitools}"
+: "${SERVICE:=appximo}"
+: "${BIN:=/opt/appximo/bin/appximo}"
 
 # suite_stamp: a single UTC timestamp per invocation, used for the results dir.
 suite_stamp() { date -u +%Y%m%dT%H%M%SZ; }
@@ -62,7 +62,7 @@ need() {
 	done
 }
 
-# on_server: true when this box looks like the Appitools server (the env file and
+# on_server: true when this box looks like the Appximo server (the env file and
 # the systemd unit exist). Scripts that must read /proc or run systemctl check it.
 on_server() { [ -f "$ENV_FILE" ] && [ -r "$ENV_FILE" ]; }
 
@@ -85,7 +85,7 @@ resolve_token() {
 			return 0
 		fi
 	fi
-	die "no JWT available: pass --token=<jwt> (mint one on the server with: appitools token --secret \"\$JWT_SECRET\" --tenant <id> --role admin)"
+	die "no JWT available: pass --token=<jwt> (mint one on the server with: appximo token --secret \"\$JWT_SECRET\" --tenant <id> --role admin)"
 }
 
 # json_escape: minimal string escaping for hand-built JSON values.

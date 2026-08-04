@@ -1,13 +1,13 @@
-package appitools
+package appximo
 
 import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/miguelangel/appitools/pkg/codegen"
-	appmiddleware "github.com/miguelangel/appitools/pkg/middleware"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/codegen"
+	appmiddleware "github.com/appximo/appximo/pkg/middleware"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // swaggerUIHTML is a self-contained Swagger UI page (loaded from a pinned CDN, the
@@ -19,7 +19,7 @@ const swaggerUIHTML = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>API documentation — Appitools</title>
+  <title>API documentation — Appximo</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui.css">
   <style>body{margin:0}</style>
 </head>
@@ -50,7 +50,7 @@ const swaggerUIHTML = `<!DOCTYPE html>
 // The registered CUSTOM routes are included as path items (ENG-33): a running
 // app's /openapi.json is the authority for what the app SERVES — generated AND
 // custom — because it is the one document an external consumer can fetch
-// without repo access. (The `appitools openapi <schema>` CLI keeps printing the
+// without repo access. (The `appximo openapi <schema>` CLI keeps printing the
 // schema-derived half only: a schema file has no registered routes.)
 func (a *App) registerOpenAPIRoutes(r chi.Router, sch *schema.APISchema) {
 	custom := a.customRouteDescriptors()

@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // maxWebhookRespBytes bounds how much of a webhook endpoint's response body the
@@ -130,8 +130,8 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, hook *schema.HookConfi
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Appitools-Event", event)
-		req.Header.Set("X-Appitools-Signature", sig)
+		req.Header.Set("X-Appximo-Event", event)
+		req.Header.Set("X-Appximo-Signature", sig)
 
 		resp, err := d.client.Do(req)
 		if err != nil {

@@ -13,7 +13,7 @@
 // This test is the missing half: a real App, a real middleware chain, a real
 // httptest listener, real HS256 tokens. It is the surface an unauthenticated
 // caller reaches from the internet, so "it passes in a unit test" is not enough.
-package appitools
+package appximo
 
 import (
 	"encoding/json"
@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/tests/helpers"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/tests/helpers"
 )
 
 // newPublicRouteApp boots an App with one PUBLIC route that reports what the

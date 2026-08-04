@@ -13,7 +13,7 @@ func checkErrs(t *testing.T, raw string) []ValidationError {
 
 func TestCheckUnknownKeys_ValidSchemaPasses(t *testing.T) {
 	valid := `{
-		"$schema": "https://appitools.dev/schema/v1", "version": "1", "name": "t",
+		"$schema": "https://appximo.com/schema/v1", "version": "1", "name": "t",
 		"resources": {
 			"tasks": {
 				"fields": {"title": {"type": "string", "required": true, "maxLength": 200}},

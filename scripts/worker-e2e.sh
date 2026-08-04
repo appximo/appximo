@@ -34,7 +34,7 @@ DATABASE_URL="${DATABASE_URL:?set DATABASE_URL to a reachable Postgres}"
 export DATABASE_URL
 export JWT_SECRET="${JWT_SECRET:-a-very-long-test-secret-of-32plus-chars}"
 export ADMIN_KEY="${ADMIN_KEY:-e2e-admin}"
-export APPITOOLS_SYNTHETIC=off
+export APPXIMO_SYNTHETIC=off
 
 WORK="$(mktemp -d)"
 ENGINE_PID="" WORKER_PID=""
@@ -47,15 +47,15 @@ cleanup() {
 trap cleanup EXIT
 
 echo "==> building engine + worker"
-sh scripts/build-engine.sh "$WORK/appitools" >/dev/null 2>&1
-go build -o "$WORK/appitools-worker" ./cmd/appitools-worker
+sh scripts/build-engine.sh "$WORK/appximo" >/dev/null 2>&1
+go build -o "$WORK/appximo-worker" ./cmd/appximo-worker
 
 echo "==> starting engine on :$PORT (control plane :9090 unused here)"
-"$WORK/appitools" serve --schema "$SCHEMA" --port "$PORT" >"$WORK/engine.log" 2>&1 &
+"$WORK/appximo" serve --schema "$SCHEMA" --port "$PORT" >"$WORK/engine.log" 2>&1 &
 ENGINE_PID=$!
 
 echo "==> starting worker (separate process)"
-"$WORK/appitools-worker" >"$WORK/worker.log" 2>&1 &
+"$WORK/appximo-worker" >"$WORK/worker.log" 2>&1 &
 WORKER_PID=$!
 
 echo -n "==> waiting for /health "
@@ -64,7 +64,7 @@ for _ in $(seq 1 30); do
   echo -n "."; sleep 1
 done
 
-TOKEN="$("$WORK/appitools" token --secret "$JWT_SECRET" --tenant "$TENANT" --role admin 2>/dev/null | tail -1)"
+TOKEN="$("$WORK/appximo" token --secret "$JWT_SECRET" --tenant "$TENANT" --role admin 2>/dev/null | tail -1)"
 
 echo "==> POST /api/_echo (Host: $TENANT.localhost)"
 t0=$(date +%s.%N)

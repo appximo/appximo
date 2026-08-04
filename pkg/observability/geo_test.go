@@ -3,7 +3,7 @@ package observability_test
 import (
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/observability"
+	"github.com/appximo/appximo/pkg/observability"
 )
 
 func TestGeoLookup_Country(t *testing.T) {

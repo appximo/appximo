@@ -1,5 +1,5 @@
 #!/bin/sh
-# build-worker.sh — THE canonical worker build (cmd/appitools-worker, ADR-016
+# build-worker.sh — THE canonical worker build (cmd/appximo-worker, ADR-016
 # §Class 2 outbox consumer). The sibling of scripts/build-engine.sh, with the
 # SAME flags, consumed by:
 #   - Dockerfile (builder stage — the worker ships in the same image as the engine)
@@ -11,7 +11,7 @@
 #   CGO_ENABLED=0   fully static binary (alpine/scratch; the worker is pure Go)
 #   -trimpath       no local paths in the binary
 #   -ldflags -s -w  drop symbol table + DWARF (~30% smaller; pclntab stays)
-#   -X main.version/main.revision   the "appitools-worker starting" log reports the
+#   -X main.version/main.revision   the "appximo-worker starting" log reports the
 #                   build identity (release tag or short SHA; "dev" otherwise)
 #
 # Usage: build-worker.sh <output-path> [version] [revision]
@@ -26,4 +26,4 @@ REVISION="${3:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
 
 CGO_ENABLED=0 "${GO:-go}" build -trimpath \
   -ldflags="-s -w -X main.version=${VERSION} -X main.revision=${REVISION}" \
-  -o "${OUT}" ./cmd/appitools-worker
+  -o "${OUT}" ./cmd/appximo-worker

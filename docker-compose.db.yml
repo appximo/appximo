@@ -1,4 +1,4 @@
-# Appitools — Postgres-ONLY stack, for the native-binary deploy (Level 3 in
+# Appximo — Postgres-ONLY stack, for the native-binary deploy (Level 3 in
 # docs/DEPLOY.md): the engine binary runs directly on the host for maximum
 # throughput, while Postgres runs containerized with a persistent volume.
 # That hybrid is deliberate — the engine is what receives thousands of req/s
@@ -7,7 +7,7 @@
 # negligible. A native Postgres install buys you setup pain, not performance.
 #
 #   docker compose -f docker-compose.db.yml up -d
-#   DATABASE_URL='postgres://appitools:<DB_PASSWORD>@localhost:5432/appitools?sslmode=disable'
+#   DATABASE_URL='postgres://appximo:<DB_PASSWORD>@localhost:5432/appximo?sslmode=disable'
 #
 # The published port binds to 127.0.0.1 only — nothing but this host (i.e.
 # the engine binary next to it) can reach Postgres.
@@ -28,9 +28,9 @@ services:
       - -c
       - work_mem=16MB
     environment:
-      POSTGRES_USER: appitools
+      POSTGRES_USER: appximo
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
-      POSTGRES_DB: appitools
+      POSTGRES_DB: appximo
     ports:
       - "127.0.0.1:5432:5432" # localhost only — the native binary connects here
     volumes:
@@ -43,7 +43,7 @@ services:
       - source: control_plane_init
         target: /docker-entrypoint-initdb.d/001_control_plane.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U appitools"]
+      test: ["CMD-SHELL", "pg_isready -U appximo"]
       interval: 5s
       timeout: 5s
       retries: 5

@@ -17,19 +17,19 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/db"
-	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
-	"github.com/miguelangel/appitools/pkg/observability"
-	"github.com/miguelangel/appitools/pkg/query"
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/db"
+	pkghandlers "github.com/appximo/appximo/pkg/handlers"
+	"github.com/appximo/appximo/pkg/observability"
+	"github.com/appximo/appximo/pkg/query"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
 )
 
 // DefaultMaxTxOps bounds the number of operations in one POST /api/transaction
 // request — a DoS guard (an unbounded batch is an attack vector). Override with
-// APPITOOLS_MAX_TX_OPS.
+// APPXIMO_MAX_TX_OPS.
 const DefaultMaxTxOps = 100
 
 // txGuardOps is the closed set of comparison operators a guard may use. The value
@@ -133,7 +133,7 @@ func registerTransactionRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantD
 	}
 
 	maxOps := DefaultMaxTxOps
-	if v := os.Getenv("APPITOOLS_MAX_TX_OPS"); v != "" {
+	if v := os.Getenv("APPXIMO_MAX_TX_OPS"); v != "" {
 		if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
 			maxOps = n
 		}

@@ -9,7 +9,7 @@ import (
 
 func policySchema(fieldJSON string) string {
 	return `{
-		"$schema": "https://appitools.dev/schema/v1",
+		"$schema": "https://appximo.com/schema/v1",
 		"version": "1",
 		"name": "policy-test",
 		"resources": {

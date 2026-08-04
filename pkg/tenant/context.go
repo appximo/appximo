@@ -27,7 +27,7 @@ func FromCtx(ctx context.Context) *TenantCtx {
 func MustFromCtx(ctx context.Context) *TenantCtx {
 	tc := FromCtx(ctx)
 	if tc == nil {
-		panic("appitools: no TenantCtx in context — ensure TenantMiddleware is in the middleware chain")
+		panic("appximo: no TenantCtx in context — ensure TenantMiddleware is in the middleware chain")
 	}
 	return tc
 }

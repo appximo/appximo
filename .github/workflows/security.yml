@@ -1,7 +1,7 @@
 name: Security Scan (Nightly)
 
 # OWASP ZAP API scan driven by the engine's OWN generated OpenAPI 3.0 spec
-# (`appitools openapi`). Runs nightly and on demand.
+# (`appximo openapi`). Runs nightly and on demand.
 #
 # SAFETY (deliberate, see context-docs/TESTING_PLAN.md "Hallazgos S39"):
 # an API scan is ACTIVE — it sends attack payloads (the brief's `-a`). It must
@@ -58,7 +58,7 @@ jobs:
       - name: Generate OpenAPI spec (base-url = scan target)
         run: |
           set -euo pipefail
-          go run ./cmd/appitools openapi \
+          go run ./cmd/appximo openapi \
             --base-url "${{ steps.target.outputs.url }}" \
             tests/fixtures/schemas/logistics_schema.json > openapi.yml
           head -n 10 openapi.yml

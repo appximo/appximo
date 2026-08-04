@@ -15,7 +15,7 @@
 #   -trimpath       no local paths in the binary
 #   -ldflags -s -w  drop symbol table + DWARF (~30% smaller; runtime pclntab
 #                   stays, so symbolized stacks still work)
-#   -X main.version/main.revision   `appitools version` + /health report the
+#   -X main.version/main.revision   `appximo version` + /health report the
 #                   build identity (release tag or short SHA; "dev" otherwise)
 #
 # Usage: build-engine.sh <output-path> [version] [revision]
@@ -31,4 +31,4 @@ REVISION="${3:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
 
 CGO_ENABLED=0 "${GO:-go}" build -trimpath \
   -ldflags="-s -w -X main.version=${VERSION} -X main.revision=${REVISION}" \
-  -o "${OUT}" ./cmd/appitools
+  -o "${OUT}" ./cmd/appximo

@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "Appitools API Certification — ERP (nimbus)",
-    "description": "End-to-end certification of the Appitools production API against the live ERP demo (tenant 'nimbus'). Exercises, as a real external consumer would: the OpenAPI contract, the full auth cycle (refresh + expired/invalid token handling), CRUD with pagination/filters/sort, consumable error codes, RBAC deny-by-default, and create-time mass-assignment protection. Run with scripts/api-cert.sh (mints the tokens) — `newman run` exits non-zero on any failed assertion.",
+    "name": "Appximo API Certification — ERP (nimbus)",
+    "description": "End-to-end certification of the Appximo production API against the live ERP demo (tenant 'nimbus'). Exercises, as a real external consumer would: the OpenAPI contract, the full auth cycle (refresh + expired/invalid token handling), CRUD with pagination/filters/sort, consumable error codes, RBAC deny-by-default, and create-time mass-assignment protection. Run with scripts/api-cert.sh (mints the tokens) — `newman run` exits non-zero on any failed assertion.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [

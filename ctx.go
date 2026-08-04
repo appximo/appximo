@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"bytes"
@@ -18,17 +18,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/codegen"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/files"
-	pkghandlers "github.com/miguelangel/appitools/pkg/handlers"
-	"github.com/miguelangel/appitools/pkg/outbox"
-	"github.com/miguelangel/appitools/pkg/query"
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/tenant"
-	"github.com/miguelangel/appitools/pkg/userauth"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/codegen"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/files"
+	pkghandlers "github.com/appximo/appximo/pkg/handlers"
+	"github.com/appximo/appximo/pkg/outbox"
+	"github.com/appximo/appximo/pkg/query"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/tenant"
+	"github.com/appximo/appximo/pkg/userauth"
 )
 
 // maxBodyBytes caps a custom handler's request body, matching the generated
@@ -205,9 +205,9 @@ type Ctx interface {
 	//     transaction: a file uploaded inside THIS tx is not yet servable.
 	//   - Cache policy (FILES-2): by default no Cache-Control is set (browsers
 	//     revalidate — cheap 304s via the strong ETag). Pass
-	//     appitools.WithCacheControl(...) to declare one; the store is
+	//     appximo.WithCacheControl(...) to declare one; the store is
 	//     content-addressed, so a given file id's BYTES can never change —
-	//     appitools.CacheControlImmutable ("public, max-age=31536000,
+	//     appximo.CacheControlImmutable ("public, max-age=31536000,
 	//     immutable") is safe for any route whose URL embeds the file id (a
 	//     product image, an avatar): a different image is a different id, so a
 	//     stale cache is structurally impossible. Do NOT use it when the SAME
@@ -243,19 +243,19 @@ var (
 	// ErrEmailTaken: the email already has a user in this tenant.
 	ErrEmailTaken = userauth.ErrEmailTaken
 	// ErrInvalidEmail: the email failed the engine's format check.
-	ErrInvalidEmail = errors.New("appitools: invalid email")
+	ErrInvalidEmail = errors.New("appximo: invalid email")
 	// ErrWeakPassword: a non-empty password shorter than the engine's minimum.
-	ErrWeakPassword = errors.New("appitools: password too short")
+	ErrWeakPassword = errors.New("appximo: password too short")
 	// ErrUnknownRole: the role is not declared in the schema RBAC.
-	ErrUnknownRole = errors.New("appitools: role not declared in the schema RBAC")
+	ErrUnknownRole = errors.New("appximo: role not declared in the schema RBAC")
 	// ErrBodyTooLarge: the request body exceeded MaxBodyBytes. Returned by
 	// RawBody/Bind/BindResource; returning it from a Handler yields a 413.
-	ErrBodyTooLarge = errors.New("appitools: request body too large")
+	ErrBodyTooLarge = errors.New("appximo: request body too large")
 	// ErrUpdateConflict: a Ctx.Update matched zero rows because the row changed
 	// concurrently (its state fields already equal the requested values, so the
 	// guard, not a bad transition, is what fired). Returning it from a Handler
 	// yields a 409 — the caller should re-read and retry.
-	ErrUpdateConflict = errors.New("appitools: the resource changed during the update; retry")
+	ErrUpdateConflict = errors.New("appximo: the resource changed during the update; retry")
 	// ErrFileNotFound: Ctx.ServeFile's uniform miss — a malformed id, an unknown
 	// id and another tenant's id are deliberately indistinguishable (no
 	// enumeration oracle on a download route). Returning it from a Handler
@@ -309,14 +309,14 @@ type engineRefs struct {
 	// by construction), for Ctx.ServeFile. Never nil in a New()-built App.
 	files *files.Store
 	// minPassword is the engine's configured minimum password length
-	// (Config.AuthMinPasswordLength / APPITOOLS_AUTH_MIN_PASSWORD, default 8) —
+	// (Config.AuthMinPasswordLength / APPXIMO_AUTH_MIN_PASSWORD, default 8) —
 	// Ctx.CreateUser enforces the same bar as signup and the admin API.
 	minPassword int
 
 	// safeGoTimeout bounds a Ctx.SafeGo goroutine's CONTEXT (LIBRARY-HARDEN-S1):
 	// it is cancelled after this. fn must honor cancellation to actually stop — a
 	// deadline cannot forcibly kill a goroutine. Config.SafeGoTimeoutSeconds /
-	// APPITOOLS_SAFEGO_TIMEOUT, default 30s.
+	// APPXIMO_SAFEGO_TIMEOUT, default 30s.
 	safeGoTimeout time.Duration
 	// onGoroutinePanic increments the goroutine_panics_total metric when a
 	// SafeGo goroutine recovers a panic (set to app.metrics.IncGoroutinePanic).
@@ -446,7 +446,7 @@ func (c *requestCtx) UnsafeTx() pgx.Tx { return c.tx }
 func (c *requestCtx) Query(resource string, opts QueryOpts) ([]map[string]any, error) {
 	res, ok := c.eng.schema.Resources[resource]
 	if !ok {
-		return nil, fmt.Errorf("appitools: unknown resource %q", resource)
+		return nil, fmt.Errorf("appximo: unknown resource %q", resource)
 	}
 	eval := c.eng.policy.Evaluate(c.evalCtx(), resource, "read")
 	if !eval.Allowed {
@@ -499,7 +499,7 @@ func (c *requestCtx) Query(resource string, opts QueryOpts) ([]map[string]any, e
 // cannot see a row (or a column) the REST API would hide from the same caller.
 func (c *requestCtx) Get(resource, id string) (map[string]any, error) {
 	if _, ok := c.eng.schema.Resources[resource]; !ok {
-		return nil, fmt.Errorf("appitools: unknown resource %q", resource)
+		return nil, fmt.Errorf("appximo: unknown resource %q", resource)
 	}
 	eval := c.eng.policy.Evaluate(c.evalCtx(), resource, "read")
 	if !eval.Allowed {
@@ -522,7 +522,7 @@ func (c *requestCtx) Get(resource, id string) (map[string]any, error) {
 
 func (c *requestCtx) Insert(resource string, data map[string]any) (map[string]any, error) {
 	if _, ok := c.eng.schema.Resources[resource]; !ok {
-		return nil, fmt.Errorf("appitools: unknown resource %q", resource)
+		return nil, fmt.Errorf("appximo: unknown resource %q", resource)
 	}
 	eval := c.eng.policy.Evaluate(c.evalCtx(), resource, "create")
 	if !eval.Allowed {
@@ -561,7 +561,7 @@ func (c *requestCtx) Insert(resource string, data map[string]any) (map[string]an
 func (c *requestCtx) Update(resource, id string, data map[string]any) (map[string]any, error) {
 	res, ok := c.eng.schema.Resources[resource]
 	if !ok {
-		return nil, fmt.Errorf("appitools: unknown resource %q", resource)
+		return nil, fmt.Errorf("appximo: unknown resource %q", resource)
 	}
 	eval := c.eng.policy.Evaluate(c.evalCtx(), resource, "update")
 	if !eval.Allowed {
@@ -670,7 +670,7 @@ func (c *requestCtx) readBody() ([]byte, error) {
 		var mbe *http.MaxBytesError
 		if errors.As(c.bodyErr, &mbe) {
 			// A typed, matchable error instead of net/http's internal one, so a
-			// handler can `errors.Is(err, appitools.ErrBodyTooLarge)` and the
+			// handler can `errors.Is(err, appximo.ErrBodyTooLarge)` and the
 			// middleware can map a returned one to 413.
 			c.bodyErr = ErrBodyTooLarge
 		}
@@ -693,7 +693,7 @@ func (c *requestCtx) Bind(dst any) error {
 func (c *requestCtx) BindResource(resource string, dst any) error {
 	rv := c.eng.validators[resource]
 	if rv == nil {
-		return fmt.Errorf("appitools: unknown resource %q", resource)
+		return fmt.Errorf("appximo: unknown resource %q", resource)
 	}
 	b, err := c.readBody()
 	if err != nil {
@@ -778,13 +778,13 @@ func (c *requestCtx) ServeFile(fileID string, opts ...ServeFileOption) error {
 	// Content-Disposition/Range headers on a hit) and the compression wrapper
 	// suppresses sendfile — a silent correctness bug measured in FILES-BENCH.
 	if !c.byteServing {
-		return fmt.Errorf("appitools: Ctx.ServeFile requires the route to declare ByteServing: true (the response must bypass the response cache and compression)")
+		return fmt.Errorf("appximo: Ctx.ServeFile requires the route to declare ByteServing: true (the response must bypass the response cache and compression)")
 	}
 	if c.set {
-		return fmt.Errorf("appitools: Ctx.ServeFile called after JSON/Error already buffered a response")
+		return fmt.Errorf("appximo: Ctx.ServeFile called after JSON/Error already buffered a response")
 	}
 	if c.serveFileID != "" {
-		return fmt.Errorf("appitools: Ctx.ServeFile called twice (one response per request)")
+		return fmt.Errorf("appximo: Ctx.ServeFile called twice (one response per request)")
 	}
 	// Malformed ids get the SAME uniform miss as unknown/foreign ids — a
 	// download route must not be a format oracle. (Store.Serve would surface a
@@ -806,7 +806,7 @@ func (c *requestCtx) ServeFile(fileID string, opts ...ServeFileOption) error {
 // → a masked 500 (logged), mirroring the engine's own download handlers.
 func (c *requestCtx) serveRegisteredFile(w http.ResponseWriter) {
 	if c.eng == nil || c.eng.files == nil {
-		log.Printf("appitools: ServeFile: no file store wired (test-built ctx?)")
+		log.Printf("appximo: ServeFile: no file store wired (test-built ctx?)")
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -830,7 +830,7 @@ func (c *requestCtx) serveRegisteredFile(w http.ResponseWriter) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
 	}
-	log.Printf("appitools: ServeFile %s (tenant %s): %v", c.serveFileID, c.tc.ID, err)
+	log.Printf("appximo: ServeFile %s (tenant %s): %v", c.serveFileID, c.tc.ID, err)
 	writeErr(w, http.StatusInternalServerError, "download failed")
 }
 

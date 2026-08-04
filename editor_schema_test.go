@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"net/http"
@@ -15,7 +15,7 @@ import (
 func TestServeCurrentSchema(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "schema.json")
-	doc := `{"$schema":"https://appitools.dev/schema/v1","version":"1","name":"punto-gafas","resources":{"pacientes":{"fields":{"nombre":{"type":"string"}}}}}`
+	doc := `{"$schema":"https://appximo.com/schema/v1","version":"1","name":"punto-gafas","resources":{"pacientes":{"fields":{"nombre":{"type":"string"}}}}}`
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}

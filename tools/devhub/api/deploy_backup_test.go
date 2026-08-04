@@ -37,7 +37,7 @@ func writeFakeBinary(t *testing.T, path string, size int) {
 
 func TestBackup_CopiesAndVerifies(t *testing.T) {
 	root := t.TempDir()
-	bin := filepath.Join(root, "appitools", "appitools")
+	bin := filepath.Join(root, "appximo", "appximo")
 	writeFakeBinary(t, bin, 4096)
 
 	out, code := runBackup(t, bin)
@@ -48,11 +48,11 @@ func TestBackup_CopiesAndVerifies(t *testing.T) {
 		t.Fatalf("expected BACKED_UP, got:\n%s", out)
 	}
 	// the rollback dir is the binary dir's sibling, base.<timestamp>
-	rb := filepath.Join(root, "appitools-rollback")
+	rb := filepath.Join(root, "appximo-rollback")
 	entries, _ := os.ReadDir(rb)
 	var found string
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "appitools.") {
+		if strings.HasPrefix(e.Name(), "appximo.") {
 			found = e.Name()
 		}
 	}
@@ -68,7 +68,7 @@ func TestBackup_CopiesAndVerifies(t *testing.T) {
 
 func TestBackup_NoPreviousSkips(t *testing.T) {
 	root := t.TempDir()
-	bin := filepath.Join(root, "appitools", "appitools") // never created
+	bin := filepath.Join(root, "appximo", "appximo") // never created
 	out, code := runBackup(t, bin)
 	if code != 0 {
 		t.Fatalf("first deploy must NOT fail, got exit %d:\n%s", code, out)
@@ -80,9 +80,9 @@ func TestBackup_NoPreviousSkips(t *testing.T) {
 
 func TestBackup_RetentionKeeps10AndSparesManual(t *testing.T) {
 	root := t.TempDir()
-	bin := filepath.Join(root, "appitools", "appitools")
+	bin := filepath.Join(root, "appximo", "appximo")
 	writeFakeBinary(t, bin, 1024)
-	rb := filepath.Join(root, "appitools-rollback")
+	rb := filepath.Join(root, "appximo-rollback")
 	if err := os.MkdirAll(rb, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -92,12 +92,12 @@ func TestBackup_RetentionKeeps10AndSparesManual(t *testing.T) {
 		"20260105-000000", "20260106-000000", "20260107-000000", "20260108-000000",
 		"20260109-000000", "20260110-000000", "20260111-000000",
 	} {
-		if err := os.WriteFile(filepath.Join(rb, "appitools."+ts), []byte("x"), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(rb, "appximo."+ts), []byte("x"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Two MANUAL labels that must NEVER be pruned.
-	for _, m := range []string{"appitools.pre_realip", "appitools.pre_s33"} {
+	for _, m := range []string{"appximo.pre_realip", "appximo.pre_s33"} {
 		if err := os.WriteFile(filepath.Join(rb, m), []byte("x"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -112,9 +112,9 @@ func TestBackup_RetentionKeeps10AndSparesManual(t *testing.T) {
 	var autos, manuals int
 	for _, e := range entries {
 		switch {
-		case strings.HasPrefix(e.Name(), "appitools.pre_"):
+		case strings.HasPrefix(e.Name(), "appximo.pre_"):
 			manuals++
-		case strings.HasPrefix(e.Name(), "appitools."):
+		case strings.HasPrefix(e.Name(), "appximo."):
 			autos++
 		}
 	}
@@ -129,21 +129,21 @@ func TestBackup_RetentionKeeps10AndSparesManual(t *testing.T) {
 		t.Fatalf("expected PRUNED lines, got:\n%s", out)
 	}
 	// The oldest auto (20260101) must be gone; the newest old (20260111) kept.
-	if _, err := os.Stat(filepath.Join(rb, "appitools.20260101-000000")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(rb, "appximo.20260101-000000")); !os.IsNotExist(err) {
 		t.Fatalf("oldest backup should have been pruned")
 	}
-	if _, err := os.Stat(filepath.Join(rb, "appitools.20260111-000000")); err != nil {
+	if _, err := os.Stat(filepath.Join(rb, "appximo.20260111-000000")); err != nil {
 		t.Fatalf("recent backup should have been kept: %v", err)
 	}
 }
 
 func TestBackup_AbortsWhenCopyImpossible(t *testing.T) {
 	root := t.TempDir()
-	bin := filepath.Join(root, "appitools", "appitools")
+	bin := filepath.Join(root, "appximo", "appximo")
 	writeFakeBinary(t, bin, 2048)
 	// Make the rollback dir path a regular FILE so mkdir -p can't create it →
 	// the backup must FAIL (non-zero), which makes the caller abort the swap.
-	rbPath := filepath.Join(root, "appitools-rollback")
+	rbPath := filepath.Join(root, "appximo-rollback")
 	if err := os.WriteFile(rbPath, []byte("blocker"), 0o644); err != nil {
 		t.Fatal(err)
 	}

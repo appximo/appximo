@@ -1,5 +1,5 @@
 // Package schemadiff is the foundation of a real schema-migration engine for
-// Appitools — the eventual replacement for the idempotent table "converger" in
+// Appximo — the eventual replacement for the idempotent table "converger" in
 // pkg/migration (which only ever runs CREATE TABLE / ADD COLUMN IF NOT EXISTS and
 // therefore loses data on rename, ignores NOT NULL, no-ops a type change, and
 // emits no foreign keys — see docs/MIGRATION_DIAG.md).
@@ -23,7 +23,7 @@
 //     DELETE / ON UPDATE actions (the converger has none today). Rename intent is
 //     EXPLICIT (RenamedFrom), never a heuristic.
 //   - The type alias map + ParseType (parsetype.go): normalizes any Postgres type
-//     spelling — and the Appitools schema-JSON type vocabulary — into the canonical
+//     spelling — and the Appximo schema-JSON type vocabulary — into the canonical
 //     Type.
 //   - The pg_catalog introspector (introspect.go): reads the REAL state of a
 //     Postgres schema into the canonical model in a fixed, small number of queries

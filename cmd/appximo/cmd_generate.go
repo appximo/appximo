@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/miguelangel/appitools/pkg/codegen"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/codegen"
+	"github.com/appximo/appximo/pkg/schema"
 	"github.com/spf13/cobra"
 )
 

@@ -2,7 +2,7 @@
 """stats.py — the statistical core of the production verification suite.
 
 Pure Python 3 standard library: no numpy, no scipy, no pip. The suite has to run
-on whatever box a user just installed Appitools on, so it may not assume anything
+on whatever box a user just installed Appximo on, so it may not assume anything
 beyond `python3`.
 
 It exists because a benchmark that reports a mean is not evidence. Every number

@@ -1,7 +1,7 @@
-# Appitools production Caddyfile (mounted by docker-compose.prod.yml).
+# Appximo production Caddyfile (mounted by docker-compose.prod.yml).
 # Parameterized by env: DOMAIN and ACME_EMAIL come from your .env.
 #
-# reverse_proxy passes the original Host header through BY DEFAULT — Appitools'
+# reverse_proxy passes the original Host header through BY DEFAULT — Appximo'
 # tenant routing (acme.your-domain.com → tenant_acme) depends on that. Do not
 # add a `header_up Host ...` override.
 

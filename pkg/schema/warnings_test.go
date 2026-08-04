@@ -11,7 +11,7 @@ import (
 // id against a foreign key to the `veterinarians` table. Valid, deployable, and it
 // returns zero rows forever.
 const vetSchemaJSON = `{
-  "$schema": "https://appitools.dev/schema/v1",
+  "$schema": "https://appximo.com/schema/v1",
   "version": "1",
   "name": "petfriendly",
   "resources": {
@@ -107,7 +107,7 @@ func TestWarnings_BridgeColumnSilencesIt(t *testing.T) {
 // relation column.
 func TestWarnings_NoFalsePositives(t *testing.T) {
 	raw := `{
-	  "$schema": "https://appitools.dev/schema/v1", "version": "1", "name": "x",
+	  "$schema": "https://appximo.com/schema/v1", "version": "1", "name": "x",
 	  "resources": {
 	    "customers": { "fields": { "name": { "type": "string" } } },
 	    "orders": { "fields": {
@@ -132,7 +132,7 @@ func TestWarnings_NoFalsePositives(t *testing.T) {
 // resource the role lists, exactly like the runtime injects it.
 func TestWarnings_RoleGlobalFormToo(t *testing.T) {
 	raw := `{
-	  "$schema": "https://appitools.dev/schema/v1", "version": "1", "name": "x",
+	  "$schema": "https://appximo.com/schema/v1", "version": "1", "name": "x",
 	  "resources": {
 	    "vets": { "fields": { "name": { "type": "string" } } },
 	    "visits": { "fields": { "vet_id": { "type": "uuid", "relation": "vets" } } }

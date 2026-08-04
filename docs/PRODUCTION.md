@@ -1,4 +1,4 @@
-# Running Appitools in production
+# Running Appximo in production
 
 The official path: from an **empty Ubuntu/Debian VPS to a live HTTPS API in
 minutes**, with one command. The stack is **native PostgreSQL + the engine under
@@ -25,13 +25,13 @@ the box) and an **email** for Let's Encrypt.
 
 ```bash
 # Once public GitHub Releases exist:
-curl -fsSL https://raw.githubusercontent.com/miguel09acosta/appitools/main/scripts/install.sh \
+curl -fsSL https://raw.githubusercontent.com/appximo/appximo/main/scripts/install.sh \
   | sudo bash -s -- --domain api.example.com --email you@example.com
 
 # Today (no public release yet) — build the binary, copy it up, install with --binary:
-./scripts/build-engine.sh /tmp/appitools "$(git rev-parse --short HEAD)" "$(git rev-parse HEAD)"
-scp /tmp/appitools you@server:/tmp/appitools
-ssh you@server 'sudo bash /path/to/install.sh --domain api.example.com --email you@example.com --binary=/tmp/appitools'
+./scripts/build-engine.sh /tmp/appximo "$(git rev-parse --short HEAD)" "$(git rev-parse HEAD)"
+scp /tmp/appximo you@server:/tmp/appximo
+ssh you@server 'sudo bash /path/to/install.sh --domain api.example.com --email you@example.com --binary=/tmp/appximo'
 ```
 
 Flags: `--domain` `--email` `--binary=PATH` `--schema=PATH` (your model; default
@@ -76,14 +76,14 @@ including the engine's own port and the control plane on 9090 — off the intern
 internet ──443──▶ Caddy  (TLS: automatic Let's Encrypt, Host header preserved)
                     │ reverse_proxy 127.0.0.1:8090
                     ▼
-                  appitools engine  (systemd: Restart=always, drains on SIGTERM)
+                  appximo engine  (systemd: Restart=always, drains on SIGTERM)
                     │ pool of ~10 connections
                     ▼
                   PostgreSQL  (native apt package, localhost only)
 ```
 
 - **Caddy** terminates TLS and obtains/renews the certificate automatically (no
-  certbot, no cron). It passes the `Host` header through unchanged — Appitools'
+  certbot, no cron). It passes the `Host` header through unchanged — Appximo'
   tenant routing (`acme.example.com` → `tenant_acme`) depends on it — and
   auto-flushes SSE streams (`/api/*/events`).
 - **The engine** runs as a systemd service on an internal port (8090 by default),
@@ -112,8 +112,8 @@ One VPS, two ideas is the normal case. Every path the installer writes is
 namespaced by an **app name**, so a second app is one flag:
 
 ```bash
-# first app — unchanged, no flag needed (the name defaults to "appitools")
-sudo bash install.sh --domain=tienda.example.com --email=you@example.com --binary=./appitools
+# first app — unchanged, no flag needed (the name defaults to "appximo")
+sudo bash install.sh --domain=tienda.example.com --email=you@example.com --binary=./appximo
 
 # second app on the SAME box, fully separate
 sudo bash install.sh --app=vetapp --domain=petfriendly.example.com \
@@ -125,15 +125,15 @@ but the machine, PostgreSQL and Caddy:
 
 | | default app | `--app=vetapp` |
 |---|---|---|
-| systemd unit | `appitools.service` | `vetapp.service` |
-| service user | `appitools` | `vetapp` |
-| config + boot schema | `/etc/appitools/` | `/etc/vetapp/` |
-| binary | `/opt/appitools/bin/appitools` | `/opt/vetapp/bin/vetapp` |
-| data (files, obs) | `/var/lib/appitools/` | `/var/lib/vetapp/` |
-| database + role | `appitools` | `vetapp` |
+| systemd unit | `appximo.service` | `vetapp.service` |
+| service user | `appximo` | `vetapp` |
+| config + boot schema | `/etc/appximo/` | `/etc/vetapp/` |
+| binary | `/opt/appximo/bin/appximo` | `/opt/vetapp/bin/vetapp` |
+| data (files, obs) | `/var/lib/appximo/` | `/var/lib/vetapp/` |
+| database + role | `appximo` | `vetapp` |
 | secrets (JWT, admin key) | its own | its own — never shared |
 | control plane (localhost) | `:9090` | a stable port derived from the name (`--control-port` to pin it) |
-| Caddy site | `/etc/caddy/sites/appitools.caddy` | `/etc/caddy/sites/vetapp.caddy` |
+| Caddy site | `/etc/caddy/sites/appximo.caddy` | `/etc/caddy/sites/vetapp.caddy` |
 
 **The Caddyfile is never overwritten.** Each app owns one file under
 `/etc/caddy/sites/`, and the main `Caddyfile` only carries the global options plus
@@ -162,17 +162,27 @@ app name so re-running the installer always picks the same one; pin it with
 
 ## 3. Updates & redeploys
 
+> **Migrating an install from before the rename (Appitools → Appximo, 2026-08):**
+> the installer now provisions everything under the `appximo` name — systemd unit
+> `appximo.service`, user `appximo`, `/opt/appximo`, `/etc/appximo`. An existing
+> server installed as `appitools` keeps working untouched: unit names are local
+> to the box, and `deploy-update.sh --app appitools` targets the old unit
+> explicitly. To actually migrate the name, run the new installer with
+> `--app appximo` alongside, move the data (`pg_dump`/restore or keep the same
+> PostgreSQL), flip the domain, then remove the old unit — or simply keep the
+> old unit name; nothing in the engine depends on it.
+
 The official flow is **build → copy → atomic swap → restart**, wrapped in
 [`scripts/deploy-update.sh`](../scripts/deploy-update.sh) (which also
 health-checks and **auto-rolls-back** if the new binary won't come up):
 
 ```bash
 # on your dev machine
-./scripts/build-engine.sh /tmp/appitools "$(git rev-parse --short HEAD)" "$(git rev-parse HEAD)"
-scp /tmp/appitools you@server:/tmp/appitools
+./scripts/build-engine.sh /tmp/appximo "$(git rev-parse --short HEAD)" "$(git rev-parse HEAD)"
+scp /tmp/appximo you@server:/tmp/appximo
 
 # on the server (or over ssh)
-sudo bash /opt/appitools/scripts/deploy-update.sh --binary=/tmp/appitools
+sudo bash /opt/appximo/scripts/deploy-update.sh --binary=/tmp/appximo
 ```
 
 It backs up the live binary to `<dir>-rollback/`, renames the new one over it
@@ -183,7 +193,7 @@ the old one is serving again in ~1 s). Re-running the **installer** with
 `--binary=` does the same swap + restart (and reuses your existing secrets), so
 either path is a safe upgrade.
 
-> `deploy-update.sh` and `backup.sh` are placed in `/opt/appitools/scripts/` by
+> `deploy-update.sh` and `backup.sh` are placed in `/opt/appximo/scripts/` by
 > the installer **when you run it from a checkout** (they sit next to
 > `install.sh`). Under `curl | bash` there are no sibling files to copy, so fetch
 > them from the repo into that directory when you need them.
@@ -203,16 +213,16 @@ and rotates old dumps. Wire it into cron:
 
 ```cron
 # nightly at 03:30, keep 14 days (as root)
-30 3 * * *  /opt/appitools/scripts/backup.sh --env-file=/etc/appitools/appitools.env \
-            >> /var/log/appitools-backup.log 2>&1
+30 3 * * *  /opt/appximo/scripts/backup.sh --env-file=/etc/appximo/appximo.env \
+            >> /var/log/appximo-backup.log 2>&1
 ```
 
 **A backup you have never restored is not a backup.** Test the restore:
 
 ```bash
-createdb appitools_restore_test
-pg_restore -d appitools_restore_test /var/backups/appitools/appitools-<stamp>.dump
-# inspect, then: dropdb appitools_restore_test
+createdb appximo_restore_test
+pg_restore -d appximo_restore_test /var/backups/appximo/appximo-<stamp>.dump
+# inspect, then: dropdb appximo_restore_test
 ```
 
 Point-in-time recovery (WAL archiving) is a PostgreSQL-level concern beyond this
@@ -224,7 +234,7 @@ a backup on the same disk as the database is one failure away from gone.
 
 ## 5. Framework mode — your own binary
 
-When you build a custom backend (import `appitools`, register handlers — see
+When you build a custom backend (import `appximo`, register handlers — see
 [docs/BACKEND_SPEC_LLM.md](BACKEND_SPEC_LLM.md)), **the production path is
 identical** — provided your binary honors the **deployable contract**
 ([ADR-023](adr/ADR-023-deployable-binary-contract.md)): `<bin> version` prints
@@ -235,9 +245,9 @@ LOUD on misplaced arguments. The library gives you both in one call:
 var version, revision = "dev", "unknown"   // injected by the build below
 
 func main() {
-    args := appitools.ParseServeArgs("myapp", version, revision,
-        appitools.ServeArgs{Port: 8099, ControlPort: 9099})
-    app, err := appitools.New(appitools.Config{
+    args := appximo.ParseServeArgs("myapp", version, revision,
+        appximo.ServeArgs{Port: 8099, ControlPort: 9099})
+    app, err := appximo.New(appximo.Config{
         SchemaPath: args.SchemaPath, Port: args.Port,
         ControlPort: args.ControlPort, Version: version, // /health reports it
     })
@@ -252,12 +262,12 @@ real SHA):
 
 ```bash
 # from your app repo; resolves the script out of your engine dependency
-bash "$(go list -m -f '{{.Dir}}' github.com/miguelangel/appitools)/scripts/build-consumer.sh" /tmp/myapp
+bash "$(go list -m -f '{{.Dir}}' github.com/appximo/appximo)/scripts/build-consumer.sh" /tmp/myapp
 scp /tmp/myapp you@server:/tmp/myapp
 sudo bash install.sh --domain api.example.com --email you@example.com \
-  --binary=/tmp/myapp --cli=/tmp/appitools --schema=/tmp/myschema.json
+  --binary=/tmp/myapp --cli=/tmp/appximo --schema=/tmp/myschema.json
 # updates later:
-sudo bash /opt/appitools/scripts/deploy-update.sh --binary=/tmp/myapp
+sudo bash /opt/appximo/scripts/deploy-update.sh --binary=/tmp/myapp
 ```
 
 **Production is two artifacts for a consumer app** (the honest version of the
@@ -265,8 +275,8 @@ sudo bash /opt/appitools/scripts/deploy-update.sh --binary=/tmp/myapp
 frontend, health, control plane — and the engine CLI OPERATES it (register
 tenants, `migrate --dry-run`, mint tokens, create the super-admin). Pass it via
 `--cli` (build with `scripts/build-engine.sh`) and it lands at
-`/opt/appitools/bin/appitools-cli`; when the installed binary IS the engine the
-installer symlinks it automatically, so `appitools-cli …` is the one documented
+`/opt/appximo/bin/appximo-cli`; when the installed binary IS the engine the
+installer symlinks it automatically, so `appximo-cli …` is the one documented
 invocation on every box. The systemd unit, Caddy, PostgreSQL and the env file
 don't change. The installer prints WHERE the generated secrets live, never the
 values (`--show-secrets` to opt in), and detects your control-plane port from
@@ -290,7 +300,7 @@ The outbox worker, if you run one, is a second systemd unit (see
 
 ## 6. Serving your frontend
 
-The Appitools binary serves an **API** (plus its own built-in UIs at `/editor`,
+The Appximo binary serves an **API** (plus its own built-in UIs at `/editor`,
 `/admin`, `/docs`, `/graphiql`) **and, in framework mode, your own frontend**
 (`Config.Static` — LOOSE-ENDS-SWEEP-S1). Three ways to serve it, in the order you
 should consider them:
@@ -326,8 +336,8 @@ frontend lives elsewhere and calls the API cross-origin. Enable CORS on the
 engine for exactly those origins:
 
 ```bash
-APPITOOLS_CORS_ORIGINS="https://app.example.com"
-# optional: APPITOOLS_CORS_CREDENTIALS=true, APPITOOLS_CORS_HEADERS=…
+APPXIMO_CORS_ORIGINS="https://app.example.com"
+# optional: APPXIMO_CORS_CREDENTIALS=true, APPXIMO_CORS_HEADERS=…
 ```
 
 CORS is off by default and scoped to `/api`,`/auth`,`/graphql`,`/openapi` only
@@ -344,9 +354,9 @@ no CORS, no second deploy target, no proxy rule to keep in sync:
 var frontend embed.FS
 
 dist, _ := fs.Sub(frontend, "web/dist")
-app, err := appitools.New(appitools.Config{
+app, err := appximo.New(appximo.Config{
     SchemaPath: "schema.json",
-    Static: []appitools.StaticMount{{Path: "/", FS: dist, SPA: true}},
+    Static: []appximo.StaticMount{{Path: "/", FS: dist, SPA: true}},
 })
 ```
 
@@ -379,7 +389,7 @@ the frontend is deployed on its own cadence.
 > reach the cardholder data entry surface. Put marketing tags on the pages that
 > never touch payment.
 
-Multi-app note: in `appitools fleet serve` (N apps in one process) a static mount
+Multi-app note: in `appximo fleet serve` (N apps in one process) a static mount
 belongs to the **app that declares it**. The manifest-driven fleet configures
 none, so no app serves static files there — a custom multi-app binary sets them
 per app. Fail-closed: nothing is served unless it was declared.
@@ -401,7 +411,7 @@ cp .env.example .env        # set DOMAIN, ACME_EMAIL, JWT_SECRET, ADMIN_KEY, DB_
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-The published multi-arch image (`neodevtrix/appitools-engine`) **ships the built
+The published multi-arch image (`appximo/appximo`) **ships the built
 `/editor` and `/admin` UIs** (the Dockerfile builds the SPAs in dedicated node
 stages) and runs the engine or the outbox worker from one image. On a
 memory-limited container (`--memory` / `mem_limit`) the engine auto-detects the
@@ -413,7 +423,7 @@ cgroup limit and sets `GOMEMLIMIT` to 90 % of it (see § 8). Full walkthrough:
 ## 8. Configuration — production environment variables
 
 Three are **required**; the rest have safe defaults. The installer sets the
-required ones plus `APPITOOLS_ENV`, the file/obs paths and `GOMEMLIMIT`. Full
+required ones plus `APPXIMO_ENV`, the file/obs paths and `GOMEMLIMIT`. Full
 per-field docs are in [config.go](../config.go) and the README config table.
 
 | Variable | Req | Default | Notes |
@@ -421,28 +431,28 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `DATABASE_URL` | **yes** | — | PostgreSQL DSN. The engine **auto-creates the control-plane tables** on boot, so a fresh empty database just works. |
 | `JWT_SECRET` | **yes** | — | HS256 signing secret, ≥ 32 chars (`openssl rand -hex 32`). |
 | `ADMIN_KEY` | **yes** | — | `X-Admin-Key` for the control plane, `/metrics`, `/debug`, `/admin`. |
-| `APPITOOLS_ENV` | no | (prod) | `development` enables pprof (:6060) + GraphQL introspection + GraphiQL. **Leave unset/`production`** in prod. |
+| `APPXIMO_ENV` | no | (prod) | `development` enables pprof (:6060) + GraphQL introspection + GraphiQL. **Leave unset/`production`** in prod. |
 | `GOMEMLIMIT` | no | auto | Soft heap ceiling. Unset → the engine uses 90 % of an explicit **cgroup** limit if present, else warns on a small box. **Set it on a bare small box** — the installer sets **30 % of RAM** (measured: the engine's own anonymous memory peaks in the tens of MB even at 1M rows, and PostgreSQL needs the rest). Never derived from total RAM as if the engine were alone on the box. |
 | `GOMAXPROCS` | no | auto | cgroup-aware (automaxprocs). |
 | `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | no | 1000 / 100 | Per-tenant token bucket. |
-| `OBS_DB_PATH` | no | `/var/lib/appitools/obs/obs.db` | Trace/snapshot history (SQLite). Keep it on a persistent path. |
-| `APPITOOLS_FILES_DIR` | no | `/var/lib/appitools/files` | Local file-store root (or use `APPITOOLS_FILES_BACKEND=s3`). |
-| `APPITOOLS_FILES_BACKEND` / `APPITOOLS_FILES_S3_*` | no | `local` | S3/R2/Spaces/MinIO backend — see [docs/FILES.md](FILES.md). |
-| `APPITOOLS_FILES_MAX_BYTES` / `_TOKEN_TTL` / `_ALLOWED_EXT` | no | 256 MiB / 180 s / curated | Upload cap, signed-URL TTL, extension allowlist. |
+| `OBS_DB_PATH` | no | `/var/lib/appximo/obs/obs.db` | Trace/snapshot history (SQLite). Keep it on a persistent path. |
+| `APPXIMO_FILES_DIR` | no | `/var/lib/appximo/files` | Local file-store root (or use `APPXIMO_FILES_BACKEND=s3`). |
+| `APPXIMO_FILES_BACKEND` / `APPXIMO_FILES_S3_*` | no | `local` | S3/R2/Spaces/MinIO backend — see [docs/FILES.md](FILES.md). |
+| `APPXIMO_FILES_MAX_BYTES` / `_TOKEN_TTL` / `_ALLOWED_EXT` | no | 256 MiB / 180 s / curated | Upload cap, signed-URL TTL, extension allowlist. |
 | `DB_MAX_CONNS` | no | 10 | Postgres pool size. |
-| `APPITOOLS_MAX_TX_OPS` | no | 100 | Max ops per `POST /api/transaction`. |
-| `APPITOOLS_MAX_SSE_PER_TENANT` | no | unbounded | Cap concurrent SSE streams per tenant. |
-| `APPITOOLS_CORS_ORIGINS` (+ `_METHODS`/`_HEADERS`/`_EXPOSE_HEADERS`/`_CREDENTIALS`/`_MAX_AGE`) | no | off | Browser CORS; empty = disabled. |
-| `APPITOOLS_GRAPHQL_PLAYGROUND` | no | off | Serve GraphiQL + allow introspection outside dev. |
-| `APPITOOLS_AUTH_SIGNUP_ROLE` / `_MIN_PASSWORD` / `_REQUIRE_VERIFIED` / `_BASE_URL` | no | off / 8 / off / — | Public signup (opt-in, role-gated) + reset/verify email links. |
-| `APPITOOLS_OAUTH_{GOOGLE,GITHUB,MICROSOFT}_CLIENT_ID`/`_SECRET`, `_CALLBACK_URL`, `_DEFAULT_ROLE`, `_SUCCESS_REDIRECT` | no | off | Social login. |
-| `APPITOOLS_MFA_KEY` / `APPITOOLS_MFA_ISSUER` | no | JWT secret / `Appitools` | TOTP secret encryption + issuer label. |
-| `APPITOOLS_PLATFORM_SUPER_ADMIN_ROLE` / `_MFA_ISSUER` | no | `platform_super_admin` | Admin API super-admin. Bootstrap with `appitools admin create`. |
-| `APPITOOLS_EMAIL_TOPIC`, `SMTP_*` | no | — | Outbox email worker (`APPITOOLS_WORKER_MODE=email`). |
+| `APPXIMO_MAX_TX_OPS` | no | 100 | Max ops per `POST /api/transaction`. |
+| `APPXIMO_MAX_SSE_PER_TENANT` | no | unbounded | Cap concurrent SSE streams per tenant. |
+| `APPXIMO_CORS_ORIGINS` (+ `_METHODS`/`_HEADERS`/`_EXPOSE_HEADERS`/`_CREDENTIALS`/`_MAX_AGE`) | no | off | Browser CORS; empty = disabled. |
+| `APPXIMO_GRAPHQL_PLAYGROUND` | no | off | Serve GraphiQL + allow introspection outside dev. |
+| `APPXIMO_AUTH_SIGNUP_ROLE` / `_MIN_PASSWORD` / `_REQUIRE_VERIFIED` / `_BASE_URL` | no | off / 8 / off / — | Public signup (opt-in, role-gated) + reset/verify email links. |
+| `APPXIMO_OAUTH_{GOOGLE,GITHUB,MICROSOFT}_CLIENT_ID`/`_SECRET`, `_CALLBACK_URL`, `_DEFAULT_ROLE`, `_SUCCESS_REDIRECT` | no | off | Social login. |
+| `APPXIMO_MFA_KEY` / `APPXIMO_MFA_ISSUER` | no | JWT secret / `Appximo` | TOTP secret encryption + issuer label. |
+| `APPXIMO_PLATFORM_SUPER_ADMIN_ROLE` / `_MFA_ISSUER` | no | `platform_super_admin` | Admin API super-admin. Bootstrap with `appximo admin create`. |
+| `APPXIMO_EMAIL_TOPIC`, `SMTP_*` | no | — | Outbox email worker (`APPXIMO_WORKER_MODE=email`). |
 | `SLACK_WEBHOOK_URL` | no | — | SLO burn-rate alerts. |
 | `REDIS_URL` | no | — | Optional async migration worker. |
-| `BACKUP_DIR` | no | `/tmp/appitools-backups` | Output dir for `POST /admin/backup`. |
-| `APPITOOLS_SAFEGO_TIMEOUT` / `APPITOOLS_PUBLIC_ROUTE_RPS` / `_BURST` | no | 30 s / 5 / 10 | Library-mode custom-handler tuning. |
+| `BACKUP_DIR` | no | `/tmp/appximo-backups` | Output dir for `POST /admin/backup`. |
+| `APPXIMO_SAFEGO_TIMEOUT` / `APPXIMO_PUBLIC_ROUTE_RPS` / `_BURST` | no | 30 s / 5 / 10 | Library-mode custom-handler tuning. |
 | `--port` / `--control-port` | flag | 8080 / 9090 | Data plane / control plane (control plane = **localhost only**). |
 
 ---
@@ -457,9 +467,9 @@ per-field docs are in [config.go](../config.go) and the README config table.
   127.0.0.1:9090/...`) or an SSH tunnel.
 - **Strong `ADMIN_KEY` and `JWT_SECRET`** (≥ 32 chars, `openssl rand -hex 32`).
   The installer generates them; never reuse a weak one.
-- **Secrets file `0600`, owned `root:appitools`.** `/etc/appitools/appitools.env`
+- **Secrets file `0600`, owned `root:appximo`.** `/etc/appximo/appximo.env`
   holds every secret; the systemd unit runs the engine as the unprivileged
-  `appitools` user with `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`.
+  `appximo` user with `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`.
 - **Keep the box patched** (`--harden` enables unattended-upgrades) and copy
   backups off-box.
 - **TLS is automatic** — don't disable it; don't serve the API on plain HTTP to
@@ -472,8 +482,8 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | Symptom | Most likely cause → fix |
 |---|---|
 | `https://domain` — certificate never issues | DNS for `domain` doesn't point at this box, or port **80** is blocked (Let's Encrypt's HTTP challenge needs it). Check `journalctl -u caddy -f`; confirm `dig +short domain` = your IP. |
-| **502 Bad Gateway** from Caddy | The engine is down or not on the expected port. `systemctl status appitools`; `journalctl -u appitools -n 50`. A bad schema fails boot loudly there. |
-| Engine **OOM-killed** / restarts under load | No `GOMEMLIMIT` on a small box. Set `GOMEMLIMIT=512MiB` (1 GB) in `/etc/appitools/appitools.env` and `systemctl restart appitools`. `dmesg | grep -i oom` confirms. |
+| **502 Bad Gateway** from Caddy | The engine is down or not on the expected port. `systemctl status appximo`; `journalctl -u appximo -n 50`. A bad schema fails boot loudly there. |
+| Engine **OOM-killed** / restarts under load | No `GOMEMLIMIT` on a small box. Set `GOMEMLIMIT=512MiB` (1 GB) in `/etc/appximo/appximo.env` and `systemctl restart appximo`. `dmesg | grep -i oom` confirms. |
 | `serve` exits immediately | Missing a required var (`DATABASE_URL`/`JWT_SECRET`/`ADMIN_KEY`) or Postgres unreachable. The log names which. Check `DATABASE_URL` and `systemctl status postgresql`. |
 | Registering a tenant returns an error about the tenant id | The id must match `^[a-z][a-z0-9_]{1,29}$` (it becomes a Postgres schema) — no hyphens/uppercase. |
 | Port already in use on boot | Another process on 8090 (or your `--port`). Find it with `ss -ltnp | grep :8090` and stop it, or pick another port. |

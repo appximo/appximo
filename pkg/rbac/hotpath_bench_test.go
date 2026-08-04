@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/rbac"
+	"github.com/appximo/appximo/pkg/rbac"
 )
 
 // The authorization hot path: every /api request evaluates the policy once.

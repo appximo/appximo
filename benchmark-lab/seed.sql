@@ -1,6 +1,6 @@
 -- ============================================================
 -- PUBLIC SCHEMA — NestJS baseline (single-schema, tenant_id col)
--- Statuses aligned with Appitools schema.json enum:
+-- Statuses aligned with Appximo schema.json enum:
 --   pending, in_transit, delivered, returned
 -- ============================================================
 CREATE TABLE IF NOT EXISTS guides (
@@ -17,7 +17,7 @@ TRUNCATE TABLE guides RESTART IDENTITY;
 -- Status keyed off (i/10) — NOT i — so it does not correlate with the tenant
 -- residue MOD(i, 10). With CASE MOD(i, 4) every tenant only ever saw 2 of the
 -- 4 statuses (e.g. tenant_10 had zero 'pending' rows), which broke parity with
--- the Appitools per-tenant seed (25k rows per status per tenant).
+-- the Appximo per-tenant seed (25k rows per status per tenant).
 INSERT INTO guides (tenant_id, title, content, status, created_at)
 SELECT
     'tenant_' || (1 + MOD(g.i, 10))::text,
@@ -36,7 +36,7 @@ CREATE INDEX IF NOT EXISTS idx_guides_tenant_status_created
 ON guides(tenant_id, status, created_at DESC);
 
 -- ============================================================
--- TENANT SCHEMAS — Appitools multi-tenant
+-- TENANT SCHEMAS — Appximo multi-tenant
 -- Columns match testdata/logistics/schema.json exactly.
 -- 100k rows per tenant (10 tenants = 1M rows total).
 -- ============================================================
@@ -85,7 +85,7 @@ BEGIN
       'CREATE INDEX IF NOT EXISTS idx_tenant_%s_guides_status_created
        ON tenant_%s.guides(status, created_at DESC)', i, i);
 
-    -- Índice para ORDER BY id ASC (el default del codegen de Appitools)
+    -- Índice para ORDER BY id ASC (el default del codegen de Appximo)
     EXECUTE format(
       'CREATE INDEX IF NOT EXISTS idx_tenant_%s_guides_status_id
        ON tenant_%s.guides(status, id ASC)', i, i);

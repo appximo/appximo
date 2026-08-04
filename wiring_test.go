@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 // These guard tests fail if a security/resilience fix is disconnected from the
 // engine's middleware wiring during a future refactor. They assert the call
 // sites exist in non-comment source of app.go (the bootstrap moved here from
-// cmd/appitools/cmd_serve.go in the ADR-016 library extraction — same guard,
+// cmd/appximo/cmd_serve.go in the ADR-016 library extraction — same guard,
 // new home). A purely behavioural test would require standing up the full
 // DB-backed production router; a source guard is a cheap, deterministic
 // backstop for the one-line wiring that is otherwise easy to delete by

@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/resilience"
-	"github.com/miguelangel/appitools/pkg/tenant"
+	"github.com/appximo/appximo/pkg/resilience"
+	"github.com/appximo/appximo/pkg/tenant"
 )
 
 func withTenantID(r *http.Request, id string) *http.Request {

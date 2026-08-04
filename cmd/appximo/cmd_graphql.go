@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/miguelangel/appitools/pkg/codegen"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/codegen"
+	"github.com/appximo/appximo/pkg/schema"
 	"github.com/spf13/cobra"
 )
 
@@ -15,8 +15,8 @@ var graphqlCmd = &cobra.Command{
 	Long: `Reads schema.json and emits a complete GraphQL SDL document to stdout.
 
 Examples:
-  appitools graphql schema.json > schema.graphql
-  appitools graphql schema.json | head -30`,
+  appximo graphql schema.json > schema.graphql
+  appximo graphql schema.json | head -30`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		s, err := schema.LoadFromFile(args[0])

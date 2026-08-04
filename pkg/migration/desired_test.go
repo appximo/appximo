@@ -3,8 +3,8 @@ package migration
 import (
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/schemadiff"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/schemadiff"
 )
 
 // erpResource subset used to assert the JSON→canonical bridge structurally,

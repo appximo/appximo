@@ -97,7 +97,7 @@ func Dial(s *Server) (*ssh.Client, error) {
 	poolMu.Unlock()
 	if ok {
 		// Cheap liveness probe; a dead TCP conn fails immediately.
-		if _, _, err := pc.client.SendRequest("keepalive@appitools", true, nil); err == nil {
+		if _, _, err := pc.client.SendRequest("keepalive@appximo", true, nil); err == nil {
 			poolMu.Lock()
 			pc.lastUsed = time.Now()
 			poolMu.Unlock()

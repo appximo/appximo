@@ -1,11 +1,11 @@
 // Command frontend-guide is the runnable companion to docs/FRONTEND_SPEC_LLM.md
-// (`appitools frontend-spec`): ONE binary serving a frontend + the generated
+// (`appximo frontend-spec`): ONE binary serving a frontend + the generated
 // API + one custom byte-serving route, exercising every pattern the spec
 // teaches —
 //
 //   - Config.Static:   a no-build vanilla SPA (web/) embedded and served at "/"
 //   - auth:            signup/login from the SPA (enable signup with
-//     APPITOOLS_AUTH_SIGNUP_ROLE=editor), the 401-bounce, expiry
+//     APPXIMO_AUTH_SIGNUP_ROLE=editor), the 401-bounce, expiry
 //   - generated CRUD:  posts list/create with the multi-field 422 mapped to
 //     inputs and the screen states (loading/empty/error+retry)
 //   - files:           upload with XHR progress → attach via the `photo` file
@@ -22,7 +22,7 @@
 //
 // Run it:
 //
-//	DATABASE_URL=… JWT_SECRET=… ADMIN_KEY=… APPITOOLS_AUTH_SIGNUP_ROLE=editor \
+//	DATABASE_URL=… JWT_SECRET=… ADMIN_KEY=… APPXIMO_AUTH_SIGNUP_ROLE=editor \
 //	  go run ./examples/frontend-guide --schema examples/frontend-guide/schema.json
 //
 // then register a tenant on the control plane and open http://<tenant>.localhost:8080/.
@@ -34,7 +34,7 @@ import (
 	"io/fs"
 	"log"
 
-	"github.com/miguelangel/appitools"
+	"github.com/appximo/appximo"
 )
 
 //go:embed all:web
@@ -50,10 +50,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	app, err := appitools.New(appitools.Config{
+	app, err := appximo.New(appximo.Config{
 		SchemaPath: *schemaPath,
 		Port:       *port,
-		Static: []appitools.StaticMount{{
+		Static: []appximo.StaticMount{{
 			Path: "/",
 			FS:   dist,
 			SPA:  true,
@@ -70,12 +70,12 @@ func main() {
 	// around the response cache and compression (Range/ETag/sendfile intact);
 	// the generous RateLimit is the read-sized budget a public image route
 	// needs (the 5 rps public default would trip on one page of thumbnails).
-	if err := app.Register(appitools.Route{
+	if err := app.Register(appximo.Route{
 		Method: "GET", Path: "/api/public-photo",
 		Public:      true,
 		ByteServing: true,
-		RateLimit:   &appitools.RateLimit{RPS: 200, Burst: 400},
-		Handler: func(ctx appitools.Ctx) error {
+		RateLimit:   &appximo.RateLimit{RPS: 200, Burst: 400},
+		Handler: func(ctx appximo.Ctx) error {
 			id := ctx.Request().URL.Query().Get("id")
 			var ok bool
 			if err := ctx.UnsafeTx().QueryRow(ctx.Context(),

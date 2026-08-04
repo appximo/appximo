@@ -1,4 +1,4 @@
-# Appitools — PRODUCTION stack: a VPS + a domain pointing at it.
+# Appximo — PRODUCTION stack: a VPS + a domain pointing at it.
 #
 #   cp .env.example .env       # set DOMAIN, ACME_EMAIL and real secrets
 #   docker compose -f docker-compose.prod.yml up -d
@@ -30,25 +30,25 @@ services:
     restart: unless-stopped
 
   engine:
-    image: neodevtrix/appitools-engine:latest
+    image: appximo/appximo:latest
     # No ports: — internal network only, fronted by Caddy. The control plane
     # (:9090) is NOT exposed either; reach it from the VPS itself with
     #   docker compose -f docker-compose.prod.yml exec engine wget -q -O- http://127.0.0.1:9090/...
     # or an SSH tunnel. Never publish 9090 to the internet.
     environment:
-      DATABASE_URL: postgres://appitools:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/appitools?sslmode=disable
+      DATABASE_URL: postgres://appximo:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/appximo?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}
       ADMIN_KEY: ${ADMIN_KEY:?ADMIN_KEY is required}
       GOMAXPROCS: "2"
       # Content-addressable file store (FILES-V1); shared with the worker.
-      APPITOOLS_FILES_DIR: /var/lib/appitools/files
+      APPXIMO_FILES_DIR: /var/lib/appximo/files
       # Observability store (trace + snapshot history) on its own volume so the
-      # history SURVIVES a container restart (the default /var/lib/appitools/obs.db
+      # history SURVIVES a container restart (the default /var/lib/appximo/obs.db
       # would otherwise live in the container's ephemeral writable layer).
-      OBS_DB_PATH: /var/lib/appitools/obs/obs.db
+      OBS_DB_PATH: /var/lib/appximo/obs/obs.db
     volumes:
-      - files_data:/var/lib/appitools/files
-      - obs_data:/var/lib/appitools/obs
+      - files_data:/var/lib/appximo/files
+      - obs_data:/var/lib/appximo/obs
     depends_on:
       db:
         condition: service_healthy
@@ -60,22 +60,22 @@ services:
   # worker=N): N workers claim disjoint rows, never double-processing. No host
   # ports — internal network only.
   worker:
-    image: neodevtrix/appitools-engine:latest
+    image: appximo/appximo:latest
     command: ["worker"]
     environment:
-      DATABASE_URL: postgres://appitools:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/appitools?sslmode=disable
+      DATABASE_URL: postgres://appximo:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/appximo?sslmode=disable
       # MUST match the engine's JWT_SECRET (the worker mints scoped service JWTs).
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}
       # echo (default) | writeback | xlsx — see docs/DEPLOY.md → Background worker.
-      APPITOOLS_WORKER_MODE: ${APPITOOLS_WORKER_MODE:-echo}
-      APPITOOLS_ENGINE_URL: http://engine:8080
+      APPXIMO_WORKER_MODE: ${APPXIMO_WORKER_MODE:-echo}
+      APPXIMO_ENGINE_URL: http://engine:8080
       # Internal Host-header suffix ({tenant}.{suffix}); the engine reads the
       # SUBDOMAIN, so "localhost" is correct even in prod (not a DNS name).
-      APPITOOLS_TENANT_DOMAIN: ${APPITOOLS_TENANT_DOMAIN:-localhost}
-      APPITOOLS_WORKER_ROLE: ${APPITOOLS_WORKER_ROLE:-service_worker}
-      APPITOOLS_FILES_DIR: /var/lib/appitools/files
+      APPXIMO_TENANT_DOMAIN: ${APPXIMO_TENANT_DOMAIN:-localhost}
+      APPXIMO_WORKER_ROLE: ${APPXIMO_WORKER_ROLE:-service_worker}
+      APPXIMO_FILES_DIR: /var/lib/appximo/files
     volumes:
-      - files_data:/var/lib/appitools/files
+      - files_data:/var/lib/appximo/files
     depends_on:
       db:
         condition: service_healthy
@@ -87,9 +87,9 @@ services:
     image: postgres:16-alpine
     # No ports: — only the engine talks to it.
     environment:
-      POSTGRES_USER: appitools
+      POSTGRES_USER: appximo
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
-      POSTGRES_DB: appitools
+      POSTGRES_DB: appximo
     volumes:
       - pgdata:/var/lib/postgresql/data
     configs:
@@ -98,7 +98,7 @@ services:
       - source: control_plane_init
         target: /docker-entrypoint-initdb.d/001_control_plane.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U appitools"]
+      test: ["CMD-SHELL", "pg_isready -U appximo"]
       interval: 5s
       timeout: 5s
       retries: 5

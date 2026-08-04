@@ -140,18 +140,18 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: appitools
-          POSTGRES_PASSWORD: appitools
-          POSTGRES_DB: appitools
+          POSTGRES_USER: appximo
+          POSTGRES_PASSWORD: appximo
+          POSTGRES_DB: appximo
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U appitools"
+          --health-cmd "pg_isready -U appximo"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgres://appitools:appitools@localhost:5432/appitools?sslmode=disable
+      DATABASE_URL: postgres://appximo:appximo@localhost:5432/appximo?sslmode=disable
       JWT_SECRET: ci-perf-jwt-secret
       ADMIN_KEY: ci-perf-admin-key
       # Prod-hardware target is 2000 RPS / p95<15ms (PRIMER). Shared CI runners are
@@ -169,8 +169,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build appitools
-        run: go build -o appitools ./cmd/appitools
+      - name: Build appximo
+        run: go build -o appximo ./cmd/appximo
 
       - name: Install k6 + psql client
         run: |
@@ -187,7 +187,7 @@ jobs:
           # ApplyTenantMigration (the `migrate` CLI) only does CREATE TABLE, so the
           # schema must exist first.
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS tenant_'"$TENANT_ID"';'
-          ./appitools migrate --tenant "$TENANT_ID" --schema tests/fixtures/schemas/logistics_schema.json
+          ./appximo migrate --tenant "$TENANT_ID" --schema tests/fixtures/schemas/logistics_schema.json
           # Seed 500 guides so the filtered query returns real rows.
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c \
             "INSERT INTO tenant_${TENANT_ID}.guides (code, status, origin, destination) \
@@ -197,14 +197,14 @@ jobs:
       - name: Run k6 SLO gate
         run: |
           set -uo pipefail
-          ./appitools serve --schema tests/fixtures/schemas/logistics_schema.json --port 8080 > serve.log 2>&1 &
+          ./appximo serve --schema tests/fixtures/schemas/logistics_schema.json --port 8080 > serve.log 2>&1 &
           SERVER_PID=$!
           # Wait for liveness.
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8080/healthz >/dev/null; then break; fi
             sleep 1
           done
-          TOKEN=$(./appitools token --tenant "$TENANT_ID" --role super_admin --secret "$JWT_SECRET")
+          TOKEN=$(./appximo token --tenant "$TENANT_ID" --role super_admin --secret "$JWT_SECRET")
           set +e
           BENCH_TOKEN="$TOKEN" k6 run \
             -e RATE="$RATE" -e DURATION="$DURATION" -e TENANT_ID="$TENANT_ID" \

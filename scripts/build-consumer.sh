@@ -1,5 +1,5 @@
 #!/bin/sh
-# build-consumer.sh — THE canonical build for a CONSUMER app on the appitools
+# build-consumer.sh — THE canonical build for a CONSUMER app on the appximo
 # framework (ADR-023; the consumer twin of build-engine.sh). Run it from the
 # CONSUMER repo root. It exists because the deploy journey (PROD-JOURNEY-1B)
 # found every consumer re-discovers the same three traps:
@@ -14,7 +14,7 @@
 #   3. The static-binary flags: CGO_ENABLED=0 + -trimpath + -s -w, same as the
 #      engine, for a portable, reproducible artifact.
 #
-# A consumer main() should use appitools.ParseServeArgs so the binary honors
+# A consumer main() should use appximo.ParseServeArgs so the binary honors
 # the deployable contract (`version`, `serve --schema --port`, fail-loud args);
 # this script verifies the contract on the produced binary and warns if not.
 #
@@ -28,7 +28,7 @@
 #
 # From a consumer repo, invoke it out of your engine dependency (resolves the
 # replace directive AND the module cache):
-#   bash "$(go list -m -f '{{.Dir}}' github.com/miguelangel/appitools)/scripts/build-consumer.sh" out/app
+#   bash "$(go list -m -f '{{.Dir}}' github.com/appximo/appximo)/scripts/build-consumer.sh" out/app
 set -eu
 
 OUT="${1:?usage: build-consumer.sh <output-path> [version] [revision]}"
@@ -55,7 +55,7 @@ if [ "${GOOS:-$(go env GOOS)}" = "$(go env GOHOSTOS)" ] && [ "${GOARCH:-$(go env
 		echo "✓ ${OUT} — $ID"
 	else
 		echo "! ${OUT} built, but it does NOT honor the deployable contract ('$OUT version' failed)." >&2
-		echo "  install.sh will refuse it. Wire appitools.ParseServeArgs in main() — docs/adr/ADR-023." >&2
+		echo "  install.sh will refuse it. Wire appximo.ParseServeArgs in main() — docs/adr/ADR-023." >&2
 		exit 1
 	fi
 else

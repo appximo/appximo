@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // TestSystemPromptComposition pins the shared-source guarantee (JSON-EDITOR-S3):
@@ -12,7 +12,7 @@ import (
 // GrammarCore, so the grammar can never diverge between the two consumers.
 func TestSystemPromptComposition(t *testing.T) {
 	if !strings.Contains(systemPrompt, GrammarCore) {
-		t.Fatal("systemPrompt no longer embeds GrammarCore — the internal loop and `appitools spec` have diverged")
+		t.Fatal("systemPrompt no longer embeds GrammarCore — the internal loop and `appximo spec` have diverged")
 	}
 	if !strings.Contains(Spec(), GrammarCore) {
 		t.Fatal("Spec() no longer embeds GrammarCore — the printed grammar has diverged from the generation prompt")

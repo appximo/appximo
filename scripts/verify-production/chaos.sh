@@ -309,7 +309,7 @@ run_case() {
 
 	if ! healthy; then
 		warn "  target is NOT healthy before this case — skipping it rather than reporting a"
-		warn "  fault we did not cause. Fix the previous failure first (systemctl status caddy appitools)."
+		warn "  fault we did not cause. Fix the previous failure first (systemctl status caddy appximo)."
 		python3 -c '
 import json, sys
 json.dump({"part": "C-chaos", "case": sys.argv[1], "notes": sys.argv[2],
@@ -398,8 +398,8 @@ fault_deploy_update() {
 	remote "set -e
 	  BIN=${BIN}
 	  cp \"\$BIN\" /tmp/redeploy-same.bin
-	  if [ -x /opt/appitools/scripts/deploy-update.sh ]; then
-	    bash /opt/appitools/scripts/deploy-update.sh --binary=/tmp/redeploy-same.bin --port=${ENGINE_PORT} 2>&1 | tail -3
+	  if [ -x /opt/appximo/scripts/deploy-update.sh ]; then
+	    bash /opt/appximo/scripts/deploy-update.sh --binary=/tmp/redeploy-same.bin --port=${ENGINE_PORT} 2>&1 | tail -3
 	  else
 	    echo 'deploy-update.sh not installed — falling back to a plain systemctl restart'
 	    systemctl restart ${SERVICE}

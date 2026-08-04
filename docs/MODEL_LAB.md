@@ -1,6 +1,6 @@
 # Model Lab — which modern app archetypes can the engine model today?
 
-> **Diagnostic, not a change to the engine.** This maps what the Appitools schema
+> **Diagnostic, not a change to the engine.** This maps what the Appximo schema
 > can and cannot express for the data patterns behind the apps people actually
 > build today, with **live evidence** (schemas that validate, tenants registered,
 > rows populated, real queries run). It is the map that defines what the engine
@@ -8,7 +8,7 @@
 > to generate what the engine can model.
 >
 > Engine version under test: `0c29240` (API-PRODUCTIVA-V1). Date: 2026-06-16.
-> Method, per archetype: design a serious schema → `appitools validate` →
+> Method, per archetype: design a serious schema → `appximo validate` →
 > `serve` with that schema → register a tenant → populate rows → run the
 > domain-critical REST + GraphQL queries → record what worked and what didn't.
 > The six schemas live in [`examples/model-lab/`](../examples/model-lab/); the
@@ -58,11 +58,11 @@ query-field name, so any multi-word resource name (`cart-items`, `order-lines`,
 `serve` **panic at boot**:
 
 ```
-panic: appitools/graphql: failed to build schema:
+panic: appximo/graphql: failed to build schema:
   Names must match /^[_a-zA-Z][_a-zA-Z0-9]*$/ but "cart-item" does not.
 ```
 
-- `appitools validate` **passes** (it never builds the GraphQL schema).
+- `appximo validate` **passes** (it never builds the GraphQL schema).
 - The crash is **total** (the whole instance, every tenant — the GraphQL handler
   is built once at boot from the boot schema).
 - **5 of the 6** archetypes, written with natural names, hit this. Only `chat`
@@ -201,7 +201,7 @@ Observed consequences:
 
 **Severity: blocks** where money/inventory invariants matter (ecommerce, fintech;
 booking payments). **Workaround:** a custom Go handler on the library surface
-(`appitools.New` + `Ctx.Tx`) or a single-consumer outbox worker — i.e. write code.
+(`appximo.New` + `Ctx.Tx`) or a single-consumer outbox worker — i.e. write code.
 
 ### ✅ G5 — No state-machine / status-transition enforcement — **RESOLVED (FIX-G5)**
 
@@ -489,12 +489,12 @@ plan). To re-run one:
 
 ```bash
 # boot the engine with the archetype schema, then drive it
-set -a; source /root/.appitools-secrets-dev; set +a
-./appitools-dev serve --schema examples/model-lab/<archetype>.json --port 8080 &
+set -a; source .env.dev; set +a
+./appximo-dev serve --schema examples/model-lab/<archetype>.json --port 8080 &
 # register tenant + populate + query (driver + per-archetype plan are session scratch)
 ```
 
 The committed schemas use **concatenated** resource names (`cartitems`, not
 `cart-items`) to avoid G1; the original multi-word names are the evidence for that
-finding. All six **validate** (`appitools validate examples/model-lab/<a>.json`)
+finding. All six **validate** (`appximo validate examples/model-lab/<a>.json`)
 and **boot**.

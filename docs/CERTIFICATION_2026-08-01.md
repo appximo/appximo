@@ -5,7 +5,7 @@
 >
 > | Finding | Status |
 > |---|---|
-> | **ENG-14** (`is_null` silently ignored) | **CLOSED** — and generalized: the audit found the same shape across ten input surfaces, so the fix is a policy ([ADR-024](adr/ADR-024-unrecognized-input.md)) plus [an audit](audits/UNRECOGNIZED_INPUT_AUDIT.md), not a regex patch. Two more instances were found and fixed: a misspelled `dry_run` turned a PREVIEW into a real migration, and `appitools serve <path>` served a different app than the one named. |
+> | **ENG-14** (`is_null` silently ignored) | **CLOSED** — and generalized: the audit found the same shape across ten input surfaces, so the fix is a policy ([ADR-024](adr/ADR-024-unrecognized-input.md)) plus [an audit](audits/UNRECOGNIZED_INPUT_AUDIT.md), not a regex patch. Two more instances were found and fixed: a misspelled `dry_run` turned a PREVIEW into a real migration, and `appximo serve <path>` served a different app than the one named. |
 > | **SEC-1** (CSP lost on cached responses) | **CLOSED** — security headers now survive the cache, by allowlist (replaying every header would replay `X-Trace-Id` too). |
 > | **SEC-2** (`'unsafe-inline'` on script-src) | **CLOSED** — hash-based CSP, verified in a real browser with a control arm: legacy → injected script executed; hardened → the shell still boots and the injected script is blocked. |
 > | **SEC-3** (`Route.Public` untested live) | **CLOSED** — all three branches exercised through a booted App over real HTTP. |
@@ -210,7 +210,7 @@ the first ceiling a single-tenant workload meets, well before CPU.
 
 Scope reconstructed from `context-docs/SESSION_LOG.md` session 16 (2026-05-30, nine
 findings) plus SEC-AUDIT-V1/V2. Every item re-tested **live** against a running
-engine with `APPITOOLS_ENV=production` and two tenants holding distinguishable data.
+engine with `APPXIMO_ENV=production` and two tenants holding distinguishable data.
 
 | # | Original finding | Re-test today | Result |
 |---|---|---|---|
@@ -327,7 +327,7 @@ output. It is permissive **by necessity, not by design**, and an app whose bundl
 emits no inline scripts should tighten it per mount:
 
 ```go
-StaticMount{CSP: strings.Replace(appitools.DefaultStaticCSP,
+StaticMount{CSP: strings.Replace(appximo.DefaultStaticCSP,
     "script-src 'self' 'unsafe-inline'", "script-src 'self'", 1)}
 ```
 
@@ -345,7 +345,7 @@ restores the XSS protection. Tracked as **SEC-2**.
 | `make test` (unit, `-race -short`) | ✅ green |
 | integration lane (`-tags integration ./pkg/... .`) | ✅ green |
 | `golangci-lint run ./...` | ⚠️ **62 issues, exit 1** (50 `errcheck`, 12 `staticcheck`). **No workflow references it** — OPS-3 confirmed, now with a number |
-| `govulncheck ./...` | ⚠️ **not verifiable here** — OOM-killed (exit 137) three times on the 105 (1 vCPU / 2 GB, shared), even scoped to `./cmd/appitools/...`. CI runs it as a blocking gate (`.github/workflows/ci.yml:112`), and AGENTS.md records a real incident where it blocked a release, so the gate demonstrably works — it simply cannot be exercised on this box |
+| `govulncheck ./...` | ⚠️ **not verifiable here** — OOM-killed (exit 137) three times on the 105 (1 vCPU / 2 GB, shared), even scoped to `./cmd/appximo/...`. CI runs it as a blocking gate (`.github/workflows/ci.yml:112`), and AGENTS.md records a real incident where it blocked a release, so the gate demonstrably works — it simply cannot be exercised on this box |
 
 ---
 
@@ -374,7 +374,7 @@ with a valid token; strict-key rejection of an unknown top-level schema key.
 | C-2 | `README.md` | "2,000 req/s sustained … 0 errors" | true **only** with `RATE_LIMIT_RPS=3000`; on defaults ~50 % `429` | caveat added |
 | C-3 | `README.md` | "~4.8× faster … ~2.7× bypassed" (present tense) | not re-verified since 2026-06-10 | re-dated and marked |
 | C-4 | `AGENTS.md`, `README.md` | "Filter ops `neq`, `in`, `like`, `is_null` → 400" | `neq`/`in`/`nin`/`like`/`ilike` **do** → 400. **`is_null` returns `200` and is silently ignored** | doc corrected to the measured behavior; the defect is ENG-14 |
-| C-5 | `context-docs/BENCHMARK_PUBLIC.md` | reproduction uses `appitools token --tenant 10` | tenant id `10` is **no longer registrable** (ENG-11 tightened the rule to `^[a-z][a-z0-9]{1,29}$` — it must start with a letter) | recipe updated |
+| C-5 | `context-docs/BENCHMARK_PUBLIC.md` | reproduction uses `appximo token --tenant 10` | tenant id `10` is **no longer registrable** (ENG-11 tightened the rule to `^[a-z][a-z0-9]{1,29}$` — it must start with a letter) | recipe updated |
 | C-6 | `docs/BENCHMARKS.md` §3 | production layers cost "+0.97 ms" | **+1.22 ms** measured 2026-08-01 | both figures kept, each with its date |
 
 ### ⚠️ Not verifiable (with the reason)
@@ -490,9 +490,9 @@ Stated plainly, so nobody mistakes silence for a pass:
 bash scripts/bench-protocol.sh 10 <label> 2000 30s      # env in §1
 
 # 2. Security battery — a local engine with two tenants and four roles
-go build -o appitools ./cmd/appitools
-DATABASE_URL=… JWT_SECRET=… ADMIN_KEY=… APPITOOLS_ENV=production \
-  ./appitools serve --schema <sec-schema>.json --port 8081
+go build -o appximo ./cmd/appximo
+DATABASE_URL=… JWT_SECRET=… ADMIN_KEY=… APPXIMO_ENV=production \
+  ./appximo serve --schema <sec-schema>.json --port 8081
 #    the probes themselves are inline in §3.1–3.2
 
 # 3. Toolchain
@@ -577,7 +577,7 @@ control-plane self-bootstrap on an empty DB, tenant registration (all-or-nothing
 `token --schema` role refusal, first POST (default applied) and filtered GET,
 multi-field 422, named 400 for an unsupported filter op, `/docs` + `/openapi.json`
 unauthenticated, signup 403 by default, GraphQL query, `validate --json` report
-shape, and `appitools specs` printing the full trilogy (~2,310 lines). A plain
+shape, and `appximo specs` printing the full trilogy (~2,310 lines). A plain
 `go build` measured **85.2 MB** — consistent with C-1's 84.7 MB.
 
 Claim corrections applied to older documents (no engine change):
@@ -587,7 +587,7 @@ Claim corrections applied to older documents (no engine change):
   parameters pick a winner non-deterministically") predated NIGHT-SWEEP-S1's fix
   and now states the named-400 behavior; its GraphQL line now includes the
   `update` mutation the engine has served since SEC-AUDIT-V2.
-- `nuevo_chat_web/02_QUE_ES_APPITOOLS.md` (internal pitch base) carried the
+- `nuevo_chat_web/02_QUE_ES_APPXIMO.md` (internal pitch base) carried the
   pre-certification figures (1.58 ms/600k, "+1 ms", the whole-stack footprint,
   and the NestJS comparison in present tense) — updated to this report's numbers,
   conditions and the NOT-re-verified marking.

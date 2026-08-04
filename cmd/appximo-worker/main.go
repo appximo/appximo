@@ -1,4 +1,4 @@
-// Command appitools-worker is the outbox consumer (ADR-016 §Class 2): a SEPARATE
+// Command appximo-worker is the outbox consumer (ADR-016 §Class 2): a SEPARATE
 // process that drains public.outbox and runs each event through a Processor. It
 // connects to the SAME Postgres as the engine (DATABASE_URL) with DEDICATED
 // connections (never the engine's pool), LISTENs on outbox.NotifyChannel as a
@@ -7,7 +7,7 @@
 // Scope: by default the Processor is the echo consumer, which logs the event and
 // marks it sent — the minimal end-to-end proof that the async Class 2 loop lives.
 //
-// SERVICE-JWT-V1: setting APPITOOLS_WORKER_WRITEBACK=on swaps in the write-back
+// SERVICE-JWT-V1: setting APPXIMO_WORKER_WRITEBACK=on swaps in the write-back
 // demo consumer, which mints a SHORT-LIVED, SCOPED service JWT and PATCHes the
 // created row's status back through the engine API — proving authenticated
 // write-back (event → mint JWT → engine API → RBAC accepts the scoped role). It
@@ -25,11 +25,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
 
-	"github.com/miguelangel/appitools/pkg/consumers"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/files"
-	"github.com/miguelangel/appitools/pkg/logging"
-	"github.com/miguelangel/appitools/pkg/worker"
+	"github.com/appximo/appximo/pkg/consumers"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/files"
+	"github.com/appximo/appximo/pkg/logging"
+	"github.com/appximo/appximo/pkg/worker"
 )
 
 // version / revision are stamped at build time by scripts/build-worker.sh via
@@ -41,7 +41,7 @@ var (
 )
 
 func main() {
-	logging.Init(os.Getenv("APPITOOLS_ENV"))
+	logging.Init(os.Getenv("APPXIMO_ENV"))
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -61,16 +61,16 @@ func main() {
 		return pgx.Connect(ctx, dsn)
 	}
 
-	// Pick the consumer. APPITOOLS_WORKER_MODE = echo (default) | writeback | xlsx
-	// | email. The legacy APPITOOLS_WORKER_WRITEBACK=on still maps to "writeback".
+	// Pick the consumer. APPXIMO_WORKER_MODE = echo (default) | writeback | xlsx
+	// | email. The legacy APPXIMO_WORKER_WRITEBACK=on still maps to "writeback".
 	//
 	// One mode = one consumer for the WHOLE worker; a mode acks the topics it does
 	// not own. Running two DIFFERENT single-mode workers against the SAME outbox is
 	// unsafe (each acks/drops the other's events under SKIP LOCKED) — to handle more
 	// than one event type, compose a consumers.Router in a custom worker main.go
 	// (ADR-016 library model) and run N identical Router workers. See docs/DEPLOY.md.
-	mode := os.Getenv("APPITOOLS_WORKER_MODE")
-	if mode == "" && os.Getenv("APPITOOLS_WORKER_WRITEBACK") == "on" {
+	mode := os.Getenv("APPXIMO_WORKER_MODE")
+	if mode == "" && os.Getenv("APPXIMO_WORKER_WRITEBACK") == "on" {
 		mode = "writeback"
 	}
 	var proc worker.Processor
@@ -87,11 +87,11 @@ func main() {
 
 	w := worker.New(connect, proc, worker.Config{}, logging.Log)
 
-	logging.Log.Info().Str("version", version).Str("revision", revision).Msg("appitools-worker starting")
+	logging.Log.Info().Str("version", version).Str("revision", revision).Msg("appximo-worker starting")
 	if err := w.Run(ctx); err != nil && ctx.Err() == nil {
-		logging.Log.Fatal().Err(err).Msg("appitools-worker exited with error")
+		logging.Log.Fatal().Err(err).Msg("appximo-worker exited with error")
 	}
-	logging.Log.Info().Msg("appitools-worker stopped")
+	logging.Log.Info().Msg("appximo-worker stopped")
 }
 
 // echoProcessor is the WORKER-V1 consumer: it logs the event and returns nil. It
@@ -116,19 +116,19 @@ func (p echoProcessor) Process(_ context.Context, row worker.Row) error {
 // newWritebackProcessor builds the SERVICE-JWT-V1 demo consumer from env:
 //
 //	JWT_SECRET                  (required) — shared with the engine, signs the service JWT
-//	APPITOOLS_ENGINE_URL        engine data-plane URL   (default http://localhost:8080)
-//	APPITOOLS_TENANT_DOMAIN     Host suffix per tenant  (default localhost → acme.localhost)
-//	APPITOOLS_WORKER_ROLE       scoped service role     (default service_worker)
+//	APPXIMO_ENGINE_URL        engine data-plane URL   (default http://localhost:8080)
+//	APPXIMO_TENANT_DOMAIN     Host suffix per tenant  (default localhost → acme.localhost)
+//	APPXIMO_WORKER_ROLE       scoped service role     (default service_worker)
 //
 // The role MUST be a minimally-scoped role in the schema RBAC — never admin.
 func newWritebackProcessor() worker.Processor {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		logging.Log.Fatal().Msg("APPITOOLS_WORKER_WRITEBACK=on requires JWT_SECRET (shared with the engine)")
+		logging.Log.Fatal().Msg("APPXIMO_WORKER_WRITEBACK=on requires JWT_SECRET (shared with the engine)")
 	}
-	engineURL := envOr("APPITOOLS_ENGINE_URL", "http://localhost:8080")
-	tenantDomain := envOr("APPITOOLS_TENANT_DOMAIN", "localhost")
-	role := envOr("APPITOOLS_WORKER_ROLE", "service_worker")
+	engineURL := envOr("APPXIMO_ENGINE_URL", "http://localhost:8080")
+	tenantDomain := envOr("APPXIMO_TENANT_DOMAIN", "localhost")
+	role := envOr("APPXIMO_WORKER_ROLE", "service_worker")
 
 	client := worker.NewEngineClient(engineURL, tenantDomain, secret, role, worker.DefaultServiceTokenTTL)
 	logging.Log.Info().
@@ -143,13 +143,13 @@ func newWritebackProcessor() worker.Processor {
 // newXLSXProcessor builds the XLSX-CONSUMER-V1 real consumer (FileJob pattern).
 // Same engine-client env as the write-back demo, plus:
 //
-//	APPITOOLS_WORKER_RESOURCE   the jobs resource (default filejobs)
+//	APPXIMO_WORKER_RESOURCE   the jobs resource (default filejobs)
 //
-// The service role (APPITOOLS_WORKER_ROLE, default service_worker) must have
+// The service role (APPXIMO_WORKER_ROLE, default service_worker) must have
 // read+update on that resource — read to fetch the job's file_ref, update to
 // write {status, result}.
 //
-// File source (FILES-V1): when APPITOOLS_FILES_DIR is set, file_ref is a VFS
+// File source (FILES-V1): when APPXIMO_FILES_DIR is set, file_ref is a VFS
 // file_id and the consumer streams the content-addressed blob via VFS.Get (the
 // worker opens a dedicated pool for the per-tenant metadata lookup, sharing the
 // SAME blob root as the engine on this host). Without it, file_ref is read as a
@@ -157,18 +157,18 @@ func newWritebackProcessor() worker.Processor {
 func newXLSXProcessor(ctx context.Context, dsn string) worker.Processor {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		logging.Log.Fatal().Msg("APPITOOLS_WORKER_MODE=xlsx requires JWT_SECRET (shared with the engine)")
+		logging.Log.Fatal().Msg("APPXIMO_WORKER_MODE=xlsx requires JWT_SECRET (shared with the engine)")
 	}
-	engineURL := envOr("APPITOOLS_ENGINE_URL", "http://localhost:8080")
-	tenantDomain := envOr("APPITOOLS_TENANT_DOMAIN", "localhost")
-	role := envOr("APPITOOLS_WORKER_ROLE", "service_worker")
-	resource := envOr("APPITOOLS_WORKER_RESOURCE", "filejobs")
+	engineURL := envOr("APPXIMO_ENGINE_URL", "http://localhost:8080")
+	tenantDomain := envOr("APPXIMO_TENANT_DOMAIN", "localhost")
+	role := envOr("APPXIMO_WORKER_ROLE", "service_worker")
+	resource := envOr("APPXIMO_WORKER_RESOURCE", "filejobs")
 
 	client := worker.NewEngineClient(engineURL, tenantDomain, secret, role, worker.DefaultServiceTokenTTL)
 	proc := consumers.NewXLSXProcessor(client, resource, logging.Log)
 
 	source := "local-path"
-	if filesDir := os.Getenv("APPITOOLS_FILES_DIR"); filesDir != "" {
+	if filesDir := os.Getenv("APPXIMO_FILES_DIR"); filesDir != "" {
 		pool, err := db.NewPool(ctx, dsn)
 		if err != nil {
 			logging.Log.Fatal().Err(err).Msg("worker: open pool for VFS metadata")
@@ -199,7 +199,7 @@ func newXLSXProcessor(ctx context.Context, dsn string) worker.Processor {
 //	SMTP_PORT   (required)  e.g. 587
 //	SMTP_FROM   (required)  e.g. "My App <no-reply@myapp.com>"
 //	SMTP_USER / SMTP_PASS   provider credentials (omit for an open/test relay)
-//	APPITOOLS_EMAIL_TOPIC   outbox topic to consume (default email.send)
+//	APPXIMO_EMAIL_TOPIC   outbox topic to consume (default email.send)
 //
 // Provider-agnostic: STARTTLS + AUTH PLAIN is the common denominator, so Brevo,
 // Resend, Mailgun, SES… all work by changing only these vars.
@@ -213,9 +213,9 @@ func newEmailProcessor() worker.Processor {
 	}
 	sender, err := consumers.NewSMTPSender(cfg)
 	if err != nil {
-		logging.Log.Fatal().Err(err).Msg("APPITOOLS_WORKER_MODE=email requires SMTP_HOST, SMTP_PORT and SMTP_FROM")
+		logging.Log.Fatal().Err(err).Msg("APPXIMO_WORKER_MODE=email requires SMTP_HOST, SMTP_PORT and SMTP_FROM")
 	}
-	topic := envOr("APPITOOLS_EMAIL_TOPIC", consumers.DefaultEmailTopic)
+	topic := envOr("APPXIMO_EMAIL_TOPIC", consumers.DefaultEmailTopic)
 	logging.Log.Info().
 		Str("smtp_host", cfg.Host).
 		Str("smtp_port", cfg.Port).

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/appximo/appximo/pkg/controlplane"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/controlplane"
 )
 
 // ENG-8 (CONSUMER-PATH-S1): the consumer's per-tenant provisioning seam. The

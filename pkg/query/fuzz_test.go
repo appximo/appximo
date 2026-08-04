@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // FuzzBuildQuery feeds attacker-controlled query parameters (the field name, the

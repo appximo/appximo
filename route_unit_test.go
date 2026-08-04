@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"encoding/json"
@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // tasksSchema is a minimal quickstart-shaped schema: one resource `tasks` with a

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/auth"
+	"github.com/appximo/appximo/pkg/auth"
 )
 
 // TestMintTokenAcceptedByEngineValidator mints a service token via the EngineClient

@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"context"
@@ -26,40 +26,40 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/miguelangel/appitools/migrations"
-	"github.com/miguelangel/appitools/pkg/adminui"
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/cache"
-	"github.com/miguelangel/appitools/pkg/codegen"
-	"github.com/miguelangel/appitools/pkg/controlplane"
-	"github.com/miguelangel/appitools/pkg/db"
-	"github.com/miguelangel/appitools/pkg/editorui"
-	"github.com/miguelangel/appitools/pkg/events"
-	"github.com/miguelangel/appitools/pkg/extensions"
-	"github.com/miguelangel/appitools/pkg/files"
-	"github.com/miguelangel/appitools/pkg/flowtest"
-	gqlhandler "github.com/miguelangel/appitools/pkg/graphql"
-	"github.com/miguelangel/appitools/pkg/logging"
-	appmiddleware "github.com/miguelangel/appitools/pkg/middleware"
-	"github.com/miguelangel/appitools/pkg/migration"
-	"github.com/miguelangel/appitools/pkg/observability"
-	"github.com/miguelangel/appitools/pkg/outbox"
-	"github.com/miguelangel/appitools/pkg/platformadmin"
-	"github.com/miguelangel/appitools/pkg/rbac"
-	"github.com/miguelangel/appitools/pkg/resilience"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/schemahistory"
-	"github.com/miguelangel/appitools/pkg/shutdown"
-	"github.com/miguelangel/appitools/pkg/tenant"
-	"github.com/miguelangel/appitools/pkg/userauth"
-	"github.com/miguelangel/appitools/scripts"
+	"github.com/appximo/appximo/migrations"
+	"github.com/appximo/appximo/pkg/adminui"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/cache"
+	"github.com/appximo/appximo/pkg/codegen"
+	"github.com/appximo/appximo/pkg/controlplane"
+	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/editorui"
+	"github.com/appximo/appximo/pkg/events"
+	"github.com/appximo/appximo/pkg/extensions"
+	"github.com/appximo/appximo/pkg/files"
+	"github.com/appximo/appximo/pkg/flowtest"
+	gqlhandler "github.com/appximo/appximo/pkg/graphql"
+	"github.com/appximo/appximo/pkg/logging"
+	appmiddleware "github.com/appximo/appximo/pkg/middleware"
+	"github.com/appximo/appximo/pkg/migration"
+	"github.com/appximo/appximo/pkg/observability"
+	"github.com/appximo/appximo/pkg/outbox"
+	"github.com/appximo/appximo/pkg/platformadmin"
+	"github.com/appximo/appximo/pkg/rbac"
+	"github.com/appximo/appximo/pkg/resilience"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/schemahistory"
+	"github.com/appximo/appximo/pkg/shutdown"
+	"github.com/appximo/appximo/pkg/tenant"
+	"github.com/appximo/appximo/pkg/userauth"
+	"github.com/appximo/appximo/scripts"
 )
 
 // version is the build version reported by /health. The cmd binary overrides it
 // via Config.Version (ldflags-injected); a plain library build reports "dev".
 const defaultVersion = "dev"
 
-// App is a constructed Appitools engine: schema-derived REST + GraphQL + OpenAPI,
+// App is a constructed Appximo engine: schema-derived REST + GraphQL + OpenAPI,
 // multi-tenant, plus any custom Class-1 routes registered before Start. Build it
 // with New, add routes with Register, run it with Start.
 type App struct {
@@ -158,7 +158,7 @@ type App struct {
 
 // New builds an engine from cfg. SchemaPath is required; the DSN, JWT secret,
 // admin key, port and env fall back to DATABASE_URL / JWT_SECRET / ADMIN_KEY /
-// 8080 / APPITOOLS_ENV when their Config fields are empty — so the pure binary
+// 8080 / APPXIMO_ENV when their Config fields are empty — so the pure binary
 // and a custom binary boot identically. It performs the SAME initialization the
 // `serve` command always has (pool, outbox table, hook runtime, observability,
 // control plane, caches, rate limiter); the goroutines and HTTP listeners are
@@ -174,28 +174,28 @@ func New(cfg Config) (*App, error) {
 		cfg.AdminKey = os.Getenv("ADMIN_KEY")
 	}
 	if cfg.Env == "" {
-		cfg.Env = os.Getenv("APPITOOLS_ENV")
+		cfg.Env = os.Getenv("APPXIMO_ENV")
 	}
 	if cfg.Port == 0 {
 		cfg.Port = 8080
 	}
 	if cfg.SchemaPath == "" {
-		return nil, errors.New("appitools: Config.SchemaPath is required")
+		return nil, errors.New("appximo: Config.SchemaPath is required")
 	}
 	if cfg.DSN == "" {
-		return nil, errors.New("appitools: DSN is required (set Config.DSN or DATABASE_URL)")
+		return nil, errors.New("appximo: DSN is required (set Config.DSN or DATABASE_URL)")
 	}
 	if cfg.JWTSecret == "" {
-		return nil, errors.New("appitools: JWT secret is required (set Config.JWTSecret or JWT_SECRET)")
+		return nil, errors.New("appximo: JWT secret is required (set Config.JWTSecret or JWT_SECRET)")
 	}
 	if cfg.AdminKey == "" {
-		return nil, errors.New("appitools: admin key is required (set Config.AdminKey or ADMIN_KEY)")
+		return nil, errors.New("appximo: admin key is required (set Config.AdminKey or ADMIN_KEY)")
 	}
 
 	logging.Init(cfg.Env)
 
 	// Phase-0 runtime backpressure (LIBRARY-HARDEN-S1): apply GOMEMLIMIT/GOGC from
-	// the env here, in the library, so EVERY appitools.New binary — a custom
+	// the env here, in the library, so EVERY appximo.New binary — a custom
 	// backend included — gets the same soft memory ceiling, not just `serve`.
 	applyRuntimeLimits()
 
@@ -222,7 +222,7 @@ func New(cfg Config) (*App, error) {
 	// Pool — context.Background so the pool outlives New; closed in Start's cleanup.
 	pool, err := db.NewPool(context.Background(), cfg.DSN)
 	if err != nil {
-		return nil, fmt.Errorf("appitools: connect db: %w", err)
+		return nil, fmt.Errorf("appximo: connect db: %w", err)
 	}
 	app.pool = pool
 
@@ -241,13 +241,13 @@ func New(cfg Config) (*App, error) {
 	// tenant), so no new privilege is assumed.
 	if _, err := pool.Exec(context.Background(), migrations.ControlPlane); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("appitools: bootstrap control plane: %w", err)
+		return nil, fmt.Errorf("appximo: bootstrap control plane: %w", err)
 	}
 	log.Println("control plane: public.tenants schema ready")
 
 	if err := outbox.EnsureTable(context.Background(), pool); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("appitools: ensure outbox table: %w", err)
+		return nil, fmt.Errorf("appximo: ensure outbox table: %w", err)
 	}
 	log.Println("outbox: public.outbox table ready")
 
@@ -258,7 +258,7 @@ func New(cfg Config) (*App, error) {
 	// best-effort: a failure is loud but never blocks boot.
 	if err := schemahistory.EnsureTable(context.Background(), pool); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("appitools: %w", err)
+		return nil, fmt.Errorf("appximo: %w", err)
 	}
 	if n, bfErr := controlplane.BackfillSchemaHistory(context.Background(), pool); bfErr != nil {
 		log.Printf("WARNING: schema history backfill: %v", bfErr)
@@ -270,7 +270,7 @@ func New(cfg Config) (*App, error) {
 	// regression runs (same idempotent-ensure pattern).
 	if err := flowtest.EnsureTables(context.Background(), pool); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("appitools: %w", err)
+		return nil, fmt.Errorf("appximo: %w", err)
 	}
 
 	app.tdb = db.NewTenantDB(pool)
@@ -281,43 +281,43 @@ func New(cfg Config) (*App, error) {
 	// config: R2/Spaces/MinIO/AWS). A misconfigured s3 backend fails boot loudly;
 	// the local blob root is created lazily on the first upload, so an engine
 	// that never serves /api/files pays nothing.
-	filesBackendName := strings.ToLower(strings.TrimSpace(coalesce(cfg.FilesBackend, os.Getenv("APPITOOLS_FILES_BACKEND"))))
-	uploadPolicy := files.NewUploadPolicy(coalesceCSV(cfg.FilesAllowedExt, os.Getenv("APPITOOLS_FILES_ALLOWED_EXT")))
+	filesBackendName := strings.ToLower(strings.TrimSpace(coalesce(cfg.FilesBackend, os.Getenv("APPXIMO_FILES_BACKEND"))))
+	uploadPolicy := files.NewUploadPolicy(coalesceCSV(cfg.FilesAllowedExt, os.Getenv("APPXIMO_FILES_ALLOWED_EXT")))
 	var filesBackend files.Backend
 	switch filesBackendName {
 	case "", "local":
-		filesDir := coalesce(cfg.FilesDir, os.Getenv("APPITOOLS_FILES_DIR"))
+		filesDir := coalesce(cfg.FilesDir, os.Getenv("APPXIMO_FILES_DIR"))
 		if filesDir == "" {
-			filesDir = "/var/lib/appitools/files"
+			filesDir = "/var/lib/appximo/files"
 		}
 		filesBackend = files.NewLocalBackend(filesDir)
 		log.Printf("files: local backend at %s", filesDir)
 	case "s3":
 		s3cfg := files.S3Config{
-			Bucket:         coalesce(cfg.FilesS3Bucket, os.Getenv("APPITOOLS_FILES_S3_BUCKET")),
-			Endpoint:       coalesce(cfg.FilesS3Endpoint, os.Getenv("APPITOOLS_FILES_S3_ENDPOINT")),
-			Region:         coalesce(cfg.FilesS3Region, os.Getenv("APPITOOLS_FILES_S3_REGION")),
-			AccessKey:      coalesce(cfg.FilesS3AccessKey, os.Getenv("APPITOOLS_FILES_S3_ACCESS_KEY")),
-			SecretKey:      coalesce(cfg.FilesS3SecretKey, os.Getenv("APPITOOLS_FILES_S3_SECRET_KEY")),
-			ForcePathStyle: cfg.FilesS3ForcePathStyle || envTruthy(os.Getenv("APPITOOLS_FILES_S3_FORCE_PATH_STYLE")),
-			Prefix:         coalesce(cfg.FilesS3Prefix, os.Getenv("APPITOOLS_FILES_S3_PREFIX")),
-			ServeMode:      files.S3ServeMode(coalesce(cfg.FilesS3ServeMode, os.Getenv("APPITOOLS_FILES_S3_SERVE"))),
+			Bucket:         coalesce(cfg.FilesS3Bucket, os.Getenv("APPXIMO_FILES_S3_BUCKET")),
+			Endpoint:       coalesce(cfg.FilesS3Endpoint, os.Getenv("APPXIMO_FILES_S3_ENDPOINT")),
+			Region:         coalesce(cfg.FilesS3Region, os.Getenv("APPXIMO_FILES_S3_REGION")),
+			AccessKey:      coalesce(cfg.FilesS3AccessKey, os.Getenv("APPXIMO_FILES_S3_ACCESS_KEY")),
+			SecretKey:      coalesce(cfg.FilesS3SecretKey, os.Getenv("APPXIMO_FILES_S3_SECRET_KEY")),
+			ForcePathStyle: cfg.FilesS3ForcePathStyle || envTruthy(os.Getenv("APPXIMO_FILES_S3_FORCE_PATH_STYLE")),
+			Prefix:         coalesce(cfg.FilesS3Prefix, os.Getenv("APPXIMO_FILES_S3_PREFIX")),
+			ServeMode:      files.S3ServeMode(coalesce(cfg.FilesS3ServeMode, os.Getenv("APPXIMO_FILES_S3_SERVE"))),
 		}
 		s3b, s3err := files.NewS3Backend(context.Background(), s3cfg)
 		if s3err != nil {
 			pool.Close()
-			return nil, fmt.Errorf("appitools: %w", s3err)
+			return nil, fmt.Errorf("appximo: %w", s3err)
 		}
 		filesBackend = s3b
 		log.Printf("files: s3 backend — bucket %q endpoint %q (serve mode %s)",
 			s3cfg.Bucket, s3cfg.Endpoint, s3cfg.ServeMode)
 	default:
 		pool.Close()
-		return nil, fmt.Errorf("appitools: unknown files backend %q (use \"local\" or \"s3\")", filesBackendName)
+		return nil, fmt.Errorf("appximo: unknown files backend %q (use \"local\" or \"s3\")", filesBackendName)
 	}
 	app.files = files.NewStore(filesBackend, files.NewPGStore(pool), files.WithUploadPolicy(uploadPolicy))
 	app.filesMaxBytes = files.DefaultMaxUploadBytes
-	if v := os.Getenv("APPITOOLS_FILES_MAX_BYTES"); v != "" {
+	if v := os.Getenv("APPXIMO_FILES_MAX_BYTES"); v != "" {
 		if n, perr := strconv.ParseInt(v, 10, 64); perr == nil && n > 0 {
 			app.filesMaxBytes = n
 		}
@@ -325,7 +325,7 @@ func New(cfg Config) (*App, error) {
 	app.filesTokenTTL = files.DefaultSignedURLTTL
 	if cfg.FilesTokenTTLSeconds > 0 {
 		app.filesTokenTTL = time.Duration(cfg.FilesTokenTTLSeconds) * time.Second
-	} else if v := os.Getenv("APPITOOLS_FILES_TOKEN_TTL"); v != "" {
+	} else if v := os.Getenv("APPXIMO_FILES_TOKEN_TTL"); v != "" {
 		if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
 			app.filesTokenTTL = time.Duration(n) * time.Second
 		}
@@ -403,7 +403,7 @@ func New(cfg Config) (*App, error) {
 	// until MT-STRUCT-S1; it is now Config/env-parameterized (default preserved)
 	// so N engines can coexist on one box. Boot config only — not the hot path.
 	if cfg.ControlPort == 0 {
-		if v := os.Getenv("APPITOOLS_CONTROL_PORT"); v != "" {
+		if v := os.Getenv("APPXIMO_CONTROL_PORT"); v != "" {
 			if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
 				cfg.ControlPort = n
 			}
@@ -434,18 +434,18 @@ func New(cfg Config) (*App, error) {
 	policyBytes, err := json.Marshal(s.RBAC)
 	if err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("appitools: serialize RBAC policy: %w", err)
+		return nil, fmt.Errorf("appximo: serialize RBAC policy: %w", err)
 	}
 	var rbacPolicy rbac.Policy
 	if err := json.Unmarshal(policyBytes, &rbacPolicy); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("appitools: parse RBAC policy: %w", err)
+		return nil, fmt.Errorf("appximo: parse RBAC policy: %w", err)
 	}
 	app.rbacPolicy = &rbacPolicy
 
 	// SSE hub.
 	maxSSE := 0
-	if v := os.Getenv("APPITOOLS_MAX_SSE_PER_TENANT"); v != "" {
+	if v := os.Getenv("APPXIMO_MAX_SSE_PER_TENANT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			maxSSE = n
 		}
@@ -484,7 +484,7 @@ func New(cfg Config) (*App, error) {
 	// pre-authentication surface. Applies ONLY to routes registered Public.
 	pubRPS := cfg.PublicRouteRPS
 	if pubRPS <= 0 {
-		if v := os.Getenv("APPITOOLS_PUBLIC_ROUTE_RPS"); v != "" {
+		if v := os.Getenv("APPXIMO_PUBLIC_ROUTE_RPS"); v != "" {
 			if f, perr := strconv.ParseFloat(v, 64); perr == nil && f > 0 {
 				pubRPS = f
 			}
@@ -495,7 +495,7 @@ func New(cfg Config) (*App, error) {
 	}
 	pubBurst := cfg.PublicRouteBurst
 	if pubBurst <= 0 {
-		if v := os.Getenv("APPITOOLS_PUBLIC_ROUTE_BURST"); v != "" {
+		if v := os.Getenv("APPXIMO_PUBLIC_ROUTE_BURST"); v != "" {
 			if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
 				pubBurst = n
 			}
@@ -517,17 +517,17 @@ func New(cfg Config) (*App, error) {
 	// boot fails — a typo never becomes a silent "everyone signs up as <unknown>".
 	signupRole := cfg.AuthSignupRole
 	if signupRole == "" {
-		signupRole = os.Getenv("APPITOOLS_AUTH_SIGNUP_ROLE")
+		signupRole = os.Getenv("APPXIMO_AUTH_SIGNUP_ROLE")
 	}
 	if signupRole != "" {
 		if _, ok := rbacPolicy.Roles[signupRole]; !ok {
 			pool.Close()
-			return nil, fmt.Errorf("appitools: AuthSignupRole %q is not a role declared in the schema RBAC", signupRole)
+			return nil, fmt.Errorf("appximo: AuthSignupRole %q is not a role declared in the schema RBAC", signupRole)
 		}
 	}
 	minPw := cfg.AuthMinPasswordLength
 	if minPw <= 0 {
-		if v := os.Getenv("APPITOOLS_AUTH_MIN_PASSWORD"); v != "" {
+		if v := os.Getenv("APPXIMO_AUTH_MIN_PASSWORD"); v != "" {
 			if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
 				minPw = n
 			}
@@ -535,15 +535,15 @@ func New(cfg Config) (*App, error) {
 	}
 	// AUTH-EMAIL-V1: password reset + email verification. The reset/verify flows
 	// enqueue an "email.send" event to the outbox (delivered async by the email
-	// worker, APPITOOLS_WORKER_MODE=email) — the topic must match the worker's
-	// APPITOOLS_EMAIL_TOPIC. RequireVerified gates login on a verified email;
+	// worker, APPXIMO_WORKER_MODE=email) — the topic must match the worker's
+	// APPXIMO_EMAIL_TOPIC. RequireVerified gates login on a verified email;
 	// BaseURL overrides the email-link origin (else derived from the request Host).
-	requireVerified := cfg.AuthRequireVerified || envTruthy(os.Getenv("APPITOOLS_AUTH_REQUIRE_VERIFIED"))
+	requireVerified := cfg.AuthRequireVerified || envTruthy(os.Getenv("APPXIMO_AUTH_REQUIRE_VERIFIED"))
 	baseURL := cfg.AuthBaseURL
 	if baseURL == "" {
-		baseURL = os.Getenv("APPITOOLS_AUTH_BASE_URL")
+		baseURL = os.Getenv("APPXIMO_AUTH_BASE_URL")
 	}
-	emailTopic := os.Getenv("APPITOOLS_EMAIL_TOPIC") // empty → NewService defaults to "email.send"
+	emailTopic := os.Getenv("APPXIMO_EMAIL_TOPIC") // empty → NewService defaults to "email.send"
 
 	// AUTH-OAUTH-V1: social login providers from env. A provider is offered ONLY
 	// when its client id is set, so leaving these unset disables OAuth with no boot
@@ -552,39 +552,39 @@ func New(cfg Config) (*App, error) {
 	oauthProviders := cfg.OAuthProviders
 	if oauthProviders == nil {
 		oauthProviders = map[string]userauth.OAuthProviderConfig{
-			"google":    {ClientID: os.Getenv("APPITOOLS_OAUTH_GOOGLE_CLIENT_ID"), ClientSecret: os.Getenv("APPITOOLS_OAUTH_GOOGLE_CLIENT_SECRET")},
-			"github":    {ClientID: os.Getenv("APPITOOLS_OAUTH_GITHUB_CLIENT_ID"), ClientSecret: os.Getenv("APPITOOLS_OAUTH_GITHUB_CLIENT_SECRET")},
-			"microsoft": {ClientID: os.Getenv("APPITOOLS_OAUTH_MICROSOFT_CLIENT_ID"), ClientSecret: os.Getenv("APPITOOLS_OAUTH_MICROSOFT_CLIENT_SECRET")},
+			"google":    {ClientID: os.Getenv("APPXIMO_OAUTH_GOOGLE_CLIENT_ID"), ClientSecret: os.Getenv("APPXIMO_OAUTH_GOOGLE_CLIENT_SECRET")},
+			"github":    {ClientID: os.Getenv("APPXIMO_OAUTH_GITHUB_CLIENT_ID"), ClientSecret: os.Getenv("APPXIMO_OAUTH_GITHUB_CLIENT_SECRET")},
+			"microsoft": {ClientID: os.Getenv("APPXIMO_OAUTH_MICROSOFT_CLIENT_ID"), ClientSecret: os.Getenv("APPXIMO_OAUTH_MICROSOFT_CLIENT_SECRET")},
 		}
 	}
 	oauthCallbackURL := cfg.OAuthCallbackURL
 	if oauthCallbackURL == "" {
-		oauthCallbackURL = os.Getenv("APPITOOLS_OAUTH_CALLBACK_URL")
+		oauthCallbackURL = os.Getenv("APPXIMO_OAUTH_CALLBACK_URL")
 	}
 	oauthDefaultRole := cfg.OAuthDefaultRole
 	if oauthDefaultRole == "" {
-		oauthDefaultRole = os.Getenv("APPITOOLS_OAUTH_DEFAULT_ROLE")
+		oauthDefaultRole = os.Getenv("APPXIMO_OAUTH_DEFAULT_ROLE")
 	}
 	if oauthDefaultRole != "" {
 		if _, ok := rbacPolicy.Roles[oauthDefaultRole]; !ok {
 			pool.Close()
-			return nil, fmt.Errorf("appitools: OAuthDefaultRole %q is not a role declared in the schema RBAC", oauthDefaultRole)
+			return nil, fmt.Errorf("appximo: OAuthDefaultRole %q is not a role declared in the schema RBAC", oauthDefaultRole)
 		}
 	}
 	oauthSuccessRedirect := cfg.OAuthSuccessRedirect
 	if oauthSuccessRedirect == "" {
-		oauthSuccessRedirect = os.Getenv("APPITOOLS_OAUTH_SUCCESS_REDIRECT")
+		oauthSuccessRedirect = os.Getenv("APPXIMO_OAUTH_SUCCESS_REDIRECT")
 	}
 
 	// AUTH-MFA-V1: TOTP second factor. The secret-encryption key falls back to the
 	// JWT secret (so MFA works out of the box); MFAIssuer labels the authenticator app.
 	mfaKey := cfg.MFAKey
 	if mfaKey == "" {
-		mfaKey = os.Getenv("APPITOOLS_MFA_KEY")
+		mfaKey = os.Getenv("APPXIMO_MFA_KEY")
 	}
 	mfaIssuer := cfg.MFAIssuer
 	if mfaIssuer == "" {
-		mfaIssuer = os.Getenv("APPITOOLS_MFA_ISSUER")
+		mfaIssuer = os.Getenv("APPXIMO_MFA_ISSUER")
 	}
 
 	// One shared per-tenant identity store, used by BOTH the password identity core
@@ -596,8 +596,8 @@ func New(cfg Config) (*App, error) {
 	// admin API. It WRAPS the existing control plane and REUSES the existing
 	// per-tenant identity + RBAC — it is not a second permission system. Built
 	// before authSvc so the login flow can consult its tenant-suspension predicate.
-	platformSuperAdminRole := os.Getenv("APPITOOLS_PLATFORM_SUPER_ADMIN_ROLE")
-	platformMFAIssuer := os.Getenv("APPITOOLS_PLATFORM_MFA_ISSUER")
+	platformSuperAdminRole := os.Getenv("APPXIMO_PLATFORM_SUPER_ADMIN_ROLE")
+	platformMFAIssuer := os.Getenv("APPXIMO_PLATFORM_MFA_ISSUER")
 	// obsSentinel is a resource name no schema can declare (resource names match
 	// ^[a-z][a-z0-9_]*$ — no dots, no leading underscore) — Allows(role, obsSentinel, "read") is true only
 	// for a wildcard-resource admin role, the "admin-grade" test for tenant-scoped
@@ -687,7 +687,7 @@ func New(cfg Config) (*App, error) {
 	if signupRole != "" {
 		log.Printf("auth: password identity enabled (public signup → role %q)", signupRole)
 	} else {
-		log.Println("auth: password identity enabled (public signup DISABLED — set APPITOOLS_AUTH_SIGNUP_ROLE to enable)")
+		log.Println("auth: password identity enabled (public signup DISABLED — set APPXIMO_AUTH_SIGNUP_ROLE to enable)")
 	}
 	log.Printf("auth: reset/verify email flows enabled (require_verified=%t, email topic via outbox)", requireVerified)
 	if app.authSvc.OAuthEnabled() {
@@ -701,20 +701,20 @@ func New(cfg Config) (*App, error) {
 	}
 
 	// CORS (API-PRODUCTIVA-V1): cross-origin policy for the public data-plane
-	// routes. Config fields win; each falls back to its APPITOOLS_CORS_* env var.
+	// routes. Config fields win; each falls back to its APPXIMO_CORS_* env var.
 	// An empty origin list (the default) leaves CORS DISABLED — the middleware is
 	// not even wired, so a default deployment pays zero and never emits an
 	// Access-Control-* header. An operator enables it by listing browser origins.
 	app.corsConfig = appmiddleware.CORSConfig{
-		AllowedOrigins:   coalesceCSV(cfg.CORSAllowedOrigins, os.Getenv("APPITOOLS_CORS_ORIGINS")),
-		AllowedMethods:   coalesceCSV(cfg.CORSAllowedMethods, os.Getenv("APPITOOLS_CORS_METHODS")),
-		AllowedHeaders:   coalesceCSV(cfg.CORSAllowedHeaders, os.Getenv("APPITOOLS_CORS_HEADERS")),
-		ExposedHeaders:   coalesceCSV(cfg.CORSExposedHeaders, os.Getenv("APPITOOLS_CORS_EXPOSE_HEADERS")),
-		AllowCredentials: cfg.CORSAllowCredentials || envTruthy(os.Getenv("APPITOOLS_CORS_CREDENTIALS")),
+		AllowedOrigins:   coalesceCSV(cfg.CORSAllowedOrigins, os.Getenv("APPXIMO_CORS_ORIGINS")),
+		AllowedMethods:   coalesceCSV(cfg.CORSAllowedMethods, os.Getenv("APPXIMO_CORS_METHODS")),
+		AllowedHeaders:   coalesceCSV(cfg.CORSAllowedHeaders, os.Getenv("APPXIMO_CORS_HEADERS")),
+		ExposedHeaders:   coalesceCSV(cfg.CORSExposedHeaders, os.Getenv("APPXIMO_CORS_EXPOSE_HEADERS")),
+		AllowCredentials: cfg.CORSAllowCredentials || envTruthy(os.Getenv("APPXIMO_CORS_CREDENTIALS")),
 		MaxAge:           cfg.CORSMaxAge,
 	}
 	if app.corsConfig.MaxAge == 0 {
-		if v := os.Getenv("APPITOOLS_CORS_MAX_AGE"); v != "" {
+		if v := os.Getenv("APPXIMO_CORS_MAX_AGE"); v != "" {
 			if n, perr := strconv.Atoi(v); perr == nil {
 				app.corsConfig.MaxAge = n
 			}
@@ -724,7 +724,7 @@ func New(cfg Config) (*App, error) {
 		log.Printf("CORS enabled for /api,/auth,/graphql,/openapi — origins: %s (credentials=%t)",
 			strings.Join(app.corsConfig.AllowedOrigins, ", "), app.corsConfig.AllowCredentials)
 	} else {
-		log.Println("CORS disabled (no origins configured — set APPITOOLS_CORS_ORIGINS to enable browser cross-origin access)")
+		log.Println("CORS disabled (no origins configured — set APPXIMO_CORS_ORIGINS to enable browser cross-origin access)")
 	}
 
 	// engineRefs for custom-route Ctx helpers: compile validators once. The
@@ -740,11 +740,11 @@ func New(cfg Config) (*App, error) {
 		ctxMinPw = 8 // the same default userauth.NewService applies
 	}
 	// SafeGo goroutine deadline (LIBRARY-HARDEN-S1): Config wins, then
-	// APPITOOLS_SAFEGO_TIMEOUT (seconds), then the 30s default.
+	// APPXIMO_SAFEGO_TIMEOUT (seconds), then the 30s default.
 	safeGoTimeout := defaultSafeGoTimeout
 	if cfg.SafeGoTimeoutSeconds > 0 {
 		safeGoTimeout = time.Duration(cfg.SafeGoTimeoutSeconds) * time.Second
-	} else if v := os.Getenv("APPITOOLS_SAFEGO_TIMEOUT"); v != "" {
+	} else if v := os.Getenv("APPXIMO_SAFEGO_TIMEOUT"); v != "" {
 		if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
 			safeGoTimeout = time.Duration(n) * time.Second
 		}
@@ -783,7 +783,7 @@ func New(cfg Config) (*App, error) {
 // Register after Start returns an error.
 func (a *App) Register(rt Route) error {
 	if a.started {
-		return errors.New("appitools: Register must be called before Start")
+		return errors.New("appximo: Register must be called before Start")
 	}
 	seen := make(map[string]bool, len(a.routes))
 	for _, existing := range a.routes {
@@ -826,7 +826,7 @@ func (a *App) logf(format string, args ...any) { log.Printf(format, args...) }
 // shutdown sequence. It blocks until shutdown completes.
 func (a *App) Start() error {
 	if a.started {
-		return errors.New("appitools: Start called twice")
+		return errors.New("appximo: Start called twice")
 	}
 
 	// Custom-route authorization (LIBRARY-GAPS-S1, ADR-021): every `routes` grant
@@ -878,9 +878,9 @@ func (a *App) Start() error {
 	// statement of fact; a failed bind prints only the error.
 	ln, err := shutdown.Listen(addr)
 	if err != nil {
-		return fmt.Errorf("appitools: cannot listen on %s: %w", addr, err)
+		return fmt.Errorf("appximo: cannot listen on %s: %w", addr, err)
 	}
-	fmt.Printf("Appitools serving on %s — Ctrl+C to stop\n", addr)
+	fmt.Printf("Appximo serving on %s — Ctrl+C to stop\n", addr)
 	if err := a.ss.Serve(ctx, srv, ln, 5*time.Second, a.cleanup); err != nil {
 		return err
 	}
@@ -903,7 +903,7 @@ func (a *App) runBeforeStart(ctx context.Context) error {
 		return nil
 	}
 	if err := a.cfg.BeforeStart(ctx, a.pool); err != nil {
-		return fmt.Errorf("appitools: BeforeStart: %w", err)
+		return fmt.Errorf("appximo: BeforeStart: %w", err)
 	}
 	return nil
 }
@@ -926,7 +926,7 @@ func (a *App) startBackground(ctx context.Context) {
 	// In the multi-app runtime a bare Host resolves to the process-level 404
 	// handler, so the runner disables it per app (noSynthetic) instead of
 	// letting every app log canary failures.
-	if os.Getenv("APPITOOLS_SYNTHETIC") != "off" && !a.noSynthetic {
+	if os.Getenv("APPXIMO_SYNTHETIC") != "off" && !a.noSynthetic {
 		a.synthmon.AddDynamic(observability.DynamicCheck{
 			Name:    "api-canary",
 			Resolve: canaryResolver(a.pool, a.schema, a.cfg.JWTSecret, a.cfg.Port),
@@ -1207,10 +1207,10 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 
 	if a.cfg.Env == "development" {
 		// Dev-only pprof. The port was ":6060" hardcoded until MT-STRUCT-S1;
-		// APPITOOLS_PPROF_PORT overrides it (default preserved) so N dev
+		// APPXIMO_PPROF_PORT overrides it (default preserved) so N dev
 		// engines can coexist on one box.
 		pprofAddr := ":6060"
-		if v := os.Getenv("APPITOOLS_PPROF_PORT"); v != "" {
+		if v := os.Getenv("APPXIMO_PPROF_PORT"); v != "" {
 			if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
 				pprofAddr = fmt.Sprintf(":%d", n)
 			}
@@ -1218,7 +1218,7 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 		pprofMux := chimiddleware.Profiler()
 		pprofSrv := &http.Server{Addr: pprofAddr, Handler: pprofMux, ReadHeaderTimeout: 10 * time.Second}
 		go func() {
-			log.Printf("WARNING: pprof profiler enabled on %s (APPITOOLS_ENV=development)", pprofAddr)
+			log.Printf("WARNING: pprof profiler enabled on %s (APPXIMO_ENV=development)", pprofAddr)
 			if err := pprofSrv.ListenAndServe(); err != nil {
 				log.Println("pprof server:", err)
 			}
@@ -1264,13 +1264,13 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 	} else if !editorui.HasBuiltAssets() {
 		log.Println("editor: serving /editor (WARNING: no built assets embedded — run `make editor-ui` (npm run build) before `go build`)")
 	} else {
-		log.Println("editor: visual schema editor (Appitools Studio) served at /editor")
+		log.Println("editor: visual schema editor (Appximo Studio) served at /editor")
 	}
 	// EDITOR-BOOT-SYNC: the SOURCE schema the engine serves, so Studio boots
 	// showing reality instead of a frontend sample. Same thin/read-only class
 	// as /editor/validate (JWT-skipped via the /editor prefix, off hot path).
 	r.Get("/editor/current-schema", a.serveCurrentSchema)
-	// DOC-2: the "copy AI context" payload — `appitools spec` + this app's schema,
+	// DOC-2: the "copy AI context" payload — `appximo spec` + this app's schema,
 	// so the owner can paste one block into their own assistant.
 	r.Get("/editor/ai-context", a.serveAIContext)
 
@@ -1307,7 +1307,7 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 	// differ (one exploring GraphQL, one locked down); the env fallback covers
 	// single-engine `serve`, mirroring the CORS pattern just above.
 	allowGraphQLIntrospection := a.cfg.Env == "development" || a.cfg.GraphQLPlayground ||
-		envTruthy(os.Getenv("APPITOOLS_GRAPHQL_PLAYGROUND"))
+		envTruthy(os.Getenv("APPXIMO_GRAPHQL_PLAYGROUND"))
 	r.With(appmiddleware.StrictCSP).Handle("/graphql",
 		gqlhandler.BuildHandler(surf.schema, a.tdb, a.hr, surf.policy, a.eventsHub, allowGraphQLIntrospection))
 	if allowGraphQLIntrospection {
@@ -1316,7 +1316,7 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 		// queries/mutations with a real Authorization header. It NEEDS the same
 		// gate as introspection above (it is unusable without it).
 		r.With(appmiddleware.PermissiveCSP).Handle("/graphiql", gqlhandler.PlaygroundHandler("/graphql"))
-		log.Println("GraphiQL playground enabled at /graphiql (APPITOOLS_ENV=development or APPITOOLS_GRAPHQL_PLAYGROUND=on)")
+		log.Println("GraphiQL playground enabled at /graphiql (APPXIMO_ENV=development or APPXIMO_GRAPHQL_PLAYGROUND=on)")
 	}
 
 	// User static mounts (LOOSE-ENDS-SWEEP-S1) — registered BEFORE the group that
@@ -1401,7 +1401,7 @@ func coalesce(a, b string) string {
 
 // coalesceCSV returns cfgVal when non-empty, otherwise the comma-separated env
 // string parsed into a trimmed, non-empty slice (nil when both are empty). Used to
-// resolve the CORS list config fields against their APPITOOLS_CORS_* env vars.
+// resolve the CORS list config fields against their APPXIMO_CORS_* env vars.
 func coalesceCSV(cfgVal []string, env string) []string {
 	if len(cfgVal) > 0 {
 		return cfgVal
@@ -1430,7 +1430,7 @@ func envTruthy(v string) bool {
 	}
 }
 
-// ── relocated engine helpers (moved verbatim from cmd/appitools) ────────────
+// ── relocated engine helpers (moved verbatim from cmd/appximo) ────────────
 
 // isInfraPath reports whether p is an internal infrastructure/admin endpoint
 // that must not be counted as tenant application traffic.
@@ -1488,7 +1488,7 @@ func flushObsSnapshots(ctx context.Context, store *observability.ObsStore, rings
 func backupHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	outputDir := os.Getenv("BACKUP_DIR")
 	if outputDir == "" {
-		outputDir = "/tmp/appitools-backups"
+		outputDir = "/tmp/appximo-backups"
 	}
 	return func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

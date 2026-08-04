@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	sd "github.com/miguelangel/appitools/pkg/schemadiff"
+	sd "github.com/appximo/appximo/pkg/schemadiff"
 )
 
 func schemaEquivalent(a, b *sd.Schema) bool {

@@ -4,11 +4,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/schemadiff"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/schemadiff"
 )
 
-// buildDesiredSchema maps an Appitools API schema (the tenant's JSON, the model
+// buildDesiredSchema maps an Appximo API schema (the tenant's JSON, the model
 // the engine already parses) onto the canonical schemadiff.Schema — the bridge
 // between the engine's schema vocabulary and the migration engine's comparable
 // model. It is built so that diffing it against a tenant the historical converger

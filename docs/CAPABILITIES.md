@@ -1,4 +1,4 @@
-# Appitools — Capability Inventory
+# Appximo — Capability Inventory
 
 Everything the engine does, one line each — verified against the code, not the docs.
 Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
@@ -10,7 +10,7 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 - Compiles one JSON schema into a full API at boot — no handlers, models, or migrations.
 - Generates REST per resource — `GET` (list + by id), `POST`, `PUT`, `PATCH`, `DELETE` on `/api/{resource}`.
 - Generates GraphQL from the same schema — queries + `create`/`update`/`delete` mutations at `/graphql`.
-- Generates an OpenAPI **3.0.3** spec — `appitools openapi schema.json`, importable into Swagger/Hoppscotch.
+- Generates an OpenAPI **3.0.3** spec — `appximo openapi schema.json`, importable into Swagger/Hoppscotch.
 - Creates the tenant's Postgres tables automatically — idempotent DDL when a tenant registers.
 - `file` field type — attaches an uploaded file to a **record** with real referential
   integrity (a `file_id` column with a per-tenant FK to the file store; bad reference →
@@ -64,15 +64,15 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 - Filters rows with dynamic conditions — `operator_id = $user_id` resolves to the JWT subject.
 - Denies by default — no matching policy → 403; no token → 401; row excluded by a condition → 404.
 - Compiles RBAC at boot — roles added via `PUT` + reload do not take effect until restart.
-- Mints dev tokens from the CLI — `appitools token --tenant X --role Y`.
+- Mints dev tokens from the CLI — `appximo token --tenant X --role Y`.
 
 ## Identity (auth-as-product)
 
 - Serves in-engine signup/login/refresh at `POST /auth/*` — the issued JWT is the SAME one the engine validates (one token contract, no second path).
 - Isolates users per tenant — they live in `tenant_<id>.auth_users`, so **email is unique per tenant, not globally** (the same email is a distinct account in two tenants — the structural edge over Supabase Auth).
 - Hashes passwords with **argon2id** (pure Go, no CGO), paid only on signup/login — never the request hot path; anti-enumeration login (uniform 401, timing-equalized) + per-identity throttle.
-- Opt-in public signup — off by default; `APPITOOLS_AUTH_SIGNUP_ROLE` enables it and pins the role (a client-supplied role is ignored).
-- **Password reset + email verification** — single-use tokens delivered async via the outbox + email worker; `APPITOOLS_AUTH_REQUIRE_VERIFIED` can gate login on a verified email.
+- Opt-in public signup — off by default; `APPXIMO_AUTH_SIGNUP_ROLE` enables it and pins the role (a client-supplied role is ignored).
+- **Password reset + email verification** — single-use tokens delivered async via the outbox + email worker; `APPXIMO_AUTH_REQUIRE_VERIFIED` can gate login on a verified email.
 - **Social login (OAuth2)** — Google, GitHub, Microsoft; standard authorization-code flow, tenant carried in a signed state (not the Host), identity linked by stable provider id, no new dependency. A provider is offered only when its client id is set.
 - **TOTP MFA (RFC 6238)** — opt-in per user, AES-256-GCM-encrypted secret, one-time backup codes, two-step login (an intermediate `mfa_token` that carries no role, so it can't authorize CRUD).
 - **Stateless sessions** — no server-side session/denylist; logout = discard the token; forced revocation is via admin suspend (blocks new logins; issued JWTs live to `exp`). No refresh-token rotation, magic-link/passwordless, or passkeys yet.
@@ -91,7 +91,7 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 - Applies RBAC at delivery — fields and rows your role can't see never reach your stream.
 - Isolates streams per tenant — one tenant's events never cross into another's stream.
 - Caps SSE connections per tenant — over the cap → 429; a comment ping every 25 s keeps proxies open.
-- Dispatches signed webhooks — async `POST`, HMAC-SHA256 (`X-Appitools-Signature`), 3 retries with backoff.
+- Dispatches signed webhooks — async `POST`, HMAC-SHA256 (`X-Appximo-Signature`), 3 retries with backoff.
 - Guards webhooks against SSRF — HTTPS-only, loopback/private/link-local IPs refused (logged, never sent).
 
 ## Custom logic (extensions)
@@ -115,7 +115,7 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 - SLO burn-rate state — 5m/1h error ratios, `ok`/`warning`/`critical`, Slack alerts with cooldown.
 - Per-tenant anomaly detector — EWMA z-score over request latencies.
 - Built-in synthetic monitor — 60 s loop over `/health` + a canary derived from the loaded schema.
-- Traceable version — `/health` and `appitools version` report the binary's build commit.
+- Traceable version — `/health` and `appximo version` report the binary's build commit.
 
 ## Operations
 
@@ -181,10 +181,10 @@ engineering. Re-verified against the running engine and the field reports on
 - **Single node** — no HA/clustering; scale is vertical.
 - **The Go module is not published.** Writing custom handlers (the "10 %" path)
   requires a local checkout plus a `replace` directive in your `go.mod`: `go get
-  github.com/miguelangel/appitools` does not work, so a project using the framework
+  github.com/appximo/appximo` does not work, so a project using the framework
   mode does not build on a teammate's machine or in CI. This is a publishing
   decision, not a code gap — see `docs/BACKEND_SPEC_LLM.md` §3.0.
-- **The platform super-admin is created from a terminal only** (`appitools admin
+- **The platform super-admin is created from a terminal only** (`appximo admin
   create`, needs `DATABASE_URL`). Studio's deploy flow requires one and says so, but
   cannot create it — so the visual path stops at the moment it becomes useful.
 - **`install.sh --app=NAME` (several apps on one box) has never run on a real
@@ -197,12 +197,12 @@ engineering. Re-verified against the running engine and the field reports on
 - **No hosted/SaaS version** — self-hosted only, by design.
 
 (Former limits now closed and documented elsewhere: declarative relations + real
-FKs (`?include=`), CORS (`APPITOOLS_CORS_ORIGINS`), GraphQL `update` mutation,
+FKs (`?include=`), CORS (`APPXIMO_CORS_ORIGINS`), GraphQL `update` mutation,
 opt-in list totals (`?count=true`), `default` values applied on insert, `indexes`
 materialized as real DB indexes, write-path response-cache invalidation, and the
 tenant list on the admin API (`GET /admin/tenants`).)
 
-(The former "no visual schema editor" limit is closed: **Appitools Studio**
+(The former "no visual schema editor" limit is closed: **Appximo Studio**
 ships embedded at `/editor` — full schema-grammar design, per-tenant deploy
 with migration preview + destructive gate, one-click engine restart, and a
 tenant files manager. The schema remains plain JSON you can also write by hand.)

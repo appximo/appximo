@@ -3,7 +3,7 @@ package tenant
 import (
 	"sync"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // SchemaCache holds the compiled API schemas for active tenants in memory.

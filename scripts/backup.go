@@ -1,5 +1,5 @@
 // Package scripts holds operational commands that run pg_dump and other external
-// tooling on behalf of the appitools engine (CLI `appitools backup` and the admin
+// tooling on behalf of the appximo engine (CLI `appximo backup` and the admin
 // /admin/backup endpoint).
 package scripts
 
@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/appximo/appximo/pkg/logging"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/logging"
 )
 
 // ErrPgDumpNotFound is returned (wrapped) when the pg_dump binary is not on PATH,

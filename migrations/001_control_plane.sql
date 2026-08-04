@@ -1,4 +1,4 @@
--- Control plane tables for Appitools multi-tenant platform.
+-- Control plane tables for Appximo multi-tenant platform.
 -- Apply once against the shared PostgreSQL instance before starting the server.
 
 -- ── Tenants ──────────────────────────────────────────────────────────────────

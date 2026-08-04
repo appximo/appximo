@@ -99,8 +99,8 @@ admin rollback) now decode with `DisallowUnknownFields`. The `/admin` surface
 already had a strict `decode()` helper — the discipline existed and simply had not
 been applied to the paths where it matters most.
 
-### F-4 — `appitools serve <path>` served a different app than the one named
-Measured: `appitools serve /tmp/other.json` booted the `./schema.json` in the
+### F-4 — `appximo serve <path>` served a different app than the one named
+Measured: `appximo serve /tmp/other.json` booted the `./schema.json` in the
 working directory and served it. The operator pointed at one app and got another,
 with nothing said.
 
@@ -139,18 +139,18 @@ decision rather than a patch. Each is filed with its file:line and a probe.
 
 ### Configuration (OPS-13)
 Nineteen environment variables whose parse failure silently reverts to a default:
-`RATE_LIMIT_RPS`, `RATE_LIMIT_BURST`, `APPITOOLS_AUTH_MIN_PASSWORD`,
-`APPITOOLS_CONTROL_PORT`, `APPITOOLS_FILES_MAX_BYTES`, `DB_MAX_CONNS`,
-`APPITOOLS_MAX_TX_OPS` and more. Measured: booting with `RATE_LIMIT_RPS=abc`
+`RATE_LIMIT_RPS`, `RATE_LIMIT_BURST`, `APPXIMO_AUTH_MIN_PASSWORD`,
+`APPXIMO_CONTROL_PORT`, `APPXIMO_FILES_MAX_BYTES`, `DB_MAX_CONNS`,
+`APPXIMO_MAX_TX_OPS` and more. Measured: booting with `RATE_LIMIT_RPS=abc`
 logs `rate limiter: 1000 RPS / 100 burst per tenant` and never mentions that the
 operator's value was rejected. `envTruthy` maps **any** unrecognized value to
-false, including on `APPITOOLS_AUTH_REQUIRE_VERIFIED` — a security toggle.
-There is also **no inventory of the 60+ `APPITOOLS_*` variables**, so a misspelled
+false, including on `APPXIMO_AUTH_REQUIRE_VERIFIED` — a security toggle.
+There is also **no inventory of the 60+ `APPXIMO_*` variables**, so a misspelled
 one is simply never read.
 
 **Ready:** one `envInt`/`envBool`/`envDuration` helper that logs
 `WARNING: RATE_LIMIT_RPS="abc" is not a number — using 1000` and a boot-time
-inventory check that warns on an unknown `APPITOOLS_*` variable.
+inventory check that warns on an unknown `APPXIMO_*` variable.
 
 ### Write bodies (ENG-21)
 No write body in `pkg/codegen` uses `DisallowUnknownFields`, though the engine
@@ -389,7 +389,7 @@ change, enumerated in the session report).
   same work on both deny paths (no timing/length channel). Naming the
   difference in the response would be a role-enumeration oracle (same family as
   SEC-5: a defence must not leak through its own error channel). A test pins
-  both halves. `appitools token --schema <file>` now REFUSES an undeclared
+  both halves. `appximo token --schema <file>` now REFUSES an undeclared
   role, listing the declared set — the place the typo can be told the truth.
 - **ENG-25.** `validateFilterValue` rejects, BEFORE any SQL exists, a filter
   value Postgres could not cast — naming the parameter, the value and the type.

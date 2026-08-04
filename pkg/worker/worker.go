@@ -1,5 +1,5 @@
 // Package worker implements the outbox consumer (ADR-016 §Class 2): a SEPARATE
-// process (cmd/appitools-worker) that drains rows the engine wrote to
+// process (cmd/appximo-worker) that drains rows the engine wrote to
 // public.outbox and runs each through a Processor. It is deliberately NOT a
 // goroutine inside the engine — it survives engine restarts and never touches the
 // engine's request hot path (the engine only WRITES to the outbox; the worker
@@ -31,7 +31,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
 
-	"github.com/miguelangel/appitools/pkg/outbox"
+	"github.com/appximo/appximo/pkg/outbox"
 )
 
 // Beginner is any pgx handle that can start a transaction — both *pgx.Conn and

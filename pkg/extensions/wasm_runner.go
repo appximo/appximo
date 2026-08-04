@@ -24,9 +24,9 @@ const (
 	// no deadline of its own.
 	wasmDefaultTimeout = 500 * time.Millisecond
 	// wasmHostModule is the import module name under which the host functions
-	// (appitools_log, appitools_now) are exported to guests.
-	wasmHostModule = "appitools"
-	// wasmMaxLogBytes caps a single appitools_log message. A guest controls the
+	// (appximo_log, appximo_now) are exported to guests.
+	wasmHostModule = "appximo"
+	// wasmMaxLogBytes caps a single appximo_log message. A guest controls the
 	// (ptr,len) it passes, so without this it could log up to its full 16 MiB of
 	// linear memory per call and flood the log/disk.
 	wasmMaxLogBytes = 4096
@@ -38,7 +38,7 @@ type wasmTenantKey struct{}
 // WasmRunner executes sandboxed WASM (Capa 3) modules. Each module is compiled
 // once and cached per (tenant, module-hash); instances are created and destroyed
 // per Execute call. Guests get NO filesystem, network, clock-walltime, or syscall
-// access — only the two host functions appitools_log and appitools_now. Execution
+// access — only the two host functions appximo_log and appximo_now. Execution
 // time is bounded by the caller's context deadline (or wasmDefaultTimeout), and
 // the runtime is configured to abort a running guest when that context is done.
 type WasmRunner struct {
@@ -73,7 +73,7 @@ func NewWasmRunner(ctx context.Context) (*WasmRunner, error) {
 // no network, no syscalls — just logging and a monotonic-ish clock.
 func (wr *WasmRunner) registerHostFunctions(ctx context.Context) error {
 	_, err := wr.runtime.NewHostModuleBuilder(wasmHostModule).
-		// appitools_log(ptr, len): read a UTF-8 string from guest memory → zerolog.
+		// appximo_log(ptr, len): read a UTF-8 string from guest memory → zerolog.
 		NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, m api.Module, ptr, length uint32) {
 			if length > wasmMaxLogBytes {
@@ -84,13 +84,13 @@ func (wr *WasmRunner) registerHostFunctions(ctx context.Context) error {
 				zlog.Info().Str("tenant", tid).Str("source", "wasm").Msg(string(buf))
 			}
 		}).
-		Export("appitools_log").
-		// appitools_now(): current time in unix milliseconds.
+		Export("appximo_log").
+		// appximo_now(): current time in unix milliseconds.
 		NewFunctionBuilder().
 		WithFunc(func(context.Context) int64 {
 			return time.Now().UnixMilli()
 		}).
-		Export("appitools_now").
+		Export("appximo_now").
 		Instantiate(ctx)
 	return err
 }

@@ -10,8 +10,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/miguelangel/appitools/pkg/auth"
-	"github.com/miguelangel/appitools/pkg/outbox"
+	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/outbox"
 )
 
 // Sentinel errors the handlers map to HTTP status codes. Login NEVER distinguishes
@@ -56,7 +56,7 @@ type Config struct {
 
 	// EmailTopic is the outbox topic the reset/verify flows enqueue email events
 	// to (default "email.send"). It MUST match the email worker's
-	// APPITOOLS_EMAIL_TOPIC so the consumer picks the events up.
+	// APPXIMO_EMAIL_TOPIC so the consumer picks the events up.
 	EmailTopic string
 	// BaseURL optionally overrides the origin used to build email links
 	// (e.g. "https://acme.example.com"). Empty ⇒ the link origin is derived from
@@ -104,7 +104,7 @@ type Config struct {
 	// recoverable (the server re-derives codes), so it is encrypted, not hashed.
 	MFAKey string
 	// MFAIssuer is the issuer label shown in the authenticator app (otpauth URI).
-	// Empty ⇒ "Appitools".
+	// Empty ⇒ "Appximo".
 	MFAIssuer string
 }
 
@@ -137,7 +137,7 @@ func NewService(store *Store, cfg Config) *Service {
 	if cfg.EmailTopic == "" {
 		cfg.EmailTopic = "email.send"
 	}
-	dummy, _ := HashPassword("appitools-anti-enumeration-timing-equalizer")
+	dummy, _ := HashPassword("appximo-anti-enumeration-timing-equalizer")
 	// MFA secret cipher: encrypts the TOTP secret at rest. Key material is MFAKey,
 	// falling back to the (always-present) JWTSecret, so MFA works out of the box.
 	mfaKey := cfg.MFAKey
@@ -318,7 +318,7 @@ func (s *Service) mint(user User, tenantID string) (string, error) {
 //
 // Both flows enqueue an "email.send" event to the transactional outbox IN THE
 // SAME TX as the token row, so the email and the token are atomic. The email is
-// delivered ASYNC by the email consumer (cmd/appitools-worker, mode=email) — the
+// delivered ASYNC by the email consumer (cmd/appximo-worker, mode=email) — the
 // request returns immediately. If no email worker is running, the event waits
 // durably in the outbox and goes out when one starts (the user already saw "if
 // that email exists, we sent a link"). The plain token rides the email link;

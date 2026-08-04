@@ -5,14 +5,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // TestMetaSchema_Compiles ensures the embedded meta-schema itself is a valid JSON
-// Schema (a compile error here is a bug in appitools.schema.json).
+// Schema (a compile error here is a bug in appximo.schema.json).
 func TestMetaSchema_Compiles(t *testing.T) {
 	// A trivially-valid document exercises compilation without asserting content.
-	raw := []byte(`{"$schema":"https://appitools.dev/schema/v1","version":"1"}`)
+	raw := []byte(`{"$schema":"https://appximo.com/schema/v1","version":"1"}`)
 	if errs := schema.ValidateAgainstMetaSchema(raw); len(errs) != 0 {
 		t.Fatalf("minimal valid schema rejected (meta-schema may not compile / be too strict): %v", errs)
 	}

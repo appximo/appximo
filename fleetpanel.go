@@ -1,4 +1,4 @@
-package appitools
+package appximo
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/miguelangel/appitools/pkg/fleet"
+	"github.com/appximo/appximo/pkg/fleet"
 )
 
 // MT-STRUCT-S5 — the unified fleet console: ONE face over the N in-process
@@ -22,7 +22,7 @@ import (
 // surface underneath (the S3 isolation is not bypassable from here).
 //
 // Auth taxonomy (decided in S5): the console is gated by the FLEET-OPERATOR
-// key (manifest `operator_key` / APPITOOLS_FLEET_OPERATOR_KEY) — the server
+// key (manifest `operator_key` / APPXIMO_FLEET_OPERATOR_KEY) — the server
 // owner's credential, distinct by validation from every app's ADMIN_KEY and
 // JWT_SECRET. A missing or wrong key is a UNIFORM 404 (anti-fingerprinting,
 // the signed-files pattern), and an empty key disables the console entirely
@@ -151,7 +151,7 @@ func (p *fleetPanel) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /fleet/api/apps", p.requireOperator(p.handleAddApp))
 	mux.HandleFunc("DELETE /fleet/api/apps/{name}", p.requireOperator(p.handleRemoveApp))
 	// FLEET-EDIT-S1: edit an EXISTING app's env (add/change/remove keys) hot,
-	// no restart — e.g. turning on APPITOOLS_GRAPHQL_PLAYGROUND for one app.
+	// no restart — e.g. turning on APPXIMO_GRAPHQL_PLAYGROUND for one app.
 	mux.HandleFunc("PATCH /fleet/api/apps/{name}", p.requireOperator(p.handleEditApp))
 	// FLEET-DB-ASSIST: the declared instances + a connection test. Both are
 	// server-side: credentials never reach the browser (the console references
@@ -457,7 +457,7 @@ const fleetConsoleHTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Appitools — Fleet</title>
+<title>Appximo — Fleet</title>
 <style>
 :root{
   --bg:#fafafa;--panel:#ffffff;--border:#e4e4e7;--text:#18181b;--muted:#71717a;
@@ -539,7 +539,7 @@ button.subtle:hover{border-color:var(--accent)}
 </head>
 <body>
 <header>
-  <h1>Appitools · Fleet</h1>
+  <h1>Appximo · Fleet</h1>
   <span class="sub" id="summary">loading…</span>
   <div class="right"><button class="toggle" onclick="flip()">◐ theme</button></div>
 </header>
@@ -554,7 +554,7 @@ button.subtle:hover{border-color:var(--accent)}
       <label for="f-domains">domains (comma-separated)</label>
       <input id="f-domains" placeholder="optica.example.com" autocomplete="off">
       <label for="f-schema">schema JSON (paste — e.g. from Studio's Code view or your agent)</label>
-      <textarea id="f-schema" spellcheck="false" placeholder='{ "$schema": "https://appitools.dev/schema/v1", ... }'></textarea>
+      <textarea id="f-schema" spellcheck="false" placeholder='{ "$schema": "https://appximo.com/schema/v1", ... }'></textarea>
       <label>database</label>
       <div class="dbsec">
         <div class="seg" id="db-modes">
@@ -602,7 +602,7 @@ button.subtle:hover{border-color:var(--accent)}
     <div id="edit-rows"></div>
     <button type="button" class="ghost" onclick="addEnvRow()" style="margin-top:8px">+ row</button>
     <label for="edit-unset" style="display:block;margin-top:12px;font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">unset keys (comma-separated)</label>
-    <input id="edit-unset" placeholder="APPITOOLS_GRAPHQL_PLAYGROUND" autocomplete="off" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 9px;font-size:12.5px;font-family:var(--mono)">
+    <input id="edit-unset" placeholder="APPXIMO_GRAPHQL_PLAYGROUND" autocomplete="off" style="width:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 9px;font-size:12.5px;font-family:var(--mono)">
     <div class="form actions" style="margin-top:14px">
       <button class="primary" id="edit-submit" onclick="applyEdit()">Apply (hot — no restart)</button>
       <button class="ghost" onclick="closeEdit()">Cancel</button>
@@ -637,7 +637,7 @@ async function load(){
         '<a href="http://'+esc(dm)+PORT+'/admin" target="_blank">Admin</a>'+
         '<a href="http://'+esc(dm)+PORT+'/docs" target="_blank">Docs</a>'+
         // GraphiQL (GRAPHQL-EXPLORER-S1): only mounted in dev or with the
-        // operator's APPITOOLS_GRAPHQL_PLAYGROUND opt-in, same as /docs is
+        // operator's APPXIMO_GRAPHQL_PLAYGROUND opt-in, same as /docs is
         // always mounted — a 404 here in a locked-down prod fleet is expected.
         '<a href="http://'+esc(dm)+PORT+'/graphiql" target="_blank">GraphQL</a>').join('');
       const obsRows = Object.entries(a.obs).map(([t,o]) =>
@@ -797,7 +797,7 @@ function addEnvRow(key, val){
   const rows = document.getElementById('edit-rows');
   const row = document.createElement('div'); row.className='envrow';
   row.innerHTML =
-    '<input class="key" placeholder="APPITOOLS_GRAPHQL_PLAYGROUND" autocomplete="off" value="'+esc(key||'')+'">'+
+    '<input class="key" placeholder="APPXIMO_GRAPHQL_PLAYGROUND" autocomplete="off" value="'+esc(key||'')+'">'+
     '<input class="val" placeholder="on" autocomplete="off" value="'+esc(val||'')+'">'+
     '<button type="button" class="ghost" onclick="this.parentElement.remove()">✕</button>';
   rows.appendChild(row);

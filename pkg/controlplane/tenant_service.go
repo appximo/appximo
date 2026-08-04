@@ -9,12 +9,12 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/appximo/appximo/pkg/migration"
+	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/schemahistory"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/miguelangel/appitools/pkg/migration"
-	"github.com/miguelangel/appitools/pkg/schema"
-	"github.com/miguelangel/appitools/pkg/schemahistory"
 )
 
 // tenantIDRe is THE tenant id rule: the INTERSECTION of the two alphabets the id
@@ -297,8 +297,8 @@ func RegisterTenantWithHook(ctx context.Context, pool *pgxpool.Pool, req Registe
 		// everything this registration created; a failed create leaves the
 		// system exactly as it was.
 		if cleanupErr := rollbackFailedRegistration(ctx, pool, req.TenantID, pgSchema); cleanupErr != nil {
-			log.Printf("CRITICAL: tenant %q registration failed AND cleanup failed — remove it manually with `appitools tenant delete %s --yes`: cleanup error: %v", req.TenantID, req.TenantID, cleanupErr)
-			return nil, fmt.Errorf("apply migrations: %w (automatic rollback also failed — remove the tenant with `appitools tenant delete %s --yes`)", migErr, req.TenantID)
+			log.Printf("CRITICAL: tenant %q registration failed AND cleanup failed — remove it manually with `appximo tenant delete %s --yes`: cleanup error: %v", req.TenantID, req.TenantID, cleanupErr)
+			return nil, fmt.Errorf("apply migrations: %w (automatic rollback also failed — remove the tenant with `appximo tenant delete %s --yes`)", migErr, req.TenantID)
 		}
 		return nil, fmt.Errorf("apply migrations: %w (the registration was rolled back — no tenant was left behind)", migErr)
 	}

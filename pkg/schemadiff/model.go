@@ -283,7 +283,7 @@ type Index struct {
 	Opclass string
 }
 
-// EnumType is a Postgres enum type with its labels in sort order. Appitools' own
+// EnumType is a Postgres enum type with its labels in sort order. Appximo' own
 // converger does not create enums (enum fields are TEXT + app-layer validation),
 // but the model captures them so an introspected schema that has them is faithful.
 type EnumType struct {

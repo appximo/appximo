@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/miguelangel/appitools/pkg/schema"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 func TestLoadFromFile_FileNotFound(t *testing.T) {
@@ -51,7 +51,7 @@ func TestLoadFromFile_MissingSchemaField(t *testing.T) {
 
 func TestLoadFromFile_MissingVersionField(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "schema.json")
-	payload := `{"$schema":"https://appitools.dev/schema/v1","name":"test"}`
+	payload := `{"$schema":"https://appximo.com/schema/v1","name":"test"}`
 	if err := os.WriteFile(f, []byte(payload), 0644); err != nil {
 		t.Fatal(err)
 	}

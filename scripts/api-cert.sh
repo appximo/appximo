@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# api-cert.sh — run the Appitools API certification suite (Newman) against a live
+# api-cert.sh — run the Appximo API certification suite (Newman) against a live
 # engine serving the ERP demo (tenant "nimbus"). It mints the JWTs the collection
 # needs (an external consumer cannot mint its own — only the engine holds the
 # secret), writes a Postman environment, and runs `newman run`. Any failed
@@ -7,7 +7,7 @@
 #
 # Usage:  bash scripts/api-cert.sh
 # Env:    TARGET_URL (default http://localhost:8080), TENANT_ID (default nimbus),
-#         APPITOOLS_SECRETS (default /root/.appitools-secrets-dev), BIN
+#         APPXIMO_SECRETS (default .env.dev), BIN
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,7 +15,7 @@ cd "$REPO_ROOT"
 
 TARGET_URL="${TARGET_URL:-http://localhost:8080}"
 TENANT="${TENANT_ID:-nimbus}"
-SECRETS="${APPITOOLS_SECRETS:-/root/.appitools-secrets-dev}"
+SECRETS="${APPXIMO_SECRETS:-.env.dev}"
 COLLECTION="examples/erp-demo/api-cert.postman_collection.json"
 ENV_FILE="/tmp/api-cert-env-$$.json"
 
@@ -31,7 +31,7 @@ if [ -z "${JWT_SECRET:-}" ]; then
   exit 1
 fi
 
-BIN="${BIN:-./appitools-dev}"; [ -x "$BIN" ] || BIN="./appitools"
+BIN="${BIN:-./appximo-dev}"; [ -x "$BIN" ] || BIN="./appximo"
 mint() { "$BIN" token --tenant "$TENANT" --secret "$JWT_SECRET" --role "$1" ${2:+--user-id "$2"} 2>/dev/null | tail -1; }
 
 echo "▶ minting tokens for tenant '$TENANT' (roles: rrhh-admin, auditor, empleado)…"

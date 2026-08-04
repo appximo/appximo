@@ -1,5 +1,5 @@
 // Package aigen is the AI schema-generation layer: it turns a natural-language
-// description into a VALID Appitools schema.
+// description into a VALID Appximo schema.
 //
 // ARCHITECTURE (AI-F2-S4, decided with real data): the plain VALIDATOR-GUIDED LOOP.
 // The model generates a candidate schema; schema.ValidateReport (the engine's own
@@ -11,7 +11,7 @@
 //
 // ARCHIVED / EXPERIMENTAL — constrained decoding (AI-F1-S1 structured-outputs
 // envelope, AI-F2-S2 array-IR). The intent was to fix p_struct=1 at the decoder, but
-// the real Anthropic strict-outputs subset REJECTS the Appitools grammar (every
+// the real Anthropic strict-outputs subset REJECTS the Appximo grammar (every
 // object needs additionalProperties:false → the schema's open maps can't be
 // expressed; a hard 16-union-param cap → the field grammar with ~17 optionals
 // exceeds it), so both modes silently fall back to plain. They are kept opt-in

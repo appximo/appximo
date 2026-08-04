@@ -76,7 +76,7 @@ func TestApplyDefaults(t *testing.T) {
 func TestValidateDefault_LoadErrors(t *testing.T) {
 	mk := func(fd FieldDef) *APISchema {
 		return &APISchema{
-			Schema:    "https://appitools.dev/schema/v1",
+			Schema:    "https://appximo.com/schema/v1",
 			Version:   "1",
 			Name:      "t",
 			Resources: map[string]ResourceSchema{"items": {Fields: map[string]FieldDef{"f": fd}}},

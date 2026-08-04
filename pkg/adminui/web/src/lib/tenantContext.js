@@ -4,7 +4,7 @@ import { createSignal } from "solid-js"
 // it. Persisted in localStorage so a refresh keeps the context. (A future
 // tenant-admin would have a fixed tenant and no selector — documented extension
 // point: seed this from the JWT's tenant_id and hide the selector.)
-const KEY = "appitools_admin_tenant"
+const KEY = "appximo_admin_tenant"
 let initial = ""
 try { initial = localStorage.getItem(KEY) || "" } catch { /* ignore */ }
 
