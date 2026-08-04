@@ -318,6 +318,11 @@ already have a decision, and the reasoning may be the thing you need.
 
 ## The handoff-package rule (non-negotiable)
 
+> `nuevo_chat_web/` is the maintainer's internal handoff package; it is **not
+> part of the public repository**. If you are reading this from the public repo
+> and the directory is absent, this section does not apply to you — it governs
+> the maintainer's own working clone.
+
 **`nuevo_chat_web/` is a LIVING artifact, not a snapshot.** It is the
 strategic context — the plan, the decisions and their reasoning, the current phase,
 the architect's role and tone, the servers — that lives in the *conversation* and

@@ -48,8 +48,8 @@ jobs:
             exit 1
           fi
           case "$TARGET" in
-            *PROD-VPS*)
-              echo "::error::Refusing to active-scan production (PROD-VPS). Point this at a throwaway/staging instance."
+            *appitools.com*|*appximo.com*)
+              echo "::error::Refusing to active-scan a production domain. Point this at a throwaway/staging instance."
               exit 1
               ;;
           esac

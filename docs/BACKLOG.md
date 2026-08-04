@@ -260,7 +260,7 @@ refreshed).
 - **Evidence:** `GET https://api.appximo.com/healthz` → **525** on 3/3 attempts,
   `server: cloudflare`. The host resolves to a **Cloudflare** address
   (`2606:4700:3030::6815:4d8c`), while the two live apps resolve **directly** to the
-  origin (`PROD-VPS`) and both answer `/healthz` → **200**. A 525 is
+  origin (`the production VPS`) and both answer `/healthz` → **200**. A 525 is
   "Cloudflare could not complete the TLS handshake to the origin".
 - **Impact:** the public demo URL from PROD-PATH-GOLD-S1 — the one that proved the
   official install path end to end with a real Let's Encrypt certificate — is dead
@@ -316,16 +316,15 @@ refreshed).
 
 ### SEC-5 — (details delivered to the maintainer directly)
 - **Origin:** SILENT-FAILURE-S1 audit, verified live by the session.
-- **Class:** the same unrecognized-input family with the sign flipped — input that is
-  [redacted while open]
-- **Handling:** it is an exploitable information-disclosure vector, so per the
-  session's rule the reproduction was reported directly to the maintainer and is
-  deliberately NOT written in this file, in the audit document, or in any commit
-  message. Ask Miguel for the detail before working on it.
-- **Impact:** High. [redacted while open]
-- **Ready:** [redacted while open]
-  [redacted while open]
-  neighbouring file.
+- **Handling:** an exploitable finding, so per the session's rule the
+  reproduction — and everything that would narrow it down — was reported
+  directly to the maintainer and is deliberately NOT written in this file, in
+  the audit document, or in any commit message (the class, scope and fix sketch
+  live in the maintainer's internal handoff package). Ask Miguel for the detail
+  before working on it.
+- **Impact:** High.
+- **Ready:** fixed per the privately-delivered description, with a regression
+  test and a binary-diff-gate corpus row.
 
 ### SCHEMA-1 — Computed / derived fields
 - **Origin:** docs/MODEL_LAB.md G7 ("order totals as a computed field").

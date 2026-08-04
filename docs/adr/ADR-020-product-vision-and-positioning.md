@@ -7,7 +7,8 @@ architectural decision — not just an operational plan. Where ADR-016
 (extensibility) and ADR-019 (relations) decide *how the engine is built*, this
 one decides *what the engine is for, who it is for, and which constraints every
 future layer must respect*. The operational sequencing lives in
-[`ESTADO_Y_PLAN_MAESTRO.md`](../../ESTADO_Y_PLAN_MAESTRO.md) (the 7-phase plan);
+`ESTADO_Y_PLAN_MAESTRO.md` (the 7-phase plan — an internal planning document,
+not part of the public repository);
 the *why* lives here.
 
 ---

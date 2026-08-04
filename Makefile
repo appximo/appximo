@@ -228,7 +228,7 @@ test-reflex:
 cover:
 	go test -coverprofile=coverage.out -coverpkg=./... ./... -short -count=1 2>/dev/null || true
 	go tool cover -html=coverage.out -o coverage.html
-	@echo "→ tunnel: ssh -L 8090:localhost:8090 root@PROD-VPS"
+	@echo "→ tunnel: ssh -L 8090:localhost:8090 <your-server>"
 	python3 -m http.server 8090
 
 cover-treemap:
