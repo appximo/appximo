@@ -26,7 +26,12 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-02 (PHASE3-GUIDE-S1)** — the Phase-3 public-material
+**Last reviewed: 2026-08-05 (HOUSEKEEPING-S1)** — the post-publication
+operational sweep: OPS-19 (repo unification), SCHEMA-6 (`is_null` shipped),
+SEC-6 (JWT_SECRET floor enforced) closed and moved to DONE; OPS-17 executed to
+the edge of Miguel's DNS (demos redeployed on post-rename binaries, Caddy sites
+prepared); gh-pages recreated clean and the site is LIVE on GitHub Pages.
+Previous review: 2026-08-02 (PHASE3-GUIDE-S1) — the Phase-3 public-material
 pass: `docs/GUIDE.md` (the third-party master guide, distilled from the five
 field journeys) and `site/` (the official page, every number condition-attached)
 written and browser-verified; the zero-to-API path re-executed live; three stale
@@ -59,19 +64,6 @@ refreshed).
   changes a contract wider than one release").
 - **Ready:** a wrongly-typed variable for ANY declared type is a request error
   naming the variable and both types, or the tolerance is documented per type.
-
-### SEC-6 — No JWT-secret strength floor anywhere
-- **Origin:** NIGHT-SWEEP-S1 audit (CLI surface). `appximo token --secret
-  short` mints, and `serve` BOOTS, with a 5-character HS256 secret — while every
-  doc says "at least 32 characters". Rule 8 of ADR-024: when the engine states a
-  rule it must enforce it.
-- **Impact:** Medium (security posture). A weak secret makes every tenant's JWTs
-  forgeable; nothing warns.
-- **Why deferred:** a boot-refusal is a breaking change for dev setups and the
-  right floor (warn vs refuse, 32 chars vs entropy) is a product decision —
-  Miguel's call.
-- **Ready:** `serve` refuses (or at minimum WARNS loudly at boot) below a
-  documented floor; `token` warns; docs and the floor agree.
 
 ### OPS-16 — Small named-rejection residue from the NIGHT-SWEEP audit
 - **Origin:** NIGHT-SWEEP-S1 audit, all LOW, verified live, none silent-harmful
@@ -277,29 +269,6 @@ refreshed).
   **Miguel's call** — it is also fair to retire the hostname if the demo has moved.
 
 
-### SCHEMA-6 — Filtering by NULL has no declarative surface
-- **Origin:** SILENT-FAILURE-S1. Closing ENG-14 forced the question explicitly: now
-  that `?filter[x][is_null]=true` returns a clean `400` instead of the whole table,
-  **should the operator exist at all?**
-- **The decision this session made: NOT NOW, deliberately.** The session's mandate
-  was to close a defect class, and adding a filter operator is a capability, not a
-  fix: it touches the type×operator matrix, the GraphQL filter arguments (which must
-  stay in parity), `SCHEMA_REFERENCE.md`, the LLM grammar in `pkg/aigen` (so
-  generated schemas learn it), the AGENTS table and `CAPABILITIES.md`. Shipping that
-  inside an audit pass is the scope creep the audit exists to prevent.
-- **But the gap is real, and this is the honest part:** there is currently **no way
-  to filter by null in the declarative surface at all**. The veterinary app hit it.
-  The workarounds are a custom Go handler (framework mode, which needs the
-  unpublished module — DOC-2) or modelling the column as non-nullable with a
-  sentinel. So the clean `400` is, today, a dead end rather than a redirection.
-- **Impact:** Medium. "Show me the rows with no assigned vet / no invoice / no
-  closing date" is an ordinary business question.
-- **Ready:** `is_null` (and its negation) as a real operator on every nullable type,
-  rendering `IS NULL` / `IS NOT NULL` — value ignored or restricted to `true`/`false`
-  — with REST and GraphQL parity, a test per type, and the doc + LLM-grammar updates
-  that make it discoverable. Until then the `400` should name the limitation rather
-  than only listing the operators that do exist.
-
 ### SCHEMA-7 — Schema KEYS are strict; VALUES and key×type combinations are not
 - **Origin:** SILENT-FAILURE-S1 audit. The strict-key claim was verified and HOLDS at
   all 17 levels. One level down it does not: `auto: true` silently discards the
@@ -466,14 +435,24 @@ refreshed).
   sandbox credentials, the CUFE returned and stored, and the failure modes mapped
   to the `facturas` state machine.
 
-### OPS-17 — The live demo domains still carry the pre-rename name
-- **Origin:** RENAME-AND-PUBLISH-PREP-S1 (the rename session). `tiendita.appitools.com`
-  and `petfriendly.appitools.com` were deliberately NOT touched by the rename (live
-  apps, DNS + certs on the production VPS); the README links them with a
-  "moves to appximo.com next" note.
-- **Impact:** Medium (brand coherence).
-- **Ready:** DNS records under `appximo.com` for both demos, Caddy site blocks
-  updated, old domains redirected or retired, README/site links updated.
+### OPS-17 — Demo domains: DNS cutover to appximo.com (Miguel's half remains)
+- **Origin:** RENAME-AND-PUBLISH-PREP-S1; executed to the edge of DNS by
+  HOUSEKEEPING-S1 (2026-08-05). DONE already: both 58 demos REDEPLOYED on
+  post-rename binaries (tiendita: commerce ca57a48 on the appximo framework via
+  deploy-update.sh; petfriendly: engine 9ebeaa1), env files carry BOTH prefixes
+  (`APPITOOLS_*` kept + `APPXIMO_*` added — safe in both swap directions), ops
+  CLI updated, e2e purchase + vet CRUD/RBAC verified live, and
+  `/etc/caddy/appximo-sites.caddy.READY` holds the new site blocks + the 301
+  templates + the activation runbook.
+- **What remains (blocked on Miguel):** create DNS A records
+  `tiendita.appximo.com` → 162.243.64.58 and `petfriendly.appximo.com` →
+  162.243.64.58; then on the 58 follow the READY file (append blocks, `systemctl
+  reload caddy`, verify HTTPS, then flip the old `*.appitools.com` blocks to 301
+  redirects), and update README/site/GUIDE demo links to the new domains.
+  `api.appitools.com` stays dead (OPS-14) and `api.appximo.com` is deliberately
+  NOT created — the bare-engine demo was retired; petfriendly IS the engine demo.
+- **Ready:** both demos answer 200 on `*.appximo.com`, old domains 301, public
+  material links the new domains.
 
 ### OPS-18 — The `neodevtrix/appximo` Docker image: first publish pending; org namespace deferred
 - **Origin:** RENAME-AND-PUBLISH-PREP-S1; re-scoped by CI-GREEN-S1 (2026-08-05):
@@ -507,15 +486,30 @@ All three were **re-verified as still open on 2026-07-29**.
 
 | Item | Why it needs him |
 |---|---|
-| **Cloudflare proxy on `api.appximo.com`** | Still proxied (dig → Cloudflare IPs), but since PROD-JOURNEY-1B the 58 no longer serves that domain: Caddy's only site is `tiendita.appitools.com` (direct A record, measured clean), so `api.appximo.com` now dead-ends at the proxy. Decide: retire the DNS entry, point it somewhere real, or leave it dark. |
+| **Cloudflare proxy on `api.appitools.com`** | Still dead-ends at the proxy (the 58 has no site for it). HOUSEKEEPING-S1's OPS-17 decision: `api.appximo.com` is deliberately NOT created (the bare-engine demo was retired; petfriendly IS the engine demo) — so the only action left is Miguel retiring the old `api.appitools.com` DNS entry. |
 | **Cut the first release tag** | Still zero tags (`git tag` is empty) and `RELEASE_VERSION=""` at `scripts/install.sh:33`, so the documented "download the binary from GitHub Releases" path cannot work yet, and OPS-4 (version traceability) partly depends on it. |
 | ~~**Rotate the 58's PostgreSQL password**~~ | **RESOLVED by PROD-JOURNEY-1B (2026-07-31):** the wipe (`--uninstall --purge`) dropped the role and database; the reinstall generated a fresh password (plus fresh JWT/admin secrets, rotated again on-box after the installer printed them to stdout — see OPS-7). The exposed credential no longer exists. |
 | **Publish the Go module (the 10 % path is blocked on it)** | `github.com/appximo/appximo` is private with no tag, so `go get` / `go mod tidy` FAIL for anyone building a custom backend: the only recipe that works is a local checkout plus an absolute-path `replace`, which does not build on a teammate's machine, in CI, or in a plain `docker build`. This is now written honestly at the top of `backend-spec` §3.0 (with exactly what changes once it is published), but it is a **product blocker, not a doc gap** — the framework half of the product is unreachable outside this machine until the repo is public or a tagged private module + `GOPRIVATE` is set up. Part of **DOC-2**, which is otherwise DONE. |
 | **Give `/root/commerce` a remote** | The technical fix is trivial; the decision (which account, public or private, whether the commerce platform is a product or a demo) is his. See **OPS-5** — until then the field report lives on one disk. |
 | ~~**Pick the canonical repo URL**~~ (PHASE3-GUIDE-S1) | **RESOLVED by RENAME-AND-PUBLISH-PREP-S1 (2026-08-04):** everything is **`github.com/appximo/appximo`** — module path, imports, OpenAPI description, specs, badges, site. |
-| **Where `site/` lives** (PHASE3-GUIDE-S1) | The official page is finished, self-contained and browser-verified, with the repo/Releases/domain spots as dashed placeholders. Publishing venue (GitHub Pages over the repo, `appximo.com`, or a host) is his call; `site/README.md` documents what each choice changes (the relative `../docs/` links). |
+| ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in HOUSEKEEPING-S1 (2026-08-05)
+
+The post-publication operational sweep: the two product decisions Miguel took
+(`is_null`, the JWT-secret floor), the repo-flow unification, the demo redeploy
+to post-rename binaries, and a clean gh-pages with the site LIVE on Pages.
+
+| What shipped | Verified by |
+|---|---|
+| **SCHEMA-6 — `is_null` filter operator** — `?filter[field][is_null]=true|false` → `IS NULL`/`IS NOT NULL` on every nullable column; values exactly `true|1|false|0` (ENG-23 vocabulary); the implicit `id` / a `required` field → named 400 (a filter that can never match is refused); `json`/`jsonb` gain explicit operator entries (rejections now list the allowed set); GraphQL parity (`is_null: Boolean` on String/Date/RangeFilter + `NullFilter` for uuid/bool/file/json/jsonb — previously unfilterable) incl. the SDL generator; aggregation inherits via the shared `BuildQuery` core (the ENG-14 lesson); OpenAPI advertises it on nullable fields only. ADR-022 Decision 5 RESOLVED; AGENTS/SCHEMA_REFERENCE/FRONTEND_SPEC/CAPABILITIES/GUIDE updated | unit tests per type + vocabulary + never-null rejections + arg-index contiguity; live probe REST+GraphQL+aggregate 6/6; binary-diff gate 98 cases: 88 SAME + 10 DIFF, every one the feature landing (new-op 400s → feature responses; allowed-set lists grew; OpenAPI advertises the op), explained in the session report; full lane green |
+| **SEC-6 — JWT_SECRET floor enforced** — `appximo.New` refuses a secret under `MinJWTSecretLen=32`, naming the variable, the received length and the fix (`openssl rand -hex 32`); one seam covers serve, custom binaries and every fleet app; `appximo token` warns on a short `--secret`; docs (PRODUCTION/README/AGENTS) say "enforced" | boot with a 5-char secret refuses with the actionable message (live probe); 32-char boundary test; test-helper secret lengthened; full lane green |
+| **Repo flow unified (the maintainer's OPS-19)** — the public repo IS the working repo now; the internal handoff package moved to its own private repo (reachable via an untracked symlink from the working clone, history preserved via `git filter-repo`); the pre-filter full-history clone retired to a read-only archive; dev tooling defaults updated | build + `make test` + lint green from the unified repo; commit+push flow exercised (this session's pushes); devhub restarted from the new path, :3099 healthy |
+| **Demos on post-rename binaries (OPS-17, the executable half)** — tiendita redeployed via `deploy-update.sh` (commerce ca57a48 on the appximo framework), petfriendly on engine 9ebeaa1; env files carry both prefixes during the transition; ops CLI updated; Caddy site blocks for `*.appximo.com` prepared with the activation runbook + 301 templates (DNS is Miguel's — see OPS-17 above) | live e2e purchase (pendiente_pago → pagada/aprobado via signed webhook) on the 58; vet CRUD+RBAC live (row-scoping, mass-assignment 403, delete-not-granted 403); the 4 local commerce suites 43/43+18/18+21/21+21/21 |
+| **gh-pages clean + the site LIVE** — orphan-rooted gh-pages (the old branch's `data.js` carried unfiltered-history commit messages and was deliberately NOT republished); `site/` published at the branch root (`.nojekyll`, doc links absolute to the GitHub blob); the Benchmark workflow publishes `dev/bench/` into it | https://appximo.github.io/appximo/ answers 200 (Pages was already enabled); Playwright over the published structure: 390×844 + desktop, 0 h-scroll, 5/5 images, 0 console errors; `dev/bench/data.js` audited — only public-history commits |
+| **ABBA bench (hot path untouched in practice)** — four arms (base,new,new,base) × 10 runs on the canonical benchblank fixture | all four MWU group comparisons `no_change` under the max(0.5ms,3%) gate; controls A-A 1.6% / B-B 0.25%; effect 4.7–6.1% — inside the 105's 8.7–12% between-run CV floor |
 
 ## DONE in CI-GREEN-S1 (2026-08-05)
 
@@ -680,7 +674,7 @@ pre-session and session binaries, canonical baseline (dev-fast + `examples/blank
 **−3.30 %**, so the host's own drift is larger than the measured delta. All runs are
 in `benchmarks/history.tsv`.
 
-**`is_null` was NOT added** — see the note under SCHEMA-6.
+**`is_null` was NOT added in that session** — it shipped later (HOUSEKEEPING-S1, 2026-08-05; see DONE above).
 
 ## DONE in CERTIFY-S1 (2026-08-01)
 
