@@ -475,13 +475,18 @@ refreshed).
 - **Ready:** DNS records under `appximo.com` for both demos, Caddy site blocks
   updated, old domains redirected or retired, README/site links updated.
 
-### OPS-18 — The `appximo/appximo` Docker image does not exist yet
-- **Origin:** RENAME-AND-PUBLISH-PREP-S1. Every doc/compose names
-  `appximo/appximo`; the published image is still the historical pre-rename one.
-- **Impact:** High for the README quick start (the docker path 404s until this
-  lands — the README says so inline).
-- **Ready:** Docker Hub namespace `appximo` + publish secrets set, one green CI
-  on main; `docker pull appximo/appximo` works anonymously.
+### OPS-18 — The `neodevtrix/appximo` Docker image: first publish pending; org namespace deferred
+- **Origin:** RENAME-AND-PUBLISH-PREP-S1; re-scoped by CI-GREEN-S1 (2026-08-05):
+  the `appximo` Docker Hub org was not created (Docker Hub charges for orgs), so
+  the image publishes under the personal namespace **`neodevtrix/appximo`** —
+  every doc/compose/badge now says so, and the publish secrets are loaded.
+- **Impact:** Medium. The quick-start docker path 404s until the first green CI
+  on main pushes the image (the README says so inline). The namespace can
+  migrate to an `appximo` org later if the project justifies the fee — a rename
+  in docker-publish.yml + docs plus a deprecation tag on the old image.
+- **Ready:** `docker pull neodevtrix/appximo` works anonymously (green CI on
+  main → docker-publish.yml pushes). Reconsider the org when there is revenue
+  or a second maintainer.
 
 ---
 
@@ -528,7 +533,7 @@ publication, and the history's commit messages are otherwise preserved.
 | **Public-repo files** — SECURITY.md, CODE_OF_CONDUCT.md, LICENSE/NOTICE copyright named | filtered repo: build OK, `make test` OK, `make test-all` EXIT 0, lint 0 |
 
 New OPEN above: **OPS-17** (demo-domain DNS migration), **OPS-18** (image
-publication). Resolved: the canonical-URL decision (everything is
+publication under `neodevtrix/appximo`). Resolved: the canonical-URL decision (everything is
 `github.com/appximo/appximo`).
 
 ## DONE in PHASE3-GUIDE-S1 (2026-08-02)

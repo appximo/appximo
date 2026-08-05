@@ -9,7 +9,7 @@ Three ways to run it. Pick by goal:
 | **Production, max throughput** | [native binary + dockerized Postgres + reverse proxy](#level-3--maximum-performance-native-binary--dockerized-postgres) | Caddy or nginx | the benchmark config |
 
 Levels 1 and 2 use the published multi-arch image
-(`appximo/appximo`, linux/amd64 + linux/arm64 — Apple Silicon works
+(`neodevtrix/appximo`, linux/amd64 + linux/arm64 — Apple Silicon works
 natively). Level 3 runs the engine binary directly on the host — it is the
 stack the [public benchmark](../context-docs/BENCHMARK_PUBLIC.md) numbers come
 from.
@@ -145,7 +145,7 @@ Start with A; move to B when adding tenants becomes routine.
 ### Operations
 
 - **Upgrade**: `docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d` (the engine drains in-flight requests on SIGTERM).
-- **Pin a version**: replace `appximo/appximo:latest` with `appximo/appximo:<git-sha>` or a `v*` tag (every image is also pushed under its commit SHA).
+- **Pin a version**: replace `neodevtrix/appximo:latest` with `neodevtrix/appximo:<git-sha>` or a `v*` tag (every image is also pushed under its commit SHA).
 - **Backups**: `pg_dump` from the db container, or `POST /admin/backup?tenant=ID` if you add `postgresql16-client` to the engine image (see Dockerfile note).
 - **Metrics**: `GET /metrics` (Prometheus) is admin-gated with `X-Admin-Key`.
 
@@ -416,7 +416,7 @@ redelivery — for transactional email a rare duplicate is the accepted trade-of
 ```yaml
 # An email worker (compose). Coexisting with an xlsx worker? Read the next section.
   worker-email:
-    image: appximo/appximo:latest
+    image: neodevtrix/appximo:latest
     command: ["worker"]
     environment:
       DATABASE_URL: postgres://appximo:${DB_PASSWORD}@db:5432/appximo?sslmode=disable

@@ -4,7 +4,7 @@
 #   docker compose up -d   # pulls the published image + postgres, ~20s
 #
 # Uses the pre-built multi-arch image from Docker Hub — no Go toolchain, no
-# compile. To build from source instead: docker build -t appximo/appximo:latest .
+# compile. To build from source instead: docker build -t neodevtrix/appximo:latest .
 # For PRODUCTION (a VPS with a domain, automatic TLS, tenant subdomains) use
 # docker-compose.prod.yml — see docs/DEPLOY.md.
 #
@@ -18,7 +18,7 @@
 
 services:
   engine:
-    image: appximo/appximo:latest
+    image: neodevtrix/appximo:latest
     environment:
       DATABASE_URL: postgres://appximo:${DB_PASSWORD:-changeme}@db:5432/appximo?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}
@@ -48,7 +48,7 @@ services:
   # `deploy.replicas` or `docker compose up --scale worker=N`) and the N workers
   # claim disjoint rows — never double-processing (proven in WORKER-V1).
   worker:
-    image: appximo/appximo:latest
+    image: neodevtrix/appximo:latest
     command: ["worker"]
     environment:
       DATABASE_URL: postgres://appximo:${DB_PASSWORD:-changeme}@db:5432/appximo?sslmode=disable

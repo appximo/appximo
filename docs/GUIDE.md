@@ -99,7 +99,7 @@ source.
 > **Availability, honestly.** There is **no release tag yet** — a "download
 > the binary from GitHub Releases" path does not exist today. The two paths
 > that work: **build from a checkout** of the repository, or the **published
-> Docker image** (`appximo/appximo`, multi-arch) with the
+> Docker image** (`neodevtrix/appximo`, multi-arch) with the
 > self-contained `docker-compose.yml` at the repo root. The image itself is
 > public on Docker Hub, but the compose file, the example schema and every doc
 > live in the repository — so until it is published, both paths in practice

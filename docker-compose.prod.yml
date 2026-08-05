@@ -30,7 +30,7 @@ services:
     restart: unless-stopped
 
   engine:
-    image: appximo/appximo:latest
+    image: neodevtrix/appximo:latest
     # No ports: — internal network only, fronted by Caddy. The control plane
     # (:9090) is NOT exposed either; reach it from the VPS itself with
     #   docker compose -f docker-compose.prod.yml exec engine wget -q -O- http://127.0.0.1:9090/...
@@ -60,7 +60,7 @@ services:
   # worker=N): N workers claim disjoint rows, never double-processing. No host
   # ports — internal network only.
   worker:
-    image: appximo/appximo:latest
+    image: neodevtrix/appximo:latest
     command: ["worker"]
     environment:
       DATABASE_URL: postgres://appximo:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/appximo?sslmode=disable

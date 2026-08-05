@@ -4,7 +4,7 @@
 > One ~64 MB static Go binary, on your own server. Apache 2.0.
 
 [![CI](https://github.com/appximo/appximo/actions/workflows/ci.yml/badge.svg)](https://github.com/appximo/appximo/actions/workflows/ci.yml)
-[![Docker](https://img.shields.io/docker/v/appximo/appximo?label=docker&color=2496ED&logo=docker)](https://hub.docker.com/r/appximo/appximo)
+[![Docker](https://img.shields.io/docker/v/neodevtrix/appximo?label=docker&color=2496ED&logo=docker)](https://hub.docker.com/r/neodevtrix/appximo)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go)](go.mod)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
 <!-- Activate after the first tagged release (git tag v0.1.0 && git push --tags):
@@ -51,10 +51,11 @@ not scaffolded into files you then maintain.
 
 ## Quick start (~30 s with the image pull)
 
-> ⚠ The `curl` URLs work once this repo is public, and the `appximo/appximo`
-> Docker image publishes with the first green CI after that. From a clone, the
-> two files are at the repo root — skip the downloads. No Docker? Build from
-> source: `make install` (Go 1.25), then `appximo serve --schema examples/quickstart/schema.json`.
+> ⚠ The `neodevtrix/appximo` Docker image publishes automatically on every
+> green CI run of `main` — if the pull fails, the image simply hasn't landed
+> yet. From a clone, the two files are at the repo root — skip the downloads.
+> No Docker? Build from source: `make install` (Go 1.25), then
+> `appximo serve --schema examples/quickstart/schema.json`.
 
 ```bash
 mkdir appximo && cd appximo

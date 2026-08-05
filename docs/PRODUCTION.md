@@ -411,7 +411,7 @@ cp .env.example .env        # set DOMAIN, ACME_EMAIL, JWT_SECRET, ADMIN_KEY, DB_
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-The published multi-arch image (`appximo/appximo`) **ships the built
+The published multi-arch image (`neodevtrix/appximo`) **ships the built
 `/editor` and `/admin` UIs** (the Dockerfile builds the SPAs in dedicated node
 stages) and runs the engine or the outbox worker from one image. On a
 memory-limited container (`--memory` / `mem_limit`) the engine auto-detects the
