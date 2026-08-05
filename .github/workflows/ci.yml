@@ -149,7 +149,7 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgres://appximo:appximo@localhost:5432/appximo?sslmode=disable
-      JWT_SECRET: ci-perf-jwt-secret
+      JWT_SECRET: ci-perf-jwt-secret-0123456789abcdef
       ADMIN_KEY: ci-perf-admin-key
       # Prod-hardware target is 2000 RPS / p95<15ms (PRIMER). Shared CI runners are
       # not prod hardware, so drive a runner-safe rate while still enforcing the SLO
