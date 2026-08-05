@@ -13,18 +13,25 @@ input StringFilter {
   exact:   String
   partial: String
   start:   String
+  is_null: Boolean
 }
 
 input DateFilter {
-  after:  String
-  before: String
-  gte:    String
-  lte:    String
+  after:   String
+  before:  String
+  gte:     String
+  lte:     String
+  is_null: Boolean
 }
 
 input RangeFilter {
-  gte: Float
-  lte: Float
+  gte:     Float
+  lte:     Float
+  is_null: Boolean
+}
+
+input NullFilter {
+  is_null: Boolean
 }
 
 type PageMeta {
@@ -186,6 +193,9 @@ func gqlFilterType(fieldType string) string {
 		return "DateFilter"
 	case "int", "int64", "float64":
 		return "RangeFilter"
+	case "uuid", "bool", "file", "json", "jsonb":
+		// is_null only (SCHEMA-6) — mirrors pkg/graphql filterInputFor.
+		return "NullFilter"
 	default:
 		return ""
 	}

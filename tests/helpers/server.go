@@ -45,7 +45,7 @@ import (
 // Shared test credentials. These never reach production — they exist only to sign
 // and verify JWTs inside the in-process test server.
 const (
-	JWTSecret = "s37-integration-jwt-secret"
+	JWTSecret = "s37-integration-jwt-secret-32plus-chars"
 	AdminKey  = "s37-integration-admin-key"
 )
 

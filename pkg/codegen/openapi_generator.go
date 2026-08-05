@@ -321,6 +321,16 @@ func oaListOp(name, title string, res *schema.ResourceSchema) map[string]any {
 				oaOpDesc(fname, op),
 			))
 		}
+		// is_null (SCHEMA-6) applies to every NULLABLE column — a required
+		// field is NOT NULL and the engine rejects the operator on it, so the
+		// spec does not advertise it there.
+		if !fd.Required {
+			params = append(params, oaQueryParamDesc(
+				"filter["+fname+"][is_null]",
+				map[string]any{"type": "boolean"},
+				"Filter "+fname+" by nullness: true → IS NULL, false → IS NOT NULL",
+			))
+		}
 	}
 
 	return map[string]any{

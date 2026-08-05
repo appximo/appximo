@@ -54,21 +54,30 @@ const orderParamPrefix = "order["
 var conditionFieldRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // operatorsForType lists valid filter operators per schema field type.
+//
+// `is_null` (SCHEMA-6) is valid on EVERY declared type — nullability is a
+// property of the column (`required`), not of the type, and the required check
+// lives in the parse loop where the FieldDef is at hand. `json`/`jsonb` gained
+// explicit entries with it: they used to ride the unknown-type eq-only
+// fallback, but "rows with no attrs document" is exactly the question is_null
+// answers.
 var operatorsForType = map[string]map[string]bool{
-	"string":  {"eq": true, "partial": true, "start": true},
-	"text":    {"eq": true, "partial": true, "start": true},
-	"int":     {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true},
-	"int64":   {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true},
-	"float64": {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true},
-	"time":    {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true, "after": true, "before": true},
-	"uuid":    {"eq": true},
-	"bool":    {"eq": true},
-	"file":    {"eq": true}, // a file_id column — filters like uuid (FILES-LINK-S1)
+	"string":  {"eq": true, "partial": true, "start": true, "is_null": true},
+	"text":    {"eq": true, "partial": true, "start": true, "is_null": true},
+	"int":     {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true, "is_null": true},
+	"int64":   {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true, "is_null": true},
+	"float64": {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true, "is_null": true},
+	"time":    {"eq": true, "gte": true, "lte": true, "gt": true, "lt": true, "after": true, "before": true, "is_null": true},
+	"uuid":    {"eq": true, "is_null": true},
+	"bool":    {"eq": true, "is_null": true},
+	"file":    {"eq": true, "is_null": true}, // a file_id column — filters like uuid (FILES-LINK-S1)
+	"json":    {"eq": true, "is_null": true},
+	"jsonb":   {"eq": true, "is_null": true},
 }
 
 type filterClause struct {
 	field string
-	op    string // "eq", "partial", "gte", "lte", "gt", "lt", "after", "before"
+	op    string // "eq", "partial", "gte", "lte", "gt", "lt", "after", "before", "is_null"
 	value string
 }
 
@@ -240,6 +249,34 @@ func BuildQuery(
 			return nil, fmt.Errorf("filter[%s][%s]: %s", field, op, err.Error())
 		}
 
+		// is_null (SCHEMA-6): the value is not a column value — it selects
+		// between IS NULL (true) and IS NOT NULL (false), so it is read by
+		// value with the same vocabulary as ?count (ENG-23) and validated
+		// here, never bound. A column that can never be null — the implicit
+		// primary key, or a `required` (NOT NULL) field — is a named 400: the
+		// filter would match zero rows forever (is_null=true) or every row
+		// (is_null=false), the exact "declared but meaningless" class SCHEMA-5
+		// warns about elsewhere.
+		if op == "is_null" {
+			if field == "id" {
+				return nil, fmt.Errorf("filter[id][is_null]: id is the primary key — it can never be null")
+			}
+			if fd.Required {
+				return nil, fmt.Errorf("filter[%s][is_null]: %q is declared required (NOT NULL) — it can never be null", field, field)
+			}
+			var want string
+			switch vals[0] {
+			case "true", "1":
+				want = "true"
+			case "false", "0":
+				want = "false"
+			default:
+				return nil, fmt.Errorf("filter[%s][is_null]: %q is not a valid value (use true for IS NULL, false for IS NOT NULL)", field, vals[0])
+			}
+			qb.filters = append(qb.filters, filterClause{field: field, op: op, value: want})
+			continue
+		}
+
 		// An EMPTY value is only meaningful for a text column, where it asks for
 		// the empty string. On any other type it is not a value at all: it used
 		// to be bound verbatim, and Postgres answered with a data-exception that
@@ -259,9 +296,9 @@ func BuildQuery(
 		// (backlog ENG-25).
 		// `json` counts as text here: it is stored as TEXT (the type table says so
 		// two sections away), so an empty value is a legitimate exact match on the
-		// empty string, and a working query would otherwise start returning 400
-		// with no alternative syntax — there is no IS-NULL/IS-EMPTY operator to
-		// fall back on (SCHEMA-6). `jsonb` is a real document and cannot take one.
+		// empty string. `jsonb` is a real document and cannot take one. (Since
+		// SCHEMA-6 closed, "no value" questions also have a real operator:
+		// filter[field][is_null], handled above before this check.)
 		if vals[0] == "" && fd.Type != "string" && fd.Type != "text" && fd.Type != "json" {
 			return nil, fmt.Errorf("filter[%s][%s]: empty value is not valid for a %s field", field, op, fd.Type)
 		}
@@ -571,6 +608,15 @@ func (qb *QueryBuilder) appendConditions(parts []string, args []any, idx int) ([
 		case "start":
 			parts = append(parts, fmt.Sprintf("%s ILIKE $%d", f.field, idx))
 			args = append(args, f.value+"%")
+		case "is_null":
+			// No bound parameter — the clause is structural, and the value was
+			// normalized to "true"/"false" at parse time. idx must NOT advance.
+			if f.value == "true" {
+				parts = append(parts, f.field+" IS NULL")
+			} else {
+				parts = append(parts, f.field+" IS NOT NULL")
+			}
+			continue
 		default:
 			parts = append(parts, fmt.Sprintf("%s %s $%d", f.field, filterToSQL(f.op), idx))
 			args = append(args, f.value)

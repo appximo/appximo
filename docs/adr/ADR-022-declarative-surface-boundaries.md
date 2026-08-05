@@ -259,6 +259,16 @@ grammar, and benchmarked `no_change` on the update path. Backlog: `SCHEMA-3`.
 
 ## Decision 5 — `is_null` is not a filter operator (yet), and the 400 must say so
 
+> **RESOLVED 2026-08-05 (HOUSEKEEPING-S1, Miguel's call): `is_null` IS a filter
+> operator now.** `?filter[field][is_null]=true|false` renders `IS NULL` /
+> `IS NOT NULL` on every nullable column (values `true|1|false|0`, the ENG-23
+> vocabulary); on the implicit `id` or a `required` field it is a named 400
+> (a filter that can never match is refused, not served). REST, GraphQL
+> (`is_null: Boolean` on every filter input + `NullFilter` for the types that
+> had none) and the aggregate endpoint (shared `BuildQuery` core) all carry it.
+> SCHEMA-6 closed. The text below is the original deferral, kept for the
+> reasoning about scope discipline.
+
 **Added 2026-08-01 (SILENT-FAILURE-S1).** Closing ENG-14 turned
 `?filter[x][is_null]=true` from "200 with the whole table" into a clean `400`, which
 forced the question this ADR is the place for: should the operator exist?

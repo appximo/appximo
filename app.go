@@ -59,6 +59,13 @@ import (
 // via Config.Version (ldflags-injected); a plain library build reports "dev".
 const defaultVersion = "dev"
 
+// MinJWTSecretLen is the enforced floor for the HS256 signing secret (SEC-6).
+// The docs said "at least 32 characters" while the engine booted with 5; a
+// stated rule the engine does not enforce is the "accepts and continues"
+// class (ADR-024 rule 8). Exported so a custom binary can reference the same
+// number it will be held to.
+const MinJWTSecretLen = 32
+
 // App is a constructed Appximo engine: schema-derived REST + GraphQL + OpenAPI,
 // multi-tenant, plus any custom Class-1 routes registered before Start. Build it
 // with New, add routes with Register, run it with Start.
@@ -187,6 +194,19 @@ func New(cfg Config) (*App, error) {
 	}
 	if cfg.JWTSecret == "" {
 		return nil, errors.New("appximo: JWT secret is required (set Config.JWTSecret or JWT_SECRET)")
+	}
+	// SEC-6 (2026-08-05, Miguel's call): the docs have always said "at least 32
+	// characters"; rule 8 of ADR-024 says a stated rule is an enforced rule. A
+	// short HS256 secret makes every tenant's JWTs brute-forceable offline, so
+	// the boot refuses it loudly instead of serving with a forgeable signer.
+	// This runs in New — the single seam — so `serve`, custom binaries and every
+	// fleet app all get the same floor.
+	if len(cfg.JWTSecret) < MinJWTSecretLen {
+		return nil, fmt.Errorf(
+			"appximo: JWT_SECRET is too short (%d characters; the floor is %d). "+
+				"HS256 security depends on the secret's length — a short secret makes every tenant's tokens forgeable offline. "+
+				"Set Config.JWTSecret / JWT_SECRET to a random value of at least %d characters (e.g. `openssl rand -hex 32`)",
+			len(cfg.JWTSecret), MinJWTSecretLen, MinJWTSecretLen)
 	}
 	if cfg.AdminKey == "" {
 		return nil, errors.New("appximo: admin key is required (set Config.AdminKey or ADMIN_KEY)")

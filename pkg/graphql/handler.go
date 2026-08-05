@@ -430,28 +430,44 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 			"DESC": &gql.EnumValueConfig{Value: "desc"},
 		},
 	})
+	// is_null (SCHEMA-6): REST parity — true → IS NULL, false → IS NOT NULL.
+	// Present on every filter input; the query builder still rejects it on a
+	// `required` (NOT NULL) field with the same named error as REST.
+	isNullField := &gql.InputObjectFieldConfig{Type: gql.Boolean, Description: "true → IS NULL, false → IS NOT NULL. Rejected on a required (NOT NULL) field."}
 	stringFilter := gql.NewInputObject(gql.InputObjectConfig{
 		Name: "StringFilter",
 		Fields: gql.InputObjectConfigFieldMap{
 			"exact":   &gql.InputObjectFieldConfig{Type: gql.String},
 			"partial": &gql.InputObjectFieldConfig{Type: gql.String},
 			"start":   &gql.InputObjectFieldConfig{Type: gql.String},
+			"is_null": isNullField,
 		},
 	})
 	dateFilter := gql.NewInputObject(gql.InputObjectConfig{
 		Name: "DateFilter",
 		Fields: gql.InputObjectConfigFieldMap{
-			"after":  &gql.InputObjectFieldConfig{Type: gql.String},
-			"before": &gql.InputObjectFieldConfig{Type: gql.String},
-			"gte":    &gql.InputObjectFieldConfig{Type: gql.String},
-			"lte":    &gql.InputObjectFieldConfig{Type: gql.String},
+			"after":   &gql.InputObjectFieldConfig{Type: gql.String},
+			"before":  &gql.InputObjectFieldConfig{Type: gql.String},
+			"gte":     &gql.InputObjectFieldConfig{Type: gql.String},
+			"lte":     &gql.InputObjectFieldConfig{Type: gql.String},
+			"is_null": isNullField,
 		},
 	})
 	rangeFilter := gql.NewInputObject(gql.InputObjectConfig{
 		Name: "RangeFilter",
 		Fields: gql.InputObjectConfigFieldMap{
-			"gte": &gql.InputObjectFieldConfig{Type: gql.Float},
-			"lte": &gql.InputObjectFieldConfig{Type: gql.Float},
+			"gte":     &gql.InputObjectFieldConfig{Type: gql.Float},
+			"lte":     &gql.InputObjectFieldConfig{Type: gql.Float},
+			"is_null": isNullField,
+		},
+	})
+	// NullFilter carries is_null for the types that have no other filter input
+	// in GraphQL (uuid, bool, file, json, jsonb). Their eq filtering remains
+	// REST-only — a pre-existing gap this deliberately does not widen.
+	nullFilter := gql.NewInputObject(gql.InputObjectConfig{
+		Name: "NullFilter",
+		Fields: gql.InputObjectConfigFieldMap{
+			"is_null": isNullField,
 		},
 	})
 	// total / total_pages are LAZY (SEC-AUDIT-V2 Hallazgo C): their resolvers run
@@ -589,7 +605,7 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 		filterFields := gql.InputObjectConfigFieldMap{}
 		for _, fname := range sortedFieldNames(&res) {
 			fd := res.Fields[fname]
-			if ft := filterInputFor(fd.Type, stringFilter, dateFilter, rangeFilter); ft != nil {
+			if ft := filterInputFor(fd.Type, stringFilter, dateFilter, rangeFilter, nullFilter); ft != nil {
 				filterFields[fname] = &gql.InputObjectFieldConfig{Type: ft}
 			}
 		}
@@ -1508,6 +1524,9 @@ func argsToURLValues(args map[string]any) (url.Values, error) {
 						params.Set("filter["+field+"]["+dbOp+"]", vs)
 					case float64:
 						params.Set("filter["+field+"]["+dbOp+"]", strconv.FormatFloat(vs, 'f', -1, 64))
+					case bool:
+						// is_null: Boolean (SCHEMA-6) — the only bool-valued op.
+						params.Set("filter["+field+"]["+dbOp+"]", strconv.FormatBool(vs))
 					}
 				}
 			case string:
@@ -1543,7 +1562,7 @@ func mapOp(op string) string {
 	if op == "exact" {
 		return "eq"
 	}
-	return op // partial, start, after, before, gte, lte pass through
+	return op // partial, start, after, before, gte, lte, is_null pass through
 }
 
 // ── type helpers ──────────────────────────────────────────────────────────────
@@ -1637,7 +1656,7 @@ func parseJSONLiteral(v ast.Value) any {
 	}
 }
 
-func filterInputFor(fieldType string, strF, dateF, rangeF *gql.InputObject) gql.Input {
+func filterInputFor(fieldType string, strF, dateF, rangeF, nullF *gql.InputObject) gql.Input {
 	switch fieldType {
 	case "string", "text":
 		return strF
@@ -1645,6 +1664,10 @@ func filterInputFor(fieldType string, strF, dateF, rangeF *gql.InputObject) gql.
 		return dateF
 	case "int", "int64", "float64":
 		return rangeF
+	case "uuid", "bool", "file", "json", "jsonb":
+		// is_null only (SCHEMA-6) — these types have no other GraphQL filter
+		// input; their eq filtering remains REST-only (pre-existing gap).
+		return nullF
 	default:
 		return nil
 	}

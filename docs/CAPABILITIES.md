@@ -159,10 +159,11 @@ engineering. Re-verified against the running engine and the field reports on
   rollback appends a new version; the trail is never rewritten.
 - **No `neq`/`in`/`nin`/`like`/`ilike` filter ops** — an unsupported operator is a
   400 that names it and lists the allowed set (ADR-024).
-- **No way to filter by NULL.** `is_null` is rejected cleanly, but nothing replaces
-  it: the declarative surface cannot express "rows where this column is empty".
-  Deferred deliberately, with the debt written down — backlog **SCHEMA-6**,
-  ADR-022 Decision 5.
+- **Filtering by NULL exists since HOUSEKEEPING-S1 (2026-08-05):**
+  `?filter[field][is_null]=true|false` renders `IS NULL` / `IS NOT NULL` on every
+  nullable column, REST + GraphQL + aggregation (SCHEMA-6 closed; ADR-022
+  Decision 5 updated). On the implicit `id` or a `required` (NOT NULL) field it
+  is a 400 naming why — a filter that could never match is refused, not served.
 - **No multi-field sort.** One sort field only; an unknown field, an invalid
   direction, or two `order[…]` parameters are each a 400 that names the problem
   (ENG-16, closed in NIGHT-SWEEP-S1).

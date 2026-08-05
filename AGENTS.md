@@ -41,7 +41,7 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   ./appximo serve --schema examples/quickstart/schema.json --port 8080
 ```
 
-- All three env vars are hard-required — `serve` exits without them.
+- All three env vars are hard-required — `serve` exits without them. `JWT_SECRET` additionally has an **enforced 32-character floor** (SEC-6, 2026-08-05): a shorter secret refuses to boot, naming the variable, the length it got and the floor; `appximo token` warns on a short `--secret` (the token would be rejected by any bootable engine).
 - Do NOT use `make run` / `go run ./cmd/appximo/main.go`: passing the
   file compiles *only* `main.go`, producing a binary with **zero
   subcommands** (no `serve`). Use the package path:
@@ -568,14 +568,22 @@ silently dead config.
 
 | `type` | Postgres column | Filter ops available |
 |---|---|---|
-| `string`, `text` | TEXT | `eq`, `partial` (`ILIKE %v%`), `start` (`ILIKE v%`) |
-| `int`, `int64`, `float64` | INTEGER / BIGINT / DOUBLE PRECISION | `eq`, `gt`, `gte`, `lt`, `lte` |
-| `time` | TIMESTAMPTZ | `eq`, `gt`, `gte`, `lt`, `lte`, `after`, `before` |
-| `uuid` | UUID | `eq` |
-| `bool` | BOOLEAN | `eq` |
-| `json` | TEXT (stored as text) | `eq` only (exact match on the stored text) |
-| `jsonb` | JSONB (a real document) | `eq` only — but `@>` containment via a `gin` index |
-| `file` | UUID + a real FK to the tenant's `files` table | `eq` |
+| `string`, `text` | TEXT | `eq`, `partial` (`ILIKE %v%`), `start` (`ILIKE v%`), `is_null` |
+| `int`, `int64`, `float64` | INTEGER / BIGINT / DOUBLE PRECISION | `eq`, `gt`, `gte`, `lt`, `lte`, `is_null` |
+| `time` | TIMESTAMPTZ | `eq`, `gt`, `gte`, `lt`, `lte`, `after`, `before`, `is_null` |
+| `uuid` | UUID | `eq`, `is_null` |
+| `bool` | BOOLEAN | `eq`, `is_null` |
+| `json` | TEXT (stored as text) | `eq` (exact match on the stored text), `is_null` |
+| `jsonb` | JSONB (a real document) | `eq`, `is_null` — plus `@>` containment via a `gin` index |
+| `file` | UUID + a real FK to the tenant's `files` table | `eq`, `is_null` |
+
+`is_null` (SCHEMA-6, 2026-08-05): `?filter[field][is_null]=true` → `IS NULL`,
+`false` → `IS NOT NULL` (values exactly `true|1|false|0`, the `?count`
+vocabulary — anything else is a named 400). Only on NULLABLE columns: on the
+implicit `id` or a `required` field it is a 400 naming why. GraphQL parity:
+`is_null: Boolean` on every filter input, and `uuid`/`bool`/`file`/`json`/
+`jsonb` fields (otherwise unfilterable in GraphQL) take `NullFilter`. The
+aggregate endpoint inherits it like any filter.
 
 **`json` vs `jsonb`** (LIBRARY-GAPS-S1): `json` is stored as TEXT — exact bytes,
 nothing queryable. `jsonb` is a real Postgres document: it is the only type a `gin`
@@ -2132,14 +2140,13 @@ is a JSON snapshot, not a stream).
 - Hook events other than the four listed (no `on_create`, no
   `before_delete`/`after_delete`).
 - Filter ops beyond the type table → **400 naming the operator and listing the
-  allowed set** (`neq`, `in`, `nin`, `like`, `ilike`, `is_null`, an uppercase
+  allowed set** (`neq`, `in`, `nin`, `like`, `ilike`, an uppercase
   `EQ`, a malformed `filter[a][b][c]` — all of them, verified live 2026-08-01).
   ENG-14 used to make some of these silent: the op pattern matched `[a-z]+`, so an
   op containing `_` failed the regex and the WHOLE parameter was dropped with no
   error. That is fixed — the pattern now decides only what IS a filter, and
-  validation produces the error (ADR-024).
-  **There is still NO way to filter by NULL** in the declarative surface; the 400 is
-  honest but it is a dead end (backlog SCHEMA-6, ADR-022 Decision 5).
+  validation produces the error (ADR-024). (Filtering by NULL DOES exist now:
+  `is_null`, in the type table above — SCHEMA-6 closed 2026-08-05.)
 - Multi-field sort (`sort=a,b`) or `sort=field:desc` → **400 naming the value and
   listing the sortable fields** (`unknown sort field: title:desc (available: …)`).
   Neither syntax exists; since ADR-024 the engine says so instead of ignoring it

@@ -394,17 +394,27 @@ the filter operators a type accepts are fixed by `operatorsForType`
 
 | `type` | Meaning | Postgres column | Filter ops available |
 |---|---|---|---|
-| `string` | short UTF-8 text | `TEXT` | `eq`, `partial` (`ILIKE %v%`), `start` (`ILIKE v%`) |
-| `text` | long UTF-8 text (identical column to `string`) | `TEXT` | `eq`, `partial`, `start` |
-| `int` | 32-bit integer | `INTEGER` | `eq`, `gt`, `gte`, `lt`, `lte` |
-| `int64` | 64-bit integer | `BIGINT` | `eq`, `gt`, `gte`, `lt`, `lte` |
-| `float64` | floating-point number | `DOUBLE PRECISION` | `eq`, `gt`, `gte`, `lt`, `lte` |
-| `bool` | boolean | `BOOLEAN` | `eq` |
-| `uuid` | UUID | `UUID` | `eq` |
-| `time` | timestamp with time zone | `TIMESTAMPTZ` | `eq`, `gt`, `gte`, `lt`, `lte`, `after` (→ `>`), `before` (→ `<`) |
-| `json` | JSON stored as text | `TEXT` | `eq` only (see §3.7 finding) |
-| `jsonb` | a real JSON document (LIBRARY-GAPS-S1) | `JSONB` | `eq` only |
-| `file` | reference to an uploaded file (FILES-LINK-S1) | `UUID` + a real FK to the tenant's `files(id)` | `eq` |
+| `string` | short UTF-8 text | `TEXT` | `eq`, `partial` (`ILIKE %v%`), `start` (`ILIKE v%`), `is_null` |
+| `text` | long UTF-8 text (identical column to `string`) | `TEXT` | `eq`, `partial`, `start`, `is_null` |
+| `int` | 32-bit integer | `INTEGER` | `eq`, `gt`, `gte`, `lt`, `lte`, `is_null` |
+| `int64` | 64-bit integer | `BIGINT` | `eq`, `gt`, `gte`, `lt`, `lte`, `is_null` |
+| `float64` | floating-point number | `DOUBLE PRECISION` | `eq`, `gt`, `gte`, `lt`, `lte`, `is_null` |
+| `bool` | boolean | `BOOLEAN` | `eq`, `is_null` |
+| `uuid` | UUID | `UUID` | `eq`, `is_null` |
+| `time` | timestamp with time zone | `TIMESTAMPTZ` | `eq`, `gt`, `gte`, `lt`, `lte`, `after` (→ `>`), `before` (→ `<`), `is_null` |
+| `json` | JSON stored as text | `TEXT` | `eq`, `is_null` |
+| `jsonb` | a real JSON document (LIBRARY-GAPS-S1) | `JSONB` | `eq`, `is_null` |
+| `file` | reference to an uploaded file (FILES-LINK-S1) | `UUID` + a real FK to the tenant's `files(id)` | `eq`, `is_null` |
+
+`is_null` (SCHEMA-6, HOUSEKEEPING-S1): `?filter[field][is_null]=true` → `IS
+NULL`, `=false` → `IS NOT NULL`; accepted values are exactly `true`/`1`/
+`false`/`0` (the `?count` vocabulary, ENG-23 — anything else is a named 400).
+It is valid on every declared type but only on a NULLABLE column: on the
+implicit `id` or a `required` field it is a 400 saying the column can never be
+null. The clause is structural (no bound parameter). GraphQL parity: `is_null:
+Boolean` on `StringFilter`/`DateFilter`/`RangeFilter`, and `uuid`/`bool`/
+`file`/`json`/`jsonb` fields — previously unfilterable in GraphQL — take a
+`NullFilter { is_null }`. The aggregate endpoint inherits it like any filter.
 
 Notes verified in code:
 - `string` and `text` are byte-identical at the column level (both `BaseText` →
@@ -629,17 +639,13 @@ is the ten values in §3.2; anything else is rejected at load with
 The findings below are documented behaviors that diverge from how they read
 elsewhere; they are recorded, not fixed.
 
-- **`json` fields accept the `eq` filter operator, not "none".** AGENTS.md and the
-  README field-type table state `json` fields have NO filter operators. In code,
-  `json` is absent from `operatorsForType` (`builder.go`), so a
-  `filter[<jsonfield>]=...` query falls into the `validateFilterOp` fallback for
-  unknown types, which explicitly ALLOWS `eq` (`if op != "eq" { return error };
-  return nil` — `builder.go`). So `?filter[attributes][eq]=...` on a `json`
-  field is accepted (compared as TEXT equality, since `json`→`TEXT`); any other op
-  (`gt`, `partial`, …) is rejected. The validator never rejects a `json` filter
-  itself. Net: real behaviour is `json` → `eq` only, not `json` → none. (The
-  fallback error message lacks the `(allowed: …)` suffix that the known-type branch
-  appends.)
+- **`json` fields accept the `eq` filter operator, not "none".** (Historical
+  finding; since HOUSEKEEPING-S1 `json`/`jsonb` carry explicit
+  `operatorsForType` entries — `eq` + `is_null` — so the unknown-type fallback
+  no longer decides them and their rejection messages list the allowed set like
+  every other type.) So `?filter[attributes][eq]=...` on a `json` field is
+  accepted (compared as TEXT equality, since `json`→`TEXT`); any other op
+  (`gt`, `partial`, …) is rejected naming the allowed set.
 
 - **`unique` is single-column only; composite uniqueness is a separate code path.**
   `unique: true` produces exactly one single-column UNIQUE constraint named
@@ -1767,7 +1773,7 @@ Notes grounded in code:
 
 #### List query parameters (`pkg/query/builder.go`)
 
-- **Filters:** `?filter[field]=v` (implies `eq`) or `?filter[field][op]=v`. The bracket pattern (`filterParamRe`) is deliberately PERMISSIVE — `^filter\[([^\[\]]+)\](?:\[([^\[\]]+)\])?$` — because a pattern decides what a filter IS, never what is VALID (ADR-024/ENG-14: the old strict pattern silently dropped anything it did not match); validation happens in code that names the problem. Valid ops per field type: `string`/`text` → `eq`, `partial` (`ILIKE %v%`), `start` (`ILIKE v%`); `int`/`int64`/`float64` → `eq`, `gt`, `gte`, `lt`, `lte`; `time` → those five plus `after`/`before`; `uuid`/`bool`/`file` → `eq` only. **`id` (the implicit PK) is filterable as a uuid, `eq` only** (ENG-26). Unknown field → `400` "unknown filter field" listing the available set (incl. `id`); incompatible op → `400` listing the allowed ops; a value the field's type cannot take → `400` naming the parameter, value and type (`validateFilterValue`, ENG-25 — the acceptors reproduce Postgres's input grammar, pinned by a live conformance test; `time` values are the documented exception, validated only by Postgres). With curl, brackets need `-g`: `curl -g '...?filter[status][eq]=open'`.
+- **Filters:** `?filter[field]=v` (implies `eq`) or `?filter[field][op]=v`. The bracket pattern (`filterParamRe`) is deliberately PERMISSIVE — `^filter\[([^\[\]]+)\](?:\[([^\[\]]+)\])?$` — because a pattern decides what a filter IS, never what is VALID (ADR-024/ENG-14: the old strict pattern silently dropped anything it did not match); validation happens in code that names the problem. Valid ops per field type: `string`/`text` → `eq`, `partial` (`ILIKE %v%`), `start` (`ILIKE v%`); `int`/`int64`/`float64` → `eq`, `gt`, `gte`, `lt`, `lte`; `time` → those five plus `after`/`before`; `uuid`/`bool`/`file`/`json`/`jsonb` → `eq` only; every NULLABLE column additionally takes `is_null` (`true`→`IS NULL`, `false`→`IS NOT NULL`, values `true|1|false|0`, no bound parameter; on `id` or a `required` field it is a named 400 — SCHEMA-6). **`id` (the implicit PK) is filterable as a uuid, `eq` only** (ENG-26). Unknown field → `400` "unknown filter field" listing the available set (incl. `id`); incompatible op → `400` listing the allowed ops; a value the field's type cannot take → `400` naming the parameter, value and type (`validateFilterValue`, ENG-25 — the acceptors reproduce Postgres's input grammar, pinned by a live conformance test; `time` values are the documented exception, validated only by Postgres). With curl, brackets need `-g`: `curl -g '...?filter[status][eq]=open'`.
 - **Search:** `?search=term` → case-insensitive `ILIKE %term%` (with `%`/`_` escaped, `ESCAPE '\'`) over only the resource's `string`/`text` fields, OR-ed together and AND-ed with filters. No-op on a resource with no string/text fields.
 - **Sort:** `?sort=field&order=asc|desc` — ONE field only; default direction is `ASC`, `desc` (case-insensitive) flips it. Alternative `?order[field]=desc` also works and, when both are present, the `order[...]` form overrides `sort`. An unknown sort/order field, or a direction that is not `asc`/`desc`, is a **400** naming it (ADR-024; both were silently ignored before 2026-08-01). An EMPTY `?sort=`/`?order=`, and `?order=desc` with no `?sort=`, are also named 400s (ENG-30 — presence is the gate, so an empty form field no longer defaults silently). Multi-field sort and `sort=field:desc` remain unsupported.
 - **Pagination — keyset (preferred):** `?after=<uuid>` (`id > cursor`, ORDER BY id ASC) or `?before=<uuid>` (`id < cursor`, ORDER BY id DESC; mutually exclusive, `after` wins). The cursor must be a strict lowercase-hyphenated UUID matching `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`, else `400` "invalid after/before cursor: must be a lowercase UUID".

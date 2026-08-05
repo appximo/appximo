@@ -440,10 +440,11 @@ separate `routes` block (§5.4).
 
 - **Filters:** `?filter[field]=v` or `?filter[field][op]=v`. Ops by type:
   strings `eq|partial|start`; numbers `eq|gt|gte|lt|lte`; `time` adds
-  `after|before`; `uuid`/`bool`/`json`/`jsonb`/`file` are `eq` only. **Anything
-  else — `neq`, `in`, `like`, `is_null`, a typo — is a 400 that names the
-  operator and lists the allowed set.** There is deliberately no way to filter
-  by NULL yet (backlog SCHEMA-6).
+  `after|before`; `uuid`/`bool`/`json`/`jsonb`/`file` are `eq` only — and every
+  nullable column also takes `is_null` (`true` → IS NULL, `false` → IS NOT
+  NULL; on `id` or a `required` field it is a 400 naming why). **Anything
+  else — `neq`, `in`, `like`, a typo — is a 400 that names the
+  operator and lists the allowed set.**
 - **Search:** `?search=term` — case-insensitive substring across the
   resource's string/text fields. A plain ILIKE, not a ranked engine.
 - **Sort:** `?sort=field&order=asc|desc` — **one field**. Multi-field sort

@@ -536,7 +536,7 @@ func TestBuildQuery_UnrecognizedInputIsAlwaysRejected(t *testing.T) {
 		// name the offending input is only half the fix.
 		mustName string
 	}{
-		{"op with an underscore (ENG-14)", url.Values{"filter[title][is_null]": {"true"}}, "is_null"},
+		{"op with an underscore (ENG-14)", url.Values{"filter[title][starts_with]": {"x"}}, "starts_with"},
 		{"op with an underscore, negated", url.Values{"filter[title][not_null]": {"true"}}, "not_null"},
 		{"uppercase operator", url.Values{"filter[title][EQ]": {"x"}}, "EQ"},
 		{"uppercase field", url.Values{"filter[Title][eq]": {"x"}}, "Title"},
@@ -660,5 +660,126 @@ func TestBuildQuery_SearchWithoutTextFieldsRejected(t *testing.T) {
 	// A resource WITH text fields keeps searching.
 	if _, err := BuildQuery("guides", testResource(), url.Values{"search": {"zzz"}}, nil); err != nil {
 		t.Errorf("search on a text resource must keep working: %v", err)
+	}
+}
+
+// ── SCHEMA-6: is_null ────────────────────────────────────────────────────────
+
+func isNullResource() *schema.ResourceSchema {
+	return &schema.ResourceSchema{
+		Fields: map[string]schema.FieldDef{
+			"title":      {Type: "string"},
+			"notes":      {Type: "text"},
+			"qty":        {Type: "int"},
+			"total":      {Type: "int64"},
+			"price":      {Type: "float64"},
+			"due":        {Type: "time"},
+			"vet_id":     {Type: "uuid"},
+			"done":       {Type: "bool"},
+			"attachment": {Type: "file"},
+			"raw":        {Type: "json"},
+			"attrs":      {Type: "jsonb"},
+			"name":       {Type: "string", Required: true},
+			"created_at": {Type: "time", Auto: true},
+		},
+	}
+}
+
+// Every declared type takes is_null; true → IS NULL, false → IS NOT NULL, and
+// the clause binds NO parameter.
+func TestBuildQuery_IsNull_AllTypes(t *testing.T) {
+	res := isNullResource()
+	for _, field := range []string{"title", "notes", "qty", "total", "price", "due", "vet_id", "done", "attachment", "raw", "attrs", "created_at"} {
+		qb := mustBuild(t, res, url.Values{"filter[" + field + "][is_null]": {"true"}}, nil)
+		selectQ, _, selectArgs, _ := qb.SQL()
+		if !strings.Contains(selectQ, field+" IS NULL") {
+			t.Errorf("%s: SQL missing IS NULL clause: %s", field, selectQ)
+		}
+		if len(selectArgs) != 1 { // only the LIMIT/OFFSET… actually offset path binds none; see below
+			// The plain list path binds no filter arg for is_null; selectArgs holds
+			// only pagination-independent args. Assert no arg carries the value.
+			for _, a := range selectArgs {
+				if a == "true" {
+					t.Errorf("%s: is_null value was BOUND as a parameter", field)
+				}
+			}
+		}
+
+		qb = mustBuild(t, res, url.Values{"filter[" + field + "][is_null]": {"false"}}, nil)
+		selectQ, _, _, _ = qb.SQL()
+		if !strings.Contains(selectQ, field+" IS NOT NULL") {
+			t.Errorf("%s: SQL missing IS NOT NULL clause: %s", field, selectQ)
+		}
+	}
+}
+
+// ENG-23 vocabulary: 1/0 are accepted, anything else is a named 400.
+func TestBuildQuery_IsNull_ValueVocabulary(t *testing.T) {
+	res := isNullResource()
+	qb := mustBuild(t, res, url.Values{"filter[due][is_null]": {"1"}}, nil)
+	if q, _, _, _ := qb.SQL(); !strings.Contains(q, "due IS NULL") {
+		t.Errorf("1 should mean IS NULL: %s", q)
+	}
+	qb = mustBuild(t, res, url.Values{"filter[due][is_null]": {"0"}}, nil)
+	if q, _, _, _ := qb.SQL(); !strings.Contains(q, "due IS NOT NULL") {
+		t.Errorf("0 should mean IS NOT NULL: %s", q)
+	}
+	for _, bad := range []string{"", "yes", "TRUE", "null"} {
+		msg := mustError(t, res, url.Values{"filter[due][is_null]": {bad}})
+		if !strings.Contains(msg, "is_null") || !strings.Contains(msg, "true") {
+			t.Errorf("bad value %q: error must name the op and the vocabulary: %s", bad, msg)
+		}
+	}
+}
+
+// A column that can never be null is a named 400, not a filter that silently
+// matches zero rows (is_null=true) or every row (is_null=false) forever.
+func TestBuildQuery_IsNull_NeverNullColumns(t *testing.T) {
+	res := isNullResource()
+	msg := mustError(t, res, url.Values{"filter[id][is_null]": {"true"}})
+	if !strings.Contains(msg, "primary key") {
+		t.Errorf("id: error must say the primary key can never be null: %s", msg)
+	}
+	msg = mustError(t, res, url.Values{"filter[name][is_null]": {"true"}})
+	if !strings.Contains(msg, "required") || !strings.Contains(msg, "NOT NULL") {
+		t.Errorf("required field: error must name required/NOT NULL: %s", msg)
+	}
+}
+
+// is_null composes with a bound filter: parameter indices must stay contiguous
+// (the structural clause consumes no $n).
+func TestBuildQuery_IsNull_ComposesWithBoundFilters(t *testing.T) {
+	res := isNullResource()
+	qb := mustBuild(t, res, url.Values{
+		"filter[title][eq]":       {"x"},
+		"filter[vet_id][is_null]": {"true"},
+		"filter[qty][gte]":        {"3"},
+	}, nil)
+	selectQ, _, selectArgs, _ := qb.SQL()
+	if !strings.Contains(selectQ, "vet_id IS NULL") {
+		t.Fatalf("missing IS NULL clause: %s", selectQ)
+	}
+	// two bound filter values + LIMIT + OFFSET
+	if len(selectArgs) != 4 {
+		t.Fatalf("want 4 args (2 filters + limit + offset), got %d: %v — SQL: %s", len(selectArgs), selectArgs, selectQ)
+	}
+	if strings.Contains(selectQ, "$5") {
+		t.Errorf("parameter indices must be contiguous: %s", selectQ)
+	}
+}
+
+// The aggregate path inherits is_null through the shared BuildQuery core.
+func TestBuildAggregate_InheritsIsNull(t *testing.T) {
+	res := isNullResource()
+	aq, err := BuildAggregate("orders", res, url.Values{
+		"count":                   {"true"},
+		"filter[vet_id][is_null]": {"true"},
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("BuildAggregate: %v", err)
+	}
+	sqlQ, _ := aq.SQL()
+	if !strings.Contains(sqlQ, "vet_id IS NULL") {
+		t.Errorf("aggregate WHERE missing IS NULL: %s", sqlQ)
 	}
 }

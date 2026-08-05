@@ -415,7 +415,7 @@ the trilogy in one stream) — and it can build the full stack.
 | Setting | Kind | Required | Description |
 |---------|------|----------|-------------|
 | `DATABASE_URL` | env | **yes** | PostgreSQL connection string |
-| `JWT_SECRET` | env | **yes** | HS256 signing secret (≥ 32 chars) |
+| `JWT_SECRET` | env | **yes** | HS256 signing secret (≥ 32 chars — **enforced**: the engine refuses to boot with a shorter one) |
 | `ADMIN_KEY` | env | **yes** | `X-Admin-Key` for `/metrics`, `/debug`, `/admin`, control plane |
 | `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | env | no | per-tenant token bucket (default 1000/100) |
 | `APPXIMO_MAX_TX_OPS` | env | no | max operations per `POST /api/transaction` (default 100) |

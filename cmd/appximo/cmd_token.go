@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/appximo/appximo"
 	"github.com/appximo/appximo/pkg/auth"
 	"github.com/appximo/appximo/pkg/schema"
 	"github.com/spf13/cobra"
@@ -53,6 +54,16 @@ schema.`,
 					role, schemaPath, strings.Join(declaredRoles, ", "))
 				os.Exit(1)
 			}
+		}
+
+		// SEC-6: the engine refuses to BOOT with a secret under the floor, so a
+		// token minted with one can never be validated by a running engine. The
+		// mint still happens (a dev tool stays a dev tool) but says so loudly.
+		if len(secret) < appximo.MinJWTSecretLen {
+			fmt.Fprintf(os.Stderr,
+				"WARNING: secret is %d characters — the engine refuses to boot below %d (SEC-6),\n"+
+					"so no running engine will accept this token. Use the same ≥%d-char JWT_SECRET the engine boots with.\n",
+				len(secret), appximo.MinJWTSecretLen, appximo.MinJWTSecretLen)
 		}
 
 		claims := auth.Claims{

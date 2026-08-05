@@ -429,7 +429,7 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | Variable | Req | Default | Notes |
 |---|---|---|---|
 | `DATABASE_URL` | **yes** | — | PostgreSQL DSN. The engine **auto-creates the control-plane tables** on boot, so a fresh empty database just works. |
-| `JWT_SECRET` | **yes** | — | HS256 signing secret, ≥ 32 chars (`openssl rand -hex 32`). |
+| `JWT_SECRET` | **yes** | — | HS256 signing secret, ≥ 32 chars (`openssl rand -hex 32`). **Enforced since SEC-6 (2026-08-05): the engine refuses to boot below 32 characters**, naming the variable and the floor. |
 | `ADMIN_KEY` | **yes** | — | `X-Admin-Key` for the control plane, `/metrics`, `/debug`, `/admin`. |
 | `APPXIMO_ENV` | no | (prod) | `development` enables pprof (:6060) + GraphQL introspection + GraphiQL. **Leave unset/`production`** in prod. |
 | `GOMEMLIMIT` | no | auto | Soft heap ceiling. Unset → the engine uses 90 % of an explicit **cgroup** limit if present, else warns on a small box. **Set it on a bare small box** — the installer sets **30 % of RAM** (measured: the engine's own anonymous memory peaks in the tens of MB even at 1M rows, and PostgreSQL needs the rest). Never derived from total RAM as if the engine were alone on the box. |

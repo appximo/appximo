@@ -357,20 +357,24 @@ The complete operator set, by field type — **this table is closed**:
 
 | Field type | Operators |
 |---|---|
-| `string`, `text` | `eq`, `partial` (contains, case-insensitive), `start` (prefix) |
-| `int`, `int64`, `float64` | `eq`, `gt`, `gte`, `lt`, `lte` |
-| `time` | `eq`, `gt`, `gte`, `lt`, `lte`, `after`, `before` |
-| `uuid`, `bool`, `json`, `jsonb`, `file` | `eq` |
-| `id` (the implicit PK) | `eq` |
+| `string`, `text` | `eq`, `partial` (contains, case-insensitive), `start` (prefix), `is_null` |
+| `int`, `int64`, `float64` | `eq`, `gt`, `gte`, `lt`, `lte`, `is_null` |
+| `time` | `eq`, `gt`, `gte`, `lt`, `lte`, `after`, `before`, `is_null` |
+| `uuid`, `bool`, `json`, `jsonb`, `file` | `eq`, `is_null` |
+| `id` (the implicit PK) | `eq` (never `is_null` — a PK is never null) |
 
 Facts an agent must not learn the hard way:
 
-- **`neq`, `in`, `nin`, `like`, `ilike`, `is_null` DO NOT EXIST.** An unknown
+- **`neq`, `in`, `nin`, `like`, `ilike` DO NOT EXIST.** An unknown
   operator is a `400` naming it and listing the allowed set. Multi-value → make
   N requests or ask the backend for a custom route.
-- **There is no way to filter by NULL** in the declarative surface — a real dead
-  end. If a screen needs "rows where X is unset", the data model should carry an
-  explicit flag/status field, or the backend adds a custom route.
+- **Filter by NULL with `?filter[field][is_null]=true`** (`false` → IS NOT NULL;
+  the only accepted values are `true`/`1`/`false`/`0` — anything else is a named
+  `400`). It works on every nullable column; on the implicit `id` or a
+  `required` field it is a `400` saying the column can never be null. GraphQL:
+  `filter: { field: { is_null: true } }` (every filterable type carries it;
+  `uuid`/`bool`/`file`/`json`/`jsonb` fields take a `NullFilter` with only
+  `is_null`).
 - A wrongly-typed value (`filter[amount][gt]=abc`) is a `400` naming the
   parameter, the value and the expected type. An empty value on a non-text field
   is a `400`; on string/text it legitimately means the empty string.
