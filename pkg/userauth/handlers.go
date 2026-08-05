@@ -463,7 +463,11 @@ func (s *Service) handleSignup(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrSignupDisabled):
-			writeAuthErr(w, http.StatusForbidden, "signup is disabled")
+			// PHASE4-FIRST-MILE-S1: getting the FIRST user used to be a puzzle —
+			// this 403 said "signup is disabled" and stopped. Name both ways out:
+			// the operator's env switch, and the admin-created-user path.
+			writeAuthErr(w, http.StatusForbidden,
+				"signup is disabled: to enable public signup set APPXIMO_AUTH_SIGNUP_ROLE to a role your schema's rbac declares and restart; or have an admin create users in the admin panel (/admin → Users)")
 		case errors.Is(err, ErrInvalidEmail):
 			writeAuthErr(w, http.StatusUnprocessableEntity, "invalid email")
 		case errors.Is(err, ErrWeakPassword):

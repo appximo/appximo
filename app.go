@@ -189,11 +189,25 @@ func New(cfg Config) (*App, error) {
 	if cfg.SchemaPath == "" {
 		return nil, errors.New("appximo: Config.SchemaPath is required")
 	}
+	// PHASE4-FIRST-MILE-S1: report EVERY missing required setting at once, with
+	// what each one is for and how to generate a value — a new user used to
+	// discover them one exit at a time, with no hint of where a secret comes from.
+	var missing []string
 	if cfg.DSN == "" {
-		return nil, errors.New("appximo: DSN is required (set Config.DSN or DATABASE_URL)")
+		missing = append(missing,
+			"  DATABASE_URL — the PostgreSQL connection string, e.g. postgres://user:pass@localhost:5432/appximo (or set Config.DSN)")
 	}
 	if cfg.JWTSecret == "" {
-		return nil, errors.New("appximo: JWT secret is required (set Config.JWTSecret or JWT_SECRET)")
+		missing = append(missing,
+			"  JWT_SECRET   — signs every auth token; any random value of 32+ characters. Generate one: openssl rand -hex 32 (or set Config.JWTSecret)")
+	}
+	if cfg.AdminKey == "" {
+		missing = append(missing,
+			"  ADMIN_KEY    — protects tenant registration and the first-admin bootstrap. Generate one: openssl rand -hex 16 (or set Config.AdminKey)")
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("appximo: missing required configuration:\n%s\nSet the variable(s) in the environment (or a .env you source) and run again",
+			strings.Join(missing, "\n"))
 	}
 	// SEC-6 (2026-08-05, Miguel's call): the docs have always said "at least 32
 	// characters"; rule 8 of ADR-024 says a stated rule is an enforced rule. A
@@ -208,10 +222,6 @@ func New(cfg Config) (*App, error) {
 				"Set Config.JWTSecret / JWT_SECRET to a random value of at least %d characters (e.g. `openssl rand -hex 32`)",
 			len(cfg.JWTSecret), MinJWTSecretLen, MinJWTSecretLen)
 	}
-	if cfg.AdminKey == "" {
-		return nil, errors.New("appximo: admin key is required (set Config.AdminKey or ADMIN_KEY)")
-	}
-
 	logging.Init(cfg.Env)
 
 	// Phase-0 runtime backpressure (LIBRARY-HARDEN-S1): apply GOMEMLIMIT/GOGC from
@@ -355,11 +365,11 @@ func New(cfg Config) (*App, error) {
 	// HookRunner with Capa 3 (WASM) when the runtime initializes; JS+webhook only on error.
 	sandbox := extensions.NewJSSandbox()
 	if wasmRunner, werr := extensions.NewWasmRunner(context.Background()); werr != nil {
-		log.Printf("WARNING: WASM runtime (Capa 3) disabled: %v", werr)
+		log.Printf("WARNING: WASM runtime (layer 3) disabled: %v", werr)
 		app.hr = extensions.NewHookRunner(sandbox)
 	} else {
 		app.hr = extensions.NewHookRunnerWithWasm(sandbox, extensions.NewWebhookDispatcher(), wasmRunner)
-		log.Println("WASM runtime (Capa 3) enabled")
+		log.Println("WASM runtime (layer 3) enabled")
 	}
 
 	// Redis optional.
@@ -901,6 +911,13 @@ func (a *App) Start() error {
 		return fmt.Errorf("appximo: cannot listen on %s: %w", addr, err)
 	}
 	fmt.Printf("Appximo serving on %s — Ctrl+C to stop\n", addr)
+	// PHASE4-FIRST-MILE-S1: say that the process stays in the foreground and how
+	// to keep working — a first-time user's terminal "freezes" here and nothing
+	// used to explain it (the guide had to grow a "open a second terminal" note).
+	// Printed AFTER the bind (ENG-34: only facts get announced).
+	fmt.Printf("  This process stays in the foreground. Open a SECOND terminal to make requests,\n")
+	fmt.Printf("  or run it in the background (append `&`, or use a systemd unit in production).\n")
+	fmt.Printf("  Try it:  http://localhost:%d/docs  ·  admin panel /admin  ·  schema editor /editor\n", a.cfg.Port)
 	if err := a.ss.Serve(ctx, srv, ln, 5*time.Second, a.cleanup); err != nil {
 		return err
 	}
