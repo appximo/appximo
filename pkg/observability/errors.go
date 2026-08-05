@@ -205,6 +205,12 @@ func trimGoPath(path string) string {
 			return path[i+1:]
 		}
 	}
+	// Stdlib frames live under GOROOT/src (e.g. .../go/1.25.12/x64/src/testing/
+	// testing.go). GOROOT differs per install — a module-cache toolchain even
+	// contains "/pkg/" and got trimmed by luck above — so anchor on "/src/".
+	if i := strings.Index(path, "/src/"); i >= 0 {
+		return path[i+len("/src/"):]
+	}
 	return path
 }
 
