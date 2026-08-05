@@ -37,15 +37,15 @@ jobs:
             target: FuzzJSSandbox
     name: fuzz ${{ matrix.target }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Fuzz ${{ matrix.target }} (30s)
-        uses: jidicula/go-fuzz-action@v1.1.0
+        uses: jidicula/go-fuzz-action@v1.2.0
         with:
           packages: ${{ matrix.package }}
           fuzz-regexp: ${{ matrix.target }}

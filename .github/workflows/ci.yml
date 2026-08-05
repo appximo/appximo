@@ -17,19 +17,15 @@ permissions:
 # CI runners are ephemeral, so the reaper's cleanup is unnecessary — disable it.
 env:
   TESTCONTAINERS_RYUK_DISABLED: "true"
-  # Run bundled JS actions (checkout, setup-go, upload-artifact) on Node 24 so the
-  # deprecated-Node-20 warning does not clutter the logs. Set workflow-wide so it
-  # applies to every job (it cascades into each job's env).
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   test:
     name: Test & fix gates
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -80,7 +76,7 @@ jobs:
 
       - name: Upload raw test JSON
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gotest-json
           path: gotest.json
@@ -95,9 +91,9 @@ jobs:
     name: golangci-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -108,18 +104,19 @@ jobs:
       # implied audited quality. The policy (and every exclusion's reason) lives in
       # .golangci.yml; this job is what makes it binding.
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
+          # Matches the version developers run locally (make lint). golangci-lint
+          # v2 removed --timeout (no default timeout anymore), so no args.
           version: v2.12.2
-          args: --timeout=10m
 
   govulncheck:
     name: vet + govulncheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -162,9 +159,9 @@ jobs:
       DURATION: 20s
       TENANT_ID: ciperf
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true

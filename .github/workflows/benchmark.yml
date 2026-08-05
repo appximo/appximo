@@ -23,14 +23,10 @@ permissions:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    # Run bundled JS actions (checkout, setup-go, benchmark-action) on Node 24 so
-    # the deprecated-Node-20 warning does not clutter the logs.
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -41,7 +37,24 @@ jobs:
             -bench='BenchmarkJWTValidation|BenchmarkRBACCheck' \
             -benchmem -benchtime=2s -run='^$' | tee output.txt
 
+      # The action pushes data to gh-pages. A fresh repo has no gh-pages branch
+      # (the filtered public history ships main only), and the missing branch
+      # fails the push — measured on run #1. Until the branch exists, skip the
+      # store step with a visible notice instead of failing the whole workflow:
+      # the benchmarks above still ran and printed. To enable the chart:
+      #   git checkout --orphan gh-pages && git rm -rf .       #     && git commit --allow-empty -m "benchmark data branch"       #     && git push origin gh-pages && git checkout main
+      - name: Check gh-pages branch exists
+        id: ghpages
+        run: |
+          if git ls-remote --exit-code origin gh-pages >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::gh-pages branch missing — benchmark data not stored (see benchmark.yml for the one-time setup)"
+          fi
+
       - name: Store benchmark result
+        if: steps.ghpages.outputs.exists == 'true'
         uses: benchmark-action/github-action-benchmark@v1
         with:
           tool: go

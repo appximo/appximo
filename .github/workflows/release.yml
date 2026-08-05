@@ -35,15 +35,26 @@ jobs:
       github.event.workflow_run.event == 'push' &&
       startsWith(github.event.workflow_run.head_branch, 'v')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The exact commit CI validated — never the default branch tip.
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
+
+      # The SPAs are go:embed-ded; their hashed assets are gitignored (committed
+      # index.html only), so a bare checkout builds binaries that serve EMPTY
+      # /editor and /admin shells (AGENTS.md documents the trap; the Dockerfile
+      # already runs both npm builds — this is the release-path equivalent).
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Build embedded SPAs (Studio + admin)
+        run: make editor-ui admin-ui
 
       - name: Build matrix (static cross-compile)
         env:
