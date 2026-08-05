@@ -53,7 +53,14 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   (STRUCTURAL — validates against the embedded formal JSON Schema meta-schema,
   `pkg/schema/appximo.schema.json`; engine-free, the deterministic net for
   AI-generated schemas), `meta-schema` (prints that meta-schema for IDE `$schema` /
-  tooling), `token` (mint a dev JWT),
+  tooling), `explain <schema> [--lang en|es]` (PHASE4-FIRST-MILE-S1: the READ-BACK
+  step of the authoring loop — renders a VALID schema as plain-language prose for
+  the app's OWNER: resources, each field's rules in words, state machines as
+  "from X it can move to Y / Z is final", relations, and every role's grants
+  incl. row conditions ("only rows whose owner_id is the signed-in user").
+  Deterministic — derived from the parsed schema, never guessed; how a
+  non-programmer confirms an AI-written schema models what they asked),
+  `token` (mint a dev JWT),
   `openapi`, `graphql` (SDL), `generate`, `migrate`, `backup`, `init`,
   `ai-generate "<description>"` (the AI democratization loop: a natural-language
   app description → LLM-generated schema → self-correct from `ValidateReport`'s
@@ -1997,7 +2004,18 @@ scripts) on the management routes — humans log in (auditable identity + MFA),
 machines present the key. Two paths for two consumers; the key is NOT removed.
 
 **Bootstrap the first super-admin** (no public super-admin signup — a super-admin
-cannot be created by a super-admin that does not yet exist):
+cannot be created by a super-admin that does not yet exist). TWO equivalent paths
+(PHASE4-FIRST-MILE-S1):
+
+1. **From the /admin login screen itself** — when NO admin exists, the screen
+   detects it (`GET /admin/auth/status`, unauthenticated: `{"bootstrapped":bool}`;
+   post-bootstrap a constant `true`, so it discloses nothing) and offers a
+   first-run form: admin key + email + password →
+   `POST /admin/auth/bootstrap` (gated by `X-Admin-Key` — the operator's own boot
+   credential, the same trust level as shell access; wrong/missing key → uniform
+   403). It creates the first admin AND signs them in (201 `{admin, token}`);
+   once ANY admin exists the route is permanently closed (409).
+2. **From the terminal**:
 
 ```bash
 DATABASE_URL=… JWT_SECRET=… \
