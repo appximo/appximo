@@ -411,22 +411,16 @@ refreshed).
   local engine path — the remote must document how to build it (or the replace
   becomes a broken clone for anyone else).
 
-### COMMERCE-1 — Credit notes (fiscally correct refunds)
-- **Origin:** COMMERCE-CORE-S1 report; the DIAN interface (`docs/DIAN.md`).
-- **Impact:** **High for a Colombian merchant.** A refund today reverses the
-  payment and the stock but issues no *nota crédito* — the invoice stays as
-  issued, so the tax record is wrong.
-- **Ready:** an approved refund emits a credit note through the same outbox +
-  issuer path an invoice uses, linked to the original invoice's CUFE, with the
-  same at-least-once idempotency; verified in `verify-webhook.sh`.
-
-### COMMERCE-2 — Tax categories per product
-- **Origin:** COMMERCE-CORE-S1 report. IVA is hardcoded at 19 % in the checkout.
-- **Impact:** Medium — product scope, not a defect. Wrong for exempt/excluded
-  goods, which is most food retail.
-- **Ready:** a tax category per product type resolving a rate at checkout, with
-  exempt (0 %) and excluded (no tax) distinguished, and the reconciliation report
-  broken down by rate.
+### COMMERCE-7 — Partial refunds (nota crédito parcial)
+- **Origin:** PHASE4-FIRST-MILE-S1 (closing COMMERCE-1 surfaced it). The refund
+  route always reverses the FULL payment and the credit note reverses every
+  line; `pagos.monto_reembolsado_centavos` and the payments layer already
+  support partial amounts, but no surface asks for one.
+- **Impact:** Medium — a merchant returning ONE item of a three-item order has
+  to refund everything. Product scope, not an engine gap.
+- **Ready:** the refund route accepts an optional line/amount subset, the nota
+  crédito carries only the reversed lines, and stock returns only for those
+  lines; suite coverage for the partial path.
 
 ### COMMERCE-4 — A real DIAN Proveedor Tecnológico adapter
 - **Origin:** `docs/DIAN.md` (the interface exists; the implementation is a stub).
@@ -449,6 +443,19 @@ refreshed).
   or a second maintainer.
 
 ---
+
+### OPS-20 — The Windows path is written but UNVERIFIED
+- **Origin:** PHASE4-FIRST-MILE-S1. The release now cross-compiles a
+  `windows/amd64` .exe (CGO-free; unix-only signal/exec isolated behind build
+  tags — `fleet run` supervision and the engine self-restart are documented as
+  unsupported on Windows) and QUICKSTART.md documents the native path in
+  PowerShell — explicitly marked **NOT YET VERIFIED** (this project has no
+  Windows machine).
+- **Impact:** Medium — Windows developers are a real slice of the first mile;
+  an unverified path can burn exactly the users the quick start exists for.
+- **Ready:** the numbered Windows script (in the session report) executed on a
+  real Windows machine, discrepancies fixed, and the QUICKSTART section's
+  NOT-VERIFIED marker replaced with the verification date.
 
 ## CLOSED (decided, with the reasoning written down)
 
@@ -476,6 +483,27 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in PHASE4-FIRST-MILE-S1 (2026-08-05)
+
+| What shipped | Verified by |
+|---|---|
+| **The /admin dead end is gone** — the login screen detects first-run (`GET /admin/auth/status`, unauth; constant `true` after bootstrap) and offers "Create the first admin": ADMIN_KEY + email + password → `POST /admin/auth/bootstrap` (X-Admin-Key-gated, permanently closed once any admin exists → 409; weak password → 422 naming the minimum), auto-signs-in; the CLI path (`appximo admin create`) stays and the screen names it | integration test (status→403 no key→403 wrong key→201+token→status true→409→422 weak); live probes 6/6; Playwright: first-run screen renders, bootstrap through the UI signs in, 0 console errors |
+| **`serve` says it stays in the foreground** — after the bind (ENG-34 order kept): second-terminal hint + docs//admin//editor URLs | live boot probe |
+| **Signup 403 names both ways out** (APPXIMO_AUTH_SIGNUP_ROLE, or admin-created users via /admin → Users) | live probe; binary-diff gate row |
+| **Missing required configuration reported ALL at once** — DATABASE_URL/JWT_SECRET/ADMIN_KEY each with what it's for + how to generate a value (`openssl rand …`) | live probe with zero env |
+| **English-first CLI** — ~91 Spanish strings translated (18 `Short:`s, ai-generate's whole report + flags, migrate/token `Long:`s, init/generate output, fleet Shorts, Prometheus HELP, "Capa 3" logs); `--help` now fully English | `--help` probe; grep for residual Spanish 0 (example prompts deliberately kept) |
+| **`appximo explain <schema> [--lang en\|es]`** — the read-back step of the authoring loop: a VALID schema rendered as owner-readable prose (resources, field rules in words, state machines as sentences with terminal states, relations, per-role grants incl. row conditions); deterministic, never guessed; invalid schemas are refused with the validator's errors | live probes over quickstart/state-machine/rbac-per-resource examples in both languages |
+| **Windows release asset** — `windows/amd64` .exe added to the release matrix (CGO-free cross-compile); unix-only `syscall.Kill`/`syscall.Exec` isolated behind build tags (fleet supervisor + engine self-restart degrade explicitly on Windows) | `GOOS=windows go build ./cmd/appximo` green; unix build + full lane unchanged |
+| **docs/QUICKSTART.md** — the two-track first mile (manual + AI-agent per step), install→schema→live API→first user→custom Go→frontend→production HTTPS→migrate→backup, with real Playwright screenshots, per-step "you should see"/"if it fails", the Windows path marked NOT VERIFIED, and honest (next release) markers for post-v0.1.1 behavior; cold-read by a second agent (10 findings, all fixed) | Linux path executed end-to-end against the v0.1.1 RELEASE binary (install→validate→serve→tenant+schema→token→POST/GET→/docs→migrate dry-run/apply); README + GUIDE link it |
+| **COMMERCE-1 — credit notes** (was OPEN above): refund creates the nota crédito row in the SAME tx as the reversal, linked via `factura_origen_id`/`cufe_origen`, enqueues `nota_credito.emitir` through the same outbox+Issuer path (new `EmitCreditNote`; stub records intent, never fabricates a CUFE); idempotent on the note row; worker consumes both fiscal topics in one process | verify-webhook.sh section 8 (5 new checks) 26/26; e2e-1b 50/50; worker run: nota processed via stub |
+| **COMMERCE-2 — per-category VAT** (was OPEN above): `tipos_producto.regimen_iva` (gravado/exento/excluido) + `tarifa_iva_pct`; per-line rate+tax stored on `orden_lineas`; checkout sums per line; catalogue reports the effective rate; SPA estimates per line; invoice worker reads the stored rate; `/api/conciliacion` adds `iva_por_tarifa` | e2e-1b 7b (exempt: catalogue 0, checkout IVA 0, line 0/0, gravado still 19%); reconciliation probe |
+| **GAPS 4-1 flake closed** — verify.sh's GIN EXPLAIN retries once after re-ANALYZE (the documented cheap fix) | verify.sh 18/18 twice |
+
+Binary-diff gate: **101 cases, 98 SAME / 3 DIFF — all three the intentional
+Part-A features** (the signup-403 message; the two new bootstrap routes, which
+the base binary answered 404). No data-path semantics changed; hot path
+untouched (no bench required — the admin/auth/boot surfaces are off it).
 
 ## DONE in HOUSEKEEPING-S1 (2026-08-05)
 

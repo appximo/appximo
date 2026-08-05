@@ -1,5 +1,9 @@
 # The Appximo guide
 
+> In a hurry? **[QUICKSTART.md](QUICKSTART.md)** is the condensed first mile —
+> install → schema → live API → first user → production, each step with a
+> manual track and an AI-agent track. This guide is the depth behind it.
+
 **You have a backend to build and you have never seen this project before. This
 is the document to read.** It was not written from the source code — it was
 distilled from five field journeys in which real apps were built, deployed,

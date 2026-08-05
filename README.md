@@ -49,6 +49,11 @@ not scaffolded into files you then maintain.
 
 ## Quick start (~30 s with the image pull)
 
+> **New here?** The full first-mile walkthrough — install (Linux/macOS/Windows),
+> schema, first call, first user, custom Go, frontend, production with HTTPS,
+> backup — with a manual track AND an AI-agent track for every step, is
+> **[docs/QUICKSTART.md](docs/QUICKSTART.md)**.
+
 > ⚠ The `neodevtrix/appximo` Docker image publishes automatically on every
 > green CI run of `main` — if the pull fails, the image simply hasn't landed
 > yet. From a clone, the two files are at the repo root — skip the downloads.
