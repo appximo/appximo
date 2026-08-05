@@ -120,14 +120,15 @@ unique constraints — belongs in `schema.json`, where the migration engine owns
 
 ### 3.0 Getting the dependency — READ THIS FIRST
 
-**The Appximo module is not published.** `github.com/appximo/appximo` is a
-private repository with no release tag, so `go get github.com/appximo/appximo`
-and a bare `go mod tidy` **fail** — there is no version to fetch. An agent that
-guesses a version (`v0.1.0`) will produce a project that does not build, which is
-exactly what happened the first time this document was used
-(docs/AUTHORING_JOURNEY.md 5-7).
+**The Appximo module IS published** (since v0.1.1, 2026-08-05):
+`go get github.com/appximo/appximo@v0.1.1` fetches from the public proxy —
+verified live. A plain `go mod tidy` against the import works; no `replace`
+needed. (Historical note: before publication the only working recipe was a
+local checkout plus a `replace`, and an agent guessing a version produced a
+project that did not build — docs/AUTHORING_JOURNEY.md 5-7.)
 
-**The recipe that works today** is a local checkout plus a `replace`:
+**The checkout + `replace` recipe below remains valid** for developing against
+an unreleased engine tree:
 
 ```bash
 git clone <your-appximo-checkout> /path/to/appximo   # or use the one you already have

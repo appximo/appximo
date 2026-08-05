@@ -96,10 +96,12 @@ source.
 
 ## 2. From zero to a live API (the path that works TODAY)
 
-> **Availability, honestly.** There is **no release tag yet** — a "download
-> the binary from GitHub Releases" path does not exist today. The two paths
-> that work: **build from a checkout** of the repository, or the **published
-> Docker image** (`neodevtrix/appximo`, multi-arch) with the
+> **Availability.** Three paths work today: **download the binary from
+> [GitHub Releases](https://github.com/appximo/appximo/releases)** (v0.1.1,
+> linux/darwin × amd64/arm64, checksums published — the installer downloads
+> and verifies it automatically when you omit `--binary`), **build from a
+> checkout**, or the **published Docker image**
+> (`neodevtrix/appximo`, multi-arch) with the
 > self-contained `docker-compose.yml` at the repo root. The image itself is
 > public on Docker Hub, but the compose file, the example schema and every doc
 > live in the repository — so until it is published, both paths in practice
@@ -645,8 +647,10 @@ VPS installs PostgreSQL (tuned to the box), the binary under systemd
 Let's Encrypt certificate:
 
 ```bash
-sudo bash scripts/install.sh --domain=api.example.com --email=you@example.com \
-     --binary=./appximo        # --binary because there is no release tag yet
+sudo bash scripts/install.sh --domain=api.example.com --email=you@example.com
+# (add --binary=./appximo to deploy a binary you built yourself — e.g. a
+#  framework-mode consumer app; without it the installer downloads the
+#  v0.1.1 release asset and verifies its checksum)
 ```
 
 Box-to-HTTPS was walked end-to-end on a real DigitalOcean droplet, twice (the
@@ -798,10 +802,11 @@ If your project needs one of these today, factor that in *now*:
 
 **Distribution — the honest state of "today"**
 
-- **No release tag yet** — there is no Releases download; you build from a
-  checkout or use the Docker image (the installer takes `--binary=`).
-- **The Go module is unpublished** — framework mode (§5) builds only against
-  a local checkout + `replace`; not on a teammate's machine, not in CI
+- **Released: v0.1.1** — binaries for linux/darwin (amd64/arm64) with
+  checksums on GitHub Releases; the installer's download path is enabled.
+- **The Go module is fetchable** — `go get github.com/appximo/appximo@v0.1.1`
+  works from the public proxy (verified live 2026-08-05), so framework mode
+  (§5) builds on any machine and in CI
   (DOC-2). The docs are already written for the published state.
 - **Self-hosted only. No SaaS.** By design.
 

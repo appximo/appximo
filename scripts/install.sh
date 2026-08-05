@@ -38,7 +38,7 @@ SERVICE_NAME="appximo"   # derived from APP_NAME in derive_paths
 readonly REPO="appximo/appximo"
 # Set to a published tag (e.g. "v0.1.0") to enable the download path. Empty means
 # "no public release" → the installer requires --binary.
-readonly RELEASE_VERSION=""
+readonly RELEASE_VERSION="v0.1.1"
 
 # ── Defaults (overridable by flags) ──────────────────────────────────────────
 DOMAIN=""; EMAIL=""; BINARY=""; CLI=""; SCHEMA=""; PORT="8090"; CONTROL_PORT=""
