@@ -28,7 +28,7 @@
 {"name": "filter-by-id-bad-value", "method": "GET", "path": "/api/notes?filter[id][eq]=zzz", "expect": "ENG-26+25: 400 naming the uuid value — was 400 unknown filter field"}
 {"name": "filter-by-id-bad-op", "method": "GET", "path": "/api/notes?filter[id][gt]={{ID}}", "expect": "400 — uuid allows eq only; names the operator and the allowed set"}
 {"name": "filter-unknown-field", "method": "GET", "path": "/api/notes?filter[ghost][eq]=1", "expect": "400 available: now truthfully includes id (ENG-26 closed the self-contradiction)"}
-{"name": "filter-op-underscore", "method": "GET", "path": "/api/notes?filter[title][is_null]=true", "expect": "400 naming is_null + allowed set (ENG-14/ADR-024; SCHEMA-6 keeps NULL-filtering an honest dead end)"}
+{"name": "filter-op-underscore", "method": "GET", "path": "/api/notes?filter[title][is_null]=true", "expect": "400 — title is required (NOT NULL), so is_null can never match; pre-SCHEMA-6 this was the unknown-operator 400 (the row still pins ENG-14: an underscore op is named, never dropped)"}
 {"name": "filter-op-capital", "method": "GET", "path": "/api/notes?filter[title][NEQ]=x", "expect": "400 — op validated in code, not regex-dropped"}
 {"name": "filter-malformed", "method": "GET", "path": "/api/notes?filter[a][b][c]=1", "expect": "400 malformed filter parameter"}
 {"name": "filter-empty-nontext", "method": "GET", "path": "/api/notes?filter[amount][gte]=", "expect": "400 empty value is not valid for a int64 field"}
@@ -95,4 +95,4 @@
 {"name": "filter-is-null-on-required", "method": "GET", "path": "/api/notes?filter[title][is_null]=true", "expect": "SCHEMA-6: 400 naming that title is required (NOT NULL) and can never be null — a filter that can never match is refused, not served"}
 {"name": "filter-is-null-on-id", "method": "GET", "path": "/api/notes?filter[id][is_null]=true", "expect": "SCHEMA-6: 400 — id is the primary key, never null"}
 {"name": "filter-is-null-bad-value", "method": "GET", "path": "/api/notes?filter[amount][is_null]=maybe", "expect": "SCHEMA-6: 400 naming the value and the vocabulary (true/false) — ENG-23 by-value reading, never presence-only"}
-{"name": "aggregate-inherits-is-null", "method": "GET", "path": "/api/notes/aggregate?count&filter[amount][is_null]=false", "expect": "SCHEMA-6 + ENG-14 lesson: the aggregate WHERE inherits is_null through the shared BuildQuery core — count:1 (the seed row)"}
+{"name": "aggregate-inherits-is-null", "method": "GET", "path": "/api/notes/aggregate?count&filter[amount][is_null]=false", "expect": "SCHEMA-6 + ENG-14 lesson: the aggregate WHERE inherits is_null through the shared BuildQuery core — count = rows with amount NOT NULL (the seed + the create-string-scalar-int row = 2)"}
