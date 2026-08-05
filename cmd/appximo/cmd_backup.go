@@ -31,7 +31,7 @@ every tenant listed in public.tenants. Connection comes from DATABASE_URL.`,
 		ctx := context.Background()
 		pool, err := db.NewPool(ctx, connStr)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Error conectando a la DB:", err)
+			fmt.Fprintln(os.Stderr, "Error connecting to the DB:", err)
 			os.Exit(1)
 		}
 		defer pool.Close()

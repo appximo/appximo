@@ -27,7 +27,7 @@ var debugTracesHTML []byte
 // see examples/custom-handler/main.go for the import-and-Register model.
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Levanta el servidor HTTP multi-tenant",
+	Short: "Start the multi-tenant HTTP server",
 	// ADR-024: `serve` takes NO positional arguments. It used to accept and
 	// silently ignore them, so `appximo serve myapp.json` booted whatever
 	// ./schema.json happened to be in the working directory — the operator pointed

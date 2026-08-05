@@ -29,7 +29,7 @@ import (
 // reachable (--database-url or $DATABASE_URL), so `make fleet` boots first try.
 var fleetInitCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Genera un fleet listo para arrancar: fleet.json + secrets prolijos + schema inicial + DBs",
+	Short: "Generate a ready-to-run fleet: fleet.json + tidy secrets + initial schema + DBs",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfgPath, _ := cmd.Flags().GetString("config")
 		appNames, _ := cmd.Flags().GetStringSlice("app")

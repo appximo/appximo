@@ -18,7 +18,7 @@ import (
 // handlers/hooks/jobs safely — the in-process power made agent-accessible.
 var backendSpecCmd = &cobra.Command{
 	Use:   "backend-spec",
-	Short: "Imprime la guía para construir un BACKEND completo (handlers/hooks/auth/jobs) para un agente — pégala en tu Claude Code/Cursor",
+	Short: "Print the guide for building a COMPLETE backend (handlers/hooks/auth/jobs) for an agent — paste it into your Claude Code/Cursor",
 	Long: `Prints the definitive agent guide for building a complete Appximo backend:
 the decision framework (schema vs hook vs custom handler vs job vs service), the
 custom-handler surface (the whole Ctx, with compiling examples), the Phase-0

@@ -23,7 +23,7 @@ import (
 // behind --yes. Off the hot path entirely.
 var tenantCmd = &cobra.Command{
 	Use:   "tenant",
-	Short: "Gestiona los tenants (list / delete) — mantiene el entorno sin tenants basura de prueba",
+	Short: "Manage tenants (list / delete) — keeps the environment free of leftover test tenants",
 }
 
 func tenantPool(ctx context.Context) *pgxpool.Pool {
@@ -42,7 +42,7 @@ func tenantPool(ctx context.Context) *pgxpool.Pool {
 
 var tenantListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "Inventario de tenants: schema, recursos, filas (~), usuarios, creado",
+	Short: "Tenant inventory: schema, resources, rows (~), users, created",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx := context.Background()
 		pool := tenantPool(ctx)
@@ -86,7 +86,7 @@ var tenantListCmd = &cobra.Command{
 
 var tenantDeleteCmd = &cobra.Command{
 	Use:   "delete <id> [<id>…]",
-	Short: "Borra tenant(s) DESTRUCTIVAMENTE: schema completo + toda su metadata (requiere --yes)",
+	Short: "Delete tenant(s) DESTRUCTIVELY: full schema + all its metadata (requires --yes)",
 	Long: `Deletes tenants COMPLETELY and IRREVERSIBLY: the tenant's Postgres schema
 (all its data, CASCADE) plus every control-plane row that references it
 (policies, migration log, schema history, flow tests/runs, outbox) — the same

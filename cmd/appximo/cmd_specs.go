@@ -17,7 +17,7 @@ import (
 // markdowns) — this is concatenation, never a fourth document to drift.
 var specsCmd = &cobra.Command{
 	Use:   "specs",
-	Short: "Imprime la TRILOGÍA completa (spec + backend-spec + frontend-spec) de una vez — un solo paste para tu agente",
+	Short: "Print the FULL trilogy (spec + backend-spec + frontend-spec) at once — a single paste for your agent",
 	Long: `Prints the complete agent trilogy in one stream, separated by banners:
 
   1. appximo spec           — the schema grammar

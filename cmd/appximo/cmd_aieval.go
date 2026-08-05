@@ -24,7 +24,7 @@ import (
 // real model. The instrument is the deliverable; the techniques it scores come later.
 var aiEvalCmd = &cobra.Command{
 	Use:   "ai-eval",
-	Short: "Mide la capa de IA: ablation pareado sobre el test set gold con estadística rigurosa (McNemar/Wilson/Cochran-Q+Holm)",
+	Short: "Measure the AI layer: paired ablation over the gold test set with rigorous statistics (McNemar/Wilson/Cochran-Q+Holm)",
 	Long: `Runs the curated NL→schema gold test set through a paired ablation harness and
 emits a rigorous statistical report: p_sem (first-try semantic success) with Wilson
 95% intervals, the EMPIRICAL E[iterations] distribution (never the geometric
@@ -72,7 +72,7 @@ Examples:
 			client, cerr := aigen.NewAnthropicClient(model)
 			if cerr != nil {
 				if errors.Is(cerr, aigen.ErrNoAPIKey) {
-					fmt.Fprintln(os.Stderr, "Error: --live requiere ANTHROPIC_API_KEY (export it; never hardcode).")
+					fmt.Fprintln(os.Stderr, "Error: --live requires ANTHROPIC_API_KEY (export it; never hardcode).")
 					os.Exit(2)
 				}
 				return cerr
@@ -118,11 +118,11 @@ Examples:
 }
 
 func init() {
-	aiEvalCmd.Flags().Bool("live", false, "medir un modelo real (requiere ANTHROPIC_API_KEY); default = simulado determinístico")
-	aiEvalCmd.Flags().String("model", aigen.DefaultModel, "modelo (para la etiqueta de costo y, en --live, el modelo real)")
-	aiEvalCmd.Flags().String("out", "", "persistir los outcomes pareados como JSON (reproducibilidad)")
-	aiEvalCmd.Flags().Bool("json", false, "emitir el análisis estadístico completo como JSON")
-	aiEvalCmd.Flags().Int("max-iterations", 0, "override del budget de iteraciones (0 = default del loop)")
-	aiEvalCmd.Flags().Int("sample", 0, "submuestra estratificada: N casos por estrato (0 = corpus completo) — para acotar una corrida --live bajo límite de tasa")
+	aiEvalCmd.Flags().Bool("live", false, "measure a real model (requires ANTHROPIC_API_KEY); default = deterministic simulation")
+	aiEvalCmd.Flags().String("model", aigen.DefaultModel, "model (for the cost label and, with --live, the real model)")
+	aiEvalCmd.Flags().String("out", "", "persist the paired outcomes as JSON (reproducibility)")
+	aiEvalCmd.Flags().Bool("json", false, "emit the full statistical analysis as JSON")
+	aiEvalCmd.Flags().Int("max-iterations", 0, "override the iteration budget (0 = the loop's default)")
+	aiEvalCmd.Flags().Int("sample", 0, "stratified subsample: N cases per stratum (0 = full corpus) — bounds a --live run under rate limits")
 	rootCmd.AddCommand(aiEvalCmd)
 }

@@ -14,16 +14,16 @@ import (
 
 var tokenCmd = &cobra.Command{
 	Use:   "token",
-	Short: "Genera un JWT de desarrollo para pruebas con curl",
-	Long: `Emite un JWT firmado con HS256 listo para pegar en:
+	Short: "Generate a development JWT for curl testing",
+	Long: `Mints an HS256-signed JWT ready to paste into:
   curl -H "Authorization: Bearer <token>" ...
 
-Con --schema, el rol se valida contra los roles que ese schema declara y un rol
-inexistente se RECHAZA (un token con un rol que ningún rol del schema declara
-recibe el mismo 403 "forbidden" que un rol sin permiso — deny-by-default — y el
-porqué solo aparece en el log del servidor, ENG-27). Sin --schema no se valida
-nada: el default "super_admin" es solo una convención y puede no existir en tu
-schema.`,
+With --schema, the role is validated against the roles that schema declares and a
+nonexistent role is REFUSED (a token carrying a role no schema role declares gets
+the same 403 "forbidden" as a role without permission — deny-by-default — and the
+why appears only in the server log, ENG-27). Without --schema nothing is
+validated: the default "super_admin" is just a convention and may not exist in
+your schema.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		role, _ := cmd.Flags().GetString("role")
 		tenantID, _ := cmd.Flags().GetString("tenant")

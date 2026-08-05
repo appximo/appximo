@@ -27,12 +27,12 @@ import (
 // Host-routing proxy. Each app is today's engine, hot path untouched.
 var fleetCmd = &cobra.Command{
 	Use:   "fleet",
-	Short: "Orquesta N apps (schemas distintos) en un servidor — un motor por app + proxy por dominio",
+	Short: "Orchestrate N apps (distinct schemas) on one server — one engine per app + a per-domain proxy",
 }
 
 var fleetRunCmd = &cobra.Command{
 	Use:   "run",
-	Short: "Levanta la fleet: un motor por app, supervisados, detrás del proxy Host→app",
+	Short: "Start the fleet: one engine per app, supervised, behind the Host→app proxy",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfgPath, _ := cmd.Flags().GetString("config")
 		mf, err := fleet.LoadManifest(cfgPath)
@@ -118,7 +118,7 @@ var fleetRunCmd = &cobra.Command{
 // unmatched Hosts get a clean 404, never an arbitrary app.
 var fleetServeCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Sirve N apps EN UN PROCESO (in-process, Opción B) desde el mismo fleet.json",
+	Short: "Serve N apps IN ONE PROCESS (in-process, Option B) from the same fleet.json",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfgPath, _ := cmd.Flags().GetString("config")
 		mf, err := fleet.LoadManifest(cfgPath)
@@ -140,7 +140,7 @@ var fleetServeCmd = &cobra.Command{
 
 var fleetStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Muestra el estado de la fleet (consulta el status API del fleet run)",
+	Short: "Show the fleet status (queries the fleet run status API)",
 	Run: func(cmd *cobra.Command, args []string) {
 		addr, _ := cmd.Flags().GetString("addr")
 		resp, err := http.Get("http://" + addr + "/fleet/status")
@@ -246,7 +246,7 @@ func requireOperatorKey(mf *fleet.Manifest) string {
 
 var fleetListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "Lista las apps del fleet — el estado VIVO si `fleet serve` corre, o el manifiesto",
+	Short: "List the fleet's apps — the LIVE state if `fleet serve` is running, else the manifest",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfgPath, _ := cmd.Flags().GetString("config")
 		mf, err := fleet.LoadManifest(cfgPath)
@@ -287,7 +287,7 @@ var fleetListCmd = &cobra.Command{
 
 var fleetAddCmd = &cobra.Command{
 	Use:   "add",
-	Short: "Agrega una app al fleet — EN CALIENTE si `fleet serve` corre (sin reiniciar, otras apps intactas) + persiste el manifiesto",
+	Short: "Add an app to the fleet — HOT if `fleet serve` is running (no restart, other apps untouched) + persists the manifest",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfgPath, _ := cmd.Flags().GetString("config")
 		name, _ := cmd.Flags().GetString("name")
@@ -374,7 +374,7 @@ var fleetAddCmd = &cobra.Command{
 
 var fleetRemoveCmd = &cobra.Command{
 	Use:   "remove",
-	Short: "Quita una app del fleet — EN CALIENTE si `fleet serve` corre; su base de datos NO se borra",
+	Short: "Remove an app from the fleet — HOT if `fleet serve` is running; its database is NOT deleted",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfgPath, _ := cmd.Flags().GetString("config")
 		name, _ := cmd.Flags().GetString("name")

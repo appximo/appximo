@@ -20,7 +20,7 @@ import (
 // storefront, not from theory.
 var frontendSpecCmd = &cobra.Command{
 	Use:   "frontend-spec",
-	Short: "Imprime la guía para construir un FRONTEND productivo (stack/contrato API/errores→UI/archivos) para un agente — pégala en tu Claude Code/Cursor",
+	Short: "Print the guide for building a production FRONTEND (stack/API contract/errors→UI/files) for an agent — paste it into your Claude Code/Cursor",
 	Long: `Prints the definitive agent guide for building a production frontend on an
 Appximo backend: the embedded-vs-apart decision, the recommended stack
 (SvelteKit + adapter-static as a pure SPA — and WHY), the complete API contract

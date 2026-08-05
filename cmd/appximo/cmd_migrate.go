@@ -16,32 +16,32 @@ import (
 
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
-	Short: "Migra el schema de uno o TODOS los tenants (diff seguro + gate de drops + fan-out reanudable)",
-	Long: `Converge las tablas del/los tenant(s) a su schema con el motor de migraciones real
-(introspección → diff → apply seguro): renames preservan datos, NOT NULL se
-aplica fiel, los índices/constraints declarados se materializan.
+	Short: "Migrate one or ALL tenants' schema (safe diff + drop gate + resumable fan-out)",
+	Long: `Converges the tenant(s)' tables to their schema with the real migration engine
+(introspection → diff → safe apply): renames preserve data, NOT NULL is applied
+faithfully, declared indexes/constraints are materialized.
 
-Por defecto la política es ADITIVA: crea/agrega/altera/renombra pero NUNCA
-dropea — una operación destructiva (eliminar un recurso/tabla o un campo/columna)
-queda GATEADA como drift, sin pérdida de datos. Aplicar un drop requiere ENUMERARLO
-explícitamente con --approve-drops (consentimiento informado — nunca un "sí a todo").
+The default policy is ADDITIVE: it creates/adds/alters/renames but NEVER drops —
+a destructive operation (removing a resource/table or a field/column) stays
+GATED as drift, with no data loss. Applying a drop requires ENUMERATING it
+explicitly with --approve-drops (informed consent — never a "yes to everything").
 
-UN tenant:
+ONE tenant:
     appximo migrate --tenant acme --schema schema.json [--dry-run]
     appximo migrate --tenant acme --schema schema.json --approve-drops "empleados.telefono"
 
-TODOS los tenants (fan-out reanudable — el diferencial vs Prisma):
-    appximo migrate --all-tenants --schema base.json --dry-run   # plan + impacto AGREGADO
-    appximo migrate --all-tenants --schema base.json             # aplica a los N
-    appximo migrate --tenants acme,globex --schema base.json     # a un subconjunto
+ALL tenants (resumable fan-out — the differentiator vs Prisma):
+    appximo migrate --all-tenants --schema base.json --dry-run   # plan + AGGREGATE impact
+    appximo migrate --all-tenants --schema base.json             # apply to all N
+    appximo migrate --tenants acme,globex --schema base.json     # a subset
 
-El fan-out es RESILIENTE (un tenant que falla no aborta a los sanos; se registra y
-se reporta) y REANUDABLE (re-correrlo salta los ya migrados — diff vacío = no-op — y
-reintenta los que fallaron). NUNCA auto-aprueba destructivas: para un drop masivo hay
-que pasar --approve-drops (se aplica a CADA tenant; el dry-run muestra el impacto
-agregado primero). Secuencial en v1.
+The fan-out is RESILIENT (a failing tenant does not abort the healthy ones; it is
+recorded and reported) and RESUMABLE (re-running skips the already-migrated —
+empty diff = no-op — and retries the failed). It NEVER auto-approves destructives:
+a mass drop requires --approve-drops (applied to EVERY tenant; the dry-run shows
+the aggregate impact first). Sequential in v1.
 
-Útil para instalaciones on-premise o para depurar sin un worker de Redis.`,
+Useful for on-premise installs or debugging without a Redis worker.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		schemaFile, _ := cmd.Flags().GetString("schema")
 		tenantID, _ := cmd.Flags().GetString("tenant")
@@ -64,10 +64,10 @@ agregado primero). Secuencial en v1.
 
 		s, err := schema.LoadFromFile(schemaFile)
 		if err != nil {
-			fatal("Error leyendo schema: " + err.Error())
+			fatal("Error reading schema: " + err.Error())
 		}
 		if errs := schema.Validate(s); len(errs) > 0 {
-			fmt.Fprintln(os.Stderr, "Schema inválido:")
+			fmt.Fprintln(os.Stderr, "Invalid schema:")
 			for _, e := range errs {
 				fmt.Fprintln(os.Stderr, " ", e.Error())
 			}
@@ -81,7 +81,7 @@ agregado primero). Secuencial en v1.
 		ctx := context.Background()
 		pool, err := db.NewPool(ctx, connStr)
 		if err != nil {
-			fatal("Error conectando a la DB: " + err.Error())
+			fatal("Error connecting to the DB: " + err.Error())
 		}
 		defer pool.Close()
 

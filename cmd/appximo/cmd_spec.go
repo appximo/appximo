@@ -17,7 +17,7 @@ import (
 // subscription, zero product API cost.
 var specCmd = &cobra.Command{
 	Use:   "spec",
-	Short: "Imprime la gramática del schema destilada para un LLM/agente externo (pégala en tu Claude Code/Cursor)",
+	Short: "Print the schema grammar distilled for an external LLM/agent (paste it into your Claude Code/Cursor)",
 	Long: `Prints the Appximo schema grammar distilled for an LLM: closed sets (types,
 actions, relation kinds), the strict-key rule, naming, the file field, state
 machines, hooks, events, both RBAC forms, full FK coverage — plus two worked

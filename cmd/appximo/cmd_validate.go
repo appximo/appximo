@@ -10,8 +10,8 @@ import (
 )
 
 var validateCmd = &cobra.Command{
-	Use:   "validate [archivo]",
-	Short: "Valida un schema JSON de Appximo (semántico; --json = reporte unificado LLM-friendly)",
+	Use:   "validate [file]",
+	Short: "Validate an Appximo JSON schema (semantic; --json = unified LLM-friendly report)",
 	Long: `Validates a schema file. By default it runs the Go semantic validator (the
 authority) and prints human-readable errors.
 
@@ -45,7 +45,7 @@ source} ] } an AI (or any tool) can parse and auto-correct from. Exit 1 when inv
 
 		errs := schema.Validate(s)
 		if len(errs) == 0 {
-			fmt.Println("Schema válido ✓")
+			fmt.Println("Schema valid ✓")
 			printSchemaWarnings(s)
 			return
 		}

@@ -12,12 +12,12 @@ import (
 
 var blueprintsCmd = &cobra.Command{
 	Use:   "blueprints",
-	Short: "Gestiona blueprints de proyectos Appximo",
+	Short: "Manage Appximo project blueprints",
 }
 
 var blueprintsListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "Lista los blueprints disponibles en blueprints/",
+	Short: "List the blueprints available in blueprints/",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		entries, err := os.ReadDir("blueprints")
 		if err != nil {
@@ -25,7 +25,7 @@ var blueprintsListCmd = &cobra.Command{
 				fmt.Println("No blueprints/ directory found in current path.")
 				return nil
 			}
-			return fmt.Errorf("leer blueprints/: %w", err)
+			return fmt.Errorf("read blueprints/: %w", err)
 		}
 
 		found := false

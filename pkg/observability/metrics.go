@@ -44,20 +44,20 @@ func NewMetrics() *Metrics {
 		seen: make(map[string]struct{}),
 		requestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "appximo_requests_total",
-			Help: "Total de requests por tenant y endpoint",
+			Help: "Total requests by tenant and endpoint",
 		}, []string{"tenant_id", "method", "path", "status"}),
 		requestDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "appximo_request_duration_seconds",
-			Help:    "Duración de requests",
+			Help:    "Request duration",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"tenant_id", "method", "path"}),
 		activeTenants: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "appximo_active_tenants",
-			Help: "Número de tenants cargados en cache",
+			Help: "Number of tenants loaded in the cache",
 		}),
 		migrationDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "appximo_migration_duration_seconds",
-			Help:    "Duración de migraciones Atlas por tenant",
+			Help:    "Tenant migration duration",
 			Buckets: []float64{0.5, 1, 2, 5, 10, 30, 60, 120},
 		}, []string{"tenant_id", "status"}),
 		requestPanics: prometheus.NewCounter(prometheus.CounterOpts{
