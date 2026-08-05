@@ -517,6 +517,23 @@ All three were **re-verified as still open on 2026-07-29**.
 
 ---
 
+## DONE in CI-GREEN-S1 (2026-08-05)
+
+CI went green (all 4 jobs + Benchmark) across 4 pushes. The register keeps the
+honest trail: two of the fixes were real defects the green pipeline surfaced.
+
+| What shipped | Verified by |
+|---|---|
+| **govulncheck clean** — x/text v0.39.0 (GO-2026-5970), grpc v1.82.1 (GO-2026-6061), x/net v0.56.0 (GO-2026-5942), otel v1.44.0 (GO-2026-5158), toolchain go1.25.12 (stdlib GO-2026-5856/4970). GO-2026-5932 (x/crypto/openpgp, no fix upstream): zero imports anywhere — module-level only, unreachable | binary-diff gate pre↔post deps **92/92 SAME**; make test 0 FAIL; make test-all EXIT 0; CI govulncheck green |
+| **Workflows modernized** — golangci-lint-action v9 pinning the local v2.12.2 (golangci-lint v2 removed `--timeout`; the old args would fail), checkout/setup-go/upload-artifact v7, docker actions v4/v7; benchmark.yml skips its store step with a notice while the gh-pages branch does not exist; release.yml builds the embedded SPAs before cross-compiling (a release binary otherwise serves empty /editor and /admin) | CI lint green; Benchmark green; release build verified (version stamp + arm64/darwin cross-compiles) |
+| **trimGoPath fix** — go1.25.12 exposes a testing.tRunner frame; stdlib paths under a hostedtoolcache GOROOT stayed absolute (no /pkg//cmd//internal marker). Anchors `/src/`; also stops server filesystem paths reaching observability stack output for stdlib frames | pkg/observability tests green; gate **92/92 SAME**; CI full suite green next run |
+| **.dockerignore re-includes docs/FRONTEND_SPEC_LLM.md** — the embed postdated the file's last edit; the first image publish died on it | full docker build end to end; container smoke green |
+| **Image → neodevtrix/appximo** (personal namespace; OPS-18 records the org migration path) | docker-publish triggered on green CI |
+
+**v0.1.0 cannot produce a release**: the tag's commit carries the pre-fix
+workflows and a re-run reuses them. The tag stays; the release is **v0.1.1**
+on green main.
+
 ## DONE in RENAME-AND-PUBLISH-PREP-S1 (2026-08-04)
 
 The product renamed **Appitools → Appximo** (a name collision with Applitools —
