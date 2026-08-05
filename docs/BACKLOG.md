@@ -435,25 +435,6 @@ refreshed).
   sandbox credentials, the CUFE returned and stored, and the failure modes mapped
   to the `facturas` state machine.
 
-### OPS-17 — Demo domains: DNS cutover to appximo.com (Miguel's half remains)
-- **Origin:** RENAME-AND-PUBLISH-PREP-S1; executed to the edge of DNS by
-  HOUSEKEEPING-S1 (2026-08-05). DONE already: both 58 demos REDEPLOYED on
-  post-rename binaries (tiendita: commerce ca57a48 on the appximo framework via
-  deploy-update.sh; petfriendly: engine 9ebeaa1), env files carry BOTH prefixes
-  (`APPITOOLS_*` kept + `APPXIMO_*` added — safe in both swap directions), ops
-  CLI updated, e2e purchase + vet CRUD/RBAC verified live, and
-  `/etc/caddy/appximo-sites.caddy.READY` holds the new site blocks + the 301
-  templates + the activation runbook.
-- **What remains (blocked on Miguel):** create DNS A records
-  `tiendita.appximo.com` → 162.243.64.58 and `petfriendly.appximo.com` →
-  162.243.64.58; then on the 58 follow the READY file (append blocks, `systemctl
-  reload caddy`, verify HTTPS, then flip the old `*.appitools.com` blocks to 301
-  redirects), and update README/site/GUIDE demo links to the new domains.
-  `api.appitools.com` stays dead (OPS-14) and `api.appximo.com` is deliberately
-  NOT created — the bare-engine demo was retired; petfriendly IS the engine demo.
-- **Ready:** both demos answer 200 on `*.appximo.com`, old domains 301, public
-  material links the new domains.
-
 ### OPS-18 — The `neodevtrix/appximo` Docker image: first publish pending; org namespace deferred
 - **Origin:** RENAME-AND-PUBLISH-PREP-S1; re-scoped by CI-GREEN-S1 (2026-08-05):
   the `appximo` Docker Hub org was not created (Docker Hub charges for orgs), so
@@ -497,6 +478,22 @@ All three were **re-verified as still open on 2026-07-29**.
 ---
 
 ## DONE in HOUSEKEEPING-S1 (2026-08-05)
+
+**OPS-17 CLOSED same day (second half):** Miguel created the A records
+(`tiendita.appximo.com` / `petfriendly.appximo.com` → 162.243.64.58, direct)
+and DELETED the old `*.appitools.com` records. dig verified both new domains
+resolve straight to the 58; the prepared Caddy blocks were applied
+(`systemctl reload caddy`, zero-downtime) and both domains serve HTTPS with
+fresh Let's Encrypt certs (issued 2026-08-05, `CN = tiendita.appximo.com` /
+`petfriendly.appximo.com`). **The planned 301 redirects were NOT applied — a
+deliberate reversal:** with the old DNS records gone the old hostnames are
+unreachable, so a redirect block would never serve and would only make Caddy
+retry ACME issuance for unresolvable names (guaranteed failures against Let's
+Encrypt); the old site blocks were removed entirely instead. Demo links in
+README, site/ (repo + the published gh-pages copy) and GUIDE.md flipped to the
+new domains. Verified end-to-end ON the new domains: a real purchase
+(pendiente_pago → pagada/aprobado via the signed webhook) and the vet app's
+CRUD+RBAC matrix.
 
 The post-publication operational sweep: the two product decisions Miguel took
 (`is_null`, the JWT-secret floor), the repo-flow unification, the demo redeploy

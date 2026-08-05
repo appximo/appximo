@@ -630,7 +630,7 @@ files/images, the browser-only traps). The load-bearing facts:
   that authorizes by relationship (e.g. "this product is published") and
   streams with Range/ETag/sendfile.
 
-The proof this composes: **https://tiendita.appitools.com** — storefront +
+The proof this composes: **https://tiendita.appximo.com** — storefront +
 mobile back-office + Studio + admin panel + docs, one binary on a $16 VPS,
 and the §3 experiment's agent shipped a working mobile frontend against these
 docs without ever seeing the engine's source.
@@ -861,9 +861,9 @@ is re-checkable on your own hardware with tools that ship in the repo:
 | The engine's own lanes | `make test` (unit, ~7 s) · `make test-all` (integration + e2e + resilience, Docker) | the same gates CI runs |
 
 And the standing proof: two production apps built on the engine are live —
-**[tiendita.appitools.com](https://tiendita.appitools.com)** (the commerce
+**[tiendita.appximo.com](https://tiendita.appximo.com)** (the commerce
 storefront + back-office; its buy path is exercised by the regression suites)
-and **[petfriendly.appitools.com](https://petfriendly.appitools.com)** (the
+and **[petfriendly.appximo.com](https://petfriendly.appximo.com)** (the
 veterinary app whose schema was AI-generated from one paragraph of plain Spanish, §3).
 Both report their build SHA at `/health`.
 

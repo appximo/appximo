@@ -18,7 +18,7 @@ certification §2.3 / OPS-12). Edit numbers only together with a new
 certification pass.
 
 The screenshots are real captures (2026-08-02): the live shop at
-`tiendita.appitools.com` (mobile viewport), petfriendly's generated `/docs`,
+`tiendita.appximo.com` (mobile viewport), petfriendly's generated `/docs`,
 and Studio / Swagger / the admin panel served by a scratch engine running the
 `examples/model-lab/ecommerce.json` schema.
 

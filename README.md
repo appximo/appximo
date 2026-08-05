@@ -121,10 +121,10 @@ The long-form docs behind each command:
 Two real apps — schema + custom Go logic + embedded frontend, each one binary on
 a $16/mo VPS — run in production today:
 
-- **[tiendita.appitools.com](https://tiendita.appitools.com)** — a commerce
+- **[tiendita.appximo.com](https://tiendita.appximo.com)** — a commerce
   storefront (catalog, cart, checkout with an atomic stock transaction, order
   tracking, image uploads).
-- **[petfriendly.appitools.com](https://petfriendly.appitools.com)** — a
+- **[petfriendly.appximo.com](https://petfriendly.appximo.com)** — a
   pet-services app born from the AI authoring flow.
 
 (The demo domains still carry the project's pre-rename name; they move to
