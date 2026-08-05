@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Appximo — a JSON schema in, a production multi-tenant backend out</title>
+<meta name="description" content="Appximo compiles one JSON schema into a multi-tenant REST + GraphQL + OpenAPI server at boot. One static Go binary, your PostgreSQL, a $7–16 VPS. Apache 2.0.">
+<style>
+  :root{
+    --ink:#16181d; --ink-2:#4b5563; --ink-3:#6b7280;
+    --bg:#fdfdfc; --panel:#ffffff; --wash:#f4f5f7;
+    --line:#e5e7eb; --line-2:#d6d9de;
+    --accent:#4f46e5; --accent-ink:#3730a3; --accent-wash:#eef2ff;
+    --ok:#047857; --warn:#92400e; --warn-wash:#fffbeb; --warn-line:#fde68a;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{font-family:var(--sans);color:var(--ink);background:var(--bg);line-height:1.6;font-size:16.5px;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,pre{font-family:var(--mono)}
+  code{background:var(--wash);border:1px solid var(--line);border-radius:5px;padding:.08em .35em;font-size:.86em}
+  pre{background:#101321;color:#dbe2f4;border-radius:10px;padding:1rem 1.2rem;overflow-x:auto;font-size:.82rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:inherit;font-size:inherit}
+  .wrap{max-width:1060px;margin:0 auto;padding:0 1.25rem}
+  section{padding:4.2rem 0}
+  h2{font-size:1.72rem;letter-spacing:-.02em;line-height:1.25;margin-bottom:.4rem}
+  h3{font-size:1.12rem;margin:1.6rem 0 .5rem}
+  .kicker{font-family:var(--mono);font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:.55rem}
+  .lead{color:var(--ink-2);max-width:46rem}
+  .muted{color:var(--ink-3)}
+  .small{font-size:.86rem}
+
+  /* nav */
+  nav{position:sticky;top:0;background:rgba(253,253,252,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);z-index:50}
+  .nav-in{display:flex;align-items:center;gap:1.2rem;height:3.4rem}
+  .logo{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.05rem;color:var(--ink)}
+  .logo:hover{text-decoration:none}
+  .logo-mark{width:1.45rem;height:1.45rem;border-radius:6px;background:var(--accent);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-family:var(--mono);font-size:.8rem;font-weight:700}
+  .nav-links{display:flex;gap:1.1rem;margin-left:auto;font-size:.9rem}
+  .nav-links a{color:var(--ink-2)}
+  .nav-links a:hover{color:var(--ink)}
+  @media(max-width:760px){.nav-links{display:none}}
+
+  /* hero */
+  header.hero{padding:5rem 0 3.6rem;border-bottom:1px solid var(--line)}
+  .hero h1{font-size:clamp(1.9rem,5.4vw,3.05rem);letter-spacing:-.03em;line-height:1.12;max-width:47rem}
+  .hero h1 .dim{color:var(--ink-3)}
+  .hero p.sub{margin:1.15rem 0 0;font-size:1.13rem;color:var(--ink-2);max-width:44rem}
+  .cta-row{display:flex;flex-wrap:wrap;gap:.7rem;margin-top:1.7rem}
+  .btn{display:inline-block;padding:.62rem 1.15rem;border-radius:9px;font-weight:600;font-size:.95rem;border:1px solid transparent}
+  .btn:hover{text-decoration:none}
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-primary:hover{background:var(--accent-ink)}
+  .btn-ghost{border-color:var(--line-2);color:var(--ink)}
+  .btn-ghost:hover{background:var(--wash)}
+  .hero-facts{display:flex;flex-wrap:wrap;gap:.45rem 1.4rem;margin-top:1.9rem;font-size:.88rem;color:var(--ink-3)}
+  .hero-facts span::before{content:"·";margin-right:1.4rem;color:var(--line-2)}
+  .hero-facts span:first-child::before{content:""}
+  @media(max-width:760px){.hero-facts{flex-direction:column;gap:.3rem}.hero-facts span::before{content:""}}
+
+  /* status strip */
+  .status{background:var(--warn-wash);border:1px solid var(--warn-line);border-radius:10px;padding:.8rem 1rem;margin-top:2.1rem;font-size:.9rem;color:var(--warn)}
+  .status strong{font-weight:700}
+
+  /* placeholder markers (Miguel's pending decisions) */
+  .todo{display:inline-block;border:1.5px dashed #d97706;background:var(--warn-wash);color:var(--warn);border-radius:6px;padding:.02em .45em;font-family:var(--mono);font-size:.82em}
+
+  /* cards & grids */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:1.1rem}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:1.1rem}
+  @media(max-width:860px){.grid2,.grid3{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1.25rem 1.35rem}
+  .card h4{font-size:1rem;margin-bottom:.35rem}
+  .card p{font-size:.92rem;color:var(--ink-2)}
+
+  /* steps */
+  .step{display:grid;grid-template-columns:2.2rem 1fr;gap:.9rem;margin-top:1.6rem}
+  .step>div{min-width:0}
+  .step-n{width:2rem;height:2rem;border-radius:50%;background:var(--accent-wash);color:var(--accent-ink);font-weight:700;display:flex;align-items:center;justify-content:center;font-size:.95rem}
+  .step h3{margin:0 0 .35rem}
+  .step p{color:var(--ink-2);font-size:.95rem;margin-bottom:.6rem}
+
+  /* numbers table */
+  .tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+  table{border-collapse:collapse;width:100%;font-size:.9rem;min-width:640px}
+  th,td{text-align:left;padding:.68rem .9rem;border-top:1px solid var(--line);vertical-align:top}
+  thead th{border-top:none;background:var(--wash);font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+  td.num{font-family:var(--mono);font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+  td .cond{display:block;color:var(--ink-3);font-size:.83rem;margin-top:.15rem}
+  .cmp td:first-child,.cmp th:first-child{font-weight:600}
+  .cmp td{font-size:.87rem}
+  .cmp .you{background:var(--accent-wash)}
+  /* numbers table stacks into cards on narrow screens */
+  @media(max-width:720px){
+    .stack-sm{min-width:0}
+    .stack-sm thead{display:none}
+    .stack-sm tr{display:block;border-top:1px solid var(--line);padding:.85rem .95rem}
+    .stack-sm tr:first-child{border-top:none}
+    .stack-sm td{display:block;border:none;padding:0}
+    .stack-sm td:first-child{font-weight:600}
+    .stack-sm td.num{margin:.2rem 0 .35rem;white-space:normal}
+    .stack-sm td:last-child{font-size:.88rem;color:var(--ink-2)}
+  }
+
+  /* screenshots */
+  .shot{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel);box-shadow:0 1px 3px rgba(16,19,33,.06)}
+  .shot img{display:block;width:100%;height:auto}
+  .shot figcaption{padding:.65rem .95rem;font-size:.84rem;color:var(--ink-3);border-top:1px solid var(--line)}
+  .demo-card{display:flex;flex-direction:column;gap:0}
+  .demo-body{padding:1.1rem 1.2rem}
+  .demo-body h4{font-size:1.05rem}
+  .demo-body p{font-size:.9rem;color:var(--ink-2);margin:.3rem 0 .7rem}
+  .demo-split{display:grid;grid-template-columns:5fr 7fr;gap:1.1rem;align-items:start}
+  @media(max-width:860px){.demo-split{grid-template-columns:1fr}}
+
+  /* not-for list */
+  .notfor li{margin:.7rem 0;padding-left:1.55rem;position:relative;color:var(--ink-2)}
+  .notfor li::before{content:"✕";position:absolute;left:0;top:.05rem;color:#b91c1c;font-weight:700}
+  .notfor li strong{color:var(--ink)}
+
+  .check li{margin:.55rem 0;padding-left:1.55rem;position:relative;color:var(--ink-2)}
+  .check li::before{content:"✓";position:absolute;left:0;color:var(--ok);font-weight:700}
+
+  footer{border-top:1px solid var(--line);padding:2.6rem 0 3.4rem;font-size:.88rem;color:var(--ink-3)}
+  .foot-cols{display:grid;grid-template-columns:2fr 1fr 1fr;gap:2rem}
+  @media(max-width:760px){.foot-cols{grid-template-columns:1fr}}
+  footer h5{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-2);margin-bottom:.55rem}
+  footer ul{list-style:none}
+  footer li{margin:.3rem 0}
+  .divider{border:none;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+
+<nav><div class="wrap nav-in">
+  <a class="logo" href="#top"><span class="logo-mark">A</span>Appximo</a>
+  <div class="nav-links">
+    <a href="#start">How it starts</a>
+    <a href="#ai">The AI path</a>
+    <a href="#numbers">Numbers</a>
+    <a href="#not-for">Who it's not for</a>
+    <a href="#demos">Live demos</a>
+    <a href="#compare">Comparison</a>
+  </div>
+</div></nav>
+
+<header class="hero" id="top"><div class="wrap">
+  <h1>A JSON schema in.<br>A production multi-tenant backend out.<span class="dim"> At boot.</span></h1>
+  <p class="sub">You write a schema — or describe your app to <strong>your own AI agent</strong>, which writes it against the contract the engine prints. The result is <strong>one static Go binary</strong> serving REST + GraphQL + OpenAPI, auth, RBAC, files, migrations and observability, per isolated tenant, on a <strong>$7–16/mo VPS</strong> — against a PostgreSQL you control.</p>
+  <div class="cta-row">
+    <a class="btn btn-primary" href="https://github.com/appximo/appximo/blob/main/docs/GUIDE.md">Read the guide</a>
+    <a class="btn btn-ghost" href="https://tiendita.appitools.com" rel="noopener">See it live</a>
+    <a class="btn btn-ghost" href="https://github.com/appximo/appximo" rel="noopener">GitHub</a>
+  </div>
+  <div class="hero-facts">
+    <span>Go 1.25, no CGO</span>
+    <span>~64 MB release binary</span>
+    <span>Schema-per-tenant isolation</span>
+    <span>Apache 2.0</span>
+  </div>
+  <div class="status"><strong>Status, honestly:</strong> the code is production-verified and two demo apps run on it in production, but the repository is <strong>not public yet</strong> and there is <strong>no release tag</strong> — today you build from a checkout or use the published Docker image. This page ships with the repo so both facts change together.</div>
+</div></header>
+
+<section id="start"><div class="wrap">
+  <p class="kicker">How it starts</p>
+  <h2>The whole backend is one file you can read</h2>
+  <p class="lead">No handlers, no models, no migration files. The schema compiles at boot — routes, SQL, validation, RBAC and docs are derived from it, and each tenant's tables are created when the tenant registers.</p>
+
+  <div class="step"><div class="step-n">1</div><div>
+    <h3>Declare</h3>
+    <p>Types, rules, lifecycles, relations and roles — a closed, validated vocabulary. Typos are load errors that list the valid keys, never silently dead config.</p>
+<pre><code>{
+  "$schema": "https://appximo.com/schema/v1",
+  "version": "1",
+  "name": "todo-api",
+  "resources": {
+    "tasks": {
+      "fields": {
+        "title":  { "type": "string", "required": true },
+        "status": { "type": "string", "enum": ["open", "done"], "default": "open" }
+      }
+    }
+  },
+  "rbac": { "roles": {
+    "admin":  { "resources": "*", "actions": ["*"] },
+    "viewer": { "resources": ["tasks"], "actions": ["read"], "fields": ["id","title","status"] }
+  } }
+}</code></pre>
+  </div></div>
+
+  <div class="step"><div class="step-n">2</div><div>
+    <h3>Boot</h3>
+    <p>Three env vars, one command. On an empty database the engine bootstraps its own control plane — no SQL to apply.</p>
+<pre><code>DATABASE_URL=… JWT_SECRET=… ADMIN_KEY=… \
+  ./appximo serve --schema schema.json --port 8080</code></pre>
+  </div></div>
+
+  <div class="step"><div class="step-n">3</div><div>
+    <h3>Call it</h3>
+    <p>Register a tenant (its isolated Postgres schema is created at that moment), mint a token, and the API answers — with typed filters, keyset pagination, GraphQL, SSE, aggregation and a 422 that lists <em>every</em> invalid field at once.</p>
+<pre><code>curl -X POST localhost:8080/api/tasks \
+  -H "Authorization: Bearer $TOKEN" -H "Host: acme.localhost" \
+  -d '{"title":"ship it"}'
+# → {"id":"d29325e1-…","title":"ship it","status":"open"}</code></pre>
+  </div></div>
+
+  <div class="grid3" style="margin-top:2.2rem">
+    <div class="card"><h4>The 90 % is declared</h4><p>CRUD, filters, relations with real foreign keys, state machines enforced inside the UPDATE, RBAC down to rows and fields, migrations with a destructive-approval gate — all from the schema.</p></div>
+    <div class="card"><h4>The 10 % is plain Go</h4><p>Custom routes run <em>in-process</em>, inside the same transaction as the generated CRUD, with the same RBAC re-evaluated. A checkout that locks stock, writes the order and its lines commits as one unit.</p></div>
+    <div class="card"><h4>The frontend rides along</h4><p><code>Config.Static</code> serves your SPA from the same binary and origin — no CORS, no second deploy. The live shop below is exactly that.</p></div>
+  </div>
+</div></section>
+
+<hr class="divider">
+
+<section id="ai"><div class="wrap">
+  <p class="kicker">The AI path</p>
+  <h2>Your agent builds it. The engine prints the contract.</h2>
+  <p class="lead">Three commands print the full agent-facing documentation — schema grammar, backend handlers, frontend contract. Paste them into the Claude Code or Cursor you already pay for; the agent generates and then self-corrects against a machine-readable oracle. Zero product API cost.</p>
+
+<pre style="margin-top:1.4rem"><code>appximo spec           # the schema grammar (the declarative 90 %)
+appximo backend-spec   # custom Go handlers, hooks, auth, jobs
+appximo frontend-spec  # the API contract a UI consumes, errors → screens
+appximo specs          # all three in one stream (~2,300 lines, one paste)
+
+appximo validate --json app.json   # the oracle: path/rule/expected/fix per error</code></pre>
+
+  <div class="grid2" style="margin-top:1.6rem">
+    <div class="card">
+      <h4>Tested cold: an agent with NO repo access built a working app</h4>
+      <p>A fresh agent was given only four printed documents — the three specs plus the project README — and the CLI; no engine source. It shipped “Cancha Ya”, a court-booking app: schema with a state machine and per-resource RBAC, a custom Go route computing a price inside the engine's transaction, and an embedded frontend. The schema validated <strong>on the first attempt</strong>; the Go compiled on the first attempt; browser e2e at mobile viewport passed <strong>9/9 with zero console errors</strong>. Its diary records <strong>zero blockers</strong> — “nothing exceeded 20 minutes without a way out.”</p>
+    </div>
+    <div class="card">
+      <h4>The built-in loop, measured</h4>
+      <p><code>appximo ai-generate "&lt;description&gt;"</code> runs the same loop with a cheap hosted model: on a 120-case stratified corpus, <strong>~90 % of schemas valid on the first try, 100 % convergence, ~$0.006 per schema</strong>. And a schema that is <em>valid but wrong</em> — the classic: a row condition that would silently match zero rows forever — is named by a separate warnings layer at generation, validation, deploy and boot.</p>
+    </div>
+  </div>
+  <p class="small muted" style="margin-top:1rem">Why this works: the schema is a finite, validated vocabulary — a bounded decision space a cheap model edits reliably, instead of open-ended code it has to debug. That constraint shapes the whole engine: strict keys, multi-field 422s, errors written to be corrected by a model with minimal tokens.</p>
+</div></section>
+
+<hr class="divider">
+
+<section><div class="wrap">
+  <p class="kicker">In the binary</p>
+  <h2>What ships when you deploy that one file</h2>
+  <p class="lead">The API is the product, and the binary also carries its own tooling: interactive docs, a visual schema designer that deploys and migrates tenants, and an admin panel with per-tenant observability.</p>
+  <div class="grid3" style="margin-top:1.8rem">
+    <figure class="shot"><img src="assets/shot-studio.png" alt="Appximo Studio — the visual schema editor showing a 10-resource e-commerce ERD" loading="lazy">
+      <figcaption><strong>Appximo Studio</strong> at /editor — the schema as an ERD: entities, relations, RBAC, state machines; deploys with a migration preview.</figcaption></figure>
+    <figure class="shot"><img src="assets/shot-docs.png" alt="Swagger UI at /docs showing the generated OpenAPI for a marketplace schema" loading="lazy">
+      <figcaption><strong>/docs</strong> — the generated OpenAPI 3.0, interactive. Custom Go routes are listed too.</figcaption></figure>
+    <figure class="shot"><img src="assets/shot-admin.png" alt="The admin panel showing tenants, served resources and data rows" loading="lazy">
+      <figcaption><strong>/admin</strong> — tenants, users, data browser, observability (latency, SLO burn rate, traces).</figcaption></figure>
+  </div>
+</div></section>
+
+<hr class="divider">
+
+<section id="numbers"><div class="wrap">
+  <p class="kicker">Numbers</p>
+  <h2>Measured, dated, with their conditions</h2>
+  <p class="lead">Every figure below was measured against a running engine and re-verified on 2026-08-01 (or carries its own date). The conditions are part of the claim — a number without its condition is marketing.</p>
+
+  <div class="tbl-wrap" style="margin-top:1.6rem">
+  <table class="stack-sm">
+    <thead><tr><th>Figure</th><th>Value</th><th>Condition — read it</th></tr></thead>
+    <tbody>
+      <tr><td>Sustained throughput</td><td class="num">2,000 req/s · p50 1.60 ms · 0 errors in 597,461 requests</td>
+        <td>2-vCPU $16 droplet, external loader over a real network; JWT + RBAC + multi-tenancy + validation active. <span class="cond">Requires raising the per-tenant rate limiter (<code>RATE_LIMIT_RPS=3000</code>) — on the default 1,000 rps/tenant, ~half of a single-tenant 2,000 rps load is 429 <em>by design</em>.</span></td></tr>
+      <tr><td>Median latency, comfortable load</td><td class="num">p50 1.53 ms @ 500 req/s</td>
+        <td>Same stack; response cache on.<span class="cond">With the cache <strong>fully bypassed</strong> — every request reaching PostgreSQL — p50 2.44 ms.</span></td></tr>
+      <tr><td>A million-row query</td><td class="num">~3 ms engine · ~4.2 ms over HTTPS</td>
+        <td>Filtered + sorted + paginated page over 1,000,000 rows; does not degrade as the table grows (keyset pagination + real indexes).</td></tr>
+      <tr><td>Cost of the production layers</td><td class="num">≈ +1.2 ms p50</td>
+        <td>Caddy + real TLS in front of the engine, measured on both live demo apps (they agree to 0.01 ms).</td></tr>
+      <tr><td>Footprint</td><td class="num">engine ~21 MiB RSS idle · full stack ~186 MiB PSS under load</td>
+        <td>Idle engine on a small dataset (2026-08-01); full stack = engine + PostgreSQL + Caddy serving the live shop at 200 req/s (2026-07-31).</td></tr>
+      <tr><td>Deploy blip</td><td class="num">~0.3–0.6 s of 502s</td>
+        <td>Binary swap under live traffic (2026-07-31), health-polled, <strong>auto-rollback</strong> if the new binary fails (a deliberately broken deploy rolled itself back, unattended, in ~17 s). Honest sub-second blip — <em>not</em> zero-downtime.</td></tr>
+      <tr><td>Backup → restore drill</td><td class="num">restore in 1.8 s</td>
+        <td>Executed on the live shop (2026-07-31): schema dropped, restored, row counts identical, a new purchase completed. Rehearsed, not hoped.</td></tr>
+      <tr><td>AI schema generation</td><td class="num">~90 % first-try · 100 % convergence · ~$0.006/schema</td>
+        <td>120-case stratified NL→schema corpus, validator-guided loop, cheap model (Haiku), Wilson CIs / McNemar.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="small muted" style="margin-top:.9rem">Sources and reproduction recipes: <a href="https://github.com/appximo/appximo/blob/main/docs/CERTIFICATION_2026-08-01.md">the certification report</a> · <a href="https://github.com/appximo/appximo/blob/main/docs/BENCHMARKS.md">BENCHMARKS.md</a>. The repo ships the harness (<code>scripts/bench-protocol.sh</code>, <code>scripts/verify-production/</code>) so you can re-measure on your own hardware. No comparative claims against other frameworks are made here: the last such measurement (2026-06-10) predates today's conditions and was deliberately not re-run.</p>
+</div></section>
+
+<hr class="divider">
+
+<section id="not-for"><div class="wrap">
+  <p class="kicker">Fit</p>
+  <h2>Who it is NOT for</h2>
+  <p class="lead">The scale ceiling is a declared product range, not a bug. If any line below describes you, use something else — this list exists so you can decide in sixty seconds.</p>
+  <ul class="notfor" style="margin-top:1.2rem">
+    <li><strong>Consumer scale.</strong> There is no HA and no clustering — one node, vertical scaling.</li>
+    <li><strong>Thousands of tenants on one instance.</strong> The healthy range is tens to low hundreds per instance (the Postgres catalog degrades past ~1,000–2,000 schemas). Past it, you run more instances.</li>
+    <li><strong>Zero-downtime deploys.</strong> A binary swap costs a measured ~0.3 s of 502s.</li>
+    <li><strong>The simple single-tenant app.</strong> PocketBase wins that on packaging — no Postgres to run, one process. Appximo earns its weight when isolation, multi-tenancy or in-process logic matter.</li>
+    <li><strong>Never touching a terminal.</strong> Studio covers the schema visually; first boot, the first platform admin and production installs are CLI commands.</li>
+  </ul>
+  <h3 style="margin-top:2rem">And who it is for</h3>
+  <ul class="check">
+    <li>A B2B product with tens to low hundreds of customer-tenants, each physically isolated in its own Postgres schema.</li>
+    <li>A business group running N internal apps on cheap hardware, operated by a small team.</li>
+    <li>Builders whose AI agent writes the app against a validated, finite contract.</li>
+  </ul>
+</div></section>
+
+<hr class="divider">
+
+<section id="demos"><div class="wrap">
+  <p class="kicker">Live demos</p>
+  <h2>Two production apps run on it today</h2>
+  <p class="lead">Both on one $16 VPS, each its own binary, database and Let's Encrypt certificate. Both report their build SHA at <code>/health</code>.</p>
+  <div class="demo-split" style="margin-top:1.8rem">
+    <figure class="shot demo-card">
+      <img src="assets/shot-tiendita.png" alt="La Tiendita — the storefront on a phone viewport" loading="lazy">
+      <div class="demo-body">
+        <h4>tiendita.appitools.com</h4>
+        <p>A real commerce platform in framework mode: catalogue with dynamic attributes (jsonb + GIN), inventory that cannot oversell (20 concurrent checkouts for the last unit → exactly one wins), order lifecycles, signed payment webhooks, storefront + mobile back-office embedded in the binary.</p>
+        <a href="https://tiendita.appitools.com" rel="noopener">Visit the shop →</a>
+      </div>
+    </figure>
+    <figure class="shot demo-card">
+      <img src="assets/shot-petfriendly.png" alt="Petfriendly — the generated OpenAPI docs of the AI-authored veterinary app" loading="lazy">
+      <div class="demo-body">
+        <h4>petfriendly.appitools.com</h4>
+        <p>A veterinary appointment API whose schema was <strong>generated by AI from one paragraph of plain Spanish</strong> — pets, owners, appointments with an enforced lifecycle, per-vet row-level access — then deployed through the same path as any hand-written schema. What you see is its generated, interactive API surface.</p>
+        <a href="https://petfriendly.appitools.com/docs" rel="noopener">Browse its API →</a>
+      </div>
+    </figure>
+  </div>
+</div></section>
+
+<hr class="divider">
+
+<section id="compare"><div class="wrap">
+  <p class="kicker">Comparison</p>
+  <h2>Where it sits — honestly</h2>
+  <p class="lead">Different tools that overlap on “I need an API”. What each does better is stated, because you should pick the right one.</p>
+  <div class="tbl-wrap" style="margin-top:1.6rem">
+  <table class="cmp">
+    <thead><tr><th></th><th class="you">Appximo</th><th>NestJS / Rails</th><th>Supabase</th><th>PocketBase</th></tr></thead>
+    <tbody>
+      <tr><td>You write</td><td class="you">a JSON schema (+ optional Go)</td><td>application code</td><td>SQL + RLS policies + client code</td><td>collections config + hooks</td></tr>
+      <tr><td>Multi-tenancy</td><td class="you">first-class: schema-per-tenant, physical isolation</td><td>you build it</td><td>you build it (RLS = logical)</td><td>one DB per app</td></tr>
+      <tr><td>Database</td><td class="you"><strong>your</strong> PostgreSQL</td><td>any</td><td>bundled Postgres (its platform)</td><td>embedded SQLite</td></tr>
+      <tr><td>Runtime</td><td class="you">one static Go binary</td><td>Node/Ruby + deps</td><td>a service fleet (or their cloud)</td><td>one Go binary</td></tr>
+      <tr><td>Custom logic</td><td class="you">Go <em>in-process, same transaction</em> + sandboxed JS/WASM hooks</td><td>unlimited — it's your code</td><td>edge functions (another process)</td><td>Go/JS hooks</td></tr>
+      <tr><td>Observability</td><td class="you">in-binary: metrics, traces, SLO, per-tenant</td><td>you assemble it</td><td>rich in its cloud</td><td>minimal</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p style="margin-top:1.1rem;color:var(--ink-2);font-size:.95rem"><strong>What they do better:</strong> frameworks give you unlimited logic with no ceremony. Supabase has a massive ecosystem — realtime channels, storage, hosted auth. PocketBase is simpler to run (no Postgres) and wins the simple single-tenant app on packaging. <strong>The Appximo lane:</strong> several physically isolated tenants on one cheap box, against a Postgres you control, with the API contract generated and enforced from a schema file — plus the 10 % as in-process Go in the same transaction. One structural example: per-tenant identity — the same email is a distinct account in two tenants, which a globally-unique-email auth model cannot express.</p>
+</div></section>
+
+<hr class="divider">
+
+<section><div class="wrap">
+  <p class="kicker">Trust</p>
+  <h2>Don't believe this page — re-run it</h2>
+  <p class="lead">The repo ships the instruments that produced every claim above: the benchmark protocol with statistical gates, a production-verification suite that runs against <em>your</em> server, an acceptance suite for the whole API surface, and a binary-diff gate with a 92-case behavioral corpus. The certification report documents what was verified, what was corrected, and what could <em>not</em> be re-verified — including the claims this project deliberately no longer makes.</p>
+  <div class="cta-row" style="margin-top:1.4rem">
+    <a class="btn btn-primary" href="https://github.com/appximo/appximo/blob/main/docs/GUIDE.md">Read the guide</a>
+    <a class="btn btn-ghost" href="https://github.com/appximo/appximo/blob/main/docs/CERTIFICATION_2026-08-01.md">Read the certification</a>
+    <a class="btn btn-ghost" href="https://github.com/appximo/appximo/blob/main/docs/CAPABILITIES.md">What it does — and doesn't</a>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <div class="foot-cols">
+    <div>
+      <h5>Appximo</h5>
+      <p>A JSON schema in. A production multi-tenant backend out. One static Go binary, on your own server, against your own PostgreSQL.</p>
+      <p style="margin-top:.6rem">License: <strong>Apache 2.0</strong>. Self-hosted only — there is no SaaS.</p>
+      <p style="margin-top:.6rem">Repository: <a href="https://github.com/appximo/appximo" rel="noopener">github.com/appximo/appximo</a><br>
+      Releases: <a href="https://github.com/appximo/appximo/releases" rel="noopener">github.com/appximo/appximo/releases</a><br>
+      Domain: <strong>appximo.com</strong></p>
+    </div>
+    <div>
+      <h5>Documentation</h5>
+      <ul>
+        <li><a href="https://github.com/appximo/appximo/blob/main/docs/GUIDE.md">The guide</a></li>
+        <li><a href="https://github.com/appximo/appximo/blob/main/docs/SCHEMA_SPEC_LLM.md">spec — schema grammar</a></li>
+        <li><a href="https://github.com/appximo/appximo/blob/main/docs/BACKEND_SPEC_LLM.md">backend-spec — the 10 %</a></li>
+        <li><a href="https://github.com/appximo/appximo/blob/main/docs/FRONTEND_SPEC_LLM.md">frontend-spec — the UI</a></li>
+        <li><a href="https://github.com/appximo/appximo/blob/main/docs/PRODUCTION.md">Production install</a></li>
+      </ul>
+    </div>
+    <div>
+      <h5>Evidence</h5>
+      <ul>
+        <li><a href="https://github.com/appximo/appximo/blob/main/docs/CERTIFICATION_2026-08-01.md">Certification 2026-08-01</a></li>
+        <li><a href="https://github.com/appximo/appximo/blob/main/docs/BENCHMARKS.md">Benchmarks</a></li>
+        <li><a href="https://github.com/appximo/appximo/blob/main/docs/CAPABILITIES.md">Capabilities + limits</a></li>
+        <li><a href="https://tiendita.appitools.com" rel="noopener">tiendita (live)</a></li>
+        <li><a href="https://petfriendly.appitools.com/docs" rel="noopener">petfriendly (live)</a></li>
+      </ul>
+    </div>
+  </div>
+</div></footer>
+
+</body>
+</html>
