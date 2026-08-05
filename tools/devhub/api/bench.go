@@ -849,7 +849,7 @@ func mintRemoteBenchToken(s *RegisteredServer, tenant string) (string, error) {
 		return "", fmt.Errorf("invalid tenant %q", tenant)
 	}
 	cmd := `source /root/.appitools-secrets 2>/dev/null || source /root/.appitools-secrets-dev; ` +
-		`cd /root/appitools && BIN=./appximo; [ -x "$BIN" ] || BIN=./appximo-dev; ` +
+		`cd /root/appximo && BIN=./appximo; [ -x "$BIN" ] || BIN=./appximo-dev; ` +
 		`"$BIN" token --tenant ` + tenant + ` --secret "$JWT_SECRET" --role super_admin 2>/dev/null | tail -1`
 	res, err := sshx.Run(&s.Server, cmd, 20*time.Second)
 	if err != nil {

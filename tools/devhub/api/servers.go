@@ -196,7 +196,7 @@ func ServersCreateHandler(w http.ResponseWriter, r *http.Request) {
 		req.StartScript = "/tmp/start_prod.sh"
 	}
 	if req.BinaryPath == "" {
-		req.BinaryPath = "/root/appitools/appximo"
+		req.BinaryPath = "/root/appximo/appximo"
 	}
 	if req.LogPath == "" {
 		req.LogPath = "/tmp/appximo.log"

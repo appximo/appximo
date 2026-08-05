@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-cd /root/appitools
+cd /root/appximo
 export PATH=$PATH:/usr/local/go/bin
 
 echo "→ Compilando UI..."

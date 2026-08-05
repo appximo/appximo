@@ -20,7 +20,7 @@ var benchSchema string
 func main() {
 	repoDir := os.Getenv("APPXIMO_DIR")
 	if repoDir == "" {
-		repoDir = "/root/appitools"
+		repoDir = "/root/appximo"
 	}
 	api.StartMetricsScraper()
 	if err := api.InitBenchDB(repoDir, benchSchema); err != nil {

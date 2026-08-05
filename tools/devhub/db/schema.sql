@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS servers (
     host_key      TEXT,                      -- TOFU, first connect
     secrets_path  TEXT DEFAULT '/root/.appitools-secrets', -- remote file fetch-admin-key reads
     start_script  TEXT DEFAULT '/tmp/start_prod.sh',
-    binary_path   TEXT DEFAULT '/root/appitools/appximo',
+    binary_path   TEXT DEFAULT '/root/appximo/appximo',
     log_path      TEXT DEFAULT '/tmp/appximo.log',
     created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 );

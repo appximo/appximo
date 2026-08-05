@@ -321,7 +321,8 @@ already have a decision, and the reasoning may be the thing you need.
 > `nuevo_chat_web/` is the maintainer's internal handoff package; it is **not
 > part of the public repository**. If you are reading this from the public repo
 > and the directory is absent, this section does not apply to you — it governs
-> the maintainer's own working clone.
+> the maintainer's own working clone, where the package appears as a symlink to
+> a separate private repository and is excluded from this repo's tracking.
 
 **`nuevo_chat_web/` is a LIVING artifact, not a snapshot.** It is the
 strategic context — the plan, the decisions and their reasoning, the current phase,
@@ -347,11 +348,15 @@ files precisely because it had already been lost once.
 Skipping this is the same class of error as leaving an open item out of the
 backlog: it does not fail today, it fails the next session silently.
 
-The package lives **inside the repo**, so it is versioned with the code: it ships in
-the session's own commit, it pushes with everything else, and
-`git log -p -- nuevo_chat_web/` is the history of how the project's strategic context
-evolved, session by session. Update it in the same diff as the work it describes —
-not as a separate chore.
+Since HOUSEKEEPING-S1 (2026-08-05) the package is its **own private git
+repository** (on the maintainer's box: `/root/appximo-internal`, reachable as the
+`nuevo_chat_web/` symlink from the working clone — with its pre-split history
+preserved via `git filter-repo`). It is versioned, but **separately from the
+public code**: a session that touches it must `git commit` **inside that repo**
+as part of closing the session — the public repo's commit does not carry it.
+`git -C nuevo_chat_web/ log -p` is the history of how the project's strategic
+context evolved, session by session. Update it in the same working session as
+the work it describes — not as a separate chore.
 
 ## Boundaries — do not
 
