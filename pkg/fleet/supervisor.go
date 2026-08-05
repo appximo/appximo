@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -309,7 +308,7 @@ func (s *Supervisor) StopApp(name string) error {
 	pid := p.pid
 	p.mu.Unlock()
 
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	if err := signalTerm(pid); err != nil {
 		return fmt.Errorf("fleet: stop %q: %w", name, err)
 	}
 	deadline := time.Now().Add(15 * time.Second)
@@ -322,7 +321,7 @@ func (s *Supervisor) StopApp(name string) error {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	syscall.Kill(pid, syscall.SIGKILL) //nolint:errcheck
+	signalKill(pid)
 	return nil
 }
 

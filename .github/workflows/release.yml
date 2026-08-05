@@ -66,10 +66,16 @@ jobs:
           # scripts/build-engine.sh is the ONE canonical engine build (same
           # flags as the Docker image and the deploy pipeline); the version
           # stamp makes `appximo version` on a downloaded binary report its tag.
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+          # windows/amd64 added in PHASE4-FIRST-MILE-S1: the Windows quick start
+          # needs a downloadable .exe (the engine is CGO-free, so the cross-
+          # compile is exactly the same as the others). NOT smoke-tested here
+          # (no Windows runner in this job) — the quick start marks the Windows
+          # path as community-verified.
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
             os="${target%/*}" arch="${target#*/}"
+            ext=""; [ "$os" = "windows" ] && ext=".exe"
             GOOS="$os" GOARCH="$arch" \
-              ./scripts/build-engine.sh "dist/appximo-${VERSION}-${os}-${arch}" "$VERSION" "$REVISION"
+              ./scripts/build-engine.sh "dist/appximo-${VERSION}-${os}-${arch}${ext}" "$VERSION" "$REVISION"
           done
           ls -lh dist/
 

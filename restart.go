@@ -29,7 +29,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/appximo/appximo/pkg/platformadmin"
@@ -220,7 +219,7 @@ func (a *App) requestRestart() {
 	log.Println("self-restart: requested — draining (readyz→503) then re-exec'ing with the persisted boot schema")
 	go func() {
 		time.Sleep(400 * time.Millisecond) // let the 200 response reach the caller
-		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		if err := signalSelfTerm(); err != nil {
 			log.Printf("self-restart: could not signal self: %v", err)
 			a.restartRequested.Store(false)
 		}
@@ -248,7 +247,7 @@ func execRestartProcess(note string) {
 		return
 	}
 	log.Printf("self-restart: re-exec %s (same argv — %s)", exe, note)
-	if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
+	if err := execSelf(exe); err != nil {
 		log.Printf("CRITICAL: self-restart: exec failed (%v) — exiting; a supervisor restart policy must relaunch the engine", err)
 	}
 }
