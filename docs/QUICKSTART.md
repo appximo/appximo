@@ -209,6 +209,10 @@ wrong — fix it now, before anything is deployed.
 appximo serve --schema schema.json --port 8080
 ```
 
+(Two listeners: the API on `--port`, and the tenant-registration **control
+plane** on `--control-port` — default **9090**, keep it internal. If 8080 or
+9090 are taken, both flags exist.)
+
 **You should see** (the last lines — the engine binds first, then announces;
 the two helper lines below the first one are **(next release)** — v0.1.1 prints
 only the "serving on" line):

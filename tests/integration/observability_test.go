@@ -81,7 +81,7 @@ func TestObservability_RequestMetrics(t *testing.T) {
 
 	// appximo_requests_total: exact series + value via the official comparator.
 	expected := `
-# HELP appximo_requests_total Total de requests por tenant y endpoint
+# HELP appximo_requests_total Total requests by tenant and endpoint
 # TYPE appximo_requests_total counter
 appximo_requests_total{method="GET",path="/api/guides",status="200",tenant_id="obsmetrics"} 5
 `
@@ -133,7 +133,7 @@ func TestObservability_DeniedByIDPathIsTemplated(t *testing.T) {
 	// The whole requests_total family must be exactly ONE templated 403 series with
 	// value 3 — proving the three random UUIDs did not create three series.
 	expected := `
-# HELP appximo_requests_total Total de requests por tenant y endpoint
+# HELP appximo_requests_total Total requests by tenant and endpoint
 # TYPE appximo_requests_total counter
 appximo_requests_total{method="DELETE",path="/api/guides/{id}",status="403",tenant_id="obscard"} 3
 `
@@ -156,7 +156,7 @@ func TestObservability_ActiveTenantsGauge(t *testing.T) {
 	fireGET(t, srv, tb, helpers.GenToken(t, "super_admin", "00000000-0000-0000-0000-000000000002", tb), 3)
 
 	expected := `
-# HELP appximo_active_tenants Número de tenants cargados en cache
+# HELP appximo_active_tenants Number of tenants loaded in the cache
 # TYPE appximo_active_tenants gauge
 appximo_active_tenants 2
 `
