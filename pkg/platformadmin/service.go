@@ -29,6 +29,10 @@ var (
 	ErrUnknownRole        = errors.New("platformadmin: role not declared in the schema RBAC")
 	ErrTenantNotFound     = errors.New("platformadmin: tenant not found")
 	ErrConfirmRequired    = errors.New("platformadmin: explicit confirmation required")
+	// ErrAlreadyBootstrapped guards the first-run bootstrap: once ANY platform
+	// admin exists, the bootstrap route is permanently closed (admins are then
+	// created by an authenticated admin, or the CLI).
+	ErrAlreadyBootstrapped = errors.New("platformadmin: an admin already exists")
 	// ErrSchemaRejected marks a PersistBootSchema failure caused by an INVALID
 	// schema — nothing was persisted and no restart happens (→ 422). Any other
 	// persist failure (e.g. an unwritable schema file) is an infrastructure 500.
@@ -220,6 +224,43 @@ func (s *Service) CreateAdmin(ctx context.Context, email, password, role string)
 		return PublicAdmin{}, err
 	}
 	return toPublicAdmin(a), nil
+}
+
+// Bootstrapped reports whether at least one platform admin exists. It backs the
+// unauthenticated /admin/auth/status probe the login screen uses to decide
+// between "sign in" and "create the first admin" — after bootstrap it is a
+// constant true, so it discloses nothing an attacker can use.
+func (s *Service) Bootstrapped(ctx context.Context) (bool, error) {
+	n, err := s.store.CountAdmins(ctx)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// Bootstrap creates the FIRST platform admin and signs them in (PHASE4-FIRST-MILE-S1).
+// It exists because the first-run /admin experience was a dead end: a login form
+// with no way to obtain credentials except knowing the CLI. The route that calls
+// this is gated by the ADMIN_KEY (the operator's own boot credential — the same
+// trust level as shell access, where `appximo admin create` already lives) and
+// closes permanently once any admin exists.
+func (s *Service) Bootstrap(ctx context.Context, email, password string) (PlatformAuthResult, error) {
+	n, err := s.store.CountAdmins(ctx)
+	if err != nil {
+		return PlatformAuthResult{}, err
+	}
+	if n > 0 {
+		return PlatformAuthResult{}, ErrAlreadyBootstrapped
+	}
+	a, err := s.CreateAdmin(ctx, email, password, "")
+	if err != nil {
+		return PlatformAuthResult{}, err
+	}
+	tok, err := signPlatformToken(a.ID, a.Role, s.cfg.JWTSecret)
+	if err != nil {
+		return PlatformAuthResult{}, err
+	}
+	return PlatformAuthResult{Admin: a, Token: tok}, nil
 }
 
 // Login verifies a platform admin's credentials and returns a platform token (or

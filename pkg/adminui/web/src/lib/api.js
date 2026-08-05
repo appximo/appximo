@@ -39,6 +39,21 @@ async function request(method, path, { body, auth = true } = {}) {
 
 export const api = {
   // auth
+  // First-run bootstrap (PHASE4-FIRST-MILE-S1): status says whether any admin
+  // exists; bootstrap creates the first one, gated by the operator's ADMIN_KEY.
+  authStatus: () => request("GET", "/admin/auth/status", { auth: false }),
+  bootstrap: (adminKey, email, password) =>
+    fetch("/admin/auth/bootstrap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Admin-Key": adminKey },
+      body: JSON.stringify({ email, password }),
+    }).then(async (res) => {
+      let data = null
+      const text = await res.text()
+      if (text) { try { data = JSON.parse(text) } catch { data = { raw: text } } }
+      if (!res.ok) throw new ApiError(res.status, data)
+      return data
+    }),
   login: (email, password) => request("POST", "/admin/auth/login", { body: { email, password }, auth: false }),
   mfaVerify: (mfa_token, code) => request("POST", "/admin/auth/mfa/verify", { body: { mfa_token, code }, auth: false }),
   refresh: () => request("POST", "/admin/auth/refresh", { body: {} }),

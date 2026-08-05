@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -38,6 +39,14 @@ func (s *Service) Register(r chi.Router, obs ObsHandler, adminKey string) {
 	s.adminKey = adminKey
 
 	// --- super-admin auth (humans; no platform token required to obtain one) ---
+	// First-run bootstrap (PHASE4-FIRST-MILE-S1): /admin used to be a dead end —
+	// a login form with no way to obtain credentials except already knowing the
+	// CLI. status is unauthenticated (post-bootstrap it is a constant true, so it
+	// discloses nothing); bootstrap requires the X-Admin-Key (the operator's own
+	// boot credential — the same trust level as the shell where `appximo admin
+	// create` lives) and closes permanently once any admin exists.
+	r.Get("/admin/auth/status", s.handleAuthStatus)
+	r.Post("/admin/auth/bootstrap", s.handleBootstrap)
 	r.Post("/admin/auth/login", s.handleLogin)
 	r.Post("/admin/auth/refresh", s.handleRefresh)
 	r.Post("/admin/auth/mfa/verify", s.handleMFAVerify) // completes the login challenge
@@ -248,6 +257,49 @@ func platformClaimsFromCtx(ctx context.Context) *PlatformClaims {
 }
 
 // --- auth handlers ----------------------------------------------------------
+
+// handleAuthStatus answers whether any platform admin exists yet, so the login
+// screen can guide a first-run operator instead of presenting a dead-end form.
+func (s *Service) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
+	ok, err := s.Bootstrapped(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "status unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"bootstrapped": ok})
+}
+
+// handleBootstrap creates the FIRST admin, gated by the admin key. 409 once any
+// admin exists; 403 without the key (uniform, no oracle about which was wrong).
+func (s *Service) handleBootstrap(w http.ResponseWriter, r *http.Request) {
+	if !s.adminKeyOK(r) {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "admin key required: send the ADMIN_KEY the server was started with as the X-Admin-Key header",
+		})
+		return
+	}
+	var req struct{ Email, Password string }
+	if !decode(w, r, &req) {
+		return
+	}
+	res, err := s.Bootstrap(r.Context(), req.Email, req.Password)
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusCreated, res)
+	case errors.Is(err, ErrAlreadyBootstrapped):
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "an admin already exists — sign in, or create more admins from a signed-in session or `appximo admin create`",
+		})
+	case errors.Is(err, ErrInvalidEmail):
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "invalid email"})
+	case errors.Is(err, ErrWeakPassword):
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
+			"error": fmt.Sprintf("password too short (minimum %d characters)", s.cfg.MinPasswordLength),
+		})
+	default:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "bootstrap failed"})
+	}
+}
 
 func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct{ Email, Password string }

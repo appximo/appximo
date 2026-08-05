@@ -26,6 +26,13 @@ export async function completeMfa(mfaToken, code) {
   applySession(res)
 }
 
+// bootstrap creates the FIRST platform admin (gated by the operator's ADMIN_KEY)
+// and signs them straight in — the first-run path of the login screen.
+export async function bootstrap(adminKey, email, password) {
+  const res = await api.bootstrap(adminKey, email, password)
+  applySession(res)
+}
+
 function applySession(res) {
   if (!res || !res.token) throw new Error("no token in response")
   setToken(res.token)

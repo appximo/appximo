@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -528,4 +529,83 @@ func (o *obsStub) ServeTenantData(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"tenant": chi.URLParam(r, "id")})
+}
+
+// --- first-run bootstrap (PHASE4-FIRST-MILE-S1) ------------------------------
+
+// TestIntegration_FirstRunBootstrap exercises the /admin first-run flow over
+// HTTP: status reports not-bootstrapped, bootstrap without the admin key is
+// refused, with the key it creates the first admin AND signs them in, and the
+// route closes permanently (409) once any admin exists.
+func TestIntegration_FirstRunBootstrap(t *testing.T) {
+	requirePG(t)
+	// The suite shares one DB — clear platform admins so this test owns first-run.
+	if _, err := testPool.Exec(ctxBG(), "DELETE FROM "+SystemSchema+".platform_admins"); err != nil {
+		t.Fatalf("clear admins: %v", err)
+	}
+	svc := newSvc(t)
+	r := chi.NewRouter()
+	svc.Register(r, &obsStub{}, "boot-admin-key")
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	get := func(path string) (int, map[string]any) {
+		res, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		defer res.Body.Close()
+		var body map[string]any
+		_ = json.NewDecoder(res.Body).Decode(&body)
+		return res.StatusCode, body
+	}
+	post := func(path, key, payload string) (int, map[string]any) {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+path, strings.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		if key != "" {
+			req.Header.Set("X-Admin-Key", key)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("POST %s: %v", path, err)
+		}
+		defer res.Body.Close()
+		var body map[string]any
+		_ = json.NewDecoder(res.Body).Decode(&body)
+		return res.StatusCode, body
+	}
+
+	if code, body := get("/admin/auth/status"); code != 200 || body["bootstrapped"] != false {
+		t.Fatalf("status pre-bootstrap: %d %v", code, body)
+	}
+	if code, _ := post("/admin/auth/bootstrap", "", `{"email":"op@example.com","password":"a-long-password-12"}`); code != 403 {
+		t.Fatalf("bootstrap without key: expected 403, got %d", code)
+	}
+	if code, _ := post("/admin/auth/bootstrap", "wrong-key", `{"email":"op@example.com","password":"a-long-password-12"}`); code != 403 {
+		t.Fatalf("bootstrap with wrong key: expected 403, got %d", code)
+	}
+	code, body := post("/admin/auth/bootstrap", "boot-admin-key", `{"email":"op@example.com","password":"a-long-password-12"}`)
+	if code != 201 {
+		t.Fatalf("bootstrap: expected 201, got %d %v", code, body)
+	}
+	tok, _ := body["token"].(string)
+	if tok == "" {
+		t.Fatalf("bootstrap did not auto-sign-in (no token): %v", body)
+	}
+	if _, err := parsePlatformToken(tok, itSecret); err != nil {
+		t.Fatalf("bootstrap token invalid: %v", err)
+	}
+	if code, body := get("/admin/auth/status"); code != 200 || body["bootstrapped"] != true {
+		t.Fatalf("status post-bootstrap: %d %v", code, body)
+	}
+	if code, _ := post("/admin/auth/bootstrap", "boot-admin-key", `{"email":"two@example.com","password":"a-long-password-12"}`); code != 409 {
+		t.Fatalf("second bootstrap: expected 409, got %d", code)
+	}
+	// Weak password with the key → 422 naming the minimum.
+	if _, err := testPool.Exec(ctxBG(), "DELETE FROM "+SystemSchema+".platform_admins"); err != nil {
+		t.Fatalf("clear admins: %v", err)
+	}
+	if code, body := post("/admin/auth/bootstrap", "boot-admin-key", `{"email":"op@example.com","password":"short"}`); code != 422 {
+		t.Fatalf("weak password: expected 422, got %d %v", code, body)
+	}
 }
