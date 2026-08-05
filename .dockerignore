@@ -29,16 +29,21 @@ coverage.out
 pkg/editorui/web/build/
 pkg/adminui/web/dist/
 
-# Docs are not needed to compile the binary — EXCEPT the one file backendspec.go
-# embeds (`//go:embed docs/BACKEND_SPEC_LLM.md`, the `appximo backend-spec`
-# source). Excluding docs/ WITHOUT re-including it breaks the build:
-#   pattern docs/BACKEND_SPEC_LLM.md: no matching files found
+# Docs are not needed to compile the binary — EXCEPT the files the binary
+# //go:embed's: backendspec.go embeds docs/BACKEND_SPEC_LLM.md and
+# frontendspec.go embeds docs/FRONTEND_SPEC_LLM.md (the `appximo
+# backend-spec` / `frontend-spec` sources). Excluding docs/ WITHOUT
+# re-including them breaks the build:
+#   pattern docs/FRONTEND_SPEC_LLM.md: no matching files found
+# (exactly how the first neodevtrix/appximo publish died — the frontend spec
+# landed after this file last changed, and nothing built the image between).
 *.md
 !README.md
 context-docs/
 benchmarks/
 docs/
 !docs/BACKEND_SPEC_LLM.md
+!docs/FRONTEND_SPEC_LLM.md
 
 # Local env / secrets (never send to the build)
 .env
