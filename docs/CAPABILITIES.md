@@ -133,16 +133,22 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 - `serve`, `validate` (`--json` for the unified report), `validate-schema`, `meta-schema`,
   `token`, `openapi`, `graphql` (SDL), `generate`, `migrate`, `backup`, `init`,
   `ai-generate`, `ai-eval`, `blueprints`, `admin`, `fleet`, `version`.
-- The agent-doc trilogy — `spec` (the schema grammar for an LLM), `backend-spec`
-  (handlers/hooks/auth/jobs) and `frontend-spec` (the UI: stack, API contract,
-  error→screen-state mapping, files/images incl. public serving, browser-only
-  traps — distilled from the production storefront). Paste all three into your
-  own agent and it can build the full stack at zero product API cost.
-  `specs` prints the whole trilogy in one stream (one paste); the root
-  `--help`, the README, `/docs` and the installer's closing summary all point
-  at it, and a running app's `/openapi.json` lists its REGISTERED custom
-  routes too (method/path/auth mode/`x-public`; shapes stay in the app's
-  contract sheet).
+- The agent docs, five of them — `spec` (the schema grammar for an LLM),
+  `backend-spec` (handlers/hooks/auth/jobs), `frontend-spec` (the UI: stack,
+  API contract, error→screen-state mapping, files/images incl. public serving,
+  browser-only traps — distilled from the production storefront),
+  `backoffice-spec` (a CRUD admin UI generated from `/openapi.json` — zero
+  resource-specific screens, powered by the `x-appximo-*` contract
+  extensions), and `quickstart` (the OPERATE side: install → tenant → users →
+  evolve → production — the two steps the first field evaluation had to
+  reverse-engineer, printable now). Paste them into your own agent and it can
+  build AND run the full stack at zero product API cost.
+  `specs` prints all five in one stream (one paste); the root `--help`, the
+  README, `/docs` and the installer's closing summary all point at it, and a
+  running app's `/openapi.json` lists its REGISTERED custom routes too
+  (method/path/auth mode/`x-public`; shapes stay in the app's contract sheet)
+  plus the Part-F vendor extensions (`x-appximo-references`, `x-appximo-file`,
+  `x-appximo-transitions`, `x-appximo-virtual-resources`).
 
 ## What it does NOT do
 

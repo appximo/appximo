@@ -946,8 +946,8 @@ summary() {
 	printf '  Update   build a new binary → scp up → sudo bash %s --binary=/path --domain=%s --email=%s --yes\n' "$0" "$DOMAIN" "${EMAIL:-you@example.com}"
 	printf '  Remove   sudo bash %s --uninstall   (add --purge to also drop the database)\n' "$0"
 	printf '  Guide    docs/PRODUCTION.md\n'
-	printf '  AI agent building on this app?  appximo-cli spec | backend-spec | frontend-spec\n'
-	printf '           (or "specs" for all three) — paste into the agent; live contract at https://%s/openapi.json\n' "$DOMAIN"
+	printf '  AI agent building on this app?  appximo-cli spec | backend-spec | frontend-spec | backoffice-spec | quickstart\n'
+	printf '           (or "specs" for all five) — paste into the agent; live contract at https://%s/openapi.json\n' "$DOMAIN"
 	echo
 }
 

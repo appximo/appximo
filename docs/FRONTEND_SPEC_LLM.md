@@ -14,13 +14,15 @@ build an API client SDK from guesswork: the running engine serves its own
 contract at `/openapi.json`, and this document tells you everything the spec
 cannot (error semantics, screen states, the serving model).
 
-This is the third document of a trilogy; keep them straight:
+This is the third of five printable documents; keep them straight:
 
 | Doc | Teaches | Command |
 |---|---|---|
 | `appximo spec` / SCHEMA_SPEC_LLM.md | the **schema** (the declarative 90 %) | `appximo spec` |
 | `appximo backend-spec` / BACKEND_SPEC_LLM.md | the **backend** (handlers, hooks, auth, jobs — the 10 %) | `appximo backend-spec` |
 | **this doc** | the **frontend** (the part users touch) | `appximo frontend-spec` |
+| `appximo backoffice-spec` / BACKOFFICE_SPEC_LLM.md | a **generated admin CRUD UI** driven by /openapi.json | `appximo backoffice-spec` |
+| `appximo quickstart` / LIFECYCLE_SPEC_LLM.md | **operating** it (install → tenant → users → production) | `appximo quickstart` |
 
 Everything below is distilled from a shipped reference storefront (a real
 mobile-first shop + merchant back-office, SvelteKit, embedded in one binary,

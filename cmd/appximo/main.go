@@ -22,13 +22,15 @@ var rootCmd = &cobra.Command{
 	Long: `API engine for Go — generate production APIs from a JSON schema.
 
 Building with an AI agent? The engine prints its own agent-facing contract —
-paste these into your Claude Code / Cursor and the agent can build the full
-stack against the real grammar:
+paste these into your Claude Code / Cursor and the agent can build AND run the
+full stack against the real grammar:
 
-  appximo spec           the schema grammar (the declarative 90%)
-  appximo backend-spec   custom Go handlers, hooks, auth, background jobs
-  appximo frontend-spec  the API contract a UI consumes, errors→screens, files
-  appximo specs          all three at once (one paste = the whole contract)
+  appximo spec             the schema grammar (the declarative 90%)
+  appximo backend-spec     custom Go handlers, hooks, auth, background jobs
+  appximo frontend-spec    the API contract a UI consumes, errors→screens, files
+  appximo backoffice-spec  a CRUD admin UI generated from /openapi.json
+  appximo quickstart       OPERATING it: install → tenant → users → production
+  appximo specs            all five at once (one paste = the whole contract)
 
 The agent self-corrects with 'appximo validate --json <schema>' as the oracle.`,
 }

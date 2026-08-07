@@ -24,12 +24,14 @@ definition. This document is the complete distilled grammar; the engine's
 validator is STRICT (any key outside this grammar rejects the schema, nothing
 is silently ignored).
 
-This is one of THREE companion documents the CLI prints — together they cover a
-complete app: this one (` + "`appximo spec`" + `) teaches the SCHEMA;
+This is one of FIVE companion documents the CLI prints — together they cover a
+complete app, built and operated: this one (` + "`appximo spec`" + `) teaches the SCHEMA;
 ` + "`appximo backend-spec`" + ` teaches custom Go handlers, hooks, auth and
 background jobs; ` + "`appximo frontend-spec`" + ` teaches the frontend (the
-API contract a UI consumes, error→screen-state mapping, files/images).
-` + "`appximo specs`" + ` prints all three at once.
+API contract a UI consumes, error→screen-state mapping, files/images);
+` + "`appximo backoffice-spec`" + ` teaches generating an admin CRUD UI from
+/openapi.json; ` + "`appximo quickstart`" + ` teaches OPERATING it (install →
+tenant → users → production). ` + "`appximo specs`" + ` prints all five at once.
 
 ## Core grammar
 `

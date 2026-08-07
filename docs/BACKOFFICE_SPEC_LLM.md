@@ -1,0 +1,284 @@
+# Appximo — the BACK-OFFICE contract (a CRUD admin UI generated from /openapi.json)
+
+This is the fourth build-side document (`appximo backoffice-spec`), the
+companion of `spec` (the schema), `backend-spec` (custom Go) and
+`frontend-spec` (the API contract a UI consumes). It teaches ONE pattern,
+distilled from a real, verified implementation (a 7-resource back-office in
+~500 total lines, built during the first third-party field evaluation and
+adopted here): **a complete admin CRUD UI — tables, forms, validation,
+permissions, sort, search, pagination — derived at runtime from
+`/openapi.json`, with zero resource-specific screens.** If the schema changes
+and redeploys, the UI adapts by itself.
+
+Why this pattern earns its own document:
+
+- It is the same move as API Platform's Admin (React-Admin reading the
+  contract), but cheaper and more complete here, because the contract Appximo
+  publishes is unusually rich and its errors are written to be displayed.
+- It is the **sovereign back-office**: it lives inside YOUR binary
+  (`Config.Static`), with your theme, governed by your schema's RBAC — while
+  the stock `/admin` is the platform operator's panel, this is your APP's.
+- Since the `x-appximo-*` contract extensions shipped, the generated UI needs
+  **no hardcoded domain knowledge at all** — the exception maps the first
+  implementation carried (FK target columns, state machines, "which uuid is a
+  file") are dead. Everything below reads from the contract.
+
+Runnable proof: `examples/backoffice-guide/` — a no-build vanilla SPA
+implementing every section of this document against a real engine.
+
+---
+
+## 1. The idea in one line
+
+```
+schema.json ──(engine)──▶ /openapi.json ──(runtime fetch)──▶ tables + forms + menus
+```
+
+The UI knows nothing about "members" or "bookings". It knows how to read a
+contract. Write the reader once; every resource — including ones added after
+you shipped — gets its screens for free.
+
+## 2. What the contract publishes (all of it — the blind spots are closed)
+
+Fetch `/openapi.json` (unauthenticated). Everything a generic UI needs:
+
+| From the contract | Becomes |
+|---|---|
+| `components.schemas.<Pascal>` → `properties` with `type`, `format`, `enum`, `maxLength`, `minimum`, `maximum`, `readOnly` | the right control per field, with native browser limits |
+| `required` on `<Pascal>Input` | asterisks + create-form validation |
+| published methods per path (`get/post` on the collection, `get/patch/put/delete` on the item) | which buttons exist per resource |
+| `x-appximo-relation` on a property | this field is a FK and WHICH resource it points to |
+| **`x-appximo-references`** on a property | which COLUMN of the target the FK stores — `"id"` normally, `"user_id"` in the `$user_id` RBAC pattern. **A relation selector must send `row[references]`, never blindly `row.id`** — sending id where user_id is expected violates the FK, and the framework's own recommended pattern creates exactly those FKs |
+| **`x-appximo-file: true`** (+ `x-appximo-accept`, `x-appximo-max-bytes`) | this uuid is an uploaded-file reference, not a FK: render the upload→attach widget (frontend-spec §7) with the declared policy shown to the user before they pick a file |
+| **`x-appximo-initial` / `x-appximo-transitions`** on a status property | the state machine: create-forms offer only initial states; edit-forms offer `[current, ...transitions[current]]`; a terminal state (empty list) renders read-only |
+| **`x-appximo-virtual-resources`** at the document root | engine-provided resources that are not in the schema (the `files` store, with its RBAC action vocabulary) — list them separately, never as CRUD resources |
+| `x-appximo-custom-route: true` on an operation | a hand-written Go route: exclude from the generated CRUD, surface as an action/link if you want it |
+| the RBAC, by answering 403 | which resources this ROLE sees — probed, never configured (§5) |
+
+## 3. The contract reader (~150 lines, zero dependencies)
+
+The reference shape (`examples/backoffice-guide/web/contract.js` is the
+complete version):
+
+```js
+export async function loadContract(fetchJSON) {
+  const doc = await fetchJSON('/openapi.json');
+  const paths = doc.paths ?? {};
+  const virtual = new Set(Object.keys(doc['x-appximo-virtual-resources'] ?? {}));
+
+  // Resources = collection paths that are generated CRUD (not custom routes,
+  // not virtual-store operations).
+  const names = Object.keys(paths)
+    .filter((p) => /^\/api\/[a-z_]+$/.test(p))
+    .map((p) => p.slice(5))
+    .filter((n) => !virtual.has(n))
+    .filter((n) => !Object.values(paths['/api/' + n] ?? {})
+      .some((op) => op['x-appximo-custom-route']))
+    .sort();
+
+  const resources = names.map((name) => {
+    const Pascal = name.replace(/(^|_)([a-z])/g, (_, __, c) => c.toUpperCase());
+    const read = doc.components?.schemas?.[Pascal];
+    const input = doc.components?.schemas?.[Pascal + 'Input'];
+    const colMethods = Object.keys(paths['/api/' + name] ?? {});
+    const itemMethods = Object.keys(paths[`/api/${name}/{id}`] ?? {});
+    const required = new Set(input?.required ?? read?.required ?? []);
+
+    const fields = Object.entries(read?.properties ?? {}).map(([key, p]) => ({
+      key,
+      type: p.type, format: p.format ?? null, enum: p.enum ?? null,
+      maxLength: p.maxLength ?? null, minimum: p.minimum ?? null, maximum: p.maximum ?? null,
+      readOnly: !!p.readOnly || key === 'id',
+      required: required.has(key),
+      relation: p['x-appximo-relation'] ?? null,
+      references: p['x-appximo-references'] ?? 'id',   // the FE5 fix, from the contract
+      file: p['x-appximo-file'] === true,
+      accept: p['x-appximo-accept'] ?? null,
+      maxBytes: p['x-appximo-max-bytes'] ?? null,
+      transitions: p['x-appximo-transitions'] ?? null, // state machine, from the contract
+      initialStates: p['x-appximo-initial'] ?? null,
+      auto: key === 'created_at' || key === 'updated_at',
+    }));
+
+    return {
+      name, fields,
+      title: name[0].toUpperCase() + name.slice(1).replace(/_/g, ' '),
+      canCreate: colMethods.includes('post'),
+      canEdit: itemMethods.includes('patch'),
+      canDelete: itemMethods.includes('delete'),
+    };
+  });
+
+  return { resources, byName: Object.fromEntries(resources.map((r) => [r.name, r])) };
+}
+```
+
+Note what is ABSENT: no resource-name list, no FK exception map, no mirrored
+state machine, no "these uuids are files" list. If you find yourself writing
+one of those, you are reimplementing something the contract already says.
+
+## 4. Field → control mapping
+
+```js
+export function controlFor(f) {
+  if (f.transitions) return 'state';        // constrained select, §6 rule 5
+  if (f.enum) return 'select';
+  if (f.file) return 'file';                // upload→attach widget, §8
+  if (f.relation) return 'relation';        // select over the target resource, §7
+  if (f.type === 'boolean') return 'checkbox';
+  if (f.format === 'date-time') return 'datetime-local';
+  if (f.format === 'email') return 'email';
+  if (f.type === 'integer' || f.type === 'number') return 'number';
+  if (f.maxLength && f.maxLength > 200) return 'textarea';
+  return 'text';
+}
+```
+
+Wire `maxlength`, `min`, `max` from the contract onto the inputs — the
+browser's native validation and the server's then tell the same story.
+
+## 5. Permissions by probing: the 403 answers for you
+
+Do NOT encode a role matrix. Ask, once per resource, on opening the index:
+
+```js
+try {
+  const r = await api(`/api/${res.name}?per_page=1&count=true`);
+  state[res.name] = { total: r.meta?.total ?? 0 };
+} catch (e) {
+  state[res.name] = e.status === 403 ? { denied: true } : { error: true };
+}
+```
+
+Deny-by-default does the rest: a receptionist role sees its 4 of 7 resources,
+an admin all 7, with zero configuration. Render denied resources dimmed, not
+hidden — the user understands they exist and the role doesn't reach them.
+(Cost: one request per resource on the index — irrelevant for a back-office;
+consider probing lazily past ~50 resources.)
+
+## 6. The generic form — the five rules that matter
+
+One component serves every resource. The non-obvious rules, each learned
+against the live engine:
+
+1. **On CREATE, OMIT empty fields.** `required` means "present and non-null":
+   sending `""` PASSES it and creates a blank record; omitting the key is
+   what triggers the correct 422. This is the single most common generated-
+   form bug.
+2. **On EDIT, PATCH partial** — only what changed; the server validates only
+   what you send. Numbers go as JSON numbers: update rejects `"7"` even
+   though create tolerates it (documented create-path leniency).
+3. **Explicit `null` clears** a nullable field (remove a FK, detach a photo).
+4. **Paint the whole 422 in one pass.** The body carries EVERY failing field
+   (`{field, rule, message}`): mark them all on their inputs, scroll to the
+   first. A 409 (duplicate, referenced delete) NEVER discards the user's
+   work — banner + form intact; the message already names the column/table.
+5. **State fields offer only legal moves.** From the contract:
+   create → `initialStates`; edit → `[current, ...transitions[current]]`;
+   `transitions[current].length === 0` → render the value read-only (terminal).
+   Still handle the 422 `invalid transition` — two operators can race, and the
+   loser reloads the row.
+
+Submit skeleton:
+
+```js
+const body = {};
+for (const f of fields) {
+  const v = clean(values[f.key], f);          // number coercion, ISO dates, '' → null
+  if (!editing && (v === null || v === '')) continue;   // rule 1
+  body[f.key] = v;
+}
+try {
+  const r = editing
+    ? await api(`/api/${res.name}/${row.id}`, { method: 'PATCH', body })
+    : await api(`/api/${res.name}`,           { method: 'POST',  body });
+  onSaved(r);
+} catch (e) {
+  if (e.status === 422 && e.fields?.length) paintFields(e);        // rule 4
+  else if (e.status === 409) banner(e.message);                    // work intact
+  else screenStateFor(e);                                          // frontend-spec §5
+}
+```
+
+## 7. Relation selectors — send the referenced COLUMN
+
+The one place generic tools used to break. The recipe:
+
+```js
+const target = await api(`/api/${f.relation}?per_page=100`);
+options = target.data.map((row) => ({
+  value: row[f.references],                    // ← x-appximo-references, NOT row.id blindly
+  label: row.nombre ?? row.name ?? row.title ?? row.email ?? row[f.references],
+}));
+```
+
+With `references === "user_id"` (the `$user_id` RBAC pattern) the selector
+sends the target's `user_id` — the value the FK actually stores. Past ~100
+target rows, switch the select to a search input backed by `?search=`.
+
+## 8. Lists, files, and the rest (delegating to frontend-spec)
+
+- **Columns:** first N non-object fields, preferring
+  `name/title/code/status/email`-ish keys; overrides (§9) fix the rest.
+- **Sort:** ONE field (`?sort=x&order=asc`) — `sort=a,b` is a named 400, and
+  that 400 is a bug in YOUR UI, not user error. **Search:** `?search=` sweeps
+  the text fields. **Pagination:** keyset (`?after=` + `meta.has_next`).
+- **Delete:** two-click confirm; show the 409 verbatim — `still referenced by
+  "clases" record(s)` is already end-user language.
+- **Files:** `f.file` fields render the upload→attach→display flow exactly as
+  frontend-spec §7 specifies (multipart upload → take `file_id` → set it as
+  the field value → display via short-lived signed URL — an `<img>` cannot
+  send an Authorization header). Show `f.accept`/`f.maxBytes` next to the
+  picker; the server enforces them at attach time with a 422 `file_policy`.
+- Every screen keeps the six mandatory screen states and the error→state
+  mapping of frontend-spec §5/§6 — this document adds the generation layer,
+  not a different error contract.
+
+## 9. Growing past the generated 95% — the overrides registry
+
+Personalizing a resource must NOT eject it from the generated system. One
+registry, consulted at every decision point:
+
+```js
+export const OVERRIDES = {
+  miembros: {
+    columns: ['codigo_socio', 'nombre', 'documento', 'activo'],
+    labels:  { codigo_socio: 'Carnet' },
+    cells:   { foto: (row) => SignedAvatar(row) },     // custom cell renderer
+    widgets: { foto: PhotoEditor },                    // custom form widget
+    actions: [{ label: 'Export CSV', run: exportMembers }],
+  },
+};
+```
+
+The generic screens read `OVERRIDES[res.name] ?? {}`; an overridden resource
+still inherits forms, error painting and permission probing. The visual theme
+is your SPA's own tokens — nothing here dictates a look.
+
+## 10. Honest limits
+
+- `jsonb` fields: a raw-JSON textarea by default. A structured editor is
+  resource-specific work (an override widget).
+- No bulk actions or CSV export by default — natural §9 extensions.
+- The permission probe costs one request per resource at index open.
+- A brand-NEW resource appears in `/openapi.json` only after the engine
+  restarts with a schema that includes it (the deploy flow tells you when) —
+  the UI adapts on next load, but not before the contract does.
+- The back-office inherits your app's session (frontend-spec §2: login →
+  Bearer token). Building it as part of your SPA means the RBAC role of the
+  logged-in user shapes it automatically — that is the point.
+
+## 11. Checklist an agent can verify
+
+1. `/openapi.json` fetched once, cached; reader produces N resources with
+   fields — zero hardcoded resource names anywhere in the bundle.
+2. A relation field on a FK with `references: user_id` saves without a
+   FK-violation 409 (the selector sent the target's user_id).
+3. A file field shows the accept/size policy and completes
+   upload→attach→signed-URL display.
+4. A state field on create offers only initial states; on edit only legal
+   moves; a terminal row's state is read-only.
+5. Creating with an empty optional field omits the key (no blank-record bug);
+   a 422 paints every named field at once; a 409 leaves the form intact.
+6. A role with partial grants sees denied resources dimmed after the 403
+   probe — with no role matrix in the code.

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://appximo.com/schema/v1",
+  "version": "1",
+  "name": "backoffice-guide",
+  "resources": {
+    "instructores": {
+      "fields": {
+        "user_id": { "type": "uuid", "unique": true },
+        "nombre": { "type": "string", "required": true, "maxLength": 120 },
+        "email": { "type": "string", "format": "email" }
+      }
+    },
+    "clases": {
+      "fields": {
+        "titulo": { "type": "string", "required": true, "maxLength": 200 },
+        "instructor_id": { "type": "uuid", "relation": "instructores", "references": "user_id" },
+        "cupo": { "type": "int", "min": 1, "max": 100 },
+        "estado": {
+          "type": "string",
+          "enum": ["programada", "abierta", "en_curso", "finalizada", "cancelada"],
+          "default": "programada",
+          "state_machine": {
+            "initial": "programada",
+            "transitions": {
+              "programada": ["abierta", "cancelada"],
+              "abierta": ["en_curso", "cancelada"],
+              "en_curso": ["finalizada"],
+              "finalizada": [],
+              "cancelada": []
+            }
+          }
+        },
+        "poster": { "type": "file", "accept": "image", "max_bytes": 2097152 }
+      }
+    },
+    "reservas": {
+      "fields": {
+        "clase_id": { "type": "uuid", "relation": "clases", "required": true },
+        "socio": { "type": "string", "required": true, "minLength": 1 },
+        "creada": { "type": "time", "auto": true }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": { "resources": "*", "actions": ["*"] },
+      "recepcion": {
+        "permissions": {
+          "reservas": { "actions": ["read", "create", "update", "delete"] },
+          "clases": { "actions": ["read"] },
+          "files": { "actions": ["read", "create"] }
+        }
+      }
+    }
+  }
+}

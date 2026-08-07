@@ -15,16 +15,18 @@ transaction and RBAC already resolved. That in-process model is the differential
 (no network hop, one transaction, the engine's own validation + RBAC), and this
 guide is how you wield it without the footguns.
 
-Two companion documents; keep them straight:
+Four companion documents; keep them straight:
 
 | Doc | Teaches | Command |
 |---|---|---|
 | **`appximo spec`** / [SCHEMA_SPEC_LLM.md](SCHEMA_SPEC_LLM.md) | the **schema** (declarative surface) | `appximo spec` |
 | **this doc** / `appximo backend-spec` | the **backend** (handlers + hooks + auth + jobs) | `appximo backend-spec` |
 | **`appximo frontend-spec`** / [FRONTEND_SPEC_LLM.md](FRONTEND_SPEC_LLM.md) | the **frontend** (the API contract a UI consumes, screen states, files) | `appximo frontend-spec` |
+| **`appximo backoffice-spec`** / [BACKOFFICE_SPEC_LLM.md](BACKOFFICE_SPEC_LLM.md) | a **generated admin CRUD UI** driven by /openapi.json | `appximo backoffice-spec` |
+| **`appximo quickstart`** / [LIFECYCLE_SPEC_LLM.md](LIFECYCLE_SPEC_LLM.md) | **operating** it (install → tenant → users → production) | `appximo quickstart` |
 | [SCHEMA_REFERENCE.md](SCHEMA_REFERENCE.md) | the complete human reference | — |
 
-(`appximo specs` prints all three at once — one paste gives an agent the
+(`appximo specs` prints all five at once — one paste gives an agent the
 whole contract.)
 
 Everything below is audited against the engine source and demonstrated by a
