@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785967276440,
+  "lastUpdate": 1786076489465,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -576,6 +576,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "34034401 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "1701b5a7445e89ebb94a1338cc3564e3b69ae6e2",
+          "message": "chore(bench): FIELD-FEEDBACK-S1 ABBA record — M1 read-path change measures no_change\n\n4 arms (base f7911af vs HEAD, A-B-B-A, 6×30s@100rps each on the canonical\nblank/benchblank fixture): median p50 base 0.641 ms vs new 0.585 ms,\nΔ −0.056 ms (−8.8%, new FASTER — within the box's 8.7–10.4% between-run CV\nfloor), MWU p=0.094; the max(0.5ms, 3%) gate passes. Also removed 4 bogus\nffs1-* rows a broken first attempt imported from stale k6 files (the runs\nnever executed — k6 rejected a unitless duration).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-07T04:20:52Z",
+          "tree_id": "5360a8d2cfa1fb154b2de7b7bb0a213945f80f04",
+          "url": "https://github.com/appximo/appximo/commit/1701b5a7445e89ebb94a1338cc3564e3b69ae6e2"
+        },
+        "date": 1786076488460,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6236,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "377318 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6236,
+            "unit": "ns/op",
+            "extra": "377318 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "377318 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "377318 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 64.47,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "37165990 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 64.47,
+            "unit": "ns/op",
+            "extra": "37165990 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "37165990 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "37165990 times\n4 procs"
           }
         ]
       }
