@@ -10,12 +10,19 @@ import (
 )
 
 type openAPISpec struct {
-	OpenAPI    string           `yaml:"openapi" json:"openapi"`
-	Info       map[string]any   `yaml:"info" json:"info"`
-	Servers    []map[string]any `yaml:"servers,omitempty" json:"servers,omitempty"`
-	Security   []map[string]any `yaml:"security" json:"security"`
-	Paths      map[string]any   `yaml:"paths" json:"paths"`
-	Components map[string]any   `yaml:"components" json:"components"`
+	OpenAPI  string           `yaml:"openapi" json:"openapi"`
+	Info     map[string]any   `yaml:"info" json:"info"`
+	Servers  []map[string]any `yaml:"servers,omitempty" json:"servers,omitempty"`
+	Security []map[string]any `yaml:"security" json:"security"`
+	// VirtualResources declares the ENGINE-PROVIDED resources that exist on
+	// every app without being schema resources — today the built-in `files`
+	// store (absent when a schema resource shadows it). A generic tool needs
+	// this to offer file management and to know the RBAC grant vocabulary;
+	// its absence was gap #4 of PATRON-BACKOFFICE §6 (and the same blind spot
+	// behind Studio's ST1). Keys: name → {actions, description}.
+	VirtualResources map[string]any `yaml:"x-appximo-virtual-resources,omitempty" json:"x-appximo-virtual-resources,omitempty"`
+	Paths            map[string]any `yaml:"paths" json:"paths"`
+	Components       map[string]any `yaml:"components" json:"components"`
 }
 
 // buildOASpec assembles the full OpenAPI 3.0.3 document object for an APISchema
@@ -30,8 +37,20 @@ func buildOASpec(s *schema.APISchema, baseURL string, routes []CustomRoute) open
 	}
 	paths := buildOAPaths(s)
 	addOACustomPaths(paths, routes)
+	var virtual map[string]any
+	if _, shadowed := s.Resources["files"]; !shadowed {
+		virtual = map[string]any{
+			"files": map[string]any{
+				"actions": []string{"read", "create", "delete"},
+				"description": "the built-in content-addressable file store (/api/files) — " +
+					"grantable in RBAC exactly like a schema resource (actions only, no " +
+					"conditions/fields); not declared in the schema",
+			},
+		}
+	}
 	return openAPISpec{
-		OpenAPI: "3.0.3",
+		VirtualResources: virtual,
+		OpenAPI:          "3.0.3",
 		Info: map[string]any{
 			"title":   s.Name,
 			"version": s.Version,
@@ -202,10 +221,15 @@ func addOAAuthPaths(paths map[string]any) {
 
 // addOAFilePaths documents the built-in content-addressable file store routes.
 func addOAFilePaths(paths map[string]any) {
+	// Every operation of the built-in store is tagged as belonging to the
+	// VIRTUAL `files` resource (x-appximo-virtual-resource), pairing with the
+	// document-root x-appximo-virtual-resources declaration — so a generic
+	// tool can group them and offer file management without hardcoding.
 	paths["/api/files"] = map[string]any{"post": map[string]any{
-		"operationId": "uploadFile",
-		"summary":     "Upload a file (multipart, streamed + content-addressed)",
-		"tags":        []string{"files"},
+		"x-appximo-virtual-resource": "files",
+		"operationId":                "uploadFile",
+		"summary":                    "Upload a file (multipart, streamed + content-addressed)",
+		"tags":                       []string{"files"},
 		"requestBody": map[string]any{
 			"required": true,
 			"content": map[string]any{"multipart/form-data": map[string]any{"schema": map[string]any{
@@ -221,10 +245,11 @@ func addOAFilePaths(paths map[string]any) {
 	}}
 	paths["/api/files/{id}"] = map[string]any{
 		"get": map[string]any{
-			"operationId": "downloadFile",
-			"summary":     "Download a file blob by id (Range/ETag honored; the S3 backend may answer 302 to a short-lived presigned URL)",
-			"tags":        []string{"files"},
-			"parameters":  []any{oaPathIDParam()},
+			"x-appximo-virtual-resource": "files",
+			"operationId":                "downloadFile",
+			"summary":                    "Download a file blob by id (Range/ETag honored; the S3 backend may answer 302 to a short-lived presigned URL)",
+			"tags":                       []string{"files"},
+			"parameters":                 []any{oaPathIDParam()},
 			"responses": map[string]any{
 				"200": map[string]any{"description": "The file bytes", "content": map[string]any{
 					"application/octet-stream": map[string]any{"schema": map[string]any{"type": "string", "format": "binary"}},
@@ -235,10 +260,11 @@ func addOAFilePaths(paths map[string]any) {
 			},
 		},
 		"delete": map[string]any{
-			"operationId": "deleteFile",
-			"summary":     "Delete a file (metadata row + blob when no other upload references the same content)",
-			"tags":        []string{"files"},
-			"parameters":  []any{oaPathIDParam()},
+			"x-appximo-virtual-resource": "files",
+			"operationId":                "deleteFile",
+			"summary":                    "Delete a file (metadata row + blob when no other upload references the same content)",
+			"tags":                       []string{"files"},
+			"parameters":                 []any{oaPathIDParam()},
 			"responses": map[string]any{
 				"204": map[string]any{"description": "Deleted"},
 				"401": oaRespRef("Error401"), "403": oaRespRef("Error403"), "404": oaRespRef("Error404"),
@@ -246,10 +272,11 @@ func addOAFilePaths(paths map[string]any) {
 		},
 	}
 	paths["/api/files/{id}/url"] = map[string]any{"get": map[string]any{
-		"operationId": "signFileURL",
-		"summary":     "Mint a short-lived signed download URL (engine token URL on the local backend; native presigned URL on S3)",
-		"tags":        []string{"files"},
-		"parameters":  []any{oaPathIDParam()},
+		"x-appximo-virtual-resource": "files",
+		"operationId":                "signFileURL",
+		"summary":                    "Mint a short-lived signed download URL (engine token URL on the local backend; native presigned URL on S3)",
+		"tags":                       []string{"files"},
+		"parameters":                 []any{oaPathIDParam()},
 		"responses": map[string]any{
 			"200": map[string]any{"description": "Signed URL", "content": oaJSONContent(map[string]any{
 				"type": "object",
@@ -655,7 +682,7 @@ func oaResourceSchema(res *schema.ResourceSchema, includeAuto bool) map[string]a
 		if fd.Auto && !includeAuto {
 			continue
 		}
-		props[fname] = oaFieldType(fd)
+		props[fname] = oaPropertySchema(fd)
 		if fd.Required && !fd.Auto {
 			required = append(required, fname)
 		}
@@ -670,6 +697,66 @@ func oaResourceSchema(res *schema.ResourceSchema, includeAuto bool) map[string]a
 		out["required"] = required
 	}
 	return out
+}
+
+// oaPropertySchema is oaFieldType plus the x-appximo-* vendor extensions a
+// GENERIC tool needs to drive a UI/client from the contract alone
+// (FIELD-FEEDBACK-S1, FE5 + PATRON-BACKOFFICE §6). It is used for COMPONENT
+// property schemas only — filter query parameters keep the plain oaFieldType,
+// where these keys would be noise. The extensions:
+//
+//   - x-appximo-relation:   the FK's target resource (fd.Relation)
+//   - x-appximo-references: the FK's target COLUMN — "id" unless the schema
+//     declared otherwise. THE blind spot of FE5: the $user_id pattern the
+//     framework itself recommends requires FKs referencing user_id, and a
+//     generic relation selector that always sends the row's id violates
+//     exactly those FKs; before this key every tool needed a hand-written
+//     exception map.
+//   - x-appximo-file (+ x-appximo-accept / x-appximo-max-bytes): a file field
+//     was indistinguishable from any other uuid FK; the marks let a tool
+//     generate the upload→attach widget with the declared policy.
+//   - x-appximo-initial / x-appximo-transitions: the state machine, so a UI
+//     offers only legal moves (a terminal state is present with an empty
+//     list). frontend-spec used to say these were "not in the OpenAPI" —
+//     they are now.
+func oaPropertySchema(fd schema.FieldDef) map[string]any {
+	m := oaFieldType(fd)
+	if fd.Relation != "" {
+		m["x-appximo-relation"] = fd.Relation
+		ref := fd.References
+		if ref == "" {
+			ref = "id" // the schema-level default, made explicit for tools
+		}
+		m["x-appximo-references"] = ref
+	}
+	if fd.Type == "file" {
+		m["x-appximo-file"] = true
+		if len(fd.Accept) > 0 {
+			m["x-appximo-accept"] = []string(fd.Accept)
+		}
+		if fd.MaxBytes > 0 {
+			m["x-appximo-max-bytes"] = fd.MaxBytes
+		}
+	}
+	if sm := fd.StateMachine; sm != nil {
+		known := sm.KnownStates()
+		states := make([]string, 0, len(known))
+		for st := range known {
+			states = append(states, st)
+		}
+		sort.Strings(states)
+		trans := make(map[string][]string, len(states))
+		for _, st := range states {
+			if outs := sm.Transitions[st]; len(outs) > 0 {
+				trans[st] = outs
+			} else {
+				trans[st] = []string{} // terminal: present, no exits
+			}
+		}
+		m["x-appximo-initial"] = []string(sm.Initial)
+		m["x-appximo-transitions"] = trans
+	}
+	return m
 }
 
 // oaFieldType maps a FieldDef to an OpenAPI type schema object, including the

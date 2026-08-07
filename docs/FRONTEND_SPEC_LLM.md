@@ -59,7 +59,10 @@ everything else: **guessing the surface**. Do this first, in order:
    - the **role matrix** — which roles exist and what each may do (drives
      which buttons you render; the JWT only tells you the caller's own role);
    - any **state machines** — states + legal transitions per status field
-     (you mirror them in the UI, §6.6; they are not in the OpenAPI);
+     (you mirror them in the UI, §6.6; the OpenAPI now PUBLISHES them —
+     `x-appximo-initial` / `x-appximo-transitions` on the field's property
+     schema, a terminal state present with an empty list — so read them from
+     the contract instead of asking);
    - the **upload limits** (instance-wide max bytes/extensions AND any
      per-field `accept`/`max_bytes` policies — §7.4) and the **public rate
      budgets** (§9.5).

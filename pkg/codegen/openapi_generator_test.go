@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/appximo/appximo/pkg/schema"
@@ -106,5 +107,156 @@ func TestAuthPathsUnauthenticated(t *testing.T) {
 	arr, ok := sec.([]any)
 	if !ok || len(arr) != 0 {
 		t.Fatalf("/auth/login security must be an empty array (no auth), got %v", sec)
+	}
+}
+
+// TestOpenAPIVendorExtensions pins the Part-F contract (FIELD-FEEDBACK-S1,
+// FE5 + PATRON-BACKOFFICE §6): the generated document carries everything a
+// GENERIC tool needs — the FK target column (x-appximo-references, defaulted
+// to "id"), the file-field marking with its attach policy, the state machine,
+// and the virtual files resource declared at the document root — while filter
+// query parameters stay extension-free.
+func TestOpenAPIVendorExtensions(t *testing.T) {
+	s := &schema.APISchema{
+		Name: "ext-api", Version: "1",
+		Resources: map[string]schema.ResourceSchema{
+			"instructores": {Fields: map[string]schema.FieldDef{
+				"user_id": {Type: "uuid", Unique: true},
+				"nombre":  {Type: "string", Required: true},
+			}},
+			"reservas": {Fields: map[string]schema.FieldDef{
+				"instructor_id": {Type: "uuid", Relation: "instructores", References: "user_id"},
+				"miembro_id":    {Type: "uuid", Relation: "instructores"}, // references defaults to id
+				"comprobante":   {Type: "file", Accept: schema.StringList{"image", "pdf"}, MaxBytes: 2 << 20},
+				"estado": {Type: "string", Enum: []string{"solicitada", "confirmada", "cancelada"},
+					StateMachine: &schema.StateMachine{
+						Initial: []string{"solicitada"},
+						Transitions: map[string][]string{
+							"solicitada": {"confirmada", "cancelada"},
+							"confirmada": {"cancelada"},
+						},
+					}},
+			}},
+		},
+	}
+	raw, err := GenerateOpenAPIJSON(s, "/")
+	if err != nil {
+		t.Fatalf("GenerateOpenAPIJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+
+	comp := doc["components"].(map[string]any)["schemas"].(map[string]any)
+	props := comp["Reservas"].(map[string]any)["properties"].(map[string]any)
+
+	// FK with explicit references → the declared column.
+	inst := props["instructor_id"].(map[string]any)
+	if inst["x-appximo-relation"] != "instructores" || inst["x-appximo-references"] != "user_id" {
+		t.Fatalf("instructor_id extensions wrong: %v", inst)
+	}
+	// FK without references → defaulted to "id" EXPLICITLY (the common case is
+	// where the FE5 blind spot would otherwise stay open).
+	miem := props["miembro_id"].(map[string]any)
+	if miem["x-appximo-references"] != "id" {
+		t.Fatalf("miembro_id must default x-appximo-references to id: %v", miem)
+	}
+	// File field: marked + policy. Before, it was indistinguishable from a FK.
+	f := props["comprobante"].(map[string]any)
+	if f["x-appximo-file"] != true {
+		t.Fatalf("file field not marked: %v", f)
+	}
+	if acc, _ := f["x-appximo-accept"].([]any); len(acc) != 2 || acc[0] != "image" {
+		t.Fatalf("accept policy not emitted: %v", f)
+	}
+	if f["x-appximo-max-bytes"] != float64(2<<20) {
+		t.Fatalf("max_bytes not emitted: %v", f)
+	}
+	if f["x-appximo-relation"] != nil {
+		t.Fatalf("a file field is NOT a relation: %v", f)
+	}
+	// State machine: initial + full transitions map, terminal state present
+	// with an empty list.
+	est := props["estado"].(map[string]any)
+	ini, _ := est["x-appximo-initial"].([]any)
+	if len(ini) != 1 || ini[0] != "solicitada" {
+		t.Fatalf("initial wrong: %v", est)
+	}
+	trans, _ := est["x-appximo-transitions"].(map[string]any)
+	if len(trans) != 3 {
+		t.Fatalf("transitions must cover every known state: %v", trans)
+	}
+	if outs, _ := trans["cancelada"].([]any); len(outs) != 0 {
+		t.Fatalf("terminal state must be present with no exits: %v", trans)
+	}
+	if outs, _ := trans["solicitada"].([]any); len(outs) != 2 {
+		t.Fatalf("solicitada must have 2 exits: %v", trans)
+	}
+	// The input schemas carry the same extensions (a form builder reads Input).
+	inProps := comp["ReservasInput"].(map[string]any)["properties"].(map[string]any)
+	if inProps["instructor_id"].(map[string]any)["x-appximo-references"] != "user_id" {
+		t.Fatal("Input schema must carry the extensions too")
+	}
+
+	// Virtual resource declared at the document root…
+	vr, _ := doc["x-appximo-virtual-resources"].(map[string]any)
+	filesDecl, _ := vr["files"].(map[string]any)
+	if filesDecl == nil {
+		t.Fatalf("x-appximo-virtual-resources must declare files: %v", doc["x-appximo-virtual-resources"])
+	}
+	if acts, _ := filesDecl["actions"].([]any); len(acts) != 3 {
+		t.Fatalf("files actions wrong: %v", filesDecl)
+	}
+	// …and its operations tagged.
+	paths := doc["paths"].(map[string]any)
+	up := paths["/api/files"].(map[string]any)["post"].(map[string]any)
+	if up["x-appximo-virtual-resource"] != "files" {
+		t.Fatalf("upload op not tagged: %v", up)
+	}
+
+	// Filter query parameters stay extension-free (oaFieldType, not
+	// oaPropertySchema): no x-appximo-* key in any parameter schema.
+	list := paths["/api/reservas"].(map[string]any)["get"].(map[string]any)
+	if params, ok := list["parameters"].([]any); ok {
+		var walk func(v any) bool
+		walk = func(v any) bool {
+			switch t := v.(type) {
+			case map[string]any:
+				for k, vv := range t {
+					if strings.HasPrefix(k, "x-appximo-") {
+						return true
+					}
+					if walk(vv) {
+						return true
+					}
+				}
+			case []any:
+				for _, vv := range t {
+					if walk(vv) {
+						return true
+					}
+				}
+			}
+			return false
+		}
+		if walk(params) {
+			t.Fatalf("filter parameters must not carry x-appximo-* extensions")
+		}
+	}
+
+	// A schema resource literally named files SHADOWS the virtual store: no
+	// root declaration then.
+	s2 := &schema.APISchema{Name: "shadow", Version: "1", Resources: map[string]schema.ResourceSchema{
+		"files": {Fields: map[string]schema.FieldDef{"name": {Type: "string"}}},
+	}}
+	raw2, err := GenerateOpenAPIJSON(s2, "/")
+	if err != nil {
+		t.Fatalf("shadowed: %v", err)
+	}
+	var doc2 map[string]any
+	_ = json.Unmarshal(raw2, &doc2)
+	if _, present := doc2["x-appximo-virtual-resources"]; present {
+		t.Fatal("a shadowed files store must not be declared virtual")
 	}
 }
