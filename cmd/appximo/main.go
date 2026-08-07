@@ -21,6 +21,11 @@ var rootCmd = &cobra.Command{
 	},
 	Long: `API engine for Go — generate production APIs from a JSON schema.
 
+First time here? ONE command starts everything locally:
+
+  appximo up               Postgres + secrets + tenant + admin + server, in one go
+  appximo new "<idea>"     same, with the schema AI-generated from your idea
+
 Building with an AI agent? The engine prints its own agent-facing contract —
 paste these into your Claude Code / Cursor and the agent can build AND run the
 full stack against the real grammar:
