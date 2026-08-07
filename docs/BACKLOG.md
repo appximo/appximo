@@ -26,7 +26,7 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-07 (FIRST-TEN-MINUTES-S1)** — ENG-38 (the §13
+**Last reviewed: 2026-08-07 (PUBLIC-SURFACE-S1)** — the second field report answered: ADR-026 public reads, SEC-5 general closure, include/references, up reconciliation, 2 warnings, the static path; UI-2/ENG-40 filed. Previous review: 2026-08-07 (FIRST-TEN-MINUTES-S1) — ENG-38 (the §13
 first-ten-minutes proposal) is DONE: `appximo up`/`down`/`new` + the embedded
 `/app` back-office + the QUICKSTART rewrite, all verified (see the DONE block);
 ENG-39 filed (`--embedded-pg`, deliberately deferred with its reasoning).
@@ -55,6 +55,33 @@ refreshed).
 ---
 
 ## OPEN
+
+### UI-2 — Studio must author (and provably round-trip) `rbac.public`
+- **Origin:** PUBLIC-SURFACE-S1 (ADR-026) added the `rbac.public` block; the
+  visual RBAC editor (UI-F2-S1) predates it and does not author it. Worse
+  risk than a missing panel: if the editor RE-EMITS the rbac object from its
+  internal model on deploy, an existing public block could be silently
+  DROPPED — a public site going dark after an unrelated Studio deploy.
+- **Impact:** High if the round-trip drops the key (data-loss class), medium
+  otherwise (the JSON/Code view can author it; AUDIT-F1-S1's 100%-parity
+  claim is reopened either way).
+- **Ready:** (1) a pinned test that a schema WITH `rbac.public` deployed from
+  Studio keeps the block byte-equivalent; (2) the Roles editor grows a
+  "Public (anonymous)" section faithful to validatePublicBlock (read-only,
+  literal-only conditions, existing fields).
+
+### ENG-40 — `explain` and the aggregate endpoint don't know the new surface
+- **Origin:** PUBLIC-SURFACE-S1. Two small parity gaps noticed while
+  building ADR-026: `appximo explain` renders every ROLE's grants but not
+  the `rbac.public` block (an owner reviewing an AI-written schema would not
+  see what the whole internet can read — exactly the audience explain
+  exists for), and `/api/{r}/aggregate` has never been documented in
+  /openapi.json (pre-existing; noticed while marking public reads).
+- **Impact:** Medium for explain (the public surface is the one a
+  non-programmer most needs read back); low for the OpenAPI aggregate.
+- **Ready:** explain prints a "Cualquiera, sin iniciar sesión, puede ver…"
+  section per public grant (conditions in words, field list); the aggregate
+  path appears in the generated spec with its parameter set.
 
 ### ENG-35 — GraphQL String-typed variables silently coerce any scalar
 - **Origin:** NIGHT-SWEEP-S1 audit (GraphQL surface), CONFIRMED adversarially.
@@ -569,6 +596,51 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in PUBLIC-SURFACE-S1 (2026-08-07)
+
+The second field report (the blog evaluator, working ONLY from the distributed
+binary + `appximo specs`), answered end to end. Commits 98a7f24 → HEAD.
+
+- **`rbac.public` — declarative anonymous reads (ADR-026).** A blog/catalogue/
+  landing needs no Go: per-resource read grants with row conditions + field
+  allowlists, compiled into the ONE evaluator as the reserved `$public` role.
+  Read-only at load; literal-only conditions; public rate limiter; never
+  cached; invalid Bearer stays 401; `security: []`+`x-public` in the contract.
+  Verified by 4 integration tests + 5 gate corpus rows + a real-browser run.
+- **SEC-5 closed GENERALLY:** filter/sort/order naming a field outside ANY
+  role's allowlist is 403 (`query.ErrForbiddenField`); `?search=` sweeps only
+  role-readable text columns. The value-oracle over hidden columns is gone.
+- **`?include=` honors `references`** (the D divergence): embed + subroute now
+  share `FieldDef.ReferencedColumn()`; GraphQL/nested fixed by construction;
+  gate rows pin the parity.
+- **`up` reconciles a changed schema.json on re-run** (never `ok: true` over
+  the old schema): unchanged says so; changed migrates through the real PUT
+  path with drops gated; failure is loud. `tenant.schema`/`gated_drops` in
+  the JSON card. (Advances ENG-36's spirit on the `up` path; ENG-36's
+  boot-level detection stays OPEN.)
+- **Two SCHEMA-5 warnings:** `file_field_without_files_grant` and
+  `required_text_without_min_length`, in validate/--json/boot/deploy; grammar
+  + canonical schemas updated (starter now declares minLength: 1).
+- **The static path from the binary:** `serve --static [urlpath=]dir --spa`,
+  `APPXIMO_STATIC_{DIR,SPA,CSP}`, `up/new --static`, ParseServeArgs grows the
+  flags, and `appximo init` emits a COMPILABLE one-binary project (main.go +
+  web/ + .gitignore; pinned by TestInitProjectCompiles). frontend-spec §10
+  rewritten per the evaluator's own retraction: the go-get path with measured
+  costs instead of the give-up paragraph; CSP docs now declare the SEC-2
+  hash-hardened truth; §9 trap 8 documents the Node-on-Windows Host escape.
+- **The stale-read-after-DELETE suspicion:** not reproduced live (0/60) but
+  CONFIRMED by code reading as the invalidate/refresh race; closed with a
+  per-tenant epoch guard (`TestInvalidateDropsInFlightStore`).
+- **Error language decision:** engine messages stay English; `rule` is the
+  stable contract; the full rule→message map documented (frontend-spec §5.1).
+- Gates: lint 0 issues; full lane (integration+e2e, -race) green; binary-diff
+  gate phase 1 (old schema/corpus, old-vs-new binary) 108/108 SAME, phase 2
+  (new corpus) 117/117; browser verification PASS (Chromium, mobile
+  viewport). ABBA bench (k6 constant 100 rps, 20s runs, warmup discarded,
+  scratch engine pair on one DB): A=641/621µs p50, B=655/606µs — Δmean
+  −0.2%, inside the A↔A spread (3.2%) and far under the max(0.5ms, 3%)
+  gate → **no_change**. New OPEN: UI-2, ENG-40.
 
 ## DONE in FIRST-TEN-MINUTES-S1 (2026-08-07)
 
