@@ -29,6 +29,26 @@ type ServeArgs struct {
 	SchemaPath  string
 	Port        int
 	ControlPort int
+
+	// Static holds "[urlpath=]dir" mount specs from --static (repeatable), and
+	// SPA the --spa flag (PUBLIC-SURFACE-S1 Part A) — feed them through
+	// ParseStaticSpecs into Config.Static:
+	//
+	//	mounts, err := appximo.ParseStaticSpecs(args.Static, args.SPA)
+	//	… Config{Static: mounts}
+	//
+	// A binary that wires its frontend with go:embed simply ignores them.
+	Static []string
+	SPA    bool
+}
+
+// stringArrayFlag collects a repeatable string flag ("--static a --static b").
+type stringArrayFlag []string
+
+func (f *stringArrayFlag) String() string { return fmt.Sprint([]string(*f)) }
+func (f *stringArrayFlag) Set(v string) error {
+	*f = append(*f, v)
+	return nil
 }
 
 // ParseServeArgs processes os.Args for a consumer binary per the deployable
@@ -106,6 +126,9 @@ func parseServeArgs(name, version, revision string, defaults ServeArgs, args []s
 	schemaPath := fs.String("schema", defaults.SchemaPath, "path to the schema JSON")
 	port := fs.Int("port", defaults.Port, "data-plane port")
 	controlPort := fs.Int("control-port", defaults.ControlPort, "control-plane port (keep it loopback-only)")
+	static := stringArrayFlag(defaults.Static)
+	fs.Var(&static, "static", "serve a frontend from this binary: [urlpath=]dir (repeatable)")
+	spa := fs.Bool("spa", defaults.SPA, "SPA fallback for --static mounts (serve index.html for unmatched paths)")
 	if err := fs.Parse(args); err != nil {
 		return ServeArgs{}, "", err
 	}
@@ -117,5 +140,5 @@ func parseServeArgs(name, version, revision string, defaults ServeArgs, args []s
 			"unexpected argument %q after the flags — every option must be a --flag (Go's flag parsing stops at the first bare word, so a misplaced argument would silently discard the rest). Got: %v",
 			fs.Arg(0), args)
 	}
-	return ServeArgs{SchemaPath: *schemaPath, Port: *port, ControlPort: *controlPort}, "", nil
+	return ServeArgs{SchemaPath: *schemaPath, Port: *port, ControlPort: *controlPort, Static: static, SPA: *spa}, "", nil
 }

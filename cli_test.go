@@ -35,8 +35,16 @@ func TestParseServeArgs_Contract(t *testing.T) {
 
 	// No args at all → the defaults.
 	got, _, err = parseServeArgs("myapp", "v", "r", def, nil)
-	if err != nil || got != def {
+	if err != nil || got.SchemaPath != def.SchemaPath || got.Port != def.Port || got.ControlPort != def.ControlPort {
 		t.Fatalf("defaults: %+v err=%v", got, err)
+	}
+
+	// PUBLIC-SURFACE-S1 Part A: --static repeats and --spa parses — the
+	// distributed-binary path to Config.Static.
+	got, _, err = parseServeArgs("myapp", "v", "r", def,
+		[]string{"serve", "--static", "./web/build", "--static", "/site=./dist", "--spa"})
+	if err != nil || len(got.Static) != 2 || got.Static[0] != "./web/build" || got.Static[1] != "/site=./dist" || !got.SPA {
+		t.Fatalf("static flags: %+v err=%v", got, err)
 	}
 
 	// An unknown subcommand fails LOUD with the contract in the message.

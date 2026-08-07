@@ -39,7 +39,20 @@ and names every missing one:
 A .env file in the working directory is loaded automatically (KEY=value per
 line; the real environment wins on conflict). Two listeners: the API on
 --port (public) and the tenant-registration control plane on --control-port
-(keep it internal). Optional env: APPXIMO_ENV, APPXIMO_AUTH_SIGNUP_ROLE,
+(keep it internal).
+
+Serve your own frontend from this same binary with --static (same origin, no
+CORS, the engine's SPA Content-Security-Policy):
+
+  appximo serve --schema schema.json --static ./web/build --spa
+
+--static is [urlpath=]dir and repeats (a bare dir mounts at "/"; "/site=./dist"
+mounts a sub-path); --spa serves index.html for unmatched client routes.
+Environment equivalents for systemd/Docker: APPXIMO_STATIC_DIR (comma-
+separated specs), APPXIMO_STATIC_SPA, APPXIMO_STATIC_CSP (a verbatim policy,
+or "off").
+
+Optional env: APPXIMO_ENV, APPXIMO_AUTH_SIGNUP_ROLE,
 APPXIMO_CORS_ORIGINS, APPXIMO_FILES_DIR, GOMEMLIMIT — the full table lives in
 docs/PRODUCTION.md; 'appximo quickstart' prints the operations contract.`,
 	// ADR-024: `serve` takes NO positional arguments. It used to accept and
@@ -67,6 +80,16 @@ docs/PRODUCTION.md; 'appximo quickstart' prints the operations contract.`,
 		schemaFile, _ := cmd.Flags().GetString("schema")
 		port, _ := cmd.Flags().GetInt("port")
 		controlPort, _ := cmd.Flags().GetInt("control-port")
+		staticSpecs, _ := cmd.Flags().GetStringArray("static")
+		spa, _ := cmd.Flags().GetBool("spa")
+
+		// PUBLIC-SURFACE-S1 Part A: the distributed binary reaches Config.Static —
+		// the same seam, same validation, same CSP as a Go consumer's mounts.
+		staticMounts, err := appximo.ParseStaticSpecs(staticSpecs, spa)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 
 		app, err := appximo.New(appximo.Config{
 			SchemaPath:      schemaFile,
@@ -74,8 +97,10 @@ docs/PRODUCTION.md; 'appximo quickstart' prints the operations contract.`,
 			ControlPort:     controlPort,
 			Version:         version,
 			DebugTracesHTML: debugTracesHTML,
+			Static:          staticMounts,
 			// DSN, JWTSecret, AdminKey, Env fall back to DATABASE_URL / JWT_SECRET /
-			// ADMIN_KEY / APPXIMO_ENV inside New.
+			// ADMIN_KEY / APPXIMO_ENV inside New. An empty Static falls back to
+			// APPXIMO_STATIC_DIR / _SPA / _CSP inside New too.
 		})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -93,5 +118,7 @@ func init() {
 	serveCmd.Flags().String("schema", "schema.json", "path to schema.json")
 	serveCmd.Flags().Int("port", 8080, "HTTP port to listen on")
 	serveCmd.Flags().Int("control-port", 0, "control-plane port (0 = APPXIMO_CONTROL_PORT, then 9090)")
+	serveCmd.Flags().StringArray("static", nil, "serve a frontend from this binary: [urlpath=]dir (repeatable; bare dir mounts at \"/\"; env: APPXIMO_STATIC_DIR)")
+	serveCmd.Flags().Bool("spa", false, "client-side-routing fallback for --static mounts: unmatched paths serve index.html (env: APPXIMO_STATIC_SPA)")
 	rootCmd.AddCommand(serveCmd)
 }

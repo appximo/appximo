@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -317,5 +318,53 @@ func TestStaticMount_LongestPrefixWins(t *testing.T) {
 	h := staticRouter(hs)
 	if rec := get(t, h, "/ui/admin"); !strings.Contains(rec.Body.String(), "INNER") {
 		t.Fatalf("the nested mount must win: %q", rec.Body.String())
+	}
+}
+
+// TestParseStaticSpecs — PUBLIC-SURFACE-S1 Part A: the CLI/env grammar for
+// Config.Static ("[urlpath=]dir"). A bare dir mounts at "/", "path=dir" at the
+// sub-path, a missing directory is a loud error at parse (boot) time, and the
+// result flows into the SAME validateStaticMounts as code-declared mounts.
+func TestParseStaticSpecs(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(dir+"/index.html", []byte("<!doctype html><title>x</title>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mounts, err := ParseStaticSpecs([]string{dir}, true)
+	if err != nil {
+		t.Fatalf("bare dir: %v", err)
+	}
+	if len(mounts) != 1 || mounts[0].Path != "/" || !mounts[0].SPA || mounts[0].FS == nil {
+		t.Fatalf("bare dir mount = %+v", mounts)
+	}
+	// It compiles through the one true validator (no second implementation).
+	if _, err := validateStaticMounts(mounts); err != nil {
+		t.Fatalf("parsed mount must validate: %v", err)
+	}
+
+	mounts, err = ParseStaticSpecs([]string{"/site=" + dir, "assets=" + dir}, false)
+	if err != nil {
+		t.Fatalf("sub-path specs: %v", err)
+	}
+	if mounts[0].Path != "/site" || mounts[1].Path != "/assets" {
+		t.Fatalf("sub-path mounts = %+v", mounts)
+	}
+
+	if _, err := ParseStaticSpecs([]string{dir + "/definitely-missing"}, false); err == nil {
+		t.Fatal("a missing directory must be a loud error")
+	}
+	if _, err := ParseStaticSpecs([]string{dir + "/index.html"}, false); err == nil {
+		t.Fatal("a file (not a directory) must be a loud error")
+	}
+	if _, err := ParseStaticSpecs([]string{"/site="}, false); err == nil {
+		t.Fatal("a spec with no directory must be a loud error")
+	}
+
+	// Empty entries (a trailing comma in APPXIMO_STATIC_DIR) are skipped, not errors.
+	mounts, err = ParseStaticSpecs([]string{dir, ""}, false)
+	if err != nil || len(mounts) != 1 {
+		t.Fatalf("empty entries must be skipped: %+v err=%v", mounts, err)
 	}
 }

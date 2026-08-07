@@ -46,6 +46,8 @@ type upOptions struct {
 	PGContainer   string
 	PGPort        int
 	NoDocker      bool
+	Static        []string
+	SPA           bool
 	JSON          bool
 	Yes           bool
 	AdminEmail    string
@@ -151,6 +153,8 @@ Stop the server with Ctrl+C. Stop the Docker Postgres too: appximo down.`,
 		opts.PGContainer, _ = cmd.Flags().GetString("pg-container")
 		opts.PGPort, _ = cmd.Flags().GetInt("pg-port")
 		opts.NoDocker, _ = cmd.Flags().GetBool("no-docker")
+		opts.Static, _ = cmd.Flags().GetStringArray("static")
+		opts.SPA, _ = cmd.Flags().GetBool("spa")
 		opts.JSON, _ = cmd.Flags().GetBool("json")
 		opts.Yes, _ = cmd.Flags().GetBool("yes")
 		opts.AdminEmail, _ = cmd.Flags().GetString("admin-email")
@@ -171,6 +175,8 @@ func init() {
 	upCmd.Flags().String("pg-container", "appximo-pg", "Docker container name for Postgres")
 	upCmd.Flags().Int("pg-port", 54329, "host port for the Docker Postgres (loopback-only)")
 	upCmd.Flags().Bool("no-docker", false, "never start Docker; require DATABASE_URL")
+	upCmd.Flags().StringArray("static", nil, "serve your frontend from the same binary: [urlpath=]dir (repeatable, same form as serve --static)")
+	upCmd.Flags().Bool("spa", false, "client-side-routing fallback for --static mounts (serve index.html for unmatched paths)")
 	upCmd.Flags().Bool("json", false, "print the final card as ONE JSON object on stdout (progress → stderr)")
 	upCmd.Flags().Bool("yes", false, "no questions: accept every default (implied by --json / non-TTY)")
 	upCmd.Flags().String("admin-email", "", "first admin email (default admin@<name>.local)")
@@ -306,12 +312,17 @@ func runUp(opts upOptions) error {
 
 	// ── Boot the engine (this same process; the orchestration below drives its
 	// REAL http surface — no second implementation of any step) ──────────────
+	staticMounts, err := appximo.ParseStaticSpecs(opts.Static, opts.SPA)
+	if err != nil {
+		return err
+	}
 	app, err := appximo.New(appximo.Config{
 		SchemaPath:      schemaPath,
 		Port:            opts.Port,
 		ControlPort:     opts.ControlPort,
 		Version:         version,
 		DebugTracesHTML: debugTracesHTML,
+		Static:          staticMounts,
 		BannerWriter:    io.Discard, // the card below replaces the banner; --json owns stdout
 	})
 	if err != nil {
@@ -354,6 +365,13 @@ func runUp(opts upOptions) error {
 		res.URLs = map[string]string{
 			"app": base + "/app", "docs": base + "/docs", "admin": base + "/admin",
 			"editor": base + "/editor", "api": base + "/api", "graphql": base + "/graphql",
+		}
+		for _, m := range staticMounts {
+			key := "site"
+			if m.Path != "/" {
+				key = "site " + m.Path
+			}
+			res.URLs[key] = base + strings.TrimSuffix(m.Path, "/") + "/"
 		}
 
 		// 1. Tenant, with the schema in the body (T2 — the same POST /tenants

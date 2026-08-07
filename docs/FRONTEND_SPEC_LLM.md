@@ -100,6 +100,23 @@ browser is already on. **Served apart** is right when a separate team owns the
 frontend's deploy cadence, or when one frontend must talk to many tenant
 domains (then CORS + explicit base URLs are the price).
 
+**No Go toolchain? The flagship shape does not require one.** The distributed
+engine binary serves your built frontend directly (PUBLIC-SURFACE-S1):
+
+```bash
+appximo serve --schema schema.json --static ./web/build --spa
+```
+
+`--static` is `[urlpath=]dir` and repeats (`--static /site=./dist` mounts a
+sub-path); `--spa` turns on the client-routing fallback. Environment
+equivalents for systemd/Docker: `APPXIMO_STATIC_DIR` (comma-separated specs),
+`APPXIMO_STATIC_SPA`, `APPXIMO_STATIC_CSP` (verbatim policy, or `off`).
+`appximo up --static ./web/build --spa` serves it from the first minute, and
+`appximo init <name>` scaffolds the Go variant below with `Config.Static`
+already wired (it compiles as generated: `go mod tidy && go build`). Same
+mount validation, same CSP, same serving rules in every form — one
+implementation behind all of them.
+
 What embedded looks like in the backend's `main.go` (the backend agent usually
 writes this; shown so you know the contract you are building into):
 
@@ -934,9 +951,15 @@ The reference storefront's architecture, worth copying:
 Each of these cost a real session real time. In order of damage:
 
 1. **A blank page with a 200 is a CSP problem, and `curl` cannot see it.**
-   The static mount serves a correct SPA policy (`DefaultStaticCSP` — includes
-   `script-src 'unsafe-inline'` with hash-hardening for inline bootstraps,
-   because SvelteKit's shell boots from an inline script). If you override CSP
+   The static mount serves a correct SPA policy — and STRICTER than the
+   `DefaultStaticCSP` constant reads: at boot the engine inspects the mount's
+   index and upgrades `script-src` per mount (field-verified): no inline
+   scripts → `script-src 'self'` only; inline bootstraps (SvelteKit's shell)
+   → each pinned by `'sha256-…'` hash, `'unsafe-inline'` dropped — injected
+   inline script is blocked; only an unparseable shell keeps the permissive
+   form, with the reason in the boot log. Consequence: editing an inline
+   script in the shell REQUIRES a binary restart (the hash is computed at
+   boot). If you override CSP
    (per mount via `StaticMount.CSP`) and the page renders blank while curl
    shows perfect HTML: open the BROWSER console — you'll find
    `Refused to execute inline script…`. **Never verify a frontend with curl**
@@ -972,11 +995,24 @@ Each of these cost a real session real time. In order of damage:
 7. **Polling etiquette**: cap it (count + backoff), stop when the tab is done
    (`clearTimeout` on unmount), and only poll endpoints sized for it (the
    order-status route budget is ~30 rps per tenant+IP for exactly this).
-8. **`Host` is load-bearing in every dev tool.** Browsers on
-   `tenant.localhost` are fine; Node scripts and proxies MUST forward/set the
-   Host header (`fetch` overrides it — set `headers: {host: …}` on the proxy,
-   or call the tenant hostname directly). A `500`/`401` that only happens from
-   a script and never from the browser is almost always a missing tenant Host.
+8. **`Host` is load-bearing in every dev tool — and Node's `fetch` cannot set
+   it.** Browsers on `tenant.localhost` are fine (they resolve `.localhost`
+   internally, RFC 6761). From Node the same hostname can be `ENOTFOUND`
+   (the OS resolver doesn't know `.localhost` — measured on Windows), and
+   `fetch`/undici SILENTLY IGNORES a hand-set `host` header (you get a 401,
+   not an error). The escape that actually works from Node (field-verified on
+   Windows): the `node:http` module against `127.0.0.1` with the explicit
+   header —
+
+   ```js
+   const http = require('node:http');
+   http.get({ host: '127.0.0.1', port: 8080, path: '/api/posts',
+              headers: { Host: 'tenant.localhost', Authorization: `Bearer ${tok}` } }, res => { … });
+   ```
+
+   (A proxy that forwards the inbound Host also works; `fetch` with
+   `headers: {host}` does NOT.) A `500`/`401` that only happens from a script
+   and never from the browser is almost always a missing tenant Host.
 9. **Don't hand-build filter strings**: `URLSearchParams` + a tiny helper;
    remember `curl -g` when reproducing (brackets are glob characters in curl).
 10. **Money is integers.** All math in minor units, `Intl.NumberFormat` only at
@@ -1009,12 +1045,29 @@ Dev loop options: Vite dev server + proxy with a tenant Host (§3), or rebuild
 & run the binary and open `http://<tenant>.localhost:<port>` (production-
 faithful; what the reference e2e suites use).
 
-**If you don't own the backend's Go project** (you were handed a running
-binary, not a repo): your deliverable is the built static tree (`web/build/`)
-plus the `Config.Static` snippet from §1 — the backend agent embeds it and
-rebuilds. Alternatively the served-apart shape (§1) with the operator setting
-`APPXIMO_CORS_ORIGINS` (§4.10). State which one you're producing; don't
-silently assume you can recompile the binary.
+**If you don't own a backend Go project, you can still ship the one-binary
+shape — do NOT fall back to a tarball or a side server.** Field-verified
+(second evaluation, 24/24 in a real browser): the framework is a public Go
+module, so the whole "backend project" is ~40 lines you can write yourself:
+
+```bash
+appximo init myapp        # scaffolds exactly that main.go, compilable as generated
+# — or by hand —
+go mod init myapp && go get github.com/appximo/appximo@latest
+```
+
+The main.go is the §1 snippet plus `ParseServeArgs` + `app.Start()` — nothing
+else. Build order is MANDATORY: the SPA first, then the binary
+(`cd web && npm run build`, then `go mod tidy && go build`) — the embed
+compiles whatever is in `web/build` at that moment. Real measured cost: first
+build ≈ 2m36s cold (the dependency graph downloads once; warm rebuilds are
+seconds) and the binary ≈ 80 MB — normal for this framework, not a mistake.
+
+**No Go toolchain at all?** The engine binary serves the built tree itself:
+`appximo serve --schema schema.json --static ./web/build --spa` (§1) — same
+mounts, same CSP, no compilation. The served-apart shape (§1, with
+`APPXIMO_CORS_ORIGINS`, §4.10) remains the fallback when a separate host is a
+requirement — a constraint someone named, never a default you retreat to.
 
 ---
 

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"path"
 	"sort"
 	"strings"
@@ -98,8 +99,19 @@ type StaticMount struct {
 	CSP string
 }
 
-// DefaultStaticCSP is the policy a StaticMount serves when CSP is unset:
+// DefaultStaticCSP is the BASE policy a StaticMount uses when CSP is unset:
 // same-origin everything, no framing, no external script/connect targets.
+//
+// ⚠ The SERVED policy is usually STRICTER than this constant (SEC-2,
+// hardenedStaticCSP): at boot the mount's index document is inspected and
+// script-src is upgraded — no inline scripts → `script-src 'self'` only;
+// inline bootstraps → pinned by 'sha256-…' hashes with 'unsafe-inline'
+// DROPPED; only an unparseable shell keeps the permissive form, and then the
+// reason is logged. The second field evaluation read this comment, expected
+// 'unsafe-inline' on the wire, and measured the hardened form instead — the
+// doc under-declared what the engine does. Consequence worth knowing: editing
+// an inline script in the shell requires a restart (hashes are computed at
+// boot).
 //
 // script-src carries 'unsafe-inline' DELIBERATELY: SvelteKit's adapter-static
 // shell boots hydration from an INLINE <script> (so do Next export and Astro
@@ -163,6 +175,48 @@ func (h *staticHandler) setCSP(w http.ResponseWriter) {
 		return
 	}
 	w.Header().Set("Content-Security-Policy", h.csp)
+}
+
+// ParseStaticSpecs turns CLI/env mount specs into StaticMounts served from
+// disk (PUBLIC-SURFACE-S1 Part A: Config.Static used to be reachable only from
+// Go code — a `go get` away, but nothing said so, and the no-toolchain case had
+// no path at all; `serve --static` is that path). Each spec is "[urlpath=]dir": a bare dir
+// mounts at "/" (the whole site); "site=./dist" mounts at "/site". spa applies
+// to every produced mount (the CLI's one flag mirroring StaticMount.SPA). The
+// directory must exist NOW — a typo'd path is an error here, at boot, never a
+// tree of silent 404s. Everything else (CSP, engine-prefix collisions, the
+// index/SPA contract) is the SAME validateStaticMounts every mount goes
+// through: this is a parser, not a second implementation.
+func ParseStaticSpecs(specs []string, spa bool) ([]StaticMount, error) {
+	var out []StaticMount
+	for _, spec := range specs {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+		path, dir := "/", spec
+		if i := strings.Index(spec, "="); i >= 0 {
+			path, dir = strings.TrimSpace(spec[:i]), strings.TrimSpace(spec[i+1:])
+			if path == "" {
+				path = "/"
+			}
+			if !strings.HasPrefix(path, "/") {
+				path = "/" + path
+			}
+			if dir == "" {
+				return nil, fmt.Errorf("appximo: static spec %q names no directory — the form is [urlpath=]dir, e.g. --static ./web/build or --static /site=./dist", spec)
+			}
+		}
+		st, err := os.Stat(dir)
+		if err != nil {
+			return nil, fmt.Errorf("appximo: static dir %q does not exist (%v) — the path is resolved from the working directory", dir, err)
+		}
+		if !st.IsDir() {
+			return nil, fmt.Errorf("appximo: static path %q is a file, not a directory — point at the built frontend's output directory", dir)
+		}
+		out = append(out, StaticMount{Path: path, FS: os.DirFS(dir), SPA: spa})
+	}
+	return out, nil
 }
 
 // validateStaticMounts checks every declared mount at BOOT and compiles it.

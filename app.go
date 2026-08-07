@@ -790,7 +790,30 @@ func New(cfg Config) (*App, error) {
 	// construction, so a frontend that would shadow /api or /admin — or a build
 	// that never ran, leaving no index.html — fails the boot with the reason
 	// instead of serving a surprise.
-	if app.static, err = validateStaticMounts(cfg.Static); err != nil {
+	//
+	// PUBLIC-SURFACE-S1 Part A: when the CODE declares no mounts, the environment
+	// may (APPXIMO_STATIC_DIR = comma-separated "[urlpath=]dir" entries, served
+	// from disk; APPXIMO_STATIC_SPA turns on the SPA fallback for all of them) —
+	// the systemd/Docker/install.sh path to the same seam `serve --static`
+	// exposes. Code wins when both are set: a consumer that wired Config.Static
+	// chose its mounts deliberately.
+	staticMounts := cfg.Static
+	if len(staticMounts) == 0 {
+		if dirs := os.Getenv("APPXIMO_STATIC_DIR"); dirs != "" {
+			envMounts, serr := ParseStaticSpecs(strings.Split(dirs, ","), envTruthy(os.Getenv("APPXIMO_STATIC_SPA")))
+			if serr != nil {
+				pool.Close()
+				return nil, fmt.Errorf("APPXIMO_STATIC_DIR: %w", serr)
+			}
+			if csp := os.Getenv("APPXIMO_STATIC_CSP"); csp != "" {
+				for i := range envMounts {
+					envMounts[i].CSP = csp
+				}
+			}
+			staticMounts = envMounts
+		}
+	}
+	if app.static, err = validateStaticMounts(staticMounts); err != nil {
 		pool.Close()
 		return nil, err
 	}
