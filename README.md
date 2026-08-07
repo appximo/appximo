@@ -279,7 +279,8 @@ runs the same suite against *your* server and prints *your* report.
   embedded in the binary and served at `/admin`** — login + MFA, tenant management,
   per-tenant user management, read-only data navigation, and an **observability
   dashboard** (ECharts latency + SLO burn-rate charts, a trace-span waterfall, and
-  the z-score anomaly + error views) (built with `make admin-ui` before `go build`)
+  the z-score anomaly + error views) — the built assets ship in the module
+  (ADR-025), so every `go build` includes the panel
 - **Real-time**: per-resource SSE streams with RBAC applied at delivery
 - **Webhooks**: HMAC-SHA256-signed, async, retries with backoff, SSRF-guarded
 - **Extensions**: JS sandbox (Goja, watchdog-interrupted) with built-in helpers —
@@ -377,8 +378,9 @@ state machines, relations, plus a **Code view**: the raw schema in an assisted
 JSON editor with live engine validation, every error on its line) that
 deploys/migrates tenants, restarts the engine in one click when a new resource
 needs it, and manages tenant files — plus the admin panel at `/admin`. Both are
-static SPAs compiled into the binary (`make editor-ui admin-ui` before
-`go build`; the published image ships them).
+static SPAs whose **built assets ship in the module** (ADR-025): any
+`go build` — including a consumer's custom binary via
+`go get github.com/appximo/appximo` — embeds working `/admin` and `/editor`.
 
 And you don't have to write the schema by hand: `appximo ai-generate
 "<description>"` turns a natural-language app description into a valid schema

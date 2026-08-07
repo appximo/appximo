@@ -30,6 +30,14 @@ func TestServeIndex(t *testing.T) {
 	h := router(t)
 	for _, p := range []string{"/admin", "/admin/"} {
 		rec := get(t, h, p)
+		if !HasBuiltAssets() {
+			// ADR-025: with no embedded assets the shell must be an honest 503,
+			// never a blank 200 (field report B1).
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Fatalf("%s without assets: status %d, want 503", p, rec.Code)
+			}
+			continue
+		}
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s: status %d", p, rec.Code)
 		}
@@ -87,6 +95,27 @@ func TestUnknownAssetAndTraversal(t *testing.T) {
 	// A traversal attempt must not escape the assets prefix.
 	if rec := get(t, h, "/admin/assets/../../../etc/passwd"); rec.Code == http.StatusOK {
 		t.Fatalf("path traversal served a file (status %d)", rec.Code)
+	}
+}
+
+// TestServeIndexNoAssets pins the ADR-025 contract regardless of the embed's
+// state: a handler with no built assets answers the shell with a 503 page that
+// names the missing piece and the fix — never the blank 200 shell of B1.
+func TestServeIndexNoAssets(t *testing.T) {
+	h := &handler{indexHTML: []byte("<html>shell</html>"), hasAssets: false}
+	rec := httptest.NewRecorder()
+	h.serveIndex(rec, httptest.NewRequest(http.MethodGet, "/admin", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("no-assets shell: status %d, want 503", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"make admin-ui", "ADR-025", "503"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("no-assets page must mention %q, got: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "<html>shell</html>") {
+		t.Fatalf("no-assets page must not serve the broken shell")
 	}
 }
 

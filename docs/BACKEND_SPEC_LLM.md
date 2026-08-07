@@ -1035,9 +1035,12 @@ day of reverse-engineering 422s. (Probing is still not discovery: an unknown
 ### 3.7 Serving your frontend from the same binary
 
 `Config.Static` mounts a file tree — one binary that is backend **and** frontend
-**and** admin **and** docs. It is NOT a `Route`: a Route must live under `/api/`
-and runs inside a per-request tenant transaction, which is exactly wrong for a
-`.js` file.
+**and** admin **and** docs. Your custom binary carries the stock surfaces too:
+the admin panel (`/admin`) and Studio (`/editor`) ship as prebuilt assets inside
+the module (ADR-025), so a plain `go build` of your backend serves them — no
+engine repo, no npm. `Config.Static` is NOT a `Route`: a Route must live under
+`/api/` and runs inside a per-request tenant transaction, which is exactly wrong
+for a `.js` file.
 
 ```go
 //go:embed all:web/dist

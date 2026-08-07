@@ -1,8 +1,10 @@
 // Package adminui embeds the SolidJS admin panel (ADMIN-UI-V1) and serves it from
-// the engine binary under /admin. The compiled bundle lives in web/dist; following
-// the DevHub's pattern, web/dist/index.html is committed (so go:embed always has
-// something) while web/dist/assets/ is gitignored and produced by `npm run build`
-// before `go build`/release (see Makefile target `admin-ui`).
+// the engine binary under /admin. The compiled bundle lives in web/dist and is
+// COMMITTED (ADR-025): the published module carries the prebuilt assets, so any
+// `go build` — including a module consumer's — ships a working panel. After
+// touching web/src, rebuild with `make admin-ui` and commit the new assets with
+// the src change. A binary that embeds no assets serves an honest 503 from the
+// shell routes instead of a blank page (field report B1).
 //
 // The SPA uses HASH routing (/admin#/…), so the only real server paths are:
 //   - GET /admin and /admin/        → index.html (no-cache; always fresh so it
@@ -60,6 +62,21 @@ type handler struct {
 	hasAssets bool
 }
 
+// noAssetsHTML answers the shell routes (503) when the binary embeds only the
+// placeholder index.html. Serving the real shell in that state renders a blank
+// page whose bundle 404s — a broken 200 nobody can diagnose from the browser
+// (field report B1; ADR-025). The page names what is missing and the exact fix.
+const noAssetsHTML = `<!doctype html><html><head><meta charset="utf-8"><title>admin panel unavailable</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:42rem;margin:4rem auto;padding:0 1rem;color:#1f2937}code{background:#f3f4f6;padding:.1em .35em;border-radius:4px}</style></head><body>
+<h1>503 &mdash; admin panel assets are not in this binary</h1>
+<p>This build embeds only the placeholder shell: the compiled admin panel bundle
+(<code>pkg/adminui/web/dist/assets/</code>) was missing when <code>go build</code> ran.</p>
+<p>Since ADR-025 the published module carries the prebuilt assets, so a normal
+<code>go build</code> (or <code>go get github.com/appximo/appximo</code>) includes them.
+Seeing this page means the binary was built from an engine tree without them &mdash;
+run <code>make admin-ui</code> in the engine repo and recompile, or update the module.</p>
+</body></html>`
+
 // newHandler builds the serving state from the embedded dist. It is tolerant of a
 // dist that only contains the committed placeholder index.html (no built assets):
 // the shell route still works and asset routes 404 until `npm run build` runs.
@@ -113,6 +130,14 @@ func serveFavicon(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) serveIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if !h.hasAssets {
+		// Honest failure over a broken 200 (ADR-025): the shell would render
+		// blank because the bundle it names is not embedded.
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(noAssetsHTML))
+		return
+	}
 	// index.html must never be cached: it names the current hashed assets, so a
 	// stale copy would point at deleted bundles after a deploy.
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")

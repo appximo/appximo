@@ -277,18 +277,18 @@ devhub-build:
 	cd tools/devhub/web && npm run build
 	go build -trimpath -ldflags="-s -w" -o devhub ./tools/devhub/
 
-# admin-ui: build the embedded SolidJS admin panel (ADMIN-UI-V1). The hashed assets
-# are gitignored (same pattern as the devhub), so this MUST run before `go build` /
-# the release / the Docker image for the panel to be populated. `npm ci` is used in
-# CI/release for reproducibility; locally `npm install` is fine.
-admin-ui: ## Build the embedded admin panel SPA (required before go build)
+# admin-ui: build the embedded SolidJS admin panel (ADMIN-UI-V1). Since ADR-025
+# the BUILT dist is COMMITTED (the module ships working UIs; a bare `go build`
+# includes them) — run this after touching pkg/adminui/web/src and commit the
+# rebuilt assets WITH the src change. Release still rebuilds for freshness.
+admin-ui: ## Build the embedded admin panel SPA (after touching its src; commit the dist)
 	cd pkg/adminui/web && npm install --no-audit --no-fund && npm run build
 
 # editor-ui: build the embedded visual schema editor SPA (Appximo Studio, UI-F0-S1).
-# Plain Vite + Svelte 5 → static files in pkg/editorui/web/build. Same gitignore
-# pattern as admin-ui: the hashed assets are gitignored, so this MUST run before
-# `go build` / the release / the Docker image for the editor to be populated.
-editor-ui: ## Build the embedded Studio SPA (required before go build)
+# Plain Vite + Svelte 5 → static files in pkg/editorui/web/build. Same ADR-025
+# pattern as admin-ui: the built assets are COMMITTED — rebuild after touching
+# web/src and commit the new assets with the src change.
+editor-ui: ## Build the embedded Studio SPA (after touching its src; commit the build)
 	cd pkg/editorui/web && npm install --no-audit --no-fund && npm run build
 
 # Protocolo de benchmark científico: N runs + warmup + cooldown + import a SQLite

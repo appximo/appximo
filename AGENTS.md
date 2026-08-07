@@ -220,10 +220,12 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   service first or :3099 is taken and the stale binary keeps serving).
 - `pkg/editorui/` is the **visual schema editor** (Appximo Studio, UI-F0-S1):
   a static Svelte 5 SPA (plain Vite, `pkg/editorui/web/`) `go:embed`-served at
-  **`/editor`** — a graphical ERD over the schema, no AI, zero Node in prod. Build
-  it with `make editor-ui` BEFORE `go build` (same committed-`index.html` /
-  gitignored-assets pattern as the admin UI); a bare build serves an empty shell
-  (logged). It edits/exports the same schema JSON the engine consumes (round-trip
+  **`/editor`** — a graphical ERD over the schema, no AI, zero Node in prod. The
+  BUILT assets are **committed** (ADR-025, field report B1): every `go build` —
+  including a module consumer's — ships a working editor. A session that touches
+  `web/src` runs `make editor-ui` and commits the rebuilt assets WITH the src
+  change; a binary that somehow embeds none answers `/editor` with an honest 503,
+  never a blank 200 shell. It edits/exports the same schema JSON the engine consumes (round-trip
   faithful, `appximo validate`-clean). It is the schema-authoring FACE of the
   product — engine features still live in the schema/engine, never in the editor.
   **Deploy from the editor (UI-F1-S1):** a "Deploy" button signs in as a platform
@@ -2124,15 +2126,18 @@ is a JSON snapshot, not a stream).
 - **Develop it**: `make admin-ui` (`cd pkg/adminui/web && npm install && npm run
   build`) → produces `web/dist`, then `make build`. Dev loop: `npm run dev` (Vite
   on :5174, proxies `/admin/*` to a local engine on :8080).
-- **Build pattern — IMPORTANT (matches the devhub, NOT a committed dist):** the
-  hashed assets `pkg/adminui/web/dist/assets/` are **gitignored**; only the built
-  `dist/index.html` is committed (so `//go:embed web/dist` always resolves). This
-  mirrors `tools/devhub/` exactly. Consequence: **the release/Docker/CI build MUST
-  run `make admin-ui` before `go build`**, or the binary serves an empty shell (the
-  engine logs a WARNING when only the placeholder is embedded). A bare `go build`
-  from a fresh clone does NOT include the UI — same trade-off the devhub already
-  lives with. (To make a bare `go build` ship the UI, un-ignore the assets; left as
-  Miguel's call for consistency with the devhub.)
+- **Build pattern — the built dist IS committed (ADR-025, FIELD-FEEDBACK-S1):**
+  `pkg/adminui/web/dist/` (and Studio's `pkg/editorui/web/build/`) are tracked in
+  git, so the published module and any bare `go build` — including a consumer's
+  custom binary — embed working UIs. This REVERSED the original gitignored-assets
+  pattern after the first third-party field evaluation found consumer binaries
+  serving `/admin` broken with a 200 (finding B1), corroborated on the project's
+  own production demos. The duty that remains: a session that touches `web/src`
+  MUST run `make admin-ui` / `make editor-ui` and commit the rebuilt assets WITH
+  the src change (release.yml still rebuilds both, so a forgotten rebuild is
+  corrected at the next release). A binary that embeds no assets answers the
+  shell routes with an honest 503 naming the fix — never a blank shell.
+  (`tools/devhub/` keeps the old placeholder pattern: it is not part of the module.)
 - **Light theme default** (better dense-data legibility), instant dark toggle (CSS
   variables, persisted in `localStorage` — this is a served app, not an artifact,
   so `localStorage` is fine). Status is shown with a **double channel** (colour +

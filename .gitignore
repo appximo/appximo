@@ -60,18 +60,14 @@ tools/devhub/db/*.db-wal
 tools/devhub/web/dist/assets/
 tools/devhub/web/node_modules/
 
-# admin panel UI build output — SAME pattern as the devhub above (ADMIN-UI-V1):
-# the built index.html stays committed so //go:embed web/dist always resolves;
-# the hashed assets are produced by `npm run build` (make admin-ui) before go build.
-pkg/adminui/web/dist/assets/
+# admin panel + Studio UI build output: since ADR-025 the BUILT assets are
+# COMMITTED (pkg/adminui/web/dist/, pkg/editorui/web/build/) so the published
+# module — and any bare `go build` — ships working /admin and /editor (field
+# report B1). A session that touches web/src MUST rebuild (make admin-ui /
+# editor-ui) and commit the new assets with the src change. Only node_modules
+# stays ignored. (tools/devhub above keeps the old placeholder pattern: it is
+# an internal dev tool, not part of the module.)
 pkg/adminui/web/node_modules/
-
-# visual schema editor UI build output — SAME pattern (UI-F0-S1): the built
-# build/index.html stays committed so //go:embed all:web/build always resolves;
-# the hashed assets are produced by `npm run build` (make editor-ui) before go build.
-# (public/favicon.svg is the committed SOURCE; build/favicon.svg is its build copy.)
-pkg/editorui/web/build/assets/
-pkg/editorui/web/build/favicon.svg
 pkg/editorui/web/node_modules/
 
 # Self-restart artifacts (UI-F4-S2): the boot-schema backup + marker written

@@ -1280,26 +1280,26 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 	// Admin panel UI (ADMIN-UI-V1): the embedded SolidJS SPA served under /admin
 	// (shell at /admin, hashed assets at /admin/assets/*). Hash routing keeps client
 	// routes in the URL fragment so they never collide with the /admin/* API above.
-	// Static serving — no hot-path impact. If the bundle was not built before
-	// `go build` (only the placeholder index.html is embedded), the shell still
-	// loads but is empty; log a hint.
+	// Static serving — no hot-path impact. The built assets ship in the module
+	// (ADR-025); a binary that somehow embeds none answers /admin with an honest
+	// 503 page (never a blank 200 shell — field report B1).
 	if err := adminui.Register(r); err != nil {
 		log.Printf("WARNING: admin UI not mounted: %v", err)
 	} else if !adminui.HasBuiltAssets() {
-		log.Println("admin UI: serving /admin (WARNING: no built assets embedded — run `make admin-ui` (npm run build) before `go build`)")
+		log.Println("admin UI: WARNING — no built assets embedded; /admin answers 503 (rebuild with `make admin-ui` in the engine repo, or update the module: since ADR-025 it ships them prebuilt)")
 	} else {
 		log.Println("admin UI: SolidJS admin panel served at /admin")
 	}
 
 	// Visual schema editor (UI-F0-S1): the embedded Svelte 5 SPA served at /editor
 	// (shell at /editor, hashed assets at /editor/assets/*). Static serving — no
-	// hot-path impact, tenant-agnostic, JWT-skipped (see pkg/auth.skipJWT). Built
-	// with `make editor-ui` (npm run build) before `go build`; without it only the
-	// placeholder shell is embedded (logged).
+	// hot-path impact, tenant-agnostic, JWT-skipped (see pkg/auth.skipJWT). The
+	// built assets ship in the module (ADR-025); a binary that embeds none
+	// answers /editor with an honest 503 page (never a blank 200 shell).
 	if err := editorui.Register(r); err != nil {
 		log.Printf("WARNING: visual editor not mounted: %v", err)
 	} else if !editorui.HasBuiltAssets() {
-		log.Println("editor: serving /editor (WARNING: no built assets embedded — run `make editor-ui` (npm run build) before `go build`)")
+		log.Println("editor: WARNING — no built assets embedded; /editor answers 503 (rebuild with `make editor-ui` in the engine repo, or update the module: since ADR-025 it ships them prebuilt)")
 	} else {
 		log.Println("editor: visual schema editor (Appximo Studio) served at /editor")
 	}
