@@ -19,8 +19,8 @@ You don't write handlers, models, or migrations. You write this:
   "resources": {
     "tasks": {
       "fields": {
-        "title":  { "type": "string", "required": true },
-        "status": { "type": "string", "enum": ["open", "done"] },
+        "title":  { "type": "string", "required": true, "maxLength": 200 },
+        "status": { "type": "string", "enum": ["open", "done"], "default": "open" },
         "due":    { "type": "time" }
       }
     }
@@ -49,7 +49,14 @@ not scaffolded into files you then maintain.
 
 ## Quick start (~30 s with the image pull)
 
-> **New here?** The full first-mile walkthrough — install (Linux/macOS/Windows),
+> **With the binary, it's ONE command.** `appximo up` in an empty directory
+> starts Postgres (Docker, or your `DATABASE_URL`), writes+loads the secrets,
+> registers your app with its schema, creates the first admin, serves — and
+> prints the URLs, the credentials (once), a dev token and a curl that already
+> works. Your app is browsable at **`/app`** (a back-office generated live
+> from your API's own contract), documented at `/docs`, manageable at `/admin`,
+> editable at `/editor`. `appximo new "<your idea>"` does the same with the
+> schema AI-generated from one sentence. The full walkthrough — install,
 > schema, first call, first user, custom Go, frontend, production with HTTPS,
 > backup — with a manual track AND an AI-agent track for every step, is
 > **[docs/QUICKSTART.md](docs/QUICKSTART.md)**.

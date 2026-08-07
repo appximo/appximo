@@ -26,6 +26,12 @@ Why this pattern earns its own document:
 Runnable proof: `examples/backoffice-guide/` — a no-build vanilla SPA
 implementing every section of this document against a real engine.
 
+**You may not need to build it at all:** the engine SERVES this exact pattern
+at **`/app`** on every binary (the embedded generic back-office — sign in as a
+tenant user and every schema resource gets its screens). Build your own — this
+document — when you want it inside YOUR SPA, with your theme, your overrides
+and your custom actions; `/app` is the zero-effort baseline it grows from.
+
 ---
 
 ## 1. The idea in one line
@@ -46,6 +52,7 @@ Fetch `/openapi.json` (unauthenticated). Everything a generic UI needs:
 |---|---|
 | `components.schemas.<Pascal>` → `properties` with `type`, `format`, `enum`, `maxLength`, `minimum`, `maximum`, `readOnly` | the right control per field, with native browser limits |
 | `required` on `<Pascal>Input` | asterisks + create-form validation |
+| **`default` on a property** | a `required` field WITH a `default` is satisfiable by OMISSION (the engine fills it on create) — do NOT add the native `required` attribute to it; a required field WITHOUT one gets `required`, so the browser blocks the fully-empty submit with a pointed message instead of the server's generic `400 empty body` |
 | published methods per path (`get/post` on the collection, `get/patch/put/delete` on the item) | which buttons exist per resource |
 | `x-appximo-relation` on a property | this field is a FK and WHICH resource it points to |
 | **`x-appximo-references`** on a property | which COLUMN of the target the FK stores — `"id"` normally, `"user_id"` in the `$user_id` RBAC pattern. **A relation selector must send `row[references]`, never blindly `row.id`** — sending id where user_id is expected violates the FK, and the framework's own recommended pattern creates exactly those FKs |
@@ -164,7 +171,11 @@ against the live engine:
 1. **On CREATE, OMIT empty fields.** `required` means "present and non-null":
    sending `""` PASSES it and creates a blank record; omitting the key is
    what triggers the correct 422. This is the single most common generated-
-   form bug.
+   form bug. Pair it with the NATIVE layer: give the `required` attribute to
+   contract-required fields **without a `default`** (see §2) — the browser
+   then blocks the fully-empty submit itself (an all-omitted create would
+   otherwise be the engine's generic `400 empty body`), while a partial
+   submit still exercises the engine's painted 422.
 2. **On EDIT, PATCH partial** — only what changed; the server validates only
    what you send. Numbers go as JSON numbers: update rejects `"7"` even
    though create tolerates it (documented create-path leniency).

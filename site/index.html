@@ -168,6 +168,7 @@
   <p class="kicker">How it starts</p>
   <h2>The whole backend is one file you can read</h2>
   <p class="lead">No handlers, no models, no migration files. The schema compiles at boot — routes, SQL, validation, RBAC and docs are derived from it, and each tenant's tables are created when the tenant registers.</p>
+  <p class="lead">The first local run is <strong>one command</strong>: <code>appximo up</code> resolves Postgres (yours, or Docker), writes and loads the secrets, registers your app with its schema, creates the first admin, and prints the URLs, the credentials and a curl that already works — including <code>/app</code>, a back-office generated live from your API's own contract. <code>appximo new "&lt;your idea&gt;"</code> does the same with the schema AI-generated from one sentence. The three steps below are what it orchestrates.</p>
 
   <div class="step"><div class="step-n">1</div><div>
     <h3>Declare</h3>

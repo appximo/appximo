@@ -35,6 +35,31 @@ command is not listed here or in the other four docs, do not invent it.
   `/auth/login` (your users) or the admin panel, the API validates it the
   same way.
 
+## 0-bis. The one-command local start: `appximo up`
+
+Steps 1–4 below are the pieces. **For a LOCAL first run, one command does all
+of them**:
+
+```bash
+mkdir myapp && cd myapp
+appximo up                       # interactive: two questions, then everything
+appximo up --name myapp --yes    # non-interactive: all defaults
+appximo up --json                # for agents: the card as ONE JSON object on stdout
+```
+
+It resolves Postgres (`DATABASE_URL` if set, else `postgres:16` in Docker —
+container `appximo-pg`, loopback-only, data in a volume), generates secrets and
+writes+loads `./.env`, takes `--schema`/`./schema.json`/a starter, registers
+the tenant WITH the schema (step 1), bootstraps the first admin and an app
+user (step 2), mints a dev token, verifies one real request, and prints the
+card: URLs (`/app` `/docs` `/admin` `/editor`), credentials (ONCE), token, a
+working curl. Re-running is safe (everything existing is reused; schema
+changes go through `migrate`, §5). `appximo down` stops the Docker Postgres
+(`--destroy-data` also removes the data volume). `appximo new "<idea>"` is
+`ai-generate` → validate → `up`; with no ANTHROPIC_API_KEY it prints a prompt
+for YOUR agent instead of failing. **Production never uses `up`** — that is
+§6's installer.
+
 ## 1. Install and configure
 
 **Linux/macOS:** download the release binary for your platform, `chmod +x`,

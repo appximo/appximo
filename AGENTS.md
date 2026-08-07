@@ -46,6 +46,27 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   file compiles *only* `main.go`, producing a binary with **zero
   subcommands** (no `serve`). Use the package path:
   `go run ./cmd/appximo serve …`.
+- **`appximo up`** (FIRST-TEN-MINUTES-S1, ENG-38): ONE command from an empty
+  directory to a running app — resolves Postgres (`DATABASE_URL`, else
+  `postgres:16` in Docker: container `appximo-pg`, loopback-published,
+  volume-backed, password RECOVERABLE from the container so a lost .env is not
+  a dead end), generates secrets → `./.env` (0600, loaded into the process),
+  takes the schema (`--schema` > `./schema.json` > writes the embedded
+  quickstart starter — `appximo.StarterSchema()`), boots the engine IN-PROCESS
+  and drives its OWN HTTP seams (control-plane `POST /tenants` with the schema
+  in the body, `/admin/auth/bootstrap`, `POST /admin/tenants/{id}/users`,
+  the token mint), smoke-verifies one real request through the full chain, and
+  prints the card (URLs incl. `/app`, credentials ONCE, dev token, a curl that
+  works). ONE question block at the start (TTY only; `--yes`/`--json` skip);
+  idempotent re-runs (everything existing is detected + reused; the schema is
+  NOT re-applied — `migrate` does that); every failure names the problem AND
+  the way out. `--json` = the machine card: stdout carries EXACTLY one JSON
+  object (progress/logs → stderr; `Config.BannerWriter` +
+  `logging.SetDefaultWriter` are the seams). `appximo down` stops/removes the
+  Docker Postgres (volume KEPT unless `--destroy-data`; refuses containers
+  without the `com.appximo.up` label). `appximo new "<idea>"` chains
+  `ai-generate` → validate → `up`; with no ANTHROPIC_API_KEY it prints the
+  agent-ready prompt instead of failing.
 - Other subcommands: `validate <schema>` (SEMANTIC, the Go authority — load +
   cross-reference checks; `--json` emits the UNIFIED LLM-friendly report —
   structural + semantic — with path/rule/message/expected/got/fix/source per error,
@@ -232,6 +253,19 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   It is **not part of the engine** — never ship engine features there.
   `make devhub-run` is only for developing the devhub itself (stop the
   service first or :3099 is taken and the stale binary keeps serving).
+- `pkg/backofficeui/` is the **embedded generic back-office** (`/app`,
+  FIRST-TEN-MINUTES-S1): a no-build vanilla-JS SPA (`web/` — source IS the
+  bundle, always embedded) serving a CRUD admin generated ENTIRELY from
+  `/openapi.json` at runtime — zero resource-specific screens, powered by the
+  Part-F `x-appximo-*` extensions plus the standard `default` keyword (a
+  `required` field WITH a default is satisfiable by omission, so the form does
+  not natively demand it). Always mounted (like /admin and /editor), JWT-skipped
+  shell (`/app` prefix in `pkg/auth.skipJWT`, reserved in
+  `reservedStaticPrefixes`), tenant-resolved at API-call time (the login screen
+  hints the `<tenant>.` URL on a bare host). The TEACHING copy consumers adapt
+  into their own SPA stays `examples/backoffice-guide/web/` — same pattern, may
+  diverge in polish, behaviors pinned by `pkg/backofficeui/embed_test.go`.
+  Browser-verified (Playwright) against two schemas incl. one never seen.
 - `pkg/editorui/` is the **visual schema editor** (Appximo Studio, UI-F0-S1):
   a static Svelte 5 SPA (plain Vite, `pkg/editorui/web/`) `go:embed`-served at
   **`/editor`** — a graphical ERD over the schema, no AI, zero Node in prod. The
@@ -549,7 +583,7 @@ without them). A complete, working example:
     "tasks": {
       "fields": {
         "title":  { "type": "string", "required": true, "maxLength": 200 },
-        "status": { "type": "string", "enum": ["open", "done"] },
+        "status": { "type": "string", "enum": ["open", "done"], "default": "open" },
         "due":    { "type": "time" }
       }
     }

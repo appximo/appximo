@@ -26,7 +26,11 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-07 (FIELD-FEEDBACK-S1)** — the first third-party
+**Last reviewed: 2026-08-07 (FIRST-TEN-MINUTES-S1)** — ENG-38 (the §13
+first-ten-minutes proposal) is DONE: `appximo up`/`down`/`new` + the embedded
+`/app` back-office + the QUICKSTART rewrite, all verified (see the DONE block);
+ENG-39 filed (`--embedded-pg`, deliberately deferred with its reasoning).
+Previous review: 2026-08-07 (FIELD-FEEDBACK-S1) — the first third-party
 field evaluation answered end to end: 5 new items filed (ENG-36/37/38,
 OPS-21/22), OPS-20 refreshed with the session's Windows fixes, and the
 session's DONE block below. Previous review: 2026-08-05 (HOUSEKEEPING-S1) — the post-publication
@@ -524,20 +528,20 @@ refreshed).
 
 ---
 
-### ENG-38 — The first-10-minutes path (`appximo up`, `appximo new`, the embedded generic `/app`)
-- **Origin:** FEEDBACK.md §13, the evaluator's design proposal, grounded in a
-  measured ~1h30 from install to first visible record — of which the schema
-  (the product's core) took minutes and everything else was orchestrable
-  friction. The pieces exist (install.sh generates secrets + registers the
-  tenant with the schema in the body; ai-generate; the admin bootstrap; the
-  backoffice pattern is now examples/backoffice-guide + backoffice-spec):
-  `up` orchestrates them locally; `new` chains ai-generate→validate→up; the
-  generic `/app` is one more embedded bundle.
-- **Impact:** High for adoption; zero for existing users.
-- **Ready:** `appximo up --name x` on a clean box (Docker present) reaches
-  "API + /docs + /admin + /editor + /app live, credentials printed once" in
-  one command; `--json` output for agents; the §13 script's minute-marks
-  hold on a cold run. Needs Miguel's product sign-off on scope first.
+### ENG-39 — `appximo up --embedded-pg` for machines without Docker
+- **Origin:** FEEDBACK.md §13 names it as the third Postgres path
+  (`DATABASE_URL` / Docker / embedded). FIRST-TEN-MINUTES-S1 shipped the first
+  two and deliberately deferred this one: an embedded Postgres means a new
+  runtime-download dependency (e.g. fergusstrange/embedded-postgres fetches a
+  ~30 MB PG binary at first run), exactly the dependency-weight class the same
+  field report flags in ENG-37 — adding it deserves its own measured session
+  and Miguel's sign-off on the download-at-runtime posture.
+- **Impact:** A no-Docker machine today gets an actionable error naming three
+  ways out (install Docker / local PG / hosted PG) — a mitigation, not the §13
+  promise. Mostly affects corporate laptops where Docker is banned.
+- **Ready:** `appximo up --embedded-pg` boots on a machine with no Docker and
+  no Postgres, the downloaded runtime is checksum-verified, and `appximo down`
+  knows how to stop it; dependency cost measured and accepted.
 
 ## CLOSED (decided, with the reasoning written down)
 
@@ -565,6 +569,38 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in FIRST-TEN-MINUTES-S1 (2026-08-07)
+
+**ENG-38 — the first-10-minutes path — is DONE**, built as pure orchestration
+of existing seams (the session's governing thesis: nothing re-implemented).
+**(A) `appximo up`**: one command from an empty directory to a running app —
+Postgres via `DATABASE_URL` or Docker (`appximo-pg`, loopback-only, volume,
+password recoverable from the container), secrets → `./.env` (0600, loaded),
+schema (`--schema` / `./schema.json` / embedded starter), in-process boot
+driving the engine's own HTTP seams (control-plane `POST /tenants` with the
+schema in the body — T2; `/admin/auth/bootstrap` — B8; tenant user; token
+mint), a real smoke request, and the card (URLs incl. `/app`, credentials once,
+dev token, a working curl). One question block; idempotent re-runs;
+nine failure modes each naming the problem + the way out; `--json` = exactly
+one JSON object on stdout (`Config.BannerWriter` + `logging.SetDefaultWriter`
+added as the purity seams). `appximo down` (label-guarded, volume kept unless
+`--destroy-data`). **(B) `/app`**: `pkg/backofficeui` — the backoffice-guide
+pattern embedded (no-build vanilla SPA, always present), everything derived
+from `/openapi.json` (+ the standard `default` keyword now published, so
+required-with-default fields are not natively over-demanded);
+browser-verified 9/9 + 15/15 (Playwright) against the starter AND a
+never-seen schema (state machine incl. terminal read-only, relation selects,
+multi-field 422 painting, work-preserving 409, RBAC dimming). **(C)
+`appximo new`**: ai-generate → validate → up; measured live ×3: 100%
+first-try valid, ~$0.008/schema (haiku); without a key it prints the
+agent-ready §13 prompt (exit 0). **(D)** QUICKSTART.md rewritten with `up` as
+act one, the manual path preserved verbatim as §4 (the truth and the net), the
+agent paste-prompt, the executable success checklist, real screenshots, and
+the measured minute-marks. **(E)** a fresh agent with only the public docs +
+canonical binary re-ran the whole thing timed (see the session report for the
+raw table). Verified by: unit lane 44/44, full no-`-short` lane, lint, the
+binary-diff gate (every DIFF explained), ABBA bench on the JWT-skip touch.
 
 ## DONE in FIELD-FEEDBACK-S1 (2026-08-07)
 

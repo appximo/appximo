@@ -3,23 +3,26 @@
 Two tracks, side by side, for every step:
 
 - **Manual** — the ground truth. Every command here was executed against a real
-  engine before being written down. If the agent track ever fails you, this is
-  the net.
+  engine before being written down. If the one-command track ever fails you,
+  [§4 The manual path](#4-the-manual-path--what-up-does-step-by-step) is the net.
 - **With an AI agent** (Claude Code, Cursor, Copilot…) — the shortcut. You paste
   the engine's own printed contract into your agent and ask for outcomes, not
   commands.
 
-> Rough budget, measured on a small Linux VPS: **with an agent ~20 minutes** to a
-> running API you can click through; **by hand ~45–60 minutes** reading as you go.
-> Production deploy (domain + VPS + HTTPS) adds ~15 minutes on top of either.
+> Measured on a small (1 vCPU) Linux box, 2026-08-07, by a fresh agent given
+> only this document and the binary: **from first command to the success
+> checklist fully green = 1m53s** with the Postgres image cached (`appximo up`
+> itself: 12 s; a cold first run adds the `postgres:16` download, ~½–1 min).
+> A human typing and actually reading should budget **~5 minutes warm**. The
+> raw minute-by-minute table is in the session record; the ten-minute script
+> is [at the end of §2](#the-ten-minute-script-measured).
 
-**Version note.** Steps marked **(next release)** describe features merged after
-`v0.1.1`: the `explain` command, the `/admin` first-run screen, the Windows
-binary, the multi-line boot banner, the consolidated missing-configuration
-error, the enforced 32-character `JWT_SECRET` floor, and the signup-403 message
-that names its switch. Until the next tag they exist when you build from source
-or use the Docker image (`neodevtrix/appximo`, published from `main`);
-everything else below works with `v0.1.1` exactly as written.
+**Version note.** `appximo up`, `appximo new`, `appximo down` and the embedded
+`/app` back-office described below are merged after `v0.1.2` — until the next
+tag they exist when you build from source or use the Docker image
+(`neodevtrix/appximo`, published from `main`). Everything in the manual path
+works with `v0.1.1`/`v0.1.2` exactly as written (the few "(next release)" marks
+name what doesn't).
 
 ---
 
@@ -27,10 +30,10 @@ everything else below works with `v0.1.1` exactly as written.
 
 | Thing | Why | Where |
 |---|---|---|
-| **PostgreSQL 14+** | the only external dependency | Docker one-liner below, or a native install |
 | **The `appximo` binary** | the engine — one static file, no runtime deps | [GitHub Releases](https://github.com/appximo/appximo/releases) |
-| **curl** (or any HTTP client) | to talk to your API | preinstalled on Linux/macOS; on Windows use PowerShell's built-in `curl` alias or Invoke-RestMethod |
-| Go 1.25+ | **only** if you'll write custom Go handlers (step 6) or build from source | [go.dev/dl](https://go.dev/dl/) |
+| **Docker** *or* **any PostgreSQL 14+** | the only external dependency; `up` starts Postgres in Docker for you, or uses your `DATABASE_URL` | [get-docker](https://docs.docker.com/get-docker/), or a native/hosted PG |
+| **curl** (or any HTTP client) | to talk to your API | preinstalled on Linux/macOS; on Windows use `curl.exe` |
+| Go 1.25+ | **only** if you'll write custom Go handlers (§6) or build from source | [go.dev/dl](https://go.dev/dl/) |
 
 No Node, no Redis, no message broker. Go is *not* needed to run the engine.
 
@@ -53,110 +56,185 @@ appximo version
 binary file` → wrong platform; `uname -m` says which one you need (`x86_64` →
 amd64, `aarch64`/`arm64` → arm64).
 
-PostgreSQL, if you don't have one (Docker):
-
-```bash
-docker run -d --name appximo-pg -p 5432:5432 \
-  -e POSTGRES_USER=appuser -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=appximo \
-  postgres:16-alpine
-```
-
 ### Windows — ⚠ NOT YET VERIFIED
 
 > This path is written with care but **has not been executed on a real Windows
-> machine**. The Windows `.exe` ships from the **next release** (the `v0.1.1`
-> release has no Windows asset — download the source or use WSL2 meanwhile).
-> If something below is wrong, please open an issue.
-
-The genuinely-verified Windows options **today**:
-
-1. **WSL2** (recommended): install Ubuntu from the Microsoft Store and follow
-   the Linux track above verbatim inside it. This is the same code path we test.
-2. **Docker Desktop**: follow the README quick start's compose flow (it wires
-   PostgreSQL + the three settings for you) — the image alone won't boot
-   without them.
-
-Native Windows (next release, unverified — PowerShell, not CMD):
-
-```powershell
-# Download appximo-vX.Y.Z-windows-amd64.exe from Releases, then:
-Move-Item .\appximo-vX.Y.Z-windows-amd64.exe .\appximo.exe
-.\appximo.exe version
-
-# PostgreSQL: Docker Desktop (as above), or the EDB installer from
-# https://www.postgresql.org/download/windows/ (remember the password you set).
-
-# Environment variables are per-session in PowerShell:
-$env:DATABASE_URL = "postgres://appuser:secret@localhost:5432/appximo"
-$env:JWT_SECRET   = [guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N")  # 64 chars
-$env:ADMIN_KEY    = [guid]::NewGuid().ToString("N")                                     # 32 chars
-
-.\appximo.exe serve --schema schema.json --port 8080
-```
-
-Known Windows caveats (by design, from the code):
-
-- The engine self-restart (Studio's one-click "Restart engine now") is
-  **not supported on Windows** — stop and start the process by hand.
-- `appximo fleet run` (multi-process fleet) is a unix deployment shape; on
-  Windows use plain `serve`.
-- Paths with spaces: quote `--schema "C:\My Apps\schema.json"`.
-- Data lives under `%LOCALAPPDATA%\Appximo` (files, observability DB) — the
-  boot log prints the resolved paths; `APPXIMO_FILES_DIR`/`OBS_DB_PATH`
-  override.
-- After editing PATH, open a **new** terminal — Explorer caches its
-  environment block, so already-open shells (and apps launched from them,
-  like VS Code) don't see the change. (A future installer must broadcast
-  `WM_SETTINGCHANGE`; `[Environment]::SetEnvironmentVariable(..., 'User')`
-  does, writing the registry directly does not — field report W3.)
-- Scripting: use `curl.exe`, not `Invoke-WebRequest` (it loses response
-  bodies on ≥400 and mangles inline JSON — send bodies with
-  `--data-binary "@file.json"`).
+> machine**. The Windows `.exe` ships from the **next release**. The
+> genuinely-verified options today: **WSL2** (install Ubuntu from the Microsoft
+> Store, follow the Linux track verbatim — the code path we test), or **Docker
+> Desktop** with the README compose flow. Native (PowerShell, unverified):
+> download the `.exe`, rename to `appximo.exe`, then the same `appximo up`
+> below. Windows caveats that ARE known from the code: data lives under
+> `%LOCALAPPDATA%\Appximo`; the engine self-restart is not supported; script
+> with `curl.exe`, not `Invoke-WebRequest`; after editing PATH open a **new**
+> terminal.
 
 ### With an agent (any OS)
 
-Paste this into your agent:
-
 > Install the Appximo engine on this machine: download the right binary for this
 > platform from https://github.com/appximo/appximo/releases, verify its
-> checksum against checksums.txt, put it on the PATH, and start a PostgreSQL 16
-> in Docker for it. Then show me `appximo version`.
+> checksum against checksums.txt, and put it on the PATH. Then show me
+> `appximo version`.
 
-## 2. The three settings
+## 2. One command: `appximo up`
 
-The engine refuses to start without three values — and tells you exactly which
-are missing and how to generate them (run it once with nothing set to see the
-message). Set them:
+From an empty directory:
 
 ```bash
-export DATABASE_URL='postgres://appuser:secret@localhost:5432/appximo'
-export JWT_SECRET="$(appximo gen-secret)"            # signs every auth token (32+ chars, enforced)
-export ADMIN_KEY="$(appximo gen-secret --bytes 16)"  # protects tenant registration + the first-admin bootstrap
+mkdir myapp && cd myapp
+appximo up
 ```
 
-(`appximo gen-secret` works identically on every platform — no openssl needed.)
+It asks its **only two questions up front** (skip both with `--yes`, or answer
+them as flags: `--name myapp`; `DATABASE_URL` in the environment answers the
+Postgres one):
 
-**Or skip the exports entirely (next release):** put the three lines in a
-`.env` file in your working directory — `KEY=value`, one per line — and every
-`appximo` command loads it automatically (the real environment wins on
-conflict; a BOM from a Windows editor is tolerated). `appximo init myapp
---env` writes one for you with the secrets already generated.
+1. **Postgres?** — if `DATABASE_URL` is set it uses it; otherwise it asks
+   permission to start `postgres:16` in Docker (container `appximo-pg`,
+   published on loopback only, data in a named volume that survives restarts).
+2. **App name?** — defaults to the directory name, sanitized to the tenant rule.
 
-**You should see (next release)** if you skip this and run `serve` anyway
-(v0.1.1 reports the missing variables one at a time, with shorter text):
+Then it does everything the first mile used to cost by hand — and says what it
+wrote where at every step:
 
 ```
-appximo: missing required configuration:
-  DATABASE_URL — the PostgreSQL connection string, e.g. postgres://user:pass@localhost:5432/appximo …
-  JWT_SECRET   — signs every auth token; any random value of 32+ characters. Generate one: openssl rand -hex 32 …
-  ADMIN_KEY    — protects tenant registration and the first-admin bootstrap. Generate one: openssl rand -hex 16 …
+  ✓ schema: wrote the starter to schema.json (todo-api — edit it, or pass --schema)
+  ✓ postgres: started postgres:16 in Docker — container "appximo-pg", port 127.0.0.1:54329, data in volume appximo-pg-data
+  ✓ secrets: wrote DATABASE_URL, JWT_SECRET, ADMIN_KEY to ./.env (0600, no BOM) — and loaded them into this process
+  ✓ tenant "myapp" registered with the schema — its tables were just created
+  ✓ first admin created: admin@myapp.local — password printed ONCE below (works in /app and /admin)
+  ✓ dev token minted (role admin, 24 h)
+  ✓ verified: GET /api/tasks answered 200 through the full chain
+
+──────────────────────────────────────────────────────────────
+  Your app is running.
+
+  App      http://myapp.localhost:8080/app      ← create & edit records
+  Docs     http://myapp.localhost:8080/docs     (interactive API explorer)
+  Admin    http://myapp.localhost:8080/admin    (tenants, users, observability)
+  Editor   http://myapp.localhost:8080/editor   (visual schema editor)
+
+  Sign in (works in /app and /admin) — printed ONCE, save it now:
+    email     admin@myapp.local
+    password  9fe4f489afa42f1ed269
+
+  Dev API token (role admin, 24 h):
+    eyJ…
+
+  Try it from a second terminal:
+    curl -H 'Authorization: Bearer TOKEN' -H 'Host: myapp.localhost' \
+      -H 'Content-Type: application/json' \
+      -d '{"title":"hello appximo"}' http://localhost:8080/api/tasks
+
+  Wrote  ./.env (secrets, 0600)  ·  ./schema.json (the starter — make it YOURS)
+  Postgres  docker container "appximo-pg" (127.0.0.1:54329, volume appximo-pg-data)
+  Stop the server: Ctrl+C · Stop the Docker Postgres too: appximo down
+──────────────────────────────────────────────────────────────
 ```
 
-## 3. The schema — your whole API in one JSON file
+Every line of that card is **verified before it prints** — the last ✓ is a real
+request through the full tenant → JWT → RBAC → SQL chain.
+
+Open the **App** URL: that's `/app`, a back-office generated at runtime from
+your API's own OpenAPI contract — tables, forms, validation, permissions — with
+**zero code and zero build**. Sign in with the printed credentials and create a
+record:
+
+![The /app back-office over the starter schema](img/quickstart/app-list.png)
+
+It is not a demo screen: every control comes from the contract. Enums become
+selects, relations become dropdowns of the target resource, state machines
+offer **only the legal next states** (terminal states render read-only), a
+`file` field gets an upload widget with its declared policy, and a role that
+can't read a resource sees it dimmed. Same UI, any schema:
+
+![The /app generic form on a different schema — state machine + relation + validation](img/quickstart/app-form.png)
+
+**Success checklist** (each independently checkable — an agent knows when to
+stop):
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: myapp.localhost' http://localhost:8080/docs   # → 200
+# the card's curl (with the real token) → 201 with the created record
+# /app (browser) → lists that record after sign-in
+```
+
+**Run it twice, nothing breaks:** `up` detects and reuses everything it already
+created (the `.env`, the container, the tenant, the admin — the card then says
+`already registered — reusing`). The schema is NOT re-applied on re-run; to
+apply schema edits use `appximo migrate --tenant myapp --schema schema.json`
+(§9). Stop the server with Ctrl+C; `appximo down` stops the Docker Postgres too
+(data volume kept — `--destroy-data` removes it, irreversibly).
+
+**For machines:** `appximo up --json` prints the whole card as ONE JSON object
+on stdout (URLs, credentials, token, files written, postgres details, the smoke
+result) — progress and logs go to stderr. It is the `validate --json` pattern
+applied to the first mile: an agent parses data, not prose.
+
+**When it fails, it names the way out** — no Docker on the PATH, the Docker
+daemon down or permission-denied, a busy port (`--port`), a foreign container
+squatting the name (`--pg-container`), an unreachable `DATABASE_URL`, an
+invalid schema (with the per-field errors), an invalid app name (with a valid
+suggestion). `--no-docker` refuses the Docker path explicitly; three
+alternatives are printed.
+
+### From an idea instead of a starter: `appximo new`
+
+```bash
+appximo new "class bookings for a gym"
+```
+
+With `ANTHROPIC_API_KEY` set, it generates the schema from your sentence (the
+same validator-guided loop as `appximo ai-generate` — measured: ~90% valid on
+the first try, ~$0.01 per schema with the default cheap model), writes
+`schema.json`, and runs `up`. **Without the key it does not fail**: it prints a
+ready-to-paste prompt for your own coding agent plus the exact `up` command to
+run when the agent is done.
+
+### With an agent (the whole first act as one paste)
+
+> Goal: API + admin + editor + visual back-office running LOCALLY for:
+> `<YOUR IDEA IN ONE SENTENCE>`.
+>
+> Before starting, ask me ONLY these questions, together: (1) a Postgres
+> connection string, or my permission to start one in Docker; (2) a short app
+> name. After that, no more questions: use defaults.
+>
+> Then: install the appximo binary (verify its checksum), generate schema.json
+> for my idea with the grammar from `appximo spec`, correct it with
+> `appximo validate --json schema.json` until it prints `"valid": true`, and
+> run: `appximo up --name <name> --schema schema.json --yes --json`.
+>
+> Deliver: every URL from the card (/app /docs /admin /editor), the
+> credentials, and one curl that ALREADY WORKS against a record you created.
+>
+> Success criteria (verify each): /docs answers 200; that curl answers 201;
+> /app lists the record.
+
+### The ten-minute script (measured)
+
+| Minute | What happens | With what |
+|---|---|---|
+| 0–2 | install + `appximo up` | §1 one-liner + `up` (first run adds ~1 min of Docker image download) |
+| 2–3 | "it exists": /docs, /admin, /editor open | already embedded |
+| 3–6 | "it's MY app": schema from the idea, deployed | `new` / your agent + `validate --json`, then `migrate` or Studio |
+| 6–8 | "I USE it": create and edit records visually | the `/app` back-office |
+| 8–10 | "I INTEGRATE it": token + curl + next steps | the card's token and example |
+
+Measured (agent-driven, image cached): **checklist green at 1m53s** — the
+minute marks above hold with room to spare; a human's doc-reading time is the
+main variable (budget ~5 min warm, +1 min cold for the image). The production
+deploy is deliberately NOT in these ten minutes — it's the second session, and
+it's already a solved ~20 minutes with `scripts/install.sh` (§8).
+
+## 3. Make the schema YOURS
+
+Your whole API is one JSON file — `schema.json` in your project directory.
+Edit it (or regenerate it), and apply.
 
 ### Manual
 
-Create `schema.json`:
+The starter shape, to grow by hand:
 
 ```json
 {
@@ -207,7 +285,7 @@ Paste `appximo-spec.md` into your agent and ask, in your own words:
 The `--json` validator output is designed as an error-correction oracle for
 agents — path, rule, expected, got, and a suggested fix per error.
 
-**(next release) Read it back before trusting it:**
+**Read it back before trusting it:**
 
 ```bash
 appximo explain schema.json            # plain-language: what the app manages,
@@ -216,29 +294,61 @@ appximo explain schema.json --lang es  # who can do what, lifecycles — no JSON
 
 `explain` is the step for the person who ASKED for the app: it renders the
 schema as prose ("a new order starts as *pending*… *cancelled* is final — once
-there it can never change; *member* can only see rows whose `owner_id` is the
-signed-in user"). If the prose doesn't match what you meant, the schema is
-wrong — fix it now, before anything is deployed.
+there it can never change"). If the prose doesn't match what you meant, the
+schema is wrong — fix it now, before anything is deployed.
 
-## 4. Run it and make the first call
+**Apply your edits** to the running app: new fields go live hot with
+`appximo migrate --tenant <name> --schema schema.json`; a new resource needs a
+restart (§9 has the details and the safety gates).
+
+## 4. The manual path — what `up` does, step by step
+
+Everything `up` orchestrates, by hand. **This is the ground truth and the
+net**: when something fails, these are the pieces to check — and each was
+executed against a real engine before being written down.
+
+### 4.1 The three settings
+
+The engine refuses to start without three values — and tells you exactly which
+are missing and how to generate them. Set them (or put the same three lines in
+a `.env` file in your working directory — every `appximo` command loads it
+automatically; the real environment wins on conflict; a BOM from a Windows
+editor is tolerated):
+
+```bash
+export DATABASE_URL='postgres://appuser:secret@localhost:5432/appximo'
+export JWT_SECRET="$(appximo gen-secret)"            # signs every auth token (32+ chars, enforced)
+export ADMIN_KEY="$(appximo gen-secret --bytes 16)"  # protects tenant registration + the first-admin bootstrap
+```
+
+(`appximo gen-secret` works identically on every platform — no openssl needed.
+`appximo init myapp --env` writes a ready `.env` for you.)
+
+PostgreSQL, if you don't have one (Docker — this is exactly what `up` runs,
+minus the loopback publish and the volume):
+
+```bash
+docker run -d --name appximo-pg -p 127.0.0.1:5432:5432 \
+  -e POSTGRES_USER=appuser -e POSTGRES_PASSWORD=secret -e POSTGRES_DB=appximo \
+  postgres:16
+```
+
+### 4.2 Serve
 
 ```bash
 appximo serve --schema schema.json --port 8080
 ```
 
 (Two listeners: the API on `--port`, and the tenant-registration **control
-plane** on `--control-port` — default **9090**, keep it internal. If 8080 or
-9090 are taken, both flags exist.)
+plane** on `--control-port` — default **9090**, keep it internal.)
 
-**You should see** (the last lines — the engine binds first, then announces;
-the two helper lines below the first one are **(next release)** — v0.1.1 prints
-only the "serving on" line):
+**You should see** (the engine binds first, then announces):
 
 ```
 Appximo serving on :8080 — Ctrl+C to stop
   This process stays in the foreground. Open a SECOND terminal to make requests,
   or run it in the background (append `&`, or use a systemd unit in production).
-  Try it:  http://localhost:8080/docs  ·  admin panel /admin  ·  schema editor /editor
+  Try it:  http://localhost:8080/docs  ·  your app /app  ·  admin panel /admin  ·  schema editor /editor
 ```
 
 That first line matters: **the terminal is now busy serving**. Open a second one.
@@ -249,8 +359,10 @@ regenerate. Postgres connection errors name the DSN — check host/password.
 If you just killed a previous instance, its graceful drain can hold the port
 for a few seconds — wait and retry.
 
-Now, in the second terminal — every app on the engine is a **tenant**, addressed
-by Host subdomain. Register one and talk to it:
+### 4.3 Register the tenant, mint a token, first calls
+
+Every app on the engine is a **tenant**, addressed by Host subdomain. Register
+one and talk to it:
 
 ```bash
 # 1. Register the tenant (control plane, :9090, gated by your ADMIN_KEY).
@@ -289,12 +401,12 @@ canvas (edit, validate, deploy from the browser):
 
 ![Appximo Studio showing the tasks entity](img/quickstart/studio-editor.png)
 
-**If it fails:** `400 invalid tenant` → the Host's subdomain isn't a valid
-tenant label; `401 token tenant mismatch` → the `Host:` header names a
-different tenant than the token (the tenant IS the Host — always send it).
-`403 forbidden` → the token's role isn't in your schema's
-rbac (mint with `--schema` so bad roles are refused with the declared list).
-`filter` returning everything → your shell ate the brackets; use `curl -g`.
+**If it fails:** `400 no tenant in host` → send the Host header (the tenant IS
+the Host subdomain); `401 token tenant mismatch` → the `Host:` names a
+different tenant than the token. `403 forbidden` → the token's role isn't in
+your schema's rbac (mint with `--schema` so bad roles are refused with the
+declared list). `filter` returning everything → your shell ate the brackets;
+use `curl -g`.
 
 ### With an agent
 
@@ -304,16 +416,17 @@ rbac (mint with `--schema` so bad roles are refused with the declared list).
 
 ## 5. Real users + the admin panel
 
-Two ways to get your first human into the app:
+`up` already created the first platform admin and a first tenant user (same
+credentials, printed once). Beyond that, two ways to get humans into the app:
 
 **The admin panel** — open **http://localhost:8080/admin**.
 
-- **(next release)** If no admin exists yet, the login screen detects it and
-  offers **"Create the first admin"**: paste your `ADMIN_KEY`, choose email +
-  password, and you're in. (The key is the proof you're the operator.)
+- If no admin exists yet, the login screen detects it and offers **"Create the
+  first admin"**: paste your `ADMIN_KEY`, choose email + password, and you're
+  in. (The key is the proof you're the operator.)
 
   ![The /admin first-run screen](img/quickstart/admin-firstrun.png)
-- On `v0.1.1`, create it from the terminal first, then sign in:
+- From the terminal instead:
 
 ```bash
 appximo admin create --email you@example.com --password 'a-strong-passphrase'
@@ -332,8 +445,7 @@ curl -s -X POST http://localhost:8080/auth/signup -H 'Host: acme.localhost' \
   -d '{"email":"ana@example.com","password":"a-password-123"}'
 ```
 
-Signup is **off by default** — a 403 that, from the next release, names this
-exact switch. Login is
+Signup is **off by default** — the 403 names this exact switch. Login is
 `POST /auth/login` → `{user, token}`; the token is the same JWT the API
 validates. Password reset, email verification, OAuth (Google/GitHub/Microsoft)
 and TOTP MFA are all built in — [GUIDE.md](GUIDE.md) §2.7.
@@ -362,6 +474,9 @@ The runnable skeleton is
 
 ## 7. A frontend on the same binary
 
+You already have one: `/app` is the generic back-office, free with the engine.
+When you want a **product** frontend (your screens, your brand):
+
 ```bash
 appximo frontend-spec > frontend-spec.md
 ```
@@ -371,7 +486,9 @@ exact filter grammar, keyset pagination, uploads, SSE, the error→screen-state
 map) plus the recommended stack (SvelteKit static SPA embedded via `go:embed` —
 one binary, same origin, no CORS). Paste it into your agent with your schema
 and ask for the screens. A runnable no-build example:
-[examples/frontend-guide/](../examples/frontend-guide/).
+[examples/frontend-guide/](../examples/frontend-guide/). And
+`appximo backoffice-spec` is the recipe `/app` itself is built from — for
+embedding a contract-driven admin INSIDE your own SPA with your own theme.
 
 ## 8. Production: a domain, a $6 VPS, HTTPS
 
@@ -410,13 +527,14 @@ appximo migrate --tenant acme --schema schema.json --dry-run   # see the plan fi
 appximo migrate --tenant acme --schema schema.json             # apply
 ```
 
-New **fields** go live hot (no restart). A new **resource** needs the engine to
-recompile its routes: restart `serve` with the new schema — or use **Studio**
-(`/editor`): it's the visual editor over the same schema JSON, its Deploy button
-runs the same dry-run → approve flow, and it offers the one-click engine
-restart when one is needed. Nothing is ever dropped without an explicitly
-enumerated approval — a destructive change is gated behind a dry-run that shows
-you the rows you'd lose.
+New **fields** go live hot (no restart) — readable, writable, filterable.
+`/app` and `/docs` re-shape themselves from the contract. A new **resource**
+needs the engine to recompile its routes: restart `serve` with the new schema —
+or use **Studio** (`/editor`): its Deploy button runs the same dry-run →
+approve flow, and it offers the one-click engine restart when one is needed.
+Nothing is ever dropped without an explicitly enumerated approval — a
+destructive change is gated behind a dry-run that shows you the rows you'd
+lose.
 
 ## 10. Backup (before you need it)
 
@@ -440,16 +558,20 @@ restore you never tested is not a backup.
 
 | Symptom | Cause → fix |
 |---|---|
-| `missing required configuration: …` | the three settings of step 2 — the message itself tells you how to generate each |
-| `JWT_SECRET is too short` | 32-character floor, enforced from the next release — `openssl rand -hex 32` |
-| `400 invalid tenant` / `401 token tenant mismatch` | wrong `Host:` header — the tenant is the Host subdomain |
+| `up`: `no DATABASE_URL and no docker on the PATH` | install Docker, or point `DATABASE_URL` at any Postgres (local or hosted) — the error lists both |
+| `up`: `app port 8080 is already in use` | another server owns it — the error prints the `ss` line to find it and the `--port` alternative |
+| `up`: `container "appximo-pg" exists but…` | a previous run's container (recovered automatically) or a foreign one — the error says which and the way out |
+| `missing required configuration: …` | the three settings of §4.1 — the message itself tells you how to generate each |
+| `JWT_SECRET is too short` | 32-character floor, enforced — `appximo gen-secret` |
+| `400 no tenant in host` / `401 token tenant mismatch` | wrong `Host:` header — the tenant is the Host subdomain |
 | `403 forbidden` on every call | token role not declared in the schema rbac — mint with `appximo token --schema …` |
-| `403 signup is disabled` | set `APPXIMO_AUTH_SIGNUP_ROLE` (the next release's message names it) or create users via `/admin` |
+| `403 signup is disabled` | set `APPXIMO_AUTH_SIGNUP_ROLE` (the message names it) or create users via `/admin` |
 | `bind: address already in use` | another engine (or the draining previous one) owns the port — wait/`--port` |
-| Terminal "frozen" after `serve` | it's the foreground server (the boot message says so) — second terminal |
-| `/admin` login, no credentials | **(next release)** the screen offers first-admin creation; on v0.1.1: `appximo admin create` |
+| Terminal "frozen" after `serve`/`up` | it's the foreground server (the boot message says so) — second terminal |
+| `/admin` login, no credentials | `up` printed them once; else the screen offers first-admin creation, or `appximo admin create` |
+| `/app` sign-in fails from `localhost` | open it at the tenant URL (`http://<name>.localhost:8080/app`) — the login screen's banner says so |
 | A filter is ignored / shell error | `curl -g` (brackets), quote the URL |
 | Blank page in a browser, but curl works | you're serving a SPA under a strict CSP — see FRONTEND_SPEC §CSP |
 
 Everything deeper: [GUIDE.md](GUIDE.md) — the full third-party guide, and
-`appximo specs` — the machine-readable contract trilogy.
+`appximo specs` — the machine-readable contract set (five printables).

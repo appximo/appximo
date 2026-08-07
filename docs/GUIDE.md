@@ -100,6 +100,16 @@ source.
 
 ## 2. From zero to a live API (the path that works TODAY)
 
+> **The short way (post-v0.1.2 builds): `appximo up`.** In an empty directory
+> it resolves Postgres (your `DATABASE_URL`, or `postgres:16` in Docker),
+> writes and loads the secrets, registers your app WITH its schema, creates
+> the first admin, serves, and prints a card with the URLs (`/app` — a
+> back-office generated from your contract — plus `/docs`, `/admin`,
+> `/editor`), the credentials (printed once) and a working curl.
+> `appximo new "<idea>"` prepends AI schema generation. Everything below
+> remains the piece-by-piece truth `up` orchestrates — read it to understand,
+> use it when a piece needs diagnosing.
+
 > **Availability.** Three paths work today: **download the binary from
 > [GitHub Releases](https://github.com/appximo/appximo/releases)** (v0.1.1,
 > linux/darwin × amd64/arm64, checksums published — the installer downloads

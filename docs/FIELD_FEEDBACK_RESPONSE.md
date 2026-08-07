@@ -126,10 +126,33 @@ and the `recepcion` role saw Instructores dimmed purely from the 403 probe.
 
 ## §13 (the 10-minute path)
 
-Filed as **ENG-38** with your evidence and minute-marks as the Ready
-criterion — it needs Miguel's product sign-off on scope. Two of its
-ingredients shipped this session (`init --env`; the generic back-office as a
-reusable example + spec).
+Filed as **ENG-38**, and **BUILT the following session
+(FIRST-TEN-MINUTES-S1, 2026-08-07)** — as orchestration, exactly as §13
+argued ("no hay que construirlo, hay que orquestarlo"):
+
+- **`appximo up`** — the one-command first contact in §13's shape: the single
+  question block (Postgres? name?), then Postgres resolved (`DATABASE_URL` or
+  a loopback-published Dockerized `postgres:16` whose password is recoverable
+  from the container), secrets written to `./.env` (0600, no BOM) AND loaded
+  (F1/F1-bis), the tenant registered WITH the schema in the body (T2), the
+  first admin bootstrapped (B8), a tenant user for `/app`, a dev token, a
+  smoke request through the full chain, and the final card. Idempotent;
+  `appximo down` undoes the Docker part; every failure mode names the way
+  out; `--json` emits exactly one JSON object (your DX-for-agents rule — the
+  `validate --json` pattern applied to the first mile).
+- **`/app`** — the generic back-office from your PATRON-BACKOFFICE, embedded:
+  one prebuilt no-build bundle, everything derived from `/openapi.json`
+  (your §6 extensions plus the standard `default` keyword, published now so
+  required-with-default fields are not over-demanded). Browser-verified
+  against two schemas, one never seen by the bundle.
+- **`appximo new "<idea>"`** — `ai-generate` → `validate --json` → `up`;
+  without an API key it prints the §13 prompt for the user's own agent.
+- **QUICKSTART.md** rewritten with `up` as act one and the manual path
+  preserved as the net; the ten-minute script published with measured
+  numbers.
+
+ENG-38 is DONE in docs/BACKLOG.md; the one §13 ingredient deliberately
+deferred is `--embedded-pg` (ENG-39, with its dependency-weight reasoning).
 
 ## The Windows verification script (for Miguel — these fixes are NOT live-verified)
 
