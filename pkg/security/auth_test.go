@@ -209,7 +209,7 @@ func TestSecurity_PageClamped(t *testing.T) {
 	params := url.Values{}
 	params.Set("page", "999999999")
 
-	qb, err := query.BuildQuery("items", res, params, nil)
+	qb, err := query.BuildQuery("items", res, params, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildQuery: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestSecurity_SearchEscapesWildcards(t *testing.T) {
 	params := url.Values{}
 	params.Set("search", "50%_off")
 
-	qb, err := query.BuildQuery("items", res, params, nil)
+	qb, err := query.BuildQuery("items", res, params, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildQuery: %v", err)
 	}

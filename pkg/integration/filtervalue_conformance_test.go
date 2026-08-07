@@ -82,7 +82,7 @@ func TestFilterValueLivePostgresConformance(t *testing.T) {
 			// Does the engine accept it? Through the real surface.
 			params := url.Values{}
 			params.Set("filter[f][eq]", v)
-			_, err := query.BuildQuery("things", res, params, nil)
+			_, err := query.BuildQuery("things", res, params, nil, nil)
 			engineAccepts := err == nil
 
 			if pgAccepts && !engineAccepts {
