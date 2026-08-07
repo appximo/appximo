@@ -137,17 +137,17 @@ func TestStaticMount_RootNeverShadowsTheEngine(t *testing.T) {
 }
 
 func TestStaticMount_SubPath(t *testing.T) {
-	h := staticRouter(mustCompile(t, StaticMount{Path: "/app", FS: spaFS(), SPA: true}))
+	h := staticRouter(mustCompile(t, StaticMount{Path: "/ui", FS: spaFS(), SPA: true}))
 
-	for _, p := range []string{"/app", "/app/"} {
+	for _, p := range []string{"/ui", "/ui/"} {
 		if rec := get(t, h, p); rec.Code != 200 || !strings.Contains(rec.Body.String(), "id=app") {
 			t.Fatalf("%s: %d", p, rec.Code)
 		}
 	}
-	if rec := get(t, h, "/app/assets/app-abc123.css"); rec.Code != 200 {
+	if rec := get(t, h, "/ui/assets/app-abc123.css"); rec.Code != 200 {
 		t.Fatalf("sub-path asset: %d", rec.Code)
 	}
-	if rec := get(t, h, "/app/deep/link"); rec.Code != 200 {
+	if rec := get(t, h, "/ui/deep/link"); rec.Code != 200 {
 		t.Fatalf("sub-path SPA fallback: %d", rec.Code)
 	}
 	// Outside the mount, the API still owns the tree.
@@ -174,14 +174,14 @@ func TestStaticMount_SPAIsOptIn(t *testing.T) {
 // Path traversal is impossible by construction: path.Clean collapses "..",
 // fs.ValidPath rejects what is left, and io/fs never opens outside its root.
 func TestStaticMount_PathTraversalBlocked(t *testing.T) {
-	h := staticRouter(mustCompile(t, StaticMount{Path: "/app", FS: spaFS(), SPA: true}))
+	h := staticRouter(mustCompile(t, StaticMount{Path: "/ui", FS: spaFS(), SPA: true}))
 	for _, p := range []string{
-		"/app/../../../etc/passwd",
-		"/app/../../etc/passwd",
-		"/app/..%2f..%2fetc%2fpasswd",
-		"/app/%2e%2e%2f%2e%2e%2fetc%2fpasswd",
-		"/app/./../../secret",
-		"/app/nested/../../../../root/.ssh/id_rsa",
+		"/ui/../../../etc/passwd",
+		"/ui/../../etc/passwd",
+		"/ui/..%2f..%2fetc%2fpasswd",
+		"/ui/%2e%2e%2f%2e%2e%2fetc%2fpasswd",
+		"/ui/./../../secret",
+		"/ui/nested/../../../../root/.ssh/id_rsa",
 	} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest("GET", p, nil))
@@ -212,9 +212,9 @@ func TestStaticMount_BootValidation(t *testing.T) {
 		mount StaticMount
 		want  string
 	}{
-		{"no FS", StaticMount{Path: "/app"}, "FS is required"},
+		{"no FS", StaticMount{Path: "/ui"}, "FS is required"},
 		{"relative path", StaticMount{Path: "app", FS: spaFS()}, "must start with"},
-		{"a pattern, not a prefix", StaticMount{Path: "/app/*", FS: spaFS()}, "literal prefix"},
+		{"a pattern, not a prefix", StaticMount{Path: "/ui/*", FS: spaFS()}, "literal prefix"},
 		{"collides with /api", StaticMount{Path: "/api", FS: spaFS()}, "collides with the engine"},
 		{"collides under /api", StaticMount{Path: "/api/ui", FS: spaFS()}, "collides with the engine"},
 		{"collides with /admin", StaticMount{Path: "/admin", FS: spaFS()}, "collides with the engine"},
@@ -223,7 +223,7 @@ func TestStaticMount_BootValidation(t *testing.T) {
 		// 1B-2 (LIBRARY-GAPS-S2): a missing index is an error only when SPA is
 		// on — the index IS the fallback document. An assets-only mount without
 		// one is valid (covered in static_csp_test.go).
-		{"no index in an SPA FS", StaticMount{Path: "/app", SPA: true, FS: fstest.MapFS{"a.js": {Data: []byte("x")}}}, "cannot read"},
+		{"no index in an SPA FS", StaticMount{Path: "/ui", SPA: true, FS: fstest.MapFS{"a.js": {Data: []byte("x")}}}, "cannot read"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -242,7 +242,7 @@ func TestStaticMount_BootValidation(t *testing.T) {
 
 	t.Run("the same path twice is rejected", func(t *testing.T) {
 		_, err := validateStaticMounts([]StaticMount{
-			{Path: "/app", FS: spaFS()}, {Path: "/app/", FS: spaFS()},
+			{Path: "/ui", FS: spaFS()}, {Path: "/ui/", FS: spaFS()},
 		})
 		if err == nil || !strings.Contains(err.Error(), "mounted twice") {
 			t.Fatalf("expected a duplicate-mount error, got: %v", err)
@@ -270,8 +270,8 @@ func TestStaticMatcher_CoversTheMountAndNeverTheEngine(t *testing.T) {
 	})
 
 	t.Run("a sub-path mount owns only its own prefix", func(t *testing.T) {
-		m := staticMatcher(mustCompile(t, StaticMount{Path: "/app", FS: spaFS()}))
-		for _, p := range []string{"/app", "/app/", "/app/assets/x.js", "/app/deep/link"} {
+		m := staticMatcher(mustCompile(t, StaticMount{Path: "/ui", FS: spaFS()}))
+		for _, p := range []string{"/ui", "/ui/", "/ui/assets/x.js", "/ui/deep/link"} {
 			if !m(p) {
 				t.Errorf("%s should belong to the mount", p)
 			}
@@ -308,14 +308,14 @@ func TestStaticMatcher_CoversTheMountAndNeverTheEngine(t *testing.T) {
 func TestStaticMount_LongestPrefixWins(t *testing.T) {
 	inner := fstest.MapFS{"index.html": {Data: []byte("INNER")}}
 	hs := mustCompile(t,
-		StaticMount{Path: "/app", FS: spaFS(), SPA: true},
-		StaticMount{Path: "/app/admin", FS: inner, SPA: true},
+		StaticMount{Path: "/ui", FS: spaFS(), SPA: true},
+		StaticMount{Path: "/ui/admin", FS: inner, SPA: true},
 	)
-	if hs[0].prefix != "/app/admin" {
+	if hs[0].prefix != "/ui/admin" {
 		t.Fatalf("longest prefix must sort first, got %q", hs[0].prefix)
 	}
 	h := staticRouter(hs)
-	if rec := get(t, h, "/app/admin"); !strings.Contains(rec.Body.String(), "INNER") {
+	if rec := get(t, h, "/ui/admin"); !strings.Contains(rec.Body.String(), "INNER") {
 		t.Fatalf("the nested mount must win: %q", rec.Body.String())
 	}
 }

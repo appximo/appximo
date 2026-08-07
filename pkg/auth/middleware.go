@@ -66,7 +66,13 @@ func HookUserContext(ctx context.Context) map[string]any {
 // handler; any failure is a uniform 404). A Bearer requirement would defeat the
 // point — the URL exists so <img>/video tags and share links can fetch without an
 // Authorization header.
-var skipJWT = []string{"/health", "/readyz", "/graphiql", "/metrics", "/debug", "/admin", "/editor", "/auth/", "/favicon.ico", "/openapi", "/docs", "/files/signed/"}
+// "/app" is the generic back-office SPA (ENG-38): the static shell + module
+// files load before any token exists, exactly like /admin and /editor; the API
+// calls the SPA makes carry the Bearer and keep full enforcement. Like /admin,
+// the entry is a plain prefix — /app is an engine-owned prefix (reserved
+// against static mounts in reservedStaticPrefixes), so nothing else may live
+// under it.
+var skipJWT = []string{"/health", "/readyz", "/graphiql", "/metrics", "/debug", "/admin", "/app", "/editor", "/auth/", "/favicon.ico", "/openapi", "/docs", "/files/signed/"}
 
 // PublicMatcher reports whether (method, path) is an EXPLICITLY-registered
 // public custom route (LIBRARY-EXTEND-S1: Route.Public). Matching is exact —

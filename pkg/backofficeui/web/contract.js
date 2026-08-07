@@ -2,7 +2,8 @@
 // of backoffice-spec §3: NOTHING here names a resource, maps an FK exception,
 // mirrors a state machine or lists "which uuids are files" — every one of
 // those was a pre-extension blind spot and every one now comes from the
-// contract itself (x-appximo-*).
+// contract itself (x-appximo-*). This is the embedded /app copy; the teaching
+// copy consumers adapt lives in examples/backoffice-guide/web/contract.js.
 
 let cache = null;
 
@@ -56,6 +57,7 @@ export async function loadContract(fetchJSON) {
   });
 
   cache = {
+    appTitle: doc.info?.title ?? 'app',
     resources,
     byName: Object.fromEntries(resources.map((r) => [r.name, r])),
     virtual: virtualDecl,

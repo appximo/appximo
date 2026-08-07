@@ -86,10 +86,21 @@ func (r RedactWriter) Write(p []byte) (int, error) {
 	return len(p), nil // report original length so zerolog does not treat it as a short write
 }
 
+// defaultWriter is where Init sends structured log output. os.Stdout is the
+// historical (12-factor) default and stays untouched for `serve` and library
+// consumers. `appximo up --json` redirects it to stderr BEFORE booting the
+// engine, because its stdout must carry exactly one JSON object (the C1 rule:
+// machine commands keep byte-clean stdout).
+var defaultWriter io.Writer = os.Stdout
+
+// SetDefaultWriter redirects where subsequent Init calls send log output.
+// Call it before the engine boots (appximo.New re-runs Init).
+func SetDefaultWriter(w io.Writer) { defaultWriter = w }
+
 // Init configures the global logger for the given environment.
 // All output passes through RedactWriter to strip sensitive field values.
 func Init(env string) {
-	base := RedactWriter{w: os.Stdout}
+	base := RedactWriter{w: defaultWriter}
 	if env == "development" {
 		Log = zerolog.New(
 			zerolog.ConsoleWriter{Out: base}).

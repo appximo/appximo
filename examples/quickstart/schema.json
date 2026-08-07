@@ -5,8 +5,8 @@
   "resources": {
     "tasks": {
       "fields": {
-        "title":  { "type": "string", "required": true },
-        "status": { "type": "string", "enum": ["open", "done"] },
+        "title":  { "type": "string", "required": true, "maxLength": 200 },
+        "status": { "type": "string", "enum": ["open", "done"], "default": "open" },
         "due":    { "type": "time" }
       }
     }

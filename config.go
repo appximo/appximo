@@ -13,6 +13,7 @@ package appximo
 
 import (
 	"context"
+	"io"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -60,6 +61,14 @@ type Config struct {
 	// env-only) since MT-STRUCT-S3: N in-process apps share the process env,
 	// and each app needs its OWN obs store.
 	ObsDBPath string
+
+	// BannerWriter is where Start's human boot banner ("Appximo serving on …",
+	// the foreground note, the Try-it line) is printed. nil keeps the historical
+	// os.Stdout. `appximo up` points it at io.Discard: up prints its own final
+	// card, and in --json mode stdout must carry EXACTLY one JSON object
+	// (ENG-38; the C1 rule — machine commands keep byte-clean stdout). Engine
+	// LOGS are unaffected (they follow the standard logger to stderr).
+	BannerWriter io.Writer
 
 	// JWTSecret signs/validates HS256 tokens. Empty falls back to JWT_SECRET.
 	JWTSecret string

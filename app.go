@@ -29,6 +29,7 @@ import (
 	"github.com/appximo/appximo/migrations"
 	"github.com/appximo/appximo/pkg/adminui"
 	"github.com/appximo/appximo/pkg/auth"
+	"github.com/appximo/appximo/pkg/backofficeui"
 	"github.com/appximo/appximo/pkg/cache"
 	"github.com/appximo/appximo/pkg/codegen"
 	"github.com/appximo/appximo/pkg/controlplane"
@@ -916,14 +917,18 @@ func (a *App) Start() error {
 	if err != nil {
 		return fmt.Errorf("appximo: cannot listen on %s: %w", addr, err)
 	}
-	fmt.Printf("Appximo serving on %s — Ctrl+C to stop\n", addr)
+	// ENG-38: the banner is redirectable so `appximo up` (which prints its own
+	// final card, and whose --json mode owns stdout) can silence it. nil keeps
+	// the historical stdout — `serve` is byte-identical.
+	banner := a.banner()
+	fmt.Fprintf(banner, "Appximo serving on %s — Ctrl+C to stop\n", addr)
 	// PHASE4-FIRST-MILE-S1: say that the process stays in the foreground and how
 	// to keep working — a first-time user's terminal "freezes" here and nothing
 	// used to explain it (the guide had to grow a "open a second terminal" note).
 	// Printed AFTER the bind (ENG-34: only facts get announced).
-	fmt.Printf("  This process stays in the foreground. Open a SECOND terminal to make requests,\n")
-	fmt.Printf("  or run it in the background (append `&`, or use a systemd unit in production).\n")
-	fmt.Printf("  Try it:  http://localhost:%d/docs  ·  admin panel /admin  ·  schema editor /editor\n", a.cfg.Port)
+	fmt.Fprintf(banner, "  This process stays in the foreground. Open a SECOND terminal to make requests,\n")
+	fmt.Fprintf(banner, "  or run it in the background (append `&`, or use a systemd unit in production).\n")
+	fmt.Fprintf(banner, "  Try it:  http://localhost:%d/docs  ·  your app /app  ·  admin panel /admin  ·  schema editor /editor\n", a.cfg.Port)
 	if err := a.ss.Serve(ctx, srv, ln, 5*time.Second, a.cleanup); err != nil {
 		return err
 	}
@@ -935,6 +940,15 @@ func (a *App) Start() error {
 		a.execRestart()
 	}
 	return nil
+}
+
+// banner resolves where human boot announcements print: Config.BannerWriter,
+// or the historical os.Stdout when unset (ENG-38).
+func (a *App) banner() io.Writer {
+	if a.cfg.BannerWriter != nil {
+		return a.cfg.BannerWriter
+	}
+	return os.Stdout
 }
 
 // runBeforeStart invokes Config.BeforeStart with the engine's own pool, wrapping
@@ -984,7 +998,7 @@ func (a *App) startBackground(ctx context.Context) {
 			fmt.Fprintln(os.Stderr, "Control plane error:", err)
 			return
 		}
-		fmt.Println("Control plane serving on " + a.cpSrv.Addr)
+		fmt.Fprintln(a.banner(), "Control plane serving on "+a.cpSrv.Addr)
 		if err := a.cpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			fmt.Fprintln(os.Stderr, "Control plane error:", err)
 		}
@@ -1299,6 +1313,18 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 		log.Println("admin UI: WARNING — no built assets embedded; /admin answers 503 (rebuild with `make admin-ui` in the engine repo, or update the module: since ADR-025 it ships them prebuilt)")
 	} else {
 		log.Println("admin UI: SolidJS admin panel served at /admin")
+	}
+
+	// Generic back-office (ENG-38): the embedded contract-driven CRUD UI served
+	// at /app. One prebuilt no-build bundle for EVERY schema — everything it
+	// renders is derived from /openapi.json at runtime (x-appximo-* extensions),
+	// so a hot-swap or restart with a new schema re-shapes it with zero work.
+	// Static serving, JWT-skipped shell (API calls carry the Bearer), off the
+	// hot path.
+	if err := backofficeui.Register(r); err != nil {
+		log.Printf("WARNING: back-office UI not mounted: %v", err)
+	} else {
+		log.Println("back-office: generic CRUD UI (from /openapi.json) served at /app")
 	}
 
 	// Visual schema editor (UI-F0-S1): the embedded Svelte 5 SPA served at /editor

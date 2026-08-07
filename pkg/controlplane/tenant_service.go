@@ -36,6 +36,13 @@ import (
 // mirror), and the docs.
 var tenantIDRe = regexp.MustCompile(`^[a-z][a-z0-9]{1,29}$`)
 
+// ValidTenantID reports whether id satisfies THE tenant id rule above. It is
+// the same regexp RegisterTenant enforces, exported so front-of-the-funnel
+// callers (`appximo up`, Studio's live mirror) pre-check against the single
+// source instead of growing a second copy of the rule (field report T1: two
+// copies diverged once already).
+func ValidTenantID(id string) bool { return tenantIDRe.MatchString(id) }
+
 // SuggestTenantID converts a rejected id into the closest VALID one: lowercased,
 // with every separator and any other character DROPPED (mi-clinica → miclinica),
 // leading non-letters trimmed, capped at 30. Separators are dropped rather than

@@ -85,9 +85,9 @@ func TestStaticCSP_RootMountOverridesTheAPIPolicy(t *testing.T) {
 }
 
 func TestStaticCSP_SubPathMountGetsTheSamePolicy(t *testing.T) {
-	h := cspRouter(mustCompile(t, StaticMount{Path: "/app", FS: spaFS(), SPA: true}))
+	h := cspRouter(mustCompile(t, StaticMount{Path: "/ui", FS: spaFS(), SPA: true}))
 
-	for _, p := range []string{"/app", "/app/", "/app/orders/42"} {
+	for _, p := range []string{"/ui", "/ui/", "/ui/orders/42"} {
 		csp, code := cspOf(t, h, p)
 		if code != 200 {
 			t.Fatalf("GET %s = %d, want 200", p, code)

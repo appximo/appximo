@@ -721,6 +721,13 @@ func oaResourceSchema(res *schema.ResourceSchema, includeAuto bool) map[string]a
 //     they are now.
 func oaPropertySchema(fd schema.FieldDef) map[string]any {
 	m := oaFieldType(fd)
+	// The declared create-default, as the STANDARD OpenAPI keyword (ENG-38).
+	// It tells a generic tool (the /app back-office, a form generator) that a
+	// `required` field with a default is satisfiable by OMISSION — without it,
+	// every such tool over-demands a value the engine would have filled.
+	if fd.Default != nil {
+		m["default"] = fd.Default
+	}
 	if fd.Relation != "" {
 		m["x-appximo-relation"] = fd.Relation
 		ref := fd.References

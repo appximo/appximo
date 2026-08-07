@@ -132,7 +132,7 @@ const CSPOff = "off"
 // so a frontend can never silently shadow the API, the admin panel or a health
 // probe (and an operator never debugs "why does /admin show my SPA?").
 var reservedStaticPrefixes = []string{
-	"/api", "/auth", "/admin", "/editor", "/docs", "/graphql", "/graphiql",
+	"/api", "/app", "/auth", "/admin", "/editor", "/docs", "/graphql", "/graphiql",
 	"/openapi", "/metrics", "/debug", "/healthz", "/readyz", "/health",
 	"/files", "/fleet",
 }

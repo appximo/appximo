@@ -2,6 +2,8 @@
 // list (sort/search/keyset pagination), form (the five rules), relation
 // selects honoring x-appximo-references, constrained state selects, a file
 // widget with the declared policy. No resource is named anywhere in this file.
+// This is the embedded /app copy (ENG-38); the teaching copy consumers adapt
+// into their own SPA lives in examples/backoffice-guide/web/app.js.
 import { loadContract, controlFor } from './contract.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -47,10 +49,24 @@ async function signup(email, password) {
   boot().catch(showFatal);
 }
 
+// The engine resolves the tenant from the Host subdomain. Opening /app on a
+// bare host (localhost, an IP) means every API call will get the named 400 —
+// say so BEFORE the first failed login, with the exact URL shape that works.
+function tenantHint() {
+  const h = window.location.hostname;
+  if (h.includes('.')) return '';
+  return `<div class="banner info">This page talks to the API on <b>this origin</b>, and the engine
+    reads the tenant from the subdomain. Open it as
+    <code>http://&lt;tenant&gt;.${esc(h)}${window.location.port ? ':' + window.location.port : ''}/app</code>
+    (e.g. the URL <code>appximo up</code> printed) — signing in from a bare host will fail.</div>`;
+}
+
 function renderLogin(msg = '') {
+  document.title = 'App — Appximo back-office';
   $('#app').innerHTML = `
     <div class="login">
-      <h1>Back-office <span class="muted">— generated from /openapi.json</span></h1>
+      <h1>Your app <span class="muted">— generated from /openapi.json</span></h1>
+      ${tenantHint()}
       ${msg ? `<div class="banner err">${esc(msg)}</div>` : ''}
       <input id="l-email" type="email" placeholder="email" autocomplete="username">
       <input id="l-pass" type="password" placeholder="password" autocomplete="current-password">
@@ -58,6 +74,8 @@ function renderLogin(msg = '') {
         <button id="l-go" class="primary">Log in</button>
         <button id="l-su">Sign up</button>
       </div>
+      <small class="muted">Sign in as a tenant user (the credentials <code>appximo up</code> printed,
+      or a user created in /admin). The session lives in memory — a refresh signs you out.</small>
     </div>`;
   $('#l-go').onclick = () => login($('#l-email').value, $('#l-pass').value).catch((e) => renderLogin(e.message));
   $('#l-su').onclick = () => signup($('#l-email').value, $('#l-pass').value).catch((e) => renderLogin(e.message));
@@ -81,6 +99,7 @@ async function boot() {
 }
 
 function renderShell() {
+  document.title = `${contract.appTitle} — back-office`;
   const items = contract.resources.map((r) => {
     const p = probe[r.name] ?? {};
     const cls = p.denied ? 'denied' : '';
@@ -92,6 +111,7 @@ function renderShell() {
   $('#app').innerHTML = `
     <div class="shell">
       <nav>
+        <h2 class="appname" title="from /openapi.json — this UI knows nothing else">«${esc(contract.appTitle)}»</h2>
         <h2>Resources</h2>
         <ul id="menu">${items}</ul>
         ${virtual ? `<h2>Engine</h2><ul>${virtual}</ul>` : ''}
