@@ -282,8 +282,8 @@ func refTestSchema() *schema.APISchema {
 					"autor_id": {Type: "uuid", Relation: "autores", References: "user_id"},
 				},
 				Relations: map[string]schema.RelationDef{
-					"autor":      {Type: "belongs_to", Target: "autores", FK: "autor_id"},
-					"etiquetas":  {Type: "many_to_many", Target: "etiquetas", Through: "articulo_etiquetas", FK: "articulo_id", TargetFK: "etiqueta_slug"},
+					"autor":       {Type: "belongs_to", Target: "autores", FK: "autor_id"},
+					"etiquetas":   {Type: "many_to_many", Target: "etiquetas", Through: "articulo_etiquetas", FK: "articulo_id", TargetFK: "etiqueta_slug"},
 					"comentarios": {Type: "has_many", Target: "comentarios", FK: "articulo_codigo"},
 				},
 			},
@@ -365,8 +365,8 @@ func TestIncludeManyToManyHonorsReferences(t *testing.T) {
 		t.Fatalf("unexpected error: %v", ierr)
 	}
 	for _, want := range []string{
-		`"slug" = _h`,                 // target join on etiquetas.slug (references of etiqueta_slug)
-		`"articulo_id" = _base."id"`,  // parent side: articulo_id has no references → id
+		`"slug" = _h`,                // target join on etiquetas.slug (references of etiqueta_slug)
+		`"articulo_id" = _base."id"`, // parent side: articulo_id has no references → id
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("m2m embed missing %q\nSQL: %s", want, sql)
