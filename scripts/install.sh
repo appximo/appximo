@@ -485,7 +485,38 @@ setup_user_dirs() {
 	fi
 	run mkdir -p "$ETC_DIR" "$OPT_DIR/bin" "$OPT_DIR/scripts" "$VARLIB/files" "$VARLIB/obs"
 	run chown -R "$SERVICE_USER:$SERVICE_USER" "$VARLIB"
+	# Explicit modes, NEVER the umask's (LAUNCHPAD-S1, field finding: on a
+	# CIS-hardened box with umask 027 the bare mkdir left /etc/<app> at 0750
+	# root:root — the service user could not traverse it, and the unit sat in
+	# an activating↔restart loop that reads as a silent hang).
+	run chmod 0755 "$OPT_DIR" "$OPT_DIR/bin" "$OPT_DIR/scripts"
+	# /etc/<app>: root:<service> with the sticky bit (1775). The GROUP write
+	# bit is what lets the engine's own deploy path (Studio "restart engine
+	# now" → persist boot schema + .bak + marker) work under
+	# ProtectSystem=strict; the STICKY bit is what keeps the service from
+	# unlinking root's files there — the 0600 root-owned env file stays
+	# untouchable even though the directory is group-writable.
+	run chown "root:$SERVICE_USER" "$ETC_DIR"
+	run chmod 1775 "$ETC_DIR"
 	ok "service user + directories ready"
+}
+
+# verify_service_can_read: fail AT INSTALL TIME, loudly, if the service user
+# cannot read its own schema/config — the alternative is a unit that loops in
+# "activating" after every boot with the cause one journalctl away but nobody
+# looking (real third-party field report, 2026-08). Root can read anything, so
+# the check impersonates the service user.
+verify_service_can_read() {
+	[ "$DRY_RUN" = "yes" ] && return 0
+	local f
+	for f in "$SCHEMA_FILE" "$BIN_PATH"; do
+		if ! runuser -u "$SERVICE_USER" -- test -r "$f"; then
+			die "the '$SERVICE_USER' service user cannot read $f — the service would crash-loop at boot.
+  Fix:  chmod 0755 $(dirname "$f")  &&  chmod a+r $f
+  (a restrictive umask on this box likely tightened the directory; re-run the installer after fixing)"
+		fi
+	done
+	ok "service user can read its schema + binary (verified as $SERVICE_USER)"
 }
 
 # install_companion_scripts: place deploy-update.sh + backup.sh in
@@ -647,6 +678,7 @@ install_ops_cli() {
 write_schema() {
 	if [ -f "$SCHEMA_FILE" ] && [ -z "$SCHEMA" ]; then
 		info "keeping existing $SCHEMA_FILE"
+		schema_perms
 		return
 	fi
 	if [ -n "$SCHEMA" ]; then
@@ -670,7 +702,19 @@ write_schema() {
   "rbac": { "roles": { "admin": { "resources": "*", "actions": ["*"] } } }
 }'
 	fi
+	schema_perms
 	ok "boot schema at $SCHEMA_FILE"
+}
+
+# schema_perms: the boot schema belongs to the SERVICE user, explicitly —
+# (a) umask-proof (write_file inherits the umask; 027 would make it 0640
+# root:root and unreadable to the service), and (b) owner-writable by the
+# service so the engine's own deploy-persist path (Studio one-click restart)
+# can update it in place.
+schema_perms() {
+	[ -f "$SCHEMA_FILE" ] || return 0
+	run chown "$SERVICE_USER:$SERVICE_USER" "$SCHEMA_FILE"
+	run chmod 0644 "$SCHEMA_FILE"
 }
 
 # ── Config file writers ──────────────────────────────────────────────────────
@@ -724,7 +768,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=${VARLIB#"$PREFIX"}
+ReadWritePaths=${VARLIB#"$PREFIX"} ${ETC_DIR#"$PREFIX"}
 StateDirectory=${APP_NAME}
 
 [Install]
@@ -983,6 +1027,7 @@ main() {
 	write_env_file
 	write_systemd_unit
 	write_caddyfile
+	verify_service_can_read
 	start_services
 	verify
 	maybe_harden

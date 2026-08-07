@@ -432,7 +432,7 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `JWT_SECRET` | **yes** | — | HS256 signing secret, ≥ 32 chars (`openssl rand -hex 32`). **Enforced since SEC-6 (2026-08-05): the engine refuses to boot below 32 characters**, naming the variable and the floor. |
 | `ADMIN_KEY` | **yes** | — | `X-Admin-Key` for the control plane, `/metrics`, `/debug`, `/admin`. |
 | `APPXIMO_ENV` | no | (prod) | `development` enables pprof (:6060) + GraphQL introspection + GraphiQL. **Leave unset/`production`** in prod. |
-| `GOMEMLIMIT` | no | auto | Soft heap ceiling. Unset → the engine uses 90 % of an explicit **cgroup** limit if present, else warns on a small box. **Set it on a bare small box** — the installer sets **30 % of RAM** (measured: the engine's own anonymous memory peaks in the tens of MB even at 1M rows, and PostgreSQL needs the rest). Never derived from total RAM as if the engine were alone on the box. |
+| `GOMEMLIMIT` | no | auto | Soft heap ceiling. Unset → the engine uses 90 % of an explicit **cgroup** limit if present, else warns on a small box. **Set it on a bare small box** — the installer sets **30 % of RAM** (min 256 MiB). Field-verified range on a 1 GB / 1 vCPU droplet (2026-08): the engine idles at ~70–80 MB RSS with `GOMEMLIMIT=180MiB`, so anything in **180–300 MiB works comfortably on 1 GB** — the installer's 287 MiB default included; below ~128 MiB the GC starts thrashing under load. Never derived from total RAM as if the engine were alone on the box (PostgreSQL needs the rest). |
 | `GOMAXPROCS` | no | auto | cgroup-aware (automaxprocs). |
 | `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | no | 1000 / 100 | Per-tenant token bucket. |
 | `OBS_DB_PATH` | no | `/var/lib/appximo/obs/obs.db` | Trace/snapshot history (SQLite). Keep it on a persistent path. |
@@ -499,6 +499,7 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `serve` exits immediately | Missing a required var (`DATABASE_URL`/`JWT_SECRET`/`ADMIN_KEY`) or Postgres unreachable. The log names which. Check `DATABASE_URL` and `systemctl status postgresql`. |
 | Registering a tenant returns an error about the tenant id | The id must match `^[a-z][a-z0-9]{1,29}$` (it is BOTH the Postgres schema and the host's first label) — no hyphens, no underscores, no uppercase. |
 | Port already in use on boot | Another process on 8090 (or your `--port`). Find it with `ss -ltnp | grep :8090` and stop it, or pick another port. |
+| Service loops between `active` and `activating (auto-restart)` — looks hung, `systemctl status` shows no error | The service user can't READ its config: a restrictive umask (027 on CIS-hardened images) left `/etc/<app>` at 0750 root:root, so `serve` dies on `open /etc/<app>/schema.json: permission denied` **every 5 s** — the message IS in `journalctl -u <app> -n 50`, but each attempt exits so fast the status line never settles on `failed`. Fix: `chmod 0755 /etc/<app>` (the installer now sets explicit modes and verifies readability **as the service user** at install time, so this only bites hand-rolled units). |
 
 Health endpoints for a probe/monitor (all unauthenticated): `/healthz`
 (liveness), `/readyz` (readiness — 503 while draining), `/health` (JSON +
