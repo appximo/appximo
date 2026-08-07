@@ -193,3 +193,37 @@ FE2/FE3/FE6, ST4) were treated as regression contracts: the binary-diff gate
 verifications ran against every change in this session, and each reported
 DIFF is enumerated and explained in the session report. Nothing you verified
 green went un-re-verified.
+
+---
+
+# Response to the SECOND field evaluation — PUBLIC-SURFACE-S1 (2026-08-07)
+
+**Context:** the second report came from an agent working ONLY from the
+distributed binary + `appximo specs` — the real path of most users. It built a
+complete blog (login, lector/editor roles, cover uploads, a state machine,
+24/24 in a mobile-viewport browser) and its verdict was: *"the cliff appears
+when someone wants their own frontend."* Every finding below is closed in code
+this session (commits `98a7f24…`) or filed in docs/BACKLOG.md. GitHub issues
+could not be read from this session (no `gh` credential on the box); this
+section is the finding-by-finding answer.
+
+| Finding | Outcome |
+|---|---|
+| **A. `Config.Static` unreachable from the binary** — later **retracted by the evaluator** (the Go module is public; ~40-line main.go verified, 24/24 in browser): the real problem is DISCOVERABILITY (frontend-spec §10 said "hand over a tarball") | **CLOSED, both halves.** §10 rewritten around the verified `go get` path with your measured costs (≈2m36s cold build, ≈80 MB binary) and the mandatory SPA→binary build order — the give-up paragraph is gone. `appximo init` now emits that main.go FOR you (compilable as generated — pinned by an integration test that builds the generated project). And the no-toolchain case got a first-class path: `appximo serve --schema schema.json --static ./web/build --spa` (+ `APPXIMO_STATIC_{DIR,SPA,CSP}` for systemd/Docker, `up/new --static`, `ParseServeArgs` flags) — same mount validation, same CSP, ONE implementation behind every form. Verified in a real browser: SPA at `/`, hardened CSP, fallback, immutable assets, `/api` auth intact. |
+| **A-bis. `static.go` serves a STRICTER CSP than documented** (sha256-pins inline scripts, doesn't fall back to `unsafe-inline`) | **CLOSED.** True — the doc under-declared SEC-2. `DefaultStaticCSP`'s comment and frontend-spec §9 trap 1 now state the served truth: no inline scripts → `script-src 'self'`; inline bootstraps → sha256-pinned with `unsafe-inline` DROPPED; only an unparseable shell keeps the permissive form (logged). Plus the consequence: editing an inline shell script needs a restart. |
+| **B. The pure binary cannot serve anything anonymous** — blog/catalogue/landing demand Go | **CLOSED — ADR-026, the session's centerpiece.** `rbac.public` declares per-resource anonymous READS with row conditions + field allowlists, compiled into the ONE existing evaluator as the reserved `$public` role. Read-only enforced at load; `$user_id` in a public condition is a load error; the public rate limiter applies; the response cache never touches anonymous responses; an invalid Bearer stays 401. Your exact scenario — an anonymous blog listing only published articles, hiding drafts and private fields, zero Go — is an integration-test suite AND was re-verified end-to-end in a real browser (pure binary + `--static` SPA + anonymous fetches). `/openapi.json` marks the ops `security: []` + `x-public: true`. Bonus hardening the ask surfaced: **field allowlists now bind filters/sort/search for EVERY role** (the SEC-5 value-oracle over hidden columns is closed engine-wide, 403 `ErrForbiddenField`). §7.5's public-images pattern: grant `"files": {"actions": ["read"]}` publicly. |
+| **C. `up` twice says ok and serves the old schema** | **CLOSED.** On a re-run `up` reads the tenant's REGISTERED schema back and reconciles: unchanged → says so (`tenant.schema: "unchanged"`); changed → migrates through the SAME `PUT /tenants/{id}/schema` path `migrate` drives (additive live; destructive drops stay gated, the exact `--approve-drops` command printed; `gated_drops[]` in the JSON card); a failed migration exits non-zero naming the way out. Never `ok: true` over the old schema — pinned by `TestReconcileSchema`. Help text and QUICKSTART now say what `up` actually does. Your `titulo: ""` symptom also died twice over: the starter and warning below. |
+| **D. `?include=` ignores `references`** (subroute right, embed null) | **CLOSED.** Exactly the diverging-duplicates class: the embed compiler hardcoded `id`. Both now resolve through one source (`FieldDef.ReferencedColumn()`); fixed for belongs_to/has_many/many_to_many, and GraphQL + nested embeds share the same compiler so all were fixed by construction (aggregation does no embeds; audited). 4 gate corpus rows pin embed/subroute parity. The spec's "works everywhere unchanged" promise is now true. |
+| **E1. `permissions` role without a `files` grant → every upload 403** | **CLOSED.** New SCHEMA-5 warning `file_field_without_files_grant` (both RBAC forms, wildcard-aware, exact fix in the message) — in `validate`, `validate --json` (the AI loop's oracle), boot and deploy responses. The grammar (`spec`) now teaches the rule. |
+| **E2. required text + empty string → blank records with 201** | **CLOSED.** New warning `required_text_without_min_length` (suppressed when minLength/enum/pattern/format already constrain). The starter schema and its four doc mirrors now declare `minLength: 1` — the product dogfoods its own fix. |
+| **F1. English-only engine errors** | **DECIDED: they stay English.** One source of truth beats N half-translated catalogs, and no server locale matches every user of every tenant. What you actually need is now documented: frontend-spec §5.1 carries the complete, closed `rule` → message map (12 rules) with interpolation guidance from `/openapi.json`'s own limits — build the map once. |
+| **F2. Stale list after DELETE (aggregate already correct, self-healed in seconds)** | **CLOSED as the invalidate/refresh race.** Not reproduced live (0/60 — the window is ~1 query wide) but confirmed by code reading: an in-flight cache refresh could store a pre-DELETE body AFTER the write's invalidation, pinning it until TTL — precisely your symptom. Fixed structurally: every store captures the tenant's invalidation epoch before running and is dropped if an `Invalidate` landed mid-flight (`TestInvalidateDropsInFlightStore`). |
+| **New: Node-on-Windows can't reach a tenant** (`.localhost` ENOTFOUND; `fetch` ignores a hand-set Host → 401) | **CLOSED in docs.** frontend-spec §9 trap 8 now documents the escape that actually works — `node:http` against `127.0.0.1` with the explicit `Host` header — and states plainly that `fetch`/undici silently ignores it. |
+
+**Verification for the whole batch:** lint 0 issues · full lane
+(integration+e2e, `-race`, no `-short`) green · binary-diff gate 108/108 SAME
+against the pre-session binary on the shared surface + 117/117 on the grown
+corpus · ABBA bench p50 Δ−0.2% (**no_change**) · the end-to-end scenario
+(pure binary, `--static` SPA, anonymous public reads) verified in Chromium at
+a mobile viewport. Filed OPEN: **UI-2** (Studio must author + round-trip
+`rbac.public`), **ENG-40** (`explain`/OpenAPI parity for the new surface).
