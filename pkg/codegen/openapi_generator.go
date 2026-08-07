@@ -123,6 +123,15 @@ func buildOAPaths(s *schema.APISchema) map[string]any {
 			"get":  listOp,
 			"post": oaCreateOp(name, title),
 		}
+		// The aggregate endpoint (G3) is a read of the same scoped set, so it
+		// is public exactly when the list is (ADR-026 covers aggregates).
+		aggOp := oaAggregateOp(name, title, &res)
+		if publicRead {
+			aggOp = markPublic(aggOp)
+		}
+		paths["/api/"+name+"/aggregate"] = map[string]any{
+			"get": aggOp,
+		}
 		paths["/api/"+name+"/{id}"] = map[string]any{
 			"get":    getOp,
 			"put":    oaReplaceOp(name, title),
@@ -349,7 +358,27 @@ func oaListOp(name, title string, res *schema.ResourceSchema) map[string]any {
 		))
 	}
 
-	// filter params with operator variants per field type
+	params = append(params, oaFilterParams(res)...)
+
+	return map[string]any{
+		"operationId": "list" + title,
+		"summary":     "List " + name,
+		"tags":        []string{name},
+		"parameters":  params,
+		"responses": map[string]any{
+			"200": oaSuccessResp(oaSchemaRef(title + "ListResponse")),
+			"400": oaRespRef("Error400"),
+			"401": oaRespRef("Error401"),
+			"403": oaRespRef("Error403"),
+		},
+	}
+}
+
+// oaFilterParams builds the filter[...] query parameters a resource accepts —
+// shared by the list operation and the aggregate operation (ENG-40), which
+// scope by the same filter grammar.
+func oaFilterParams(res *schema.ResourceSchema) []any {
+	var params []any
 	for _, fname := range sortedFieldKeys(res) {
 		fd := res.Fields[fname]
 		baseSchema := oaFieldType(fd)
@@ -380,14 +409,67 @@ func oaListOp(name, title string, res *schema.ResourceSchema) map[string]any {
 			))
 		}
 	}
+	return params
+}
 
+// oaAggregateOp documents GET /api/{resource}/aggregate (ENG-40: the endpoint
+// shipped in G3 but never appeared in the served contract). The parameter
+// vocabulary and per-type eligibility mirror query.BuildAggregate exactly:
+// sum/avg over numeric fields, min/max over numeric or time, group_by over
+// anything but json/jsonb, plus the same filter[...]/search grammar as the
+// list — a parameter the endpoint cannot honor (page, sort, order…) is a 400
+// and is deliberately NOT advertised here.
+func oaAggregateOp(name, title string, res *schema.ResourceSchema) map[string]any {
+	var numeric, minmax, groupable []string
+	for _, fname := range sortedFieldKeys(res) {
+		switch res.Fields[fname].Type {
+		case "int", "int64", "float64":
+			numeric = append(numeric, fname)
+			minmax = append(minmax, fname)
+		case "time":
+			minmax = append(minmax, fname)
+		}
+		if t := res.Fields[fname].Type; t != "json" && t != "jsonb" {
+			groupable = append(groupable, fname)
+		}
+	}
+	params := []any{
+		oaQueryParamDesc("count", map[string]any{"type": "boolean"},
+			"COUNT(*) over the filtered, RBAC-scoped set. Bare ?count or count=true → on; count=false → off"),
+	}
+	if len(numeric) > 0 {
+		list := strings.Join(numeric, ", ")
+		params = append(params,
+			oaQueryParamDesc("sum", map[string]any{"type": "string"},
+				"Comma-separated numeric fields to SUM (eligible: "+list+")"),
+			oaQueryParamDesc("avg", map[string]any{"type": "string"},
+				"Comma-separated numeric fields to AVG (eligible: "+list+")"),
+		)
+	}
+	if len(minmax) > 0 {
+		list := strings.Join(minmax, ", ")
+		params = append(params,
+			oaQueryParamDesc("min", map[string]any{"type": "string"},
+				"Comma-separated fields to MIN — numeric or time (eligible: "+list+")"),
+			oaQueryParamDesc("max", map[string]any{"type": "string"},
+				"Comma-separated fields to MAX — numeric or time (eligible: "+list+")"),
+		)
+	}
+	if len(groupable) > 0 {
+		params = append(params, oaQueryParamDesc("group_by", map[string]any{"type": "string"},
+			"Comma-separated fields to GROUP BY (eligible: "+strings.Join(groupable, ", ")+"). Requires at least one aggregate function. Response becomes {\"groups\":[…]}"))
+	}
+	params = append(params, oaQueryParamDesc("search", map[string]any{"type": "string"},
+		"Case-insensitive substring match across the resource's string/text fields (same as the list)"))
+	params = append(params, oaFilterParams(res)...)
 	return map[string]any{
-		"operationId": "list" + title,
-		"summary":     "List " + name,
+		"operationId": "aggregate" + title,
+		"summary":     "Aggregate " + name + " (count/sum/avg/min/max, optional group_by)",
+		"description": "Runs the fixed aggregate functions over " + name + ", scoped EXACTLY like a list read: the role's row condition, field allowlist and the same filter grammar apply. List-only parameters (page, per_page, sort, order, after, before, include) are a 400 here.",
 		"tags":        []string{name},
 		"parameters":  params,
 		"responses": map[string]any{
-			"200": oaSuccessResp(oaSchemaRef(title + "ListResponse")),
+			"200": oaSuccessResp(oaSchemaRef("AggregateResponse")),
 			"400": oaRespRef("Error400"),
 			"401": oaRespRef("Error401"),
 			"403": oaRespRef("Error403"),
@@ -547,6 +629,26 @@ func buildOAComponents(s *schema.APISchema) map[string]any {
 			"properties": map[string]any{
 				"error":  map[string]any{"type": "string", "example": "validation_failed"},
 				"fields": map[string]any{"type": "array", "items": oaSchemaRef("ValidationError")},
+			},
+		},
+		// ENG-40: the aggregate endpoint's response. Without group_by, ONE
+		// object carrying only the requested keys; with group_by, {"groups":
+		// [...]} where each group carries its group-by field values plus the
+		// same aggregate keys. sum/avg values are numbers; min/max values are
+		// numbers or timestamps depending on the field's type.
+		"AggregateResponse": map[string]any{
+			"type":        "object",
+			"description": "Without group_by: one object with only the requested keys (count, sum, avg, min, max). With group_by: {\"groups\": [...]} — each group carries its group-by field values plus the requested aggregate keys.",
+			"properties": map[string]any{
+				"count": map[string]any{"type": "integer"},
+				"sum":   map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "number"}},
+				"avg":   map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "number"}},
+				"min":   map[string]any{"type": "object", "additionalProperties": map[string]any{}},
+				"max":   map[string]any{"type": "object", "additionalProperties": map[string]any{}},
+				"groups": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "object", "additionalProperties": true},
+				},
 			},
 		},
 		// Matches the actual list response meta. page/has_prev are ABSENT on a

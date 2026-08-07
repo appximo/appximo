@@ -260,3 +260,80 @@ func TestOpenAPIVendorExtensions(t *testing.T) {
 		t.Fatal("a shadowed files store must not be declared virtual")
 	}
 }
+
+// ENG-40: the aggregate endpoint (G3) must appear in the served contract with
+// its own parameter vocabulary, and inherit the public marking when the
+// resource is anonymously readable (an aggregate is a read of the same set).
+func TestOpenAPIAggregatePath(t *testing.T) {
+	s := testSchema()
+	s.Resources["orders"] = schema.ResourceSchema{
+		Fields: map[string]schema.FieldDef{
+			"total_cents": {Type: "int64"},
+			"created":     {Type: "time"},
+			"status":      {Type: "string"},
+			"attrs":       {Type: "jsonb"},
+		},
+	}
+	s.RBAC.Public = map[string]schema.ResourcePermission{
+		"orders": {Actions: []string{"read"}},
+	}
+	raw, err := GenerateOpenAPIJSON(s, "/")
+	if err != nil {
+		t.Fatalf("GenerateOpenAPIJSON: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	paths := doc["paths"].(map[string]any)
+	for _, p := range []string{"/api/tasks/aggregate", "/api/orders/aggregate"} {
+		if _, ok := paths[p]; !ok {
+			t.Fatalf("missing %s in served contract", p)
+		}
+	}
+	agg := paths["/api/orders/aggregate"].(map[string]any)["get"].(map[string]any)
+	// public resource → aggregate carries the anonymous marking
+	if agg["x-public"] != true {
+		t.Errorf("aggregate of a public resource must carry x-public: true")
+	}
+	if sec, ok := agg["security"].([]any); !ok || len(sec) != 0 {
+		t.Errorf("aggregate of a public resource must carry security: []")
+	}
+	names := map[string]string{}
+	for _, pr := range agg["parameters"].([]any) {
+		pm := pr.(map[string]any)
+		names[pm["name"].(string)], _ = pm["description"].(string)
+	}
+	for _, want := range []string{"count", "sum", "avg", "min", "max", "group_by", "search", "filter[status]"} {
+		if _, ok := names[want]; !ok {
+			t.Errorf("aggregate op missing parameter %q", want)
+		}
+	}
+	// eligibility mirrors query.BuildAggregate: jsonb is not groupable, time
+	// is min/max-eligible but not summable.
+	if !strings.Contains(names["sum"], "total_cents") || strings.Contains(names["sum"], "created") {
+		t.Errorf("sum eligibility wrong: %q", names["sum"])
+	}
+	if !strings.Contains(names["min"], "created") {
+		t.Errorf("min must list time fields: %q", names["min"])
+	}
+	if strings.Contains(names["group_by"], "attrs") {
+		t.Errorf("group_by must not list jsonb fields: %q", names["group_by"])
+	}
+	// list-only parameters are a 400 on this endpoint — never advertised
+	for _, banned := range []string{"page", "per_page", "sort", "order"} {
+		if _, ok := names[banned]; ok {
+			t.Errorf("aggregate op must not advertise list-only parameter %q", banned)
+		}
+	}
+	// the tasks aggregate (no public grant) stays authenticated
+	tagg := paths["/api/tasks/aggregate"].(map[string]any)["get"].(map[string]any)
+	if _, ok := tagg["x-public"]; ok {
+		t.Errorf("non-public resource's aggregate must not be marked public")
+	}
+	// the response component exists
+	comps := doc["components"].(map[string]any)["schemas"].(map[string]any)
+	if _, ok := comps["AggregateResponse"]; !ok {
+		t.Error("missing AggregateResponse component")
+	}
+}

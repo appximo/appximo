@@ -56,6 +56,8 @@ type explainPhrases struct {
 	roleCondActions string // actions the condition gates
 	roleFields      string // allowlist
 	roleRoutes      string // custom endpoints
+	publicLine      string // resource — anyone, without logging in
+	publicOnly      string // rows restriction note for public conditions
 	denyDefault     string
 	noRBAC          string
 	eventNames      map[string]string
@@ -106,6 +108,8 @@ var explainEN = explainPhrases{
 	roleCondActions: " (the restriction applies to %s; the other actions see everything)",
 	roleFields:      "sees only the fields: %s",
 	roleRoutes:      "%s can also call the custom endpoint(s): %s",
+	publicLine:      "ANYONE on the internet, without logging in, can read %s",
+	publicOnly:      "but only rows whose %q equals %q",
 	denyDefault:     "Anything not listed above is denied by default.",
 	noRBAC:          "No roles are declared: every request will be denied (deny by default). Add an \"rbac\" block before deploying.",
 	footer: "This is a literal reading of the schema — nothing here is guessed.\n" +
@@ -165,6 +169,8 @@ var explainES = explainPhrases{
 	roleCondActions: " (la restricción aplica a %s; las demás acciones ven todo)",
 	roleFields:      "ve solo los campos: %s",
 	roleRoutes:      "%s además puede llamar el/los endpoint(s) custom: %s",
+	publicLine:      "CUALQUIERA en internet, sin iniciar sesión, puede leer %s",
+	publicOnly:      "pero solo las filas cuyo %q vale %q",
 	denyDefault:     "Todo lo que no está listado arriba se niega por defecto.",
 	noRBAC:          "No hay roles declarados: toda petición será negada (deny by default). Agregá un bloque \"rbac\" antes de desplegar.",
 	footer: "Esto es una lectura literal del schema — nada de lo de arriba es adivinado.\n" +
@@ -437,9 +443,30 @@ func explainRelations(b *strings.Builder, rn string, r ResourceSchema, p explain
 }
 
 func explainRBAC(b *strings.Builder, s *APISchema, p explainPhrases, and string) {
-	if len(s.RBAC.Roles) == 0 {
+	if len(s.RBAC.Roles) == 0 && len(s.RBAC.Public) == 0 {
 		b.WriteString(p.noRBAC + "\n")
 		return
+	}
+	// ENG-40: the public block FIRST — the owner reviewing an AI-written
+	// schema most needs to hear what the whole internet can read, before any
+	// role detail. Worded as a warning-grade fact, never softened.
+	if len(s.RBAC.Public) > 0 {
+		pubs := make([]string, 0, len(s.RBAC.Public))
+		for res := range s.RBAC.Public {
+			pubs = append(pubs, res)
+		}
+		sort.Strings(pubs)
+		for _, res := range pubs {
+			g := s.RBAC.Public[res]
+			line := "• " + fmt.Sprintf(p.publicLine, res)
+			if g.Conditions != nil {
+				line += " — " + fmt.Sprintf(p.publicOnly, g.Conditions.Field, g.Conditions.Val)
+			}
+			if len(g.Fields) > 0 {
+				line += "; " + fmt.Sprintf(p.roleFields, strings.Join(g.Fields, ", "))
+			}
+			b.WriteString(line + "\n")
+		}
 	}
 	roles := make([]string, 0, len(s.RBAC.Roles))
 	for r := range s.RBAC.Roles {
