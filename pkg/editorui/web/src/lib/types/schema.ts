@@ -174,7 +174,17 @@ export interface RolePolicy {
 /** The RBAC block. Mirrors schema.RBACPolicy. */
 export interface RBACPolicy {
 	roles: Record<string, RolePolicy>;
+	/** Anonymous-read surface (ADR-026): resource → grant. Each grant's actions
+	 * must be exactly ["read"], condition vals are LITERAL only ($user_id /
+	 * $external_client_id are load errors — anonymous has no identity), and
+	 * condition_actions is forbidden. The built-in `files` grant is actions-only. */
+	public?: Record<string, ResourcePermission>;
 }
+
+/** The reserved role name the rbac.public block compiles into (ADR-026,
+ * pkg/schema/validator.go PublicRoleName). Declaring it under rbac.roles is a
+ * load error — the anonymous surface only ever comes from the public block. */
+export const PUBLIC_ROLE_NAME = '$public';
 
 /** The top-level Appximo schema (map form). Mirrors schema.APISchema. */
 export interface APISchema {

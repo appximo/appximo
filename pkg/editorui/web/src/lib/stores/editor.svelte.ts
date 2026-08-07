@@ -31,7 +31,7 @@ import type {
 	RolePolicy,
 	StateMachine
 } from '../types/schema';
-import { IDENT_RE, RBAC_ACTIONS, HOOK_EVENTS } from '../types/schema';
+import { IDENT_RE, RBAC_ACTIONS, HOOK_EVENTS, PUBLIC_ROLE_NAME } from '../types/schema';
 import type {
 	ForeignKeyDef,
 	IndexDef,
@@ -1092,6 +1092,8 @@ class EditorStore {
 	addRole(raw: string): string | null {
 		const name = raw.trim();
 		if (!name) return 'role name is required';
+		const reserved = this.reservedRoleNameError(name);
+		if (reserved) return reserved;
 		if (this.rbac.roles[name]) return 'duplicate role name';
 		// New roles start per-resource (the recommended form) and deny-all until a
 		// grant is added — deny-by-default.
@@ -1103,6 +1105,8 @@ class EditorStore {
 		const name = raw.trim();
 		if (oldName === name) return null;
 		if (!name) return 'role name is required';
+		const reserved = this.reservedRoleNameError(name);
+		if (reserved) return reserved;
 		if (this.rbac.roles[name]) return 'duplicate role name';
 		if (!this.rbac.roles[oldName]) return 'role not found';
 		const next: Record<string, RolePolicy> = {};
@@ -1136,6 +1140,43 @@ class EditorStore {
 			delete role.permissions[resource];
 			this.bump();
 		}
+	}
+
+	// ── the anonymous surface — rbac.public (ADR-026, UI-2) ────────────────────
+	// Mirrors addPermission/removePermission for the public block: resource →
+	// read-only grant. The engine's validatePublicBlock is the authority; the
+	// modal's fixed-read UI + rbacIssues() keep the editor from producing what it
+	// would reject.
+
+	/** `$public` (and any `$…` name) can never be a schema role — the engine
+	 *  reserves the alphabet for the compiled anonymous role (PublicRoleName). */
+	private reservedRoleNameError(name: string): string | null {
+		if (name === PUBLIC_ROLE_NAME) {
+			return `"${PUBLIC_ROLE_NAME}" is reserved — anonymous access is edited in the "Public (anonymous)" entry, not as a role`;
+		}
+		if (name.startsWith('$')) return 'role names cannot start with "$" (reserved by the engine)';
+		return null;
+	}
+
+	get publicGrantNames(): string[] {
+		return Object.keys(this.rbac.public ?? {}).sort();
+	}
+	getPublicGrant(resource: string): ResourcePermission | undefined {
+		return this.rbac.public?.[resource];
+	}
+	addPublicGrant(resource: string) {
+		if (!this.getEntityByName(resource) && !this.isVirtualResource(resource)) return;
+		if (!this.rbac.public) this.rbac.public = {};
+		if (this.rbac.public[resource]) return;
+		// The anonymous surface is read-only by engine rule — actions are fixed.
+		this.rbac.public[resource] = { actions: ['read'] };
+		this.bump();
+	}
+	removePublicGrant(resource: string) {
+		if (!this.rbac.public?.[resource]) return;
+		delete this.rbac.public[resource];
+		if (Object.keys(this.rbac.public).length === 0) delete this.rbac.public;
+		this.bump();
 	}
 
 	/** Upgrade a role-global role to the per-resource form, expanding its resources. */
@@ -1197,6 +1238,7 @@ class EditorStore {
 			if (role.permissions) delete role.permissions[name];
 			if (Array.isArray(role.resources)) role.resources = role.resources.filter((r) => r !== name);
 		}
+		if (this.rbac.public?.[name]) delete this.rbac.public[name];
 	}
 	private rbacOnResourceRenamed(oldName: string, newName: string) {
 		for (const role of Object.values(this.rbac.roles)) {
@@ -1208,6 +1250,10 @@ class EditorStore {
 				role.resources = role.resources.map((r) => (r === oldName ? newName : r));
 			}
 		}
+		if (this.rbac.public?.[oldName]) {
+			this.rbac.public[newName] = this.rbac.public[oldName];
+			delete this.rbac.public[oldName];
+		}
 	}
 	private rbacOnFieldDeleted(resource: string, field: string) {
 		for (const role of Object.values(this.rbac.roles)) {
@@ -1218,6 +1264,11 @@ class EditorStore {
 				delete p.condition_actions;
 			}
 			if (p.fields) p.fields = p.fields.filter((f) => f !== field);
+		}
+		const pub = this.rbac.public?.[resource];
+		if (pub) {
+			if (pub.conditions?.field === field) delete pub.conditions;
+			if (pub.fields) pub.fields = pub.fields.filter((f) => f !== field);
 		}
 	}
 	private rbacOnFieldRenamed(resource: string, oldField: string, newField: string) {
@@ -1245,6 +1296,12 @@ class EditorStore {
 			if (role.conditions?.field === oldField) role.conditions.field = newField;
 			if (role.fields) role.fields = role.fields.map((f) => (f === oldField ? newField : f));
 		}
+		// A public grant is per-resource, so the repoint is always unambiguous.
+		const pub = this.rbac.public?.[resource];
+		if (pub) {
+			if (pub.conditions?.field === oldField) pub.conditions.field = newField;
+			if (pub.fields) pub.fields = pub.fields.map((f) => (f === oldField ? newField : f));
+		}
 	}
 
 	/** Live RBAC validation — mirrors the engine's validateRBAC for fast feedback.
@@ -1253,6 +1310,15 @@ class EditorStore {
 		const out: string[] = [];
 		const actions = RBAC_ACTIONS as readonly string[];
 		for (const [name, role] of Object.entries(this.rbac.roles)) {
+			// A loaded schema may carry a reserved name (addRole/renameRole already
+			// refuse it) — the engine rejects it at load, so surface it here too.
+			if (name.startsWith('$')) {
+				out.push(
+					name === PUBLIC_ROLE_NAME
+						? `role "${name}": reserved — anonymous access lives in rbac.public (the "Public (anonymous)" entry), never as a declared role`
+						: `role "${name}": names starting with "$" are reserved by the engine`
+				);
+			}
 			const perms = role.permissions ?? {};
 			if (Object.keys(perms).length > 0) {
 				if (role.resources !== undefined || role.actions !== undefined || role.conditions !== undefined || role.fields !== undefined) {
@@ -1296,6 +1362,43 @@ class EditorStore {
 					out.push(`role "${name}": condition field "${role.conditions.field}" is not on its resources`);
 				}
 				for (const f of role.fields ?? []) if (!union.includes(f)) out.push(`role "${name}": field "${f}" is not on its resources`);
+			}
+		}
+		// The anonymous surface — mirrors the engine's validatePublicBlock
+		// (ADR-026): read-only, no condition_actions, literal condition vals
+		// (anonymous has no identity), real resources/fields, files actions-only.
+		for (const [res, p] of Object.entries(this.rbac.public ?? {})) {
+			const pre = `public grant "${res}"`;
+			if (!(p.actions?.length === 1 && p.actions[0] === 'read')) {
+				out.push(`${pre}: the anonymous surface is READ-ONLY — actions must be exactly ["read"]`);
+			}
+			if (p.condition_actions && p.condition_actions.length > 0) {
+				out.push(`${pre}: condition_actions is not valid on a public grant (read is the only action)`);
+			}
+			if (this.isVirtualResource(res)) {
+				if (p.conditions || (p.fields && p.fields.length > 0)) {
+					out.push(`${pre}: the built-in "files" grant takes actions only (no conditions/fields)`);
+				}
+				continue;
+			}
+			if (!this.getEntityByName(res)) {
+				out.push(`${pre}: unknown resource "${res}"`);
+				continue;
+			}
+			const valid = this.fieldNamesForResource(res);
+			if (p.conditions) {
+				if (p.conditions.val === '$user_id' || p.conditions.val === '$external_client_id') {
+					out.push(
+						`${pre}: condition compares against ${p.conditions.val}, but an anonymous request has no identity — use a literal (e.g. "published")`
+					);
+				}
+				if (!p.conditions.field) out.push(`${pre}: condition field is required`);
+				else if (!valid.includes(p.conditions.field)) {
+					out.push(`${pre}: condition field "${p.conditions.field}" is not a field of ${res}`);
+				}
+			}
+			for (const f of p.fields ?? []) {
+				if (!valid.includes(f)) out.push(`${pre}: field "${f}" is not a field of ${res}`);
 			}
 		}
 		return out;

@@ -289,7 +289,7 @@ admin-ui: ## Build the embedded admin panel SPA (after touching its src; commit 
 # pattern as admin-ui: the built assets are COMMITTED — rebuild after touching
 # web/src and commit the new assets with the src change.
 editor-ui: ## Build the embedded Studio SPA (after touching its src; commit the build)
-	cd pkg/editorui/web && npm install --no-audit --no-fund && npm run build
+	cd pkg/editorui/web && npm install --no-audit --no-fund && npm run test && npm run build
 
 # Protocolo de benchmark científico: N runs + warmup + cooldown + import a SQLite
 # Línea base canónica (OPS-9): make dev-fast (examples/blank) + tenant acme +

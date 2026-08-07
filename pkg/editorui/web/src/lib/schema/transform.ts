@@ -7,7 +7,8 @@
 //
 // ROUND-TRIP CONTRACT: modelToSchema(schemaToModel(x)) is semantically identical
 // to x (key order aside). Unmodeled resource-level keys ride along in
-// EntityModel.extras; rbac/workflows are preserved verbatim. Editor-only data
+// EntityModel.extras; rbac — BOTH rbac.roles and the anonymous rbac.public
+// block (ADR-026, UI-2) — and workflows are preserved. Editor-only data
 // (ids, canvas positions) is never emitted. `renamed_from` (resource + field) is
 // NOT stored raw: import lifts it into the model's `originalName` baseline and
 // export derives it back (originalName !== name ⇒ renamed_from=originalName), so
@@ -40,9 +41,20 @@ export function schemaToModel(schema: APISchema): SchemaModel {
 		version: schema.version ?? '1',
 		name: schema.name ?? 'untitled-api',
 		entities,
-		rbac: schema.rbac ?? { roles: {} },
+		rbac: normalizeRBAC(schema.rbac),
 		workflows: schema.workflows
 	};
+}
+
+// normalizeRBAC keeps rbac.roles AND rbac.public (UI-2 — public used to survive
+// parse only by accident and was then dropped at serialize). `roles` is always
+// materialized (a public-only schema has none, and the store indexes
+// rbac.roles unconditionally); `public` rides along only when present.
+function normalizeRBAC(rbac?: RBACPolicy): RBACPolicy {
+	if (!rbac) return { roles: {} };
+	const out: RBACPolicy = { roles: rbac.roles ?? {} };
+	if (rbac.public) out.public = rbac.public;
+	return out;
 }
 
 function resourceToEntity(name: string, res: ResourceSchema): EntityModel {
@@ -92,7 +104,11 @@ export function modelToSchema(model: SchemaModel): APISchema {
 		name: model.name,
 		resources
 	};
-	if (model.rbac && Object.keys(model.rbac.roles ?? {}).length > 0) {
+	if (
+		model.rbac &&
+		(Object.keys(model.rbac.roles ?? {}).length > 0 ||
+			Object.keys(model.rbac.public ?? {}).length > 0)
+	) {
 		out.rbac = cleanRBACPolicy(model.rbac);
 	}
 	if (model.workflows && Object.keys(model.workflows).length > 0) {
@@ -140,13 +156,25 @@ function entityToResource(ent: EntityModel): ResourceSchema {
 // `permissions` when non-empty, else role-global), empty arrays/conditions are
 // dropped, and the row-condition op is pinned to "eq" (the only operator the engine
 // enforces — SEC-AUDIT-V1). Faithful round-trip: a role with no empties (e.g. the
-// erp-demo roles) is reproduced identically.
+// erp-demo roles) is reproduced identically. The anonymous `public` block
+// (ADR-026) is re-emitted when non-empty — each grant cleaned like a permission
+// but NEVER carrying condition_actions (the engine rejects it on a public grant:
+// read is the only action, there is no subset to scope). A roles-less,
+// public-only policy emits `public` alone (no invented empty `roles`), and a
+// policy with no public block emits none (byte-stability for existing schemas).
 function cleanRBACPolicy(rbac: RBACPolicy): RBACPolicy {
 	const roles: Record<string, RolePolicy> = {};
 	for (const [name, role] of Object.entries(rbac.roles ?? {})) {
 		roles[name] = cleanRole(role);
 	}
-	return { roles };
+	const out = {} as RBACPolicy;
+	if (Object.keys(roles).length > 0) out.roles = roles;
+	const pub: Record<string, ResourcePermission> = {};
+	for (const [res, p] of Object.entries(rbac.public ?? {})) {
+		pub[res] = cleanPermission(p, { allowConditionActions: false });
+	}
+	if (Object.keys(pub).length > 0) out.public = pub;
+	return out;
 }
 
 function cleanRole(role: RolePolicy): RolePolicy {
@@ -168,13 +196,17 @@ function cleanRole(role: RolePolicy): RolePolicy {
 	return out;
 }
 
-function cleanPermission(p: ResourcePermission): ResourcePermission {
+function cleanPermission(
+	p: ResourcePermission,
+	opts: { allowConditionActions: boolean } = { allowConditionActions: true }
+): ResourcePermission {
 	const out: ResourcePermission = { actions: [...(p.actions ?? [])] };
 	const cond = cleanCondition(p.conditions);
 	if (cond) {
 		out.conditions = cond;
-		// condition_actions is meaningless without a condition (the engine rejects it).
-		if (p.condition_actions && p.condition_actions.length > 0) {
+		// condition_actions is meaningless without a condition (the engine rejects
+		// it) — and never valid at all on a public grant (allowConditionActions=false).
+		if (opts.allowConditionActions && p.condition_actions && p.condition_actions.length > 0) {
 			out.condition_actions = [...p.condition_actions];
 		}
 	}

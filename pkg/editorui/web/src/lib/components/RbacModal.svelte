@@ -6,21 +6,28 @@
 
 	const CONCRETE = ['read', 'create', 'update', 'delete'] as const;
 
+	// Sentinel for the pinned "Public (anonymous)" entry (rbac.public, ADR-026).
+	// Safe as a selection key: the engine reserves "$public", and the store
+	// refuses to create/rename a role to any "$…" name.
+	const PUBLIC = '$public';
+
 	let active = $state<string | null>(null);
 	let newRole = $state('');
 	let addError = $state<string | null>(null);
 	let renameError = $state<string | null>(null);
 
 	const roles = $derived(editor.roleNames);
-	const role = $derived(active ? editor.getRole(active) : undefined);
+	const role = $derived(active && active !== PUBLIC ? editor.getRole(active) : undefined);
 	const isPer = $derived(active ? editor.roleForm(active) === 'perResource' : false);
 	const roleIssues = $derived(
-		active ? editor.rbacIssues().filter((i) => i.startsWith(`role "${active}"`)) : []
+		active && active !== PUBLIC
+			? editor.rbacIssues().filter((i) => i.startsWith(`role "${active}"`))
+			: []
 	);
 
 	// Auto-select the first role when the panel opens with none active.
 	$effect(() => {
-		if (ui.rbacOpen && (!active || !editor.getRole(active))) {
+		if (ui.rbacOpen && active !== PUBLIC && (!active || !editor.getRole(active))) {
 			active = editor.roleNames[0] ?? null;
 		}
 	});
@@ -142,6 +149,31 @@
 			addRes = '';
 		}
 	}
+
+	// ── the public (anonymous) surface — rbac.public (UI-2) ─────────────────────
+	const publicGrants = $derived(editor.publicGrantNames);
+	const publicIssues = $derived(editor.rbacIssues().filter((i) => i.startsWith('public grant')));
+	const addablePublic = $derived(editor.rbacResourceNames.filter((n) => !publicGrants.includes(n)));
+	let addPubRes = $state('');
+	function doAddPublicGrant() {
+		if (addPubRes) {
+			editor.addPublicGrant(addPubRes);
+			addPubRes = '';
+		}
+	}
+	// Unlike setCondField, a NEW public condition starts as an empty LITERAL —
+	// anonymous callers have no identity, so $user_id is never offered here
+	// (the engine rejects it on a public grant: public_condition_identity).
+	function setPublicCondField(c: CondCarrier, field: string) {
+		if (!field) {
+			delete c.conditions;
+		} else if (c.conditions) {
+			c.conditions.field = field;
+		} else {
+			c.conditions = { field, op: 'eq', val: '' };
+		}
+		editor.touch();
+	}
 </script>
 
 {#snippet actionBoxes(carrier: ActionsCarrier)}
@@ -233,6 +265,35 @@
 	</div>
 {/snippet}
 
+{#snippet publicConditionEditor(carrier: CondCarrier, fieldOpts: string[])}
+	<!-- Public variant of conditionEditor: literal val ONLY (no $user_id /
+	     $external_client_id — an anonymous request has no identity) and no
+	     condition_actions (read is the only action). -->
+	<div class="cond">
+		<div class="cond-row">
+			<span class="cond-lead">row filter:</span>
+			<select
+				class="field-select sm"
+				value={carrier.conditions?.field ?? ''}
+				onchange={(e) => setPublicCondField(carrier, e.currentTarget.value)}
+			>
+				<option value="">— no filter (all rows) —</option>
+				{#each fieldOpts as f}<option value={f}>{f}</option>{/each}
+			</select>
+			{#if carrier.conditions?.field}
+				<span class="op-eq" title="row conditions are equality-only (engine-enforced)">=</span>
+				<input
+					class="field-input sm"
+					placeholder={'literal value (e.g. "published")'}
+					value={carrier.conditions.val}
+					oninput={(e) => setLiteral(carrier, e.currentTarget.value)}
+				/>
+				<span class="muted xs">literal only — anonymous callers have no $user_id</span>
+			{/if}
+		</div>
+	</div>
+{/snippet}
+
 {#if ui.rbacOpen}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
@@ -261,6 +322,15 @@
 						</button>
 					{/each}
 					{#if roles.length === 0}<div class="muted pad">no roles yet</div>{/if}
+					<!-- Pinned: the anonymous surface (rbac.public) — not a role. -->
+					<button class="role-item public" class:on={active === PUBLIC} onclick={() => (active = PUBLIC)}>
+						<span class="ri-name">🌐 Public (anonymous)</span>
+						<span class="ri-form">
+							{publicGrants.length > 0
+								? `${publicGrants.length} read grant${publicGrants.length === 1 ? '' : 's'}`
+								: 'no anonymous access'}
+						</span>
+					</button>
 					<div class="add-role">
 						<input
 							class="field-input sm"
@@ -275,7 +345,58 @@
 
 				<!-- right: role editor -->
 				<section class="editor">
-					{#if !active || !role}
+					{#if active === PUBLIC}
+						<!-- ── PUBLIC (ANONYMOUS) SURFACE — rbac.public (ADR-026) ── -->
+						<div class="role-head">
+							<span class="role-name public-name">🌐 Public (anonymous)</span>
+						</div>
+						<div class="form-tag">Anonymous read grants</div>
+						<div class="muted xs">
+							What an UNAUTHENTICATED request may READ — no token, no identity. The engine keeps
+							this surface read-only; row filters compare against literal values.
+						</div>
+
+						{#if publicIssues.length > 0}
+							<div class="banner err">
+								<ul>{#each publicIssues as i}<li>{i}</li>{/each}</ul>
+							</div>
+						{/if}
+
+						{#each publicGrants as res (res)}
+							{@const perm = editor.getPublicGrant(res)!}
+							{@const virtual = editor.isVirtualResource(res)}
+							<div class="grant">
+								<div class="grant-head">
+									<span class="grant-res">{res}{#if virtual}<span class="muted"> (built-in file store)</span>{/if}</span>
+									<button class="btn subtle xs" onclick={() => editor.removePublicGrant(res)}>remove</button>
+								</div>
+								<div class="grant-row">
+									<span class="grow-lbl">can</span>
+									<span class="fixed-read">read <span class="muted xs">— the anonymous surface is read-only (engine-enforced)</span></span>
+								</div>
+								{#if virtual}
+									<div class="grant-row muted">actions only — the engine's file store has no row conditions or field allowlists</div>
+								{:else}
+									<div class="grant-row">{@render publicConditionEditor(perm, editor.fieldNamesForResource(res))}</div>
+									<div class="grant-row">{@render fieldAllowlist(perm, editor.fieldNamesForResource(res))}</div>
+								{/if}
+							</div>
+						{/each}
+						{#if publicGrants.length === 0}
+							<div class="muted pad">No public grants — anonymous requests are denied (the default). Add a resource to publish it.</div>
+						{/if}
+						{#if addablePublic.length > 0}
+							<div class="add-grant">
+								<select class="field-select sm" bind:value={addPubRes}>
+									<option value="">+ add resource…</option>
+									{#each addablePublic as n}<option value={n}>{n}</option>{/each}
+								</select>
+								<button class="btn sm" onclick={doAddPublicGrant} disabled={!addPubRes}>Add</button>
+							</div>
+						{/if}
+
+						<div class="deny-note">Deny-by-default: a resource not granted here answers 401/403 to anonymous callers.</div>
+					{:else if !active || !role}
 						<div class="empty">Select or add a role to edit its permissions.</div>
 					{:else}
 						<div class="role-head">
@@ -453,6 +574,29 @@
 		display: flex;
 		gap: 4px;
 		margin-top: 8px;
+	}
+	/* The pinned anonymous-surface entry — visually a sibling of the roles but
+	   set apart (it is rbac.public, not a role). */
+	.role-item.public {
+		margin-top: 6px;
+		border-style: dashed;
+		border-color: var(--border-strong);
+	}
+	.role-item.public.on {
+		border-color: var(--brand);
+		border-style: solid;
+	}
+	.public-name {
+		font-family: var(--mono);
+		font-weight: 700;
+		font-size: 15px;
+		flex: 1;
+	}
+	.fixed-read {
+		font-family: var(--mono);
+		font-weight: 700;
+		font-size: 12.5px;
+		padding-top: 2px;
 	}
 
 	.editor {

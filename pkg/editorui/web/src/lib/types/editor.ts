@@ -80,6 +80,6 @@ export interface SchemaModel {
 	version: string;
 	name: string;
 	entities: EntityModel[];
-	rbac: RBACPolicy; // preserved as-is; the RBAC visual panel is a future increment
+	rbac: RBACPolicy; // roles + the anonymous rbac.public block — both preserved AND authored (RbacModal, UI-F2-S1/UI-2)
 	workflows?: Record<string, unknown>; // preserved verbatim
 }

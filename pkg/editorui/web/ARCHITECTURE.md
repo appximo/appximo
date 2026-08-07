@@ -141,8 +141,11 @@ Backed by two routes added to `pkg/platformadmin` (`GET`/`PUT
 
 The **Roles** button (toolbar) opens `RbacModal.svelte`, a full editor for the
 engine's RBAC grammar — so a designed app ships with real security, not just a data
-shape. The roles live in `editor.rbac` (deep `$state`, round-tripped verbatim); the
-modal edits them and `Deploy` enforces them on the live API.
+shape. The whole RBAC block — `roles` AND the anonymous `rbac.public` surface
+(ADR-026) — lives in `editor.rbac` (deep `$state`, preserved on round-trip and
+authorable); the modal edits it and `Deploy` enforces it on the live API. (UI-2
+closed the gap where `rbac.public` survived parse by accident and was silently
+DROPPED on every export/deploy.)
 
 It mirrors the engine grammar **faithfully** (it can only produce schemas the
 validator accepts):
@@ -162,6 +165,16 @@ validator accepts):
   (read-all / write-own) — checkboxes of the granted actions; ⊆ actions, no `*`.
 - **field allowlist** — checkboxes of the resource's fields (+`id`); none = all.
 - **deny-by-default** is stated in the UI; nothing is granted unless added.
+- **Public (anonymous)** — a pinned entry below the roles edits `rbac.public`
+  (ADR-026, UI-2): per-resource read grants for UNAUTHENTICATED callers. Actions
+  are FIXED at `read` (the engine rejects anything else), the row-condition val is
+  **literal only** (no `$user_id`/`$external_client_id` — anonymous has no
+  identity, the engine makes them load errors), the built-in `files` grant is
+  actions-only, and the role name `$public` is refused in `addRole`/`renameRole`
+  (reserved — the block compiles into it). Export re-emits `public` when
+  non-empty (never with `condition_actions`); a roles-less, public-only schema
+  still emits its rbac block. Resource/field rename+delete propagation walks the
+  public grants too, and `rbacIssues()` mirrors `validatePublicBlock`.
 
 Store surface (in `editor.svelte.ts`): `roleNames`, `getRole`, `roleForm`,
 `addRole`/`renameRole`/`deleteRole`, `addPermission`/`removePermission`,
