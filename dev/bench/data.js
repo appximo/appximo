@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786137264350,
+  "lastUpdate": 1786137571071,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -864,6 +864,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "37726396 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "7afc8634d341be0bd674e675f24f241b4146d5aa",
+          "message": "test: two tagged suites follow BuildQuery's new allowlist parameter\n\nThe exact CI-bites-tagged-tests class the project already recorded twice —\nthe local full lane passed because the fix existed uncommitted.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-07T21:18:54Z",
+          "tree_id": "21bc4b622ca8c369de553edf11e3ac4ca5923730",
+          "url": "https://github.com/appximo/appximo/commit/7afc8634d341be0bd674e675f24f241b4146d5aa"
+        },
+        "date": 1786137570501,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6335,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "385399 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6335,
+            "unit": "ns/op",
+            "extra": "385399 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "385399 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "385399 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 67.07,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "35916376 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 67.07,
+            "unit": "ns/op",
+            "extra": "35916376 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "35916376 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "35916376 times\n4 procs"
           }
         ]
       }
