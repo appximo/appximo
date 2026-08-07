@@ -241,7 +241,7 @@ func (b *includeBuilder) rowObject(alias, resource string, node *includeNode, de
 			}
 			return "", nil, &IncludeError{Status: 400, Msg: "unknown relation " + relName + " on " + resource + " (" + hint + ")"}
 		}
-		join, valueExpr, e := b.buildEmbed(alias, rel, node.children[relName], childDepth)
+		join, valueExpr, e := b.buildEmbed(alias, resource, rel, node.children[relName], childDepth)
 		if e != nil {
 			return "", nil, e
 		}
@@ -252,10 +252,39 @@ func (b *includeBuilder) rowObject(alias, resource string, node *includeNode, de
 	return "json_build_object(" + strings.Join(pairs, ", ") + ")", joins, nil
 }
 
+// refColumnOf resolves the column a relation join matches on the side OPPOSITE
+// the FK column: the FK field's `references` when declared (MIG-F1-S5), else
+// "id" — via the SAME schema.FieldDef.ReferencedColumn the relation subroute
+// uses, so the two surfaces can never diverge again (PUBLIC-SURFACE-S1: the
+// embed used to hardcode id and answered null for a non-id `references` FK the
+// subroute followed correctly). ownerResource is the resource the FK column
+// lives ON (source for belongs_to, target for has_many, the junction for
+// many_to_many). An owner that is not a declared resource, an FK column not
+// declared as a field, or a field whose `relation` names a DIFFERENT resource
+// than the one this join targets (an incoherent relations-block declaration —
+// its `references` would name a column of the wrong table) keeps the implicit
+// "id" (the only possibility before `references` existed).
+func (b *includeBuilder) refColumnOf(ownerResource, fkField, joinTarget string) string {
+	res, ok := b.s.Resources[ownerResource]
+	if !ok {
+		return "id"
+	}
+	fd, ok := res.Fields[fkField]
+	if !ok {
+		return "id"
+	}
+	if fd.Relation != joinTarget {
+		return "id"
+	}
+	return fd.ReferencedColumn()
+}
+
 // buildEmbed compiles one relation embed correlated to parentAlias, returning the
 // LEFT JOIN LATERAL fragment and the json value expression (latAlias.j) to drop
 // into the parent's json_build_object. RBAC for the target is enforced here.
-func (b *includeBuilder) buildEmbed(parentAlias string, rel schema.RelationDef, node *includeNode, depth int) (string, string, *IncludeError) {
+// sourceResource is the resource parentAlias rows belong to (needed to resolve
+// a belongs_to FK's `references`).
+func (b *includeBuilder) buildEmbed(parentAlias, sourceResource string, rel schema.RelationDef, node *includeNode, depth int) (string, string, *IncludeError) {
 	b.nodes++
 	if b.nodes > maxIncludeNodes {
 		return "", "", &IncludeError{Status: 400, Msg: "too many includes"}
@@ -299,7 +328,8 @@ func (b *includeBuilder) buildEmbed(parentAlias string, rel schema.RelationDef, 
 	var sb strings.Builder
 	switch rel.Type {
 	case schema.RelationBelongsTo:
-		// parent → its one target: target.id = parent.<fk>. Null when absent.
+		// parent → its one target: target.<ref> = parent.<fk>, where <ref> is the
+		// FK field's `references` (default id). Null when absent.
 		sb.WriteString("LEFT JOIN LATERAL (SELECT ")
 		sb.WriteString(rowObj)
 		sb.WriteString(" AS j FROM ")
@@ -310,7 +340,7 @@ func (b *includeBuilder) buildEmbed(parentAlias string, rel schema.RelationDef, 
 		sb.WriteString(" WHERE ")
 		sb.WriteString(childAlias)
 		sb.WriteString(".")
-		sb.WriteString(quoteIdent("id"))
+		sb.WriteString(quoteIdent(b.refColumnOf(sourceResource, rel.FK, rel.Target)))
 		sb.WriteString(" = ")
 		sb.WriteString(parentAlias)
 		sb.WriteString(".")
@@ -321,7 +351,8 @@ func (b *includeBuilder) buildEmbed(parentAlias string, rel schema.RelationDef, 
 		sb.WriteString(" ON TRUE")
 
 	case schema.RelationHasMany:
-		// parent → many children: child.<fk> = parent.id, top-N by id.
+		// parent → many children: child.<fk> = parent.<ref>, where <ref> is the
+		// child FK field's `references` (default id). Top-N by id.
 		sb.WriteString("LEFT JOIN LATERAL (SELECT COALESCE(json_agg(_e ORDER BY _ord), '[]'::json) AS j FROM (SELECT ")
 		sb.WriteString(rowObj)
 		sb.WriteString(" AS _e, ")
@@ -340,7 +371,7 @@ func (b *includeBuilder) buildEmbed(parentAlias string, rel schema.RelationDef, 
 		sb.WriteString(" = ")
 		sb.WriteString(parentAlias)
 		sb.WriteString(".")
-		sb.WriteString(quoteIdent("id"))
+		sb.WriteString(quoteIdent(b.refColumnOf(rel.Target, rel.FK, sourceResource)))
 		sb.WriteString(rowCond)
 		sb.WriteString(" ORDER BY ")
 		sb.WriteString(childAlias)
@@ -353,8 +384,9 @@ func (b *includeBuilder) buildEmbed(parentAlias string, rel schema.RelationDef, 
 		sb.WriteString(" ON TRUE")
 
 	case schema.RelationManyToMany:
-		// parent ↔ targets via junction: through.<fk> = parent.id, join target on
-		// target.id = through.<target_fk>, top-N by target id.
+		// parent ↔ targets via junction: through.<fk> = parent.<refP>, join target
+		// on target.<refT> = through.<target_fk> — each junction FK field's
+		// `references` resolved like any other FK (default id), top-N by target id.
 		thrAlias := "_h" + n
 		sb.WriteString("LEFT JOIN LATERAL (SELECT COALESCE(json_agg(_e ORDER BY _ord), '[]'::json) AS j FROM (SELECT ")
 		sb.WriteString(rowObj)
@@ -373,7 +405,7 @@ func (b *includeBuilder) buildEmbed(parentAlias string, rel schema.RelationDef, 
 		sb.WriteString(" ON ")
 		sb.WriteString(childAlias)
 		sb.WriteString(".")
-		sb.WriteString(quoteIdent("id"))
+		sb.WriteString(quoteIdent(b.refColumnOf(rel.Through, rel.TargetFK, rel.Target)))
 		sb.WriteString(" = ")
 		sb.WriteString(thrAlias)
 		sb.WriteString(".")
@@ -386,7 +418,7 @@ func (b *includeBuilder) buildEmbed(parentAlias string, rel schema.RelationDef, 
 		sb.WriteString(" = ")
 		sb.WriteString(parentAlias)
 		sb.WriteString(".")
-		sb.WriteString(quoteIdent("id"))
+		sb.WriteString(quoteIdent(b.refColumnOf(rel.Through, rel.FK, sourceResource)))
 		sb.WriteString(rowCond)
 		sb.WriteString(" ORDER BY ")
 		sb.WriteString(childAlias)

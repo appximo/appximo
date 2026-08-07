@@ -1042,12 +1042,10 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			fn := fieldName // capture
 			relResource := fd.Relation
 			relRoute := strings.TrimSuffix(fn, "_id")
-			// The FK targets the referenced column (MIG-F1-S5: `references`), defaulting
-			// to the target's id — so the subresource JOIN follows the FK faithfully.
-			refCol := fd.References
-			if refCol == "" {
-				refCol = "id"
-			}
+			// The FK targets the referenced column (MIG-F1-S5: `references`),
+			// defaulting to the target's id — the shared resolution the ?include=
+			// embeds use too, so subroute and embed can never diverge.
+			refCol := fd.ReferencedColumn()
 
 			r.Get("/api/"+name+"/{id}/"+relRoute, pkghandlers.CachedGet(func(w http.ResponseWriter, req *http.Request) {
 				tc := tenant.MustFromCtx(req.Context())

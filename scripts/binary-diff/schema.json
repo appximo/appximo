@@ -1,35 +1,110 @@
 {
-  "$schema": "https://appximo.com/schema/v1",
-  "version": "1",
-  "name": "binary-diff-gate",
-  "resources": {
-    "notes": {
-      "fields": {
-        "title":  { "type": "string", "required": true, "maxLength": 200 },
-        "status": {
-          "type": "string",
-          "enum": ["open", "paid", "done"],
-          "default": "open",
-          "state_machine": {
-            "initial": "open",
-            "transitions": { "open": ["paid"], "paid": ["done"], "done": [] }
-          }
-        },
-        "amount": { "type": "int64" },
-        "ratio":  { "type": "float64" },
-        "done":   { "type": "bool" },
-        "due":    { "type": "time" },
-        "fecha":  { "type": "time", "default": "now" },
-        "code":   { "type": "string", "unique": true },
-        "ref":    { "type": "uuid" },
-        "attrs":  { "type": "jsonb" }
+ "$schema": "https://appximo.com/schema/v1",
+ "version": "1",
+ "name": "binary-diff-gate",
+ "resources": {
+  "notes": {
+   "fields": {
+    "title": {
+     "type": "string",
+     "required": true,
+     "maxLength": 200
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "open",
+      "paid",
+      "done"
+     ],
+     "default": "open",
+     "state_machine": {
+      "initial": "open",
+      "transitions": {
+       "open": [
+        "paid"
+       ],
+       "paid": [
+        "done"
+       ],
+       "done": []
       }
+     }
+    },
+    "amount": {
+     "type": "int64"
+    },
+    "ratio": {
+     "type": "float64"
+    },
+    "done": {
+     "type": "bool"
+    },
+    "due": {
+     "type": "time"
+    },
+    "fecha": {
+     "type": "time",
+     "default": "now"
+    },
+    "code": {
+     "type": "string",
+     "unique": true
+    },
+    "ref": {
+     "type": "uuid"
+    },
+    "attrs": {
+     "type": "jsonb"
+    },
+    "author_login": {
+     "type": "uuid",
+     "relation": "authors",
+     "references": "login"
     }
+   },
+   "relations": {
+    "author": {
+     "type": "belongs_to",
+     "target": "authors",
+     "fk": "author_login"
+    }
+   }
   },
-  "rbac": {
-    "roles": {
-      "admin":  { "resources": "*", "actions": ["*"] },
-      "viewer": { "resources": ["notes"], "actions": ["read"], "fields": ["id", "title", "status"] }
+  "authors": {
+   "fields": {
+    "name": {
+     "type": "string",
+     "required": true
+    },
+    "login": {
+     "type": "uuid",
+     "unique": true
     }
+   }
   }
+ },
+ "rbac": {
+  "roles": {
+   "admin": {
+    "resources": "*",
+    "actions": [
+     "*"
+    ]
+   },
+   "viewer": {
+    "resources": [
+     "notes"
+    ],
+    "actions": [
+     "read"
+    ],
+    "fields": [
+     "id",
+     "title",
+     "status"
+    ]
+   }
+  }
+ }
 }

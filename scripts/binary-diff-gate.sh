@@ -115,10 +115,18 @@ boot() { # $1=side $2=binary $3=port $4=ctrl
     -d "{\"tenant_id\":\"$TENANT\",\"display_name\":\"BDG\",\"email\":\"bdg@example.com\",\"plan\":\"free\",\"schema\":$(cat "$SCHEMA")}" \
     >/dev/null || { tail -20 "$WORK/$side.log" >&2; die "$side: tenant registration failed"; }
 
+  # An author with a FIXED login uuid — the notes.author_login FK declares
+  # `references: login` (PUBLIC-SURFACE-S1 Part D), so the include/subroute
+  # corpus rows exercise a non-id references join with real data.
+  curl -sf -X POST "http://127.0.0.1:$port/api/authors" \
+    -H "Authorization: Bearer $TOKEN_ADMIN" -H "Host: $HOST_DEFAULT" -H "Content-Type: application/json" \
+    -d '{"name":"seed author","login":"44444444-4444-4444-4444-444444444444"}' >/dev/null \
+    || { tail -20 "$WORK/$side.log" >&2; die "$side: author seeding failed"; }
+
   local seed
   seed=$(curl -s -X POST "http://127.0.0.1:$port/api/notes" \
     -H "Authorization: Bearer $TOKEN_ADMIN" -H "Host: $HOST_DEFAULT" -H "Content-Type: application/json" \
-    -d '{"title":"seed","amount":10,"ratio":1.5,"done":true,"code":"C1","attrs":{"k":"v"}}')
+    -d '{"title":"seed","amount":10,"ratio":1.5,"done":true,"code":"C1","attrs":{"k":"v"},"author_login":"44444444-4444-4444-4444-444444444444"}')
   echo "$seed" | jq -er '.id // .data.id' >"$WORK/$side.id" 2>/dev/null \
     || { echo "seed response: $seed" >&2; die "$side: seeding failed"; }
 }

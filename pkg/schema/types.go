@@ -183,6 +183,21 @@ type FieldDef struct {
 	StateMachine *StateMachine `json:"state_machine,omitempty"`
 }
 
+// ReferencedColumn resolves the target column this field's foreign key points
+// at: `references` when declared (MIG-F1-S5), else the implicit "id". It is the
+// SINGLE source of that rule — the relation subroute, the ?include= embed
+// compiler (REST and GraphQL share it) and anything else that follows an FK
+// must call this instead of re-deriving the default, so the resolutions can
+// never diverge (PUBLIC-SURFACE-S1: the embed compiler had its own hardcoded
+// "id" and returned null for every FK declaring a non-id `references`, while
+// the subroute followed the FK correctly).
+func (f FieldDef) ReferencedColumn() string {
+	if f.References != "" {
+		return f.References
+	}
+	return "id"
+}
+
 // StringList is a []string that additionally accepts a single JSON string
 // ("image" ⇒ ["image"]) — the same author-friendly flexibility as
 // state_machine's `initial`.

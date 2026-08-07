@@ -268,3 +268,129 @@ func TestIncludeCustomLimit(t *testing.T) {
 		t.Errorf("custom embed limit not applied\nSQL: %s", sql)
 	}
 }
+
+// refTestSchema models the evaluator's blog (PUBLIC-SURFACE-S1 Part D): the FK
+// `autor_id` on articulos declares `references: "user_id"` — a non-id unique
+// column of autores (the $user_id pattern the spec recommends). The embed must
+// join on THAT column, exactly like the /api/articulos/{id}/autor subroute.
+func refTestSchema() *schema.APISchema {
+	return &schema.APISchema{
+		Resources: map[string]schema.ResourceSchema{
+			"articulos": {
+				Fields: map[string]schema.FieldDef{
+					"titulo":   {Type: "string"},
+					"autor_id": {Type: "uuid", Relation: "autores", References: "user_id"},
+				},
+				Relations: map[string]schema.RelationDef{
+					"autor":      {Type: "belongs_to", Target: "autores", FK: "autor_id"},
+					"etiquetas":  {Type: "many_to_many", Target: "etiquetas", Through: "articulo_etiquetas", FK: "articulo_id", TargetFK: "etiqueta_slug"},
+					"comentarios": {Type: "has_many", Target: "comentarios", FK: "articulo_codigo"},
+				},
+			},
+			"autores": {
+				Fields: map[string]schema.FieldDef{
+					"nombre":  {Type: "string"},
+					"user_id": {Type: "uuid", Unique: true},
+				},
+				Relations: map[string]schema.RelationDef{
+					// has_many whose child FK references a NON-id parent column:
+					// comentarios.autor_user = autores.user_id.
+					"comentarios": {Type: "has_many", Target: "comentarios", FK: "autor_user"},
+				},
+			},
+			"comentarios": {
+				Fields: map[string]schema.FieldDef{
+					"texto": {Type: "string"},
+					// child FK to autores via its unique user_id column.
+					"autor_user": {Type: "uuid", Relation: "autores", References: "user_id"},
+					// child FK to articulos via a non-id unique column.
+					"articulo_codigo": {Type: "string", Relation: "articulos", References: "codigo"},
+				},
+			},
+			"etiquetas": {
+				Fields: map[string]schema.FieldDef{
+					"nombre": {Type: "string"},
+					"slug":   {Type: "string", Unique: true},
+				},
+			},
+			"articulo_etiquetas": {
+				Fields: map[string]schema.FieldDef{
+					"articulo_id":   {Type: "uuid", Relation: "articulos"},
+					"etiqueta_slug": {Type: "string", Relation: "etiquetas", References: "slug"},
+				},
+			},
+		},
+	}
+}
+
+// TestIncludeBelongsToHonorsReferences — PUBLIC-SURFACE-S1 Part D: the embed
+// used to hardcode target.id = parent.<fk>, answering null for every FK that
+// declares a non-id `references` (while the subroute joined correctly — two
+// implementations of one rule, diverged). The join must follow the FK field's
+// ReferencedColumn, the same source the subroute uses.
+func TestIncludeBelongsToHonorsReferences(t *testing.T) {
+	s := refTestSchema()
+	sql, _, ierr := BuildListInclude("articulos", "autor", "SELECT * FROM articulos", nil, "id", "ASC", s, schema.DefaultMaxIncludeDepth, allowAll)
+	if ierr != nil {
+		t.Fatalf("unexpected error: %v", ierr)
+	}
+	if !strings.Contains(sql, `"user_id" = _base."autor_id"`) {
+		t.Errorf("belongs_to embed must join on the referenced column user_id\nSQL: %s", sql)
+	}
+	if strings.Contains(sql, `"id" = _base."autor_id"`) {
+		t.Errorf("belongs_to embed still joins on id despite references\nSQL: %s", sql)
+	}
+}
+
+// TestIncludeHasManyHonorsReferences — the child FK declares references to a
+// non-id parent column: child.<fk> must match parent.<referenced>, not parent.id.
+func TestIncludeHasManyHonorsReferences(t *testing.T) {
+	s := refTestSchema()
+	sql, _, ierr := BuildListInclude("autores", "comentarios", "SELECT * FROM autores", nil, "id", "ASC", s, schema.DefaultMaxIncludeDepth, allowAll)
+	if ierr != nil {
+		t.Fatalf("unexpected error: %v", ierr)
+	}
+	if !strings.Contains(sql, `"autor_user" = _base."user_id"`) {
+		t.Errorf("has_many embed must correlate child fk against the referenced parent column\nSQL: %s", sql)
+	}
+}
+
+// TestIncludeManyToManyHonorsReferences — junction FK fields with `references`:
+// the target side joins on the referenced target column, the parent side on the
+// referenced parent column (both default id when undeclared — pinned elsewhere).
+func TestIncludeManyToManyHonorsReferences(t *testing.T) {
+	s := refTestSchema()
+	sql, _, ierr := BuildListInclude("articulos", "etiquetas", "SELECT * FROM articulos", nil, "id", "ASC", s, schema.DefaultMaxIncludeDepth, allowAll)
+	if ierr != nil {
+		t.Fatalf("unexpected error: %v", ierr)
+	}
+	for _, want := range []string{
+		`"slug" = _h`,                 // target join on etiquetas.slug (references of etiqueta_slug)
+		`"articulo_id" = _base."id"`,  // parent side: articulo_id has no references → id
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("m2m embed missing %q\nSQL: %s", want, sql)
+		}
+	}
+}
+
+// TestIncludeNestedHonorsReferences — depth-2: the nested embed resolves its own
+// FK references too (articulos.comentarios → comentarios.articulo_codigo =
+// articulos.codigo would need a codigo field; here nested autor under comentarios).
+func TestIncludeNestedHonorsReferences(t *testing.T) {
+	s := refTestSchema()
+	// comentarios needs a relation to embed under articulos.comentarios: reuse
+	// autor via a belongs_to on comentarios.
+	c := s.Resources["comentarios"]
+	c.Relations = map[string]schema.RelationDef{
+		"autor": {Type: "belongs_to", Target: "autores", FK: "autor_user"},
+	}
+	s.Resources["comentarios"] = c
+	sql, _, ierr := BuildListInclude("articulos", "comentarios.autor", "SELECT * FROM articulos", nil, "id", "ASC", s, schema.DefaultMaxIncludeDepth, allowAll)
+	if ierr != nil {
+		t.Fatalf("unexpected error: %v", ierr)
+	}
+	if !strings.Contains(sql, `"user_id" = _c`) {
+		t.Errorf("nested belongs_to embed must join on referenced user_id\nSQL: %s", sql)
+	}
+}
