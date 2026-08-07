@@ -3,6 +3,7 @@ package tenant_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/appximo/appximo/pkg/tenant"
@@ -147,5 +148,39 @@ func TestMiddlewareBareHosts_OtherHostsUnchanged(t *testing.T) {
 	rec2, tc2 := runBareMiddleware(nil, "acme.localhost")
 	if rec2.Code != http.StatusOK || tc2 == nil || tc2.ID != "acme" {
 		t.Errorf("nil bare must behave as TenantMiddleware, got code=%d tc=%+v", rec2.Code, tc2)
+	}
+}
+
+// TestRequireForTenantAPI pins T3: a tenant-scoped request whose Host names no
+// tenant is a NAMED 400 at the edge (it used to panic in MustFromCtx and mask
+// as a 500), while tenant-agnostic surfaces pass through untouched.
+func TestRequireForTenantAPI(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	h := tenant.MiddlewareWithBareHosts(nil)(tenant.RequireForTenantAPI(inner))
+
+	cases := []struct {
+		host, path string
+		want       int
+	}{
+		{"localhost:8080", "/api/notes", http.StatusBadRequest},   // T3: named, not 500
+		{"localhost:8080", "/graphql", http.StatusBadRequest},     // GraphQL too
+		{"localhost:8080", "/auth/login", http.StatusBadRequest},  // auth is tenant-scoped
+		{"localhost:8080", "/admin", http.StatusOK},               // tenant-agnostic passes
+		{"localhost:8080", "/healthz", http.StatusOK},             // probes pass
+		{"acme.localhost:8080", "/api/notes", http.StatusOK},      // a real tenant passes
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest(http.MethodGet, "http://x"+c.path, nil)
+		req.Host = c.host
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != c.want {
+			t.Fatalf("%s %s: status %d, want %d (body: %s)", c.host, c.path, rec.Code, c.want, rec.Body.String())
+		}
+		if c.want == http.StatusBadRequest && !strings.Contains(rec.Body.String(), "no tenant in host") {
+			t.Fatalf("%s %s: the 400 must NAME the problem, got: %s", c.host, c.path, rec.Body.String())
+		}
 	}
 }

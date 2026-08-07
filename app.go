@@ -1089,6 +1089,10 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 	// docs, console), not the phantom tenant its first label would suggest.
 	// Empty (single-engine) ⇒ identical to the historical TenantMiddleware.
 	r.Use(tenant.MiddlewareWithBareHosts(a.cfg.BareDomains))
+	// T3: a tenant-scoped request whose Host names no tenant is a NAMED 400 at
+	// the edge — it used to reach the handlers, panic in MustFromCtx and mask
+	// as a 500. Tenant-agnostic surfaces (/admin, /editor, /docs, probes) pass.
+	r.Use(tenant.RequireForTenantAPI)
 	r.Use(resilience.RateLimit(a.tenantLimiter))
 
 	tracePersistSem := make(chan struct{}, 64)

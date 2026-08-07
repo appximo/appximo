@@ -163,3 +163,35 @@ func truncateLabel(s string) string {
 	}
 	return string(r[:maxEchoedLabel]) + "…"
 }
+
+// RequireForTenantAPI answers the tenant-scoped surfaces (/api/*, /graphql,
+// /auth/*) with a NAMED 400 when the request carries no tenant — field report
+// T3: `curl localhost:8080/api/x` used to reach the generated handlers, panic
+// in MustFromCtx and surface as a masked `500 {"error":"internal error"}`,
+// blaming the server for a malformed request (ADR-024: a bad input is a named
+// 400, never a 500). Tenant-agnostic surfaces (/admin, /editor, /docs, probes,
+// the fleet console) keep passing through untouched, which is why the tenant
+// middleware itself must NOT reject a dotless host.
+//
+// Install it AFTER MiddlewareWithBareHosts in the chain.
+func RequireForTenantAPI(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		tenantScoped := strings.HasPrefix(p, "/api/") || p == "/graphql" || strings.HasPrefix(p, "/auth/")
+		if tenantScoped && FromCtx(r.Context()) == nil {
+			host := strings.ToLower(r.Host)
+			if idx := strings.LastIndex(host, ":"); idx != -1 {
+				host = host[:idx]
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+				"error": fmt.Sprintf(
+					"no tenant in host %q: this endpoint is tenant-scoped and the tenant is the host's first label — request it at <tenant>.<your-domain> (e.g. acme.localhost:8080), or send `-H \"Host: <tenant>.localhost\"`",
+					truncateLabel(host)),
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}

@@ -485,7 +485,7 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | **502 Bad Gateway** from Caddy | The engine is down or not on the expected port. `systemctl status appximo`; `journalctl -u appximo -n 50`. A bad schema fails boot loudly there. |
 | Engine **OOM-killed** / restarts under load | No `GOMEMLIMIT` on a small box. Set `GOMEMLIMIT=512MiB` (1 GB) in `/etc/appximo/appximo.env` and `systemctl restart appximo`. `dmesg | grep -i oom` confirms. |
 | `serve` exits immediately | Missing a required var (`DATABASE_URL`/`JWT_SECRET`/`ADMIN_KEY`) or Postgres unreachable. The log names which. Check `DATABASE_URL` and `systemctl status postgresql`. |
-| Registering a tenant returns an error about the tenant id | The id must match `^[a-z][a-z0-9_]{1,29}$` (it becomes a Postgres schema) — no hyphens/uppercase. |
+| Registering a tenant returns an error about the tenant id | The id must match `^[a-z][a-z0-9]{1,29}$` (it is BOTH the Postgres schema and the host's first label) — no hyphens, no underscores, no uppercase. |
 | Port already in use on boot | Another process on 8090 (or your `--port`). Find it with `ss -ltnp | grep :8090` and stop it, or pick another port. |
 
 Health endpoints for a probe/monitor (all unauthenticated): `/healthz`

@@ -18,7 +18,7 @@ import (
 // tenantIDRe is the LOOKUP/DELETE-side id guard (defence in depth before
 // interpolating a schema name — every use is Sanitize()-quoted anyway). It is
 // deliberately LOOSER than the creation rule (controlplane's tenantIDRe,
-// ^[a-z][a-z0-9_]{1,29}$): it still accepts hyphens so that legacy/broken
+// ^[a-z][a-z0-9]{1,29}$ — no underscores): it accepts hyphens/underscores so that legacy/broken
 // tenants created under the old permissive rule (e.g. "punto-gafas-v1", the
 // zombie bug) remain DELETABLE through the admin API and CLI. Do not tighten
 // it to the creation rule — that would strand exactly the tenants that most
