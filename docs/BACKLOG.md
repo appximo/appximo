@@ -26,7 +26,10 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-05 (HOUSEKEEPING-S1)** — the post-publication
+**Last reviewed: 2026-08-07 (FIELD-FEEDBACK-S1)** — the first third-party
+field evaluation answered end to end: 5 new items filed (ENG-36/37/38,
+OPS-21/22), OPS-20 refreshed with the session's Windows fixes, and the
+session's DONE block below. Previous review: 2026-08-05 (HOUSEKEEPING-S1) — the post-publication
 operational sweep: OPS-19 (repo unification), SCHEMA-6 (`is_null` shipped),
 SEC-6 (JWT_SECRET floor enforced) closed and moved to DONE; OPS-17 executed to
 the edge of Miguel's DNS (demos redeployed on post-rename binaries, Caddy sites
@@ -444,18 +447,97 @@ refreshed).
 
 ---
 
-### OPS-20 — The Windows path is written but UNVERIFIED
-- **Origin:** PHASE4-FIRST-MILE-S1. The release now cross-compiles a
-  `windows/amd64` .exe (CGO-free; unix-only signal/exec isolated behind build
-  tags — `fleet run` supervision and the engine self-restart are documented as
-  unsupported on Windows) and QUICKSTART.md documents the native path in
-  PowerShell — explicitly marked **NOT YET VERIFIED** (this project has no
-  Windows machine).
-- **Impact:** Medium — Windows developers are a real slice of the first mile;
-  an unverified path can burn exactly the users the quick start exists for.
-- **Ready:** the numbered Windows script (in the session report) executed on a
-  real Windows machine, discrepancies fixed, and the QUICKSTART section's
-  NOT-VERIFIED marker replaced with the verification date.
+### OPS-20 — The Windows path is written but UNVERIFIED (refreshed by FIELD-FEEDBACK-S1)
+- **Origin:** PHASE4-FIRST-MILE-S1; **refreshed 2026-08-07**: the first field
+  evaluation RAN Windows 11 and its findings drove real fixes — C1 (no more
+  per-invocation maxprocs stderr; PowerShell `$?` is trustworthy), F1/F1-bis
+  (the binary loads `.env`, BOM-tolerant), W1 (data under
+  `%LOCALAPPDATA%\Appximo`, never `C:\var`), W2 (`appximo gen-secret`), C5
+  (`version --json`). All are cross-compiled and unit-tested but **NOT
+  LIVE-VERIFIED on Windows** (this project has no Windows machine); the
+  numbered verification script for Miguel is in
+  docs/FIELD_FEEDBACK_RESPONSE.md §Windows.
+- **Impact:** Medium — Windows developers are a real slice of the first mile.
+- **Ready:** the numbered script executed on a real Windows machine,
+  discrepancies fixed, and QUICKSTART's NOT-VERIFIED marker replaced with the
+  verification date.
+
+---
+
+### ENG-36 — Warn when a tenant's stored schema diverges from the boot schema (B7 residual)
+- **Origin:** field report B7 (FEEDBACK.md): the tenant record was stale
+  relative to the boot schema (v2 without the `routes` grants added later),
+  so a Studio deploy — which correctly loads the RECORD — would have quietly
+  reverted live RBAC. B1's fix removed the two-process workaround that
+  CAUSED the divergence, and the operator rule is documented in `appximo
+  quickstart` §5 ("after changing the schema, run migrate — never only edit
+  the boot file"), but nothing DETECTS the state.
+- **Impact:** Medium. Two sources of truth by design (boot = served surface;
+  record = per-tenant migration state); a silent divergence turns the next
+  well-intentioned deploy into a revert.
+- **Ready:** at boot (and in Studio's deploy target list), a tenant whose
+  stored schema hash differs from the boot schema is flagged — a log line +
+  a visible marker in the deploy modal ("record differs from the running
+  surface — review the preview closely"), with zero hot-path cost.
+
+---
+
+### OPS-21 — `appximo files gc` (orphaned uploads collector — M8)
+- **Origin:** field report M8: `POST /api/files` runs before the referencing
+  record exists, so abandoned forms strand uploads forever (7 of 10 in the
+  evaluation). Behavior + the safe manual sweep are documented in
+  docs/FILES.md; no collector exists.
+- **Impact:** Low-Medium (disk growth on long-lived apps; confusing inventory).
+- **Ready:** `appximo files gc --tenant X --older-than 24h [--dry-run]`
+  deletes uploads not referenced by ANY `file`-typed column, grouping by
+  `sha256` (content-addressing means the blob may back other uploads — the
+  safe unit is "every id sharing the hash is orphaned"), dry-run first,
+  per-tenant, tested against attach/detach races.
+
+---
+
+### ENG-37 — The consumer dependency graph is disproportionate (B2 + D3)
+- **Origin:** field report B2/D3: `go mod tidy` on a two-endpoint backend
+  downloads >1.2 GB (full AWS SDK, gcloud, gRPC, Redis, OTel, MaxMind …) and
+  the binary is ~78 MB — almost all of it OPTIONAL-by-config features (S3,
+  Redis) every consumer compiles anyway.
+- **Impact:** Medium: first contact (15 cold minutes reads as a hang), CI
+  cost, image size. Not correctness.
+- **Ready:** the optional backends live behind build tags or submodules so the
+  default graph is core+pgx; measured module-download and binary-size deltas
+  published; ADR for the split (it changes the consumer contract).
+
+---
+
+### OPS-22 — Verify the D1/D2 release hardening at the next tag
+- **Origin:** FIELD-FEEDBACK-S1 implemented, in release.yml, the version-less
+  asset aliases (`releases/latest/download/appximo-<os>-<arch>` — D1) and the
+  keyless cosign signature over checksums.txt (trust anchor in Sigstore's
+  transparency log, not in the release — D2). A release workflow can only be
+  proven by a release; none has run since.
+- **Impact:** High for D2 (supply-chain trust for a binary that runs with DB
+  credentials), Low effort.
+- **Ready:** the next tag's release carries both asset name families +
+  `checksums.txt.sigstore.json`; the documented `cosign verify-blob` line
+  passes from a clean machine; then a one-line fetch installer (install.ps1 /
+  get.sh) can be written against the stable URLs (the rest of D1).
+
+---
+
+### ENG-38 — The first-10-minutes path (`appximo up`, `appximo new`, the embedded generic `/app`)
+- **Origin:** FEEDBACK.md §13, the evaluator's design proposal, grounded in a
+  measured ~1h30 from install to first visible record — of which the schema
+  (the product's core) took minutes and everything else was orchestrable
+  friction. The pieces exist (install.sh generates secrets + registers the
+  tenant with the schema in the body; ai-generate; the admin bootstrap; the
+  backoffice pattern is now examples/backoffice-guide + backoffice-spec):
+  `up` orchestrates them locally; `new` chains ai-generate→validate→up; the
+  generic `/app` is one more embedded bundle.
+- **Impact:** High for adoption; zero for existing users.
+- **Ready:** `appximo up --name x` on a clean box (Docker present) reaches
+  "API + /docs + /admin + /editor + /app live, credentials printed once" in
+  one command; `--json` output for agents; the §13 script's minute-marks
+  hold on a cold run. Needs Miguel's product sign-off on scope first.
 
 ## CLOSED (decided, with the reasoning written down)
 
@@ -483,6 +565,27 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in FIELD-FEEDBACK-S1 (2026-08-07)
+
+The first third-party field evaluation (FEEDBACK.md + PATRON-BACKOFFICE.md,
+appximo v0.1.2, Windows 11 + Ubuntu droplet, install→production <24h) answered
+finding by finding — the traceable response is
+[docs/FIELD_FEEDBACK_RESPONSE.md](FIELD_FEEDBACK_RESPONSE.md). Closed in code:
+**B1** (ADR-025 — the built SPA assets ship in the module; consumer binaries
+serve /admin+/editor complete, browser-verified; honest 503 when absent),
+**ST1/ST2** (Studio's deploy gate defers to the engine's own validator; the
+files grant renders in both RBAC forms), **M1** (hot-migrated columns
+filter/sort/search/aggregate without restart — the ENG-12 seam reused),
+**C1/F1/W1/W2/C5** (Windows first mile: clean stderr, real .env+BOM, platform
+paths, gen-secret, version --json), **T2/C6/B8** (`appximo quickstart` — the
+operations contract, printable; specs → five docs), **T3** (no-tenant host =
+named 400, was masked 500), **T1** (tenant-rule single source + pin test),
+**FE5/Part F** (x-appximo-references/file/transitions/virtual-resources in the
+OpenAPI), **Part G** (`appximo backoffice-spec` + examples/backoffice-guide,
+zero hardcoded domain knowledge, browser-verified), plus the medium/low sweep
+(S1-S4, C2-C4, F2, M2/M3/M7/M8-doc, B3-doc, FE1/FE4, I1/I2/I3, W3, D1/D2).
+Filed above: ENG-36, ENG-37, ENG-38, OPS-21, OPS-22; OPS-20 refreshed.
 
 ## DONE in PHASE4-FIRST-MILE-S1 (2026-08-05)
 

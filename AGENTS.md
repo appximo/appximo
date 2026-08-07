@@ -41,7 +41,7 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   ./appximo serve --schema examples/quickstart/schema.json --port 8080
 ```
 
-- All three env vars are hard-required — `serve` exits without them. `JWT_SECRET` additionally has an **enforced 32-character floor** (SEC-6, 2026-08-05): a shorter secret refuses to boot, naming the variable, the length it got and the floor; `appximo token` warns on a short `--secret` (the token would be rejected by any bootable engine).
+- All three env vars are hard-required — `serve` exits without them, naming every missing one. A **`.env` in the working directory is loaded automatically** (FIELD-FEEDBACK-S1 F1: stdlib parser, no new dependency; the real environment always wins; a Windows-editor BOM is stripped — F1-bis; wired into every CLI subcommand AND `ParseServeArgs`, so consumer binaries behave identically). `JWT_SECRET` additionally has an **enforced 32-character floor** (SEC-6, 2026-08-05): a shorter secret refuses to boot, naming the variable, the length it got and the floor; `appximo token` warns on a short `--secret` (the token would be rejected by any bootable engine). Generate secrets with `appximo gen-secret` (any platform, no openssl).
 - Do NOT use `make run` / `go run ./cmd/appximo/main.go`: passing the
   file compiles *only* `main.go`, producing a binary with **zero
   subcommands** (no `serve`). Use the package path:
@@ -168,15 +168,29 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   `CacheControlImmutable` is safe whenever the URL embeds the file id, because
   the store is content-addressed; sent only on the success path, never on the
   404)),
-  `specs` (THIRD-PARTY-READY-S1: prints the WHOLE trilogy —
-  spec + backend-spec + frontend-spec — in one stream with banners, for the
-  one-paste agent priming; pure concatenation of the three single sources, so
-  it can never diverge. The root `appximo --help` and each spec's header now
-  name the trilogy — the discoverability fix: nobody has to be told the three
-  commands exist),
+  `backoffice-spec` (FIELD-FEEDBACK-S1 Part G: the FOURTH build doc —
+  docs/BACKOFFICE_SPEC_LLM.md embedded in `backofficespec.go` — a complete
+  admin CRUD UI generated at runtime from /openapi.json, zero
+  resource-specific screens, powered by the Part-F `x-appximo-*` extensions
+  so it needs NO hardcoded domain knowledge; runnable proof
+  examples/backoffice-guide/, browser-verified),
+  `quickstart` (alias `lifecycle-spec`; FIELD-FEEDBACK-S1 T2/C6/B8: the
+  OPERATE side — docs/LIFECYCLE_SPEC_LLM.md embedded in `lifecyclespec.go` —
+  install/.env, boot, TENANT REGISTRATION as step 1 (the schema travels in
+  the body), the FIRST-ADMIN bootstrap as step 2, where users come from,
+  hot-vs-restart truth, production, the field-verified operator traps; the
+  first evaluation had to de-minify a JS bundle to find step 1),
+  `specs` (THIRD-PARTY-READY-S1, grown to FIVE in FIELD-FEEDBACK-S1: prints
+  spec + backend-spec + frontend-spec + backoffice-spec + quickstart in one
+  stream with banners, for the one-paste agent priming; pure concatenation of
+  the five single sources, so it can never diverge. The root `appximo --help`
+  and each spec's header name all five),
+  `gen-secret` (W2: a crypto-random hex secret on any platform — the config
+  errors point at it instead of assuming openssl; `--bytes N`),
   `blueprints list` (lists schema files in a local `blueprints/` dir),
   `version` (prints the ldflags-injected build version; "dev" on a plain
-  local build — releases and published images carry their tag),
+  local build — releases and published images carry their tag; `--json` for
+  CI pinning),
   `fleet run|serve|status` (ONE server, N DISTINCT apps from a `fleet.json`
   manifest, TWO runtimes. `run` = MT-STRUCT-S1 multi-process: one engine
   process per app, supervised (restart-on-EXIT-only, reconciled with the
@@ -1342,8 +1356,11 @@ Facts agents most often get wrong:
 
 - **Tenant = Host header.** Every data-plane request needs
   `Host: acme.localhost` (or a real subdomain). Host of a different
-  tenant → 401 `token tenant mismatch`; Host with no subdomain (bare
-  IP/`localhost`) → 500. The host is matched
+  tenant → 401 `token tenant mismatch`; Host with no subdomain
+  (`localhost`) → **400 naming the problem and the fix** (`no tenant in host
+  "localhost"…` — T3; it used to panic in MustFromCtx and mask as a 500),
+  while tenant-agnostic surfaces (/admin, /editor, /docs, probes) pass. The
+  host is matched
   **case-insensitively** (RFC 9110 §4.2.3), so `ACME.localhost` resolves to the
   same tenant and the same `tenant_acme` schema; an invalid label is a 400 that
   names the label, the host and the rule (ADR-024 — it used to be a bare
@@ -1384,12 +1401,17 @@ Facts agents most often get wrong:
   file: `PATCH` → 200, same PID, no restart (AI-JOURNEY-S1 had measured the
   OPPOSITE — the write path then validated only against boot — and that
   restriction is what AUTHORING-GAPS-S1 removed; docs/AUTHORING_JOURNEY.md 5-6
-  records both halves). **Still restart-gated, and the engine now says so:** a
+  records both halves). Since FIELD-FEEDBACK-S1 (M1) the READ path's query
+  validation resolves the SAME deployed surface (`codegen.readSurface`, one
+  seam): a hot-migrated column also **filters/sorts/searches/aggregates hot**
+  — before, the data saved fine while `?filter[new_field]=` answered 400 until
+  a restart, the silent kind of divergence. **Still restart-gated, and the
+  engine now says so:** a
   NEW RESOURCE (its routes/GraphQL type/docs don't exist in the process — the
   API answers `resource_not_loaded` with the reason and the fix, not a bare
   404), GraphQL input types (a new field is not an argument the boot-compiled
-  mutation parses), and everything else derived from the schema DEFINITION —
-  filters/sort on the new field, `/docs`, RBAC, hooks — activates on a restart
+  mutation parses), and the rest derived from the schema DEFINITION —
+  `/docs`, RBAC, hooks, relations — activates on a restart
   with the new schema — one click from the editor since UI-F4-S2 (graceful
   self-restart via `POST /admin/engine/schema`). The full verified model:
   [docs/MENTAL_MODEL.md](docs/MENTAL_MODEL.md).
@@ -1685,7 +1707,18 @@ plus an interactive explorer — no flag needed:
   summary, auth mode (`x-public: true` + `security: []` for a Public route;
   otherwise Bearer + the RBAC segment/action named in the description),
   `x-required-role`, `x-byte-serving`, all flagged
-  `x-appximo-custom-route: true`. Request/response SHAPES are deliberately
+  `x-appximo-custom-route: true`. Since FIELD-FEEDBACK-S1 (Part F) the
+  component property schemas ALSO carry what a generic tool needs:
+  `x-appximo-relation` + `x-appximo-references` (the FK's target column,
+  defaulted to `id` — the $user_id pattern's non-id FKs were every generic
+  tool's blind spot), `x-appximo-file` (+`x-appximo-accept`/
+  `x-appximo-max-bytes` — a file field used to be byte-identical to a FK),
+  and `x-appximo-initial`/`x-appximo-transitions` (the state machine, terminal
+  states present with an empty list); the document root declares
+  `x-appximo-virtual-resources` (the built-in `files` store + its RBAC action
+  vocabulary, gated when shadowed) and the /api/files operations are tagged
+  `x-appximo-virtual-resource`. Filter query parameters stay extension-free.
+  Request/response SHAPES are deliberately
   NOT published (a Go handler declares none — the app's contract sheet stays
   the authority for shapes; the OpenAPI is the authority for EXISTENCE). The
   CLI `appximo openapi <schema>` prints the schema-derived half only (a

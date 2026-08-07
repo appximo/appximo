@@ -203,6 +203,12 @@ from it — §4.1):
 
 ```js
 // vite.config.js
+// FE1: the import is from '@sveltejs/kit/vite' — NOT from
+// '@sveltejs/vite-plugin-svelte' (which §2's dependency list also installs;
+// guessing that one is an immediate "does not provide an export named
+// 'sveltekit'" build error).
+import { sveltekit } from '@sveltejs/kit/vite';
+
 export default {
   plugins: [sveltekit()],
   server: {
