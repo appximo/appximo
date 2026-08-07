@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,4 +113,96 @@ func TestExampleCurlShape(t *testing.T) {
 	if strings.Contains(c2, "-d '") {
 		t.Fatalf("required uuid relation cannot be fabricated — expected a GET example, got: %s", c2)
 	}
+}
+
+// TestReconcileSchema pins the PUBLIC-SURFACE-S1 Part C contract: a re-run of
+// `up` over an existing tenant NEVER reports success while silently keeping an
+// older registered schema. Same schema → "unchanged" with no write; changed →
+// migrated through PUT /tenants/{id}/schema (gated drops passed through);
+// failed migration → an error naming the way out.
+func TestReconcileSchema(t *testing.T) {
+	local := []byte(`{"$schema":"https://appximo.com/schema/v1","version":"1","resources":{"tasks":{"fields":{"title":{"type":"string","minLength":1}}}}}`)
+	reordered := []byte(`{"version":"1","$schema":"https://appximo.com/schema/v1","resources":{"tasks":{"fields":{"title":{"minLength":1,"type":"string"}}}}}`)
+	older := []byte(`{"$schema":"https://appximo.com/schema/v1","version":"1","resources":{"tasks":{"fields":{"title":{"type":"string"}}}}}`)
+
+	t.Run("unchanged means no PUT", func(t *testing.T) {
+		var putCalled bool
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				w.Write(reordered) // key order differs — still the same schema
+			case http.MethodPut:
+				putCalled = true
+			}
+		}))
+		defer srv.Close()
+		rec, err := reconcileSchema(srv.URL, "k", "acme", "schema.json", local)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if rec.state != "unchanged" || putCalled {
+			t.Fatalf("want unchanged with no PUT, got state=%q putCalled=%v", rec.state, putCalled)
+		}
+	})
+
+	t.Run("changed migrates and reports gated drops", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				w.Write(older)
+			case http.MethodPut:
+				var body struct {
+					Schema json.RawMessage `json:"schema"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Schema) == 0 {
+					t.Errorf("PUT body must carry the schema: %v", err)
+				}
+				w.Write([]byte(`{"status":"migration_queued","gated_drops":["tasks.old_col"]}`))
+			}
+		}))
+		defer srv.Close()
+		rec, err := reconcileSchema(srv.URL, "k", "acme", "schema.json", local)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if rec.state != "migrated" || len(rec.gated) != 1 || rec.gated[0] != "tasks.old_col" {
+			t.Fatalf("want migrated with the gated drop, got %+v", rec)
+		}
+	})
+
+	t.Run("failed migration is a loud error, never ok", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				w.Write(older)
+			case http.MethodPut:
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(`{"error":"internal error"}`))
+			}
+		}))
+		defer srv.Close()
+		_, err := reconcileSchema(srv.URL, "k", "acme", "schema.json", local)
+		if err == nil {
+			t.Fatal("a failed migration must be an error")
+		}
+		if !strings.Contains(err.Error(), "appximo migrate") {
+			t.Fatalf("the error must name the way out, got: %v", err)
+		}
+	})
+
+	t.Run("tenant with no stored schema migrates", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				w.Write([]byte("null"))
+			case http.MethodPut:
+				w.Write([]byte(`{"status":"migration_queued"}`))
+			}
+		}))
+		defer srv.Close()
+		rec, err := reconcileSchema(srv.URL, "k", "acme", "schema.json", local)
+		if err != nil || rec.state != "migrated" {
+			t.Fatalf("want migrated, got %+v err=%v", rec, err)
+		}
+	})
 }

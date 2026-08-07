@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -93,6 +94,15 @@ type upPostgres struct {
 type upTenant struct {
 	ID      string `json:"id"`
 	Created bool   `json:"created"` // false = it already existed (reused)
+	// Schema says what happened to the tenant's REGISTERED schema this run:
+	// "registered" (new tenant), "unchanged" (schema.json matches it), or
+	// "migrated" (it differed and was migrated — PUBLIC-SURFACE-S1 Part C: a
+	// re-run must never answer ok:true while serving an older schema silently).
+	Schema string `json:"schema,omitempty"`
+	// GatedDrops lists destructive drops the migration left gated (a removed
+	// field/resource whose data would be lost) — approve them explicitly with
+	// `appximo migrate --approve-drops`; nothing was lost.
+	GatedDrops []string `json:"gated_drops,omitempty"`
 }
 
 type upSmoke struct {
@@ -122,7 +132,11 @@ var upCmd = &cobra.Command{
 
 One question block at the start (Postgres? name?) — nothing after that. In a
 non-interactive shell (or with --yes) there are no questions: defaults apply.
-Running it twice is safe: everything already created is detected and reused.
+Running it twice is safe: everything already created is detected and reused,
+and a CHANGED schema.json is migrated to the tenant (additive changes apply
+live; a destructive drop is never auto-approved — it stays gated and the card
+prints the exact "appximo migrate --approve-drops" command). A migration that
+fails is a loud failure, never an ok over the old schema.
 --json prints the card as ONE JSON object on stdout (progress goes to stderr).
 
 Stop the server with Ctrl+C. Stop the Docker Postgres too: appximo down.`,
@@ -350,10 +364,33 @@ func runUp(opts upOptions) error {
 		}
 		res.Tenant.Created = created
 		if created {
+			res.Tenant.Schema = "registered"
 			step("tenant %q registered with the schema — its tables were just created", opts.Name)
 		} else {
 			step("tenant %q already registered — reusing it", opts.Name)
-			note("(schema changes are NOT auto-applied on re-run: appximo migrate --tenant %s --schema %s)", opts.Name, schemaPath)
+			// PUBLIC-SURFACE-S1 Part C: an existing tenant's REGISTERED schema is
+			// the surface the engine serves (deployed wins over boot), so a changed
+			// schema.json silently kept meant `ok: true` over the OLD rules — the
+			// accepted-and-continues class, in the newest command. Reconcile: same
+			// schema → say so; changed → migrate through the same additive-with-
+			// gated-drops path `appximo migrate` uses; failure → loud, never ok.
+			rec, rerr := reconcileSchema(fmt.Sprintf("http://127.0.0.1:%d", controlPort), adminKey, opts.Name, schemaPath, schemaRaw)
+			if rerr != nil {
+				fail(rerr)
+			}
+			res.Tenant.Schema = rec.state
+			res.Tenant.GatedDrops = rec.gated
+			switch {
+			case rec.state == "unchanged":
+				step("schema.json matches the registered schema — nothing to migrate")
+			case len(rec.gated) > 0:
+				step("schema.json changed — additive changes migrated live")
+				note("⚠ %d destructive drop(s) stay GATED (no data was lost): %s", len(rec.gated), strings.Join(rec.gated, ", "))
+				note("  review impact: appximo migrate --tenant %s --schema %s --dry-run", opts.Name, schemaPath)
+				note("  then approve:  appximo migrate --tenant %s --schema %s --approve-drops '%s'", opts.Name, schemaPath, strings.Join(rec.gated, ","))
+			default:
+				step("schema.json changed — migrated to the registered tenant (tables + live surface updated)")
+			}
 		}
 
 		// 2. First admin (B8): the /admin bootstrap route, key-gated. 409 = an
@@ -685,6 +722,59 @@ func registerTenant(controlPort int, adminKey, name, email string, schemaRaw []b
 	default:
 		return false, fmt.Errorf("register tenant %q failed (%d): %s", name, status, firstLine(string(respBody)))
 	}
+}
+
+// schemaReconcile is the verdict of comparing schema.json against the tenant's
+// REGISTERED schema on a re-run: "unchanged" (nothing to do) or "migrated" (the
+// PUT ran; gated lists any destructive drops that stayed gated — no data lost).
+type schemaReconcile struct {
+	state string
+	gated []string
+}
+
+// schemasEquivalent compares two schema documents structurally (key order and
+// whitespace are serialization noise, not schema changes).
+func schemasEquivalent(a, b []byte) bool {
+	var av, bv any
+	if json.Unmarshal(a, &av) != nil || json.Unmarshal(b, &bv) != nil {
+		return false
+	}
+	return reflect.DeepEqual(av, bv)
+}
+
+// reconcileSchema makes a re-run honest about the schema (PUBLIC-SURFACE-S1
+// Part C): it reads the tenant's registered schema back from the control plane
+// and, when schema.json differs, applies it through the SAME PUT
+// /tenants/{id}/schema migration path `appximo migrate` drives (additive
+// applies live + notifies the running engine; destructive drops stay gated and
+// are reported, never auto-approved). Any failure is an error the caller must
+// surface — a changed schema silently kept behind `ok: true` is the bug this
+// closes.
+func reconcileSchema(baseURL, adminKey, name, schemaPath string, schemaRaw []byte) (schemaReconcile, error) {
+	hdr := map[string]string{"X-Admin-Key": adminKey}
+	status, stored, err := doJSON(http.MethodGet, fmt.Sprintf("%s/tenants/%s/schema", baseURL, name), hdr, nil)
+	if err != nil {
+		return schemaReconcile{}, fmt.Errorf("read the tenant's registered schema: %v", err)
+	}
+	if status == http.StatusOK && schemasEquivalent(stored, schemaRaw) {
+		return schemaReconcile{state: "unchanged"}, nil
+	}
+
+	putBody, _ := json.Marshal(map[string]any{"schema": json.RawMessage(schemaRaw)})
+	status, resp, err := doJSON(http.MethodPut, fmt.Sprintf("%s/tenants/%s/schema", baseURL, name), hdr, putBody)
+	if err != nil {
+		return schemaReconcile{}, fmt.Errorf("migrate the changed schema: %v", err)
+	}
+	if status != http.StatusOK {
+		return schemaReconcile{}, fmt.Errorf(
+			"schema.json differs from the registered schema and the migration FAILED (%d): %s — the tenant keeps its previous schema; fix the schema, or inspect with: appximo migrate --tenant %s --schema %s --dry-run",
+			status, firstLine(string(resp)), name, schemaPath)
+	}
+	var out struct {
+		Gated []string `json:"gated_drops"`
+	}
+	_ = json.Unmarshal(resp, &out)
+	return schemaReconcile{state: "migrated", gated: out.Gated}, nil
 }
 
 func bootstrapAdmin(port int, adminKey, email, password string) (createdNow bool, err error) {

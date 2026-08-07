@@ -58,8 +58,12 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   the token mint), smoke-verifies one real request through the full chain, and
   prints the card (URLs incl. `/app`, credentials ONCE, dev token, a curl that
   works). ONE question block at the start (TTY only; `--yes`/`--json` skip);
-  idempotent re-runs (everything existing is detected + reused; the schema is
-  NOT re-applied — `migrate` does that); every failure names the problem AND
+  idempotent re-runs (everything existing is detected + reused; a CHANGED
+  schema.json is reconciled — unchanged says so, changed migrates through the
+  same PUT /tenants/{id}/schema path `migrate` uses, destructive drops stay
+  gated with the exact approve command printed, a failed migration is a loud
+  failure — never `ok: true` over the old schema, PUBLIC-SURFACE-S1 Part C);
+  every failure names the problem AND
   the way out. `--json` = the machine card: stdout carries EXACTLY one JSON
   object (progress/logs → stderr; `Config.BannerWriter` +
   `logging.SetDefaultWriter` are the seams). `appximo down` stops/removes the

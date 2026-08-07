@@ -161,10 +161,14 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: myapp.localhost' http://local
 
 **Run it twice, nothing breaks:** `up` detects and reuses everything it already
 created (the `.env`, the container, the tenant, the admin — the card then says
-`already registered — reusing`). The schema is NOT re-applied on re-run; to
-apply schema edits use `appximo migrate --tenant myapp --schema schema.json`
-(§9). Stop the server with Ctrl+C; `appximo down` stops the Docker Postgres too
-(data volume kept — `--destroy-data` removes it, irreversibly).
+`already registered — reusing`), and it compares your `schema.json` against the
+tenant's registered schema: unchanged → it says so; changed → it migrates
+(additive changes apply live, a destructive drop is never auto-approved — it
+stays gated and the card prints the exact `appximo migrate --approve-drops`
+command); a failed migration is a loud failure, never an `ok` over the old
+schema. `appximo migrate` (§9) remains the explicit tool for dry-runs and
+approving drops. Stop the server with Ctrl+C; `appximo down` stops the Docker
+Postgres too (data volume kept — `--destroy-data` removes it, irreversibly).
 
 **For machines:** `appximo up --json` prints the whole card as ONE JSON object
 on stdout (URLs, credentials, token, files written, postgres details, the smoke
