@@ -44,6 +44,8 @@ benchmarks/
 docs/
 !docs/BACKEND_SPEC_LLM.md
 !docs/FRONTEND_SPEC_LLM.md
+!docs/BACKOFFICE_SPEC_LLM.md
+!docs/LIFECYCLE_SPEC_LLM.md
 
 # Local env / secrets (never send to the build)
 .env
