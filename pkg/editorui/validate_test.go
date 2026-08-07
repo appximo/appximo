@@ -131,3 +131,63 @@ func TestMetaSchemaRoute(t *testing.T) {
 		t.Error("served meta-schema differs from schema.MetaSchemaJSON()")
 	}
 }
+
+// TestValidateRouteFilesGrant pins the ST1 contract: the deploy gate's judge is
+// this endpoint (the engine's own schema.Validate), and it ACCEPTS the built-in
+// `files` grant that frontend-spec §7.1 orders declared — in BOTH RBAC forms.
+// Studio's old client-side mirror rejected it ("permission over unknown resource
+// \"files\"") and pushed users to delete a grant that live uploads depend on.
+func TestValidateRouteFilesGrant(t *testing.T) {
+	r := newTestRouter(t)
+	body := `{
+		"$schema": "https://appximo.com/schema/v1",
+		"version": "1",
+		"name": "files-grant",
+		"resources": {
+			"miembros": { "fields": { "nombre": { "type": "string", "required": true },
+				"foto": { "type": "file" } } }
+		},
+		"rbac": { "roles": {
+			"miembro":    { "permissions": {
+				"miembros": { "actions": ["read"] },
+				"files":    { "actions": ["read", "create"] } } },
+			"recepcion":  { "resources": ["miembros", "files"], "actions": ["read", "create"] }
+		} }
+	}`
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/editor/validate", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var rep schema.ValidationReport
+	if err := json.Unmarshal(rec.Body.Bytes(), &rep); err != nil {
+		t.Fatalf("response is not a ValidationReport: %v", err)
+	}
+	if !rep.Valid || len(rep.Errors) != 0 {
+		t.Fatalf("the files grant must validate (both forms): %+v", rep.Errors)
+	}
+
+	// And the actions-only rule still holds: a files grant with conditions is
+	// rejected with the named rule, not accepted silently.
+	bad := strings.Replace(body,
+		`"files":    { "actions": ["read", "create"] }`,
+		`"files":    { "actions": ["read"], "conditions": { "field": "id", "op": "eq", "val": "$user_id" } }`, 1)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/editor/validate", strings.NewReader(bad)))
+	var rep2 schema.ValidationReport
+	if err := json.Unmarshal(rec.Body.Bytes(), &rep2); err != nil {
+		t.Fatalf("response is not a ValidationReport: %v", err)
+	}
+	if rep2.Valid {
+		t.Fatal("a files grant with conditions must be rejected (files_grant_actions_only)")
+	}
+	found := false
+	for _, e := range rep2.Errors {
+		if e.Rule == "files_grant_actions_only" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected rule files_grant_actions_only, got: %+v", rep2.Errors)
+	}
+}

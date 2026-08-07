@@ -8,6 +8,7 @@
 // again (the safe trade-off). Designing needs no auth; deploying does.
 
 import { adminApi, ApiError, type CreateTenantBody } from '../api/admin';
+import { validateSchemaText } from '../codeview/validateApi';
 import type { Preview, TenantInfo } from '../types/deploy';
 import type { APISchema } from '../types/schema';
 import { editor } from './editor.svelte';
@@ -419,11 +420,37 @@ class DeployStore {
 		this.error = null;
 		this.fieldErrors = [];
 
-		const issues = editor.validate();
-		if (issues.length > 0) {
-			this.fieldErrors = issues;
-			this.error = 'fix these before deploying';
-			return;
+		// THE GATE IS THE ENGINE'S OWN VALIDATOR (ST1): the schema is judged by
+		// POST /editor/validate — the same schema.Validate the CLI, the boot and
+		// the deploy APIs run — so the Deploy button can never disagree with the
+		// engine again (it used to reject the legal built-in `files` grant that
+		// frontend-spec §7.1 orders declared, pushing users to DELETE it). The
+		// local mirror (editor.validate()) is live-hint UX only; it blocks a
+		// deploy solely as a fallback when the engine is unreachable.
+		this.busy = true;
+		let report: { valid: boolean; errors: { path: string; message: string }[] } | null = null;
+		try {
+			report = await validateSchemaText(JSON.stringify(editor.toSchema()));
+		} catch {
+			report = null; // engine unreachable — fall back to the local mirror below
+		} finally {
+			this.busy = false;
+		}
+		if (report) {
+			if (!report.valid) {
+				this.fieldErrors = report.errors.map((e) =>
+					e.path && e.path !== '$' ? `${e.path}: ${e.message}` : e.message
+				);
+				this.error = 'fix these before deploying';
+				return;
+			}
+		} else {
+			const issues = editor.validate();
+			if (issues.length > 0) {
+				this.fieldErrors = issues;
+				this.error = 'fix these before deploying';
+				return;
+			}
 		}
 
 		// Learn which resources the engine serves live, so the preview can honestly
@@ -433,9 +460,13 @@ class DeployStore {
 		if (this.mode === 'new') {
 			const id = this.newId.trim();
 			if (!TENANT_ID_RE.test(id)) {
+				// One source for the message: tenantIdIssue names the actual cause
+				// (T1: a hand-written copy of the rule here claimed '_' was legal —
+				// the exact opposite of the API's verdict — and diverged silently).
 				const s = suggestTenantId(id);
 				this.error =
-					"tenant id must be 2–30 chars: a lowercase letter first, then lowercase letters, digits or '_' (no hyphens/uppercase/spaces)" +
+					(tenantIdIssue(id) ??
+						'tenant id must be 2–30 chars: a lowercase letter, then lowercase letters or digits.') +
 					(s && s !== id ? ` — try "${s}"` : '');
 				return;
 			}

@@ -146,6 +146,17 @@ class EditorStore {
 	getEntityByName(name: string): EntityModel | undefined {
 		return this.entities.find((e) => e.name === name);
 	}
+	/** Virtual engine resources grantable in RBAC — today only the built-in
+	 *  `files` store, valid unless shadowed by a real schema resource. Mirrors
+	 *  the engine authority (pkg/schema/validator.go validateRBAC); ST1 was this
+	 *  exemption missing here while the deploy button trusted the local mirror. */
+	isVirtualResource(name: string): boolean {
+		return name === 'files' && !this.getEntityByName(name);
+	}
+	/** Resource names offerable in RBAC pickers: entities + the virtual store. */
+	get rbacResourceNames(): string[] {
+		return this.isVirtualResource('files') ? [...this.entityNames, 'files'] : this.entityNames;
+	}
 
 	private bump() {
 		this.revision++;
@@ -1107,7 +1118,7 @@ class EditorStore {
 
 	addPermission(roleName: string, resource: string) {
 		const role = this.rbac.roles[roleName];
-		if (!role || !this.getEntityByName(resource)) return;
+		if (!role || (!this.getEntityByName(resource) && !this.isVirtualResource(resource))) return;
 		if (!role.permissions) role.permissions = {};
 		if (role.permissions[resource]) return;
 		// First permission commits the role to per-resource — drop role-global keys
@@ -1134,8 +1145,14 @@ class EditorStore {
 		const actions = role.actions && role.actions.length > 0 ? [...role.actions] : ['read'];
 		const perms: Record<string, ResourcePermission> = {};
 		for (const res of this.roleResourceNames(role)) {
-			const valid = this.fieldNamesForResource(res);
 			const p: ResourcePermission = { actions: [...actions] };
+			if (this.isVirtualResource(res)) {
+				// The built-in files grant takes actions only — never carry
+				// conditions/fields onto it (the engine rejects them).
+				perms[res] = p;
+				continue;
+			}
+			const valid = this.fieldNamesForResource(res);
 			if (role.conditions?.field && valid.includes(role.conditions.field)) {
 				p.conditions = { field: role.conditions.field, op: 'eq', val: role.conditions.val };
 			}
@@ -1147,10 +1164,12 @@ class EditorStore {
 		this.bump();
 	}
 
-	/** Resource names a role-global role applies to ('*' → every entity). */
+	/** Resource names a role-global role applies to ('*' → every entity). A
+	 *  virtual resource (the built-in `files` store) is kept, not filtered out —
+	 *  dropping it silently was ST2. */
 	roleResourceNames(role: RolePolicy): string[] {
 		if (role.resources === '*') return this.entities.map((e) => e.name);
-		if (Array.isArray(role.resources)) return role.resources.filter((r) => !!this.getEntityByName(r));
+		if (Array.isArray(role.resources)) return role.resources.filter((r) => !!this.getEntityByName(r) || this.isVirtualResource(r));
 		return [];
 	}
 
@@ -1240,6 +1259,16 @@ class EditorStore {
 					out.push(`role "${name}": mixes per-resource and role-global keys — use one form`);
 				}
 				for (const [res, p] of Object.entries(perms)) {
+					if (this.isVirtualResource(res)) {
+						// The built-in "files" grant takes actions only — mirrors the
+						// engine's files_grant_actions_only rule.
+						if (!p.actions || p.actions.length === 0) out.push(`role "${name}" / ${res}: needs at least one action`);
+						for (const a of p.actions ?? []) if (!actions.includes(a)) out.push(`role "${name}" / ${res}: unknown action "${a}"`);
+						if (p.conditions || p.condition_actions || p.fields) {
+							out.push(`role "${name}" / ${res}: the built-in "files" grant takes actions only (no conditions/fields)`);
+						}
+						continue;
+					}
 					if (!this.getEntityByName(res)) {
 						out.push(`role "${name}": permission over unknown resource "${res}"`);
 						continue;

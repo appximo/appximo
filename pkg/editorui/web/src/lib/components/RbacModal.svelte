@@ -127,12 +127,14 @@
 		const cur = new Set(Array.isArray(r.resources) ? r.resources : []);
 		if (on) cur.add(name);
 		else cur.delete(name);
-		r.resources = editor.entityNames.filter((n) => cur.has(n));
+		// rbacResourceNames keeps the virtual `files` store — filtering through
+		// entityNames silently dropped a legal grant (ST2).
+		r.resources = editor.rbacResourceNames.filter((n) => cur.has(n));
 		editor.touch();
 	}
 
 	const grantedResources = $derived(role?.permissions ? Object.keys(role.permissions) : []);
-	const addableResources = $derived(editor.entityNames.filter((n) => !grantedResources.includes(n)));
+	const addableResources = $derived(editor.rbacResourceNames.filter((n) => !grantedResources.includes(n)));
 	let addRes = $state('');
 	function doAddPermission() {
 		if (active && addRes) {
@@ -293,14 +295,19 @@
 							<div class="form-tag">Per-resource permissions</div>
 							{#each grantedResources as res (res)}
 								{@const perm = role.permissions![res]}
+								{@const virtual = editor.isVirtualResource(res)}
 								<div class="grant">
 									<div class="grant-head">
-										<span class="grant-res">{res}</span>
+										<span class="grant-res">{res}{#if virtual}<span class="muted"> (built-in file store)</span>{/if}</span>
 										<button class="btn subtle xs" onclick={() => editor.removePermission(active!, res)}>remove</button>
 									</div>
 									<div class="grant-row"><span class="grow-lbl">can</span>{@render actionBoxes(perm)}</div>
-									<div class="grant-row">{@render conditionEditor(perm, editor.fieldNamesForResource(res), perm)}</div>
-									<div class="grant-row">{@render fieldAllowlist(perm, editor.fieldNamesForResource(res))}</div>
+									{#if virtual}
+										<div class="grant-row muted">actions only — the engine's file store has no row conditions or field allowlists</div>
+									{:else}
+										<div class="grant-row">{@render conditionEditor(perm, editor.fieldNamesForResource(res), perm)}</div>
+										<div class="grant-row">{@render fieldAllowlist(perm, editor.fieldNamesForResource(res))}</div>
+									{/if}
 								</div>
 							{/each}
 							{#if grantedResources.length === 0}
@@ -330,8 +337,8 @@
 								</div>
 								{#if role.resources !== '*'}
 									<div class="grant-row res-grid">
-										{#each editor.entityNames as n}
-											<label class="chk sm"><input type="checkbox" checked={resChecked(role, n)} onchange={(e) => toggleRes(role, n, e.currentTarget.checked)} /> {n}</label>
+										{#each editor.rbacResourceNames as n}
+											<label class="chk sm"><input type="checkbox" checked={resChecked(role, n)} onchange={(e) => toggleRes(role, n, e.currentTarget.checked)} /> {n}{#if editor.isVirtualResource(n)}<span class="muted"> ⬡</span>{/if}</label>
 										{/each}
 									</div>
 								{/if}
