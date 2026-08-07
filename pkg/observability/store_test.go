@@ -96,8 +96,8 @@ func TestStore_EmptyPathUsesPersistentDefault(t *testing.T) {
 	// must survive a restart out of the box). Asserted on the pure resolver so the
 	// test never writes to the real system path.
 	got := resolveObsDBPath("")
-	if got != defaultObsDBPath {
-		t.Fatalf("resolveObsDBPath(\"\") = %q, want %q", got, defaultObsDBPath)
+	if got != defaultObsDBPath() {
+		t.Fatalf("resolveObsDBPath(\"\") = %q, want %q", got, defaultObsDBPath())
 	}
 	if got == "/tmp/obs.db" || strings.HasPrefix(got, "/tmp/") {
 		t.Errorf("default obs path %q is ephemeral (under /tmp) — R1 regression", got)

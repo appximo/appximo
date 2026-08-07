@@ -45,6 +45,7 @@ import (
 	"github.com/appximo/appximo/pkg/observability"
 	"github.com/appximo/appximo/pkg/outbox"
 	"github.com/appximo/appximo/pkg/platformadmin"
+	"github.com/appximo/appximo/pkg/platformpath"
 	"github.com/appximo/appximo/pkg/rbac"
 	"github.com/appximo/appximo/pkg/resilience"
 	"github.com/appximo/appximo/pkg/schema"
@@ -199,14 +200,16 @@ func New(cfg Config) (*App, error) {
 	}
 	if cfg.JWTSecret == "" {
 		missing = append(missing,
-			"  JWT_SECRET   — signs every auth token; any random value of 32+ characters. Generate one: openssl rand -hex 32 (or set Config.JWTSecret)")
+			"  JWT_SECRET   — signs every auth token; any random value of 32+ characters. Generate one: appximo gen-secret (or openssl rand -hex 32, or set Config.JWTSecret)")
 	}
 	if cfg.AdminKey == "" {
 		missing = append(missing,
-			"  ADMIN_KEY    — protects tenant registration and the first-admin bootstrap. Generate one: openssl rand -hex 16 (or set Config.AdminKey)")
+			"  ADMIN_KEY    — protects tenant registration and the first-admin bootstrap. Generate one: appximo gen-secret --bytes 16 (or set Config.AdminKey)")
 	}
 	if len(missing) > 0 {
-		return nil, fmt.Errorf("appximo: missing required configuration:\n%s\nSet the variable(s) in the environment (or a .env you source) and run again",
+		// F1: the binary DOES load a .env now (LoadDotEnv — BOM-tolerant, the
+		// real environment wins), so the fix named here works on every platform.
+		return nil, fmt.Errorf("appximo: missing required configuration:\n%s\nSet the variable(s) in the environment, or put them in a .env file in the working directory (KEY=value per line — loaded automatically; existing environment wins) and run again",
 			strings.Join(missing, "\n"))
 	}
 	// SEC-6 (2026-08-05, Miguel's call): the docs have always said "at least 32
@@ -219,7 +222,7 @@ func New(cfg Config) (*App, error) {
 		return nil, fmt.Errorf(
 			"appximo: JWT_SECRET is too short (%d characters; the floor is %d). "+
 				"HS256 security depends on the secret's length — a short secret makes every tenant's tokens forgeable offline. "+
-				"Set Config.JWTSecret / JWT_SECRET to a random value of at least %d characters (e.g. `openssl rand -hex 32`)",
+				"Set Config.JWTSecret / JWT_SECRET to a random value of at least %d characters (e.g. `appximo gen-secret`, or `openssl rand -hex 32`)",
 			len(cfg.JWTSecret), MinJWTSecretLen, MinJWTSecretLen)
 	}
 	logging.Init(cfg.Env)
@@ -318,7 +321,10 @@ func New(cfg Config) (*App, error) {
 	case "", "local":
 		filesDir := coalesce(cfg.FilesDir, os.Getenv("APPXIMO_FILES_DIR"))
 		if filesDir == "" {
-			filesDir = "/var/lib/appximo/files"
+			// W1: the platform default — /var/lib/appximo/files on Linux,
+			// %LOCALAPPDATA%\Appximo\files on Windows, Application Support on
+			// macOS — never a POSIX literal that becomes C:\var on Windows.
+			filesDir = platformpath.FilesDir()
 		}
 		filesBackend = files.NewLocalBackend(filesDir)
 		log.Printf("files: local backend at %s", filesDir)

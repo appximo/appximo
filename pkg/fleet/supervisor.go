@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/appximo/appximo/pkg/platformpath"
 )
 
 // Supervisor runs one engine process per app and keeps it alive.
@@ -151,7 +153,7 @@ func (s *Supervisor) buildEnv(spec *AppSpec) []string {
 		env[k] = v
 	}
 	appDir := filepath.Join(s.dataDir, spec.Name)
-	if env["OBS_DB_PATH"] == "" || env["OBS_DB_PATH"] == "/var/lib/appximo/obs.db" {
+	if env["OBS_DB_PATH"] == "" || env["OBS_DB_PATH"] == platformpath.ObsDBPath() {
 		env["OBS_DB_PATH"] = filepath.Join(appDir, "obs.db")
 	}
 	if env["APPXIMO_FILES_DIR"] == "" {

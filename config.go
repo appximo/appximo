@@ -54,9 +54,11 @@ type Config struct {
 	ControlPort int
 
 	// ObsDBPath is the observability SQLite path. Empty falls back to
-	// OBS_DB_PATH, then the package default (/var/lib/appximo/obs.db).
-	// A Config field (not env-only) since MT-STRUCT-S3: N in-process apps
-	// share the process env, and each app needs its OWN obs store.
+	// OBS_DB_PATH, then the platform default (Linux /var/lib/appximo/obs.db;
+	// Windows %LOCALAPPDATA%\Appximo\obs.db; macOS ~/Library/Application
+	// Support/Appximo/obs.db — pkg/platformpath, W1). A Config field (not
+	// env-only) since MT-STRUCT-S3: N in-process apps share the process env,
+	// and each app needs its OWN obs store.
 	ObsDBPath string
 
 	// JWTSecret signs/validates HS256 tokens. Empty falls back to JWT_SECRET.
@@ -78,8 +80,10 @@ type Config struct {
 	GraphQLPlayground bool
 
 	// FilesDir is the root directory of the content-addressable file store
-	// (FILES-V1). Empty falls back to APPXIMO_FILES_DIR, then to
-	// /var/lib/appximo/files. The directory is created lazily on the first
+	// (FILES-V1). Empty falls back to APPXIMO_FILES_DIR, then to the platform
+	// default (Linux /var/lib/appximo/files; Windows %LOCALAPPDATA%\Appximo\
+	// files; macOS ~/Library/Application Support/Appximo/files —
+	// pkg/platformpath, W1). The directory is created lazily on the first
 	// upload, so an engine that never serves /api/files touches no disk.
 	// Applies to the "local" files backend only.
 	FilesDir string

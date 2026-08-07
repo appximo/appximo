@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"runtime"
-
-	_ "go.uber.org/automaxprocs"
 
 	"github.com/spf13/cobra"
 
@@ -40,10 +37,15 @@ var serveCmd = &cobra.Command{
 		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		// GOMAXPROCS is set by the automaxprocs blank import (cgroup-aware). GOGC /
-		// GOMEMLIMIT are applied inside appximo.New (applyRuntimeLimits), in the
-		// library, so a custom-handler binary gets the same soft memory ceiling.
-		log.Printf("GOMAXPROCS=%d NumCPU=%d", runtime.GOMAXPROCS(0), runtime.NumCPU())
+		// GOMAXPROCS (automaxprocs, cgroup-aware), GOGC and GOMEMLIMIT are all
+		// applied inside appximo.New (applyRuntimeLimits) — in the LIBRARY, so a
+		// custom-handler binary gets the identical runtime setup, and non-serve
+		// CLI commands emit zero stderr noise (C1: PowerShell treats native
+		// stderr as an error, so the old per-invocation maxprocs line made
+		// every wrapped call look failed on Windows).
+		if dotenvLoaded > 0 {
+			log.Printf(".env: loaded %d variable(s) from ./.env (existing environment wins on conflict)", dotenvLoaded)
+		}
 
 		schemaFile, _ := cmd.Flags().GetString("schema")
 		port, _ := cmd.Flags().GetInt("port")

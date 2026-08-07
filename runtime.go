@@ -6,6 +6,8 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+
+	"go.uber.org/automaxprocs/maxprocs"
 )
 
 // applyRuntimeLimits wires the process-level Go runtime knobs from the
@@ -24,10 +26,17 @@ import (
 //   - GOGC — GC target percentage (Go default 100).
 //
 // It is idempotent (reads env, sets the same value) so the in-process fleet
-// calling New per app is harmless. GOMAXPROCS is left to the process entry point
-// (the cmd binary blank-imports automaxprocs for cgroup awareness; a custom
-// binary should do the same if it runs under a CPU cgroup).
+// calling New per app is harmless. GOMAXPROCS is set here too (automaxprocs,
+// cgroup-aware) — it used to be a package-level blank import in the cmd binary,
+// which made EVERY CLI invocation (`version`, `validate --json`, …) print a
+// maxprocs line to stderr; PowerShell treats native stderr as an error, so
+// each wrapped call looked failed on Windows (field report C1). Living here it
+// runs only when a server actually boots — CLI commands stay byte-silent —
+// and custom-handler binaries gain the cgroup awareness for free.
 func applyRuntimeLimits() {
+	if _, err := maxprocs.Set(maxprocs.Logger(log.Printf)); err != nil {
+		log.Printf("runtime: automaxprocs: %v", err)
+	}
 	if v := strings.TrimSpace(os.Getenv("GOGC")); v != "" {
 		if pct, err := strconv.Atoi(v); err == nil {
 			debug.SetGCPercent(pct)

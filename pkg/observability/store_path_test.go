@@ -21,11 +21,11 @@ func cleanupSQLite(path string) {
 // default must be a persistent path, never /tmp (which systemd-tmpfiles or a
 // container tmpfs can wipe on restart).
 func TestDefaultObsDBPathIsPersistent(t *testing.T) {
-	if defaultObsDBPath == "/tmp/obs.db" || strings.HasPrefix(defaultObsDBPath, "/tmp/") {
-		t.Fatalf("default obs path %q is ephemeral (under /tmp) — R1 regression", defaultObsDBPath)
+	if defaultObsDBPath() == "/tmp/obs.db" || strings.HasPrefix(defaultObsDBPath(), "/tmp/") {
+		t.Fatalf("default obs path %q is ephemeral (under /tmp) — R1 regression", defaultObsDBPath())
 	}
-	if !filepath.IsAbs(defaultObsDBPath) {
-		t.Errorf("default obs path %q must be absolute", defaultObsDBPath)
+	if !filepath.IsAbs(defaultObsDBPath()) {
+		t.Errorf("default obs path %q must be absolute", defaultObsDBPath())
 	}
 }
 

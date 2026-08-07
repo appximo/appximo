@@ -59,6 +59,9 @@ type ServeArgs struct {
 //		…
 //	}
 func ParseServeArgs(name, version, revision string, defaults ServeArgs) ServeArgs {
+	// F1: a consumer binary gets the same .env fill-in as the engine CLI —
+	// a `.env` in the working directory is loaded, the real environment wins.
+	LoadDotEnv()
 	out, versionLine, err := parseServeArgs(name, version, revision, defaults, os.Args[1:])
 	if versionLine != "" {
 		fmt.Println(versionLine)

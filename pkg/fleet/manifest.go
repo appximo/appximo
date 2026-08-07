@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/appximo/appximo/pkg/platformpath"
 )
 
 // AppSpec declares one app of the fleet: its schema, the domains the proxy
@@ -201,7 +203,7 @@ func LoadManifest(path string) (*Manifest, error) {
 		m.StatusAddr = "127.0.0.1:9601"
 	}
 	if m.DataDir == "" {
-		m.DataDir = "/var/lib/appximo/fleet"
+		m.DataDir = platformpath.FleetDataDir()
 	}
 
 	if len(m.Apps) == 0 {

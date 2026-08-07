@@ -11,16 +11,19 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite" // CGO-free SQLite driver, registered as "sqlite"
+
+	"github.com/appximo/appximo/pkg/platformpath"
 )
 
 // defaultObsDBPath is where the observability store lives when OBS_DB_PATH (or the
-// OpenStore arg) is empty. It is a PERSISTENT, standard Linux application-data path
+// OpenStore arg) is empty: a PERSISTENT, platform-correct application-data path
 // (not /tmp) so the trace/snapshot history survives a process or container restart
-// out of the box — the same root the file store uses (/var/lib/appximo). Its
-// parent directory is created on open; if it cannot be created or written OpenStore
+// out of the box — the same root the file store uses (platformpath.DataDir; W1:
+// the old POSIX constant became C:\var\lib\appximo on Windows). Its parent
+// directory is created on open; if it cannot be created or written OpenStore
 // falls back to an ephemeral temp file and logs a WARNING (observability is
 // best-effort — a bad path never crashes the engine).
-const defaultObsDBPath = "/var/lib/appximo/obs.db"
+func defaultObsDBPath() string { return platformpath.ObsDBPath() }
 
 // retentionDays bounds how long snapshots are kept; Prune drops anything older.
 const retentionDays = 7
@@ -148,7 +151,7 @@ func OpenStore(path string) (*ObsStore, error) {
 // non-empty path is honored verbatim. Pure (no filesystem access).
 func resolveObsDBPath(requested string) string {
 	if requested == "" {
-		return defaultObsDBPath
+		return defaultObsDBPath()
 	}
 	return requested
 }
