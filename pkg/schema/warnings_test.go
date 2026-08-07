@@ -15,7 +15,7 @@ const vetSchemaJSON = `{
   "version": "1",
   "name": "petfriendly",
   "resources": {
-    "veterinarians": { "fields": { "name": { "type": "string", "required": true } } },
+    "veterinarians": { "fields": { "name": { "type": "string", "required": true, "minLength": 1 } } },
     "appointments": {
       "fields": {
         "reason": { "type": "string" },
@@ -91,8 +91,8 @@ func TestWarnings_ReportCarriesThemButStaysValid(t *testing.T) {
 // warning. A warning you cannot turn off is noise.
 func TestWarnings_BridgeColumnSilencesIt(t *testing.T) {
 	fixed := strings.Replace(vetSchemaJSON,
-		`"veterinarians": { "fields": { "name": { "type": "string", "required": true } } }`,
-		`"veterinarians": { "fields": { "name": { "type": "string", "required": true }, "user_id": { "type": "uuid", "unique": true } } }`, 1)
+		`"veterinarians": { "fields": { "name": { "type": "string", "required": true, "minLength": 1 } } }`,
+		`"veterinarians": { "fields": { "name": { "type": "string", "required": true, "minLength": 1 }, "user_id": { "type": "uuid", "unique": true } } }`, 1)
 	fixed = strings.Replace(fixed,
 		`"veterinarian_id": { "type": "uuid", "relation": "veterinarians" }`,
 		`"veterinarian_id": { "type": "uuid", "relation": "veterinarians", "references": "user_id" }`, 1)
@@ -186,5 +186,84 @@ func TestWarnings_BareVariableVal(t *testing.T) {
 	}
 	if !hit {
 		t.Fatalf("expected bare_condition_variable warning, got: %v", warns)
+	}
+}
+
+// TestWarnings_FileFieldWithoutFilesGrant — PUBLIC-SURFACE-S1 Part E: a role
+// that can write a resource with a `file` field but holds no grant on the
+// built-in files store warns (its uploads 403); granting files silences it, on
+// both RBAC forms. A wildcard role never warns (it covers files).
+func TestWarnings_FileFieldWithoutFilesGrant(t *testing.T) {
+	raw := `{
+	  "$schema":"x","version":"1","name":"x",
+	  "resources": { "posts": { "fields": {
+	    "title": { "type": "string" },
+	    "cover": { "type": "file" }
+	  } } },
+	  "rbac": { "roles": {
+	    "admin":  { "resources": "*", "actions": ["*"] },
+	    "editor": { "permissions": { "posts": { "actions": ["read","create","update"] } } },
+	    "lector": { "permissions": { "posts": { "actions": ["read"] } } },
+	    "global": { "resources": ["posts"], "actions": ["read","create"] }
+	  } }
+	}`
+	warns := Warnings(mustLoad(t, raw))
+	var got []string
+	for _, w := range warns {
+		if w.Rule == "file_field_without_files_grant" {
+			got = append(got, w.Got)
+			if !strings.Contains(w.Message, "posts.cover") || !strings.Contains(w.Fix, `"files"`) {
+				t.Errorf("warning not actionable: %+v", w)
+			}
+		}
+	}
+	if len(got) != 2 || got[0] != "editor" || got[1] != "global" {
+		t.Fatalf("want editor and global flagged (admin=wildcard, lector=read-only), got %v (all: %v)", got, warns)
+	}
+
+	// The suggested fix silences it, in both forms.
+	fixed := strings.Replace(raw,
+		`"editor": { "permissions": { "posts": { "actions": ["read","create","update"] } } }`,
+		`"editor": { "permissions": { "posts": { "actions": ["read","create","update"] }, "files": { "actions": ["create","read"] } } }`, 1)
+	fixed = strings.Replace(fixed,
+		`"global": { "resources": ["posts"], "actions": ["read","create"] }`,
+		`"global": { "resources": ["posts","files"], "actions": ["read","create"] }`, 1)
+	for _, w := range Warnings(mustLoad(t, fixed)) {
+		if w.Rule == "file_field_without_files_grant" {
+			t.Fatalf("the recommended fix must silence the warning, got: %+v", w)
+		}
+	}
+}
+
+// TestWarnings_RequiredTextWithoutMinLength — PUBLIC-SURFACE-S1 Part E: the
+// empty-string-passes-`required` trap the spec documents twice. A required
+// string with no content rule warns; minLength/enum/pattern/format silence it;
+// non-required and non-text fields never warn.
+func TestWarnings_RequiredTextWithoutMinLength(t *testing.T) {
+	raw := `{
+	  "$schema":"x","version":"1","name":"x",
+	  "resources": { "posts": { "fields": {
+	    "title":   { "type": "string", "required": true },
+	    "body":    { "type": "text", "required": true },
+	    "ok_min":  { "type": "string", "required": true, "minLength": 1 },
+	    "ok_enum": { "type": "string", "required": true, "enum": ["a","b"] },
+	    "ok_fmt":  { "type": "string", "required": true, "format": "email" },
+	    "ok_pat":  { "type": "string", "required": true, "pattern": "^x" },
+	    "optional":{ "type": "string" },
+	    "amount":  { "type": "int64", "required": true }
+	  } } }
+	}`
+	warns := Warnings(mustLoad(t, raw))
+	var got []string
+	for _, w := range warns {
+		if w.Rule == "required_text_without_min_length" {
+			got = append(got, w.Got)
+			if !strings.Contains(w.Fix, "minLength") {
+				t.Errorf("fix must name minLength: %+v", w)
+			}
+		}
+	}
+	if len(got) != 2 || got[0] != "body" || got[1] != "title" {
+		t.Fatalf("want exactly body and title flagged, got %v", got)
 	}
 }

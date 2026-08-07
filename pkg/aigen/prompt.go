@@ -40,6 +40,10 @@ FIELD KEYS (all optional unless noted):
   numeric fields: "min", "max"
   string/text fields: "minLength", "maxLength", "pattern" (RE2 regex),
     "format": one of "email" | "uuid" | "url" | "date"
+    On a REQUIRED string/text field ALWAYS declare "minLength": 1 (or more):
+    "required" rejects only an absent key or null — the empty string "" is a
+    present value, so an empty form field would create blank records with 201.
+    The validator warns on this (rule required_text_without_min_length).
   "auto": true  (engine-managed timestamp, for created_at/updated_at; type must be time)
   "relation": "<other_resource>"  (makes this uuid field a foreign key),
     optional "on_delete": "restrict" | "cascade" | "set_null"
@@ -134,6 +138,15 @@ A role is EITHER role-global OR per-resource — never both keys.
                          {"type":"uuid","relation":"veterinarians","references":"user_id"} } }
   Rule of thumb: a "$user_id" condition may only name a column that stores a LOGIN
   id — either a plain uuid column, or a relation whose "references" is such a column.
+
+  A ROLE THAT WRITES A RESOURCE WITH A "file" FIELD ALSO NEEDS THE "files" GRANT.
+  Uploads flow through the built-in store (POST /api/files → attach the returned
+  id), and that endpoint is authorized as the virtual resource "files". A role
+  granted only the resource can set ids but never upload — every POST /api/files
+  answers 403. Grant it explicitly: per-resource form add
+  "files": { "actions": ["create", "read"] } (actions only — no conditions/fields
+  on the built-in store); role-global form add "files" to the resources list.
+  The validator warns on this (rule file_field_without_files_grant).
 
 CANONICAL EXAMPLE (a valid schema — follow this shape exactly):
 {

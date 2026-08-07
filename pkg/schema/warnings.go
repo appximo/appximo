@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 )
@@ -27,7 +28,171 @@ func Warnings(s *APISchema) []ValidationError {
 	}
 	out := identityConditionWarnings(s)
 	out = append(out, bareVariableConditionWarnings(s)...)
+	out = append(out, fileGrantWarnings(s)...)
+	out = append(out, requiredTextWarnings(s)...)
 	return out
+}
+
+// fileGrantWarnings (PUBLIC-SURFACE-S1 Part E) flags a role that can WRITE a
+// resource carrying a `file` field but has NO grant on the built-in "files"
+// store: its flow is upload (POST /api/files) → attach, and the upload answers
+// 403 before the record is ever created. Legal (maybe another role uploads and
+// this one only sets ids), almost always a mistake (measured in the second
+// field evaluation: every upload from the role 403'd until the grant was
+// added), invisible until the first user hits the button — the SCHEMA-5 bar.
+func fileGrantWarnings(s *APISchema) []ValidationError {
+	if _, shadowed := s.Resources["files"]; shadowed {
+		return nil // a resource literally named files replaces the built-in store
+	}
+	var out []ValidationError
+	for _, roleName := range sortedNames(s.RBAC.Roles) {
+		role := s.RBAC.Roles[roleName]
+		if roleGrantsFilesAction(role, s, "create") {
+			continue
+		}
+		// The resources this role can create/update that carry a file field.
+		var hits []string
+		for _, resName := range roleWritableResources(role, s) {
+			res := s.Resources[resName]
+			for _, fieldName := range sortedNames(res.Fields) {
+				if res.Fields[fieldName].Type == "file" {
+					hits = append(hits, fmt.Sprintf("%s.%s", resName, fieldName))
+				}
+			}
+		}
+		if len(hits) == 0 {
+			continue
+		}
+		fix := `add "files": { "actions": ["create", "read"] } to this role's permissions`
+		if len(role.Permissions) == 0 {
+			fix = `add "files" to this role's resources list (its actions already apply), or switch to the permissions form and grant "files": { "actions": ["create", "read"] }`
+		}
+		out = append(out, ValidationError{
+			Field: "rbac.roles." + roleName,
+			Rule:  "file_field_without_files_grant",
+			Got:   roleName,
+			Message: fmt.Sprintf(
+				"role %q can write %s — file field(s) whose flow is upload first (POST /api/files), then attach — but has no grant on the built-in \"files\" store, so every upload answers 403 before the record is ever created. Nothing else reports this: the schema is valid and the form just fails.",
+				roleName, joinAnd(hits)),
+			Fix: fix,
+		})
+	}
+	return out
+}
+
+// roleGrantsFilesAction reports whether the role may perform `action` on the
+// built-in files store, in either RBAC form.
+func roleGrantsFilesAction(role RolePolicy, s *APISchema, action string) bool {
+	if len(role.Permissions) > 0 {
+		p, ok := role.Permissions["files"]
+		return ok && actionListAllows(p.Actions, action)
+	}
+	return rawResourcesInclude(role.Resources) && actionListAllows(role.Actions, action)
+}
+
+// rawResourcesInclude reports whether a role-global `resources` value covers the
+// built-in files store: the wildcard "*", or a list naming "files".
+func rawResourcesInclude(raw json.RawMessage) bool {
+	var star string
+	if json.Unmarshal(raw, &star) == nil {
+		return star == "*"
+	}
+	var list []string
+	if json.Unmarshal(raw, &list) == nil {
+		for _, r := range list {
+			if r == "files" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func actionListAllows(actions []string, action string) bool {
+	for _, a := range actions {
+		if a == action || a == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+// roleWritableResources lists the DECLARED resources the role may create or
+// update, in either RBAC form, sorted.
+func roleWritableResources(role RolePolicy, s *APISchema) []string {
+	var out []string
+	if len(role.Permissions) > 0 {
+		for _, resName := range sortedNames(role.Permissions) {
+			if _, declared := s.Resources[resName]; !declared {
+				continue
+			}
+			acts := role.Permissions[resName].Actions
+			if actionListAllows(acts, "create") || actionListAllows(acts, "update") {
+				out = append(out, resName)
+			}
+		}
+		return out
+	}
+	if !actionListAllows(role.Actions, "create") && !actionListAllows(role.Actions, "update") {
+		return nil
+	}
+	return applicableResources(role.Resources, s)
+}
+
+// requiredTextWarnings (PUBLIC-SURFACE-S1 Part E) flags a required string/text
+// field with NO content rule: `required` rejects an ABSENT key and an explicit
+// null, but the empty string "" is a present string value — an empty form field
+// submits "", passes, and creates blank records with 201. The spec documents
+// the trap twice (frontend-spec §4.6 and §6.4); documented twice means
+// recurrent, so the validator now says it where the schema is written. A field
+// with minLength/enum/pattern/format already constrains content and is not
+// flagged.
+func requiredTextWarnings(s *APISchema) []ValidationError {
+	var out []ValidationError
+	for _, resName := range sortedNames(s.Resources) {
+		res := s.Resources[resName]
+		for _, fieldName := range sortedNames(res.Fields) {
+			f := res.Fields[fieldName]
+			if f.Type != "string" && f.Type != "text" {
+				continue
+			}
+			if !f.Required || f.MinLength != nil || len(f.Enum) > 0 || f.Pattern != "" || f.Format != "" {
+				continue
+			}
+			out = append(out, ValidationError{
+				Field: fmt.Sprintf("resources.%s.fields.%s", resName, fieldName),
+				Rule:  "required_text_without_min_length",
+				Got:   fieldName,
+				Message: fmt.Sprintf(
+					"%q is required but the empty string \"\" satisfies `required` (it is a present value — only an absent key or null is rejected): an empty form field creates blank %q records with 201.",
+					fieldName, resName),
+				Fix: `declare "minLength": 1 so an empty submission is a named 422 instead of a blank record`,
+			})
+		}
+	}
+	return out
+}
+
+// joinAnd renders a short list as prose: "a", "a and b", "a, b and c".
+func joinAnd(items []string) string {
+	switch len(items) {
+	case 0:
+		return ""
+	case 1:
+		return items[0]
+	case 2:
+		return items[0] + " and " + items[1]
+	default:
+		last := items[len(items)-1]
+		out := ""
+		for _, it := range items[:len(items)-1] {
+			if out != "" {
+				out += ", "
+			}
+			out += it
+		}
+		return out + " and " + last
+	}
 }
 
 // bareVariableNames maps a condition `val` that is a known variable MINUS its `$`

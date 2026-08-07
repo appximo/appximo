@@ -248,7 +248,7 @@ The starter shape, to grow by hand:
   "resources": {
     "tasks": {
       "fields": {
-        "title":  { "type": "string", "required": true, "maxLength": 200 },
+        "title":  { "type": "string", "required": true, "minLength": 1, "maxLength": 200 },
         "status": { "type": "string", "enum": ["open", "done"], "default": "open" },
         "due":    { "type": "time" }
       }

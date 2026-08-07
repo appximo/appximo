@@ -457,7 +457,10 @@ which **passes** `required` and creates a blank record with a 201. A schema
 whose required text fields matter to a form must also declare `minLength: 1`
 (then the empty submit is the normal `422` with rule `minLength`); ask the
 backend for it, or strip empty-string keys from the payload before sending
-(omitting the key is what triggers `required`).
+(omitting the key is what triggers `required`). `appximo validate` now WARNS
+on a required text field without a content rule (rule
+`required_text_without_min_length`), so a schema that skips this is flagged at
+authoring time, not discovered in a browser.
 
 Multi-step writes that must land together (a checkout: order + lines + stock)
 are **one `POST /api/transaction`** `{"operations":[{op,resource,data|id}…]}` —
@@ -737,7 +740,9 @@ upload → attach → display, for both authenticated screens and public ones.
    `Authorization` required; RBAC action `create` on the `files` resource — a
    scoped role grants it with a `permissions` entry
    `"files": {"actions": ["read","create"]}`; ask the backend for it if
-   uploads 403) → `201 {"file_id","sha256","size"}`.
+   uploads 403 — `appximo validate` WARNS when a role can write a file field
+   but lacks this grant, rule `file_field_without_files_grant`) →
+   `201 {"file_id","sha256","size"}`.
 2. **Attach**: set the returned `file_id` as the value of the record's `file`
    field like any other field — `PATCH /api/productos/{id}
    {"imagen_id":"<file_id>"}`. A nonexistent or foreign-tenant id → `422`

@@ -586,7 +586,7 @@ without them). A complete, working example:
   "resources": {
     "tasks": {
       "fields": {
-        "title":  { "type": "string", "required": true, "maxLength": 200 },
+        "title":  { "type": "string", "required": true, "minLength": 1, "maxLength": 200 },
         "status": { "type": "string", "enum": ["open", "done"], "default": "open" },
         "due":    { "type": "time" }
       }

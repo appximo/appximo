@@ -8,7 +8,8 @@
     "title": {
      "type": "string",
      "required": true,
-     "maxLength": 200
+     "maxLength": 200,
+     "minLength": 1
     },
     "status": {
      "type": "string",
@@ -75,7 +76,8 @@
    "fields": {
     "name": {
      "type": "string",
-     "required": true
+     "required": true,
+     "minLength": 1
     },
     "login": {
      "type": "uuid",
