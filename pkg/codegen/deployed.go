@@ -20,11 +20,22 @@ import (
 // TENANT'S DEPLOYED schema — the same schema the read path already reflects —
 // falling back to the boot resource whenever there is nothing deployed to use.
 //
+// FIELD-FEEDBACK-S1 (field report M1) extended the SAME seam to the read path's
+// query validation: filters, sort, search, is_null and aggregates now resolve the
+// field set from the deployed surface too (readSurface below). Before, a
+// hot-migrated column was writable and readable while ?filter[new_field]= answered
+// 400 "unknown filter field" until a restart — the data saved fine and only the
+// search screen broke, the silent kind of divergence. One seam, not two: both
+// paths ask the same provider, so they can never disagree about which schema
+// version a tenant is on.
+//
 // Deliberately NOT covered (a restart is still required, and the engine now SAYS so
 // rather than answering "unknown field"):
 //   - a NEW RESOURCE: its routes, GraphQL type and docs do not exist in this process.
 //   - GraphQL mutations: the input types are boot-compiled, so a new field is not an
 //     argument the query even parses.
+//   - relation embeds (?include=): relations stay boot-compiled by design (the
+//     merged surface unions FIELDS only).
 //   - the declarative rules of a new field are compiled when the deployed schema is
 //     loaded, not at boot — see the provider in app.go.
 
@@ -74,4 +85,20 @@ func writeSurface(ctx context.Context, tenantID, resource string, bootRes *schem
 		return ws.Res, ws.RV
 	}
 	return bootRes, bootRV
+}
+
+// readSurface picks the resource DEFINITION the read path validates query
+// parameters against — filters, sort, search, is_null, aggregate field lists:
+// the tenant's DEPLOYED surface when one is available, else the boot resource.
+// It is the write path's provider re-asked (M1: reuse the ENG-12 seam, never a
+// second one), so what a tenant can write is exactly what it can filter by.
+func readSurface(ctx context.Context, tenantID, resource string, bootRes *schema.ResourceSchema) *schema.ResourceSchema {
+	p := DeployedProviderFromCtx(ctx)
+	if p == nil {
+		return bootRes
+	}
+	if ws := p.WriteSurfaceFor(tenantID, resource); ws != nil && ws.Res != nil {
+		return ws.Res
+	}
+	return bootRes
 }

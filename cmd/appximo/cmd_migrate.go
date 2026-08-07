@@ -134,7 +134,7 @@ func runSingleTenant(ctx context.Context, pool *pgxpool.Pool, s *schema.APISchem
 		fmt.Printf("  ⚠ schema applied but NOT persisted to the tenant record (%v)\n"+
 			"    the running engine keeps validating against the previous schema — re-run, or deploy via the control plane\n", perr)
 	} else {
-		fmt.Println("  ✓ schema persisted to the tenant record (running engine notified — new fields serve hot; a NEW resource still needs a restart)")
+		fmt.Println("  ✓ schema persisted to the tenant record (running engine notified — new fields serve hot on REST: read, write, filter/sort/search and aggregates; a NEW resource, GraphQL input types, /docs and RBAC changes still need a restart)")
 	}
 	tables := make([]string, 0, len(s.Resources))
 	for name := range s.Resources {

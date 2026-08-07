@@ -137,10 +137,11 @@
 					</div>
 
 					<p class="hint-sm model-note">
-						The engine serves routes / GraphQL / RBAC from its <b>boot schema</b>: editing
-						existing resources (columns, validations, roles…) deploys <b>live</b>; a brand-new
-						resource is provisioned but needs an engine restart to be served. You'll be told
-						before any restart is needed.
+						The engine serves routes / GraphQL / RBAC from its <b>boot schema</b>: new
+						<b>columns</b> on existing resources deploy <b>live</b> on REST (read, write,
+						filter/sort/search, aggregates); a brand-new resource — and RBAC, hooks, GraphQL
+						input types and /docs — activate on an engine restart. You'll be told before any
+						restart is needed.
 					</p>
 
 					{#if deploy.mode === 'new'}
@@ -332,9 +333,9 @@
 								is <b>unavailable</b> (a <b>403</b> or <b>404</b>) until the engine restarts with a
 								schema that includes {deploy.newResources.length === 1 ? 'it' : 'them'}.
 								{#if deploy.liveResources.length > 0}
-									For <span class="mono">{deploy.liveResources.join(', ')}</span>, raw column read/write is
-									live after the migration — but RBAC, validation, filters, GraphQL and /docs recompile
-									on the same activation.
+									For <span class="mono">{deploy.liveResources.join(', ')}</span>, column read/write and
+									REST filter/sort/search/aggregates are live after the migration — but RBAC, hooks,
+									GraphQL input types and /docs recompile on the same activation.
 								{/if}
 							</p>
 							<p class="hint-sm">

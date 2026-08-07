@@ -134,6 +134,33 @@ boot base "$BASE_BIN" "$PORT_BASE" "$CTRL_BASE"
 boot new  "$NEW_BIN"  "$PORT_NEW"  "$CTRL_NEW"
 ID_BASE=$(cat "$WORK/base.id"); ID_NEW=$(cat "$WORK/new.id")
 
+# ── hot migration (M1) ────────────────────────────────────────────────────────
+# Deploy a v2 schema (one new column, `hotcol`) to the SAME tenant on both sides
+# WITHOUT restarting, then poll until the hot WRITE path serves it (ENG-12 — both
+# binaries have it). The hot-migrated-* corpus rows then pin whether a deployed
+# column filters/sorts/searches/aggregates live (M1). NOTE: rows whose 400 body
+# prints an "(available: …)" field list will legitimately DIFF across the M1
+# change — the list is now the tenant's deployed truth; explain them as such.
+jq '.resources.notes.fields.hotcol = {"type":"string"}' "$SCHEMA" >"$WORK/schema-hot.json"
+hotmigrate() { # $1=side $2=port $3=ctrl $4=seeded-id
+  local side=$1 port=$2 ctrl=$3 id=$4 code
+  curl -sf -X PUT "http://127.0.0.1:$ctrl/tenants/$TENANT/schema" \
+    -H "X-Admin-Key: $ADMIN_KEY_GATE" -H "Content-Type: application/json" \
+    -d "{\"schema\":$(cat "$WORK/schema-hot.json")}" >/dev/null \
+    || die "$side: hot schema deploy failed"
+  for _ in $(seq 1 150); do
+    code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "http://127.0.0.1:$port/api/notes/$id" \
+      -H "Authorization: Bearer $TOKEN_ADMIN" -H "Host: $HOST_DEFAULT" -H "Content-Type: application/json" \
+      -d '{"hotcol":"hot"}')
+    [ "$code" = "200" ] && return 0
+    sleep 0.2
+  done
+  die "$side: hot-migrated column never became writable (30s) — ENG-12 regression?"
+}
+echo "── hot-migrating both sides (M1 fixture: +notes.hotcol)"
+hotmigrate base "$PORT_BASE" "$CTRL_BASE" "$ID_BASE"
+hotmigrate new  "$PORT_NEW"  "$CTRL_NEW"  "$ID_NEW"
+
 # ── normalization ─────────────────────────────────────────────────────────────
 # Bodies: JSON is key-sorted and every uuid/timestamp replaced by a placeholder
 # (seeded rows have different ids per instance — that is not a behavioral

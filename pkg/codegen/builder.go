@@ -309,7 +309,10 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				cond = evalResult.Condition
 			}
 
-			qb, err := query.BuildQuery(name, &res, req.URL.Query(), cond)
+			// M1: the field universe for filter/sort/search validation is the
+			// tenant's DEPLOYED surface (same ENG-12 seam as the write path), so
+			// a hot-migrated column filters without a restart.
+			qb, err := query.BuildQuery(name, readSurface(req.Context(), tc.ID, name, &res), req.URL.Query(), cond)
 			if err != nil {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
@@ -462,7 +465,8 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				allowedFields = evalResult.AllowedFields
 			}
 
-			aq, err := query.BuildAggregate(name, &res, req.URL.Query(), cond, allowedFields)
+			// M1: aggregates share the deployed field universe with the list path.
+			aq, err := query.BuildAggregate(name, readSurface(req.Context(), tc.ID, name, &res), req.URL.Query(), cond, allowedFields)
 			if err != nil {
 				if errors.Is(err, query.ErrAggForbiddenField) {
 					writeJSONErr(w, http.StatusForbidden, err.Error())
