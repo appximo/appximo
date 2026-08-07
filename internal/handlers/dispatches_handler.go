@@ -30,7 +30,7 @@ func (h *Handlers) ListDispatches(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res := h.apiSchema.Resources["dispatches"]
-	qb, err := querypkg.BuildQuery("dispatches", &res, r.URL.Query(), cond)
+	qb, err := querypkg.BuildQuery("dispatches", &res, r.URL.Query(), cond, nil)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)

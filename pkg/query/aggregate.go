@@ -143,7 +143,7 @@ func BuildAggregate(
 		return nil, fmt.Errorf("unknown aggregate parameter %q (valid: count, sum, avg, min, max, group_by, filter[...], search)", key)
 	}
 
-	qb, err := BuildQuery(resource, res, params, condition)
+	qb, err := BuildQuery(resource, res, params, condition, allowedFields)
 	if err != nil {
 		return nil, err
 	}

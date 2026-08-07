@@ -626,6 +626,36 @@ stock insuficiente para CAM-OXF-M: disponible 1, solicitado 2" — the server
 message is written to be shown), and every destructive/paying action reports
 what did NOT happen ("No se realizó ningún cobro — intentá de nuevo").
 
+### 5.1 Localizing the 422s — the `rule` is the contract, build the map ONCE
+
+The engine's `message` strings are **English only, by decision** (PUBLIC-
+SURFACE-S1): one source of truth in the engine beats N half-translated
+catalogs, and no server-chosen locale would match every user of every tenant
+anyway. What IS designed for you is the **`rule` key: a closed, stable set** —
+map it once to your app's language and interpolate the field's own limits from
+the schema you already have (via `/openapi.json`: `minLength`, `maximum`,
+`enum`…). The complete set a form can receive:
+
+| `rule` | fires when | example UI copy (es) |
+|---|---|---|
+| `required` | the key is absent or null on POST/PUT | «Este campo es obligatorio» |
+| `type` | value of the wrong JSON type | «Valor inválido» |
+| `unknown_field` | a key the resource doesn't declare | (frontend bug — fix the payload) |
+| `read_only` | `id`/`auto` field sent in a write body | (frontend bug — strip it) |
+| `min` / `max` | numeric bounds | «Debe ser al menos {min}» |
+| `minLength` / `maxLength` | string length (runes) | «Mínimo {minLength} caracteres» |
+| `pattern` | regex mismatch | «Formato inválido» |
+| `format` | email/uuid/url/date mismatch | «No parece un correo válido» |
+| `enum` | value outside the declared set | «Elegí una opción de la lista» |
+| `state` | invalid state-machine create/transition | «No se puede pasar de X a Y» |
+| `file_not_found` | a `file` field names no existing upload | «El archivo ya no existe — subilo de nuevo» |
+| `file_policy` | attached file violates `accept`/`max_bytes` | «Este campo acepta {accept}, máx {max}» |
+
+Anything NOT in a `fields[]` entry (409 uniqueness, 403, custom-route
+messages) is prose meant to be shown or mapped by status (§5 table). Treat an
+unknown `rule` as generic invalid — new rules may appear, removals/renames
+are treated as breaking.
+
 ---
 
 ## 6. The mandatory screen states
@@ -924,9 +954,27 @@ the grid doesn't reflow as images arrive.
 
 The reference storefront's architecture, worth copying:
 
-- **Public surface** = the backend's `Route.Public` custom routes (catalogue,
-  product detail, checkout, order status). No token, per-(tenant, IP) rate
-  limits, server-computed prices. The SPA calls them bare.
+- **Public READS need no Go at all — `rbac.public` in the schema (ADR-026).**
+  Declare the resources anyone may read, with a row condition and a field
+  allowlist, and the GENERATED endpoints serve them tokenless:
+
+  ```json
+  "rbac": { "roles": { … },
+    "public": { "articulos": { "actions": ["read"],
+        "conditions": {"field":"estado","op":"eq","val":"publicado"},
+        "fields": ["id","titulo","cuerpo","portada"] },
+      "files": { "actions": ["read"] } } }
+  ```
+
+  The SPA then calls `/api/articulos` bare (no Authorization header — an empty
+  `Bearer ` is a 401, anonymity means NO header). `/openapi.json` marks these
+  ops `security: []` + `x-public: true`. Read-only by design; anonymous
+  callers can only see/filter/sort the allowlisted fields, drafts read as
+  404, and the surface rides the public rate limiter. The `files` grant makes
+  attached images servable via the signed-URL flow with no token (§7.5).
+- **Public surface with LOGIC** (a checkout, server-computed prices, composite
+  lookups) = the backend's `Route.Public` custom routes. No token,
+  per-(tenant, IP) rate limits. The SPA calls them bare.
 - **Authenticated surface** = the generated CRUD + custom panel routes, called
   through the `papi` wrapper (§4.2) with the stored JWT.
 - **One public checkout serves guests AND logged-in customers**: `Route.Public`

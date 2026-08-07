@@ -29,7 +29,7 @@ func testResource() *schema.ResourceSchema {
 
 func mustBuild(t *testing.T, res *schema.ResourceSchema, params url.Values, cond *rbac.WhereCondition) *QueryBuilder {
 	t.Helper()
-	qb, err := BuildQuery("orders", res, params, cond)
+	qb, err := BuildQuery("orders", res, params, cond, nil)
 	if err != nil {
 		t.Fatalf("BuildQuery unexpected error: %v", err)
 	}
@@ -38,7 +38,7 @@ func mustBuild(t *testing.T, res *schema.ResourceSchema, params url.Values, cond
 
 func mustError(t *testing.T, res *schema.ResourceSchema, params url.Values) string {
 	t.Helper()
-	_, err := BuildQuery("orders", res, params, nil)
+	_, err := BuildQuery("orders", res, params, nil, nil)
 	if err == nil {
 		t.Fatal("BuildQuery expected error, got nil")
 	}
@@ -261,7 +261,7 @@ func TestBuildQuery_OrderBracketSyntax(t *testing.T) {
 // (a caller probing for a column that is not in the schema).
 func TestBuildQuery_SortUnknownFieldIsRejected(t *testing.T) {
 	params := url.Values{"sort": {"password"}}
-	_, err := BuildQuery("guides", testResource(), params, nil)
+	_, err := BuildQuery("guides", testResource(), params, nil, nil)
 	if err == nil {
 		t.Fatal("an unknown sort field must be an error, not a silent fallback")
 	}
@@ -276,7 +276,7 @@ func TestBuildQuery_SortUnknownFieldIsRejected(t *testing.T) {
 // The direction is validated too: `?order=descending` used to sort ASCENDING and
 // say nothing.
 func TestBuildQuery_InvalidSortDirectionIsRejected(t *testing.T) {
-	_, err := BuildQuery("guides", testResource(), url.Values{"sort": {"title"}, "order": {"descending"}}, nil)
+	_, err := BuildQuery("guides", testResource(), url.Values{"sort": {"title"}, "order": {"descending"}}, nil, nil)
 	if err == nil {
 		t.Fatal("an invalid sort direction must be an error, not a silent fallback to ASC")
 	}
@@ -331,7 +331,7 @@ func TestBuildQuery_RBACConditionCombinedWithFilter(t *testing.T) {
 // silently skipping nothing and duplicating everything, with no way to notice.
 func TestBuildQuery_NonPositivePageIsRejected(t *testing.T) {
 	for _, v := range []string{"0", "-1", "-4"} {
-		_, err := BuildQuery("notes", testResource(), url.Values{"page": {v}}, nil)
+		_, err := BuildQuery("notes", testResource(), url.Values{"page": {v}}, nil, nil)
 		if err == nil {
 			t.Errorf("page=%s was accepted; a non-positive page must be rejected", v)
 			continue
@@ -341,7 +341,7 @@ func TestBuildQuery_NonPositivePageIsRejected(t *testing.T) {
 		}
 	}
 	for _, v := range []string{"0", "-1"} {
-		_, err := BuildQuery("notes", testResource(), url.Values{"per_page": {v}}, nil)
+		_, err := BuildQuery("notes", testResource(), url.Values{"per_page": {v}}, nil, nil)
 		if err == nil {
 			t.Errorf("per_page=%s was accepted; a non-positive per_page must be rejected", v)
 			continue
@@ -355,7 +355,7 @@ func TestBuildQuery_NonPositivePageIsRejected(t *testing.T) {
 // The over-max CLAMP stays: "max 100" is documented and the response reports the
 // effective value in meta, which is reported tolerance rather than silence.
 func TestBuildQuery_OverMaxIsClampedNotRejected(t *testing.T) {
-	qb, err := BuildQuery("notes", testResource(), url.Values{"per_page": {"5000"}}, nil)
+	qb, err := BuildQuery("notes", testResource(), url.Values{"per_page": {"5000"}}, nil, nil)
 	if err != nil {
 		t.Fatalf("per_page over the cap must be clamped, not rejected: %v", err)
 	}
@@ -428,7 +428,7 @@ func TestBuildQuery_InvalidCursorRejected(t *testing.T) {
 func TestBuildQuery_ConflictingCursorsRejected(t *testing.T) {
 	const after = "aaaaaaaa-0000-0000-0000-000000000000"
 	const before = "bbbbbbbb-0000-0000-0000-000000000000"
-	_, err := BuildQuery("guides", testResource(), url.Values{"after": {after}, "before": {before}}, nil)
+	_, err := BuildQuery("guides", testResource(), url.Values{"after": {after}, "before": {before}}, nil, nil)
 	if err == nil {
 		t.Fatal("after+before must be rejected, was accepted")
 	}
@@ -455,7 +455,7 @@ func TestBuildQuery_CursorRejectsIncompatibleParams(t *testing.T) {
 		"empty before":  {"before": {""}},
 	}
 	for name, params := range cases {
-		if _, err := BuildQuery("guides", testResource(), params, nil); err == nil {
+		if _, err := BuildQuery("guides", testResource(), params, nil, nil); err == nil {
 			t.Errorf("%s: must be rejected, was accepted", name)
 		} else if !strings.Contains(err.Error(), "cursor") {
 			t.Errorf("%s: error must mention the cursor, got: %s", name, err)
@@ -478,7 +478,7 @@ func TestBuildQuery_CursorRejectsIncompatibleParams(t *testing.T) {
 // builds of the same URL). The error names every order key sent.
 func TestBuildQuery_MultipleOrderParamsRejected(t *testing.T) {
 	params := url.Values{"order[title]": {"asc"}, "order[likes]": {"desc"}}
-	_, err := BuildQuery("guides", testResource(), params, nil)
+	_, err := BuildQuery("guides", testResource(), params, nil, nil)
 	if err == nil {
 		t.Fatal("two order[…] params must be rejected, was accepted (the winner used to be a coin flip)")
 	}
@@ -511,7 +511,7 @@ func TestBuildQuery_RepeatedParamsRejected(t *testing.T) {
 		"identical dup": {"page": {"2", "2"}},
 	}
 	for name, params := range cases {
-		_, err := BuildQuery("guides", testResource(), params, nil)
+		_, err := BuildQuery("guides", testResource(), params, nil, nil)
 		if err == nil {
 			t.Errorf("%s: repeated parameter must be rejected, was accepted", name)
 			continue
@@ -550,7 +550,7 @@ func TestBuildQuery_UnrecognizedInputIsAlwaysRejected(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := BuildQuery("guides", testResource(), tc.params, nil)
+			_, err := BuildQuery("guides", testResource(), tc.params, nil, nil)
 			if err == nil {
 				t.Fatalf("%v was ACCEPTED — unrecognized input must never be silently dropped (ADR-024)", tc.params)
 			}
@@ -577,7 +577,7 @@ func TestBuildQuery_ValidInputStillWorks(t *testing.T) {
 		{"utm_source": {"newsletter"}}, // an unknown TOP-LEVEL param stays tolerated
 	}
 	for _, p := range ok {
-		if _, err := BuildQuery("guides", testResource(), p, nil); err != nil {
+		if _, err := BuildQuery("guides", testResource(), p, nil, nil); err != nil {
 			t.Errorf("valid input %v was rejected: %v", p, err)
 		}
 	}
@@ -598,7 +598,7 @@ func TestBuildQuery_EmptyValueOnTypedFieldIsRejected(t *testing.T) {
 		"done":   {Type: "bool"},
 	}}
 	for _, f := range []string{"amount", "due", "done"} {
-		_, err := BuildQuery("notes", res, url.Values{"filter[" + f + "][eq]": {""}}, nil)
+		_, err := BuildQuery("notes", res, url.Values{"filter[" + f + "][eq]": {""}}, nil, nil)
 		if err == nil {
 			t.Errorf("filter[%s][eq]= was accepted; an empty value is not valid for that type", f)
 			continue
@@ -610,7 +610,7 @@ func TestBuildQuery_EmptyValueOnTypedFieldIsRejected(t *testing.T) {
 	// An empty value on a TEXT column is legitimate — it asks for the empty
 	// string — and must keep working.
 	for _, f := range []string{"title", "body"} {
-		if _, err := BuildQuery("notes", res, url.Values{"filter[" + f + "][eq]": {""}}, nil); err != nil {
+		if _, err := BuildQuery("notes", res, url.Values{"filter[" + f + "][eq]": {""}}, nil, nil); err != nil {
 			t.Errorf("filter[%s][eq]= must remain valid on a text column: %v", f, err)
 		}
 	}
@@ -623,7 +623,7 @@ func TestBuildQuery_EmptyValueOnTypedFieldIsRejected(t *testing.T) {
 // retries the same request.
 func TestBuildQuery_FilterErrorDoesNotClaimIDIsAvailable(t *testing.T) {
 	res := &schema.ResourceSchema{Fields: map[string]schema.FieldDef{"title": {Type: "string"}}}
-	_, err := BuildQuery("notes", res, url.Values{"filter[id][eq]": {"x"}}, nil)
+	_, err := BuildQuery("notes", res, url.Values{"filter[id][eq]": {"x"}}, nil, nil)
 	if err == nil {
 		t.Fatal("filter[id] is not supported today and must be rejected (see backlog ENG-26)")
 	}
@@ -637,7 +637,7 @@ func TestBuildQuery_FilterErrorDoesNotClaimIDIsAvailable(t *testing.T) {
 		}
 	}
 	// Sorting DOES accept id, so its error must keep listing it.
-	_, serr := BuildQuery("notes", res, url.Values{"sort": {"ghost"}}, nil)
+	_, serr := BuildQuery("notes", res, url.Values{"sort": {"ghost"}}, nil, nil)
 	if serr == nil || !strings.Contains(serr.Error(), "id") {
 		t.Errorf("the sort error must still list id, which sorting accepts: %v", serr)
 	}
@@ -650,7 +650,7 @@ func TestBuildQuery_SearchWithoutTextFieldsRejected(t *testing.T) {
 	res := &schema.ResourceSchema{Fields: map[string]schema.FieldDef{
 		"qty": {Type: "int"}, "ref": {Type: "uuid"},
 	}}
-	_, err := BuildQuery("lines", res, url.Values{"search": {"zzz"}}, nil)
+	_, err := BuildQuery("lines", res, url.Values{"search": {"zzz"}}, nil, nil)
 	if err == nil {
 		t.Fatal("search on a text-less resource must be rejected, was accepted")
 	}
@@ -658,7 +658,7 @@ func TestBuildQuery_SearchWithoutTextFieldsRejected(t *testing.T) {
 		t.Errorf("error must say why, got: %s", err)
 	}
 	// A resource WITH text fields keeps searching.
-	if _, err := BuildQuery("guides", testResource(), url.Values{"search": {"zzz"}}, nil); err != nil {
+	if _, err := BuildQuery("guides", testResource(), url.Values{"search": {"zzz"}}, nil, nil); err != nil {
 		t.Errorf("search on a text resource must keep working: %v", err)
 	}
 }

@@ -1290,6 +1290,44 @@ No matching policy → **403**:
 
 A row excluded by an applicable condition reads as **404** (it matches no row), not 403.
 
+### 7.10b `public` — the declarative anonymous surface (ADR-026)
+
+`rbac.public` (sibling of `roles`) declares what an UNAUTHENTICATED request may
+**read** — the no-Go path to a blog/catalogue/landing:
+
+```json
+"rbac": {
+  "roles": { "admin": { "resources": "*", "actions": ["*"] } },
+  "public": {
+    "articulos": {
+      "actions": ["read"],
+      "conditions": { "field": "estado", "op": "eq", "val": "publicado" },
+      "fields": ["id", "titulo", "cuerpo", "portada"]
+    },
+    "files": { "actions": ["read"] }
+  }
+}
+```
+
+Each entry has the per-resource permission shape minus `condition_actions`.
+Compiled into the ONE evaluator as the reserved role `$public` (declaring that
+name in `roles` is a load error), so every surface — REST, GraphQL, aggregate,
+`?include=` embeds, subroutes, SSE, files — enforces it identically.
+
+Validated at load: `actions` must be exactly `["read"]`
+(`public_read_only`); a condition `val` must be a **literal** —
+`$user_id`/`$external_client_id` are errors (`public_condition_identity`: an
+anonymous request has no identity, the rule would match zero rows forever);
+`conditions.field` and every `fields` entry must exist; `files` is grantable
+actions-only. Runtime: anonymous requests ride the `Route.Public` rate
+limiter (per tenant+IP), never read or populate the response cache, and a
+present-but-invalid Bearer stays **401** (no silent downgrade). The `fields`
+allowlist also bounds what may be **filtered and sorted** (`403`,
+`ErrForbiddenField`) and which text columns `?search=` sweeps. With a block
+declared, a tokenless request on an undeclared resource is **403** (it
+reached RBAC); with no block, tokenless stays **401** — byte-identical to
+before the key existed.
+
 ### 7.11 Examples
 
 **Role-global, owner-scoped** — `operator` may read and update tasks, sees only `id`/`title`/`status`, and is restricted to rows it owns (`operator_id = $user_id`). The condition applies to **every** listed resource and **both** granted actions:

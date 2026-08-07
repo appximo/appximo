@@ -305,17 +305,26 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			evalResult := rbac.EvalResultFromCtx(req.Context())
 
 			var cond *rbac.WhereCondition
+			var allowedFields []string
 			if evalResult != nil {
 				cond = evalResult.Condition
+				allowedFields = evalResult.AllowedFields
 			}
 
 			// M1: the field universe for filter/sort/search validation is the
 			// tenant's DEPLOYED surface (same ENG-12 seam as the write path), so
 			// a hot-migrated column filters without a restart.
-			qb, err := query.BuildQuery(name, readSurface(req.Context(), tc.ID, name, &res), req.URL.Query(), cond)
+			qb, err := query.BuildQuery(name, readSurface(req.Context(), tc.ID, name, &res), req.URL.Query(), cond, allowedFields)
 			if err != nil {
+				// SEC-5 closed generally (PUBLIC-SURFACE-S1): naming a field the
+				// role may not read — filter, sort or order — is a 403, like the
+				// aggregate path; every other parse error stays a 400.
+				status := http.StatusBadRequest
+				if errors.Is(err, query.ErrForbiddenField) {
+					status = http.StatusForbidden
+				}
 				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusBadRequest)
+				w.WriteHeader(status)
 				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 				return
 			}

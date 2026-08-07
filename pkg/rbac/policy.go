@@ -11,6 +11,45 @@ type Policy struct {
 	Roles map[string]RolePolicy `json:"roles"`
 }
 
+// PublicRoleName is the reserved role the schema's `rbac.public` block compiles
+// into (ADR-026, PUBLIC-SURFACE-S1). An anonymous request (no Authorization
+// header, on an app whose schema declares the block) is evaluated AS this role
+// through the one existing evaluator — same deny-by-default, same conditions,
+// same field allowlists, on every surface. The name is not declarable in
+// rbac.roles (schema.PublicRoleName mirrors it; a cross-pin test keeps the two
+// constants identical), so the anonymous surface can only come from the block.
+const PublicRoleName = "$public"
+
+// UnmarshalJSON folds the schema's `rbac.public` block into the reserved
+// public role, so everything downstream — Evaluate, Allows, RoleCacheable,
+// DenyDetail — sees ONE uniform role map and needs no second code path.
+func (p *Policy) UnmarshalJSON(data []byte) error {
+	type plain struct {
+		Roles  map[string]RolePolicy         `json:"roles"`
+		Public map[string]ResourcePermission `json:"public"`
+	}
+	var a plain
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	p.Roles = a.Roles
+	if len(a.Public) > 0 {
+		if p.Roles == nil {
+			p.Roles = make(map[string]RolePolicy, 1)
+		}
+		p.Roles[PublicRoleName] = RolePolicy{Permissions: a.Public}
+	}
+	return nil
+}
+
+// HasPublicSurface reports whether the policy declares an anonymous surface —
+// the switch that lets the auth middleware admit tokenless /api requests as
+// the public role instead of answering 401.
+func (p *Policy) HasPublicSurface() bool {
+	_, ok := p.Roles[PublicRoleName]
+	return ok
+}
+
 // RolePolicy defines what a role can do.
 // Resources is json.RawMessage because it can be the string "*" or a []string.
 //

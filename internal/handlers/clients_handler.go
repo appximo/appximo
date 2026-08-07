@@ -30,7 +30,7 @@ func (h *Handlers) ListClients(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res := h.apiSchema.Resources["clients"]
-	qb, err := querypkg.BuildQuery("clients", &res, r.URL.Query(), cond)
+	qb, err := querypkg.BuildQuery("clients", &res, r.URL.Query(), cond, nil)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)

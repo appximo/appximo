@@ -111,7 +111,7 @@ func (s *Service) ListData(ctx context.Context, tenantID, resource string, param
 	if !ok {
 		return nil, ErrResourceNotFound
 	}
-	qb, err := query.BuildQuery(resource, &res, params, nil) // nil cond: super-admin sees all rows
+	qb, err := query.BuildQuery(resource, &res, params, nil, nil) // nil cond/allowlist: super-admin sees all rows and fields
 	if err != nil {
 		return nil, err // a bad filter/sort param → 400 (mapped by handler)
 	}

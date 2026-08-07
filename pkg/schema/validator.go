@@ -511,8 +511,19 @@ var validRBACActions = map[string]bool{
 // surface gets the stricter checks.
 func validateRBAC(s *APISchema) []ValidationError {
 	var errs []ValidationError
+	errs = append(errs, validatePublicBlock(s)...)
 	for roleName, role := range s.RBAC.Roles {
 		rolePrefix := "rbac.roles." + roleName
+		if roleName == PublicRoleName {
+			errs = append(errs, ValidationError{
+				Field:   rolePrefix,
+				Rule:    "reserved_role_name",
+				Got:     roleName,
+				Message: fmt.Sprintf("role name %q is reserved: it is the internal role the rbac.public block compiles into (ADR-026)", roleName),
+				Fix:     "rename the role; to expose resources anonymously, declare them under rbac.public",
+			})
+			continue
+		}
 
 		// Custom-route grants (LIBRARY-GAPS-S1) are orthogonal to BOTH forms — they
 		// name registered endpoints, not tables — so they are validated for every
@@ -768,6 +779,117 @@ var validConditionOps = map[string]bool{"": true, "eq": true}
 // validateConditionOp rejects an RBAC condition whose operator the engine does not
 // enforce. prefix is the condition's path (e.g. "rbac.roles.x.conditions"). A nil
 // condition or an eq/empty op produces no error.
+// PublicRoleName is the reserved role the rbac.public block compiles into
+// (ADR-026). It starts with a character no schema role may use, and declaring
+// it literally in rbac.roles is rejected at load — the anonymous surface can
+// only ever come from the public block.
+const PublicRoleName = "$public"
+
+// validatePublicBlock checks the anonymous surface (ADR-026). The bar is
+// deliberately higher than for authenticated roles: this surface answers to
+// the whole internet, so everything that could silently widen it is a load
+// error, never a default.
+func validatePublicBlock(s *APISchema) []ValidationError {
+	var errs []ValidationError
+	for resName, perm := range s.RBAC.Public {
+		permPrefix := "rbac.public." + resName
+
+		// Read-only, explicitly: the anonymous surface takes exactly ["read"].
+		onlyRead := len(perm.Actions) == 1 && perm.Actions[0] == "read"
+		if !onlyRead {
+			errs = append(errs, ValidationError{
+				Field:    permPrefix + ".actions",
+				Rule:     "public_read_only",
+				Got:      strings.Join(perm.Actions, ","),
+				Expected: []string{"read"},
+				Message:  fmt.Sprintf("the anonymous surface is READ-ONLY: rbac.public.%s.actions must be exactly [\"read\"] — an unauthenticated write is an abuse surface (spam, mass creation) that a schema key must not open by accident (ADR-026)", resName),
+				Fix:      `set "actions": ["read"]; writes need an authenticated role (or a custom Route with its own guards)`,
+			})
+		}
+		if len(perm.ConditionActions) > 0 {
+			errs = append(errs, ValidationError{
+				Field:   permPrefix + ".condition_actions",
+				Message: "condition_actions is not valid on a public grant: read is the only action, so there is no subset to scope",
+			})
+		}
+
+		res, declared := s.Resources[resName]
+		if !declared && resName == "files" {
+			// The built-in store: actions-only, like any role's files grant —
+			// this is what makes the public-image pattern reachable without Go.
+			if perm.Conditions != nil || len(perm.Fields) > 0 {
+				errs = append(errs, ValidationError{
+					Field:   permPrefix,
+					Rule:    "files_grant_actions_only",
+					Message: "the built-in \"files\" grant takes actions only — file metadata has no owner column for a row condition, and downloads are not field-projected",
+					Fix:     "keep only \"actions\" on the public files grant",
+				})
+			}
+			continue
+		}
+		if !declared {
+			avail := resourceNamesList(s)
+			errs = append(errs, ValidationError{
+				Field:    permPrefix,
+				Rule:     "unknown_resource",
+				Got:      resName,
+				Expected: avail,
+				Message:  fmt.Sprintf("rbac.public references unknown resource %q — available resources: %s (or the built-in \"files\" store)", resName, joinQuoted(avail)),
+				Fix:      "key this public grant by one of the existing resources above",
+			})
+			continue
+		}
+
+		if perm.Conditions != nil {
+			errs = append(errs, validateConditionOp(permPrefix+".conditions", perm.Conditions)...)
+			// An anonymous request HAS no identity: the identity variables can
+			// only ever match zero rows here, so unlike an authenticated role
+			// they are load errors, not a warning.
+			if perm.Conditions.Val == "$user_id" || perm.Conditions.Val == "$external_client_id" {
+				errs = append(errs, ValidationError{
+					Field:   permPrefix + ".conditions.val",
+					Rule:    "public_condition_identity",
+					Got:     perm.Conditions.Val,
+					Message: fmt.Sprintf("a public grant's condition compares against %s, but an anonymous request has no identity — the rule would match ZERO rows forever", perm.Conditions.Val),
+					Fix:     `use a literal val that marks the publishable rows (e.g. "conditions": {"field": "status", "op": "eq", "val": "published"})`,
+				})
+			}
+			if perm.Conditions.Field == "" {
+				errs = append(errs, ValidationError{
+					Field:   permPrefix + ".conditions.field",
+					Rule:    "missing_condition_field",
+					Message: "condition field is required",
+					Fix:     `set conditions.field to the column that marks publishable rows (e.g. "status")`,
+				})
+			} else if !rbacFieldExists(res, perm.Conditions.Field) {
+				avail := fieldNamesList(res)
+				errs = append(errs, ValidationError{
+					Field:    permPrefix + ".conditions.field",
+					Rule:     "unknown_field",
+					Got:      perm.Conditions.Field,
+					Expected: avail,
+					Message:  fmt.Sprintf("condition field %q does not exist on resource %q — available fields: %s", perm.Conditions.Field, resName, joinQuoted(avail)),
+					Fix:      "set conditions.field to one of the available fields above",
+				})
+			}
+		}
+		for _, f := range perm.Fields {
+			if !rbacFieldExists(res, f) {
+				avail := fieldNamesList(res)
+				errs = append(errs, ValidationError{
+					Field:    permPrefix + ".fields",
+					Rule:     "unknown_field",
+					Got:      f,
+					Expected: avail,
+					Message:  fmt.Sprintf("public field allowlist names %q which does not exist on resource %q — available fields: %s", f, resName, joinQuoted(avail)),
+					Fix:      "list only existing fields (this allowlist also bounds what anonymous callers may filter and sort by)",
+				})
+			}
+		}
+	}
+	return errs
+}
+
 func validateConditionOp(prefix string, cond *Condition) []ValidationError {
 	if cond == nil || validConditionOps[cond.Op] {
 		return nil

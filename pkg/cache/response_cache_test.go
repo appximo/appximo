@@ -402,3 +402,27 @@ func TestCacheQueryStringDistinct(t *testing.T) {
 		t.Errorf("different query strings must use different cache keys; expected 2 calls, got %d", calls)
 	}
 }
+
+// TestInvalidateDropsInFlightStore — the invalidate/refresh race
+// (PUBLIC-SURFACE-S1 Part F): a store whose backend ran BEFORE an Invalidate
+// must not land AFTER it (it would resurrect pre-write data until TTL —
+// observed in the field as a deleted row still listed while the uncached
+// aggregate was already correct). The epoch captured before the backend runs
+// makes the late store a no-op; a store with the CURRENT epoch still lands.
+func TestInvalidateDropsInFlightStore(t *testing.T) {
+	rc := New(time.Minute)
+	item := rc.buildItem(200, http.Header{}, []byte(`{"data":["stale"]}`))
+
+	asOf := rc.epoch("t1")
+	rc.Invalidate("t1") // the write's invalidation lands mid-flight
+	rc.set("t1", "/api/tasks", item, asOf)
+	if got := rc.get("t1", "/api/tasks"); got != nil {
+		t.Fatal("a store that raced an Invalidate must be dropped, not resurrect pre-write data")
+	}
+
+	// The non-racing store (current epoch) still works.
+	rc.set("t1", "/api/tasks", item, rc.epoch("t1"))
+	if got := rc.get("t1", "/api/tasks"); got == nil {
+		t.Fatal("a store with the current epoch must land")
+	}
+}

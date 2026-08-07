@@ -509,6 +509,34 @@ var validIndexOpclasses = map[string]map[string]bool{
 // RBACPolicy holds all role definitions for a resource set.
 type RBACPolicy struct {
 	Roles map[string]RolePolicy `json:"roles"`
+
+	// Public declares the ANONYMOUS surface (PUBLIC-SURFACE-S1, ADR-026): the
+	// resources an UNAUTHENTICATED request may READ, each with its own row
+	// condition and field allowlist — a blog's published articles, a catalogue,
+	// a landing — with no Go and no token. It reuses the per-resource
+	// permission shape (`{ "articulos": { "actions": ["read"], "conditions":
+	// {…}, "fields": […] } }`) and compiles into the ONE existing evaluator as
+	// the reserved role rbac.PublicRoleName, so every enforcement surface
+	// (REST, GraphQL, aggregates, embeds, SSE, files) is the same code path an
+	// authenticated role uses — never a second implementation.
+	//
+	// Constraints, validated at load (deny-by-default stays intact):
+	//   - actions must be exactly ["read"] — the anonymous surface is
+	//     read-only in v1 (an anonymous write is a spam/abuse surface that
+	//     needs its own design; ADR-026 records the reasoning).
+	//   - conditions.val must be a LITERAL ("published") — $user_id /
+	//     $external_client_id name an identity an anonymous request does not
+	//     have, so they are load errors here.
+	//   - the built-in "files" store is grantable (actions-only, like any
+	//     role) — the public-image pattern.
+	//   - absent block ⇒ NOTHING anonymous, exactly today's behavior. The key
+	//     is NEW, and unknown keys have always rejected the schema, so no
+	//     existing schema can change meaning by upgrading the engine.
+	//
+	// Anonymous requests are additionally throttled by the public-route rate
+	// limiter (APPXIMO_PUBLIC_ROUTE_RPS) and NEVER served from or stored in
+	// the response cache.
+	Public map[string]ResourcePermission `json:"public,omitempty"`
 }
 
 // RolePolicy defines what a role can do.

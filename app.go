@@ -1250,9 +1250,40 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 		}
 	}
 	a.responseCache.SetBypassMatcher(cacheBypass)
-	r.Use(auth.JWTMiddlewareWithStatic(a.cfg.JWTSecret, isPublic, isStatic, func(tenantID, reason string) {
+	// The declarative anonymous surface (ADR-026): only when the schema declares
+	// rbac.public does the JWT middleware admit tokenless requests — as the
+	// reserved public role, which the one evaluator then holds to its grants.
+	// No block ⇒ anonRole "" ⇒ byte-identical enforcement to before.
+	anonRole := ""
+	if surf.policy.HasPublicSurface() {
+		anonRole = rbac.PublicRoleName
+	}
+	r.Use(auth.JWTMiddlewareWithAnonymous(a.cfg.JWTSecret, isPublic, isStatic, anonRole, func(tenantID, reason string) {
 		a.errStore.Record(tenantID, fmt.Errorf("jwt: %s", reason))
 	}))
+	// Anonymous requests get the AGGRESSIVE public-route throttle (the same
+	// limiter Route.Public uses, keyed tenant+IP) BEFORE RBAC/SQL runs — the
+	// whole internet can reach this surface, so it never competes with
+	// authenticated traffic for backend work. Authenticated requests pay one
+	// pointer-compare.
+	if anonRole != "" && a.publicLimiter != nil {
+		lim := a.publicLimiter
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if c := auth.ClaimsFromCtx(req.Context()); c != nil && c.Role == rbac.PublicRoleName {
+					key := c.TenantID + "|" + remoteIP(req)
+					if !lim.Allow(key, "") {
+						w.Header().Set("Retry-After", "1")
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusTooManyRequests)
+						_, _ = w.Write([]byte(`{"error":"rate limit exceeded for anonymous requests — authenticate for the normal per-tenant limits"}`))
+						return
+					}
+				}
+				next.ServeHTTP(w, req)
+			})
+		})
+	}
 	r.Use(rbac.RBACMiddlewareWithPublic(mustMarshal(surf.schema.RBAC), isPublic))
 	// ENG-12: hand the generated write handlers the tenant's DEPLOYED write
 	// surface, so a column a deploy just added is writable with no restart (the

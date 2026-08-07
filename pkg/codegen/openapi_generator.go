@@ -102,20 +102,35 @@ func buildOAPaths(s *schema.APISchema) map[string]any {
 	if _, taken := s.Resources["files"]; !taken {
 		addOAFilePaths(paths)
 	}
+	// The anonymous surface (ADR-026): a resource with a rbac.public read grant
+	// marks its READ operations `security: []` + `x-public: true`, so a generic
+	// tool discovers that no token is needed there (the write ops keep the
+	// global bearer requirement — the public surface is read-only).
+	markPublic := func(op map[string]any) map[string]any {
+		op["security"] = []any{}
+		op["x-public"] = true
+		return op
+	}
 	for _, name := range sortedResourceKeys(s) {
 		res := s.Resources[name]
 		title := toPascalCase(name)
+		_, publicRead := s.RBAC.Public[name]
+		listOp, getOp := oaListOp(name, title, &res), oaGetOp(name, title)
+		if publicRead {
+			listOp, getOp = markPublic(listOp), markPublic(getOp)
+		}
 		paths["/api/"+name] = map[string]any{
-			"get":  oaListOp(name, title, &res),
+			"get":  listOp,
 			"post": oaCreateOp(name, title),
 		}
 		paths["/api/"+name+"/{id}"] = map[string]any{
-			"get":    oaGetOp(name, title),
+			"get":    getOp,
 			"put":    oaReplaceOp(name, title),
 			"patch":  oaUpdateOp(name, title),
 			"delete": oaDeleteOp(name, title),
 		}
-		// subresource paths
+		// subresource paths (public only when the TARGET is publicly readable
+		// too — the subroute enforces the target's RBAC, SEC-AUDIT-V1).
 		for _, fname := range sortedFieldKeys(&res) {
 			fd := res.Fields[fname]
 			if fd.Relation == "" {
@@ -123,8 +138,14 @@ func buildOAPaths(s *schema.APISchema) map[string]any {
 			}
 			relName := strings.TrimSuffix(fname, "_id")
 			relTitle := toPascalCase(fd.Relation)
+			subOp := oaSubresourceOp(name, title, relName, relTitle, fd.Relation, fname)
+			if publicRead {
+				if _, targetPublic := s.RBAC.Public[fd.Relation]; targetPublic {
+					subOp = markPublic(subOp)
+				}
+			}
 			paths["/api/"+name+"/{id}/"+relName] = map[string]any{
-				"get": oaSubresourceOp(name, title, relName, relTitle, fd.Relation, fname),
+				"get": subOp,
 			}
 		}
 	}

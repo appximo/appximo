@@ -1,0 +1,40 @@
+{
+  "$schema": "https://appximo.com/schema/v1",
+  "version": "1",
+  "name": "public-blog",
+  "resources": {
+    "articulos": {
+      "fields": {
+        "titulo": { "type": "string", "required": true, "minLength": 1 },
+        "cuerpo": { "type": "text" },
+        "estado": { "type": "string", "enum": ["borrador", "publicado"], "default": "borrador" },
+        "notas_internas": { "type": "text" },
+        "portada": { "type": "file" }
+      }
+    },
+    "suscriptores": {
+      "fields": {
+        "email": { "type": "string", "required": true, "minLength": 1, "format": "email" }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": { "resources": "*", "actions": ["*"] },
+      "editor": {
+        "permissions": {
+          "articulos": { "actions": ["read", "create", "update", "delete"] },
+          "files": { "actions": ["create", "read"] }
+        }
+      }
+    },
+    "public": {
+      "articulos": {
+        "actions": ["read"],
+        "conditions": { "field": "estado", "op": "eq", "val": "publicado" },
+        "fields": ["id", "titulo", "cuerpo", "estado", "portada"]
+      },
+      "files": { "actions": ["read"] }
+    }
+  }
+}

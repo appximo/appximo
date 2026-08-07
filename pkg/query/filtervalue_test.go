@@ -99,7 +99,7 @@ func TestFilterValue_PostgresConformance(t *testing.T) {
 // ENG-25 complaint — `400 invalid request` named nothing).
 func TestBuildQuery_WronglyTypedFilterValueIsNamed(t *testing.T) {
 	params, _ := url.ParseQuery("filter[title][eq]=ok&filter[amount][gt]=abc")
-	_, err := BuildQuery("things", typedResource(), params, nil)
+	_, err := BuildQuery("things", typedResource(), params, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for filter[amount][gt]=abc")
 	}
@@ -112,7 +112,7 @@ func TestBuildQuery_WronglyTypedFilterValueIsNamed(t *testing.T) {
 	// The measured constraint that shaped the whole design: `yes` IS a boolean
 	// in Postgres, so it must keep working (it returned 200 pre-fix).
 	params, _ = url.ParseQuery("filter[done][eq]=yes")
-	if _, err := BuildQuery("things", typedResource(), params, nil); err != nil {
+	if _, err := BuildQuery("things", typedResource(), params, nil, nil); err != nil {
 		t.Fatalf("filter[done][eq]=yes must stay accepted (Postgres accepts it): %v", err)
 	}
 }
@@ -122,7 +122,7 @@ func TestBuildQuery_WronglyTypedFilterValueIsNamed(t *testing.T) {
 // keyset cursors, and it composes with other filters.
 func TestBuildQuery_FilterByID(t *testing.T) {
 	params, _ := url.ParseQuery("filter[id][eq]=a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11&filter[title][eq]=x")
-	qb, err := BuildQuery("things", typedResource(), params, nil)
+	qb, err := BuildQuery("things", typedResource(), params, nil, nil)
 	if err != nil {
 		t.Fatalf("filter[id][eq]=<uuid> must be accepted: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestBuildQuery_FilterByID(t *testing.T) {
 
 	// Non-eq ops stay rejected (uuid's operator set), naming the set.
 	params, _ = url.ParseQuery("filter[id][gt]=a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
-	if _, err := BuildQuery("things", typedResource(), params, nil); err == nil {
+	if _, err := BuildQuery("things", typedResource(), params, nil, nil); err == nil {
 		t.Fatal("filter[id][gt] must be rejected (uuid: eq only)")
 	}
 
@@ -146,7 +146,7 @@ func TestBuildQuery_FilterByID(t *testing.T) {
 
 	// And the unknown-field message may name id as available, truthfully now.
 	params, _ = url.ParseQuery("filter[ghost][eq]=x")
-	_, err = BuildQuery("things", typedResource(), params, nil)
+	_, err = BuildQuery("things", typedResource(), params, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "id") {
 		t.Fatalf("available list should include id: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestBuildQuery_FilterByID(t *testing.T) {
 
 func BuildQuery2Err(t *testing.T, params url.Values) error {
 	t.Helper()
-	_, err := BuildQuery("things", typedResource(), params, nil)
+	_, err := BuildQuery("things", typedResource(), params, nil, nil)
 	return err
 }
 
@@ -177,7 +177,7 @@ func TestBuildQuery_EmptyOwnedParamsAreRejected(t *testing.T) {
 	}
 	for _, c := range cases {
 		params, _ := url.ParseQuery(c.query)
-		_, err := BuildQuery("things", typedResource(), params, nil)
+		_, err := BuildQuery("things", typedResource(), params, nil, nil)
 		if err == nil {
 			t.Errorf("?%s: expected a named 400, got nil", c.query)
 			continue
@@ -191,13 +191,13 @@ func TestBuildQuery_EmptyOwnedParamsAreRejected(t *testing.T) {
 
 	// Absent parameters still default silently — presence is the gate.
 	params, _ := url.ParseQuery("filter[title][eq]=x")
-	qb, err := BuildQuery("things", typedResource(), params, nil)
+	qb, err := BuildQuery("things", typedResource(), params, nil, nil)
 	if err != nil || qb.Page() != DefaultPage || qb.PerPage() != DefaultPerPage {
 		t.Fatalf("absent params must keep their defaults: %v", err)
 	}
 	// And ?sort=field&order=desc keeps working.
 	params, _ = url.ParseQuery("sort=title&order=desc")
-	if _, err := BuildQuery("things", typedResource(), params, nil); err != nil {
+	if _, err := BuildQuery("things", typedResource(), params, nil, nil); err != nil {
 		t.Fatalf("sort+order must keep working: %v", err)
 	}
 }

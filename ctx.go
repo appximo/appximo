@@ -472,7 +472,10 @@ func (c *requestCtx) Query(resource string, opts QueryOpts) ([]map[string]any, e
 		}
 	}
 
-	qb, err := query.BuildQuery(resource, &res, params, eval.Condition)
+	// The role's field allowlist bounds Filters/OrderBy too (SEC-5 closed
+	// generally): a custom handler acting AS a restricted role cannot use a
+	// hidden column as an oracle any more than the HTTP surface can.
+	qb, err := query.BuildQuery(resource, &res, params, eval.Condition, eval.AllowedFields)
 	if err != nil {
 		return nil, err
 	}

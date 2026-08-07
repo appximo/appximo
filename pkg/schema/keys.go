@@ -116,7 +116,18 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 	}
 
 	rbac := object("rbac", top["rbac"])
-	addUnknown("rbac", rbac, "roles")
+	addUnknown("rbac", rbac, "roles", "public")
+	// The anonymous surface (ADR-026): resource → read grant. Same keys as a
+	// per-resource permission, minus condition_actions (with read as the only
+	// grantable action there is no subset to scope).
+	for resName, rawPerm := range object("rbac.public", rbac["public"]) {
+		permPath := "rbac.public." + resName
+		perm := object(permPath, rawPerm)
+		addUnknown(permPath, perm, "actions", "conditions", "fields")
+		if cond := object(permPath+".conditions", perm["conditions"]); cond != nil {
+			addUnknown(permPath+".conditions", cond, "field", "op", "val")
+		}
+	}
 	for roleName, rawRole := range object("rbac.roles", rbac["roles"]) {
 		rolePath := "rbac.roles." + roleName
 		role := object(rolePath, rawRole)

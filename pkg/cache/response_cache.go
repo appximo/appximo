@@ -90,6 +90,19 @@ type ResponseCache struct {
 	tenants map[string]map[string]*cacheItem // tenantID → requestURI → item
 	ttl     time.Duration
 
+	// epochs guards the store against the invalidate/refresh race
+	// (PUBLIC-SURFACE-S1 Part F, second field report: after a DELETE the list
+	// briefly served the deleted row while the aggregate — uncached — was
+	// already correct, self-healing at TTL). A refresh/store runs its backend
+	// query and THEN writes the item; a write that COMMITS and invalidates in
+	// that window would have its invalidation undone by the in-flight store,
+	// pinning a pre-write body until TTL. Every store now captures the
+	// tenant's epoch BEFORE running the backend and set() drops the item if
+	// Invalidate bumped it meanwhile — the stale body is served at most to
+	// the caller that raced, never stored. (Not reproduced live — the window
+	// is ~1 query; confirmed by code reading and closed structurally.)
+	epochs map[string]uint64
+
 	// sf collapses concurrent cache-miss refreshes for the same (tenant, key)
 	// into a single backend call. Without it, every goroutine that arrives in
 	// the window between TTL expiry and the next write hits Postgres at once
@@ -169,12 +182,25 @@ func New(ttl time.Duration) *ResponseCache {
 	return rc
 }
 
-// Invalidate removes all cached entries for tenantID.
+// Invalidate removes all cached entries for tenantID and bumps its epoch so
+// any in-flight refresh/store started before this point is discarded on
+// completion (see the epochs field).
 // Call this when a schema_updated pg_notify arrives for that tenant.
 func (rc *ResponseCache) Invalidate(tenantID string) {
 	rc.mu.Lock()
 	delete(rc.tenants, tenantID)
+	if rc.epochs == nil {
+		rc.epochs = make(map[string]uint64)
+	}
+	rc.epochs[tenantID]++
 	rc.mu.Unlock()
+}
+
+// epoch returns the tenant's current invalidation epoch.
+func (rc *ResponseCache) epoch(tenantID string) uint64 {
+	rc.mu.RLock()
+	defer rc.mu.RUnlock()
+	return rc.epochs[tenantID]
 }
 
 // Middleware returns an http.Handler that sits after authentication/RBAC
@@ -304,6 +330,7 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 		// across unvalidated tokens would let an invalid token piggyback on a
 		// valid 200. We still populate the cache (with a pre-gzipped copy) so the
 		// next request — now token-validated — gets the gzip-free HIT path.
+		asOf := rc.epoch(tc.ID)
 		cw := &captureWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(cw, r)
 		if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {
@@ -321,7 +348,7 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 			}
 			if rc.cacheable(role) {
 				plain := append([]byte(nil), cw.buf.Bytes()...)
-				rc.set(tc.ID, key, rc.buildItem(cw.status, cw.Header(), plain))
+				rc.set(tc.ID, key, rc.buildItem(cw.status, cw.Header(), plain), asOf)
 			}
 		}
 	})
@@ -334,12 +361,13 @@ func (rc *ResponseCache) Middleware(next http.Handler) http.Handler {
 // be replayed — in whichever encoding each caller accepts — to every waiter.
 func (rc *ResponseCache) refresh(r *http.Request, tenantID, key string, next http.Handler) *cacheItem {
 	res, _, _ := rc.sf.Do(tenantID+"\x00"+key, func() (any, error) {
+		asOf := rc.epoch(tenantID)
 		rec := &bufferedResponse{header: make(http.Header), status: http.StatusOK}
 		next.ServeHTTP(rec, r)
 		plain := append([]byte(nil), rec.body.Bytes()...)
 		item := rc.buildItem(rec.status, rec.header, plain)
 		if item.status == http.StatusOK && len(plain) > 0 {
-			rc.set(tenantID, key, item)
+			rc.set(tenantID, key, item, asOf)
 		}
 		return item, nil
 	})
@@ -457,9 +485,15 @@ func (rc *ResponseCache) get(tenantID, key string) *cacheItem {
 	return item
 }
 
-func (rc *ResponseCache) set(tenantID, key string, item *cacheItem) {
+// set stores item unless the tenant's epoch moved past asOf — a write
+// invalidated the tenant while this response was being produced, so storing it
+// would resurrect pre-write data until TTL (the invalidate/refresh race).
+func (rc *ResponseCache) set(tenantID, key string, item *cacheItem, asOf uint64) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
+	if rc.epochs[tenantID] != asOf {
+		return // invalidated mid-flight: the response may predate the write
+	}
 	bucket := rc.tenants[tenantID]
 	if bucket == nil {
 		bucket = make(map[string]*cacheItem)

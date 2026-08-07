@@ -101,7 +101,20 @@ func JWTMiddleware(secret string, onError ...func(tenantID, reason string)) func
 // never inherit each other's mounts. nil behaves byte-identically to
 // JWTMiddlewareWithPublic.
 func JWTMiddlewareWithStatic(secret string, isPublic PublicMatcher, isStatic func(path string) bool, onError ...func(tenantID, reason string)) func(http.Handler) http.Handler {
-	return jwtMiddleware(secret, isPublic, isStatic, onError...)
+	return jwtMiddleware(secret, isPublic, isStatic, "", onError...)
+}
+
+// JWTMiddlewareWithAnonymous is JWTMiddlewareWithStatic plus the DECLARATIVE
+// anonymous surface (ADR-026, PUBLIC-SURFACE-S1): when anonRole is non-empty
+// (the app's schema declares rbac.public), a request with NO Authorization
+// header on an otherwise-enforced route proceeds carrying synthetic claims
+// {Role: anonRole, TenantID: <request tenant>} — downstream RBAC then decides
+// per resource with the one existing evaluator, deny-by-default. The ENG-6
+// rule holds unchanged: a PRESENT-but-invalid/expired/foreign-tenant Bearer is
+// a 401, never a silent downgrade to anonymous. Empty anonRole is byte-
+// identical to JWTMiddlewareWithStatic.
+func JWTMiddlewareWithAnonymous(secret string, isPublic PublicMatcher, isStatic func(path string) bool, anonRole string, onError ...func(tenantID, reason string)) func(http.Handler) http.Handler {
+	return jwtMiddleware(secret, isPublic, isStatic, anonRole, onError...)
 }
 
 // JWTMiddlewareWithPublic is JWTMiddleware plus OPTIONAL authentication for the
@@ -115,10 +128,10 @@ func JWTMiddlewareWithStatic(secret string, isPublic PublicMatcher, isStatic fun
 // not matched by isPublic keeps the full Bearer enforcement: deny-by-default is
 // unchanged for every other route.
 func JWTMiddlewareWithPublic(secret string, isPublic PublicMatcher, onError ...func(tenantID, reason string)) func(http.Handler) http.Handler {
-	return jwtMiddleware(secret, isPublic, nil, onError...)
+	return jwtMiddleware(secret, isPublic, nil, "", onError...)
 }
 
-func jwtMiddleware(secret string, isPublic PublicMatcher, isStatic func(path string) bool, onError ...func(tenantID, reason string)) func(http.Handler) http.Handler {
+func jwtMiddleware(secret string, isPublic PublicMatcher, isStatic func(path string) bool, anonRole string, onError ...func(tenantID, reason string)) func(http.Handler) http.Handler {
 	var recordErr func(tenantID, reason string)
 	if len(onError) > 0 {
 		recordErr = onError[0]
@@ -217,6 +230,23 @@ func jwtMiddleware(secret string, isPublic PublicMatcher, isStatic func(path str
 
 			header := r.Header.Get("Authorization")
 			if header == "" {
+				// The anonymous surface (ADR-026): tokenless ≠ rejected when the
+				// schema declares rbac.public. The synthetic claims carry ONLY the
+				// public role and the request tenant — no user id — and RBAC
+				// evaluates them exactly like a real token's. The claims being
+				// non-nil also means the X-User-Role test fallback in
+				// EvalContextFromRequest can never engage on this path.
+				if anonRole != "" {
+					claims := &Claims{Role: anonRole}
+					if tc := tenant.FromCtx(r.Context()); tc != nil {
+						claims.TenantID = tc.ID
+					}
+					if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {
+						t.Mark("jwt")
+					}
+					next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), claimsKey{}, claims)))
+					return
+				}
 				reject(w, r, "missing token")
 				return
 			}

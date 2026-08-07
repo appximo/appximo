@@ -30,7 +30,7 @@ func (h *Handlers) ListGuides(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res := h.apiSchema.Resources["guides"]
-	qb, err := querypkg.BuildQuery("guides", &res, r.URL.Query(), cond)
+	qb, err := querypkg.BuildQuery("guides", &res, r.URL.Query(), cond, nil)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)

@@ -47,7 +47,7 @@ func FuzzBuildQuery(f *testing.F) {
 		params.Set("after", value)
 		params.Set("before", value)
 
-		qb, err := BuildQuery("guides", res, params, nil)
+		qb, err := BuildQuery("guides", res, params, nil, nil)
 		if err != nil || qb == nil {
 			return
 		}

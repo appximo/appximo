@@ -929,11 +929,16 @@ func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, pol
 			return nil, err
 		}
 		var cond *rbac.WhereCondition
+		var allowedFields []string
 		if evalResult != nil {
 			cond = evalResult.Condition
+			allowedFields = evalResult.AllowedFields
 		}
 
-		qb, err := query.BuildQuery(name, res, params, cond)
+		// SEC-5 closed generally (PUBLIC-SURFACE-S1): the filter/order arguments
+		// are held to the role's field allowlist, exactly like REST (a named
+		// forbidden field is an error in `errors[]`, never an oracle).
+		qb, err := query.BuildQuery(name, res, params, cond, allowedFields)
 		if err != nil {
 			return nil, err
 		}

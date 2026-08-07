@@ -107,6 +107,17 @@
      "status"
     ]
    }
+  },
+  "public": {
+   "authors": {
+    "actions": [
+     "read"
+    ],
+    "fields": [
+     "id",
+     "name"
+    ]
+   }
   }
  }
 }

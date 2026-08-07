@@ -1,6 +1,7 @@
 package query
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -95,15 +96,47 @@ type QueryBuilder struct {
 	// Keyset (cursor) pagination — when set, OFFSET is skipped and an index range scan is used.
 	afterID  string // ?after=UUID  → WHERE id > UUID ORDER BY id ASC  LIMIT N
 	beforeID string // ?before=UUID → WHERE id < UUID ORDER BY id DESC LIMIT N
+
+	// allowed is the role's RBAC field allowlist (nil = unrestricted). It bounds
+	// which fields may be filtered/sorted (ErrForbiddenField at parse) and which
+	// text columns the ?search= sweep touches (searchableFields).
+	allowed []string
 }
 
+// searchableFields lists the string/text columns the role may read, sorted —
+// the exact set the ?search= OR sweeps.
+func (qb *QueryBuilder) searchableFields() []string {
+	var out []string
+	for name, fd := range qb.res.Fields {
+		if (fd.Type == "string" || fd.Type == "text") && fieldAllowed(name, qb.allowed) {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ErrForbiddenField signals that a list request named a field the role's RBAC
+// allowlist excludes — in a filter or a sort. Callers map it to 403; every other
+// BuildQuery error stays a 400. SEC-5's lesson, closed generally in
+// PUBLIC-SURFACE-S1: the response allowlist alone left `?filter[hidden][eq]=x`
+// as a value oracle over a column the role could never read (match/no-match
+// reveals its contents by binary search), and `?sort=hidden` as an ordering
+// oracle. The defense must exist wherever a field can be NAMED, not only where
+// it is returned. Same contract as ErrAggForbiddenField on the aggregate path.
+var ErrForbiddenField = errors.New("request references a field not permitted for this role")
+
 // BuildQuery parses url.Values and returns a validated QueryBuilder.
-// Returns error for unknown filter fields, type-incompatible operators, or non-integer page/per_page.
+// Returns error for unknown filter fields, type-incompatible operators, or
+// non-integer page/per_page; naming a field outside allowedFields (nil = no
+// restriction; the implicit id is always allowed, as in every other surface)
+// returns ErrForbiddenField.
 func BuildQuery(
 	resource string,
 	res *schema.ResourceSchema,
 	params url.Values,
 	condition *rbac.WhereCondition,
+	allowedFields []string,
 ) (*QueryBuilder, error) {
 	if condition != nil && !conditionFieldRe.MatchString(condition.Field) {
 		return nil, fmt.Errorf("invalid condition field: %q", condition.Field)
@@ -115,6 +148,10 @@ func BuildQuery(
 		page:      DefaultPage,
 		perPage:   DefaultPerPage,
 		condition: condition,
+		allowed:   allowedFields,
+	}
+	roleAllows := func(field string) bool {
+		return field == "id" || fieldAllowed(field, allowedFields)
 	}
 
 	// Cursor pagination is parsed FIRST because it changes what the other
@@ -244,6 +281,9 @@ func BuildQuery(
 				return nil, fmt.Errorf("unknown filter field: %s (available: %s)", field, availableFieldNames(res))
 			}
 		}
+		if !roleAllows(field) {
+			return nil, fmt.Errorf("%w: filter[%s]", ErrForbiddenField, field)
+		}
 
 		if err := validateFilterOp(op, fd.Type); err != nil {
 			return nil, fmt.Errorf("filter[%s][%s]: %s", field, op, err.Error())
@@ -348,6 +388,9 @@ func BuildQuery(
 		if _, ok := res.Fields[sf]; !ok && sf != "id" {
 			return nil, fmt.Errorf("unknown sort field: %s (available: %s)", sf, availableFieldNames(res))
 		}
+		if !roleAllows(sf) {
+			return nil, fmt.Errorf("%w: sort=%s", ErrForbiddenField, sf)
+		}
 		qb.sortField = sf
 		qb.sortOrder = "ASC"
 		if dir, dirPresent, derr := singleValue(params, "order"); derr != nil {
@@ -407,6 +450,9 @@ func BuildQuery(
 		if _, ok := res.Fields[field]; !ok && field != "id" {
 			return nil, fmt.Errorf("unknown sort field: %s (available: %s)", field, availableFieldNames(res))
 		}
+		if !roleAllows(field) {
+			return nil, fmt.Errorf("%w: order[%s]", ErrForbiddenField, field)
+		}
 		qb.sortField = field
 		d, err := sortDirection(vals[0])
 		if err != nil {
@@ -425,6 +471,13 @@ func BuildQuery(
 		// must be reported, and here the honest report is a rejection naming why.
 		if !resourceHasTextField(res) {
 			return nil, fmt.Errorf("search is not supported on this resource: it has no string/text fields (search scans only text columns), so the term %q could never match anything", search)
+		}
+		// The sweep is bounded by the role's allowlist (SEC-5: a hidden text
+		// column must not be probeable through the search OR either). A role
+		// whose readable set has no text column gets the same honest rejection
+		// as a text-less resource.
+		if len(qb.searchableFields()) == 0 {
+			return nil, fmt.Errorf("search is not available for this role on this resource: none of the fields it may read are string/text (search scans only readable text columns)")
 		}
 		qb.search = search
 	}
@@ -625,14 +678,8 @@ func (qb *QueryBuilder) appendConditions(parts []string, args []any, idx int) ([
 	}
 
 	if qb.search != "" {
-		// collect string fields sorted for deterministic SQL output
-		var strFields []string
-		for name, fd := range qb.res.Fields {
-			if fd.Type == "string" || fd.Type == "text" {
-				strFields = append(strFields, name)
-			}
-		}
-		sort.Strings(strFields)
+		// The role-readable string fields, sorted for deterministic SQL output.
+		strFields := qb.searchableFields()
 
 		escaped := strings.NewReplacer(`%`, `\%`, `_`, `\_`).Replace(qb.search)
 		var searchParts []string

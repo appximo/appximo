@@ -938,6 +938,26 @@ Actions are exactly `read | create | update | delete | "*"`. **Deny by
 default**: a role with no matching policy gets 403; a record excluded by
 a row condition reads as 404 (not 403).
 
+**Anonymous reads — `rbac.public` (ADR-026, PUBLIC-SURFACE-S1).** A sibling of
+`roles`: the resources an UNAUTHENTICATED request may READ, each with its own
+row condition and field allowlist — a blog/catalogue/landing with no Go and no
+token. `"public": { "articulos": { "actions": ["read"], "conditions":
+{"field":"estado","op":"eq","val":"publicado"}, "fields": [...] }, "files":
+{"actions":["read"]} }`. Compiles into the ONE evaluator as the reserved role
+`$public` (declaring that name in `roles` is a load error), so REST, GraphQL,
+aggregates, embeds, SSE and files all enforce it identically. Load-validated:
+actions exactly `["read"]`; condition `val` must be a LITERAL (`$user_id` is
+an error — an anonymous request has no identity); fields/conditions must
+exist. The allowlist also bounds what anonymous callers may FILTER/SORT by
+(and, since this session, that naming rule applies to EVERY role's allowlist —
+`?filter[hidden]=` / `?sort=hidden` are 403 `ErrForbiddenField`, and `?search=`
+sweeps only role-readable text columns; SEC-5 closed generally). Anonymous
+requests are throttled by the `Route.Public` limiter (per tenant+IP), never
+touch the response cache, and a present-but-invalid Bearer stays 401 (no
+silent downgrade). Publicly-readable GETs carry `security: []` + `x-public` in
+`/openapi.json`. No block ⇒ identical behavior to before (tokenless = 401);
+with a block, an undeclared resource answers 403 to anonymous callers.
+
 ```json
 "rbac": {
   "roles": {

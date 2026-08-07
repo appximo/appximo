@@ -139,6 +139,23 @@ A role is EITHER role-global OR per-resource — never both keys.
   Rule of thumb: a "$user_id" condition may only name a column that stores a LOGIN
   id — either a plain uuid column, or a relation whose "references" is such a column.
 
+  PUBLIC (anonymous) READS — "rbac.public", sibling of "roles" (ADR-026). When
+  the app has pages anyone may see without logging in (a blog's published
+  articles, a catalogue, a landing), declare them:
+    "rbac": { "roles": { … },
+      "public": { "articulos": { "actions": ["read"],
+                    "conditions": { "field": "estado", "op": "eq", "val": "publicado" },
+                    "fields": ["id","titulo","cuerpo"] },
+                  "files": { "actions": ["read"] } } }
+    - actions MUST be exactly ["read"] (anonymous writes are rejected at load).
+    - conditions.val MUST be a literal — "$user_id" is a load error here (an
+      anonymous request has no identity).
+    - "fields" bounds what anonymous callers see AND what they may filter/sort
+      by; a resource absent from the block stays denied (deny by default).
+    - grant "files": {"actions":["read"]} to serve attached images publicly.
+  Do NOT create a role named "public" for this — an authenticated role cannot
+  be reached without a token; only the rbac.public block is.
+
   A ROLE THAT WRITES A RESOURCE WITH A "file" FIELD ALSO NEEDS THE "files" GRANT.
   Uploads flow through the built-in store (POST /api/files → attach the returned
   id), and that endpoint is authorized as the virtual resource "files". A role
