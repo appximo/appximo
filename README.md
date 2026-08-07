@@ -384,7 +384,11 @@ static SPAs whose **built assets ship in the module** (ADR-025): any
 `go build` — including a consumer's custom binary via
 `go get github.com/appximo/appximo` — embeds working `/admin` and `/editor`.
 
-And you don't have to write the schema by hand: `appximo ai-generate
+And the schema speaks both directions: `appximo explain schema.json --lang
+es|en` reads a VALID schema back as plain-language prose for the app's owner
+(fields in words, lifecycles in flow order, each role's reach — deterministic,
+never guessed), so a non-programmer can confirm an AI-written schema models
+what they asked. And you don't have to write it by hand: `appximo ai-generate
 "<description>"` turns a natural-language app description into a valid schema
 (validator-guided loop, ~$0.006/schema), or — with **your own agent** (Claude
 Code, Cursor) — `appximo spec` prints the LLM-distilled grammar so *your*

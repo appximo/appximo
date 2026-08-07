@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: write # create the release + upload assets
+  id-token: write # cosign keyless signing (D2 — GitHub OIDC identity)
 
 jobs:
   release:
@@ -88,12 +89,43 @@ jobs:
           echo "$OUT"
           echo "$OUT" | grep -F "$VERSION"
 
+      - name: Version-less aliases (stable latest/download URLs — D1)
+        env:
+          VERSION: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          # releases/latest/download/appximo-<os>-<arch>[.exe] must be a STABLE
+          # URL (field report D1: with only versioned names, no one-line
+          # installer can exist). Both names ship; checksums.txt covers both.
+          for f in dist/appximo-"${VERSION}"-*; do
+            base="${f##*/}"
+            cp "$f" "dist/${base/appximo-${VERSION}-/appximo-}"
+          done
+          ls -lh dist/
+
       - name: Checksums
         run: |
           set -euo pipefail
           cd dist
           sha256sum * > checksums.txt
           cat checksums.txt
+
+      # D2 (field report): checksums.txt lives in the SAME release as the
+      # binaries, so verifying against it only detects transport corruption —
+      # whoever can replace the .exe can replace the checksums. The keyless
+      # cosign signature moves the trust anchor OUT of the release: the
+      # signing identity is this workflow's GitHub OIDC token, recorded in
+      # Sigstore's public transparency log. Verify with:
+      #   cosign verify-blob checksums.txt --bundle checksums.txt.sigstore.json \
+      #     --certificate-identity-regexp 'github.com/appximo/appximo' \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign the checksums (keyless — the trust anchor lives outside the release)
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes dist/checksums.txt \
+            --bundle dist/checksums.txt.sigstore.json
 
       - name: Create GitHub Release
         env:

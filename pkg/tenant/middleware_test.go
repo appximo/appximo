@@ -164,12 +164,12 @@ func TestRequireForTenantAPI(t *testing.T) {
 		host, path string
 		want       int
 	}{
-		{"localhost:8080", "/api/notes", http.StatusBadRequest},   // T3: named, not 500
-		{"localhost:8080", "/graphql", http.StatusBadRequest},     // GraphQL too
-		{"localhost:8080", "/auth/login", http.StatusBadRequest},  // auth is tenant-scoped
-		{"localhost:8080", "/admin", http.StatusOK},               // tenant-agnostic passes
-		{"localhost:8080", "/healthz", http.StatusOK},             // probes pass
-		{"acme.localhost:8080", "/api/notes", http.StatusOK},      // a real tenant passes
+		{"localhost:8080", "/api/notes", http.StatusBadRequest},  // T3: named, not 500
+		{"localhost:8080", "/graphql", http.StatusBadRequest},    // GraphQL too
+		{"localhost:8080", "/auth/login", http.StatusBadRequest}, // auth is tenant-scoped
+		{"localhost:8080", "/admin", http.StatusOK},              // tenant-agnostic passes
+		{"localhost:8080", "/healthz", http.StatusOK},            // probes pass
+		{"acme.localhost:8080", "/api/notes", http.StatusOK},     // a real tenant passes
 	}
 	for _, c := range cases {
 		req := httptest.NewRequest(http.MethodGet, "http://x"+c.path, nil)

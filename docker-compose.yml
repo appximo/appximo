@@ -32,8 +32,15 @@ services:
       # /var/lib/appximo/obs.db would otherwise sit in the ephemeral layer).
       OBS_DB_PATH: /var/lib/appximo/obs/obs.db
     ports:
-      - "8080:8080" # data plane: REST + GraphQL (public)
-      - "9090:9090" # control plane: tenant/schema admin (keep private in prod)
+      # LOOPBACK binds, deliberately (field report I1): Docker's NAT rules are
+      # evaluated BEFORE ufw's INPUT chain, so a bare "9090:9090" on a VPS is
+      # internet-exposed even while `ufw status` says deny-incoming — and the
+      # control plane is the tenant-registration API, gated only by
+      # X-Admin-Key. On a laptop loopback costs nothing; on a server it is the
+      # difference between private and scanned-in-minutes. To serve the data
+      # plane publicly, front it with a proxy (docker-compose.prod.yml).
+      - "127.0.0.1:8080:8080" # data plane: REST + GraphQL
+      - "127.0.0.1:9090:9090" # control plane: NEVER expose beyond localhost
     volumes:
       - files_data:/var/lib/appximo/files
       - obs_data:/var/lib/appximo/obs # observability history survives restarts

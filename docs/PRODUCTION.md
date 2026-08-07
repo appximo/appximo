@@ -465,8 +465,20 @@ per-field docs are in [config.go](../config.go) and the README config table.
 - **Control plane (`:9090`) is never on the internet.** Its safety model is
   *unreachable*, not *unguessable* — reach it from the box (`curl
   127.0.0.1:9090/...`) or an SSH tunnel.
-- **Strong `ADMIN_KEY` and `JWT_SECRET`** (≥ 32 chars, `openssl rand -hex 32`).
-  The installer generates them; never reuse a weak one.
+- **Docker publishes ports AROUND ufw** (field report I1 — the classic VPS
+  trap). Docker inserts NAT rules evaluated BEFORE ufw's INPUT chain, so
+  `docker run -p 5432:5432 postgres` is internet-exposed even while
+  `ufw status` says deny-incoming — and ufw will not warn you. Always publish
+  on loopback: `-p 127.0.0.1:5432:5432`. This applies to ANY container on the
+  box, not only Postgres.
+- **Cloud images ship pre-opened ports** (field report I3): DigitalOcean's
+  Docker image, for example, allows 2375/2376 (the Docker API — 2375 is
+  unauthenticated) in ufw even though the daemon only listens on the unix
+  socket. Audit `ufw status numbered` on a fresh droplet and delete what you
+  don't serve.
+- **Strong `ADMIN_KEY` and `JWT_SECRET`** (≥ 32 chars, `appximo gen-secret` —
+  or `openssl rand -hex 32`). The installer generates them; never reuse a
+  weak one.
 - **Secrets file `0600`, owned `root:appximo`.** `/etc/appximo/appximo.env`
   holds every secret; the systemd unit runs the engine as the unprivileged
   `appximo` user with `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`.

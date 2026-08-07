@@ -159,6 +159,14 @@ whoever uploaded it):
   must never silently delete the records that attached it.
 - **Deleting the RECORD never deletes the file** (no surprise data loss; remove
   it explicitly via `DELETE /api/files/{id}` when it is no longer referenced).
+- **Orphans accumulate by design, and cleanup is the operator's** (field report
+  M8): `POST /api/files` runs BEFORE the record that will reference the file
+  exists, so an abandoned form leaves an uploaded file — metadata row + blob —
+  that nothing collects (the evaluation left 7 orphans out of 10 uploads).
+  There is no GC today (a `files gc` command is in the backlog, OPS-21). If
+  you sweep by hand, group by `sha256`, NOT by `id`: blobs are deduplicated by
+  content, so deleting "an orphan's blob" can strand another upload's bytes —
+  the safe unit is "every id sharing this hash is orphaned".
 - The field is a plain `uuid` column to every other subsystem: filter
   `?filter[formula][eq]=<id>`, GraphQL type `ID`, OpenAPI `string`/`uuid`.
   `relation`/`references`/`on_update`/`enum`/`default`/`auto` are rejected on it.

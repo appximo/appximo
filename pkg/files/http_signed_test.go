@@ -77,13 +77,17 @@ func TestHTTP_SignedURL_MintAndServe(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || out.URL == "" || out.ExpiresIn != 2 {
 		t.Fatalf("mint status=%d url=%q expires_in=%d", resp.StatusCode, out.URL, out.ExpiresIn)
 	}
-	if !strings.Contains(out.URL, SignedPathPrefix+"/") {
-		t.Fatalf("local signed URL must go through the engine: %q", out.URL)
+	// M2 (FIELD-FEEDBACK-S1): the local-backend URL is RELATIVE — it drops
+	// straight into a same-origin <img src> on any host/port. The absolute
+	// form was rebuilt from the Host header and came out unusable behind dev
+	// proxies (portless).
+	if !strings.HasPrefix(out.URL, SignedPathPrefix+"/") {
+		t.Fatalf("local signed URL must be relative under the engine's signed path: %q", out.URL)
 	}
 
 	// The signed URL serves WITHOUT any Authorization (that is its purpose) —
 	// and supports Range like the normal download.
-	got, err := http.Get(out.URL)
+	got, err := http.Get(srv.URL + out.URL)
 	if err != nil {
 		t.Fatalf("signed get: %v", err)
 	}
@@ -93,7 +97,7 @@ func TestHTTP_SignedURL_MintAndServe(t *testing.T) {
 		t.Fatalf("signed get status=%d", got.StatusCode)
 	}
 
-	rreq, _ := http.NewRequest(http.MethodGet, out.URL, nil)
+	rreq, _ := http.NewRequest(http.MethodGet, srv.URL+out.URL, nil)
 	rreq.Header.Set("Range", "bytes=0-6")
 	rgot, err := http.DefaultClient.Do(rreq)
 	if err != nil {

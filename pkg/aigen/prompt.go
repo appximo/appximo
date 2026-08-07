@@ -50,6 +50,10 @@ FIELD KEYS (all optional unless noted):
     alias "pdf", or an exact type like "application/zip"; string or array) and
     "max_bytes" (> 0) — a write attaching a file that violates them is a 422
     naming the field (rule "file_policy"). Both keys are file-field-only.
+    NOTE: the "image" family INCLUDES image/svg+xml, and SVG is XML that may
+    carry scripts — the engine serves files with hardened headers (attachment,
+    nosniff, CSP), but if YOUR app re-serves user images publicly, exclude it
+    with exact types: "accept": ["image/png", "image/jpeg", "image/webp"].
 
 RELATIONS (optional per-resource "relations" block, sibling of "fields", for nested reads):
   "relations": {
@@ -60,6 +64,11 @@ RELATIONS (optional per-resource "relations" block, sibling of "fields", for nes
   - belongs_to: the FK lives on THIS table.
   - many_to_many: needs "through" (junction resource), "fk", "target_fk".
   - "target" must be a declared resource.
+  - An FK declared with "references" (a non-id target column, e.g. the
+    $user_id pattern's "references": "user_id") works everywhere unchanged:
+    the generated read subroute (/api/x/{id}/y) and any relation over that FK
+    join against the REFERENCED column, not id — you never handle the
+    difference, so don't under-declare relations to avoid it.
 
 INDEXES (optional per-resource "indexes" array): [ { "fields": ["status"], "unique": true } ]
   Optional "method": "btree" (default) | "gin". A gin index is ONLY valid over

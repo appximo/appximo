@@ -255,7 +255,12 @@ func SignedURLHandler(store *Store, secret []byte, ttl time.Duration) http.Handl
 				writeErr(w, http.StatusNotFound, "not found")
 				return
 			}
-			u, err = requestOrigin(r)+SignedPathPrefix+"/"+tok, nil
+			// M2 (FIELD-FEEDBACK-S1): a RELATIVE URL. The engine serves the
+			// signed path itself, so relative works in an <img src> on any
+			// host and any port — the absolute form was rebuilt from the Host
+			// header and came out portless behind dev proxies, unusable as
+			// returned. (S3 URLs stay absolute by necessity: another origin.)
+			u, err = SignedPathPrefix+"/"+tok, nil
 		}
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
@@ -322,19 +327,6 @@ func roleFromRequest(r *http.Request) string {
 		return claims.Role
 	}
 	return r.Header.Get("X-User-Role")
-}
-
-// requestOrigin rebuilds the caller-facing origin for minted URLs: the
-// forwarded proto when a proxy terminated TLS, else the direct scheme.
-func requestOrigin(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if xf := r.Header.Get("X-Forwarded-Proto"); xf != "" {
-		scheme = xf
-	}
-	return scheme + "://" + r.Host
 }
 
 // safeFilename reduces a stored original_name to a header-safe basename: no path

@@ -101,6 +101,11 @@ curl -s -X POST http://localhost:9090/tenants \
   --schema schema.json` (with `--schema` it refuses roles the schema does not
   declare). Then every data call needs the tenant host + the token:
   `curl -H 'Host: acme.localhost' -H "Authorization: Bearer $TOKEN" …`.
+- Before trusting a schema you did not write by hand:
+  `appximo explain schema.json --lang es|en` renders it as plain-language
+  prose for the app's OWNER — resources, every field's rules in words, state
+  machines in flow order, each role's reach. Deterministic (read from the
+  parsed schema, never guessed): the read-back step of the authoring loop.
 - Inventory / cleanup: `appximo tenant list` ·
   `appximo tenant delete <id> --yes` (drops the schema CASCADE + every
   control-plane row).

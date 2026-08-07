@@ -269,12 +269,41 @@ type Concern struct {
 // to refuse or warn BEFORE applying. The executor itself renders faithfully and
 // fails loudly on truly-inapplicable DDL; Validate is the up-front signal.
 func Validate(plan *Plan) []Concern {
+	// M3 (FIELD-FEEDBACK-S1): a UNIQUE or FK over columns BORN in this same
+	// plan as nullable cannot need a backfill — every existing row holds NULL
+	// there, NULLs are distinct for a UNIQUE and exempt from FK validation, so
+	// the constraint applies trivially. Warning anyway cost credibility exactly
+	// where it matters: an operator trained to ignore harmless [backfill] lines
+	// misses the real one (a NOT NULL over a populated table).
+	freshNullable := map[string]bool{}
+	for _, op := range plan.Ops {
+		if ac, ok := op.(AddColumn); ok && !ac.Column.NotNull {
+			freshNullable[ac.Table+"."+ac.Column.Name] = true
+		}
+	}
+	allFresh := func(table string, cols []string) bool {
+		if len(cols) == 0 {
+			return false
+		}
+		for _, c := range cols {
+			if !freshNullable[table+"."+c] {
+				return false
+			}
+		}
+		return true
+	}
 	var out []Concern
 	for _, op := range plan.Ops {
 		switch op.Risk() {
 		case RiskDestructive:
 			out = append(out, Concern{op, RiskDestructive, op.String() + " is destructive — it loses data"})
 		case RiskBackfill:
+			if au, ok := op.(AddUnique); ok && allFresh(au.Table, au.Unique.Columns) {
+				continue // fresh nullable columns: trivially satisfied
+			}
+			if af, ok := op.(AddForeignKey); ok && allFresh(af.Table, af.FK.Columns) {
+				continue // NULL FK values are exempt from validation
+			}
 			msg := op.String() + " requires existing rows to already satisfy it; on a populated table it will fail unless backfilled"
 			if ac, ok := op.(AddColumn); ok && ac.RequiresBackfill() {
 				msg = fmt.Sprintf("ADD COLUMN %s.%s is NOT NULL without a default — on a non-empty table this fails; provide a default or a backfill value", ac.Table, ac.Column.Name)

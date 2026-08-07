@@ -812,6 +812,16 @@ On `POST /api/contacts` with body `{"name":"","email":"nope","age":200,"handle":
 
 A `string`/`text` field can declare a `state_machine` to turn a status column into an enforced lifecycle: the engine controls which states a row may be **created** in and which moves are permitted between states. Without `state_machine` a string field is a free label (unchanged); with it, the rules below are forced on every write path (REST, GraphQL, and `POST /api/transaction`).
 
+> **The database itself carries no CHECK constraint** (field report B3, by
+> design): enums and state machines live in the engine, at the API layer — a
+> CHECK would make every lifecycle evolution a constraint migration. The
+> consequence to know: any write that bypasses the API (a manual SQL
+> migration, an import script, a seeding job) can store values the API would
+> never accept, and nothing detects them afterwards. Route bulk writes
+> through the API (`POST /api/transaction`, or a custom route using
+> `Ctx.Insert`/`Ctx.Update`, which enforce the machine) — or re-validate by
+> hand after direct SQL.
+
 The declaration is a field-level key (`pkg/schema/types.go`, `FieldDef.StateMachine *StateMachine`):
 
 ```json

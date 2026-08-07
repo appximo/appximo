@@ -135,8 +135,40 @@ func identityConditionWarning(path, resName string, cond *Condition, s *APISchem
 		return nil
 	}
 	f, ok := res.Fields[cond.Field]
-	if !ok || f.Relation == "" {
-		return nil // not a relation column — nothing to suspect
+	if !ok {
+		return nil
+	}
+	if f.Relation == "" {
+		// S1 (FIELD-FEEDBACK-S1): no relation declared, but the column's NAME
+		// derives from a sibling resource (instructor_id ↔ instructores) — the
+		// same id-space mismatch, one declaration short of the relation case,
+		// and the shape an AI most often generates. Deliberately NOT flagged:
+		// owner_id / author_id / created_by — the documented CORRECT pattern
+		// stores login ids in columns whose base names no declared resource.
+		if identityColumnNames[cond.Field] {
+			return nil
+		}
+		implied := impliedRelationTarget(cond.Field, resName, s)
+		if implied == "" {
+			return nil
+		}
+		who := "the user who is logged in"
+		if cond.Val == "$external_client_id" {
+			who = "the external client making the request"
+		}
+		return []ValidationError{{
+			Field: path + ".field",
+			Rule:  "identity_condition_on_implied_relation",
+			Got:   cond.Field,
+			Message: fmt.Sprintf(
+				"this rule only shows rows of %q where %q equals the id of %s — but the column's name says it holds ids of %q rows, a different kind of id. "+
+					"As written the rule would match NO rows, ever, and nothing reports an error: the app just shows nothing.",
+				resName, cond.Field, who, implied),
+			Fix: fmt.Sprintf(
+				"if %q holds ids of %q: give %q a unique login-id column (\"user_id\") and declare %q with \"relation\": %q, \"references\": \"user_id\". "+
+					"If %q really stores login ids already, rename it (e.g. \"user_id\") or ignore this warning.",
+				cond.Field, implied, implied, cond.Field, implied, cond.Field),
+		}}
 	}
 	target := f.References
 	if target == "" {
@@ -164,6 +196,35 @@ func identityConditionWarning(path, resName string, cond *Condition, s *APISchem
 				"If %q already holds login ids, this warning does not apply.",
 			f.Relation, bridge, cond.Field, bridge, cond.Field),
 	}}
+}
+
+// impliedRelationTarget reports the declared resource a column NAME points at:
+// "instructor_id" matches a resource named "instructor", "instructors" or
+// "instructores" (bare, +s, +es). Empty when nothing matches — an owner_id with
+// no "owners" resource is the documented login-id pattern, not a suspect.
+func impliedRelationTarget(field, selfRes string, s *APISchema) string {
+	base, cut := stringsCutSuffix(field, "_id")
+	if !cut || base == "" {
+		return ""
+	}
+	for _, cand := range []string{base, base + "s", base + "es"} {
+		if cand == selfRes {
+			continue // a self-reference id column is its own topic
+		}
+		if _, ok := s.Resources[cand]; ok {
+			return cand
+		}
+	}
+	return ""
+}
+
+// stringsCutSuffix is strings.CutSuffix (kept local to avoid a new import line
+// churning this file's diff).
+func stringsCutSuffix(s, suffix string) (string, bool) {
+	if len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix {
+		return s[:len(s)-len(suffix)], true
+	}
+	return s, false
 }
 
 // sortedNames returns a map's keys in a stable order, so warnings are deterministic.

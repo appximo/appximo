@@ -342,6 +342,33 @@ func explainFields(b *strings.Builder, r ResourceSchema, p explainPhrases) {
 	}
 }
 
+// flowOrder walks a state machine breadth-first from its initial states, so a
+// lifecycle prints the way it runs. Unreachable transition sources follow,
+// alphabetically (deterministic).
+func flowOrder(sm *StateMachine) []string {
+	seen := map[string]bool{}
+	var order []string
+	queue := append([]string{}, sm.Initial...)
+	for len(queue) > 0 {
+		s := queue[0]
+		queue = queue[1:]
+		if seen[s] {
+			continue
+		}
+		seen[s] = true
+		order = append(order, s)
+		queue = append(queue, sm.Transitions[s]...)
+	}
+	rest := make([]string, 0)
+	for f := range sm.Transitions {
+		if !seen[f] {
+			rest = append(rest, f)
+		}
+	}
+	sort.Strings(rest)
+	return append(order, rest...)
+}
+
 func explainStateMachines(b *strings.Builder, r ResourceSchema, p explainPhrases, and string) {
 	names := make([]string, 0, len(r.Fields))
 	for n := range r.Fields {
@@ -354,11 +381,13 @@ func explainStateMachines(b *strings.Builder, r ResourceSchema, p explainPhrases
 		sm := r.Fields[fn].StateMachine
 		b.WriteString("  " + fmt.Sprintf(p.smIntro, fn) + "\n")
 		b.WriteString("    - " + fmt.Sprintf(p.smInitial, quoteJoin(sm.Initial)) + "\n")
-		froms := make([]string, 0, len(sm.Transitions))
-		for f := range sm.Transitions {
-			froms = append(froms, f)
-		}
-		sort.Strings(froms)
+		// S3 (FIELD-FEEDBACK-S1): FLOW order, not alphabetical — the command
+		// exists so a non-programmer can review a lifecycle, and the natural
+		// reading is breadth-first from the initial states (the evaluator's
+		// 5-state machine printed its initial state third). States unreachable
+		// from initial (legal but odd) follow alphabetically; terminals keep
+		// their grouped line at the end.
+		froms := flowOrder(sm)
 		var terminal []string
 		for _, from := range froms {
 			tos := sm.Transitions[from]

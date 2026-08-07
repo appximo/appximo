@@ -291,3 +291,37 @@ func TestExecutor_LockTimeoutAndRetry(t *testing.T) {
 		t.Error("after releasing the lock the column should have been added")
 	}
 }
+
+// TestValidate_FreshNullableColumnsSuppressBackfillConcern pins M3
+// (FIELD-FEEDBACK-S1): a UNIQUE or FK over columns ADDED nullable in the SAME
+// plan raises no [backfill] concern (existing rows hold NULL there — distinct
+// for a UNIQUE, exempt from FK validation), while the same constraints over
+// PRE-EXISTING columns keep warning, and a NOT-NULL add keeps its named
+// concern. The generic warning on fresh columns trained operators to ignore
+// the one warning that matters.
+func TestValidate_FreshNullableColumnsSuppressBackfillConcern(t *testing.T) {
+	plan := &sd.Plan{Ops: []sd.Operation{
+		sd.AddColumn{Table: "miembros", Column: &sd.Column{Name: "codigo_socio", Type: sd.Type{Base: sd.BaseText}}},
+		sd.AddColumn{Table: "miembros", Column: &sd.Column{Name: "foto", Type: sd.Type{Base: sd.BaseUUID}}},
+		sd.AddUnique{Table: "miembros", Unique: &sd.UniqueConstraint{Columns: []string{"codigo_socio"}}},
+		sd.AddForeignKey{Table: "miembros", FK: &sd.ForeignKey{Columns: []string{"foto"}, RefTable: "files", RefColumns: []string{"id"}}},
+		// Over a column NOT added in this plan → the concern stays.
+		sd.AddUnique{Table: "miembros", Unique: &sd.UniqueConstraint{Columns: []string{"documento"}}},
+	}}
+	concerns := sd.Validate(plan)
+	for _, c := range concerns {
+		s := c.Op.String()
+		if strings.Contains(s, "codigo_socio") || strings.Contains(s, "foto") {
+			t.Fatalf("fresh nullable column must not raise a backfill concern: %s", s)
+		}
+	}
+	found := false
+	for _, c := range concerns {
+		if strings.Contains(c.Op.String(), "documento") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a UNIQUE over a pre-existing column must keep its backfill concern")
+	}
+}

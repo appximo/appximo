@@ -114,7 +114,14 @@ type StaticMount struct {
 //
 // The load-bearing protections remain: no external script sources, no
 // external connect targets (exfil), no framing, no foreign form action.
-const DefaultStaticCSP = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; " +
+//
+// img-src carries blob: (FIELD-FEEDBACK-S1, FE4): the canonical image-preview
+// pattern of every upload UI is URL.createObjectURL(file) — a blob: URL — and
+// without it the preview silently doesn't render, visible only in the browser
+// console (the curl-blind CSP class again). blob: relaxes nothing appreciable:
+// a blob URL is same-origin and created by the document itself — it is not a
+// third-party load channel or an exfil path.
+const DefaultStaticCSP = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; " +
 	"script-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 
 // CSPOff is the StaticMount.CSP sentinel that disables the header entirely.

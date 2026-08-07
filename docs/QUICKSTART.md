@@ -101,6 +101,17 @@ Known Windows caveats (by design, from the code):
 - `appximo fleet run` (multi-process fleet) is a unix deployment shape; on
   Windows use plain `serve`.
 - Paths with spaces: quote `--schema "C:\My Apps\schema.json"`.
+- Data lives under `%LOCALAPPDATA%\Appximo` (files, observability DB) — the
+  boot log prints the resolved paths; `APPXIMO_FILES_DIR`/`OBS_DB_PATH`
+  override.
+- After editing PATH, open a **new** terminal — Explorer caches its
+  environment block, so already-open shells (and apps launched from them,
+  like VS Code) don't see the change. (A future installer must broadcast
+  `WM_SETTINGCHANGE`; `[Environment]::SetEnvironmentVariable(..., 'User')`
+  does, writing the registry directly does not — field report W3.)
+- Scripting: use `curl.exe`, not `Invoke-WebRequest` (it loses response
+  bodies on ≥400 and mangles inline JSON — send bodies with
+  `--data-binary "@file.json"`).
 
 ### With an agent (any OS)
 
@@ -119,11 +130,17 @@ message). Set them:
 
 ```bash
 export DATABASE_URL='postgres://appuser:secret@localhost:5432/appximo'
-export JWT_SECRET="$(openssl rand -hex 32)"    # signs every auth token (32+ chars; enforced from the next release)
-export ADMIN_KEY="$(openssl rand -hex 16)"     # protects tenant registration + the first-admin bootstrap
+export JWT_SECRET="$(appximo gen-secret)"            # signs every auth token (32+ chars, enforced)
+export ADMIN_KEY="$(appximo gen-secret --bytes 16)"  # protects tenant registration + the first-admin bootstrap
 ```
 
-Keep them in a `.env` file you `source` — you'll need the same values every run.
+(`appximo gen-secret` works identically on every platform — no openssl needed.)
+
+**Or skip the exports entirely (next release):** put the three lines in a
+`.env` file in your working directory — `KEY=value`, one per line — and every
+`appximo` command loads it automatically (the real environment wins on
+conflict; a BOM from a Windows editor is tolerated). `appximo init myapp
+--env` writes one for you with the secrets already generated.
 
 **You should see (next release)** if you skip this and run `serve` anyway
 (v0.1.1 reports the missing variables one at a time, with shorter text):

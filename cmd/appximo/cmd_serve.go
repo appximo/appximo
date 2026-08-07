@@ -25,6 +25,23 @@ var debugTracesHTML []byte
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the multi-tenant HTTP server",
+	// C3 (FIELD-FEEDBACK-S1): the env contract lives in the help — it used to
+	// be discoverable only by failing.
+	Long: `Start the multi-tenant HTTP server (foreground; Ctrl+C to stop).
+
+Three environment variables are REQUIRED — serve refuses to boot without them
+and names every missing one:
+
+  DATABASE_URL   postgres://user:pass@host:5432/dbname
+  JWT_SECRET     32+ random characters   (generate: appximo gen-secret)
+  ADMIN_KEY      the operator credential (generate: appximo gen-secret --bytes 16)
+
+A .env file in the working directory is loaded automatically (KEY=value per
+line; the real environment wins on conflict). Two listeners: the API on
+--port (public) and the tenant-registration control plane on --control-port
+(keep it internal). Optional env: APPXIMO_ENV, APPXIMO_AUTH_SIGNUP_ROLE,
+APPXIMO_CORS_ORIGINS, APPXIMO_FILES_DIR, GOMEMLIMIT — the full table lives in
+docs/PRODUCTION.md; 'appximo quickstart' prints the operations contract.`,
 	// ADR-024: `serve` takes NO positional arguments. It used to accept and
 	// silently ignore them, so `appximo serve myapp.json` booted whatever
 	// ./schema.json happened to be in the working directory — the operator pointed

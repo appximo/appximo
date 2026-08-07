@@ -795,8 +795,17 @@ const { url } = await papi(`/api/files/${id}/url`);   // 200 {"url","expires_in"
 img.src = url;                                        // no auth header needed on this URL
 ```
 
-Mint per render, never persist the URL (it expires); batch-mint for a list
-view. Any invalid/expired signed URL is a uniform `404`.
+On the local backend the URL is **relative** (`/files/signed/<token>`) — it
+drops into a same-origin `src` on any host and port; on S3 it is the
+provider's absolute presigned URL. Both work verbatim as `img.src`. Mint per
+render, never persist the URL (it expires); batch-mint for a list view. Any
+invalid/expired signed URL is a uniform `404`.
+
+**Pre-upload previews**: showing the picked file BEFORE uploading is
+`URL.createObjectURL(file)` — a `blob:` URL, which `DefaultStaticCSP` allows
+in `img-src` (a blob URL is same-origin and created by the document; the CSP
+used to block it and the preview silently didn't render — the curl-blind CSP
+class, visible only in the browser console).
 
 ### 7.4 The upload limits — instance-wide at upload, per-field at attach
 

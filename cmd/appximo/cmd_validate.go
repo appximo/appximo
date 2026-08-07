@@ -11,14 +11,18 @@ import (
 
 var validateCmd = &cobra.Command{
 	Use:   "validate [file]",
-	Short: "Validate an Appximo JSON schema (semantic; --json = unified LLM-friendly report)",
-	Long: `Validates a schema file. By default it runs the Go semantic validator (the
-authority) and prints human-readable errors.
+	Short: "Validate a schema — BOTH layers (structural + semantic); --json = the LLM-friendly report",
+	Long: `Validates a schema file, running BOTH layers in order: the structural
+meta-schema check first (the deterministic net), then the Go semantic validator
+(the authority: cross-references, RBAC, state machines). One command answers
+"may this run?" completely — you never need to guess which of two commands to
+call (validate-schema remains available as the structural half alone).
 
-With --json it emits the UNIFIED, LLM-friendly structured report (AI-F0-S2): it runs
-BOTH validators — the structural meta-schema and the semantic validator — and outputs
-one JSON object { "valid", "errors":[ {path, rule, message, expected, got, fix,
-source} ] } an AI (or any tool) can parse and auto-correct from. Exit 1 when invalid,
+Default output is human-readable errors plus the SCHEMA-5 warnings ("valid but
+almost certainly not what you meant"). With --json it emits the UNIFIED,
+LLM-friendly structured report (AI-F0-S2): one JSON object { "valid",
+"errors":[ {path, rule, message, expected, got, fix, source} ], "warnings":[…] }
+an AI (or any tool) can parse and auto-correct from. Exit 1 when invalid,
 0 when valid (both modes).`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
@@ -37,21 +41,34 @@ source} ] } an AI (or any tool) can parse and auto-correct from. Exit 1 when inv
 			return
 		}
 
-		s, err := schema.LoadFromFile(args[0])
+		// C2 (FIELD-FEEDBACK-S1): the human mode runs BOTH layers too — the
+		// unified report (structural + semantic), rendered as prose. Before,
+		// plain `validate` was semantic-only and nothing said which of the two
+		// near-identically-named commands to run, or whether one included the
+		// other.
+		raw, err := os.ReadFile(args[0])
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(os.Stderr, "Error reading schema:", err)
 			os.Exit(1)
 		}
-
-		errs := schema.Validate(s)
-		if len(errs) == 0 {
+		rep := schema.ValidateReport(raw)
+		if rep.Valid {
 			fmt.Println("Schema valid ✓")
-			printSchemaWarnings(s)
+			if s, lerr := schema.LoadFromFile(args[0]); lerr == nil {
+				printSchemaWarnings(s)
+			}
 			return
 		}
-
-		for _, e := range errs {
-			fmt.Fprintln(os.Stderr, e.Error())
+		for _, e := range rep.Errors {
+			loc := e.Path
+			if loc == "" || loc == "$" {
+				loc = "schema"
+			}
+			line := fmt.Sprintf("%s: %s", loc, e.Message)
+			if e.Fix != "" {
+				line += " — fix: " + e.Fix
+			}
+			fmt.Fprintln(os.Stderr, line)
 		}
 		os.Exit(1)
 	},

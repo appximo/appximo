@@ -234,7 +234,10 @@ const specFooter = `
    "expected", "got", "fix" } ] } — machine-readable, one entry per problem.
 3. If invalid: for each error, edit the schema at "path" following "fix"
    (pick from "expected" when given). Re-validate. Repeat until "valid": true.
-4. Deliver ONLY the JSON object (no prose, no markdown fences).
+4. In a PIPELINE (a tool parses your output): deliver ONLY the JSON object —
+   no prose, no markdown fences. In a CONVERSATION with a human, do explain
+   your design decisions alongside the JSON; the bare-JSON rule is for
+   machine consumers, not chats.
 
 The finished schema can be pasted into Appximo Studio's Code view (/editor →
 Code) — the same validator runs live there, errors land on their lines, and a
