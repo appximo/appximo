@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786078205843,
+  "lastUpdate": 1786088211118,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -720,6 +720,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "37211053 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "01fa0f60242ec84916cee2df116b6115de7d7e3e",
+          "message": "docs: the first ten minutes — QUICKSTART rewritten on up/new, with the measured number (ENG-38)\n\nQUICKSTART.md's first act is now `appximo up` (the card, the /app\nscreenshots, the executable success checklist, the paste-ready agent\nprompt, the ten-minute script) — and the manual path is PRESERVED verbatim\nas §4, explicitly framed as the ground truth and the net: when `up` fails,\nthese are the pieces to diagnose. The published timing is the measured one,\nnot an estimate: a fresh agent holding only this document and the binary\nwent from first command to checklist-green in 1m53s (up: 12s, Postgres\nimage cached; a human should budget ~5 minutes warm).\n\nThe rest of the public surface catches up: README (the one-command lead),\nGUIDE ch.2 (the short way, above the piece-by-piece truth), the site's\n\"How it starts\", `appximo quickstart` (§0-bis: up as the local composition\nof steps 1–4; production never uses it), `backoffice-spec` (/app is the\nbuilt-in embodiment; the `default`-keyword rule joins form rule 1),\nAGENTS.md (the new subcommands + pkg/backofficeui), and the canonical\nstarter snippet aligned in all three copies (README/AGENTS/example — the\nfresh agent caught the doc's own filter example assuming a default the\nstarter didn't declare).\n\nBACKLOG: ENG-38 → DONE with its verification; ENG-39 filed\n(--embedded-pg, deliberately deferred: a runtime-download dependency is\nthe ENG-37 weight class and deserves its own measured session).\nFIELD_FEEDBACK_RESPONSE §13 records the proposal as built, one session\nafter it was filed. benchmarks/history.tsv carries the four ABBA arms\n(skipJWT +1 prefix: all four comparisons no_change; the base-vs-base\ncontrol's −4.2% bounds today's host noise above both treatment deltas).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-07T07:34:10Z",
+          "tree_id": "46c0e81c26e276b24d43f157b7aad32b962913dd",
+          "url": "https://github.com/appximo/appximo/commit/01fa0f60242ec84916cee2df116b6115de7d7e3e"
+        },
+        "date": 1786088210463,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6130,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "387963 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6130,
+            "unit": "ns/op",
+            "extra": "387963 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "387963 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "387963 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 64.55,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "37215459 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 64.55,
+            "unit": "ns/op",
+            "extra": "37215459 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "37215459 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "37215459 times\n4 procs"
           }
         ]
       }
