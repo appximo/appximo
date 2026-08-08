@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786151463537,
+  "lastUpdate": 1786151873419,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -1152,6 +1152,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36234626 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "8c9e9b3c4b6fccb0ac0fc6d8b7df6d027ab714b5",
+          "message": "docs(backlog): LAUNCHPAD-S1 review — UI-2 and ENG-40 closed, three items filed\n\nUI-2 was exactly the data-loss it was filed as: Studio's serializer dropped\nrbac.public on every export and deploy. Both it and ENG-40 move to DONE with\ntheir verification recorded. New OPEN: OPS-23 (install.sh has no --static),\nENG-41 (required validated before the RBAC ownership injection — warned now,\nthe reorder deferred with its side effect written down), OPS-24 (the released\nbinaries predate 'appximo prompt', which the website now leads with).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-08T01:17:21Z",
+          "tree_id": "fb55c541eb3816313771528ddc8515bdac53142a",
+          "url": "https://github.com/appximo/appximo/commit/8c9e9b3c4b6fccb0ac0fc6d8b7df6d027ab714b5"
+        },
+        "date": 1786151872898,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6118,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "370590 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6118,
+            "unit": "ns/op",
+            "extra": "370590 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "370590 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "370590 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 65.96,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36267073 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 65.96,
+            "unit": "ns/op",
+            "extra": "36267073 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36267073 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36267073 times\n4 procs"
           }
         ]
       }
