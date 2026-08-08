@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786160342854,
+  "lastUpdate": 1786160598442,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -1296,6 +1296,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "37163304 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "05d4c2cb44a9b596ca1c4ebb3be3069d1580e278",
+          "message": "fix(prompts): the three leaks the chained fresh-agent run found\n\nA fresh agent was given a container with a STALE v0.1.2 on the PATH and then\nthe two prompts in order. It updated to v0.1.5 in 41 s and had a verified\ndentist-office app running 7 minutes later — but its DOUBTS log names three\nplaces where it had to decide alone. Each is now a line:\n\n- The install prompt's Linux block hardcoded 'sudo', which does not exist on a\n  root-only box; the agent dropped it silently. It now says to drop it when\n  already root, and to replace the file the shell ALREADY resolves.\n- The master prompt had no guidance for a Postgres string that is unreachable\n  for an ENVIRONMENTAL reason. The agent was caught between 'ask nothing more'\n  and 'fix what the error names' — and the error came from the network, where\n  the engine's actionable errors cannot help. It now says: do not silently\n  change the string I gave you, fix reachability at your end and say what you\n  changed in one line, or stop and name the address that did not answer.\n- The rbac.public checklist row was conditional, so a schema without a public\n  block leaves a row that can be quietly skipped. It now demands an explicit\n  N/A plus the proven negative (a tokenless read is 401).\n\nThe site carries the corrected text (re-injected from the same sources, so\npage and docs cannot drift); re-verified in a real browser at both viewports:\nclipboard equals the corrected .md byte for byte (7851 / 13020 chars), the\nthree new lines are visible in the rendered prompts, zero console errors.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-08T03:42:36Z",
+          "tree_id": "dc2171360906703d10d6c695ef6590e6a981909a",
+          "url": "https://github.com/appximo/appximo/commit/05d4c2cb44a9b596ca1c4ebb3be3069d1580e278"
+        },
+        "date": 1786160597539,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 5025,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "465747 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 5025,
+            "unit": "ns/op",
+            "extra": "465747 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "465747 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "465747 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 50.74,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "48996780 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 50.74,
+            "unit": "ns/op",
+            "extra": "48996780 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "48996780 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "48996780 times\n4 procs"
           }
         ]
       }
