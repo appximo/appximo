@@ -267,3 +267,85 @@ func TestWarnings_RequiredTextWithoutMinLength(t *testing.T) {
 		t.Fatalf("want exactly body and title flagged, got %v", got)
 	}
 }
+
+// LAUNCHPAD-S1: an ownership column that is both `required` and the target of
+// an identity row condition breaks every create by that role (the required
+// check runs before the engine injects the value).
+func TestRequiredConditionFieldWarning(t *testing.T) {
+	base := func(required bool, condActions []string) *APISchema {
+		return &APISchema{
+			Resources: map[string]ResourceSchema{
+				"notes": {Fields: map[string]FieldDef{
+					"body":    {Type: "text"},
+					"user_id": {Type: "uuid", Required: required},
+				}},
+			},
+			RBAC: RBACPolicy{Roles: map[string]RolePolicy{
+				"member": {Permissions: map[string]ResourcePermission{
+					"notes": {
+						Actions:          []string{"read", "create", "update"},
+						Conditions:       &Condition{Field: "user_id", Op: "eq", Val: "$user_id"},
+						ConditionActions: condActions,
+					},
+				}},
+			}},
+		}
+	}
+	has := func(t *testing.T, ws []ValidationError) bool {
+		t.Helper()
+		for _, w := range ws {
+			if w.Rule == "required_field_is_rbac_forced" {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("required + identity condition on create → warned", func(t *testing.T) {
+		ws := Warnings(base(true, nil))
+		if !has(t, ws) {
+			t.Fatalf("expected required_field_is_rbac_forced, got %+v", ws)
+		}
+		for _, w := range ws {
+			if w.Rule == "required_field_is_rbac_forced" {
+				if !strings.Contains(w.Message, "422") || !strings.Contains(w.Fix, "drop") {
+					t.Errorf("warning must name the symptom and the fix: %+v", w)
+				}
+			}
+		}
+	})
+
+	t.Run("not required → no warning", func(t *testing.T) {
+		if has(t, Warnings(base(false, nil))) {
+			t.Error("a nullable ownership column is the correct shape — must not warn")
+		}
+	})
+
+	t.Run("condition does not gate create → no warning", func(t *testing.T) {
+		if has(t, Warnings(base(true, []string{"update"}))) {
+			t.Error("condition_actions excluding create means nothing is injected there")
+		}
+	})
+
+	t.Run("literal condition value → no warning", func(t *testing.T) {
+		s := base(true, nil)
+		p := s.RBAC.Roles["member"].Permissions["notes"]
+		p.Conditions = &Condition{Field: "user_id", Op: "eq", Val: "fixed-literal"}
+		s.RBAC.Roles["member"].Permissions["notes"] = p
+		if has(t, Warnings(s)) {
+			t.Error("a literal condition is not identity-forced — must not warn")
+		}
+	})
+
+	t.Run("role-global form is covered too", func(t *testing.T) {
+		s := base(true, nil)
+		s.RBAC.Roles["member"] = RolePolicy{
+			Resources:  []byte(`["notes"]`),
+			Actions:    []string{"read", "create"},
+			Conditions: &Condition{Field: "user_id", Op: "eq", Val: "$user_id"},
+		}
+		if !has(t, Warnings(s)) {
+			t.Error("the role-global RBAC form must warn identically")
+		}
+	})
+}

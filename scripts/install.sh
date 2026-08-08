@@ -356,7 +356,7 @@ gather_input() {
 	printf '    domain        %s\n' "$DOMAIN"
 	printf '    tls email     %s\n' "${EMAIL:-<dry-run>}"
 	printf '    engine        %s (internal port %s)\n' "$BIN_PATH" "$PORT"
-	printf '    postgres      native, database "appximo" (local, generated password)\n'
+	printf '    postgres      native, database "%s" (local, generated password)\n' "$DB_NAME"
 	printf '    data dir      %s\n' "$VARLIB"
 	printf '    gomemlimit    %s\n' "${GOMEMLIMIT_VAL:-<engine auto/none>}"
 	[ "$HARDEN" = "yes" ] && printf '    hardening     ufw + fail2ban + unattended-upgrades\n'

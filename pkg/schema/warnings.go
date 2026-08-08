@@ -30,7 +30,79 @@ func Warnings(s *APISchema) []ValidationError {
 	out = append(out, bareVariableConditionWarnings(s)...)
 	out = append(out, fileGrantWarnings(s)...)
 	out = append(out, requiredTextWarnings(s)...)
+	out = append(out, requiredConditionFieldWarnings(s)...)
 	return out
+}
+
+// requiredConditionFieldWarnings (LAUNCHPAD-S1) flags the ownership column that
+// is BOTH `required` and the target of a role's row condition. On create the
+// engine FORCES that column to the caller's identity — but it does so in
+// EnforceCreateRBAC, which runs AFTER the declarative validation that checks
+// `required`. So a create by that role, omitting the column exactly as it
+// should, answers 422 "<field> is required" for a value the caller was never
+// supposed to send and the engine was about to fill in itself.
+//
+// It is a warning, not an error, because the pattern is legal: another role
+// (an admin with no condition) may legitimately be required to supply the
+// column. But for the scoped role it is a dead end, and the 422 blames the
+// client for a schema misconfiguration — the SCHEMA-5 bar exactly. Found by a
+// third-party agent building a recipe box from the master prompt: it hit the
+// 422, correctly diagnosed the ordering itself, and dropped `required`.
+func requiredConditionFieldWarnings(s *APISchema) []ValidationError {
+	var out []ValidationError
+	for _, roleName := range sortedNames(s.RBAC.Roles) {
+		role := s.RBAC.Roles[roleName]
+		type scoped struct{ resource, field string }
+		var hits []scoped
+		add := func(resName string, cond *Condition, condActions, actions []string) {
+			if cond == nil || !identityVal(cond.Val) {
+				return // a literal condition is not identity-forced on create
+			}
+			if !actionListAllows(actions, "create") {
+				return
+			}
+			// condition_actions narrows which actions the condition gates; a
+			// condition that does not gate create is never injected there.
+			if len(condActions) > 0 && !actionListAllows(condActions, "create") {
+				return
+			}
+			res, ok := s.Resources[resName]
+			if !ok {
+				return
+			}
+			if fd, ok := res.Fields[cond.Field]; ok && fd.Required {
+				hits = append(hits, scoped{resName, cond.Field})
+			}
+		}
+		if len(role.Permissions) > 0 {
+			for _, resName := range sortedNames(role.Permissions) {
+				p := role.Permissions[resName]
+				add(resName, p.Conditions, p.ConditionActions, p.Actions)
+			}
+		} else {
+			for _, resName := range applicableResources(role.Resources, s) {
+				add(resName, role.Conditions, nil, role.Actions)
+			}
+		}
+		for _, h := range hits {
+			out = append(out, ValidationError{
+				Field: fmt.Sprintf("resources.%s.fields.%s", h.resource, h.field),
+				Rule:  "required_field_is_rbac_forced",
+				Got:   "required: true",
+				Message: fmt.Sprintf(
+					"%q is required AND is the row-condition column of role %q, which may create %s. On create the engine forces this column to the caller's identity — but AFTER the required check runs, so every create by that role answers 422 %q is required for a value it was never meant to send. Nothing else reports this: the schema is valid and creates just fail.",
+					h.field, roleName, h.resource, h.field),
+				Fix: fmt.Sprintf("drop \"required\": true from resources.%s.fields.%s — the row condition already forces the value on create, and reads/updates stay scoped to the owner", h.resource, h.field),
+			})
+		}
+	}
+	return out
+}
+
+// identityVal reports whether a condition value is one of the two session
+// variables the engine resolves per request (as opposed to a literal).
+func identityVal(v string) bool {
+	return v == "$user_id" || v == "$external_client_id"
 }
 
 // fileGrantWarnings (PUBLIC-SURFACE-S1 Part E) flags a role that can WRITE a

@@ -368,3 +368,31 @@ func TestParseStaticSpecs(t *testing.T) {
 		t.Fatalf("empty entries must be skipped: %+v err=%v", mounts, err)
 	}
 }
+
+// LAUNCHPAD-S1: the dot rule belongs to /openapi alone. Applying it to every
+// reserved prefix shadowed ordinary SPA assets — /app.js 404'd while
+// /style.css from the same mount served, and nothing said why.
+func TestEngineOwnedPathDoesNotShadowSPAAssets(t *testing.T) {
+	owned := []string{
+		"/api", "/api/tasks", "/app", "/app/", "/app/index.html",
+		"/openapi.json", "/openapi.yaml", "/openapi", "/admin", "/admin/assets/x.js",
+		"/healthz", "/graphql", "/files/signed/abc",
+	}
+	notOwned := []string{
+		// ordinary frontend filenames that merely start like a reserved prefix
+		"/app.js", "/app.css", "/app.webmanifest", "/api.js", "/admin.js",
+		"/health.css", "/docs.js", "/editor.js", "/files.js", "/graphql.js",
+		// and the long-standing "merely similar name" rule
+		"/apixyz", "/application.js", "/appointments",
+	}
+	for _, p := range owned {
+		if !isEngineOwnedPath(p) {
+			t.Errorf("%q must be engine-owned (the engine serves it)", p)
+		}
+	}
+	for _, p := range notOwned {
+		if isEngineOwnedPath(p) {
+			t.Errorf("%q must NOT be engine-owned — the engine serves nothing there, so a static mount owns it", p)
+		}
+	}
+}

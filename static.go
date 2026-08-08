@@ -391,19 +391,36 @@ func (h *staticHandler) serveRoot(w http.ResponseWriter, r *http.Request) {
 // never mask an API 404, and — the security half — the JWT skip must never cover
 // an engine surface).
 //
-// A prefix owns a path when the path IS it, is under it ("/api/tasks"), or is it
-// with an extension ("/openapi.json", "/openapi.yaml" — the engine serves those
-// two at the root). Matching on the first segment alone missed the extension
-// case: a test caught /openapi.json being classified as static, which would have
-// skipped authentication for it. A merely similar name ("/apixyz") is NOT owned.
+// A prefix owns a path when the path IS it or is under it ("/api/tasks"). A
+// merely similar name ("/apixyz") is NOT owned.
+//
+// The dotted form ("/openapi.json") is owned ONLY for the prefixes that really
+// serve one — today just /openapi (.json and .yaml, which the engine serves at
+// the root). Applying the dot rule to EVERY reserved prefix, as this function
+// first did, silently shadowed ordinary frontend assets: a SPA bundle named
+// /app.js 404'd while /style.css from the same mount served fine, because
+// "/app.js" has the prefix "/app." — a third-party agent lost time renaming its
+// bundle to find that out (LAUNCHPAD-S1). Nothing is weakened by narrowing it:
+// the engine serves nothing at /app.js, /api.js or /health.css, so those paths
+// belong to the mount that does.
 func isEngineOwnedPath(p string) bool {
 	for _, res := range reservedStaticPrefixes {
-		if p == res || strings.HasPrefix(p, res+"/") || strings.HasPrefix(p, res+".") {
+		if p == res || strings.HasPrefix(p, res+"/") {
+			return true
+		}
+	}
+	for _, res := range dottedEnginePaths {
+		if strings.HasPrefix(p, res+".") {
 			return true
 		}
 	}
 	return false
 }
+
+// dottedEnginePaths are the reserved prefixes the engine also serves with an
+// extension at the root. Keep it minimal: every entry here shadows a filename a
+// frontend might legitimately ship.
+var dottedEnginePaths = []string{"/openapi"}
 
 func (h *staticHandler) serveIndex(w http.ResponseWriter, r *http.Request) {
 	if h.index == nil {

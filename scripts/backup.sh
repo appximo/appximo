@@ -43,6 +43,18 @@ for arg in "$@"; do
 	esac
 done
 
+# LAUNCHPAD-S1: infer the app from --env-file when --app was not given. The
+# installed copy lives at /opt/<app>/scripts/backup.sh and is naturally invoked
+# with just its own env file (/etc/<app>/<app>.env), and without this every app
+# on the box wrote "appximo-<stamp>.dump" into ONE shared directory — two apps'
+# backups interleaved under one prefix, which a third-party deploy hit on the
+# first run. --app still wins when passed.
+if [ -z "$APP_NAME" ] && [ -n "$ENV_FILE" ]; then
+	case "$ENV_FILE" in
+		/etc/*/*.env) APP_NAME="$(basename "$(dirname "$ENV_FILE")")" ;;
+	esac
+fi
+
 # --app derives this app's env file + its own backup directory (OPS-10).
 if [ -n "$APP_NAME" ]; then
 	[ -n "$ENV_FILE" ] || ENV_FILE="/etc/$APP_NAME/$APP_NAME.env"
@@ -68,8 +80,11 @@ mv -f "$TMP" "$OUT"
 SIZE="$(du -h "$OUT" | cut -f1)"
 echo "$(date -u +%FT%TZ) backup ok: $OUT ($SIZE)"
 
-# Rotation: keep the newest $BACKUP_KEEP dumps.
+# Rotation: keep the newest $BACKUP_KEEP dumps OF THIS APP. The glob must match
+# what this run writes — hardcoding "appximo-*" meant a namespaced app's dumps
+# were never pruned, and (when two apps shared a directory) that the wrong app's
+# dumps were the only ones eligible.
 # shellcheck disable=SC2012
-ls -1t "$BACKUP_DIR"/appximo-*.dump 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" | while read -r old; do
+ls -1t "$BACKUP_DIR/${APP_NAME:-appximo}"-*.dump 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" | while read -r old; do
 	rm -f "$old" && echo "$(date -u +%FT%TZ) pruned old backup: $old"
 done
