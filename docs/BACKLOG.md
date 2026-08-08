@@ -26,7 +26,10 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-08 (LAUNCHPAD-S1)** — the front door shipped and
+**Last reviewed: 2026-08-08 (INSTALL-PROMPT-S1)** — the front door split in
+two (install, then build); the update class closed in the product; OPS-24 DONE
+(Miguel cut v0.1.5); OPS-25 filed (the Windows upgrade path is unexecuted).
+Previous review: 2026-08-08 (LAUNCHPAD-S1) — the front door shipped and
 verified with two fresh agents; UI-2 and ENG-40 closed (UI-2 WAS the data-loss
 it was filed as); OPS-23, ENG-41 and OPS-24 filed. Previous review: 2026-08-07 (PUBLIC-SURFACE-S1) — the second field report answered: ADR-026 public reads, SEC-5 general closure, include/references, up reconciliation, 2 warnings, the static path; UI-2/ENG-40 filed. Previous review: 2026-08-07 (FIRST-TEN-MINUTES-S1) — ENG-38 (the §13
 first-ten-minutes proposal) is DONE: `appximo up`/`down`/`new` + the embedded
@@ -95,17 +98,23 @@ refreshed).
   no other behavioral change, or (b) an ADR records that the warning is the
   permanent answer and why.
 
-### OPS-24 — the release binaries do not carry this session's front door
-- **Origin:** LAUNCHPAD-S1. `appximo prompt`, the `up` role fix, the
-  `--harden` and permissions fixes, and the three exp-2 fixes are all on
-  `main` and in the Docker image, but the newest tag is v0.1.2. The website
-  now leads with `appximo prompt`, which a user who downloads the released
-  binary does not have (the page says so in its version note, but that is a
-  caveat, not a fix).
-- **Impact:** Medium and growing — the entry page's flagship command is not
-  in the artifact the entry page tells people to download.
-- **Ready:** Miguel cuts the next tag (only he does; this is not an agent
-  action), and the site's version note comes out.
+### OPS-25 — `appximo upgrade` is untested on Windows
+- **Origin:** INSTALL-PROMPT-S1. The self-replace path is implemented for all
+  three platforms, but the Windows branch — rename the running `.exe` aside
+  (Windows refuses to OVERWRITE a running binary but allows RENAMING one),
+  move the new one into place, let the NEXT upgrade delete the leftover
+  `<name>.old.exe` — is reasoned from the platform's semantics and has NOT
+  been executed: this box is Linux and the project has no Windows runner.
+- **Impact:** Medium. It is the platform where the failure is most likely and
+  most confusing, and the same dance is what the install prompt tells agents
+  to do by hand. If the rename fails (an antivirus lock, a handle from an
+  editor), the code puts the old binary back rather than leaving nothing
+  installed — that fallback is also unexecuted.
+- **Ready:** either Miguel runs the four cases on a real Windows box
+  (upgrade while idle · upgrade while `appximo serve` is running · a locked
+  `.old.exe` from a previous upgrade · a Program-Files-style unwritable
+  destination) and reports, or CI grows a `windows-latest` job that at least
+  exercises `upgrade --check` and the rename against a dummy binary.
 
 ### ENG-35 — GraphQL String-typed variables silently coerce any scalar
 - **Origin:** NIGHT-SWEEP-S1 audit (GraphQL surface), CONFIRMED adversarially.
@@ -620,6 +629,70 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in INSTALL-PROMPT-S1 (2026-08-08)
+
+The session that split the front door in two, because ONE prompt could not own
+both jobs.
+
+- **The problem, found by Miguel using the product:** the master prompt assumed
+  a clean machine ("appximo version first — if it prints a version, skip
+  this"). Once releases exist, the most common state is the opposite — an OLD
+  appximo on the PATH — and an agent handed the build prompt uses it happily,
+  then fails on commands that binary lacks, in a way that reads like a typo.
+- **`appximo prompt --install`** (docs/INSTALL_PROMPT.md, embedded): owns the
+  three starting states (absent / older / already the requested one → say so
+  and change nothing) and the three platforms. Resolves the newest tag from
+  the /releases/latest redirect (one request, no token, no rate limit),
+  downloads through the UNVERSIONED aliases (D1 — verified live: all four
+  resolve 200), verifies the checksum (the release's checksums.txt lists both
+  the alias and the versioned name for the same bytes), documents the cosign
+  verification, and gives Windows the real procedure for a binary that cannot
+  be overwritten while running.
+- **The master prompt stops installing** and instead VERIFIES with the one test
+  an old binary cannot fake (`appximo prompt` must print), stopping and
+  pointing at the install prompt when it fails.
+- **The update class closed in the PRODUCT:** `version` reports a newer release
+  (anonymous GET of a public URL — no telemetry; human runs only, never at
+  serve boot, 2 s timeout, silent on failure, off with
+  APPXIMO_NO_VERSION_CHECK / --no-check / CI, and never with --json);
+  `appximo upgrade` downloads, verifies the checksum and replaces the running
+  binary (atomic rename on Unix, rename-aside on Windows — see OPS-25),
+  refusing to install without a matching checksum entry and naming the
+  privileged command when the destination is unwritable; an unknown command
+  now says the binary may simply be too old, deliberately WITHOUT a
+  per-command version catalogue that would be wrong in exactly the binaries
+  too old to carry it.
+- **QUICKSTART §1-bis "Already had Appximo installed?"** — how to see your
+  version, how to upgrade, and a table of what a previous attempt left behind
+  (.env, schema.json, the Docker Postgres, tenants) with how to clear each.
+- **The entry page rebuilt visually** (the second explicit ask): two numbered
+  prompt steps, platform tabs, the prompt markdown RENDERED (headings as
+  section rules, fenced blocks as highlighted inset panels, backticks as
+  chips), and an amber "✏ REPLACE THIS LINE" marker on what the reader must
+  edit. A copy button per box copying the exact .md body from a hidden raw
+  carrier, verified by reading the clipboard back in a real browser.
+- **Verified by a chained fresh-agent run** on a container with a stale v0.1.2
+  on the PATH: prompt 1 identified state (b) and updated to v0.1.5 in **41 s**
+  with the three-command checklist green; prompt 2 then reached a verified
+  running app **7 minutes** later, never trying to install anything itself.
+  Its three recorded doubts are closed as prompt lines (the `sudo`-as-root
+  case, unreachable-Postgres guidance, the conditional rbac.public row that
+  could be silently skipped). Notably, the SCHEMA-5 warning shipped in
+  LAUNCHPAD-S1 (`required_field_is_rbac_forced`) caught a real bug in that
+  agent's first schema draft.
+- **OPS-24 — DONE, by Miguel.** He cut **v0.1.5** (2026-08-08) from commit
+  8c9e9b3, so the published binaries now carry `appximo prompt`; verified by
+  downloading the release through the `latest` alias, checking its sha256
+  against checksums.txt, and running `prompt`. The site's version caveat is
+  gone. (`upgrade` and the version check land in the NEXT tag.)
+
+Gates: full lane (unit + integration + e2e + resilience, no `-short`) exit 0 ·
+root tagged suite ok · lint 0 issues · binary-diff gate **117/117 SAME, zero
+DIFFs** (this session touched the CLI, not the data path) · commerce 1-B suite
+50/50 against the local store · the three live demos healthy · CI green · the
+page verified on the LIVE URL at both viewports including the clipboard. 105
+left clean, disk 76% → 73%.
 
 ## DONE in LAUNCHPAD-S1 (2026-08-08)
 
