@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786149624996,
+  "lastUpdate": 1786150552174,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -1008,6 +1008,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "44532210 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "4ee8f7302eb316cf7711a7b5ede3cd68da3f11be",
+          "message": "fix(docker): the image build stops dying on each new embedded doc\n\nDocker Publish failed on 65fce17 with the same mechanism that killed it\nthree times before: docs/ is excluded from the build context, a new\n//go:embed docs/MASTER_PROMPT.md landed, and the image build died with\n'pattern docs/MASTER_PROMPT.md: no matching files found' — long after the\nunit lane was green, because nothing in the fast lane knew about the\ncoupling.\n\n- .dockerignore re-includes docs/MASTER_PROMPT.md (the immediate fix).\n- TestDockerignoreKeepsEmbeddedDocs scans every non-test .go file in the\n  module root for //go:embed docs/... and fails the UNIT lane when the\n  path has no matching '!docs/...' re-include, quoting the exact error the\n  image build would print and the line to add. The list is no longer\n  maintained by memory.\n- TestEmbeddedDocsExist names a stale embed path directly.\n\nMutation-checked: commenting the re-include out turns the guard red, and\nrestoring it green. Verified the real mechanism too — a build against the\nactual context now carries MASTER_PROMPT.md into the image.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-08T00:55:24Z",
+          "tree_id": "c178354caa19f65471560c1036d188a8480cd363",
+          "url": "https://github.com/appximo/appximo/commit/4ee8f7302eb316cf7711a7b5ede3cd68da3f11be"
+        },
+        "date": 1786150551367,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 5965,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "398308 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 5965,
+            "unit": "ns/op",
+            "extra": "398308 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "398308 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "398308 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 64.93,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36979029 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 64.93,
+            "unit": "ns/op",
+            "extra": "36979029 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36979029 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36979029 times\n4 procs"
           }
         ]
       }
