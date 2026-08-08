@@ -30,13 +30,14 @@ pkg/editorui/web/build/
 pkg/adminui/web/dist/
 
 # Docs are not needed to compile the binary — EXCEPT the files the binary
-# //go:embed's: backendspec.go embeds docs/BACKEND_SPEC_LLM.md and
-# frontendspec.go embeds docs/FRONTEND_SPEC_LLM.md (the `appximo
-# backend-spec` / `frontend-spec` sources). Excluding docs/ WITHOUT
-# re-including them breaks the build:
+# //go:embed's (the sources of `appximo backend-spec`, `frontend-spec`,
+# `backoffice-spec`, `quickstart` and `prompt`). Excluding docs/ WITHOUT
+# re-including one of them breaks the image build:
 #   pattern docs/FRONTEND_SPEC_LLM.md: no matching files found
-# (exactly how the first neodevtrix/appximo publish died — the frontend spec
-# landed after this file last changed, and nothing built the image between).
+# That has now happened FOUR times — each time a new embedded doc landed and
+# nothing built the image before the push. The list below is no longer
+# maintained by memory: TestDockerignoreKeepsEmbeddedDocs (dockerignore_test.go)
+# fails the unit lane whenever a //go:embed docs/... path is missing here.
 *.md
 !README.md
 context-docs/
@@ -46,6 +47,7 @@ docs/
 !docs/FRONTEND_SPEC_LLM.md
 !docs/BACKOFFICE_SPEC_LLM.md
 !docs/LIFECYCLE_SPEC_LLM.md
+!docs/MASTER_PROMPT.md
 
 # Local env / secrets (never send to the build)
 .env
