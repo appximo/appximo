@@ -31,7 +31,11 @@ var specsCmd = &cobra.Command{
 
 Use it when priming an agent that will build and run a FULL app; use the
 individual commands when the task is only one layer (smaller context). Same
-sources — this can never diverge from the five commands it concatenates.`,
+sources — this can never diverge from the five commands it concatenates.
+
+If what you want is "take my idea to a running app (and to production)", the
+front door is 'appximo prompt' — the one block you paste into your agent; it
+tells the agent when to pull each of these five.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		const sep = "\n\n---\n\n<!-- ======================= %s ======================= -->\n\n"
 		fmt.Printf(sep, "appximo spec — THE SCHEMA")

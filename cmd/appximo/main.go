@@ -26,9 +26,14 @@ First time here? ONE command starts everything locally:
   appximo up               Postgres + secrets + tenant + admin + server, in one go
   appximo new "<idea>"     same, with the schema AI-generated from your idea
 
-Building with an AI agent? The engine prints its own agent-facing contract —
-paste these into your Claude Code / Cursor and the agent can build AND run the
-full stack against the real grammar:
+Have an AI agent (Claude Code, Cursor, Copilot…)? Then start here instead:
+
+  appximo prompt           THE prompt: paste it into your agent → from an idea
+                           to production with HTTPS, one question block, zero
+                           questions after it
+
+The engine also prints the deeper contracts the prompt draws on — paste these
+individually when the task is only one layer:
 
   appximo spec             the schema grammar (the declarative 90%)
   appximo backend-spec     custom Go handlers, hooks, auth, background jobs
