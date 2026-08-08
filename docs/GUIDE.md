@@ -124,7 +124,26 @@ source.
 Everything in this section was **executed on 2026-08-02** against a fresh
 empty database; the outputs shown are real.
 
-### 2.1 Build the binary
+### 2.1 Get the binary — or update the one you already have
+
+Most people should install a release, not build one:
+
+```bash
+appximo version     # already installed? this also tells you if a newer one exists
+appximo upgrade     # replace it in place (downloads, verifies the checksum, swaps)
+```
+
+If you have no binary yet, the fastest path is to hand the engine's own
+install prompt to your agent (`appximo prompt --install`, or the "Install
+Appximo" block on the website) — it covers Linux, macOS and Windows, and it
+handles the awkward case: **an OLD appximo already on the PATH**. That state is
+worth calling out because of how it fails — new commands simply "do not exist",
+which reads like a typo rather than a stale install. Everything you need to
+know about clearing a previous attempt's leftovers (`.env`, `schema.json`, the
+Docker Postgres, tenants) is in
+[QUICKSTART §1-bis](QUICKSTART.md#1-bis-already-had-appximo-installed).
+
+From source (contributors, or a platform with no published binary):
 
 ```bash
 git clone <the-appximo-repo> && cd appximo

@@ -17,12 +17,12 @@ Two tracks, side by side, for every step:
 > raw minute-by-minute table is in the session record; the ten-minute script
 > is [at the end of §2](#the-ten-minute-script-measured).
 
-**Version note.** `appximo up`, `appximo new`, `appximo down` and the embedded
-`/app` back-office described below are merged after `v0.1.2` — until the next
-tag they exist when you build from source or use the Docker image
-(`neodevtrix/appximo`, published from `main`). Everything in the manual path
-works with `v0.1.1`/`v0.1.2` exactly as written (the few "(next release)" marks
-name what doesn't).
+**Version note.** Everything below — `appximo up`, `new`, `down`, `prompt` and
+the embedded `/app` back-office — ships in the current release (`v0.1.5`,
+2026-08-08). `appximo upgrade` and the update check in `version` land in the
+next one; until then they exist in a source build or the Docker image
+(`neodevtrix/appximo`, published from `main`). **If you installed Appximo
+before, update first** — see [§1-bis](#1-bis-already-had-appximo-installed).
 
 ---
 
@@ -71,10 +71,55 @@ amd64, `aarch64`/`arm64` → arm64).
 
 ### With an agent (any OS)
 
-> Install the Appximo engine on this machine: download the right binary for this
-> platform from https://github.com/appximo/appximo/releases, verify its
-> checksum against checksums.txt, and put it on the PATH. Then show me
-> `appximo version`.
+Paste the engine's own install prompt — it handles a fresh machine **and** an
+old binary already on the PATH, on Linux, macOS and Windows:
+
+```bash
+appximo prompt --install      # already have it? this is also the update path
+```
+
+Don't have it yet? The same block is the "Install Appximo" step on
+[the website](https://appximo.github.io/appximo/), or read
+[docs/INSTALL_PROMPT.md](INSTALL_PROMPT.md).
+
+## 1-bis. Already had Appximo installed?
+
+**Read this before anything else if `appximo version` already prints
+something.** An old binary is the most common state once releases exist, and
+it fails in the most confusing way: commands documented here simply "don't
+exist", which reads like a typo.
+
+```bash
+appximo version     # what you have — and it tells you if a newer release exists
+appximo upgrade     # replace this binary with the newest one (verified checksum)
+```
+
+- `upgrade` swaps the running binary in place. On **Windows** it renames the
+  current `appximo.exe` aside first (a running `.exe` cannot be overwritten)
+  and leaves `appximo.old.exe` behind for the next upgrade to remove.
+- If the binary lives somewhere root-owned, `upgrade` says so and names the
+  privileged command — it never installs a second copy elsewhere on the PATH.
+- The update check in `version` sends **nothing** about you or your machine
+  (it is an anonymous GET of a public URL), never runs at `serve` boot, times
+  out in 2 s, and is silenced with `APPXIMO_NO_VERSION_CHECK=1` or `--no-check`.
+  `version --json` never checks at all, so CI stays offline and byte-stable.
+
+### The state your previous try left behind
+
+Upgrading the binary does **not** touch your data. If you want to know whether
+something works because of the product or because of leftovers, this is what
+exists and how to clear it:
+
+| Leftover | What it is | Start clean |
+|---|---|---|
+| `./.env` | the three secrets `up` generated, 0600 | delete it — `up` writes a fresh one (the DB password changes too, so drop the volume as well) |
+| `./schema.json` | your app's schema | delete it and `up` writes the starter again; keep it to preserve your app |
+| Docker container `appximo-pg` | the Postgres `up` started | `appximo down` (keeps data) · `appximo down --destroy-data` (removes the volume — irreversible) |
+| Tenants inside that Postgres | one per app you registered | `appximo tenant list` · `appximo tenant delete <id> --yes` (drops its schema + control-plane rows) |
+| A previous `serve` still running | holds the port | find it with `ss -ltnp \| grep :8080` and stop that PID |
+
+A completely clean slate is: `appximo down --destroy-data`, then delete `.env`
+and `schema.json`, then `appximo up` again.
 
 ## 2. One command: `appximo up`
 

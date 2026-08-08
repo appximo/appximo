@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -50,8 +51,37 @@ The agent self-corrects with 'appximo validate --json <schema>' as the oracle.`,
 var dotenvLoaded int
 
 func main() {
+	// Cobra would print the error itself AND main would print it again; with
+	// the version hint attached that doubling is loud, so the CLI owns the
+	// single rendering here.
+	rootCmd.SilenceErrors = true
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", annotateUnknownCommand(err))
 		os.Exit(1)
 	}
+}
+
+// annotateUnknownCommand is ADR-024 on the VERSION axis (INSTALL-PROMPT-S1).
+//
+// `appximo prompt` on a v0.1.2 binary answered a bare `unknown command
+// "prompt"`, which is indistinguishable from a typo — and the real cause (an
+// old binary, the most common state once releases exist) went unnamed. The fix
+// deliberately does NOT introduce a catalogue of "command X exists since vY":
+// that table would be one more thing to forget to update, and it would be
+// wrong in exactly the binaries too old to contain it. Instead the message
+// names the OTHER possibility and the two commands that settle it in one line
+// each — true forever, for every command, with nothing to maintain.
+func annotateUnknownCommand(err error) error {
+	if err == nil || !strings.HasPrefix(err.Error(), "unknown command") {
+		return err
+	}
+	return fmt.Errorf(`%w
+Run 'appximo --help' for the commands this binary has.
+
+If that command is not a typo, this binary may simply be too old to have it —
+new commands ship with new releases, and an already-installed appximo is the
+most common reason a documented command "does not exist".
+
+  appximo version    what you have, and whether a newer release exists
+  appximo upgrade    replace this binary with the newest one`, err)
 }
