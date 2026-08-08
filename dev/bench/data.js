@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786150552174,
+  "lastUpdate": 1786151463537,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -1080,6 +1080,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36979029 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "3e2ba3ec64a7de91faf7ce8e51321c202b7284e1",
+          "message": "fix: three frictions the second fresh-agent run surfaced (warning, static shadowing, backup namespacing)\n\nAll three came from an agent building a recipe box from the master prompt\nwith no repo access — it worked around each one itself, which is exactly\nthe evidence that the product, not the agent, was wrong.\n\n1. SCHEMA-5 warning 'required_field_is_rbac_forced'. An ownership column\n   that is BOTH `required` and the target of an identity row condition\n   fails EVERY create by that role: the declarative required check runs\n   before EnforceCreateRBAC injects the caller's id, so the 422 blames the\n   client for a value it was never meant to send. Legal (another,\n   unscoped role may genuinely have to supply it), almost always a\n   mistake, invisible until the first create — the SCHEMA-5 bar. Verified\n   end to end: `appximo validate` prints it on the exact shape the agent\n   hit.\n\n2. /app.js no longer 404s. isEngineOwnedPath applied the dotted rule\n   (which exists for /openapi.json and /openapi.yaml) to EVERY reserved\n   prefix, so a SPA bundle named app.js was shadowed while style.css from\n   the same mount served — with nothing saying why. The dot rule now\n   belongs to /openapi alone; the engine serves nothing at /app.js,\n   /api.js or /health.css, so those paths go to the mount that does.\n\n3. backup.sh namespaces per app even when invoked with just its env file.\n   The installed copy at /opt/<app>/scripts is naturally called with\n   --env-file=/etc/<app>/<app>.env, and every app was writing\n   'appximo-<stamp>.dump' into one shared directory. It now infers the app\n   from that path (--app still wins), and the rotation glob matches what\n   the run writes — hardcoding 'appximo-*' meant a namespaced app's dumps\n   were never pruned. The installer summary also prints the real database\n   name instead of a hardcoded 'appximo'.\n\nGates: full lane (unit + integration + e2e + resilience, no -short) exit\n0, root tagged suite ok, lint 0 issues, binary-diff gate 117 cases =\n116 SAME + the one expected DIFF (openapi-served-contract, the aggregate\npaths of the previous commit).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-08T01:10:39Z",
+          "tree_id": "a96a9c6d43b755bd5f7b86cb4c8daf722b647c56",
+          "url": "https://github.com/appximo/appximo/commit/3e2ba3ec64a7de91faf7ce8e51321c202b7284e1"
+        },
+        "date": 1786151462974,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6145,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "388230 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6145,
+            "unit": "ns/op",
+            "extra": "388230 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "388230 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "388230 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 66.46,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36234626 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 66.46,
+            "unit": "ns/op",
+            "extra": "36234626 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36234626 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36234626 times\n4 procs"
           }
         ]
       }
