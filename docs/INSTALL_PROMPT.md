@@ -88,6 +88,9 @@ chmod +x appximo-linux-amd64
 sudo install -m 0755 appximo-linux-amd64 /usr/local/bin/appximo   # replaces an old copy in place
 ```
 
+(Drop the `sudo` if you are already root or the box has none — say which you
+did. Replace the file the shell ALREADY resolves in Step 1, then `hash -r`.)
+
 On macOS the file is `appximo-darwin-arm64` (Apple Silicon) or
 `appximo-darwin-amd64` (Intel), and `sha256sum` is `shasum -a 256`. If macOS
 quarantines the download, clear it: `xattr -d com.apple.quarantine <file>`.

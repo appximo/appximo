@@ -100,8 +100,10 @@ MY IDEA: <describe the app in one or two sentences>
 - [ ] `POST /api/<main resource>` with a token whose role may write it → 201
       (the printed token, or one minted for the right role — see step 3)
 - [ ] The filtered list (`?filter[...]`) returns the record just created
-- [ ] If the schema declares `rbac.public`: the public resource reads with NO
-      token (200) and a non-public one does not (401/403)
+- [ ] Anonymous access behaves as declared: if the schema has an `rbac.public`
+      block, that resource reads with NO token (200) while a non-public one
+      does not (401/403). No public block? Say **N/A** and prove the negative
+      (a tokenless read is 401) — never leave this row silently unchecked
 - [ ] `GET /app` → 200 (the generated back-office; sign-in works with the
       printed credentials at the `<name>.localhost` URL)
 - [ ] `appximo explain schema.json` reads back as MY IDEA — paste its output
@@ -199,6 +201,14 @@ config and backups live on the VPS, and the exact three commands for my next
 schema change (validate → migrate --dry-run → migrate).
 
 ## When something fails
+
+**If the Postgres I gave you is unreachable** (it times out, DNS does not
+resolve, a firewall drops it): that failure is the network, not Appximo, so
+its errors cannot help you. Do not silently change the connection string I
+gave you and do not disable anything — fix the reachability at your end if
+you can (a hosts entry, the right address for this machine), and say in one
+line what you changed. If you cannot, stop and tell me the exact address that
+did not answer.
 
 Read the error first — this engine's errors are written to be acted on: they
 name the missing thing and the way out. Fix exactly what is named and re-run

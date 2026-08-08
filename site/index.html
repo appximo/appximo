@@ -642,7 +642,7 @@ Three possible states — identify mine before downloading anything:
   that silently breaks things: an old binary will not have newer commands, and
   the failure looks like a typo instead of a stale install.
 - **(c) Already the version I asked for** → change NOTHING. Say so, run the
-  checklist, and stop. Do not reinstall "to be safe".
+  checklist, and stop. Do not reinstall &quot;to be safe&quot;.
 
 Also note WHERE it lives (`which appximo` / `where.exe appximo`) — an update
 must replace THAT file, or the PATH will keep finding the old one. If you find
@@ -655,7 +655,7 @@ If I said `latest`, resolve the real tag without guessing — this redirect name
 it and needs no API token or rate limit:
 
 ```
-curl -sI https://github.com/appximo/appximo/releases/latest | grep -i '^location:'
+curl -sI https://github.com/appximo/appximo/releases/latest | grep -i &#x27;^location:&#x27;
 ```
 
 The tag is the last path segment (e.g. `v0.1.5`). Compare it with what Step 1
@@ -673,7 +673,7 @@ https://github.com/appximo/appximo/releases/latest/download/appximo-windows-amd6
 https://github.com/appximo/appximo/releases/latest/download/checksums.txt
 ```
 
-If I named an exact tag instead, use that release's own versioned assets:
+If I named an exact tag instead, use that release&#x27;s own versioned assets:
 `https://github.com/appximo/appximo/releases/download/&lt;TAG&gt;/appximo-&lt;TAG&gt;-linux-amd64`
 (and `checksums.txt` from the same `/download/&lt;TAG&gt;/` directory).
 
@@ -684,17 +684,20 @@ Pick the file for MY platform and CPU (`uname -sm`, or `$env:PROCESSOR_ARCHITECT
 ### Linux / macOS
 
 ```bash
-cd "$(mktemp -d)"
+cd &quot;$(mktemp -d)&quot;
 curl -fsSLO https://github.com/appximo/appximo/releases/latest/download/appximo-linux-amd64
 curl -fsSLO https://github.com/appximo/appximo/releases/latest/download/checksums.txt
 
 # integrity: the checksums file lists BOTH the alias and the versioned name,
 # so this works for the alias download too
-grep " appximo-linux-amd64$" checksums.txt | sha256sum -c -
+grep &quot; appximo-linux-amd64$&quot; checksums.txt | sha256sum -c -
 
 chmod +x appximo-linux-amd64
 sudo install -m 0755 appximo-linux-amd64 /usr/local/bin/appximo   # replaces an old copy in place
 ```
+
+(Drop the `sudo` if you are already root or the box has none — say which you
+did. Replace the file the shell ALREADY resolves in Step 1, then `hash -r`.)
 
 On macOS the file is `appximo-darwin-arm64` (Apple Silicon) or
 `appximo-darwin-amd64` (Intel), and `sha256sum` is `shasum -a 256`. If macOS
@@ -710,27 +713,27 @@ any already-running process keeps the old copy open until it exits.
 ### Windows (PowerShell)
 
 ⚠ **Windows cannot overwrite a binary that is currently running or open.** A
-plain copy fails with "being used by another process". Do it in this order:
+plain copy fails with &quot;being used by another process&quot;. Do it in this order:
 
 ```powershell
-$dir = "$env:LOCALAPPDATA\Appximo"
+$dir = &quot;$env:LOCALAPPDATA\Appximo&quot;
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
-$tmp = Join-Path $env:TEMP "appximo-new.exe"
+$tmp = Join-Path $env:TEMP &quot;appximo-new.exe&quot;
 
-Invoke-WebRequest -Uri "https://github.com/appximo/appximo/releases/latest/download/appximo-windows-amd64.exe" -OutFile $tmp
-Invoke-WebRequest -Uri "https://github.com/appximo/appximo/releases/latest/download/checksums.txt" -OutFile "$env:TEMP\checksums.txt"
+Invoke-WebRequest -Uri &quot;https://github.com/appximo/appximo/releases/latest/download/appximo-windows-amd64.exe&quot; -OutFile $tmp
+Invoke-WebRequest -Uri &quot;https://github.com/appximo/appximo/releases/latest/download/checksums.txt&quot; -OutFile &quot;$env:TEMP\checksums.txt&quot;
 
 # integrity
-$want = (Select-String -Path "$env:TEMP\checksums.txt" -Pattern 'appximo-windows-amd64\.exe$').Line.Split(' ')[0]
+$want = (Select-String -Path &quot;$env:TEMP\checksums.txt&quot; -Pattern &#x27;appximo-windows-amd64\.exe$&#x27;).Line.Split(&#x27; &#x27;)[0]
 $got  = (Get-FileHash $tmp -Algorithm SHA256).Hash.ToLower()
-if ($want -ne $got) { throw "checksum mismatch — do not install this file" }
+if ($want -ne $got) { throw &quot;checksum mismatch — do not install this file&quot; }
 
-$target = Join-Path $dir "appximo.exe"
+$target = Join-Path $dir &quot;appximo.exe&quot;
 if (Test-Path $target) {
   # The old exe may be running or open: RENAME it (Windows allows renaming a
   # running executable, it just refuses to overwrite one), then put the new one
   # in its place. Delete the .old file later, or on the next update.
-  $old = Join-Path $dir "appximo.old.exe"
+  $old = Join-Path $dir &quot;appximo.old.exe&quot;
   Remove-Item $old -Force -ErrorAction SilentlyContinue
   Rename-Item $target $old -Force
 }
@@ -746,21 +749,21 @@ different versions end up shadowing each other.
 
 ```powershell
 [Environment]::SetEnvironmentVariable(
-  "Path", [Environment]::GetEnvironmentVariable("Path","User") + ";$env:LOCALAPPDATA\Appximo", "User")
+  &quot;Path&quot;, [Environment]::GetEnvironmentVariable(&quot;Path&quot;,&quot;User&quot;) + &quot;;$env:LOCALAPPDATA\Appximo&quot;, &quot;User&quot;)
 ```
 
 Then **open a NEW terminal** — the current one keeps the old PATH, and every
-"it still says command not found" after an install is this.
+&quot;it still says command not found&quot; after an install is this.
 
 ### Optional: verify the signature, not just the checksum
 
 The checksum only proves the download was not corrupted in transit — it lives
 in the same release as the binary. If you have (or can install) `cosign`, this
-verifies the release was really produced by the project's CI:
+verifies the release was really produced by the project&#x27;s CI:
 
 ```
 cosign verify-blob checksums.txt --bundle checksums.txt.sigstore.json \
-  --certificate-identity-regexp 'github.com/appximo/appximo' \
+  --certificate-identity-regexp &#x27;github.com/appximo/appximo&#x27; \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
@@ -770,13 +773,13 @@ Skip it if cosign is not available; do NOT skip the checksum.
 
 ```
 appximo version     # must print the version I asked for — not the old one
-appximo prompt      # must print a long prompt starting "You are going to build me…"
+appximo prompt      # must print a long prompt starting &quot;You are going to build me…&quot;
 appximo --help      # must list: up, new, prompt, serve, validate, migrate, specs
 ```
 
 - If `version` still shows the OLD number: the shell cached the old path
   (`hash -r` on Linux/macOS) or there is a second copy earlier on the PATH
-  (`which -a appximo` / `where.exe appximo`) — fix that, don't reinstall.
+  (`which -a appximo` / `where.exe appximo`) — fix that, don&#x27;t reinstall.
 - If `prompt` says `unknown command`: the update did not take effect. That
   command is the proof; do not report success without it.
 
@@ -821,7 +824,7 @@ MY IDEA: &lt;describe the app in one or two sentences&gt;
 - Never serve any part of this app from a second server or port: the engine
   serves API, frontend, admin and docs from ONE binary, same origin. If you
   are tempted to run `npx serve`, `python -m http.server` or a Node server
-  next to it, you took a wrong turn — go to "Custom screens" below.
+  next to it, you took a wrong turn — go to &quot;Custom screens&quot; below.
 - Never write to the database with raw SQL. Schema changes go through
   `appximo validate` → `appximo migrate` (Act 2 §3); data changes go through
   the API.
@@ -834,36 +837,36 @@ MY IDEA: &lt;describe the app in one or two sentences&gt;
    give me: (a) the domain (and confirm you can edit its DNS records),
    (b) SSH access to an Ubuntu VPS (`user@host`), and (c) whether anything
    else already runs on that box. If NO, I stop after Act 1 and print what
-   production will take when you're ready.
+   production will take when you&#x27;re ready.
 
 # ACT 1 — from the idea to a running app, locally
 
 1. **Check the engine is installed AND current enough** — do not install it
-   here, and do NOT accept "a version prints, therefore we're fine": an old
+   here, and do NOT accept &quot;a version prints, therefore we&#x27;re fine&quot;: an old
    binary is the usual state and it fails later, in ways that read like typos.
    Run both:
 
    ```
    appximo version     # must print a version
-   appximo prompt      # must print a long prompt, NOT "unknown command"
+   appximo prompt      # must print a long prompt, NOT &quot;unknown command&quot;
    ```
 
    If either fails, **stop and tell me to run the install prompt first**
-   (`appximo prompt --install`, or the "Install Appximo" block on the
+   (`appximo prompt --install`, or the &quot;Install Appximo&quot; block on the
    website). Do not work around it, do not build from source, do not proceed
    with an older binary.
 2. **Write the schema from MY IDEA**:
    - `appximo spec &gt; /tmp/appximo-spec.md`, read it, then write `schema.json`
      using ONLY that grammar.
    - Correction loop: `appximo validate --json schema.json`, fix every entry
-     it reports, repeat until `"valid": true` **and `warnings` is empty**.
+     it reports, repeat until `&quot;valid&quot;: true` **and `warnings` is empty**.
      Warnings are real bugs waiting to happen — two you will likely hit:
-     a `required` string field also needs `"minLength": 1` (an empty string
+     a `required` string field also needs `&quot;minLength&quot;: 1` (an empty string
      satisfies `required`), and a role that writes a resource with a `file`
      field also needs a grant on the `files` resource (or uploads 403).
    - If any part of the app must be readable WITHOUT login (a public catalog,
-     published posts, a landing's data), declare it in the schema's
-     `rbac.public` block (it's in the grammar) — do not invent an "anonymous"
+     published posts, a landing&#x27;s data), declare it in the schema&#x27;s
+     `rbac.public` block (it&#x27;s in the grammar) — do not invent an &quot;anonymous&quot;
      role and do not proxy around auth.
 3. **Boot everything with ONE command**:
    `appximo up --name &lt;shortname&gt; --schema schema.json --yes --json`
@@ -873,14 +876,14 @@ MY IDEA: &lt;describe the app in one or two sentences&gt;
    - The printed token and the first user carry the **most privileged role
      your schema declares** (`token_role` in the JSON). To act as any OTHER
      role — to prove a restricted role really is restricted — mint one:
-     `appximo token --secret "$JWT_SECRET" --tenant &lt;name&gt; --role &lt;role&gt; --schema schema.json`
+     `appximo token --secret &quot;$JWT_SECRET&quot; --tenant &lt;name&gt; --role &lt;role&gt; --schema schema.json`
      (the secret is in the `.env` `up` wrote).
    - Re-running `up` after editing schema.json is safe: it migrates the
      tenant to the new schema (destructive drops stay gated and print the
      exact approval command).
 4. **Prove it with real requests.** The tenant is addressed by Host header:
    use the printed `http://&lt;name&gt;.localhost:&lt;port&gt;` URLs, or add
-   `-H 'Host: &lt;name&gt;.localhost'`. Filters need `curl -g`.
+   `-H &#x27;Host: &lt;name&gt;.localhost&#x27;`. Filters need `curl -g`.
 
 **ACT 1 CHECKLIST** — verify each, then show me the table with evidence:
 
@@ -889,8 +892,10 @@ MY IDEA: &lt;describe the app in one or two sentences&gt;
 - [ ] `POST /api/&lt;main resource&gt;` with a token whose role may write it → 201
       (the printed token, or one minted for the right role — see step 3)
 - [ ] The filtered list (`?filter[...]`) returns the record just created
-- [ ] If the schema declares `rbac.public`: the public resource reads with NO
-      token (200) and a non-public one does not (401/403)
+- [ ] Anonymous access behaves as declared: if the schema has an `rbac.public`
+      block, that resource reads with NO token (200) while a non-public one
+      does not (401/403). No public block? Say **N/A** and prove the negative
+      (a tokenless read is 401) — never leave this row silently unchecked
 - [ ] `GET /app` → 200 (the generated back-office; sign-in works with the
       printed credentials at the `&lt;name&gt;.localhost` URL)
 - [ ] `appximo explain schema.json` reads back as MY IDEA — paste its output
@@ -909,7 +914,7 @@ production, continue.
   - No Go toolchain: `appximo serve --schema schema.json --static ./dist --spa`
   - Go route (one binary containing everything): `appximo init &lt;name&gt;` emits a
     compilable project (main.go + go:embed) on `go get github.com/appximo/appximo`.
-  The UI's exact API contract is `appximo frontend-spec` — read it before
+  The UI&#x27;s exact API contract is `appximo frontend-spec` — read it before
   writing fetch calls (tenant Host, 422 shape, keyset pagination, uploads).
 - **Custom endpoints** (checkout, signed webhooks, reports): read
   `appximo backend-spec`; handlers run in-process with `Ctx` (validation +
@@ -924,7 +929,7 @@ production, continue.
    `*.&lt;app&gt;.&lt;domain&gt;` → same IP if tenants get their own subdomains. The
    tenant id must EQUAL the first DNS label it is served at.
 1. **Put the binary on the VPS**: `scp` the SAME binary you ran locally (or
-   your custom one from "Custom screens") to the VPS, plus your
+   your custom one from &quot;Custom screens&quot;) to the VPS, plus your
    `schema.json` — any file transfer works, `scp` is just the usual one.
    Then fetch the installer AND its companion scripts into the same
    directory on the VPS (the installer only installs the companions it finds
@@ -938,28 +943,28 @@ production, continue.
      `sudo bash install.sh --domain=&lt;app&gt;.&lt;domain&gt; --email=&lt;your email&gt; --binary=./appximo --schema=schema.json --harden --yes`
    - Box that ALREADY runs something (or a second Appximo app): add
      `--app=&lt;name&gt;` — everything (service, user, config dir, db, ports) is
-     namespaced under that name next to what's there, untouched. If ports
+     namespaced under that name next to what&#x27;s there, untouched. If ports
      8090/9090 are taken, add `--port`/`--control-port`.
-   - Custom binary from Act 1's Go route: pass it as `--binary=` and add
+   - Custom binary from Act 1&#x27;s Go route: pass it as `--binary=` and add
      `--cli=./appximo` (the stock engine as ops companion — your binary
      serves, the CLI operates: migrate, token, backup).
    - It installs native PostgreSQL, a systemd unit, and Caddy with automatic
-     Let's Encrypt. It prints every name it created and where config lives
-     (`/etc/&lt;name&gt;/&lt;name&gt;.env`). Read the summary; don't re-derive paths.
+     Let&#x27;s Encrypt. It prints every name it created and where config lives
+     (`/etc/&lt;name&gt;/&lt;name&gt;.env`). Read the summary; don&#x27;t re-derive paths.
    - **It is idempotent**: if it stops with a named error, fix exactly what
      it named and run the SAME command again — it detects and reuses
      everything it already created. Never start over by hand.
    - If the certificate never issues, it is almost always DNS not yet
      pointing here or port 80 blocked — `dig +short &lt;app&gt;.&lt;domain&gt;` must
-     return this box's IP, and `journalctl -u caddy -f` says the rest. Wait
+     return this box&#x27;s IP, and `journalctl -u caddy -f` says the rest. Wait
      for DNS rather than working around TLS; **never** verify with `-k`.
 3. **First production tenant + admin** (on the VPS — the control plane is
    localhost-only by design, never exposed):
    - Register the tenant WITH the schema in the body:
-     `curl -s -X POST http://localhost:&lt;control-port&gt;/tenants -H "X-Admin-Key: $ADMIN_KEY" -H 'Content-Type: application/json' -d "{\"tenant_id\":\"&lt;app&gt;\",\"display_name\":\"&lt;App&gt;\",\"schema\":$(cat schema.json)}"`
+     `curl -s -X POST http://localhost:&lt;control-port&gt;/tenants -H &quot;X-Admin-Key: $ADMIN_KEY&quot; -H &#x27;Content-Type: application/json&#x27; -d &quot;{\&quot;tenant_id\&quot;:\&quot;&lt;app&gt;\&quot;,\&quot;display_name\&quot;:\&quot;&lt;App&gt;\&quot;,\&quot;schema\&quot;:$(cat schema.json)}&quot;`
      (ADMIN_KEY and the control port are in `/etc/&lt;name&gt;/&lt;name&gt;.env`.)
    - First admin: open `https://&lt;app&gt;.&lt;domain&gt;/admin` — the login screen
-     offers "Create the first admin" (paste the ADMIN_KEY) — or run
+     offers &quot;Create the first admin&quot; (paste the ADMIN_KEY) — or run
      `appximo admin create --email … --password …` on the VPS.
    - Mint a token and create one real record over HTTPS.
 4. **Every future schema change** (now and forever): edit schema.json →
@@ -971,7 +976,7 @@ production, continue.
 
 **ACT 2 CHECKLIST** — verify each, then show me the table with evidence:
 
-- [ ] `curl https://&lt;app&gt;.&lt;domain&gt;/health` (NO `-k`) → 200 `{"status":"ok",…}`
+- [ ] `curl https://&lt;app&gt;.&lt;domain&gt;/health` (NO `-k`) → 200 `{&quot;status&quot;:&quot;ok&quot;,…}`
       — real certificate, valid chain
 - [ ] `POST /api/&lt;main resource&gt;` over HTTPS with a fresh token → 201
 - [ ] `https://&lt;app&gt;.&lt;domain&gt;/app` → 200 and lists that record after sign-in;
@@ -981,7 +986,7 @@ production, continue.
 - [ ] `journalctl -u &lt;service&gt; -n 50` shows a clean boot (no errors)
 - [ ] Backups work: run `/opt/&lt;name&gt;/scripts/backup.sh --env-file=/etc/&lt;name&gt;/&lt;name&gt;.env`
       once and show the dump file it produced (if the installer reported it
-      couldn't find the companion scripts, fetch them as in §1 first)
+      couldn&#x27;t find the companion scripts, fetch them as in §1 first)
 
 Deliver at the end: the live HTTPS URLs, credentials (shown once), where
 config and backups live on the VPS, and the exact three commands for my next
@@ -989,15 +994,23 @@ schema change (validate → migrate --dry-run → migrate).
 
 ## When something fails
 
-Read the error first — this engine's errors are written to be acted on: they
+**If the Postgres I gave you is unreachable** (it times out, DNS does not
+resolve, a firewall drops it): that failure is the network, not Appximo, so
+its errors cannot help you. Do not silently change the connection string I
+gave you and do not disable anything — fix the reachability at your end if
+you can (a hosts entry, the right address for this machine), and say in one
+line what you changed. If you cannot, stop and tell me the exact address that
+did not answer.
+
+Read the error first — this engine&#x27;s errors are written to be acted on: they
 name the missing thing and the way out. Fix exactly what is named and re-run
 the same command (every installer and `up` is idempotent). If a step fails
 twice, run `appximo quickstart` and search its output for the symptom before
 improvising. Three dead ends to never take: a second
 server/port for the frontend, raw SQL against the database, and disabling
-auth "temporarily". If the box refuses something (a port, a permission), the
+auth &quot;temporarily&quot;. If the box refuses something (a port, a permission), the
 installer summary and `journalctl -u &lt;service&gt;` name the owner — fix the
-named thing, don't work around it.</pre>
+named thing, don&#x27;t work around it.</pre>
 <pre id="raw-prev-unix"># your agent works out the platform and runs the matching block — this is Linux
 curl -fsSLO https://github.com/appximo/appximo/releases/latest/download/appximo-linux-amd64
 curl -fsSLO https://github.com/appximo/appximo/releases/latest/download/checksums.txt
