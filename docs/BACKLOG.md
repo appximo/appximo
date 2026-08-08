@@ -26,7 +26,9 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-07 (PUBLIC-SURFACE-S1)** — the second field report answered: ADR-026 public reads, SEC-5 general closure, include/references, up reconciliation, 2 warnings, the static path; UI-2/ENG-40 filed. Previous review: 2026-08-07 (FIRST-TEN-MINUTES-S1) — ENG-38 (the §13
+**Last reviewed: 2026-08-08 (LAUNCHPAD-S1)** — the front door shipped and
+verified with two fresh agents; UI-2 and ENG-40 closed (UI-2 WAS the data-loss
+it was filed as); OPS-23, ENG-41 and OPS-24 filed. Previous review: 2026-08-07 (PUBLIC-SURFACE-S1) — the second field report answered: ADR-026 public reads, SEC-5 general closure, include/references, up reconciliation, 2 warnings, the static path; UI-2/ENG-40 filed. Previous review: 2026-08-07 (FIRST-TEN-MINUTES-S1) — ENG-38 (the §13
 first-ten-minutes proposal) is DONE: `appximo up`/`down`/`new` + the embedded
 `/app` back-office + the QUICKSTART rewrite, all verified (see the DONE block);
 ENG-39 filed (`--embedded-pg`, deliberately deferred with its reasoning).
@@ -56,32 +58,54 @@ refreshed).
 
 ## OPEN
 
-### UI-2 — Studio must author (and provably round-trip) `rbac.public`
-- **Origin:** PUBLIC-SURFACE-S1 (ADR-026) added the `rbac.public` block; the
-  visual RBAC editor (UI-F2-S1) predates it and does not author it. Worse
-  risk than a missing panel: if the editor RE-EMITS the rbac object from its
-  internal model on deploy, an existing public block could be silently
-  DROPPED — a public site going dark after an unrelated Studio deploy.
-- **Impact:** High if the round-trip drops the key (data-loss class), medium
-  otherwise (the JSON/Code view can author it; AUDIT-F1-S1's 100%-parity
-  claim is reopened either way).
-- **Ready:** (1) a pinned test that a schema WITH `rbac.public` deployed from
-  Studio keeps the block byte-equivalent; (2) the Roles editor grows a
-  "Public (anonymous)" section faithful to validatePublicBlock (read-only,
-  literal-only conditions, existing fields).
+### OPS-23 — `install.sh` has no `--static` flag for a frontend directory
+- **Origin:** LAUNCHPAD-S1, second fresh-agent run. An agent deploying an app
+  with its own SPA (served by the stock binary, not a consumer build) has to
+  hand-add `APPXIMO_STATIC_DIR=` to `/etc/<app>/<app>.env` after the install,
+  because the installer exposes no `--static`/`--spa` flag even though
+  `serve` and `ParseServeArgs` both do. It cost a two-minute detour, not a
+  wall (the env equivalent IS documented in `serve --help`), but it is the
+  one place where the deploy path is narrower than the run path.
+- **Impact:** Low-medium. Self-solvable and documented, yet it breaks the
+  "the installer prints every name it created; don't re-derive paths" promise
+  for the most common frontend case.
+- **Ready:** `install.sh --static=<dir> [--spa]` copies the directory under
+  `/opt/<app>/web`, writes `APPXIMO_STATIC_DIR`/`APPXIMO_STATIC_SPA` into the
+  env file, and the summary names the served root — verified by installing an
+  app with a SPA and getting a 200 at `/` with no manual env edit.
 
-### ENG-40 — `explain` and the aggregate endpoint don't know the new surface
-- **Origin:** PUBLIC-SURFACE-S1. Two small parity gaps noticed while
-  building ADR-026: `appximo explain` renders every ROLE's grants but not
-  the `rbac.public` block (an owner reviewing an AI-written schema would not
-  see what the whole internet can read — exactly the audience explain
-  exists for), and `/api/{r}/aggregate` has never been documented in
-  /openapi.json (pre-existing; noticed while marking public reads).
-- **Impact:** Medium for explain (the public surface is the one a
-  non-programmer most needs read back); low for the OpenAPI aggregate.
-- **Ready:** explain prints a "Cualquiera, sin iniciar sesión, puede ver…"
-  section per public grant (conditions in words, field list); the aggregate
-  path appears in the generated spec with its parameter set.
+### ENG-41 — the create path validates `required` before RBAC fills the ownership column
+- **Origin:** LAUNCHPAD-S1. `ValidateWrite` (required/rules) runs at
+  builder.go:561, `EnforceCreateRBAC` (which forces the row-condition column
+  to the caller's identity) at :609 — so a column that is BOTH `required` and
+  identity-scoped answers 422 "<field> is required" on every create by that
+  role, for a value the client was never meant to send.
+- **Impact:** Medium, and now WARNED rather than silent: this session shipped
+  the SCHEMA-5 warning `required_field_is_rbac_forced`, which names the
+  symptom and the fix (drop `required`). The warning closes the discovery
+  problem; this item tracks the deeper fix.
+- **Why deferred:** reordering the two phases is a real data-path change with
+  a non-obvious side effect — EnforceCreateRBAC also DROPS fields outside the
+  role's allowlist, so running it first would remove those fields from
+  validation, turning today's 422 on a badly-typed non-allowlisted field into
+  a silent 201. That trade needs its own session with the binary-diff gate,
+  not a tail-end edit.
+- **Ready:** either (a) the injection of condition VALUES moves before
+  validation while the allowlist DROP stays after it, with the gate showing
+  no other behavioral change, or (b) an ADR records that the warning is the
+  permanent answer and why.
+
+### OPS-24 — the release binaries do not carry this session's front door
+- **Origin:** LAUNCHPAD-S1. `appximo prompt`, the `up` role fix, the
+  `--harden` and permissions fixes, and the three exp-2 fixes are all on
+  `main` and in the Docker image, but the newest tag is v0.1.2. The website
+  now leads with `appximo prompt`, which a user who downloads the released
+  binary does not have (the page says so in its version note, but that is a
+  caveat, not a fix).
+- **Impact:** Medium and growing — the entry page's flagship command is not
+  in the artifact the entry page tells people to download.
+- **Ready:** Miguel cuts the next tag (only he does; this is not an agent
+  action), and the site's version note comes out.
 
 ### ENG-35 — GraphQL String-typed variables silently coerce any scalar
 - **Origin:** NIGHT-SWEEP-S1 audit (GraphQL surface), CONFIRMED adversarially.
@@ -596,6 +620,83 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in LAUNCHPAD-S1 (2026-08-08)
+
+The session that gave the product a FRONT DOOR and verified it with two
+fresh agents, plus the two items PUBLIC-SURFACE-S1 left open.
+
+- **UI-2 — DONE.** The round-trip DID drop the block (confirmed in code and
+  live): `cleanRBACPolicy` re-emitted only `roles`, so any export or deploy
+  from Studio deleted `rbac.public` — a public site going dark after an
+  unrelated deploy — and a roles-less public-only schema lost the whole rbac
+  block. Fixed in `transform.ts`; Studio now AUTHORS the block (a pinned
+  "Public (anonymous)" entry: read-only actions, literal-only row filter,
+  field allowlist, files actions-only, issues mirroring
+  `validatePublicBlock`); rename/delete propagation walks `public`; role
+  names starting with `$` are refused. Pinned by the editor's first JS test
+  harness (vitest, 5 round-trip tests, wired into `make editor-ui`) and
+  verified live: canonical byte-equal through the BUILT editor's Code view,
+  a real `PUT /admin/tenants/{id}/schema` keeping the block, and the
+  anonymous surface still serving only published rows afterwards. (4612a08)
+- **ENG-40 — DONE.** `explain` opens the RBAC section with the anonymous
+  surface in words (EN/ES), and a public-only schema no longer prints the
+  "every request will be denied" warning; `/api/{r}/aggregate` is in
+  `/openapi.json` with its own parameter vocabulary (mirroring
+  `query.BuildAggregate`), an `AggregateResponse` component, and `x-public`
+  inherited when the resource is anonymously readable. (af16cbd)
+- **The MASTER PROMPT + `appximo prompt`** — the front door: one paste, one
+  question block, zero questions after it, executable checklists, two acts
+  (local, then production with HTTPS). Embedded from
+  `docs/MASTER_PROMPT.md`, named first in the root help and in `specs`.
+  VERIFIED with two fresh agents on two different ideas, neither with repo
+  access: a board-game lending library (Act 1 green in 3m28s, production
+  HTTPS at ~17 min) and a recipe box (22 min end to end, first-try valid
+  schema, zero questions). Both reached a real certificate chain validated
+  with `--cacert`, never `-k`. (51453db, v2 in the same commit)
+- **`up` hands over the MOST privileged role** — it used to be "admin" by
+  name else the ALPHABETICALLY FIRST role, so a {member, staff} schema gave
+  the operator `member`: the printed token could not write the app's own
+  main resource. Found by fresh agent #1. (7d1d04b)
+- **`install.sh` hardening** — umask-proof explicit modes (the 750 root:root
+  `/etc/<app>` that leaves a service crash-looping in `activating` with the
+  cause one journal line away), `/etc/<app>` in `ReadWritePaths` (which also
+  unblocks Studio's one-click restart in production), an install-time
+  readability check impersonating the service user, and `--harden` probes
+  that tolerate a missing `ss`/`sshd_config` and NAME what is missing
+  instead of dying with a bare 127/2 (four paths exercised against the
+  shipped function on a minimal image). (f765a5a, 004e1ab)
+- **The Docker-image trap closed structurally** — `docs/MASTER_PROMPT.md` is
+  `//go:embed`ed and `docs/` is excluded from the build context, so Docker
+  Publish died for the FOURTH time on the same mechanism.
+  `TestDockerignoreKeepsEmbeddedDocs` now fails the UNIT lane whenever an
+  embedded doc has no `!docs/...` re-include, quoting the exact error and
+  the line to add; mutation-checked. (4ee8f73)
+- **Three frictions from fresh agent #2** (3e2ba3e): the SCHEMA-5 warning
+  `required_field_is_rbac_forced` (see ENG-41 for the deeper fix);
+  `/app.js` no longer shadowed by the reserved-prefix dot rule, which
+  belongs to `/openapi` alone; `backup.sh` namespaces per app when invoked
+  with just its env file, and its rotation glob matches what it writes.
+- **The entry page rebuilt** — hero = the copyable master prompt with the
+  measured 1m53s badge and agent/by-hand tabs, three numbered steps with
+  real screenshots, architecture below the fold, and a third live demo:
+  `crisblogs.appximo.com`, built end to end by a third party. Published to
+  gh-pages and verified on the LIVE URL at 390x844 and 1366x900 (no
+  horizontal scroll, no console errors, all 8 images 200). (65fce17)
+- **The consumer-binary deploy on a NON-EMPTY box — verified.** A binary
+  built from `appximo init` (82 MB, ADR-023 contract) installed as the THIRD
+  app on a box already running two others: own service/user/db/port/Caddy
+  site, HTTPS with a valid chain, `POST /api/items` → 201, its own embedded
+  frontend at `/` → 200, `/admin` `/docs` `/app` → 200 (ADR-025 assets
+  travel in the module), and both neighbours untouched (active/enabled,
+  health 200). The namespaced backup inference verified in the same run.
+
+Gates: full lane (unit + integration + e2e + resilience, no `-short`) exit 0
+· root tagged suite ok · lint 0 issues · binary-diff gate 117 cases = 116
+SAME + 1 DIFF, explained: `openapi-served-contract` differs by EXACTLY the
+two new `/api/{r}/aggregate` path items and the `AggregateResponse`
+component (both OpenAPI documents diffed directly — zero shared paths
+changed, zero other top-level keys changed). 105 left clean.
 
 ## DONE in PUBLIC-SURFACE-S1 (2026-08-07)
 
