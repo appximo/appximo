@@ -22,9 +22,13 @@ var masterPromptMarkdown string
 // MasterPrompt returns the paste-ready master prompt. The source file opens
 // with an HTML comment addressed to maintainers, not agents — it is stripped
 // here so the printed text is exactly what a user should paste.
-func MasterPrompt() string {
-	if _, rest, found := strings.Cut(masterPromptMarkdown, "-->\n"); found {
+func MasterPrompt() string { return stripPromptPreamble(masterPromptMarkdown) }
+
+// stripPromptPreamble drops the leading maintainer-only HTML comment that every
+// prompt source carries, so what the binary prints is exactly the paste.
+func stripPromptPreamble(md string) string {
+	if _, rest, found := strings.Cut(md, "-->\n"); found {
 		return strings.TrimLeft(rest, "\n")
 	}
-	return masterPromptMarkdown
+	return md
 }

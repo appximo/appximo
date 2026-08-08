@@ -33,12 +33,26 @@ The deeper contracts it draws on (spec, backend-spec, frontend-spec,
 backoffice-spec, quickstart) stay available individually; the prompt tells
 the agent when to print each one.
 
-Single source: docs/MASTER_PROMPT.md (embedded).`,
-	Run: func(_ *cobra.Command, _ []string) {
+  --install   print the INSTALL prompt instead: the short block that installs
+              or UPDATES the engine itself. Paste that one first — an agent
+              handed the build prompt on a machine with an OLD appximo will
+              happily use the old one and then fail on commands it lacks.
+
+Single sources: docs/MASTER_PROMPT.md and docs/INSTALL_PROMPT.md (embedded).`,
+	Run: func(cmd *cobra.Command, _ []string) {
+		if install, _ := cmd.Flags().GetBool("install"); install {
+			fmt.Println(appximo.InstallPrompt())
+			return
+		}
 		fmt.Println(appximo.MasterPrompt())
 	},
 }
 
 func init() {
+	// A FLAG, not a second command: there is one front door ("the prompt"),
+	// with two moments. `appximo prompt --install` is also the update path for
+	// someone who already has the binary and wants their agent to refresh it.
+	promptCmd.Flags().Bool("install", false,
+		"print the INSTALL/UPDATE prompt instead of the build prompt (paste this one first)")
 	rootCmd.AddCommand(promptCmd)
 }

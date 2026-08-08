@@ -49,10 +49,20 @@ MY IDEA: <describe the app in one or two sentences>
 
 # ACT 1 — from the idea to a running app, locally
 
-1. **Install the engine if missing** (`appximo version` first — if it prints
-   a version, skip this): download the binary for this platform from
-   https://github.com/appximo/appximo/releases/latest, verify its checksum
-   against the release's `checksums.txt`, `chmod +x`, move it onto the PATH.
+1. **Check the engine is installed AND current enough** — do not install it
+   here, and do NOT accept "a version prints, therefore we're fine": an old
+   binary is the usual state and it fails later, in ways that read like typos.
+   Run both:
+
+   ```
+   appximo version     # must print a version
+   appximo prompt      # must print a long prompt, NOT "unknown command"
+   ```
+
+   If either fails, **stop and tell me to run the install prompt first**
+   (`appximo prompt --install`, or the "Install Appximo" block on the
+   website). Do not work around it, do not build from source, do not proceed
+   with an older binary.
 2. **Write the schema from MY IDEA**:
    - `appximo spec > /tmp/appximo-spec.md`, read it, then write `schema.json`
      using ONLY that grammar.

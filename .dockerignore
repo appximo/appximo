@@ -48,6 +48,7 @@ docs/
 !docs/BACKOFFICE_SPEC_LLM.md
 !docs/LIFECYCLE_SPEC_LLM.md
 !docs/MASTER_PROMPT.md
+!docs/INSTALL_PROMPT.md
 
 # Local env / secrets (never send to the build)
 .env
