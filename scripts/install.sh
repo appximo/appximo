@@ -883,12 +883,48 @@ maybe_harden() {
 	info "hardening: ufw + fail2ban + unattended-upgrades"
 	run apt-get install -y -qq ufw fail2ban unattended-upgrades
 	if [ "$DRY_RUN" != "yes" ]; then
+		command -v ufw >/dev/null 2>&1 || die "hardening needs ufw and apt could not provide it on this box.
+  Fix:  install it yourself (apt-get install -y ufw) and re-run, or drop --harden and firewall this box your own way.
+  Nothing was firewalled; the app itself is installed and running."
 		# CRITICAL: allow the CURRENT SSH port(s) BEFORE enabling ufw, or we lock
-		# ourselves out. Detect them from the live listeners (covers a non-22 sshd);
-		# fall back to 22.
-		local sshports; sshports="$(ss -ltnH 'sport = :ssh' 2>/dev/null | awk '{print $4}' | sed -E 's/.*:([0-9]+)$/\1/' | sort -u)"
-		[ -z "$sshports" ] && sshports="$(awk '/^[[:space:]]*Port[[:space:]]+[0-9]+/{print $2}' /etc/ssh/sshd_config 2>/dev/null | sort -u)"
-		[ -z "$sshports" ] && sshports="22"
+		# ourselves out. Detect them from the live listeners (covers a non-22
+		# sshd), else from sshd_config. EVERY probe is optional and
+		# failure-tolerant: under `set -euo pipefail` a missing `ss` binary
+		# (exit 127) or an absent /etc/ssh/sshd_config (awk exit 2) used to
+		# abort the WHOLE install with a bare exit code and no message — a
+		# third-party evaluator had to diagnose both by hand on a minimal
+		# image (LAUNCHPAD-S1). What is missing is now named, and only a
+		# genuinely dangerous unknown stops the run.
+		local sshports=""
+		if command -v ss >/dev/null 2>&1; then
+			sshports="$(ss -ltnH 'sport = :ssh' 2>/dev/null | awk '{print $4}' | sed -E 's/.*:([0-9]+)$/\1/' | sort -u || true)"
+		else
+			info "hardening: 'ss' is not installed (iproute2), so live SSH listeners can't be read — falling back to /etc/ssh/sshd_config"
+		fi
+		if [ -z "$sshports" ] && [ -f /etc/ssh/sshd_config ]; then
+			sshports="$(awk '/^[[:space:]]*Port[[:space:]]+[0-9]+/{print $2}' /etc/ssh/sshd_config 2>/dev/null | sort -u || true)"
+		fi
+		if [ -z "$sshports" ]; then
+			# Nothing detected. Harmless when this box has no sshd at all
+			# (containers, consoles-only VMs); a LOCKOUT when sshd is running on
+			# a port we failed to read — so that case stops, named.
+			if pgrep -x sshd >/dev/null 2>&1 || systemctl is-active --quiet ssh 2>/dev/null || systemctl is-active --quiet sshd 2>/dev/null; then
+				local missing=""
+				command -v ss >/dev/null 2>&1 || missing="the 'ss' command (apt-get install -y iproute2)"
+				if [ ! -f /etc/ssh/sshd_config ]; then
+					[ -n "$missing" ] && missing="$missing, and "
+					missing="${missing}/etc/ssh/sshd_config"
+				fi
+				[ -z "$missing" ] && missing="neither 'ss' nor sshd_config reported a Port line"
+				die "hardening would enable ufw but the SSH port could not be determined, and sshd IS running on this box — enabling the firewall now could lock you out.
+  Missing: ${missing}
+  Fix:  install what is named above and re-run (the installer is idempotent), or run WITHOUT --harden and apply ufw yourself:
+          ufw allow <your-ssh-port>/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw --force enable
+  Nothing was firewalled; the app itself is installed and running."
+			fi
+			info "hardening: no sshd found on this box — opening the conventional 22/tcp anyway (harmless) plus 80 and 443"
+			sshports="22"
+		fi
 		local p; for p in $sshports; do ufw allow "${p}/tcp" >/dev/null; done
 		ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null
 		ufw --force enable >/dev/null
