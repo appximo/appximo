@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786137571071,
+  "lastUpdate": 1786149624996,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -936,6 +936,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "35916376 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "65fce17058776a2d08467fabed9d70e13f4cdf0c",
+          "message": "docs(site): the entry page leads with the prompt, not the architecture\n\nThe page explained what the engine is before telling anyone how to start\n— the opposite of the references Miguel named (frankenphp.dev opens with\none command; api-platform.com with three numbered steps). Appximo has a\nbetter opening move than either: the user doesn't run a command, they\npaste a prompt.\n\n- Hero = the master prompt in a copy-to-clipboard box, with a measured\n  badge (1m53s, the number a fresh agent actually took) and two tabs —\n  'With your AI agent' (the flagship path) and 'By hand' (the truth and\n  the net, three commands).\n- Three numbered steps: paste it · watch your app run · publish it with\n  HTTPS, each with a real screenshot (the /app back-office, a live HTTPS\n  deploy) instead of prose.\n- Architecture moved below the fold, renamed 'Under the hood'.\n- Live demos are now THREE, including crisblogs.appximo.com — built\n  end-to-end by a third party whose agent only had the printed contracts.\n  It is the strongest social proof the project has; the screenshot is a\n  real capture of the live site.\n- The specs block lists all five printables and names 'appximo prompt'\n  first.\n\nBrowser-verified (Playwright) at 390x844 and 1366x900: no horizontal\nscroll, no console errors, tabs and expand/copy working at both sizes.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-08T00:39:50Z",
+          "tree_id": "6023e9da9e8ac7e12cae3da43381be9499101de3",
+          "url": "https://github.com/appximo/appximo/commit/65fce17058776a2d08467fabed9d70e13f4cdf0c"
+        },
+        "date": 1786149623839,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 5956,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "393896 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 5956,
+            "unit": "ns/op",
+            "extra": "393896 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "393896 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "393896 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 53.94,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "44532210 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 53.94,
+            "unit": "ns/op",
+            "extra": "44532210 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "44532210 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "44532210 times\n4 procs"
           }
         ]
       }
