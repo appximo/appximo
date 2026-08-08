@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786160598442,
+  "lastUpdate": 1786160749556,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -1368,6 +1368,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "48996780 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "c8ca0fd2b5b7c99bc176faa3f6c993b4a1f2d44a",
+          "message": "docs(backlog): INSTALL-PROMPT-S1 review — OPS-24 closed by Miguel's v0.1.5, OPS-25 filed\n\nOPS-24 is DONE and not by an agent: Miguel cut v0.1.5 from 8c9e9b3, so the\npublished binaries carry 'appximo prompt' — verified by downloading through\nthe latest alias, checking the sha256, and running it. OPS-25 replaces it as\nthe honest open item: the Windows branch of 'appximo upgrade' is reasoned, not\nexecuted, and its Ready criterion names the four cases someone with a Windows\nbox must run.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-08T03:45:22Z",
+          "tree_id": "105e46fd4f8b2d9ec265efbd68183f3111e311a1",
+          "url": "https://github.com/appximo/appximo/commit/c8ca0fd2b5b7c99bc176faa3f6c993b4a1f2d44a"
+        },
+        "date": 1786160748970,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6521,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "388381 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6521,
+            "unit": "ns/op",
+            "extra": "388381 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "388381 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "388381 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 66.18,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36387474 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 66.18,
+            "unit": "ns/op",
+            "extra": "36387474 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36387474 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36387474 times\n4 procs"
           }
         ]
       }
