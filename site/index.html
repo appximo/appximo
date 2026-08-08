@@ -25,7 +25,7 @@
   pre{background:#101321;color:#dbe2f4;border-radius:10px;padding:1rem 1.2rem;overflow-x:auto;font-size:.82rem;line-height:1.55}
   pre code{background:none;border:none;padding:0;color:inherit;font-size:inherit}
   .wrap{max-width:1060px;margin:0 auto;padding:0 1.25rem}
-  section{padding:4.2rem 0}
+  section{padding:4.2rem 0;scroll-margin-top:3.6rem}
   h2{font-size:1.72rem;letter-spacing:-.02em;line-height:1.25;margin-bottom:.4rem}
   h3{font-size:1.12rem;margin:1.6rem 0 .5rem}
   .kicker{font-family:var(--mono);font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:.55rem}
@@ -46,7 +46,7 @@
 
   /* hero */
   header.hero{padding:5rem 0 3.6rem;border-bottom:1px solid var(--line)}
-  .hero h1{font-size:clamp(1.9rem,5.4vw,3.05rem);letter-spacing:-.03em;line-height:1.12;max-width:47rem}
+  .hero h1{font-size:clamp(1.9rem,5.4vw,2.95rem);letter-spacing:-.03em;line-height:1.12;max-width:56rem}
   .hero h1 .dim{color:var(--ink-3)}
   .hero p.sub{margin:1.15rem 0 0;font-size:1.13rem;color:var(--ink-2);max-width:44rem}
   .cta-row{display:flex;flex-wrap:wrap;gap:.7rem;margin-top:1.7rem}
@@ -61,23 +61,91 @@
   .hero-facts span:first-child::before{content:""}
   @media(max-width:760px){.hero-facts{flex-direction:column;gap:.3rem}.hero-facts span::before{content:""}}
 
-  /* hero prompt box + tabs */
+  /* measured badge */
   .measured{display:inline-flex;align-items:center;gap:.45rem;margin-top:1.15rem;font-size:.88rem;color:var(--ok);background:#ecfdf5;border:1px solid #a7f3d0;border-radius:999px;padding:.28rem .85rem}
   .measured b{font-variant-numeric:tabular-nums}
-  .tabs{display:flex;gap:.4rem;margin-top:1.9rem}
-  .tab{border:1px solid var(--line-2);border-bottom:none;border-radius:9px 9px 0 0;padding:.5rem 1.05rem;font-size:.9rem;font-weight:600;color:var(--ink-3);background:var(--wash);cursor:pointer}
-  .tab[aria-selected="true"]{background:#101321;color:#dbe2f4;border-color:#101321}
-  .promptbox{position:relative;border-radius:0 10px 10px 10px;overflow:hidden}
-  .promptbox pre{margin:0;border-radius:0 10px 10px 10px;max-height:19rem;overflow-y:hidden;overflow-x:auto;padding-bottom:3.2rem}
-  .promptbox.open pre{max-height:none;overflow-x:auto}
-  .promptbox .fade{position:absolute;left:0;right:0;bottom:0;height:5.2rem;background:linear-gradient(transparent,#101321 78%);display:flex;align-items:flex-end;justify-content:space-between;padding:.7rem .9rem;gap:.6rem}
-  .promptbox.open .fade{background:none;position:static;padding:.7rem .9rem;background:#101321;border-radius:0 0 10px 10px;margin-top:-1px}
-  .btn-copy{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.5rem 1rem;font-weight:600;font-size:.88rem;cursor:pointer}
-  .btn-copy:hover{background:var(--accent-ink)}
-  .btn-expand{background:transparent;color:#9aa7c7;border:1px solid #2c3350;border-radius:8px;padding:.5rem .9rem;font-size:.85rem;cursor:pointer}
-  .btn-expand:hover{color:#dbe2f4}
+  @media(max-width:640px){.measured{display:block;border-radius:12px;padding:.5rem .85rem}}
+
+  /* ── onboarding: two numbered prompt steps ─────────────────── */
+  .startup{padding:3rem 0 3.6rem;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#f8f8f7,#fdfdfc 55%)}
+  .pstep{margin-top:2rem}
+  .pstep-head{display:grid;grid-template-columns:2.6rem 1fr;gap:.9rem;align-items:start}
+  .pstep-n{width:2.5rem;height:2.5rem;border-radius:50%;background:var(--accent);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:1.05rem;box-shadow:0 1px 3px rgba(79,70,229,.35)}
+  .pstep-head h2{font-size:1.36rem;margin:.18rem 0 .28rem;letter-spacing:-.02em}
+  .pstep-head .eyebrow{font-family:var(--mono);font-size:.7rem;letter-spacing:.13em;text-transform:uppercase;color:var(--accent);display:block}
+  .pstep-head p{color:var(--ink-2);font-size:.94rem;max-width:45rem}
+  .pstep-body{margin-left:3.5rem;margin-top:1.05rem;min-width:0}
+  @media(max-width:640px){.pstep-body{margin-left:0}.pstep-head{grid-template-columns:2.1rem 1fr;gap:.7rem}.pstep-n{width:2.1rem;height:2.1rem;font-size:.95rem}}
+  .then{display:flex;align-items:center;gap:.8rem;margin:2.2rem 0 0;color:var(--ink-3);font-size:.85rem;font-weight:600}
+  .then::before,.then::after{content:"";height:1px;background:var(--line);flex:1}
   .prompt-alt{margin-top:.7rem;font-size:.86rem;color:var(--ink-3)}
+  .prompt-alt strong{color:var(--ink-2)}
   .panel-hidden{display:none}
+  [hidden]{display:none !important}
+
+  /* tabs (platform / agent-vs-hand) */
+  .tabs{display:flex;gap:.3rem;flex-wrap:wrap;margin-bottom:-1px;position:relative;z-index:1}
+  .tab{font-family:inherit;border:1px solid var(--line);border-bottom-color:transparent;background:var(--wash);border-radius:9px 9px 0 0;padding:.44rem .95rem;font-size:.86rem;font-weight:600;color:var(--ink-3);cursor:pointer}
+  .tab:hover{color:var(--ink)}
+  .tab[aria-selected="true"]{background:var(--panel);color:var(--accent-ink);border-color:var(--line-2);border-bottom-color:var(--panel);box-shadow:inset 0 2.5px 0 var(--accent)}
+  .tabbed{border-top-left-radius:0 !important}
+
+  /* dark code panel (previews + the by-hand path) */
+  .codewrap{border:1px solid var(--line-2);border-radius:12px;overflow:hidden;background:#101321}
+  .codewrap .caption{font-family:var(--mono);font-size:.7rem;letter-spacing:.09em;text-transform:uppercase;color:#8b96b8;padding:.55rem .9rem;border-bottom:1px solid #232a44}
+  .codewrap .code{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .codewrap pre{margin:0;border-radius:0;overflow:visible;padding:.85rem 1rem;font-size:.79rem}
+
+  /* prompt box */
+  .pbox{border:1px solid var(--line-2);border-radius:12px;background:var(--panel);overflow:hidden;box-shadow:0 1px 2px rgba(16,19,33,.05)}
+  .pbox-bar{display:flex;align-items:center;gap:.7rem;padding:.55rem .75rem;background:var(--wash);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .pbox-label{font-family:var(--mono);font-size:.7rem;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+  .pbox-bar .btn-copy{margin-left:auto}
+  .btn-copy{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:.44rem .9rem;font-weight:600;font-size:.85rem;cursor:pointer;font-family:inherit}
+  .btn-copy:hover{background:var(--accent-ink)}
+  .btn-copy.done{background:var(--ok)}
+  .pbox-body{position:relative;padding:.35rem 1.1rem 1.1rem;max-height:26rem;overflow:hidden}
+  .pbox.open .pbox-body{max-height:none}
+  .pbox-body::after{content:"";position:absolute;left:0;right:0;bottom:0;height:5.5rem;background:linear-gradient(rgba(255,255,255,0),#fff 80%);pointer-events:none}
+  .pbox.open .pbox-body::after{display:none}
+  .pbox-foot{padding:.5rem .75rem;border-top:1px solid var(--line);background:var(--wash)}
+  .btn-expand{background:#fff;color:var(--accent-ink);border:1px solid var(--line-2);border-radius:8px;padding:.4rem .85rem;font-size:.83rem;font-weight:600;cursor:pointer;font-family:inherit}
+  .btn-expand:hover{background:var(--accent-wash)}
+  @media(max-width:640px){.pbox-body{padding-left:.85rem;padding-right:.85rem;max-height:29rem}}
+
+  /* rendered prompt: prose vs commands */
+  .p-body{font-size:.9rem;color:var(--ink-2);line-height:1.62}
+  .p-body p{margin:.5rem 0;overflow-wrap:anywhere}
+  .p-body p,.p-li{max-width:80ch}
+  .p-body strong{color:var(--ink)}
+  .p-body code{background:var(--wash);border:1px solid var(--line);color:var(--accent-ink);border-radius:5px;padding:.06em .34em;font-size:.85em;overflow-wrap:anywhere}
+  .p-h{font-size:.98rem;font-weight:700;color:var(--ink);margin:1.4rem 0 .55rem;padding-top:.9rem;border-top:1px solid var(--line);letter-spacing:-.01em}
+  .p-h1{color:var(--accent-ink)}
+  .p-body>.p-h:first-child{margin-top:.5rem;padding-top:0;border-top:none}
+  .p-list{list-style:none;margin:.45rem 0}
+  .p-li{position:relative;padding-left:1.15rem;margin:.35rem 0;overflow-wrap:anywhere}
+  .p-li::before{content:"▪";position:absolute;left:.15rem;color:var(--line-2)}
+  .p-li.ind1{margin-left:1.05rem}
+  .p-li.ind2{margin-left:2.1rem}
+  .p-num{padding-left:1.7rem}
+  .p-num::before{content:attr(data-n);left:0;font-family:var(--mono);font-size:.82em;font-weight:700;color:var(--accent)}
+  .p-check{padding-left:1.7rem}
+  .p-check::before{content:"☐";left:.1rem;color:var(--ok)}
+  .p-code{margin:.75rem 0;background:#101321;border-radius:9px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .p-code pre{background:none;border-radius:0;padding:.8rem 1rem;font-size:.785rem;line-height:1.6;overflow:visible}
+  .p-body pre code{background:none;border:none;padding:0;color:inherit;font-size:inherit}
+  .t-cmd{color:#a5b4fc;font-weight:600}
+  .t-cm{color:#717ea6;font-style:italic}
+  .t-str{color:#9ae6b4}
+  .t-url{color:#7dd3fc}
+  .t-flag{color:#fbbf85}
+  .t-var{color:#f0abfc}
+
+  /* the line you must replace */
+  .replaceme{margin:.95rem 0;border:1.5px dashed #f59e0b;background:var(--warn-wash);border-radius:10px;padding:.6rem .75rem}
+  .replaceme-tag{display:inline-block;background:#f59e0b;color:#3b2606;font-family:var(--mono);font-size:.66rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;border-radius:999px;padding:.14rem .6rem;margin-bottom:.45rem}
+  .replaceme code{display:block;background:#fff;border:1px solid var(--warn-line);color:#7c2d12;padding:.42rem .6rem;border-radius:7px;font-size:.86rem;font-family:var(--mono);overflow-wrap:anywhere}
+  .replaceme code em{font-style:normal;background:#fde68a;border-radius:4px;padding:0 .22em;box-shadow:0 0 0 1px #f59e0b inset}
 
   /* status strip */
   .status{background:var(--warn-wash);border:1px solid var(--warn-line);border-radius:10px;padding:.8rem 1rem;margin-top:2.1rem;font-size:.9rem;color:var(--warn)}
@@ -156,7 +224,8 @@
 <nav><div class="wrap nav-in">
   <a class="logo" href="#top"><span class="logo-mark">A</span>Appximo</a>
   <div class="nav-links">
-    <a href="#steps">Three steps</a>
+    <a href="#start-here">Get started</a>
+    <a href="#steps">What happens</a>
     <a href="#start">Under the hood</a>
     <a href="#ai">The AI path</a>
     <a href="#numbers">Numbers</a>
@@ -167,233 +236,12 @@
 </div></nav>
 
 <header class="hero" id="top"><div class="wrap">
-  <h1>Paste one prompt into your AI agent.<br>Get a production app.<span class="dim"> HTTPS included.</span></h1>
-  <p class="sub">Appximo compiles a JSON schema into a complete multi-tenant backend — REST + GraphQL + interactive docs + admin panel + a generated back-office — as <strong>one static Go binary</strong> on a PostgreSQL you control. The prompt below takes your agent (Claude Code, Cursor, Copilot…) from <strong>an idea in one sentence</strong> to a running app, and to a real domain with HTTPS when you say so.</p>
+  <h1>Two prompts into your AI agent.<br>One production app.<span class="dim"> HTTPS included.</span></h1>
+  <p class="sub">Appximo compiles a JSON schema into a complete multi-tenant backend — REST + GraphQL + interactive docs + admin panel + a generated back-office — as <strong>one static Go binary</strong> on a PostgreSQL you control. <strong>Prompt 1</strong> puts the engine on your machine. <strong>Prompt 2</strong> takes your agent (Claude Code, Cursor, Copilot…) from <strong>an idea in one sentence</strong> to a running app, and to a real domain with HTTPS when you say so.</p>
   <div class="measured">⏱ Measured: a fresh agent went from first command to the fully green checklist in <b>&nbsp;1m53s</b></div>
-
-  <div class="tabs" role="tablist">
-    <button class="tab" id="tab-agent" role="tab" aria-selected="true" onclick="pickTab('agent')">With your AI agent</button>
-    <button class="tab" id="tab-manual" role="tab" aria-selected="false" onclick="pickTab('manual')">By hand</button>
-  </div>
-
-  <div id="panel-agent" role="tabpanel">
-    <div class="promptbox" id="promptbox">
-      <pre><code id="master-prompt">You are going to build me a complete, working application on **Appximo** — an
-engine that compiles a JSON schema into a multi-tenant REST + GraphQL +
-OpenAPI server with an embedded admin panel (`/admin`), visual schema editor
-(`/editor`), generated back-office (`/app`) and interactive docs (`/docs`).
-One static binary + PostgreSQL. You will take it from my idea to a running
-app, and — if I ask for it — to production on a real domain with HTTPS.
-
-MY IDEA: &lt;describe the app in one or two sentences&gt;
-
-## Rules of engagement (read first, they override your habits)
-
-- Ask me ONLY the question block below, all questions together, before doing
-  anything. After I answer, make every remaining decision yourself with
-  sensible defaults and **do not ask me anything else** — if something fails,
-  read the error (Appximo errors name the problem and the way out) and fix it.
-- A step is DONE when its checklist item passes, not when a command exits 0.
-  Verify each item with a real request and show me the evidence.
-- The engine prints its own contracts — when you need exact syntax, run the
-  matching command instead of guessing, and **never invent API surface**:
-  - `appximo spec` — the schema grammar (types, relations, state machines, RBAC)
-  - `appximo backend-spec` — custom Go handlers, hooks, background jobs
-  - `appximo frontend-spec` — the API contract a UI consumes (auth, filters,
-    pagination, uploads, error→screen map)
-  - `appximo backoffice-spec` — a CRUD admin UI generated from /openapi.json
-  - `appximo quickstart` — OPERATING it: tenants, users, migrate, production
-- Never serve any part of this app from a second server or port: the engine
-  serves API, frontend, admin and docs from ONE binary, same origin. If you
-  are tempted to run `npx serve`, `python -m http.server` or a Node server
-  next to it, you took a wrong turn — go to &quot;Custom screens&quot; below.
-- Never write to the database with raw SQL. Schema changes go through
-  `appximo validate` → `appximo migrate` (Act 2 §3); data changes go through
-  the API.
-
-## Question block — the ONLY questions, asked together, then silence
-
-1. **Postgres**: do you have a connection string I should use, or may I start
-   PostgreSQL 16 in Docker locally?
-2. **Production**: do you want this on the internet with HTTPS now? If YES,
-   give me: (a) the domain (and confirm you can edit its DNS records),
-   (b) SSH access to an Ubuntu VPS (`user@host`), and (c) whether anything
-   else already runs on that box. If NO, I stop after Act 1 and print what
-   production will take when you&#x27;re ready.
-
-# ACT 1 — from the idea to a running app, locally
-
-1. **Install the engine if missing** (`appximo version` first — if it prints
-   a version, skip this): download the binary for this platform from
-   https://github.com/appximo/appximo/releases/latest, verify its checksum
-   against the release&#x27;s `checksums.txt`, `chmod +x`, move it onto the PATH.
-2. **Write the schema from MY IDEA**:
-   - `appximo spec &gt; /tmp/appximo-spec.md`, read it, then write `schema.json`
-     using ONLY that grammar.
-   - Correction loop: `appximo validate --json schema.json`, fix every entry
-     it reports, repeat until `&quot;valid&quot;: true` **and `warnings` is empty**.
-     Warnings are real bugs waiting to happen — two you will likely hit:
-     a `required` string field also needs `&quot;minLength&quot;: 1` (an empty string
-     satisfies `required`), and a role that writes a resource with a `file`
-     field also needs a grant on the `files` resource (or uploads 403).
-   - If any part of the app must be readable WITHOUT login (a public catalog,
-     published posts, a landing&#x27;s data), declare it in the schema&#x27;s
-     `rbac.public` block (it&#x27;s in the grammar) — do not invent an &quot;anonymous&quot;
-     role and do not proxy around auth.
-3. **Boot everything with ONE command**:
-   `appximo up --name &lt;shortname&gt; --schema schema.json --yes --json`
-   - stdout is one JSON object: every URL, one-time admin credentials, a dev
-     API token, and a smoke-test result. Save the credentials for me.
-   - The name must match `^[a-z][a-z0-9]{1,29}$` (no hyphens/underscores).
-   - The printed token and the first user carry the **most privileged role
-     your schema declares** (`token_role` in the JSON). To act as any OTHER
-     role — to prove a restricted role really is restricted — mint one:
-     `appximo token --secret &quot;$JWT_SECRET&quot; --tenant &lt;name&gt; --role &lt;role&gt; --schema schema.json`
-     (the secret is in the `.env` `up` wrote).
-   - Re-running `up` after editing schema.json is safe: it migrates the
-     tenant to the new schema (destructive drops stay gated and print the
-     exact approval command).
-4. **Prove it with real requests.** The tenant is addressed by Host header:
-   use the printed `http://&lt;name&gt;.localhost:&lt;port&gt;` URLs, or add
-   `-H &#x27;Host: &lt;name&gt;.localhost&#x27;`. Filters need `curl -g`.
-
-**ACT 1 CHECKLIST** — verify each, then show me the table with evidence:
-
-- [ ] `appximo validate schema.json` → valid, zero warnings
-- [ ] `GET /docs` → 200
-- [ ] `POST /api/&lt;main resource&gt;` with a token whose role may write it → 201
-      (the printed token, or one minted for the right role — see step 3)
-- [ ] The filtered list (`?filter[...]`) returns the record just created
-- [ ] If the schema declares `rbac.public`: the public resource reads with NO
-      token (200) and a non-public one does not (401/403)
-- [ ] `GET /app` → 200 (the generated back-office; sign-in works with the
-      printed credentials at the `&lt;name&gt;.localhost` URL)
-- [ ] `appximo explain schema.json` reads back as MY IDEA — paste its output
-      for me so I can confirm the rules are what I meant
-
-Then STOP and show me: the URLs, the one-time credentials, one curl that
-already works, and the explain output. **Call out every place you extended
-my idea** (a state, a field, a role I never named) in one short list, so I
-can confirm or reject it before it reaches production. If I asked for
-production, continue.
-
-## Custom screens or endpoints (only if MY IDEA needs them)
-
-- **Your own frontend** (brand, screens): build a STATIC SPA (no SSR) and
-  serve it from the same binary — two ways, pick one, never a second server:
-  - No Go toolchain: `appximo serve --schema schema.json --static ./dist --spa`
-  - Go route (one binary containing everything): `appximo init &lt;name&gt;` emits a
-    compilable project (main.go + go:embed) on `go get github.com/appximo/appximo`.
-  The UI&#x27;s exact API contract is `appximo frontend-spec` — read it before
-  writing fetch calls (tenant Host, 422 shape, keyset pagination, uploads).
-- **Custom endpoints** (checkout, signed webhooks, reports): read
-  `appximo backend-spec`; handlers run in-process with `Ctx` (validation +
-  RBAC + transaction included). Grant the route to roles with the RBAC
-  `routes` block — and know that the plain `appximo` binary refuses a schema
-  granting routes nothing registers: that schema belongs to YOUR binary.
-
-# ACT 2 — production with HTTPS (only if I said yes)
-
-0. **DNS first** (propagation takes time — start it before touching the VPS):
-   an A record `&lt;app&gt;.&lt;domain&gt;` → the VPS IP, and a wildcard
-   `*.&lt;app&gt;.&lt;domain&gt;` → same IP if tenants get their own subdomains. The
-   tenant id must EQUAL the first DNS label it is served at.
-1. **Put the binary on the VPS**: `scp` the SAME binary you ran locally (or
-   your custom one from &quot;Custom screens&quot;) to the VPS, plus your
-   `schema.json` — any file transfer works, `scp` is just the usual one.
-   Then fetch the installer AND its companion scripts into the same
-   directory on the VPS (the installer only installs the companions it finds
-   NEXT TO ITSELF — fetched alone, backups and updates have no script):
-   ```
-   base=https://raw.githubusercontent.com/appximo/appximo/main/scripts
-   curl -fsSLO $base/install.sh -O $base/backup.sh -O $base/deploy-update.sh
-   ```
-2. **Install** (as root). One script covers both box states:
-   - Empty box:
-     `sudo bash install.sh --domain=&lt;app&gt;.&lt;domain&gt; --email=&lt;your email&gt; --binary=./appximo --schema=schema.json --harden --yes`
-   - Box that ALREADY runs something (or a second Appximo app): add
-     `--app=&lt;name&gt;` — everything (service, user, config dir, db, ports) is
-     namespaced under that name next to what&#x27;s there, untouched. If ports
-     8090/9090 are taken, add `--port`/`--control-port`.
-   - Custom binary from Act 1&#x27;s Go route: pass it as `--binary=` and add
-     `--cli=./appximo` (the stock engine as ops companion — your binary
-     serves, the CLI operates: migrate, token, backup).
-   - It installs native PostgreSQL, a systemd unit, and Caddy with automatic
-     Let&#x27;s Encrypt. It prints every name it created and where config lives
-     (`/etc/&lt;name&gt;/&lt;name&gt;.env`). Read the summary; don&#x27;t re-derive paths.
-   - **It is idempotent**: if it stops with a named error, fix exactly what
-     it named and run the SAME command again — it detects and reuses
-     everything it already created. Never start over by hand.
-   - If the certificate never issues, it is almost always DNS not yet
-     pointing here or port 80 blocked — `dig +short &lt;app&gt;.&lt;domain&gt;` must
-     return this box&#x27;s IP, and `journalctl -u caddy -f` says the rest. Wait
-     for DNS rather than working around TLS; **never** verify with `-k`.
-3. **First production tenant + admin** (on the VPS — the control plane is
-   localhost-only by design, never exposed):
-   - Register the tenant WITH the schema in the body:
-     `curl -s -X POST http://localhost:&lt;control-port&gt;/tenants -H &quot;X-Admin-Key: $ADMIN_KEY&quot; -H &#x27;Content-Type: application/json&#x27; -d &quot;{\&quot;tenant_id\&quot;:\&quot;&lt;app&gt;\&quot;,\&quot;display_name\&quot;:\&quot;&lt;App&gt;\&quot;,\&quot;schema\&quot;:$(cat schema.json)}&quot;`
-     (ADMIN_KEY and the control port are in `/etc/&lt;name&gt;/&lt;name&gt;.env`.)
-   - First admin: open `https://&lt;app&gt;.&lt;domain&gt;/admin` — the login screen
-     offers &quot;Create the first admin&quot; (paste the ADMIN_KEY) — or run
-     `appximo admin create --email … --password …` on the VPS.
-   - Mint a token and create one real record over HTTPS.
-4. **Every future schema change** (now and forever): edit schema.json →
-   `appximo validate` → `appximo migrate --tenant &lt;app&gt; --schema schema.json --dry-run`
-   → run it again without `--dry-run` to apply. New fields go live hot; a new
-   resource needs a service restart (`systemctl restart &lt;service&gt;` after
-   updating the schema file the unit points at). Keep the deployed schema and
-   the tenant record in sync by ALWAYS going through `migrate`.
-
-**ACT 2 CHECKLIST** — verify each, then show me the table with evidence:
-
-- [ ] `curl https://&lt;app&gt;.&lt;domain&gt;/health` (NO `-k`) → 200 `{&quot;status&quot;:&quot;ok&quot;,…}`
-      — real certificate, valid chain
-- [ ] `POST /api/&lt;main resource&gt;` over HTTPS with a fresh token → 201
-- [ ] `https://&lt;app&gt;.&lt;domain&gt;/app` → 200 and lists that record after sign-in;
-      `/docs` → 200
-- [ ] `systemctl is-active &lt;service&gt;` → active, and
-      `systemctl is-enabled &lt;service&gt;` → enabled (survives reboot)
-- [ ] `journalctl -u &lt;service&gt; -n 50` shows a clean boot (no errors)
-- [ ] Backups work: run `/opt/&lt;name&gt;/scripts/backup.sh --env-file=/etc/&lt;name&gt;/&lt;name&gt;.env`
-      once and show the dump file it produced (if the installer reported it
-      couldn&#x27;t find the companion scripts, fetch them as in §1 first)
-
-Deliver at the end: the live HTTPS URLs, credentials (shown once), where
-config and backups live on the VPS, and the exact three commands for my next
-schema change (validate → migrate --dry-run → migrate).
-
-## When something fails
-
-Read the error first — this engine&#x27;s errors are written to be acted on: they
-name the missing thing and the way out. Fix exactly what is named and re-run
-the same command (every installer and `up` is idempotent). If a step fails
-twice, run `appximo quickstart` and search its output for the symptom before
-improvising. Three dead ends to never take: a second
-server/port for the frontend, raw SQL against the database, and disabling
-auth &quot;temporarily&quot;. If the box refuses something (a port, a permission), the
-installer summary and `journalctl -u &lt;service&gt;` name the owner — fix the
-named thing, don&#x27;t work around it.</code></pre>
-      <div class="fade">
-        <button class="btn-expand" id="btn-expand" onclick="toggleExpand()">Show the whole prompt ▾</button>
-        <button class="btn-copy" id="btn-copy" onclick="copyPrompt()">Copy the full prompt</button>
-      </div>
-    </div>
-    <p class="prompt-alt">Replace <code>MY IDEA</code> with your app, paste, and answer its one question block. Already have the binary? It prints itself: <code>appximo prompt</code></p>
-  </div>
-
-  <div id="panel-manual" class="panel-hidden" role="tabpanel">
-<pre><code># 1. install (Linux/macOS — pick your platform from the releases page)
-curl -LO https://github.com/appximo/appximo/releases/latest/download/appximo-linux-amd64
-chmod +x appximo-linux-amd64 && sudo mv appximo-linux-amd64 /usr/local/bin/appximo
-
-# 2. everything, locally, in one command (Postgres in Docker, secrets, tenant,
-#    admin, a smoke-tested API — it prints every URL and credential once)
-mkdir myapp && cd myapp && appximo up
-
-# 3. production, when ready (empty or busy VPS — native Postgres + systemd +
-#    Caddy with automatic Let's Encrypt)
-sudo bash install.sh --domain=api.you.com --email=you@you.com --binary=./appximo</code></pre>
-    <p class="prompt-alt">The manual path is the ground truth and the net — every command verified against a real engine: <a href="https://github.com/appximo/appximo/blob/main/docs/QUICKSTART.md">QUICKSTART.md</a></p>
+  <div class="cta-row">
+    <a class="btn btn-primary" href="#start-here">Get the two prompts ↓</a>
+    <a class="btn btn-ghost" href="https://github.com/appximo/appximo/blob/main/docs/GUIDE.md">Read the guide</a>
   </div>
 
   <div class="hero-facts">
@@ -402,27 +250,109 @@ sudo bash install.sh --domain=api.you.com --email=you@you.com --binary=./appximo
     <span>Your own PostgreSQL</span>
     <span>Apache 2.0 · self-hosted</span>
   </div>
-  <div class="status"><strong>Status, honestly:</strong> the code is production-verified; three apps run on it in production today — one of them <strong>built end-to-end by a third party</strong>. The repository is <a href="https://github.com/appximo/appximo" rel="noopener">public</a>, binaries + checksums are released, the Go module is fetchable, the Docker image is published. One version note: <code>appximo up</code>, <code>new</code>, <code>prompt</code> and the <code>/app</code> back-office merged after v0.1.2 — until the next tag they ship in source builds and the Docker image; everything in the "By hand" tab works with the released binaries as written.</div>
+  <div class="status"><strong>Status, honestly:</strong> the code is production-verified; three apps run on it in production today — one of them <strong>built end-to-end by a third party</strong>. The repository is <a href="https://github.com/appximo/appximo" rel="noopener">public</a>, binaries + checksums are released, the Go module is fetchable, the Docker image is published. Version note: the current release, <strong>v0.1.5 (2026-08-08)</strong> — built from the same commit as <code>main</code> at that time — ships <code>appximo prompt</code>, <code>up</code>, <code>new</code> and the <code>/app</code> back-office, so the install prompt below leaves you a binary with everything this page describes.</div>
 </div></header>
 
+<section class="startup" id="start-here"><div class="wrap">
+  <p class="kicker">Get started</p>
+  <h2>Two prompts, pasted in order</h2>
+  <p class="lead">Nothing to install by hand, no wizard. Each block below is a complete prompt for the coding agent you already use. Paste the first one, wait for it to report the version it installed, then paste the second.</p>
+
+  <article class="pstep">
+    <div class="pstep-head">
+      <div class="pstep-n">1</div>
+      <div>
+        <span class="eyebrow">Step 1 · once per machine</span>
+        <h2>Install Appximo</h2>
+        <p>This prompt does exactly one thing: leave the right binary on your PATH — a fresh install, or an <strong>update of the old copy already there</strong> (the common case, and the one that later fails in ways that read like typos). It ends by proving the result with a three-command checklist.</p>
+      </div>
+    </div>
+    <div class="pstep-body">
+      <div class="tabs" role="tablist" aria-label="Platform preview">
+        <button class="tab" id="tab-plat-unix" role="tab" aria-selected="true" aria-controls="panel-plat-unix" onclick="pickTab('plat','unix')">Linux / macOS</button>
+        <button class="tab" id="tab-plat-win" role="tab" aria-selected="false" aria-controls="panel-plat-win" onclick="pickTab('plat','win')">Windows</button>
+      </div>
+      <div class="codewrap tabbed" id="panel-plat-unix" role="tabpanel" aria-labelledby="tab-plat-unix">
+        <div class="caption">Preview — what the agent will run for you</div>
+        <div class="code" id="prev-unix"></div>
+      </div>
+      <div class="codewrap tabbed panel-hidden" id="panel-plat-win" role="tabpanel" aria-labelledby="tab-plat-win">
+        <div class="caption">Preview — what the agent will run for you</div>
+        <div class="code" id="prev-win"></div>
+      </div>
+      <p class="prompt-alt">You don't type those. The prompt below is <strong>platform-agnostic</strong> — the agent detects your machine, picks its own block, verifies the checksum and replaces the old binary in place.</p>
+
+      <div class="pbox" id="box-install" style="margin-top:1rem">
+        <div class="pbox-bar">
+          <span class="pbox-label">Prompt 1 · install</span>
+          <button class="btn-copy" id="copy-install" onclick="copyPrompt('raw-install',this,'Copy install prompt')">Copy install prompt</button>
+        </div>
+        <div class="pbox-body"><div class="p-body" id="render-install"></div></div>
+        <div class="pbox-foot"><button class="btn-expand" id="expand-install" onclick="toggleBox('box-install',this)">Show the whole prompt ▾</button></div>
+      </div>
+      <p class="prompt-alt">Already have a binary? It prints this prompt itself: <code>appximo prompt --install</code></p>
+    </div>
+  </article>
+
+  <div class="then">then, once the agent tells you which version it installed</div>
+
+  <article class="pstep">
+    <div class="pstep-head">
+      <div class="pstep-n">2</div>
+      <div>
+        <span class="eyebrow">Step 2 · once per app</span>
+        <h2>Build your app</h2>
+        <p>Replace one line with your idea and paste. The agent asks its <strong>single question block</strong> up front (Postgres? production?), then works alone against an executable checklist. It checks the engine from Step 1 first and refuses to proceed on a missing or stale binary — which is why the two prompts are separate.</p>
+      </div>
+    </div>
+    <div class="pstep-body">
+      <div class="tabs" role="tablist" aria-label="How you want to build">
+        <button class="tab" id="tab-step2-agent" role="tab" aria-selected="true" aria-controls="panel-step2-agent" onclick="pickTab('step2','agent')">With your AI agent</button>
+        <button class="tab" id="tab-step2-manual" role="tab" aria-selected="false" aria-controls="panel-step2-manual" onclick="pickTab('step2','manual')">By hand</button>
+      </div>
+
+      <div id="panel-step2-agent" role="tabpanel" aria-labelledby="tab-step2-agent">
+        <div class="pbox tabbed" id="box-master">
+          <div class="pbox-bar">
+            <span class="pbox-label">Prompt 2 · build</span>
+            <button class="btn-copy" id="copy-master" onclick="copyPrompt('raw-master',this,'Copy build prompt')">Copy build prompt</button>
+          </div>
+          <div class="pbox-body"><div class="p-body" id="render-master"></div></div>
+          <div class="pbox-foot"><button class="btn-expand" id="expand-master" onclick="toggleBox('box-master',this)">Show the whole prompt ▾</button></div>
+        </div>
+        <p class="prompt-alt">Replace the highlighted <code>MY IDEA</code> line, paste, answer the one question block. It prints itself too: <code>appximo prompt</code></p>
+      </div>
+
+      <div id="panel-step2-manual" class="panel-hidden" role="tabpanel" aria-labelledby="tab-step2-manual">
+        <div class="codewrap tabbed">
+          <div class="caption">The same path, typed by you</div>
+          <div class="code" id="prev-manual"></div>
+        </div>
+        <p class="prompt-alt">The manual path is the ground truth and the net — every command verified against a real engine: <a href="https://github.com/appximo/appximo/blob/main/docs/QUICKSTART.md">QUICKSTART.md</a></p>
+      </div>
+    </div>
+  </article>
+</div></section>
+
 <section id="steps"><div class="wrap">
-  <p class="kicker">Three steps</p>
-  <h2>From idea to HTTPS, without leaving your agent</h2>
+  <p class="kicker">What happens</p>
+  <h2>After the second paste, in three moves</h2>
+  <p class="lead">You watch; the agent works. Every move is gated by a checklist item it has to prove with a real request, so it knows when it is done and you are never asked mid-way.</p>
 
   <div class="step"><div class="step-n">1</div><div>
-    <h3>Paste the prompt</h3>
-    <p>Copy the block above into your coding agent and replace one line with your idea. The agent asks its <strong>single question block</strong> up front (Postgres? production?), then works alone — every step gated by an executable checklist, so it knows when it's done and you never get asked mid-way.</p>
+    <h3>It writes the schema from your idea</h3>
+    <p>The engine prints its own grammar (<code>appximo spec</code>), so nothing is invented. The agent then self-corrects in a loop against <code>appximo validate --json</code> until the schema is valid <em>and</em> warning-free — a machine-readable oracle instead of guesswork.</p>
   </div></div>
 
   <div class="step"><div class="step-n">2</div><div>
-    <h3>Watch your app run</h3>
-    <p>The agent writes the schema from your idea, self-corrects against <code>appximo validate --json</code> until valid with zero warnings, boots everything with <code>appximo up</code>, and proves it with real requests — then hands you the URLs, the one-time credentials, and a curl that already works. You get <code>/app</code> (a back-office generated live from your API's contract), <code>/docs</code>, <code>/admin</code> and <code>/editor</code>, no code written.</p>
+    <h3>Your app runs</h3>
+    <p><code>appximo up</code> boots everything in one command — Postgres, secrets, your tenant, the first admin — and prints the URLs, the one-time credentials and a curl that already works. You get <code>/app</code> (a back-office generated live from your API's contract), <code>/docs</code>, <code>/admin</code> and <code>/editor</code>, with no code written.</p>
     <figure class="shot" style="margin-top:.9rem;max-width:620px"><img src="assets/shot-app.png" alt="The /app generated back-office listing records right after appximo up" loading="lazy">
       <figcaption><strong>/app</strong> — generated from the OpenAPI contract at runtime: forms, validation, state machines, permissions. Zero screens written.</figcaption></figure>
   </div></div>
 
   <div class="step"><div class="step-n">3</div><div>
-    <h3>Publish it with HTTPS</h3>
+    <h3>It publishes with HTTPS</h3>
     <p>Say yes to the production question and give it a domain + a VPS. The same prompt drives the one-command installer — native PostgreSQL, a hardened systemd unit, Caddy with automatic Let's Encrypt — on an <em>empty</em> box or <em>next to what already runs there</em> (<code>--app</code> namespaces everything). The final checklist is a valid certificate, a 201 over HTTPS, and a service that survives reboots.</p>
     <figure class="shot" style="margin-top:.9rem;max-width:620px"><img src="assets/shot-https.png" alt="A production Appximo app served over HTTPS with a real certificate" loading="lazy">
       <figcaption>A real deploy of exactly this path — one of the three production apps linked below.</figcaption></figure>
@@ -683,34 +613,580 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
   </div>
 </div></footer>
 
+<div hidden aria-hidden="true">
+<pre id="raw-install">Install the Appximo engine on this machine, or update the one that is already
+here. Do ONLY this — do not build or scaffold anything; I will paste a second
+prompt for that once you are done.
+
+WHICH VERSION: latest
+
+(Leave it as `latest`, or replace it with an exact tag like `v0.1.5`.)
+
+## Rules
+
+- Ask me NOTHING. Every decision below has a default; take it.
+- Work out my platform yourself (Linux, macOS or Windows) and use the matching
+  section. Do not ask me which one I am on.
+- Finish by proving the result with the success checklist, not by asserting it.
+
+## Step 1 — what is already here?
+
+```
+appximo version
+```
+
+Three possible states — identify mine before downloading anything:
+
+- **(a) Not installed** (`command not found` / `not recognized`) → install it.
+- **(b) An older version** → update it. This is the common case, and the one
+  that silently breaks things: an old binary will not have newer commands, and
+  the failure looks like a typo instead of a stale install.
+- **(c) Already the version I asked for** → change NOTHING. Say so, run the
+  checklist, and stop. Do not reinstall "to be safe".
+
+Also note WHERE it lives (`which appximo` / `where.exe appximo`) — an update
+must replace THAT file, or the PATH will keep finding the old one. If you find
+more than one copy on the PATH, say so and replace the first one the shell
+resolves.
+
+## Step 2 — resolve the version I asked for
+
+If I said `latest`, resolve the real tag without guessing — this redirect names
+it and needs no API token or rate limit:
+
+```
+curl -sI https://github.com/appximo/appximo/releases/latest | grep -i '^location:'
+```
+
+The tag is the last path segment (e.g. `v0.1.5`). Compare it with what Step 1
+printed. **Equal → state (c): stop, nothing to do.** Different → continue.
+
+Download URLs, for `latest`, never carry a version (these aliases always point
+at the newest release):
+
+```
+https://github.com/appximo/appximo/releases/latest/download/appximo-linux-amd64
+https://github.com/appximo/appximo/releases/latest/download/appximo-linux-arm64
+https://github.com/appximo/appximo/releases/latest/download/appximo-darwin-amd64
+https://github.com/appximo/appximo/releases/latest/download/appximo-darwin-arm64
+https://github.com/appximo/appximo/releases/latest/download/appximo-windows-amd64.exe
+https://github.com/appximo/appximo/releases/latest/download/checksums.txt
+```
+
+If I named an exact tag instead, use that release's own versioned assets:
+`https://github.com/appximo/appximo/releases/download/&lt;TAG&gt;/appximo-&lt;TAG&gt;-linux-amd64`
+(and `checksums.txt` from the same `/download/&lt;TAG&gt;/` directory).
+
+Pick the file for MY platform and CPU (`uname -sm`, or `$env:PROCESSOR_ARCHITECTURE`).
+
+## Step 3 — install or update
+
+### Linux / macOS
+
+```bash
+cd "$(mktemp -d)"
+curl -fsSLO https://github.com/appximo/appximo/releases/latest/download/appximo-linux-amd64
+curl -fsSLO https://github.com/appximo/appximo/releases/latest/download/checksums.txt
+
+# integrity: the checksums file lists BOTH the alias and the versioned name,
+# so this works for the alias download too
+grep " appximo-linux-amd64$" checksums.txt | sha256sum -c -
+
+chmod +x appximo-linux-amd64
+sudo install -m 0755 appximo-linux-amd64 /usr/local/bin/appximo   # replaces an old copy in place
+```
+
+On macOS the file is `appximo-darwin-arm64` (Apple Silicon) or
+`appximo-darwin-amd64` (Intel), and `sha256sum` is `shasum -a 256`. If macOS
+quarantines the download, clear it: `xattr -d com.apple.quarantine &lt;file&gt;`.
+
+If `/usr/local/bin` is not writable and there is no `sudo`, install to
+`~/.local/bin` instead and make sure that directory is on the PATH — say
+explicitly which one you chose.
+
+**Replacing a RUNNING binary is fine here**: `install`/`mv` swaps the file, and
+any already-running process keeps the old copy open until it exits.
+
+### Windows (PowerShell)
+
+⚠ **Windows cannot overwrite a binary that is currently running or open.** A
+plain copy fails with "being used by another process". Do it in this order:
+
+```powershell
+$dir = "$env:LOCALAPPDATA\Appximo"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+$tmp = Join-Path $env:TEMP "appximo-new.exe"
+
+Invoke-WebRequest -Uri "https://github.com/appximo/appximo/releases/latest/download/appximo-windows-amd64.exe" -OutFile $tmp
+Invoke-WebRequest -Uri "https://github.com/appximo/appximo/releases/latest/download/checksums.txt" -OutFile "$env:TEMP\checksums.txt"
+
+# integrity
+$want = (Select-String -Path "$env:TEMP\checksums.txt" -Pattern 'appximo-windows-amd64\.exe$').Line.Split(' ')[0]
+$got  = (Get-FileHash $tmp -Algorithm SHA256).Hash.ToLower()
+if ($want -ne $got) { throw "checksum mismatch — do not install this file" }
+
+$target = Join-Path $dir "appximo.exe"
+if (Test-Path $target) {
+  # The old exe may be running or open: RENAME it (Windows allows renaming a
+  # running executable, it just refuses to overwrite one), then put the new one
+  # in its place. Delete the .old file later, or on the next update.
+  $old = Join-Path $dir "appximo.old.exe"
+  Remove-Item $old -Force -ErrorAction SilentlyContinue
+  Rename-Item $target $old -Force
+}
+Move-Item $tmp $target -Force
+```
+
+If the rename ALSO fails, something is holding the file: close every terminal,
+editor and running `appximo serve`, then retry. As a last resort reboot — do
+not install a second copy somewhere else on the PATH, which is how two
+different versions end up shadowing each other.
+
+**PATH**: `$env:LOCALAPPDATA\Appximo` must be on it, permanently:
+
+```powershell
+[Environment]::SetEnvironmentVariable(
+  "Path", [Environment]::GetEnvironmentVariable("Path","User") + ";$env:LOCALAPPDATA\Appximo", "User")
+```
+
+Then **open a NEW terminal** — the current one keeps the old PATH, and every
+"it still says command not found" after an install is this.
+
+### Optional: verify the signature, not just the checksum
+
+The checksum only proves the download was not corrupted in transit — it lives
+in the same release as the binary. If you have (or can install) `cosign`, this
+verifies the release was really produced by the project's CI:
+
+```
+cosign verify-blob checksums.txt --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp 'github.com/appximo/appximo' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Skip it if cosign is not available; do NOT skip the checksum.
+
+## Step 4 — the success checklist (run all three, show me the output)
+
+```
+appximo version     # must print the version I asked for — not the old one
+appximo prompt      # must print a long prompt starting "You are going to build me…"
+appximo --help      # must list: up, new, prompt, serve, validate, migrate, specs
+```
+
+- If `version` still shows the OLD number: the shell cached the old path
+  (`hash -r` on Linux/macOS) or there is a second copy earlier on the PATH
+  (`which -a appximo` / `where.exe appximo`) — fix that, don't reinstall.
+- If `prompt` says `unknown command`: the update did not take effect. That
+  command is the proof; do not report success without it.
+
+Then tell me: the version now installed, where the binary lives, and whether
+this was a fresh install, an update from which version, or a no-op. Stop there
+— I will paste the build prompt next.
+
+## If something fails
+
+- **No network / TLS errors** → say so plainly and stop; do not fall back to
+  building from source or to an unverified mirror.
+- **No write permission at the destination** → name the directory that refused,
+  and either use `sudo` (Linux/macOS) or install into a user-writable directory
+  that is on the PATH. Never silently install somewhere the PATH will not find.
+- **Checksum mismatch** → delete the file and retry once. If it mismatches
+  again, stop and tell me; do not install it.</pre>
+<pre id="raw-master">You are going to build me a complete, working application on **Appximo** — an
+engine that compiles a JSON schema into a multi-tenant REST + GraphQL +
+OpenAPI server with an embedded admin panel (`/admin`), visual schema editor
+(`/editor`), generated back-office (`/app`) and interactive docs (`/docs`).
+One static binary + PostgreSQL. You will take it from my idea to a running
+app, and — if I ask for it — to production on a real domain with HTTPS.
+
+MY IDEA: &lt;describe the app in one or two sentences&gt;
+
+## Rules of engagement (read first, they override your habits)
+
+- Ask me ONLY the question block below, all questions together, before doing
+  anything. After I answer, make every remaining decision yourself with
+  sensible defaults and **do not ask me anything else** — if something fails,
+  read the error (Appximo errors name the problem and the way out) and fix it.
+- A step is DONE when its checklist item passes, not when a command exits 0.
+  Verify each item with a real request and show me the evidence.
+- The engine prints its own contracts — when you need exact syntax, run the
+  matching command instead of guessing, and **never invent API surface**:
+  - `appximo spec` — the schema grammar (types, relations, state machines, RBAC)
+  - `appximo backend-spec` — custom Go handlers, hooks, background jobs
+  - `appximo frontend-spec` — the API contract a UI consumes (auth, filters,
+    pagination, uploads, error→screen map)
+  - `appximo backoffice-spec` — a CRUD admin UI generated from /openapi.json
+  - `appximo quickstart` — OPERATING it: tenants, users, migrate, production
+- Never serve any part of this app from a second server or port: the engine
+  serves API, frontend, admin and docs from ONE binary, same origin. If you
+  are tempted to run `npx serve`, `python -m http.server` or a Node server
+  next to it, you took a wrong turn — go to "Custom screens" below.
+- Never write to the database with raw SQL. Schema changes go through
+  `appximo validate` → `appximo migrate` (Act 2 §3); data changes go through
+  the API.
+
+## Question block — the ONLY questions, asked together, then silence
+
+1. **Postgres**: do you have a connection string I should use, or may I start
+   PostgreSQL 16 in Docker locally?
+2. **Production**: do you want this on the internet with HTTPS now? If YES,
+   give me: (a) the domain (and confirm you can edit its DNS records),
+   (b) SSH access to an Ubuntu VPS (`user@host`), and (c) whether anything
+   else already runs on that box. If NO, I stop after Act 1 and print what
+   production will take when you're ready.
+
+# ACT 1 — from the idea to a running app, locally
+
+1. **Check the engine is installed AND current enough** — do not install it
+   here, and do NOT accept "a version prints, therefore we're fine": an old
+   binary is the usual state and it fails later, in ways that read like typos.
+   Run both:
+
+   ```
+   appximo version     # must print a version
+   appximo prompt      # must print a long prompt, NOT "unknown command"
+   ```
+
+   If either fails, **stop and tell me to run the install prompt first**
+   (`appximo prompt --install`, or the "Install Appximo" block on the
+   website). Do not work around it, do not build from source, do not proceed
+   with an older binary.
+2. **Write the schema from MY IDEA**:
+   - `appximo spec &gt; /tmp/appximo-spec.md`, read it, then write `schema.json`
+     using ONLY that grammar.
+   - Correction loop: `appximo validate --json schema.json`, fix every entry
+     it reports, repeat until `"valid": true` **and `warnings` is empty**.
+     Warnings are real bugs waiting to happen — two you will likely hit:
+     a `required` string field also needs `"minLength": 1` (an empty string
+     satisfies `required`), and a role that writes a resource with a `file`
+     field also needs a grant on the `files` resource (or uploads 403).
+   - If any part of the app must be readable WITHOUT login (a public catalog,
+     published posts, a landing's data), declare it in the schema's
+     `rbac.public` block (it's in the grammar) — do not invent an "anonymous"
+     role and do not proxy around auth.
+3. **Boot everything with ONE command**:
+   `appximo up --name &lt;shortname&gt; --schema schema.json --yes --json`
+   - stdout is one JSON object: every URL, one-time admin credentials, a dev
+     API token, and a smoke-test result. Save the credentials for me.
+   - The name must match `^[a-z][a-z0-9]{1,29}$` (no hyphens/underscores).
+   - The printed token and the first user carry the **most privileged role
+     your schema declares** (`token_role` in the JSON). To act as any OTHER
+     role — to prove a restricted role really is restricted — mint one:
+     `appximo token --secret "$JWT_SECRET" --tenant &lt;name&gt; --role &lt;role&gt; --schema schema.json`
+     (the secret is in the `.env` `up` wrote).
+   - Re-running `up` after editing schema.json is safe: it migrates the
+     tenant to the new schema (destructive drops stay gated and print the
+     exact approval command).
+4. **Prove it with real requests.** The tenant is addressed by Host header:
+   use the printed `http://&lt;name&gt;.localhost:&lt;port&gt;` URLs, or add
+   `-H 'Host: &lt;name&gt;.localhost'`. Filters need `curl -g`.
+
+**ACT 1 CHECKLIST** — verify each, then show me the table with evidence:
+
+- [ ] `appximo validate schema.json` → valid, zero warnings
+- [ ] `GET /docs` → 200
+- [ ] `POST /api/&lt;main resource&gt;` with a token whose role may write it → 201
+      (the printed token, or one minted for the right role — see step 3)
+- [ ] The filtered list (`?filter[...]`) returns the record just created
+- [ ] If the schema declares `rbac.public`: the public resource reads with NO
+      token (200) and a non-public one does not (401/403)
+- [ ] `GET /app` → 200 (the generated back-office; sign-in works with the
+      printed credentials at the `&lt;name&gt;.localhost` URL)
+- [ ] `appximo explain schema.json` reads back as MY IDEA — paste its output
+      for me so I can confirm the rules are what I meant
+
+Then STOP and show me: the URLs, the one-time credentials, one curl that
+already works, and the explain output. **Call out every place you extended
+my idea** (a state, a field, a role I never named) in one short list, so I
+can confirm or reject it before it reaches production. If I asked for
+production, continue.
+
+## Custom screens or endpoints (only if MY IDEA needs them)
+
+- **Your own frontend** (brand, screens): build a STATIC SPA (no SSR) and
+  serve it from the same binary — two ways, pick one, never a second server:
+  - No Go toolchain: `appximo serve --schema schema.json --static ./dist --spa`
+  - Go route (one binary containing everything): `appximo init &lt;name&gt;` emits a
+    compilable project (main.go + go:embed) on `go get github.com/appximo/appximo`.
+  The UI's exact API contract is `appximo frontend-spec` — read it before
+  writing fetch calls (tenant Host, 422 shape, keyset pagination, uploads).
+- **Custom endpoints** (checkout, signed webhooks, reports): read
+  `appximo backend-spec`; handlers run in-process with `Ctx` (validation +
+  RBAC + transaction included). Grant the route to roles with the RBAC
+  `routes` block — and know that the plain `appximo` binary refuses a schema
+  granting routes nothing registers: that schema belongs to YOUR binary.
+
+# ACT 2 — production with HTTPS (only if I said yes)
+
+0. **DNS first** (propagation takes time — start it before touching the VPS):
+   an A record `&lt;app&gt;.&lt;domain&gt;` → the VPS IP, and a wildcard
+   `*.&lt;app&gt;.&lt;domain&gt;` → same IP if tenants get their own subdomains. The
+   tenant id must EQUAL the first DNS label it is served at.
+1. **Put the binary on the VPS**: `scp` the SAME binary you ran locally (or
+   your custom one from "Custom screens") to the VPS, plus your
+   `schema.json` — any file transfer works, `scp` is just the usual one.
+   Then fetch the installer AND its companion scripts into the same
+   directory on the VPS (the installer only installs the companions it finds
+   NEXT TO ITSELF — fetched alone, backups and updates have no script):
+   ```
+   base=https://raw.githubusercontent.com/appximo/appximo/main/scripts
+   curl -fsSLO $base/install.sh -O $base/backup.sh -O $base/deploy-update.sh
+   ```
+2. **Install** (as root). One script covers both box states:
+   - Empty box:
+     `sudo bash install.sh --domain=&lt;app&gt;.&lt;domain&gt; --email=&lt;your email&gt; --binary=./appximo --schema=schema.json --harden --yes`
+   - Box that ALREADY runs something (or a second Appximo app): add
+     `--app=&lt;name&gt;` — everything (service, user, config dir, db, ports) is
+     namespaced under that name next to what's there, untouched. If ports
+     8090/9090 are taken, add `--port`/`--control-port`.
+   - Custom binary from Act 1's Go route: pass it as `--binary=` and add
+     `--cli=./appximo` (the stock engine as ops companion — your binary
+     serves, the CLI operates: migrate, token, backup).
+   - It installs native PostgreSQL, a systemd unit, and Caddy with automatic
+     Let's Encrypt. It prints every name it created and where config lives
+     (`/etc/&lt;name&gt;/&lt;name&gt;.env`). Read the summary; don't re-derive paths.
+   - **It is idempotent**: if it stops with a named error, fix exactly what
+     it named and run the SAME command again — it detects and reuses
+     everything it already created. Never start over by hand.
+   - If the certificate never issues, it is almost always DNS not yet
+     pointing here or port 80 blocked — `dig +short &lt;app&gt;.&lt;domain&gt;` must
+     return this box's IP, and `journalctl -u caddy -f` says the rest. Wait
+     for DNS rather than working around TLS; **never** verify with `-k`.
+3. **First production tenant + admin** (on the VPS — the control plane is
+   localhost-only by design, never exposed):
+   - Register the tenant WITH the schema in the body:
+     `curl -s -X POST http://localhost:&lt;control-port&gt;/tenants -H "X-Admin-Key: $ADMIN_KEY" -H 'Content-Type: application/json' -d "{\"tenant_id\":\"&lt;app&gt;\",\"display_name\":\"&lt;App&gt;\",\"schema\":$(cat schema.json)}"`
+     (ADMIN_KEY and the control port are in `/etc/&lt;name&gt;/&lt;name&gt;.env`.)
+   - First admin: open `https://&lt;app&gt;.&lt;domain&gt;/admin` — the login screen
+     offers "Create the first admin" (paste the ADMIN_KEY) — or run
+     `appximo admin create --email … --password …` on the VPS.
+   - Mint a token and create one real record over HTTPS.
+4. **Every future schema change** (now and forever): edit schema.json →
+   `appximo validate` → `appximo migrate --tenant &lt;app&gt; --schema schema.json --dry-run`
+   → run it again without `--dry-run` to apply. New fields go live hot; a new
+   resource needs a service restart (`systemctl restart &lt;service&gt;` after
+   updating the schema file the unit points at). Keep the deployed schema and
+   the tenant record in sync by ALWAYS going through `migrate`.
+
+**ACT 2 CHECKLIST** — verify each, then show me the table with evidence:
+
+- [ ] `curl https://&lt;app&gt;.&lt;domain&gt;/health` (NO `-k`) → 200 `{"status":"ok",…}`
+      — real certificate, valid chain
+- [ ] `POST /api/&lt;main resource&gt;` over HTTPS with a fresh token → 201
+- [ ] `https://&lt;app&gt;.&lt;domain&gt;/app` → 200 and lists that record after sign-in;
+      `/docs` → 200
+- [ ] `systemctl is-active &lt;service&gt;` → active, and
+      `systemctl is-enabled &lt;service&gt;` → enabled (survives reboot)
+- [ ] `journalctl -u &lt;service&gt; -n 50` shows a clean boot (no errors)
+- [ ] Backups work: run `/opt/&lt;name&gt;/scripts/backup.sh --env-file=/etc/&lt;name&gt;/&lt;name&gt;.env`
+      once and show the dump file it produced (if the installer reported it
+      couldn't find the companion scripts, fetch them as in §1 first)
+
+Deliver at the end: the live HTTPS URLs, credentials (shown once), where
+config and backups live on the VPS, and the exact three commands for my next
+schema change (validate → migrate --dry-run → migrate).
+
+## When something fails
+
+Read the error first — this engine's errors are written to be acted on: they
+name the missing thing and the way out. Fix exactly what is named and re-run
+the same command (every installer and `up` is idempotent). If a step fails
+twice, run `appximo quickstart` and search its output for the symptom before
+improvising. Three dead ends to never take: a second
+server/port for the frontend, raw SQL against the database, and disabling
+auth "temporarily". If the box refuses something (a port, a permission), the
+installer summary and `journalctl -u &lt;service&gt;` name the owner — fix the
+named thing, don't work around it.</pre>
+<pre id="raw-prev-unix"># your agent works out the platform and runs the matching block — this is Linux
+curl -fsSLO https://github.com/appximo/appximo/releases/latest/download/appximo-linux-amd64
+curl -fsSLO https://github.com/appximo/appximo/releases/latest/download/checksums.txt
+grep " appximo-linux-amd64$" checksums.txt | sha256sum -c -
+sudo install -m 0755 appximo-linux-amd64 /usr/local/bin/appximo
+
+# macOS: the asset is appximo-darwin-arm64 (or -amd64) and the check is shasum -a 256
+appximo version   # proof, not a promise: it must print the version just installed</pre>
+<pre id="raw-prev-win"># PowerShell. Windows refuses to overwrite an .exe that is running, so the
+# prompt RENAMES the old one first — the step everyone gets wrong by hand.
+$dir = "$env:LOCALAPPDATA\Appximo"
+Invoke-WebRequest -Uri "https://github.com/appximo/appximo/releases/latest/download/appximo-windows-amd64.exe" -OutFile "$env:TEMP\appximo-new.exe"
+Move-Item "$env:TEMP\appximo-new.exe" (Join-Path $dir "appximo.exe") -Force
+
+appximo version   # in a NEW terminal, so the PATH is the updated one</pre>
+<pre id="raw-by-hand"># 1. everything, locally, in ONE command: Postgres in Docker, secrets, your
+#    tenant, the first admin and a smoke-tested API — every URL and every
+#    credential printed once
+mkdir myapp &amp;&amp; cd myapp &amp;&amp; appximo up
+
+# 2. every later schema change goes through migrate (destructive drops stay
+#    gated behind an explicit approval)
+appximo validate schema.json
+appximo migrate --tenant myapp --schema schema.json --dry-run
+
+# 3. production, when you are ready — on an empty VPS or next to what already
+#    runs there: native PostgreSQL + systemd + Caddy with automatic Let's Encrypt
+sudo bash install.sh --domain=api.you.com --email=you@you.com --binary=./appximo</pre>
+</div>
 <script>
-function pickTab(which){
-  for (const t of ['agent','manual']){
-    document.getElementById('tab-'+t).setAttribute('aria-selected', String(t===which));
-    document.getElementById('panel-'+t).classList.toggle('panel-hidden', t!==which);
+/* ── tabs ─────────────────────────────────────────────────────── */
+const TABGROUPS = {plat:['unix','win'], step2:['agent','manual']};
+function pickTab(group, which){
+  for (const n of TABGROUPS[group]){
+    document.getElementById('tab-'+group+'-'+n).setAttribute('aria-selected', String(n===which));
+    document.getElementById('panel-'+group+'-'+n).classList.toggle('panel-hidden', n!==which);
   }
 }
-function toggleExpand(){
-  const box = document.getElementById('promptbox');
-  box.classList.toggle('open');
-  document.getElementById('btn-expand').textContent =
-    box.classList.contains('open') ? 'Collapse ▴' : 'Show the whole prompt ▾';
+
+/* ── expand / collapse ────────────────────────────────────────── */
+function toggleBox(boxId, btn){
+  const box = document.getElementById(boxId);
+  const open = box.classList.toggle('open');
+  btn.textContent = open ? 'Collapse ▴' : 'Show the whole prompt ▾';
+  if (!open) box.scrollIntoView({block:'nearest'});
 }
-function copyPrompt(){
-  const text = document.getElementById('master-prompt').textContent;
+
+/* ── copy: always the RAW prompt, never the decorated DOM ──────── */
+function copyPrompt(rawId, btn, label){
+  const text = document.getElementById(rawId).textContent;
   const done = () => {
-    const b = document.getElementById('btn-copy');
-    b.textContent = 'Copied ✓';
-    setTimeout(() => { b.textContent = 'Copy the full prompt'; }, 2200);
+    btn.textContent = 'Copied ✓'; btn.classList.add('done');
+    setTimeout(() => { btn.textContent = label; btn.classList.remove('done'); }, 2000);
   };
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(done);
-  } else {
-    const ta = document.createElement('textarea');
-    ta.value = text; document.body.appendChild(ta); ta.select();
-    document.execCommand('copy'); ta.remove(); done();
-  }
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+  } else { fallbackCopy(text, done); }
 }
+function fallbackCopy(text, done){
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.setAttribute('readonly','');
+  ta.style.position='fixed'; ta.style.top='-1000px';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); } catch(e){}
+  ta.remove(); done();
+}
+
+/* ── shell / powershell highlighting (tiny, no dependency) ────── */
+const TOKENS = /(#[^\n]*)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(https?:\/\/[^\s'"`)]+)|(\$(?:env:)?[A-Za-z_][A-Za-z0-9_]*|\$\{[^}]*\})|(--?[A-Za-z][A-Za-z0-9-]*)/g;
+function span(cls, txt){ const s=document.createElement('span'); s.className=cls; s.textContent=txt; return s; }
+function highlightLine(line, out){
+  let rest = line;
+  const lead = rest.match(/^(\s*)([A-Za-z_][A-Za-z0-9_.-]*)(?=\s|$)/);
+  if (lead && !/^\s*#/.test(rest)){
+    out.appendChild(document.createTextNode(lead[1]));
+    out.appendChild(span('t-cmd', lead[2]));
+    rest = rest.slice(lead[0].length);
+  }
+  let last = 0, m; TOKENS.lastIndex = 0;
+  while ((m = TOKENS.exec(rest)) !== null){
+    if (m.index > last) out.appendChild(document.createTextNode(rest.slice(last, m.index)));
+    const cls = m[1] !== undefined ? 't-cm' : m[2] !== undefined ? 't-str'
+              : m[3] !== undefined ? 't-url' : m[4] !== undefined ? 't-var' : 't-flag';
+    // a hyphen inside a word (appximo-linux-amd64) is not a flag
+    if (cls === 't-flag' && m.index > 0 && /[\w-]/.test(rest[m.index-1])) out.appendChild(document.createTextNode(m[0]));
+    else out.appendChild(span(cls, m[0]));
+    last = TOKENS.lastIndex;
+  }
+  out.appendChild(document.createTextNode(rest.slice(last)));
+}
+function codeNode(code){
+  const pre = document.createElement('pre');
+  const c = document.createElement('code');
+  const lines = code.split('\n');
+  lines.forEach((ln, i) => { highlightLine(ln, c); if (i < lines.length-1) c.appendChild(document.createTextNode('\n')); });
+  pre.appendChild(c); return pre;
+}
+
+/* ── markdown-ish rendering of a prompt ───────────────────────── */
+function inlineInto(el, text){
+  const re = /`([^`]+)`|\*\*([^*]+)\*\*/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null){
+    if (m.index > last) el.appendChild(document.createTextNode(text.slice(last, m.index)));
+    if (m[1] !== undefined){ const c=document.createElement('code'); c.textContent=m[1]; el.appendChild(c); }
+    else { const b=document.createElement('strong'); b.textContent=m[2]; el.appendChild(b); }
+    last = re.lastIndex;
+  }
+  el.appendChild(document.createTextNode(text.slice(last)));
+}
+function replaceBlock(key, value){
+  const box = document.createElement('div'); box.className = 'replaceme';
+  const tag = document.createElement('span'); tag.className = 'replaceme-tag';
+  tag.textContent = '✏ Replace this line';
+  const code = document.createElement('code');
+  code.appendChild(document.createTextNode(key + ': '));
+  const em = document.createElement('em'); em.textContent = value; code.appendChild(em);
+  box.appendChild(tag); box.appendChild(code);
+  return box;
+}
+function renderBlock(lines, frag){
+  if (lines.length === 1){
+    const h = lines[0].match(/^(#{1,6})\s+(.*)$/);
+    if (h){
+      const el = document.createElement('div');
+      el.className = 'p-h' + (h[1].length === 1 ? ' p-h1' : '');
+      inlineInto(el, h[2]); frag.appendChild(el); return;
+    }
+    const rep = lines[0].match(/^(WHICH VERSION|MY IDEA):\s*(.*)$/);
+    if (rep){ frag.appendChild(replaceBlock(rep[1], rep[2])); return; }
+  }
+  const isList = lines.some(l => /^\s*(?:[-*]|\d+\.)\s/.test(l));
+  if (!isList){
+    const p = document.createElement('p');
+    inlineInto(p, lines.map(s => s.trim()).join(' '));
+    frag.appendChild(p); return;
+  }
+  const ul = document.createElement('ul'); ul.className = 'p-list';
+  const bufs = []; let cur = null;
+  for (const l of lines){
+    const m = l.match(/^(\s*)(?:([-*])|(\d+)\.)\s+(.*)$/);
+    if (m){
+      cur = document.createElement('li');
+      const ind = Math.min(2, Math.floor(m[1].length / 2));
+      cur.className = 'p-li' + (ind ? ' ind' + ind : '');
+      let txt = m[4];
+      const chk = txt.match(/^\[[ xX]\]\s*(.*)$/);
+      if (chk){ cur.classList.add('p-check'); txt = chk[1]; }
+      else if (m[3]){ cur.classList.add('p-num'); cur.setAttribute('data-n', m[3] + '.'); }
+      ul.appendChild(cur); bufs.push({el: cur, txt: txt});
+    } else if (cur){ bufs[bufs.length-1].txt += ' ' + l.trim(); }
+    else { const p = document.createElement('p'); inlineInto(p, l.trim()); frag.appendChild(p); }
+  }
+  for (const b of bufs) inlineInto(b.el, b.txt);
+  frag.appendChild(ul);
+}
+function renderPrompt(rawId, targetId){
+  const raw = document.getElementById(rawId).textContent;
+  const target = document.getElementById(targetId);
+  const frag = document.createDocumentFragment();
+  const lines = raw.split('\n');
+  let block = [], i = 0;
+  const flush = () => { if (block.length) renderBlock(block, frag); block = []; };
+  while (i < lines.length){
+    const ln = lines[i];
+    if (/^\s*```/.test(ln)){
+      flush(); i++;
+      const code = [];
+      while (i < lines.length && !/^\s*```/.test(lines[i])){ code.push(lines[i]); i++; }
+      i++;
+      const wrap = document.createElement('div'); wrap.className = 'p-code';
+      wrap.appendChild(codeNode(code.join('\n')));
+      frag.appendChild(wrap); continue;
+    }
+    if (ln.trim() === ''){ flush(); i++; continue; }
+    block.push(ln); i++;
+  }
+  flush();
+  target.appendChild(frag);
+}
+function renderCode(rawId, targetId){
+  document.getElementById(targetId).appendChild(codeNode(document.getElementById(rawId).textContent));
+}
+
+renderPrompt('raw-install', 'render-install');
+renderPrompt('raw-master', 'render-master');
+renderCode('raw-prev-unix', 'prev-unix');
+renderCode('raw-prev-win', 'prev-win');
+renderCode('raw-by-hand', 'prev-manual');
 </script>
 </body>
 </html>
