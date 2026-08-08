@@ -980,8 +980,21 @@ func deriveAppName() string {
 	return "app"
 }
 
-// pickRole chooses the role for the dev token + first user: "admin" when the
-// schema declares it, else the alphabetically first declared role.
+// pickRole chooses the role for the dev token + the first tenant user. These
+// are the OPERATOR's credentials — the person who just ran `up` and has to be
+// able to manage their own app — so the choice is the MOST PRIVILEGED role the
+// schema declares, never an arbitrary one.
+//
+// It used to be "admin" by name, else the ALPHABETICALLY FIRST role. That
+// silently handed the operator the least-privileged identity whenever the
+// schema named its roles differently: a library schema with {member, staff}
+// got `member`, so the printed token could not write the app's own main
+// resource and the printed credentials could not manage anything (found by a
+// third-party agent following the master prompt, LAUNCHPAD-S1).
+//
+// Order: "admin" by name → a role with full access (resources "*" + actions
+// "*") → the widest grant surface → alphabetical, as the last deterministic
+// tie-break.
 func pickRole(s *schema.APISchema) string {
 	if _, ok := s.RBAC.Roles["admin"]; ok {
 		return "admin"
@@ -993,8 +1006,86 @@ func pickRole(s *schema.APISchema) string {
 	if len(roles) == 0 {
 		return ""
 	}
-	sort.Strings(roles)
-	return roles[0]
+	sort.Strings(roles) // alphabetical first, so every tie below breaks deterministically
+	best, bestScore := roles[0], -1
+	for _, name := range roles {
+		if sc := roleBreadth(s.RBAC.Roles[name], s); sc > bestScore {
+			best, bestScore = name, sc
+		}
+	}
+	return best
+}
+
+// roleBreadth scores how much of the app a role can reach, for pickRole's
+// "most privileged wins". It is a heuristic for choosing a DEV credential —
+// never an authorization decision (the engine's RBAC evaluator is the only
+// authority for that).
+func roleBreadth(r schema.RolePolicy, s *schema.APISchema) int {
+	wildcardActions := func(actions []string) bool {
+		for _, a := range actions {
+			if a == "*" {
+				return true
+			}
+		}
+		return false
+	}
+	// A row condition or a field allowlist means the role sees only part of
+	// its resources — a worse operator credential than an unrestricted one.
+	const fullAccess = 1 << 20
+	if len(r.Permissions) == 0 {
+		var wildcardRes string
+		if json.Unmarshal(r.Resources, &wildcardRes) == nil && wildcardRes == "*" {
+			if wildcardActions(r.Actions) && r.Conditions == nil && len(r.Fields) == 0 {
+				return fullAccess
+			}
+		}
+		var named []string
+		_ = json.Unmarshal(r.Resources, &named)
+		if wildcardRes == "*" {
+			named = sortedResourceNames(s)
+		}
+		score := len(named) * actionWeight(r.Actions)
+		if r.Conditions != nil {
+			score /= 2
+		}
+		if len(r.Fields) > 0 {
+			score /= 2
+		}
+		return score
+	}
+	score := 0
+	for _, p := range r.Permissions {
+		s := actionWeight(p.Actions)
+		if p.Conditions != nil {
+			s /= 2
+		}
+		if len(p.Fields) > 0 {
+			s /= 2
+		}
+		score += s
+	}
+	return score
+}
+
+// actionWeight counts what a grant may do; "*" counts as all four actions.
+func actionWeight(actions []string) int {
+	w := 0
+	for _, a := range actions {
+		if a == "*" {
+			return 4
+		}
+		w++
+	}
+	return w
+}
+
+func sortedResourceNames(s *schema.APISchema) []string {
+	names := make([]string, 0, len(s.Resources))
+	for n := range s.Resources {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func sortedKeys[V any](m map[string]V) []string {

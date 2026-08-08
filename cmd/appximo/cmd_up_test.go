@@ -206,3 +206,106 @@ func TestReconcileSchema(t *testing.T) {
 		}
 	})
 }
+
+// LAUNCHPAD-S1: `up` hands the operator the MOST privileged role the schema
+// declares. The old rule (admin-by-name, else alphabetically first) gave a
+// {member, staff} schema the `member` identity, so the printed token could not
+// write the app's own main resource — found by a third-party agent following
+// the master prompt.
+func TestPickRolePrefersTheMostPrivileged(t *testing.T) {
+	role := func(res string, actions ...string) schema.RolePolicy {
+		return schema.RolePolicy{Resources: json.RawMessage(res), Actions: actions}
+	}
+	cases := []struct {
+		name  string
+		roles map[string]schema.RolePolicy
+		want  string
+	}{
+		{
+			name: "admin by name always wins",
+			roles: map[string]schema.RolePolicy{
+				"admin":     role(`"*"`, "*"),
+				"aaa_first": role(`"*"`, "*"),
+			},
+			want: "admin",
+		},
+		{
+			name: "full access beats the alphabetically first role",
+			roles: map[string]schema.RolePolicy{
+				"member": role(`["games","loans"]`, "read"),
+				"staff":  role(`"*"`, "*"),
+			},
+			want: "staff",
+		},
+		{
+			name: "widest grant surface wins when nobody has wildcards",
+			roles: map[string]schema.RolePolicy{
+				"auditor": role(`["games"]`, "read"),
+				"manager": role(`["games","loans","members"]`, "read", "create", "update"),
+			},
+			want: "manager",
+		},
+		{
+			name: "an unrestricted role beats a row-scoped one of equal reach",
+			roles: map[string]schema.RolePolicy{
+				"owner": {Resources: json.RawMessage(`["orders"]`), Actions: []string{"read", "create", "update", "delete"},
+					Conditions: &schema.Condition{Field: "user_id", Op: "eq", Val: "$user_id"}},
+				"support": role(`["orders"]`, "read", "create", "update", "delete"),
+			},
+			want: "support",
+		},
+		{
+			name: "per-resource permissions are scored too",
+			roles: map[string]schema.RolePolicy{
+				"cashier": {Permissions: map[string]schema.ResourcePermission{
+					"orders": {Actions: []string{"read"}},
+				}},
+				"boss": {Permissions: map[string]schema.ResourcePermission{
+					"orders":   {Actions: []string{"read", "create", "update", "delete"}},
+					"products": {Actions: []string{"read", "create", "update", "delete"}},
+				}},
+			},
+			want: "boss",
+		},
+		{
+			name:  "no roles at all → empty (the caller warns)",
+			roles: map[string]schema.RolePolicy{},
+			want:  "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &schema.APISchema{
+				Resources: map[string]schema.ResourceSchema{
+					"games": {}, "loans": {}, "members": {}, "orders": {}, "products": {},
+				},
+				RBAC: schema.RBACPolicy{Roles: tc.roles},
+			}
+			if got := pickRole(s); got != tc.want {
+				t.Errorf("pickRole = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Determinism: equally-privileged roles must never flip between runs (Go map
+// iteration order would otherwise decide the operator's identity).
+func TestPickRoleIsDeterministicOnTies(t *testing.T) {
+	s := &schema.APISchema{
+		Resources: map[string]schema.ResourceSchema{"a": {}},
+		RBAC: schema.RBACPolicy{Roles: map[string]schema.RolePolicy{
+			"zeta":  {Resources: json.RawMessage(`["a"]`), Actions: []string{"read"}},
+			"alpha": {Resources: json.RawMessage(`["a"]`), Actions: []string{"read"}},
+			"mid":   {Resources: json.RawMessage(`["a"]`), Actions: []string{"read"}},
+		}},
+	}
+	first := pickRole(s)
+	for i := 0; i < 50; i++ {
+		if got := pickRole(s); got != first {
+			t.Fatalf("pickRole flipped between runs: %q then %q", first, got)
+		}
+	}
+	if first != "alpha" {
+		t.Errorf("tie must break alphabetically, got %q", first)
+	}
+}
