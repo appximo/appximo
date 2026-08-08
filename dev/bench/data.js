@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786151873419,
+  "lastUpdate": 1786160342854,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -1224,6 +1224,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36267073 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "9d2cb723bc3190d5ed2dca9a3e444710c2991140",
+          "message": "docs(site): two numbered prompt steps, and prompt boxes that are not a wall of text\n\nThe entry page led with ONE prompt as plain text. Two problems, both raised\nafter real use: the onboarding is now TWO prompts (install, then build) and\nthe page did not say so; and the prompt itself read as a wall — no\ndistinction between prose and commands, and nothing marking what the reader\nhas to replace.\n\n- Step 1 'Install Appximo' and Step 2 'Build your app' as numbered blocks\n  with a divider between them, so it reads as two moments. Step 1 carries\n  FrankenPHP-style Linux/macOS · Windows tabs previewing the platform\n  commands; Step 2 keeps the agent · by-hand tabs (its by-hand path now\n  starts at 'appximo up', since installing moved to step 1).\n- The prompt markdown is rendered, not dumped: its own headings become\n  visible section rules, fenced blocks become dark inset panels with light\n  shell/PowerShell highlighting, inline backticks become code chips,\n  checklists become ☐ rows.\n- What the reader must replace ('WHICH VERSION: latest', 'MY IDEA: …') is an\n  amber dashed block with a '✏ REPLACE THIS LINE' pill and the placeholder\n  itself highlighted — unmissable instead of buried in a paragraph.\n- A copy button per box. The copied text comes from a hidden raw carrier\n  holding the exact .md body, never from the decorated DOM, so decoration can\n  never drift from the paste; verified by reading the clipboard back in a\n  real browser and asserting full string equality (7696 and 12378 chars) and\n  the absence of HTML tags.\n- The status strip drops the stale 'merged after v0.1.2' caveat: v0.1.5\n  (2026-08-08) ships everything this page describes.\n\nBrowser-verified at 390x844 and 1366x900: 66 checks, 0 failures — no\nhorizontal scroll before or after scrolling, zero console/page errors, both\ncopy buttons copying the exact prompt, both tab groups switching, both boxes\nexpanding and collapsing, all 8 images loaded.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-08T03:32:14Z",
+          "tree_id": "c0815645ff0b2a4e70fba93941affd2bbd3a3afa",
+          "url": "https://github.com/appximo/appximo/commit/9d2cb723bc3190d5ed2dca9a3e444710c2991140"
+        },
+        "date": 1786160342096,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6345,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "405208 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6345,
+            "unit": "ns/op",
+            "extra": "405208 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "405208 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "405208 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 65.44,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "37163304 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 65.44,
+            "unit": "ns/op",
+            "extra": "37163304 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "37163304 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "37163304 times\n4 procs"
           }
         ]
       }
