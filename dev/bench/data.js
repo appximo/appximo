@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786257962458,
+  "lastUpdate": 1786258711725,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -1872,6 +1872,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36468693 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "bc9adadd7ce28685f1102ea8828b6c7dec73e456",
+          "message": "ci: windows gate iteration 2 — scenario transcripts travel in the artifact\n\nScenario 2 (upgrade under a running serve) failed its first execution\nwith no readable diagnosis: step logs need a token this box does not\nhave. Every scenario now Notes its progress and the upgrade's full\noutput into win-e2e/scenario.txt, uploaded always together with\nserve.log/serve.err — the same black-box pattern as the unit lane.\nHealthz wait widened to 45 s (first boot self-bootstraps the control\nplane on a cold runner).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-09T06:58:01Z",
+          "tree_id": "fd3951ca74d5961570a5c9feec172f343a8e9903",
+          "url": "https://github.com/appximo/appximo/commit/bc9adadd7ce28685f1102ea8828b6c7dec73e456"
+        },
+        "date": 1786258710607,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6209,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "365866 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6209,
+            "unit": "ns/op",
+            "extra": "365866 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "365866 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "365866 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 66.03,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36299840 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 66.03,
+            "unit": "ns/op",
+            "extra": "36299840 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36299840 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36299840 times\n4 procs"
           }
         ]
       }
