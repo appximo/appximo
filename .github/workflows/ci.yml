@@ -87,6 +87,167 @@ jobs:
       - name: 'Integration · observability metrics (tags integration)'
         run: go test -tags integration -race -count=1 ./tests/integration/...
 
+  # ---------------------------------------------------------------------
+  # OPS-25 (CTX-CLOSE-S1): Windows, verifiable FOREVER instead of reasoned
+  # about once. Runs in parallel with the Linux jobs, so it adds no wall time
+  # beyond its own duration; it is a REAL gate — a failure turns CI red.
+  #
+  # What it covers:
+  #   - the whole module compiles and the platform-sensitive unit lanes pass
+  #     natively on Windows (paths, %LOCALAPPDATA%, the .env BOM case);
+  #   - `validate --json` keeps stdout machine-clean on Windows;
+  #   - the four `upgrade` scenarios from the backlog, against the REAL
+  #     pinned release (download, checksum, the rename-aside dance):
+  #       1. idle upgrade  2. upgrade while `serve` is RUNNING (real
+  #       PostgreSQL, the runner image ships one)  3. a locked .old.exe
+  #       (the natural aftermath of 2)  4. an unwritable destination;
+  #   - the released .exe actually BOOTS (scenario 2 serves with it).
+  #
+  # NOT covered, deliberately (recorded in docs/BACKLOG.md, OPS-25): a real
+  # Program Files ACL (the runner user is an administrator; scenario 4
+  # simulates the class with an explicit deny ACL), antivirus file locks, and
+  # a non-admin user profile.
+  #
+  # UPGRADE_TAG is pinned so the job is deterministic; bump it deliberately
+  # when a release changes the upgrade contract.
+  windows:
+    name: Windows gate (OPS-25)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      UPGRADE_TAG: v0.1.5
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build (whole module, native Windows)
+        run: go build ./...
+
+      - name: Unit lane (platform-sensitive packages)
+        run: |
+          go test -short -count=1 ./cmd/appximo/... ./pkg/platformpath/... ./pkg/schema/... ./pkg/query/...
+          if ($LASTEXITCODE -ne 0) { throw "unit lane failed" }
+
+      - name: '.env loading incl. the UTF-8 BOM case (F1-bis)'
+        run: |
+          go test -short -count=1 -run TestLoadDotEnv .
+          if ($LASTEXITCODE -ne 0) { throw "dotenv lane failed" }
+
+      - name: Build the CLI and prepare the e2e dir
+        run: |
+          go build -o appximo.exe ./cmd/appximo
+          .\appximo.exe version --json
+          New-Item -ItemType Directory -Force win-e2e | Out-Null
+          Copy-Item appximo.exe win-e2e\appximo.exe
+
+      - name: 'validate --json: stdout is exactly one JSON object'
+        run: |
+          $out = .\appximo.exe validate examples/quickstart/schema.json --json | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "validate --json exited $LASTEXITCODE" }
+          $parsed = $out | ConvertFrom-Json   # throws if stdout is not clean JSON
+          if (-not $parsed.valid) { throw "quickstart schema reported invalid: $out" }
+
+      - name: 'upgrade scenario 0: --check with a pinned tag is a no-write no-op'
+        working-directory: win-e2e
+        run: |
+          $before = (Get-FileHash appximo.exe).Hash
+          .\appximo.exe upgrade --check --version $env:UPGRADE_TAG
+          if ($LASTEXITCODE -ne 0) { throw "upgrade --check exited $LASTEXITCODE" }
+          if ((Get-FileHash appximo.exe).Hash -ne $before) { throw "--check modified the binary" }
+
+      - name: 'upgrade scenario 1 (idle): real download, checksum, rename-aside swap'
+        working-directory: win-e2e
+        run: |
+          .\appximo.exe upgrade --version $env:UPGRADE_TAG
+          if ($LASTEXITCODE -ne 0) { throw "idle upgrade exited $LASTEXITCODE" }
+          $v = .\appximo.exe version --json | ConvertFrom-Json
+          $want = $env:UPGRADE_TAG
+          if ($v.version -ne $want) { throw "version after upgrade: $($v.version), want $want" }
+          if (-not (Test-Path appximo.exe.old.exe)) { throw "rename-aside did not leave appximo.exe.old.exe" }
+
+      - name: Start PostgreSQL (preinstalled on the runner image)
+        run: |
+          $svc = Get-Service postgresql* | Select-Object -First 1
+          if (-not $svc) { throw "no postgresql service on this runner image" }
+          Set-Service $svc.Name -StartupType Manual
+          Start-Service $svc.Name
+          $env:PGPASSWORD = 'root'
+          & "$env:PGBIN\createdb.exe" -U postgres appximo_ci
+          if ($LASTEXITCODE -ne 0) { throw "createdb failed" }
+
+      - name: 'upgrade scenario 2: swap under a RUNNING serve (the released .exe boots)'
+        working-directory: win-e2e
+        run: |
+          $env:DATABASE_URL = 'postgres://postgres:root@localhost:5432/appximo_ci?sslmode=disable'
+          $env:JWT_SECRET   = 'ci-windows-jwt-secret-0123456789abcdef'
+          $env:ADMIN_KEY    = 'ci-windows-admin'
+          $schema = Resolve-Path ..\examples\quickstart\schema.json
+          # serve runs the RELEASE binary scenario 1 installed — this is also the
+          # "released .exe actually boots on Windows" verification.
+          $proc = Start-Process -FilePath (Resolve-Path .\appximo.exe) `
+            -ArgumentList 'serve','--schema',"$schema",'--port','8093' `
+            -PassThru -NoNewWindow -RedirectStandardOutput serve.log -RedirectStandardError serve.err
+          $ok = $false
+          foreach ($i in 1..30) {
+            try { Invoke-RestMethod http://localhost:8093/healthz | Out-Null; $ok = $true; break }
+            catch { Start-Sleep 1 }
+          }
+          if (-not $ok) {
+            Get-Content serve.log, serve.err -ErrorAction SilentlyContinue
+            throw "the released .exe did not answer /healthz"
+          }
+          "SERVE_PID=$($proc.Id)" | Out-File -Append $env:GITHUB_ENV
+          # The swap, while the same .exe is running AND is this process's own image.
+          .\appximo.exe upgrade --force --version $env:UPGRADE_TAG
+          if ($LASTEXITCODE -ne 0) { throw "upgrade under a running serve exited $LASTEXITCODE" }
+          if (-not (Test-Path appximo.exe.old.exe)) { throw "no .old.exe after the running-serve swap" }
+          # The old process must still be serving from its renamed image.
+          Invoke-RestMethod http://localhost:8093/healthz | Out-Null
+
+      - name: 'upgrade scenario 3: a LOCKED .old.exe fails loudly, binary intact'
+        working-directory: win-e2e
+        run: |
+          # serve (still running) now holds appximo.exe.old.exe as its image — the
+          # natural aftermath of scenario 2 and exactly the backlog's locked case.
+          $out = .\appximo.exe upgrade --force --version $env:UPGRADE_TAG 2>&1 | Out-String
+          if ($LASTEXITCODE -eq 0) { throw "upgrade must fail while .old.exe is locked; it exited 0" }
+          if ($out -notmatch 'could not move the current binary aside') {
+            throw "the failure must be the documented actionable one, got: $out"
+          }
+          # The machine is never left without a working engine.
+          $v = .\appximo.exe version --json | ConvertFrom-Json
+          if ($v.version -ne $env:UPGRADE_TAG) { throw "binary broken after failed upgrade: $($v.version)" }
+
+      - name: Stop serve
+        if: always()
+        run: |
+          if ($env:SERVE_PID) { Stop-Process -Id $env:SERVE_PID -Force -ErrorAction SilentlyContinue }
+
+      - name: 'upgrade scenario 4: unwritable destination → actionable permission error'
+        run: |
+          New-Item -ItemType Directory -Force locked-dir | Out-Null
+          Copy-Item win-e2e\appximo.exe locked-dir\appximo.exe
+          icacls locked-dir /deny "${env:USERNAME}:(W,AD,WD)" | Out-Null
+          try {
+            $out = & .\locked-dir\appximo.exe upgrade --force --version $env:UPGRADE_TAG 2>&1 | Out-String
+            if ($LASTEXITCODE -eq 0) { throw "upgrade must fail in an unwritable directory; it exited 0" }
+            if ($out -notmatch 'no permission to write' -or $out -notmatch 'Run as administrator') {
+              throw "the permission error must name the path and the elevated command, got: $out"
+            }
+            # Nothing was broken and no second copy appeared.
+            & .\locked-dir\appximo.exe version --json | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "binary broken after refused upgrade" }
+          } finally {
+            icacls locked-dir "/remove:d" "$env:USERNAME" | Out-Null
+          }
+
   lint:
     name: golangci-lint
     runs-on: ubuntu-latest

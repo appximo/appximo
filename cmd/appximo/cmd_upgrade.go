@@ -228,15 +228,21 @@ func replaceSelf(self string, blob []byte) error {
 }
 
 // notWritable turns a permission failure into the ADR-024 shape: name the path
-// that refused and the exact command that works.
+// that refused and the exact command that works — PER PLATFORM. `sudo` on
+// Windows is not advice, it is a lie (OPS-25: found while writing the Windows
+// CI gate — the message predates the platform).
 func notWritable(path string, err error) error {
 	if !os.IsPermission(err) {
 		return fmt.Errorf("%s: %w", path, err)
 	}
+	privileged := "sudo appximo upgrade"
+	if runtime.GOOS == "windows" {
+		privileged = "appximo upgrade  (from a terminal opened with \"Run as administrator\")"
+	}
 	return fmt.Errorf("no permission to write %s: %w\n"+
-		"  Re-run with privileges:  sudo appximo upgrade\n"+
+		"  Re-run with privileges:  %s\n"+
 		"  (or install into a user-writable directory that is on your PATH — never a second copy the PATH finds first)",
-		path, err)
+		path, err, privileged)
 }
 
 func init() {
