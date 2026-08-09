@@ -298,10 +298,32 @@ preflight_conflicts() {
 	if [ -f "$ENV_FILE" ] || [ -f "$UNIT_FILE" ]; then
 		info "existing Appximo install detected — upgrading in place (secrets reused)"
 	fi
-	# Port already in use by something that ISN'T our own service → refuse.
-	if command -v ss >/dev/null 2>&1 && ss -ltn "( sport = :$PORT )" 2>/dev/null | grep -q ":$PORT "; then
-		if ! systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-			die "port $PORT is already in use by another process (not the appximo service). Free it (ss -ltnp | grep :$PORT) or pass --port=<other>."
+	# PORT PREFLIGHT (CTX-PARITY-S1, field report C2). EVERY port this install
+	# will bind is checked HERE — before a single file is written — so a
+	# collision cannot leave a half-installed app behind (the field report ended
+	# a failed attempt with an orphan /etc/<app>/<app>.env). The control port
+	# used to be unchecked, which is precisely the one that collides when a
+	# SECOND app lands on a box: the data port is chosen by the operator, the
+	# control port is derived from the app name.
+	if ! command -v ss >/dev/null 2>&1; then
+		info "'ss' is not installed (iproute2) — skipping the port preflight; a collision will surface later as a failed start"
+	else
+		local busy="" p label pair owner
+		for pair in "$PORT:--port" "$CONTROL_PORT:--control-port"; do
+			p="${pair%%:*}"; label="${pair##*:}"
+			ss -ltn "( sport = :$p )" 2>/dev/null | grep -q ":$p " || continue
+			# Our OWN service holding it is an upgrade, not a conflict.
+			if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then continue; fi
+			owner="$(ss -ltnp "( sport = :$p )" 2>/dev/null | awk 'NR>1{print $NF}' | head -1)"
+			[ -n "$owner" ] || owner="an unidentified process"
+			busy="${busy}
+    port ${p} (${label}) is held by ${owner}"
+		done
+		if [ -n "$busy" ]; then
+			die "these ports are already in use, so nothing was installed:${busy}
+  Pick free ones and re-run — the installer is idempotent:
+    sudo bash $0 --app=${APP_NAME} --port=<free> --control-port=<free> ...
+  Find what is listening:  ss -ltnp | grep -E ':(${PORT}|${CONTROL_PORT})'"
 		fi
 	fi
 	# An existing Caddyfile that isn't ours would be overwritten — back it up first.
@@ -550,7 +572,10 @@ setup_postgres() {
 	fi
 	systemctl enable --now postgresql >/dev/null 2>&1 || die "postgresql did not start (systemctl status postgresql). Re-run after fixing."
 	# Wait for the socket (fresh installs take a moment to accept connections).
-	local i; for i in $(seq 1 15); do runuser -u postgres -- psql -tAc 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
+	local i; for i in $(seq 1 15); do pg_ready && break; sleep 1; done
+	# cd /tmp: see pg_ready — postgres cannot chdir into /root, and the warning
+	# it prints on every call pollutes an output the operator is asked to read.
+	cd /tmp || true
 	local psql="runuser -u postgres -- psql -tAX"
 	if [ "$($psql -c "SELECT 1 FROM pg_roles WHERE rolname='${DB_ROLE}'")" != "1" ]; then
 		$psql -c "CREATE ROLE ${DB_ROLE} LOGIN PASSWORD '${DB_PASS}'" || die "could not create the postgres role"
@@ -589,7 +614,7 @@ setup_postgres() {
 # file) and never fights the package's own postgresql.conf. Idempotent.
 tune_postgres() {
 	local conf_file conf_dir
-	conf_file="$(runuser -u postgres -- psql -tAX -c 'SHOW config_file' 2>/dev/null | head -1 || true)"
+	conf_file="$( (cd /tmp && runuser -u postgres -- psql -tAX -c 'SHOW config_file') 2>/dev/null | head -1 || true)"
 	[ -n "$conf_file" ] || { warn "could not locate postgresql.conf — skipping PostgreSQL tuning (defaults kept)"; return 0; }
 	conf_dir="$(dirname "$conf_file")/conf.d"
 	mkdir -p "$conf_dir"
@@ -612,7 +637,8 @@ tune_postgres() {
 		return 0
 	fi
 
-	write_file "$conf_dir/99-appximo-tuning.conf" "# Appximo — PostgreSQL sizing for this box (${MEM_MB} MiB RAM, $(nproc) vCPU).
+	local tuning_file="$conf_dir/99-appximo-tuning.conf"
+	local desired="# Appximo — PostgreSQL sizing for this box (${MEM_MB} MiB RAM, $(nproc) vCPU).
 # Written by scripts/install.sh. Delete this file and restart PostgreSQL to
 # return to the packaged defaults. See docs/BENCHMARKS.md for the measurements.
 shared_buffers = ${sb}MB
@@ -620,12 +646,44 @@ effective_cache_size = ${ecs}MB
 work_mem = ${wm}MB
 maintenance_work_mem = ${mwm}MB
 max_connections = ${mc}"
-	chown postgres:postgres "$conf_dir/99-appximo-tuning.conf" 2>/dev/null || true
+
+	# NO-CHANGE GUARD (CTX-PARITY-S1, field report C1). PostgreSQL here is a
+	# SHARED service: restarting it interrupts every app on the box. Installing a
+	# second app used to rewrite this file unconditionally and restart anyway —
+	# and when the values were already identical (an earlier install put them
+	# there), two neighbouring production apps took a ~3 s blackout for nothing.
+	# A restart is defensible when something changed; a restart when nothing
+	# changed is pure damage to somebody else's users.
+	if [ -f "$tuning_file" ] && [ "$(cat "$tuning_file" 2>/dev/null)" = "$desired" ]; then
+		ok "postgresql tuning already matches this box — left untouched, NOT restarted (no neighbour is disturbed)"
+		return 0
+	fi
+
+	if [ "$DRY_RUN" != "yes" ] && [ -f "$tuning_file" ]; then
+		info "postgresql tuning differs from the desired sizing — updating it (this DOES restart the shared PostgreSQL)"
+	fi
+	write_file "$tuning_file" "$desired"
+	chown postgres:postgres "$tuning_file" 2>/dev/null || true
+	if [ "$DRY_RUN" = "yes" ]; then
+		printf '  [dry-run] systemctl restart postgresql (tuning changed)\n'
+		return 0
+	fi
 	# shared_buffers and max_connections need a full restart, not a reload.
 	systemctl restart postgresql >/dev/null 2>&1 \
-		|| warn "PostgreSQL did not restart after tuning — check journalctl -u postgresql (remove $conf_dir/99-appximo-tuning.conf to revert)"
-	local i; for i in $(seq 1 20); do runuser -u postgres -- psql -tAc 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
+		|| warn "PostgreSQL did not restart after tuning — check journalctl -u postgresql (remove $tuning_file to revert)"
+	local i; for i in $(seq 1 20); do pg_ready && break; sleep 1; done
 	ok "postgresql tuned for this box (shared_buffers=${sb}MB, effective_cache_size=${ecs}MB, work_mem=${wm}MB, max_connections=${mc})"
+}
+
+# pg_ready is the quiet "is PostgreSQL answering?" probe. `runuser -u postgres`
+# inherits the caller's cwd, and when that is /root (the normal place to run the
+# installer from) postgres cannot chdir there, so EVERY invocation prints
+# "could not change directory to /root: Permission denied" — noise in an output
+# the installer explicitly asks the operator to read (field report C3). Running
+# from a directory postgres can enter removes the message at the source instead
+# of hiding it with 2>/dev/null, which would also hide real errors.
+pg_ready() {
+	(cd /tmp && runuser -u postgres -- psql -tAc 'SELECT 1' >/dev/null 2>&1)
 }
 
 # ── Engine binary ────────────────────────────────────────────────────────────
@@ -966,8 +1024,8 @@ uninstall() {
 	ok "service, unit, binary and config removed"
 	if [ "$PURGE" = "yes" ]; then
 		warn "purging the database + data dir (destructive)"
-		runuser -u postgres -- psql -tAX -c "DROP DATABASE IF EXISTS ${DB_NAME}" >/dev/null 2>&1 || true
-		runuser -u postgres -- psql -tAX -c "DROP ROLE IF EXISTS ${DB_ROLE}" >/dev/null 2>&1 || true
+		(cd /tmp && runuser -u postgres -- psql -tAX -c "DROP DATABASE IF EXISTS ${DB_NAME}") >/dev/null 2>&1 || true
+		(cd /tmp && runuser -u postgres -- psql -tAX -c "DROP ROLE IF EXISTS ${DB_ROLE}") >/dev/null 2>&1 || true
 		rm -rf "$VARLIB"
 		ok "database, role and data dir dropped"
 	else
