@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786261888586,
+  "lastUpdate": 1786262568840,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -2232,6 +2232,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36186242 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "37edf41fe35f72470bebe096c6523a18f557b8a0",
+          "message": "docs: OPS-25's DONE entry records what the gate actually found\n\nSeven iterations to green, each one a real lesson: the sudo lie, two\nplatform-blind tests, a pinned release predating `upgrade`, the runner\nkilling per-step children, and the corrected platform truth — a running\n.old.exe DOES block the next upgrade with the documented loud failure\n(an intermediate run had \"proven\" the opposite; the runner had already\nkilled serve). The entry now matches the shipped workflow.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-09T08:02:25Z",
+          "tree_id": "630fc493cf7b5373f45ade50ae7096186455a0c4",
+          "url": "https://github.com/appximo/appximo/commit/37edf41fe35f72470bebe096c6523a18f557b8a0"
+        },
+        "date": 1786262568220,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 5834,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "400485 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 5834,
+            "unit": "ns/op",
+            "extra": "400485 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "400485 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "400485 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 65.06,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "32775060 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 65.06,
+            "unit": "ns/op",
+            "extra": "32775060 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "32775060 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "32775060 times\n4 procs"
           }
         ]
       }
