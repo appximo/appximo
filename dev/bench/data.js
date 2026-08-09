@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786261075815,
+  "lastUpdate": 1786261888586,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -2160,6 +2160,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "32873930 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "276cc4e7df92c5287cfe8df54ab3bee50bc7c25e",
+          "message": "ci: windows gate iteration 6 — the truth with serve genuinely alive: a running .old.exe DOES block, loudly\n\nIteration 5's merged step finally ran scenario 3 with serve actually\nrunning, and the original backlog reasoning stands: Windows denies\nDELETE on an executing image and denies the rename-over, so the next\nupgrade fails with the documented actionable message. (Iteration 4 had\n\"proven\" the opposite — an artifact of the runner killing serve between\nsteps, exactly the self-deception this session's method exists to\ncatch.) s3a now asserts the loud failure with the binary intact AND the\nrunning serve untouched; s3b stops serve first and asserts the same\nfailure for the other lock class (a no-sharing handle — antivirus/\neditor), which also could not coexist with the running image's own\nhandles.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-09T07:50:57Z",
+          "tree_id": "c34488679b99bc5f566e4f6335f872832e2d09ac",
+          "url": "https://github.com/appximo/appximo/commit/276cc4e7df92c5287cfe8df54ab3bee50bc7c25e"
+        },
+        "date": 1786261887429,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6177,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "386541 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6177,
+            "unit": "ns/op",
+            "extra": "386541 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "386541 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "386541 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 66.02,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36186242 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 66.02,
+            "unit": "ns/op",
+            "extra": "36186242 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36186242 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36186242 times\n4 procs"
           }
         ]
       }
