@@ -232,7 +232,11 @@ jobs:
           }
           Note "boot: PASS — released .exe served /healthz"
 
-      - name: 'upgrade scenario 2: swap under a RUNNING serve'
+      # Scenarios 2–3 share ONE step deliberately: the Windows runner kills a
+      # step's child processes when the step ends (found by iteration 4 — the
+      # serve started in scenario 2's step was dead by scenario 3's), so the
+      # running-serve chain must live and be asserted within a single step.
+      - name: 'upgrade scenarios 2–3: swap under a RUNNING serve · running .old.exe · hard-locked .old.exe'
         working-directory: win-e2e
         run: |
           function Note($m) { $m | Tee-Object -Append -FilePath scenario.txt | Write-Host }
@@ -247,73 +251,60 @@ jobs:
           $proc = Start-Process -FilePath (Resolve-Path .\appximo.exe) `
             -ArgumentList 'serve','--schema',"$schema",'--port','8093' `
             -PassThru -NoNewWindow -RedirectStandardOutput serve.log -RedirectStandardError serve.err
-          $ok = $false
-          foreach ($i in 1..45) {
-            try { Invoke-RestMethod http://localhost:8093/healthz | Out-Null; $ok = $true; break }
-            catch { Start-Sleep 1 }
-          }
-          if (-not $ok) {
-            Note "s2: serve never answered /healthz; serve.log/serve.err follow"
-            Get-Content serve.log, serve.err -ErrorAction SilentlyContinue | Tee-Object -Append -FilePath scenario.txt
-            throw "serve (dev exe) did not answer /healthz"
-          }
-          Note "s2: serve healthy (pid $($proc.Id)); upgrading under it"
-          "SERVE_PID=$($proc.Id)" | Out-File -Append $env:GITHUB_ENV
-          # The swap, while the same .exe is running AND is this process's own image.
-          $out = .\appximo.exe upgrade --version $env:UPGRADE_TAG 2>&1 | Out-String
-          Note "s2: upgrade exit=$LASTEXITCODE output:`n$out"
-          if ($LASTEXITCODE -ne 0) { throw "upgrade under a running serve exited $LASTEXITCODE" }
-          if (-not (Test-Path appximo.exe.old.exe)) { throw "no .old.exe after the running-serve swap" }
-          $v = .\appximo.exe version --json | ConvertFrom-Json
-          if ($v.version -ne $env:UPGRADE_TAG) { throw "swapped binary reports $($v.version), want $env:UPGRADE_TAG" }
-          # The old process must still be serving from its renamed image.
-          Invoke-RestMethod http://localhost:8093/healthz | Out-Null
-          Note "s2: PASS — old process still serving from the renamed image"
-
-      # The gate's first execution CORRECTED the reasoning here: a .old.exe
-      # whose image a process is still RUNNING does not block the next upgrade
-      # on modern Windows — Go's os.Remove uses POSIX delete semantics
-      # (Windows 10+/NTFS), which can unlink a running image. So 3a asserts the
-      # TRUE behavior (success, old process untouched), and 3b manufactures the
-      # genuinely-locked case — a no-sharing open handle, the antivirus/editor
-      # class — which is what actually exercises the documented loud-failure
-      # fallback.
-      - name: 'upgrade scenario 3a: a RUNNING .old.exe does not block the next upgrade'
-        working-directory: win-e2e
-        run: |
-          function Note($m) { $m | Tee-Object -Append -FilePath scenario.txt | Write-Host }
-          # serve (still running) holds appximo.exe.old.exe as its image — the
-          # natural aftermath of scenario 2. The current appximo.exe is the
-          # v0.1.5 release (no `upgrade`), so put the dev build back first.
-          Copy-Item ..\appximo.exe appximo.exe -Force
-          $out = .\appximo.exe upgrade --version $env:UPGRADE_TAG 2>&1 | Out-String
-          Note "s3a: upgrade-with-RUNNING-old exit=$LASTEXITCODE output:`n$out"
-          if ($LASTEXITCODE -ne 0) { throw "an upgrade over a merely-running .old.exe must succeed on Windows 10+ (POSIX delete); it exited $LASTEXITCODE" }
-          # The old serve process survives its image being unlinked.
-          Invoke-RestMethod http://localhost:8093/healthz | Out-Null
-          Note "s3a: PASS — POSIX-delete unlinked the running old image; serve still up"
-
-      - name: 'upgrade scenario 3b: a HARD-LOCKED .old.exe fails loudly, binary intact'
-        working-directory: win-e2e
-        run: |
-          function Note($m) { $m | Tee-Object -Append -FilePath scenario.txt | Write-Host }
-          Copy-Item ..\appximo.exe appximo.exe -Force
-          # A no-sharing handle on .old.exe — deletion AND rename-over both need
-          # an open the sharing mode refuses (the antivirus/editor lock class).
-          if (-not (Test-Path appximo.exe.old.exe)) { Copy-Item ..\appximo.exe appximo.exe.old.exe }
-          $lock = [System.IO.File]::Open((Resolve-Path appximo.exe.old.exe), 'Open', 'Read', 'None')
           try {
-            $out = .\appximo.exe upgrade --version $env:UPGRADE_TAG 2>&1 | Out-String
-            Note "s3b: upgrade-with-hard-locked-old exit=$LASTEXITCODE output:`n$out"
-            if ($LASTEXITCODE -eq 0) { throw "upgrade must fail while .old.exe is hard-locked; it exited 0" }
-            if ($out -notmatch 'could not move the current binary aside') {
-              throw "the failure must be the documented actionable one, got: $out"
+            $ok = $false
+            foreach ($i in 1..45) {
+              try { Invoke-RestMethod http://localhost:8093/healthz | Out-Null; $ok = $true; break }
+              catch { Start-Sleep 1 }
             }
-            # The machine is never left without a working engine.
-            .\appximo.exe version --json | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "binary broken after the refused upgrade" }
-            Note "s3b: PASS — loud failure, binary intact"
-          } finally { $lock.Dispose() }
+            if (-not $ok) {
+              Note "s2: serve never answered /healthz; serve.log/serve.err follow"
+              Get-Content serve.log, serve.err -ErrorAction SilentlyContinue | Tee-Object -Append -FilePath scenario.txt
+              throw "serve (dev exe) did not answer /healthz"
+            }
+            Note "s2: serve healthy (pid $($proc.Id)); upgrading under it"
+            # ── s2: the swap, while the same .exe is running AND is this
+            # process's own image.
+            $out = .\appximo.exe upgrade --version $env:UPGRADE_TAG 2>&1 | Out-String
+            Note "s2: upgrade exit=$LASTEXITCODE output:`n$out"
+            if ($LASTEXITCODE -ne 0) { throw "upgrade under a running serve exited $LASTEXITCODE" }
+            if (-not (Test-Path appximo.exe.old.exe)) { throw "no .old.exe after the running-serve swap" }
+            $v = .\appximo.exe version --json | ConvertFrom-Json
+            if ($v.version -ne $env:UPGRADE_TAG) { throw "swapped binary reports $($v.version), want $env:UPGRADE_TAG" }
+            Invoke-RestMethod http://localhost:8093/healthz | Out-Null
+            Note "s2: PASS — old process still serving from the renamed image"
+
+            # ── s3a: the RUNNING .old.exe does not block the next upgrade.
+            # The gate's first execution corrected the reasoning here: Go's
+            # os.Remove uses POSIX delete semantics on Windows 10+/NTFS, so a
+            # still-running old image unlinks cleanly — the leftover-lock
+            # failure mode does not exist for that case.
+            Copy-Item ..\appximo.exe appximo.exe -Force
+            $out = .\appximo.exe upgrade --version $env:UPGRADE_TAG 2>&1 | Out-String
+            Note "s3a: upgrade-with-RUNNING-old exit=$LASTEXITCODE output:`n$out"
+            if ($LASTEXITCODE -ne 0) { throw "an upgrade over a merely-running .old.exe must succeed on Windows 10+ (POSIX delete); it exited $LASTEXITCODE" }
+            Invoke-RestMethod http://localhost:8093/healthz | Out-Null
+            Note "s3a: PASS — POSIX-delete unlinked the running old image; serve still up"
+
+            # ── s3b: a HARD-LOCKED .old.exe (no-sharing handle — the
+            # antivirus/editor class) fails loudly, binary intact.
+            Copy-Item ..\appximo.exe appximo.exe -Force
+            if (-not (Test-Path appximo.exe.old.exe)) { Copy-Item ..\appximo.exe appximo.exe.old.exe }
+            $lock = [System.IO.File]::Open((Resolve-Path appximo.exe.old.exe), 'Open', 'Read', 'None')
+            try {
+              $out = .\appximo.exe upgrade --version $env:UPGRADE_TAG 2>&1 | Out-String
+              Note "s3b: upgrade-with-hard-locked-old exit=$LASTEXITCODE output:`n$out"
+              if ($LASTEXITCODE -eq 0) { throw "upgrade must fail while .old.exe is hard-locked; it exited 0" }
+              if ($out -notmatch 'could not move the current binary aside') {
+                throw "the failure must be the documented actionable one, got: $out"
+              }
+              .\appximo.exe version --json | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "binary broken after the refused upgrade" }
+              Note "s3b: PASS — loud failure, binary intact"
+            } finally { $lock.Dispose() }
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Stop serve
         if: always()
