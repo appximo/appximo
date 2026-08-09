@@ -43,9 +43,9 @@ did about it BEFORE this session. `→` marks what changed.
 | 12 | State-machine transition guard | `AppendStateTransitionGuard` | same function (ENG-7) | same |
 | 13 | Outbox event (`events:[…]`) | emitted in the same tx | **not emitted** | **differs, documented** — `ctx.Enqueue` is the sanctioned equivalent |
 | 14 | SSE broadcast, `after_*` webhooks | fired post-commit | not fired | **differs, inherent** — the handler's tx has not committed |
-| 15 | Unique violation | 409 `field "x": value already exists` | raw driver error | **open (ENG-42)** |
-| 16 | Unknown column | 422 `unknown_field` (42703) | raw driver error | **open (ENG-42)** |
-| 17 | Deployed-schema surface (ENG-12) | `writeSurface` — a hot-migrated column's rules compile | boot schema | **open (ENG-43)** |
+| 15 | Unique violation | 409 `field "x": value already exists` | raw driver error | **DIVERGED → fixed (ENG-42, CTX-CLOSE-S1)** |
+| 16 | Unknown column | 422 `unknown_field` (42703) | raw driver error | **DIVERGED → fixed (ENG-42, CTX-CLOSE-S1)** |
+| 17 | Deployed-schema surface (ENG-12) | `writeSurface` — a hot-migrated column's rules compile | boot schema | **DIVERGED → fixed (ENG-43, CTX-CLOSE-S1)** |
 
 ### The chain that made #3 expensive
 
@@ -119,10 +119,56 @@ every case; it passes now. Closing a future divergence means **adding a row to
 that table**, not writing a new test — which is what keeps the audit honest
 after the session that wrote it.
 
+## Rows 15–17, closed (CTX-CLOSE-S1, 2026-08-09)
+
+**ENG-42 (rows 15–16, plus what auditing the class surfaced).** The fix is the
+same shape as the rest of this audit: ONE source, compiled toward every
+renderer. `handlers.ClassifyWriteError` is now the single SQLSTATE ladder —
+unique (23505), unknown column (42703), bad `file` reference (23503 on the
+files FK), other FK conflicts (23503), missing tenant, the observed class-22
+bad-input codes, unavailable — and FOUR renderers are compiled from it: the
+REST single-op `WriteDBError` (which absorbed the create/update unique
+pre-checks that lived in `builder.go`), the batch `dbTxError`, the GraphQL
+`safeDBErr` (which absorbed the two mutation-site unique pre-checks), and the
+library path's `classifyWriteErr`, which translates the verdict into typed
+errors a handler returns verbatim: `*UniqueViolationError` (409, the field),
+`*ValidationError` with `unknown_field`/`file_not_found` (the S44 422), and
+`*ForeignKeyConflictError` (409, the safe message). The binary-diff gate ran
+120 cases (3 new rows for the touched contracts) with **120 SAME** — the
+consolidation is byte-identical on the generated surface.
+
+Deliberately NOT translated for the library path: the class-22 bad-input codes
+and missing-tenant. On the generated path the offending value provably came
+from the request body, so a 400 blaming the caller is honest; a handler may
+have COMPUTED the value itself, and a 400 pointing at its client would blame
+the wrong party — the raw error reaches the handler and masks as 500, pointing
+the bug at the code that made it. (`db.IsUnavailable` was already mapped to
+503 by the middleware.) Every classified SQLSTATE was OBSERVED in the parity
+suite's own runs (23505, 42703, 23503 plain, 23503-files) — nothing was
+classified from theory, per the ADR-024 discipline.
+
+**ENG-43 (row 17).** `Ctx` now resolves the SAME deployed surface the
+generated handlers resolve — `codegen.ResolveWriteSurface`, the ENG-12 seam
+exported, never a second resolution — for Insert, Update, Query, Get and
+BindResource. The ENG-12 union guarantee carries over: a tenant with nothing
+deployed (or a lagging record) keeps the boot pair. A resource that exists
+ONLY in the deployed schema stays unknown to `Ctx`, deliberately: its routes,
+GraphQL type and docs are boot-compiled, and the library path claiming to
+serve what the rest of the process cannot would be a new divergence. Verified
+live on the 105: a field deployed to a running consumer binary (PID identical
+before/after, no restart) answered 422 `unknown_field` through a custom
+handler BEFORE the deploy, and its declared `max` rule (not a type error, not
+unknown_field) AFTER it — the discriminating verdict only a compiled deployed
+definition can produce.
+
+The parity table rows: `TestParity_WriteErrorShapesMatchGenerated` (four
+error shapes, same payload both paths, same status AND same decoded body) and
+`TestParity_CtxWritesDeployedSurface` (hot field: declared-rule 422 + working
+write, with a self-deception guard asserting the boot fixture still lacks the
+field).
+
 ## Still open
 
-Filed in [BACKLOG.md](../BACKLOG.md): **ENG-42** (error shape — unique violation
-and unknown column reach a handler as raw driver errors instead of the engine's
-409/422 vocabulary) and **ENG-43** (`Ctx` resolves the BOOT schema, so a
-hot-migrated column's rules are not compiled for the library path the way
-`writeSurface` compiles them for the generated one).
+Nothing from this audit. The table is fully closed: 12 same, 5 fixed by
+CTX-PARITY-S1, 3 fixed by CTX-CLOSE-S1 (rows 15–17), 3 deliberate permanent
+differences documented above.

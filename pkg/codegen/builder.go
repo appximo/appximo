@@ -634,14 +634,12 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// plain ExecRowsTenant, zero added overhead.
 			result, err := RunInsert(req.Context(), tdb, tbl, name, tc.ID, tc.PGSchema, body, emitCreate)
 			if err != nil {
-				// A unique-constraint collision (field unique:true OR a unique
-				// index) is an EXPECTED conflict, not a server error — map it to
-				// 409, same as the UPDATE path (G6). Only the error branch runs;
+				// Every write error flows through the ONE classifier
+				// (handlers.ClassifyWriteError, ENG-42): a unique collision is
+				// the same expected 409 it always was, an unknown column the
+				// S44 422 — rendered by WriteDBError, identically to the
+				// library path's typed errors. Only the error branch runs;
 				// the success path is byte-identical.
-				if field, ok := db.UniqueViolationField(err); ok {
-					writeJSONErr(w, http.StatusConflict, fmt.Sprintf("field %q: value already exists", field))
-					return
-				}
 				writeDBErr(w, req, err)
 				return
 			}
@@ -983,10 +981,9 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 						writeJSONErr(w, http.StatusUnprocessableEntity, "no writable fields in request")
 						return
 					}
-					if field, ok := db.UniqueViolationField(err); ok {
-						writeJSONErr(w, http.StatusConflict, fmt.Sprintf("field %q: value already exists", field))
-						return
-					}
+					// One classifier for every write error (ENG-42): the unique
+					// 409, unknown-column 422 and FK 409 all render from
+					// handlers.ClassifyWriteError via WriteDBError.
 					writeDBErr(w, req, err)
 					return
 				}

@@ -507,40 +507,32 @@ func appendGuards(sql string, args []any, guards []txGuard, res *schema.Resource
 	return sql, args, nil
 }
 
-// dbTxError classifies a DB error from inside the transaction into a txError. A
-// unique violation is a 409, an undefined column a 422, a bad `file` reference a
-// field-addressed 422 and any other FK violation a 409 (exactly the single-op
-// mapping); anything else is an unexpected 500 (the raw SQL is never exposed).
+// dbTxError renders a DB error from inside the transaction into a txError —
+// the batch-shaped rendering of the ONE classifier (handlers.ClassifyWriteError,
+// ENG-42): a unique violation is a 409, an undefined column a 422, a bad `file`
+// reference a field-addressed 422 and any other FK violation a 409 (exactly the
+// single-op mapping); anything else is an unexpected 500 (the raw SQL is never
+// exposed). NIGHT-SWEEP-S1 note kept: bad input (the class-22 SQLSTATEs) used to
+// be a masked 500 on the batch path only — a client typo logged as an engine
+// fault, and a create/create asymmetry with the standalone POST.
 func dbTxError(err error) *txError {
-	if field, ok := db.UniqueViolationField(err); ok {
-		return &txError{status: http.StatusConflict, msg: fmt.Sprintf("field %q: value already exists", field)}
-	}
-	if field, ok := db.UndefinedColumnField(err); ok {
-		return &txError{status: http.StatusUnprocessableEntity, msg: fmt.Sprintf("unknown field: %q", field)}
-	}
-	// A `file` field referencing no file of the tenant (FILES-LINK-S1) — the same
-	// field-addressed 422 the single-op path answers.
-	if column, ok := db.FileReferenceViolation(err); ok {
-		if column == "" {
-			column = "file"
-		}
+	switch v := pkghandlers.ClassifyWriteError(err); v.Kind {
+	case pkghandlers.WriteErrUnique:
+		return &txError{status: http.StatusConflict, msg: fmt.Sprintf("field %q: value already exists", v.Field)}
+	case pkghandlers.WriteErrUnknownColumn:
+		return &txError{status: http.StatusUnprocessableEntity, msg: fmt.Sprintf("unknown field: %q", v.Field)}
+	case pkghandlers.WriteErrFileRef:
 		return &txError{status: http.StatusUnprocessableEntity, msg: "validation_failed",
-			fields: []schema.FieldRuleError{{Field: column, Rule: "file_not_found", Message: "does not reference an existing file of this tenant"}}}
-	}
-	// Any other referential conflict (a bad relation reference, a RESTRICT delete)
-	// — the same clean 409 as the single-op path (previously a masked 500).
-	if fkMsg, ok := db.ForeignKeyViolation(err); ok {
-		return &txError{status: http.StatusConflict, msg: fkMsg}
-	}
-	// Caller-supplied bad input (the F-6 SQLSTATE class — e.g. a non-uuid id in a
-	// create's data) — the same 400 the single-op path answers
-	// (handlers.WriteDBError). NIGHT-SWEEP-S1: this was a masked 500 on the batch
-	// path only — a client typo logged as an engine fault, burning the SLO error
-	// budget, and a create/create asymmetry with the standalone POST.
-	if db.IsBadInput(err) {
+			fields: []schema.FieldRuleError{{Field: v.Field, Rule: "file_not_found", Message: pkghandlers.FileRefMessage}}}
+	case pkghandlers.WriteErrForeignKey:
+		return &txError{status: http.StatusConflict, msg: v.Message}
+	case pkghandlers.WriteErrBadInput:
 		return &txError{status: http.StatusBadRequest, msg: "invalid request"}
+	default:
+		// Missing tenant / unreachable DB fall through with the 503 marker;
+		// everything unclassified stays the masked 500 it is.
+		return &txError{status: http.StatusInternalServerError, msg: "internal error", fields: dbUnavailableMarker(err)}
 	}
-	return &txError{status: http.StatusInternalServerError, msg: "internal error", fields: dbUnavailableMarker(err)}
 }
 
 // dbUnavailableMarker is nil normally; when err signals an unreachable DB it carries

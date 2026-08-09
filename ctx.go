@@ -295,6 +295,30 @@ type InvalidTransitionError struct{ Message string }
 
 func (e *InvalidTransitionError) Error() string { return e.Message }
 
+// UniqueViolationError is returned by Ctx.Insert/Update when the write collided
+// with a unique constraint — a field's `unique: true` or a composite `unique`
+// index (ENG-42). Field is the offending column, parsed from the constraint the
+// same way the generated path does. Returning it from a Handler yields the
+// IDENTICAL 409 the generated POST/PATCH answer: `field "x": value already
+// exists`. Branch on it with errors.As when the endpoint wants its own wording —
+// but prefer returning it verbatim: it is the error a form UI already knows how
+// to present ("that value is taken — change it").
+type UniqueViolationError struct{ Field string }
+
+func (e *UniqueViolationError) Error() string {
+	return fmt.Sprintf("field %q: value already exists", e.Field)
+}
+
+// ForeignKeyConflictError is returned by Ctx.Insert/Update on a referential
+// conflict (ENG-42): a write referencing a row that does not exist ("invalid
+// reference: no matching \"x\" record") or a change a RESTRICT FK refuses
+// ("cannot delete: still referenced by …"). Message is the engine's safe,
+// human-readable wording — the raw Postgres error never reaches a client.
+// Returning it from a Handler yields the same 409 the generated path answers.
+type ForeignKeyConflictError struct{ Message string }
+
+func (e *ForeignKeyConflictError) Error() string { return e.Message }
+
 // engineRefs is the read-only engine state shared by every requestCtx: the
 // loaded schema, the validators compiled once at boot, the RBAC policy, and
 // the per-tenant identity store (for Ctx.CreateUser). It is never mutated
@@ -443,8 +467,70 @@ func (c *requestCtx) evalCtx() rbac.EvalContext {
 func (c *requestCtx) Tx() pgx.Tx       { return c.tx }
 func (c *requestCtx) UnsafeTx() pgx.Tx { return c.tx }
 
+// surface resolves the resource definition + compiled validators every RBAC-aware
+// helper works against: the tenant's DEPLOYED surface when one exists, else the
+// boot-compiled pair — the SAME seam the generated handlers resolve
+// (codegen.ResolveWriteSurface, the ENG-12 union), never a second resolution.
+// Before ENG-43 the Ctx read c.eng.schema/c.eng.validators directly, which are
+// the BOOT surface: after a hot migration a new column validated through /api
+// and was silently unvalidated through a custom handler (the write still worked
+// — the DB has the column — just without its declared rules). ok=false means the
+// resource is unknown to BOTH surfaces; a resource that exists only in the
+// deployed schema stays unknown here, deliberately — its routes, GraphQL type
+// and docs are boot-compiled, and the library path claiming to serve what the
+// rest of the process cannot would be a new divergence, not a feature.
+func (c *requestCtx) surface(resource string) (*schema.ResourceSchema, *schema.ResourceValidator, bool) {
+	bootRes, ok := c.eng.schema.Resources[resource]
+	if !ok {
+		return nil, nil, false
+	}
+	// A hand-built test ctx may carry no request context or tenant; the boot
+	// pair is then the whole surface (exactly the no-provider fallback).
+	if c.ctx == nil || c.tc == nil {
+		return &bootRes, c.eng.validators[resource], true
+	}
+	res, rv := codegen.ResolveWriteSurface(c.ctx, c.tc.ID, resource, &bootRes, c.eng.validators[resource])
+	return res, rv, true
+}
+
+// classifyWriteErr translates a write's database error into the SAME typed
+// vocabulary the generated POST/PATCH answer with (ENG-42), rendered from the
+// ONE classifier both paths share (handlers.ClassifyWriteError): the unique
+// 409, the unknown-column and bad-file-reference 422s (S44 shape), and the
+// referential-conflict 409. A handler that returns these verbatim produces the
+// byte-identical response — see backend-spec: the engine's per-field 422 is
+// better than any hand-written wrapper, which is exactly what a field evaluator
+// hid by wrapping raw pgx errors in a generic message.
+//
+// Kinds deliberately NOT translated here:
+//   - bad input (the class-22 SQLSTATEs): on the generated path the offending
+//     value came from the request body, so a 400 blaming the caller is honest.
+//     A handler may have COMPUTED the value itself — a 400 pointing at its
+//     client would blame the wrong party — so the raw error reaches the handler
+//     (and masks as 500), pointing the bug at the code that made it.
+//   - missing tenant / unreachable DB: infrastructure verdicts the middleware
+//     already maps (db.IsUnavailable → 503 + Retry-After).
+func classifyWriteErr(err error) error {
+	switch v := pkghandlers.ClassifyWriteError(err); v.Kind {
+	case pkghandlers.WriteErrUnique:
+		return &UniqueViolationError{Field: v.Field}
+	case pkghandlers.WriteErrUnknownColumn:
+		return &ValidationError{Fields: []schema.FieldRuleError{
+			{Field: v.Field, Rule: "unknown_field", Message: pkghandlers.UnknownFieldMessage}}}
+	case pkghandlers.WriteErrFileRef:
+		return &ValidationError{Fields: []schema.FieldRuleError{
+			{Field: v.Field, Rule: "file_not_found", Message: pkghandlers.FileRefMessage}}}
+	case pkghandlers.WriteErrForeignKey:
+		return &ForeignKeyConflictError{Message: v.Message}
+	}
+	return err
+}
+
 func (c *requestCtx) Query(resource string, opts QueryOpts) ([]map[string]any, error) {
-	res, ok := c.eng.schema.Resources[resource]
+	// The deployed surface (ENG-43): a hot-migrated column filters/sorts here
+	// exactly as it does on the generated list path (M1's readSurface is the
+	// same provider re-asked).
+	res, _, ok := c.surface(resource)
 	if !ok {
 		return nil, fmt.Errorf("appximo: unknown resource %q", resource)
 	}
@@ -475,7 +561,7 @@ func (c *requestCtx) Query(resource string, opts QueryOpts) ([]map[string]any, e
 	// The role's field allowlist bounds Filters/OrderBy too (SEC-5 closed
 	// generally): a custom handler acting AS a restricted role cannot use a
 	// hidden column as an oracle any more than the HTTP surface can.
-	qb, err := query.BuildQuery(resource, &res, params, eval.Condition, eval.AllowedFields)
+	qb, err := query.BuildQuery(resource, res, params, eval.Condition, eval.AllowedFields)
 	if err != nil {
 		return nil, err
 	}
@@ -501,7 +587,7 @@ func (c *requestCtx) Query(resource string, opts QueryOpts) ([]map[string]any, e
 // evaluation, query.AppendRowCondition and the field projection — so a custom route
 // cannot see a row (or a column) the REST API would hide from the same caller.
 func (c *requestCtx) Get(resource, id string) (map[string]any, error) {
-	if _, ok := c.eng.schema.Resources[resource]; !ok {
+	if _, _, ok := c.surface(resource); !ok {
 		return nil, fmt.Errorf("appximo: unknown resource %q", resource)
 	}
 	eval := c.eng.policy.Evaluate(c.evalCtx(), resource, "read")
@@ -524,7 +610,10 @@ func (c *requestCtx) Get(resource, id string) (map[string]any, error) {
 }
 
 func (c *requestCtx) Insert(resource string, data map[string]any) (map[string]any, error) {
-	if _, ok := c.eng.schema.Resources[resource]; !ok {
+	// The deployed surface, not the boot one (ENG-43): a hot-migrated column's
+	// declared rules bind here exactly as they do on the generated POST.
+	res, rv, ok := c.surface(resource)
+	if !ok {
 		return nil, fmt.Errorf("appximo: unknown resource %q", resource)
 	}
 	eval := c.eng.policy.Evaluate(c.evalCtx(), resource, "create")
@@ -538,10 +627,8 @@ func (c *requestCtx) Insert(resource string, data map[string]any) (map[string]an
 	// status and the next transition failed with `invalid transition from ""`),
 	// values were never type-checked, and a row could be created outside its
 	// declared initial state — while backend-spec promised parity with the POST.
-	if res, ok := c.eng.schema.Resources[resource]; ok {
-		if verrs := codegen.PrepareCreate(&res, c.eng.validators[resource], data); len(verrs) > 0 {
-			return nil, &ValidationError{Fields: verrs}
-		}
+	if verrs := codegen.PrepareCreate(res, rv, data); len(verrs) > 0 {
+		return nil, &ValidationError{Fields: verrs}
 	}
 	// The SAME create-time RBAC the generated POST and the GraphQL create run
 	// (EnforceCreateRBAC), at the same point in the sequence: it drops fields
@@ -563,12 +650,10 @@ func (c *requestCtx) Insert(resource string, data map[string]any) (map[string]an
 	}
 	// Per-field file attach policy (FILES-1) — same check as REST/GraphQL/batch,
 	// on the handler's tx.
-	if res, ok := c.eng.schema.Resources[resource]; ok {
-		if fpErrs, fpErr := codegen.CheckFilePoliciesTx(c.ctx, c.tx, &res, data); fpErr != nil {
-			return nil, fpErr
-		} else if len(fpErrs) > 0 {
-			return nil, &ValidationError{Fields: fpErrs}
-		}
+	if fpErrs, fpErr := codegen.CheckFilePoliciesTx(c.ctx, c.tx, res, data); fpErr != nil {
+		return nil, fpErr
+	} else if len(fpErrs) > 0 {
+		return nil, &ValidationError{Fields: fpErrs}
 	}
 
 	cols, ph, args := pkghandlers.BuildInsertArgs(data)
@@ -576,13 +661,18 @@ func (c *requestCtx) Insert(resource string, data map[string]any) (map[string]an
 		pgx.Identifier{resource}.Sanitize(), cols, ph)
 	row, err := c.queryOne(q, args)
 	if err != nil {
-		return nil, err
+		// The engine's typed verdicts instead of the raw driver error (ENG-42):
+		// the unique 409, the unknown-column / bad-file-reference 422, the
+		// referential 409 — return them verbatim and the response is the
+		// generated POST's, byte for byte.
+		return nil, classifyWriteErr(err)
 	}
 	return pkghandlers.FilterFields(row, eval.AllowedFields), nil
 }
 
 func (c *requestCtx) Update(resource, id string, data map[string]any) (map[string]any, error) {
-	res, ok := c.eng.schema.Resources[resource]
+	// The deployed surface, not the boot one (ENG-43) — same seam as Insert.
+	res, rv, ok := c.surface(resource)
 	if !ok {
 		return nil, fmt.Errorf("appximo: unknown resource %q", resource)
 	}
@@ -592,7 +682,7 @@ func (c *requestCtx) Update(resource, id string, data map[string]any) (map[strin
 	}
 	// The SAME preparation the generated PATCH runs (CTX-PARITY-S1): partial
 	// semantics plus the value type check the library path never had.
-	if verrs := codegen.PrepareUpdate(&res, c.eng.validators[resource], data); len(verrs) > 0 {
+	if verrs := codegen.PrepareUpdate(res, rv, data); len(verrs) > 0 {
 		return nil, &ValidationError{Fields: verrs}
 	}
 	data = applyWriteAllowlist(data, eval.AllowedFields)
@@ -600,7 +690,7 @@ func (c *requestCtx) Update(resource, id string, data map[string]any) (map[strin
 		return nil, &ValidationError{Fields: []schema.FieldRuleError{{Rule: "empty", Message: "no writable fields"}}}
 	}
 	// Per-field file attach policy (FILES-1) — same check as REST/GraphQL/batch.
-	if fpErrs, fpErr := codegen.CheckFilePoliciesTx(c.ctx, c.tx, &res, data); fpErr != nil {
+	if fpErrs, fpErr := codegen.CheckFilePoliciesTx(c.ctx, c.tx, res, data); fpErr != nil {
 		return nil, fpErr
 	} else if len(fpErrs) > 0 {
 		return nil, &ValidationError{Fields: fpErrs}
@@ -627,14 +717,15 @@ func (c *requestCtx) Update(resource, id string, data map[string]any) (map[strin
 	// never needs to re-state the transition table). Race-safe: the move is
 	// allowed only if the row's CURRENT state permits it, inside the UPDATE's
 	// WHERE. No-op for updates that touch no state-machine field.
-	q, args, err = codegen.AppendStateTransitionGuard(q, args, &res, data)
+	q, args, err = codegen.AppendStateTransitionGuard(q, args, res, data)
 	if err != nil {
 		return nil, err
 	}
 	q += " RETURNING *"
 	row, err := c.queryOne(q, args)
 	if err != nil {
-		return nil, err
+		// Same typed verdicts as Insert (ENG-42) — see classifyWriteErr.
+		return nil, classifyWriteErr(err)
 	}
 	if row == nil {
 		// Zero rows: not found / row-condition excluded (→ nil, nil — the
@@ -642,7 +733,7 @@ func (c *requestCtx) Update(resource, id string, data map[string]any) (map[strin
 		// The explain read runs the row condition too, so a hidden row stays
 		// indistinguishable from a missing one.
 		status, msg := codegen.ExplainTransitionFailureTx(c.ctx, c.tx,
-			pgx.Identifier{resource}.Sanitize(), id, &res, data, eval.Condition)
+			pgx.Identifier{resource}.Sanitize(), id, res, data, eval.Condition)
 		switch status {
 		case http.StatusUnprocessableEntity:
 			return nil, &InvalidTransitionError{Message: msg}
@@ -713,8 +804,10 @@ func (c *requestCtx) Bind(dst any) error {
 }
 
 func (c *requestCtx) BindResource(resource string, dst any) error {
-	rv := c.eng.validators[resource]
-	if rv == nil {
+	// The deployed surface (ENG-43): a hot-migrated field's rules validate here
+	// too, not only through the generated routes.
+	_, rv, ok := c.surface(resource)
+	if !ok || rv == nil {
 		return fmt.Errorf("appximo: unknown resource %q", resource)
 	}
 	b, err := c.readBody()

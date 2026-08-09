@@ -87,6 +87,16 @@ func writeSurface(ctx context.Context, tenantID, resource string, bootRes *schem
 	return bootRes, bootRV
 }
 
+// ResolveWriteSurface is the SAME decision writeSurface makes, exported for the
+// library path (ENG-43): Ctx.Insert/Update/Query resolve the tenant's deployed
+// surface through this — one seam, never a second resolution — so a hot-migrated
+// column's declared rules bind on a custom handler exactly as they do on the
+// generated /api write (and a tenant with nothing deployed keeps the boot pair,
+// the ENG-12 union guarantee).
+func ResolveWriteSurface(ctx context.Context, tenantID, resource string, bootRes *schema.ResourceSchema, bootRV *schema.ResourceValidator) (*schema.ResourceSchema, *schema.ResourceValidator) {
+	return writeSurface(ctx, tenantID, resource, bootRes, bootRV)
+}
+
 // readSurface picks the resource DEFINITION the read path validates query
 // parameters against — filters, sort, search, is_null, aggregate field lists:
 // the tenant's DEPLOYED surface when one is available, else the boot resource.

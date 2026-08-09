@@ -476,6 +476,45 @@ field) — no switch needed.
 > business rule) — and then keep the cause: `errors.As` the
 > `*appximo.ValidationError` and merge its `Fields` into your response rather
 > than replacing them.
+>
+> **The database-level failures are typed too (ENG-42)** — you never see a raw
+> pgx error for the cases a form must distinguish, and `return err` renders
+> each one as the generated endpoint's exact response:
+>
+> | error | means | rendered |
+> |---|---|---|
+> | `*appximo.ValidationError` | a field broke its rules; also an unknown field (`rule:"unknown_field"`) or a `file` id that references no file (`rule:"file_not_found"`) | 422, per-field |
+> | `*appximo.UniqueViolationError` | that value is taken (`unique:true` or a unique index); `.Field` names the column | 409 `field "code": value already exists` |
+> | `*appximo.ForeignKeyConflictError` | a reference to a row that does not exist, or a change a RESTRICT FK refuses | 409, safe message |
+> | `*appximo.InvalidTransitionError` | the state machine refused the move | 422, same as PATCH |
+> | `appximo.ErrUpdateConflict` | the row changed concurrently (re-read and retry) | 409 |
+>
+> The two a form UI always needs: **409 unique** = "change that value";
+> **422 per-field** = "complete/fix these fields". Both come classified from the
+> SAME source the generated path renders (one SQLSTATE ladder,
+> `handlers.ClassifyWriteError`), so branching with `errors.As` is safe:
+>
+> ```go
+> row, err := ctx.Insert("orders", data)
+> var uve *appximo.UniqueViolationError
+> if errors.As(err, &uve) {
+>     // optional: your own wording — uve.Field names the column
+>     return ctx.Error(409, "ya existe un pedido con ese código", err)
+> }
+> if err != nil {
+>     return err // ✅ everything else: the engine's own 422/409/403 shape
+> }
+> ```
+>
+> An error the engine has NOT observed being caused by input stays raw and masks
+> as 500 — deliberately. In a handler the value may be one YOUR code computed,
+> and a 400 blaming the caller for your bug would point at the wrong party.
+
+> **Ctx validates against the tenant's DEPLOYED schema (ENG-43)** — same seam as
+> the generated routes: a column added by a hot migration is immediately
+> writable through `ctx.Insert`/`Update`/`BindResource` WITH its declared rules
+> compiled, and filterable through `ctx.Query`, no restart. What still needs a
+> restart is unchanged (a NEW resource, hooks, GraphQL input types).
 
 `Update` also enforces a declared **state machine**, with the exact semantics of
 the generated PATCH (the guard lives in the UPDATE's WHERE — race-safe, terminal

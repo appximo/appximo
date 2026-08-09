@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/appximo/appximo/pkg/schema"
@@ -41,9 +42,17 @@ const paritySchemaJSON = `{
   "version": "1",
   "name": "parity",
   "resources": {
+    "customers": {
+      "fields": {
+        "name": { "type": "string", "required": true, "minLength": 1 }
+      }
+    },
     "orders": {
       "fields": {
         "reference":   { "type": "string", "required": true, "minLength": 1, "maxLength": 40 },
+        "code":        { "type": "string", "unique": true },
+        "customer_id": { "type": "uuid", "relation": "customers" },
+        "attachment":  { "type": "file" },
         "total_cents": { "type": "int64", "min": 0 },
         "priority":    { "type": "int", "default": 3 },
         "channel":     { "type": "string", "enum": ["web", "phone"], "default": "web" },
@@ -373,6 +382,160 @@ func TestParity_InsertEnforcesRowConditionOnCreate(t *testing.T) {
 				t.Errorf("%s: want 403 (mass-assignment block), got %d (%v) — a custom route must not be a way "+
 					"around a rule the REST API enforces", path, resp.StatusCode, b)
 			}
+		}
+	})
+}
+
+// TestParity_WriteErrorShapesMatchGenerated — the ENG-42 rows of the parity
+// table. The two most common write failures are exactly the two a form UI must
+// distinguish — "that value is taken" (409) vs "fix this field" (422) — and the
+// generated path already names both. Before this session Ctx.Insert returned
+// the RAW pgx error for all of them, so a consumer either leaked a driver
+// message or wrote their own mapping (the field evaluator wrapped everything in
+// a generic message, HIDING the per-field 422 the engine produced). Every case
+// runs the SAME payload through both paths and asserts the same status and the
+// same decoded body.
+func TestParity_WriteErrorShapesMatchGenerated(t *testing.T) {
+	app, schemaPath := newParityApp(t)
+	s := mustLoadSchema(t, schemaPath)
+	srv := newServerFor(t, app)
+	tenant := "parityerr"
+	helpers.RegisterTenant(t, itPool, tenant, s)
+	token := helpers.GenToken(t, "admin", "u1", tenant)
+	host := tenant + ".localhost"
+
+	// Seed the unique collision target through the generated path.
+	seed := do(t, srv, http.MethodPost, "/api/orders", host, token, `{"reference":"U-seed","code":"DUP-1"}`)
+	if seed.StatusCode != http.StatusCreated {
+		t.Fatalf("seed: want 201, got %d (%v)", seed.StatusCode, decode(t, seed))
+	}
+
+	cases := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{
+			// SQLSTATE 23505, OBSERVED in this test's own run: the classified 409.
+			name:       "unique violation → 409 naming the field",
+			body:       `{"reference":"U-1","code":"DUP-1"}`,
+			wantStatus: http.StatusConflict,
+		},
+		{
+			// SQLSTATE 42703, OBSERVED: the S44 422 unknown_field (the create
+			// path deliberately has no whitelist — the DB is the source of truth
+			// for the writable column set, ENG-12).
+			name:       "unknown column → 422 unknown_field",
+			body:       `{"reference":"U-2","ghost":true}`,
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+		{
+			// SQLSTATE 23503 (plain FK), OBSERVED: the safe referential 409.
+			name:       "bad relation reference → 409 invalid reference",
+			body:       `{"reference":"U-3","customer_id":"3f0a97a1-58cc-4372-a567-0e02b2c3d479"}`,
+			wantStatus: http.StatusConflict,
+		},
+		{
+			// SQLSTATE 23503 on the files FK (FILES-LINK-S1), OBSERVED: the
+			// field-addressed 422 file_not_found.
+			name:       "bad file reference → 422 file_not_found",
+			body:       `{"reference":"U-4","attachment":"3f0a97a1-58cc-4372-a567-0e02b2c3d479"}`,
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			genResp := do(t, srv, http.MethodPost, "/api/orders", host, token, tc.body)
+			genBody := decode(t, genResp)
+			if genResp.StatusCode != tc.wantStatus {
+				t.Fatalf("generated POST: want %d, got %d (%v)", tc.wantStatus, genResp.StatusCode, genBody)
+			}
+
+			libResp := do(t, srv, http.MethodPost, "/api/_lib_orders", host, token, tc.body)
+			libBody := decode(t, libResp)
+			if libResp.StatusCode != tc.wantStatus {
+				t.Fatalf("ctx.Insert surfaced verbatim: want %d, got %d (%v) — the handler returned the "+
+					"engine's typed error; the middleware must render the generated path's exact response",
+					tc.wantStatus, libResp.StatusCode, libBody)
+			}
+			if !reflect.DeepEqual(libBody, genBody) {
+				t.Errorf("same failing payload, DIFFERENT error body.\n  generated: %v\n  ctx.Insert: %v\n"+
+					"  ENG-42's contract: return ctx.Insert's error verbatim and the client sees the "+
+					"generated path's response.", genBody, libBody)
+			}
+		})
+	}
+}
+
+// TestParity_CtxWritesDeployedSurface — the ENG-43 row. A column added by a hot
+// migration (deployed to the TENANT, absent from the BOOT schema) must validate
+// through Ctx.Insert exactly as it does through the generated POST — same seam
+// (codegen.ResolveWriteSurface), same compiled rules, no restart.
+//
+// The test is built so it cannot self-deceive:
+//   - it ASSERTS the boot schema genuinely lacks the field (if a future edit
+//     adds it to the boot fixture, the test fails loudly instead of testing
+//     nothing);
+//   - it demands the DECLARED rule ("max") in the 422 — not unknown_field, not
+//     a type error — which only exists if the DEPLOYED definition was compiled;
+//   - the valid-value write must land (the column must really be writable).
+func TestParity_CtxWritesDeployedSurface(t *testing.T) {
+	app, schemaPath := newParityApp(t)
+	boot := mustLoadSchema(t, schemaPath)
+	if _, present := boot.Resources["orders"].Fields["discount_cents"]; present {
+		t.Fatal("self-deception guard: the BOOT parity schema now declares discount_cents — " +
+			"this test only proves ENG-43 if the field exists ONLY in the tenant's deployed schema")
+	}
+
+	// The tenant's DEPLOYED schema: the boot schema plus one hot field with a
+	// declared rule. RegisterTenant provisions the column and persists this
+	// schema as the tenant's json_schema — exactly what a live deploy does.
+	deployedJSON := strings.Replace(paritySchemaJSON,
+		`"total_cents": { "type": "int64", "min": 0 },`,
+		`"total_cents": { "type": "int64", "min": 0 },
+        "discount_cents": { "type": "int64", "min": 0, "max": 1000 },`, 1)
+	dir := t.TempDir()
+	depPath := filepath.Join(dir, "deployed.json")
+	if err := os.WriteFile(depPath, []byte(deployedJSON), 0o600); err != nil {
+		t.Fatalf("write deployed schema: %v", err)
+	}
+	deployed := mustLoadSchema(t, depPath)
+
+	srv := newServerFor(t, app)
+	tenant := "parityhot"
+	helpers.RegisterTenant(t, itPool, tenant, deployed)
+	token := helpers.GenToken(t, "admin", "u1", tenant)
+	host := tenant + ".localhost"
+
+	t.Run("the hot field's DECLARED rule rejects on both paths", func(t *testing.T) {
+		for _, path := range []string{"/api/orders", "/api/_lib_orders"} {
+			resp := do(t, srv, http.MethodPost, path, host, token, `{"reference":"H-1","discount_cents":5000}`)
+			body := decode(t, resp)
+			if resp.StatusCode != http.StatusUnprocessableEntity {
+				t.Fatalf("%s: want 422 (max rule of a hot-migrated field), got %d (%v) — "+
+					"the path validated against the BOOT surface", path, resp.StatusCode, body)
+			}
+			fields, _ := body["fields"].([]any)
+			if len(fields) != 1 {
+				t.Fatalf("%s: want exactly the max violation, got %v", path, body)
+			}
+			f, _ := fields[0].(map[string]any)
+			if f["field"] != "discount_cents" || f["rule"] != "max" {
+				t.Errorf("%s: want the DECLARED rule {discount_cents, max}, got %v — "+
+					"unknown_field or a type error here means the deployed definition was NOT compiled", path, f)
+			}
+		}
+	})
+
+	t.Run("a valid value lands through Ctx.Insert", func(t *testing.T) {
+		resp := do(t, srv, http.MethodPost, "/api/_lib_orders", host, token, `{"reference":"H-2","discount_cents":500}`)
+		body := decode(t, resp)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("want 201, got %d (%v)", resp.StatusCode, body)
+		}
+		if fmt.Sprint(body["discount_cents"]) != "500" {
+			t.Errorf("discount_cents round-trip: want 500, got %v", body["discount_cents"])
 		}
 	})
 }

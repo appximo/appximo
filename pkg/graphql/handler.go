@@ -325,33 +325,39 @@ func (e *validationError) Extensions() map[string]any {
 
 // safeDBErr maps a database-layer error to a client-safe GraphQL error so internal
 // details (schema/table/column names, raw SQL, SQLSTATE) are never serialized into
-// the GraphQL errors array. Mirrors the REST WriteDBError masking. Always returns a
-// generic message — never the original error.
+// the GraphQL errors array. It is the GraphQL rendering of the ONE classifier
+// (handlers.ClassifyWriteError, ENG-42) — the same ladder REST, the batch
+// transaction and Ctx.Insert/Update render from. Always returns a safe message —
+// never the original error.
 func safeDBErr(err error) error {
-	// A `file` field referencing no file of the tenant (FILES-LINK-S1) → the same
-	// field-addressed validation_failed shape REST answers with 422, so both APIs
-	// present a bad file reference as input validation on that field.
-	if column, ok := db.FileReferenceViolation(err); ok {
-		if column == "" {
-			column = "file"
-		}
+	switch v := pkghandlers.ClassifyWriteError(err); v.Kind {
+	case pkghandlers.WriteErrUnique:
+		// A unique-constraint collision is a clean conflict (G6), identical on
+		// create and update — not a masked DB error.
+		return fmt.Errorf("field %q: value already exists", v.Field)
+	case pkghandlers.WriteErrFileRef:
+		// A `file` field referencing no file of the tenant (FILES-LINK-S1) → the
+		// same field-addressed validation_failed shape REST answers with 422, so
+		// both APIs present a bad file reference as input validation on that field.
 		return &validationError{fields: []schema.FieldRuleError{
-			{Field: column, Rule: "file_not_found", Message: "does not reference an existing file of this tenant"},
+			{Field: v.Field, Rule: "file_not_found", Message: pkghandlers.FileRefMessage},
 		}}
-	}
-	// Foreign-key violation → a clear referential message (MIG-F1-S1), mirroring the
-	// REST 409 so a RESTRICT delete / bad reference is never a masked "internal error".
-	if fkMsg, ok := db.ForeignKeyViolation(err); ok {
-		return fmt.Errorf("%s", fkMsg)
-	}
-	switch {
-	case db.IsMissingTenant(err):
+	case pkghandlers.WriteErrForeignKey:
+		// Foreign-key violation → a clear referential message (MIG-F1-S1), mirroring
+		// the REST 409 so a RESTRICT delete / bad reference is never a masked
+		// "internal error".
+		return fmt.Errorf("%s", v.Message)
+	case pkghandlers.WriteErrMissingTenant:
 		return fmt.Errorf("invalid tenant")
-	case db.IsBadInput(err):
+	case pkghandlers.WriteErrBadInput:
 		return fmt.Errorf("invalid request")
-	case db.IsUnavailable(err):
+	case pkghandlers.WriteErrUnavailable:
 		return fmt.Errorf("service unavailable")
 	default:
+		// WriteErrUnknownColumn deliberately lands here: the GraphQL input types
+		// are boot-compiled, so an unknown field is rejected at parse and a 42703
+		// reaching this point is an engine fault, not client input — masked, as
+		// it always was on this surface.
 		return fmt.Errorf("internal error")
 	}
 }
@@ -1274,11 +1280,8 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		// set (no res.Fields whitelist), mirroring REST.
 		result, err := codegen.RunInsert(p.Context, tdb, tbl, name, tc.ID, tc.PGSchema, body, emitCreate)
 		if err != nil {
-			// Surface a unique-constraint collision as a clean conflict (G6),
-			// identical to the GraphQL update resolver — not a masked DB error.
-			if field, ok := db.UniqueViolationField(err); ok {
-				return nil, fmt.Errorf("field %q: value already exists", field)
-			}
+			// safeDBErr renders the shared classifier — the unique-collision
+			// conflict (G6) included, identically to the update resolver.
 			return nil, safeDBErr(err)
 		}
 
@@ -1400,9 +1403,6 @@ func updateResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		if err != nil {
 			if err == codegen.ErrNoWritableUpdate {
 				return nil, fmt.Errorf("no writable fields in request")
-			}
-			if field, ok := db.UniqueViolationField(err); ok {
-				return nil, fmt.Errorf("field %q: value already exists", field)
 			}
 			return nil, safeDBErr(err)
 		}

@@ -606,6 +606,21 @@ func (a *App) writeHandlerError(w http.ResponseWriter, rc *requestCtx, rt Route,
 		writeErr(w, http.StatusConflict, "the resource changed during the update; retry")
 		return
 	}
+	// The typed write conflicts from Ctx.Insert/Update (ENG-42): a handler that
+	// returns them verbatim answers the generated path's exact 409 — `field "x":
+	// value already exists` for a unique collision, the safe referential message
+	// for an FK conflict. (The 422s of the same classifier arrive as
+	// *ValidationError, already handled above.)
+	var uve *UniqueViolationError
+	if errors.As(err, &uve) {
+		writeErr(w, http.StatusConflict, uve.Error())
+		return
+	}
+	var fke *ForeignKeyConflictError
+	if errors.As(err, &fke) {
+		writeErr(w, http.StatusConflict, fke.Message)
+		return
+	}
 	// Ctx.ServeFile's uniform miss (malformed/unknown/foreign file id): a
 	// handler that just `return ctx.ServeFile(id)` answers the same 404 the
 	// engine's own download routes do (FRONTEND-SPEC-S1).
