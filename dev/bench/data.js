@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786260361779,
+  "lastUpdate": 1786261075815,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -2088,6 +2088,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "48400071 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "f1af468d15b6cbb9211034fb1157541fb324782e",
+          "message": "ci: windows gate iteration 5 — the runner kills a step's children; the running-serve chain lives in ONE step\n\nIteration 4's black box showed serve.log ending at scenario 2's own\nprobes: the Windows runner terminates a step's child processes when the\nstep ends, so the serve started in scenario 2 was dead by 3a's assert.\nScenarios 2, 3a and 3b now share one step (serve started, asserted and\nstopped within it, with a finally); the always-on Stop-serve step\nremains as backup.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-09T07:37:27Z",
+          "tree_id": "fa1ee37c1b197a3c92eeb5196dc4dab2fd26fca0",
+          "url": "https://github.com/appximo/appximo/commit/f1af468d15b6cbb9211034fb1157541fb324782e"
+        },
+        "date": 1786261074944,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 7039,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "381170 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 7039,
+            "unit": "ns/op",
+            "extra": "381170 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "381170 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "381170 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 72.98,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "32873930 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 72.98,
+            "unit": "ns/op",
+            "extra": "32873930 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "32873930 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "32873930 times\n4 procs"
           }
         ]
       }
