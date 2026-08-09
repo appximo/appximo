@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786256166044,
+  "lastUpdate": 1786256710705,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -1728,6 +1728,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "35924223 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "2036bc3708776a04516ed973602c27cb347f9b57",
+          "message": "ci: windows gate iteration 1 — keep LF at checkout, upload the test output as the black box\n\nThe runner image sets core.autocrlf=true system-wide, so checkout\nrewrote every LF file to CRLF — the likely breaker of byte-exact\ncomparisons in the unit lane. And a failed Windows run's logs are not\nAPI-readable from the box that watches CI (no token), so the lane's\noutput now ships as an artifact (nightly.link-fetchable), the same\npattern as the Linux gotest-json.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-09T06:24:42Z",
+          "tree_id": "2df69bc1d4a23c51b605fda569872977ef5b4cba",
+          "url": "https://github.com/appximo/appximo/commit/2036bc3708776a04516ed973602c27cb347f9b57"
+        },
+        "date": 1786256709687,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6173,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "371774 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6173,
+            "unit": "ns/op",
+            "extra": "371774 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "371774 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "371774 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 66.59,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36361965 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 66.59,
+            "unit": "ns/op",
+            "extra": "36361965 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36361965 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36361965 times\n4 procs"
           }
         ]
       }
