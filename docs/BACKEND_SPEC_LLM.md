@@ -748,15 +748,19 @@ Rules worth knowing before you use it:
   declaring either is a load error. The **data** a handler touches is authorized
   separately — `ctx.Query`/`Insert`/`Update` re-evaluate the role against the real
   resources (Layer 2 below).
-- **Boot-validated.** A grant for a segment no route registers — or an action no
-  registered method provides — **fails the boot**, with the registered segments
-  listed. Dead authorization config never becomes a mystery 403.
+- **Boot-validated in YOUR binary.** A grant for a segment none of your
+  registered routes serves — or an action no registered method provides —
+  **fails the boot**, with the registered segments listed. Dead authorization
+  config never becomes a mystery 403.
 - **Authoritative for the segments it names**: adding `routes` to a wildcard role
   *narrows* those segments. A segment it doesn't name falls through to the role's
   normal evaluation, so deny-by-default is untouched.
 - A key that names a real resource is rejected — use `permissions` for that.
-- The **pure `appximo serve` binary registers no custom routes**, so a schema
-  with a `routes` grant only boots in the binary that registers them.
+- The **stock `appximo serve`/`up` binary registers no custom routes**, so your
+  grants are INERT there — and it **boots anyway, with a warning** naming each
+  one (OPS-26). One schema file serves the whole journey: prototype it with
+  `appximo up` today, compile it into your binary tomorrow, and the same grants
+  activate — no second schema to maintain.
 
 Full rationale, alternatives considered, and the security tests:
 [ADR-021](adr/ADR-021-custom-route-authorization.md).

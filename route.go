@@ -241,9 +241,43 @@ func validateRoute(rt Route, s *schema.APISchema, seen map[string]bool) error {
 // It is deliberately about EXISTENCE, never about widening: nothing here grants
 // anything. A schema with no `routes` (every schema before this key) returns nil
 // after one map length check.
-func validateRouteGrants(s *schema.APISchema, routes []Route) error {
+//
+// OPS-26 — THE ASYMMETRY. The verdict depends on WHICH binary is booting:
+//
+//   - A binary that registers NO custom routes (the stock `appximo serve` / `up`)
+//     WARNS and boots. A grant for a segment nothing serves is INERT — it
+//     authorizes nothing and opens nothing (deny-by-default is untouched) — and
+//     refusing to boot over it meant ONE schema file could not both be
+//     `up`-bootable for the first mile AND carry the grants its custom routes
+//     need in the consumer binary: users ended up maintaining two schemas, the
+//     exact divergence class this project exists to close.
+//   - A binary that DOES register custom routes keeps the fail-closed rejection
+//     for any grant that matches none of them. There the original argument holds
+//     with full force: the routes this binary serves are the routes this schema
+//     is FOR, so a grant naming a segment (or an action) none of them provides
+//     is dead authorization config — a typo that would otherwise surface as
+//     "the RBAC says they can, so why the 403?".
+//
+// The reasoning is recorded in ADR-021 (the `routes` block's home).
+func validateRouteGrants(s *schema.APISchema, routes []Route) ([]string, error) {
 	if !schemaHasRouteGrants(s) {
-		return nil
+		return nil, nil
+	}
+	if len(routes) == 0 {
+		// The stock binary: every grant is inert by construction. Name each one,
+		// say WHY it does nothing, and point at the binary that activates it.
+		var warnings []string
+		for _, roleName := range sortedMapKeys(s.RBAC.Roles) {
+			role := s.RBAC.Roles[roleName]
+			for _, seg := range sortedMapKeys(role.Routes) {
+				warnings = append(warnings, fmt.Sprintf(
+					"rbac.roles.%s.routes.%s: this binary registers no custom routes, so the grant is INERT — "+
+						"it authorizes nothing (and opens nothing) until the app runs on the consumer binary that "+
+						"registers /api/%s via appximo.Route. Booting anyway.",
+					roleName, seg, seg))
+			}
+		}
+		return warnings, nil
 	}
 	// segment → the set of actions its registered routes provide.
 	served := make(map[string]map[string]bool, len(routes))
@@ -284,10 +318,10 @@ func validateRouteGrants(s *schema.APISchema, routes []Route) error {
 		}
 	}
 	if len(problems) > 0 {
-		return fmt.Errorf("appximo: RBAC grants custom routes that are not registered:\n  %s",
+		return nil, fmt.Errorf("appximo: RBAC grants custom routes that are not registered:\n  %s",
 			strings.Join(problems, "\n  "))
 	}
-	return nil
+	return nil, nil
 }
 
 // schemaHasRouteGrants reports whether any role declares a `routes` block.

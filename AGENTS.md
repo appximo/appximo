@@ -1099,12 +1099,17 @@ with `routes`, a map of segment → `{actions}`:
 - **Authoritative but never widening:** a listed segment is decided by its entry
   (so it can NARROW a wildcard role); an unlisted one falls through to normal
   evaluation, so deny-by-default is intact.
-- **Boot-validated against the REGISTERED routes:** a grant for a segment nothing
-  serves — or an action no registered method provides — fails the boot with the
-  registered segments listed (also checked on `POST /admin/engine/schema`, so a
-  Studio deploy gets a clean 422 instead of a restart+rollback). Consequence: the
-  pure `serve` binary, which registers no custom routes, refuses to boot a schema
-  that grants one.
+- **Boot-validated against the REGISTERED routes, with the OPS-26 asymmetry
+  (CTX-CLOSE-S1):** in a binary that registers custom routes, a grant for a
+  segment none of them serves — or an action no registered method provides —
+  fails the boot with the registered segments listed (also checked on
+  `POST /admin/engine/schema`, so a Studio deploy gets a clean 422 instead of a
+  restart+rollback). The STOCK `serve`/`up` binary, which registers no custom
+  routes, instead WARNS and boots — the grant is INERT there (it authorizes
+  nothing; deny-by-default untouched), and the warning names the role, the
+  segment and the consumer binary that activates it. One schema file is
+  therefore both `up`-bootable and consumer-ready; see ADR-021 §The
+  stock-binary asymmetry.
 - Hot path: one `len()` on a nil map for every role without `routes` — measured
   `no_change`.
 

@@ -893,9 +893,15 @@ func (a *App) Start() error {
 	// in the schema must name a route this binary actually registered. Checked here
 	// — the first moment BOTH halves exist (Register is done, the listener is not
 	// open) — so dead authorization config fails the boot instead of reading as an
-	// inexplicable 403 later.
-	if err := validateRouteGrants(a.schema, a.routes); err != nil {
+	// inexplicable 403 later. On the STOCK binary (no custom routes registered) a
+	// grant is inert, so it WARNS and boots instead (OPS-26): one schema file can
+	// be both `up`-bootable and carry its consumer binary's grants.
+	grantWarnings, err := validateRouteGrants(a.schema, a.routes)
+	if err != nil {
 		return err
+	}
+	for _, w := range grantWarnings {
+		a.logf("WARNING [%s]", w)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

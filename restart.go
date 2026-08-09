@@ -162,8 +162,15 @@ func clearBootMarker(path string) { os.Remove(bootMarkerPath(path)) } //nolint:e
 // is a clean 422 with nothing written.
 func (a *App) persistBootSchema(raw json.RawMessage) error {
 	if s, err := schema.LoadFromBytes(raw); err == nil {
-		if gerr := validateRouteGrants(s, a.routes); gerr != nil {
+		// Same asymmetry as boot (OPS-26): on the stock binary a grant is inert
+		// — warn (logged; the deploy proceeds), don't 422 a schema the consumer
+		// binary will authorize correctly.
+		warnings, gerr := validateRouteGrants(s, a.routes)
+		if gerr != nil {
 			return fmt.Errorf("%w: %v", platformadmin.ErrSchemaRejected, gerr)
+		}
+		for _, w := range warnings {
+			log.Printf("WARNING [%s]", w)
 		}
 	}
 	return persistBootSchemaFile(a.cfg.SchemaPath, raw)

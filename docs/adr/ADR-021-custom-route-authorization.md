@@ -87,7 +87,43 @@ Add a **`routes`** block to a role: a map of **custom-route segment → `{action
      every concrete action must correspond to a registered method on it. A grant
      nothing serves is dead authorization config — exactly the thing that later
      reads as "the RBAC says they can, so why the 403?" — so it fails the boot with
-     the registered segments listed.
+     the registered segments listed. **Asymmetry (OPS-26, CTX-CLOSE-S1): this
+     fail-closed verdict applies only to a binary that registers custom routes.**
+     See "The stock-binary asymmetry" below.
+
+### The stock-binary asymmetry (OPS-26, added 2026-08-09)
+
+The boot check's original argument — dead authorization config should fail early —
+is an argument about a binary whose routes ARE the schema's routes: if this build
+registers `/api/checkout` and the schema grants `chekout`, the grant is a typo and
+the 403 it would produce later is inexplicable. That argument is **strong for a
+consumer binary and weak for the stock one**. The stock `appximo serve`/`up`
+binary registers no custom routes by construction, so EVERY grant is inert there —
+it authorizes nothing and opens nothing (deny-by-default is untouched) — and
+failing the boot meant one schema file could not both be `up`-bootable for the
+first mile and carry the grants its consumer binary needs. Users solved it by
+maintaining **two schema files**, which is the divergence class this project
+spends its sessions closing (found independently by the CTX-PARITY-S1 fresh-agent
+run and the VecinGo field report).
+
+The resolution is the asymmetry, not a global softening:
+
+- **Stock binary (zero routes registered): warn and boot.** One actionable
+  warning per grant, naming the role, the segment, the fact that it is INERT, and
+  the binary that activates it:
+  `rbac.roles.recepcion.routes.checkout: this binary registers no custom routes,
+  so the grant is INERT — it authorizes nothing (and opens nothing) until the app
+  runs on the consumer binary that registers /api/checkout via appximo.Route.
+  Booting anyway.`
+- **Consumer binary (≥1 route registered): fail-closed, unchanged.** A grant that
+  matches none of ITS routes — or an action no registered method provides — still
+  refuses the boot (and still 422s on the deploy path). The routes this binary
+  serves are the routes this schema is for; there, an unmatched grant is a typo,
+  not a first-mile artifact.
+
+The discriminator is `len(routes) == 0` — a property of the BUILD, not of the
+schema — so the same schema file boots with `up`, warns, and enforces correctly
+the day it is compiled into its consumer binary.
 
 ### Hot path
 
@@ -139,9 +175,11 @@ places. The schema is where "who may do what" lives.
   tests (`pkg/rbac/route_grant_test.go`): a role that does not declare a segment
   gets 403; a wildcard role is unaffected on segments it does not name; a route
   grant never widens resource access.
-- A schema that grants a route is now **binary-specific**: the pure `appximo
-  serve` binary, which registers no custom routes, refuses to boot it. That is
-  deliberate — the alternative is a policy that can never match.
+- ~~A schema that grants a route is now **binary-specific**: the pure `appximo
+  serve` binary, which registers no custom routes, refuses to boot it.~~
+  **Superseded (OPS-26, 2026-08-09):** the stock binary now WARNS and boots — the
+  grant is inert there — while a consumer binary keeps the fail-closed rejection.
+  See "The stock-binary asymmetry" above.
 - The `routes` key is authoritative, so adding one to a wildcard role *narrows*
   that segment. Documented; it is the "what you wrote is what applies" trade.
 

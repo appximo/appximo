@@ -1267,12 +1267,17 @@ condition and allowlist included.
 | Layer | Where | Checks |
 |---|---|---|
 | schema | `validateRouteGrants`, `pkg/schema/validator.go` | segment matches `^[a-z][a-z0-9_\-]*$` (hyphens allowed — a route path is a URL, not a GraphQL identifier); at least one known action; the segment is **not** a declared resource (`"<x>" is a declared resource, not a custom route`) |
-| boot | `validateRouteGrants`, `route.go` (in `Start`, and on `POST /admin/engine/schema`) | the segment is **registered** by this binary, and every concrete action has a registered method — else the boot fails, listing the registered segments |
+| boot | `validateRouteGrants`, `route.go` (in `Start`, and on `POST /admin/engine/schema`) | in a binary that registers custom routes: the segment is **registered**, and every concrete action has a registered method — else the boot fails, listing the registered segments. In the STOCK binary (no custom routes): each grant is a boot **WARNING**, not a refusal |
 
 The boot layer is what a standalone schema cannot check: `appximo validate`,
-Studio and the AI loop see no Go program. Consequence: the pure `appximo serve`
-binary registers no custom routes, so it **refuses to boot** a schema with a
-`routes` grant — deliberately, since such a policy could never match.
+Studio and the AI loop see no Go program. The verdict is asymmetric (OPS-26,
+ADR-021 §The stock-binary asymmetry): the stock `appximo serve`/`up` binary
+registers no custom routes, so a `routes` grant is INERT there — it authorizes
+nothing — and the engine **warns and boots** (naming the role, the segment and
+the consumer binary that activates it) instead of refusing. A binary that DOES
+register custom routes keeps the fail-closed refusal for a grant matching none
+of them — there, an unmatched grant is a typo, and such a policy could never
+match. One schema file is therefore both `up`-bootable and consumer-ready.
 
 **Evaluation** (`routeGrantFor`, `pkg/rbac/policy.go`): a segment listed in
 `routes` is decided by that entry (it can only NARROW a wildcard role, never widen

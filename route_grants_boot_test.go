@@ -31,7 +31,7 @@ func TestValidateRouteGrants_AcceptsARegisteredSegment(t *testing.T) {
 		"checkout": {Actions: []string{"create"}},
 	})
 	routes := []Route{{Method: "POST", Path: "/api/checkout", Handler: noopHandler}}
-	if err := validateRouteGrants(s, routes); err != nil {
+	if _, err := validateRouteGrants(s, routes); err != nil {
 		t.Fatalf("a grant matching a registered route must pass, got: %v", err)
 	}
 }
@@ -43,7 +43,7 @@ func TestValidateRouteGrants_AcceptsANestedPathSegment(t *testing.T) {
 		"webhooks": {Actions: []string{"create"}},
 	})
 	routes := []Route{{Method: "POST", Path: "/api/webhooks/wompi", Handler: noopHandler}}
-	if err := validateRouteGrants(s, routes); err != nil {
+	if _, err := validateRouteGrants(s, routes); err != nil {
 		t.Fatalf("a nested path's first segment must match, got: %v", err)
 	}
 }
@@ -53,7 +53,7 @@ func TestValidateRouteGrants_RejectsAnUnregisteredSegment(t *testing.T) {
 		"chekout": {Actions: []string{"create"}}, // typo
 	})
 	routes := []Route{{Method: "POST", Path: "/api/checkout", Handler: noopHandler}}
-	err := validateRouteGrants(s, routes)
+	_, err := validateRouteGrants(s, routes)
 	if err == nil {
 		t.Fatal("a grant for a segment nothing serves must fail the boot")
 	}
@@ -68,7 +68,7 @@ func TestValidateRouteGrants_RejectsAnActionNoMethodProvides(t *testing.T) {
 		"checkout": {Actions: []string{"create", "read"}}, // no GET is registered
 	})
 	routes := []Route{{Method: "POST", Path: "/api/checkout", Handler: noopHandler}}
-	err := validateRouteGrants(s, routes)
+	_, err := validateRouteGrants(s, routes)
 	if err == nil {
 		t.Fatal("granting an action no registered method provides is dead config and must fail")
 	}
@@ -82,7 +82,7 @@ func TestValidateRouteGrants_WildcardAcceptsWhateverTheSegmentServes(t *testing.
 		"checkout": {Actions: []string{"*"}},
 	})
 	routes := []Route{{Method: "POST", Path: "/api/checkout", Handler: noopHandler}}
-	if err := validateRouteGrants(s, routes); err != nil {
+	if _, err := validateRouteGrants(s, routes); err != nil {
 		t.Fatalf("a wildcard grant must not require every method to exist, got: %v", err)
 	}
 }
@@ -90,18 +90,35 @@ func TestValidateRouteGrants_WildcardAcceptsWhateverTheSegmentServes(t *testing.
 // A schema with no `routes` at all — every schema before this feature — must skip
 // the check entirely, including in the pure binary (zero registered routes).
 func TestValidateRouteGrants_NoGrantsIsANoOp(t *testing.T) {
-	if err := validateRouteGrants(tasksSchema(), nil); err != nil {
-		t.Fatalf("a schema without routes must never fail this check, got: %v", err)
+	warnings, err := validateRouteGrants(tasksSchema(), nil)
+	if err != nil || len(warnings) != 0 {
+		t.Fatalf("a schema without routes must never fail nor warn, got: %v / %v", warnings, err)
 	}
 }
 
-// The PURE binary (no custom routes) booting a schema that grants one is dead
-// config — fail loudly rather than serve a policy that can never match.
-func TestValidateRouteGrants_PureBinaryRejectsGrants(t *testing.T) {
+// OPS-26 — THE ASYMMETRY. The stock binary (no custom routes registered) BOOTS a
+// schema that grants one, warning that the grant is inert: a grant for a segment
+// nothing serves authorizes nothing, and refusing to boot meant one schema file
+// could not both be `up`-bootable and carry its consumer binary's grants (the
+// user ended up maintaining two schemas). The consumer binary keeps the
+// fail-closed rejection (the tests above), where the original dead-config
+// argument holds with full force.
+func TestValidateRouteGrants_StockBinaryWarnsAndBoots(t *testing.T) {
 	s := schemaGranting(map[string]schema.RouteGrant{"checkout": {Actions: []string{"create"}}})
-	err := validateRouteGrants(s, nil)
-	if err == nil || !strings.Contains(err.Error(), "registered segments: none") {
-		t.Fatalf("expected a clear failure naming an empty route set, got: %v", err)
+	warnings, err := validateRouteGrants(s, nil)
+	if err != nil {
+		t.Fatalf("the stock binary must tolerate an inert grant (OPS-26), got: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("want exactly one warning naming the grant, got %d: %v", len(warnings), warnings)
+	}
+	// Actionable: name the role, the segment, say it is INERT, and point at the
+	// consumer binary that activates it.
+	w := warnings[0]
+	for _, must := range []string{"rbac.roles.customer.routes.checkout", "INERT", "/api/checkout", "appximo.Route", "Booting anyway"} {
+		if !strings.Contains(w, must) {
+			t.Errorf("warning must contain %q, got: %s", must, w)
+		}
 	}
 }
 
