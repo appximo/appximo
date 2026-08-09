@@ -657,21 +657,36 @@ blocking the first mile and the Windows verification.
   (201); the consumer with an unmatched grant refused the boot naming its
   registered segments. Applied on boot AND the `POST /admin/engine/schema`
   deploy path.
-- **OPS-25 — Windows verified FOREVER: the `windows` CI job.** `windows-latest`
-  in ci.yml (parallel, ~real gate, 30-min cap): whole-module native build,
+- **OPS-25 — Windows verified FOREVER: the `windows` CI job, GREEN after 7
+  iterations that each taught something real.** `windows-latest` in ci.yml
+  (parallel, real gate, 30-min cap): whole-module native build,
   platform-sensitive unit lanes (cmd, platformpath — %LOCALAPPDATA% —, schema,
-  query), the `.env` BOM case, `validate --json` stdout purity, and the four
-  upgrade scenarios against the REAL pinned release (v0.1.5): idle
-  (download+checksum+rename-aside), under a RUNNING `serve` (real PostgreSQL
-  from the runner image; also proves the released .exe boots), the locked
-  `.old.exe` (the natural aftermath of the running-serve swap; asserts the
-  loud failure + intact binary), and an unwritable destination (deny-ACL;
-  asserts the actionable permission error). Found + fixed while writing it:
-  `notWritable` advised `sudo appximo upgrade` on Windows — now platform-aware
-  ("Run as administrator"). **NOT covered, recorded:** a real Program Files
-  ACL under a NON-admin user (the runner user is an administrator; the
-  deny-ACL simulates the class, not the elevation UX), antivirus file locks,
-  and a non-admin profile — reopen from a field report if one hits them.
+  query), the `.env` BOM case, `validate --json` stdout purity, the released
+  .exe BOOTING and serving /healthz on Windows, and the upgrade scenarios
+  against the real pinned release (v0.1.5): idle
+  (download+checksum+rename-aside), the swap under a RUNNING `serve` (real
+  PostgreSQL from the runner image; the old process keeps serving from its
+  renamed image), a `.old.exe` whose image still RUNS, a hard-locked
+  `.old.exe` (no-sharing handle — the antivirus/editor class), and an
+  unwritable destination (deny-ACL; actionable permission error). What the
+  gate FOUND, run by run: (1) `notWritable` advised `sudo` on Windows — now
+  platform-aware ("Run as administrator"); (2) two platform-blind tests
+  (0600-permission-bits and the sudo-literal pin); (3) the pinned v0.1.5
+  PREDATES `upgrade` (unknown command) — the self-replace scenarios run on the
+  dev build until a release ships the command, then UPGRADE_TAG goes
+  release→release; (4) the runner kills a step's child processes — the
+  running-serve chain must live in one step; (5) **the platform truth,
+  including a self-deception the method caught:** with serve genuinely alive,
+  a running `.old.exe` DOES block the next upgrade (Windows denies DELETE and
+  rename-over on an executing image) with the documented loud actionable
+  failure, binary intact, serve untouched — an intermediate iteration had
+  "proven" the opposite because the runner had already killed serve between
+  steps. Windows-runner craft that stays in the workflow comments: autocrlf
+  neutralized BEFORE checkout, and the black-box artifacts (win-gotest.txt +
+  scenario.txt/serve logs via nightly.link) because step logs need a token
+  this box does not have. **NOT covered, recorded:** a real Program Files ACL
+  under a NON-admin user (the runner user is an administrator; the deny-ACL
+  simulates the class, not the elevation UX) — reopen from a field report.
 
 Gates: unit lane green · full lane (no `-short`, Docker) green · lint 0 ·
 binary-diff gate **120/120 SAME** (3 new corpus rows for the touched write
