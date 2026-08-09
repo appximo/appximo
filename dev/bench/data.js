@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786160749556,
+  "lastUpdate": 1786249111582,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -1440,6 +1440,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36387474 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "0a7c340ec46ecc9880a95cf413d310a2bbe95b7f",
+          "message": "fix(ctx): Ctx.Insert/Update really do validate like the generated POST/PATCH\n\nbackend-spec told consumers that Ctx.Insert validates \"exactly like the\ngenerated POST\". It did not, and a third party built 18 resources and 13\ncustom handlers on that promise (VecinGo). What the generated create did and\nthe library create skipped:\n\n  - schema DEFAULTS. Rows written by a custom handler landed with a NULL\n    status, and the NEXT transition then failed with `invalid transition from\n    \"\"` — the row was not merely missing a value, it was outside its own\n    declared lifecycle, with no error at write time.\n  - the create TYPE check (validateCreateTypes).\n  - the state-machine INITIAL states — a custom handler could create a row in\n    a state the schema forbids as an entry point.\n\nClosed the way this project has closed the same class twice before\n(AppendStateTransitionGuard, FieldDef.ReferencedColumn): ONE function both\npaths call, not a patch on the second one. codegen.PrepareCreate applies\ndefaults, then the declarative rules and value types together (so one response\nstill carries every failing field), then the initial states — the generated\nPOST's exact order. PrepareUpdate is its PATCH-semantics counterpart. The\ngenerated handler now calls it too, so a step added there reaches both paths\nby construction.\n\nNumbers, the second reported bug: the declarative rules and the type check\nboth accepted float64 ONLY, on the reasoning that encoding/json produces\nfloat64 — true of the HTTP path, false of the library path, where a handler\npasses what Go computes and what the engine RETURNS from a read is int64 from\nthe driver. Rejecting int64 on write while handing int64 back on read makes\nread-modify-write impossible without a manual cast. schema.AsFloat64 and\nschema.IsIntegral are now the one decision about what a number is, shared by\npkg/schema's rules and codegen's type check; fromJSONBody accepts Go numerics\nas caller input while still excluding time.Time (the engine-injected\ndefault-now value whose rejection once broke every create on such a schema).\n\nAlso: validate --json always emits `warnings` even when empty. With the key\nomitted, \"no warnings\" and \"an engine without the warnings feature\" were the\nsame JSON — a fresh agent reported it could not use zero warnings as a\npositive signal and hand-checked the known rules instead.\n\nTHE GUARANTEE: ctx_parity_integration_test.go runs the SAME payload through\nBOTH paths and asserts identical rows, plus a read-write round trip of values\nthe engine itself returned. It failed on all three cases before this change\n(status NULL; \"must be a number\" for int64) and passes now.\n\nGates: unit lane 0 FAIL, binary-diff gate 117/117 SAME (the generated path is\nbyte-identical after the refactor), ABBA write-path bench base vs new\np50 1.114/1.058 vs 1.031/0.954 ms, delta -0.093 ms, under the 0.5 ms gate,\nwith an A-to-A control of 0.056 ms covering over half of it, so no_change. A\nfresh agent with no repo access rebuilt the reported scenario (default plus\nstate machine plus int64 through ctx.Insert) and needed ZERO workarounds.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-09T04:09:47Z",
+          "tree_id": "89d0f712dacd1c6c2719ba6afa0f48d5cee3f9fa",
+          "url": "https://github.com/appximo/appximo/commit/0a7c340ec46ecc9880a95cf413d310a2bbe95b7f"
+        },
+        "date": 1786249111019,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6231,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "373771 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6231,
+            "unit": "ns/op",
+            "extra": "373771 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "373771 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "373771 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 66.81,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36204046 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 66.81,
+            "unit": "ns/op",
+            "extra": "36204046 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36204046 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36204046 times\n4 procs"
           }
         ]
       }
