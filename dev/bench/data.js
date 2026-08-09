@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786249111582,
+  "lastUpdate": 1786249755112,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -1512,6 +1512,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36204046 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "3877dd873082a03a5eb851293725432a9c3905e6",
+          "message": "fix(ctx): close the create-RBAC divergence nobody reported, and write the parity audit\n\nAuditing the whole Ctx-vs-generated class (not just the two divergences the\nfield report named) surfaced a third one that is security-relevant and that no\nuser had hit yet.\n\nThe generated POST runs EnforceCreateRBAC, which does THREE things: drops\nfields outside the role's allowlist, FORCES the row-condition column to the\ncaller's resolved identity, and REJECTS a body supplying a different value for\nit. Ctx.Insert did only the first. For a role scoped by\nconditions:{field:owner_id, val:$user_id}:\n\n  POST /api/notes  {\"body\":\"mine\"}                        -> 201, owner_id forced\n  ctx.Insert       {\"body\":\"mine\"}                        -> 201, owner_id NULL\n  POST /api/notes  {\"body\":\"x\",\"owner_id\":\"user-mallory\"} -> 403\n  ctx.Insert       {\"body\":\"x\",\"owner_id\":\"user-mallory\"} -> 201, attributed to mallory\n\nA custom route was a way AROUND a rule /api enforces. Ctx.Insert now calls the\nsame EnforceCreateRBAC, at the same point in the sequence — the function\nalready existed and was already shared with the GraphQL create, so this adds\nno implementation, only a caller.\n\ndocs/audits/CTX_PARITY_AUDIT.md records the whole class: 17 behaviours of the\nwrite path, what each side did, the 5 that diverged, the 3 that differ\nDELIBERATELY (hooks, post-commit effects, numeric precision) with the argument\nfor each, and the 2 left open as ENG-42 (error shape: a unique violation and an\nunknown column reach a handler as raw driver errors instead of the engine's\n409/422 vocabulary) and ENG-43 (Ctx resolves the BOOT schema, so a hot-migrated\ncolumn's rules are not compiled for it the way writeSurface compiles them for\nthe generated path).\n\nbackend-spec stops promising parity it does not have: it now names exactly what\nIS shared, what is not, and why. It also says with emphasis what a field\nevaluator learned the hard way — RETURN the engine's write errors verbatim;\n`return err` gives the caller every failing field, and wrapping it in a generic\nsentence throws away the per-field 422 the engine already computed.\n\nGates: unit lane 0 FAIL, lint 0 issues, binary-diff gate 117/117 SAME.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-09T04:28:40Z",
+          "tree_id": "84e1dc61cb8664c8350aa66e4ac2cba3f6b59cd3",
+          "url": "https://github.com/appximo/appximo/commit/3877dd873082a03a5eb851293725432a9c3905e6"
+        },
+        "date": 1786249754574,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6069,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "381546 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6069,
+            "unit": "ns/op",
+            "extra": "381546 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "381546 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "381546 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 66.27,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36485445 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 66.27,
+            "unit": "ns/op",
+            "extra": "36485445 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36485445 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36485445 times\n4 procs"
           }
         ]
       }
