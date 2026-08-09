@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -82,9 +83,14 @@ func TestEnsureEnvFileMergesWithoutRewriting(t *testing.T) {
 			t.Fatalf("JWT_SECRET reported as written though it existed")
 		}
 	}
-	st, _ := os.Stat(filepath.Join(dir, ".env"))
-	if st.Mode().Perm() != 0o600 {
-		t.Fatalf(".env permissions = %v, want 0600", st.Mode().Perm())
+	// POSIX permission bits do not exist on Windows (Stat reports 0666 for any
+	// writable file — the OS models access as ACLs); the 0600 contract is a
+	// Unix one, so it is asserted only where it is real (OPS-25 windows gate).
+	if runtime.GOOS != "windows" {
+		st, _ := os.Stat(filepath.Join(dir, ".env"))
+		if st.Mode().Perm() != 0o600 {
+			t.Fatalf(".env permissions = %v, want 0600", st.Mode().Perm())
+		}
 	}
 }
 

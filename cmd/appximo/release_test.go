@@ -203,18 +203,25 @@ func TestReplaceSelfUnwritableIsActionable(t *testing.T) {
 
 // The message shape itself, asserted regardless of uid — the test above skips
 // under root (which ignores directory permissions), and this is the part that
-// must never regress: the path that refused AND the command that works.
+// must never regress: the path that refused AND the command that works — which
+// is PER PLATFORM (OPS-25: `sudo` on Windows is a lie; there the advice is an
+// elevated prompt).
 func TestNotWritableNamesPathAndFix(t *testing.T) {
+	privileged := "sudo appximo upgrade"
+	if runtime.GOOS == "windows" {
+		privileged = "Run as administrator"
+	}
 	err := notWritable("/usr/local/bin/appximo", os.ErrPermission)
-	for _, want := range []string{"/usr/local/bin/appximo", "sudo appximo upgrade", "on your PATH"} {
+	for _, want := range []string{"/usr/local/bin/appximo", privileged, "on your PATH"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("permission error must contain %q:\n%v", want, err)
 		}
 	}
-	// A non-permission failure keeps its own cause instead of suggesting sudo.
+	// A non-permission failure keeps its own cause instead of suggesting
+	// privileges.
 	other := notWritable("/tmp/x", errors.New("no space left on device"))
-	if strings.Contains(other.Error(), "sudo") {
-		t.Errorf("a non-permission error must not suggest sudo: %v", other)
+	if strings.Contains(other.Error(), "sudo") || strings.Contains(other.Error(), "administrator") {
+		t.Errorf("a non-permission error must not suggest privileges: %v", other)
 	}
 }
 
