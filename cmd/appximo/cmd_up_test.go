@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"testing"
 
 	"github.com/appximo/appximo"
@@ -136,7 +137,7 @@ func TestReconcileSchema(t *testing.T) {
 			}
 		}))
 		defer srv.Close()
-		rec, err := reconcileSchema(srv.URL, "k", "acme", "schema.json", local)
+		rec, err := reconcileSchema(srv.URL, "k", "acme", "schema.json", local, 30*time.Second, 0)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -161,7 +162,7 @@ func TestReconcileSchema(t *testing.T) {
 			}
 		}))
 		defer srv.Close()
-		rec, err := reconcileSchema(srv.URL, "k", "acme", "schema.json", local)
+		rec, err := reconcileSchema(srv.URL, "k", "acme", "schema.json", local, 30*time.Second, 0)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -181,7 +182,7 @@ func TestReconcileSchema(t *testing.T) {
 			}
 		}))
 		defer srv.Close()
-		_, err := reconcileSchema(srv.URL, "k", "acme", "schema.json", local)
+		_, err := reconcileSchema(srv.URL, "k", "acme", "schema.json", local, 30*time.Second, 0)
 		if err == nil {
 			t.Fatal("a failed migration must be an error")
 		}
@@ -200,7 +201,7 @@ func TestReconcileSchema(t *testing.T) {
 			}
 		}))
 		defer srv.Close()
-		rec, err := reconcileSchema(srv.URL, "k", "acme", "schema.json", local)
+		rec, err := reconcileSchema(srv.URL, "k", "acme", "schema.json", local, 30*time.Second, 0)
 		if err != nil || rec.state != "migrated" {
 			t.Fatalf("want migrated, got %+v err=%v", rec, err)
 		}
@@ -307,5 +308,49 @@ func TestPickRoleIsDeterministicOnTies(t *testing.T) {
 	}
 	if first != "alpha" {
 		t.Errorf("tie must break alphabetically, got %q", first)
+	}
+}
+
+// CTX-PARITY-S1 (field report B): the provisioning deadline must scale with the
+// work — the tenant's DDL is one statement per round trip, so a remote database
+// multiplies the wall clock. A fixed 30 s failed against a managed database
+// ~119 ms away with an 18-resource schema, WHILE the DDL completed.
+func TestProvisionTimeoutScalesWithSchemaAndLatency(t *testing.T) {
+	local := provisionTimeout(18, 200*time.Microsecond)
+	if local < 30*time.Second || local > 31*time.Second {
+		t.Errorf("a local database must stay at the ~30 s floor, got %s", local)
+	}
+	// The reported case: 18 resources, 119 ms RTT.
+	remote := provisionTimeout(18, 119*time.Millisecond)
+	if remote <= 30*time.Second {
+		t.Errorf("a remote database must get more than the floor, got %s", remote)
+	}
+	if remote < 2*time.Minute {
+		t.Errorf("18 resources at 119 ms should budget minutes, got %s", remote)
+	}
+	// Monotonic in both inputs.
+	if provisionTimeout(40, 119*time.Millisecond) <= remote {
+		t.Error("more resources must budget more time")
+	}
+	if provisionTimeout(18, 300*time.Millisecond) <= remote {
+		t.Error("higher latency must budget more time")
+	}
+	// Bounded, so a pathological RTT cannot hang the command forever.
+	if capped := provisionTimeout(500, 2*time.Second); capped != 15*time.Minute {
+		t.Errorf("the budget must cap at 15m, got %s", capped)
+	}
+	// Degenerate inputs stay sane.
+	if provisionTimeout(0, 0) != 30*time.Second {
+		t.Error("an empty schema still gets the floor")
+	}
+}
+
+func TestRemoteHintOnlySpeaksWhenRemote(t *testing.T) {
+	if h := remoteHint(300 * time.Microsecond); h != "" {
+		t.Errorf("a local database must not mention latency, got %q", h)
+	}
+	h := remoteHint(119 * time.Millisecond)
+	if !strings.Contains(h, "119ms") || !strings.Contains(h, "not local") {
+		t.Errorf("a remote database must name the measured RTT: %q", h)
 	}
 }

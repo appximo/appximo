@@ -52,6 +52,10 @@ type upOptions struct {
 	Yes           bool
 	AdminEmail    string
 	AdminPassword string
+	// ProvisionTimeout overrides the deadline for the two DDL-bearing control
+	// plane calls (tenant registration and schema migration). Zero = derive it
+	// from the schema size and the measured database RTT.
+	ProvisionTimeout time.Duration
 
 	// progress is where step-by-step announcements go: stdout normally, stderr
 	// in --json mode (stdout must carry EXACTLY one JSON object — the C1 rule).
@@ -159,6 +163,7 @@ Stop the server with Ctrl+C. Stop the Docker Postgres too: appximo down.`,
 		opts.Yes, _ = cmd.Flags().GetBool("yes")
 		opts.AdminEmail, _ = cmd.Flags().GetString("admin-email")
 		opts.AdminPassword, _ = cmd.Flags().GetString("admin-password")
+		opts.ProvisionTimeout, _ = cmd.Flags().GetDuration("provision-timeout")
 		if err := runUp(opts); err != nil {
 			fmt.Fprintln(os.Stderr, "appximo up:", err)
 			os.Exit(1)
@@ -175,6 +180,8 @@ func init() {
 	upCmd.Flags().String("pg-container", "appximo-pg", "Docker container name for Postgres")
 	upCmd.Flags().Int("pg-port", 54329, "host port for the Docker Postgres (loopback-only)")
 	upCmd.Flags().Bool("no-docker", false, "never start Docker; require DATABASE_URL")
+	upCmd.Flags().Duration("provision-timeout", 0,
+		"deadline for tenant registration / schema migration (0 = sized from the schema and the measured database RTT)")
 	upCmd.Flags().StringArray("static", nil, "serve your frontend from the same binary: [urlpath=]dir (repeatable, same form as serve --static)")
 	upCmd.Flags().Bool("spa", false, "client-side-routing fallback for --static mounts (serve index.html for unmatched paths)")
 	upCmd.Flags().Bool("json", false, "print the final card as ONE JSON object on stdout (progress → stderr)")
@@ -376,7 +383,15 @@ func runUp(opts upOptions) error {
 
 		// 1. Tenant, with the schema in the body (T2 — the same POST /tenants
 		// install.sh prints; a duplicate is the idempotent re-run, not an error).
-		created, err := registerTenant(controlPort, adminKey, opts.Name, admEmail, schemaRaw)
+		// The DDL behind these two calls scales with the schema and pays the
+		// database RTT per statement, so the deadline is sized from both
+		// (--provision-timeout overrides). A client-side timeout is never
+		// treated as a verdict: both helpers verify what actually landed.
+		provTimeout := opts.ProvisionTimeout
+		if provTimeout <= 0 {
+			provTimeout = provisionTimeout(len(parsed.Resources), pg.RTT)
+		}
+		created, err := registerTenant(controlPort, adminKey, opts.Name, admEmail, schemaRaw, provTimeout, pg.RTT)
 		if err != nil {
 			fail(err)
 		}
@@ -392,7 +407,7 @@ func runUp(opts upOptions) error {
 			// accepted-and-continues class, in the newest command. Reconcile: same
 			// schema → say so; changed → migrate through the same additive-with-
 			// gated-drops path `appximo migrate` uses; failure → loud, never ok.
-			rec, rerr := reconcileSchema(fmt.Sprintf("http://127.0.0.1:%d", controlPort), adminKey, opts.Name, schemaPath, schemaRaw)
+			rec, rerr := reconcileSchema(fmt.Sprintf("http://127.0.0.1:%d", controlPort), adminKey, opts.Name, schemaPath, schemaRaw, provTimeout, pg.RTT)
 			if rerr != nil {
 				fail(rerr)
 			}
@@ -508,6 +523,10 @@ func resolveUpSchema(flag string) (path string, raw []byte, wroteStarter bool, e
 type pgResolved struct {
 	DSN  string
 	card upPostgres
+	// RTT is the measured ping round trip to this database. It separates a
+	// local socket from a managed instance across a region, and sizes the
+	// provisioning deadline accordingly (the tenant DDL pays it per statement).
+	RTT time.Duration
 }
 
 // resolvePostgres returns a CONNECTABLE DSN: the environment's DATABASE_URL if
@@ -515,13 +534,14 @@ type pgResolved struct {
 // from the container env, so a lost .env is not a dead end).
 func resolvePostgres(opts upOptions, step func(string, ...any), note func(string, ...any)) (pgResolved, error) {
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
-		if err := waitPostgres(dsn, 5*time.Second); err != nil {
+		rtt, err := waitPostgres(dsn, 5*time.Second)
+		if err != nil {
 			return pgResolved{}, fmt.Errorf("DATABASE_URL is set but not connectable: %v\n"+
 				"  - is that Postgres running? (the value came from the environment or ./.env)\n"+
 				"  - fix the value, or unset DATABASE_URL to let `up` start one in Docker", err)
 		}
 		step("postgres: using DATABASE_URL from the environment")
-		return pgResolved{DSN: dsn, card: upPostgres{Mode: "external"}}, nil
+		return pgResolved{DSN: dsn, card: upPostgres{Mode: "external"}, RTT: rtt}, nil
 	}
 	if opts.NoDocker {
 		return pgResolved{}, fmt.Errorf("--no-docker is set and DATABASE_URL is not. Three ways forward:\n" +
@@ -582,7 +602,8 @@ func resolvePostgres(opts upOptions, step func(string, ...any), note func(string
 				"  - or, if it IS a Postgres you own, set DATABASE_URL to point at it", name, rerr, name)
 		}
 		card.HostPort = port
-		if err := waitPostgres(dsn, 60*time.Second); err != nil {
+		rtt, err := waitPostgres(dsn, 60*time.Second)
+		if err != nil {
 			return pgResolved{}, fmt.Errorf("container %q is up but Postgres is not answering: %v\n  docker logs --tail 20 %s", name, err, name)
 		}
 		if running {
@@ -590,7 +611,7 @@ func resolvePostgres(opts upOptions, step func(string, ...any), note func(string
 		} else {
 			step("postgres: restarted container %q (port %d, volume %s — your data survived)", name, port, volume)
 		}
-		return pgResolved{DSN: dsn, card: card}, nil
+		return pgResolved{DSN: dsn, card: card, RTT: rtt}, nil
 	}
 
 	// Fresh container. Loopback-published (field report I1: Docker bypasses
@@ -617,13 +638,14 @@ func resolvePostgres(opts upOptions, step func(string, ...any), note func(string
 		return pgResolved{}, fmt.Errorf("docker run failed: %s\n  - inspect: docker logs %s\n  - clean up and retry: appximo down --pg-container %s --destroy-data", firstLine(string(out)), name, name)
 	}
 	dsn := fmt.Sprintf("postgres://appximo:%s@127.0.0.1:%d/appximo", password, opts.PGPort)
-	if err := waitPostgres(dsn, 90*time.Second); err != nil {
+	rtt, err := waitPostgres(dsn, 90*time.Second)
+	if err != nil {
 		logs, _ := exec.Command("docker", "logs", "--tail", "10", name).CombinedOutput()
 		return pgResolved{}, fmt.Errorf("started container %q but Postgres never became ready: %v\n  last log lines:\n%s", name, err, indent(string(logs)))
 	}
 	card.HostPort = opts.PGPort
 	step("postgres: started %s in Docker — container %q, port 127.0.0.1:%d, data in volume %s", opts.PGImage, name, opts.PGPort, volume)
-	return pgResolved{DSN: dsn, card: card}, nil
+	return pgResolved{DSN: dsn, card: card, RTT: rtt}, nil
 }
 
 // recoverContainerDSN rebuilds the DSN of an `up`-created container from the
@@ -722,15 +744,31 @@ func waitReady(port int, timeout time.Duration) error {
 	return fmt.Errorf("the engine did not become ready on :%d within %s — its log above says why", port, timeout)
 }
 
-func registerTenant(controlPort int, adminKey, name, email string, schemaRaw []byte) (created bool, err error) {
+func registerTenant(controlPort int, adminKey, name, email string, schemaRaw []byte, timeout time.Duration, rtt time.Duration) (created bool, err error) {
+	base := fmt.Sprintf("http://127.0.0.1:%d", controlPort)
+	hdr := map[string]string{"X-Admin-Key": adminKey}
 	body, _ := json.Marshal(map[string]any{
 		"tenant_id": name, "display_name": name, "email": email, "plan": "dev",
 		"schema": json.RawMessage(schemaRaw),
 	})
-	status, respBody, err := doJSON(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/tenants", controlPort),
-		map[string]string{"X-Admin-Key": adminKey}, body)
+	status, respBody, err := doJSONTimeout(http.MethodPost, base+"/tenants", hdr, body, timeout)
 	if err != nil {
-		return false, fmt.Errorf("register tenant: %v", err)
+		// A CLIENT-side deadline is not evidence that the work failed: the
+		// engine is still executing the tenant's DDL on the other side of this
+		// call, and it usually finishes. Reporting a failure here is the
+		// "engine says something different from what happened" family — the
+		// field report saw exactly that (up failed twice; the tables existed).
+		// So: ask the control plane what is actually true before deciding.
+		if landed, verr := tenantExists(base, hdr, name, timeout); verr == nil && landed {
+			return true, nil
+		}
+		return false, fmt.Errorf("register tenant %q: %v\n"+
+			"  %sThe engine may STILL be creating the tables — nothing was rolled back.\n"+
+			"  Re-run `appximo up` (it is idempotent: it detects and reuses whatever landed),\n"+
+			"  or converge the schema over a direct database connection, which pays no HTTP deadline:\n"+
+			"    appximo migrate --tenant %s --schema schema.json\n"+
+			"  A bigger budget for this run: appximo up --provision-timeout 10m",
+			name, err, remoteHint(rtt), name)
 	}
 	switch status {
 	case http.StatusCreated, http.StatusOK:
@@ -739,6 +777,24 @@ func registerTenant(controlPort int, adminKey, name, email string, schemaRaw []b
 		return false, nil // idempotent re-run
 	default:
 		return false, fmt.Errorf("register tenant %q failed (%d): %s", name, status, firstLine(string(respBody)))
+	}
+}
+
+// tenantExists reports whether the tenant is registered NOW. It is the truth
+// check after a client-side timeout: the control plane is local and answers
+// instantly even when the database behind it is far away, so this distinguishes
+// "the DDL is still running / finished" from "nothing happened".
+func tenantExists(base string, hdr map[string]string, name string, budget time.Duration) (bool, error) {
+	deadline := time.Now().Add(budget)
+	for {
+		status, _, err := doJSONTimeout(http.MethodGet, base+"/tenants/"+name, hdr, nil, 10*time.Second)
+		if err == nil && (status == http.StatusOK || status == http.StatusConflict) {
+			return true, nil
+		}
+		if time.Now().After(deadline) {
+			return false, err
+		}
+		time.Sleep(2 * time.Second)
 	}
 }
 
@@ -768,7 +824,7 @@ func schemasEquivalent(a, b []byte) bool {
 // are reported, never auto-approved). Any failure is an error the caller must
 // surface — a changed schema silently kept behind `ok: true` is the bug this
 // closes.
-func reconcileSchema(baseURL, adminKey, name, schemaPath string, schemaRaw []byte) (schemaReconcile, error) {
+func reconcileSchema(baseURL, adminKey, name, schemaPath string, schemaRaw []byte, timeout time.Duration, rtt time.Duration) (schemaReconcile, error) {
 	hdr := map[string]string{"X-Admin-Key": adminKey}
 	status, stored, err := doJSON(http.MethodGet, fmt.Sprintf("%s/tenants/%s/schema", baseURL, name), hdr, nil)
 	if err != nil {
@@ -779,9 +835,21 @@ func reconcileSchema(baseURL, adminKey, name, schemaPath string, schemaRaw []byt
 	}
 
 	putBody, _ := json.Marshal(map[string]any{"schema": json.RawMessage(schemaRaw)})
-	status, resp, err := doJSON(http.MethodPut, fmt.Sprintf("%s/tenants/%s/schema", baseURL, name), hdr, putBody)
+	status, resp, err := doJSONTimeout(http.MethodPut, fmt.Sprintf("%s/tenants/%s/schema", baseURL, name), hdr, putBody, timeout)
 	if err != nil {
-		return schemaReconcile{}, fmt.Errorf("migrate the changed schema: %v", err)
+		// Same rule as registerTenant: a client deadline is not a verdict. The
+		// migration is idempotent and its result is READABLE, so re-read the
+		// stored schema and let the database decide what happened.
+		if st, back, gerr := doJSON(http.MethodGet, fmt.Sprintf("%s/tenants/%s/schema", baseURL, name), hdr, nil); gerr == nil &&
+			st == http.StatusOK && schemasEquivalent(back, schemaRaw) {
+			return schemaReconcile{state: "migrated"}, nil
+		}
+		return schemaReconcile{}, fmt.Errorf("migrate the changed schema: %v\n"+
+			"  %sThe migration may still be running; the tenant keeps its previous schema until it completes.\n"+
+			"  Converge over a direct database connection instead (no HTTP deadline):\n"+
+			"    appximo migrate --tenant %s --schema %s --dry-run   # see the plan\n"+
+			"    appximo migrate --tenant %s --schema %s             # apply it",
+			err, remoteHint(rtt), name, schemaPath, name, schemaPath)
 	}
 	if status != http.StatusOK {
 		return schemaReconcile{}, fmt.Errorf(
@@ -850,6 +918,17 @@ func runSmoke(port int, host, token, resource string) upSmoke {
 }
 
 func doJSON(method, url string, headers map[string]string, body []byte) (int, []byte, error) {
+	return doJSONTimeout(method, url, headers, body, 30*time.Second)
+}
+
+// doJSONTimeout is doJSON with an explicit deadline. The provisioning calls
+// (POST /tenants, PUT /tenants/{id}/schema) need one that scales with the work:
+// behind those two seams the engine runs the tenant's DDL, one statement per
+// round trip to Postgres, so a REMOTE database multiplies the wall clock by the
+// RTT. A fixed 30 s was fine against a local container and failed against a
+// managed database ~119 ms away with an 18-resource schema — while the DDL kept
+// running and completed (INSTALL-PROMPT-S1 field report B).
+func doJSONTimeout(method, url string, headers map[string]string, body []byte, timeout time.Duration) (int, []byte, error) {
 	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, err
@@ -858,7 +937,7 @@ func doJSON(method, url string, headers map[string]string, body []byte) (int, []
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, err
@@ -866,6 +945,44 @@ func doJSON(method, url string, headers map[string]string, body []byte) (int, []
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	return resp.StatusCode, b, nil
+}
+
+// provisionTimeout sizes the deadline for the two DDL-bearing calls from the
+// work they actually do: the tenant's DDL is roughly proportional to the number
+// of resources, and every statement costs one round trip to the database. A
+// local socket makes that free; a database across a region does not.
+//
+// It is a BUDGET, not a promise — when it is exceeded the caller verifies what
+// actually landed instead of reporting a failure (see registerTenant).
+func provisionTimeout(resources int, rtt time.Duration) time.Duration {
+	if resources < 1 {
+		resources = 1
+	}
+	// ~60 round trips per resource: the migration engine INTROSPECTS the live
+	// catalog (several queries per table) before applying the DDL (table,
+	// columns, indexes, FKs, constraints), and every one of those is a round
+	// trip. Plus a floor for connection setup and the fixed control-plane work.
+	// Erring generous is deliberate — the failure this replaces (a false
+	// failure over work that succeeded) is far worse than waiting longer for a
+	// real one, and `up` prints progress while it waits.
+	budget := 30*time.Second + time.Duration(resources)*60*rtt
+	if min := 30 * time.Second; budget < min {
+		budget = min
+	}
+	if max := 15 * time.Minute; budget > max {
+		budget = max
+	}
+	return budget
+}
+
+// remoteHint is the human sentence for a database that is far away. Empty when
+// the RTT is local-ish, so a normal run says nothing about latency.
+func remoteHint(rtt time.Duration) string {
+	if rtt < 5*time.Millisecond {
+		return ""
+	}
+	return fmt.Sprintf("your database answered in %s per round trip, so it is not local — "+
+		"the tenant's DDL pays that latency once per statement. ", rtt.Round(time.Millisecond))
 }
 
 // ── the card ─────────────────────────────────────────────────────────────────
@@ -1118,24 +1235,31 @@ func portFree(port int) error {
 	return ln.Close()
 }
 
-func waitPostgres(dsn string, timeout time.Duration) error {
+// waitPostgres blocks until the database answers, and returns the round-trip
+// time of the ping that succeeded. That RTT is what tells `up` whether the
+// database is a local socket or a managed instance in another region — which
+// decides how long the tenant's DDL will take, one statement at a time.
+func waitPostgres(dsn string, timeout time.Duration) (time.Duration, error) {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		conn, err := pgx.Connect(ctx, dsn)
+		var rtt time.Duration
 		if err == nil {
+			start := time.Now() // measure the PING, not the connection setup
 			err = conn.Ping(ctx)
+			rtt = time.Since(start)
 			_ = conn.Close(ctx)
 		}
 		cancel()
 		if err == nil {
-			return nil
+			return rtt, nil
 		}
 		lastErr = err
 		time.Sleep(500 * time.Millisecond)
 	}
-	return fmt.Errorf("not reachable after %s (last error: %v)", timeout, lastErr)
+	return 0, fmt.Errorf("not reachable after %s (last error: %v)", timeout, lastErr)
 }
 
 func firstLine(s string) string {
