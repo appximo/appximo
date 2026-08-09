@@ -102,77 +102,6 @@ refreshed).
   no other behavioral change, or (b) an ADR records that the warning is the
   permanent answer and why.
 
-### OPS-25 — `appximo upgrade` is untested on Windows
-- **Origin:** INSTALL-PROMPT-S1. The self-replace path is implemented for all
-  three platforms, but the Windows branch — rename the running `.exe` aside
-  (Windows refuses to OVERWRITE a running binary but allows RENAMING one),
-  move the new one into place, let the NEXT upgrade delete the leftover
-  `<name>.old.exe` — is reasoned from the platform's semantics and has NOT
-  been executed: this box is Linux and the project has no Windows runner.
-- **Impact:** Medium. It is the platform where the failure is most likely and
-  most confusing, and the same dance is what the install prompt tells agents
-  to do by hand. If the rename fails (an antivirus lock, a handle from an
-  editor), the code puts the old binary back rather than leaving nothing
-  installed — that fallback is also unexecuted.
-- **Ready:** either Miguel runs the four cases on a real Windows box
-  (upgrade while idle · upgrade while `appximo serve` is running · a locked
-  `.old.exe` from a previous upgrade · a Program-Files-style unwritable
-  destination) and reports, or CI grows a `windows-latest` job that at least
-  exercises `upgrade --check` and the rename against a dummy binary.
-
-### ENG-42 — a write error reaches a custom handler as a raw driver error
-- **Origin:** CTX-PARITY-S1, the parity audit (docs/audits/CTX_PARITY_AUDIT.md
-  rows 15–16). The generated path maps a unique violation to `409 field "x":
-  value already exists` (db.UniqueViolationField) and an unknown column to the
-  S44 `422 unknown_field` (Postgres 42703). `Ctx.Insert`/`Ctx.Update` return
-  the pgx error unchanged, so a consumer either leaks a driver message or
-  writes their own mapping — and every consumer writes a slightly different one.
-- **Impact:** Medium. Not a wrong result, a wrong SHAPE: the two most common
-  write failures are exactly the two a form UI must distinguish, and the
-  engine already knows how to name them. `ErrUpdateConflict` shows the
-  precedent — an exported sentinel a handler can branch on.
-- **Ready:** `Ctx.Insert`/`Update` translate the same two Postgres codes the
-  generated path does, into exported errors (`ErrUniqueViolation` carrying the
-  field, and the existing `*ValidationError` with `rule:"unknown_field"`), and
-  the parity test table gains a row per case asserting both paths answer the
-  same status and body.
-
-### ENG-43 — `Ctx` writes against the BOOT schema, not the tenant's DEPLOYED one
-- **Origin:** CTX-PARITY-S1, the parity audit (row 17). The generated handler
-  resolves `writeSurface` so a column added by a hot migration is writable
-  immediately with its declared rules compiled (ENG-12). `Ctx` reads
-  `c.eng.schema` / `c.eng.validators`, which are the BOOT surface.
-- **Impact:** Medium, and asymmetric in a confusing direction: after a hot
-  migration a new field validates through `/api` and is silently unvalidated
-  through a custom handler (it still reaches Postgres — the DB is the source of
-  truth for what exists — so the write works, just without its declared rules).
-- **Ready:** `Ctx.Insert`/`Update` resolve the same deployed surface
-  `writeSurface` returns, keyed by the request tenant, with the boot schema as
-  the fallback; a test hot-migrates a field and asserts its rules are enforced
-  on BOTH paths without a restart.
-
-### OPS-26 — a schema granting a custom route cannot be booted by the stock binary
-- **Origin:** CTX-PARITY-S1 fresh-agent run, and independently the VecinGo
-  report. A role that uses per-resource `permissions` needs a `routes` grant to
-  reach a custom endpoint (ADR-021) — but the stock `appximo serve`/`up` binary
-  registers no custom routes, so it refuses to boot a schema that grants one
-  (the boot check is correct and deliberate). Consequence: ONE schema file
-  cannot both be `up`-bootable for the first mile AND grant a custom route to a
-  scoped role. The fresh agent sidestepped it by exercising its route as the
-  wildcard admin; a real app whose end-user role is `recepcion` has to keep the
-  grant only in the schema its own binary boots.
-- **Impact:** Medium. It splits the documented first mile (`up`) from the
-  documented 10% (custom handlers) at exactly the point where a real app needs
-  both, and the workaround (two schema files) is the divergence class this
-  project spends its sessions closing.
-- **Ready:** either the stock binary tolerates a `routes` grant for a segment
-  it does not serve (a boot WARNING naming it, instead of a refusal — the grant
-  is inert without a route to authorize), or `up` learns to accept the
-  consumer's binary, or an ADR records why the split is correct and what the
-  documented shape is. Decide with the boot check's original argument in hand:
-  it exists so a grant for a route nothing serves is caught early, and that
-  argument is weaker for `up`'s first-mile binary than for a production deploy.
-
 ### ENG-35 — GraphQL String-typed variables silently coerce any scalar
 - **Origin:** NIGHT-SWEEP-S1 audit (GraphQL surface), CONFIRMED adversarially.
   A `query($t: String!)` executed with `variables: {"t": 5}` runs — the library
@@ -686,6 +615,69 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in CTX-CLOSE-S1 (2026-08-09)
+
+The session that closed what the parity audit left open — the audit's table is
+now fully closed (17/17 rows accounted for) — plus the two operational items
+blocking the first mile and the Windows verification.
+
+- **ENG-42 — typed write errors on the library path.** ONE SQLSTATE ladder
+  (`handlers.ClassifyWriteError`) compiled into FOUR renderers: REST single-op
+  `WriteDBError` (absorbing builder.go's two unique pre-checks), batch
+  `dbTxError`, GraphQL `safeDBErr` (absorbing its two unique pre-checks), and
+  the new `Ctx` translation returning `*UniqueViolationError` (409, the
+  field), `*ValidationError` `unknown_field`/`file_not_found` (S44 422) and
+  `*ForeignKeyConflictError` (409, safe message) — a handler that `return err`s
+  produces the generated path's response byte for byte. Class-22 bad input and
+  missing-tenant deliberately stay RAW on the library path (a handler may have
+  computed the value itself; a 400 would blame its client for the handler's
+  bug). Every classified code observed in the parity suite's own runs; nothing
+  classified from theory. Pinned by
+  `TestParity_WriteErrorShapesMatchGenerated` (4 shapes, same payload both
+  paths, same status + decoded body); backend-spec's "return them verbatim"
+  section now carries the full typed-error table.
+- **ENG-43 — `Ctx` resolves the tenant's DEPLOYED surface.** The ENG-12 seam
+  exported (`codegen.ResolveWriteSurface`), consumed by
+  Insert/Update/Query/Get/BindResource — never a second resolution; the union
+  guarantee (lagging tenant ⇒ boot pair) carries over; a deployed-only
+  resource stays unknown (routes/GraphQL/docs are boot-compiled). Pinned by
+  `TestParity_CtxWritesDeployedSurface` (self-deception-guarded: asserts the
+  boot fixture LACKS the field and demands the DECLARED rule in the 422), and
+  verified live on the 105: custom handler, live tenant, control-plane deploy,
+  PID identical (2499798) before/after — pre-deploy 422 `unknown_field`,
+  post-deploy the declared `max` rule and a working write.
+- **OPS-26 — the inert grant no longer blocks the first mile.** The asymmetry
+  (Miguel's decision): the STOCK binary (zero custom routes registered) warns
+  and boots — one actionable warning per grant naming the role, segment,
+  INERT, and the consumer binary that activates it; a binary that registers
+  routes keeps the fail-closed rejection (ADR-021 §The stock-binary
+  asymmetry). Verified live with both binaries and ONE schema file: stock
+  warned + booted; the consumer authorized `recepcion` on `/api/checkout`
+  (201); the consumer with an unmatched grant refused the boot naming its
+  registered segments. Applied on boot AND the `POST /admin/engine/schema`
+  deploy path.
+- **OPS-25 — Windows verified FOREVER: the `windows` CI job.** `windows-latest`
+  in ci.yml (parallel, ~real gate, 30-min cap): whole-module native build,
+  platform-sensitive unit lanes (cmd, platformpath — %LOCALAPPDATA% —, schema,
+  query), the `.env` BOM case, `validate --json` stdout purity, and the four
+  upgrade scenarios against the REAL pinned release (v0.1.5): idle
+  (download+checksum+rename-aside), under a RUNNING `serve` (real PostgreSQL
+  from the runner image; also proves the released .exe boots), the locked
+  `.old.exe` (the natural aftermath of the running-serve swap; asserts the
+  loud failure + intact binary), and an unwritable destination (deny-ACL;
+  asserts the actionable permission error). Found + fixed while writing it:
+  `notWritable` advised `sudo appximo upgrade` on Windows — now platform-aware
+  ("Run as administrator"). **NOT covered, recorded:** a real Program Files
+  ACL under a NON-admin user (the runner user is an administrator; the
+  deny-ACL simulates the class, not the elevation UX), antivirus file locks,
+  and a non-admin profile — reopen from a field report if one hits them.
+
+Gates: unit lane green · full lane (no `-short`, Docker) green · lint 0 ·
+binary-diff gate **120/120 SAME** (3 new corpus rows for the touched write
+contracts — the four-renderer consolidation is byte-identical on the generated
+surface) · ABBA write-path bench (A-B-B-A, RUNS=5, 20 rps/15 s, :8580) —
+see the session report for the verdict.
 
 ## DONE in CTX-PARITY-S1 (2026-08-09)
 

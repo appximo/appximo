@@ -274,3 +274,15 @@ then the transition through both `ctx.Update` and the generated PATCH) and
 needed **zero workarounds**. Filed OPEN: **ENG-42** (write errors reach a
 handler as raw driver errors), **ENG-43** (`Ctx` writes against the boot schema,
 not the tenant's deployed one), **OPS-26**.
+
+## Addendum — CTX-CLOSE-S1 (2026-08-09): the three filed items, closed same-day
+
+The previous batch filed ENG-42, ENG-43 and OPS-26 as OPEN. This session closed
+all three (plus OPS-25, the Windows verification):
+
+| Item | Answer |
+|---|---|
+| **ENG-42 — write errors reached a handler as raw driver errors** | **CLOSED.** `ctx.Insert`/`Update` now return the engine's TYPED verdicts, rendered from the SAME SQLSTATE ladder the generated path uses (`handlers.ClassifyWriteError` — one source, four renderers: REST, batch, GraphQL, Ctx): `*UniqueViolationError` (→ the same `409 field "x": value already exists`), `*ValidationError` with `unknown_field` / `file_not_found` (→ the S44 422), `*ForeignKeyConflictError` (→ the safe 409). **`return err` now gives your client the generated endpoint's response byte for byte** — the wrap-it-in-a-generic-message trap you named is structurally unnecessary. backend-spec's callout carries the full table. What deliberately stays raw: the class-22 bad-input codes — in a handler the offending value may be one YOUR code computed, and a 400 blaming your client would point at the wrong party. |
+| **ENG-43 — `Ctx` validated against the BOOT schema** | **CLOSED.** Same seam as the generated routes (`codegen.ResolveWriteSurface`, the ENG-12 union — never a second resolution), for Insert/Update/Query/Get/BindResource. Verified live: a field deployed to a RUNNING process (PID identical, no restart) answered 422 `unknown_field` through a custom handler before the deploy, and its declared `max` rule after it. |
+| **OPS-26 — one schema file couldn't be both `up`-bootable and grant custom routes** | **CLOSED, as an asymmetry.** The STOCK `serve`/`up` binary now WARNS and boots (the grant is INERT there — it authorizes nothing until the consumer binary registers the route; the warning names role, segment, and that binary). A binary that DOES register routes keeps the fail-closed rejection — your typo still fails the boot with the registered segments listed. One schema file now serves the whole journey. ADR-021 §The stock-binary asymmetry has the reasoning. |
+| **OPS-25 — the Windows upgrade path was reasoned, not executed** | **CLOSED as a permanent CI gate.** A `windows-latest` job now runs on every push: native build + platform unit lanes + the `.env` BOM case + `validate --json` stdout purity + the four upgrade scenarios against the real pinned release (idle · under a running `serve` on a real PostgreSQL · locked `.old.exe` · unwritable destination). Writing it found a real defect: the permission error advised `sudo` on Windows — now platform-aware. Not covered (recorded): real Program Files elevation UX under a non-admin user, antivirus locks. |
