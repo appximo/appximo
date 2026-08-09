@@ -543,8 +543,21 @@ func (c *requestCtx) Insert(resource string, data map[string]any) (map[string]an
 			return nil, &ValidationError{Fields: verrs}
 		}
 	}
-	// A field-restricted role may only write the fields it is allowed to read.
-	data = applyWriteAllowlist(data, eval.AllowedFields)
+	// The SAME create-time RBAC the generated POST and the GraphQL create run
+	// (EnforceCreateRBAC), at the same point in the sequence: it drops fields
+	// outside the role's allowlist, FORCES the row-condition column to the
+	// caller's resolved identity, and REJECTS a body that supplies a different
+	// value for it.
+	//
+	// This used to be a local allowlist filter only, so a custom route was a way
+	// AROUND a rule the REST API enforces: an owner-scoped role could create a
+	// row with no owner at all (the condition was never applied) or attributed
+	// to another principal (the mass-assignment block was absent) — 201 through
+	// a handler, 403 through /api. Found by auditing the whole parity class
+	// rather than only the two divergences the field report named.
+	if status, msg := codegen.EnforceCreateRBAC(data, &eval); status != 0 {
+		return nil, &forbiddenError{msg}
+	}
 	if len(data) == 0 {
 		return nil, &ValidationError{Fields: []schema.FieldRuleError{{Rule: "empty", Message: "no writable fields"}}}
 	}

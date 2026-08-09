@@ -404,11 +404,35 @@ rows, err := ctx.Query("students", appximo.QueryOpts{
 // role — the two are indistinguishable on purpose.
 row, err := ctx.Get("students", id)
 
-// Insert / Update: declarative validation + field allowlist + row condition,
-// exactly like the generated POST / PATCH. Update is PATCH semantics.
+// Insert / Update run the SAME body preparation the generated POST / PATCH
+// runs (codegen.PrepareCreate / PrepareUpdate — one shared function, not a
+// second implementation): schema DEFAULTS for omitted fields, the declarative
+// rules (required, enum, min/max, length, pattern, format), the value TYPE
+// check, and the state-machine INITIAL states on create. Plus the field
+// allowlist and the row condition. Update is PATCH semantics and enforces the
+// declared transitions in SQL.
 row, err := ctx.Insert("students", map[string]any{"full_name": "Ana"})
 row, err := ctx.Update("students", id, map[string]any{"country": "MX"})
+
+// Numbers: pass what Go computed. int, int8..int64, uint*, float32/64 and
+// json.Number are all accepted, so a value you READ from a row (int64 from the
+// driver) can be written straight back. No float64 casts.
+row, err := ctx.Insert("orders", map[string]any{"total_cents": int64(45_000)})
 ```
+
+> **What is deliberately NOT identical** — these follow from a custom handler
+> running INSIDE your transaction, not from a gap:
+> - **`before_create` / `before_update` hooks do not run.** A js/wasm hook is
+>   the schema's way to gate the GENERATED write; your handler IS the gate for
+>   the writes it makes. If a resource's invariant must hold on every path,
+>   put it in the schema (rules, state machine, constraints), not in a hook.
+> - **After-hooks, the SSE broadcast and the outbox event fire on the generated
+>   path only.** They are post-COMMIT, and your transaction has not committed
+>   while your handler runs. Need an event? `ctx.Enqueue(topic, payload)` —
+>   it writes to the outbox in YOUR transaction, so it is atomic with the row.
+> - **Precision**: the HTTP path decodes JSON numbers into float64 (the JSON
+>   limit, ~2^53). `ctx.Insert` stores the exact `int64` you passed. The
+>   library path is the more precise of the two, on purpose.
 
 **Row types** (so you never write defensive converters): every row is a
 `map[string]any` with pgx's native Go values — `uuid` (and the implicit `id`)
@@ -427,6 +451,31 @@ field) — no switch needed.
 > sanctioned lookup-by-id and keeps the row rule. Reaching for `ctx.UnsafeTx()`
 > and a hand-written `SELECT … WHERE id = $1` is the wrong fix: it silently drops
 > the role's row condition, so a caller can read a row the REST API would hide.
+
+> ### RETURN the engine's write errors VERBATIM. Do not wrap them.
+>
+> `ctx.Insert` / `ctx.Update` return `*appximo.ValidationError`, which the
+> middleware renders as the SAME per-field 422 the generated endpoints produce:
+> `{"error":"validation_failed","fields":[{"field":"email","rule":"format",
+> "message":"must be a valid email"}]}`. **`return err` is the right handler
+> code**, and it is better than anything you would write:
+>
+> ```go
+> row, err := ctx.Insert("students", data)
+> if err != nil {
+>     return err          // ✅ the caller gets every failing field, named
+> }
+> // ❌ return ctx.Error(422, "could not create the student", err)
+> //    — one opaque sentence; the per-field detail the engine ALREADY computed
+> //      is thrown away, and the form UI has nothing to highlight.
+> ```
+>
+> A real evaluator wrapped these in generic messages early on and spent the rest
+> of the build blind to the very 422 the engine was handing them. Wrap ONLY when
+> you are adding information the engine could not have (which principal, which
+> business rule) — and then keep the cause: `errors.As` the
+> `*appximo.ValidationError` and merge its `Fields` into your response rather
+> than replacing them.
 
 `Update` also enforces a declared **state machine**, with the exact semantics of
 the generated PATCH (the guard lives in the UPDATE's WHERE — race-safe, terminal

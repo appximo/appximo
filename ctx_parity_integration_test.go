@@ -317,3 +317,93 @@ func TestParity_ReadWriteRoundTrip(t *testing.T) {
 			"it must accept them back", resp.StatusCode, b)
 	}
 }
+
+// TestParity_InsertEnforcesRowConditionOnCreate — the security half of the
+// parity contract. The generated POST runs EnforceCreateRBAC, which FORCES the
+// row-condition column to the caller's identity and REJECTS a body claiming
+// another principal's id (the mass-assignment block). If Ctx.Insert only
+// applies the field allowlist, a custom route becomes a way around a rule the
+// REST API enforces — an owner-scoped role writing a row attributed to
+// somebody else.
+func TestParity_InsertEnforcesRowConditionOnCreate(t *testing.T) {
+	schemaPath := writeOwnerSchema(t)
+	app, err := New(Config{SchemaPath: schemaPath, DSN: itConnStr,
+		JWTSecret: helpers.JWTSecret, AdminKey: helpers.AdminKey, Env: "test"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { app.pool.Close() })
+	mustRegister(t, app, Route{Method: "POST", Path: "/api/libnotes", Handler: func(ctx Ctx) error {
+		var body map[string]any
+		if err := ctx.Bind(&body); err != nil {
+			return ctx.Error(400, "bad body", err)
+		}
+		row, err := ctx.Insert("notes", body)
+		if err != nil {
+			return err
+		}
+		return ctx.JSON(201, row)
+	}})
+	s := mustLoadSchema(t, schemaPath)
+	tenant := "parityown"
+	helpers.RegisterTenant(t, itPool, tenant, s)
+	srv := newServerFor(t, app)
+	host := tenant + ".localhost"
+	tok := helpers.GenToken(t, "member", "user-alice", tenant)
+
+	t.Run("the owner column is FORCED to the caller, not left to the body", func(t *testing.T) {
+		for _, path := range []string{"/api/notes", "/api/libnotes"} {
+			resp := do(t, srv, http.MethodPost, path, host, tok, `{"body":"mine"}`)
+			if resp.StatusCode != http.StatusCreated {
+				t.Fatalf("%s: want 201, got %d", path, resp.StatusCode)
+			}
+			row := decode(t, resp)
+			if row["owner_id"] != "user-alice" {
+				t.Errorf("%s: owner_id = %v, want the caller's id — the row condition must be forced on create",
+					path, row["owner_id"])
+			}
+		}
+	})
+
+	t.Run("a body claiming ANOTHER principal is refused on both paths", func(t *testing.T) {
+		for _, path := range []string{"/api/notes", "/api/libnotes"} {
+			resp := do(t, srv, http.MethodPost, path, host, tok, `{"body":"theirs","owner_id":"user-mallory"}`)
+			if resp.StatusCode != http.StatusForbidden {
+				b := decode(t, resp)
+				t.Errorf("%s: want 403 (mass-assignment block), got %d (%v) — a custom route must not be a way "+
+					"around a rule the REST API enforces", path, resp.StatusCode, b)
+			}
+		}
+	})
+}
+
+func writeOwnerSchema(t *testing.T) string {
+	t.Helper()
+	const js = `{
+  "$schema": "https://appximo.com/schema/v1",
+  "version": "1",
+  "name": "ownerparity",
+  "resources": {
+    "notes": {
+      "fields": {
+        "body":     { "type": "string", "required": true, "minLength": 1 },
+        "owner_id": { "type": "string" }
+      }
+    }
+  },
+  "rbac": { "roles": {
+    "member": {
+      "resources": ["notes"],
+      "actions": ["read", "create", "update"],
+      "conditions": { "field": "owner_id", "op": "eq", "val": "$user_id" },
+      "routes": { "libnotes": { "actions": ["create"] } }
+    }
+  } }
+}`
+	dir := t.TempDir()
+	p := filepath.Join(dir, "owner.json")
+	if err := os.WriteFile(p, []byte(js), 0o600); err != nil {
+		t.Fatalf("write schema: %v", err)
+	}
+	return p
+}
