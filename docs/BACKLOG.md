@@ -26,7 +26,11 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-08 (INSTALL-PROMPT-S1)** — the front door split in
+**Last reviewed: 2026-08-09 (CTX-PARITY-S1)** — the third field report
+answered: the Ctx-vs-generated parity CLASS audited (5 divergences, not the 2
+reported) and closed from one source; up survives a remote database; the
+installer stops disturbing neighbours. New OPEN: ENG-42, ENG-43, OPS-26.
+Previous review: 2026-08-08 (INSTALL-PROMPT-S1) — the front door split in
 two (install, then build); the update class closed in the product; OPS-24 DONE
 (Miguel cut v0.1.5); OPS-25 filed (the Windows upgrade path is unexecuted).
 Previous review: 2026-08-08 (LAUNCHPAD-S1) — the front door shipped and
@@ -115,6 +119,59 @@ refreshed).
   `.old.exe` from a previous upgrade · a Program-Files-style unwritable
   destination) and reports, or CI grows a `windows-latest` job that at least
   exercises `upgrade --check` and the rename against a dummy binary.
+
+### ENG-42 — a write error reaches a custom handler as a raw driver error
+- **Origin:** CTX-PARITY-S1, the parity audit (docs/audits/CTX_PARITY_AUDIT.md
+  rows 15–16). The generated path maps a unique violation to `409 field "x":
+  value already exists` (db.UniqueViolationField) and an unknown column to the
+  S44 `422 unknown_field` (Postgres 42703). `Ctx.Insert`/`Ctx.Update` return
+  the pgx error unchanged, so a consumer either leaks a driver message or
+  writes their own mapping — and every consumer writes a slightly different one.
+- **Impact:** Medium. Not a wrong result, a wrong SHAPE: the two most common
+  write failures are exactly the two a form UI must distinguish, and the
+  engine already knows how to name them. `ErrUpdateConflict` shows the
+  precedent — an exported sentinel a handler can branch on.
+- **Ready:** `Ctx.Insert`/`Update` translate the same two Postgres codes the
+  generated path does, into exported errors (`ErrUniqueViolation` carrying the
+  field, and the existing `*ValidationError` with `rule:"unknown_field"`), and
+  the parity test table gains a row per case asserting both paths answer the
+  same status and body.
+
+### ENG-43 — `Ctx` writes against the BOOT schema, not the tenant's DEPLOYED one
+- **Origin:** CTX-PARITY-S1, the parity audit (row 17). The generated handler
+  resolves `writeSurface` so a column added by a hot migration is writable
+  immediately with its declared rules compiled (ENG-12). `Ctx` reads
+  `c.eng.schema` / `c.eng.validators`, which are the BOOT surface.
+- **Impact:** Medium, and asymmetric in a confusing direction: after a hot
+  migration a new field validates through `/api` and is silently unvalidated
+  through a custom handler (it still reaches Postgres — the DB is the source of
+  truth for what exists — so the write works, just without its declared rules).
+- **Ready:** `Ctx.Insert`/`Update` resolve the same deployed surface
+  `writeSurface` returns, keyed by the request tenant, with the boot schema as
+  the fallback; a test hot-migrates a field and asserts its rules are enforced
+  on BOTH paths without a restart.
+
+### OPS-26 — a schema granting a custom route cannot be booted by the stock binary
+- **Origin:** CTX-PARITY-S1 fresh-agent run, and independently the VecinGo
+  report. A role that uses per-resource `permissions` needs a `routes` grant to
+  reach a custom endpoint (ADR-021) — but the stock `appximo serve`/`up` binary
+  registers no custom routes, so it refuses to boot a schema that grants one
+  (the boot check is correct and deliberate). Consequence: ONE schema file
+  cannot both be `up`-bootable for the first mile AND grant a custom route to a
+  scoped role. The fresh agent sidestepped it by exercising its route as the
+  wildcard admin; a real app whose end-user role is `recepcion` has to keep the
+  grant only in the schema its own binary boots.
+- **Impact:** Medium. It splits the documented first mile (`up`) from the
+  documented 10% (custom handlers) at exactly the point where a real app needs
+  both, and the workaround (two schema files) is the divergence class this
+  project spends its sessions closing.
+- **Ready:** either the stock binary tolerates a `routes` grant for a segment
+  it does not serve (a boot WARNING naming it, instead of a refusal — the grant
+  is inert without a route to authorize), or `up` learns to accept the
+  consumer's binary, or an ADR records why the split is correct and what the
+  documented shape is. Decide with the boot check's original argument in hand:
+  it exists so a grant for a route nothing serves is caught early, and that
+  argument is weaker for `up`'s first-mile binary than for a production deploy.
 
 ### ENG-35 — GraphQL String-typed variables silently coerce any scalar
 - **Origin:** NIGHT-SWEEP-S1 audit (GraphQL surface), CONFIRMED adversarially.
@@ -629,6 +686,65 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in CTX-PARITY-S1 (2026-08-09)
+
+The third field report (VecinGo: 18 resources, 8 state machines, 13 custom Go
+handlers, multi-tenant, HTTPS on a box already serving two apps; ~3–3.5 h of
+work; verdict "as a consumer, I would do it again") answered end to end.
+
+- **The parity class, audited and closed.** The report named TWO divergences
+  between `Ctx.Insert`/`Update` and the generated POST/PATCH. The audit found
+  **five**, one of them security-relevant and unreported: `Ctx.Insert` applied
+  the field allowlist but NOT the row-condition forcing or the mass-assignment
+  block, so an owner-scoped role could create a row with no owner, or attributed
+  to another principal — 201 through a custom route, 403 through `/api`. All
+  five closed from a SINGLE SOURCE (`codegen.PrepareCreate`/`PrepareUpdate`,
+  the pre-existing `EnforceCreateRBAC`, and `schema.AsFloat64`/`IsIntegral`),
+  never a third implementation. Full table, including the three differences
+  that are DELIBERATE and why: docs/audits/CTX_PARITY_AUDIT.md.
+- **A1 defaults:** rows written by a custom handler landed with a NULL status
+  and the next transition failed with `invalid transition from ""` — a row
+  outside its own declared lifecycle, with no error at write time.
+- **A2 numerics:** the rules and the type check accepted float64 only (true of
+  JSON, false of a Go handler), so an `int64` READ from the engine could not be
+  written back. Now every Go numeric type is accepted, and the caller's exact
+  value reaches the database.
+- **The anti-drift instrument:** `ctx_parity_integration_test.go` runs the same
+  payload through both paths and asserts identical rows, plus the read→write
+  round trip and the RBAC-on-create matrix. Red on every case before, green now.
+- **backend-spec** stops promising "exactly like the generated POST" and names
+  what is shared, what is not, and why — plus, with emphasis, the evaluator's
+  own lesson: RETURN the engine's write errors verbatim; wrapping them throws
+  away the per-field 422 the engine already computed.
+- **`up` against a remote database (B):** a client-side deadline is no longer a
+  verdict. On a timeout `up` asks what actually landed and continues if the work
+  succeeded; the deadline is sized from the schema and the MEASURED database RTT
+  instead of a fixed 30 s (`--provision-timeout` overrides); a genuine failure
+  names the RTT, that nothing was rolled back, and both exits. Reproduced with a
+  latency proxy: the pre-fix binary exits 1 with `context deadline exceeded`
+  while the tenant and its 18 tables exist — a false failure over work that
+  succeeded.
+- **The installer (C):** PostgreSQL is no longer restarted when its tuning
+  needs no change (verified: installing a second app left the neighbour's
+  postgres PID, NRestarts and ActiveEnterTimestamp untouched and a 400-sample
+  health probe recorded zero non-200s); the port preflight covers the CONTROL
+  port too and names who holds each busy port, before writing anything; the
+  `runuser -u postgres` cwd noise is fixed at the source.
+- **`validate --json` always emits `warnings`**, even empty — a fresh agent
+  reported that "no warnings" and "an engine without the warnings feature" were
+  the same JSON, so it could not use a clean report as a positive signal.
+- **Verified by a fresh agent** with no repo access, rebuilding the reported
+  scenario (schema default + state machine + int64 through `ctx.Insert`, then
+  the transition through both `ctx.Update` and the generated PATCH): **zero
+  workarounds** — no manual `estado`, no float64 cast, no transition table in Go.
+
+Gates: unit lane 0 FAIL · full lane (integration + e2e + resilience, no
+`-short`) exit 0 · root tagged suite ok · lint 0 issues · binary-diff gate
+**117/117 SAME** (the generated path is byte-identical after the refactor) ·
+ABBA write-path bench base vs new p50 1.114/1.058 vs 1.031/0.954 ms → Δ −0.093 ms,
+under the 0.5 ms gate, A↔A control 0.056 ms → **no_change**. New OPEN: ENG-42,
+ENG-43, OPS-26.
 
 ## DONE in INSTALL-PROMPT-S1 (2026-08-08)
 

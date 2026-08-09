@@ -227,3 +227,50 @@ corpus · ABBA bench p50 Δ−0.2% (**no_change**) · the end-to-end scenario
 (pure binary, `--static` SPA, anonymous public reads) verified in Chromium at
 a mobile viewport. Filed OPEN: **UI-2** (Studio must author + round-trip
 `rbac.public`), **ENG-40** (`explain`/OpenAPI parity for the new surface).
+
+---
+
+# Response to the THIRD field evaluation (VecinGo) — CTX-PARITY-S1, 2026-08-09
+
+**What was built:** a neighbourhood-association platform — 18 resources, 8 state
+machines, 3 roles, 13 custom Go handlers, a 13-screen SPA embedded in the
+binary, weighted voting with quorum, multi-tenant, deployed with HTTPS onto a
+VPS **already serving two apps** — in ~3–3.5 h of effective work. Verdict:
+*"as a consumer, I would do it again."*
+
+**What worked, and is now protected by a test so it keeps working:** the
+validator as an oracle (2 iterations to `valid:true`; **the 8
+`required_field_is_rbac_forced` warnings were real future bugs** — every
+resident create would have 422'd in production); `explain`; two-layer RBAC with
+`routes` validated at boot (a 13-route × 3-role matrix correct on the first
+try); `go get …@v0.1.6` resolving from the public proxy on the first attempt
+and the Go project compiling first try; `go:embed` + `Config.Static{SPA:true}`;
+the multi-app installer isolating `--app=vecingo` from its neighbours;
+`OnTenantProvisioned` keeping the first production PQRS from being a 500; and
+the five printable documents — *"the best engine→agent interface I have
+consumed: I did not invent a single endpoint."*
+
+| Finding | Answer |
+|---|---|
+| **A1. `ctx.Insert` does not apply schema `default`s** (rows with `estado` NULL; the next transition fails `invalid transition from ""`), while backend-spec promises validation *"exactly like the generated POST"* | **CLOSED — and the audit found three more.** The promise was the bug: two implementations of one contract had drifted. `codegen.PrepareCreate` is now the SINGLE source both paths call (defaults → declarative rules + value types → state-machine initial states, in the generated POST's exact order), `PrepareUpdate` its PATCH counterpart. Auditing the whole class instead of the instance surfaced that `Ctx.Insert` also skipped the create type check, the initial-state check, **and the create-time RBAC** (below). Full table, including the three differences that are deliberate: [docs/audits/CTX_PARITY_AUDIT.md](audits/CTX_PARITY_AUDIT.md). |
+| **A2. Read/write asymmetry on numbers** — rows come back as `int64`, but passing an `int64` to `Insert` fails `must be a number`; you must cast to `float64` | **CLOSED.** The rules and the type check accepted float64 only, reasoning that `encoding/json` produces float64 — true of the HTTP path, false of a Go handler. `schema.AsFloat64` / `schema.IsIntegral` are now the ONE decision about what a number is, shared by both validators: `int`, `int8..64`, `uint*`, `float32/64` and `json.Number` are all accepted, and **your exact `int64` reaches the database** (the HTTP path is the lossy one, at JSON's ~2^53 — that asymmetry is now documented as deliberate, not levelled down). |
+| **(unreported, found by the audit) `ctx.Insert` skipped the create-time RBAC** | **CLOSED — security-relevant.** The generated POST forces the row-condition column to the caller and rejects a body claiming another principal. `Ctx.Insert` did neither: an owner-scoped role could create a row with no owner, or attributed to somebody else — **201 through a custom route, 403 through `/api`**. It now calls the same `EnforceCreateRBAC`. This is the argument for auditing the class: the two you hit were the two that happened to be visible. |
+| **B. `up` has a fixed HTTP deadline that a remote database defeats** (~119 ms RTT, 18 resources → `context deadline exceeded` twice, *while the DDL completed*) | **CLOSED, and the deeper half first.** A client-side deadline is no longer a verdict: on a timeout `up` asks the control plane what actually landed and continues if the work succeeded — your run failed over an operation that had SUCCEEDED. The deadline is now sized from the schema and the **measured** database RTT (~60 round trips per resource over a 30 s floor; `--provision-timeout` overrides), and a genuine failure names the measured RTT, that nothing was rolled back, and both exits (`up` is idempotent; `migrate` converges over a direct connection with no HTTP deadline). Reproduced with a latency proxy at 400 ms RTT: the old binary exits 1 while the tenant and its 18 tables exist. |
+| **C1. `install.sh` restarts the shared PostgreSQL even when the tuning does not change** (~3 s blackout for two neighbouring production apps) | **CLOSED.** The desired config is compared against the file on disk; identical → the file is left alone and PostgreSQL is **not** restarted, and the run says so. Verified on a box running a first app: installing a second left the neighbour's postgres PID (6425 → 6425), `NRestarts` (0) and `ActiveEnterTimestamp` untouched, and a 400-sample continuous health probe across the whole install recorded **zero** non-200 responses. |
+| **C2. The port check arrives mid-execution; a failed attempt left an orphan `vecingo.env`** | **CLOSED.** The preflight now covers **every** port the install will bind — the CONTROL port was never checked, and it is precisely the one that collides when a second app arrives (the data port is chosen by the operator; the control port is derived from the app name). A collision dies before a single file is written, naming each busy port and the process holding it. Verified: a third install onto occupied ports named both holders by app name and wrote nothing. |
+| **C3. `could not change directory to "/root/..."` noise from `runuser -u postgres`** | **CLOSED at the source** — the probes run from a directory postgres can enter, rather than being muted with `2>/dev/null`, which would also hide real errors. |
+| **Process note: "return `ctx.Insert/Update` errors verbatim"** (you wrapped them at first and hid the engine's per-field 422) | **ADOPTED, with emphasis.** backend-spec now carries a callout: `return err` is the right handler code and is better than anything you would write; wrap ONLY to add information the engine could not have, and then merge its `Fields` rather than replacing them. Your own recommendation, in the document that would have prevented it. |
+| **New (fresh-agent run): `validate --json` omits `warnings` when empty** | **CLOSED.** "No warnings" and "an engine without the warnings feature" were the same JSON, so a clean report could not be used as a positive signal. The key is always emitted now. |
+| **New (fresh-agent run): a schema granting a custom `routes` segment cannot be booted by the stock `up`/`serve` binary** | **FILED as OPS-26** with its design. The boot check is correct (a grant for a route nothing serves should be caught early), but it means one schema file cannot be both `up`-bootable for the first mile AND grant a custom route to a scoped role — the two documented halves of the product meet exactly there. |
+
+**Verification for this batch:** unit lane 0 FAIL · full lane (integration +
+e2e + resilience, `-race`, no `-short`) exit 0 · root tagged suite ok · lint 0
+issues · binary-diff gate **117/117 SAME** (the generated path is byte-identical
+after routing it through the shared core) · ABBA write-path bench base vs new
+p50 1.114/1.058 vs 1.031/0.954 ms → Δ −0.093 ms, under the 0.5 ms gate, with an
+A↔A control of 0.056 ms → **no_change** · a fresh agent with no repo access
+rebuilt your scenario (default + state machine + `int64` through `ctx.Insert`,
+then the transition through both `ctx.Update` and the generated PATCH) and
+needed **zero workarounds**. Filed OPEN: **ENG-42** (write errors reach a
+handler as raw driver errors), **ENG-43** (`Ctx` writes against the boot schema,
+not the tenant's deployed one), **OPS-26**.
