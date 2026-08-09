@@ -99,9 +99,11 @@ jobs:
   #   - the four `upgrade` scenarios from the backlog, against the REAL
   #     pinned release (download, checksum, the rename-aside dance):
   #       1. idle upgrade  2. upgrade while `serve` is RUNNING (real
-  #       PostgreSQL, the runner image ships one)  3. a locked .old.exe
-  #       (the natural aftermath of 2)  4. an unwritable destination;
-  #   - the released .exe actually BOOTS (scenario 2 serves with it).
+  #       PostgreSQL, the runner image ships one)  3a. a .old.exe whose image
+  #       still RUNS (the natural aftermath of 2 — blocks with the documented
+  #       loud failure)  3b. a hard-locked .old.exe (no-sharing handle, the
+  #       antivirus/editor class)  4. an unwritable destination;
+  #   - the released .exe actually BOOTS and serves (its own step).
   #
   # NOT covered, deliberately (recorded in docs/BACKLOG.md, OPS-25): a real
   # Program Files ACL (the runner user is an administrator; scenario 4
@@ -274,37 +276,46 @@ jobs:
             Invoke-RestMethod http://localhost:8093/healthz | Out-Null
             Note "s2: PASS — old process still serving from the renamed image"
 
-            # ── s3a: the RUNNING .old.exe does not block the next upgrade.
-            # The gate's first execution corrected the reasoning here: Go's
-            # os.Remove uses POSIX delete semantics on Windows 10+/NTFS, so a
-            # still-running old image unlinks cleanly — the leftover-lock
-            # failure mode does not exist for that case.
+            # ── s3a: a .old.exe whose image is STILL RUNNING blocks the next
+            # upgrade with the documented loud failure — Windows denies DELETE
+            # on an executing image, and the rename-over is denied too. (An
+            # earlier iteration "passed" this as a success only because the
+            # runner had already killed serve between steps — with serve
+            # genuinely alive, the backlog's original reasoning holds.) The
+            # failure must be actionable, leave the binary working, and leave
+            # the running serve untouched.
             Copy-Item ..\appximo.exe appximo.exe -Force
             $out = .\appximo.exe upgrade --version $env:UPGRADE_TAG 2>&1 | Out-String
             Note "s3a: upgrade-with-RUNNING-old exit=$LASTEXITCODE output:`n$out"
-            if ($LASTEXITCODE -ne 0) { throw "an upgrade over a merely-running .old.exe must succeed on Windows 10+ (POSIX delete); it exited $LASTEXITCODE" }
+            if ($LASTEXITCODE -eq 0) { throw "upgrade must fail while .old.exe's image is still running; it exited 0" }
+            if ($out -notmatch 'could not move the current binary aside') {
+              throw "the failure must be the documented actionable one, got: $out"
+            }
+            .\appximo.exe version --json | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "binary broken after the refused upgrade" }
             Invoke-RestMethod http://localhost:8093/healthz | Out-Null
-            Note "s3a: PASS — POSIX-delete unlinked the running old image; serve still up"
-
-            # ── s3b: a HARD-LOCKED .old.exe (no-sharing handle — the
-            # antivirus/editor class) fails loudly, binary intact.
-            Copy-Item ..\appximo.exe appximo.exe -Force
-            if (-not (Test-Path appximo.exe.old.exe)) { Copy-Item ..\appximo.exe appximo.exe.old.exe }
-            $lock = [System.IO.File]::Open((Resolve-Path appximo.exe.old.exe), 'Open', 'Read', 'None')
-            try {
-              $out = .\appximo.exe upgrade --version $env:UPGRADE_TAG 2>&1 | Out-String
-              Note "s3b: upgrade-with-hard-locked-old exit=$LASTEXITCODE output:`n$out"
-              if ($LASTEXITCODE -eq 0) { throw "upgrade must fail while .old.exe is hard-locked; it exited 0" }
-              if ($out -notmatch 'could not move the current binary aside') {
-                throw "the failure must be the documented actionable one, got: $out"
-              }
-              .\appximo.exe version --json | Out-Null
-              if ($LASTEXITCODE -ne 0) { throw "binary broken after the refused upgrade" }
-              Note "s3b: PASS — loud failure, binary intact"
-            } finally { $lock.Dispose() }
+            Note "s3a: PASS — loud failure, binary intact, serve untouched"
           } finally {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
           }
+          # ── s3b: serve stopped — .old.exe is now a plain file. The OTHER
+          # lock class (antivirus/editor: an open handle with no sharing)
+          # must produce the same loud failure.
+          Start-Sleep 2
+          Copy-Item ..\appximo.exe appximo.exe -Force
+          if (-not (Test-Path appximo.exe.old.exe)) { Copy-Item ..\appximo.exe appximo.exe.old.exe }
+          $lock = [System.IO.File]::Open((Resolve-Path appximo.exe.old.exe), 'Open', 'Read', 'None')
+          try {
+            $out = .\appximo.exe upgrade --version $env:UPGRADE_TAG 2>&1 | Out-String
+            Note "s3b: upgrade-with-hard-locked-old exit=$LASTEXITCODE output:`n$out"
+            if ($LASTEXITCODE -eq 0) { throw "upgrade must fail while .old.exe is hard-locked; it exited 0" }
+            if ($out -notmatch 'could not move the current binary aside') {
+              throw "the failure must be the documented actionable one, got: $out"
+            }
+            .\appximo.exe version --json | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "binary broken after the refused upgrade" }
+            Note "s3b: PASS — loud failure, binary intact"
+          } finally { $lock.Dispose() }
 
       - name: Stop serve
         if: always()
