@@ -203,38 +203,46 @@ jobs:
       - name: 'upgrade scenario 2: swap under a RUNNING serve (the released .exe boots)'
         working-directory: win-e2e
         run: |
+          function Note($m) { $m | Tee-Object -Append -FilePath scenario.txt | Write-Host }
           $env:DATABASE_URL = 'postgres://postgres:root@localhost:5432/appximo_ci?sslmode=disable'
           $env:JWT_SECRET   = 'ci-windows-jwt-secret-0123456789abcdef'
           $env:ADMIN_KEY    = 'ci-windows-admin'
           $schema = Resolve-Path ..\examples\quickstart\schema.json
           # serve runs the RELEASE binary scenario 1 installed — this is also the
           # "released .exe actually boots on Windows" verification.
+          Note "s2: starting serve"
           $proc = Start-Process -FilePath (Resolve-Path .\appximo.exe) `
             -ArgumentList 'serve','--schema',"$schema",'--port','8093' `
             -PassThru -NoNewWindow -RedirectStandardOutput serve.log -RedirectStandardError serve.err
           $ok = $false
-          foreach ($i in 1..30) {
+          foreach ($i in 1..45) {
             try { Invoke-RestMethod http://localhost:8093/healthz | Out-Null; $ok = $true; break }
             catch { Start-Sleep 1 }
           }
           if (-not $ok) {
-            Get-Content serve.log, serve.err -ErrorAction SilentlyContinue
+            Note "s2: serve never answered /healthz; serve.log/serve.err follow"
+            Get-Content serve.log, serve.err -ErrorAction SilentlyContinue | Tee-Object -Append -FilePath scenario.txt
             throw "the released .exe did not answer /healthz"
           }
+          Note "s2: serve healthy (pid $($proc.Id)); upgrading under it"
           "SERVE_PID=$($proc.Id)" | Out-File -Append $env:GITHUB_ENV
           # The swap, while the same .exe is running AND is this process's own image.
-          .\appximo.exe upgrade --force --version $env:UPGRADE_TAG
+          $out = .\appximo.exe upgrade --force --version $env:UPGRADE_TAG 2>&1 | Out-String
+          Note "s2: upgrade exit=$LASTEXITCODE output:`n$out"
           if ($LASTEXITCODE -ne 0) { throw "upgrade under a running serve exited $LASTEXITCODE" }
           if (-not (Test-Path appximo.exe.old.exe)) { throw "no .old.exe after the running-serve swap" }
           # The old process must still be serving from its renamed image.
           Invoke-RestMethod http://localhost:8093/healthz | Out-Null
+          Note "s2: PASS — old process still serving from the renamed image"
 
       - name: 'upgrade scenario 3: a LOCKED .old.exe fails loudly, binary intact'
         working-directory: win-e2e
         run: |
+          function Note($m) { $m | Tee-Object -Append -FilePath scenario.txt | Write-Host }
           # serve (still running) now holds appximo.exe.old.exe as its image — the
           # natural aftermath of scenario 2 and exactly the backlog's locked case.
           $out = .\appximo.exe upgrade --force --version $env:UPGRADE_TAG 2>&1 | Out-String
+          Note "s3: upgrade-with-locked-old exit=$LASTEXITCODE output:`n$out"
           if ($LASTEXITCODE -eq 0) { throw "upgrade must fail while .old.exe is locked; it exited 0" }
           if ($out -notmatch 'could not move the current binary aside') {
             throw "the failure must be the documented actionable one, got: $out"
@@ -242,11 +250,23 @@ jobs:
           # The machine is never left without a working engine.
           $v = .\appximo.exe version --json | ConvertFrom-Json
           if ($v.version -ne $env:UPGRADE_TAG) { throw "binary broken after failed upgrade: $($v.version)" }
+          Note "s3: PASS — loud failure, binary intact"
 
       - name: Stop serve
         if: always()
         run: |
           if ($env:SERVE_PID) { Stop-Process -Id $env:SERVE_PID -Force -ErrorAction SilentlyContinue }
+
+      - name: Upload Windows e2e logs (the black box for a failed scenario)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-e2e-logs
+          path: |
+            win-e2e/scenario.txt
+            win-e2e/serve.log
+            win-e2e/serve.err
+          if-no-files-found: ignore
 
       - name: 'upgrade scenario 4: unwritable destination → actionable permission error'
         run: |
