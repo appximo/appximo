@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786258711725,
+  "lastUpdate": 1786259552669,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -1944,6 +1944,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36299840 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "bf5dde49152db1dfaea7ee0696693a0a9e38248f",
+          "message": "ci: windows gate iteration 3 — the pinned release predates `upgrade`; self-replace runs on the dev build\n\nThe black box named it exactly: scenario 1's freshly installed v0.1.5\nanswered `unknown command \"upgrade\"` — the command shipped after that\ntag. The rename-aside dance is a property of the CODE UNDER TEST, so\nscenarios 2–4 now self-replace the CI-built dev binary (which has the\ncommand); \"the released .exe boots and serves on Windows\" — proven\nincidentally by the failing run's serve.log — becomes its own step.\nOnce a release ships with `upgrade`, bump UPGRADE_TAG and the chain can\ngo release→release.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-09T07:12:05Z",
+          "tree_id": "e6cdc63ddb771931cb06a6556adc45d3233f1ada",
+          "url": "https://github.com/appximo/appximo/commit/bf5dde49152db1dfaea7ee0696693a0a9e38248f"
+        },
+        "date": 1786259552114,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6293,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "378147 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6293,
+            "unit": "ns/op",
+            "extra": "378147 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "378147 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "378147 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 65.97,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36217334 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 65.97,
+            "unit": "ns/op",
+            "extra": "36217334 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36217334 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36217334 times\n4 procs"
           }
         ]
       }
