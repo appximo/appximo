@@ -120,6 +120,13 @@ jobs:
       run:
         shell: pwsh
     steps:
+      # The Windows runner image sets core.autocrlf=true system-wide, which
+      # rewrites every LF file to CRLF at checkout — breaking any test that
+      # compares file bytes against an embedded doc or golden string. Neutralize
+      # BEFORE checkout so the tree is byte-identical to the Linux jobs'.
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v7
@@ -132,8 +139,19 @@ jobs:
 
       - name: Unit lane (platform-sensitive packages)
         run: |
-          go test -short -count=1 ./cmd/appximo/... ./pkg/platformpath/... ./pkg/schema/... ./pkg/query/...
+          go test -short -count=1 ./cmd/appximo/... ./pkg/platformpath/... ./pkg/schema/... ./pkg/query/... 2>&1 | Tee-Object -FilePath win-gotest.txt
           if ($LASTEXITCODE -ne 0) { throw "unit lane failed" }
+
+      # Logs of a failed run are not API-readable without a token (the box that
+      # watches CI has none); the artifact is the black box, same pattern as the
+      # Linux gotest-json.
+      - name: Upload Windows test output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-gotest
+          path: win-gotest.txt
+          if-no-files-found: ignore
 
       - name: '.env loading incl. the UTF-8 BOM case (F1-bis)'
         run: |
