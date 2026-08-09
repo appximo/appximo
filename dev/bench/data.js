@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786259552669,
+  "lastUpdate": 1786260361779,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -2016,6 +2016,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36217334 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "5147bd27f2c446a6ee9b3641552b4986da7df082",
+          "message": "ci: windows gate iteration 4 — the gate corrected the reasoning: a running .old.exe does NOT block the upgrade\n\nScenario 3's first execution succeeded where the code's comments\npredicted failure: Go's os.Remove uses POSIX delete semantics on\nWindows 10+/NTFS, so the image of a still-RUNNING old process unlinks\ncleanly and the next upgrade proceeds — the leftover-lock failure mode\nreasoned about in INSTALL-PROMPT-S1 does not exist for that case. The\nscenario is now split: 3a asserts the true behavior (success, old serve\nuntouched), 3b manufactures the genuinely-locked case — a no-sharing\nopen handle, the antivirus/editor class — which is what exercises the\ndocumented loud-failure fallback.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-09T07:25:36Z",
+          "tree_id": "8cb76e16e6b17387a76658603e011827e9926bba",
+          "url": "https://github.com/appximo/appximo/commit/5147bd27f2c446a6ee9b3641552b4986da7df082"
+        },
+        "date": 1786260360586,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 4901,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "467442 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 4901,
+            "unit": "ns/op",
+            "extra": "467442 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "467442 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "467442 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 49.74,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "48400071 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 49.74,
+            "unit": "ns/op",
+            "extra": "48400071 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "48400071 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "48400071 times\n4 procs"
           }
         ]
       }
