@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786249755112,
+  "lastUpdate": 1786249893897,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -1584,6 +1584,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36485445 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "9c763d8378dec15c7ab9808077b0f68189103959",
+          "message": "docs: CTX-PARITY-S1 review — the third field report answered, three items filed\n\nBACKLOG: the session's DONE block (the parity class audited and closed, up\nagainst a remote database, the installer no longer disturbing neighbours) plus\nthree new OPEN items — ENG-42 (write errors reach a custom handler as raw\ndriver errors instead of the engine's 409/422 vocabulary), ENG-43 (Ctx writes\nagainst the boot schema, so a hot-migrated column's rules are not compiled for\nthe library path), OPS-26 (a schema granting a custom route cannot be booted by\nthe stock binary, which splits the first mile from the custom-handler half).\n\nFIELD_FEEDBACK_RESPONSE gains its third section: every VecinGo finding with\nwhat was done and how it was verified, including the divergence the report did\nNOT contain — Ctx.Insert skipped the create-time RBAC, so an owner-scoped role\ncould attribute a row to another principal through a custom route.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-09T04:31:03Z",
+          "tree_id": "2193ea1163d4da8abeed54fb5fb20ba1e6d84177",
+          "url": "https://github.com/appximo/appximo/commit/9c763d8378dec15c7ab9808077b0f68189103959"
+        },
+        "date": 1786249892851,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 5812,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "399634 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 5812,
+            "unit": "ns/op",
+            "extra": "399634 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "399634 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "399634 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 64.98,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "37045126 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 64.98,
+            "unit": "ns/op",
+            "extra": "37045126 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "37045126 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "37045126 times\n4 procs"
           }
         ]
       }
