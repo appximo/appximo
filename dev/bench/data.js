@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786249893897,
+  "lastUpdate": 1786256166044,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -1656,6 +1656,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "37045126 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "650798d1ad5797d845d45ab01c045e04aa27e986",
+          "message": "docs: CTX-CLOSE-S1 close-out — the parity audit table fully closed, the backlog's four items DONE\n\nBACKLOG: ENG-42, ENG-43, OPS-26 and OPS-25 move to DONE in\nCTX-CLOSE-S1, with the Windows residue (non-admin Program Files,\nantivirus locks) recorded inside the entry. FIELD_FEEDBACK_RESPONSE\ngains the same-day addendum for the three items the VecinGo batch\nfiled. benchmarks/history.tsv carries the ABBA windows\n(ctc-wA1/B1/B2/A2 — verdict no_change).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-09T06:10:14Z",
+          "tree_id": "771dc3231e04e6fd92b8261dde7954a20c67edda",
+          "url": "https://github.com/appximo/appximo/commit/650798d1ad5797d845d45ab01c045e04aa27e986"
+        },
+        "date": 1786256164986,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6199,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "380646 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6199,
+            "unit": "ns/op",
+            "extra": "380646 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "380646 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "380646 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 65.93,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "35924223 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 65.93,
+            "unit": "ns/op",
+            "extra": "35924223 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "35924223 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "35924223 times\n4 procs"
           }
         ]
       }
