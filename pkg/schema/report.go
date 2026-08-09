@@ -34,7 +34,15 @@ type ValidationReport struct {
 	// mean it will not do what its author intended (SCHEMA-5). They are reported in
 	// the same shape as errors so the AI correction loop can act on them with the
 	// same code path, and `valid` stays true — a warning never blocks a deploy.
-	Warnings []StructuredError `json:"warnings,omitempty"`
+	//
+	// ALWAYS EMITTED, even when empty — deliberately not omitempty. With the key
+	// absent, "this schema has no warnings" and "this binary has no warnings
+	// feature" are the same JSON, so a caller cannot tell a clean bill of health
+	// from an old engine. A third-party agent reported exactly that: it could not
+	// confirm zero warnings as a POSITIVE signal and pre-empted the known rules by
+	// hand instead. `errors` has always been emitted unconditionally; this makes
+	// the two halves of the report symmetric.
+	Warnings []StructuredError `json:"warnings"`
 }
 
 // ValidateReport runs BOTH validators over raw schema bytes and returns a unified,
@@ -58,7 +66,7 @@ func ValidateReport(raw []byte) ValidationReport {
 	// Semantic (Go) — only if the JSON parses into the schema struct. Unknown keys
 	// are dropped by json.Unmarshal (the meta-schema already flagged them), so the
 	// semantic pass runs over the well-formed remainder.
-	var warnings []StructuredError
+	warnings := []StructuredError{} // non-nil: the key is always emitted (see ValidationReport.Warnings)
 	var s APISchema
 	if err := json.Unmarshal(raw, &s); err == nil {
 		for _, e := range Validate(&s) {

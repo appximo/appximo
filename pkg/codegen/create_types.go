@@ -119,5 +119,16 @@ func fromJSONBody(v any) bool {
 	case string, float64, bool, map[string]any, []any, nil:
 		return true
 	}
+	// CTX-PARITY-S1: the LIBRARY path (Ctx.Insert / Ctx.Update) is a second,
+	// equally legitimate caller, and it passes what Go computes — int64 from a
+	// previous read, int from a literal. Those are caller INPUT and must be
+	// type-checked like any other value; only they are not JSON-shaped. Note
+	// what is deliberately still excluded: time.Time, which the engine itself
+	// injects for a `default:"now"` field and which validateFieldValue would
+	// reject as "must be a timestamp string" — the outage this guard exists to
+	// prevent.
+	if _, isNum := schema.AsFloat64(v); isNum {
+		return true
+	}
 	return false
 }

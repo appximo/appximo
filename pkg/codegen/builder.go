@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"regexp"
 	"sort"
@@ -536,12 +535,6 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// read path already returns it. Falls back to the boot surface.
 			wres, wrv := writeSurface(req.Context(), tc.ID, name, &res, rv)
 
-			// Schema defaults (SCHEMA-CLOSE-V1): fill omitted fields that declare a
-			// default BEFORE validation, so a required field with a default is
-			// satisfied by it. No-op (one length check) for a resource with no
-			// defaults — the create gate.
-			wrv.ApplyDefaults(body)
-
 			// Declarative validation: BEFORE the before_create hook and the
 			// INSERT. Create requires every required non-auto field (S44 #2).
 			// Declared rules AND value types are collected together, then reported
@@ -557,15 +550,12 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// before — so POST silently truncated 1.9 to 1 on an int64 column and
 			// answered 201, while PATCH answered a clean 422 for the same value
 			// (ADR-024).
-			verrs := wrv.ValidateWrite(body, true)
-			verrs = append(verrs, validateCreateTypes(wres, body)...)
-			if len(verrs) > 0 {
-				markSpan(req, "validate")
-				writeValidationErrs(w, verrs)
-				return
-			}
-			// State-machine (G5): a row may only be CREATED in an initial state.
-			if verrs := wrv.ValidateInitialStates(body); len(verrs) > 0 {
+			// PrepareCreate is the SHARED core (CTX-PARITY-S1): defaults →
+			// declarative rules + value types (collected together, so one
+			// response carries every failing field) → state-machine initial
+			// states. Ctx.Insert calls the SAME function, which is what keeps
+			// backend-spec's "exactly like the generated POST" true.
+			if verrs := PrepareCreate(wres, wrv, body); len(verrs) > 0 {
 				markSpan(req, "validate")
 				writeValidationErrs(w, verrs)
 				return
@@ -1721,12 +1711,15 @@ func validateFieldValue(name string, fd schema.FieldDef, v any) (string, bool) {
 			return fmt.Sprintf("field %q must be a file id (a uuid)", name), false
 		}
 	case "int", "int64":
-		f, ok := v.(float64)
-		if !ok || f != math.Trunc(f) {
+		// Any Go integer type is integral; a float must have no fractional
+		// part (1.9 into an int column is what Postgres would silently
+		// truncate). schema.IsIntegral is the shared decision, so the library
+		// path and the HTTP path cannot disagree about what an integer is.
+		if _, ok := schema.AsFloat64(v); !ok || !schema.IsIntegral(v) {
 			return fmt.Sprintf("field %q must be an integer", name), false
 		}
 	case "float64":
-		if _, ok := v.(float64); !ok {
+		if _, ok := schema.AsFloat64(v); !ok {
 			return fmt.Sprintf("field %q must be a number", name), false
 		}
 	case "bool":

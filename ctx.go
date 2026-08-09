@@ -531,8 +531,15 @@ func (c *requestCtx) Insert(resource string, data map[string]any) (map[string]an
 	if !eval.Allowed {
 		return nil, &forbiddenError{"forbidden"}
 	}
-	if rv := c.eng.validators[resource]; rv != nil {
-		if verrs := rv.ValidateWrite(data, true); len(verrs) > 0 {
+	// The SAME preparation the generated POST runs (CTX-PARITY-S1):
+	// defaults → declarative rules + value types → state-machine initial
+	// states. This used to be a bare ValidateWrite, so a custom handler skipped
+	// all three: a schema `default` was not applied (rows landed with a NULL
+	// status and the next transition failed with `invalid transition from ""`),
+	// values were never type-checked, and a row could be created outside its
+	// declared initial state — while backend-spec promised parity with the POST.
+	if res, ok := c.eng.schema.Resources[resource]; ok {
+		if verrs := codegen.PrepareCreate(&res, c.eng.validators[resource], data); len(verrs) > 0 {
 			return nil, &ValidationError{Fields: verrs}
 		}
 	}
@@ -570,11 +577,10 @@ func (c *requestCtx) Update(resource, id string, data map[string]any) (map[strin
 	if !eval.Allowed {
 		return nil, &forbiddenError{"forbidden"}
 	}
-	if rv := c.eng.validators[resource]; rv != nil {
-		// Partial (PATCH) semantics: validate only the fields present.
-		if verrs := rv.ValidateWrite(data, false); len(verrs) > 0 {
-			return nil, &ValidationError{Fields: verrs}
-		}
+	// The SAME preparation the generated PATCH runs (CTX-PARITY-S1): partial
+	// semantics plus the value type check the library path never had.
+	if verrs := codegen.PrepareUpdate(&res, c.eng.validators[resource], data); len(verrs) > 0 {
+		return nil, &ValidationError{Fields: verrs}
 	}
 	data = applyWriteAllowlist(data, eval.AllowedFields)
 	if len(data) == 0 {

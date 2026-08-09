@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 	"testing"
+	"time"
 
 	"github.com/appximo/appximo"
 	"github.com/appximo/appximo/pkg/schema"

@@ -1,7 +1,9 @@
 package schema
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"net/url"
 	"regexp"
 	"sort"
@@ -344,11 +346,11 @@ func strRule(field, rule, msg string, ok func(string) bool) ruleFn {
 	}
 }
 
-// numRule wraps a numeric predicate. encoding/json decodes every JSON number
-// into float64, so that is the only accepted dynamic type.
+// numRule wraps a numeric predicate over any Go numeric value — see AsFloat64
+// for why float64 alone is not enough.
 func numRule(field, rule, msg string, ok func(float64) bool) ruleFn {
 	return func(v any) *FieldRuleError {
-		f, isNum := v.(float64)
+		f, isNum := AsFloat64(v)
 		if !isNum {
 			return &FieldRuleError{Field: field, Rule: rule, Message: "must be a number"}
 		}
@@ -357,6 +359,68 @@ func numRule(field, rule, msg string, ok func(float64) bool) ruleFn {
 		}
 		return nil
 	}
+}
+
+// AsFloat64 converts any Go numeric value to float64 for rule evaluation. It is
+// the ONE place that decides what counts as a number on a write, shared by the
+// declarative rules here and by codegen's type check, so the two cannot drift.
+//
+// WHY IT IS NOT JUST float64. encoding/json decodes every JSON number into
+// float64, and for years that was the only shape a write could arrive in — the
+// HTTP path is the only caller. The library path (Ctx.Insert / Ctx.Update, the
+// custom-handler surface) broke that assumption: a Go handler passes what Go
+// computes, and what the engine RETURNS from a read is int64/int32 from the pgx
+// driver. Rejecting int64 on a write while handing int64 back on a read makes
+// the round trip — read a row, change a field, write it back — impossible
+// without a manual cast, which is what a third-party consumer hit and had to
+// diagnose ("surprising in a Go API; it cost a full rebuild cycle").
+//
+// The conversion is for VALIDATION only; the caller's original value is what
+// reaches the database, so an int64 beyond 2^53 is still stored exactly.
+func AsFloat64(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int8:
+		return float64(n), true
+	case int16:
+		return float64(n), true
+	case int32:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint:
+		return float64(n), true
+	case uint8:
+		return float64(n), true
+	case uint16:
+		return float64(n), true
+	case uint32:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	}
+	return 0, false
+}
+
+// IsIntegral reports whether v is a whole number, for the int/int64 type check.
+// Any Go integer type is integral by construction; a float is only integral
+// when it has no fractional part (the 1.9-into-an-int-column case, which
+// Postgres would silently truncate).
+func IsIntegral(v any) bool {
+	switch v.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return true
+	}
+	f, ok := AsFloat64(v)
+	return ok && f == math.Trunc(f)
 }
 
 // formatChecker maps a format name to its predicate and client-safe message.
