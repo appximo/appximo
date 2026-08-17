@@ -9,7 +9,18 @@
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go)](go.mod)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
 
-You don't write handlers, models, or migrations. You write this:
+**One sentence in. A running, multi-tenant app out — in 47 seconds, unedited:**
+
+![appximo new: one sentence to a running app in 47 seconds](docs/demo/appximo-new.gif)
+
+<sub>Real, complete run — AI-generated schema (valid on the first try, stats on
+screen), Postgres, tenant, admin, a verified request through the full auth
+chain, graceful shutdown. The untouched recording with embedded timing, the
+browser tour of what it serves, and the exact steps to reproduce it yourself:
+[**docs/demo/**](docs/demo/README.md).</sub>
+
+That command (`appximo new`) is the shortcut. The contract underneath is what
+matters: you don't write handlers, models, or migrations. You write this:
 
 ```json
 {
@@ -46,6 +57,44 @@ and the engine serves — per isolated tenant, from one process:
 
 It's a code generator without the generated code: the schema is compiled at boot,
 not scaffolded into files you then maintain.
+
+## The layers — everything below ships in the one binary
+
+Each of these is usually its own service, dependency, or SaaS. Here they are
+compiled surfaces of the same process, all derived from the schema:
+
+| | | |
+|---|---|---|
+| **REST + GraphQL + OpenAPI**, generated per resource | **Auth as a product**: signup/login/refresh, argon2id, password reset + email verify, OAuth (Google/GitHub/Microsoft), TOTP MFA | **RBAC** per role/resource/action/field + row conditions, deny-by-default, enforced on create too |
+| **Migrations with a conscience**: diff-based, data-preserving renames, destructive drops behind a dry-run + approval gate, resumable multi-tenant fan-out, version history + rollback | **Multi-tenancy**: schema-per-tenant Postgres isolation, subdomain routing, per-tenant rate limits | **File store**: content-addressed, OWASP upload validation, signed URLs, local disk or any S3 |
+| **`/app`** — a back-office CRUD UI generated at runtime from your API's own OpenAPI | **`/admin`** — tenants, users, and an observability dashboard (latency, SLO burn rate, trace waterfalls) | **`/editor`** — Appximo Studio: a visual ERD schema designer that deploys, migrates and restarts the engine |
+| **State machines** enforced race-safely in SQL | **Atomic multi-resource transactions** with compare-and-set guards | **SSE real-time**, signed webhooks, JS/WASM sandboxed hooks, Prometheus + trace ring |
+
+The same generated schema from the demo, seen through three of those surfaces:
+
+| The data, in `/app` | The model, in `/editor` | The platform, in `/admin` |
+|---|---|---|
+| ![the generated back-office](docs/img/demo/app-properties.png) | ![the ERD in Appximo Studio](docs/img/demo/editor-erd.png) | ![the admin panel](docs/img/demo/admin.png) |
+
+## Who it's for — and who it's NOT for
+
+**For you if:** you want several small-to-medium apps (or tenants) on a box you
+control, with the API contract generated and *enforced* from a schema file, the
+custom 10% as plain Go in the same process, and an AI agent doing most of the
+typing against a printable spec.
+
+**NOT for you if —**
+
+- **You need horizontal scale or HA.** Appximo is deliberately single-node;
+  scale is vertical. The benchmark shows how far one cheap box goes — that's
+  the honest ceiling.
+- **Your domain logic outgrows a bounded framework surface.** Custom logic is
+  in-process Go routes + sandboxed hooks — powerful, but it is not an
+  anything-goes app server. If most of your app is bespoke logic, use a
+  framework; this engine's bet is that most of most apps isn't.
+- **You want a managed cloud.** Self-hosted only, by design, for now.
+- **You need NoSQL, MySQL, or SQLite.** It's PostgreSQL, period (`jsonb` covers
+  the document-shaped corners).
 
 ## Quick start (~30 s with the image pull)
 
@@ -105,9 +154,21 @@ To serve **your own** model, mount your schema over `/etc/appximo/schema.json`
 (or `--schema yours.json` on the binary). Tenants are addressed by Host
 subdomain: `acme.localhost` → Postgres schema `tenant_acme`.
 
-## Building with an AI agent? Start with five commands
+## Building with an AI agent? Two prompts, then five specs
 
-The engine prints its own agent-facing contract — no repo access needed:
+The product ships its own prompts. Paste them into YOUR agent (Claude Code,
+Cursor, Copilot) — they carry the whole journey, with executable checklists:
+
+```bash
+appximo prompt --install   # 1. gets the right binary onto this machine (any OS,
+                           #    any starting state — fresh, outdated, or current)
+appximo prompt             # 2. one idea in a sentence → schema → local checklist
+                           #    green → production with HTTPS, zero questions
+```
+
+(Readable versions: [docs/INSTALL_PROMPT.md](docs/INSTALL_PROMPT.md) ·
+[docs/MASTER_PROMPT.md](docs/MASTER_PROMPT.md).) Underneath them, the engine
+prints its complete agent-facing contract — no repo access needed:
 
 ```bash
 appximo spec             # 1. the schema grammar (the declarative 90% of an app)
@@ -128,19 +189,50 @@ The long-form docs behind each command:
 [BACKEND_SPEC_LLM](docs/BACKEND_SPEC_LLM.md) ·
 [FRONTEND_SPEC_LLM](docs/FRONTEND_SPEC_LLM.md).
 
-## See it live
+## The proof, not the adjective
 
-Two real apps — schema + custom Go logic + embedded frontend, each one binary on
-a $16/mo VPS — run in production today:
+Every claim in this README traces to a measurement or a third party — the
+inventory of what we assert, with conditions, is
+[docs/CERTIFICATION_2026-08-01.md](docs/CERTIFICATION_2026-08-01.md) (+ dated
+addendums). When an audit kills a claim, the correction stays visible in the
+docs — that's the method, not an apology. The strongest evidence, in order:
+
+**Independent builds.** Three field evaluations by outside developers with no
+repository access, building real apps from the public docs alone — each one
+answered finding-by-finding in
+[docs/FIELD_FEEDBACK_RESPONSE.md](docs/FIELD_FEEDBACK_RESPONSE.md):
+
+- **[VecinGo — the case study](docs/CASE_STUDY_VECINGO.md):** a
+  neighborhood-association platform (18 resources, 8 state machines, 13 custom
+  Go handlers, weighted quorum voting, a 13-screen embedded SPA) to production
+  with HTTPS in **~3–3.5 h**. Verdict: *"as a consumer, I would do it again."*
+- **[crisblogs.appximo.com](https://crisblogs.appximo.com)** — a complete blog
+  (roles, cover uploads, publish lifecycle) built ONLY from the distributed
+  binary + `appximo specs`, publicly live.
+- A gym-bookings app, install → production with HTTPS in under 24 h of
+  part-time evaluation — the report that opened this feedback loop.
+
+**Fresh-agent runs** (agents with zero repo access, only the public docs, all
+disclosed in full): the QUICKSTART checklist 0→green in **1m53s** (measured);
+a sports-court app — schema valid first try, Go compiling first try, zero
+blockers; two master-prompt runs reaching a local green checklist in **3m28s**
+and HTTPS installs on a disposable test box (a simulated VPS — systemd
+container with a local CA, said, not hidden) in ~17–22 min, **zero questions
+asked**.
+
+**Live demos** — schema + custom Go + embedded frontend, one binary each on a
+$16/mo VPS:
 
 - **[tiendita.appximo.com](https://tiendita.appximo.com)** — a commerce
   storefront (catalog, cart, checkout with an atomic stock transaction, order
   tracking, image uploads).
 - **[petfriendly.appximo.com](https://petfriendly.appximo.com)** — a
   pet-services app born from the AI authoring flow.
+- **[crisblogs.appximo.com](https://crisblogs.appximo.com)** — the third-party
+  blog above.
 
-(The demo domains still carry the project's pre-rename name; they move to
-`appximo.com` next.)
+Demo data is public and writable — treat it accordingly; it resets
+periodically.
 
 ## Where it sits
 
@@ -165,21 +257,19 @@ talking to a Postgres you control, with the API contract generated and enforced
 from a schema file — plus the custom 10 % as Go in the same process and
 transaction.**
 
-## Performance
+## Performance — the numbers WITH their conditions
 
-On a $16/mo 2-vCPU droplet with JWT + RBAC + multi-tenancy + validation + rate
-limiting all active, measured from an external load generator over a real network:
-**2,000 req/s sustained, p50 1.60 ms (CI95 [1.57, 1.67]), 0 errors in 597k requests**
-— re-measured 2026-08-01 on the same hardware and reproducing the original figure
-(1.58 ms [1.52, 1.62], 2026-06-10). With the response cache **fully bypassed**, every
-request reaching PostgreSQL: **p50 2.44 ms at 500 req/s**.
+No number below is valid without its condition column. That is deliberate.
 
-> **Read this before reproducing it.** 2,000 req/s against a *single tenant* needs
-> the per-tenant rate limiter raised — `RATE_LIMIT_RPS=3000 RATE_LIMIT_BURST=300`,
-> the configuration the benchmark declares. On the **defaults (1000 rps / 100
-> burst)** roughly half of a 2,000 rps single-tenant load is answered `429`, by
-> design. The limit is per tenant, so real multi-tenant traffic is not affected the
-> same way.
+| Number | What it measures | Condition — read it |
+|---|---|---|
+| **2,000 req/s, p50 1.60 ms** (CI95 [1.57, 1.67]), 0 errors / 597k reqs | the engine: JWT + RBAC + multi-tenancy + validation + rate limiting active, external load generator over a real network | $16/mo 2-vCPU droplet; **single-tenant load needs the per-tenant limiter raised** (`RATE_LIMIT_RPS=3000 RATE_LIMIT_BURST=300`, as the benchmark declares — on the defaults, ~half of 2,000 rps to ONE tenant is answered `429`, by design); re-measured 2026-08-01, reproducing 2026-06-10's 1.58 ms |
+| **p50 2.44 ms @ 500 req/s** | the same engine with the response cache **fully bypassed** — every request reaches PostgreSQL | same box; the uncached truth next to the cached one |
+| **+1.2 ms p50** | the full production stack's overhead: Caddy + Let's Encrypt TLS → systemd → native PostgreSQL | re-measured 2026-08-01; see [docs/BENCHMARKS.md](docs/BENCHMARKS.md) |
+| **~4.2 ms** end-to-end | a filtered page over **1M rows**, whole stack | re-measured 2026-08-01 |
+| **~186 MiB PSS** under load | a real consumer app's ENTIRE stack | 2026-07-31, box serving two apps (the older ~109 MiB idle figure is kept in BENCHMARKS with its date) |
+| **47 s** | one sentence → running app (`appximo new`, the hero demo) | one real recorded run, cast + reproduction steps in [docs/demo/](docs/demo/README.md); AI step varies per run (measured convergence: ~90% first-try) |
+| **1m53s** | fresh agent, QUICKSTART 0 → green checklist | measured once, disclosed conditions in the doc |
 
 Full methodology — every limitation, the cache asymmetry, the statistical
 treatment (Mann-Whitney, bootstrap CIs), and raw per-run data — ships in the
@@ -494,9 +584,13 @@ make test-all    # + integration + E2E + resilience (real Postgres, toxiproxy)
 
 ## License & contributing
 
-Apache 2.0 — [LICENSE](LICENSE) · [NOTICE](NOTICE). Issues and PRs welcome,
-especially: benchmark-baseline improvements, DNS modules for the Caddy wildcard
-setup, and schema features you're missing. Security reports:
+Apache 2.0 — [LICENSE](LICENSE) · [NOTICE](NOTICE). **[CONTRIBUTING.md](CONTRIBUTING.md)**
+has the ground rules (Conventional Commits, the PR gate, how the data-path
+binary-diff gate works); CI runs the full suite — unit + integration + E2E +
+resilience against real Postgres, lint, govulncheck, and a native **Windows
+gate** — on every push ([workflows](.github/workflows/)). Issues and PRs
+welcome, especially: benchmark-baseline improvements, DNS modules for the Caddy
+wildcard setup, and schema features you're missing. Security reports:
 [SECURITY.md](SECURITY.md).
 
 ---
