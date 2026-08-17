@@ -650,6 +650,31 @@ touched; the data path is unchanged.
   real state-machine transitions), six stills, and a README whose whole job is
   reproducibility: the honesty notes (typing effect, idle-cap, why `--port`
   appears) and the exact steps for a third party to re-run and re-time it.
+- **Follow-up pass (same session, from Miguel reading the published README):
+  the hero was the least usable asset on the page** — the GIF raced and, being
+  a GIF, could not be paused; trying restarts it, exactly at the two moments
+  that convert. Fixed by giving the recording a real player: asciinema-player
+  vendored into `site/` (no CDN) with controls, seek, speed and **selectable,
+  copyable terminal text**, verified live (play → Space → the clock stays
+  frozen). GitHub sanitizes `<video>` out of READMEs (verified against their
+  markdown API), so there the GIF stays — re-rendered at **real speed** (was
+  1.25×), idle capped at 3 s, final card held 6 s, same 1.2 MB — wrapped in a
+  link to the player, with `asciinema play docs/demo/appximo-new.cast` offered
+  as the terminal alternative. The two moments are now named: **0:17** the
+  schema validates first try, **0:22** the app is running and verified. That
+  surfaced a real imprecision now corrected everywhere: **the app is up at
+  0:22**; the 47 s take includes the card dwelling plus the graceful `Ctrl+C`.
+  Both clocks are stated wherever the demo is mentioned (the player caps dead
+  air, so its bar reads 0:06 / 0:11 — said explicitly rather than left to
+  collide with the real clock). Also in the pass: the `/app` screenshot with
+  raw UUID columns replaced by a real record open in the form (foreign key
+  resolved to the agent's NAME, `status` offering only the transitions its
+  state machine allows — better looking and more engine on display), the
+  demo's `schema.json` committed for reproduction, and a visual-execution
+  pass on `site/` (one shared media frame for player and video, a poster on
+  the tour video which was rendering as a blank white box, demo cards evened
+  to one height with aligned CTAs, tabular figures, section rhythm, ad-hoc
+  inline styles replaced by classes). Structure untouched.
 - **The VecinGo case study** (`docs/CASE_STUDY_VECINGO.md`): the third field
   evaluation presented at publication level — why the domain is hard, the
   numbers, where the time went (the declarative 90% in minutes; the custom 10%
