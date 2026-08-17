@@ -239,6 +239,12 @@
   <h1>Two prompts into your AI agent.<br>One production app.<span class="dim"> HTTPS included.</span></h1>
   <p class="sub">Appximo compiles a JSON schema into a complete multi-tenant backend — REST + GraphQL + interactive docs + admin panel + a generated back-office — as <strong>one static Go binary</strong> on a PostgreSQL you control. <strong>Prompt 1</strong> puts the engine on your machine. <strong>Prompt 2</strong> takes your agent (Claude Code, Cursor, Copilot…) from <strong>an idea in one sentence</strong> to a running app, and to a real domain with HTTPS when you say so.</p>
   <div class="measured">⏱ Measured: a fresh agent went from first command to the fully green checklist in <b>&nbsp;1m53s</b></div>
+  <figure class="shot" style="margin:1.6rem 0 0;max-width:56rem">
+    <video autoplay loop muted playsinline preload="metadata" style="width:100%;display:block" aria-label="appximo new: one sentence to a running app in 47 seconds, unedited">
+      <source src="assets/appximo-new.mp4" type="video/mp4">
+    </video>
+    <figcaption style="font-size:.8rem;color:var(--ink-3);padding:.5rem .9rem">One sentence → a running multi-tenant app in <strong>47&nbsp;s</strong>, unedited. The raw recording with embedded timing and the steps to reproduce it: <a href="https://github.com/appximo/appximo/blob/main/docs/demo/README.md" rel="noopener">docs/demo</a>.</figcaption>
+  </figure>
   <div class="cta-row">
     <a class="btn btn-primary" href="#start-here">Get the two prompts ↓</a>
     <a class="btn btn-ghost" href="https://github.com/appximo/appximo/blob/main/docs/GUIDE.md">Read the guide</a>
@@ -543,6 +549,17 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
       </div>
     </figure>
   </div>
+  <div class="pbox" style="margin-top:1.8rem">
+    <span class="pbox-label">Case study</span>
+    <p style="margin:.5rem 0 .3rem"><strong>VecinGo</strong> — an independent developer took a neighborhood-association platform (18 resources, 8 state machines, 13 custom Go handlers, weighted quorum voting, a 13-screen embedded SPA) to production with HTTPS in <strong>~3–3.5&nbsp;h</strong>, onto a VPS already serving two other apps. Verdict: <em>"as a consumer, I would do it again."</em> Including the four engine defects they found — and how each one was closed.</p>
+    <a href="https://github.com/appximo/appximo/blob/main/docs/CASE_STUDY_VECINGO.md" rel="noopener">Read the case study →</a>
+  </div>
+  <figure class="shot" style="margin-top:1.8rem">
+    <video controls muted playsinline preload="metadata" style="width:100%;display:block" aria-label="Browser tour: the generated back-office, Swagger docs, the Studio ERD and the admin panel">
+      <source src="assets/app-tour.mp4" type="video/mp4">
+    </video>
+    <figcaption style="font-size:.8rem;color:var(--ink-3);padding:.5rem .9rem">What <code>appximo new</code> leaves you in the browser — <code>/app</code> (generated back-office), <code>/docs</code>, <code>/editor</code> (the ERD in Appximo Studio) and <code>/admin</code> — on the demo's own generated schema.</figcaption>
+  </figure>
 </div></section>
 
 <hr class="divider">
