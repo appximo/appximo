@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Appximo — a JSON schema in, a production multi-tenant backend out</title>
 <meta name="description" content="Appximo compiles one JSON schema into a multi-tenant REST + GraphQL + OpenAPI server at boot. One static Go binary, your PostgreSQL, a $7–16 VPS. Apache 2.0.">
+<link rel="stylesheet" href="assets/asciinema-player.css">
 <style>
   :root{
     --ink:#16181d; --ink-2:#4b5563; --ink-3:#6b7280;
@@ -22,12 +23,14 @@
   a:hover{text-decoration:underline}
   code,pre{font-family:var(--mono)}
   code{background:var(--wash);border:1px solid var(--line);border-radius:5px;padding:.08em .35em;font-size:.86em}
-  pre{background:#101321;color:#dbe2f4;border-radius:10px;padding:1rem 1.2rem;overflow-x:auto;font-size:.82rem;line-height:1.55}
+  pre{background:#101321;color:#dbe2f4;border-radius:10px;padding:1.05rem 1.25rem;overflow-x:auto;font-size:.82rem;line-height:1.6;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
   pre code{background:none;border:none;padding:0;color:inherit;font-size:inherit}
   .wrap{max-width:1060px;margin:0 auto;padding:0 1.25rem}
-  section{padding:4.2rem 0;scroll-margin-top:3.6rem}
+  section{padding:4.6rem 0;scroll-margin-top:4rem}
+  section + section{padding-top:4.2rem}
   h2{font-size:1.72rem;letter-spacing:-.02em;line-height:1.25;margin-bottom:.4rem}
-  h3{font-size:1.12rem;margin:1.6rem 0 .5rem}
+  h3{font-size:1.12rem;letter-spacing:-.01em;margin:1.7rem 0 .5rem}
+  h2 + .lead{margin-top:.55rem}
   .kicker{font-family:var(--mono);font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:.55rem}
   .lead{color:var(--ink-2);max-width:46rem}
   .muted{color:var(--ink-3)}
@@ -173,7 +176,8 @@
   .tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
   table{border-collapse:collapse;width:100%;font-size:.9rem;min-width:640px}
   th,td{text-align:left;padding:.68rem .9rem;border-top:1px solid var(--line);vertical-align:top}
-  thead th{border-top:none;background:var(--wash);font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+  thead th{border-top:none;background:var(--wash);font-size:.76rem;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+  tbody tr:hover{background:#fafbfc}
   td.num{font-family:var(--mono);font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
   td .cond{display:block;color:var(--ink-3);font-size:.83rem;margin-top:.15rem}
   .cmp td:first-child,.cmp th:first-child{font-weight:600}
@@ -192,11 +196,38 @@
   }
 
   /* screenshots */
-  .shot{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--panel);box-shadow:0 1px 3px rgba(16,19,33,.06)}
+  .shot{border:1px solid var(--line-2);border-radius:12px;overflow:hidden;background:var(--panel);box-shadow:0 1px 3px rgba(16,19,33,.06)}
   .shot img{display:block;width:100%;height:auto}
-  .shot figcaption{padding:.65rem .95rem;font-size:.84rem;color:var(--ink-3);border-top:1px solid var(--line)}
-  .demo-card{display:flex;flex-direction:column;gap:0}
-  .demo-body{padding:1.1rem 1.2rem}
+  .shot figcaption{padding:.75rem .95rem;font-size:.85rem;line-height:1.55;color:var(--ink-3);border-top:1px solid var(--line)}
+  /* media — the terminal player and the video figures share one frame so they
+     read as one family instead of two ad-hoc embeds */
+  .media{border:1px solid var(--line-2);border-radius:12px;overflow:hidden;background:var(--panel);box-shadow:0 1px 3px rgba(16,19,33,.06)}
+  .media-bar{display:flex;align-items:center;gap:.6rem;padding:.5rem .85rem;background:var(--wash);border-bottom:1px solid var(--line)}
+  .media-dots{display:flex;gap:.32rem;flex:none}
+  .media-dots i{width:.6rem;height:.6rem;border-radius:50%;background:var(--line-2);display:block}
+  .media-title{font-family:var(--mono);font-size:.71rem;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+  .media-hint{margin-left:auto;font-size:.75rem;color:var(--ink-3);white-space:nowrap}
+  @media(max-width:600px){.media-hint{display:none}}
+  .media video{display:block;width:100%;background:#0f1117}
+  .media figcaption{padding:.75rem .95rem;font-size:.85rem;color:var(--ink-3);border-top:1px solid var(--line);line-height:1.55}
+  .media figcaption b{color:var(--ink-2);font-variant-numeric:tabular-nums}
+  .player-wrap{background:#0f1117;padding:.55rem;overflow-x:auto;display:flex;justify-content:center}
+  .hero-media{margin-top:1.9rem;max-width:51rem}
+  .casebox{margin-top:1.8rem;padding:1.15rem 1.3rem}
+  .casebox p{margin:.5rem 0 .55rem;color:var(--ink-2);font-size:.93rem}
+  .casebox em{color:var(--ink)}
+  .jump{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem .7rem;margin-top:.7rem;padding-top:.6rem;border-top:1px dashed var(--line);font-size:.82rem;color:var(--ink-3)}
+  .jump span.m{display:inline-flex;align-items:baseline;gap:.4rem}
+  .jump .t{font-family:var(--mono);font-weight:600;font-size:.78rem;color:var(--accent-ink);background:var(--accent-wash);border:1px solid #e0e3ff;border-radius:6px;padding:.06rem .42rem;font-variant-numeric:tabular-nums}
+  table td b,.measured b,.jump .t{font-variant-numeric:tabular-nums}
+  /* the three demo cards carry screenshots of different shapes (a phone
+     storefront next to two desktop captures); a fixed media height + cover
+     keeps the row even, and pushing the link to the bottom aligns the CTAs */
+  .demo-card{display:flex;flex-direction:column;gap:0;height:100%}
+  .demo-card img{height:11.5rem;object-fit:cover;object-position:top center}
+  .demo-body{padding:1.15rem 1.25rem;display:flex;flex-direction:column;flex:1}
+  .demo-body a{margin-top:auto;font-weight:600;font-size:.9rem}
+  .grid3{align-items:stretch}
   .demo-body h4{font-size:1.05rem}
   .demo-body p{font-size:.9rem;color:var(--ink-2);margin:.3rem 0 .7rem}
   .demo-split{display:grid;grid-template-columns:5fr 7fr;gap:1.1rem;align-items:start}
@@ -238,12 +269,25 @@
 <header class="hero" id="top"><div class="wrap">
   <h1>Two prompts into your AI agent.<br>One production app.<span class="dim"> HTTPS included.</span></h1>
   <p class="sub">Appximo compiles a JSON schema into a complete multi-tenant backend — REST + GraphQL + interactive docs + admin panel + a generated back-office — as <strong>one static Go binary</strong> on a PostgreSQL you control. <strong>Prompt 1</strong> puts the engine on your machine. <strong>Prompt 2</strong> takes your agent (Claude Code, Cursor, Copilot…) from <strong>an idea in one sentence</strong> to a running app, and to a real domain with HTTPS when you say so.</p>
-  <div class="measured">⏱ Measured: a fresh agent went from first command to the fully green checklist in <b>&nbsp;1m53s</b></div>
-  <figure class="shot" style="margin:1.6rem 0 0;max-width:56rem">
-    <video autoplay loop muted playsinline preload="metadata" style="width:100%;display:block" aria-label="appximo new: one sentence to a running app in 47 seconds, unedited">
-      <source src="assets/appximo-new.mp4" type="video/mp4">
-    </video>
-    <figcaption style="font-size:.8rem;color:var(--ink-3);padding:.5rem .9rem">One sentence → a running multi-tenant app in <strong>47&nbsp;s</strong>, unedited. The raw recording with embedded timing and the steps to reproduce it: <a href="https://github.com/appximo/appximo/blob/main/docs/demo/README.md" rel="noopener">docs/demo</a>.</figcaption>
+  <div class="measured">⏱ Measured, both by recording: the app is <b>&nbsp;running at 0:22</b> below · a fresh agent reached the fully green checklist in <b>&nbsp;1m53s</b></div>
+  <figure class="media hero-media" id="demo">
+    <div class="media-bar">
+      <span class="media-dots"><i></i><i></i><i></i></span>
+      <span class="media-title">appximo new — one real run, unedited</span>
+      <span class="media-hint">pause · rewind · change speed · copy the text</span>
+    </div>
+    <div class="player-wrap"><div id="cast-player"></div></div>
+    <figcaption>
+      One sentence → a running, multi-tenant app. A real recording, played by the real player:
+      press <b>space</b> to pause anywhere, drag the bar to rewind, select the text to copy it.
+      Dead air is capped at 3&nbsp;s here so you are not watching the model think for fourteen —
+      <b>on the real clock</b> the schema validates at <b>0:17</b>, the app is running and verified at
+      <b>0:22</b>, and the take runs to <b>0:47</b> because it ends with the graceful
+      <code>Ctrl+C</code>. The untouched recording ships in the repo.
+      <div class="jump">Stop here:
+        <span class="m"><span class="t">0:06</span> the AI schema validates on the first try</span>
+        <span class="m"><span class="t">0:11</span> the app is running — request verified, URLs printed</span></div>
+    </figcaption>
   </figure>
   <div class="cta-row">
     <a class="btn btn-primary" href="#start-here">Get the two prompts ↓</a>
@@ -549,16 +593,19 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
       </div>
     </figure>
   </div>
-  <div class="pbox" style="margin-top:1.8rem">
+  <div class="pbox casebox">
     <span class="pbox-label">Case study</span>
-    <p style="margin:.5rem 0 .3rem"><strong>VecinGo</strong> — an independent developer took a neighborhood-association platform (18 resources, 8 state machines, 13 custom Go handlers, weighted quorum voting, a 13-screen embedded SPA) to production with HTTPS in <strong>~3–3.5&nbsp;h</strong>, onto a VPS already serving two other apps. Verdict: <em>"as a consumer, I would do it again."</em> Including the four engine defects they found — and how each one was closed.</p>
+    <p><strong>VecinGo</strong> — an independent developer took a neighborhood-association platform (18 resources, 8 state machines, 13 custom Go handlers, weighted quorum voting, a 13-screen embedded SPA) to production with HTTPS in <strong>~3–3.5&nbsp;h</strong>, onto a VPS already serving two other apps. Verdict: <em>"as a consumer, I would do it again."</em> Including the four engine defects they found — and how each one was closed.</p>
     <a href="https://github.com/appximo/appximo/blob/main/docs/CASE_STUDY_VECINGO.md" rel="noopener">Read the case study →</a>
   </div>
-  <figure class="shot" style="margin-top:1.8rem">
-    <video controls muted playsinline preload="metadata" style="width:100%;display:block" aria-label="Browser tour: the generated back-office, Swagger docs, the Studio ERD and the admin panel">
-      <source src="assets/app-tour.mp4" type="video/mp4">
-    </video>
-    <figcaption style="font-size:.8rem;color:var(--ink-3);padding:.5rem .9rem">What <code>appximo new</code> leaves you in the browser — <code>/app</code> (generated back-office), <code>/docs</code>, <code>/editor</code> (the ERD in Appximo Studio) and <code>/admin</code> — on the demo's own generated schema.</figcaption>
+  <figure class="media" style="margin-top:1.8rem">
+    <div class="media-bar">
+      <span class="media-dots"><i></i><i></i><i></i></span>
+      <span class="media-title">the browser tour</span>
+      <span class="media-hint">play · pause · scrub</span>
+    </div>
+    <video controls muted playsinline preload="metadata" poster="assets/tour-poster.jpg" aria-label="Browser tour: the generated back-office, Swagger docs, the Studio ERD and the admin panel"><source src="assets/app-tour.mp4" type="video/mp4"></video>
+    <figcaption>What that one command leaves you in the browser — <code>/app</code> (the back-office generated from your own OpenAPI), <code>/docs</code>, <code>/editor</code> (the ERD in Appximo Studio) and <code>/admin</code> — on the demo's own generated schema.</figcaption>
   </figure>
 </div></section>
 
@@ -1217,6 +1264,19 @@ renderPrompt('raw-master', 'render-master');
 renderCode('raw-prev-unix', 'prev-unix');
 renderCode('raw-prev-win', 'prev-win');
 renderCode('raw-by-hand', 'prev-manual');
+</script>
+<script src="assets/asciinema-player.min.js"></script>
+<script>
+  // The hero is the RECORDING itself, played by asciinema-player: pausable,
+  // seekable, speed-adjustable, and its text is selectable/copyable — a GIF is
+  // none of those. The .cast is the same file the repo ships.
+  // fit:false + a fixed terminal size keeps the 100-column recording LEGIBLE:
+  // scaling it to a phone's width would render 4-pixel characters. Wide content
+  // scrolls inside its own box instead (the page itself never scrolls sideways).
+  AsciinemaPlayer.create('assets/appximo-new.cast', document.getElementById('cast-player'), {
+    cols: 100, rows: 30, fit: false, terminalFontSize: '12px', speed: 1,
+    idleTimeLimit: 3, theme: 'monokai', controls: true, poster: 'npt:0:11'
+  });
 </script>
 </body>
 </html>
