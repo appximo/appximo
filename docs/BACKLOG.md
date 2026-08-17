@@ -26,7 +26,10 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-09 (CTX-PARITY-S1)** — the third field report
+**Last reviewed: 2026-08-17 (LAUNCH-ASSETS-S1)** — the launch material
+produced: the 47 s demo (reproducible), the VecinGo case study, the README/site
+rebuilt around layer discovery, and the demo box measured + protected for the
+peak. New OPEN: ENG-44. Previous review: 2026-08-09 (CTX-PARITY-S1) — the third field report
 answered: the Ctx-vs-generated parity CLASS audited (5 divergences, not the 2
 reported) and closed from one source; up survives a remote database; the
 installer stops disturbing neighbours. New OPEN: ENG-42, ENG-43, OPS-26.
@@ -80,6 +83,23 @@ refreshed).
   `/opt/<app>/web`, writes `APPXIMO_STATIC_DIR`/`APPXIMO_STATIC_SPA` into the
   env file, and the summary names the served root — verified by installing an
   app with a SPA and getting a 200 at `/` with no manual env edit.
+
+### ENG-44 — `/health` and `/healthz` share the per-tenant rate-limit bucket
+- **Origin:** LAUNCH-ASSETS-S1, measured on the production demo box. During the
+  deliberate 1,200 rps saturation probe (tenant limiter at the default 1000),
+  the health canary probing `https://tiendita…/health` was answered **429**
+  twice — the health endpoints count against the same per-tenant token bucket
+  as data traffic, so under exactly the load where an operator most wants a
+  health verdict, the probe reads as failure. Box-local probes (`127.0.0.1`,
+  no tenant Host) and the systemd/Caddy checks are unaffected, which is why
+  this never surfaced before.
+- **Impact:** Low-medium. External uptime monitors pointed at a tenant domain
+  will report an outage during a traffic spike that the engine is actually
+  shedding correctly (429 ≠ down; recovery was instant when load stopped).
+- **Ready:** `/healthz` and `/health` (constant-time, no tenant work) are
+  exempted from the per-tenant limiter — or the docs state plainly that
+  external monitors must probe a non-tenant host / the box directly. Either
+  closes it; the exemption is the better product.
 
 ### ENG-41 — the create path validates `required` before RBAC fills the ownership column
 - **Origin:** LAUNCHPAD-S1. `ValidateWrite` (required/rules) runs at
@@ -615,6 +635,54 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in LAUNCH-ASSETS-S1 (2026-08-17)
+
+The session that produced the material the launch ships with — no engine code
+touched; the data path is unchanged.
+
+- **The motion demo.** `appximo new "<a real-estate listings portal…>"` recorded
+  in one real, unedited take: **46.7 s** from typed command to the running-app
+  card (AI schema valid on the FIRST try, stats on screen) plus the graceful
+  Ctrl+C. Assets in `docs/demo/`: the raw asciinema cast (timing embedded in the
+  format), a 1.3 MB terminal GIF, a browser-tour mp4+GIF (`/app`, `/docs`, the
+  Studio ERD, `/admin` — data seeded by the committed `seed.sh`, including two
+  real state-machine transitions), six stills, and a README whose whole job is
+  reproducibility: the honesty notes (typing effect, idle-cap, why `--port`
+  appears) and the exact steps for a third party to re-run and re-time it.
+- **The VecinGo case study** (`docs/CASE_STUDY_VECINGO.md`): the third field
+  evaluation presented at publication level — why the domain is hard, the
+  numbers, where the time went (the declarative 90% in minutes; the custom 10%
+  taking ~70% of the ~3–3.5 h, "exactly where the cost should be"), the four
+  frictions WITH their closures, the fifth (security) finding the audit added,
+  both verbatim verdicts, and why there are no screenshots (private production).
+  crisblogs — public, clickable — is the short second case.
+- **The README rebuilt for the first impression**: hero = the demo GIF; the
+  layer-discovery table + three screenshots of one generated schema through
+  `/app`/`/editor`/`/admin`; the two prompts copyable; **who it's NOT for** as a
+  prominent section; the numbers as a table where no figure appears without its
+  condition; the proof section (3 field evaluations, 4 fresh-agent runs with
+  disclosed conditions, 3 live demos, certification + audits); CONTRIBUTING and
+  CI named. `site/` updated in kind (hero video + tour video + case-study card)
+  and republished to gh-pages; verified in a real browser at 1366×900 and
+  390×844 — no horizontal scroll, videos load, the GitHub README renders the
+  hero GIF.
+- **The demo box sized for the peak, with data.** Measured from an external
+  box against production: static path ≥700 rps clean (p95 17.8 ms, 0 errors);
+  authenticated DB path ~760 rps clean (p50 2.2 ms, p95 21.6 ms, 0×429);
+  overload at 1,200 rps → **honest 429 shedding** (18,328×200 + 3,476×429,
+  0 other errors, p50 2.3 ms — no latency collapse) with the neighbour app
+  100% green throughout. **Decision, documented: the default limiter
+  (1000 rps/tenant) STAYS** — it sits just above the demonstrated clean
+  capacity, so raising it would trade clean 429s for latency collapse; the
+  public catalogue already carries its own per-route limit override.
+  **Anti-vandalism shipped and tested**: anonymous writes to core resources are
+  401 (verified); the deliberate public flows reset nightly — a golden dump
+  (`/var/backups/appitools/golden-demo.dump`) + `demo-reset.timer` (04:15 UTC,
+  after the 03:30 backup) driving the proven `restore.sh`, executed live once:
+  restore + ownership + health + row-count verification green, site back in
+  seconds. Found while measuring: ENG-44 (health under the tenant bucket),
+  filed above.
 
 ## DONE in CTX-CLOSE-S1 (2026-08-09)
 
