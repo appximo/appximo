@@ -1,0 +1,414 @@
+{
+  "$schema": "https://appximo.com/schema/v1",
+  "name": "real-estate-portal",
+  "rbac": {
+    "roles": {
+      "admin": {
+        "actions": [
+          "*"
+        ],
+        "resources": "*"
+      },
+      "agent": {
+        "permissions": {
+          "agents": {
+            "actions": [
+              "read"
+            ],
+            "conditions": {
+              "field": "user_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "clients": {
+            "actions": [
+              "read"
+            ]
+          },
+          "offers": {
+            "actions": [
+              "read",
+              "update"
+            ]
+          },
+          "properties": {
+            "actions": [
+              "read",
+              "create",
+              "update"
+            ],
+            "conditions": {
+              "field": "agent_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "visits": {
+            "actions": [
+              "read",
+              "create",
+              "update"
+            ]
+          }
+        }
+      },
+      "client": {
+        "permissions": {
+          "clients": {
+            "actions": [
+              "read"
+            ],
+            "conditions": {
+              "field": "user_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "offers": {
+            "actions": [
+              "read",
+              "create"
+            ],
+            "conditions": {
+              "field": "client_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "properties": {
+            "actions": [
+              "read"
+            ]
+          },
+          "visits": {
+            "actions": [
+              "read",
+              "create"
+            ],
+            "conditions": {
+              "field": "client_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          }
+        }
+      }
+    }
+  },
+  "resources": {
+    "agents": {
+      "fields": {
+        "created_at": {
+          "auto": true,
+          "type": "time"
+        },
+        "email": {
+          "format": "email",
+          "required": true,
+          "type": "string",
+          "unique": true
+        },
+        "name": {
+          "minLength": 1,
+          "required": true,
+          "type": "string"
+        },
+        "phone": {
+          "type": "string"
+        },
+        "updated_at": {
+          "auto": true,
+          "type": "time"
+        },
+        "user_id": {
+          "type": "uuid",
+          "unique": true
+        }
+      }
+    },
+    "clients": {
+      "fields": {
+        "created_at": {
+          "auto": true,
+          "type": "time"
+        },
+        "email": {
+          "format": "email",
+          "required": true,
+          "type": "string",
+          "unique": true
+        },
+        "name": {
+          "minLength": 1,
+          "required": true,
+          "type": "string"
+        },
+        "phone": {
+          "type": "string"
+        },
+        "updated_at": {
+          "auto": true,
+          "type": "time"
+        },
+        "user_id": {
+          "type": "uuid",
+          "unique": true
+        }
+      }
+    },
+    "offers": {
+      "fields": {
+        "amount_cents": {
+          "min": 0,
+          "required": true,
+          "type": "int64"
+        },
+        "client_id": {
+          "relation": "clients",
+          "required": true,
+          "type": "uuid"
+        },
+        "created_at": {
+          "auto": true,
+          "type": "time"
+        },
+        "notes": {
+          "type": "text"
+        },
+        "property_id": {
+          "relation": "properties",
+          "required": true,
+          "type": "uuid"
+        },
+        "status": {
+          "default": "pending",
+          "enum": [
+            "pending",
+            "accepted",
+            "rejected",
+            "withdrawn"
+          ],
+          "state_machine": {
+            "initial": [
+              "pending"
+            ],
+            "transitions": {
+              "accepted": [],
+              "pending": [
+                "accepted",
+                "rejected",
+                "withdrawn"
+              ],
+              "rejected": [],
+              "withdrawn": []
+            }
+          },
+          "type": "string"
+        },
+        "updated_at": {
+          "auto": true,
+          "type": "time"
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "property_id"
+          ]
+        },
+        {
+          "fields": [
+            "client_id"
+          ]
+        },
+        {
+          "fields": [
+            "status"
+          ]
+        }
+      ],
+      "relations": {
+        "client": {
+          "fk": "client_id",
+          "target": "clients",
+          "type": "belongs_to"
+        },
+        "property": {
+          "fk": "property_id",
+          "target": "properties",
+          "type": "belongs_to"
+        }
+      }
+    },
+    "properties": {
+      "fields": {
+        "agent_id": {
+          "relation": "agents",
+          "required": true,
+          "type": "uuid"
+        },
+        "bathrooms": {
+          "min": 0,
+          "type": "int"
+        },
+        "bedrooms": {
+          "min": 0,
+          "required": true,
+          "type": "int"
+        },
+        "created_at": {
+          "auto": true,
+          "type": "time"
+        },
+        "description": {
+          "type": "text"
+        },
+        "neighborhood": {
+          "minLength": 1,
+          "required": true,
+          "type": "string"
+        },
+        "price_cents": {
+          "min": 0,
+          "required": true,
+          "type": "int64"
+        },
+        "square_feet": {
+          "type": "int"
+        },
+        "status": {
+          "default": "draft",
+          "enum": [
+            "draft",
+            "published",
+            "reserved",
+            "sold"
+          ],
+          "state_machine": {
+            "initial": [
+              "draft"
+            ],
+            "transitions": {
+              "draft": [
+                "published"
+              ],
+              "published": [
+                "reserved",
+                "sold"
+              ],
+              "reserved": [
+                "published",
+                "sold"
+              ],
+              "sold": []
+            }
+          },
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "required": true,
+          "type": "string"
+        },
+        "updated_at": {
+          "auto": true,
+          "type": "time"
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "status"
+          ]
+        },
+        {
+          "fields": [
+            "agent_id"
+          ]
+        },
+        {
+          "fields": [
+            "neighborhood"
+          ]
+        }
+      ],
+      "relations": {
+        "agent": {
+          "fk": "agent_id",
+          "target": "agents",
+          "type": "belongs_to"
+        },
+        "offers": {
+          "fk": "property_id",
+          "target": "offers",
+          "type": "has_many"
+        },
+        "visits": {
+          "fk": "property_id",
+          "target": "visits",
+          "type": "has_many"
+        }
+      }
+    },
+    "visits": {
+      "fields": {
+        "client_id": {
+          "relation": "clients",
+          "required": true,
+          "type": "uuid"
+        },
+        "created_at": {
+          "auto": true,
+          "type": "time"
+        },
+        "notes": {
+          "type": "text"
+        },
+        "property_id": {
+          "relation": "properties",
+          "required": true,
+          "type": "uuid"
+        },
+        "scheduled_at": {
+          "required": true,
+          "type": "time"
+        },
+        "updated_at": {
+          "auto": true,
+          "type": "time"
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "property_id"
+          ]
+        },
+        {
+          "fields": [
+            "client_id"
+          ]
+        },
+        {
+          "fields": [
+            "scheduled_at"
+          ]
+        }
+      ],
+      "relations": {
+        "client": {
+          "fk": "client_id",
+          "target": "clients",
+          "type": "belongs_to"
+        },
+        "property": {
+          "fk": "property_id",
+          "target": "properties",
+          "type": "belongs_to"
+        }
+      }
+    }
+  },
+  "version": "1"
+}

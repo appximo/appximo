@@ -9,15 +9,21 @@
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go)](go.mod)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
 
-**One sentence in. A running, multi-tenant app out — in 47 seconds, unedited:**
+**One sentence in. A running, multi-tenant app out — verified and serving at
+0:22, unedited:**
 
-![appximo new: one sentence to a running app in 47 seconds](docs/demo/appximo-new.gif)
+[![appximo new: one sentence to a running app — the card prints at 0:22](docs/demo/appximo-new.gif)](https://appximo.github.io/appximo/#demo)
 
-<sub>Real, complete run — AI-generated schema (valid on the first try, stats on
-screen), Postgres, tenant, admin, a verified request through the full auth
-chain, graceful shutdown. The untouched recording with embedded timing, the
-browser tour of what it serves, and the exact steps to reproduce it yourself:
-[**docs/demo/**](docs/demo/README.md).</sub>
+<sub>▶ **[Open the player](https://appximo.github.io/appximo/#demo)** to pause,
+rewind, change speed or copy the text — this GIF plays at real speed and can't
+be stopped. Or replay it in your own terminal:
+`asciinema play docs/demo/appximo-new.cast`.<br>
+**The two moments worth stopping at: `0:17`** the AI-generated schema validates
+on the first try · **`0:22`** the app is running — request verified through the
+full auth chain, URLs and credentials printed. The take runs to `0:47` because
+it ends with the graceful `Ctrl+C`. One real run: schema, Postgres, tenant,
+first admin, server. The untouched recording, the browser tour and the exact
+steps to reproduce and re-time it: [**docs/demo/**](docs/demo/README.md).</sub>
 
 That command (`appximo new`) is the shortcut. The contract underneath is what
 matters: you don't write handlers, models, or migrations. You write this:
@@ -72,9 +78,9 @@ compiled surfaces of the same process, all derived from the schema:
 
 The same generated schema from the demo, seen through three of those surfaces:
 
-| The data, in `/app` | The model, in `/editor` | The platform, in `/admin` |
+| A record in `/app` — the FK shows the agent's NAME, `status` offers only the transitions its state machine allows | The model, in `/editor` | The platform, in `/admin` |
 |---|---|---|
-| ![the generated back-office](docs/img/demo/app-properties.png) | ![the ERD in Appximo Studio](docs/img/demo/editor-erd.png) | ![the admin panel](docs/img/demo/admin.png) |
+| ![the generated back-office: a record, its foreign key resolved to a name, its lifecycle constrained](docs/img/demo/app-record.png) | ![the ERD in Appximo Studio](docs/img/demo/editor-erd.png) | ![the admin panel](docs/img/demo/admin.png) |
 
 ## Who it's for — and who it's NOT for
 
@@ -268,7 +274,7 @@ No number below is valid without its condition column. That is deliberate.
 | **+1.2 ms p50** | the full production stack's overhead: Caddy + Let's Encrypt TLS → systemd → native PostgreSQL | re-measured 2026-08-01; see [docs/BENCHMARKS.md](docs/BENCHMARKS.md) |
 | **~4.2 ms** end-to-end | a filtered page over **1M rows**, whole stack | re-measured 2026-08-01 |
 | **~186 MiB PSS** under load | a real consumer app's ENTIRE stack | 2026-07-31, box serving two apps (the older ~109 MiB idle figure is kept in BENCHMARKS with its date) |
-| **47 s** | one sentence → running app (`appximo new`, the hero demo) | one real recorded run, cast + reproduction steps in [docs/demo/](docs/demo/README.md); AI step varies per run (measured convergence: ~90% first-try) |
+| **22 s** to a running, verified app · **47 s** full take | one sentence → `appximo new` → schema, Postgres, tenant, admin, server, one request verified through the full chain (0:22); the take continues to 0:47 only because it ends with the graceful shutdown | one real recorded run; the cast carries its own timing and ships in the repo, with reproduction steps in [docs/demo/](docs/demo/README.md). The AI step varies per run — this one validated first try (measured convergence: ~90% first-try) |
 | **1m53s** | fresh agent, QUICKSTART 0 → green checklist | measured once, disclosed conditions in the doc |
 
 Full methodology — every limitation, the cache asymmetry, the statistical
