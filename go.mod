@@ -5,7 +5,7 @@ go 1.25.0
 // Build with a patched toolchain: go1.25.0 ships stdlib advisories that
 // govulncheck flags (x509/net fixes land in point releases). go1.25.11 clears
 // all reachable stdlib vulnerabilities so the govulncheck CI gate stays green.
-toolchain go1.25.12
+toolchain go1.25.13
 
 require (
 	filippo.io/age v1.3.1
