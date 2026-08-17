@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786988740954,
+  "lastUpdate": 1786995809755,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -2448,6 +2448,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36355611 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "463bbd45aff981acbfb8e3a93185c9b0bcc6c6f8",
+          "message": "site: the recording plays in a real player, and the visual execution tightened\n\nThe hero autoplay video becomes asciinema-player (vendored, no CDN):\ncontrols, seek, speed, copyable text, poster on the running-app card.\nBoth clocks are stated — playback caps dead air at 3 s, the real clock\nis 0:17 / 0:22 / 0:47 — so no number on the page means two things.\n\nPolish, no structural change: one media frame shared by the player and\nthe tour video (title bar + hint + caption) so embeds read as a family;\na poster frame on the tour (it was rendering as a blank white box);\ndemo cards evened out (fixed media height + cover, CTAs on one\nbaseline — the phone screenshot next to two desktop ones made the row\nragged); tabular figures in tables; calmer section rhythm, heading\ntracking, code-block air; the ad-hoc inline styles replaced by classes.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-17T19:42:54Z",
+          "tree_id": "d339cc716b3e27e63c8a76d7167ceaaf65c4514e",
+          "url": "https://github.com/appximo/appximo/commit/463bbd45aff981acbfb8e3a93185c9b0bcc6c6f8"
+        },
+        "date": 1786995808163,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 4717,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "470127 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 4717,
+            "unit": "ns/op",
+            "extra": "470127 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "470127 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "470127 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 51.04,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "46656118 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 51.04,
+            "unit": "ns/op",
+            "extra": "46656118 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "46656118 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "46656118 times\n4 procs"
           }
         ]
       }
