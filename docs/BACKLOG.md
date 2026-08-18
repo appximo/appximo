@@ -26,7 +26,19 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-18 (DEMO-SHOWCASE-S1)** — the showcase pass: /app
+**Last reviewed: 2026-08-18 (SHOWCASE-TRUTH-S1)** — the honest audit of which
+live apps a STRANGER can actually visit and touch (the measured fact that
+governs the landing's trust-bar copy: 1 of the 4 claimed systems passes the
+full rubric — the table lives in the session report and the handoff package),
+plus the four DEMO-SHOWCASE follow-ups: the golden demo set rebuilt to a
+believable order mix (the 58-pending-payment residue premise was REFUTED — the
+Aug-17 golden dump was already clean; what remained was 7 verification-residue
+orders, swept by email criterion), the catalogue trimmed to a coherent 10
+(museum scarf + Minsk hoodie out, licenses updated), OPS-5 closed (commerce
+pushed to the private remote after a clean full-history secret sweep), and the
+Security Scan nightly turned genuinely green (it now boots its own throwaway
+engine instead of failing red by design). New OPEN: OPS-28, COMMERCE-8,
+COMMERCE-9. Previous review: 2026-08-18 (DEMO-SHOWCASE-S1) — the showcase pass: /app
 became a product-grade panel (Spanish/English, mobile-first, dark mode,
 consumer theme tokens, generic demo mode), the tiendita got real licensed
 photos + the brand palette + the fiscal/coupon surface made visible + a
@@ -89,10 +101,54 @@ refreshed).
   them) — `POST /admin/tenants/{id}/users` with their ADMIN_KEY, or a seed
   re-run.
 - **Impact:** a prospect who clicks the demo buttons on a public showcase hits
-  a dead end; the blog reading path is unaffected.
+  a dead end. **SHOWCASE-TRUTH-S1 (2026-08-18) re-verified from a clean
+  browser and hardened the finding:** the buttons fill
+  `editor@crisblogs.local` / `lector@…` and the server answers 401 for BOTH;
+  crisblogs declares NO `rbac.public` block (its /openapi.json carries zero
+  `x-public` operations), so there is no anonymous reading path either — a
+  stranger cannot see a single article. Audit verdict: **ROTA** as a showcase
+  (alive, valid TLS, mobile-clean — but nothing behind the door). One
+  leverage fact: the box is the evaluator's (147.182.163.170), but
+  `crisblogs.appximo.com` is OUR DNS zone — we can repoint the subdomain
+  without touching their machine.
+- **The three options (measured, decision is Miguel's — recorded, not taken):**
+  (a) **repair** — ask the crisblogs operator to re-seed the two demo users
+  (`POST /admin/tenants/{id}/users` with their ADMIN_KEY, or their seed);
+  minutes of THEIR time, zero of ours, but stays hostage to a third-party box
+  for the landing's credibility. (b) **replace** — stand a fourth app on the
+  58 (it holds ~760 rps with two apps; a blog/portal is static-light) and
+  repoint the subdomain we already control; ~a session of work, full control,
+  but the "built by a third party" credential dilutes unless the case study
+  stays linked as the story. (c) **discount it** — the trust bar publishes
+  the number without crisblogs until (a) or (b) lands; zero work, honest
+  today.
 - **Ready when:** the two demo accounts log in from the buttons, or the
-  buttons are removed from crisblogs' login. Needs: contact with the
-  crisblogs operator (Miguel has the relationship).
+  buttons are removed from crisblogs' login, or the subdomain points at a
+  replacement we operate. Needs: Miguel's call between (a)/(b)/(c).
+
+### OPS-28 — petfriendly's front door is a raw 401 JSON, and its binary predates `/app`
+
+- **Origin:** SHOWCASE-TRUTH-S1 (2026-08-18), the outside-in audit. The README
+  links `https://petfriendly.appximo.com` (the root); a stranger who clicks it
+  gets `{"error":"missing token"}` — a raw API 401 as the first impression of
+  a "live demo". `/app` ALSO answers 401: the vetapp binary is `appximo
+  9ebeaa1` (2026-08-05), which predates the embedded back-office
+  (FIRST-TEN-MINUTES-S1, 2026-08-07), so the JWT-skipped `/app` shell simply
+  does not exist in that build. What DOES work for a stranger: `/docs` (200,
+  the Swagger the technical site links as "Browse its API") and `/editor`
+  (200 — full Studio over the production schema, anonymous; deploy still
+  gated by super-admin auth). Audit verdict: **VISITABLE PERO NO TOCABLE**.
+- **Impact:** two of the three public promise-surfaces (README root link, the
+  landing's "una agenda veterinaria… en internet hoy") land on an error body
+  or need insider knowledge. It also inflates the trust-bar number if counted
+  as "visitable".
+- **Options (Miguel's call — it is a live production box):** deploy a current
+  engine binary to vetapp (brings `/app`; needs demo-mode config + a
+  read-only role in its schema to be TOUCHABLE, the tiendita pattern), or
+  re-link the README/site to `/docs` only and stop calling it visitable, or
+  give it a static landing at `/` via `APPXIMO_STATIC_DIR`.
+- **Ready when:** the URL the public material links answers 200 with
+  something a stranger can DO (or the material stops linking a 401).
 
 ### OPS-23 — `install.sh` has no `--static` flag for a frontend directory
 - **Origin:** LAUNCHPAD-S1, second fresh-agent run. An agent deploying an app
@@ -493,23 +549,6 @@ refreshed).
   PRODUCTION.md) goes through `scripts/build-engine.sh`, and `/health` on the 58
   reports a real SHA. Related to the release tag (see "Requires Miguel" below).
 
-### OPS-5 — `/root/commerce` has no git remote (its only copy is one disk)
-- **Origin:** this session, checking the repo state for the handoff package.
-  `git remote -v` in `/root/commerce` is **empty**; its 3 commits
-  (`a685cc6` commerce core, `3541b31` native migration, `178d46f` sweeper) exist
-  ONLY on the 105's disk.
-- **Impact:** **High, and it is not a code problem.** That repo holds slice 1 of
-  the commerce platform AND `docs/GAPS.md` — the field report that drove
-  LIBRARY-GAPS-S1 and the most valuable artifact the project has produced, because
-  it came from building something real. A disk failure or a rebuilt droplet loses
-  it with no way to reconstruct it. Every OTHER asset (the engine, its docs, its
-  ADRs) is pushed to GitHub; this one is not.
-- **Ready:** a remote exists (private GitHub repo, or at minimum a bundle pushed
-  off-box), the 3 commits are pushed, and `docs/GAPS.md` is reachable from
-  somewhere that is not the 105. Note the repo carries a `replace` directive to the
-  local engine path — the remote must document how to build it (or the replace
-  becomes a broken clone for anyone else).
-
 ### COMMERCE-7 — Partial refunds (nota crédito parcial)
 - **Origin:** PHASE4-FIRST-MILE-S1 (closing COMMERCE-1 surfaced it). The refund
   route always reverses the FULL payment and the credit note reverses every
@@ -520,6 +559,28 @@ refreshed).
 - **Ready:** the refund route accepts an optional line/amount subset, the nota
   crédito carries only the reversed lines, and stock returns only for those
   lines; suite coverage for the partial path.
+
+### COMMERCE-8 — The coupon discount does not reduce the IVA base
+
+- **Origin:** SHOWCASE-TRUTH-S1, observed while completing a real checkout as
+  a stranger: Ruana $220.000 + IVA $41.800 (19% of the FULL price), coupon
+  BIENVENIDA10 −$22.000 → charged $239.800. The discount is subtracted from
+  the grand total while the IVA stays computed on the undiscounted base;
+  Colombian VAT practice reduces the base by the discount (IVA should be 19%
+  of $198.000 = $37.620, total $235.620).
+- **Impact:** Low for a demo with mock payments; real for any merchant going
+  live — it overstates the tax by the discount × rate.
+- **Ready:** the checkout computes IVA per line over the discounted base, the
+  invoice (nota) carries the same, and a suite case pins coupon+IVA.
+
+### COMMERCE-9 — Attribute labels render raw snake_case glued to the value
+
+- **Origin:** SHOWCASE-TRUTH-S1, product detail as a stranger: the Sombrero
+  Vueltiao detail shows «Hecho_a_manosí» — the attribute key `hecho_a_mano`
+  rendered verbatim and concatenated with the value «sí» without a
+  separator. Cosmetic, but it is on the storefront a manager inspects.
+- **Ready:** attribute keys humanized (`hecho_a_mano` → «Hecho a mano») with
+  a visible key/value separation, verified in the browser suite.
 
 ### COMMERCE-4 — A real DIAN Proveedor Tecnológico adapter
 - **Origin:** `docs/DIAN.md` (the interface exists; the implementation is a stub).
@@ -656,11 +717,71 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Cut the first release tag**~~ | **RESOLVED (2026-08-05): v0.1.1 is out** — 4 platform binaries + checksums on Releases. Same day the working clone verified download+checksum+`version` and set `RELEASE_VERSION="v0.1.1"` in install.sh, enabling the documented no-`--binary` download path. |
 | ~~**Rotate the 58's PostgreSQL password**~~ | **RESOLVED by PROD-JOURNEY-1B (2026-07-31):** the wipe (`--uninstall --purge`) dropped the role and database; the reinstall generated a fresh password (plus fresh JWT/admin secrets, rotated again on-box after the installer printed them to stdout — see OPS-7). The exposed credential no longer exists. |
 | ~~**Publish the Go module**~~ | **RESOLVED in practice (2026-08-05):** the repo is public and v0.1.1 is tagged, so `go get github.com/appximo/appximo@v0.1.1` fetches from the public proxy — **verified live** in a scratch module. backend-spec §3.0 updated; the framework half of the product is reachable anywhere. DOC-2 fully closed. |
-| **Give `/root/commerce` a remote** | The technical fix is trivial; the decision (which account, public or private, whether the commerce platform is a product or a demo) is his. See **OPS-5** — until then the field report lives on one disk. |
+| ~~**Give `/root/commerce` a remote**~~ | **RESOLVED (2026-08-18):** Miguel created the private repo `miguel09acosta/latiendita`; SHOWCASE-TRUTH-S1 swept the full history for secrets (clean), documented the go.mod `replace`, and pushed. OPS-5 is DONE. |
 | ~~**Pick the canonical repo URL**~~ (PHASE3-GUIDE-S1) | **RESOLVED by RENAME-AND-PUBLISH-PREP-S1 (2026-08-04):** everything is **`github.com/appximo/appximo`** — module path, imports, OpenAPI description, specs, badges, site. |
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in SHOWCASE-TRUTH-S1 (2026-08-18, night)
+
+- **The visitability audit (the deliverable).** Outside-in, clean browser,
+  zero insider knowledge, screenshots in `/root/shots-audit/` on the 105. The
+  measured fact: of the landing's "4 sistemas funcionando hoy en internet",
+  **1 passes the full stranger-enters-touches-believes rubric** (tiendita:
+  full anonymous purchase — cart → coupon → mock gateway → webhook →
+  tracking — plus the read-only demo panel; 0 console errors, 0 horizontal
+  scroll at 390×844, load 164–280 ms). petfriendly = VISITABLE PERO NO
+  TOCABLE (→ OPS-28), crisblogs = ROTA (→ OPS-27 updated with options),
+  VecinGo = NO ENLAZABLE (no published URL; private production for a real
+  community — real residents' data by its nature; the case study itself says
+  why there are no screenshots). Copy candidates per scenario are in the
+  session report; the number that gets published is Miguel's call.
+- **OPS-5 CLOSED.** Miguel had already created the private remote
+  (`miguel09acosta/latiendita`) with an old head (27e48bc); this session
+  swept the FULL history for secrets (34 commits: no .env-like files ever
+  committed, the only DSN is a literal `PASS` placeholder, only published
+  demo creds + test mocks), documented the go.mod `replace` in the README
+  (the Ready criterion), and pushed — remote now at f130182, verified
+  private (anonymous 404). `docs/GAPS.md` finally lives off-box.
+- **The golden demo set is now believable (Parte B — premise REFUTED, work
+  redirected).** The prompt assumed 58 `pendiente_pago` residual orders; the
+  live DB had ZERO (the Aug-17 golden dump was already clean). What it did
+  have: 7 orders ALL verification residue by email criterion
+  (`*@example.com`, `verificacion-*@appximo.com`, session tags hk-/cps1/icc
+  — 5 of them identical $77.350 Pañoleta pickups). Swept in one transaction
+  (the verify.sh sweep template), then a 13-order believable history seeded
+  through the REAL flow (public checkout + signed mock webhook + panel
+  transitions — never SQL for the orders themselves): 5 entregada, 1
+  cerrada, 2 enviada, 1 preparando, 1 pagada, 2 pendiente_pago, 1 cancelada;
+  distinct plausible Colombian customers, varied products/amounts, one
+  coupon use, mixed retiro/envío; same-day times spread 09:00–21:36 (one
+  cosmetic SQL pass on `created_at` only — the ORD-YYYYMMDD numbers keep the
+  day coherent). Golden dump regenerated; a live `demo-reset.service` drill
+  restores exactly this state; «Ventas confirmadas» moved $552.260 →
+  $2.379.570 deliberately (the old sales WERE the residue — understood, not
+  accidental).
+- **The catalogue reads as ONE store (Parte C).** PAN-SED (Cooper Hewitt
+  museum scarf) and SUD-CAP (Minsk shop hoodie) removed from seed, live DB
+  (API DELETE as dueño, after the residue sweep left zero order lines
+  referencing them), licenses (4 attributions now, was 5) and
+  `/creditos-fotos.md` (200 live, updated). 7 orphan file rows cleaned.
+  **Found and fixed: the seed's photo idempotence was FALSE** — the engine
+  dedups the blob but every `POST /api/files` mints a new file row, so every
+  seed run re-attached and orphaned a row; now it compares the local sha256
+  against the attached file's strong ETag and re-runs upload NOTHING
+  (verified in dev and prod). Suites: verify 18/18 · e2e-1b 50/50 · browser
+  21/21 (B1c re-pointed at the suite's own pre-photo product — it targeted a
+  photo-less «Camiseta Básica» that stopped existing by design).
+- **The Security Scan nightly is genuinely green (Parte E — premise
+  corrected).** The red was NOT govulncheck (CI green on the latest push);
+  it was the ZAP nightly failing at "no target, no scan" by design since
+  S39. Fix, not suppression: with no explicit target the job now boots a
+  THROWAWAY engine in the runner (scratch Postgres service, scratch tenant,
+  `scan.localtest.me` Host) and actively scans that — the prod-domain guard
+  stays; a push touching the workflow now triggers it, so the green was
+  verified IN Actions (run on a91833b). The nightly went from
+  red-and-scanning-nothing to green-and-scanning-a-real-engine.
 
 ## DONE in DEMO-SHOWCASE-S1 (2026-08-18)
 
