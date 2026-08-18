@@ -270,6 +270,15 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   into their own SPA stays `examples/backoffice-guide/web/` — same pattern, may
   diverge in polish, behaviors pinned by `pkg/backofficeui/embed_test.go`.
   Browser-verified (Playwright) against two schemas incl. one never seen.
+  Since DEMO-SHOWCASE-S1 the panel chrome is Spanish/English (browser-derived,
+  persisted toggle; the schema's vocabulary is never translated), mobile-first
+  responsive (≤720px: card lists, drawer nav, sheet form), light/dark
+  (prefers-color-scheme + persisted auto/light/dark toggle), consumer-themable
+  (`--app-*` tokens on `:root`; `Config.AppThemeCSS` / `APPXIMO_APP_THEME_CSS`
+  → served at /app/theme.css) and supports DEMO MODE (`Config.AppDemoRoles` /
+  `APPXIMO_APP_DEMO_ROLES`: the SPA simulates writes in a per-session
+  in-memory overlay, reload resets; pair with a READ-ONLY role — the RBAC is
+  the security boundary, verified 403). See docs/BACKOFFICE_SPEC_LLM.md §10b.
 - `pkg/editorui/` is the **visual schema editor** (Appximo Studio, UI-F0-S1):
   a static Svelte 5 SPA (plain Vite, `pkg/editorui/web/`) `go:embed`-served at
   **`/editor`** — a graphical ERD over the schema, no AI, zero Node in prod. The

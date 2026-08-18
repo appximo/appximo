@@ -24,6 +24,7 @@ package backofficeui
 
 import (
 	"bytes"
+	"encoding/json"
 	"io/fs"
 	"net/http"
 	"path"
@@ -51,12 +52,33 @@ var mimeByExt = map[string]string{
 	".html": "text/html; charset=utf-8", ".svg": "image/svg+xml", ".json": "application/json",
 }
 
+// Options customizes the served back-office without touching the embedded
+// bundle (DEMO-SHOWCASE-S1 — "your panel, your colors").
+type Options struct {
+	// ThemeCSS, when non-empty, is served at /app/theme.css INSTEAD of the
+	// embedded default (which is empty). style.css defines every color, radius
+	// and font as --app-* tokens on :root and index.html links theme.css after
+	// it, so a consumer re-skins the whole panel by redefining tokens here —
+	// no rebuild, no fork. Stock binary: APPXIMO_APP_THEME_CSS=<path>.
+	ThemeCSS []byte
+	// DemoRoles lists the RBAC roles for which the SPA runs in DEMO MODE:
+	// writes are simulated in a per-session in-memory overlay (a reload
+	// resets) and never sent to the API. The role's server-side policy should
+	// be read-only — the overlay is coherence for the visitor, the RBAC is
+	// the security boundary. Published at /app/ui-config.json (role names are
+	// not secrets; the endpoint lists only these). Stock binary:
+	// APPXIMO_APP_DEMO_ROLES=<comma-separated>.
+	DemoRoles []string
+}
+
 type handler struct {
 	sub       fs.FS
 	indexHTML []byte
+	themeCSS  []byte
+	uiConfig  []byte
 }
 
-func newHandler() (*handler, error) {
+func newHandler(opts Options) (*handler, error) {
 	sub, err := fs.Sub(webFS, "web")
 	if err != nil {
 		return nil, err
@@ -65,14 +87,29 @@ func newHandler() (*handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &handler{sub: sub, indexHTML: idx}, nil
+	theme := opts.ThemeCSS
+	if len(theme) == 0 {
+		theme, _ = fs.ReadFile(sub, "theme.css")
+	}
+	cfg := map[string]any{}
+	if len(opts.DemoRoles) > 0 {
+		cfg["demo_roles"] = opts.DemoRoles
+	}
+	uiCfg, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &handler{sub: sub, indexHTML: idx, themeCSS: theme, uiConfig: uiCfg}, nil
 }
 
 // Register mounts the back-office routes on r: /app (redirect), /app/ (shell)
 // and /app/<file> (the ES-module files). The /app prefix is JWT-skipped (like
 // /admin and /editor) and reserved against user static mounts.
-func Register(r chi.Router) error {
-	h, err := newHandler()
+func Register(r chi.Router) error { return RegisterOpts(r, Options{}) }
+
+// RegisterOpts is Register with the theme/demo customization seams.
+func RegisterOpts(r chi.Router, opts Options) error {
+	h, err := newHandler(opts)
 	if err != nil {
 		return err
 	}
@@ -99,6 +136,19 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request) {
 	rel := path.Clean(strings.TrimPrefix(r.URL.Path, "/app/"))
 	if rel == "." || rel == "index.html" || strings.Contains(rel, "..") {
 		h.serveIndex(w, r)
+		return
+	}
+	// The two customization seams are handler state, not embedded files.
+	if rel == "theme.css" {
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeContent(w, r, rel, time.Time{}, bytes.NewReader(h.themeCSS))
+		return
+	}
+	if rel == "ui-config.json" {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeContent(w, r, rel, time.Time{}, bytes.NewReader(h.uiConfig))
 		return
 	}
 	f, err := h.sub.Open(rel)

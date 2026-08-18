@@ -111,3 +111,78 @@ func TestUnknownFileIs404(t *testing.T) {
 		t.Fatalf("GET /app/nope.js = %d, want 404", rec.Code)
 	}
 }
+
+// The chrome added by DEMO-SHOWCASE-S1: i18n (Spanish + English dictionaries,
+// browser-derived), the responsive/table-card layout, and the theme tokens.
+func TestChromeBehaviorsPinned(t *testing.T) {
+	r := testRouter(t)
+	i18n := get(t, r, "/app/i18n.js")
+	if i18n.Code != http.StatusOK {
+		t.Fatalf("GET /app/i18n.js = %d, want 200", i18n.Code)
+	}
+	for _, marker := range []string{"es:", "en:", "navigator.language"} {
+		if !strings.Contains(i18n.Body.String(), marker) {
+			t.Errorf("i18n.js lost %q", marker)
+		}
+	}
+	css := get(t, r, "/app/style.css").Body.String()
+	for _, marker := range []string{"--app-accent", "prefers-color-scheme", "data-theme", "max-width: 720px"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("style.css lost %q (theme tokens / dark mode / responsive)", marker)
+		}
+	}
+}
+
+// theme.css + ui-config.json are the customization seams: always 200 (the SPA
+// links/fetches them unconditionally), defaults embedded, options override.
+func TestThemeAndUIConfigSeams(t *testing.T) {
+	r := chi.NewRouter()
+	if err := RegisterOpts(r, Options{
+		ThemeCSS:  []byte(":root { --app-accent: #1c9d5b; }"),
+		DemoRoles: []string{"demo"},
+	}); err != nil {
+		t.Fatalf("RegisterOpts: %v", err)
+	}
+	theme := get(t, r, "/app/theme.css")
+	if theme.Code != http.StatusOK || !strings.Contains(theme.Body.String(), "#1c9d5b") {
+		t.Fatalf("custom theme not served: %d %q", theme.Code, theme.Body.String())
+	}
+	if ct := theme.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/css") {
+		t.Fatalf("theme.css Content-Type = %q", ct)
+	}
+	cfg := get(t, r, "/app/ui-config.json")
+	if cfg.Code != http.StatusOK || !strings.Contains(cfg.Body.String(), `"demo_roles":["demo"]`) {
+		t.Fatalf("ui-config not served: %d %q", cfg.Code, cfg.Body.String())
+	}
+
+	// Defaults: embedded theme (a comment, still 200 text/css) and empty config.
+	rd := testRouter(t)
+	dtheme := get(t, rd, "/app/theme.css")
+	if dtheme.Code != http.StatusOK || !strings.Contains(dtheme.Body.String(), "--app-accent") {
+		t.Fatalf("default theme.css: %d", dtheme.Code)
+	}
+	dcfg := get(t, rd, "/app/ui-config.json")
+	if dcfg.Code != http.StatusOK || strings.TrimSpace(dcfg.Body.String()) != "{}" {
+		t.Fatalf("default ui-config = %d %q, want 200 {}", dcfg.Code, dcfg.Body.String())
+	}
+}
+
+// Demo mode is a safety-relevant behavior: a demo-role session must SIMULATE
+// writes (never send them) and say so. Pin the markers.
+func TestDemoModePinned(t *testing.T) {
+	r := testRouter(t)
+	app := get(t, r, "/app/app.js").Body.String()
+	for _, marker := range []string{
+		"never reaches the server", // the write intercept
+		"demoMergeList",            // session coherence: created rows visible
+		"ui-config.json",           // activation comes from the served config
+	} {
+		if !strings.Contains(app, marker) {
+			t.Errorf("app.js lost the %q demo behavior", marker)
+		}
+	}
+	i18n := get(t, r, "/app/i18n.js").Body.String()
+	if !strings.Contains(i18n, "demo.banner") {
+		t.Error("i18n.js lost the demo banner string")
+	}
+}

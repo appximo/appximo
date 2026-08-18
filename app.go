@@ -1381,10 +1381,32 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 	// so a hot-swap or restart with a new schema re-shapes it with zero work.
 	// Static serving, JWT-skipped shell (API calls carry the Bearer), off the
 	// hot path.
-	if err := backofficeui.Register(r); err != nil {
+	boOpts := backofficeui.Options{
+		DemoRoles: coalesceCSV(a.cfg.AppDemoRoles, os.Getenv("APPXIMO_APP_DEMO_ROLES")),
+	}
+	if a.cfg.AppThemeCSS != "" {
+		boOpts.ThemeCSS = []byte(a.cfg.AppThemeCSS)
+	} else if p := os.Getenv("APPXIMO_APP_THEME_CSS"); p != "" {
+		css, err := os.ReadFile(p)
+		if err != nil {
+			// A theme that cannot load must be loud, not a silently-default
+			// panel: the operator pointed at a file and it is not there.
+			log.Printf("WARNING: APPXIMO_APP_THEME_CSS=%q could not be read (%v) — /app serves the default theme", p, err)
+		} else {
+			boOpts.ThemeCSS = css
+		}
+	}
+	if err := backofficeui.RegisterOpts(r, boOpts); err != nil {
 		log.Printf("WARNING: back-office UI not mounted: %v", err)
 	} else {
-		log.Println("back-office: generic CRUD UI (from /openapi.json) served at /app")
+		extras := ""
+		if len(boOpts.ThemeCSS) > 0 {
+			extras += ", custom theme"
+		}
+		if len(boOpts.DemoRoles) > 0 {
+			extras += ", demo roles: " + strings.Join(boOpts.DemoRoles, ",")
+		}
+		log.Printf("back-office: generic CRUD UI (from /openapi.json) served at /app%s", extras)
 	}
 
 	// Visual schema editor (UI-F0-S1): the embedded Svelte 5 SPA served at /editor

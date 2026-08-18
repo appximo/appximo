@@ -197,6 +197,22 @@ type Config struct {
 	// Empty (the default, and the pure binary) mounts nothing and costs nothing.
 	Static []StaticMount
 
+	// AppThemeCSS re-skins the embedded generic back-office (/app) with the
+	// consumer's brand (DEMO-SHOWCASE-S1): the CSS text is served at
+	// /app/theme.css, linked after the panel's own stylesheet, and style.css
+	// exposes every color/radius/font as --app-* tokens on :root — so a few
+	// token overrides restyle the whole panel with no rebuild. Empty serves the
+	// embedded default (neutral look) and falls back to APPXIMO_APP_THEME_CSS,
+	// which names a FILE to read at boot.
+	AppThemeCSS string
+	// AppDemoRoles lists RBAC roles for which /app runs in DEMO MODE: the SPA
+	// simulates writes in a per-session in-memory overlay (a reload resets
+	// everything) and never sends them to the API. Pair it with a role whose
+	// policy is READ-ONLY — the overlay is visitor coherence, the RBAC is the
+	// security boundary; a hand-crafted write with that role's token is still
+	// a 403. Empty falls back to APPXIMO_APP_DEMO_ROLES (comma-separated).
+	AppDemoRoles []string
+
 	// Version is reported by /health and the synthetic monitor. Empty reports
 	// "dev"; the cmd binary passes its ldflags-injected build version.
 	Version string

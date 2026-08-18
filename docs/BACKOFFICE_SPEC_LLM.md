@@ -279,6 +279,42 @@ is your SPA's own tokens — nothing here dictates a look.
   Bearer token). Building it as part of your SPA means the RBAC role of the
   logged-in user shapes it automatically — that is the point.
 
+## 10b. The embedded /app: theme, language, demo mode (DEMO-SHOWCASE-S1)
+
+Everything above is the PATTERN (build the back-office inside your own SPA).
+The engine also SHIPS the pattern as the embedded `/app` panel, and that panel
+has three product knobs a consumer controls without rebuilding anything:
+
+- **Your colors** (`Config.AppThemeCSS`, or `APPXIMO_APP_THEME_CSS=<file>` on
+  the stock binary): the panel's stylesheet defines every color/radius/font as
+  `--app-*` CSS tokens on `:root`, and the engine serves your CSS at
+  `/app/theme.css`, linked after the panel's own — so a handful of token
+  overrides re-skin the whole panel with your brand. The embedded default
+  (`pkg/backofficeui/web/theme.css`) documents the token list. Dark mode:
+  redefine the same tokens under
+  `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {…} }`
+  and `:root[data-theme="dark"] {…}`, or leave them out to keep the default
+  dark palette.
+- **Language**: the panel chrome is Spanish/English (browser-derived — an `es*`
+  browser sees Spanish; anything else English — with a persisted in-app
+  toggle). Resource names, field keys, enum values and engine error messages
+  are YOUR schema's vocabulary and are shown verbatim, never translated.
+- **Demo mode** (`Config.AppDemoRoles` / `APPXIMO_APP_DEMO_ROLES=demo`): for
+  the listed roles, `/app` SIMULATES writes in a per-session in-memory overlay
+  — the visitor creates/edits/deletes, sees their changes merged into every
+  list (and relation selects) for the rest of the session, and a reload resets
+  everything. No write ever leaves the browser. Pair it with a role whose RBAC
+  is READ-ONLY: the overlay is visitor coherence, the deny-by-default policy
+  is the security boundary (a hand-crafted request with that role's token is
+  still a 403). A discreet fixed notice says "you're trying things out —
+  changes are not saved". The role list is published at `/app/ui-config.json`
+  (role names are not secrets). This is how a public showcase stays touchable
+  without being vandalizable.
+
+The panel is also mobile-first (≤720px: tables become stacked labeled cards,
+the nav a drawer, the form a bottom sheet) and theme-aware
+(`prefers-color-scheme` + a persisted auto/light/dark toggle) out of the box.
+
 ## 11. Checklist an agent can verify
 
 1. `/openapi.json` fetched once, cached; reader produces N resources with

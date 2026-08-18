@@ -4,7 +4,16 @@
 // widget with the declared policy. No resource is named anywhere in this file.
 // This is the embedded /app copy (ENG-38); the teaching copy consumers adapt
 // into their own SPA lives in examples/backoffice-guide/web/app.js.
+//
+// DEMO-SHOWCASE-S1 added the chrome around the pattern: Spanish/English UI
+// strings (i18n.js — browser-derived, persisted override), mobile-first
+// responsive layout, light/dark themes, consumer theme tokens (theme.css),
+// and an optional DEMO MODE: for roles listed in /app/ui-config.json the
+// SPA simulates writes in a per-session in-memory overlay so a public demo
+// stays touchable while the role's server-side RBAC stays read-only — a
+// visitor's write never reaches the server, and a reload resets everything.
 import { loadContract, controlFor } from './contract.js';
+import { t, lang, setLang } from './i18n.js';
 
 const $ = (sel) => document.querySelector(sel);
 let token = null;
@@ -12,6 +21,65 @@ let contract = null;
 let current = null;          // selected resource
 let listState = {};          // per resource: {sort, order, search, after:[], rows}
 const probe = {};            // resource -> {denied|error|total}
+let uiConfig = {};           // served at /app/ui-config.json (demo roles, …)
+let demo = false;            // demo mode: writes are simulated, never sent
+
+// ── demo overlay (per session, in memory only — reload = reset) ─────────────
+const overlay = { created: {}, patched: {}, deleted: {} };
+const ov = (m, res) => (m[res] = m[res] ?? new Map());
+
+function demoWrite(path, opts) {
+  // Simulate the write locally; it never reaches the server. The demo role's
+  // RBAC is read-only server-side, so even a hand-crafted request is a 403 —
+  // this overlay is coherence, not the security boundary.
+  const method = opts.method ?? 'GET';
+  if (path === '/api/files' && method === 'POST') {
+    return { file_id: crypto.randomUUID(), sha256: '', size: 0 };
+  }
+  const m = path.match(/^\/api\/([a-z_]+)(?:\/([^/?]+))?/);
+  if (!m) return null;
+  const [, res, id] = m;
+  if (method === 'POST') {
+    const row = { id: crypto.randomUUID(), created_at: new Date().toISOString(), ...opts.body };
+    ov(overlay.created, res).set(row.id, row);
+    return row;
+  }
+  if (method === 'PATCH' || method === 'PUT') {
+    const created = ov(overlay.created, res);
+    if (created.has(id)) {
+      const merged = { ...created.get(id), ...opts.body };
+      created.set(id, merged);
+      return merged;
+    }
+    const prev = ov(overlay.patched, res).get(id) ?? {};
+    const merged = { ...prev, ...opts.body };
+    ov(overlay.patched, res).set(id, merged);
+    return { id, ...merged };
+  }
+  if (method === 'DELETE') {
+    if (ov(overlay.created, res).delete(id)) return null;
+    ov(overlay.deleted, res).add ? overlay.deleted[res].add(id) : (overlay.deleted[res] = new Set([id]));
+    return null;
+  }
+  return null;
+}
+
+function demoMergeList(res, rows, st) {
+  const deleted = overlay.deleted[res] ?? new Set();
+  const patched = overlay.patched[res] ?? new Map();
+  const out = rows
+    .filter((r) => !deleted.has(r.id))
+    .map((r) => (patched.has(r.id) ? { ...r, ...patched.get(r.id) } : r));
+  if (!st || st.after.length === 0) {
+    let created = [...(overlay.created[res]?.values() ?? [])];
+    if (st?.search) {
+      const q = st.search.toLowerCase();
+      created = created.filter((r) => Object.values(r).some((v) => String(v ?? '').toLowerCase().includes(q)));
+    }
+    out.unshift(...created.reverse());
+  }
+  return out;
+}
 
 class ApiError extends Error {
   constructor(status, body) {
@@ -22,6 +90,10 @@ class ApiError extends Error {
 }
 
 async function api(path, opts = {}) {
+  const method = opts.method ?? 'GET';
+  if (demo && method !== 'GET' && (path.startsWith('/api/'))) {
+    return demoWrite(path, opts);       // simulated: never reaches the server
+  }
   const headers = { ...(opts.headers ?? {}) };
   if (token) headers['Authorization'] = 'Bearer ' + token;
   let body = opts.body;
@@ -29,7 +101,7 @@ async function api(path, opts = {}) {
     headers['Content-Type'] = 'application/json';
     body = JSON.stringify(body);
   }
-  const res = await fetch(path, { method: opts.method ?? 'GET', headers, body });
+  const res = await fetch(path, { method, headers, body });
   if (res.status === 204) return null;
   const isJSON = (res.headers.get('content-type') ?? '').includes('json');
   const data = isJSON ? await res.json() : null;
@@ -37,15 +109,59 @@ async function api(path, opts = {}) {
   return data;
 }
 
+// ── theme (light / dark / auto) ──────────────────────────────────────────────
+const THEME_KEY = 'appximo.app.theme';
+function applyTheme() {
+  const v = localStorage.getItem(THEME_KEY);
+  if (v === 'light' || v === 'dark') document.documentElement.dataset.theme = v;
+  else delete document.documentElement.dataset.theme;
+}
+function themeLabel() {
+  const v = localStorage.getItem(THEME_KEY);
+  return v === 'light' ? '☀' : v === 'dark' ? '☾' : '◐';
+}
+function themeTitle() {
+  const v = localStorage.getItem(THEME_KEY);
+  return t(v === 'light' ? 'theme.light' : v === 'dark' ? 'theme.dark' : 'theme.auto');
+}
+function cycleTheme() {
+  const v = localStorage.getItem(THEME_KEY);
+  const next = v === 'light' ? 'dark' : v === 'dark' ? null : 'light';
+  if (next) localStorage.setItem(THEME_KEY, next);
+  else localStorage.removeItem(THEME_KEY);
+  applyTheme();
+}
+
+function prefButtons() {
+  return `<button id="pref-lang" class="subtle" title="idioma / language">${lang === 'es' ? 'EN' : 'ES'}</button>
+    <button id="pref-theme" class="subtle" title="${esc(themeTitle())}">${themeLabel()}</button>`;
+}
+function wirePrefButtons(rerender) {
+  const l = $('#pref-lang'), th = $('#pref-theme');
+  if (l) l.onclick = () => { setLang(lang === 'es' ? 'en' : 'es'); rerender(); };
+  if (th) th.onclick = () => { cycleTheme(); rerender(); };
+}
+
 // ── auth (frontend-spec §2 — minimal) ────────────────────────────────────────
+function claimsOf(tok) {
+  try {
+    return JSON.parse(atob(tok.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+  } catch { return {}; }
+}
+
 async function login(email, password) {
   const r = await api('/auth/login', { method: 'POST', body: { email, password } });
   token = r.token;
-  boot().catch(showFatal);
+  enterApp();
 }
 async function signup(email, password) {
   const r = await api('/auth/signup', { method: 'POST', body: { email, password } });
   token = r.token;
+  enterApp();
+}
+function enterApp() {
+  const role = claimsOf(token).role;
+  demo = Array.isArray(uiConfig.demo_roles) && uiConfig.demo_roles.includes(role);
   boot().catch(showFatal);
 }
 
@@ -55,30 +171,42 @@ async function signup(email, password) {
 function tenantHint() {
   const h = window.location.hostname;
   if (h.includes('.')) return '';
-  return `<div class="banner info">This page talks to the API on <b>this origin</b>, and the engine
-    reads the tenant from the subdomain. Open it as
-    <code>http://&lt;tenant&gt;.${esc(h)}${window.location.port ? ':' + window.location.port : ''}/app</code>
-    (e.g. the URL <code>appximo up</code> printed) — signing in from a bare host will fail.</div>`;
+  const host = esc(h) + (window.location.port ? ':' + window.location.port : '');
+  return `<div class="banner info">${t('login.tenantHint', { host })}</div>`;
 }
 
 function renderLogin(msg = '') {
-  document.title = 'App — Appximo back-office';
+  document.title = 'App — Appximo';
+  document.documentElement.lang = lang;
   $('#app').innerHTML = `
-    <div class="login">
-      <h1>Your app <span class="muted">— generated from /openapi.json</span></h1>
+    <div class="corner">${prefButtons()}</div>
+    <div class="login-wrap"><div class="login">
+      <h1 id="login-title">${contract ? esc(contract.appTitle) : 'App'}</h1>
+      <div class="sub">${t('login.generated')}</div>
       ${tenantHint()}
       ${msg ? `<div class="banner err">${esc(msg)}</div>` : ''}
-      <input id="l-email" type="email" placeholder="email" autocomplete="username">
-      <input id="l-pass" type="password" placeholder="password" autocomplete="current-password">
+      <input id="l-email" type="email" placeholder="${t('login.email')}" autocomplete="username">
+      <input id="l-pass" type="password" placeholder="${t('login.password')}" autocomplete="current-password">
       <div class="row">
-        <button id="l-go" class="primary">Log in</button>
-        <button id="l-su">Sign up</button>
+        <button id="l-go" class="primary">${t('login.signin')}</button>
+        <button id="l-su">${t('login.signup')}</button>
       </div>
-      <small class="muted">Sign in as a tenant user (the credentials <code>appximo up</code> printed,
-      or a user created in /admin). The session lives in memory — a refresh signs you out.</small>
-    </div>`;
-  $('#l-go').onclick = () => login($('#l-email').value, $('#l-pass').value).catch((e) => renderLogin(e.message));
+      <small class="muted">${t('login.help')}</small>
+    </div></div>`;
+  wirePrefButtons(() => renderLogin(msg));
+  const go = () => login($('#l-email').value, $('#l-pass').value).catch((e) => renderLogin(e.message));
+  $('#l-go').onclick = go;
+  $('#l-pass').onkeydown = (e) => { if (e.key === 'Enter') go(); };
   $('#l-su').onclick = () => signup($('#l-email').value, $('#l-pass').value).catch((e) => renderLogin(e.message));
+  // The contract is public (engine-global): fetch it lazily so the login card
+  // can greet with the app's own name; ignore failures (bare host, offline).
+  if (!contract) {
+    loadContract(api).then((c) => {
+      contract = c;
+      const el = $('#login-title');
+      if (el) el.textContent = c.appTitle;
+    }).catch(() => {});
+  }
 }
 
 // ── boot: read the contract, probe permissions, draw the shell ───────────────
@@ -99,37 +227,57 @@ async function boot() {
 }
 
 function renderShell() {
-  document.title = `${contract.appTitle} — back-office`;
+  document.title = `${contract.appTitle} — /app`;
+  document.documentElement.lang = lang;
   const items = contract.resources.map((r) => {
     const p = probe[r.name] ?? {};
     const cls = p.denied ? 'denied' : '';
     const badge = p.denied ? '⛔' : (p.total ?? '');
-    return `<li class="${cls}" data-res="${r.name}">${esc(r.title)} <span class="badge">${badge}</span></li>`;
+    const title = p.denied ? ` title="${t('nav.denied')}"` : '';
+    return `<li class="${cls}" data-res="${r.name}"${title}>${esc(r.title)} <span class="badge">${badge}</span></li>`;
   }).join('');
   const virtual = Object.entries(contract.virtual).map(([n, v]) =>
     `<li class="virtual" title="${esc(v.description ?? '')}">${esc(n)} <span class="badge">engine</span></li>`).join('');
   $('#app').innerHTML = `
+    <div class="topbar">
+      <button id="menu-btn" aria-label="menu">☰</button>
+      <span class="appname">${esc(contract.appTitle)}</span>
+      ${demo ? `<span class="badge">${t('demo.tag')}</span>` : ''}
+    </div>
     <div class="shell">
-      <nav>
-        <h2 class="appname" title="from /openapi.json — this UI knows nothing else">«${esc(contract.appTitle)}»</h2>
-        <h2>Resources</h2>
+      <nav class="side">
+        <h2 class="appname" title="from /openapi.json — this UI knows nothing else">${esc(contract.appTitle)}</h2>
+        <h2>${t('nav.resources')}</h2>
         <ul id="menu">${items}</ul>
-        ${virtual ? `<h2>Engine</h2><ul>${virtual}</ul>` : ''}
-        <button id="logout" class="subtle">Log out</button>
+        ${virtual ? `<h2>${t('nav.engine')}</h2><ul>${virtual}</ul>` : ''}
+        <div class="grow"></div>
+        <div class="navfoot">
+          <div class="row">${prefButtons()}</div>
+          <button id="logout" class="subtle">${t('nav.logout')}</button>
+        </div>
       </nav>
       <main id="main"></main>
-    </div>`;
+    </div>
+    <div class="drawer-bg" id="drawer-bg"></div>
+    ${demo ? `<div class="demobar">${t('demo.banner')}</div>` : ''}`;
   document.querySelectorAll('#menu li:not(.denied)').forEach((li) => {
-    li.onclick = () => selectResource(li.dataset.res);
+    li.onclick = () => { closeDrawer(); selectResource(li.dataset.res); };
   });
-  $('#logout').onclick = () => { token = null; renderLogin(); };
+  $('#logout').onclick = () => { token = null; demo = false; renderLogin(); };
+  $('#menu-btn').onclick = () => document.body.classList.toggle('drawer-open');
+  $('#drawer-bg').onclick = closeDrawer;
+  wirePrefButtons(() => { renderShell(); if (current) selectResource(current.name); });
 }
+
+function closeDrawer() { document.body.classList.remove('drawer-open'); }
 
 // ── list view (§8) ───────────────────────────────────────────────────────────
 function columnsFor(res) {
   const preferred = ['nombre', 'name', 'titulo', 'title', 'codigo', 'code', 'estado', 'status', 'email', 'socio'];
   const cols = res.fields
-    .filter((f) => !f.file && f.key !== 'id')
+    // No raw UUIDs in a list a human scans: FK relation columns and plain uuid
+    // fields stay out of the auto-columns (the form still edits them).
+    .filter((f) => !f.file && f.key !== 'id' && !f.relation && f.format !== 'uuid')
     .sort((a, b) => {
       const pa = preferred.findIndex((p) => a.key.includes(p));
       const pb = preferred.findIndex((p) => b.key.includes(p));
@@ -147,6 +295,10 @@ async function selectResource(name) {
   await renderList();
 }
 
+function skeleton() {
+  return `<div class="tablewrap"><div class="skel">${'<div></div>'.repeat(6)}</div></div>`;
+}
+
 async function renderList() {
   const st = listState[current.name];
   const q = new URLSearchParams();
@@ -155,35 +307,41 @@ async function renderList() {
   if (st.search) q.set('search', st.search);
   const cursor = st.after[st.after.length - 1];
   if (cursor) q.set('after', cursor);
-  $('#main').innerHTML = `<div class="loading">Loading ${esc(current.title)}…</div>`;
+  $('#main').innerHTML = `
+    <div class="toolbar"><h1>${esc(current.title)}</h1></div>
+    ${skeleton()}`;
   let res;
   try {
     res = await api(`/api/${current.name}?` + q.toString());
   } catch (e) {
-    $('#main').innerHTML = `<div class="banner err">${esc(e.message)} <button onclick="location.reload()">Retry</button></div>`;
+    $('#main').innerHTML = `<div class="banner err">${esc(e.message)} <button id="retry">${t('list.retry')}</button></div>`;
+    $('#retry').onclick = () => renderList();
     return;
   }
-  st.rows = res.data;
+  let rows = res.data;
+  if (demo) rows = demoMergeList(current.name, rows, st);
+  st.rows = rows;
   const cols = columnsFor(current);
   const head = cols.map((c) =>
     `<th data-k="${c.key}" class="${st.sort === c.key ? 'sorted-' + st.order : ''}">${esc(c.key)}</th>`).join('');
-  const body = res.data.map((row, i) => {
-    const tds = cols.map((c) => `<td>${esc(displayValue(row[c.key], c))}</td>`).join('');
-    const del = current.canDelete ? `<button class="subtle del" data-i="${i}">✕</button>` : '';
-    return `<tr data-i="${i}">${tds}<td>${del}</td></tr>`;
+  const body = rows.map((row, i) => {
+    const tds = cols.map((c) => `<td data-l="${esc(c.key)}">${esc(displayValue(row[c.key], c))}</td>`).join('');
+    const del = current.canDelete ? `<button class="subtle del" data-i="${i}" aria-label="${t('list.actions')}">✕</button>` : '';
+    return `<tr data-i="${i}">${tds}<td class="rowact">${del}</td></tr>`;
   }).join('');
   $('#main').innerHTML = `
     <div class="toolbar">
       <h1>${esc(current.title)}</h1>
-      <input id="search" placeholder="search…" value="${esc(st.search)}">
-      ${current.canCreate ? '<button id="new" class="primary">+ New</button>' : ''}
+      <input id="search" type="search" placeholder="${t('list.search')}" value="${esc(st.search)}">
+      <span class="spacer"></span>
+      ${current.canCreate ? `<button id="new" class="primary">+ ${t('list.new')}</button>` : ''}
     </div>
     <div id="list-banner"></div>
-    ${res.data.length === 0 ? '<div class="empty">No records' + (st.search ? ' for that search' : '') + '.</div>' : `
-    <table><thead><tr>${head}<th></th></tr></thead><tbody>${body}</tbody></table>`}
+    ${rows.length === 0 ? `<div class="empty"><b>${esc(current.title)}</b>${st.search ? t('list.emptySearch') : t('list.empty')}</div>` : `
+    <div class="tablewrap"><table><thead><tr>${head}<th></th></tr></thead><tbody>${body}</tbody></table></div>`}
     <div class="pager">
-      ${st.after.length ? '<button id="pg-first">⇤ first page</button>' : ''}
-      ${res.meta?.has_next ? '<button id="pg-next">next ›</button>' : ''}
+      ${st.after.length ? `<button id="pg-first">⇤ ${t('list.first')}</button>` : ''}
+      ${res.meta?.has_next ? `<button id="pg-next">${t('list.next')} ›</button>` : ''}
     </div>`;
   $('#search').onchange = (e) => { st.search = e.target.value; st.after = []; renderList(); };
   document.querySelectorAll('th[data-k]').forEach((th) => th.onclick = () => {
@@ -201,7 +359,7 @@ async function renderList() {
   });
   document.querySelectorAll('.del').forEach((b) => b.onclick = async () => {
     const row = st.rows[Number(b.dataset.i)];
-    if (!confirm(`Delete this ${current.name} record?`)) return;
+    if (!confirm(t('list.confirmDelete', { res: current.name }))) return;
     try {
       await api(`/api/${current.name}/${row.id}`, { method: 'DELETE' });
       renderList();
@@ -215,6 +373,7 @@ async function renderList() {
 function displayValue(v, f) {
   if (v === null || v === undefined) return '';
   if (f.format === 'date-time') return String(v).slice(0, 16).replace('T', ' ');
+  if (f.type === 'boolean') return v ? '✓' : '—';
   return String(v);
 }
 
@@ -232,16 +391,17 @@ async function renderForm(row) {
   }));
   $('#main').insertAdjacentHTML('beforeend', `
     <div class="modal-bg" id="form-bg"><div class="modal">
-      <h2>${editing ? 'Edit' : 'New'} ${esc(current.name)}</h2>
+      <h2>${editing ? t('form.edit') : t('form.new')} · ${esc(current.title)}</h2>
       <div id="form-banner"></div>
       <form id="gform">${controls.join('')}
         <div class="row">
-          <button type="submit" class="primary">${editing ? 'Save' : 'Create'}</button>
-          <button type="button" id="form-cancel">Cancel</button>
+          <button type="submit" class="primary">${editing ? t('form.save') : t('form.create')}</button>
+          <button type="button" id="form-cancel">${t('form.cancel')}</button>
         </div>
       </form>
     </div></div>`);
   $('#form-cancel').onclick = () => $('#form-bg').remove();
+  $('#form-bg').onclick = (ev) => { if (ev.target.id === 'form-bg') $('#form-bg').remove(); };
   wireFileInputs();
   $('#gform').onsubmit = async (ev) => {
     ev.preventDefault();
@@ -296,30 +456,31 @@ async function controlHTML(f, val, editing) {
         return `<select name="${f.key}">${opts}</select>`;
       }
       const nexts = f.transitions?.[v] ?? [];
-      if (nexts.length === 0) return `<input name="${f.key}" value="${esc(v)}" disabled title="terminal state — no legal moves">`;
+      if (nexts.length === 0) return `<input name="${f.key}" value="${esc(v)}" disabled title="${t('form.terminal')}">`;
       const opts = [v, ...nexts].map((s) => `<option${s === v ? ' selected' : ''}>${esc(s)}</option>`).join('');
       return `<select name="${f.key}">${opts}</select>`;
     }
     case 'select': {
       const opts = ['', ...(f.enum ?? [])].map((s) =>
-        `<option value="${esc(s)}"${s === v ? ' selected' : ''}>${esc(s || '—')}</option>`).join('');
+        `<option value="${esc(s)}"${s === v ? ' selected' : ''}>${esc(s || t('form.none'))}</option>`).join('');
       return `<select name="${f.key}"${req}>${opts}</select>`;
     }
     case 'relation': {
       // §7: send the REFERENCED column's value, never blindly the row id.
       let rows = [];
       try { rows = (await api(`/api/${f.relation}?per_page=100`)).data; } catch { rows = []; }
+      if (demo) rows = demoMergeList(f.relation, rows, null);
       const label = (r) => r.nombre ?? r.name ?? r.titulo ?? r.title ?? r.email ?? r[f.references];
-      const opts = ['<option value="">—</option>', ...rows.map((r) =>
+      const opts = [`<option value="">${t('form.none')}</option>`, ...rows.map((r) =>
         `<option value="${esc(r[f.references])}"${r[f.references] === v ? ' selected' : ''}>${esc(label(r))}</option>`)].join('');
       return `<select name="${f.key}" data-refcol="${esc(f.references)}"${req}>${opts}</select>`;
     }
     case 'file': {
-      const policy = [f.accept ? `accepts: ${[].concat(f.accept).join(', ')}` : '',
-        f.maxBytes ? `max ${(f.maxBytes / 1048576).toFixed(1)} MiB` : ''].filter(Boolean).join(' · ');
+      const policy = [f.accept ? t('file.accepts', { list: [].concat(f.accept).join(', ') }) : '',
+        f.maxBytes ? t('file.max', { mb: (f.maxBytes / 1048576).toFixed(1) }) : ''].filter(Boolean).join(' · ');
       return `<span class="filewrap"><input type="file" data-for="${f.key}">
         <input type="hidden" name="${f.key}" value="${esc(v)}">
-        <small class="muted">${esc(policy)} ${v ? '· attached: ' + esc(String(v).slice(0, 8)) + '…' : ''}</small></span>`;
+        <small class="muted">${esc(policy)} ${v ? '· ' + t('file.attached', { id: esc(String(v).slice(0, 8)) }) : ''}</small></span>`;
     }
     case 'checkbox': return `<input type="checkbox" name="${f.key}"${val ? ' checked' : ''}>`;
     case 'textarea': return `<textarea name="${f.key}"${lim}${req}>${esc(v)}</textarea>`;
@@ -338,7 +499,7 @@ function wireFileInputs() {
       try {
         const r = await api('/api/files', { method: 'POST', body: fd });
         document.querySelector(`input[type=hidden][name="${inp.dataset.for}"]`).value = r.file_id;
-        inp.insertAdjacentHTML('afterend', '<small class="ok">uploaded ✓</small>');
+        inp.insertAdjacentHTML('afterend', `<small class="ok">${t('file.uploaded')}</small>`);
       } catch (e) {
         inp.insertAdjacentHTML('afterend', `<small class="err">${esc(e.message)}</small>`);
       }
@@ -364,7 +525,9 @@ function esc(s) {
 }
 
 function showFatal(e) {
-  $('#app').innerHTML = `<div class="banner err">Failed to start: ${esc(e.message)}</div>`;
+  $('#app').innerHTML = `<div class="banner err">${t('boot.failed', { msg: esc(e.message) })}</div>`;
 }
 
-renderLogin();
+applyTheme();
+fetch('./ui-config.json').then((r) => (r.ok ? r.json() : {})).then((c) => { uiConfig = c ?? {}; }).catch(() => {})
+  .finally(() => renderLogin());

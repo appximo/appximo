@@ -1,0 +1,21 @@
+/* theme.css — the consumer's theme seam (served at /app/theme.css, ALWAYS
+   linked after style.css so anything here wins). This embedded default is
+   deliberately empty: the panel ships with its neutral product look.
+
+   To re-skin the panel with YOUR brand — no rebuild, no fork — provide a CSS
+   file that redefines the tokens (Config.AppThemeCSS in a consumer binary, or
+   APPXIMO_APP_THEME_CSS=<path> on the stock binary) and the engine serves it
+   here instead. The full token list lives at the top of style.css; the short
+   version:
+
+   :root {
+     --app-accent: #1c9d5b;        (buttons, active nav, focus)
+     --app-accent-strong: #157a47; (hover)
+     --app-on-accent: #ffffff;     (text on accent)
+     --app-bg / --app-surface / --app-border / --app-text / --app-muted
+     --app-radius / --app-font
+   }
+
+   Dark mode: redefine the same tokens under
+   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { … } }
+   and :root[data-theme="dark"] { … } — or skip them to keep the default dark. */
