@@ -26,7 +26,12 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-17 (LAUNCH-ASSETS-S1)** — the launch material
+**Last reviewed: 2026-08-18 (DEMO-SHOWCASE-S1)** — the showcase pass: /app
+became a product-grade panel (Spanish/English, mobile-first, dark mode,
+consumer theme tokens, generic demo mode), the tiendita got real licensed
+photos + the brand palette + the fiscal/coupon surface made visible + a
+verified no-persistence demo mode. New OPEN: OPS-27 (crisblogs demo accounts —
+third-party box). Previous review: 2026-08-17 (LAUNCH-ASSETS-S1) — the launch material
 produced: the 47 s demo (reproducible), the VecinGo case study, the README/site
 rebuilt around layer discovery, and the demo box measured + protected for the
 peak. New OPEN: ENG-44. Previous review: 2026-08-09 (CTX-PARITY-S1) — the third field report
@@ -67,6 +72,27 @@ refreshed).
 ---
 
 ## OPEN
+
+### OPS-27 — crisblogs demo-account buttons fail, and the box is not ours
+
+- **Origin:** LANDING-COMMERCIAL-S1 field note (2026-08-17); investigated by
+  DEMO-SHOWCASE-S1 (2026-08-18).
+- **What:** the editor/lector demo buttons on `crisblogs.appximo.com` answer
+  «Correo o contraseña incorrectos» — the public third-party showcase does not
+  let a visitor in. The technical site links the blog (which works, 200); the
+  broken part is inside crisblogs' own login.
+- **Why this session could NOT fix it:** `crisblogs.appximo.com` resolves to
+  **147.182.163.170** — NOT the 58 (tiendita/petfriendly live there; verified
+  against the 58's Caddyfile). It is the third-party evaluator's own droplet;
+  no SSH key on the dev box opens it and no admin key is on file. Restoring
+  the demo users requires whoever operates that droplet (or Miguel asking
+  them) — `POST /admin/tenants/{id}/users` with their ADMIN_KEY, or a seed
+  re-run.
+- **Impact:** a prospect who clicks the demo buttons on a public showcase hits
+  a dead end; the blog reading path is unaffected.
+- **Ready when:** the two demo accounts log in from the buttons, or the
+  buttons are removed from crisblogs' login. Needs: contact with the
+  crisblogs operator (Miguel has the relationship).
 
 ### OPS-23 — `install.sh` has no `--static` flag for a frontend directory
 - **Origin:** LAUNCHPAD-S1, second fresh-agent run. An agent deploying an app
@@ -635,6 +661,43 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in DEMO-SHOWCASE-S1 (2026-08-18)
+
+The showcase pass: the tiendita becomes the commercial standard-bearer and the
+generic back-office becomes a product every consumer inherits. Engine data
+path untouched (binary-diff gate 120/120 SAME).
+
+- **/app grew up** (`pkg/backofficeui`, commit 3e4a13f): Spanish/English chrome
+  (browser-derived, persisted toggle; schema vocabulary never translated),
+  mobile-first responsive (≤720px: card lists, drawer nav, sheet form; 0
+  horizontal scroll at 390×844), light/dark (prefers-color-scheme + persisted
+  toggle), consumer theming (`--app-*` tokens; `Config.AppThemeCSS` /
+  `APPXIMO_APP_THEME_CSS` → `/app/theme.css`), and a generic DEMO MODE
+  (`Config.AppDemoRoles` / `APPXIMO_APP_DEMO_ROLES`: session-overlay simulated
+  writes, reload resets, RBAC read-only role as the boundary). Playwright
+  18/18 against two schemas incl. one never seen; the five form rules and
+  x-appximo readers pinned unchanged. backoffice-spec §10b documents it.
+- **The tiendita, credible** (commerce ed48037): 12 REAL product photos
+  (Wikimedia Commons, per-image license in `assets/fotos/LICENSES.md`,
+  CC BY/BY-SA attribution in the storefront footer), the appximo.com palette
+  (carbon-green header, green/gold accents, warm paper, serif display), and
+  the hidden system made visible — confirmed-sales card on the dashboard
+  (engine aggregate), a Config screen for per-type IVA + coupons, the coupon
+  field in the checkout (the backend supported it; the UI never offered it),
+  the IVA note on the product detail. verify 18/18 · e2e-1b 50/50 ·
+  Playwright móvil+desktop 14/14 · load 119 ms / grid 650 ms local.
+- **Demo mode that cannot be vandalized:** schema role `demo` (read-only
+  per-resource permissions, no route grants) + a per-session in-memory
+  overlay in the panel. Verified BOTH ways: real writes with the demo token →
+  403 on POST/PATCH/DELETE/files/transitions; a full browser session touching
+  everything → zero non-GET requests left the browser, zero new rows in
+  Postgres, overlay coherent across SPA navigation, reload = pristine.
+  «Probar el panel» button on the login; discreet permanent notice.
+- Also: `minLength:1` on all 17 required strings in the commerce schema
+  (closes the SCHEMA-5 empty-string warning); two stray E2E products swept
+  from the live vitrina; the seed now attaches photos to all 12 products and
+  creates the `BIENVENIDA10` coupon + the `demo@` account.
 
 ## DONE in LAUNCH-ASSETS-S1 (2026-08-17)
 
