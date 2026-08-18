@@ -1,16 +1,20 @@
 name: Security Scan (Nightly)
 
 # OWASP ZAP API scan driven by the engine's OWN generated OpenAPI 3.0 spec
-# (`appximo openapi`). Runs nightly and on demand.
+# (`appximo openapi`). Runs nightly, on demand, and on changes to this file.
 #
 # SAFETY (deliberate, see context-docs/TESTING_PLAN.md "Hallazgos S39"):
 # an API scan is ACTIVE — it sends attack payloads (the brief's `-a`). It must
-# therefore target a THROWAWAY / STAGING instance, NEVER production. This workflow
-# refuses to scan the prod IP and requires an explicit target, so the nightly cron
-# can never silently attack prod. Set the target via the `ZAP_TARGET_URL` repo
-# variable (Settings → Variables) or the manual-run input. Until a staging target
-# exists, the nightly run fails fast with a clear message — that is intended: no
-# target, no scan. ZAP itself is heavy (RAM), so it stays nightly/manual, never per-PR.
+# therefore target a THROWAWAY instance, NEVER production. Since
+# SHOWCASE-TRUTH-S1 the job builds its own throwaway by default: it boots the
+# engine IN THE RUNNER against a scratch Postgres service container, registers
+# a scratch tenant, and scans that (the ZAP action runs docker with
+# --network=host, so the container reaches the runner's loopback;
+# *.localtest.me resolves to 127.0.0.1, giving the engine a real tenant Host).
+# An explicit target (the ZAP_TARGET_URL repo variable or the manual-run
+# input) overrides the self-boot and is still refused if it looks like
+# production. Before this, "no target" failed the job fast by design — safe,
+# but a nightly that is red forever and scans nothing.
 
 on:
   schedule:
@@ -18,9 +22,12 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'Base URL to scan — a STAGING/throwaway instance, NEVER prod'
-        required: true
+        description: 'Base URL to scan — a STAGING/throwaway instance, NEVER prod. Empty = boot a throwaway engine in the job.'
+        required: false
         default: ''
+  push:
+    branches: [main]
+    paths: ['.github/workflows/security.yml']
 
 permissions:
   contents: read
@@ -29,6 +36,26 @@ permissions:
 jobs:
   zap-scan:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: scan
+          POSTGRES_PASSWORD: scan
+          POSTGRES_DB: scan
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Throwaway credentials for an instance that lives minutes inside this
+      # job and listens on the runner's loopback only. Deliberately visible:
+      # there is nothing to protect. JWT_SECRET satisfies the 32-char floor.
+      DATABASE_URL: postgres://scan:scan@127.0.0.1:5432/scan
+      JWT_SECRET: zap-throwaway-secret-not-production-00000000
+      ADMIN_KEY: zap-throwaway-admin-key
     steps:
       - uses: actions/checkout@v7
 
@@ -44,8 +71,12 @@ jobs:
           TARGET="${{ github.event.inputs.target }}"
           if [ -z "$TARGET" ]; then TARGET="${{ vars.ZAP_TARGET_URL }}"; fi
           if [ -z "$TARGET" ]; then
-            echo "::error::No scan target. Set the ZAP_TARGET_URL repo variable or pass a workflow_dispatch input (a STAGING/throwaway instance — never prod)."
-            exit 1
+            # Self-boot mode: the throwaway engine this job starts below.
+            # scan.localtest.me resolves to 127.0.0.1 (public DNS), so the
+            # Host header carries a real tenant label for the engine.
+            echo "url=http://scan.localtest.me:8080" >> "$GITHUB_OUTPUT"
+            echo "selfboot=yes" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           case "$TARGET" in
             *appitools.com*|*appximo.com*)
@@ -54,6 +85,30 @@ jobs:
               ;;
           esac
           echo "url=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "selfboot=no" >> "$GITHUB_OUTPUT"
+
+      - name: Boot the throwaway engine + register the scratch tenant
+        if: steps.target.outputs.selfboot == 'yes'
+        run: |
+          set -euo pipefail
+          go build -o /tmp/appximo ./cmd/appximo
+          /tmp/appximo serve --schema tests/fixtures/schemas/logistics_schema.json --port 8080 \
+            > /tmp/engine.log 2>&1 &
+          echo $! > /tmp/engine.pid
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8080/readyz >/dev/null 2>&1 && break
+            [ "$i" = 60 ] && { echo "::error::engine never became ready"; tail -50 /tmp/engine.log; exit 1; }
+            sleep 1
+          done
+          curl -fsS -X POST http://127.0.0.1:9090/tenants \
+            -H "X-Admin-Key: $ADMIN_KEY" -H 'Content-Type: application/json' \
+            -d "{\"tenant_id\":\"scan\",\"display_name\":\"ZAP scan\",\"schema\":$(cat tests/fixtures/schemas/logistics_schema.json)}" \
+            > /tmp/register.json
+          # Smoke: one real request through the full chain (tokenless 401 is the
+          # expected contract for a data route — proves routing + tenant + auth).
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: scan.localtest.me' http://127.0.0.1:8080/api/shipments)
+          echo "smoke /api/shipments (anon) -> $code"
+          [ "$code" = 401 ] || { echo "::error::unexpected smoke status $code"; tail -50 /tmp/engine.log; exit 1; }
 
       - name: Generate OpenAPI spec (base-url = scan target)
         run: |
@@ -71,4 +126,8 @@ jobs:
           target: openapi.yml
           format: openapi
           rules_file_name: .zap/rules.tsv
-          cmd_options: '-a' # active scan — safe ONLY because the target is guarded to non-prod
+          cmd_options: '-a -T 30' # active scan — safe ONLY because the target is a throwaway/guarded instance
+
+      - name: Engine log on failure
+        if: failure() && steps.target.outputs.selfboot == 'yes'
+        run: tail -100 /tmp/engine.log || true
