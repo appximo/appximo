@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787031992104,
+  "lastUpdate": 1787094799310,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -2664,6 +2664,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "45625375 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "a91833b34476612d9a35d69a338a415d68178a90",
+          "message": "ci(security): the nightly ZAP scan boots its own throwaway engine instead of failing red forever\n\nThe 'no target, no scan' fail-fast was safe by design (S39: an active scan\nmust never point at prod) but left the nightly red every night while scanning\nNOTHING. Now, with no explicit target, the job builds the engine, boots it\nagainst a scratch Postgres service, registers a scratch tenant and scans that:\nthe ZAP action runs docker with --network=host, and scan.localtest.me resolves\nto 127.0.0.1, so the engine gets a real tenant Host. An explicit target\n(ZAP_TARGET_URL / dispatch input) still overrides, still refused if it looks\nlike production. The workflow also triggers on pushes touching itself, so this\nchange is verified green IN Actions rather than waiting for the 03:00 cron.\n\nThrowaway credentials are deliberately visible: the instance lives minutes on\nthe runner loopback; JWT_SECRET satisfies the 32-char floor (SEC-6).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-18T23:12:48Z",
+          "tree_id": "8ad7f58d63ddbf4ffa16d045059e9b64915c7fa7",
+          "url": "https://github.com/appximo/appximo/commit/a91833b34476612d9a35d69a338a415d68178a90"
+        },
+        "date": 1787094798176,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 5495,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "429727 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 5495,
+            "unit": "ns/op",
+            "extra": "429727 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "429727 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "429727 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 55.9,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "43280407 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 55.9,
+            "unit": "ns/op",
+            "extra": "43280407 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "43280407 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "43280407 times\n4 procs"
           }
         ]
       }
