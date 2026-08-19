@@ -26,7 +26,22 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-18 (SHOWCASE-TRUTH-S1)** — the honest audit of which
+**Last reviewed: 2026-08-19 (LINKABLE-TRUTH-S1)** — the distance between what
+the public material promises and what survives a skeptical click, closed:
+COMMERCE-8 DONE (the coupon reduces the taxable base — ONE computation in
+checkout.go, every other surface reads stored values, 5 arithmetic cases
+pinned in verify.sh section E, verified on-screen in production), COMMERCE-9
+DONE (labels humanized; category chips show accented names), OPS-28 DONE
+(petfriendly runs the current engine, has a minimal portada, a published-creds
+demo panel over the verified /app demo mode, a plausible clinic dataset, and
+passes the full stranger rubric — verdict VITRINA), the golden demo set no
+longer ages (redate-demo.sh re-anchors every reset; vetapp got its own
+nightly re-anchor), the photo catalogue passed a NEW brand/face filter
+(Lacoste polo out entirely; Levi's jacket, Ugmonk tee, portrait dress and
+fair-stall ruana photos out — ruana replaced by a vetted one; real brand
+names in attrs replaced by fictional ones), and every dead crisblogs link is
+swept from the public material (the story stays). New OPEN: COMMERCE-10.
+Previous review: 2026-08-18 (SHOWCASE-TRUTH-S1) — the honest audit of which
 live apps a STRANGER can actually visit and touch (the measured fact that
 governs the landing's trust-bar copy: 1 of the 4 claimed systems passes the
 full rubric — the table lives in the session report and the handoff package),
@@ -122,33 +137,15 @@ refreshed).
   stays linked as the story. (c) **discount it** — the trust bar publishes
   the number without crisblogs until (a) or (b) lands; zero work, honest
   today.
+- **LINKABLE-TRUTH-S1 (2026-08-19):** the DEAD LINKS are gone from every
+  public surface — README (×2), the technical site, the case study — while
+  the third-party build STORY stays everywhere (that is what crisblogs
+  proves, and it survives without a URL). The landing's quantity claim now
+  says only what survives a click ("4 construidos, 2 abiertos para probar").
+  The app itself is unchanged and still broken for a visitor.
 - **Ready when:** the two demo accounts log in from the buttons, or the
   buttons are removed from crisblogs' login, or the subdomain points at a
   replacement we operate. Needs: Miguel's call between (a)/(b)/(c).
-
-### OPS-28 — petfriendly's front door is a raw 401 JSON, and its binary predates `/app`
-
-- **Origin:** SHOWCASE-TRUTH-S1 (2026-08-18), the outside-in audit. The README
-  links `https://petfriendly.appximo.com` (the root); a stranger who clicks it
-  gets `{"error":"missing token"}` — a raw API 401 as the first impression of
-  a "live demo". `/app` ALSO answers 401: the vetapp binary is `appximo
-  9ebeaa1` (2026-08-05), which predates the embedded back-office
-  (FIRST-TEN-MINUTES-S1, 2026-08-07), so the JWT-skipped `/app` shell simply
-  does not exist in that build. What DOES work for a stranger: `/docs` (200,
-  the Swagger the technical site links as "Browse its API") and `/editor`
-  (200 — full Studio over the production schema, anonymous; deploy still
-  gated by super-admin auth). Audit verdict: **VISITABLE PERO NO TOCABLE**.
-- **Impact:** two of the three public promise-surfaces (README root link, the
-  landing's "una agenda veterinaria… en internet hoy") land on an error body
-  or need insider knowledge. It also inflates the trust-bar number if counted
-  as "visitable".
-- **Options (Miguel's call — it is a live production box):** deploy a current
-  engine binary to vetapp (brings `/app`; needs demo-mode config + a
-  read-only role in its schema to be TOUCHABLE, the tiendita pattern), or
-  re-link the README/site to `/docs` only and stop calling it visitable, or
-  give it a static landing at `/` via `APPXIMO_STATIC_DIR`.
-- **Ready when:** the URL the public material links answers 200 with
-  something a stranger can DO (or the material stops linking a 401).
 
 ### OPS-23 — `install.sh` has no `--static` flag for a frontend directory
 - **Origin:** LAUNCHPAD-S1, second fresh-agent run. An agent deploying an app
@@ -560,27 +557,18 @@ refreshed).
   crédito carries only the reversed lines, and stock returns only for those
   lines; suite coverage for the partial path.
 
-### COMMERCE-8 — The coupon discount does not reduce the IVA base
+### COMMERCE-10 — A 100% coupon produces a $0 order, accepted
 
-- **Origin:** SHOWCASE-TRUTH-S1, observed while completing a real checkout as
-  a stranger: Ruana $220.000 + IVA $41.800 (19% of the FULL price), coupon
-  BIENVENIDA10 −$22.000 → charged $239.800. The discount is subtracted from
-  the grand total while the IVA stays computed on the undiscounted base;
-  Colombian VAT practice reduces the base by the discount (IVA should be 19%
-  of $198.000 = $37.620, total $235.620).
-- **Impact:** Low for a demo with mock payments; real for any merchant going
-  live — it overstates the tax by the discount × rate.
-- **Ready:** the checkout computes IVA per line over the discounted base, the
-  invoice (nota) carries the same, and a suite case pins coupon+IVA.
-
-### COMMERCE-9 — Attribute labels render raw snake_case glued to the value
-
-- **Origin:** SHOWCASE-TRUTH-S1, product detail as a stranger: the Sombrero
-  Vueltiao detail shows «Hecho_a_manosí» — the attribute key `hecho_a_mano`
-  rendered verbatim and concatenated with the value «sí» without a
-  separator. Cosmetic, but it is on the storefront a manager inspects.
-- **Ready:** attribute keys humanized (`hecho_a_mano` → «Hecho a mano») with
-  a visible key/value separation, verified in the browser suite.
+- **Origin:** LINKABLE-TRUTH-S1, pinned while writing verify.sh section E
+  (COMMERCE-8): a coupon with descuento_pct=100 yields base 0, IVA 0,
+  total $0 — and the checkout accepts it, creating an order whose payment
+  is for zero pesos. Defined behavior (the arithmetic closes), but a real
+  store probably wants either a cap (<100) on coupon creation or a
+  zero-total short-circuit that skips the gateway.
+- **Impact:** Low — coupons are merchant-created (panel/dueño), not
+  visitor-supplied; no data corruption, the math is exact.
+- **Ready:** a decision — cap the pct at coupon creation, or define the
+  $0-order flow (auto-paid? gateway skip?) — implemented with a suite case.
 
 ### COMMERCE-4 — A real DIAN Proveedor Tecnológico adapter
 - **Origin:** `docs/DIAN.md` (the interface exists; the implementation is a stub).
@@ -722,6 +710,66 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in LINKABLE-TRUTH-S1 (2026-08-19)
+
+- **COMMERCE-8 — the coupon reduces the taxable base.** ONE computation
+  (handlers/checkout.go): descuento = subtotal×pct/100 (truncating), split
+  per line by largest-remainder (shares sum EXACTLY), per-line IVA over the
+  discounted base, total = subtotal − descuento + IVA + envío. orden_lineas
+  gained descuento_centavos (additive migration). The AUDIT found 7 surfaces
+  touching totals; after the fix exactly ONE computes — the rest read stored
+  values: orden-publica now exposes descuento (the tracking page's numbers
+  used to NOT add up with a coupon), the tracking page and panel detail show
+  the Descuento row, the invoice/nota carry DiscountCents+ShippingCents and
+  Validate refuses a header that does not close peso a peso, reconciliation
+  already read stored line values. 5 cases pinned in verify.sh §E with
+  explicit arithmetic; verified ON SCREEN in production: $220.000 − $22.000
+  + $37.620 = **$235.620** (the engine used to charge $239.800). The product
+  page's «IVA del 19% incluido» lie became «+ IVA del 19% en el checkout».
+- **OPS-28 — petfriendly is touchable (verdict: VITRINA).** vetapp deployed
+  the current engine (eb4c659; backups + rollback binaries kept), a minimal
+  static portada at / (the README-linked root used to answer a raw 401 JSON)
+  routing visitors to the demo panel (credentials published on the page —
+  the DEMO-SHOWCASE /app demo mode: read-only `demo` role, per-session
+  overlay, RBAC as the boundary) and developers to /docs. A plausible small
+  clinic seeded through the API (3 vets with real auth users — the
+  references:user_id FK pattern —, 8 owners, 11 pets, 17 citas across ALL
+  states incl. FUTURE confirmed/requested ones, 6 vaccinations). Non-
+  persistence verified BOTH ways: demo-token writes all 403; a full browser
+  session emitted ZERO write requests and Postgres counts were identical.
+  Two latent 422s fixed on the way (required + RBAC-forced veterinarian_id —
+  the validator's own suggested fix).
+- **The golden set no longer ages (the class, not the instance).**
+  scripts/seed-historia.sh builds the 13-order history through the real flow
+  and applies a designed age distribution (cerrada 30d · entregadas
+  24/18/13/9/6 · enviadas 4/2 · preparando/cancelada 1 · pagada/pendientes
+  hoy); scripts/redate-demo.sh runs after every nightly restore
+  (ExecStartPost) and re-anchors ALL visible timestamps to the execution day
+  — rewriting ORD-YYYYMMDD numbers and payment references coherently
+  (supersedes A-18's "no backdating" caveat, which rejected backdating
+  WITHOUT the coherence rewrite). Aging drill: −30d simulated, one run
+  restored the exact distribution. vetapp got its own nightly re-anchor
+  (vetapp-redate.timer, attended-anchor, birth_dates untouched).
+- **The photo catalogue passed a brand/face filter it had never seen.**
+  The Lacoste-logo polo left ENTIRELY (product + photo); the filter then
+  caught 4 of the remaining 9 with hard evidence: Levi's patch focal
+  (cha-den), UGMONK stamp (cam-bas), an identifiable portrait (ves-flo —
+  CC0 covers copyright, not personality rights) and two faces + third-party
+  fair signage (old rua-lan). The ruana got a vetted replacement (Ovecha
+  Ragué Poncho, CC BY-SA 3.0); chaqueta/camiseta/vestido use the DESIGNED
+  placeholder on purpose. Real brand names in attrs (Arturo Calle, Koaj,
+  Levis, Studio F, Zenú) became plausible fictional ones — the class dies in
+  data too. Licenses + /creditos-fotos.md carry the criterion and the
+  removal log. COMMERCE-9: attribute labels humanized («Hecho a mano: sí»),
+  category chips show the accented NAME and filter by slug.
+- **Dead promises swept.** crisblogs is a story, not a link, in README (×2),
+  the site and the case study; petfriendly links land on the new portada;
+  the landing's trust-bar claim adjusted to the minimum that survives a
+  click («4 sistemas construidos — dos abiertos para que usted los pruebe»,
+  pushed live). The measured fact moved: **2 of 4 pass the full rubric**
+  (tiendita re-audited outside-in post-changes: arithmetic closes on
+  screen, 9-tile catalogue, demo panel, 0 console errors, load 119 ms).
 
 ## DONE in SHOWCASE-TRUTH-S1 (2026-08-18, night)
 
