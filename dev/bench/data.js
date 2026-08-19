@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787095081836,
+  "lastUpdate": 1787107713205,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -2808,6 +2808,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "49502380 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "da34112ae2d5b79e8b8b76b6c7a7b64e015782d5",
+          "message": "docs+site: dead promises swept — crisblogs stays as a story, never a dead link; petfriendly links land on a door that opens\n\nSHOWCASE-TRUTH-S1 measured it: the crisblogs demo buttons answer 401 and the\nbox is not ours (OPS-27, Miguel's call pending), yet README (×2), the site and\nthe case study all linked it — a visible promise that fails at the click, the\nworst possible state. The third-party build STORY is what crisblogs proves,\nand it survives everywhere — without a clickable URL.\n\npetfriendly's README link used to land on a raw 401 JSON; after OPS-28 the\nroot serves a minimal portada (demo panel with published credentials + API\ndocs), so the links now point at the root and say what a visitor can DO.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-19T02:47:56Z",
+          "tree_id": "1cd0b2c6c4f9525eb3604ff2fca09da04d58ad64",
+          "url": "https://github.com/appximo/appximo/commit/da34112ae2d5b79e8b8b76b6c7a7b64e015782d5"
+        },
+        "date": 1787107711938,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6349,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "367036 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6349,
+            "unit": "ns/op",
+            "extra": "367036 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "367036 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "367036 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 69.59,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36438738 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 69.59,
+            "unit": "ns/op",
+            "extra": "36438738 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36438738 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36438738 times\n4 procs"
           }
         ]
       }
