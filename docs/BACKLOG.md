@@ -26,7 +26,14 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-19 (LINKABLE-TRUTH-S1)** — the distance between what
+**Last reviewed: 2026-08-19 (SHOWHN-MATERIAL-S1)** — the Show HN launch
+material written and every claim in it verified live (titles, author's first
+comment, objection FAQ — in the internal repo's `SHOWHN_MATERIAL.md`; launch
+date is Miguel's); the README's stale Docker size, the un-sourceable
+`.env.example`, the site's favicon 404 and one imprecise demo-data line fixed
+along the way. New OPEN: OPS-29 (v0.1.8's release run failed — Releases and
+the download aliases serve v0.1.7 while `go get @latest` gives v0.1.8).
+Before that, LINKABLE-TRUTH-S1 — the distance between what
 the public material promises and what survives a skeptical click, closed:
 COMMERCE-8 DONE (the coupon reduces the taxable base — ONE computation in
 checkout.go, every other surface reads stored values, 5 arithmetic cases
@@ -99,6 +106,25 @@ refreshed).
 ---
 
 ## OPEN
+
+### OPS-29 — Releases lag the tags: v0.1.8's release run failed, and the Docker badge shows a SHA
+
+- **Origin:** SHOWHN-MATERIAL-S1 (2026-08-19), pre-launch verification sweep.
+- **What:** the tag `v0.1.8` exists (2026-08-17, commit 97480d1) but its
+  Release workflow failed at the **"Create GitHub Release"** step (binaries
+  built fine) — so the Releases page, the version-less download aliases and
+  `appximo upgrade` all serve **v0.1.7**, while `go get @latest` and the tag
+  list say **v0.1.8**. A launch-day visitor who checks tags sees the skew.
+  Related cosmetic finding: the README's Docker badge renders the image tag
+  `a7689d7` (a commit SHA) instead of a version, because Docker Hub carries
+  no semver tags — only `latest` + per-commit SHAs.
+- **Impact:** low functionally (every path works; they just disagree on
+  "latest"), but it is exactly the kind of inconsistency an HN thread finds
+  in minutes.
+- **Ready when:** a release exists for the newest tag (re-run the failed
+  workflow run of 2026-08-17, or cut the next tag — Miguel's call; sessions
+  do not tag), and optionally the release job also pushes a `vX.Y.Z` Docker
+  tag so the badge shows a version.
 
 ### OPS-27 — crisblogs demo-account buttons fail, and the box is not ours
 
@@ -710,6 +736,40 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in SHOWHN-MATERIAL-S1 (2026-08-19)
+
+The Show HN launch material — five title candidates with a recommendation,
+the author's first comment, a 12-answer objection FAQ — written in native
+English and verified claim by claim; the material itself lives in the
+internal handoff repo (`SHOWHN_MATERIAL.md`), the launch date is Miguel's.
+Every public promise re-verified live first: both demos touched from a clean
+browser (tiendita catalog/cart/checkout+coupon field; petfriendly demo login
+executed against the live panel — future appointments visible, the nightly
+re-anchor works), release v0.1.7 downloaded + checksum-verified + booted,
+`go get` from a virgin module cache (51 s), the Docker quick start run
+VERBATIM on a clean project (compose→healthy 7.9 s vs the claimed ~9 s; all
+four copy-paste commands answer exactly as documented), CI/Docker/Security
+workflows green in Actions, all three badges rendering. Fixes that fell out:
+
+- **README `~22 MB pull` → `~41 MB`** (the image grew when the embedded UIs
+  started shipping in the module; measured against the registry).
+- **`.env.example`'s unquoted `SMTP_FROM`** broke the quick start's own
+  `source .env` with two bash syntax errors — quoted (the engine's dotenv
+  parser strips surrounding quotes; behavior identical).
+- **The README's "demo data is public and writable" line** made precise:
+  the store checkout writes (mock payments), the demo panels are read-only
+  server-side, everything resets nightly.
+- **The technical site's missing favicon** (its only console 404) — an
+  inline SVG icon, applied to `site/index.html` and pushed to gh-pages.
+- One translated-sounding phrase in the README ("said, not hidden" →
+  "disclosed, not hidden"); the rest of the English audit passed clean.
+
+Numbers ruled OUT of the material for lack of backing: the "$7 VPS" framing
+(nothing was ever measured on a $7 box — everything says $16/mo with its
+spec, or no price), and the historical NestJS comparison (already retired by
+OPS-12). Filed: OPS-29 (the v0.1.8 release-run failure found during
+verification).
 
 ## DONE in LINKABLE-TRUTH-S1 (2026-08-19)
 
