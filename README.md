@@ -127,7 +127,7 @@ mkdir appximo && cd appximo
 curl -O https://raw.githubusercontent.com/appximo/appximo/main/docker-compose.yml
 curl -O https://raw.githubusercontent.com/appximo/appximo/main/.env.example
 cp .env.example .env          # set JWT_SECRET (≥32 chars), ADMIN_KEY, DB_PASSWORD
-docker compose up -d          # multi-arch image (amd64+arm64), ~22 MB pull
+docker compose up -d          # multi-arch image (amd64+arm64), ~41 MB pull
 curl localhost:8080/health    # {"status":"ok",...}
 ```
 
@@ -223,7 +223,7 @@ disclosed in full): the QUICKSTART checklist 0→green in **1m53s** (measured);
 a sports-court app — schema valid first try, Go compiling first try, zero
 blockers; two master-prompt runs reaching a local green checklist in **3m28s**
 and HTTPS installs on a disposable test box (a simulated VPS — systemd
-container with a local CA, said, not hidden) in ~17–22 min, **zero questions
+container with a local CA, disclosed, not hidden) in ~17–22 min, **zero questions
 asked**.
 
 **Live demos** — schema + custom Go + embedded frontend, one binary each on a
@@ -236,8 +236,9 @@ $16/mo VPS:
   pet-services app born from the AI authoring flow; try the demo panel or
   browse its generated API docs.
 
-Demo data is public and writable — treat it accordingly; it resets
-periodically.
+Demo data is public: the store's checkout genuinely writes (payments run in
+mock mode), the demo panels are read-only (the server rejects writes — RBAC is
+the boundary, not the UI), and everything resets nightly.
 
 ## Where it sits
 
