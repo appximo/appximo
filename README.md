@@ -469,7 +469,9 @@ complete env-var table, security checklist, troubleshooting:
 
 **Production-ready and test-backed** (`make test-all`: unit + integration + E2E +
 resilience against real Postgres in Docker): everything in the feature list above.
-It serves our own production workload today.
+It runs our own live apps today — deployed and operated through the same
+official path it documents — and the heaviest production build we know of is a
+third party's ([the case study](docs/CASE_STUDY_VECINGO.md)).
 
 **Known limits, honestly:**
 
