@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787107713205,
+  "lastUpdate": 1787108195627,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -2880,6 +2880,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36438738 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "a7689d73828ea241c5b630f57481fcb8b799c55c",
+          "message": "docs: the backlog records LINKABLE-TRUTH-S1 — COMMERCE-8/9 and OPS-28 DONE, the swept links noted on OPS-27, new COMMERCE-10\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-19T02:56:04Z",
+          "tree_id": "865cce3768de13cc81da028634bc0beb0ab705a6",
+          "url": "https://github.com/appximo/appximo/commit/a7689d73828ea241c5b630f57481fcb8b799c55c"
+        },
+        "date": 1787108194172,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 5936,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "363877 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 5936,
+            "unit": "ns/op",
+            "extra": "363877 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "363877 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "363877 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 65.03,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36613885 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 65.03,
+            "unit": "ns/op",
+            "extra": "36613885 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36613885 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36613885 times\n4 procs"
           }
         ]
       }
