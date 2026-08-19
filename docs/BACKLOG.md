@@ -26,14 +26,20 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-19 (SHOWHN-MATERIAL-S1)** — the Show HN launch
+**Last reviewed: 2026-08-19 (PRELAUNCH-TRUTH-S1)** — the last "show me"
+claims closed before launch: the evaluator claim rewritten to what the
+linkable material shows (three independent field EVALUATIONS, one driven by
+the evaluator's agent — never "three developers"; the counting rule is now
+decision A-25), every VPS price without a run behind it replaced by "a cheap
+VPS" or the measured $16/mo (site meta, GUIDE, QUICKSTART, the embedded
+LIFECYCLE spec, BENCHMARKS), the site's stale "current release v0.1.5" and
+"25/25 checks" fixed, and OPS-29 advanced (cause narrowed to a ~1 s create
+failure, release.yml made idempotent, `appximo upgrade` proven from a real
+v0.1.6 install, Docker badge semver-sorted — the re-run of run 32055036588
+is the owner's). Before that, SHOWHN-MATERIAL-S1 — the Show HN launch
 material written and every claim in it verified live (titles, author's first
 comment, objection FAQ — in the internal repo's `SHOWHN_MATERIAL.md`; launch
-date is Miguel's); the README's stale Docker size, the un-sourceable
-`.env.example`, the site's favicon 404 and one imprecise demo-data line fixed
-along the way. New OPEN: OPS-29 (v0.1.8's release run failed — Releases and
-the download aliases serve v0.1.7 while `go get @latest` gives v0.1.8).
-Before that, LINKABLE-TRUTH-S1 — the distance between what
+date is Miguel's). Before that, LINKABLE-TRUTH-S1 — the distance between what
 the public material promises and what survives a skeptical click, closed:
 COMMERCE-8 DONE (the coupon reduces the taxable base — ONE computation in
 checkout.go, every other surface reads stored values, 5 arithmetic cases
@@ -121,10 +127,35 @@ refreshed).
 - **Impact:** low functionally (every path works; they just disagree on
   "latest"), but it is exactly the kind of inconsistency an HN thread finds
   in minutes.
-- **Ready when:** a release exists for the newest tag (re-run the failed
-  workflow run of 2026-08-17, or cut the next tag — Miguel's call; sessions
-  do not tag), and optionally the release job also pushes a `vX.Y.Z` Docker
-  tag so the badge shows a version.
+- **PRELAUNCH-TRUTH-S1 (2026-08-19) — cause narrowed, workflow hardened,
+  four of five surfaces verified; the re-run remains the owner's:**
+  - The failing step died in **~1 s** (18:32:28→29, per the public jobs API),
+    BEFORE any asset upload (v0.1.7's same step took 10 s uploading), with
+    release.yml unchanged across 7 straight successes. Two causes match that
+    exact signature: a pre-existing release/**draft** for v0.1.8 (drafts are
+    invisible anonymously but block `gh release create`) or a transient API
+    error on the create call. The literal error line needs a logged-in look
+    at the run — one click for the owner.
+  - **release.yml hardened:** the create step is now idempotent (release
+    exists in any state → upload `--clobber` + publish; else create with one
+    30 s retry), so a re-run converges instead of failing on its own partial
+    success. YAML validated; workflow-only change, zero engine code.
+  - Surfaces verified separately: tags `v0.1.8` ✓ · `go get @latest` →
+    v0.1.8 ✓ · version-less aliases → v0.1.7, checksum OK ✓ (they follow the
+    release) · **`appximo upgrade` tested end to end from a real v0.1.6
+    install** (detects v0.1.7, downloads via alias, checksum ok,
+    self-replaces, exit 0) · Releases page → v0.1.7 ⚠ pending. Bonus: Docker
+    was ALREADY coherent (`neodevtrix/appximo:v0.1.8` published 08-17) and
+    the README badge now uses `sort=semver`, so it shows the version, not a
+    SHA.
+- **Ready when:** a release exists for the newest tag. The owner's exact
+  path: (1) check https://github.com/appximo/appximo/releases logged-in for
+  a stale v0.1.8 DRAFT and delete it if present (the re-run uses the OLD
+  workflow, which dies against a draft); (2) "Re-run failed jobs" on run
+  32055036588 (or `gh run rerun 32055036588 --failed`); (3) verify
+  `releases/latest` redirects to v0.1.8. Alternative: the next tag
+  (`git tag v0.1.9 && git push --tags`) flows through the hardened workflow
+  — sessions do not tag.
 
 ### OPS-27 — crisblogs demo-account buttons fail, and the box is not ours
 
@@ -736,6 +767,42 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in PRELAUNCH-TRUTH-S1 (2026-08-19)
+
+The last claims that wouldn't survive a "show me", closed before launch:
+
+- **The evaluator count is now exactly what the linkable material shows.**
+  "Three outside developers" overstated it: our own public response doc
+  describes the second evaluation as "an agent", and nothing linkable proves
+  three distinct people. The claim is now **"three independent field
+  evaluations from outside the project … one of them driven end to end by
+  the evaluator's AI agent"** — rewritten in the README, the launch FAQ and
+  the case study (whose "A different independent evaluator" line now says
+  what the response doc supports). The counting rule is recorded as a
+  decision (internal 03, A-25): evaluations, not persons; external infra +
+  published-and-answered findings + words matching the documents; a broken
+  or private app's findings still count but its URL is never linked.
+- **No VPS price without a run behind it.** The "$7–16 VPS" (site meta,
+  GUIDE ×2) and "$6 VPS" (QUICKSTART, the embedded LIFECYCLE spec) became
+  "a cheap VPS" or the measured **$16/mo with its spec**; BENCHMARKS'
+  "$6–16/mo" closing line became the RAM spec its own data backs ("a small
+  1–2 GB VPS"). ADR-020's "$7–16" target range and its quote in the
+  certification stay — dated design records, not launch material. The
+  commercial landing never had a price figure (A-16 holds; the session
+  premise didn't apply there).
+- **Stale/unsourced countables swept:** the site's "current release v0.1.5"
+  → "every release from v0.1.5 onward" (never goes stale); the site's
+  crisblogs "25/25 browser checks" → 24/24, the number the published
+  response doc actually states.
+- **OPS-29 advanced** (cause narrowed via the public jobs API, release.yml
+  made idempotent, `appximo upgrade` proven from a real v0.1.6 install,
+  Docker badge semver-sorted) — see the OPS-29 entry; the re-run is the
+  owner's.
+- The T1-vs-T3 title trade-off written against the predicted top critique,
+  and the full "show me" claim table — both in the internal
+  `SHOWHN_MATERIAL.md` addendum. The T1 recommendation stands; the choice
+  is the owner's.
 
 ## DONE in SHOWHN-MATERIAL-S1 (2026-08-19)
 

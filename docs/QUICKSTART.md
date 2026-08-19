@@ -539,7 +539,7 @@ and ask for the screens. A runnable no-build example:
 `appximo backoffice-spec` is the recipe `/app` itself is built from — for
 embedding a contract-driven admin INSIDE your own SPA with your own theme.
 
-## 8. Production: a domain, a $6 VPS, HTTPS
+## 8. Production: a domain, a cheap VPS, HTTPS
 
 On a fresh Ubuntu VPS (as root), the **one-command installer** takes you from
 empty box to HTTPS: native PostgreSQL, systemd unit, Caddy with automatic

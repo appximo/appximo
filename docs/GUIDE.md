@@ -29,7 +29,7 @@ references. Nothing below is aspirational.
 4. [The 90 %: what the schema gives you](#4-the-90--what-the-schema-gives-you)
 5. [The 10 %: your own Go, in-process](#5-the-10--your-own-go-in-process)
 6. [The frontend: one binary serves it](#6-the-frontend-one-binary-serves-it)
-7. [To production: a $7–16 VPS with real HTTPS](#7-to-production-a-716-vps-with-real-https)
+7. [To production: a cheap VPS with real HTTPS](#7-to-production-a-cheap-vps-with-real-https)
 8. [Operating it: migrations, backups, observability](#8-operating-it-migrations-backups-observability)
 9. [What it does NOT do](#9-what-it-does-not-do)
 10. [Verify everything yourself](#10-verify-everything-yourself)
@@ -672,7 +672,7 @@ docs without ever seeing the engine's source.
 
 ---
 
-## 7. To production: a $7–16 VPS with real HTTPS
+## 7. To production: a cheap VPS with real HTTPS
 
 The official path is **native, not Docker**: one command on an empty Ubuntu
 VPS installs PostgreSQL (tuned to the box), the binary under systemd

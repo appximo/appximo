@@ -344,7 +344,7 @@ measurement shows is generous: the engine's own anonymous memory peaked at
 What it does well, measured:
 
 - **It is genuinely small.** 37.5 MiB of real memory at rest, 153.5 MiB under
-  sustained load, zero OOM kills ever. A $6–16/mo VPS is not a compromise here.
+  sustained load, zero OOM kills ever. A small 1–2 GB VPS is not a compromise here.
 - **It is fast where it matters.** A filtered, sorted, paginated page over a
   million rows: **4.4 ms end to end** over real TLS. The production layers
   (reverse proxy + HTTPS) cost about **1 ms** — the convenience of automatic

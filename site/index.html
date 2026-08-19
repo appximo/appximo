@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Appximo — a JSON schema in, a production multi-tenant backend out</title>
-<meta name="description" content="Appximo compiles one JSON schema into a multi-tenant REST + GraphQL + OpenAPI server at boot. One static Go binary, your PostgreSQL, a $7–16 VPS. Apache 2.0.">
+<meta name="description" content="Appximo compiles one JSON schema into a multi-tenant REST + GraphQL + OpenAPI server at boot. One static Go binary, your PostgreSQL, one cheap VPS. Apache 2.0.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Ctext x='32' y='45' font-family='Georgia,serif' font-size='40' font-weight='bold' fill='white' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="assets/asciinema-player.css">
 <style>
@@ -301,7 +301,7 @@
     <span>Your own PostgreSQL</span>
     <span>Apache 2.0 · self-hosted</span>
   </div>
-  <div class="status"><strong>Status, honestly:</strong> the code is production-verified; three apps run on it in production today — one of them <strong>built end-to-end by a third party</strong>. The repository is <a href="https://github.com/appximo/appximo" rel="noopener">public</a>, binaries + checksums are released, the Go module is fetchable, the Docker image is published. Version note: the current release, <strong>v0.1.5 (2026-08-08)</strong> — built from the same commit as <code>main</code> at that time — ships <code>appximo prompt</code>, <code>up</code>, <code>new</code> and the <code>/app</code> back-office, so the install prompt below leaves you a binary with everything this page describes.</div>
+  <div class="status"><strong>Status, honestly:</strong> the code is production-verified; three apps run on it in production today — one of them <strong>built end-to-end by a third party</strong>. The repository is <a href="https://github.com/appximo/appximo" rel="noopener">public</a>, binaries + checksums are released, the Go module is fetchable, the Docker image is published. Version note: every release from <strong>v0.1.5 (2026-08-08)</strong> onward ships <code>appximo prompt</code>, <code>up</code>, <code>new</code> and the <code>/app</code> back-office, so the install prompt below leaves you a binary with everything this page describes.</div>
 </div></header>
 
 <section class="startup" id="start-here"><div class="wrap">
@@ -589,7 +589,7 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
       <img src="assets/shot-crisblogs.png" alt="Crisblogs — a blog built end-to-end by a third party on Appximo" loading="lazy">
       <div class="demo-body">
         <h4>crisblogs — built by a third party</h4>
-        <p><strong>Built by a third party</strong> — an agent with no access to the engine's source, working only from the printed specs: a full blog with public reading, auth, and its own frontend served from the binary. 25/25 browser checks against the real domain. Hosted on the author's own infrastructure.</p>
+        <p><strong>Built by a third party</strong> — an agent with no access to the engine's source, working only from the printed specs: a full blog with public reading, auth, and its own frontend served from the binary. 24/24 browser checks in a mobile viewport. Hosted on the author's own infrastructure.</p>
       </div>
     </figure>
   </div>

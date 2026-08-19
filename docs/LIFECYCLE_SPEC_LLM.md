@@ -195,7 +195,7 @@ appximo migrate --tenant acme --schema schema.json             # apply (additive
   rollback is a re-deploy of a stored version through the same
   dry-run → approval gate.
 
-## 6. To production (a $6 VPS with real HTTPS)
+## 6. To production (a cheap VPS with real HTTPS)
 
 The official path is native (no Docker): one command on an empty Ubuntu box —
 

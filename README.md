@@ -5,7 +5,7 @@
 
 [![CI](https://github.com/appximo/appximo/actions/workflows/ci.yml/badge.svg)](https://github.com/appximo/appximo/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/appximo/appximo?label=release)](https://github.com/appximo/appximo/releases)
-[![Docker](https://img.shields.io/docker/v/neodevtrix/appximo?label=docker&color=2496ED&logo=docker)](https://hub.docker.com/r/neodevtrix/appximo)
+[![Docker](https://img.shields.io/docker/v/neodevtrix/appximo?sort=semver&label=docker&color=2496ED&logo=docker)](https://hub.docker.com/r/neodevtrix/appximo)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go)](go.mod)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
 
@@ -203,8 +203,9 @@ inventory of what we assert, with conditions, is
 addendums). When an audit kills a claim, the correction stays visible in the
 docs — that's the method, not an apology. The strongest evidence, in order:
 
-**Independent builds.** Three field evaluations by outside developers with no
-repository access, building real apps from the public docs alone — each one
+**Independent builds.** Three field evaluations from outside the project — no
+repository access, real apps built from the public docs and printed specs
+alone; one of them was driven end to end by the evaluator's AI agent — each
 answered finding-by-finding in
 [docs/FIELD_FEEDBACK_RESPONSE.md](docs/FIELD_FEEDBACK_RESPONSE.md):
 
@@ -213,8 +214,8 @@ answered finding-by-finding in
   Go handlers, weighted quorum voting, a 13-screen embedded SPA) to production
   with HTTPS in **~3–3.5 h**. Verdict: *"as a consumer, I would do it again."*
 - **crisblogs** — a complete blog (roles, cover uploads, publish lifecycle)
-  built by a third party ONLY from the distributed binary + `appximo specs`,
-  on their own infrastructure.
+  built by an outside evaluator's agent ONLY from the distributed binary +
+  `appximo specs`, on infrastructure that isn't ours.
 - A gym-bookings app, install → production with HTTPS in under 24 h of
   part-time evaluation — the report that opened this feedback loop.
 

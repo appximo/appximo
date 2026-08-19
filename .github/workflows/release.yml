@@ -127,13 +127,40 @@ jobs:
           cosign sign-blob --yes dist/checksums.txt \
             --bundle dist/checksums.txt.sigstore.json
 
+      # The one observed failure (v0.1.8, 2026-08-17, run 32055036588) died
+      # INSIDE this API call in ~1 s — before any asset upload — leaving no
+      # visible release and no retry. Two causes produce exactly that
+      # signature: a pre-existing release already holding the tag (a DRAFT is
+      # invisible to anonymous readers but still blocks `gh release create`),
+      # or a transient API error. Both converge on the same fix: if a release
+      # for the tag exists IN ANY STATE, upload into it and publish it;
+      # otherwise create it, retrying once for the transient case. Re-running
+      # this job is therefore always safe — it converges instead of failing.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
-          gh release create "$VERSION" dist/* \
-            --verify-tag \
-            --title "appximo $VERSION" \
-            --generate-notes
+          publish_into_existing() {
+            echo "release $VERSION already exists — converging (upload assets + publish)"
+            gh release upload "$VERSION" dist/* --clobber
+            gh release edit "$VERSION" --draft=false --title "appximo $VERSION"
+          }
+          create_release() {
+            gh release create "$VERSION" dist/* \
+              --verify-tag \
+              --title "appximo $VERSION" \
+              --generate-notes
+          }
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            publish_into_existing
+          elif ! create_release; then
+            echo "gh release create failed — retrying once in 30 s"
+            sleep 30
+            if gh release view "$VERSION" >/dev/null 2>&1; then
+              publish_into_existing   # the first attempt half-landed
+            else
+              create_release
+            fi
+          fi

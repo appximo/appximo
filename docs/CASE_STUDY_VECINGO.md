@@ -120,7 +120,7 @@ a third-party build you can *click on*, the second evaluation's app is public:
 
 ### The short second case: crisblogs
 
-A different independent evaluator — working **only** from the distributed
+A separate evaluation — an agent working **only** from the distributed
 binary and `appximo specs`, no repository access — built a complete blog
 (login, reader/editor roles, cover-image uploads, a publish state machine,
 24/24 checks in a mobile-viewport browser) and deployed it publicly:
