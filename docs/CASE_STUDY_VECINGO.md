@@ -124,7 +124,7 @@ A different independent evaluator — working **only** from the distributed
 binary and `appximo specs`, no repository access — built a complete blog
 (login, reader/editor roles, cover-image uploads, a publish state machine,
 24/24 checks in a mobile-viewport browser) and deployed it publicly:
-**[crisblogs.appximo.com](https://crisblogs.appximo.com)**. Their sharpest
+**crisblogs**. Their sharpest
 line — *"the cliff appears when someone wants their own frontend"* — became
 that release's centerpiece: anonymous public reads (`rbac.public`) and
 first-class static serving (`--static`), both closed in code the same week.

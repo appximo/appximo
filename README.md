@@ -212,9 +212,9 @@ answered finding-by-finding in
   neighborhood-association platform (18 resources, 8 state machines, 13 custom
   Go handlers, weighted quorum voting, a 13-screen embedded SPA) to production
   with HTTPS in **~3–3.5 h**. Verdict: *"as a consumer, I would do it again."*
-- **[crisblogs.appximo.com](https://crisblogs.appximo.com)** — a complete blog
-  (roles, cover uploads, publish lifecycle) built ONLY from the distributed
-  binary + `appximo specs`, publicly live.
+- **crisblogs** — a complete blog (roles, cover uploads, publish lifecycle)
+  built by a third party ONLY from the distributed binary + `appximo specs`,
+  on their own infrastructure.
 - A gym-bookings app, install → production with HTTPS in under 24 h of
   part-time evaluation — the report that opened this feedback loop.
 
@@ -233,9 +233,8 @@ $16/mo VPS:
   storefront (catalog, cart, checkout with an atomic stock transaction, order
   tracking, image uploads).
 - **[petfriendly.appximo.com](https://petfriendly.appximo.com)** — a
-  pet-services app born from the AI authoring flow.
-- **[crisblogs.appximo.com](https://crisblogs.appximo.com)** — the third-party
-  blog above.
+  pet-services app born from the AI authoring flow; try the demo panel or
+  browse its generated API docs.
 
 Demo data is public and writable — treat it accordingly; it resets
 periodically.
