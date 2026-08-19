@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787113437177,
+  "lastUpdate": 1787116630838,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -3024,6 +3024,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36876484 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "6122b76acbb3c661ee1653f88d4397bef26c23e4",
+          "message": "docs+ci: the last claims that wouldn't survive a 'show me' — counted evaluations, no unmeasured prices, an idempotent release step\n\nThe evaluator claim now says exactly what the linkable material shows.\n'Three outside developers' overstated it: docs/FIELD_FEEDBACK_RESPONSE.md\nitself describes the second evaluation as 'an agent working only from the\ndistributed binary + specs', and nothing linkable proves three distinct\npeople. The claim is now 'three independent field evaluations from\noutside the project … one of them driven end to end by the evaluator's\nAI agent' — in the README, and the case study's crisblogs line now says\nwhat the response doc supports. An agent evaluating the product from the\noutside is on-thesis, not a footnote to hide.\n\nNo VPS price ships without a run behind it: the '$7–16 VPS' (site meta,\nGUIDE) and '$6 VPS' (QUICKSTART, the embedded LIFECYCLE spec) become 'a\ncheap VPS'; BENCHMARKS' closing '$6–16/mo' becomes the RAM spec its own\nmemory data backs (a small 1–2 GB VPS). The measured $16/mo with its\nspec stays everywhere it was. ADR-020's target range and its quote in\nthe certification are dated records and stay as history.\n\nAlso swept: the site's 'current release v0.1.5' note (now 'every release\nfrom v0.1.5 onward' — a phrasing that cannot go stale) and its crisblogs\n'25/25 browser checks' (the published response doc says 24/24).\n\nrelease.yml: the 'Create GitHub Release' step is now idempotent — the\nv0.1.8 failure (OPS-29) died in ~1 s inside the create call, a signature\nmatching either a pre-existing draft or a transient API error; the step\nnow converges onto an existing release (upload --clobber + publish) and\nretries a failed create once, so a re-run can never fail on its own\npartial success. The README's Docker badge sorts by semver, so it shows\nv0.1.8 (which Docker Hub already had) instead of a commit SHA.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-19T05:16:44Z",
+          "tree_id": "33b1e6e57d144a9d42f7b278eb88d378486de022",
+          "url": "https://github.com/appximo/appximo/commit/6122b76acbb3c661ee1653f88d4397bef26c23e4"
+        },
+        "date": 1787116629735,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6296,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "397525 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6296,
+            "unit": "ns/op",
+            "extra": "397525 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "397525 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "397525 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 66.36,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "33575811 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 66.36,
+            "unit": "ns/op",
+            "extra": "33575811 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "33575811 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "33575811 times\n4 procs"
           }
         ]
       }
