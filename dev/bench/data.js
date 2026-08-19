@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787108195627,
+  "lastUpdate": 1787113437177,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -2952,6 +2952,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36613885 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "0681a7644055624083edda622f8f6af162b70418",
+          "message": "docs: the backlog records SHOWHN-MATERIAL-S1 — launch material DONE, new OPS-29\n\nOPS-29: the v0.1.8 tag's Release workflow failed at 'Create GitHub\nRelease' (2026-08-17), so the Releases page and the version-less\ndownload aliases serve v0.1.7 while 'go get @latest' resolves v0.1.8 —\nexactly the inconsistency a launch thread finds in minutes. Re-running\nthe workflow (or cutting the next tag) is the owner's call.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-19T04:23:28Z",
+          "tree_id": "46d05d61d22a35f8713bbdb1626d7e0d6fab067b",
+          "url": "https://github.com/appximo/appximo/commit/0681a7644055624083edda622f8f6af162b70418"
+        },
+        "date": 1787113435514,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 5983,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "397808 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 5983,
+            "unit": "ns/op",
+            "extra": "397808 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "397808 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "397808 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 65.85,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36876484 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 65.85,
+            "unit": "ns/op",
+            "extra": "36876484 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36876484 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36876484 times\n4 procs"
           }
         ]
       }
