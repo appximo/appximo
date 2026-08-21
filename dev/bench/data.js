@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787286796838,
+  "lastUpdate": 1787349033532,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -3312,6 +3312,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36468662 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "bbc9121b3ddc25d90c2c262a08c0e8203be2f426",
+          "message": "docs(backlog+guides): ENG-45 family 1 closed; the cut line — last engine session before launch\n\nAGENTS.md and SCHEMA_REFERENCE §2.5 document the import declaration and the\nevery-door read_only contract; backend-spec states the governed rule on\nCtx.Insert/Update (passing a client body through verbatim is safe);\nbackoffice-spec catalogs x-appximo-import (a capability, not a form concern —\ngenerated forms keep governed fields read-only).\n\nBACKLOG: family 1 closed with its evidence; the matrix audit's ONE new find\nrecorded with a disposition and not opened (an owner-scoped role can reassign\nits row's condition column on UPDATE with 200 while create forces it with 403\n— a different enforcement seam, its own increment); Ctx.Update's null-required\ngap re-ranked from silent corruption to loud failure. ENG-45 is the map of\nwhat follows AFTER publishing.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-21T21:49:54Z",
+          "tree_id": "1030538b540ce94127b9a89f9d5056b40433586d",
+          "url": "https://github.com/appximo/appximo/commit/bbc9121b3ddc25d90c2c262a08c0e8203be2f426"
+        },
+        "date": 1787349032407,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6347,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "370150 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6347,
+            "unit": "ns/op",
+            "extra": "370150 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "370150 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "370150 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 65.18,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "35194164 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 65.18,
+            "unit": "ns/op",
+            "extra": "35194164 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "35194164 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "35194164 times\n4 procs"
           }
         ]
       }
