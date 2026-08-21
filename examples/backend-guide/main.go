@@ -428,6 +428,81 @@ func main() {
 		},
 	})
 
+	register(app, appximo.Route{
+		// POST /api/reprice — the BATCH pattern (safety rule 6). Body:
+		// {"items":[{"course_id":"…","price_cents":N}, …]}.
+		//
+		// The mistake this route exists to teach against: a loop that runs one
+		// statement per element. Each statement pays a full round trip to
+		// Postgres, so "3 small queries per item" over 400 items is 1,200
+		// sequential round trips — at ~120 ms each on a real network that is a
+		// TWO-MINUTE request, far past any Route.Timeout, holding the tenant
+		// transaction (and its locks) open the whole time. It works in a
+		// 5-row test and falls over on the first real batch.
+		//
+		// The batch shape is TWO statements regardless of N:
+		//   1. ONE validation read over the whole set:  WHERE id = ANY($1)
+		//   2. ONE write driven by unnest():            UPDATE … FROM unnest(...)
+		// pgx binds Go slices to Postgres arrays directly — no string building.
+		Method: "POST", Path: "/api/reprice", RequireRole: "admin",
+		Handler: func(ctx appximo.Ctx) error {
+			var body struct {
+				Items []struct {
+					CourseID   string `json:"course_id"`
+					PriceCents int64  `json:"price_cents"`
+				} `json:"items"`
+			}
+			if err := ctx.Bind(&body); err != nil {
+				return ctx.Error(400, "invalid body", err)
+			}
+			if len(body.Items) == 0 || len(body.Items) > 1000 {
+				return ctx.Error(422, "items must have 1–1000 entries", nil)
+			}
+			ids := make([]string, len(body.Items))
+			prices := make([]int64, len(body.Items))
+			for i, it := range body.Items {
+				if it.CourseID == "" || it.PriceCents < 0 {
+					return ctx.Error(422, fmt.Sprintf("items[%d]: course_id and a non-negative price_cents are required", i), nil)
+				}
+				ids[i] = it.CourseID
+				prices[i] = it.PriceCents
+			}
+
+			// 1. Validate the WHOLE set in ONE query — never one lookup per id.
+			rows, err := ctx.UnsafeTx().Query(ctx.Context(),
+				`SELECT id FROM courses WHERE id = ANY($1::uuid[])`, ids)
+			if err != nil {
+				return ctx.Error(500, "course lookup failed", err)
+			}
+			found := make(map[string]bool, len(ids))
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err != nil {
+					rows.Close()
+					return ctx.Error(500, "course lookup row", err)
+				}
+				found[id] = true
+			}
+			rows.Close()
+			for i, id := range ids {
+				if !found[id] {
+					return ctx.Error(422, fmt.Sprintf("items[%d]: course %s does not exist", i, id), nil)
+				}
+			}
+
+			// 2. Apply the WHOLE batch in ONE statement. unnest() turns the two
+			// parallel arrays into a (id, price) row set the UPDATE joins against.
+			tag, err := ctx.UnsafeTx().Exec(ctx.Context(),
+				`UPDATE courses SET price_cents = u.price
+				   FROM unnest($1::uuid[], $2::bigint[]) AS u(id, price)
+				  WHERE courses.id = u.id`, ids, prices)
+			if err != nil {
+				return ctx.Error(500, "reprice failed", err)
+			}
+			return ctx.JSON(200, map[string]any{"updated": tag.RowsAffected()})
+		},
+	})
+
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
 	}

@@ -329,3 +329,9 @@ the nav a drawer, the form a bottom sheet) and theme-aware
    a 422 paints every named field at once; a 409 leaves the form intact.
 6. A role with partial grants sees denied resources dimmed after the 403
    probe — with no role matrix in the code.
+7. **The visual-verification procedure of `frontend-spec` §11 has been run and
+   passed** — the mobile layout gate (390×844, zero horizontal overflow,
+   touchable controls), the console-strict browser e2e, and the forced failure
+   states. That section is the single source of the rule: a back-office with
+   every API check green and no browser pass is NOT done (a real delivery
+   shipped a 753 px document on a 390 px screen exactly this way).

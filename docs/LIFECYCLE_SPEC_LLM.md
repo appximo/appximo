@@ -124,7 +124,12 @@ curl -s -X POST http://localhost:9090/tenants \
   (design on the canvas → "Deploy new app").
 - Dev tokens: `appximo token --secret "$JWT_SECRET" --tenant acme --role admin
   --schema schema.json` (with `--schema` it refuses roles the schema does not
-  declare). Then every data call needs the tenant host + the token:
+  declare). **Add `--user-id <uuid>` whenever identity matters**: without it
+  the token carries an EMPTY user id, so a role whose row condition compares
+  `$user_id` matches ZERO rows (no error anywhere — the list is just empty),
+  an optional-auth route reads you as a guest, and a custom handler's
+  `Claims().UserID` is `""`. The CLI now says this at mint time. Then every
+  data call needs the tenant host + the token:
   `curl -H 'Host: acme.localhost' -H "Authorization: Bearer $TOKEN" …`.
 - Before trusting a schema you did not write by hand:
   `appximo explain schema.json --lang es|en` renders it as plain-language

@@ -1119,23 +1119,77 @@ requirement — a constraint someone named, never a default you retreat to.
 
 ---
 
-## 11. Verify like a user — the browser is the bar
+## 11. Verify like a user — the browser is the bar (CONTRACT, not advice)
 
-The reference project's rule, learned twice: **curl green ≠ frontend working**
-(CSP, JS errors, and rendering are invisible to curl). The verification
-pyramid:
+The reference project's rule, learned twice — and then a third time, the
+expensive way: an agent shipped a UI **broken on phones for weeks** (the
+document measured 753 px on a 390 px screen; buttons untouchable) **with every
+API test green**. Its own conclusion: *an agent that generates UI and only
+tests with curl is delivering blind.* curl does not execute CSP, JS, layout or
+rendering. So this section is not a pyramid of suggestions: it is the
+**definition of done** for any UI built from this spec. A delivery that has
+not passed steps 2–4 below is not finished, whatever the API tests say.
+
+**The procedure — run all four, in order, before calling any UI done:**
 
 1. **API contract**: curl/httpie against the endpoints (fast, for the data
-   layer).
-2. **Browser e2e (the acceptance bar)**: Playwright at a mobile viewport
-   (390×844), driving the REAL binary serving the REAL build — walk the money
+   layer — necessary, and NOT sufficient for anything visual).
+2. **The mobile layout gate (hard pass/fail, 390×844).** Run this against
+   EVERY screen your UI has; exit 0 is the bar. It catches exactly the class
+   of failure invisible to any API test: horizontal overflow and untouchable
+   controls. (Verified against the reference storefront — and its stricter
+   draft immediately caught real sub-24 px controls, which is the point.)
+
+   ```js
+   const { chromium } = require('playwright');
+   const SCREENS = ['/', '/producto/EXAMPLE', '/carrito', '/panel']; // ← YOUR screens, all of them
+   const BASE = 'http://acme.localhost:8099';
+   (async () => {
+     const browser = await chromium.launch();
+     const page = await (await browser.newContext({ viewport: { width: 390, height: 844 } })).newPage();
+     const failures = [];
+     for (const path of SCREENS) {
+       await page.goto(BASE + path, { waitUntil: 'load' });
+       await page.waitForTimeout(800); // let the SPA settle
+       const r = await page.evaluate(() => {
+         const doc = document.documentElement;
+         const overflowX = doc.scrollWidth - doc.clientWidth;      // MUST be 0
+         const wide = [...document.querySelectorAll('*')]
+           .filter(el => el.getBoundingClientRect().width > doc.clientWidth + 1)
+           .slice(0, 3).map(el => el.tagName + '.' + (el.className || '').toString().slice(0, 30));
+         const tiny = [...document.querySelectorAll('a,button,[role=button],input[type=submit]')]
+           .map(el => ({ el, b: el.getBoundingClientRect(), d: getComputedStyle(el).display }))
+           // WCAG 2.2 target-size (24×24) — inline text links are exempt by the spec
+           .filter(({ b, d }) => d !== 'inline' && b.width > 0 && b.height > 0 && (b.width < 24 || b.height < 24))
+           .slice(0, 3).map(({ el }) => el.tagName + ':' + (el.textContent || '').trim().slice(0, 20));
+         return { overflowX, wide, tiny };
+       });
+       if (r.overflowX > 0) failures.push(`${path}: ${r.overflowX}px horizontal overflow (wide: ${r.wide.join(', ')})`);
+       if (r.tiny.length) failures.push(`${path}: touch targets under 24px: ${r.tiny.join(', ')}`);
+     }
+     if (failures.length) { console.error('LAYOUT GATE FAILED:\n' + failures.join('\n')); process.exit(1); }
+     console.log('layout gate: PASS on', SCREENS.length, 'screens');
+     await browser.close();
+   })();
+   ```
+
+3. **Browser e2e (the acceptance bar)**: Playwright at the SAME mobile
+   viewport, driving the REAL binary serving the REAL build — walk the money
    paths (browse → detail → cart → checkout → declined AND approved → panel
    login → the operational flow), assert on visible text and screenshots, and
    listen for `console.error` / `pageerror` events (a CSP violation or a JS
    crash fails the run even when the page "loads").
-3. **The states checklist**: for each screen, force loading / empty / network
+4. **The states checklist**: for each screen, force loading / empty / network
    error / 422 / 409 / 503 (a proxy or the real backend can produce each) and
    check §6's behaviors: work preserved, retry present, copy honest.
+
+What each layer is blind to — why all four are mandatory: curl cannot see
+CSP/JS/layout (step 1 alone shipped the 753 px document); the layout gate
+cannot see broken flows (a perfectly-sized dead button passes it); the e2e
+cannot see the failure states unless you force them (step 4). Other UI
+surfaces built on this engine (the back-office pattern of
+`appximo backoffice-spec`) inherit THIS section as their verification bar —
+it is defined once, here.
 
 A minimal Playwright skeleton (mobile, console-strict):
 

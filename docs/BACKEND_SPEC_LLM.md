@@ -569,6 +569,14 @@ password-login until a reset). See §5.
 
 ```go
 user, err := ctx.CreateUser(email, password, "student") // CreatedUser{ID, Email, Role, EmailVerified}
+
+// MintToken: the session for that identity — byte-shape identical to what
+// POST /auth/login issues (same claims, same secret, standard 24 h TTL), so
+// it works on every generated /api route. userID must be non-empty (an empty
+// identity matches no $user_id condition and reads as a guest everywhere) and
+// the role must be schema-declared (ErrUnknownRole). This is how a custom
+// registration endpoint auto-logs-in, like the engine's own /auth/signup.
+token, err := ctx.MintToken(user.ID, user.Role)
 switch {
 case err == nil:
 case errors.Is(err, appximo.ErrEmailTaken):     // duplicate in this tenant → your 409
@@ -666,7 +674,71 @@ in every handler you write:
    leak from.
 5. **The transaction is a single connection — not concurrency-safe.** Do not run
    `ctx.Tx()` queries concurrently (not even reads). Parallelise external I/O or
-   CPU with `SafeParallel`; serialise DB work on the tx.
+   CPU with `SafeParallel`; serialise DB work on the tx. The tx also holds its
+   row locks until your handler RETURNS — every millisecond you spend inside it
+   is a millisecond other requests may wait on those rows.
+6. **One statement for N rows — never a query per element.** The moment your
+   handler loops over items and runs a statement inside the loop, you have
+   written the request that works in a 5-row test and dies on the first real
+   batch: each statement is a full round trip, so 3 small queries per item over
+   400 items is 1,200 sequential round trips — at ~120 ms each that is a
+   **two-minute request**, far past any `Route.Timeout`, holding the tenant
+   transaction (rule 5) open the whole way down. Batch the READ with
+   `= ANY($1)` and the WRITE with `unnest()` — §3.4b has the compiling,
+   verified pattern. If you are about to write `for _, item := range items {`
+   with a query inside: stop and read §3.4b first.
+
+### 3.4b Batch patterns — resolving N records in one statement
+
+The rule-6 shapes, from the shipped example (`POST /api/reprice` in
+`examples/backend-guide/main.go` — it compiles and is verified live: a batch of
+N updates runs as exactly TWO statements regardless of N).
+
+**Read a whole set at once** — validate every id in ONE query, then check the
+result in Go. pgx binds a Go slice directly to a Postgres array; no string
+building, no loop:
+
+```go
+rows, err := ctx.UnsafeTx().Query(ctx.Context(),
+    `SELECT id FROM courses WHERE id = ANY($1::uuid[])`, ids)
+// scan into a set, then report the FIRST missing id with its index —
+// a batch error message must say which element failed, not just "bad input".
+```
+
+**Write a whole set at once** — `unnest()` turns parallel arrays into a row set
+your statement joins against. One UPDATE applies the entire batch:
+
+```go
+ids    := make([]string, len(items)) // $1
+prices := make([]int64,  len(items)) // $2 — parallel arrays, same order
+tag, err := ctx.UnsafeTx().Exec(ctx.Context(),
+    `UPDATE courses SET price_cents = u.price
+       FROM unnest($1::uuid[], $2::bigint[]) AS u(id, price)
+      WHERE courses.id = u.id`, ids, prices)
+```
+
+The same shape covers bulk INSERT (`INSERT INTO t (a, b) SELECT * FROM
+unnest($1::uuid[], $2::bigint[])`) and bulk DELETE (`WHERE id = ANY($1)`).
+When it applies: any handler whose input is a LIST — imports, reprices,
+reorderings, bulk state changes. Cap the batch size explicitly (the example
+uses 1–1000) so a hostile caller cannot hand you a million-element array.
+
+**The other three ways to kill the 10%** (each already demonstrated in the
+worked examples — follow the pointers, they compile):
+
+- **Loading a table into memory.** Always bound reads: the public catalogue
+  example (§3.6) queries with `ORDER BY … LIMIT 50`; `ctx.Query` takes
+  `PerPage`. A handler that reads "all rows" works until a tenant has real
+  data, then eats the process's RAM.
+- **Filtering on an unindexed column.** If your handler's WHERE uses a column
+  repeatedly, declare it in the resource's `indexes` block (§2) — the schema
+  owns indexes; a hand-run `CREATE INDEX` on the tenant schema is drift the
+  migration engine does not know about. A missing index turns your one good
+  batched statement into a sequential scan per call.
+- **Network calls inside the loop (or the tx).** Rule 2 already bans external
+  calls inside the transaction; a loop makes it N times worse. Durable →
+  `Enqueue` once per item (cheap: outbox rows in the same tx); best-effort →
+  ONE `SafeGo` after the response, never one goroutine per element.
 
 ### 3.5 RBAC — the biggest design force in this document
 
@@ -896,7 +968,14 @@ app.Register(appximo.Route{
 		}); err != nil {
 			return ctx.Error(500, "enqueue failed", err)
 		}
-		return ctx.JSON(201, map[string]any{"user_id": user.ID, "email": user.Email})
+		// 6. Auto-login — mint the session for the identity just created (the
+		// same token /auth/login would issue). Without this the client has to
+		// call /auth/login again with the password it just sent you.
+		token, err := ctx.MintToken(user.ID, user.Role)
+		if err != nil {
+			return ctx.Error(500, "session mint failed", err)
+		}
+		return ctx.JSON(201, map[string]any{"user_id": user.ID, "email": user.Email, "token": token})
 	},
 })
 ```

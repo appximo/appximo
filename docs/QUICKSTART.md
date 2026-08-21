@@ -420,7 +420,8 @@ curl -s -X POST http://localhost:9090/tenants \
   -H "X-Admin-Key: $ADMIN_KEY" -H 'Content-Type: application/json' \
   -d "{\"tenant_id\":\"acme\",\"display_name\":\"Acme Inc\",\"schema\":$(cat schema.json)}"
 
-# 2. Mint a dev token for it
+# 2. Mint a dev token for it. (If your schema row-scopes a role by $user_id,
+#    add --user-id <uuid> — an empty user id matches no rows, silently.)
 TOKEN=$(appximo token --secret "$JWT_SECRET" --tenant acme --role admin --schema schema.json | tail -1)
 
 # 3. Create a record
