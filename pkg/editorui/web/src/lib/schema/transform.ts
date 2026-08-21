@@ -19,6 +19,7 @@ import type {
 	APISchema,
 	Condition,
 	HookConfig,
+	ImportConfig,
 	RBACPolicy,
 	RelationDef,
 	ResourcePermission,
@@ -83,7 +84,8 @@ function resourceToEntity(name: string, res: ResourceSchema): EntityModel {
 			indexes: res.indexes,
 			foreign_keys: res.foreign_keys,
 			hooks: res.hooks,
-			events: res.events
+			events: res.events,
+			import: res.import
 		},
 		position: { x: 0, y: 0 }, // laid out by the store (dagre) on import
 		originalName: res.renamed_from ?? name
@@ -146,6 +148,14 @@ function entityToResource(ent: EntityModel): ResourceSchema {
 		res.hooks = hooks;
 	}
 	if (x.events && x.events.length > 0) res.events = x.events;
+	// Governed-field import grant (WRITE-ASYMMETRY-S1): emitted only with at
+	// least one role (the engine rejects an empty grant as dead config), and the
+	// fields subset only when it actually narrows (absent = all governed fields).
+	if (x.import && x.import.roles.length > 0) {
+		const imp: ImportConfig = { roles: [...x.import.roles] };
+		if (x.import.fields && x.import.fields.length > 0) imp.fields = [...x.import.fields];
+		res.import = imp;
+	}
 	// Table-level rename intent, derived from the baseline exactly like fields.
 	if (ent.originalName && ent.originalName !== ent.name) res.renamed_from = ent.originalName;
 	return res;

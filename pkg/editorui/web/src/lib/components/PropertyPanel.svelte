@@ -95,7 +95,7 @@
 	// boolean on toggle, which is exactly the corruption class the roles close.
 	function setAuto(raw: string) {
 		if (!entity || !field) return;
-		const v = raw === '' ? undefined : raw === 'true' ? true : raw;
+		const v = raw === '' ? undefined : raw === 'true' ? true : (raw as 'create' | 'update');
 		editor.patchFieldDef(entity.id, field.id, 'auto', v);
 	}
 	function autoValue(): string {
@@ -178,6 +178,46 @@
 		if (on) cur.add(action);
 		else cur.delete(action);
 		entity.extras.events = cur.size ? EVENT_ACTIONS.filter((a) => cur.has(a)) : undefined;
+	}
+
+	// Import — the governed-field create grant (WRITE-ASYMMETRY-S1) ---------------
+	/** Declared RBAC role names — the closed set the grant may name (the engine
+	 *  rejects an undeclared role at load, rule import_unknown_role). */
+	const declaredRoles = $derived(Object.keys(editor.rbac.roles ?? {}).sort());
+	/** The entity's governed fields: the implicit id + every auto timestamp —
+	 *  the only fields an import subset may name (import_unknown_field). */
+	const governedFields = $derived(
+		entity
+			? ['id', ...entity.fields.filter((f) => !!f.def.auto).map((f) => f.name)].sort()
+			: []
+	);
+	function toggleImportRole(role: string, on: boolean) {
+		if (!entity) return;
+		const cur = new Set(entity.extras.import?.roles ?? []);
+		if (on) cur.add(role);
+		else cur.delete(role);
+		if (cur.size === 0) {
+			// No roles = no grant: drop the whole block (an empty roles list is a
+			// load error — dead config), including any fields subset.
+			entity.extras.import = undefined;
+			return;
+		}
+		entity.extras.import = {
+			roles: declaredRoles.filter((r) => cur.has(r)),
+			fields: entity.extras.import?.fields
+		};
+	}
+	function toggleImportField(fname: string, on: boolean) {
+		if (!entity || !entity.extras.import) return;
+		const cur = new Set(entity.extras.import.fields ?? []);
+		if (on) cur.add(fname);
+		else cur.delete(fname);
+		entity.extras.import = {
+			roles: entity.extras.import.roles,
+			// All unchecked = no subset key (the schema's "absent = every governed
+			// field"; an explicitly empty list is a load error).
+			fields: cur.size ? governedFields.filter((f) => cur.has(f)) : undefined
+		};
 	}
 </script>
 
@@ -573,6 +613,45 @@
 			</div>
 		</section>
 
+		<section class="p-sec">
+			<div class="sec-title">Import (engine-managed fields on create)</div>
+			<p class="tip">
+				By default the engine owns <code>id</code> and every <code>auto</code> timestamp: a
+				create or update carrying them is rejected (422 read_only) on every door. Granting a
+				role here lets it supply those fields <em>when creating</em> rows — for data
+				migration / restores. Updates never accept them.
+			</p>
+			{#if declaredRoles.length === 0}
+				<div class="muted pad">Declare RBAC roles first (Roles button) — the grant names roles.</div>
+			{:else}
+				<div class="flags">
+					{#each declaredRoles as r (r)}
+						<label class="chk"
+							><input
+								type="checkbox"
+								checked={(entity.extras.import?.roles ?? []).includes(r)}
+								onchange={(e) => toggleImportRole(r, e.currentTarget.checked)}
+							/> {r}</label
+						>
+					{/each}
+				</div>
+				{#if entity.extras.import}
+					<div class="sub-title">Fields covered (none checked = all of them)</div>
+					<div class="flags">
+						{#each governedFields as gf (gf)}
+							<label class="chk"
+								><input
+									type="checkbox"
+									checked={(entity.extras.import?.fields ?? []).includes(gf)}
+									onchange={(e) => toggleImportField(gf, e.currentTarget.checked)}
+								/> {gf}</label
+							>
+						{/each}
+					</div>
+				{/if}
+			{/if}
+		</section>
+
 		<div class="p-foot">
 			<button class="btn danger" onclick={() => editor.deleteEntity(entity.id)}>Delete entity</button>
 		</div>
@@ -810,5 +889,13 @@
 	}
 	.pad {
 		padding: 4px 0;
+	}
+	.sub-title {
+		font-size: 11px;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--text-2);
+		margin: 8px 0 4px;
 	}
 </style>

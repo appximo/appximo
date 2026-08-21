@@ -427,6 +427,13 @@ class EditorStore {
 		e.fields = e.fields.filter((f) => f.id !== fieldId);
 		if (this.selectedFieldId === fieldId) this.selectedFieldId = null;
 		if (gone) this.rbacOnFieldDeleted(e.name, gone.name);
+		// Drop a deleted field from the entity's import-grant subset; if that
+		// empties the subset, fall back to "all governed fields" (absent key) —
+		// an explicitly empty list is a load error.
+		if (gone && e.extras.import?.fields?.includes(gone.name)) {
+			const rest = e.extras.import.fields.filter((c) => c !== gone.name);
+			e.extras.import = { ...e.extras.import, fields: rest.length ? rest : undefined };
+		}
 		if (wasFk) this.rebuildEdges();
 		this.structureVersion++;
 		this.bump();
@@ -458,6 +465,12 @@ class EditorStore {
 	private propagateFieldRename(e: EntityModel, oldField: string, newField: string) {
 		for (const idx of e.extras.indexes ?? []) {
 			idx.fields = (idx.fields ?? []).map((c) => (c === oldField ? newField : c));
+		}
+		// Import grant subset (WRITE-ASYMMETRY-S1): an auto field renamed while
+		// listed keeps its grant under the new name (a stale name would fail
+		// validation, import_unknown_field).
+		if (e.extras.import?.fields?.includes(oldField)) {
+			e.extras.import.fields = e.extras.import.fields.map((c) => (c === oldField ? newField : c));
 		}
 		for (const fk of e.extras.foreign_keys ?? []) {
 			fk.columns = (fk.columns ?? []).map((c) => (c === oldField ? newField : c));
@@ -494,6 +507,16 @@ class EditorStore {
 			delete f.def[key];
 		} else {
 			f.def[key] = value;
+		}
+		// Un-auto'ing a field removes it from the entity's import-grant subset —
+		// only governed fields (id + auto) may be listed there
+		// (import_unknown_field at load); empty subset → absent key.
+		if (key === 'auto' && !value) {
+			const e = this.getEntity(entityId);
+			if (e?.extras.import?.fields?.includes(f.name)) {
+				const rest = e.extras.import.fields.filter((c) => c !== f.name);
+				e.extras.import = { ...e.extras.import, fields: rest.length ? rest : undefined };
+			}
 		}
 		// Changing the type away from uuid clears the relation (a FK must be uuid).
 		if (key === 'type' && value !== 'uuid' && f.def.relation) {
@@ -1112,11 +1135,28 @@ class EditorStore {
 		const next: Record<string, RolePolicy> = {};
 		for (const [k, v] of Object.entries(this.rbac.roles)) next[k === oldName ? name : k] = v;
 		this.rbac.roles = next;
+		// Follow the rename into every entity's import grant (WRITE-ASYMMETRY-S1)
+		// — a stale role name there would fail validation (import_unknown_role).
+		for (const e of this.entities) {
+			const imp = e.extras.import;
+			if (imp?.roles.includes(oldName)) {
+				imp.roles = imp.roles.map((r) => (r === oldName ? name : r));
+			}
+		}
 		this.bump();
 		return null;
 	}
 	deleteRole(name: string) {
 		delete this.rbac.roles[name];
+		// Drop the deleted role from import grants; a grant left with no roles is
+		// dead config (load error) — remove the whole block.
+		for (const e of this.entities) {
+			const imp = e.extras.import;
+			if (imp?.roles.includes(name)) {
+				const rest = imp.roles.filter((r) => r !== name);
+				e.extras.import = rest.length ? { ...imp, roles: rest } : undefined;
+			}
+		}
 		this.bump();
 	}
 

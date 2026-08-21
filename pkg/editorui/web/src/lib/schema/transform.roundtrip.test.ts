@@ -185,3 +185,38 @@ describe('rbac.public round-trip (UI-2)', () => {
 		expect(out.rbac?.roles?.autor.permissions?.articulos.condition_actions).toEqual(['update']);
 	});
 });
+
+// WRITE-ASYMMETRY-S1: the governed-field import grant round-trips faithfully —
+// Studio must never silently drop a declared import (the UI-2 lesson, applied
+// to the new key at birth instead of after a field report).
+describe('import declaration round-trip', () => {
+	function importSchema(): APISchema {
+		return {
+			$schema: 'https://appximo.com/schema/v1',
+			version: '1',
+			name: 'import-api',
+			resources: {
+				legacy_rows: {
+					fields: {
+						titulo: { type: 'string', required: true, minLength: 1 },
+						creado_en: { type: 'time', auto: 'create' }
+					},
+					import: { roles: ['admin'], fields: ['id', 'creado_en'] }
+				}
+			},
+			rbac: { roles: { admin: { resources: '*', actions: ['*'] } } }
+		};
+	}
+
+	it('keeps roles and the fields subset byte-identically', () => {
+		const out = roundTrip(importSchema());
+		expect(canonical(out)).toBe(canonical(importSchema()));
+	});
+
+	it('keeps a full-set grant (no fields key) without inventing one', () => {
+		const s = importSchema();
+		delete s.resources.legacy_rows.import!.fields;
+		const out = roundTrip(s);
+		expect(out.resources.legacy_rows.import).toEqual({ roles: ['admin'] });
+	});
+});

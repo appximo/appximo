@@ -136,6 +136,16 @@ export interface HookConfig {
 	timeout?: string;
 }
 
+/** Governed-field create grant (WRITE-ASYMMETRY-S1): the roles that may supply
+ *  the engine-governed fields (implicit `id` + auto timestamps) when CREATING
+ *  rows — the data-import / fixture-restore contract. Mirrors schema.ImportConfig. */
+export interface ImportConfig {
+	roles: string[];
+	/** Optional subset of the governed fields the grant covers ("id" and/or auto
+	 *  field names). Absent = all of them. */
+	fields?: string[];
+}
+
 /** A single resource (table). Mirrors schema.ResourceSchema. */
 export interface ResourceSchema {
 	fields: Record<string, FieldDef>;
@@ -145,6 +155,7 @@ export interface ResourceSchema {
 	foreign_keys?: ForeignKeyDef[];
 	events?: string[];
 	renamed_from?: string;
+	import?: ImportConfig;
 }
 
 /** Row-level predicate. Mirrors schema.Condition. */

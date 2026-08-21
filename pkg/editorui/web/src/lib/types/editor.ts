@@ -18,6 +18,7 @@ import type {
 	IndexDef,
 	ForeignKeyDef,
 	HookConfig,
+	ImportConfig,
 	RBACPolicy
 } from './schema';
 
@@ -56,6 +57,9 @@ export interface EntityExtras {
 	foreign_keys?: ForeignKeyDef[];
 	hooks?: Record<string, HookConfig>;
 	events?: string[];
+	/** Governed-field create grant (WRITE-ASYMMETRY-S1) — authored in the
+	 *  entity inspector's Import section, preserved losslessly otherwise. */
+	import?: ImportConfig;
 }
 
 /** One resource (table) = one ERD node. */
