@@ -1,123 +1,127 @@
 {
- "$schema": "https://appximo.com/schema/v1",
- "version": "1",
- "name": "binary-diff-gate",
- "resources": {
-  "notes": {
-   "fields": {
-    "title": {
-     "type": "string",
-     "required": true,
-     "maxLength": 200,
-     "minLength": 1
-    },
-    "status": {
-     "type": "string",
-     "enum": [
-      "open",
-      "paid",
-      "done"
-     ],
-     "default": "open",
-     "state_machine": {
-      "initial": "open",
-      "transitions": {
-       "open": [
-        "paid"
-       ],
-       "paid": [
-        "done"
-       ],
-       "done": []
+  "$schema": "https://appximo.com/schema/v1",
+  "version": "1",
+  "name": "binary-diff-gate",
+  "resources": {
+    "notes": {
+      "fields": {
+        "title": {
+          "type": "string",
+          "required": true,
+          "maxLength": 200,
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "paid",
+            "done"
+          ],
+          "default": "open",
+          "state_machine": {
+            "initial": "open",
+            "transitions": {
+              "open": [
+                "paid"
+              ],
+              "paid": [
+                "done"
+              ],
+              "done": []
+            }
+          }
+        },
+        "amount": {
+          "type": "int64"
+        },
+        "ratio": {
+          "type": "float64"
+        },
+        "done": {
+          "type": "bool"
+        },
+        "due": {
+          "type": "time"
+        },
+        "fecha": {
+          "type": "time",
+          "default": "now"
+        },
+        "code": {
+          "type": "string",
+          "unique": true
+        },
+        "ref": {
+          "type": "uuid"
+        },
+        "attrs": {
+          "type": "jsonb"
+        },
+        "author_login": {
+          "type": "uuid",
+          "relation": "authors",
+          "references": "login"
+        },
+        "updated_at": {
+          "type": "time",
+          "auto": true
+        }
+      },
+      "relations": {
+        "author": {
+          "type": "belongs_to",
+          "target": "authors",
+          "fk": "author_login"
+        }
       }
-     }
     },
-    "amount": {
-     "type": "int64"
-    },
-    "ratio": {
-     "type": "float64"
-    },
-    "done": {
-     "type": "bool"
-    },
-    "due": {
-     "type": "time"
-    },
-    "fecha": {
-     "type": "time",
-     "default": "now"
-    },
-    "code": {
-     "type": "string",
-     "unique": true
-    },
-    "ref": {
-     "type": "uuid"
-    },
-    "attrs": {
-     "type": "jsonb"
-    },
-    "author_login": {
-     "type": "uuid",
-     "relation": "authors",
-     "references": "login"
+    "authors": {
+      "fields": {
+        "name": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "login": {
+          "type": "uuid",
+          "unique": true
+        }
+      }
     }
-   },
-   "relations": {
-    "author": {
-     "type": "belongs_to",
-     "target": "authors",
-     "fk": "author_login"
-    }
-   }
   },
-  "authors": {
-   "fields": {
-    "name": {
-     "type": "string",
-     "required": true,
-     "minLength": 1
+  "rbac": {
+    "roles": {
+      "admin": {
+        "resources": "*",
+        "actions": [
+          "*"
+        ]
+      },
+      "viewer": {
+        "resources": [
+          "notes"
+        ],
+        "actions": [
+          "read"
+        ],
+        "fields": [
+          "id",
+          "title",
+          "status"
+        ]
+      }
     },
-    "login": {
-     "type": "uuid",
-     "unique": true
+    "public": {
+      "authors": {
+        "actions": [
+          "read"
+        ],
+        "fields": [
+          "id",
+          "name"
+        ]
+      }
     }
-   }
   }
- },
- "rbac": {
-  "roles": {
-   "admin": {
-    "resources": "*",
-    "actions": [
-     "*"
-    ]
-   },
-   "viewer": {
-    "resources": [
-     "notes"
-    ],
-    "actions": [
-     "read"
-    ],
-    "fields": [
-     "id",
-     "title",
-     "status"
-    ]
-   }
-  },
-  "public": {
-   "authors": {
-    "actions": [
-     "read"
-    ],
-    "fields": [
-     "id",
-     "name"
-    ]
-   }
-  }
- }
 }

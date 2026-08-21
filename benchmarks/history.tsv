@@ -63,3 +63,15 @@ date	commit	label	target	tenant	endpoint	script	rate	duration	runs	p50_median_ms
 2026-08-21	b1df20c	B1	http://127.0.0.1:8580	acme	/api/tasks?per_page=20	tests/performance/sustained_writes.js	20	15s	5	2.720	3.587	3.7	0.0266	
 2026-08-21	b1df20c	B2	http://127.0.0.1:8580	acme	/api/tasks?per_page=20	tests/performance/sustained_writes.js	20	15s	1	4.749	13.806	0.0	0.5482	
 2026-08-21	b1df20c	A2	http://127.0.0.1:8580	acme	/api/tasks?per_page=20	tests/performance/sustained_writes.js	20	15s	5	2.685	3.541	16.4	0.0000	
+2026-08-21	2659155	scs1r-A1	http://localhost:8080	nimbus	/api/solicitudes?filter[estado][eq]=pendiente&per_page=20	tests/performance/sustained_2krps.js	100	25s	5	0.674	1.052	3.6	0.0000	
+2026-08-21	2659155	scs1r-B1	http://localhost:8080	nimbus	/api/solicitudes?filter[estado][eq]=pendiente&per_page=20	tests/performance/sustained_2krps.js	100	25s	5	0.698	1.095	9.6	0.0000	
+2026-08-21	2659155	scs1r-B2	http://localhost:8080	nimbus	/api/solicitudes?filter[estado][eq]=pendiente&per_page=20	tests/performance/sustained_2krps.js	100	25s	5	0.658	1.214	8.1	0.0000	
+2026-08-21	2659155	scs1r-A2	http://localhost:8080	nimbus	/api/solicitudes?filter[estado][eq]=pendiente&per_page=20	tests/performance/sustained_2krps.js	100	25s	5	0.625	0.900	11.3	0.0000	
+2026-08-21	2659155	scs1w-A1	http://localhost:8080	nimbus	/api/asignaciones?per_page=20	tests/performance/erp_patch.js	50	25s	5	4.865	7.450	12.1	0.0000	
+2026-08-21	2659155	scs1w-B1	http://localhost:8080	nimbus	/api/asignaciones?per_page=20	tests/performance/erp_patch.js	50	25s	5	4.900	8.478	20.3	0.0000	
+2026-08-21	2659155	scs1w-B2	http://localhost:8080	nimbus	/api/asignaciones?per_page=20	tests/performance/erp_patch.js	50	25s	5	5.597	9.814	4.7	0.0000	
+2026-08-21	2659155	scs1w-A2	http://localhost:8080	nimbus	/api/asignaciones?per_page=20	tests/performance/erp_patch.js	50	25s	5	4.663	7.991	5.8	0.0000	
+2026-08-21	2659155	scs1w2-A1	http://localhost:8080	nimbus	/api/asignaciones?per_page=20	tests/performance/erp_patch.js	50	25s	5	4.669	7.560	4.5	0.0000	
+2026-08-21	2659155	scs1w2-B1	http://localhost:8080	nimbus	/api/asignaciones?per_page=20	tests/performance/erp_patch.js	50	25s	5	4.823	7.461	20.8	0.0000	
+2026-08-21	2659155	scs1w2-B2	http://localhost:8080	nimbus	/api/asignaciones?per_page=20	tests/performance/erp_patch.js	50	25s	5	4.727	7.420	1.5	0.0000	
+2026-08-21	2659155	scs1w2-A2	http://localhost:8080	nimbus	/api/asignaciones?per_page=20	tests/performance/erp_patch.js	50	25s	5	4.717	7.866	4.0	0.0000	
