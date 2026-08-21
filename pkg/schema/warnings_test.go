@@ -349,3 +349,47 @@ func TestRequiredConditionFieldWarning(t *testing.T) {
 		}
 	})
 }
+
+// FRESH-AGENT-GAPS-S1: a resource that breaks its own schema's timestamp
+// convention warns; a deliberately timestamp-less schema, a resource that
+// declares either column, and a pure junction stay silent.
+func TestWarnings_MissingTimestampsConvention(t *testing.T) {
+	raw := `{
+	  "$schema":"x","version":"1","name":"x",
+	  "resources": {
+	    "orders":     { "fields": { "total": {"type":"int64"}, "created_at": {"type":"time","auto":true} } },
+	    "config":     { "fields": { "note": {"type":"string"}, "updated_at": {"type":"time","auto":true} } },
+	    "novel":      { "fields": { "title": {"type":"string"} } },
+	    "order_tags": { "fields": {
+	      "order_id": {"type":"uuid","relation":"orders"},
+	      "tag_id":   {"type":"uuid","relation":"tags"} } },
+	    "tags":       { "fields": { "name": {"type":"string"} } }
+	  }
+	}`
+	warns := Warnings(mustLoad(t, raw))
+	var got []string
+	for _, w := range warns {
+		if w.Rule == "missing_timestamps_convention" {
+			got = append(got, w.Got)
+			if !strings.Contains(w.Fix, "created_at") {
+				t.Errorf("fix must show the exact field to add: %+v", w)
+			}
+		}
+	}
+	// novel and tags break the convention; config declares updated_at (a
+	// choice), order_tags is a pure junction — both silent.
+	if len(got) != 2 || got[0] != "novel" || got[1] != "tags" {
+		t.Fatalf("want exactly [novel tags] flagged, got %v", got)
+	}
+
+	// A schema with no timestamps ANYWHERE is a style, not a slip: silent.
+	rawNone := `{
+	  "$schema":"x","version":"1","name":"x",
+	  "resources": { "things": { "fields": { "name": {"type":"string"} } } }
+	}`
+	for _, w := range Warnings(mustLoad(t, rawNone)) {
+		if w.Rule == "missing_timestamps_convention" {
+			t.Fatalf("timestamp-less schema must not warn, got %+v", w)
+		}
+	}
+}

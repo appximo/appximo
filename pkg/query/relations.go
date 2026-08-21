@@ -235,7 +235,9 @@ func (b *includeBuilder) rowObject(alias, resource string, node *includeNode, de
 				avail = append(avail, n)
 			}
 			sort.Strings(avail)
-			hint := "this resource declares no relations"
+			// FRESH-AGENT-GAPS-S1: a FK column alone does not enable ?include= —
+			// the embed needs a declared `relations` entry. Say HOW, not just what.
+			hint := "this resource declares no relations — a FK column alone does not enable ?include=; declare a `relations` block on the resource (see the schema docs)"
 			if len(avail) > 0 {
 				hint = "available: " + strings.Join(avail, ", ")
 			}

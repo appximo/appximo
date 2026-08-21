@@ -31,6 +31,70 @@ func Warnings(s *APISchema) []ValidationError {
 	out = append(out, fileGrantWarnings(s)...)
 	out = append(out, requiredTextWarnings(s)...)
 	out = append(out, requiredConditionFieldWarnings(s)...)
+	out = append(out, timestampConventionWarnings(s)...)
+	return out
+}
+
+// timestampConventionWarnings (FRESH-AGENT-GAPS-S1) flags a resource that
+// breaks its OWN schema's timestamp convention. The engine never provides or
+// needs `created_at`/`updated_at` — they are ordinary declared fields — but
+// every teaching example declares them, so authors come to believe they are
+// implicit like `id`. The observed failure: an agent added six resources
+// without `created_at` to an app whose OTHER resources all declared it; the
+// schema validated (correctly — it may run), and the app's own handlers and
+// UI, written against the convention, broke at request time with
+// `column "created_at" does not exist`. No layer had said a word.
+//
+// The rule is CONVENTION-RELATIVE to stay high-signal: it fires only when at
+// least one other resource in the schema declares a timestamp and THIS
+// resource declares neither. A deliberately timestamp-less schema stays
+// silent, and a resource that declares either column (an `updated_at`-only
+// config singleton, say) is treated as having made a choice. Pure junction
+// resources (every field is a relation FK) are exempt — nothing sorts or
+// displays them directly.
+func timestampConventionWarnings(s *APISchema) []ValidationError {
+	convention := 0
+	for _, res := range s.Resources {
+		if _, ok := res.Fields["created_at"]; ok {
+			convention++
+			continue
+		}
+		if _, ok := res.Fields["updated_at"]; ok {
+			convention++
+		}
+	}
+	if convention == 0 {
+		return nil // a schema with no timestamps anywhere is a style, not a slip
+	}
+	var out []ValidationError
+	for _, resName := range sortedNames(s.Resources) {
+		res := s.Resources[resName]
+		if _, ok := res.Fields["created_at"]; ok {
+			continue
+		}
+		if _, ok := res.Fields["updated_at"]; ok {
+			continue
+		}
+		junction := len(res.Fields) > 0
+		for _, f := range res.Fields {
+			if f.Relation == "" {
+				junction = false
+				break
+			}
+		}
+		if junction {
+			continue
+		}
+		out = append(out, ValidationError{
+			Field: fmt.Sprintf("resources.%s", resName),
+			Rule:  "missing_timestamps_convention",
+			Got:   resName,
+			Message: fmt.Sprintf(
+				"%q declares neither created_at nor updated_at while %d other resource(s) in this schema do. The engine does NOT provide timestamps implicitly (only `id` is implicit) — anything written against the convention (a handler's ORDER BY created_at, a UI column, ?sort=created_at) fails at request time with a column-does-not-exist error the validator cannot see.",
+				resName, convention),
+			Fix: `declare "created_at": {"type":"time","auto":true} (and "updated_at" likewise) — or omit them deliberately and make sure nothing references them`,
+		})
+	}
 	return out
 }
 

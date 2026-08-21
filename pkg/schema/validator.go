@@ -487,6 +487,7 @@ func Validate(s *APISchema) []ValidationError {
 		}
 	}
 
+	errs = append(errs, validateGraphQLTypeCollisions(s)...)
 	errs = append(errs, validateRBAC(s)...)
 
 	return errs
@@ -1686,5 +1687,42 @@ func validateFieldRules(fieldPrefix string, field FieldDef) []ValidationError {
 		}
 	}
 
+	return errs
+}
+
+// validateGraphQLTypeCollisions (FRESH-AGENT-GAPS-S1) rejects a schema whose
+// resources derive the SAME GraphQL type name — e.g. `categoria` and
+// `categorias` both become `Categoria`, so the GraphQL builder tries to
+// register two `CategoriaFilter` types and PANICS at boot. That is the worst
+// possible failure: `validate ✓` followed by a startup crash. The engine
+// derives every GraphQL type from schema.GraphQLTypeName, so checking it here
+// catches the collision at load with the exact resources named — one source,
+// no divergence with what actually gets built.
+func validateGraphQLTypeCollisions(s *APISchema) []ValidationError {
+	byType := make(map[string][]string, len(s.Resources))
+	for resName := range s.Resources {
+		if !resourceNameRe.MatchString(resName) {
+			continue // an invalid name is already reported; don't double-fault
+		}
+		t := GraphQLTypeName(resName)
+		byType[t] = append(byType[t], resName)
+	}
+	var errs []ValidationError
+	for _, typeName := range sortedNames(byType) {
+		names := byType[typeName]
+		if len(names) < 2 {
+			continue
+		}
+		sort.Strings(names)
+		errs = append(errs, ValidationError{
+			Field: "resources." + names[0],
+			Rule:  "graphql_type_collision",
+			Got:   strings.Join(names, ", "),
+			Message: fmt.Sprintf(
+				"resources %s all map to the GraphQL type %q (names are singularized + PascalCased), which makes the GraphQL schema build PANIC at boot — the schema validates but the engine cannot start.",
+				joinQuoted(names), typeName),
+			Fix: "rename one so they do not collapse to the same type — e.g. a plural and its singular (categoria / categorias) cannot coexist; pick distinct stems.",
+		})
+	}
 	return errs
 }

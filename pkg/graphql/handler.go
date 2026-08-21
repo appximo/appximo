@@ -1696,28 +1696,12 @@ func hookCfg(name, lifecycle string, res *schema.ResourceSchema) *schema.HookCon
 	return &c
 }
 
-func toPascalCase(s string) string {
-	parts := strings.FieldsFunc(s, func(r rune) bool { return r == '-' || r == '_' })
-	for i, p := range parts {
-		if len(p) > 0 {
-			parts[i] = strings.ToUpper(p[:1]) + p[1:]
-		}
-	}
-	return strings.Join(parts, "")
-}
+// singular / toPascalCase delegate to pkg/schema — the ONE source for GraphQL
+// name derivation, so the validator's collision check (FRESH-AGENT-GAPS-S1) can
+// never disagree with what this builder actually generates.
+func toPascalCase(s string) string { return schema.GraphQLPascal(s) }
 
-func singular(name string) string {
-	if strings.HasSuffix(name, "ches") {
-		return strings.TrimSuffix(name, "es")
-	}
-	if strings.HasSuffix(name, "ses") {
-		return strings.TrimSuffix(name, "ses") + "s"
-	}
-	if strings.HasSuffix(name, "ies") {
-		return strings.TrimSuffix(name, "ies") + "y"
-	}
-	return strings.TrimSuffix(name, "s")
-}
+func singular(name string) string { return schema.GraphQLSingular(name) }
 
 func sortedNames(s *schema.APISchema) []string {
 	names := make([]string, 0, len(s.Resources))
