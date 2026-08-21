@@ -21,6 +21,7 @@
     },
 
     "empleados": {
+      "import": { "roles": ["rrhh-admin"] },
       "fields": {
         "user_id":         { "type": "uuid",    "unique": true },
         "documento":       { "type": "string",  "required": true, "unique": true, "pattern": "^[0-9]{6,12}$" },

@@ -98,6 +98,30 @@ A populated dataset (5 departments, 17 employees, 6 projects, 24 assignments, 20
 requests, 14 reviews, 5 of them with linked logins) can be recreated with the
 seeding approach used in the Phase-2 validation session.
 
+### Restoring the bench fixture (the `import` grant)
+
+The k6 write benches (`tests/performance/erp_writes.js`, `erp_patch.js`,
+`erp_tx.js`) target one well-known employee row,
+`id = 11111111-1111-1111-1111-111111111111`. If that row is ever lost, restore
+it by POSTing it back **with its id** — `empleados` declares
+`"import": { "roles": ["rrhh-admin"] }` (WRITE-ASYMMETRY-S1), which is what
+lets an rrhh-admin supply the engine-governed `id` on create. Without that
+declaration the engine rejects a caller-supplied id at every door (422
+`read_only`):
+
+```bash
+curl -X POST http://localhost:8080/api/empleados \
+  -H "Authorization: Bearer $TOKEN" -H "Host: nimbus.localhost" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"11111111-1111-1111-1111-111111111111","documento":"11111111",
+       "nombre":"Bench","apellido":"Fixture","email":"bench.fixture@nimbus.example",
+       "cargo":"Benchmark","salario":1000000,"tipo_contrato":"indefinido",
+       "fecha_ingreso":"2024-01-01T00:00:00Z"}'
+```
+
+(If the running tenant's stored schema predates the `import` key, deploy this
+schema first: `appximo migrate --tenant nimbus --schema examples/erp-demo/schema.json`.)
+
 ### Relations in one round-trip (`?include=`, no N+1)
 
 ```bash
