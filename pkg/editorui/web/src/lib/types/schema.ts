@@ -66,7 +66,7 @@ export interface FieldDef {
 	type: FieldType;
 	required?: boolean;
 	unique?: boolean;
-	auto?: boolean;
+	auto?: boolean | 'create' | 'update';
 	enum?: string[];
 	relation?: string;
 	on_delete?: ReferentialAction;

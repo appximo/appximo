@@ -237,6 +237,12 @@ export function fieldDefIssues(def: FieldDef): string[] {
 	const isStr = isStringType(def.type);
 	const isNum = isNumericType(def.type);
 
+	// auto (any of the three enabled forms) requires type "time" — mirror of
+	// the engine's auto_requires_time load error (SILENT-CORRUPTION-S1).
+	if (def.auto && def.type !== 'time') {
+		out.push(`auto is only valid on a "time" field (the engine manages the column as a timestamp), not "${def.type}"`);
+	}
+
 	// pattern (string/text only; RE2; <= MaxPatternLength)
 	if (def.pattern) {
 		if (!isStr) {

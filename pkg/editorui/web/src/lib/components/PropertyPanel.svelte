@@ -87,8 +87,22 @@
 			raw.trim() === '' || Number.isNaN(n) || n <= 0 ? undefined : Math.floor(n)
 		);
 	}
-	function toggleFlag(key: 'required' | 'unique' | 'auto', on: boolean) {
+	function toggleFlag(key: 'required' | 'unique', on: boolean) {
 		if (entity && field) editor.patchFieldDef(entity.id, field.id, key, on ? true : undefined);
+	}
+	// auto is a union (true | "create" | "update") since SILENT-CORRUPTION-S1 —
+	// a checkbox would silently degrade the string roles back to the legacy
+	// boolean on toggle, which is exactly the corruption class the roles close.
+	function setAuto(raw: string) {
+		if (!entity || !field) return;
+		const v = raw === '' ? undefined : raw === 'true' ? true : raw;
+		editor.patchFieldDef(entity.id, field.id, 'auto', v);
+	}
+	function autoValue(): string {
+		const a = field?.def.auto as unknown;
+		if (a === true) return 'true';
+		if (a === 'create' || a === 'update') return a;
+		return '';
 	}
 	function setNum(key: 'min' | 'max' | 'minLength' | 'maxLength', raw: string) {
 		if (!entity || !field) return;
@@ -220,13 +234,19 @@
 						onchange={(e) => toggleFlag('unique', e.currentTarget.checked)}
 					/> unique</label
 				>
-				<label class="chk"
-					><input
-						type="checkbox"
-						checked={!!field.def.auto}
+				<label class="chk auto-role" title="Engine-managed timestamp. create = set once at insert (any name). update = also refreshed by the engine on every update (any name). legacy true = create semantics, except the literal name updated_at which also refreshes."
+					>auto
+					<select
+						class="field-select"
 						disabled={isFile}
-						onchange={(e) => toggleFlag('auto', e.currentTarget.checked)}
-					/> auto</label
+						value={autoValue()}
+						onchange={(e) => setAuto(e.currentTarget.value)}
+					>
+						<option value="">off</option>
+						<option value="create">create</option>
+						<option value="update">update</option>
+						<option value="true">legacy (true)</option>
+					</select></label
 				>
 			</div>
 
