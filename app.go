@@ -828,6 +828,7 @@ func New(cfg Config) (*App, error) {
 	app.eng = &engineRefs{
 		schema: s, validators: validators, policy: &rbacPolicy, users: authStore,
 		files:            app.files,
+		jwtSecret:        cfg.JWTSecret,
 		minPassword:      ctxMinPw,
 		safeGoTimeout:    safeGoTimeout,
 		onGoroutinePanic: app.metrics.IncGoroutinePanic,

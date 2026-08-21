@@ -180,6 +180,26 @@ type Ctx interface {
 	// request input, and why every input must be validated by the handler.
 	CreateUser(email, password, role string) (CreatedUser, error)
 
+	// MintToken signs a session JWT for userID with the given role —
+	// byte-shape identical to what POST /auth/login issues (HS256, the app's
+	// JWT secret, THIS tenant, the standard 24 h TTL), so the token works on
+	// every generated /api route exactly like a logged-in session
+	// (FRESH-AGENT-GAPS-S1: Ctx.CreateUser could create the identity but no
+	// engine path could mint its session — a custom registration endpoint
+	// could not auto-login like the engine's own /auth/signup does).
+	//
+	//   user, err := ctx.CreateUser(email, pass, "member")
+	//   ...
+	//   tok, err := ctx.MintToken(user.ID, user.Role)
+	//   return ctx.JSON(201, map[string]any{"user": user, "token": tok})
+	//
+	// userID must be non-empty (an empty identity makes every $user_id row
+	// condition match nothing — the CLI-token footgun, refused here) and the
+	// role must be declared in the schema RBAC (ErrUnknownRole — a token with
+	// an undeclared role is denied everything with an unexplained 403). The
+	// role comes from handler code, never from request input.
+	MintToken(userID, role string) (string, error)
+
 	// ServeFile streams one of THIS tenant's stored files (the engine file
 	// store, pkg/files — the same store /api/files/{id} serves) as the route's
 	// response: stored Content-Type, strong content-hash ETag (If-None-Match →
@@ -332,6 +352,9 @@ type engineRefs struct {
 	// /api/files is served from — backend, upload policy and metadata identical
 	// by construction), for Ctx.ServeFile. Never nil in a New()-built App.
 	files *files.Store
+	// jwtSecret signs Ctx.MintToken sessions — the SAME secret the middleware
+	// validates, so a minted token is accepted by construction.
+	jwtSecret string
 	// minPassword is the engine's configured minimum password length
 	// (Config.AuthMinPasswordLength / APPXIMO_AUTH_MIN_PASSWORD, default 8) —
 	// Ctx.CreateUser enforces the same bar as signup and the admin API.
@@ -878,6 +901,19 @@ func (c *requestCtx) CreateUser(email, password, role string) (CreatedUser, erro
 		return CreatedUser{}, err
 	}
 	return CreatedUser{ID: u.ID, Email: u.Email, Role: u.Role, EmailVerified: u.EmailVerified}, nil
+}
+
+// MintToken signs the session token for a user of THIS tenant — the same
+// claims shape and signing path (pkg/auth.GenerateToken) the engine's own
+// login uses, so acceptance is by construction, not by parallel construction.
+func (c *requestCtx) MintToken(userID, role string) (string, error) {
+	if userID == "" {
+		return "", errors.New("appximo: MintToken needs a non-empty userID — an empty identity matches no $user_id row condition and reads as a guest everywhere")
+	}
+	if _, ok := c.eng.policy.Roles[role]; !ok {
+		return "", fmt.Errorf("%w: %q", ErrUnknownRole, role)
+	}
+	return auth.GenerateToken(auth.Claims{UserID: userID, Role: role, TenantID: c.tc.ID}, c.eng.jwtSecret)
 }
 
 // --- response ---------------------------------------------------------------
