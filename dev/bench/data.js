@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787274776555,
+  "lastUpdate": 1787286796838,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -3240,6 +3240,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "50485520 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "f4d255a0c25ce23f0727f211f3c6c2c573a85ff3",
+          "message": "docs(backlog): ENG-45 re-prioritized by damage — silent corruption > non-determinism > loud failure > friction\n\nThe two families SILENT-CORRUPTION-S1 closed move to its DONE section; each\nremaining family carries a written disposition (close at load / shared-path\nfix / document — never magic). New family recorded from the audit: create\naccepts a forged id and forged auto values where PATCH answers 422 read_only\n(the ADR-024 same-input class; also the import-semantics question). OPS-30\nstays deferred untouched (auth hot path, its own session).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-21T04:31:29Z",
+          "tree_id": "f643791507e16bd9d557d167010de95c8f94e487",
+          "url": "https://github.com/appximo/appximo/commit/f4d255a0c25ce23f0727f211f3c6c2c573a85ff3"
+        },
+        "date": 1787286796122,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6245,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "380328 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6245,
+            "unit": "ns/op",
+            "extra": "380328 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "380328 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "380328 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 69.45,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36468662 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 69.45,
+            "unit": "ns/op",
+            "extra": "36468662 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36468662 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36468662 times\n4 procs"
           }
         ]
       }
