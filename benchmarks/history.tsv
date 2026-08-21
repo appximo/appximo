@@ -59,3 +59,7 @@ date	commit	label	target	tenant	endpoint	script	rate	duration	runs	p50_median_ms
 2026-08-09	9c763d8	ctc-wB1	http://127.0.0.1:8580	benchblank	/api/items?per_page=20	tests/performance/sustained_writes.js	20	15s	5	2.331	3.259	22.7	0.0000	
 2026-08-09	9c763d8	ctc-wB2	http://127.0.0.1:8580	benchblank	/api/items?per_page=20	tests/performance/sustained_writes.js	20	15s	5	2.230	3.136	2.4	0.0000	
 2026-08-09	9c763d8	ctc-wA2	http://127.0.0.1:8580	benchblank	/api/items?per_page=20	tests/performance/sustained_writes.js	20	15s	5	2.195	3.004	2.4	0.0000	
+2026-08-21	b1df20c	A1	http://127.0.0.1:8580	acme	/api/tasks?per_page=20	tests/performance/sustained_writes.js	20	15s	5	2.774	4.964	7.6	0.0365	
+2026-08-21	b1df20c	B1	http://127.0.0.1:8580	acme	/api/tasks?per_page=20	tests/performance/sustained_writes.js	20	15s	5	2.720	3.587	3.7	0.0266	
+2026-08-21	b1df20c	B2	http://127.0.0.1:8580	acme	/api/tasks?per_page=20	tests/performance/sustained_writes.js	20	15s	1	4.749	13.806	0.0	0.5482	
+2026-08-21	b1df20c	A2	http://127.0.0.1:8580	acme	/api/tasks?per_page=20	tests/performance/sustained_writes.js	20	15s	5	2.685	3.541	16.4	0.0000	

@@ -26,7 +26,21 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-19 (PRELAUNCH-TRUTH-S1)** — the last "show me"
+**Last reviewed: 2026-08-21 (FRESH-AGENT-GAPS-S1)** — the four fresh-agent
+gaps closed as CLASSES: `created_at` is a load-time SCHEMA-5 warning (never
+implicit magic — doctrine C-DOCTRINA / decision, validator not engine
+autofill); the implicit-requirement class was AUDITED (8-reader sweep +
+adversarial verify, 27 findings, 22 silent) and a boot-panic member fixed at
+load (a GraphQL type-name collision like `categoria`+`categorias` now errors
+at validate instead of crashing at startup, from a single naming source);
+`?include=` on an undeclared relation now says HOW; the CLI token warns on a
+missing `--user-id` AND an empty `--tenant` (a cross-tenant wildcard — OPS-30);
+`Ctx.MintToken` gives a custom registration endpoint the auto-login the engine
+already does; `backend-spec` gained the batch/unnest section + the N+1 warning
+where the loop is written (example verified live); `frontend-spec` §11 is now a
+mandatory visual-verification PROCEDURE (the mobile layout gate) that
+`backoffice-spec` references as its single source. New OPEN: OPS-30, ENG-45
+(the audited inventory). Previous review: 2026-08-19 (PRELAUNCH-TRUTH-S1) — the last "show me"
 claims closed before launch: the evaluator claim rewritten to what the
 linkable material shows (three independent field EVALUATIONS, one driven by
 the evaluator's agent — never "three developers"; the counting rule is now
@@ -112,6 +126,100 @@ refreshed).
 ---
 
 ## OPEN
+
+### OPS-30 — A CLI token with an empty tenant is a cross-tenant wildcard on the data plane
+
+- **Origin:** FRESH-AGENT-GAPS-S1 (2026-08-21), surfaced by the Part-A
+  implicit-requirement class audit, **hand-verified live**.
+- **What:** `pkg/auth/middleware.go` skips the tenant-match check when the
+  token's `TenantID` is empty (`claims.TenantID != "" && claims.TenantID != tc.ID`).
+  So `appximo token --role admin` **without `--tenant`** mints a token that
+  authenticates against EVERY tenant, not one. Verified: an empty-tenant admin
+  token answered `GET /api/tasks` 200 and `POST /api/tasks` 201 against a
+  tenant it was never scoped to.
+- **Severity, honestly:** minting the token needs the `JWT_SECRET`, and anyone
+  with the secret can already sign a token for any named tenant — so this is
+  **not** privilege escalation for an outsider. It is an operator footgun: the
+  easy-to-forget flag produces an all-tenants key instead of a one-tenant key,
+  and if that key leaks it is a wildcard rather than a single-tenant token.
+- **Shipped this session (the CLI half):** `appximo token` now prints a loud
+  WARNING when `--tenant` is empty, naming the wildcard behavior and the fix.
+- **Deferred (the engine half), with reason:** the empty-`TenantID` skip is on
+  the auth HOT PATH and has a legitimate neighbour (platform tokens carry
+  `scope=platform` + no tenant and are handled by a separate `/admin` chain).
+  Making the data plane reject an empty-tenant token needs a careful pass over
+  every token issuer (worker service JWTs, platform tokens, MFA-pending
+  tokens) to confirm none legitimately reaches `/api` with an empty tenant —
+  a security change that earns its own session with the gate + bench, not a
+  rushed one-liner here.
+- **Ready when:** the data plane refuses a token whose tenant does not match
+  the host (empty included), verified against every issuer, through the
+  binary-diff gate + ABBA bench.
+
+### ENG-45 — The implicit-requirement audit inventory (schema validates, breaks at runtime)
+
+- **Origin:** FRESH-AGENT-GAPS-S1 (2026-08-21), Part A class audit — an
+  8-reader source sweep + adversarial verify over the engine, hunting every
+  runtime behavior that assumes something a valid schema does not force to
+  declare. **27 findings (22 silent, 5 already-documented).** The doctrine for
+  all of them (03_DECISIONES C-DOCTRINA): each is closed by a LOAD-TIME check
+  (error, or a SCHEMA-5 warning when the pattern is sometimes legal) or
+  documented — **never** by the engine silently filling the value in.
+- **Closed this session:** (1) the `created_at`/timestamp convention →
+  SCHEMA-5 warning `missing_timestamps_convention`; (2) the GraphQL
+  type-name collision boot panic → load error `graphql_type_collision`
+  (from `schema.GraphQLTypeName`, the one source pkg/graphql now delegates to);
+  (3) `?include=` on a resource with no relations → the 400 now says a FK
+  column alone does not enable it.
+- **The families still OPEN, each to be closed at load or documented (they are
+  audit-surfaced; the load-bearing ones marked ✓ were hand-verified):**
+  - **Declared-relation pieces don't line up (the A.3 family).** `validateRelations`
+    checks the `target` resource exists but NOT that the relation's `fk`
+    column, an m2m `through` table, or `target_fk` exist ✓ — a valid schema
+    that misnames any of them fails at `?include=`/GraphQL time. Ready:
+    a SCHEMA-5 warning (not a hard error — a column can be hot-added or the
+    junction provisioned by BeforeStart DDL, the same escape the index-existence
+    check honors).
+  - **GraphQL/REST divergences.** A required field WITH a default is `NonNull`
+    in the GraphQL create input (omission rejected) where REST allows it; a
+    resource whose name is unchanged by `singular()` loses its list query to
+    the get-by-id field. Ready: reconcile or document per case.
+  - **`auto:true` on a non-time field** is provisioned `TIMESTAMPTZ DEFAULT now()`
+    regardless of declared type; **`updated_at` refresh is bound to that literal
+    column name** ✓ (verified: an auto field named `modificado_en` — a NORMAL
+    Spanish name, and Spanish schemas are the AI-generation flow's primary
+    audience — is frozen at creation forever on every PUT/PATCH/GraphQL/batch
+    update, AND cannot be written by hand either: the body echo is rejected
+    422 `read_only`. Silent wrong data on a validator-clean schema). Ready:
+    a SCHEMA-5 warning when an `auto` time field is not `created_at`/`updated_at`
+    (name-relative, like the timestamp warning), naming that only `updated_at`
+    auto-refreshes.
+  - **Relation subroute path collision** ✓. Two FK fields whose names collapse
+    under `TrimSuffix(_id)` — e.g. `customer` + `customer_id` — both register
+    `GET /api/{r}/{id}/customer`; chi (v5.3.0) silently overwrites, and Go's
+    randomized map iteration picks the winner PER BOOT, so the subroute can
+    serve a different relation (with the other resource's RBAC) after a
+    restart. Validator-clean today. Ready: a load error on a derived-subroute
+    collision (same shape as the GraphQL-collision fix shipped this session).
+  - **Ctx.Update parity gaps (CTX_PARITY family):** it does not reject id/auto
+    fields in the body, does not bump a declared auto `updated_at`, and a null
+    on a required field masks a raw 23502 as a 500 where the generated PATCH
+    returns a clean 422. Ready: route through the shared prepare path (the
+    fix pattern the CTX_PARITY audit already established).
+  - **`files`-resource shadowing:** the validator/router allow a schema
+    resource named `files` (a supported pattern) but the migration engine and
+    the `file`-field FK assume the engine's own metadata table — a validator-clean
+    combination that breaks at provision/attach time. Ready: reconcile the two,
+    or reject the shadow when a `file` field is present.
+  - **Runtime-config assumptions** (documented today, listed for completeness):
+    `hmac_secret_env` unset signs with the empty key; a `wasm` hook names a
+    module nothing can pre-load; a webhook `url` on http/loopback validates then
+    is refused at dispatch; `events` assumes an outbox consumer; `$external_client_id`
+    is schema-legal but no engine surface populates it. Each is a candidate
+    boot-time warning.
+- **Ready when:** every family above is either a load-time check with an
+  actionable message or a documented deliberate-restart/limitation note — none
+  left as a runtime-only surprise.
 
 ### OPS-29 — Releases lag the tags: v0.1.8's release run failed, and the Docker badge shows a SHA
 
@@ -767,6 +875,55 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in FRESH-AGENT-GAPS-S1 (2026-08-21)
+
+Four gaps that fresh agents hit building real apps from the public docs alone —
+each closed as a CLASS, not an instance. Engine changes went through the
+binary-diff gate (120 SAME + 1 explained DIFF — the intentional `?include=`
+hint) and an ABBA write-path bench.
+
+- **`created_at` (Part A) — implicit requirement, closed at LOAD not by magic.**
+  A schema that omitted `created_at` on new resources validated and then
+  crashed at request time with `column does not exist`. The decision
+  (03_DECISIONES C-DOCTRINA, doctrine that will recur): the validator WARNS,
+  the engine never fills it in — implicit magic breaks `declared == deployed`
+  as badly as silent input tolerance breaks ADR-024. Shipped: SCHEMA-5 warning
+  `missing_timestamps_convention`, convention-relative (fires only when other
+  resources declare timestamps; a timestamp-less schema and pure junctions stay
+  silent), naming the exact field to add. The class was then AUDITED (→ ENG-45,
+  27 findings); one boot-panic member fixed here: a **GraphQL type-name
+  collision** (`categoria` + `categorias` → `Categoria` → `validate ✓` then
+  boot panic) is now the load error `graphql_type_collision`, computed from
+  `schema.GraphQLTypeName` — the ONE naming source pkg/graphql now delegates
+  to, pinned by a divergence test. And `?include=` on a relation-less resource
+  now says a FK column alone does not enable it.
+- **The CLI token + `Ctx.MintToken` (Part B).** The `--user-id`-less token
+  footgun (a role scoped by `$user_id` matches zero rows, silently) recurred
+  from the commerce field report (GAPS 1B-3) where it was noted but never
+  surfaced at the CLI. Fixed: `appximo token` warns on a missing `--user-id`
+  (schema-aware — it names the resources the chosen role row-scopes) and on an
+  empty `--tenant` (the OPS-30 wildcard). The paired `Ctx` gap — CreateUser
+  could make an identity but nothing could mint its session — closed with
+  **`Ctx.MintToken(userID, role)`**: byte-shape identical to `/auth/login`
+  (one `pkg/auth.GenerateToken` path), so a custom registration endpoint
+  auto-logs-in like the engine's own signup. Integration-tested: minted token
+  works on a generated route; empty userID and undeclared role refused, named.
+- **`backend-spec` batch patterns (Part C).** A fresh agent wrote 3 queries ×
+  400 rows = a two-minute request. Added §3.4b (the `= ANY($1)` read + the
+  `unnest()` write, from a route that compiles and was verified live: a
+  3-item reprice ran as 2 statements, a bad id → named 422, RBAC 403) and
+  safety rule 6 (the N+1 warning) WHERE the loop is written, not in an
+  appendix — plus the other three self-kills (unbounded reads, unindexed
+  filters, network-in-loop) each pointing at a verified worked example.
+- **`frontend-spec` §11 is now a PROCEDURE (Part D).** An agent shipped a UI
+  broken on phones for weeks with every API test green. §11 is rewritten from
+  advice into the definition of done: a copy-paste **mobile layout gate**
+  (390×844, zero horizontal overflow, touch targets ≥24px with the WCAG-2.2
+  inline-link exemption — verified against the reference storefront, and its
+  strict draft caught real sub-24px controls), then console-strict e2e, then
+  forced failure states. It is the single source; `backoffice-spec`'s
+  checklist now references it instead of restating it.
 
 ## DONE in PRELAUNCH-TRUTH-S1 (2026-08-19)
 
