@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787116736548,
+  "lastUpdate": 1787274776555,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -3168,6 +3168,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36697537 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "2659155225c3a67bc3ac2a6a4901a0ce72679d30",
+          "message": "docs+bench: backlog records FRESH-AGENT-GAPS-S1 (DONE + OPS-30 + the ENG-45 audit inventory); corpus + bench artifacts\n\n- BACKLOG: the four gaps DONE, OPS-30 (empty-tenant wildcard token, CLI half\n  shipped / engine half deferred with reason), ENG-45 (the 27-finding\n  implicit-requirement audit inventory, each family to close at load or\n  document).\n- corpus.jsonl: a gate row pinning the ?include= undeclared-relation hint (the\n  one intentional DIFF in the 120 SAME + 1 gate run).\n- history.tsv: the ABBA write-path windows for this session (verdict\n  no_change: dnew-base -0.018 ms / -0.7%, under the 0.5 ms gate, control drift\n  5x larger).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-21T01:12:28Z",
+          "tree_id": "1047b4842b9389b76a7fc8b28f80bd24ef0c6d06",
+          "url": "https://github.com/appximo/appximo/commit/2659155225c3a67bc3ac2a6a4901a0ce72679d30"
+        },
+        "date": 1787274775538,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 4702,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "504712 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 4702,
+            "unit": "ns/op",
+            "extra": "504712 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "504712 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "504712 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 48.23,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "50485520 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 48.23,
+            "unit": "ns/op",
+            "extra": "50485520 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "50485520 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "50485520 times\n4 procs"
           }
         ]
       }
