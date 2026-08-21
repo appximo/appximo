@@ -411,6 +411,13 @@ row, err := ctx.Get("students", id)
 // check, and the state-machine INITIAL states on create. Plus the field
 // allowlist and the row condition. Update is PATCH semantics and enforces the
 // declared transitions in SQL.
+//
+// ENGINE-GOVERNED FIELDS: the implicit `id` and every `auto` timestamp are
+// rejected 422 read_only in the data map — on Insert AND Update, exactly like
+// the generated endpoints (WRITE-ASYMMETRY-S1; one shared source, so passing a
+// client body through verbatim is safe). The one exception: a resource whose
+// schema declares `"import": {"roles": [...]}` accepts them on Insert from the
+// granted roles (data migration / restores). Update never accepts them.
 row, err := ctx.Insert("students", map[string]any{"full_name": "Ana"})
 row, err := ctx.Update("students", id, map[string]any{"country": "MX"})
 

@@ -706,7 +706,10 @@ zero queries.
 - `auto: "create" | "update" | true` — engine-managed timestamp
   (`TIMESTAMPTZ DEFAULT now()`; type must be `time` — any other declared type
   is a load error `auto_requires_time`; exempt from the required check; the
-  client can never write it — update answers 422 `read_only`). The roles are
+  client can never write it — **create AND update answer 422 `read_only`, on
+  every door: REST, GraphQL, batch, Ctx.Insert/Update** — see the `import`
+  declaration below for the one declared exception, WRITE-ASYMMETRY-S1; POST
+  used to accept a forged `created_at` with 201 while PATCH rejected it). The roles are
   NAME-INDEPENDENT (SILENT-CORRUPTION-S1): `"create"` = set once at insert;
   `"update"` = ALSO refreshed to now() by the engine on every update (REST
   PUT/PATCH, GraphQL update, batch transaction and `Ctx.Update` — one shared
@@ -1226,6 +1229,48 @@ generated CRUD write by declaring an `events` array at the resource level
   more does its own `SELECT`; for a delete the row is already gone, so the
   id is all the event carries.
 - A delete that matches no row (404) emits nothing.
+
+### Importing rows with their own ids/timestamps (`import`, WRITE-ASYMMETRY-S1)
+
+The engine OWNS the governed write fields — the implicit `id` and every `auto`
+timestamp — at **every** write door: a create or update body carrying them is
+**422** `{"rule":"read_only"}` naming the field (REST POST/PUT/PATCH, GraphQL,
+`/api/transaction`, `Ctx.Insert`/`Ctx.Update` — one shared source,
+`schema.GovernedFieldViolations`, so no door can diverge). Before this, POST
+stored a forged `id`/`created_at` with 201 while PATCH answered 422 for the
+same keys — the audit trail was forgeable by any caller with create permission.
+
+The declared exception is **data import** (migrating rows from another system,
+restoring a fixture whose id other artifacts reference). A resource opts in:
+
+```json
+"legacy_orders": {
+  "fields": { "title": { "type": "string", "required": true },
+              "created_at": { "type": "time", "auto": "create" } },
+  "import": { "roles": ["admin"], "fields": ["id", "created_at"] }
+}
+```
+
+- `roles` (required, non-empty): the RBAC roles allowed to supply governed
+  fields **on create**. Each must be a declared role (`import_unknown_role` at
+  load otherwise — an undeclared grant is dead config, ENG-27 mold). No
+  wildcard: an auditor reads exactly who.
+- `fields` (optional): narrows the grant to a subset of the governed set —
+  `["id"]` enables client-generated ids without opening timestamp forgery.
+  Entries must be `id` or an auto field (`import_unknown_field` at load).
+- **Create-only, by design.** Update never accepts governed fields, import or
+  not: import brings rows into existence with their history; rewriting the
+  history of an existing row is not import.
+- Non-granted roles (and resources without the block) keep the uniform 422,
+  whose message says exactly how to make the write legal.
+- GraphQL: an import-declaring resource's create input gains the declared
+  fields as OPTIONAL inputs; the role gate runs at resolve time (same single
+  source). Non-declaring resources keep their historical input (structural
+  rejection).
+- `/openapi.json` publishes `x-appximo-import: {"fields":[…]}` on the
+  resource's component schema (the granted role list is deliberately NOT
+  published — the spec is unauthenticated; governed properties stay
+  `readOnly: true`, the truth for every caller outside the grant).
 
 ### Indexes
 

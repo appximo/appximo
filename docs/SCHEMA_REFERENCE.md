@@ -233,10 +233,11 @@ A resource object accepts exactly these keys (any other key rejects the schema, 
 | `relations` | object (embed name → relation def) | optional | §4 |
 | `renamed_from` | string | optional | §2.3 below |
 | `foreign_keys` | array of composite-FK defs | optional | §2.4 below |
+| `import` | object `{roles, fields?}` | optional | §2.5 below |
 
 Only `fields` carries the entity's data shape; the rest are optional and additive — a resource that omits them serves exactly as before with zero added overhead. An unknown key produces:
 
-> `unknown key "<key>" (valid keys: fields, hooks, indexes, events, relations, renamed_from, foreign_keys)`
+> `unknown key "<key>" (valid keys: fields, hooks, indexes, events, relations, renamed_from, foreign_keys, import)`
 
 ### 2.3 `renamed_from` (resource / table rename)
 
@@ -361,6 +362,29 @@ The target `branches` exposes a composite `unique` index over `(region_code, bra
 ```
 
 Here both `region_code` and `branch_code` on `orders` are nullable (not `required`), so `set_null` would also be permissible; `cascade` deletes a branch's orders when the branch is deleted.
+
+### 2.5 `import` (governed-field create grant — data import / restores)
+
+The engine **owns** the governed write fields — the implicit `id` (§3.1) and every `auto` timestamp (§3.3) — on **every** write door: a create or update body carrying them answers **422** with `"rule": "read_only"` naming the field, identically on REST POST/PUT/PATCH, GraphQL, `POST /api/transaction` and `Ctx.Insert`/`Ctx.Update` (one shared implementation, `schema.GovernedFieldViolations` — WRITE-ASYMMETRY-S1; before it, POST stored a forged `id`/`created_at` with 201 while PATCH rejected the same keys).
+
+The declared exception is **importing** rows that must keep their original identity — a data migration from another system, restoring a fixture whose id other artifacts reference:
+
+```json
+"legacy_orders": {
+  "fields": {
+    "title":      { "type": "string", "required": true },
+    "created_at": { "type": "time", "auto": "create" }
+  },
+  "import": { "roles": ["admin"], "fields": ["id", "created_at"] }
+}
+```
+
+- **`roles`** (required, non-empty array): the RBAC roles allowed to supply governed fields **on create**. Load-validated: each entry must be a declared role, else `import_unknown_role` listing the declared ones (an undeclared grant would be dead config). An empty/missing list is `import_roles_required`. There is no wildcard — an auditor reads exactly who may import.
+- **`fields`** (optional array): narrows the grant to a subset of the governed set — `["id"]` enables client-generated ids without opening timestamp forgery. Each entry must be `id` or an auto field of the resource (`import_unknown_field` otherwise); an explicitly empty list is `import_fields_empty`. Absent = the full governed set.
+- **Create-only, by design.** Update never accepts governed fields, import declaration or not: import brings rows *into existence* with their history; rewriting the history of an existing row is not import.
+- Supplied values pass as sent (the auto column stays `TIMESTAMPTZ DEFAULT now()`, so an omitted field still gets the engine default; a supplied `id` must be a UUID the database accepts, and colliding with an existing id is the normal duplicate-key error).
+- **GraphQL:** an import-declaring resource's create input gains the declared fields as OPTIONAL inputs; the role gate runs at resolve time via the same single source. A resource without the declaration keeps its historical input type — governed fields are rejected structurally.
+- **Contract:** `/openapi.json` publishes `x-appximo-import: {"fields": […]}` on the resource's component schema. The granted role list is deliberately **not** published (the spec is unauthenticated; role names are not) and the governed properties keep `readOnly: true` — the truth for every caller outside the grant.
 
 ---
 

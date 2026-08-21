@@ -26,7 +26,17 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-21 (SILENT-CORRUPTION-S1)** — the two ENG-45 families
+**Last reviewed: 2026-08-21 (WRITE-ASYMMETRY-S1)** — ENG-45 family 1 (the
+POST/PATCH asymmetry over engine-governed fields) closed as a class: `id` +
+`auto` fields now answer the same 422 `read_only` at EVERY write door from ONE
+source (`schema.GovernedFieldViolations`), the import use case became a
+declared, role-enumerated schema contract (`"import"`, doctrine C-DOCTRINA-3),
+Ctx.Update's id/auto gap closed with it, and the bench-fixture restore runs
+through the declared path (proven live on nimbus). The matrix audit surfaced
+ONE new family (owner-scoped roles can reassign their rows on update — create
+forbids the same attribution), recorded below with its disposition, not
+opened. This was the last engine session before launch; ENG-45 is the map of
+what follows AFTER publishing. Previous review: 2026-08-21 (SILENT-CORRUPTION-S1) — the two ENG-45 families
 that corrupt data silently over a validator-approved schema, closed as classes:
 the `auto` timestamp role is now DECLARED (`"create"`/`"update"`, any field
 name — `modificado_en` works; legacy `true` keeps the literal-`updated_at`
@@ -190,17 +200,42 @@ refreshed).
   query warns (`graphql_list_query_shadowed`); OpenAPI marks auto fields
   `readOnly` + `x-appximo-auto` and /app + both backoffice contract.js read it
   from the contract.
+- **CLOSED by WRITE-ASYMMETRY-S1 (2026-08-21):** family 1 — create accepted a
+  forged `id`/`auto` value with 201 (REST POST, batch create, Ctx.Insert) while
+  update answered 422 `read_only` and GraphQL rejected structurally. Closed as
+  a class with ONE source (`schema.GovernedFieldViolations` +
+  `IsGovernedWriteField`) consumed by every door: PrepareCreate (REST/batch/
+  Ctx.Insert), the GraphQL create resolver, CollectUpdate (REST PUT/PATCH,
+  GraphQL update, batch update) and PrepareUpdate (Ctx.Update — which used to
+  pass `{"id":…}` through as `SET id = …`, a PK rewrite; that id/auto half of
+  family 3 is closed too). The import use case became DECLARABLE (doctrine
+  C-DOCTRINA-3): a resource-level `"import": {"roles": […], "fields": […]}`
+  permits exactly the enumerated roles to supply governed fields ON CREATE
+  (never update), load-validated (`import_roles_required` /
+  `import_unknown_role` / `import_unknown_field` / `import_fields_empty`),
+  published as `x-appximo-import` (fields only — role names stay
+  unpublished, the ENG-27 asymmetry), authored in Studio, rendered by
+  `explain`, taught by the grammar, and honored hot from the deployed surface.
+  The bench-fixture restore path is now the declared one (erp-demo `empleados`
+  grants `rrhh-admin`; README documents it; proven live on nimbus). Update-side
+  messages stay byte-compatible; anti-divergence tests pin every door
+  (governed_divergence_test.go + governed_write_integration_test.go). Gate:
+  126 SAME + 3 intentional DIFFs (the fix itself, corpus rows added); ABBA
+  no_change on POST and PATCH protocols.
 - **The families still OPEN, by damage:**
-  1. **(silent corruption) Create accepts a forged `id` and forged `auto`
-     values.** `POST {"id":"<uuid>","created_at":"1999-…"}` → 201, both stored
-     — while PATCH answers 422 `read_only` for the same keys, and GraphQL
-     rejects them structurally. Same input, three answers (the ADR-024 class);
-     a client can forge audit timestamps at creation. Surfaced by the
-     SILENT-CORRUPTION-S1 name-audit (finding F5), NOT closed there: whether a
-     deliberate id-on-create (data import) must keep working is a contract
-     decision that deserves its own look. **Disposition: close at the write
-     path (reject like update) or document import semantics explicitly — an
-     asymmetry is the one option that stays wrong.**
+  1. **(silent corruption / authz asymmetry — NEW, surfaced by the
+     WRITE-ASYMMETRY-S1 matrix) An owner-scoped role can give its row away on
+     UPDATE.** Create FORCES the row-condition column to the caller
+     (`EnforceCreateRBAC`: claiming another principal's id → 403), but update
+     puts the condition only in the WHERE — `PATCH {"owner_id":"<other>"}` on
+     an owned row answers 200 and reassigns the row to another principal
+     (verified live). Same shape as the closed family (one rule, two answers
+     by verb) but a DIFFERENT enforcement seam (RBAC condition semantics, not
+     governed fields), with a real design question: is ownership transfer by
+     the owner legitimate? **Disposition: decide the update-side condition
+     contract (force / reject / allow-and-document) in its own increment,
+     symmetric across REST/GraphQL/batch/Ctx — not opened here (session scope
+     was closed to the governed-field family).**
   2. **(silent corruption) `files`-resource shadowing:** the validator allows a
      schema resource named `files` but `migration.isEngineManagedTable`
      excludes the table from every diff — never provisioned, never converged —
@@ -208,12 +243,13 @@ refreshed).
      **Disposition: close at load** (reject the shadow when any `file` field
      exists; provision the declared table otherwise) — or reject the shadow
      outright.
-  3. **(silent corruption) Ctx.Update remaining parity gaps:** it does not
-     reject `id`/auto body fields (PrepareUpdate lacks CollectUpdate's
-     read_only pass) and a null on a required field surfaces a raw 23502 as a
-     500. (The refresh half and the stale-cache half were closed in
-     SILENT-CORRUPTION-S1.) **Disposition: route through the shared prepare
-     path — the CTX_PARITY fix pattern.**
+  3. **(loud failure) Ctx.Update remaining parity gap:** a null on a required
+     field surfaces a raw 23502 as a 500 (CollectUpdate answers a clean 422
+     `required`). The id/auto half of this family was closed by
+     WRITE-ASYMMETRY-S1 (PrepareUpdate now runs the governed pass).
+     **Disposition: add the null-required check to PrepareUpdate — the
+     CTX_PARITY fix pattern; re-ranked from silent corruption to loud failure
+     (it fails noisily, with the wrong status).**
   4. **(silent no-op) Declared-relation pieces don't line up:** `fk`, m2m
      `through` and `target_fk` are not checked to exist ✓ — fails at
      `?include=`/GraphQL time. **Disposition: SCHEMA-5 warning** (a column can
