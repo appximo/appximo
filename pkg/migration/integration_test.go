@@ -71,7 +71,7 @@ func TestIntegration_ProvisionEvolveNoop(t *testing.T) {
 				"code":       {Type: "string", Required: true, Unique: true},
 				"customer":   {Type: "string"},
 				"amount":     {Type: "float64"},
-				"created_at": {Type: "time", Auto: true},
+				"created_at": {Type: "time", Auto: schema.AutoLegacy},
 			},
 			Indexes: []schema.IndexDef{{Fields: []string{"customer"}}},
 		},
@@ -110,7 +110,7 @@ func TestIntegration_ProvisionEvolveNoop(t *testing.T) {
 				"customer":   {Type: "string"},
 				"amount":     {Type: "float64"},
 				"note":       {Type: "text"}, // NEW nullable
-				"created_at": {Type: "time", Auto: true},
+				"created_at": {Type: "time", Auto: schema.AutoLegacy},
 			},
 			Indexes: []schema.IndexDef{{Fields: []string{"customer"}}},
 		},
@@ -128,7 +128,7 @@ func TestIntegration_ProvisionEvolveNoop(t *testing.T) {
 		"orders": {
 			Fields: map[string]schema.FieldDef{
 				"code":       {Type: "string", Required: true, Unique: true},
-				"created_at": {Type: "time", Auto: true},
+				"created_at": {Type: "time", Auto: schema.AutoLegacy},
 			},
 		},
 	})

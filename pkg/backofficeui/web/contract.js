@@ -44,7 +44,11 @@ export async function loadContract(fetchJSON) {
       maxBytes: p['x-appximo-max-bytes'] ?? null,
       transitions: p['x-appximo-transitions'] ?? null,
       initialStates: p['x-appximo-initial'] ?? null,
-      auto: key === 'created_at' || key === 'updated_at' || (p.format === 'date-time' && !!p.readOnly),
+      // Engine-managed: read from the CONTRACT (x-appximo-auto names the role,
+      // and auto fields carry readOnly) — never guessed from English field
+      // names, which rendered a Spanish `modificado_en` as an editable field
+      // the engine then rejected 422 read_only on save (SILENT-CORRUPTION-S1).
+      auto: p['x-appximo-auto'] !== undefined || (p.format === 'date-time' && !!p.readOnly),
     }));
 
     return {

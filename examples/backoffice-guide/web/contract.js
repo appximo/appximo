@@ -43,7 +43,8 @@ export async function loadContract(fetchJSON) {
       maxBytes: p['x-appximo-max-bytes'] ?? null,
       transitions: p['x-appximo-transitions'] ?? null,
       initialStates: p['x-appximo-initial'] ?? null,
-      auto: key === 'created_at' || key === 'updated_at' || (p.format === 'date-time' && !!p.readOnly),
+      // Engine-managed: read from the contract (x-appximo-auto / readOnly), never guessed from English field names.
+      auto: p['x-appximo-auto'] !== undefined || (p.format === 'date-time' && !!p.readOnly),
     }));
 
     return {

@@ -62,7 +62,7 @@ func TestWebhookScenario(t *testing.T) {
 				Fields: map[string]schema.FieldDef{
 					"code":       {Type: "string", Required: true},
 					"status":     {Type: "string"},
-					"created_at": {Type: "time", Auto: true},
+					"created_at": {Type: "time", Auto: schema.AutoLegacy},
 				},
 				Hooks: map[string]schema.HookConfig{
 					"after_create": {Type: "webhook", URL: receptor.URL, HMACSecretEnv: secretEnv},

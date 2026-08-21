@@ -126,7 +126,7 @@ func TestGraphQL(t *testing.T) {
 				"status":      {Type: "string"},
 				"origin":      {Type: "string", Required: true},
 				"destination": {Type: "string", Required: true},
-				"created_at":  {Type: "time", Auto: true},
+				"created_at":  {Type: "time", Auto: schema.AutoLegacy},
 			}},
 		},
 	}

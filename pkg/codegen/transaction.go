@@ -454,9 +454,12 @@ func buildUpdateSQL(res *schema.ResourceSchema, tbl, id string, sets map[string]
 		args = append(args, sets[c])
 		argIdx++
 	}
-	if fd, ok := res.Fields["updated_at"]; ok && fd.Auto {
-		setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", argIdx))
-		args = append(args, time.Now().UTC())
+	// Same single refresh source as RunUpdate (schema.AutoRefreshColumns) — a
+	// batched update stamps exactly the columns a single-op PATCH stamps.
+	now := time.Now().UTC()
+	for _, col := range res.AutoRefreshColumns() {
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", pgx.Identifier{col}.Sanitize(), argIdx))
+		args = append(args, now)
 		argIdx++
 	}
 	if len(setClauses) == 0 {

@@ -75,7 +75,7 @@ func minimalSchema() *schema.APISchema {
 				Fields: map[string]schema.FieldDef{
 					"name":       {Type: "string", Required: true},
 					"status":     {Type: "string"},
-					"created_at": {Type: "time", Auto: true},
+					"created_at": {Type: "time", Auto: schema.AutoLegacy},
 				},
 			},
 		},
@@ -229,8 +229,8 @@ func TestRegisterTenant_MultipleResources(t *testing.T) {
 				Fields: map[string]schema.FieldDef{
 					"code":       {Type: "string", Required: true, Unique: true},
 					"status":     {Type: "string"},
-					"created_at": {Type: "time", Auto: true},
-					"updated_at": {Type: "time", Auto: true},
+					"created_at": {Type: "time", Auto: schema.AutoLegacy},
+					"updated_at": {Type: "time", Auto: schema.AutoLegacy},
 				},
 			},
 			"clients": {
@@ -242,7 +242,7 @@ func TestRegisterTenant_MultipleResources(t *testing.T) {
 			"incidents": {
 				Fields: map[string]schema.FieldDef{
 					"description": {Type: "text"},
-					"created_at":  {Type: "time", Auto: true},
+					"created_at":  {Type: "time", Auto: schema.AutoLegacy},
 				},
 			},
 		},

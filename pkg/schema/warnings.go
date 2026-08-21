@@ -32,6 +32,82 @@ func Warnings(s *APISchema) []ValidationError {
 	out = append(out, requiredTextWarnings(s)...)
 	out = append(out, requiredConditionFieldWarnings(s)...)
 	out = append(out, timestampConventionWarnings(s)...)
+	out = append(out, autoUpdateIntentWarnings(s)...)
+	out = append(out, graphqlListShadowWarnings(s)...)
+	return out
+}
+
+// graphqlListShadowWarnings (SILENT-CORRUPTION-S1, ENG-45 audit) flags a
+// resource whose name its own singularization leaves unchanged
+// (GraphQLSingular("menu") == "menu"): the GraphQL builder registers the list
+// query under the resource name and the get-by-id query under the singular, so
+// when the two coincide the get-by-id field silently REPLACES the list query —
+// the resource has no GraphQL list/filter/pagination at all, and the emitted
+// SDL carries two same-named Query fields (structurally invalid for client
+// codegen). REST is unaffected. A warning, not an error: the schema works
+// fully on REST and partially on GraphQL, and refusing to boot would break
+// running apps at upgrade; the real fix (a collision-free get-by-id name) is a
+// GraphQL contract change that earns its own increment (ENG-45).
+func graphqlListShadowWarnings(s *APISchema) []ValidationError {
+	var out []ValidationError
+	for _, resName := range sortedNames(s.Resources) {
+		if GraphQLSingular(resName) != resName {
+			continue
+		}
+		out = append(out, ValidationError{
+			Field: "resources." + resName,
+			Rule:  "graphql_list_query_shadowed",
+			Got:   resName,
+			Message: fmt.Sprintf(
+				"%q singularizes to itself, so its GraphQL get-by-id query takes the same name as its list query and silently replaces it — the resource has NO list/filter/pagination query in GraphQL (REST is unaffected).",
+				resName),
+			Fix: fmt.Sprintf("name the resource in plural form (e.g. %q) so the list query (%q) and the get-by-id query (%q) get distinct names — or ignore this if you never consume this resource over GraphQL", resName+"s", resName+"s", resName),
+		})
+	}
+	return out
+}
+
+// autoUpdateIntentWarnings (SILENT-CORRUPTION-S1) flags the worst validator-clean
+// data corruption the ENG-45 audit found: a LEGACY `auto: true` field whose NAME
+// reads as a modification timestamp but is not the literal `updated_at`. The
+// legacy boolean binds refresh-on-update to that one English name, so
+// `modificado_en` — the name a Spanish schema (the AI-generation flow's primary
+// audience) naturally uses — is set once at creation and FROZEN forever, while
+// every response shows it as if it tracked changes; and it cannot be repaired by
+// hand either (an auto field in an update body is 422 read_only). Silent wrong
+// data on a schema every layer approved.
+//
+// It is a warning, not an error, because auto-with-any-name is a legal and
+// correct CREATION timestamp (placed_at, joined_at, creada — the engine's own
+// examples use it); only a name that suggests update intent is almost certainly
+// wrong. The name test is a small documented marker list (the same license the
+// identity-column suppression list takes) and gates a warning only — a missed
+// name costs a warning, never behavior. Both fixes silence it: declare
+// `"auto": "update"` (the engine refreshes it, any name) or `"auto": "create"`
+// (the frozen behavior, made explicit).
+func autoUpdateIntentWarnings(s *APISchema) []ValidationError {
+	var out []ValidationError
+	for _, resName := range sortedNames(s.Resources) {
+		res := s.Resources[resName]
+		for _, fieldName := range sortedNames(res.Fields) {
+			fd := res.Fields[fieldName]
+			if fd.Auto != AutoLegacy || fieldName == autoUpdateName {
+				continue
+			}
+			if !nameSuggestsUpdateIntent(fieldName) {
+				continue
+			}
+			out = append(out, ValidationError{
+				Field: fmt.Sprintf("resources.%s.fields.%s.auto", resName, fieldName),
+				Rule:  "auto_update_intent",
+				Got:   fieldName,
+				Message: fmt.Sprintf(
+					"%q declares the legacy `auto: true`, which refreshes on update ONLY the literal name `updated_at` — this field will be set once at creation and FROZEN forever (and it cannot be written by hand either: an auto field in an update body is 422 read_only), while its name says it tracks modifications. Every response would show a modification timestamp that is silently wrong.",
+					fieldName),
+				Fix: `declare "auto": "update" — the engine then refreshes this field on every update, whatever its name. If you really meant a creation timestamp, declare "auto": "create" to make that explicit.`,
+			})
+		}
+	}
 	return out
 }
 

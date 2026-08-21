@@ -31,7 +31,7 @@ func TestBuildHandler_OnlyUUIDResource_NoPanic(t *testing.T) {
 			}},
 			// only-auto resource: no writable input fields → no createX mutation.
 			"events": {Fields: map[string]schema.FieldDef{
-				"created_at": {Type: "time", Auto: true},
+				"created_at": {Type: "time", Auto: schema.AutoLegacy},
 			}},
 		},
 		RBAC: schema.RBACPolicy{Roles: map[string]schema.RolePolicy{

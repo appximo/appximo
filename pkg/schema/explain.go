@@ -32,6 +32,7 @@ type explainPhrases struct {
 	fieldDefault    string // default value
 	fieldDefaultNow string
 	fieldAuto       string
+	fieldAutoUpd    string
 	fieldRelation   string // target resource
 	fieldFile       string
 	fieldRange      []string // min only, max only, both
@@ -78,7 +79,8 @@ var explainEN = explainPhrases{
 	fieldEnum:       "one of: %s",
 	fieldDefault:    "defaults to %v when not provided",
 	fieldDefaultNow: "defaults to the moment the record is created",
-	fieldAuto:       "set automatically by the engine",
+	fieldAuto:       "set automatically by the engine when the record is created",
+	fieldAutoUpd:    "updated automatically by the engine every time the record changes",
 	fieldRelation:   "points at a record of %q",
 	fieldFile:       "an uploaded file",
 	fieldRange:      []string{"at least %v", "at most %v", "between %v and %v"},
@@ -139,7 +141,8 @@ var explainES = explainPhrases{
 	fieldEnum:       "uno de: %s",
 	fieldDefault:    "si no se envía, queda en %v",
 	fieldDefaultNow: "si no se envía, queda el momento de creación",
-	fieldAuto:       "lo llena el motor automáticamente",
+	fieldAuto:       "lo llena el motor automáticamente al crear el registro",
+	fieldAutoUpd:    "el motor lo actualiza automáticamente cada vez que el registro cambia",
 	fieldRelation:   "apunta a un registro de %q",
 	fieldFile:       "un archivo subido",
 	fieldRange:      []string{"mínimo %v", "máximo %v", "entre %v y %v"},
@@ -297,8 +300,12 @@ func explainFields(b *strings.Builder, r ResourceSchema, p explainPhrases) {
 		} else {
 			parts = append(parts, f.Type)
 		}
-		if f.Auto {
-			parts = append(parts, p.fieldAuto)
+		if f.Auto.Enabled() {
+			if f.Auto.RefreshesOnUpdate(fn) {
+				parts = append(parts, p.fieldAutoUpd)
+			} else {
+				parts = append(parts, p.fieldAuto)
+			}
 		} else if f.Required {
 			parts = append(parts, p.fieldRequired)
 		} else {

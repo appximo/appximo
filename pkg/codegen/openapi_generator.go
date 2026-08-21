@@ -145,7 +145,7 @@ func buildOAPaths(s *schema.APISchema) map[string]any {
 			if fd.Relation == "" {
 				continue
 			}
-			relName := strings.TrimSuffix(fname, "_id")
+			relName := schema.RelationSubroute(fname) // the ONE derivation, load-validated against collisions
 			relTitle := toPascalCase(fd.Relation)
 			subOp := oaSubresourceOp(name, title, relName, relTitle, fd.Relation, fname)
 			if publicRead {
@@ -802,11 +802,11 @@ func oaResourceSchema(res *schema.ResourceSchema, includeAuto bool) map[string]a
 
 	for _, fname := range sortedFieldKeys(res) {
 		fd := res.Fields[fname]
-		if fd.Auto && !includeAuto {
+		if fd.Auto.Enabled() && !includeAuto {
 			continue
 		}
-		props[fname] = oaPropertySchema(fd)
-		if fd.Required && !fd.Auto {
+		props[fname] = oaPropertySchema(fname, fd)
+		if fd.Required && !fd.Auto.Enabled() {
 			required = append(required, fname)
 		}
 	}
@@ -842,8 +842,19 @@ func oaResourceSchema(res *schema.ResourceSchema, includeAuto bool) map[string]a
 //     offers only legal moves (a terminal state is present with an empty
 //     list). frontend-spec used to say these were "not in the OpenAPI" —
 //     they are now.
-func oaPropertySchema(fd schema.FieldDef) map[string]any {
+func oaPropertySchema(fname string, fd schema.FieldDef) map[string]any {
 	m := oaFieldType(fd)
+	// Engine-managed timestamps (SILENT-CORRUPTION-S1): the standard readOnly
+	// keyword (they appear in responses, never in request bodies — before this
+	// only `id` carried it) plus x-appximo-auto naming the EFFECTIVE role —
+	// "update" when the engine refreshes the column on every update, "create"
+	// when it is set once at insert. A generic tool (the /app back-office, a
+	// form generator) reads the truth from the contract instead of guessing it
+	// from the two English field names.
+	if fd.Auto.Enabled() {
+		m["readOnly"] = true
+		m["x-appximo-auto"] = fd.EffectiveAutoRole(fname)
+	}
 	// The declared create-default, as the STANDARD OpenAPI keyword (ENG-38).
 	// It tells a generic tool (the /app back-office, a form generator) that a
 	// `required` field with a default is satisfiable by OMISSION — without it,

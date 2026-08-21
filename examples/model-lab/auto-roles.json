@@ -1,0 +1,22 @@
+{
+  "$schema": "https://appximo.com/schema/v1",
+  "version": "1",
+  "name": "auto-roles-lab",
+  "resources": {
+    "tickets": {
+      "fields": {
+        "titulo":        { "type": "string", "required": true, "minLength": 1, "maxLength": 200 },
+        "estado":        { "type": "string", "enum": ["abierto", "cerrado"], "default": "abierto" },
+        "creado_en":     { "type": "time", "auto": "create" },
+        "modificado_en": { "type": "time", "auto": "update" },
+        "created_at":    { "type": "time", "auto": true },
+        "updated_at":    { "type": "time", "auto": true }
+      }
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": { "resources": "*", "actions": ["*"] }
+    }
+  }
+}

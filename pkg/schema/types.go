@@ -105,12 +105,16 @@ type FieldDef struct {
 	// link. Its on_delete (restrict default | set_null; cascade rejected) governs
 	// what happens to the record when the referenced FILE is deleted; deleting
 	// the record never deletes the file.
-	Type     string   `json:"type"`
-	Required bool     `json:"required,omitempty"`
-	Unique   bool     `json:"unique,omitempty"`
-	Auto     bool     `json:"auto,omitempty"` // for created_at / updated_at
-	Enum     []string `json:"enum,omitempty"`
-	Relation string   `json:"relation,omitempty"` // name of the related resource
+	Type     string `json:"type"`
+	Required bool   `json:"required,omitempty"`
+	Unique   bool   `json:"unique,omitempty"`
+	// Auto declares an engine-managed timestamp. Accepts `true` (legacy:
+	// creation timestamp + refresh-on-update ONLY for the literal name
+	// `updated_at`), or the explicit, name-independent roles `"create"` /
+	// `"update"` (SILENT-CORRUPTION-S1) — see AutoValue in auto.go.
+	Auto     AutoValue `json:"auto,omitempty"`
+	Enum     []string  `json:"enum,omitempty"`
+	Relation string    `json:"relation,omitempty"` // name of the related resource
 	// OnDelete declares the referential action of THIS field's foreign key when the
 	// referenced (parent) row is deleted (MIG-F1-S1): "restrict" | "cascade" |
 	// "set_null". Only meaningful on a field that also declares `relation` (the FK

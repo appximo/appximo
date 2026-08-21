@@ -104,7 +104,7 @@ export async function loadContract(fetchJSON) {
       maxBytes: p['x-appximo-max-bytes'] ?? null,
       transitions: p['x-appximo-transitions'] ?? null, // state machine, from the contract
       initialStates: p['x-appximo-initial'] ?? null,
-      auto: key === 'created_at' || key === 'updated_at',
+      auto: p['x-appximo-auto'] !== undefined,     // engine-managed, from the contract — never guessed from field names
     }));
 
     return {

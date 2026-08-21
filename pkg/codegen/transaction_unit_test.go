@@ -16,7 +16,7 @@ func txTestRes() *schema.ResourceSchema {
 	return &schema.ResourceSchema{Fields: map[string]schema.FieldDef{
 		"sku":        {Type: "string"},
 		"stock":      {Type: "int"},
-		"updated_at": {Type: "time", Auto: true},
+		"updated_at": {Type: "time", Auto: schema.AutoLegacy},
 	}}
 }
 
@@ -29,7 +29,7 @@ func TestBuildUpdateSQL_GuardAndAutoUpdatedAt(t *testing.T) {
 		t.Fatalf("unexpected txError: %+v", terr)
 	}
 	// SET stock + auto updated_at, WHERE id, AND stock >= guard, RETURNING *.
-	for _, want := range []string{`SET "stock" = $1`, "updated_at = $2", "WHERE id = $3", "AND stock >= $4", "RETURNING *"} {
+	for _, want := range []string{`SET "stock" = $1`, `"updated_at" = $2`, "WHERE id = $3", "AND stock >= $4", "RETURNING *"} {
 		if !strings.Contains(q, want) {
 			t.Errorf("update SQL missing %q\n  got: %s", want, q)
 		}

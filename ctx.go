@@ -726,6 +726,23 @@ func (c *requestCtx) Update(resource, id string, data map[string]any) (map[strin
 		args = append(args, data[k])
 		setParts[i] = fmt.Sprintf("%s = $%d", pgx.Identifier{k}.Sanitize(), len(args))
 	}
+	// Engine-refreshed timestamps — the SAME source RunUpdate and the batch
+	// transaction consume (schema.AutoRefreshColumns, SILENT-CORRUPTION-S1), so
+	// a custom handler's update stamps updated_at / any auto:"update" column
+	// exactly like the generated PATCH. Ctx.Update used to stamp NOTHING — the
+	// same row got a fresh timestamp through REST and a stale one through a
+	// handler. A column the handler already set explicitly is left as sent
+	// (Postgres rejects two assignments to one column).
+	if refreshCols := res.AutoRefreshColumns(); len(refreshCols) > 0 {
+		now := time.Now().UTC()
+		for _, col := range refreshCols {
+			if _, present := data[col]; present {
+				continue
+			}
+			args = append(args, now)
+			setParts = append(setParts, fmt.Sprintf("%s = $%d", pgx.Identifier{col}.Sanitize(), len(args)))
+		}
+	}
 	q := fmt.Sprintf("UPDATE %s SET %s WHERE id = $1",
 		pgx.Identifier{resource}.Sanitize(), strings.Join(setParts, ", "))
 	// Append the role's row-level RBAC condition so a restricted role cannot

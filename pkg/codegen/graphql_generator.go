@@ -76,7 +76,7 @@ func GenerateGraphQL(s *schema.APISchema) string {
 			fd := res.Fields[fname]
 			gt := gqlFieldType(fd)
 			bang := ""
-			if fd.Required && !fd.Auto {
+			if fd.Required && !fd.Auto.Enabled() {
 				bang = "!"
 			}
 			sb.WriteString(fmt.Sprintf("  %s: %s%s\n", fname, gt, bang))
@@ -94,7 +94,7 @@ func GenerateGraphQL(s *schema.APISchema) string {
 		sb.WriteString(fmt.Sprintf("input %sInput {\n", title))
 		for _, fname := range sortedFieldKeys(&res) {
 			fd := res.Fields[fname]
-			if fd.Auto {
+			if fd.Auto.Enabled() {
 				continue
 			}
 			gt := gqlFieldType(fd)

@@ -56,7 +56,7 @@ func TestValidate_FileField(t *testing.T) {
 	if errs := schema.Validate(mk(schema.FieldDef{Type: "file", OnUpdate: "cascade"})); !hasError(errs, "on_update") {
 		t.Errorf("on_update on a file field must be rejected")
 	}
-	if errs := schema.Validate(mk(schema.FieldDef{Type: "file", Auto: true})); !hasError(errs, "auto") {
+	if errs := schema.Validate(mk(schema.FieldDef{Type: "file", Auto: schema.AutoLegacy})); !hasError(errs, "auto") {
 		t.Errorf("auto on a file field must be rejected")
 	}
 	if errs := schema.Validate(mk(schema.FieldDef{Type: "file", Enum: []string{"a"}})); !hasError(errs, "enum") {

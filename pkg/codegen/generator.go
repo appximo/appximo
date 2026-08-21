@@ -133,7 +133,7 @@ func buildRelations(res *schema.ResourceSchema) []RelationData {
 		if fd.Relation == "" {
 			continue
 		}
-		relName := strings.TrimSuffix(fname, "_id")
+		relName := schema.RelationSubroute(fname) // the ONE derivation, load-validated against collisions
 		rels = append(rels, RelationData{
 			FieldName:   fname,
 			RelName:     relName,

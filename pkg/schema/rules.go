@@ -85,7 +85,7 @@ func CompileRules(res *ResourceSchema) *ResourceValidator {
 
 	for _, name := range names {
 		fd := res.Fields[name]
-		if fd.Required && !fd.Auto {
+		if fd.Required && !fd.Auto.Enabled() {
 			rv.required = append(rv.required, name)
 		}
 
@@ -168,7 +168,7 @@ func CompileRules(res *ResourceSchema) *ResourceValidator {
 
 		// Default to fill on create when the field is omitted (SCHEMA-CLOSE-V1).
 		// auto fields manage their own value, so they never carry a default.
-		if fd.Default != nil && !fd.Auto {
+		if fd.Default != nil && !fd.Auto.Enabled() {
 			if rv.defaults == nil {
 				rv.defaults = make(map[string]defaultSpec)
 			}

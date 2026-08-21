@@ -21,7 +21,7 @@ func guidesOnlySchema() *schema.APISchema {
 					"destination": {Type: "string", Required: true},
 					"weight_kg":   {Type: "float64"},
 					"client_id":   {Type: "uuid", Relation: "clients"},
-					"created_at":  {Type: "time", Auto: true},
+					"created_at":  {Type: "time", Auto: schema.AutoLegacy},
 				},
 			},
 		},

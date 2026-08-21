@@ -570,6 +570,17 @@ func (a *App) customHandler(rt Route) http.HandlerFunc {
 			return
 		}
 		committed = true
+		// A committed non-GET custom route may have written through Ctx —
+		// drop this tenant's cached GETs exactly like the generated writes
+		// and the batch transaction do (SILENT-CORRUPTION-S1: a custom
+		// route's update used to leave the response cache serving the
+		// pre-write record until TTL — fresh data written, stale data read,
+		// no error anywhere). GET/HEAD routes commit read-only work and skip
+		// the drop; over-invalidation on a write-less POST costs a cache
+		// miss, never correctness.
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && a.responseCache != nil {
+			a.responseCache.Invalidate(tc.ID)
+		}
 		rc.flush(w)
 	}
 }

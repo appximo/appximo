@@ -169,6 +169,21 @@ func Validate(s *APISchema) []ValidationError {
 				})
 			}
 
+			// A field literally named `id` collides with the implicit primary
+			// key (SILENT-CORRUPTION-S1): the migration silently SKIPS it (the
+			// declared type/rules never reach the database) while GraphQL lets
+			// it overwrite the generated `id: ID!` — a declaration that is
+			// half-honored, with no error anywhere.
+			if fieldName == "id" {
+				errs = append(errs, ValidationError{
+					Field:   fieldPrefix,
+					Rule:    "reserved_field_name",
+					Got:     "id",
+					Message: `field "id" collides with the implicit primary key (a UUID the engine declares on every resource): the declaration would be silently ignored by the database while other layers partially honor it`,
+					Fix:     `remove the "id" field — every resource already has an implicit UUID primary key named id`,
+				})
+			}
+
 			if !validFieldTypes[field.Type] {
 				types := sortedSetKeys(validFieldTypes)
 				errs = append(errs, ValidationError{
@@ -178,6 +193,35 @@ func Validate(s *APISchema) []ValidationError {
 					Expected: types,
 					Message:  fmt.Sprintf("unknown field type %q: must be one of %s", field.Type, joinQuoted(types)),
 					Fix:      "set type to one of the valid field types (e.g. 'string' for short text, 'text' for long text, 'int'/'int64'/'float64' for numbers, 'time' for timestamps, 'bool', 'uuid', 'jsonb' for a queryable document, 'file' for a reference to an uploaded file)",
+				})
+			}
+
+			// auto (SILENT-CORRUPTION-S1): the value is a closed set, and every
+			// enabled form requires type "time" — the engine provisions the
+			// column TIMESTAMPTZ DEFAULT now() regardless of the declared type,
+			// so any other type would silently diverge from the database (the
+			// declared type still drives filters, GraphQL and OpenAPI: every
+			// read would be a type mismatch nothing reports).
+			switch field.Auto {
+			case AutoOff, AutoLegacy, AutoCreate, AutoUpdate:
+				if field.Auto.Enabled() && field.Type != "time" {
+					errs = append(errs, ValidationError{
+						Field:    fieldPrefix + ".auto",
+						Rule:     "auto_requires_time",
+						Got:      field.Type,
+						Expected: []string{"time"},
+						Message:  fmt.Sprintf("auto is only valid on a \"time\" field: the engine manages the column as TIMESTAMPTZ DEFAULT now(), so declaring it %q would make every layer that trusts the declaration (filters, GraphQL, OpenAPI, clients) disagree with the actual database column — silently.", field.Type),
+						Fix:      `set "type": "time" — or drop "auto" and manage the value yourself`,
+					})
+				}
+			default:
+				errs = append(errs, ValidationError{
+					Field:    fieldPrefix + ".auto",
+					Rule:     "invalid_auto",
+					Got:      string(field.Auto),
+					Expected: []string{"true", "false", `"create"`, `"update"`},
+					Message:  fmt.Sprintf("invalid auto value %q: must be true, false, \"create\" (set once at insert, any field name) or \"update\" (refreshed by the engine on every update, any field name)", string(field.Auto)),
+					Fix:      `use "auto": "update" for a modification timestamp, "auto": "create" for a creation timestamp, or the legacy "auto": true (creation semantics; refresh-on-update only for the literal name updated_at)`,
 				})
 			}
 
@@ -222,7 +266,7 @@ func Validate(s *APISchema) []ValidationError {
 						Message: "on_update is not valid on a file field — a stored file's id never changes",
 					})
 				}
-				if field.Auto {
+				if field.Auto.Enabled() {
 					errs = append(errs, ValidationError{
 						Field:   fieldPrefix + ".auto",
 						Message: "auto is not valid on a file field",
@@ -488,8 +532,66 @@ func Validate(s *APISchema) []ValidationError {
 	}
 
 	errs = append(errs, validateGraphQLTypeCollisions(s)...)
+	errs = append(errs, validateRelationSubrouteCollisions(s)...)
 	errs = append(errs, validateRBAC(s)...)
 
+	// Deterministic order (SILENT-CORRUPTION-S1): most of the list is built by
+	// ranging over maps, and the raw slice reached clients unsorted — the
+	// control-plane / admin deploy APIs returned the errors reshuffled per
+	// call, and one path embedded errs[0] in its message, so the SAME broken
+	// schema reported a DIFFERENT reason on every attempt. The CLI report
+	// already re-sorts (report.go); this makes every consumer deterministic at
+	// the source. Stable, so same-field errors keep their emission order.
+	sort.SliceStable(errs, func(i, j int) bool {
+		if errs[i].Field != errs[j].Field {
+			return errs[i].Field < errs[j].Field
+		}
+		return errs[i].Rule < errs[j].Rule
+	})
+	return errs
+}
+
+// validateRelationSubrouteCollisions (SILENT-CORRUPTION-S1) rejects a resource
+// whose relation FIELDS derive the same subroute segment — e.g. `customer` and
+// `customer_id` (both with `relation`) each generate
+// `GET /api/{resource}/{id}/customer`. chi silently overwrites the duplicate
+// registration and the winner is chosen by Go's randomized map iteration, so
+// the subroute served a DIFFERENT relation — joined on a different column,
+// against a different target resource, under the OTHER target's RBAC — per
+// process start. The same collision made the OpenAPI document one variant
+// (deterministically the wrong one half the time) and `appximo generate` emit
+// two same-named handlers that do not compile. One derivation
+// (schema.RelationSubroute, delegated to by all three emitters) checked here at
+// load closes all three — the graphql_type_collision pattern exactly.
+func validateRelationSubrouteCollisions(s *APISchema) []ValidationError {
+	var errs []ValidationError
+	for _, resName := range sortedNames(s.Resources) {
+		res := s.Resources[resName]
+		bySegment := make(map[string][]string)
+		for fieldName, fd := range res.Fields {
+			if fd.Relation == "" || !fieldNameRe.MatchString(fieldName) {
+				continue // non-relation fields register no subroute; an invalid name is already reported
+			}
+			seg := RelationSubroute(fieldName)
+			bySegment[seg] = append(bySegment[seg], fieldName)
+		}
+		for _, seg := range sortedNames(bySegment) {
+			names := bySegment[seg]
+			if len(names) < 2 {
+				continue
+			}
+			sort.Strings(names)
+			errs = append(errs, ValidationError{
+				Field: fmt.Sprintf("resources.%s.fields.%s", resName, names[0]),
+				Rule:  "relation_subroute_collision",
+				Got:   strings.Join(names, ", "),
+				Message: fmt.Sprintf(
+					"relation fields %s of %q all derive the subroute GET /api/%s/{id}/%s (the segment is the field name minus a trailing _id) — the router would silently keep only one of them, chosen at random per process start, so the subroute could serve a different relation (with the other target's access rules) after every restart.",
+					joinQuoted(names), resName, resName, seg),
+				Fix: "rename one of the fields so their subroute segments differ — a field and its `_id`-suffixed sibling cannot both declare a relation on the same resource.",
+			})
+		}
+	}
 	return errs
 }
 
@@ -1120,6 +1222,21 @@ func validateRelations(resPrefix, resName string, res ResourceSchema, s *APISche
 				Message: fmt.Sprintf("relation name %q collides with a field of the same name", relName),
 			})
 		}
+		// `id` is the implicit primary key, never in res.Fields, so the clash
+		// check above cannot see it — but a relation named `id` would OVERWRITE
+		// the row's id in every embed (json_build_object keeps the last 'id'
+		// key) and in the GraphQL type (AddFieldConfig replaces id: ID!),
+		// silently (SILENT-CORRUPTION-S1).
+		if relName == "id" {
+			errs = append(errs, ValidationError{
+				Field: relPrefix,
+				Rule:  "reserved_field_name",
+				Got:   "id",
+				Message: fmt.Sprintf(
+					"relation name %q collides with the implicit primary key: the embedded object would silently REPLACE the row's id in every ?include= response and in the GraphQL type", relName),
+				Fix: "rename the relation — id is the implicit primary key of every resource",
+			})
+		}
 
 		if !validRelationTypes[rel.Type] {
 			errs = append(errs, ValidationError{
@@ -1468,7 +1585,7 @@ func validateDefault(fieldPrefix string, fd FieldDef) []ValidationError {
 		return nil
 	}
 	dp := fieldPrefix + ".default"
-	if fd.Auto {
+	if fd.Auto.Enabled() {
 		return []ValidationError{{Field: dp, Message: "default cannot be set on an auto field"}}
 	}
 	// Enum (string-valued): the default must be a declared member.

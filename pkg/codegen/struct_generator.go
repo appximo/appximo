@@ -69,7 +69,7 @@ func fieldGoType(fd schema.FieldDef) (goType string, pointer bool) {
 	default: // string, uuid, text
 		goType = "string"
 	}
-	pointer = fd.Auto || !fd.Required
+	pointer = fd.Auto.Enabled() || !fd.Required
 	return
 }
 

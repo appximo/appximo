@@ -1037,7 +1037,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			}
 			fn := fieldName // capture
 			relResource := fd.Relation
-			relRoute := strings.TrimSuffix(fn, "_id")
+			relRoute := schema.RelationSubroute(fn) // the ONE derivation, load-validated against collisions
 			// The FK targets the referenced column (MIG-F1-S5: `references`),
 			// defaulting to the target's id — the shared resolution the ?include=
 			// embeds use too, so subroute and embed can never diverge.
@@ -1357,9 +1357,14 @@ func RunUpdate(ctx context.Context, tdb *db.TenantDB, res *schema.ResourceSchema
 		args = append(args, sets[c])
 		argIdx++
 	}
-	if fd, ok := res.Fields["updated_at"]; ok && fd.Auto {
-		setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", argIdx))
-		args = append(args, time.Now().UTC())
+	// Engine-refreshed timestamps from the ONE source (schema.AutoRefreshColumns,
+	// SILENT-CORRUPTION-S1): every auto:"update" field plus the legacy literal
+	// updated_at — this block used to hardcode the English name, silently
+	// freezing every differently-named modification timestamp at creation.
+	now := time.Now().UTC()
+	for _, col := range res.AutoRefreshColumns() {
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", pgx.Identifier{col}.Sanitize(), argIdx))
+		args = append(args, now)
 		argIdx++
 	}
 	if len(setClauses) == 0 {
@@ -1600,7 +1605,7 @@ func CollectUpdate(res *schema.ResourceSchema, body map[string]any, put bool, wr
 			errs = append(errs, schema.FieldRuleError{Field: k, Rule: "unknown_field", Message: fmt.Sprintf("unknown field: %q", k)})
 			continue
 		}
-		if fd.Auto {
+		if fd.Auto.Enabled() {
 			errs = append(errs, schema.FieldRuleError{Field: k, Rule: "read_only", Message: fmt.Sprintf("field %q is set automatically and cannot be written", k)})
 			continue
 		}
@@ -1618,7 +1623,7 @@ func CollectUpdate(res *schema.ResourceSchema, body map[string]any, put bool, wr
 	// PUT requires every non-auto required field to be present and non-null.
 	if put {
 		for name, fd := range res.Fields {
-			if fd.Auto || !fd.Required {
+			if fd.Auto.Enabled() || !fd.Required {
 				continue
 			}
 			if v, present := body[name]; !present {
@@ -1646,7 +1651,7 @@ func CollectUpdate(res *schema.ResourceSchema, body map[string]any, put bool, wr
 	if put {
 		// Full replacement: write every non-auto field — body value or NULL.
 		for name, fd := range res.Fields {
-			if fd.Auto || !writable(name) {
+			if fd.Auto.Enabled() || !writable(name) {
 				continue
 			}
 			sets[name] = body[name] // absent key → nil → NULL

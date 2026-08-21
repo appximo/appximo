@@ -48,7 +48,7 @@ func txSchema() *schema.APISchema {
 					"account_id": {Type: "uuid", Required: true},
 					"amount":     {Type: "float64", Required: true},
 					"ref":        {Type: "string", Required: true, Unique: true},
-					"created_at": {Type: "time", Auto: true},
+					"created_at": {Type: "time", Auto: schema.AutoLegacy},
 				},
 				Events: []string{"create"}, // emit in the SAME tx — must roll back with the batch
 			},

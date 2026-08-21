@@ -376,8 +376,10 @@ with a letter, `_` for multi-word names; anything else rejects the schema with
 
 Every resource gets an implicit `id` column of type UUID, `NOT NULL`, primary key,
 `DEFAULT gen_random_uuid()` — added by the migration builder, not declared in JSON
-(`pkg/migration/desired.go`). **Do NOT declare `id` in `fields`**: the builder
-explicitly skips a field literally named `id` (`desired.go`), and RBAC/FK code
+(`pkg/migration/desired.go`). **Declaring a field (or a `relations` entry) literally
+named `id` is a load error `reserved_field_name`** (SILENT-CORRUPTION-S1): the
+migration used to silently skip the field while GraphQL and the `?include=` embeds
+half-honored it (a relation named `id` even REPLACED the row's id in embeds). RBAC/FK code
 treats `id` as always-present (`rbacFieldExists` returns true for `id`,
 `validator.go`; `refColumnKind`/`targetFieldType` treat `id` as `uuid`,
 `validator.go`). `id` is also the implicit FK destination (see §3.4) and the
@@ -500,11 +502,32 @@ These keys shape the column and its constraints. (The declarative *validation* k
   named `<resource>_<field>_key` (`desired.go`). A write that collides returns
   `409 Conflict` (the raw Postgres error is masked). A composite unique constraint
   is declared via `indexes` (`{ "fields": [...], "unique": true }`), not here.
-- **`auto`** (bool, default false) — engine-managed timestamp column: `TIMESTAMPTZ
-  DEFAULT now()`, nullable (`desired.go`). Intended for `created_at` /
-  `updated_at`. An `auto` field is exempt from the `required` check, and **cannot
-  declare a `default`** — `validateDefault` rejects it with
-  `default cannot be set on an auto field` (`validator.go`).
+- **`auto`** (`true` | `"create"` | `"update"`, default off) — engine-managed
+  timestamp column: `TIMESTAMPTZ DEFAULT now()`, nullable (`desired.go`). The
+  declared type **must be `time`** — anything else is the load error
+  `auto_requires_time` (the column is TIMESTAMPTZ regardless, so any other
+  declaration would silently diverge from the database). The value declares the
+  ROLE, name-independently (SILENT-CORRUPTION-S1, `pkg/schema/auto.go`):
+  - `"create"` — set once at insert, never refreshed. Any field name
+    (`creado_en`, `placed_at`, `fecha`).
+  - `"update"` — set at insert AND refreshed to `now()` by the engine on
+    **every** update: REST PUT/PATCH, GraphQL `update…`, a batch
+    `/api/transaction` op and `Ctx.Update` all consume the one derivation
+    (`schema.AutoRefreshColumns`). Any field name (`modificado_en`).
+  - `true` (legacy) — `"create"` semantics, EXCEPT the literal name
+    `updated_at`, which also refreshes (the historical, documented magic —
+    byte-compatible with every existing schema). Legacy `true` on a name that
+    reads as update intent (`modificado_en`, `last_modified`, `actualizado_*`,
+    …) raises the SCHEMA-5 **warning `auto_update_intent`**: the field would
+    freeze at its creation value forever while its name claims otherwise.
+  An `auto` field is exempt from the `required` check, is **read-only for
+  clients** (present in an update body → `422 read_only`; excluded from
+  GraphQL inputs), **cannot declare a `default`** (`validateDefault` rejects it
+  with `default cannot be set on an auto field`), and is published in
+  `/openapi.json` with `readOnly: true` + `x-appximo-auto` naming the
+  effective role (`"create"`/`"update"`), so generic tools never have to guess
+  from English names. An unrecognized string is the load error `invalid_auto`
+  listing the valid forms.
 - **`enum`** (array of strings) — restricts the value to the listed set. String
   values only; a write outside the set is a `422`. The key must not be present and
   empty: an empty array rejects the schema with `enum must not be empty`
@@ -567,7 +590,11 @@ conditions:
 
 **Generated read subroute.** For a relation field, the engine registers
 `GET /api/{resource}/{id}/{relRoute}` returning the referenced record, where
-`relRoute = strings.TrimSuffix(fieldName, "_id")` (`pkg/codegen/builder.go`).
+`relRoute = schema.RelationSubroute(fieldName)` — the field name minus a trailing
+`_id`, the SINGLE derivation shared by the router, the OpenAPI generator and the
+write-files generator (SILENT-CORRUPTION-S1). Two relation fields of one resource
+that collapse to the same segment (`customer` + `customer_id`) are the load error
+`relation_subroute_collision` — before, chi silently kept a per-boot-random winner.
 So `customer_id` → `GET /api/orders/{id}/customer`. The JOIN follows the FK to the
 `references` column (default `id`) (`builder.go`). A relation field whose
 name does NOT end in `_id` keeps its full name in the route (e.g. a field

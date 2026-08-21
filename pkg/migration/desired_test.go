@@ -17,7 +17,7 @@ func bridgeSchema() *schema.APISchema {
 					"codigo":     {Type: "string", Required: true, Unique: true},
 					"nombre":     {Type: "string", Required: true},
 					"activo":     {Type: "bool", Default: true},
-					"created_at": {Type: "time", Auto: true},
+					"created_at": {Type: "time", Auto: schema.AutoLegacy},
 				},
 				Indexes: []schema.IndexDef{{Fields: []string{"activo"}}},
 			},
@@ -25,7 +25,7 @@ func bridgeSchema() *schema.APISchema {
 				Fields: map[string]schema.FieldDef{
 					"email":           {Type: "string", Required: true, Unique: true, Format: "email"},
 					"departamento_id": {Type: "uuid", Relation: "departamentos"},
-					"created_at":      {Type: "time", Auto: true},
+					"created_at":      {Type: "time", Auto: schema.AutoLegacy},
 				},
 				Relations: map[string]schema.RelationDef{
 					"departamento": {Type: schema.RelationBelongsTo, Target: "departamentos", FK: "departamento_id"},

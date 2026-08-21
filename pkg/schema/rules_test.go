@@ -20,7 +20,7 @@ func rulesResource() *ResourceSchema {
 			"ref":    {Type: "string", Format: "uuid"},
 			"site":   {Type: "string", Format: "url"},
 			"day":    {Type: "string", Format: "date"},
-			"id_at":  {Type: "time", Auto: true, Required: true}, // auto ⇒ never required at write
+			"id_at":  {Type: "time", Auto: AutoLegacy, Required: true}, // auto ⇒ never required at write
 		},
 	}
 }

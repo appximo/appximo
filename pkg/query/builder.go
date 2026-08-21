@@ -247,10 +247,20 @@ func BuildQuery(
 	// understood or rejected. It is never skipped, because skipping it returns an
 	// unfiltered list under a 200 — the caller cannot tell the difference between
 	// "no rows matched your filter" and "your filter was thrown away".
-	for key, vals := range params {
-		if !strings.HasPrefix(key, filterParamPrefix) {
-			continue
+	// Sorted like the order[…] loop below (ENG-16 class, SILENT-CORRUPTION-S1):
+	// with two invalid filter parameters, the 400 used to name whichever key
+	// Go's map iteration reached first — a different error per identical
+	// request. Valid filters are ANDed, so their order never changed results;
+	// only the error message was random. Sorted keys make it deterministic.
+	var filterKeys []string
+	for key := range params {
+		if strings.HasPrefix(key, filterParamPrefix) {
+			filterKeys = append(filterKeys, key)
 		}
+	}
+	sort.Strings(filterKeys)
+	for _, key := range filterKeys {
+		vals := params[key]
 		m := filterParamRe.FindStringSubmatch(key)
 		if m == nil {
 			return nil, fmt.Errorf("malformed filter parameter %q: expected filter[field] or filter[field][op]", key)
@@ -817,7 +827,14 @@ var listOnlyParams = []string{"page", "per_page", "sort", "order", "after", "bef
 // parameters keep their ADR-024 tolerance — only what the engine OWNS is
 // checked.
 func RejectListParams(params url.Values, route string, alsoInclude bool) error {
+	// Sorted (ENG-16 class, SILENT-CORRUPTION-S1): with two rejected
+	// parameters the 400 used to name a random one per identical request.
+	keys := make([]string, 0, len(params))
 	for key := range params {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
 		owned := strings.HasPrefix(key, filterParamPrefix) || strings.HasPrefix(key, orderParamPrefix)
 		if !owned {
 			for _, p := range listOnlyParams {

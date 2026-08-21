@@ -1029,7 +1029,7 @@ func exampleCurl(s *schema.APISchema, resource, host string, port int) string {
 	sample := map[string]any{}
 	ok := true
 	for name, f := range res.Fields {
-		if !f.Required || f.Auto {
+		if !f.Required || f.Auto.Enabled() {
 			continue
 		}
 		switch {

@@ -19,7 +19,7 @@ func testResource() *schema.ResourceSchema {
 			"nombre":     {Type: "string"},
 			"amount":     {Type: "float64"},
 			"precio":     {Type: "float64"},
-			"created_at": {Type: "time", Auto: true},
+			"created_at": {Type: "time", Auto: schema.AutoLegacy},
 			"user_id":    {Type: "uuid"},
 		},
 	}
@@ -680,7 +680,7 @@ func isNullResource() *schema.ResourceSchema {
 			"raw":        {Type: "json"},
 			"attrs":      {Type: "jsonb"},
 			"name":       {Type: "string", Required: true},
-			"created_at": {Type: "time", Auto: true},
+			"created_at": {Type: "time", Auto: schema.AutoLegacy},
 		},
 	}
 }

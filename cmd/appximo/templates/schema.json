@@ -7,8 +7,8 @@
       "fields": {
         "name":        { "type": "string", "required": true },
         "description": { "type": "text" },
-        "created_at":  { "type": "time",   "auto": true },
-        "updated_at":  { "type": "time",   "auto": true }
+        "created_at":  { "type": "time",   "auto": "create" },
+        "updated_at":  { "type": "time",   "auto": "update" }
       }
     }
   },

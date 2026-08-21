@@ -64,7 +64,7 @@ func buildDesiredSchema(pgSchema string, s *schema.APISchema) *schemadiff.Schema
 			if name == "id" {
 				continue
 			}
-			if f.Auto {
+			if f.Auto.Enabled() {
 				auto = append(auto, name)
 			} else {
 				regular = append(regular, name)

@@ -133,7 +133,14 @@ func BuildAggregate(
 	// cache-busters browsers and mail clients append); an authenticated
 	// aggregate XHR is never a decorated link, so the tolerance buys nothing
 	// here and hides typos.
+	// Sorted (ENG-16 class, SILENT-CORRUPTION-S1): with two unknown parameters
+	// the 400 used to name a random one per identical request.
+	unknownScan := make([]string, 0, len(params))
 	for key := range params {
+		unknownScan = append(unknownScan, key)
+	}
+	sort.Strings(unknownScan)
+	for _, key := range unknownScan {
 		if aggOwnedParams[key] || strings.HasPrefix(key, filterParamPrefix) {
 			continue
 		}

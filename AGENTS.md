@@ -629,7 +629,9 @@ Naming rules (enforced at load): resource **and** field names both match
 GraphQL identifier; a hyphenated name used to pass `validate` then crash the
 engine at boot). The `auth_` prefix is **reserved** (the per-tenant
 authentication tables), so a resource cannot be named `auth_users`. An `id` UUID
-primary key is implicit — don't declare it. The validator is **strict about keys**: any key
+primary key is implicit — don't declare it (a field or relation literally named `id`
+is now a load error `reserved_field_name`: the migration silently skipped the field
+while GraphQL/embeds half-honored it — SILENT-CORRUPTION-S1). The validator is **strict about keys**: any key
 outside the documented surface — at any level — rejects the schema with
 an error listing the valid keys for that level, so typos never become
 silently dead config.
@@ -701,8 +703,21 @@ zero queries.
   composite `unique` index) returns **`409 Conflict`** —
   `{"error":"field \"<field>\": value already exists"}` — on both REST (create &
   update) and GraphQL (in `errors[]`); the raw Postgres error is never exposed.
-- `auto: true` — engine-managed `TIMESTAMPTZ DEFAULT now()` (for
-  `created_at` / `updated_at`); exempt from the required check.
+- `auto: "create" | "update" | true` — engine-managed timestamp
+  (`TIMESTAMPTZ DEFAULT now()`; type must be `time` — any other declared type
+  is a load error `auto_requires_time`; exempt from the required check; the
+  client can never write it — update answers 422 `read_only`). The roles are
+  NAME-INDEPENDENT (SILENT-CORRUPTION-S1): `"create"` = set once at insert;
+  `"update"` = ALSO refreshed to now() by the engine on every update (REST
+  PUT/PATCH, GraphQL update, batch transaction and `Ctx.Update` — one shared
+  source, `schema.AutoRefreshColumns`), so `modificado_en` or any Spanish name
+  works. Legacy `true` = create semantics EXCEPT the literal name `updated_at`,
+  which also refreshes (the historical magic, kept byte-compatible); `true` on
+  an update-intent name (`modificado_en`, `last_modified`, …) raises the
+  SCHEMA-5 warning `auto_update_intent` naming the frozen behavior and the fix.
+  In `/openapi.json` an auto field carries `readOnly: true` +
+  `x-appximo-auto: "create"|"update"` (the EFFECTIVE role), so generic tools
+  read the truth from the contract instead of guessing from English names.
 - `enum: ["a", "b"]` — string values only; writes outside the set → 422.
 - `default: <value>` — applied **on create** (POST / GraphQL `create…`) when the
   field is OMITTED (a present key, even explicit `null`, is left as sent — like
@@ -833,7 +848,11 @@ subroute enforces the role's RBAC on the **referenced** resource (SEC-AUDIT-V1):
 `read` on the target is required (else `403`), the target's row condition scopes the
 result (a hidden row is `404`), and the target's field allowlist applies — the same
 scoping `GET /api/customers` and the `?include=` embeds apply, so the subroute never
-exposes a row/field the role could not otherwise read.
+exposes a row/field the role could not otherwise read. Two relation fields of one
+resource whose names collapse to the SAME segment (`customer` + `customer_id`) are
+a **load error** `relation_subroute_collision` (SILENT-CORRUPTION-S1 — the router
+used to keep a per-boot-random winner); the segment derivation is the single
+source `schema.RelationSubroute`, shared by the router, OpenAPI and the generator.
 
 - **`on_delete`** declares the referential action when the referenced (parent)
   row is deleted: `restrict` | `cascade` | `set_null`. **Unset defaults to

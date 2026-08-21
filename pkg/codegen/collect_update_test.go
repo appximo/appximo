@@ -12,7 +12,7 @@ func updRes() *schema.ResourceSchema {
 			"title":      {Type: "string", Required: true},
 			"amount":     {Type: "int64"},
 			"attachment": {Type: "file"},
-			"created_at": {Type: "time", Auto: true},
+			"created_at": {Type: "time", Auto: schema.AutoLegacy},
 		},
 	}
 }

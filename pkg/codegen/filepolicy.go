@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -55,7 +56,16 @@ type fileMetaFetch func(id string) (size int64, contentType string, found bool, 
 // (the S44 contract: one response carries every failing field).
 func checkFilePolicies(res *schema.ResourceSchema, vals map[string]any, fetch fileMetaFetch) ([]schema.FieldRuleError, error) {
 	var out []schema.FieldRuleError
+	// Sorted iteration (SILENT-CORRUPTION-S1): the violations reach the client
+	// as the 422 errors[] array, and "a response that reshuffles between
+	// identical requests is untestable" (the CollectUpdate rule) applies here
+	// identically — this loop used to range the map unsorted.
+	names := make([]string, 0, len(res.Fields))
 	for name := range res.Fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
 		fd := res.Fields[name]
 		if !fd.HasFilePolicy() {
 			continue

@@ -101,7 +101,7 @@ func TestValidateDefault_LoadErrors(t *testing.T) {
 		{"uuid bad", FieldDef{Type: "uuid", Default: "not-a-uuid"}, false},
 		{"enum member ok", FieldDef{Type: "string", Enum: []string{"a", "b"}, Default: "a"}, true},
 		{"enum non-member", FieldDef{Type: "string", Enum: []string{"a", "b"}, Default: "c"}, false},
-		{"auto+default rejected", FieldDef{Type: "time", Auto: true, Default: "now"}, false},
+		{"auto+default rejected", FieldDef{Type: "time", Auto: AutoLegacy, Default: "now"}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

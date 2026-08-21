@@ -54,7 +54,7 @@ func e2eSchema() *schema.APISchema {
 					"code":        {Type: "string", Required: true},
 					"status":      {Type: "string"},
 					"operator_id": {Type: "uuid"},
-					"created_at":  {Type: "time", Auto: true},
+					"created_at":  {Type: "time", Auto: schema.AutoLegacy},
 				},
 				Hooks: map[string]schema.HookConfig{
 					"before_create": {

@@ -567,7 +567,7 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 		inputFields := gql.InputObjectConfigFieldMap{}
 		for _, fname := range sortedFieldNames(&res) {
 			fd := res.Fields[fname]
-			if fd.Auto {
+			if fd.Auto.Enabled() {
 				continue
 			}
 			t := scalarInput(fd)
@@ -595,7 +595,7 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 		updateInputFields := gql.InputObjectConfigFieldMap{}
 		for _, fname := range sortedFieldNames(&res) {
 			fd := res.Fields[fname]
-			if fd.Auto {
+			if fd.Auto.Enabled() {
 				continue
 			}
 			updateInputFields[fname] = &gql.InputObjectFieldConfig{Type: scalarInput(fd)}

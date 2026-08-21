@@ -57,7 +57,7 @@ func benchSchema() *schema.APISchema {
 				Fields: map[string]schema.FieldDef{
 					"code":       {Type: "string", Required: true},
 					"status":     {Type: "string"},
-					"created_at": {Type: "time", Auto: true},
+					"created_at": {Type: "time", Auto: schema.AutoLegacy},
 				},
 				Hooks: map[string]schema.HookConfig{
 					"before_create": {

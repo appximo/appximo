@@ -44,7 +44,14 @@ FIELD KEYS (all optional unless noted):
     "required" rejects only an absent key or null — the empty string "" is a
     present value, so an empty form field would create blank records with 201.
     The validator warns on this (rule required_text_without_min_length).
-  "auto": true  (engine-managed timestamp, for created_at/updated_at; type must be time)
+  "auto": "create" | "update" | true  (engine-managed timestamp; type must be time,
+    field is read-only for clients). "create" = set once when the record is
+    inserted; "update" = ALSO refreshed by the engine on every update. The roles
+    work with ANY field name — a Spanish "modificado_en" or "fecha_registro" is
+    fine. Legacy "auto": true = create semantics, EXCEPT the literal name
+    updated_at which also refreshes; on any other update-intent name it would
+    freeze at creation (the validator warns, rule auto_update_intent) — prefer
+    the explicit "create"/"update" strings.
   "relation": "<other_resource>"  (makes this uuid field a foreign key),
     optional "on_delete": "restrict" | "cascade" | "set_null"
   a "file" field attaches an uploaded file to the record (stores a file_id with
