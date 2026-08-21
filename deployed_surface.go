@@ -135,6 +135,15 @@ func (d *deployedSurfaces) deployedSchema(tenantID string) *schema.APISchema {
 // and deployed field sets, with the deployed definition winning where both declare a
 // field (the deployed one describes the column that is actually in the table).
 //
+// The `import` declaration (WRITE-ASYMMETRY-S1) also follows the DEPLOYED
+// resource — including its absence, so removing a grant deploys hot too. It is
+// a per-request write-validation decision exactly like a field's rules, not a
+// boot-compiled artifact, and the documented fixture-restore flow (`migrate`
+// the schema, then POST with the id) depends on it taking effect without a
+// restart. The GraphQL half stays restart-gated with the rest of the
+// boot-compiled input types (a hot-deployed grant is REST/batch/Ctx-usable
+// immediately; the mutation input gains the fields on restart).
+//
 // Everything else — hooks, relations, events, indexes — is taken from the BOOT
 // resource: those are compiled into the router, the hook runner and the GraphQL
 // types at boot, so pretending a deployed change to them is live would be the same
@@ -149,6 +158,7 @@ func mergeWritableFields(bootRes, depRes schema.ResourceSchema) *schema.Resource
 		fields[k] = v
 	}
 	merged.Fields = fields
+	merged.Import = depRes.Import
 	return &merged
 }
 

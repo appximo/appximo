@@ -577,6 +577,22 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 				inputFields[fname] = &gql.InputObjectFieldConfig{Type: t}
 			}
 		}
+		// Import (WRITE-ASYMMETRY-S1): a resource that DECLARES import exposes
+		// its declared governed fields (id / auto timestamps) as OPTIONAL
+		// create inputs — the structural half of the door. WHO may actually
+		// supply them is decided at resolve time by the same
+		// schema.GovernedFieldViolations every other door consults (the type
+		// system is role-independent, exactly like the rest of RBAC). A
+		// resource with no declaration keeps its historical input shape:
+		// governed fields are not part of the type at all.
+		for _, fname := range res.ImportDeclaredFields() {
+			desc := "Import-only (WRITE-ASYMMETRY-S1): accepted solely from a role the resource's \"import\" declaration grants; every other caller gets a read_only validation error."
+			if fname == "id" {
+				inputFields["id"] = &gql.InputObjectFieldConfig{Type: gql.ID, Description: desc}
+				continue
+			}
+			inputFields[fname] = &gql.InputObjectFieldConfig{Type: scalarInput(res.Fields[fname]), Description: desc}
+		}
 		// graphql-go PANICS on an input object with zero fields, so a type is
 		// created ONLY when it has at least one field (BUG2). A resource whose
 		// columns are all uuid (no orderable/filterable fields) or all auto (no
@@ -1239,7 +1255,16 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 				norm[k] = v
 			}
 		}
-		if verrs := rv.ValidateWrite(norm, true); len(verrs) > 0 {
+		// Governed fields (WRITE-ASYMMETRY-S1): for an import-declaring
+		// resource the create input structurally CARRIES id/auto fields, so
+		// the role gate runs here — the SAME schema.GovernedFieldViolations
+		// the REST POST, the batch transaction and Ctx.Insert consult (via
+		// PrepareCreate), collected with the declarative violations so one
+		// response names every failing field (S44). On a resource with no
+		// declaration the input type already rejected the keys structurally.
+		verrs := schema.GovernedFieldViolations(res, norm, schema.GovernedCreate, callerRole(p.Context))
+		verrs = append(verrs, rv.ValidateWrite(norm, true)...)
+		if len(verrs) > 0 {
 			return nil, &validationError{fields: verrs}
 		}
 		if verrs := rv.ValidateInitialStates(norm); len(verrs) > 0 { // G5: create in an initial state
@@ -1485,6 +1510,16 @@ func gqlPublish(hub *events.Hub, tenantID, resource, typ string, record map[stri
 }
 
 // ── RBAC helper ───────────────────────────────────────────────────────────────
+
+// callerRole extracts the authenticated JWT role — consulted only by the
+// governed-field import grant (WRITE-ASYMMETRY-S1). Empty when the context
+// carries no claims, which can only permit less (matches no grant).
+func callerRole(ctx context.Context) string {
+	if c := auth.ClaimsFromCtx(ctx); c != nil {
+		return c.Role
+	}
+	return ""
+}
 
 func checkRBAC(ctx context.Context, policy *rbac.Policy, resource, action string) (*rbac.EvalResult, error) {
 	claims := auth.ClaimsFromCtx(ctx)

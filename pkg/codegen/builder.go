@@ -551,11 +551,14 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// answered 201, while PATCH answered a clean 422 for the same value
 			// (ADR-024).
 			// PrepareCreate is the SHARED core (CTX-PARITY-S1): defaults →
+			// governed fields (id/auto rejected unless the resource's `import`
+			// declaration grants them to this role, WRITE-ASYMMETRY-S1) +
 			// declarative rules + value types (collected together, so one
 			// response carries every failing field) → state-machine initial
-			// states. Ctx.Insert calls the SAME function, which is what keeps
-			// backend-spec's "exactly like the generated POST" true.
-			if verrs := PrepareCreate(wres, wrv, body); len(verrs) > 0 {
+			// states. Ctx.Insert and the batch transaction call the SAME
+			// function, which is what keeps backend-spec's "exactly like the
+			// generated POST" true.
+			if verrs := PrepareCreate(wres, wrv, body, callerRole(req.Context())); len(verrs) > 0 {
 				markSpan(req, "validate")
 				writeValidationErrs(w, verrs)
 				return
@@ -1568,6 +1571,17 @@ func classifyTransitionFailure(vals []any, stateFields []string, sets map[string
 	return http.StatusConflict, "the resource changed during the update; retry"
 }
 
+// callerRole extracts the authenticated JWT role from the request context —
+// the role the governed-field import grant is evaluated against
+// (WRITE-ASYMMETRY-S1). Empty (never a guess) when the request carries no
+// claims, which can only permit LESS: an empty role matches no import grant.
+func callerRole(ctx context.Context) string {
+	if c := auth.ClaimsFromCtx(ctx); c != nil {
+		return c.Role
+	}
+	return ""
+}
+
 // CollectUpdate validates body against the resource schema for an update and
 // returns the columns→values to write (excluding the auto updated_at, which
 // RunUpdate forces to NOW()). On a validation failure it returns the violations
@@ -1593,20 +1607,20 @@ func classifyTransitionFailure(vals []any, stateFields []string, sets map[string
 // fields, type-check values, and validate enums. Fields the role may not write
 // (per writable) are silently dropped from the result.
 func CollectUpdate(res *schema.ResourceSchema, body map[string]any, put bool, writable func(string) bool) (map[string]any, []schema.FieldRuleError) {
-	var errs []schema.FieldRuleError
-	// Reject id / unknown / auto-managed keys, then type-check each present value.
+	// Governed fields (`id` + auto) come from the ONE source every write door
+	// consults (schema.GovernedFieldViolations, WRITE-ASYMMETRY-S1) — the
+	// update op never permits them, import declaration or not. The messages are
+	// byte-compatible with what this function answered inline before.
+	errs := schema.GovernedFieldViolations(res, body, schema.GovernedUpdate, "")
+	// Reject unknown keys, then type-check each present value (governed keys
+	// were already judged above).
 	for k, v := range body {
-		if k == "id" {
-			errs = append(errs, schema.FieldRuleError{Field: "id", Rule: "read_only", Message: `field "id" cannot be set`})
+		if res.IsGovernedWriteField(k) {
 			continue
 		}
 		fd, known := res.Fields[k]
 		if !known {
 			errs = append(errs, schema.FieldRuleError{Field: k, Rule: "unknown_field", Message: fmt.Sprintf("unknown field: %q", k)})
-			continue
-		}
-		if fd.Auto.Enabled() {
-			errs = append(errs, schema.FieldRuleError{Field: k, Rule: "read_only", Message: fmt.Sprintf("field %q is set automatically and cannot be written", k)})
 			continue
 		}
 		if v == nil {

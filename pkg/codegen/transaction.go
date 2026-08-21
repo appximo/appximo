@@ -262,24 +262,17 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 			return nil, &txError{status: http.StatusBadRequest, op: op.Op, resource: op.Resource, msg: "guard is not supported on create: a guard compares an EXISTING row's values, and there is no row yet (guards apply to update and delete)"}
 		}
 		data := cloneData(op.Data)
-		ref.validator.ApplyDefaults(data)
-		// Declared rules AND value types, collected and reported together —
-		// byte-identical to the single-op create handler (ADR-024).
-		//
-		// The type half was missing here, so the batch path stayed a hole in the
-		// fix that closed the silent truncation: `{"amount": 1.9}` returned 200
-		// and stored 1 while the standalone POST returned 422, meaning a caller
-		// who hit that 422 and moved to the documented atomic endpoint got the
-		// corruption instead. It also made two shipped claims false at once — the
-		// promise above that a batch op is "validated EXACTLY like its single-op
-		// counterpart", and ADR-024's own rule that two paths accepting the same
-		// input must answer it the same way.
-		verrs := ref.validator.ValidateWrite(data, true)
-		verrs = append(verrs, validateCreateTypes(&ref.res, data)...)
-		if len(verrs) > 0 {
-			return nil, &txError{status: http.StatusUnprocessableEntity, op: op.Op, resource: op.Resource, msg: "validation_failed", fields: verrs}
-		}
-		if verrs := ref.validator.ValidateInitialStates(data); len(verrs) > 0 { // G5: create in an initial state
+		// PrepareCreate — the SAME shared core the single-op POST and Ctx.Insert
+		// run (defaults → governed fields + declared rules + value types,
+		// collected and reported together → state-machine initial states), so a
+		// batch create is validated byte-identically to its standalone
+		// counterpart (ADR-024). This used to restate the sequence inline; the
+		// restatement was exactly how the type check went missing here once
+		// (`{"amount": 1.9}` → 200 storing 1 while the standalone POST 422'd),
+		// and how the governed-field rule would have gone missing again
+		// (WRITE-ASYMMETRY-S1: `data.id`/`data.created_at` inserted verbatim
+		// while the standalone POST now rejects them).
+		if verrs := PrepareCreate(&ref.res, ref.validator, data, evalCtx.Role); len(verrs) > 0 {
 			return nil, &txError{status: http.StatusUnprocessableEntity, op: op.Op, resource: op.Resource, msg: "validation_failed", fields: verrs}
 		}
 		if hc, has := ref.res.Hooks["before_create"]; has {

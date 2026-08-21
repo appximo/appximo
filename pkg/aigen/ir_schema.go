@@ -134,6 +134,11 @@ func IROutputSchema() map[string]any {
 		"on_update":   irNullable(irEnum("restrict", "cascade", "set_null")),
 	})
 
+	importDecl := irObj(map[string]any{
+		"roles":  irArr(irStr()),
+		"fields": irNullable(irArr(irStr())),
+	})
+
 	resourceItem := irObj(map[string]any{
 		"name":         irStr(),
 		"fields":       irArr(fieldItem),
@@ -143,6 +148,7 @@ func IROutputSchema() map[string]any {
 		"foreign_keys": irNullable(irArr(fkItem)),
 		"events":       irNullable(irArr(irEnum("create", "update", "delete"))),
 		"renamed_from": irNullable(irStr()),
+		"import":       irNullable(importDecl),
 	})
 
 	rbac := irObj(map[string]any{"roles": irArr(roleItem)})

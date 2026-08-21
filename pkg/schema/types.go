@@ -59,6 +59,13 @@ type ResourceSchema struct {
 	// resource that omits this key emits nothing and pays zero overhead. See
 	// EmitActions / EmitTopic.
 	Events []string `json:"events,omitempty"`
+
+	// Import declares which roles may supply the engine-governed fields (the
+	// implicit `id` + every `auto` timestamp) when CREATING rows — the data-
+	// import / fixture-restore contract (WRITE-ASYMMETRY-S1). Absent, the
+	// governed fields are rejected on create at every door, exactly as they
+	// always were on update. See ImportConfig / GovernedFieldViolations.
+	Import *ImportConfig `json:"import,omitempty"`
 }
 
 // validEmitActions is the closed set of write actions a resource may opt into

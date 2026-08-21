@@ -47,6 +47,7 @@ type explainPhrases struct {
 	relBelongsTo    string
 	relManyToMany   string
 	eventsLine      string
+	importLine      string // roles list, fields list
 	hooksLine       string
 	rbacHeader      string
 	roleFull        string // role with * / *
@@ -100,6 +101,7 @@ var explainEN = explainPhrases{
 	relBelongsTo:    "each %s belongs to a %s (%q)",
 	relManyToMany:   "%s and %s are linked many-to-many (%q, via %s)",
 	eventsLine:      "Emits an event when a record is %s (for external processing).",
+	importLine:      "The role(s) %s may IMPORT records: on creation they may supply the engine-managed field(s) %s (for data migration / restores); everyone else, and every update, gets them set by the engine only.",
 	hooksLine:       "Has custom logic hooks on: %s.",
 	rbacHeader:      "Who can do what (roles)",
 	roleFull:        "%s — full access: every action on every resource.",
@@ -162,6 +164,7 @@ var explainES = explainPhrases{
 	relBelongsTo:    "cada %s pertenece a un %s (%q)",
 	relManyToMany:   "%s y %s se relacionan muchos-a-muchos (%q, vía %s)",
 	eventsLine:      "Emite un evento cuando un registro se %s (para procesamiento externo).",
+	importLine:      "El/los rol(es) %s pueden IMPORTAR registros: al crear pueden traer el/los campo(s) que maneja el motor %s (para migración de datos / restauraciones); todos los demás, y toda modificación, los reciben solo del motor.",
 	hooksLine:       "Tiene lógica custom (hooks) en: %s.",
 	rbacHeader:      "Quién puede hacer qué (roles)",
 	roleFull:        "%s — acceso total: toda acción sobre todo recurso.",
@@ -227,6 +230,9 @@ func Explain(s *APISchema, lang string) string {
 		explainFields(&b, r, p)
 		explainStateMachines(&b, r, p, esList)
 		explainRelations(&b, rn, r, p)
+		if r.Import != nil {
+			b.WriteString("  " + fmt.Sprintf(p.importLine, joinList(quoteAll(r.Import.Roles), esList), joinList(quoteAll(r.ImportDeclaredFields()), esList)) + "\n")
+		}
 		if len(r.Events) > 0 {
 			ev := make([]string, 0, len(r.Events))
 			for _, a := range r.Events {
@@ -570,4 +576,13 @@ func trimFloat(f float64) any {
 		return int64(f)
 	}
 	return f
+}
+
+// quoteAll wraps each entry in double quotes for prose lists.
+func quoteAll(ss []string) []string {
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = fmt.Sprintf("%q", s)
+	}
+	return out
 }

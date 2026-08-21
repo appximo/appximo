@@ -52,6 +52,15 @@ FIELD KEYS (all optional unless noted):
     updated_at which also refreshes; on any other update-intent name it would
     freeze at creation (the validator warns, rule auto_update_intent) — prefer
     the explicit "create"/"update" strings.
+    The engine OWNS auto fields and the implicit "id" on EVERY write door: a
+    create or update body carrying them is a 422 (rule "read_only"). The ONE
+    exception is a resource-level "import" declaration (sibling of "fields"):
+      "import": { "roles": ["admin"], "fields": ["id", "created_at"] }
+    which lets exactly the listed RBAC roles supply those fields ON CREATE
+    (data migration / restores; "fields" optional = all governed fields).
+    Declare it ONLY when the description asks for importing/migrating existing
+    records — never by default (it lets the granted role write its own
+    timestamps). Updates never accept engine-managed fields, import or not.
   "relation": "<other_resource>"  (makes this uuid field a foreign key),
     optional "on_delete": "restrict" | "cascade" | "set_null"
   a "file" field attaches an uploaded file to the record (stores a file_id with

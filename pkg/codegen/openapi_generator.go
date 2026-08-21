@@ -819,6 +819,16 @@ func oaResourceSchema(res *schema.ResourceSchema, includeAuto bool) map[string]a
 		sort.Strings(required)
 		out["required"] = required
 	}
+	// Import declaration (WRITE-ASYMMETRY-S1): the resource accepts these
+	// governed fields on CREATE from import-granted roles — published so a
+	// generic tool can discover the capability from the contract instead of
+	// probing. The granted ROLE LIST is deliberately not published: the spec
+	// is unauthenticated and role names are not (the ENG-27 anti-enumeration
+	// asymmetry). The governed properties keep readOnly:true — that is the
+	// truth for every caller outside the grant.
+	if res.Import != nil {
+		out["x-appximo-import"] = map[string]any{"fields": res.ImportDeclaredFields()}
+	}
 	return out
 }
 

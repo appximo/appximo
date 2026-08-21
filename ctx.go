@@ -644,13 +644,15 @@ func (c *requestCtx) Insert(resource string, data map[string]any) (map[string]an
 		return nil, &forbiddenError{"forbidden"}
 	}
 	// The SAME preparation the generated POST runs (CTX-PARITY-S1):
-	// defaults → declarative rules + value types → state-machine initial
-	// states. This used to be a bare ValidateWrite, so a custom handler skipped
-	// all three: a schema `default` was not applied (rows landed with a NULL
-	// status and the next transition failed with `invalid transition from ""`),
-	// values were never type-checked, and a row could be created outside its
+	// defaults → governed fields (id/auto rejected unless the resource's
+	// `import` declaration grants them to this role, WRITE-ASYMMETRY-S1) +
+	// declarative rules + value types → state-machine initial states. This
+	// used to be a bare ValidateWrite, so a custom handler skipped all three:
+	// a schema `default` was not applied (rows landed with a NULL status and
+	// the next transition failed with `invalid transition from ""`), values
+	// were never type-checked, and a row could be created outside its
 	// declared initial state — while backend-spec promised parity with the POST.
-	if verrs := codegen.PrepareCreate(res, rv, data); len(verrs) > 0 {
+	if verrs := codegen.PrepareCreate(res, rv, data, c.evalCtx().Role); len(verrs) > 0 {
 		return nil, &ValidationError{Fields: verrs}
 	}
 	// The SAME create-time RBAC the generated POST and the GraphQL create run

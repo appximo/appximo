@@ -57,7 +57,14 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 	for resName, rawRes := range object("resources", top["resources"]) {
 		resPath := "resources." + resName
 		res := object(resPath, rawRes)
-		addUnknown(resPath, res, "fields", "hooks", "indexes", "events", "relations", "renamed_from", "foreign_keys")
+		addUnknown(resPath, res, "fields", "hooks", "indexes", "events", "relations", "renamed_from", "foreign_keys", "import")
+
+		// import: the governed-field create grant (WRITE-ASYMMETRY-S1). Strict-key
+		// so a typo ("role" instead of "roles") is rejected, not a silently dead
+		// grant — the same contract as every other level.
+		if imp := object(resPath+".import", res["import"]); imp != nil {
+			addUnknown(resPath+".import", imp, "roles", "fields")
+		}
 
 		// foreign_keys: array of composite-FK entries (MIG-F1-S5). Strict-key each so a
 		// typo (e.g. "refcolumns" instead of "ref_columns") is rejected, not dropped.

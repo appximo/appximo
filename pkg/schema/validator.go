@@ -62,6 +62,17 @@ func fieldNamesList(res ResourceSchema) []string {
 	return out
 }
 
+// roleNamesList returns the schema's declared RBAC role names, sorted — for
+// "declared roles: …" hints (the import grant validation).
+func roleNamesList(s *APISchema) []string {
+	out := make([]string, 0, len(s.RBAC.Roles))
+	for n := range s.RBAC.Roles {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // joinQuoted renders a string slice as a quoted, comma-separated list for messages.
 func joinQuoted(ss []string) string {
 	q := make([]string, len(ss))
@@ -154,6 +165,56 @@ func Validate(s *APISchema) []ValidationError {
 					errs = append(errs, ValidationError{
 						Field:   resPrefix + ".renamed_from",
 						Message: fmt.Sprintf("renamed_from %q is still a declared resource — you cannot rename from a name that still exists (remove the old resource)", res.RenamedFrom),
+					})
+				}
+			}
+		}
+
+		// import (WRITE-ASYMMETRY-S1): the governed-field create grant. Closed,
+		// load-validated declaration — a typo'd role or field must be an error
+		// here, never a silently dead grant discovered at request time (the
+		// ENG-27 mold: a role the schema does not declare authorizes nothing).
+		if res.Import != nil {
+			impPrefix := resPrefix + ".import"
+			if len(res.Import.Roles) == 0 {
+				errs = append(errs, ValidationError{
+					Field:   impPrefix + ".roles",
+					Rule:    "import_roles_required",
+					Message: `"import" declares no roles: the grant would authorize nobody (dead config)`,
+					Fix:     `list the RBAC roles allowed to import (e.g. {"import":{"roles":["admin"]}}), or remove the "import" block`,
+				})
+			}
+			declared := roleNamesList(s)
+			for _, role := range res.Import.Roles {
+				if _, ok := s.RBAC.Roles[role]; !ok {
+					errs = append(errs, ValidationError{
+						Field:    impPrefix + ".roles",
+						Rule:     "import_unknown_role",
+						Got:      role,
+						Expected: declared,
+						Message:  fmt.Sprintf("import role %q is not declared in rbac.roles (declared: %s) — an undeclared role can never authenticate, so the grant would be dead config", role, joinQuoted(declared)),
+						Fix:      "name a role the rbac block declares, or add the role to rbac.roles",
+					})
+				}
+			}
+			if res.Import.Fields != nil && len(res.Import.Fields) == 0 {
+				errs = append(errs, ValidationError{
+					Field:   impPrefix + ".fields",
+					Rule:    "import_fields_empty",
+					Message: `"import.fields" is an empty list: the grant would cover no field (dead config)`,
+					Fix:     `list the governed fields the grant covers ("id" and/or auto fields), or omit "fields" to cover all of them`,
+				})
+			}
+			governed := res.GovernedWriteFields()
+			for _, f := range res.Import.Fields {
+				if !res.IsGovernedWriteField(f) {
+					errs = append(errs, ValidationError{
+						Field:    impPrefix + ".fields",
+						Rule:     "import_unknown_field",
+						Got:      f,
+						Expected: governed,
+						Message:  fmt.Sprintf("import field %q is not an engine-governed field of this resource (governed: %s) — \"import\" only unlocks fields the engine otherwise owns; every other field is already writable", f, joinQuoted(governed)),
+						Fix:      `list only "id" or auto fields; a regular field needs no import grant`,
 					})
 				}
 			}

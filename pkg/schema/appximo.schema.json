@@ -55,7 +55,29 @@
           "additionalProperties": { "$ref": "#/$defs/relation" }
         },
         "renamed_from": { "$ref": "#/$defs/ident" },
-        "foreign_keys": { "type": "array", "items": { "$ref": "#/$defs/foreignKey" } }
+        "foreign_keys": { "type": "array", "items": { "$ref": "#/$defs/foreignKey" } },
+        "import": { "$ref": "#/$defs/import" }
+      }
+    },
+
+    "import": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roles"],
+      "description": "Governed-field create grant: the roles that may supply the engine-governed fields (the implicit id + auto timestamps) when CREATING rows — the data-import / fixture-restore contract. Update never accepts them.",
+      "properties": {
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "RBAC roles granted import; each must be declared in rbac.roles (semantic check)."
+        },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Optional subset of the governed fields the grant covers ('id' and/or auto field names). Absent = all of them."
+        }
       }
     },
 
