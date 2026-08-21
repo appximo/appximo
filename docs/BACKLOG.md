@@ -26,7 +26,18 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-21 (FRESH-AGENT-GAPS-S1)** — the four fresh-agent
+**Last reviewed: 2026-08-21 (SILENT-CORRUPTION-S1)** — the two ENG-45 families
+that corrupt data silently over a validator-approved schema, closed as classes:
+the `auto` timestamp role is now DECLARED (`"create"`/`"update"`, any field
+name — `modificado_en` works; legacy `true` keeps the literal-`updated_at`
+magic and warns on update-intent names), with ONE refresh source consumed by
+REST/batch/Ctx.Update; and the relation-subroute collision (`customer` +
+`customer_id` → per-boot-random winner) is a load error from a single
+derivation, with the whole map-iteration-order class swept (sorted validation
+errors, deterministic 400s, `id` reserved, GraphQL self-shadow warned).
+ENG-45 re-prioritized by damage (silent corruption > non-determinism > loud
+failure > friction), each family with a written disposition; OPS-30 stays
+deferred untouched. Previous review: 2026-08-21 (FRESH-AGENT-GAPS-S1) — the four fresh-agent
 gaps closed as CLASSES: `created_at` is a load-time SCHEMA-5 warning (never
 implicit magic — doctrine C-DOCTRINA / decision, validator not engine
 autofill); the implicit-requirement class was AUDITED (8-reader sweep +
@@ -158,68 +169,74 @@ refreshed).
 
 ### ENG-45 — The implicit-requirement audit inventory (schema validates, breaks at runtime)
 
-- **Origin:** FRESH-AGENT-GAPS-S1 (2026-08-21), Part A class audit — an
-  8-reader source sweep + adversarial verify over the engine, hunting every
-  runtime behavior that assumes something a valid schema does not force to
-  declare. **27 findings (22 silent, 5 already-documented).** The doctrine for
-  all of them (03_DECISIONES C-DOCTRINA): each is closed by a LOAD-TIME check
-  (error, or a SCHEMA-5 warning when the pattern is sometimes legal) or
-  documented — **never** by the engine silently filling the value in.
-- **Closed this session:** (1) the `created_at`/timestamp convention →
-  SCHEMA-5 warning `missing_timestamps_convention`; (2) the GraphQL
-  type-name collision boot panic → load error `graphql_type_collision`
-  (from `schema.GraphQLTypeName`, the one source pkg/graphql now delegates to);
-  (3) `?include=` on a resource with no relations → the 400 now says a FK
-  column alone does not enable it.
-- **The families still OPEN, each to be closed at load or documented (they are
-  audit-surfaced; the load-bearing ones marked ✓ were hand-verified):**
-  - **Declared-relation pieces don't line up (the A.3 family).** `validateRelations`
-    checks the `target` resource exists but NOT that the relation's `fk`
-    column, an m2m `through` table, or `target_fk` exist ✓ — a valid schema
-    that misnames any of them fails at `?include=`/GraphQL time. Ready:
-    a SCHEMA-5 warning (not a hard error — a column can be hot-added or the
-    junction provisioned by BeforeStart DDL, the same escape the index-existence
-    check honors).
-  - **GraphQL/REST divergences.** A required field WITH a default is `NonNull`
-    in the GraphQL create input (omission rejected) where REST allows it; a
-    resource whose name is unchanged by `singular()` loses its list query to
-    the get-by-id field. Ready: reconcile or document per case.
-  - **`auto:true` on a non-time field** is provisioned `TIMESTAMPTZ DEFAULT now()`
-    regardless of declared type; **`updated_at` refresh is bound to that literal
-    column name** ✓ (verified: an auto field named `modificado_en` — a NORMAL
-    Spanish name, and Spanish schemas are the AI-generation flow's primary
-    audience — is frozen at creation forever on every PUT/PATCH/GraphQL/batch
-    update, AND cannot be written by hand either: the body echo is rejected
-    422 `read_only`. Silent wrong data on a validator-clean schema). Ready:
-    a SCHEMA-5 warning when an `auto` time field is not `created_at`/`updated_at`
-    (name-relative, like the timestamp warning), naming that only `updated_at`
-    auto-refreshes.
-  - **Relation subroute path collision** ✓. Two FK fields whose names collapse
-    under `TrimSuffix(_id)` — e.g. `customer` + `customer_id` — both register
-    `GET /api/{r}/{id}/customer`; chi (v5.3.0) silently overwrites, and Go's
-    randomized map iteration picks the winner PER BOOT, so the subroute can
-    serve a different relation (with the other resource's RBAC) after a
-    restart. Validator-clean today. Ready: a load error on a derived-subroute
-    collision (same shape as the GraphQL-collision fix shipped this session).
-  - **Ctx.Update parity gaps (CTX_PARITY family):** it does not reject id/auto
-    fields in the body, does not bump a declared auto `updated_at`, and a null
-    on a required field masks a raw 23502 as a 500 where the generated PATCH
-    returns a clean 422. Ready: route through the shared prepare path (the
-    fix pattern the CTX_PARITY audit already established).
-  - **`files`-resource shadowing:** the validator/router allow a schema
-    resource named `files` (a supported pattern) but the migration engine and
-    the `file`-field FK assume the engine's own metadata table — a validator-clean
-    combination that breaks at provision/attach time. Ready: reconcile the two,
-    or reject the shadow when a `file` field is present.
-  - **Runtime-config assumptions** (documented today, listed for completeness):
-    `hmac_secret_env` unset signs with the empty key; a `wasm` hook names a
-    module nothing can pre-load; a webhook `url` on http/loopback validates then
-    is refused at dispatch; `events` assumes an outbox consumer; `$external_client_id`
-    is schema-legal but no engine surface populates it. Each is a candidate
-    boot-time warning.
+- **Origin:** FRESH-AGENT-GAPS-S1 (2026-08-21), Part A class audit — 27
+  findings, 22 silent. SILENT-CORRUPTION-S1 (2026-08-21) re-audited the two
+  worst FAMILIES with two fresh sweeps (literal-English-name-bound behavior:
+  18 findings; map-iteration/boot-order non-determinism: 10 findings) and
+  closed them — see its DONE section. The doctrine stands (C-DOCTRINA): each
+  family is closed by a LOAD-TIME check (error, or a SCHEMA-5 warning when
+  sometimes legal) or documented — **never** by the engine filling values in.
+- **Priority criterion (SILENT-CORRUPTION-S1, written):** silent corruption >
+  non-determinism > loud failure > friction. The list below is ordered by it.
+- **CLOSED by SILENT-CORRUPTION-S1** (detail in its DONE section): the
+  name-bound `auto` family (auto:"create"/"update" roles + `auto_requires_time`
+  + `invalid_auto` errors + `auto_update_intent` warning + one refresh source
+  `schema.AutoRefreshColumns` consumed by REST/batch/Ctx.Update); the relation
+  subroute collision (`relation_subroute_collision` load error, single source
+  `schema.RelationSubroute`); field/relation named `id`
+  (`reserved_field_name`); custom-route writes now invalidate the response
+  cache; validation-error order, file-policy 422 order, filter/aggregate/
+  reject-list first-error — all deterministic; the GraphQL self-shadowed list
+  query warns (`graphql_list_query_shadowed`); OpenAPI marks auto fields
+  `readOnly` + `x-appximo-auto` and /app + both backoffice contract.js read it
+  from the contract.
+- **The families still OPEN, by damage:**
+  1. **(silent corruption) Create accepts a forged `id` and forged `auto`
+     values.** `POST {"id":"<uuid>","created_at":"1999-…"}` → 201, both stored
+     — while PATCH answers 422 `read_only` for the same keys, and GraphQL
+     rejects them structurally. Same input, three answers (the ADR-024 class);
+     a client can forge audit timestamps at creation. Surfaced by the
+     SILENT-CORRUPTION-S1 name-audit (finding F5), NOT closed there: whether a
+     deliberate id-on-create (data import) must keep working is a contract
+     decision that deserves its own look. **Disposition: close at the write
+     path (reject like update) or document import semantics explicitly — an
+     asymmetry is the one option that stays wrong.**
+  2. **(silent corruption) `files`-resource shadowing:** the validator allows a
+     schema resource named `files` but `migration.isEngineManagedTable`
+     excludes the table from every diff — never provisioned, never converged —
+     and a `file` field's FK assumes the engine's metadata table.
+     **Disposition: close at load** (reject the shadow when any `file` field
+     exists; provision the declared table otherwise) — or reject the shadow
+     outright.
+  3. **(silent corruption) Ctx.Update remaining parity gaps:** it does not
+     reject `id`/auto body fields (PrepareUpdate lacks CollectUpdate's
+     read_only pass) and a null on a required field surfaces a raw 23502 as a
+     500. (The refresh half and the stale-cache half were closed in
+     SILENT-CORRUPTION-S1.) **Disposition: route through the shared prepare
+     path — the CTX_PARITY fix pattern.**
+  4. **(silent no-op) Declared-relation pieces don't line up:** `fk`, m2m
+     `through` and `target_fk` are not checked to exist ✓ — fails at
+     `?include=`/GraphQL time. **Disposition: SCHEMA-5 warning** (a column can
+     be hot-added; the index-existence check honors the same escape).
+  5. **(silent no-op → now warned) GraphQL naming:** the self-singular list
+     shadow now WARNS (`graphql_list_query_shadowed`); the real fix (a
+     collision-free get-by-id name, e.g. `<name>ById`) is a GraphQL contract
+     break — **disposition: own increment, with a migration note**. Also still
+     open: a required field WITH a default is `NonNull` in the create input
+     where REST allows omission; Spanish plural mis-singularization
+     (`clases`→`Clas`) is cosmetic. **Disposition: reconcile or document per
+     case.**
+  6. **(friction/cosmetic) Runtime-config assumptions** (documented today):
+     `hmac_secret_env` unset signs with the empty key; a `wasm` hook naming an
+     unloadable module; an `events` list with no consumer; `$external_client_id`
+     never populated. **Disposition: candidate boot-time warnings.**
+  7. **(cosmetic) OpenAPI:** auto fields in responses now carry `readOnly`;
+     what remains is documenting the refresh semantics in the description
+     text. **Disposition: documentation.**
 - **Ready when:** every family above is either a load-time check with an
   actionable message or a documented deliberate-restart/limitation note — none
   left as a runtime-only surprise.
+
 
 ### OPS-29 — Releases lag the tags: v0.1.8's release run failed, and the Docker badge shows a SHA
 
@@ -875,6 +892,85 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in SILENT-CORRUPTION-S1 (2026-08-21)
+
+The two ENG-45 families that could not wait for launch — both of the shape
+"valid schema → validator approves → the engine corrupts or decides at random,
+silently" — closed as CLASSES, with two fresh audit sweeps (18 name-bound
+findings, 10 non-determinism findings) recorded in the session report.
+
+- **The `auto` role is now DECLARED, not guessed from an English name.**
+  `auto` accepts `"create"` (set once at insert, any name) and `"update"`
+  (refreshed by the engine on every update, any name) alongside the legacy
+  `true` (byte-compatible: create semantics + the literal-`updated_at` refresh
+  magic). One refresh source — `schema.AutoRefreshColumns` — consumed by REST
+  PUT/PATCH, the batch transaction AND `Ctx.Update` (which used to stamp
+  nothing: the same row got a fresh timestamp through REST and a stale one
+  through a handler). Load errors: `auto_requires_time` (the column is
+  TIMESTAMPTZ regardless of declaration — any other type silently diverged),
+  `invalid_auto` (closed value set). SCHEMA-5 warning `auto_update_intent`:
+  legacy `true` on an update-intent name (`modificado_en`, `last_modified`…)
+  names the frozen behavior and both fixes; create-intent domain names
+  (`placed_at`, `creado_en` — the engine's own examples) stay silent. The 422
+  `read_only` STAYS for every auto field (frozen+read-only is the correct pair
+  for a creation timestamp; the dead cell existed only because update intent
+  was inexpressible — now it is expressible). OpenAPI: auto fields carry
+  `readOnly: true` + `x-appximo-auto` (the EFFECTIVE role), and `/app`, both
+  backoffice `contract.js` copies and the BACKOFFICE spec now derive "engine-
+  managed" from the CONTRACT, never from the two English names (before, a
+  Spanish `modificado_en` rendered as an editable field the engine rejected on
+  save). Studio: the auto checkbox became a 4-option select (a toggle would
+  have silently degraded `"update"` → `true` — the same corruption class);
+  `explain` (en/es) words the two roles distinctly. Grammar (`GrammarCore` →
+  `spec` + the internal loop) teaches the roles; a LIVE Spanish `ai-generate`
+  run produced `modificado_en: {"auto": "update"}` first try, and the legacy
+  hand-written case warns at `validate`, `validate --json` (`warnings[]`) and
+  engine boot. Verified live end-to-end by a DB-backed integration test over
+  all three update paths (examples/model-lab/auto-roles.json).
+- **The relation-subroute collision is a load error, not a per-boot coin
+  flip.** `customer` + `customer_id` (both relation fields) used to collapse
+  onto `GET /api/{r}/{id}/customer` with chi silently keeping whichever field
+  Go's map iteration yielded last — a different relation, joined on a
+  different column, under the OTHER target's RBAC, per restart; the OpenAPI
+  deterministically documented one variant (right ~half the time) and
+  `appximo generate` emitted two same-named handlers that did not compile.
+  Now: ONE derivation `schema.RelationSubroute` (router + OpenAPI + generator
+  all delegate; anti-divergence test pins the OpenAPI paths against it) and
+  the load error `relation_subroute_collision` naming both fields, the path
+  and the fix — proven stable across 10 repeated validations, and `serve`
+  refuses to boot the colliding schema.
+- **The rest of the non-determinism class, swept and closed:** `Validate()`
+  returns its errors SORTED (the control-plane/admin deploy APIs used to
+  reshuffle them per call, and one path embedded `errs[0]` — a different
+  reason per identical retry); file-policy 422 violations sorted; the filter
+  loop, the aggregate unknown-param loop and `RejectListParams` now name the
+  sorted-first offender (the ENG-16 class — the same file already carried the
+  fix for `order[…]` with the measured 174/26 coin flip); a field OR relation
+  literally named `id` is the load error `reserved_field_name` (a relation
+  named `id` REPLACED the row's id in every embed; a field named `id` was
+  half-honored: migration skipped it, GraphQL let it overwrite `id: ID!`);
+  the self-singular GraphQL list shadow (`menu`, `media`, `lineas_orden`)
+  warns (`graphql_list_query_shadowed`). Verified already-clean: fleet
+  duplicate domains (both manifest paths reject), GraphQL type/field builds
+  (sorted), OpenAPI path assembly (sorted), migration DDL order (sorted).
+- **A parity hole the session's own test exposed, closed:** a committed
+  non-GET custom route now INVALIDATES the tenant's response cache (route.go
+  commit seam) — before, a `Ctx.Update` through a custom route left cached
+  GETs serving the pre-write record until TTL: fresh data written, stale data
+  read, no error anywhere. (Predates this session's changes; found because
+  the new integration test read back through a cached GET.)
+- **Data audit (nothing touched):** tiendita and petfriendly (read-only, via
+  /editor/current-schema) use only canonical `created_at`/`updated_at` —
+  zero affected rows in production; dev tenant `nimbus` has
+  `asignaciones.asignado_at` auto:true (create-intent name, correct create
+  semantics — no corruption, no warning); the in-repo fixtures' 11
+  domain-named auto fields are all create-intent and correct
+  (`dispatched_at`, `placed_at`, `creada`, …).
+- **Gates:** unit + full lane + `-tags integration` + lint 0 + gofmt/vet
+  clean; binary-diff gate + ABBA bench against the FROZEN new binary — see
+  the session report for the verdicts; 4 corpus rows + an auto field added to
+  the gate schema (timestamps are normalized, so the field is diff-safe).
 
 ## DONE in FRESH-AGENT-GAPS-S1 (2026-08-21)
 
