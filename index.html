@@ -12,6 +12,7 @@
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://appximo.github.io/appximo/">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Ctext x='32' y='45' font-family='Georgia,serif' font-size='40' font-weight='bold' fill='white' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E">
+<link rel="preload" href="assets/inter-latin-var.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="assets/asciinema-player.css">
 <style>
   @font-face{font-family:"Inter";font-style:normal;font-weight:100 900;font-display:swap;src:url("assets/inter-latin-var.woff2") format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
@@ -74,9 +75,8 @@
   /* hero */
   header.hero{position:relative;overflow:hidden;background:var(--color-ink-900);color:#fff;margin-top:-3.4rem;padding:calc(3.4rem + 4.2rem) 0 3.6rem;border-bottom:1px solid var(--line)}
   header.hero::before{content:"";position:absolute;inset:0;background:radial-gradient(80rem 40rem at 85% -20%,color-mix(in srgb,var(--color-brand) 45%,transparent) 0%,transparent 60%),radial-gradient(50rem 30rem at -10% 110%,color-mix(in srgb,var(--color-brand-700) 40%,transparent) 0%,transparent 55%);pointer-events:none}
-  header.hero::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.16;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.6'/%3E%3C/svg%3E")}
   .hero .wrap{position:relative;z-index:1}
-  .wordmark{font-weight:800;font-size:clamp(84px,22vw,340px);line-height:.78;letter-spacing:-.075em;color:var(--color-brand-400);filter:drop-shadow(0 20px 60px color-mix(in srgb,var(--color-brand) 35%,transparent));margin:0 0 .35em -.04em;user-select:none;font-variation-settings:"wght" 800}
+  .wordmark{font-weight:800;font-size:clamp(84px,22vw,340px);line-height:.78;letter-spacing:-.075em;color:var(--color-brand-400);margin:0 0 .35em -.04em;user-select:none;font-variation-settings:"wght" 800}
   .wordmark span{color:var(--color-brand-200)}
   .hero h1{font-size:clamp(1.9rem,5.4vw,2.95rem);letter-spacing:-.03em;line-height:1.12;max-width:56rem;color:#fff}
   .hero h1 .dim{color:rgba(255,255,255,.55)}
@@ -635,12 +635,12 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
   <div class="demo-split" style="margin-top:1.8rem">
     <figure class="media atina-loop float reveal">
       <div class="media-bar"><span class="media-dots"><i></i><i></i><i></i></span><span class="media-title">atina.appximo.com — kanban, live</span><span class="media-hint">silent loop · 9 s</span></div>
-      <video autoplay muted loop playsinline preload="metadata" poster="assets/shot-atina.webp" aria-label="atina back-office: dragging a candidate between pipeline phases on the kanban"><source src="assets/atina-kanban.webm" type="video/webm"><source src="assets/atina-kanban.mp4" type="video/mp4"></video>
+      <video muted loop playsinline preload="none" poster="assets/shot-atina.webp" data-autoplay aria-label="atina back-office: dragging a candidate between pipeline phases on the kanban"><source src="assets/atina-kanban.webm" type="video/webm"><source src="assets/atina-kanban.mp4" type="video/mp4"></video>
       <figcaption><b>atina</b> — a multi-client recruiting SaaS built by an <strong>external developer</strong> with no contact with us: 32 schema resources, 48 custom Go routes and 30+ SPA screens in one binary, HTTPS. Numbers counted in its public <code>/openapi.json</code>. <a href="https://github.com/appximo/appximo/blob/main/docs/CASE_STUDY_ATINA.md" rel="noopener">The build report, phase by phase →</a></figcaption>
     </figure>
     <figure class="media atina-loop float reveal">
       <div class="media-bar"><span class="media-dots"><i></i><i></i><i></i></span><span class="media-title">atina — public portal</span><span class="media-hint">silent loop · 9 s</span></div>
-      <video autoplay muted loop playsinline preload="metadata" aria-label="atina public portal: the landing hero and the job listings"><source src="assets/atina-landing.webm" type="video/webm"><source src="assets/atina-landing.mp4" type="video/mp4"></video>
+      <video muted loop playsinline preload="none" poster="assets/poster-atina-landing.webp" data-autoplay aria-label="atina public portal: the landing hero and the job listings"><source src="assets/atina-landing.webm" type="video/webm"><source src="assets/atina-landing.mp4" type="video/mp4"></video>
       <figcaption>The public portal, the candidate area and the client back-office are one Svelte SPA served by the engine binary. <a href="https://atina.appximo.com" rel="noopener">Open atina.appximo.com →</a> (the portal needs no account; the panels are the client's).</figcaption>
     </figure>
   </div>
@@ -1362,6 +1362,8 @@ document.documentElement.classList.add('js');
   document.querySelectorAll('.reveal-s > .wrap > h2, .reveal-s > .wrap > .kicker, .reveal-s > .wrap > .lead').forEach(function(el){el.classList.add('reveal');});
   var rv=document.querySelectorAll('.reveal');
   if(rv.length&&'IntersectionObserver' in window&&!reduce){var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}});},{rootMargin:'0px 0px -6% 0px'});rv.forEach(function(el){io.observe(el);});setTimeout(function(){rv.forEach(function(el){el.classList.add('in');});},2500);}else rv.forEach(function(el){el.classList.add('in');});
+  var vids=document.querySelectorAll('video[data-autoplay]');
+  if(vids.length){ if(reduce){/* quiet: poster only */} else if('IntersectionObserver' in window){ var vo=new IntersectionObserver(function(es){es.forEach(function(e){var v=e.target; if(e.isIntersecting){v.play().catch(function(){});} else {v.pause();}});},{rootMargin:'200px 0px'}); vids.forEach(function(v){vo.observe(v);}); } else vids.forEach(function(v){v.play().catch(function(){});}); }
   if(!reduce&&matchMedia('(hover:hover)').matches){document.querySelectorAll('.tilt').forEach(function(c){c.addEventListener('pointermove',function(e){var r=c.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;c.style.transform='perspective(900px) rotateX('+(-y*6)+'deg) rotateY('+(x*6)+'deg) translateY(-2px)';});c.addEventListener('pointerleave',function(){c.style.transform='';});});}
 })();
 </script>
