@@ -26,7 +26,19 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-21 (WRITE-ASYMMETRY-S1)** — ENG-45 family 1 (the
+**Last reviewed: 2026-08-26 (FRENTE-COMERCIAL-S1)** — a commercial-front
+session (no engine code): indexation infrastructure on both properties
+(robots/sitemap/canonical/JSON-LD — there was NO noindex; there was nothing
+at all), the third-party testimonial removed from the commercial pages under
+the "show me" rule, the stats band reduced to what survives a click, every
+`wa.me` CTA in first person with its own origin, the return bar live on both
+demos of the 58 (rollback drilled on each), atina as the fourth external
+evaluation (counts verified in its public `/openapi.json`, findings answered
+point by point, case study + design guide in docs/), and ONE segment page
+(conjuntos). New OPEN: OPS-31 (Google-account steps — Miguel), OPS-32 (no
+lead-capture endpoint for the subordinate path), ENG-46 (`/app` cannot carry
+a consumer banner), DOC-3 (batch-pattern reachability in backend-spec). New
+decisions for Miguel in the table below. Previous review: 2026-08-21 (WRITE-ASYMMETRY-S1) — ENG-45 family 1 (the
 POST/PATCH asymmetry over engine-governed fields) closed as a class: `id` +
 `auto` fields now answer the same 422 `read_only` at EVERY write door from ONE
 source (`schema.GovernedFieldViolations`), the import use case became a
@@ -147,6 +159,98 @@ refreshed).
 ---
 
 ## OPEN
+
+### OPS-31 — Indexation steps that need Miguel's Google account (Search Console, GBP)
+
+- **Origin:** FRENTE-COMERCIAL-S1 (2026-08-26), Part A.1. An external SEO
+  critique found neither `appximo.com` nor `appximo.github.io/appximo` in
+  any query, including hyper-specific ones; a WebSearch from the dev box on
+  2026-08-26 confirmed it (the "appximo" SERP is owned by Appium/AppSumo/
+  Apimo and a typo-squatter page that reports the domain as "expired one or
+  more times before"; the Wayback Machine has **zero** captures of the
+  domain, so that claim cannot be checked).
+- **What the session could do, and did:** verified there is NO `noindex`,
+  `nofollow` or `X-Robots-Tag` on either property (the suspect #1 was
+  innocent); added `robots.txt` (Allow all + Sitemap), `sitemap.xml`,
+  `<link rel="canonical">`, `og:url`, `meta robots` and JSON-LD
+  (`ProfessionalService` with phone + areaServed Pereira/Dosquebradas on the
+  landing; `Service` on conjuntos) to both properties; created the first
+  crawlable category-intent page (`conjuntos.html`, ~720 words of prose).
+- **What needs the account (exact steps, not attempted):**
+  1. Google Search Console → Add property → **Domain** `appximo.com` → verify
+     by the DNS TXT record Google prints (Cloudflare DNS → Records → TXT `@`).
+     Then Add property → **URL prefix** `https://appximo.github.io/appximo/`
+     → verify by HTML tag (add the `<meta name="google-site-verification">`
+     to `site/index.html`, publish to gh-pages) or by the HTML file (commit
+     it to gh-pages root).
+  2. In each property: Sitemaps → submit `https://appximo.com/sitemap.xml`
+     and `https://appximo.github.io/appximo/sitemap.xml`.
+  3. URL Inspection → paste `https://appximo.com/`, `/conjuntos.html`,
+     `/caso.html` and the site URL → **Request indexing** for each (one at
+     a time; the quota is ~10/day).
+  4. Pages report (Indexing → Pages) after 3–7 days: every URL must show
+     "Indexed"; anything under "Discovered – currently not indexed" is the
+     new-domain crawl budget, re-request weekly.
+  5. Google Business Profile → business.google.com → create "Appximo"
+     (category: *Software company* / *Custom software development*),
+     service area Pereira + Dosquebradas, phone +57 311 517 5472, website
+     appximo.com; verification is by postcard/phone/video as Google decides.
+     This is the local-intent lever the critique ranks above everything
+     else for "desarrollo de software a la medida Pereira".
+  6. Bing Webmaster Tools → import from Search Console (one click; Bing
+     feeds DuckDuckGo and ChatGPT search).
+- **Ready when:** both properties show the sitemap "Success" and the three
+  landing URLs "Indexed" in Search Console, and `site:appximo.com` returns
+  them.
+
+### OPS-32 — The subordinate secondary path has nowhere to deliver an email
+
+- **Origin:** FRENTE-COMERCIAL-S1 A.3.3. The research prescribes a
+  low-friction secondary CTA (PDF of the case in exchange for an email)
+  visually subordinate to WhatsApp. The landing is static GitHub Pages: no
+  endpoint receives a form, and the engine's demos are not the landing's
+  origin. The session shipped the OTHER documented secondary — "mire primero
+  un sistema funcionando, sin registrarse" (a text link under the hero CTA
+  → `#pruebe`) — and no email capture.
+- **Options (decision is Miguel's):** (a) a hosted form (Tally/Formspree
+  free tier: ~5 min, an account in Miguel's name, the email lands in his
+  inbox); (b) a `Route.Public` on one of the 58's engines
+  (`POST /api/leads` with `Route.RateLimit`, CORS to appximo.com) — ~1 h,
+  owned, but couples the landing to a demo box; (c) a `mailto:` link
+  (zero infra, fewer conversions, no PDF). The PDF itself (the case in
+  Spanish) does not exist yet either.
+- **Ready when:** a visitor can leave an email and receives the case, and
+  the address lands somewhere Miguel reads.
+
+### ENG-46 — `/app` (the embedded back-office) cannot carry a consumer banner
+
+- **Origin:** FRENTE-COMERCIAL-S1 A.3.1. The return bar reached the tiendita
+  (its SPA is the consumer's) and petfriendly's static portada, but NOT
+  petfriendly's `/app` — the engine-embedded back-office has a theme seam
+  (`APPXIMO_APP_THEME_CSS`) and a demo seam (`APPXIMO_APP_DEMO_ROLES`) but no
+  way to inject a link. CSS cannot add an anchor. The hottest petfriendly
+  visitor (inside the demo panel) still has no way back.
+- **Disposition:** a small seam — `Config.AppBannerHTML` /
+  `APPXIMO_APP_BANNER_HTML` (sanitized: text + one `href`, no script) —
+  rendered by `pkg/backofficeui` above its shell, JWT-skipped like the shell
+  itself; pinned by `embed_test.go`. Not built here (the session's rule was
+  "engine untouched").
+- **Ready when:** petfriendly's `/app` shows the same bar as its portada
+  with no consumer code, and the gate reports SAME.
+
+### DOC-3 — The batch/N+1 patterns are in backend-spec but not where an agent hits the problem
+
+- **Origin:** atina evaluation, finding 2 (FIELD_FEEDBACK_RESPONSE §4). The
+  builder's agent wrote a row-by-row recompute (~1,300 round trips), then
+  rediscovered `= ANY($1)` + `unnest()` on its own — the exact §3.4b of
+  backend-spec, which it did not open because it was not looking for a
+  section called "batch patterns".
+- **Disposition:** put a one-line pointer + the N+1 warning at the `Ctx`
+  reference entries for `Query`, `Get`, `Insert` and `Update` (the place the
+  agent IS when it writes the loop), and in the `UnsafeTx` callout. Docs
+  only; the embedded spec changes → `spec_test`/build re-run.
+- **Ready when:** the four `Ctx` entries carry the pointer and a fresh-agent
+  run with a recompute task reaches §3.4b without being told.
 
 ### OPS-30 — A CLI token with an empty tenant is a cross-tenant wildcard on the data plane
 
@@ -915,10 +1019,14 @@ refreshed).
 
 ## Requires a decision from Miguel (not technical blockers)
 
-All three were **re-verified as still open on 2026-07-29**.
+All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL-S1 rows were added 2026-08-26.
 
 | Item | Why it needs him |
 |---|---|
+| **Response-time promise on the landing** (FRENTE-COMERCIAL-S1 B.2) | The research's strongest lever (5 vs 30 min = 21× qualification, MIT/InsideSales). NOT published: no confirmed number. If Miguel can sustain e.g. "le respondemos en menos de 30 minutos en horario laboral", it is one line under the hero CTA (`.cta-trust`) on index.html and conjuntos.html. An auto-acknowledgement on WhatsApp Business (away message) is the zero-cost floor. |
+| **Name + face next to the CTA** (FRENTE-COMERCIAL-S1 B.1) | The research (founder photo +34.7 %, personal trust in LATAM) says name + photo + city. Registered decision **A-32** (Miguel, 2026-08-24) says the proper name stays OUT of the CTA ("el equipo"), and no photo exists (FOTO-PENDIENTE since A-26). The session published city + phone with country code and kept "el equipo" — A-32 wins until Miguel re-decides. Reversing it: one sentence + one `.webp` ≤ 40 KB. |
+| **The VecinGo testimonial** (FRENTE-COMERCIAL-S1 A.2.1) | Removed from index.html and caso.html. The disk holds no raw report, no name, and A-25's own chronology note ("a VPS already serving two apps" — the 58's exact state on 2026-08-09) makes the independence claim unverifiable from here; the critique also read the caption as self-attribution. It goes back ONLY with a named person's written confirmation (quote + how they want to be credited) — then it is worth ten times what it was. The technical docs (CASE_STUDY_VECINGO.md) are unchanged: they state their source. |
+| **"Cientos de sistemas generados"** (A-29 → FRENTE-COMERCIAL-S1 A.2.2) | Removed. A-29 published it on Miguel's order with the written proviso "Miguel puede re-decidir con datos"; the session prompt set the condition ("si la evidencia real son pruebas y CI, sale") and A-29 itself records that the evidence IS the eval corpus + CI. Restoring it is one `<div class="stat">`; the recommendation is not to, until there are real deliveries to count. |
 | **Cloudflare proxy on `api.appitools.com`** | Still dead-ends at the proxy (the 58 has no site for it). HOUSEKEEPING-S1's OPS-17 decision: `api.appximo.com` is deliberately NOT created (the bare-engine demo was retired; petfriendly IS the engine demo) — so the only action left is Miguel retiring the old `api.appitools.com` DNS entry. |
 | ~~**Cut the first release tag**~~ | **RESOLVED (2026-08-05): v0.1.1 is out** — 4 platform binaries + checksums on Releases. Same day the working clone verified download+checksum+`version` and set `RELEASE_VERSION="v0.1.1"` in install.sh, enabling the documented no-`--binary` download path. |
 | ~~**Rotate the 58's PostgreSQL password**~~ | **RESOLVED by PROD-JOURNEY-1B (2026-07-31):** the wipe (`--uninstall --purge`) dropped the role and database; the reinstall generated a fresh password (plus fresh JWT/admin secrets, rotated again on-box after the installer printed them to stdout — see OPS-7). The exposed credential no longer exists. |
@@ -928,6 +1036,27 @@ All three were **re-verified as still open on 2026-07-29**.
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in FRENTE-COMERCIAL-S1 (2026-08-26)
+
+A commercial-front session run on the 105 — **no engine code changed** (docs
+only: an `UnsafeTx` callout in backend-spec, a Windows caveat in QUICKSTART,
+the atina response + case study + design guide). Every item verified in a
+real browser (desktop 1366×900 + mobile 390×844), before and after.
+
+| Item | What was done | Verified by |
+|---|---|---|
+| **A.1 Indexation** | No `noindex`/`nofollow`/`X-Robots-Tag` anywhere (both properties, all pages). What was missing was everything else: `robots.txt` + `sitemap.xml` + canonical + `og:url` + `meta robots` + JSON-LD on appximo.com (3 URLs) and on the technical site. Wayback: zero captures of the domain. The Google-account steps are OPS-31. | curl 200 on both robots/sitemaps live; WebSearch reproduces the critique's finding |
+| **A.2 Claims** | The third-party testimonial OUT of index.html and caso.html (unverifiable: no raw report, no name — see the decisions table); **"Cientos de sistemas generados" OUT** (evidence = corpus/CI per A-29's own text); **"1,58 ms" OUT of the hero** (stays in the technical section); "para una comunidad real" → "para un conjunto residencial"; caso.html's "sin conocernos y sin nuestra ayuda" → "documentada paso a paso". The stats band now: **3 sistemas abiertos** (each a link) · **3½ h / 18 módulos** (→ caso.html) · **10+ años** (A-29). atina's counts published ONLY as counted in its public `/openapi.json` (32 resources, 48 custom routes) and bundle (30+ screens); "39 pantallas", "2 marcas", "≈3 h", "un trimestre" NOT published loose. | `grep` on the live pages; the sweep table in the session report |
+| **A.3.1 Return bar** | Live on **tiendita.appximo.com** (storefront + panel; sticky top, 38 px; sticky headers offset by `--volver-h`; rebuilt against the SAME engine commit the box runs, `eb4c659`, via `-modfile` + worktree — only the SPA changed) and on **petfriendly.appximo.com**'s portada (`/app` cannot take it → ENG-46). Deployed through `deploy-update.sh`; **rollback drilled**: pre-frente binary redeployed and verified (`f130182-linkable`), then the new one again (`f82db2d-frente`); petfriendly: old file + restart → 0 bars, new file + restart → 1. Backups: `/root/tiendita-bin-pre-frente`, `/opt/appitools/bin-rollback/appitools.20260826-000112`, `/opt/vetapp/web/index.html.pre-frente`. | Browser e2e: bar visible on home / product / cart / checkout / **order confirmation** (two real orders, ORD-20260826-9445 and -8633, email `prueba.barra@demo-appximo.test` — residue until the 04:15 UTC golden reset) / panel login / panel (demo aviso intact) / orders; 0 console errors |
+| **A.3.2 Attribution** | 18 distinct `wa.me` texts, all first person, each naming its page and CTA (`… Los vi en appximo.com (inicio)`, `(appximo.com/conjuntos · caso)`, `(tiendita.appximo.com · barra)`…). | Every link probed: wa.me 302 → api.whatsapp.com 200 |
+| **A.3.3 Secondary** | A subordinate text link under the hero CTA ("Abra un sistema funcionando, sin registrarse ↓" → `#pruebe`). PDF-by-email: no endpoint → OPS-32. | Live |
+| **B** | City (Pereira y Dosquebradas) + `+57 311 517 5472` next to every primary CTA on both commercial pages; "el equipo" kept (A-32); response time NOT promised (unconfirmed → decisions table). | Live |
+| **C** | New `#capacidad` section right after the video: atina as capacity proof **translated** ("su sistema no depende de una sola persona…"), immediately followed by the visitor-sized systems (`#sistemas`); the conjuntos pick now opens the segment page; footer links to both. Hero, 3 `?hero=`, tilt and count-up kept (A-27/A-31/A-33). Loops NOT covered by a registered decision removed from the commercial pages: capability marquee, floating chips, dashed-arrow animation. | Live, 3 heros, 0 stuck opacity |
+| **D** | `conjuntos.html`: H1 = the administrator's pain; three trade pains (asamblea/quórum por coeficiente + Ley 675, cartera/mora, PQRS con radicado); VecinGo with video + two screens; "lo que no hace"; how it starts; ONE CTA with its own origins; links back to the house and to caso.html. Distinct search intent from the house (category: "software administración conjuntos / propiedad horizontal"; the house: "sistemas a la medida"; caso.html: the case itself). ~720 words of prose, FH 69.5. | Live 200 (also `/conjuntos`), 0 errors, mobile clean |
+| **E** | Commercial pages: one accent (WA green only on CTAs), tabular-nums, soft shadows, sticky mobile CTA (A-34's deferred bar, both pages), real populated captures (atina portal + panel frames), microinteractions ≤ .35 s. Technical site: atina with two silent loops (allowed there), four-app status line. Identity untouched. | Screenshots in the session's scratch (`shots/after`) |
+| **F** | `docs/CASE_STUDY_ATINA.md` (verified counts table first; the ≈3 h figure ONLY inside the phase table and labelled a self-report), `docs/DESIGN_GUIDE.md` (the mould, placeholder tokens, stack as recommendation with its argument, motion contracts as a gate; the fifth-spec option rejected with reasoning; the untested prompt NOT reproduced), the four stumbles crossed: #1 documented (UnsafeTx callout added), #2 documented (§3.4b; reachability → DOC-3), #3 working as designed (Route.RateLimit + frontend-spec trap 5), #4 not Appximo (QUICKSTART Windows caveat). atina.appximo.com verified from a clean browser: 200, portal usable without an account, 0 console errors. Media measured: `landing.gif` 6.7 MB → 447 KB mp4 / 290 KB webm; promo 9.7 MB → 1.6 MB 720p trimmed at 57.5 s (before the loose "≈3 h" card), click-to-play; the 2-min tour NOT published. | ffprobe + live sizes |
+| **G (A-25)** | atina qualifies (external, no direction — confirmed in writing; findings answered point by point in FFR §4; the words say what the docs show) → **the count is FOUR** in README, SHOWHN_MATERIAL and the technical site, with the link (it opens today). Disclosed in the case study: a contractor's build for the maintainer's own use — external to the engine and its authors, not a stranger. | FFR §4 + case study |
 
 ## DONE in SILENT-CORRUPTION-S1 (2026-08-21)
 
