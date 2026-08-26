@@ -14,18 +14,31 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Ctext x='32' y='45' font-family='Georgia,serif' font-size='40' font-weight='bold' fill='white' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="assets/asciinema-player.css">
 <style>
+  @font-face{font-family:"Inter";font-style:normal;font-weight:100 900;font-display:swap;src:url("assets/inter-latin-var.woff2") format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
   :root{
+    /* sistema: un acento (índigo) en escala, una tinta, neutros; el hex vive solo aquí */
+    --color-brand-50:#eef2ff; --color-brand-100:#e0e7ff; --color-brand-200:#c7d2fe; --color-brand-300:#a5b4fc; --color-brand-400:#818cf8;
+    --color-brand-500:#4f46e5; --color-brand-600:#4338ca; --color-brand-700:#3730a3; --color-brand-800:#312e81;
+    --color-brand:var(--color-brand-500);
+    --color-ink-950:#0a0c14; --color-ink-900:#101321; --color-ink-800:#171b2c; --color-ink-700:#20253a; --color-ink-600:#2b3150;
     --ink:#16181d; --ink-2:#4b5563; --ink-3:#6b7280;
     --bg:#fdfdfc; --panel:#ffffff; --wash:#f4f5f7;
     --line:#e5e7eb; --line-2:#d6d9de;
-    --accent:#4f46e5; --accent-ink:#3730a3; --accent-wash:#eef2ff;
+    --accent:var(--color-brand); --accent-ink:var(--color-brand-700); --accent-wash:var(--color-brand-50);
     --ok:#047857; --warn:#92400e; --warn-wash:#fffbeb; --warn-line:#fde68a;
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --sans:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --radius-xl:.9rem; --radius-2xl:1.25rem; --radius-3xl:1.75rem;
+    --shadow-soft:0 1px 2px rgba(16,19,33,.04),0 12px 32px -12px rgba(16,19,33,.14);
+    --shadow-lift:0 2px 4px rgba(16,19,33,.05),0 24px 48px -16px rgba(16,19,33,.22);
+    --shadow-glow:0 0 0 1px color-mix(in srgb,var(--color-brand) 35%,transparent),0 12px 40px -8px color-mix(in srgb,var(--color-brand) 45%,transparent);
+    --ease:cubic-bezier(.22,1,.36,1);
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html{scroll-behavior:smooth}
-  body{font-family:var(--sans);color:var(--ink);background:var(--bg);line-height:1.6;font-size:16.5px;-webkit-font-smoothing:antialiased}
+  body{font-family:var(--sans);color:var(--ink);background:var(--bg);line-height:1.6;font-size:16.5px;-webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss01","ss03"}
+  h1,h2,h3,h4{letter-spacing:-.025em;text-wrap:balance}
+  .tnum,td.num{font-variant-numeric:tabular-nums}
   a{color:var(--accent);text-decoration:none}
   a:hover{text-decoration:underline}
   code,pre{font-family:var(--mono)}
@@ -35,7 +48,7 @@
   .wrap{max-width:1060px;margin:0 auto;padding:0 1.25rem}
   section{padding:4.6rem 0;scroll-margin-top:4rem}
   section + section{padding-top:4.2rem}
-  h2{font-size:1.72rem;letter-spacing:-.02em;line-height:1.25;margin-bottom:.4rem}
+  h2{font-size:clamp(1.6rem,3vw,2.1rem);letter-spacing:-.03em;line-height:1.18;margin-bottom:.4rem;font-weight:800}
   h3{font-size:1.12rem;letter-spacing:-.01em;margin:1.7rem 0 .5rem}
   h2 + .lead{margin-top:.55rem}
   .kicker{font-family:var(--mono);font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:.55rem}
@@ -44,7 +57,11 @@
   .small{font-size:.86rem}
 
   /* nav */
-  nav{position:sticky;top:0;background:rgba(253,253,252,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);z-index:50}
+  nav{position:sticky;top:0;background:transparent;border-bottom:1px solid transparent;z-index:50;transition:background .28s,border-color .28s}
+  nav.is-solid,html:not(.js) nav{background:rgba(253,253,252,.92);backdrop-filter:blur(8px);border-bottom-color:var(--line)}
+  nav:not(.is-solid) .logo,nav:not(.is-solid) .nav-links a{color:#fff}
+  nav:not(.is-solid) .nav-links a{color:rgba(255,255,255,.72)}
+  nav:not(.is-solid) .nav-links a:hover{color:#fff}
   .nav-in{display:flex;align-items:center;gap:1.2rem;height:3.4rem}
   .logo{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.05rem;color:var(--ink)}
   .logo:hover{text-decoration:none}
@@ -55,10 +72,49 @@
   @media(max-width:760px){.nav-links{display:none}}
 
   /* hero */
-  header.hero{padding:5rem 0 3.6rem;border-bottom:1px solid var(--line)}
-  .hero h1{font-size:clamp(1.9rem,5.4vw,2.95rem);letter-spacing:-.03em;line-height:1.12;max-width:56rem}
-  .hero h1 .dim{color:var(--ink-3)}
-  .hero p.sub{margin:1.15rem 0 0;font-size:1.13rem;color:var(--ink-2);max-width:44rem}
+  header.hero{position:relative;overflow:hidden;background:var(--color-ink-900);color:#fff;margin-top:-3.4rem;padding:calc(3.4rem + 4.2rem) 0 3.6rem;border-bottom:1px solid var(--line)}
+  header.hero::before{content:"";position:absolute;inset:0;background:radial-gradient(80rem 40rem at 85% -20%,color-mix(in srgb,var(--color-brand) 45%,transparent) 0%,transparent 60%),radial-gradient(50rem 30rem at -10% 110%,color-mix(in srgb,var(--color-brand-700) 40%,transparent) 0%,transparent 55%);pointer-events:none}
+  header.hero::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.16;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.6'/%3E%3C/svg%3E")}
+  .hero .wrap{position:relative;z-index:1}
+  .wordmark{font-weight:800;font-size:clamp(84px,22vw,340px);line-height:.78;letter-spacing:-.075em;color:var(--color-brand-400);filter:drop-shadow(0 20px 60px color-mix(in srgb,var(--color-brand) 35%,transparent));margin:0 0 .35em -.04em;user-select:none;font-variation-settings:"wght" 800}
+  .wordmark span{color:var(--color-brand-200)}
+  .hero h1{font-size:clamp(1.9rem,5.4vw,2.95rem);letter-spacing:-.03em;line-height:1.12;max-width:56rem;color:#fff}
+  .hero h1 .dim{color:rgba(255,255,255,.55)}
+  .hero p.sub{margin:1.15rem 0 0;font-size:1.13rem;color:rgba(255,255,255,.78);max-width:44rem}
+  .hero p.sub strong{color:#fff}
+  .hero .btn-ghost{border-color:rgba(255,255,255,.28);color:#fff}
+  .hero .btn-ghost:hover{background:rgba(255,255,255,.08)}
+  .hero .btn-primary{box-shadow:var(--shadow-glow)}
+  .hero .measured{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14);color:#c7f0dc}
+  .hero .hero-facts{color:rgba(255,255,255,.6)}
+  .hero .hero-facts span::before{color:rgba(255,255,255,.25)}
+  .hero .status{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14);color:#fde68a}
+  .hero .status a{color:#c7d2fe}
+  .hero .media{border-color:rgba(255,255,255,.12);background:var(--color-ink-800);box-shadow:var(--shadow-lift)}
+  .hero .media-bar{background:var(--color-ink-700);border-color:rgba(255,255,255,.08)}
+  .hero .media-title,.hero .media-hint{color:rgba(255,255,255,.55)}
+  .hero .media figcaption{color:rgba(255,255,255,.7);border-color:rgba(255,255,255,.08)}
+  .hero .media figcaption b{color:#fff}
+  .hero .jump{color:rgba(255,255,255,.55);border-color:rgba(255,255,255,.12)}
+  .hero .jump .t{color:#c7d2fe;background:rgba(199,210,254,.12);border-color:rgba(199,210,254,.25)}
+  /* marquee de capacidades — en bucle a propósito: este público lo premia */
+  .marquee{overflow:hidden;white-space:nowrap;border-top:1px solid rgba(255,255,255,.08);border-bottom:1px solid var(--line);background:var(--color-ink-950);color:rgba(255,255,255,.7);font-family:var(--mono);font-size:.74rem;letter-spacing:.1em;text-transform:uppercase;padding:.7rem 0;-webkit-mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent)}
+  .marquee .track{display:inline-block;padding-right:2rem}
+  .marquee .track span{display:inline-block;margin-right:2rem}
+  .marquee .track span::after{content:"·";margin-left:2rem;color:var(--color-brand-400)}
+  @media (prefers-reduced-motion:no-preference){@keyframes marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}} .marquee .anim{display:inline-block;animation:marquee 38s linear infinite} .marquee:hover .anim{animation-play-state:paused}}
+  @media (prefers-reduced-motion:reduce){.marquee{white-space:normal;mask-image:none;-webkit-mask-image:none}.marquee .track[aria-hidden]{display:none}}
+  /* float + tilt en las tarjetas del portal (permitido aquí) */
+  @media (prefers-reduced-motion:no-preference){@keyframes float{0%,100%{transform:translateY(0) rotate(-.4deg)}50%{transform:translateY(-10px) rotate(.4deg)}} .float{animation:float 7s ease-in-out infinite}}
+  .tilt{transform-style:preserve-3d;transition:transform .25s var(--ease),box-shadow .25s var(--ease)}
+  .tilt:hover{box-shadow:var(--shadow-lift)}
+  .card,.shot,.pbox,.demo-card{border-radius:var(--radius-2xl);box-shadow:var(--shadow-soft);transition:transform .25s var(--ease),box-shadow .25s var(--ease)}
+  .card:hover,.demo-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-lift)}
+  .btn{border-radius:999px;transition:transform .18s var(--ease),background .18s,box-shadow .18s}
+  .btn:active{transform:translateY(1px)}
+  .kicker{font-size:11px;letter-spacing:.18em}
+  .reveal{opacity:1}
+  @media (prefers-reduced-motion:no-preference){html.js .reveal{opacity:0;transform:translateY(20px);transition:opacity .7s var(--ease),transform .7s var(--ease)}html.js .reveal.in{opacity:1;transform:none}}
   .cta-row{display:flex;flex-wrap:wrap;gap:.7rem;margin-top:1.7rem}
   .btn{display:inline-block;padding:.62rem 1.15rem;border-radius:9px;font-weight:600;font-size:.95rem;border:1px solid transparent}
   .btn:hover{text-decoration:none}
@@ -274,6 +330,7 @@
 </div></nav>
 
 <header class="hero" id="top"><div class="wrap">
+  <div class="wordmark" aria-hidden="true">appx<span>imo</span></div>
   <h1>Two prompts into your AI agent.<br>One production app.<span class="dim"> HTTPS included.</span></h1>
   <p class="sub">Appximo compiles a JSON schema into a complete multi-tenant backend — REST + GraphQL + interactive docs + admin panel + a generated back-office — as <strong>one static Go binary</strong> on a PostgreSQL you control. <strong>Prompt 1</strong> puts the engine on your machine. <strong>Prompt 2</strong> takes your agent (Claude Code, Cursor, Copilot…) from <strong>an idea in one sentence</strong> to a running app, and to a real domain with HTTPS when you say so.</p>
   <div class="measured">⏱ Measured, both by recording: the app is <b>&nbsp;running at 0:22</b> below · a fresh agent reached the fully green checklist in <b>&nbsp;1m53s</b></div>
@@ -309,6 +366,7 @@
   </div>
   <div class="status"><strong>Status, honestly:</strong> the code is production-verified; four apps run on it in production today — two of them <strong>built end-to-end by third parties</strong> (one is a 32-resource recruiting platform you can open: <a href="https://atina.appximo.com" rel="noopener">atina.appximo.com</a>). The repository is <a href="https://github.com/appximo/appximo" rel="noopener">public</a>, binaries + checksums are released, the Go module is fetchable, the Docker image is published. Version note: every release from <strong>v0.1.5 (2026-08-08)</strong> onward ships <code>appximo prompt</code>, <code>up</code>, <code>new</code> and the <code>/app</code> back-office, so the install prompt below leaves you a binary with everything this page describes.</div>
 </div></header>
+<div class="marquee" aria-hidden="true"><div class="anim"><span class="track"><span>REST + GraphQL + OpenAPI from one schema</span><span>schema-per-tenant PostgreSQL</span><span>JWT · OAuth · TOTP MFA</span><span>row + field RBAC</span><span>state machines in the UPDATE</span><span>migrations with a destructive gate</span><span>files: local or S3</span><span>outbox + worker</span><span>SSE</span><span>p50 1.58 ms @ 2,000 rps</span><span>one static Go binary</span><span>Apache 2.0</span></span><span class="track" aria-hidden="true"><span>REST + GraphQL + OpenAPI from one schema</span><span>schema-per-tenant PostgreSQL</span><span>JWT · OAuth · TOTP MFA</span><span>row + field RBAC</span><span>state machines in the UPDATE</span><span>migrations with a destructive gate</span><span>files: local or S3</span><span>outbox + worker</span><span>SSE</span><span>p50 1.58 ms @ 2,000 rps</span><span>one static Go binary</span><span>Apache 2.0</span></span></div></div>
 
 <section class="startup" id="start-here"><div class="wrap">
   <p class="kicker">Get started</p>
@@ -391,7 +449,7 @@
   </article>
 </div></section>
 
-<section id="steps"><div class="wrap">
+<section class="reveal-s" id="steps"><div class="wrap">
   <p class="kicker">What happens</p>
   <h2>After the second paste, in three moves</h2>
   <p class="lead">You watch; the agent works. Every move is gated by a checklist item it has to prove with a real request, so it knows when it is done and you are never asked mid-way.</p>
@@ -416,7 +474,7 @@
   </div></div>
 </div></section>
 
-<section id="start"><div class="wrap">
+<section class="reveal-s" id="start"><div class="wrap">
   <p class="kicker">Under the hood</p>
   <h2>The whole backend is one file you can read</h2>
   <p class="lead">No handlers, no models, no migration files. The schema compiles at boot — routes, SQL, validation, RBAC and docs are derived from it, and each tenant's tables are created when the tenant registers.</p>
@@ -469,7 +527,7 @@
 
 <hr class="divider">
 
-<section id="ai"><div class="wrap">
+<section class="reveal-s" id="ai"><div class="wrap">
   <p class="kicker">The AI path</p>
   <h2>Your agent builds it. The engine prints the contract.</h2>
   <p class="lead">Three commands print the full agent-facing documentation — schema grammar, backend handlers, frontend contract. Paste them into the Claude Code or Cursor you already pay for; the agent generates and then self-corrects against a machine-readable oracle. Zero product API cost.</p>
@@ -516,7 +574,7 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
 
 <hr class="divider">
 
-<section id="numbers"><div class="wrap">
+<section class="reveal-s" id="numbers"><div class="wrap">
   <p class="kicker">Numbers</p>
   <h2>Measured, dated, with their conditions</h2>
   <p class="lead">Every figure below was measured against a running engine and re-verified on 2026-08-01 (or carries its own date). The conditions are part of the claim — a number without its condition is marketing.</p>
@@ -549,7 +607,7 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
 
 <hr class="divider">
 
-<section id="not-for"><div class="wrap">
+<section class="reveal-s" id="not-for"><div class="wrap">
   <p class="kicker">Fit</p>
   <h2>Who it is NOT for</h2>
   <p class="lead">The scale ceiling is a declared product range, not a bug. If any line below describes you, use something else — this list exists so you can decide in sixty seconds.</p>
@@ -570,24 +628,24 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
 
 <hr class="divider">
 
-<section id="demos"><div class="wrap">
+<section class="reveal-s" id="demos"><div class="wrap">
   <p class="kicker">Live demos</p>
   <h2>Four production apps run on it today</h2>
   <p class="lead">Each with its own binary, database and Let's Encrypt certificate, on cheap VPSs. Two of them were built <strong>entirely by third parties</strong> working only from the printed contracts — the strongest evidence on this page. The largest, <strong>atina</strong>, is open: walk through it.</p>
   <div class="demo-split" style="margin-top:1.8rem">
-    <figure class="media atina-loop">
+    <figure class="media atina-loop float reveal">
       <div class="media-bar"><span class="media-dots"><i></i><i></i><i></i></span><span class="media-title">atina.appximo.com — kanban, live</span><span class="media-hint">silent loop · 9 s</span></div>
       <video autoplay muted loop playsinline preload="metadata" poster="assets/shot-atina.webp" aria-label="atina back-office: dragging a candidate between pipeline phases on the kanban"><source src="assets/atina-kanban.webm" type="video/webm"><source src="assets/atina-kanban.mp4" type="video/mp4"></video>
       <figcaption><b>atina</b> — a multi-client recruiting SaaS built by an <strong>external developer</strong> with no contact with us: 32 schema resources, 48 custom Go routes and 30+ SPA screens in one binary, HTTPS. Numbers counted in its public <code>/openapi.json</code>. <a href="https://github.com/appximo/appximo/blob/main/docs/CASE_STUDY_ATINA.md" rel="noopener">The build report, phase by phase →</a></figcaption>
     </figure>
-    <figure class="media atina-loop">
+    <figure class="media atina-loop float reveal">
       <div class="media-bar"><span class="media-dots"><i></i><i></i><i></i></span><span class="media-title">atina — public portal</span><span class="media-hint">silent loop · 9 s</span></div>
       <video autoplay muted loop playsinline preload="metadata" aria-label="atina public portal: the landing hero and the job listings"><source src="assets/atina-landing.webm" type="video/webm"><source src="assets/atina-landing.mp4" type="video/mp4"></video>
       <figcaption>The public portal, the candidate area and the client back-office are one Svelte SPA served by the engine binary. <a href="https://atina.appximo.com" rel="noopener">Open atina.appximo.com →</a> (the portal needs no account; the panels are the client's).</figcaption>
     </figure>
   </div>
   <div class="grid3" style="margin-top:1.4rem">
-    <figure class="shot demo-card">
+    <figure class="shot demo-card tilt reveal">
       <img src="assets/shot-tiendita.png" alt="La Tiendita — the storefront on a phone viewport" loading="lazy">
       <div class="demo-body">
         <h4>tiendita.appximo.com</h4>
@@ -595,7 +653,7 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
         <a href="https://tiendita.appximo.com" rel="noopener">Visit the shop →</a>
       </div>
     </figure>
-    <figure class="shot demo-card">
+    <figure class="shot demo-card tilt reveal">
       <img src="assets/shot-petfriendly.png" alt="Petfriendly — the generated OpenAPI docs of the AI-authored veterinary app" loading="lazy">
       <div class="demo-body">
         <h4>petfriendly.appximo.com</h4>
@@ -603,7 +661,7 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
         <a href="https://petfriendly.appximo.com" rel="noopener">Try the demo panel →</a>
       </div>
     </figure>
-    <figure class="shot demo-card">
+    <figure class="shot demo-card tilt reveal">
       <img src="assets/shot-crisblogs.png" alt="Crisblogs — a blog built end-to-end by a third party on Appximo" loading="lazy">
       <div class="demo-body">
         <h4>crisblogs — built by a third party</h4>
@@ -629,7 +687,7 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
 
 <hr class="divider">
 
-<section id="compare"><div class="wrap">
+<section class="reveal-s" id="compare"><div class="wrap">
   <p class="kicker">Comparison</p>
   <h2>Where it sits — honestly</h2>
   <p class="lead">Different tools that overlap on “I need an API”. What each does better is stated, because you should pick the right one.</p>
@@ -1295,6 +1353,17 @@ renderCode('raw-by-hand', 'prev-manual');
     cols: 100, rows: 30, fit: false, terminalFontSize: '12px', speed: 1,
     idleTimeLimit: 3, theme: 'monokai', controls: true, poster: 'npt:0:11'
   });
+</script>
+<script>
+document.documentElement.classList.add('js');
+(function(){
+  var nav=document.querySelector('nav');function s(){nav.classList.toggle('is-solid',(window.scrollY||0)>40);}s();addEventListener('scroll',s,{passive:true});
+  var reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  document.querySelectorAll('.reveal-s > .wrap > h2, .reveal-s > .wrap > .kicker, .reveal-s > .wrap > .lead').forEach(function(el){el.classList.add('reveal');});
+  var rv=document.querySelectorAll('.reveal');
+  if(rv.length&&'IntersectionObserver' in window&&!reduce){var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}});},{rootMargin:'0px 0px -6% 0px'});rv.forEach(function(el){io.observe(el);});setTimeout(function(){rv.forEach(function(el){el.classList.add('in');});},2500);}else rv.forEach(function(el){el.classList.add('in');});
+  if(!reduce&&matchMedia('(hover:hover)').matches){document.querySelectorAll('.tilt').forEach(function(c){c.addEventListener('pointermove',function(e){var r=c.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;c.style.transform='perspective(900px) rotateX('+(-y*6)+'deg) rotateY('+(x*6)+'deg) translateY(-2px)';});c.addEventListener('pointerleave',function(){c.style.transform='';});});}
+})();
 </script>
 </body>
 </html>
