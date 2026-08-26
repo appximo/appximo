@@ -133,27 +133,39 @@ export function labelFor(f) {
   return k ? k[0].toUpperCase() + k.slice(1) : f.key;
 }
 
-// The display label of a related row: the first "name-like" text field, else
-// the referenced column. A naming CONVENTION (like the spec's §7), not a
-// resource list.
-const NAMEISH = ['nombre', 'name', 'titulo', 'title', 'razon_social', 'codigo', 'code', 'numero', 'email', 'radicado', 'sku', 'asunto'];
-export function rowLabel(row, refCol = 'id') {
+// Name-like keys — a naming CONVENTION (like the spec's §7), never a resource
+// list. Exact match, or a `nombre_*`/`*_name`-style compound; NOT a loose
+// substring (`numero_serie` is a serial, not the "numero" of an order).
+const NAMEISH = ['nombre', 'name', 'titulo', 'title', 'razon_social', 'codigo', 'code', 'numero', 'radicado', 'asunto', 'sku', 'email'];
+const NAMEWORD = ['nombre', 'name', 'titulo', 'title'];
+export function namePref(k) {
+  const i = NAMEISH.indexOf(k);
+  if (i !== -1) return i;
+  if (NAMEWORD.some((w) => k.startsWith(w + '_') || k.endsWith('_' + w))) return NAMEISH.length;
+  return 99;
+}
+
+// The ordered "title" candidates of a resource: name-like keys first, then the
+// REQUIRED free-text fields, then the other free-text fields. The first one is
+// the list's primary column, the board card title and the drawer title; a
+// related row is labelled by the first candidate that is NON-EMPTY for it.
+export function titleFields(res) {
+  return res.fields
+    .map((f, i) => [f, i])
+    .filter(([f]) => !f.readOnly && !f.file && !f.relation && f.type === 'string' && !f.enum && !f.transitions && !f.format)
+    .sort((a, b) => (namePref(a[0].key) - namePref(b[0].key)) || ((b[0].required ? 1 : 0) - (a[0].required ? 1 : 0)) || (a[1] - b[1]))
+    .map(([f]) => f);
+}
+export function titleField(res) { return titleFields(res)[0] ?? null; }
+
+// The display label of a related row: the first non-empty title candidate of
+// its resource (when known), else the first "name-like" value, else the
+// referenced column.
+export function rowLabel(row, refCol = 'id', res = null) {
   if (!row) return '';
+  if (res) for (const f of titleFields(res)) if (row[f.key] != null && row[f.key] !== '') return String(row[f.key]);
   for (const k of NAMEISH) if (row[k] != null && row[k] !== '') return String(row[k]);
   const firstText = Object.entries(row).find(([k, v]) => typeof v === 'string' && k !== 'id' && !k.endsWith('_id') && !/^\d{4}-\d{2}-\d{2}T/.test(v) && v.length < 80);
   if (firstText) return firstText[1];
   return String(row[refCol] ?? row.id ?? '').slice(0, 8);
-}
-
-// The "title" field of a resource: the field a human scans first — a
-// name-like key if there is one, else the first REQUIRED free-text field,
-// else the first free-text field. Used for the list's primary column, the
-// board card title, the drawer title and the label of a related row.
-export function titleField(res) {
-  const pref = (k) => { const i = NAMEISH.findIndex((p) => k === p || k.includes(p)); return i === -1 ? 99 : i; };
-  const cands = res.fields
-    .map((f, i) => [f, i])
-    .filter(([f]) => !f.readOnly && !f.file && !f.relation && f.type === 'string' && !f.enum && !f.transitions && !f.format);
-  cands.sort((a, b) => (pref(a[0].key) - pref(b[0].key)) || ((b[0].required ? 1 : 0) - (a[0].required ? 1 : 0)) || (a[1] - b[1]));
-  return cands[0]?.[0] ?? null;
 }

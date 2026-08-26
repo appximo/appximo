@@ -20,7 +20,7 @@
 // one accent, Inter, tabular figures, positional lifecycle chips, drawer
 // forms, toasts, skeletons, empty states with an action) — same contract,
 // same five rules, same demo overlay.
-import { loadContract, controlFor, isTerminal, rowLabel, titleField } from './contract.js';
+import { loadContract, controlFor, isTerminal, rowLabel, titleField, namePref } from './contract.js';
 import { t, lang, setLang } from './i18n.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -432,9 +432,8 @@ function countUp() {
 }
 
 // ── list view (§8) ───────────────────────────────────────────────────────────
-const NAMEISH = ['nombre', 'name', 'titulo', 'title', 'razon_social', 'codigo', 'code', 'numero', 'radicado', 'asunto', 'sku', 'email'];
 function columnsFor(res) {
-  const pref = (k) => { const i = NAMEISH.findIndex((p) => k === p || k.includes(p)); return i === -1 ? 99 : i; };
+  const pref = namePref;
   const kind = (f) => {
     if (f.transitions) return 1;
     if (f.enum) return 2;
@@ -633,8 +632,8 @@ async function loadRelLabels(f) {
     try { rows = (await api(`/api/${target}?per_page=100`)).data; } catch { rows = []; }
     if (demo) rows = demoMergeList(target, rows, null);
     const m = new Map();
-    const tres = contract.byName[target]; const lf = tres ? titleField(tres) : null;
-    for (const r of rows) m.set(String(r[f.references] ?? r.id), (lf && r[lf.key]) ? String(r[lf.key]) : rowLabel(r, f.references));
+    const tres = contract.byName[target] ?? null;
+    for (const r of rows) m.set(String(r[f.references] ?? r.id), rowLabel(r, f.references, tres));
     m.rows = rows;
     return m;
   })();
@@ -721,7 +720,7 @@ function drawBoard(res, st, sf, cols, hasMore) {
   const colHTML = sf.states.map((s, si) => {
     const list = byState[s] ?? [];
     const cards = list.map((row) => {
-      const title = tf ? row[tf.key] : rowLabel(row, 'id');
+      const title = rowLabel(row, 'id', res);
       const kv = cols.filter((c) => !tf || c.key !== tf.key).map((c) => `<div class="kv"><span>${esc(c.label)}</span><span>${plainValue(row[c.key], c)}</span></div>`).join('');
       const moves = (sf.transitions[s] ?? []).map((to) => `<button class="chip state s${(sf.states.indexOf(to) % 8) + 1} mv" data-to="${esc(to)}" data-id="${row.id}">${ICON.right}${esc(to.replace(/_/g, ' '))}</button>`).join('');
       return `<article class="kcard" draggable="${res.canEdit && !isTerminal(sf, s) ? 'true' : 'false'}" data-id="${row.id}" data-state="${esc(s)}"><b title="${esc(String(title ?? ''))}">${esc(String(title ?? '—'))}</b>${kv}${res.canEdit ? `<div class="moves">${moves}</div>` : ''}</article>`;
@@ -799,7 +798,7 @@ async function renderForm(row, opts = {}) {
     </div>`;
   }));
   const old = $('#form-bg'); if (old) old.remove();
-  const title = editing ? ((titleField(res) && row[titleField(res).key]) || rowLabel(row) || res.title) : null;
+  const title = editing ? (rowLabel(row, 'id', res) || res.title) : null;
   $('#app').insertAdjacentHTML('beforeend', `
     <div class="drawer-bgd" id="form-bg"><div class="drawer" role="dialog" aria-modal="true">
       <header>
