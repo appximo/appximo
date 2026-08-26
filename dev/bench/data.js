@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787713559583,
+  "lastUpdate": 1787717882214,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -3600,6 +3600,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "35387898 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "5201c3ff9a919e1d2cf9a0be436519c8cc963752",
+          "message": "docs(backlog): HERO-Y-DIRECCION-S1 — the component hero, the team voice, the folded demos, VecinGo's door, the contrast fix, and the VecinGo-authorship decision for Miguel",
+          "timestamp": "2026-08-26T04:17:31Z",
+          "tree_id": "1bbbe7dbc41e2339fdba7fc404ca13e004af95ea",
+          "url": "https://github.com/appximo/appximo/commit/5201c3ff9a919e1d2cf9a0be436519c8cc963752"
+        },
+        "date": 1787717880944,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 5194,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "443733 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 5194,
+            "unit": "ns/op",
+            "extra": "443733 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "443733 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "443733 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 53.35,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "45934261 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 53.35,
+            "unit": "ns/op",
+            "extra": "45934261 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "45934261 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "45934261 times\n4 procs"
           }
         ]
       }
