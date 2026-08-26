@@ -300,12 +300,18 @@ function renderLogin(msg = '') {
 async function boot() {
   contract = await loadContract(api);
   // §5: one cheap request per resource; deny-by-default answers for us.
-  await Promise.all(contract.resources.map(async (r) => {
-    try {
-      const res = await api(`/api/${r.name}?per_page=1&count=true`);
-      probe[r.name] = { total: res.meta?.total ?? 0 };
-    } catch (e) {
-      probe[r.name] = e.status === 403 ? { denied: true } : { error: true };
+  // In batches of 4, not all at once: a 14-resource schema probed in one burst
+  // over a public link tripped the engine's per-tenant circuit breaker (503,
+  // Retry-After 8) on a small box — seen from outside on the tiendita.
+  const queue = [...contract.resources];
+  await Promise.all(Array.from({ length: 4 }, async () => {
+    for (let r = queue.shift(); r; r = queue.shift()) {
+      try {
+        const res = await api(`/api/${r.name}?per_page=1&count=true`);
+        probe[r.name] = { total: res.meta?.total ?? 0 };
+      } catch (e) {
+        probe[r.name] = e.status === 403 ? { denied: true } : { error: true };
+      }
     }
   }));
   current = null;
