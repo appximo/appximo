@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787708479597,
+  "lastUpdate": 1787713559583,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -3528,6 +3528,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36629947 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "3ed696cd78a1c7a4b7e38fd3996dd29f5423ee9c",
+          "message": "docs(backlog): REDISENO-VISUAL-S2 — the commercial pages rebuilt with the D1–D6 brand decisions",
+          "timestamp": "2026-08-26T03:05:31Z",
+          "tree_id": "d492497c6fcc8a4f499301fc6b6762af6b0c118b",
+          "url": "https://github.com/appximo/appximo/commit/3ed696cd78a1c7a4b7e38fd3996dd29f5423ee9c"
+        },
+        "date": 1787713558925,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6297,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "376046 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6297,
+            "unit": "ns/op",
+            "extra": "376046 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "376046 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "376046 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 69.87,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "35387898 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 69.87,
+            "unit": "ns/op",
+            "extra": "35387898 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "35387898 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "35387898 times\n4 procs"
           }
         ]
       }
