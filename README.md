@@ -203,12 +203,19 @@ inventory of what we assert, with conditions, is
 addendums). When an audit kills a claim, the correction stays visible in the
 docs — that's the method, not an apology. The strongest evidence, in order:
 
-**Independent builds.** Three field evaluations from outside the project — no
+**Independent builds.** Four field evaluations from outside the project — no
 repository access, real apps built from the public docs and printed specs
 alone; one of them was driven end to end by the evaluator's AI agent — each
 answered finding-by-finding in
 [docs/FIELD_FEEDBACK_RESPONSE.md](docs/FIELD_FEEDBACK_RESPONSE.md):
 
+- **[atina — the case study](docs/CASE_STUDY_ATINA.md), open today at
+  [atina.appximo.com](https://atina.appximo.com):** a multi-client recruiting
+  SaaS — 32 resources, 48 custom Go routes, a 30+-screen embedded SPA,
+  matching engine, kanban, consent-by-link, scheduled jobs, mail worker — in
+  production with HTTPS, built by an **external developer with no direction
+  from us**. The largest third-party build we know of, and the only one a
+  reader can walk through; counts verified in its public `/openapi.json`.
 - **[VecinGo — the case study](docs/CASE_STUDY_VECINGO.md):** a
   neighborhood-association platform (18 resources, 8 state machines, 13 custom
   Go handlers, weighted quorum voting, a 13-screen embedded SPA) to production
@@ -471,7 +478,9 @@ complete env-var table, security checklist, troubleshooting:
 resilience against real Postgres in Docker): everything in the feature list above.
 It runs our own live apps today — deployed and operated through the same
 official path it documents — and the heaviest production build we know of is a
-third party's ([the case study](docs/CASE_STUDY_VECINGO.md)).
+third party's ([atina](docs/CASE_STUDY_ATINA.md), open at
+[atina.appximo.com](https://atina.appximo.com); [VecinGo](docs/CASE_STUDY_VECINGO.md)
+before it).
 
 **Known limits, honestly:**
 

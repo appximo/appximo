@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Appximo — a JSON schema in, a production multi-tenant backend out</title>
 <meta name="description" content="Appximo compiles one JSON schema into a multi-tenant REST + GraphQL + OpenAPI server at boot. One static Go binary, your PostgreSQL, one cheap VPS. Apache 2.0.">
+<link rel="canonical" href="https://appximo.github.io/appximo/">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta property="og:title" content="Appximo — a JSON schema in, a production multi-tenant backend out">
+<meta property="og:description" content="One static Go binary compiles a JSON schema into REST + GraphQL + OpenAPI with auth, RBAC, files, migrations and an embedded back-office. Apache 2.0, self-hosted.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://appximo.github.io/appximo/">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Ctext x='32' y='45' font-family='Georgia,serif' font-size='40' font-weight='bold' fill='white' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="assets/asciinema-player.css">
 <style>
@@ -301,7 +307,7 @@
     <span>Your own PostgreSQL</span>
     <span>Apache 2.0 · self-hosted</span>
   </div>
-  <div class="status"><strong>Status, honestly:</strong> the code is production-verified; three apps run on it in production today — one of them <strong>built end-to-end by a third party</strong>. The repository is <a href="https://github.com/appximo/appximo" rel="noopener">public</a>, binaries + checksums are released, the Go module is fetchable, the Docker image is published. Version note: every release from <strong>v0.1.5 (2026-08-08)</strong> onward ships <code>appximo prompt</code>, <code>up</code>, <code>new</code> and the <code>/app</code> back-office, so the install prompt below leaves you a binary with everything this page describes.</div>
+  <div class="status"><strong>Status, honestly:</strong> the code is production-verified; four apps run on it in production today — two of them <strong>built end-to-end by third parties</strong> (one is a 32-resource recruiting platform you can open: <a href="https://atina.appximo.com" rel="noopener">atina.appximo.com</a>). The repository is <a href="https://github.com/appximo/appximo" rel="noopener">public</a>, binaries + checksums are released, the Go module is fetchable, the Docker image is published. Version note: every release from <strong>v0.1.5 (2026-08-08)</strong> onward ships <code>appximo prompt</code>, <code>up</code>, <code>new</code> and the <code>/app</code> back-office, so the install prompt below leaves you a binary with everything this page describes.</div>
 </div></header>
 
 <section class="startup" id="start-here"><div class="wrap">
@@ -566,9 +572,21 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
 
 <section id="demos"><div class="wrap">
   <p class="kicker">Live demos</p>
-  <h2>Three production apps run on it today</h2>
-  <p class="lead">Each with its own binary, database and Let's Encrypt certificate, on cheap VPSs. One of them was built <strong>entirely by a third party</strong> whose agent worked only from the printed contracts — the strongest evidence on this page.</p>
-  <div class="grid3" style="margin-top:1.8rem">
+  <h2>Four production apps run on it today</h2>
+  <p class="lead">Each with its own binary, database and Let's Encrypt certificate, on cheap VPSs. Two of them were built <strong>entirely by third parties</strong> working only from the printed contracts — the strongest evidence on this page. The largest, <strong>atina</strong>, is open: walk through it.</p>
+  <div class="demo-split" style="margin-top:1.8rem">
+    <figure class="media atina-loop">
+      <div class="media-bar"><span class="media-dots"><i></i><i></i><i></i></span><span class="media-title">atina.appximo.com — kanban, live</span><span class="media-hint">silent loop · 9 s</span></div>
+      <video autoplay muted loop playsinline preload="metadata" poster="assets/shot-atina.webp" aria-label="atina back-office: dragging a candidate between pipeline phases on the kanban"><source src="assets/atina-kanban.webm" type="video/webm"><source src="assets/atina-kanban.mp4" type="video/mp4"></video>
+      <figcaption><b>atina</b> — a multi-client recruiting SaaS built by an <strong>external developer</strong> with no contact with us: 32 schema resources, 48 custom Go routes and 30+ SPA screens in one binary, HTTPS. Numbers counted in its public <code>/openapi.json</code>. <a href="https://github.com/appximo/appximo/blob/main/docs/CASE_STUDY_ATINA.md" rel="noopener">The build report, phase by phase →</a></figcaption>
+    </figure>
+    <figure class="media atina-loop">
+      <div class="media-bar"><span class="media-dots"><i></i><i></i><i></i></span><span class="media-title">atina — public portal</span><span class="media-hint">silent loop · 9 s</span></div>
+      <video autoplay muted loop playsinline preload="metadata" aria-label="atina public portal: the landing hero and the job listings"><source src="assets/atina-landing.webm" type="video/webm"><source src="assets/atina-landing.mp4" type="video/mp4"></video>
+      <figcaption>The public portal, the candidate area and the client back-office are one Svelte SPA served by the engine binary. <a href="https://atina.appximo.com" rel="noopener">Open atina.appximo.com →</a> (the portal needs no account; the panels are the client's).</figcaption>
+    </figure>
+  </div>
+  <div class="grid3" style="margin-top:1.4rem">
     <figure class="shot demo-card">
       <img src="assets/shot-tiendita.png" alt="La Tiendita — the storefront on a phone viewport" loading="lazy">
       <div class="demo-body">

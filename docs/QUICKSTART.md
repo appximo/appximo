@@ -58,6 +58,13 @@ amd64, `aarch64`/`arm64` → arm64).
 
 ### Windows — ⚠ NOT YET VERIFIED
 
+> **Accents from Git Bash (field report, atina):** `curl` in Git Bash sends
+> inline non-ASCII text (`ñ`, `á`) in the system code page, not UTF-8 — the
+> bytes are wrong before they reach the engine, and the rows store mojibake.
+> Send JSON **from a file saved as UTF-8 without BOM**
+> (`curl.exe --data-binary @body.json`), or seed from Go/Node. Not
+> live-verified on Windows (OPS-20).
+
 > This path is written with care but **has not been executed on a real Windows
 > machine**. The Windows `.exe` ships from the **next release**. The
 > genuinely-verified options today: **WSL2** (install Ubuntu from the Microsoft

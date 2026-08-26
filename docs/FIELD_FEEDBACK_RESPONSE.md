@@ -286,3 +286,44 @@ all three (plus OPS-25, the Windows verification):
 | **ENG-43 — `Ctx` validated against the BOOT schema** | **CLOSED.** Same seam as the generated routes (`codegen.ResolveWriteSurface`, the ENG-12 union — never a second resolution), for Insert/Update/Query/Get/BindResource. Verified live: a field deployed to a RUNNING process (PID identical, no restart) answered 422 `unknown_field` through a custom handler before the deploy, and its declared `max` rule after it. |
 | **OPS-26 — one schema file couldn't be both `up`-bootable and grant custom routes** | **CLOSED, as an asymmetry.** The STOCK `serve`/`up` binary now WARNS and boots (the grant is INERT there — it authorizes nothing until the consumer binary registers the route; the warning names role, segment, and that binary). A binary that DOES register routes keeps the fail-closed rejection — your typo still fails the boot with the registered segments listed. One schema file now serves the whole journey. ADR-021 §The stock-binary asymmetry has the reasoning. |
 | **OPS-25 — the Windows upgrade path was reasoned, not executed** | **CLOSED as a permanent CI gate.** A `windows-latest` job now runs on every push: native build + platform unit lanes + the `.env` BOM case + `validate --json` stdout purity + the four upgrade scenarios against the real pinned release (idle · under a running `serve` on a real PostgreSQL · locked `.old.exe` · unwritable destination). Writing it found a real defect: the permission error advised `sudo` on Windows — now platform-aware. Not covered (recorded): real Program Files elevation UX under a non-admin user, antivirus locks. |
+
+# Response to the FOURTH field evaluation (atina) — FRENTE-COMERCIAL-S1, 2026-08-26
+
+**What was built:** a multi-client recruiting SaaS — 32 schema resources,
+48 custom Go routes, a 30+-screen Svelte 5 SPA embedded in the binary, four
+roles with schema-declared public reads, a matching engine, a kanban with
+per-phase communications, consent-by-link, scheduled jobs and a mail worker
+— in production with HTTPS at [atina.appximo.com](https://atina.appximo.com)
+(open today; the counts are from its public `/openapi.json`). Built by an
+**external developer, with no direction from us**, from the published
+documentation alone; the maintainer confirms this in writing. The builder's
+own report — including a phase table that totals ≈3 h of wall-clock work —
+is reproduced with that label in [CASE_STUDY_ATINA.md](CASE_STUDY_ATINA.md).
+
+**What worked, in the builder's words:** the validator as an oracle ("three
+passes of `validate --json`; every error says the path and the fix"), and it
+caught three real future bugs before the first request (a `required` field
+the RBAC would force → every candidate `POST` a 422; a missing `minLength` on
+a required text; the `files` grant an uploading role needs); the five
+printable specs ("nothing to guess"); `install.sh --app` onto a box already
+serving other apps; `deploy-update.sh` with automatic rollback; adding a
+second brand on a second domain as a tenant + a Caddy site.
+
+The four frictions, each with the answer. The honest headline: **three of
+the four are not engine defects** — the documentation already prescribed the
+fix, and the builder's agent hit the problem anyway. That is a finding about
+*reachability* of the docs, and it is recorded as one.
+
+| Finding | Answer |
+|---|---|
+| **1. "My own SQL, not the engine."** Rows inserted by hand-written `INSERT` skipped the schema defaults; a `uuid` scanned into a Go `any` is not a `string`. | **Not an engine defect — documented behaviour, now stated where it bites.** `ctx.Insert`/`ctx.Update` apply defaults, declarative rules, type checks, state-machine initial states and create-time RBAC (the CTX-PARITY work of the VecinGo evaluation); raw SQL through `ctx.UnsafeTx()` is *by design* the escape hatch that applies none of them — its name is the audit marker. backend-spec already said "`ctx.Insert` first; raw SQL only for what the schema cannot express"; the `UnsafeTx` callout now also lists what you give up (defaults, rules, governed fields, the row condition, pgx's native `[16]byte` for uuid — scan into `pgtype.UUID` or `string` explicitly). |
+| **2. Matching performance with the database across the internet** — row-by-row recalculation was ~1,300 round trips; bulk load + batched `INSERT … ON CONFLICT` made it four queries. | **Not an engine defect — the pattern was already in backend-spec §3.4b** (batch reads with `= ANY($1)`, batch writes with `unnest()`, the N+1 warning added in FRESH-AGENT-GAPS-S1), and the builder's final solution is that pattern. What the report shows is that an agent writing a recompute loop does not open a section titled "batch patterns". Recorded in the backlog as a docs-reachability item (DOC-3): the N+1 warning should sit next to `ctx.Query` in the `Ctx` reference, not only in its own section. |
+| **3. Being a good citizen of the public rate limit** — an anonymous portal load fired twelve reads and tripped the public-route limit (5 rps / burst 10 per tenant+IP); a custom `/api/catalogos` route with its own `Route.RateLimit` and a one-hour client cache solved it. | **Working as designed, and already documented on both sides**: backend-spec (`Route.RateLimit`, "the conservative default is right for a registration endpoint and wrong for a catalogue") and frontend-spec trap 5 ("a storefront page firing a dozen requests trips it instantly unless the backend declared a per-route budget"). The builder's fix is the documented one; the engine deliberately does not relax the generated public routes. No change. |
+| **4. Seeding accents from Git Bash on Windows** — `curl` sent bytes in the system code page; a Go seeder and a small API repair script fixed the data. | **Not Appximo** (the bytes were wrong before they reached the network), but it is the kind of trap the Windows quick-start should name, since the same shell is the one our Windows instructions assume. Added to QUICKSTART's Windows caveats: send JSON from a file (`curl.exe --data-binary @body.json`) saved as UTF-8 without BOM, or seed from Go/Node — never inline non-ASCII in a Git Bash command line. Not live-verified on Windows (the Windows path is still OPS-20). |
+
+**Verification for this batch:** no engine code changed (docs only:
+backend-spec callout, QUICKSTART caveat, this section, the case study), so no
+binary-diff gate or bench applies; the atina counts were re-derived from the
+live `/openapi.json` and bundle on 2026-08-26 (see the case study's first
+table); the portal was opened in a real browser at 1366×900 and 390×844 with
+0 console errors.

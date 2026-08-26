@@ -386,6 +386,11 @@ is **no** API that exposes the raw pool; isolation is by construction.
 ```go
 ctx.Tx()       // pgx.Tx, tenant-scoped. Return nil from the handler → COMMIT; return err → ROLLBACK.
 ctx.UnsafeTx() // the SAME tx, named so `grep UnsafeTx` audits every RBAC-bypass site
+               // What you give up on this path (field report, atina): schema
+               // defaults, declarative rules, the governed-field rule, the
+               // role's row condition, and the engine's number/uuid handling —
+               // pgx scans a uuid into [16]byte, not string; scan into a
+               // pgtype.UUID or `string` explicitly. Prefer ctx.Insert/Update.
 ```
 
 **RBAC-aware data helpers** — apply the role's row filter, validate against the
