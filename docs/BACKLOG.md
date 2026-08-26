@@ -236,22 +236,6 @@ refreshed).
 - **Ready when:** a visitor can leave an email and receives the case, and
   the address lands somewhere Miguel reads.
 
-### ENG-46 — `/app` (the embedded back-office) cannot carry a consumer banner
-
-- **Origin:** FRENTE-COMERCIAL-S1 A.3.1. The return bar reached the tiendita
-  (its SPA is the consumer's) and petfriendly's static portada, but NOT
-  petfriendly's `/app` — the engine-embedded back-office has a theme seam
-  (`APPXIMO_APP_THEME_CSS`) and a demo seam (`APPXIMO_APP_DEMO_ROLES`) but no
-  way to inject a link. CSS cannot add an anchor. The hottest petfriendly
-  visitor (inside the demo panel) still has no way back.
-- **Disposition:** a small seam — `Config.AppBannerHTML` /
-  `APPXIMO_APP_BANNER_HTML` (sanitized: text + one `href`, no script) —
-  rendered by `pkg/backofficeui` above its shell, JWT-skipped like the shell
-  itself; pinned by `embed_test.go`. Not built here (the session's rule was
-  "engine untouched").
-- **Ready when:** petfriendly's `/app` shows the same bar as its portada
-  with no consumer code, and the gate reports SAME.
-
 ### DOC-3 — The batch/N+1 patterns are in backend-spec but not where an agent hits the problem
 
 - **Origin:** atina evaluation, finding 2 (FIELD_FEEDBACK_RESPONSE §4). The
@@ -1050,6 +1034,37 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in APP-VITRINA-S1 (2026-08-26, 5th session of the day)
+
+The embedded `/app` (the face every visitor touches: "Probar el panel", the
+end of the idea→system video) rebuilt on the design system atina proved on
+this engine — WITHOUT touching its generic nature. The engine cut-off line of
+WRITE-ASYMMETRY-S1 was reopened by Miguel's decision for this one session;
+ENG-45 stays the post-launch map, only the date moved. The data path did not
+change (gate SAME on every data case; bench no_change on all four crossings (A vs B +0.7 %, A2 vs B2 −7.7 %, base-vs-base control +12.1 %, new-vs-new +2.8 % — the control is the largest delta, i.e. the 105’s noise floor; p50 base 0.649/0.673 ms, new 0.651/0.677 ms, 100 rps × 30 s × 8 runs per arm)).
+
+| Item | What landed | Verified by |
+|---|---|---|
+| **A. The system, ported** | `pkg/backofficeui/web`: tokens on `:root` (ink, ONE accent + every derived colour via `color-mix`, surfaces, radii, shadows, easing, an 8-colour lifecycle palette BY POSITION), ink sidebar with monograms + counts + user block, page headers with eyebrow/`tracking-tight` titles, `tabular-nums` everywhere, tables with sticky uppercase headers/hover/sort arrows/keyset or offset pagination, positional state chips (terminal = hollow dot), enum chips, yes/no chips, money (`_centavos`) and dates formatted, relation columns RESOLVED to the target label, enum/state/boolean filters, list ⇄ BOARD (kanban derived from `x-appximo-transitions`; drag = legal transition, illegal columns dimmed, mobile tap-chips), home with stat tiles + dark hero, drawer/bottom-sheet forms with structural field order and chip-radio states, jsonb editor (type-less property), file widget with policy + signed-URL preview, two-step delete, toasts, shimmer skeletons, empty states with the action, painted 422s, inline-error + retry. Inter bundled (latin variable, 39 KB) — `font-src 'self'`; zero inline styles (`style-src 'self'`); zero CDN; hand-written static CSS; no build step; no new runtime dependency. Zero resource/state/domain names in the bundle. | 4 schemas in a real browser (below); `embed_test.go` pins font/CSP/self-containment/board/positional palette |
+| **Theme hook** | The EXISTING seam (`Config.AppThemeCSS` / `APPXIMO_APP_THEME_CSS` → `/app/theme.css`) now re-brands the whole panel from ONE variable: `:root{--app-accent:#FF5A36}`. Proven with a coral theme on the fresh schema and deployed as the two demo brands (tiendita green `#1c9d5b`; petfriendly sage `#2f6b4f` on warm paper). A schema-level `branding` key was considered and rejected (the schema is the data contract). | screenshots `theme-coral-*`; the 58 |
+| **B. Generic, proven generic** | Browser e2e (`e2e-app.mjs`, console-strict, desktop + 390×844): tienda (commerce schema, 14 resources) 17/17 · veterinaria (petfriendly's production schema) 17/17 · conjunto residencial (8 resources, 5 state machines, 3 file fields, a `references: user_id` FK — written from the VecinGo case study) 18/18 + 14/14 · a FRESH schema never seen (alquiler audiovisual: 6 resources, 3 state machines, an 18-column `equipos`, jsonb + gin, file fields, `references: user_id`) 19/19. Each run: home, sort, filter, 422 painted, create, search, edit, chip transition, board drag legal + illegal, file upload → attach, relation labels, delete, count restored, mobile sheet. Layout gate: 0 px overflow, 0 sub-24 px targets on every screen. | `/tmp/vit/tools/e2e-app.mjs` logs; shots in `/tmp/vit/shots/*` |
+| **Demo mode, both ways** | `demo-check.mjs` on the tienda: demo role → overlay create/edit/board-move/delete visible in session, reload resets, **ZERO** non-GET requests toward `/api` (network listener), hand-crafted POST/PATCH/DELETE/upload with the demo token → **403 ×4**, Postgres row counts identical before/after. 9/9. Repeated from OUTSIDE on the 58 after the deploy (14/14 on both demos, three times each; tiendita Postgres row counts identical before/after every walk). | script + psql counts |
+| **C. Gates** | unit `-race -short` 0 · full lane (no `-short`, Docker) 0 after one timing flake (`TestRunHook_WatchdogInterruptsInUnder100ms`: 100.47 ms under a fully loaded box — lint + gate + unit + full lane running together; green alone, the same flake previous sessions recorded) · lint 0 · vet/gofmt clean · **binary-diff gate 129 SAME + 2 DIFF, both intentional and DOCUMENTED IN THE CORPUS** (new rows `app-shell-served` — same status/CSP, new body — and `app-bundled-font` — 404 → 200 `font/woff2`) · **binary delta +104 KB explained byte by byte**: font +38,752 · style.css +26,845 · app.js +34,412 · i18n +4,687 · contract +3,509 · theme +571 · index +180 = +108,956 bytes of embedded sources → +106,496 bytes of binary · **ABBA with FROZEN binaries** (`5201c3f-base` vs `-vitrina`, blank fixture, 100 rps × 30 s × 8 runs × 4 arms on :8281): no_change on all four crossings (A vs B +0.7 %, A2 vs B2 −7.7 %, base-vs-base control +12.1 %, new-vs-new +2.8 % — the control is the largest delta, i.e. the 105’s noise floor; p50 base 0.649/0.673 ms, new 0.651/0.677 ms, 100 rps × 30 s × 8 runs per arm). | logs in `/tmp/vit/*.log` |
+| **ENG-46 — closed** | `Config.AppBannerText/Href` (+ `APPXIMO_APP_BANNER_TEXT/HREF`) → `backofficeui.Options.Banner` → `/app/ui-config.json {banner:{text,href}}` → the SPA renders a sticky return bar as TEXT nodes + one validated link (http/https/mailto/tel/same-site; `javascript:`/`data:`/scheme-relative dropped to text-only). Login and panel alike. Pinned by `TestBannerSeam`. Deployed on petfriendly's `/app` (live on both: “← Volver a la portada de PetFriendly” and “← Volver a La Tiendita”, href `/`). | `embed_test.go`; the 58 |
+| **Re-pointed suites (deliberately)** | `TestChromeBehaviorsPinned`: the mobile breakpoint pin 720 → **900 px** (the ink sidebar needs the room). `e2e-browser.mjs` (commerce 1-B) drives the SPA's own `/panel`, not `/app` — untouched, re-run green after the tiendita deploy (21/21 against the new commerce binary booted locally on :8281). | |
+| **D. The 58** | Both demos deployed through the drilled protocol. **petfriendly (vetapp)**: pre-deploy backups `appitools.pre-vitrina` / `vetapp.env.pre-vitrina` / `schema.json.pre-vitrina`; binary swap eb4c659 → 7f33ede → 5bf4e0c → **dec6614** (PID 414742 → … → 434440); `APPXIMO_APP_THEME_CSS=/etc/vetapp/app-theme.css` (sage on warm paper) + `APPXIMO_APP_BANNER_TEXT/HREF` added to the env; rollback drill twice (back → font 404 + old ui-config, redo → 200 + banner). **tiendita (commerce 69ad3f1-vitrina, engine dec6614 in the module replace)**: pg_dump before each deploy (`appitools-20260826-2051…/2102…/2110….dump`, the golden dump untouched, 89,291 B), `deploy-update.sh` (backup → atomic swap → health → auto-rollback; rollback copies in `/opt/appitools/bin-rollback/`, pre-vitrina binary also at `/root/tiendita-bin-pre-vitrina`), env gains theme (the shop’s green) + `APPXIMO_APP_DEMO_ROLES=demo` + banner; rollback drill through deploy-update itself (f82db2d-frente back, 404 on the font, then the vitrina binary again, 200). PIDs 417240 → … → 434687. Verified FROM OUTSIDE as a stranger (clean Chromium, desktop + 390×844, console-strict): petfriendly 14/14 ×3 runs, tiendita 14/14 ×3 (the first tiendita run caught 3 probe 503s from the circuit breaker → fixed by batching the probe, redeployed, clean). | |
+| **E. The video** | `idea-a-sistema.mp4` re-recorded on the redesigned panel — 58.0 s (54.4 s live + a 3.6 s held last frame for the closing line, the counter STOPS there), 2.74 MB, H.264 1280×800 + silent AAC, faststart, burned Spanish subtitles, ONE top-right box “GRABACIÓN REAL · SIN ACELERAR · tiempo real hh:mm:ss” (label + counter together, so nothing overlaps it — the previous session’s finding). Content: the command line as typed, `appximo new` (haiku, Spanish names asked for and obtained: bicicletas / clientes / ordenes_reparacion with a 6-state machine, VALID first try at 8.6 s, card at 9.8 s), then the browser: login with the printed credentials, home, create clienta → bicicleta → orden de reparación through the real forms, the BOARD, a drag recibida → diagnóstico, the chip changed in the list. Fictitious data. Frames verified visually. The previous video is ARCHIVED, not deleted: `assets/archivo/idea-a-sistema-2026-08-22.mp4` + poster + `NOTA.md` (Miguel’s decision). Landing: only the video, the poster and the caption duration (45 → 58 s) changed, through `tools/gen2.py` (the wa.me assert passed). | |
+| **F. Docs** | `backoffice-spec` §2 (+ the type-less jsonb row) and §10b rewritten to the shipped panel (structure, derived screens, one-variable theming, positional palette, board, CSP self-containment); README `docs/img/demo/app-*.png` and the technical site's `shot-app.png` retaken on the new panel with the same real-estate demo (`docs/demo`); handoff (04/03 A-45/00/registro) + this section. | |
+
+**Not ported, and why (the honest line):** atina's ScoreRing/matching, the
+per-phase tabs with counts, treated photography of people, a drawn wordmark —
+domain or raw material a schema does not declare. What the `/app` still lacks
+that IS reachable generically: a record DETAIL page with its related rows
+(`?include=` embeds from the `relations` block), column chooser + saved views,
+bulk actions/CSV export (spec §10), a search-backed relation select past 100
+rows, and a dashboard with aggregates (`/api/{r}/aggregate` is generic
+already). Each is a backlog candidate, not a regression.
 
 ## DONE in HERO-Y-DIRECCION-S1 (2026-08-26, 4th session of the day)
 
