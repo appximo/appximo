@@ -1385,6 +1385,9 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 	boOpts := backofficeui.Options{
 		DemoRoles: coalesceCSV(a.cfg.AppDemoRoles, os.Getenv("APPXIMO_APP_DEMO_ROLES")),
 	}
+	if txt := coalesce(a.cfg.AppBannerText, os.Getenv("APPXIMO_APP_BANNER_TEXT")); txt != "" {
+		boOpts.Banner = &backofficeui.Banner{Text: txt, Href: coalesce(a.cfg.AppBannerHref, os.Getenv("APPXIMO_APP_BANNER_HREF"))}
+	}
 	if a.cfg.AppThemeCSS != "" {
 		boOpts.ThemeCSS = []byte(a.cfg.AppThemeCSS)
 	} else if p := os.Getenv("APPXIMO_APP_THEME_CSS"); p != "" {

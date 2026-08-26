@@ -60,6 +60,7 @@ Fetch `/openapi.json` (unauthenticated). Everything a generic UI needs:
 | **`x-appximo-initial` / `x-appximo-transitions`** on a status property | the state machine: create-forms offer only initial states; edit-forms offer `[current, ...transitions[current]]`; a terminal state (empty list) renders read-only |
 | **`x-appximo-import`** on a resource's component schema | the resource accepts its listed governed fields (`id` / auto timestamps) on CREATE from import-granted roles — a data-import capability, NOT a form concern: keep those fields read-only in generated forms (`readOnly: true` stays the truth for every caller outside the grant; the granted role list is deliberately not in the contract). Surface it, if at all, as a specialized "import" affordance |
 | **`x-appximo-virtual-resources`** at the document root | engine-provided resources that are not in the schema (the `files` store, with its RBAC action vocabulary) — list them separately, never as CRUD resources |
+| a property with **no `type`** (described as "an arbitrary JSON document") | a `jsonb` column: render a JSON editor (a validated textarea is enough), never a text input — a `json` (TEXT) column is a plain `string` |
 | `x-appximo-custom-route: true` on an operation | a hand-written Go route: exclude from the generated CRUD, surface as an action/link if you want it |
 | the RBAC, by answering 403 | which resources this ROLE sees — probed, never configured (§5) |
 
@@ -280,41 +281,99 @@ is your SPA's own tokens — nothing here dictates a look.
   Bearer token). Building it as part of your SPA means the RBAC role of the
   logged-in user shapes it automatically — that is the point.
 
-## 10b. The embedded /app: theme, language, demo mode (DEMO-SHOWCASE-S1)
+## 10b. The embedded /app: the design system, theme, language, demo mode
 
 Everything above is the PATTERN (build the back-office inside your own SPA).
-The engine also SHIPS the pattern as the embedded `/app` panel, and that panel
-has three product knobs a consumer controls without rebuilding anything:
+The engine also SHIPS the pattern as the embedded `/app` panel. Since
+APP-VITRINA-S1 that panel runs on a real design system — the one a third
+party proved on this same engine (ink sidebar, ONE accent, white/zinc
+surfaces, Inter bundled, `tracking-tight` titles, `tabular-nums` figures,
+soft shadows, ≤ 300 ms motion) — while staying 100% generic: nothing in the
+bundle names a resource, a state or a domain. What the panel derives, beyond
+the sections above, all of it from the contract:
+
+- **Home**: one stat tile per resource (the §5 probe's `meta.total`), denied
+  resources dimmed with a lock, a dark hero with the app title, the resource
+  and record counts and the role.
+- **List**: the first five columns by a naming convention (name/title/code/
+  number/email-ish keys first, then lifecycle, enums, relations, numbers,
+  dates, switches; long free text last), **relation columns RESOLVED to the
+  target row's label** (one `?per_page=100` fetch per target, cached for the
+  session — the §7 recipe, read side), money rendered as money when the key
+  ends in `_centavos`/`_cents` (the int64-minor-unit convention), dates in
+  the UI locale, booleans as yes/no chips, jsonb as `{n}`.
+- **Lifecycle chips coloured BY POSITION**: the states of a state machine are
+  ordered structurally (initial states first, then breadth-first along
+  `x-appximo-transitions`) and the n-th state takes the n-th colour of an
+  8-colour palette (`--app-s1…s8`); a terminal state shows a hollow dot. No
+  colour is ever tied to a state NAME. Plain enums are neutral outline chips.
+- **Filters**: one compact select per enum / state / boolean field (max 4) →
+  `?filter[field][eq]=`; search → `?search=`; sort by header → `?sort=` —
+  and because a cursor and a sort are mutually exclusive on the engine, a
+  SORTED list pages by `?page=` while the unsorted list stays keyset
+  (`?after=`); `count=true` is sent only when no cursor is in play.
+- **Board**: a resource with a state machine gets a List ⇄ Board toggle. The
+  board's columns are the ordered states; a card drag is a transition —
+  columns the current state cannot reach are dimmed and refuse the drop,
+  a legal drop is a `PATCH {status: to}` (rule 5 on the read side; the 422
+  of a lost race reloads). On phones the cards expose their legal moves as
+  tap chips. It loads `?per_page=100` in one request and says so when more
+  exist.
+- **Form**: a right-side drawer (a bottom sheet on phones) with the fields
+  ordered structurally (title field, other required fields, text, relations,
+  enums, numbers, dates, switches, the lifecycle, files, JSON); the five
+  rules of §6 unchanged; the state field as chip-radios (create → initial
+  states; edit → current + legal moves; terminal → locked); a jsonb column —
+  published as a TYPE-LESS property, "an arbitrary JSON document" — as a
+  monospace JSON textarea validated before submit; the file widget with the
+  policy, the upload state, and an image preview through the signed URL;
+  delete behind a two-step confirm; toasts for created / saved / deleted /
+  moved; a 409 or a non-field error stays in a banner with the work intact.
+- **Designed states**: shimmer skeletons while loading (the only looping
+  animation, gone with the data), an empty state with the create action, an
+  inline error with retry, 422s painted per field with a scroll to the first.
+
+Three product knobs a consumer controls without rebuilding anything:
 
 - **Your colors** (`Config.AppThemeCSS`, or `APPXIMO_APP_THEME_CSS=<file>` on
-  the stock binary): the panel's stylesheet defines every color/radius/font as
-  `--app-*` CSS tokens on `:root`, and the engine serves your CSS at
-  `/app/theme.css`, linked after the panel's own — so a handful of token
-  overrides re-skin the whole panel with your brand. The embedded default
-  (`pkg/backofficeui/web/theme.css`) documents the token list. Dark mode:
-  redefine the same tokens under
+  the stock binary): the engine serves your CSS at `/app/theme.css`, linked
+  after the panel's own. **One line is a brand**:
+  `:root { --app-accent: #FF5A36; }` — every accent-derived colour (hover,
+  soft chip background, focus ring, glow, the active dot on the ink sidebar)
+  is a `color-mix()` of `--app-accent`. The full token list is the head of
+  `style.css`; the ones worth knowing: `--app-accent` / `--app-on-accent`,
+  `--app-nav-bg` (the sidebar, ink by default), `--app-bg` / `--app-surface`
+  / `--app-border` / `--app-text` / `--app-muted`, the radii, `--app-font`
+  (Inter ships bundled — the CSP is `font-src 'self'`, so a CDN font would
+  silently fall back), and `--app-s1…s8` (+`-bg`), the lifecycle palette by
+  position. Dark mode: redefine the same tokens under
   `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {…} }`
   and `:root[data-theme="dark"] {…}`, or leave them out to keep the default
   dark palette.
 - **Language**: the panel chrome is Spanish/English (browser-derived — an `es*`
   browser sees Spanish; anything else English — with a persisted in-app
   toggle). Resource names, field keys, enum values and engine error messages
-  are YOUR schema's vocabulary and are shown verbatim, never translated.
+  are YOUR schema's vocabulary and are shown verbatim, never translated
+  (labels are letter-case only: `fecha_de_entrega` → "Fecha de entrega",
+  a relation `cliente_id` → "Cliente", `precio_centavos` → "Precio").
 - **Demo mode** (`Config.AppDemoRoles` / `APPXIMO_APP_DEMO_ROLES=demo`): for
   the listed roles, `/app` SIMULATES writes in a per-session in-memory overlay
-  — the visitor creates/edits/deletes, sees their changes merged into every
-  list (and relation selects) for the rest of the session, and a reload resets
-  everything. No write ever leaves the browser. Pair it with a role whose RBAC
-  is READ-ONLY: the overlay is visitor coherence, the deny-by-default policy
-  is the security boundary (a hand-crafted request with that role's token is
-  still a 403). A discreet fixed notice says "you're trying things out —
-  changes are not saved". The role list is published at `/app/ui-config.json`
-  (role names are not secrets). This is how a public showcase stays touchable
-  without being vandalizable.
+  — the visitor creates/edits/deletes/moves cards, sees their changes merged
+  into every list, board and relation select for the rest of the session, and
+  a reload resets everything. No write ever leaves the browser. Pair it with
+  a role whose RBAC is READ-ONLY: the overlay is visitor coherence, the
+  deny-by-default policy is the security boundary (a hand-crafted request
+  with that role's token is still a 403). A discreet fixed notice says
+  "you're trying things out — changes are not saved". The role list is
+  published at `/app/ui-config.json` (role names are not secrets). This is
+  how a public showcase stays touchable without being vandalizable.
 
-The panel is also mobile-first (≤720px: tables become stacked labeled cards,
-the nav a drawer, the form a bottom sheet) and theme-aware
-(`prefers-color-scheme` + a persisted auto/light/dark toggle) out of the box.
+The panel is mobile-first (≤ 900 px: the sidebar becomes a drawer, tables
+become stacked labelled cards, the board scrolls horizontally with snap, the
+form is a full-height sheet), theme-aware (`prefers-color-scheme` + a
+persisted auto/light/dark toggle), and self-contained under the CSP
+(`style-src 'self'`: no inline styles, no CDN, the font embedded — pinned by
+`pkg/backofficeui/embed_test.go`).
 
 ## 11. Checklist an agent can verify
 

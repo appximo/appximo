@@ -78,9 +78,9 @@ compiled surfaces of the same process, all derived from the schema:
 
 The same generated schema from the demo, seen through three of those surfaces:
 
-| A record in `/app` — the FK shows the agent's NAME, `status` offers only the transitions its state machine allows | The model, in `/editor` | The platform, in `/admin` |
+| A record in `/app` — its foreign keys resolved to NAMES, `status` offering only the transitions its state machine allows | The model, in `/editor` | The platform, in `/admin` |
 |---|---|---|
-| ![the generated back-office: a record, its foreign key resolved to a name, its lifecycle constrained](docs/img/demo/app-record.png) | ![the ERD in Appximo Studio](docs/img/demo/editor-erd.png) | ![the admin panel](docs/img/demo/admin.png) |
+| ![the generated back-office: a record, its foreign keys resolved to names, its lifecycle constrained](docs/img/demo/app-record.png) | ![the ERD in Appximo Studio](docs/img/demo/editor-erd.png) | ![the admin panel](docs/img/demo/admin.png) |
 
 ## Who it's for — and who it's NOT for
 

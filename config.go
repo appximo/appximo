@@ -212,6 +212,14 @@ type Config struct {
 	// security boundary; a hand-crafted write with that role's token is still
 	// a 403. Empty falls back to APPXIMO_APP_DEMO_ROLES (comma-separated).
 	AppDemoRoles []string
+	// AppBannerText / AppBannerHref put a one-line RETURN BAR above the
+	// embedded /app (login and panel): the consumer's text and one link back
+	// to its storefront or landing (ENG-46 — a public demo panel used to be a
+	// dead end for the hottest visitor). Text only, one href (http/https/
+	// mailto/tel or a same-site path; anything else renders as plain text).
+	// Empty falls back to APPXIMO_APP_BANNER_TEXT / APPXIMO_APP_BANNER_HREF.
+	AppBannerText string
+	AppBannerHref string
 
 	// Version is reported by /health and the synthetic monitor. Empty reports
 	// "dev"; the cmd binary passes its ldflags-injected build version.

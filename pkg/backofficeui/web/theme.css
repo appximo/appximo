@@ -1,19 +1,28 @@
 /* theme.css — the consumer's theme seam (served at /app/theme.css, ALWAYS
    linked after style.css so anything here wins). This embedded default is
-   deliberately empty: the panel ships with its neutral product look.
+   deliberately empty: the panel ships with its sober neutral look (ink accent,
+   white/zinc surfaces, ink sidebar).
 
-   To re-skin the panel with YOUR brand — no rebuild, no fork — provide a CSS
-   file that redefines the tokens (Config.AppThemeCSS in a consumer binary, or
+   To put YOUR brand on the panel — no rebuild, no fork — provide a CSS file
+   that redefines the tokens (Config.AppThemeCSS in a consumer binary, or
    APPXIMO_APP_THEME_CSS=<path> on the stock binary) and the engine serves it
-   here instead. The full token list lives at the top of style.css; the short
-   version:
+   here instead. ONE line is enough for a brand:
+
+   :root { --app-accent: #FF5A36; }
+
+   Every accent-derived color (hover, soft chip background, focus ring, glow,
+   the active dot on the ink sidebar) is a color-mix() of --app-accent. The
+   full token list is the top of style.css; the ones worth knowing:
 
    :root {
-     --app-accent: #1c9d5b;        (buttons, active nav, focus)
-     --app-accent-strong: #157a47; (hover)
-     --app-on-accent: #ffffff;     (text on accent)
-     --app-bg / --app-surface / --app-border / --app-text / --app-muted
-     --app-radius / --app-font
+     --app-accent: #FF5A36;          buttons, active nav, focus, switches
+     --app-on-accent: #ffffff;       text on the accent (set #0b0b0c for a light accent)
+     --app-nav-bg: #0b0b0c;          the sidebar (ink by default)
+     --app-bg / --app-surface / --app-surface-2 / --app-border
+     --app-text / --app-text-2 / --app-muted
+     --app-radius-lg / --app-radius / --app-radius-sm
+     --app-font                      (Inter ships bundled; the CSP is font-src 'self')
+     --app-s1 … --app-s8 (+ -bg)    the lifecycle palette, by POSITION in the state machine
    }
 
    Dark mode: redefine the same tokens under

@@ -3,7 +3,11 @@
 // PRODUCT face of the backoffice-spec pattern: a CRUD admin UI generated
 // ENTIRELY from /openapi.json at runtime — zero resource-specific screens,
 // zero hardcoded domain knowledge — so ONE prebuilt bundle serves every schema
-// this engine will ever boot. In the minute-3 of a first contact, /app is the
+// this engine will ever boot. APP-VITRINA-S1 rebuilt its skin on the design
+// system atina proved on this engine (ink sidebar, one accent, bundled Inter,
+// positional lifecycle chips, a board derived from the state machine, drawer
+// forms, toasts) — hand-written static CSS + vanilla JS, still no build step,
+// still nothing domain-specific. In the minute-3 of a first contact, /app is the
 // screen that feels like *your* app: your resources, your fields, your RBAC.
 //
 // The SPA is no-build vanilla JS (ES modules), so unlike /admin and /editor
@@ -50,6 +54,7 @@ const cspApp = "default-src 'self'; img-src 'self' data: blob:; style-src 'self'
 var mimeByExt = map[string]string{
 	".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
 	".html": "text/html; charset=utf-8", ".svg": "image/svg+xml", ".json": "application/json",
+	".woff2": "font/woff2",
 }
 
 // Options customizes the served back-office without touching the embedded
@@ -69,6 +74,39 @@ type Options struct {
 	// not secrets; the endpoint lists only these). Stock binary:
 	// APPXIMO_APP_DEMO_ROLES=<comma-separated>.
 	DemoRoles []string
+	// Banner, when set, is a one-line bar the SPA renders above its shell
+	// (login and panel alike): the consumer's TEXT and ONE link — the way
+	// back to the storefront/landing from a public demo panel (ENG-46). It
+	// travels in /app/ui-config.json as {text, href} and the SPA renders it
+	// as text + an <a> (textContent, never markup), so no HTML is injected;
+	// Href is validated here (http/https/mailto/tel or a same-site path).
+	// Stock binary: APPXIMO_APP_BANNER_TEXT + APPXIMO_APP_BANNER_HREF.
+	Banner *Banner
+}
+
+// Banner is the consumer's return bar for /app (see Options.Banner).
+type Banner struct {
+	Text string `json:"text"`
+	Href string `json:"href,omitempty"`
+}
+
+// safeBannerHref reports whether href may be rendered as a link: an absolute
+// http(s)/mailto/tel URL or a same-site path. Anything else (javascript:,
+// data:, scheme-relative) is dropped — the bar then shows text only.
+func safeBannerHref(href string) bool {
+	h := strings.TrimSpace(strings.ToLower(href))
+	if h == "" {
+		return false
+	}
+	if strings.HasPrefix(h, "//") {
+		return false
+	}
+	for _, p := range []string{"https://", "http://", "mailto:", "tel:"} {
+		if strings.HasPrefix(h, p) {
+			return true
+		}
+	}
+	return strings.HasPrefix(h, "/") || strings.HasPrefix(h, "#")
 }
 
 type handler struct {
@@ -94,6 +132,13 @@ func newHandler(opts Options) (*handler, error) {
 	cfg := map[string]any{}
 	if len(opts.DemoRoles) > 0 {
 		cfg["demo_roles"] = opts.DemoRoles
+	}
+	if b := opts.Banner; b != nil && strings.TrimSpace(b.Text) != "" {
+		bb := Banner{Text: strings.TrimSpace(b.Text)}
+		if safeBannerHref(b.Href) {
+			bb.Href = strings.TrimSpace(b.Href)
+		}
+		cfg["banner"] = bb
 	}
 	uiCfg, err := json.Marshal(cfg)
 	if err != nil {
@@ -166,8 +211,15 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", ct)
 	}
 	// Unhashed filenames: revalidate on each load (they are a few KB; a stale
-	// app.js against a new contract reader would be a debugging trap).
-	w.Header().Set("Cache-Control", "no-cache")
+	// app.js against a new contract reader would be a debugging trap). The
+	// bundled font is the one large, rarely-changing asset (39 KB, Inter latin
+	// subset — the CSP is font-src 'self', so it MUST ship in the binary):
+	// cache it for a week; a changed font is served under a new name.
+	if path.Ext(rel) == ".woff2" {
+		w.Header().Set("Cache-Control", "public, max-age=604800")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
+	}
 	if rs, ok := f.(interface {
 		Read(p []byte) (int, error)
 		Seek(offset int64, whence int) (int64, error)

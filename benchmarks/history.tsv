@@ -83,3 +83,7 @@ date	commit	label	target	tenant	endpoint	script	rate	duration	runs	p50_median_ms
 2026-08-21	f4d255a	was1p-B1	http://localhost:8080	nimbus	/api/asignaciones?per_page=20	tests/performance/erp_patch.js	50	25s	5	5.093	7.913	13.6	0.0000	
 2026-08-21	f4d255a	was1p-B2	http://localhost:8080	nimbus	/api/asignaciones?per_page=20	tests/performance/erp_patch.js	50	25s	5	4.536	8.288	17.9	0.0000	
 2026-08-21	f4d255a	was1p-A2	http://localhost:8080	nimbus	/api/asignaciones?per_page=20	tests/performance/erp_patch.js	50	25s	5	4.438	6.635	13.7	0.0000	
+2026-08-26	5201c3f	vit-A	http://localhost:8281	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	8	0.649	1.060	9.2	0.0000	
+2026-08-26	5201c3f	vit-B	http://localhost:8281	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	8	0.651	1.085	10.1	0.0000	
+2026-08-26	5201c3f	vit-B2	http://localhost:8281	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	8	0.677	1.068	10.3	0.0000	
+2026-08-26	5201c3f	vit-A2	http://localhost:8281	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	8	0.673	1.244	15.9	0.0000	

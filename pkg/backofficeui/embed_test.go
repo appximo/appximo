@@ -126,9 +126,60 @@ func TestChromeBehaviorsPinned(t *testing.T) {
 		}
 	}
 	css := get(t, r, "/app/style.css").Body.String()
-	for _, marker := range []string{"--app-accent", "prefers-color-scheme", "data-theme", "max-width: 720px"} {
+	// The mobile breakpoint moved 720 → 900 px in APP-VITRINA-S1 (the ink
+	// sidebar needs the room); the pin follows deliberately.
+	for _, marker := range []string{"--app-accent", "prefers-color-scheme", "data-theme", "max-width: 900px"} {
 		if !strings.Contains(css, marker) {
 			t.Errorf("style.css lost %q (theme tokens / dark mode / responsive)", marker)
+		}
+	}
+}
+
+// APP-VITRINA-S1: the design system is embedded and self-contained. The CSP
+// is font-src 'self' / style-src 'self', so the font MUST ship in the binary
+// (a CDN @font-face would silently fall back to the system font, and an
+// inline style attribute is blocked and logged — both invisible to curl).
+func TestDesignSystemSelfContained(t *testing.T) {
+	r := testRouter(t)
+	font := get(t, r, "/app/fonts/inter-latin-var.woff2")
+	if font.Code != http.StatusOK {
+		t.Fatalf("GET /app/fonts/inter-latin-var.woff2 = %d, want 200", font.Code)
+	}
+	if ct := font.Header().Get("Content-Type"); ct != "font/woff2" {
+		t.Fatalf("font Content-Type = %q, want font/woff2", ct)
+	}
+	if cc := font.Header().Get("Cache-Control"); !strings.Contains(cc, "max-age=604800") {
+		t.Fatalf("font Cache-Control = %q, want a week", cc)
+	}
+	if n := font.Body.Len(); n < 20000 || n > 120000 {
+		t.Fatalf("font size %d bytes: not the latin subset (expected ~39 KB)", n)
+	}
+	css := get(t, r, "/app/style.css").Body.String()
+	for _, marker := range []string{
+		"@font-face", "./fonts/inter-latin-var.woff2", // bundled Inter
+		"--app-s1", "--app-s8", // the positional lifecycle palette
+		"--app-ease",                                               // the system's easing
+		".board", ".kcard", ".drawer", ".toast", ".skel", ".empty", // the designed states
+	} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("style.css lost %q", marker)
+		}
+	}
+	for _, f := range []string{"/app/style.css", "/app/app.js", "/app/contract.js", "/app/i18n.js", "/app/"} {
+		body := get(t, r, f).Body.String()
+		for _, bad := range []string{"https://fonts.", "cdn.", "unpkg.com", "jsdelivr"} {
+			if strings.Contains(body, bad) {
+				t.Errorf("%s references an external host (%q) — the CSP forbids it", f, bad)
+			}
+		}
+	}
+	app := get(t, r, "/app/app.js").Body.String()
+	if strings.Contains(app, `style="`) {
+		t.Errorf("app.js renders an inline style attribute — blocked by style-src 'self'")
+	}
+	for _, marker := range []string{"orderedStates", "renderBoard", "moveCard", "loadRelLabels", "toast("} {
+		if !strings.Contains(app, marker) && !strings.Contains(get(t, r, "/app/contract.js").Body.String(), marker) {
+			t.Errorf("app.js lost %q (board / positional states / resolved relations / toasts)", marker)
 		}
 	}
 }
@@ -184,5 +235,43 @@ func TestDemoModePinned(t *testing.T) {
 	i18n := get(t, r, "/app/i18n.js").Body.String()
 	if !strings.Contains(i18n, "demo.banner") {
 		t.Error("i18n.js lost the demo banner string")
+	}
+}
+
+// ENG-46: the consumer's return bar travels in ui-config.json as text + ONE
+// validated link; the SPA renders it as text nodes. A javascript: href is
+// dropped (text-only bar), an empty text disables the bar entirely.
+func TestBannerSeam(t *testing.T) {
+	r := chi.NewRouter()
+	if err := RegisterOpts(r, Options{Banner: &Banner{Text: "← Volver a la tienda", Href: "https://tiendita.example.com/?from=app"}}); err != nil {
+		t.Fatalf("RegisterOpts: %v", err)
+	}
+	cfg := get(t, r, "/app/ui-config.json").Body.String()
+	if !strings.Contains(cfg, `"banner":{"text":"← Volver a la tienda","href":"https://tiendita.example.com/?from=app"}`) {
+		t.Fatalf("banner not published: %s", cfg)
+	}
+	unsafe := chi.NewRouter()
+	_ = RegisterOpts(unsafe, Options{Banner: &Banner{Text: "x", Href: "javascript:alert(1)"}})
+	if body := get(t, unsafe, "/app/ui-config.json").Body.String(); strings.Contains(body, "javascript") || !strings.Contains(body, `"banner":{"text":"x"}`) {
+		t.Fatalf("unsafe href must be dropped, got %s", body)
+	}
+	for _, h := range []string{"//evil.example.com", "data:text/html,x", ""} {
+		if safeBannerHref(h) {
+			t.Errorf("safeBannerHref(%q) = true, want false", h)
+		}
+	}
+	for _, h := range []string{"https://a.b/c", "http://a.b", "/", "/tienda", "mailto:x@y.z", "tel:+57", "#top"} {
+		if !safeBannerHref(h) {
+			t.Errorf("safeBannerHref(%q) = false, want true", h)
+		}
+	}
+	none := chi.NewRouter()
+	_ = RegisterOpts(none, Options{Banner: &Banner{Text: "   "}})
+	if body := get(t, none, "/app/ui-config.json").Body.String(); strings.Contains(body, "banner") {
+		t.Fatalf("blank text must not publish a banner: %s", body)
+	}
+	app := get(t, r, "/app/app.js").Body.String()
+	if !strings.Contains(app, "consumer-bar") || !strings.Contains(app, "bannerHTML") {
+		t.Errorf("app.js lost the return-bar renderer")
 	}
 }
