@@ -145,10 +145,15 @@ export function rowLabel(row, refCol = 'id') {
   return String(row[refCol] ?? row.id ?? '').slice(0, 8);
 }
 
-// The "title" column of a resource: the field a human scans first.
+// The "title" field of a resource: the field a human scans first — a
+// name-like key if there is one, else the first REQUIRED free-text field,
+// else the first free-text field. Used for the list's primary column, the
+// board card title, the drawer title and the label of a related row.
 export function titleField(res) {
-  const pref = (k) => NAMEISH.findIndex((p) => k === p || k.includes(p));
-  const cands = res.fields.filter((f) => !f.readOnly && !f.file && !f.relation && f.type === 'string' && !f.enum && !f.transitions && !f.format);
-  cands.sort((a, b) => (pref(a.key) === -1 ? 99 : pref(a.key)) - (pref(b.key) === -1 ? 99 : pref(b.key)));
-  return cands[0] ?? null;
+  const pref = (k) => { const i = NAMEISH.findIndex((p) => k === p || k.includes(p)); return i === -1 ? 99 : i; };
+  const cands = res.fields
+    .map((f, i) => [f, i])
+    .filter(([f]) => !f.readOnly && !f.file && !f.relation && f.type === 'string' && !f.enum && !f.transitions && !f.format);
+  cands.sort((a, b) => (pref(a[0].key) - pref(b[0].key)) || ((b[0].required ? 1 : 0) - (a[0].required ? 1 : 0)) || (a[1] - b[1]));
+  return cands[0]?.[0] ?? null;
 }

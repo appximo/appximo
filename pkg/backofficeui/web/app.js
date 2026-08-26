@@ -445,9 +445,11 @@ function columnsFor(res) {
     if (f.type === 'string' && !f.maxLength && !f.format) return 7;   // free text (long) — last
     return 0;
   };
+  const tf = titleField(res);
   const cols = res.fields
     .filter((f) => f.key !== 'id' && !f.file && f.type !== 'object' && !f.json && !f.auto && (f.format !== 'uuid' || f.relation))
     .sort((a, b) => {
+      if (tf && (a.key === tf.key || b.key === tf.key)) return a.key === tf.key ? -1 : 1;   // the title field leads
       const pa = pref(a.key), pb = pref(b.key);
       if (pa !== pb) return pa - pb;
       const ka = kind(a), kb = kind(b);
@@ -631,7 +633,8 @@ async function loadRelLabels(f) {
     try { rows = (await api(`/api/${target}?per_page=100`)).data; } catch { rows = []; }
     if (demo) rows = demoMergeList(target, rows, null);
     const m = new Map();
-    for (const r of rows) m.set(String(r[f.references] ?? r.id), rowLabel(r, f.references));
+    const tres = contract.byName[target]; const lf = tres ? titleField(tres) : null;
+    for (const r of rows) m.set(String(r[f.references] ?? r.id), (lf && r[lf.key]) ? String(r[lf.key]) : rowLabel(r, f.references));
     m.rows = rows;
     return m;
   })();
@@ -961,7 +964,7 @@ async function controlHTML(f, val, editing, readonly) {
       const m = await loadRelLabels(f);
       const rows = m.rows ?? [];
       const opts = [`<option value="">${t('form.none')}</option>`, ...rows.map((r) =>
-        `<option value="${esc(r[f.references])}"${String(r[f.references]) === String(v) ? ' selected' : ''}>${esc(rowLabel(r, f.references))}</option>`)].join('');
+        `<option value="${esc(r[f.references])}"${String(r[f.references]) === String(v) ? ' selected' : ''}>${esc(m.get(String(r[f.references] ?? r.id)) ?? rowLabel(r, f.references))}</option>`)].join('');
       return `<select id="${id}" name="${f.key}" data-refcol="${esc(f.references)}"${req}${dis}>${opts}</select>`;
     }
     case 'file': {
