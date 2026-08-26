@@ -1051,6 +1051,28 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 
 ---
 
+## DONE in HERO-Y-DIRECCION-S1 (2026-08-26, 4th session of the day)
+
+Six direction corrections on the live landing plus the component hero
+(internal decisions A-38..A-43). Engine untouched; the 58 untouched.
+
+| Item | What landed | Verified by |
+|---|---|---|
+| Hero | ink + grain + a pre-blurred, never-legible texture (11 KB); a collage of BUILT components (paid order with golden-set data, notification card, the 58.2 % ring, an 18-module stat) with a one-pass staggered entrance; the registered triple eyebrow; the A-27 H1 complete on desktop (it used to be clipped); the sub says "trabaja solo: avisa, cobra y recuerda"; "lo ve funcionando antes de pagar" once per screen | captures desktop + 390×844; motion contracts 0 stuck ×3 modes; 132 KB of hero captures gone (page 270 → 164 KB) |
+| Team voice (A-39, FINAL) | zero proper names on index/conjuntos/caso; team block with three true credentials; SOCIA-PENDIENTE retired; FOTO-PENDIENTE = team/work photo, never stock | `grep` = 0 on the three generated pages |
+| Demos folded (A-40) | one-line strip `#pruebe` (tienda · agenda · conjunto); return bars untouched; no system counts in headings | nav + hero anchors resolve |
+| VecinGo opens (A-41) | `demovecingo.appximo.com` audited from outside: valid TLS to 2026-11-17, demo mode without login, Spanish, fictitious-data banner, a radicar does not persist (silent no-op), 0 console errors → "Abrir el sistema ↗" on the card and on conjuntos | Playwright audit + screenshots |
+| Curated captures | pf-panel (English column names), pf-thumb, atina-panel, tienda, tienda-hero removed; nothing published with English, raw tables or test-looking data | asset audit against the generated pages |
+| Reach + contrast | "Desde Pereira, Colombia — para todo el país" everywhere; the real contrast bug (`.s-ink a` outranking `.btn-wa` → 1.24:1 light-green-on-green on four live buttons) fixed at the root; every button ≥ 7.76:1 | `contrast.cjs` (WCAG ratio per button over the effective background) |
+| "Lo que no hacemos" (A-42) | rule: focus/principle limits only, never a capability we lack or seem to lack; two lines out, two in | rule recorded in 03 |
+| Reorder (A-43) | VecinGo leads the cases as our case; atina is the centrepiece of "Para empresas con equipo técnico" (bars, video, open, own CTA — the 19th wa.me origin); external-developer attribution verbatim everywhere; hero stat 32 → 18 | wa.me set: 18 preserved + 1 new (generator assert) |
+
+### Requires a decision from Miguel (added by HERO-Y-DIRECCION-S1)
+
+| Item | Why it needs him |
+|---|---|
+| **VecinGo authorship in public material** | A-43 asks the landing to present VecinGo as "caso nuestro: lo construimos". The public technical material (docs/CASE_STUDY_VECINGO.md, FIELD_FEEDBACK_RESPONSE §3, the site) says an **independent developer** built it. Both cannot be true in public at once. The landing now says "hecha con nuestra tecnología… para un conjunto residencial" (true under either reading) and does NOT say "la construimos". If Miguel confirms authorship in writing, one line in `tools/gen2.py` changes AND the technical material must be corrected the same day; if the third-party account stands, the wording stays. |
+
 ## DONE in REDISENO-VISUAL-S2 (2026-08-26, 3rd session)
 
 | Item | What was done | Verified by |
