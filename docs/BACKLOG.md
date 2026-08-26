@@ -26,7 +26,15 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-26 (FRENTE-COMERCIAL-S1)** — a commercial-front
+**Last reviewed: 2026-08-26 (REDISENO-VISUAL-S1)** — the visual execution
+of both commercial pages and the technical site rebuilt on the atina design
+system (tokens by variable, bundled Fraunces+Inter under the same CSP, the
+semantic-class layer, reveal/count-up/tilt, the two-level proof hierarchy:
+cases first, demos as the invitation; ERP card out; GSAP replaced by CSS
+under the same three motion contracts; no external host on any property).
+No engine code; the 58 untouched (demos re-verified e2e in the browser).
+Nothing new opened; decision A-36 in the internal package. Previous
+review: 2026-08-26 (FRENTE-COMERCIAL-S1) — a commercial-front
 session (no engine code): indexation infrastructure on both properties
 (robots/sitemap/canonical/JSON-LD — there was NO noindex; there was nothing
 at all), the third-party testimonial removed from the commercial pages under
@@ -1036,6 +1044,21 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in REDISENO-VISUAL-S1 (2026-08-26, 2nd session)
+
+Visual execution only — content, CTAs (18 origins, set verified identical
+before/after), claims and the wide hero (A-27) untouched; no engine code; the
+58 untouched (bars re-verified, one more e2e purchase per viewport).
+
+| Item | What was done | Verified by |
+|---|---|---|
+| **A. The system, applied** | `assets/system.css` + `system.js` shared by index/conjuntos/caso: token scales (accent 50→800, ink 950→500, radii, soft/lift/glow shadows), type scale 3xl→6xl with `text-wrap:balance`/`tracking-tight`, 11 px eyebrows, `tabular-nums`, semantic classes (`card`, `card-dark`, `card-accent`, `chip`, `input`, `skeleton`, `media`, `bframe`, `reveal`), nav transparent→solid, FAQ, mobile bar. Fonts bundled (Fraunces static 600 display 16 KB + Inter variable 39 KB, latin subsets via fonttools), `font-src 'self'` intact. | request audit: EXTERNAL=none on every page; the accent hex appears only in the token block |
+| **B. Proof hierarchy** | Level 1 `#casos` on ink: atina + VecinGo as large pieces (wide capture, click-verifiable numbers, click-to-play video, the problem solved, "what it means for you"). Level 2 `#pruebe`: the two open demos as a subordinated invitation ("y además puede entrar a tocar"). `#conjuntos` = the one accent-background section (the segment door). **Out:** the "3 sistemas abiertos" stat (it counted demos) and the ERP/CRM pick. | live captures desktop + 390×844 |
+| **C. Technical site** | Ink hero with the giant `appximo` wordmark in the indigo accent, capability marquee (loop), float on the atina loops, tilt on the demo cards, reveal per section, bundled Inter; the loops start only when visible (`preload=none` + posters), no drop-shadow/grain (measured +200 ms of main thread). | live 5-run medians; contracts |
+| **Motion contracts** | no-JS / reduced-motion / motion-after-full-scroll = **0 stuck** on all three commercial pages; infinite loops **0** on commercial, **3** on the technical site (by design; 0 under reduced-motion). GSAP removed (−118 KB), choreography in CSS. | `contracts.cjs` |
+| **Load** | Landing, local 5-run medians before→after: desktop 427→473 ms, mobile 343→324 ms; live after 458/335 ms, 303 KB. conjuntos 229/213 ms, caso 306/180 ms. Technical site: bytes 846→529 KB locally (loops lazy), medians in the session report. | `perf.cjs` |
+| **Rollback** | `git revert` of the session's landing commits reproduces `fa64ba6` byte for byte; same for gh-pages. | `cmp` |
 
 ## DONE in FRENTE-COMERCIAL-S1 (2026-08-26)
 
