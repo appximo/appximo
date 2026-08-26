@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787717882214,
+  "lastUpdate": 1787779197960,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -3672,6 +3672,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "45934261 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "fbed1e4e823d1f9d2e88f38a2aad6a45719edb5a",
+          "message": "docs(backlog): APP-VITRINA-S1 — the /app on the design system, generic on four schemas, themable from one variable, ENG-46 closed, deployed to both demos with drilled rollback, the video re-recorded",
+          "timestamp": "2026-08-26T21:19:22Z",
+          "tree_id": "0243d3490588e19afb3cb3027d176da1d3af9210",
+          "url": "https://github.com/appximo/appximo/commit/fbed1e4e823d1f9d2e88f38a2aad6a45719edb5a"
+        },
+        "date": 1787779196773,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6251,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "357868 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6251,
+            "unit": "ns/op",
+            "extra": "357868 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "357868 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "357868 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 72.01,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36664750 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 72.01,
+            "unit": "ns/op",
+            "extra": "36664750 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36664750 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36664750 times\n4 procs"
           }
         ]
       }
