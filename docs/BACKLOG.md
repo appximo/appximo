@@ -26,7 +26,13 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-26 (REDISENO-VISUAL-S1)** — the visual execution
+**Last reviewed: 2026-08-26 (REDISENO-VISUAL-S2)** — appximo.com, conjuntos
+and caso REBUILT on the atina system with the brand decisions D1–D6 (internal
+A-37): Inter only, ink/white/zinc surfaces alternating per section, green
+as the only accent, the D3 graphic components built (58.2 % quorum ring,
+bars with numbers, initials, chips, stat blocks), the hero as a treated grid
+of real captures, the A-27 hero copy restored and the AI chip out. No engine
+code; 58 untouched; nothing new opened. Previous review: 2026-08-26 (REDISENO-VISUAL-S1) — the visual execution
 of both commercial pages and the technical site rebuilt on the atina design
 system (tokens by variable, bundled Fraunces+Inter under the same CSP, the
 semantic-class layer, reveal/count-up/tilt, the two-level proof hierarchy:
@@ -1044,6 +1050,14 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in REDISENO-VISUAL-S2 (2026-08-26, 3rd session)
+
+| Item | What was done | Verified by |
+|---|---|---|
+| **D1–D6 applied** | `assets/system.css` v2 with atina's compiled values (radii .9/1.25/1.75 rem, shadow-soft/lift, reveal .8 s/22 px, ink/35 + multiply layers, grain .18); Inter self-hosted (39 KB); ink `#0b1512` / white / zinc-50 alternating per section; green only as accent; serif + gold removed; ring (`.ring`), bars (`.bars`), initials (`.avatar`), chips, stat blocks; hero = 2×2 (mobile 1×3) grid of real captures incl. a live capture of petfriendly's demo panel; A-27 hero copy restored, IA chip out; team section names Miguel Acosta with `data-pendiente` markers. | live captures; request audit EXTERNAL=none; wa.me sets asserted identical (18 origins) |
+| **Load** | live 5-run medians before→after: landing desktop 534→374 ms, mobile 369→451 ms, 303→270 KB; conjuntos 331/233 ms; caso 288/201 ms. | `perf.cjs` |
+| **Contracts / rollback / demos** | 0 stuck × 3 pages × 3 modes, 0 loops; `git revert` reproduces the previous file byte for byte; e2e purchase with the bar on both viewports; petfriendly bar live. | `contracts.cjs`, `cmp`, `compra.cjs` |
 
 ## DONE in REDISENO-VISUAL-S1 (2026-08-26, 2nd session)
 
