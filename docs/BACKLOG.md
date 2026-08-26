@@ -26,7 +26,16 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-26 (REDISENO-VISUAL-S2)** — appximo.com, conjuntos
+**Last reviewed: 2026-08-26 (TIENDITA-VITRINA-S1)** — the two public demos
+made to show what they SELL: a persistent two-mode control («Así lo ven sus
+clientes» / «Así lo ve usted») on tiendita.appximo.com and petfriendly's
+portada, the storefront ported to the atina design system with a
+photo-independent treatment for the products with no admissible photo, and
+CSS-only motion. No engine code (commerce rebuilt against the SAME engine
+commit the box runs, `dec6614`, via `-modfile` + worktree). New OPEN: ENG-47
+(the login limiter has no env knob, and a public demo shares ONE identity),
+OPS-33 (an env value with spaces must be quoted — it broke the nightly golden
+reset), COMMERCE-11 (the six product photos weigh 1.55 MB). Previous review: 2026-08-26 (REDISENO-VISUAL-S2)** — appximo.com, conjuntos
 and caso REBUILT on the atina system with the brand decisions D1–D6 (internal
 A-37): Inter only, ink/white/zinc surfaces alternating per section, green
 as the only accent, the D3 graphic components built (58.2 % quorum ring,
@@ -173,6 +182,77 @@ refreshed).
 ---
 
 ## OPEN
+
+### ENG-47 — The login limiter has no env knob, and a PUBLIC demo shares ONE identity
+
+**Origin:** TIENDITA-VITRINA-S1. The session made the demo panel reachable in
+one tap, which routes every visitor through `POST /auth/login` as the single
+public account `demo@tiendita.co`. `pkg/userauth` throttles login attempts per
+**(tenant, email)** at **5/min, burst 5** (`newLoginLimiter`, defaults applied
+because `app.go` never sets `LoginAttemptsPerMinute`/`LoginBurst`), and there
+is **no environment variable** to change it. Six visitors in a minute exhaust
+the quota and the sixth is answered `429`.
+
+**Impact:** a demo promoted from the landing page — the hottest traffic the
+business gets — degrades exactly when it is working. The SPA now retries once
+after 1.6 s and, failing that, lands the visitor on the merchant door **with
+the reason written and a "Reintentar ahora" button** (never a mute form), so
+the user-visible damage is bounded; but the engine cannot be loosened at all.
+
+**Not a "raise the default" item.** The 5/min default is right for a real
+account: it is the online brute-force guard. What is missing is the ability to
+declare that ONE identity is a public demo.
+
+**Ready:** either `APPXIMO_AUTH_LOGIN_ATTEMPTS_PER_MINUTE` / `…_BURST` wired
+into `userauth.Config` (documented, defaulting to today's 5/5 so nothing
+changes for anyone who does not set it), **or** a per-role exemption so a
+read-only demo role is not brute-forceable in the first place. Verified by a
+test that exhausts the quota and shows the configured limit applying.
+
+### OPS-33 — An env value with spaces must be QUOTED, or the scripts that source it break
+
+**Origin:** TIENDITA-VITRINA-S1, found hours before it would have bitten.
+APP-VITRINA-S1 added `APPXIMO_APP_BANNER_TEXT=← Volver a La Tiendita` to
+`/etc/appitools/appitools.env` **unquoted**. systemd's `EnvironmentFile=`
+parses that fine, so the engine was correct and nothing looked wrong. But
+`redate-demo.sh` — the `ExecStartPost=` of the nightly `demo-reset.service` —
+does `. "$ENV_FILE"` in bash, where the line becomes `APPXIMO_APP_BANNER_TEXT=←`
+followed by an attempt to RUN `Volver` → `command not found`, exit 127.
+
+**Impact:** the nightly golden reset of the tiendita demo would have started
+FAILING at its first run after that change (the restore itself ran; the
+re-dating step did not, and the unit went to `failed`). The last successful run
+was 2026-08-26 04:15; the next was due 2026-08-27 04:15. This session quoted
+both env files (`.pre-quote` backups kept), restarted both services and ran the
+whole unit end to end — `Result=success`, golden restored, dates re-anchored.
+
+**Ready:** the class, not the instance. Either (a) `install.sh` and the
+deploy docs write env values quoted and say why, or (b) the scripts that only
+need `DATABASE_URL` stop sourcing the whole env file. A test that writes a
+value with a space and asserts both consumers survive.
+
+### COMMERCE-11 — The tiendita's six product photos weigh 1.55 MB (one of them 676 KB)
+
+**Origin:** TIENDITA-VITRINA-S1's image audit. The photos are licence-verified,
+brand-free and face-free (the A-21 filter holds), but they are served at their
+ORIGINAL size — `rua-lan.jpg` is 676 KB, `jea-sli.jpg` 290 KB, `som-vue.jpg`
+299 KB — for tiles that render ~260 px wide. Measured live: the SPA itself is
+168 KB; a desktop first paint pulls 768–1 035 KB of photos on top, and the
+number swings run to run with the lazy-loading scheduler.
+
+**Impact:** the demo's weight is dominated by images nobody sees at full size.
+Lazy loading already spares mobile (0 photos at `load`), so this is a desktop
+and scroll cost, not a blocker.
+
+**Why it was not fixed here:** replacing the photos means re-uploading to the
+file store, re-pointing `productos.imagen_id`, and **regenerating the golden
+dump** — and this session was explicitly told to leave the golden intact.
+
+**Ready:** the six source JPEGs downscaled to ~1 000 px / ≤120 KB, re-seeded
+through `seed.sh` (which is idempotent on photos), a NEW `golden-demo.dump`
+regenerated by the documented procedure, and the before/after transfer
+measured with `scripts/medir-carga.mjs`. Own photography (FOTO-PENDIENTE)
+would close it better, and is Miguel's call.
 
 ### OPS-31 — Indexation steps that need Miguel's Google account (Search Console, GBP)
 
@@ -1034,6 +1114,35 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in TIENDITA-VITRINA-S1 (2026-08-26, 6th session of the day)
+
+The two public demos made to show what they SELL. `tiendita.appximo.com` gets
+the hottest traffic the business has — whoever clicks "pruébela" is already
+considering buying — and it was showing what the owner's CUSTOMERS would see:
+the only link to the panel lived in the footer, in fine print, at **1 466 px of
+scroll on desktop and 1 736 px on mobile**. A hardware-store owner left without
+knowing there was a panel. No engine code: commerce was rebuilt against the
+SAME engine commit the box runs (`dec6614`) through `-modfile` + a worktree, so
+only the SPA changed (proved: `git diff 69ad3f1..HEAD` is empty outside
+`web/` and `scripts/`).
+
+| Item | What shipped | Proof |
+|---|---|---|
+| **A · Two explicit, persistent modes** | An ink bar under the WhatsApp return bar carries a segmented control — «Así lo ven sus clientes» / «Así lo ve usted» (mobile: «Sus clientes» / «Usted · el panel»). Sticky in BOTH modes, distinguished from the green bar by surface, shape and place. The mode IS the route, so a reload keeps it. | Live on both viewports; `verify-vitrina.mjs` 22/22 × 3 runs |
+| **A · No login wall** | Tapping «Así lo ve usted» does NOT land on a form: it signs in with the public demo account (read-only server-side) and lands on the board. **0 px of scroll** to learn the panel exists; **0.4 s (desktop) / 0.5 s (mobile)** to see the offer; **1.0–2.3 s** to be inside the panel. | measured, medians of 5 / 2 live |
+| **A · The panel says what it is** | A context strip — «Este es el panel del dueño — pedidos, inventario, clientes y las ventas del día» — above the untouched demo-mode notice. | screenshots; asserted in the suite |
+| **A · petfriendly too** | Its portada carries the same control («Qué es esto» / «Así lo ve usted» → `/app`) on the same system, and the ENG-46 banner now words the return the same way (env only). The engine's `/app` cannot host a segmented control — the ENG-46 banner is its single seam; documented asymmetry, not a gap. | `verify-petfriendly.mjs` 20/20 |
+| **B · The shop on the system** | Inter bundled (CSP `font-src 'self'`), paper/ink/white surfaces, one accent by variable, generous radii and soft shadows, `tabular-nums` on money, chips with a dot, shimmer skeletons, empty states with an action, inline errors, toasts. Store rhythm, not back-office: bigger art, more air, a two-column cart and checkout with a sticky summary. | screenshots desktop + 390×844 |
+| **B · Photos that do not depend on photography** | The three products with no photo that passes the A-21 filter left the pastel gradient for a WOVEN PLATE of the brand palette — loom weave, a medallion, a cloth label with the initials — deterministic per SKU, **zero image bytes** (pure CSS gradients). Photo and plate share ONE frame, so the grid reads as a designed catalogue. The detail page shows the photo WHOLE on paper (`contain`), not cropped. | `01-vitrina`; `e2e-browser.mjs` B1c |
+| **C · Motion, CSS only** | Named durations per element type: microfeedback/hover 100 ms, press 140, icon 200, card in 260 / out 170, sheet 340 / 230. `ease-out` in, `ease-in` out, `ease-in-out` on state change. Nothing loops except the skeleton shimmer, which exists only while content is pending. `prefers-reduced-motion` honoured. No new dependency. | `app.css` tokens; three motion states |
+| **Demo mode, both ways** | Overlay create/edit/transition visible in session, reload resets, **ZERO** non-GET requests toward `/api`, hand-crafted POST/PATCH/DELETE/upload with the demo token → **403 ×4**, Postgres row counts identical. Run in production too. | `demo-check.mjs` 9/9 local, 8/8 live |
+| **Two silent demo-mode gaps closed** | (1) A product created in the overlay 404'd on its own detail GET — "producto creado" followed by "no pudimos cargar el formulario". (2) A variant created in the overlay vanished on reload: the layer merged the product row but not its EMBEDDED array (`?include=variantes`). Both are the "accept and go on in silence" class. | `demo-check.mjs` rows 3–4 |
+| **The public demo account's login quota** | Caught by the timing measurement: 1 of 5 runs landed on the login form. The engine throttles login per identity at 5/min with no knob → ENG-47. Bounded in the SPA: one retry at 1.6 s, then the merchant door WITH the reason written and a "Reintentar ahora". | quota exhausted on purpose: 4 × 429, honest door at 6.2 s, 0 page errors |
+| **The nightly golden reset, repaired** | `demo-reset.service` would have FAILED at its next run (2026-08-27 04:15): an unquoted env value with spaces broke `redate-demo.sh`'s `. env`. Both env files quoted, both services restarted, the whole unit run end to end → `Result=success`. → OPS-33. | journal + `Result=success` |
+| **Deploy + rollback** | `pg_dump` before every deploy (the golden dump untouched: 89 291 B, md5 `7dcffa84…`), `deploy-update.sh` (backup → atomic swap → health), rollback drilled BOTH ways on the tiendita (to `69ad3f1-vitrina` and back to `95f5735-vitrina4`) and on petfriendly (portada + banner env). PIDs 434687 → 439233+; the demo left on the golden (13 orders) and verified read-only afterwards. | `/health` versions at each step |
+| **Suites** | `verify.sh` 23/23 · `verify-webhook.sh` 26/26 · `e2e-1b.sh` 50/50 · `e2e-browser.mjs` 21/21 (two selectors re-pointed on purpose: `.sold-out` → `.badge.out`, the add-to-cart banner → `.toast`). The 7 `e2e-1b` failures seen first were the missing seed env — **identical on the previous binary**, so not a regression. | logs |
+| **Cost** | SPA payload 111 → **168 KB** (+57: Inter 38.7 KB + ~18 KB of CSS/JS); first paint +120 ms and first tile +150 ms in a paired A/B/B/A on the same box and DB (n=12 per arm). The page's real weight is the photos, not the SPA → COMMERCE-11. | `medir-carga.mjs`, paired local runs |
 
 ## DONE in APP-VITRINA-S1 (2026-08-26, 5th session of the day)
 
