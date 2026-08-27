@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787797881529,
+  "lastUpdate": 1787797887837,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -3888,6 +3888,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36587540 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "8bb3cd41c8a5adb89879ebec8d5c1690a3207193",
+          "message": "bench: MOTOR-AUTORIZACION-S1 ABBA on the PATCH protocol — authz-A/B/B2/A2, no_change on all four crossings\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-27T02:31:00Z",
+          "tree_id": "0923743a05b9598d24d40d1833549e5adb26e36e",
+          "url": "https://github.com/appximo/appximo/commit/8bb3cd41c8a5adb89879ebec8d5c1690a3207193"
+        },
+        "date": 1787797886937,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 4718,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "485360 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 4718,
+            "unit": "ns/op",
+            "extra": "485360 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "485360 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "485360 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 47.63,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "50254878 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 47.63,
+            "unit": "ns/op",
+            "extra": "50254878 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "50254878 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "50254878 times\n4 procs"
           }
         ]
       }
