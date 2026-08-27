@@ -87,3 +87,7 @@ date	commit	label	target	tenant	endpoint	script	rate	duration	runs	p50_median_ms
 2026-08-26	5201c3f	vit-B	http://localhost:8281	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	8	0.651	1.085	10.1	0.0000	
 2026-08-26	5201c3f	vit-B2	http://localhost:8281	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	8	0.677	1.068	10.3	0.0000	
 2026-08-26	5201c3f	vit-A2	http://localhost:8281	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	8	0.673	1.244	15.9	0.0000	
+2026-08-27	6429a00	authz-A	http://localhost:8281	nimbus	/api/asignaciones?per_page=20	tests/performance/erp_patch.js	100	30s	8	4.832	11.581	10.8	0.0000	
+2026-08-27	6429a00	authz-B	http://localhost:8281	nimbus	/api/asignaciones?per_page=20	tests/performance/erp_patch.js	100	30s	8	4.196	6.770	13.6	0.0000	
+2026-08-27	6429a00	authz-B2	http://localhost:8281	nimbus	/api/asignaciones?per_page=20	tests/performance/erp_patch.js	100	30s	8	4.567	7.622	11.2	0.0000	
+2026-08-27	6429a00	authz-A2	http://localhost:8281	nimbus	/api/asignaciones?per_page=20	tests/performance/erp_patch.js	100	30s	8	5.150	9.413	11.8	0.0000	
