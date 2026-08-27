@@ -4,8 +4,8 @@
 **Trigger:** ENG-45 family 1 (the WRITE-ASYMMETRY-S1 matrix surfaced that an
 owner-scoped role can give its row away on UPDATE) + ENG-47.
 **Method:** no conclusion from code. One audit schema declaring every class
-of field ([evidence](../../nuevo_chat_web/../evidencia) lives in the
-maintainer's internal repo: `evidencia/MOTOR-AUTORIZACION-S1/`), 61 real
+of field (the raw per-request results live in the maintainer's internal
+repo, `evidencia/MOTOR-AUTORIZACION-S1/`), 61 real
 requests per binary through every write door, the stored effect read back as
 the admin after each write, fired at THREE binaries: HEAD `f9c6ba4`, the
 published **v0.1.9** and **v0.1.8** (checksum-verified downloads).
