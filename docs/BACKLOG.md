@@ -26,7 +26,19 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-26 (TIENDITA-VITRINA-S1)** — the two public demos
+**Last reviewed: 2026-08-27 (MOTOR-AUTORIZACION-S1)** — the class of fields
+the client must never write, AUDITED request by request through every write
+door against HEAD and the published v0.1.8/v0.1.9 (docs/audits/
+AUTHZ_WRITE_AUDIT_S1.md), then closed as ONE policy: the identity column of
+an owner-scoped role is server-owned on UPDATE as it was on create — the
+row give-away (ENG-45 #1, exploitable in every published version) is a 403
+at every door (ADR-027); a state field is never null (named 422, was 500);
+ENG-47 gets its valve with the default untouched. Gate 142 = 133 SAME + 9
+DIFF (all the fix), ABBA `no_change` on the PATCH protocol, both demos
+deployed with rollback drilled, the attack reproduced from outside and
+blocked. New OPEN: ENG-48 (the admin login throttle, same knob-less shape),
+RBAC-2 (the field allowlist drops silently — a documented contract the audit
+flags as the "hidden attempt" class). Previous review: 2026-08-26 (TIENDITA-VITRINA-S1) — the two public demos
 made to show what they SELL: a persistent two-mode control («Así lo ven sus
 clientes» / «Así lo ve usted») on tiendita.appximo.com and petfriendly's
 portada, the storefront ported to the atina design system with a
@@ -183,31 +195,48 @@ refreshed).
 
 ## OPEN
 
-### ENG-47 — The login limiter has no env knob, and a PUBLIC demo shares ONE identity
+### ENG-48 — The platform-admin login throttle has no knob either (same shape as ENG-47)
 
-**Origin:** TIENDITA-VITRINA-S1. The session made the demo panel reachable in
-one tap, which routes every visitor through `POST /auth/login` as the single
-public account `demo@tiendita.co`. `pkg/userauth` throttles login attempts per
-**(tenant, email)** at **5/min, burst 5** (`newLoginLimiter`, defaults applied
-because `app.go` never sets `LoginAttemptsPerMinute`/`LoginBurst`), and there
-is **no environment variable** to change it. Six visitors in a minute exhaust
-the quota and the sixth is answered `429`.
+**Origin:** MOTOR-AUTORIZACION-S1 Part C, the sweep for limits "in the same
+situation" as ENG-47. `platformadmin.loginThrottle` bounds `/admin/auth/login`
+and the admin MFA verify at 5/min per admin email, hard-coded
+(`newLoginThrottle(5, 5)` — `pkg/platformadmin/throttle.go`). Deliberately
+NOT touched this session: a platform admin is a privileged credential no demo
+shares, so today's default is the right default and loosening it has no
+legitimate driver yet.
 
-**Impact:** a demo promoted from the landing page — the hottest traffic the
-business gets — degrades exactly when it is working. The SPA now retries once
-after 1.6 s and, failing that, lands the visitor on the merchant door **with
-the reason written and a "Reintentar ahora" button** (never a mute form), so
-the user-visible damage is bounded; but the engine cannot be loosened at all.
+**Impact:** low. It would bite only an operator who scripts many admin logins
+per minute (e.g. a CI job minting platform tokens in a loop — `X-Admin-Key`
+covers that path today).
 
-**Not a "raise the default" item.** The 5/min default is right for a real
-account: it is the online brute-force guard. What is missing is the ability to
-declare that ONE identity is a public demo.
+**Ready:** `APPXIMO_PLATFORM_LOGIN_ATTEMPTS_PER_MINUTE` / `_BURST` wired like
+ENG-47's knob (same default, same boot warning above the default, same
+refusal on a non-integer), or an ADR saying the admin throttle stays fixed
+and why.
 
-**Ready:** either `APPXIMO_AUTH_LOGIN_ATTEMPTS_PER_MINUTE` / `…_BURST` wired
-into `userauth.Config` (documented, defaulting to today's 5/5 so nothing
-changes for anyone who does not set it), **or** a per-role exemption so a
-read-only demo role is not brute-forceable in the first place. Verified by a
-test that exhausts the quota and shows the configured limit applying.
+### RBAC-2 — A field allowlist DROPS a client's field silently — the "hidden attempt" contract
+
+**Origin:** MOTOR-AUTORIZACION-S1 audit, finding 2 (generalized). For a role
+with a `fields` allowlist, a write body carrying a field outside it is
+dropped and the write answers 200/201 — on create (`EnforceCreateRBAC`) and
+update (`CollectUpdate`'s `writable`). The IDENTITY column is now exempt
+(explicit 403, ADR-027); every other non-allowlisted field keeps the
+documented silent drop (AGENTS.md, SCHEMA_REFERENCE §RBAC: "dropped silently
+— not an error").
+
+**Impact:** not an escalation — the field is never written — but the
+project's own rule ("an attempt is rejected, never swallowed": ADR-024, the
+NIGHT-SWEEP class) says a client that believes it wrote `secret_flag` and got
+200 has been lied to, and the log shows nothing. Changing it is a CONTRACT
+change: a generic UI that PUTs a whole object back with fields the role may
+only read would start failing.
+
+**Ready:** decide in its own increment — (a) reject with 422
+`rule: "forbidden_field"` naming the field (and make `/app` + the backoffice
+guide send only writable fields), or (b) keep the drop and echo it
+(`meta.dropped_fields` / a `Warning` header) so the attempt is visible; or an
+ADR that keeps the silent drop with the reasoning. Measured with the
+binary-diff gate either way.
 
 ### OPS-33 — An env value with spaces must be QUOTED, or the scripts that source it break
 
@@ -404,20 +433,21 @@ would close it better, and is Miguel's call.
   (governed_divergence_test.go + governed_write_integration_test.go). Gate:
   126 SAME + 3 intentional DIFFs (the fix itself, corpus rows added); ABBA
   no_change on POST and PATCH protocols.
+- **CLOSED by MOTOR-AUTORIZACION-S1 (2026-08-27):** family 1 — the row
+  give-away on update. Audited first (docs/audits/AUTHZ_WRITE_AUDIT_S1.md: 61
+  real requests × 3 binaries, every write door, every RBAC form; exploitable
+  in v0.1.8 and v0.1.9), then closed as ONE policy (ADR-027,
+  `codegen.EnforceUpdateRBAC` beside the create half in
+  `pkg/codegen/rbac_write.go`): an identity-bound condition column is
+  server-owned on update — another id / null → the same 403 as create; a
+  PUT that omits it keeps the caller; own id re-sent is a no-op; judged on
+  the body before the row lookup and before the allowlist; a literal
+  condition stays a visibility filter. All-doors test
+  `ownership_update_integration_test.go`; 11 gate rows. The audit ALSO closed
+  the state-null 500 (a state field set to null / omitted on PUT → named
+  422, `codegen.StateFieldNullViolations`) and re-ranked #3 below.
 - **The families still OPEN, by damage:**
-  1. **(silent corruption / authz asymmetry — NEW, surfaced by the
-     WRITE-ASYMMETRY-S1 matrix) An owner-scoped role can give its row away on
-     UPDATE.** Create FORCES the row-condition column to the caller
-     (`EnforceCreateRBAC`: claiming another principal's id → 403), but update
-     puts the condition only in the WHERE — `PATCH {"owner_id":"<other>"}` on
-     an owned row answers 200 and reassigns the row to another principal
-     (verified live). Same shape as the closed family (one rule, two answers
-     by verb) but a DIFFERENT enforcement seam (RBAC condition semantics, not
-     governed fields), with a real design question: is ownership transfer by
-     the owner legitimate? **Disposition: decide the update-side condition
-     contract (force / reject / allow-and-document) in its own increment,
-     symmetric across REST/GraphQL/batch/Ctx — not opened here (session scope
-     was closed to the governed-field family).**
+  1. ~~the row give-away~~ — **closed above.**
   2. **(silent corruption) `files`-resource shadowing:** the validator allows a
      schema resource named `files` but `migration.isEngineManagedTable`
      excludes the table from every diff — never provisioned, never converged —
@@ -428,10 +458,14 @@ would close it better, and is Miguel's call.
   3. **(loud failure) Ctx.Update remaining parity gap:** a null on a required
      field surfaces a raw 23502 as a 500 (CollectUpdate answers a clean 422
      `required`). The id/auto half of this family was closed by
-     WRITE-ASYMMETRY-S1 (PrepareUpdate now runs the governed pass).
-     **Disposition: add the null-required check to PrepareUpdate — the
-     CTX_PARITY fix pattern; re-ranked from silent corruption to loud failure
-     (it fails noisily, with the wrong status).**
+     WRITE-ASYMMETRY-S1 (PrepareUpdate now runs the governed pass); the
+     state-field-null half by MOTOR-AUTORIZACION-S1 (PrepareUpdate now runs
+     `StateFieldNullViolations`). What remains is exactly the
+     required-null: **Disposition: add the null-required check to
+     PrepareUpdate — the CTX_PARITY fix pattern — 5 lines + the row in
+     ownership_update_integration_test.go's door table; kept out of the
+     security session on purpose (functional, no client can escalate with a
+     500).**
   4. **(silent no-op) Declared-relation pieces don't line up:** `fk`, m2m
      `through` and `target_fk` are not checked to exist ✓ — fails at
      `?include=`/GraphQL time. **Disposition: SCHEMA-5 warning** (a column can
@@ -444,10 +478,16 @@ would close it better, and is Miguel's call.
      where REST allows omission; Spanish plural mis-singularization
      (`clases`→`Clas`) is cosmetic. **Disposition: reconcile or document per
      case.**
-  6. **(friction/cosmetic) Runtime-config assumptions** (documented today):
-     `hmac_secret_env` unset signs with the empty key; a `wasm` hook naming an
-     unloadable module; an `events` list with no consumer; `$external_client_id`
-     never populated. **Disposition: candidate boot-time warnings.**
+  6. **(friction/cosmetic — EXCEPT the first, which the MOTOR-AUTORIZACION-S1
+     audit re-reads as security-adjacent) Runtime-config assumptions**
+     (documented today): `hmac_secret_env` unset signs with the EMPTY key — a
+     receiver verifying `X-Appximo-Signature` accepts a payload anyone can
+     sign, so the webhook's authenticity guarantee is silently void; a
+     `wasm` hook naming an unloadable module; an `events` list with no
+     consumer; `$external_client_id` never populated. **Disposition: the
+     empty-key case becomes a boot-time WARNING naming the hook and the
+     variable (or a load error when the env var is declared and empty) in
+     the next engine increment; the rest stay candidate warnings.**
   7. **(cosmetic) OpenAPI:** auto fields in responses now carry `readOnly`;
      what remains is documenting the refresh semantics in the description
      text. **Disposition: documentation.**
@@ -1101,6 +1141,7 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 
 | Item | Why it needs him |
 |---|---|
+| **v0.1.10 as a SECURITY release** (MOTOR-AUTORIZACION-S1) | The row give-away (ENG-45 #1) is exploitable in EVERY published version by an ordinary account; the fix is on `main` (`6429a00`) and both demos run it. The tag is Miguel's; the release text AND the recommendation (yes, a GitHub Security Advisory, medium-high severity: privilege escalation between users of one tenant, no cross-tenant effect, rows cannot be stolen) are written in the internal repo `RELEASE_NOTE_v0.1.10.md`. Cutting the tag without the advisory leaves every v0.1.8/v0.1.9 deployment unwarned. |
 | **Response-time promise on the landing** (FRENTE-COMERCIAL-S1 B.2) | The research's strongest lever (5 vs 30 min = 21× qualification, MIT/InsideSales). NOT published: no confirmed number. If Miguel can sustain e.g. "le respondemos en menos de 30 minutos en horario laboral", it is one line under the hero CTA (`.cta-trust`) on index.html and conjuntos.html. An auto-acknowledgement on WhatsApp Business (away message) is the zero-cost floor. |
 | **Name + face next to the CTA** (FRENTE-COMERCIAL-S1 B.1) | The research (founder photo +34.7 %, personal trust in LATAM) says name + photo + city. Registered decision **A-32** (Miguel, 2026-08-24) says the proper name stays OUT of the CTA ("el equipo"), and no photo exists (FOTO-PENDIENTE since A-26). The session published city + phone with country code and kept "el equipo" — A-32 wins until Miguel re-decides. Reversing it: one sentence + one `.webp` ≤ 40 KB. |
 | **The VecinGo testimonial** (FRENTE-COMERCIAL-S1 A.2.1) | Removed from index.html and caso.html. The disk holds no raw report, no name, and A-25's own chronology note ("a VPS already serving two apps" — the 58's exact state on 2026-08-09) makes the independence claim unverifiable from here; the critique also read the caption as self-attribution. It goes back ONLY with a named person's written confirmation (quote + how they want to be credited) — then it is worth ten times what it was. The technical docs (CASE_STUDY_VECINGO.md) are unchanged: they state their source. |
@@ -1114,6 +1155,41 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in MOTOR-AUTORIZACION-S1 (2026-08-27)
+
+Engine and security. The thesis: an ownership column a client can rewrite is
+privilege escalation between users, every app inherits it, and it is unlikely
+to be alone — so the session AUDITED THE CLASS before touching a line
+([docs/audits/AUTHZ_WRITE_AUDIT_S1.md](audits/AUTHZ_WRITE_AUDIT_S1.md)). ENG-47
+is the mirror image: a defence without a valve. Engine `f9c6ba4` → `6429a00`;
+Miguel cuts v0.1.10.
+
+| Item | What landed | Proof |
+|---|---|---|
+| **A · The audit, before any fix** | One schema declaring every class (identity/PK, `auto` audit, ownership in the three RBAC forms, a literal condition, `tenant_id`/`created_by` as plain columns, state machine, `file`, `import`, allowlist), 61 real requests per binary through REST create/update (PATCH+PUT), GraphQL, `POST /api/transaction`, `Ctx.Update` (a custom route), files upload, signup and login — fired at HEAD, **v0.1.9** and **v0.1.8** (downloaded, checksum-verified), the stored effect read back as admin after every write. | `results-{base,v019,v018}.md` in the internal repo (`evidencia/MOTOR-AUTORIZACION-S1/`) |
+| **A · Findings by damage** | (1) **The row give-away on update — in ALL THREE binaries**, five doors, three RBAC forms: `PATCH {"owner_id": B}` on an owned row → 200 and B reads it; `null` → orphan; a PUT omitting a nullable condition column → NULL. (2) The allowlist hid the same attempt silently (200, unchanged). (3) A state field set to null → **500** at every door (PUT on any lifecycle resource failed unless the client re-sent the state). (4) v0.1.8 only: forged `id`/`created_at`/`updated_at` stored with 201 (closed in v0.1.9). (5) ENG-47. NOT in the class, verified: `tenant_id` (tenancy is the schema, never a column), `created_by` unless it is the role's own condition column, FKs to identity, upload extra parts, the signup `role`. ENG-45 re-read: #1 this class (closed), #6's `hmac_secret_env`-empty-key is security-adjacent (re-worded), the rest functional. | the audit doc's table |
+| **B · ONE policy, from the contract** | [ADR-027](adr/ADR-027-identity-column-server-owned-on-update.md): for a condition bound to `$user_id`/`$external_client_id` (`rbac.WhereCondition.Identity`, one predicate `rbac.IsIdentityVar`), the column is server-owned on UPDATE as on create — `codegen.EnforceUpdateRBAC` in `pkg/codegen/rbac_write.go` beside the create half; another id / null → the SAME 403 message; PUT-omitted → the caller's value; own id → no-op; judged on the client body BEFORE the row lookup (never an existence oracle) and BEFORE the allowlist (explicit, never dropped). Wired at REST PUT/PATCH, GraphQL `update…`, batch update, `Ctx.Update`. A literal condition stays a visibility filter (the moderator keeps approving — tested). Server path: an unscoped role or a handler on `UnsafeTx`. | `ownership_update_integration_test.go` (every door × form × case) — FAILS on the previous code at every door; `rbac_write_test.go` |
+| **B · State field never null** | `codegen.StateFieldNullViolations` (one source: CollectUpdate + PrepareUpdate): PATCH null / PUT omission → 422 `rule: "state"` naming the field. | same test file; live on both demos (dueño PATCH `estado: null` → 422) |
+| **B · The four schemas** | tienda (commerce, `dueno`, 17/17), veterinaria (13/13), conjunto (18/18), the FRESH alquiler audiovisual (19/19) in a real browser on the fixed engine — CRUD, transitions, board drag, relations, files, delete, mobile. Plus a scoped-role probe per schema (`veterinarian`/`tecnico`/`residente` — all `references: user_id` FKs): give-away 403 through PATCH and batch, own id 200, legal transition 200, state null 422, the unscoped admin transfers (200) and the row leaves the scoped principal (404). | `/tmp/vit/tools/e2e-app.mjs` logs; `scoped-probe.py` |
+| **C · ENG-47 closed** | `APPXIMO_AUTH_LOGIN_ATTEMPTS_PER_MINUTE` / `_BURST` (`Config.AuthLoginAttemptsPerMinute/Burst`, mapped per app in the fleet), default **exactly 5/5**; above the default → boot WARNING naming the weakened guard; a non-integer → refuses to boot (never a silent fallback on a security knob). Documented with the risk in README, PRODUCTION, lifecycle-spec, backend-spec, `serve --help`. Proven three ways: default → 6th login 429 (unit+integration+real binary); raised → passes; invalid → boot error. **Applied on the tiendita demo only** (`APPXIMO_AUTH_LOGIN_ATTEMPTS_PER_MINUTE=60`, one commented line in its env, reversible): from outside 8 wrong logins as the public account → 8 × 401; petfriendly keeps the default → 6th = 429. Same knob-less shape found and NOT touched: the platform-admin throttle → ENG-48. | `loginlimit_*_test.go`; the 58 |
+| **D · Gates** | unit `-race -short` 0 · full lane (no `-short`, Docker) 44 ok + the known `TestRunHook_WatchdogInterruptsInUnder100ms` timing flake under load (green alone, 0.105 s) · lint 0 · vet/gofmt clean · **binary-diff gate 142 = 133 SAME + 9 DIFF, every DIFF one of the 11 new `owner-*` rows**: state-null 500→422 (×2), tx give-away 200→403, GraphQL give-away data→errors, and — on the base side the tx row had already given the row away — put-other/patch-null/patch-give-away 404→403, put-omits-owner and reads-own 404→200 (the cascade of the hole itself; the two rows that must NOT change, own-id no-op 200 and hidden-row 404, are SAME) · **ABBA with frozen binaries on the PATCH protocol** (`erp_patch.js`, nimbus, rrhh-admin, 100 rps × 30 s × 8 runs × 4 arms on :8281): **`no_change` on all four crossings** — A/B −7.0 %, A2/B2 −8.0 %, base-vs-base +5.2 %, new-vs-new +4.1 % (the controls are the same size as the deltas: the 105's floor); p50 base 4.83/5.15 ms, new 4.20/4.57 ms · the 36 `solicitudes` rows the bench's setup() created were swept (36 201 → 36 201). | `benchmarks/history.tsv` `authz-*`; gate log |
+| **D · 1-B suites** | Against the new commerce build (`95f5735-authz`, engine `6429a00`, only the module replace changed): `verify.sh` 23/23 · `verify-webhook.sh` 26/26 · `e2e-1b.sh` 50/50 · `e2e-browser.mjs` 21/21. | logs |
+| **E · The 58** | Backups first: PIDs (440627/439236), `backup.sh` dump + `pg_dump` of vetapp (`vetapp-20260827-022111.pre-authz.dump`), binaries/envs/schemas `.pre-authz`, golden dump untouched (md5 `7dcffa84…`). **The attack reproduced LIVE before the deploy** on petfriendly (engine dec6614) with a minted `veterinarian` token on an admin-created probe appointment: `PATCH veterinarian_id=<another vet>` → **200, stored**; batch → 200 (null → 422 `required`, that schema declares the column required). Deploy: tiendita via `deploy-update.sh` (+`--cli`), vetapp swap+restart → `95f5735-authz` / `6429a00-authz` (PIDs 444524/444564). **After: 403 / 403, the row stays the caller's; legal transition 200.** Tiendita from outside: `cliente`/`demo`/`empleado` → 403 on PATCH/POST/tx/DELETE. Stranger walks (clean Chromium, desktop + 390×844): tiendita 14/14, petfriendly 14/14; demo mode both ways live 8/8 with tiendita row counts identical before/after (ordenes 13 · productos 9 · clientes 13 …). **Rollback drilled both ways** (→ `95f5735-vitrina4`/`dec6614`, smoke green → back to authz, PIDs 445409/445453), attack re-run on the redeployed engine: blocked. Probe rows deleted (0 left). | logs `attack58-*`, `verify58-*`, `democheck58` |
+| **F · Docs** | AGENTS.md (RBAC: the update side + state-null), README (RBAC line + config table), GUIDE, SCHEMA_REFERENCE, backend-spec (§3.3 Ctx comment, §3.5 layer 2, §5 auth), lifecycle-spec, PRODUCTION (env table with the risk), MODEL_LAB, `serve --help`, the `Ctx.Update` doc comment, ADR-027, the audit; the v0.1.10 release note + advisory recommendation drafted in the internal repo (`RELEASE_NOTE_v0.1.10.md`) — Miguel decides. | |
+
+**Found and NOT fixed (each with its row):** ENG-48 (admin throttle knob),
+RBAC-2 (allowlist silent drop for non-identity fields — a documented contract
+to re-decide), ENG-45 #3 (Ctx.Update required-null 500, functional), ENG-45 #6
+(`hmac_secret_env` empty key — now worded as security-adjacent), ENG-41 met
+in the field: petfriendly's production schema declares `veterinarian_id`
+`required` so a veterinarian cannot CREATE an appointment via the API (422
+before RBAC forces the column — the audit had to create the row as admin).
+**A hygiene slip to know about:** a `source` of a token file with hyphenated
+names printed six minted demo tokens into the session transcript (the 58's
+`veterinarian`/`owner`/`cliente`/`demo`/`empleado`/`dueno`, exp 2026-08-28
+02:21 UTC); they expire on their own, the transcript is private, and no
+secret (JWT_SECRET, passwords) left the box.
 
 ## DONE in TIENDITA-VITRINA-S1 (2026-08-26, 6th session of the day)
 
