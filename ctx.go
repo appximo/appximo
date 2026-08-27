@@ -112,6 +112,15 @@ type Ctx interface {
 	// follow. A role denied `read` on the resource entirely is a forbidden error.
 	Get(resource, id string) (map[string]any, error)
 	Insert(resource string, data map[string]any) (map[string]any, error)
+	// Update is the generated PATCH, in a handler: partial semantics, the
+	// declarative rules + type check, the governed-field rule (id/auto → 422
+	// read_only), the declared state-machine transitions (in SQL, race-safe),
+	// the role's row condition (a row the role may not see → nil, nil) and
+	// field allowlist — and the identity-column rule (ADR-027): for a role
+	// whose row condition is bound to the caller, a data map that sets that
+	// column to anything but the caller's own id is a 403, exactly as the
+	// REST PATCH answers. Transferring a record to another user is done as an
+	// unscoped role or on UnsafeTx, never by passing a client body through.
 	Update(resource, id string, data map[string]any) (map[string]any, error)
 
 	// Bind JSON-decodes the request body (1 MiB cap) into dst. BindResource
@@ -709,6 +718,13 @@ func (c *requestCtx) Update(resource, id string, data map[string]any) (map[strin
 	// semantics plus the value type check the library path never had.
 	if verrs := codegen.PrepareUpdate(res, rv, data); len(verrs) > 0 {
 		return nil, &ValidationError{Fields: verrs}
+	}
+	// The identity-column rule (codegen.EnforceUpdateRBAC, MOTOR-AUTORIZACION-S1)
+	// on the handler's body BEFORE the allowlist projection — the same 403 the
+	// generated PATCH answers: a custom route is not a way around it. A handler
+	// that must transfer ownership runs as an unscoped role or on UnsafeTx.
+	if status, msg := codegen.EnforceUpdateRBAC(data, data, &eval); status != 0 {
+		return nil, &forbiddenError{msg}
 	}
 	data = applyWriteAllowlist(data, eval.AllowedFields)
 	if len(data) == 0 {

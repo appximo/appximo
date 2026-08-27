@@ -27,11 +27,20 @@ type loginLimiter struct {
 	maxKeys  int
 }
 
+// DefaultLoginAttemptsPerMinute / DefaultLoginBurst are the limiter's factory
+// settings — the values every deployment ran on before the knob existed
+// (ENG-47). They are exported so the engine can name them in its boot
+// warning; they are NOT tuned here.
+const (
+	DefaultLoginAttemptsPerMinute = 5
+	DefaultLoginBurst             = 5
+)
+
 // newLoginLimiter builds a limiter allowing `burst` immediate attempts and then
 // `perMinute` sustained attempts per (tenant, email).
 func newLoginLimiter(perMinute, burst int) *loginLimiter {
 	if perMinute < 1 {
-		perMinute = 5
+		perMinute = DefaultLoginAttemptsPerMinute
 	}
 	if burst < 1 {
 		burst = perMinute

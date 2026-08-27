@@ -327,7 +327,9 @@ These carried every archetype's "shape" cleanly and are the foundation to build 
   row-scoping (owner sees only own; excluded row → `404`), and a real
   **create-time mass-assignment block** — forcing the condition column to the
   caller and rejecting a foreign value with `403` (verified in ecommerce, social,
-  chat, fintech). This is the standout feature.
+  chat, fintech) — and, since MOTOR-AUTORIZACION-S1, the same `403` on
+  **update** (a row cannot be given away or nulled out of scope through any
+  door). This is the standout feature.
 - **Automatic audit timestamps.** An `auto` `created_at` is set on insert; an
   `auto` `updated_at` **re-stamps on every PATCH** (verified: changed on update,
   `created_at` did not).

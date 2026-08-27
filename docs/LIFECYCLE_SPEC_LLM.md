@@ -167,7 +167,12 @@ platform admin, live per-tenant, and come from exactly three places:
 3. Your custom Go backend (`Ctx.CreateUser` inside a handler — backend-spec).
 
 Login is `POST /auth/login` → `{user, token}` on the tenant host; refresh via
-`POST /auth/refresh`. Password reset + email verification (needs the email
+`POST /auth/refresh`. Login attempts are throttled per (tenant, email) at
+**5/min** (`429` on the 6th) — the online brute-force guard. A PUBLIC demo
+that signs every visitor in as ONE shared account hits it by design: raise
+`APPXIMO_AUTH_LOGIN_ATTEMPTS_PER_MINUTE` (and `_BURST`) for that app only,
+keep that identity's role read-only, and know that every account of the app
+is then guarded that much less (the engine warns at boot). Password reset + email verification (needs the email
 worker), OAuth (Google/GitHub/Microsoft) and TOTP MFA are built in and
 env-configured — they are product features, not code you write.
 

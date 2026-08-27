@@ -1,6 +1,9 @@
 package codegen
 
 import (
+	"fmt"
+	"sort"
+
 	"github.com/appximo/appximo/pkg/schema"
 )
 
@@ -93,5 +96,36 @@ func PrepareUpdate(res *schema.ResourceSchema, rv *schema.ResourceValidator, bod
 		errs = append(errs, rv.ValidateWrite(body, false)...)
 	}
 	errs = append(errs, validateCreateTypes(res, body)...)
+	errs = append(errs, StateFieldNullViolations(res, body, false)...)
+	return errs
+}
+
+// StateFieldNullViolations is the ONE rule "a row is always in a declared
+// state": a state-machine field present as null, or absent from a FULL
+// replacement (put=true — PUT writes every omitted optional column as NULL),
+// is a 422 naming the field. Consumed by CollectUpdate (REST PUT/PATCH,
+// GraphQL update, batch update) and PrepareUpdate (Ctx.Update). Before this
+// rule the nil reached AppendStateTransitionGuard as a non-string and every
+// door answered 500 "internal error" — and a PUT on any resource with a
+// lifecycle failed unless the client re-sent the state. A required state
+// field's null is already reported by the `required` rule, so it is not
+// reported twice. Sorted by field (deterministic responses).
+func StateFieldNullViolations(res *schema.ResourceSchema, body map[string]any, put bool) []schema.FieldRuleError {
+	var errs []schema.FieldRuleError
+	for name, fd := range res.Fields {
+		if fd.StateMachine == nil {
+			continue
+		}
+		v, present := body[name]
+		switch {
+		case present && v == nil && !fd.Required:
+			errs = append(errs, schema.FieldRuleError{Field: name, Rule: "state",
+				Message: fmt.Sprintf("field %q is a state-machine field and cannot be null: a row is always in a declared state", name)})
+		case !present && put:
+			errs = append(errs, schema.FieldRuleError{Field: name, Rule: "state",
+				Message: fmt.Sprintf("field %q is a state-machine field and must be present on a full replacement (PUT): re-send its current value, or use PATCH", name)})
+		}
+	}
+	sort.Slice(errs, func(i, j int) bool { return errs[i].Field < errs[j].Field })
 	return errs
 }

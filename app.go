@@ -570,6 +570,15 @@ func New(cfg Config) (*App, error) {
 			}
 		}
 	}
+	// ENG-47: the login limiter's valve. Default exactly where it always was
+	// (5/min, burst 5); an operator raises it knowingly, and a value that does
+	// not parse refuses to boot — a rate limit that silently fell back to its
+	// default would be the OPS-13 class on a security knob.
+	loginPerMin, loginBurst, lerr := resolveLoginLimit(cfg.AuthLoginAttemptsPerMinute, cfg.AuthLoginBurst)
+	if lerr != nil {
+		pool.Close()
+		return nil, lerr
+	}
 	// AUTH-EMAIL-V1: password reset + email verification. The reset/verify flows
 	// enqueue an "email.send" event to the outbox (delivered async by the email
 	// worker, APPXIMO_WORKER_MODE=email) — the topic must match the worker's
@@ -707,20 +716,26 @@ func New(cfg Config) (*App, error) {
 	log.Println("admin API: platform super-admin + tenant/user/observability management enabled at /admin/*")
 
 	app.authSvc = userauth.NewService(authStore, userauth.Config{
-		JWTSecret:            cfg.JWTSecret,
-		SignupRole:           signupRole,
-		MinPasswordLength:    minPw,
-		EmailTopic:           emailTopic,
-		BaseURL:              baseURL,
-		RequireVerified:      requireVerified,
-		TenantActive:         app.platformAdmin.IsTenantActive,
-		OAuthProviders:       oauthProviders,
-		OAuthCallbackURL:     oauthCallbackURL,
-		OAuthDefaultRole:     oauthDefaultRole,
-		OAuthSuccessRedirect: oauthSuccessRedirect,
-		MFAKey:               mfaKey,
-		MFAIssuer:            mfaIssuer,
+		JWTSecret:              cfg.JWTSecret,
+		SignupRole:             signupRole,
+		MinPasswordLength:      minPw,
+		LoginAttemptsPerMinute: loginPerMin,
+		LoginBurst:             loginBurst,
+		EmailTopic:             emailTopic,
+		BaseURL:                baseURL,
+		RequireVerified:        requireVerified,
+		TenantActive:           app.platformAdmin.IsTenantActive,
+		OAuthProviders:         oauthProviders,
+		OAuthCallbackURL:       oauthCallbackURL,
+		OAuthDefaultRole:       oauthDefaultRole,
+		OAuthSuccessRedirect:   oauthSuccessRedirect,
+		MFAKey:                 mfaKey,
+		MFAIssuer:              mfaIssuer,
 	})
+	if loginPerMin > userauth.DefaultLoginAttemptsPerMinute || loginBurst > userauth.DefaultLoginBurst {
+		log.Printf("auth: WARNING — login limiter raised to %d/min (burst %d) from the default %d/%d: the online brute-force guard on every account of this app is weaker by the same factor; intended only for a deliberately shared, read-only demo identity",
+			loginPerMin, loginBurst, userauth.DefaultLoginAttemptsPerMinute, userauth.DefaultLoginBurst)
+	}
 	if signupRole != "" {
 		log.Printf("auth: password identity enabled (public signup → role %q)", signupRole)
 	} else {
@@ -1811,4 +1826,42 @@ func startCacheInvalidator(ctx context.Context, pool *pgxpool.Pool, rc *cache.Re
 		}
 		log.Printf("cache invalidator: invalidated tenant %q (responses + schema, pg_notify)", n.Payload)
 	}
+}
+
+// resolveLoginLimit resolves the ENG-47 login-limiter knob: Config wins, then
+// APPXIMO_AUTH_LOGIN_ATTEMPTS_PER_MINUTE / APPXIMO_AUTH_LOGIN_BURST, then the
+// historical defaults (5 / 5). A set-but-invalid value (not a positive
+// integer) is a boot error naming the variable and the rule — never a silent
+// fallback on a security knob. An absent burst follows the per-minute value
+// (the pre-knob shape: burst == per-minute).
+func resolveLoginLimit(cfgPerMin, cfgBurst int) (int, int, error) {
+	parse := func(name string, cfgVal int) (int, error) {
+		if cfgVal > 0 {
+			return cfgVal, nil
+		}
+		v := strings.TrimSpace(os.Getenv(name))
+		if v == "" {
+			return 0, nil
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return 0, fmt.Errorf("appximo: %s=%q is not a positive integer (the login limiter takes attempts per minute; the default is %d — leave it unset to keep it)", name, v, userauth.DefaultLoginAttemptsPerMinute)
+		}
+		return n, nil
+	}
+	perMin, err := parse("APPXIMO_AUTH_LOGIN_ATTEMPTS_PER_MINUTE", cfgPerMin)
+	if err != nil {
+		return 0, 0, err
+	}
+	burst, err := parse("APPXIMO_AUTH_LOGIN_BURST", cfgBurst)
+	if err != nil {
+		return 0, 0, err
+	}
+	if perMin == 0 {
+		perMin = userauth.DefaultLoginAttemptsPerMinute
+	}
+	if burst == 0 {
+		burst = perMin
+	}
+	return perMin, burst, nil
 }

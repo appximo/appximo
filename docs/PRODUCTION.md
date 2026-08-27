@@ -446,6 +446,7 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `APPXIMO_CORS_ORIGINS` (+ `_METHODS`/`_HEADERS`/`_EXPOSE_HEADERS`/`_CREDENTIALS`/`_MAX_AGE`) | no | off | Browser CORS; empty = disabled. |
 | `APPXIMO_GRAPHQL_PLAYGROUND` | no | off | Serve GraphiQL + allow introspection outside dev. |
 | `APPXIMO_AUTH_SIGNUP_ROLE` / `_MIN_PASSWORD` / `_REQUIRE_VERIFIED` / `_BASE_URL` | no | off / 8 / off / — | Public signup (opt-in, role-gated) + reset/verify email links. |
+| `APPXIMO_AUTH_LOGIN_ATTEMPTS_PER_MINUTE` / `APPXIMO_AUTH_LOGIN_BURST` | no | **5 / 5** | Login (and MFA-verify) attempts per **(tenant, email)** before `429`. **This is the online brute-force guard on every account — raising it weakens it by the same factor** (60/min = 86 400 guesses a day at one identity). Raise it ONLY for a deliberately shared identity (a public read-only demo account) and keep that identity's role read-only; the engine logs a warning at boot when the value is above the default, and refuses to boot on a value that is not a positive integer. |
 | `APPXIMO_OAUTH_{GOOGLE,GITHUB,MICROSOFT}_CLIENT_ID`/`_SECRET`, `_CALLBACK_URL`, `_DEFAULT_ROLE`, `_SUCCESS_REDIRECT` | no | off | Social login. |
 | `APPXIMO_MFA_KEY` / `APPXIMO_MFA_ISSUER` | no | JWT secret / `Appximo` | TOTP secret encryption + issuer label. |
 | `APPXIMO_PLATFORM_SUPER_ADMIN_ROLE` / `_MFA_ISSUER` | no | `platform_super_admin` | Admin API super-admin. Bootstrap with `appximo admin create`. |

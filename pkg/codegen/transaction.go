@@ -318,6 +318,11 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 		if len(cerrs) > 0 {
 			return nil, &txError{status: http.StatusUnprocessableEntity, op: op.Op, resource: op.Resource, msg: "validation_failed", fields: cerrs}
 		}
+		// The identity-column rule (rbac_write.go) — the SAME check the
+		// single-op PATCH runs, so a batched update cannot give a row away.
+		if st, msg := EnforceUpdateRBAC(op.Data, sets, &eval); st != 0 {
+			return nil, &txError{status: st, op: op.Op, resource: op.Resource, msg: msg}
+		}
 		if hc, has := ref.res.Hooks["before_update"]; has {
 			c := hc
 			nd, hst, hmsg := hookEval(ctx, &c, op.Data)

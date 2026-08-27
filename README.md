@@ -71,7 +71,7 @@ compiled surfaces of the same process, all derived from the schema:
 
 | | | |
 |---|---|---|
-| **REST + GraphQL + OpenAPI**, generated per resource | **Auth as a product**: signup/login/refresh, argon2id, password reset + email verify, OAuth (Google/GitHub/Microsoft), TOTP MFA | **RBAC** per role/resource/action/field + row conditions, deny-by-default, enforced on create too |
+| **REST + GraphQL + OpenAPI**, generated per resource | **Auth as a product**: signup/login/refresh, argon2id, password reset + email verify, OAuth (Google/GitHub/Microsoft), TOTP MFA | **RBAC** per role/resource/action/field + row conditions, deny-by-default, the identity column server-owned on create AND update |
 | **Migrations with a conscience**: diff-based, data-preserving renames, destructive drops behind a dry-run + approval gate, resumable multi-tenant fan-out, version history + rollback | **Multi-tenancy**: schema-per-tenant Postgres isolation, subdomain routing, per-tenant rate limits | **File store**: content-addressed, OWASP upload validation, signed URLs, local disk or any S3 |
 | **`/app`** — a back-office CRUD UI generated at runtime from your API's own OpenAPI | **`/admin`** — tenants, users, and an observability dashboard (latency, SLO burn rate, trace waterfalls) | **`/editor`** — Appximo Studio: a visual ERD schema designer that deploys, migrates and restarts the engine |
 | **State machines** enforced race-safely in SQL | **Atomic multi-resource transactions** with compare-and-set guards | **SSE real-time**, signed webhooks, JS/WASM sandboxed hooks, Prometheus + trace ring |
@@ -359,7 +359,10 @@ runs the same suite against *your* server and prints *your* report.
   dynamic row conditions (`operator_id = $user_id`); deny by default. Field
   allowlists and row conditions are enforced on **create** as well as
   read/update/delete — an owner-scoped role can only create rows attributed to
-  itself (no mass-assignment), on both REST and GraphQL. Row conditions are
+  itself (no mass-assignment), on both REST and GraphQL — and the identity
+  column is server-owned on **update** too: a body that reassigns or nulls it
+  is the same `403` on REST, GraphQL, the batch transaction and `Ctx.Update`
+  (a row can never be given to another user, ADR-027). Row conditions are
   equality (`field = $user_id`), validated at load (a condition can't declare an
   operator the engine wouldn't apply), and enforced uniformly on **every** read
   path — including `?include=` embeds and the relation read subroute
@@ -551,6 +554,7 @@ the trilogy in one stream) — and it can build the full stack.
 | `APPXIMO_PUBLIC_ROUTE_RPS` / `APPXIMO_PUBLIC_ROUTE_BURST` | env | no | dedicated rate limit for **public custom routes** (`appximo.Route{Public: true}` in the library model), per tenant+client IP; default 5 rps / burst 10 |
 | `APPXIMO_AUTH_SIGNUP_ROLE` | env | no | role assigned to public signup; **set it to enable `POST /auth/signup`** (empty = signup disabled). Must be a schema role |
 | `APPXIMO_AUTH_MIN_PASSWORD` | env | no | minimum signup password length (default 8) |
+| `APPXIMO_AUTH_LOGIN_ATTEMPTS_PER_MINUTE` / `APPXIMO_AUTH_LOGIN_BURST` | env | no | login (and MFA-verify) attempts per (tenant, email) before `429` — default **5 / 5**, the online brute-force guard on every account. **Raising it weakens that guard by the same factor**; do it only for a deliberately shared, read-only demo identity (the engine warns at boot, and refuses a non-integer) |
 | `APPXIMO_AUTH_REQUIRE_VERIFIED` | env | no | block login until the user's email is verified (default off) |
 | `APPXIMO_AUTH_BASE_URL` | env | no | origin for reset/verify email links (else derived from the request Host) |
 | `APPXIMO_OAUTH_{GOOGLE,GITHUB,MICROSOFT}_CLIENT_ID` / `…_CLIENT_SECRET` | env | no | enable social login per provider (unset = provider not offered) |

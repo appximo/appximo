@@ -19,6 +19,15 @@ type WhereCondition struct {
 	Field string
 	Op    string
 	Value string // dynamic variables already substituted
+	// Identity is true when the declared `val` was a principal variable
+	// ($user_id / $external_client_id) — i.e. the column carries WHO OWNS the
+	// row, not a literal visibility filter such as status = "published". The
+	// write path treats an identity-bound column as server-owned on create
+	// AND update (codegen.EnforceCreateRBAC / EnforceUpdateRBAC,
+	// MOTOR-AUTORIZACION-S1); a literal condition only scopes reads and the
+	// WHERE of writes, so a moderator scoped to pending rows may still move
+	// one to approved.
+	Identity bool
 }
 
 // Evaluate determines whether evalCtx.Role may perform action on resource,
@@ -58,9 +67,10 @@ func (p *Policy) Evaluate(evalCtx EvalContext, resource, action string) EvalResu
 		}
 		if perm.Conditions != nil && conditionAppliesToAction(perm, action) {
 			result.Condition = &WhereCondition{
-				Field: perm.Conditions.Field,
-				Op:    perm.Conditions.Op,
-				Value: resolveVar(perm.Conditions.Val, evalCtx),
+				Field:    perm.Conditions.Field,
+				Op:       perm.Conditions.Op,
+				Value:    resolveVar(perm.Conditions.Val, evalCtx),
+				Identity: IsIdentityVar(perm.Conditions.Val),
 			}
 		}
 		return result
@@ -82,9 +92,10 @@ func (p *Policy) Evaluate(evalCtx EvalContext, resource, action string) EvalResu
 
 	if rp.Conditions != nil {
 		result.Condition = &WhereCondition{
-			Field: rp.Conditions.Field,
-			Op:    rp.Conditions.Op,
-			Value: resolveVar(rp.Conditions.Val, evalCtx),
+			Field:    rp.Conditions.Field,
+			Op:       rp.Conditions.Op,
+			Value:    resolveVar(rp.Conditions.Val, evalCtx),
+			Identity: IsIdentityVar(rp.Conditions.Val),
 		}
 	}
 
@@ -105,6 +116,13 @@ func conditionAppliesToAction(perm ResourcePermission, action string) bool {
 		}
 	}
 	return false
+}
+
+// IsIdentityVar reports whether a condition `val` names the caller's identity
+// (the two variables the grammar accepts — any other `$…` is a load error,
+// ENG-20). The single predicate the evaluator and the write rule share.
+func IsIdentityVar(val string) bool {
+	return val == "$user_id" || val == "$external_client_id"
 }
 
 func resolveVar(val string, ctx EvalContext) string {

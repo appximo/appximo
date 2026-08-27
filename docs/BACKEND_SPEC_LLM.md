@@ -423,6 +423,15 @@ row, err := ctx.Get("students", id)
 // client body through verbatim is safe). The one exception: a resource whose
 // schema declares `"import": {"roles": [...]}` accepts them on Insert from the
 // granted roles (data migration / restores). Update never accepts them.
+//
+// THE IDENTITY COLUMN (MOTOR-AUTORIZACION-S1): for a role whose row condition
+// is bound to the caller ($user_id / $external_client_id), the condition
+// column is the server's on Insert AND Update — Insert forces it to the
+// caller; Update REJECTS a data map that sets it to anything but the caller's
+// own id (another id, nil) with the same 403 the generated PATCH answers. A
+// custom route is not a way around it. A handler that must TRANSFER a record
+// to another user runs as an unscoped role, or does it on UnsafeTx — a
+// deliberate, greppable decision, never the client's body passed through.
 row, err := ctx.Insert("students", map[string]any{"full_name": "Ana"})
 row, err := ctx.Update("students", id, map[string]any{"country": "MX"})
 
@@ -854,9 +863,11 @@ Full rationale, alternatives considered, and the security tests:
 `ctx.Query`/`Insert`/`Update` re-evaluate the caller's role against the **real**
 resource they touch, applying its row condition and field allowlist. A route grant
 opens the **endpoint**, never the data: a customer calling
-`ctx.Query("orders", …)` inside `/api/checkout` still gets only their own rows, and
+`ctx.Query("orders", …)` inside `/api/checkout` still gets only their own rows,
 `ctx.Insert` still forces the condition column to their own id (no
-mass-assignment). Two independent layers, and you want both.
+mass-assignment), and `ctx.Update` still refuses to reassign it (a row is never
+given to another user through a handler either). Two independent layers, and
+you want both.
 
 #### `Public: true` — no token REQUIRED, identity still welcome
 
@@ -1322,7 +1333,11 @@ for building a backend, know this:
 - **Three ways to create a user:**
   1. **Public signup** — `POST /auth/signup`, enabled only when
      `APPXIMO_AUTH_SIGNUP_ROLE` is set (the role every signup gets). Off by
-     default.
+     default. Login is throttled per (tenant, email) at **5/min** — the
+     brute-force guard; `APPXIMO_AUTH_LOGIN_ATTEMPTS_PER_MINUTE` /
+     `_BURST` raise it ONLY for a deliberately shared read-only demo
+     identity (raising it weakens every account's guard by the same factor;
+     the engine warns at boot).
   2. **Admin API** — `POST /admin/tenants/{id}/users` (platform super-admin or
      admin key), with an admin-chosen role.
   3. **`Ctx.CreateUser` in a custom handler** — the flexible path: run your own

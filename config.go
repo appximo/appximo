@@ -240,6 +240,21 @@ type Config struct {
 	// AuthMinPasswordLength is the minimum accepted signup password length.
 	// 0 falls back to APPXIMO_AUTH_MIN_PASSWORD, then to 8.
 	AuthMinPasswordLength int
+	// AuthLoginAttemptsPerMinute / AuthLoginBurst bound login (and MFA-verify)
+	// attempts per (tenant, email): `burst` immediate attempts, then
+	// `per-minute` sustained, the 6th attempt in a minute answering 429
+	// (ENG-47, MOTOR-AUTORIZACION-S1). 0 falls back to
+	// APPXIMO_AUTH_LOGIN_ATTEMPTS_PER_MINUTE / APPXIMO_AUTH_LOGIN_BURST, then
+	// to the defaults 5 / 5 — UNCHANGED from before the knob existed. This is
+	// the online brute-force / credential-stuffing guard on a single account:
+	// RAISING IT WEAKENS THAT DEFENCE in proportion (at 60/min an attacker
+	// tries 86 400 passwords a day against one identity). Raise it only for
+	// a deliberately shared identity — a public read-only demo account —
+	// and keep the RBAC role of that identity read-only, since the limiter
+	// is then no longer protecting it. The engine logs a warning at boot
+	// whenever the value is above the default.
+	AuthLoginAttemptsPerMinute int
+	AuthLoginBurst             int
 
 	// SafeGoTimeoutSeconds bounds a Ctx.SafeGo goroutine's context
 	// (LIBRARY-HARDEN-S1): the context is cancelled after this (fn must honor

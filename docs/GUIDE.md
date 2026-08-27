@@ -467,8 +467,12 @@ conditions are single-column equality against `$user_id`,
 `$external_client_id` or a literal — **any other `$var` rejects the schema at
 load**. The allowlist and condition are enforced on **create** as well: a
 row-scoped role cannot attribute a row to another principal (`403`
-mass-assignment block). A record excluded by a row condition reads as `404`,
-not `403` — existence never leaks. Custom endpoints are granted with the
+mass-assignment block) — and on **update** the same identity column cannot be
+reassigned or nulled either (the same `403`, through REST, GraphQL, the batch
+transaction and `Ctx.Update`; a PUT that omits it keeps the caller's value).
+A literal condition (`status = "pending"`) is a visibility filter, not
+ownership, so a moderator may still move a row out of its scope. A record
+excluded by a row condition reads as `404`, not `403` — existence never leaks. Custom endpoints are granted with the
 separate `routes` block (§5.4).
 
 ### The query surface (memorize the shape, not the list)

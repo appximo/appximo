@@ -1031,6 +1031,36 @@ enforcement core (`codegen.EnforceCreateRBAC`), so both behave
 identically. A role with neither a condition nor an allowlist creates
 unrestricted (no added cost on the create hot path).
 
+**…and on update, the identity column is server-owned too**
+(MOTOR-AUTORIZACION-S1, ADR-027). For a role whose row condition is bound to
+the caller (`$user_id` / `$external_client_id`), the condition column cannot
+be REASSIGNED by the client either: an update body that supplies it with
+anything but the caller's own id — another principal's id, or `null` — is the
+same **`403 field "<col>" must match the authenticated principal`**, on REST
+PUT/PATCH, GraphQL `update…`, the batch transaction and `Ctx.Update`, from
+ONE implementation (`codegen.EnforceUpdateRBAC`, `pkg/codegen/rbac_write.go`,
+beside the create half). Judged on the client body BEFORE the row lookup
+(never an existence oracle — another principal's row stays `404`) and BEFORE
+the field allowlist (an allowlisted role gets the explicit 403, never a 200
+that silently dropped the field). A full-replacement `PUT` that omits a
+nullable condition column keeps the caller's value instead of writing NULL;
+re-sending the caller's own id is a no-op, so full-object saves keep working.
+Before this, `PATCH {"owner_id": "<other>"}` on an owned row answered 200 and
+handed the row to another user through every door (exploitable in v0.1.8 and
+v0.1.9 — docs/audits/AUTHZ_WRITE_AUDIT_S1.md). **Deliberately NOT bound:** a
+LITERAL condition (`status = "pending"`) is a visibility filter, not
+ownership — a moderator scoped to pending rows approving one moves it out of
+scope, and that is the workflow. **The server-side path stays open:**
+transferring a record to another user is done by an unscoped role (admin, or
+a `condition_actions` list that leaves `update` unconditional) or by a
+custom handler running as one / on `UnsafeTx` — a declared, greppable
+decision, never a client body.
+
+A **state-machine field can never be null**: `PATCH {"status": null}` and a
+`PUT` that omits the state field are a named 422 (`rule: "state"`) on every
+door — they used to reach the SQL transition guard as a non-string and
+answer 500.
+
 #### Per-resource conditions (`permissions`, G2)
 
 The `conditions`/`actions`/`fields` above are **role-global**: the single

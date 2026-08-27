@@ -33,7 +33,8 @@
 #
 # The corpus is DATA (scripts/binary-diff/corpus.jsonl), one JSON object per
 # line — extend it there, not here. Fields: name, method, path (may contain
-# {{ID}} = the seeded note's id), auth (admin|viewer|ghost|none), authstyle
+# {{ID}} = the seeded note's id, {{OWNED_ID}} = the note the `owner` principal
+# owns), auth (admin|viewer|ghost|owner|none), authstyle
 # (lowercase|basic, optional), host (optional override), body (optional JSON),
 # expect (prose: the CURRENT contract, for the human reading a diff).
 #
@@ -129,6 +130,14 @@ boot() { # $1=side $2=binary $3=port $4=ctrl
     -d '{"title":"seed","amount":10,"ratio":1.5,"done":true,"code":"C1","attrs":{"k":"v"},"author_login":"44444444-4444-4444-4444-444444444444"}')
   echo "$seed" | jq -er '.id // .data.id' >"$WORK/$side.id" 2>/dev/null \
     || { echo "seed response: $seed" >&2; die "$side: seeding failed"; }
+  # A note OWNED by the `owner` principal (create forces owner_id to it) — the
+  # row the identity-column update rows try to give away.
+  local owned
+  owned=$(curl -s -X POST "http://127.0.0.1:$port/api/notes" \
+    -H "Authorization: Bearer $TOKEN_OWNER" -H "Host: $HOST_DEFAULT" -H "Content-Type: application/json" \
+    -d '{"title":"owned","code":"OWN1"}')
+  echo "$owned" | jq -er '.id // .data.id' >"$WORK/$side.owned" 2>/dev/null \
+    || { echo "owned seed response: $owned" >&2; die "$side: owned-note seeding failed"; }
 }
 
 # Tokens: same secret on both sides → one mint serves both. `ghost` is a role
@@ -136,11 +145,15 @@ boot() { # $1=side $2=binary $3=port $4=ctrl
 TOKEN_ADMIN=$("$BASE_BIN" token --secret "$JWT_SECRET_GATE" --tenant "$TENANT" --role admin --user-id 11111111-1111-1111-1111-111111111111 2>/dev/null | tail -1)
 TOKEN_VIEWER=$("$BASE_BIN" token --secret "$JWT_SECRET_GATE" --tenant "$TENANT" --role viewer --user-id 22222222-2222-2222-2222-222222222222 2>/dev/null | tail -1)
 TOKEN_GHOST=$("$BASE_BIN" token --secret "$JWT_SECRET_GATE" --tenant "$TENANT" --role ghost_role --user-id 33333333-3333-3333-3333-333333333333 2>/dev/null | tail -1)
+# `owner` is row-scoped (notes.owner_id = $user_id): the MOTOR-AUTORIZACION-S1
+# rows exercise the identity-column write rule on a note it OWNS ({{OWNED_ID}}).
+TOKEN_OWNER=$("$BASE_BIN" token --secret "$JWT_SECRET_GATE" --tenant "$TENANT" --role owner --user-id 55555555-5555-4555-8555-555555555555 2>/dev/null | tail -1)
 
 echo "── booting base ($BASE_BIN) :$PORT_BASE and new ($NEW_BIN) :$PORT_NEW"
 boot base "$BASE_BIN" "$PORT_BASE" "$CTRL_BASE"
 boot new  "$NEW_BIN"  "$PORT_NEW"  "$CTRL_NEW"
 ID_BASE=$(cat "$WORK/base.id"); ID_NEW=$(cat "$WORK/new.id")
+OWNED_BASE=$(cat "$WORK/base.owned"); OWNED_NEW=$(cat "$WORK/new.owned")
 
 # ── hot migration (M1) ────────────────────────────────────────────────────────
 # Deploy a v2 schema (one new column, `hotcol`) to the SAME tenant on both sides
@@ -199,15 +212,15 @@ normalize_headers() {
 }
 
 # ── fire one request at one side ──────────────────────────────────────────────
-fire() { # $1=port $2=seeded-id $3=case-json  → writes status/headers/body files under $4 prefix
-  local port=$1 id=$2 c=$3 out=$4
+fire() { # $1=port $2=seeded-id $3=case-json $4=out-prefix $5=owned-id → writes status/headers/body files under $4
+  local port=$1 id=$2 c=$3 out=$4 owned=${5:-}
   local method path auth style host body
   method=$(echo "$c" | jq -r '.method // "GET"')
-  path=$(echo "$c" | jq -r '.path' | sed "s/{{ID}}/$id/g")
+  path=$(echo "$c" | jq -r '.path' | sed "s/{{ID}}/$id/g; s/{{OWNED_ID}}/$owned/g")
   auth=$(echo "$c" | jq -r '.auth // "admin"')
   style=$(echo "$c" | jq -r '.authstyle // ""')
   host=$(echo "$c" | jq -r '.host // ""'); [ -z "$host" ] && host="$HOST_DEFAULT"
-  body=$(echo "$c" | jq -c 'if has("body") then .body else null end' | sed "s/{{ID}}/$id/g")
+  body=$(echo "$c" | jq -c 'if has("body") then .body else null end' | sed "s/{{ID}}/$id/g; s/{{OWNED_ID}}/$owned/g")
 
   # HEAD needs curl --head, never `-X HEAD`: with -X curl still WAITS for the
   # announced Content-Length body a HEAD response never carries, and hangs into
@@ -226,6 +239,7 @@ fire() { # $1=port $2=seeded-id $3=case-json  → writes status/headers/body fil
     admin)  tok=$TOKEN_ADMIN ;;
     viewer) tok=$TOKEN_VIEWER ;;
     ghost)  tok=$TOKEN_GHOST ;;
+    owner)  tok=$TOKEN_OWNER ;;
     none)   tok="" ;;
   esac
   case "$style" in
@@ -253,8 +267,8 @@ while IFS= read -r line; do
   name=$(echo "$line" | jq -r '.name')
   total=$((total+1))
 
-  fire "$PORT_BASE" "$ID_BASE" "$line" "$WORK/b"
-  fire "$PORT_NEW"  "$ID_NEW"  "$line" "$WORK/n"
+  fire "$PORT_BASE" "$ID_BASE" "$line" "$WORK/b" "$OWNED_BASE"
+  fire "$PORT_NEW"  "$ID_NEW"  "$line" "$WORK/n" "$OWNED_NEW"
 
   bs=$(cat "$WORK/b.status"); ns=$(cat "$WORK/n.status")
   # curl --head writes the header block as the OUTPUT (-o), so a HEAD case's

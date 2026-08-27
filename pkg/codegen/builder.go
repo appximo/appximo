@@ -900,6 +900,20 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					return
 				}
 
+				// The identity-column rule on the client body (rbac_write.go,
+				// MOTOR-AUTORIZACION-S1): an owner-scoped role cannot give its
+				// row to another principal, null it out of scope, or orphan it
+				// with a PUT that omits the column. Judged BEFORE the row lookup
+				// (body-only → never an existence oracle) and BEFORE the
+				// allowlist could hide the attempt; the same 403 create answers.
+				if status, msg := EnforceUpdateRBAC(body, sets, evalResult); status != 0 {
+					if t := observability.SpanTrackerFromCtx(req.Context()); t != nil {
+						t.RecordError(msg)
+					}
+					writeJSONErr(w, status, msg)
+					return
+				}
+
 				// Confirm the row exists AND passes the row-level RBAC condition.
 				// A non-owned row yields zero rows → 404 (never 403): this matches the
 				// GET-by-id/DELETE pattern and the S33/S34 BOLA fixes that deliberately
@@ -1258,59 +1272,6 @@ func sseHandler(name string, hub *events.Hub) http.HandlerFunc {
 // the role's allowlist dropped every field in the body). Callers map it to 422.
 var ErrNoWritableUpdate = fmt.Errorf("no writable fields in request")
 
-// EnforceCreateRBAC applies a role's field allowlist and row-level condition to a
-// CREATE body, closing the mass-assignment gap that previously existed because the
-// create path — unlike read/update/delete — applied NEITHER (FASE3-SEC, Hallazgo 2).
-// It mutates body in place and is the ONE enforcement shared by the REST POST handler
-// and the GraphQL create mutation, so both surfaces behave identically. Call it on the
-// post-hook body, just before RunInsert.
-//
-//   - Field allowlist: when the role restricts writable fields, any body key outside
-//     the allowlist is dropped silently (the same contract CollectUpdate uses for
-//     update — drop, never error), EXCEPT the row-condition field, which is
-//     server-forced below and therefore implicitly allowed.
-//   - Row-level condition: a row-scoped role (e.g. user_id = $user_id) must create
-//     rows attributed to ITSELF. The condition field is FORCED to the principal's
-//     resolved value; if the body supplies a DIFFERENT non-null value, the create is
-//     REJECTED with 403 — a client can never create a row owned by another principal.
-//
-// Returns (0,"") to proceed, or (403, msg) to reject. ev may be nil (no policy result
-// — e.g. a test without the RBAC middleware, or the library Ctx path), and a role with
-// neither an allowlist nor a condition (e.g. rrhh-admin) is a cheap no-op, so the
-// unrestricted create path keeps behaving exactly as before (the GATE-WRITE case).
-func EnforceCreateRBAC(body map[string]any, ev *rbac.EvalResult) (int, string) {
-	if ev == nil {
-		return 0, ""
-	}
-	condField := ""
-	if ev.Condition != nil {
-		condField = ev.Condition.Field
-	}
-	if len(ev.AllowedFields) > 0 {
-		allow := make(map[string]struct{}, len(ev.AllowedFields))
-		for _, f := range ev.AllowedFields {
-			allow[f] = struct{}{}
-		}
-		for k := range body {
-			if k == condField {
-				continue // server-forced below; never client-droppable
-			}
-			if _, ok := allow[k]; !ok {
-				delete(body, k)
-			}
-		}
-	}
-	if ev.Condition != nil {
-		if cur, present := body[condField]; present && cur != nil {
-			if fmt.Sprintf("%v", cur) != ev.Condition.Value {
-				return http.StatusForbidden, fmt.Sprintf("field %q must match the authenticated principal", condField)
-			}
-		}
-		body[condField] = ev.Condition.Value
-	}
-	return 0, ""
-}
-
 // RunInsert builds and executes the INSERT … RETURNING * for an already-validated
 // body (after any before_create hook AND EnforceCreateRBAC), emitting the outbox event
 // in the SAME transaction when emitCreate is set — exactly as RunUpdate does for
@@ -1627,12 +1588,18 @@ func CollectUpdate(res *schema.ResourceSchema, body map[string]any, put bool, wr
 			if fd.Required {
 				errs = append(errs, schema.FieldRuleError{Field: k, Rule: "required", Message: fmt.Sprintf("field %q is required and cannot be null", k)})
 			}
-			continue // null on an optional field → NULL in DB
+			continue // null on an optional field → NULL in DB (a state field: judged by StateFieldNullViolations)
 		}
 		if msg, ok := validateFieldValue(k, fd, v); !ok {
 			errs = append(errs, schema.FieldRuleError{Field: k, Rule: "type", Message: msg})
 		}
 	}
+
+	// A state-machine field can never be null — PATCH null, or a PUT that omits
+	// it (a full replacement would write NULL): named 422 from the ONE source
+	// PrepareUpdate (Ctx.Update) shares. It used to reach the transition guard
+	// as a non-string and surface as a 500 (MOTOR-AUTORIZACION-S1).
+	errs = append(errs, StateFieldNullViolations(res, body, put)...)
 
 	// PUT requires every non-auto required field to be present and non-null.
 	if put {

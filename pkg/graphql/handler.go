@@ -1393,6 +1393,12 @@ func updateResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		if len(cerrs) > 0 {
 			return nil, &validationError{fields: cerrs}
 		}
+		// The identity-column rule (codegen.EnforceUpdateRBAC) — identical to
+		// the REST PATCH: an owner-scoped role cannot hand its row to another
+		// principal through the mutation either (403 → GraphQL error).
+		if status, msg := codegen.EnforceUpdateRBAC(norm, sets, evalResult); status != 0 {
+			return nil, fmt.Errorf("%s", msg)
+		}
 
 		// before_update hook (same contract as REST / GraphQL create).
 		hc := hookCfg(name, "before_update", res)

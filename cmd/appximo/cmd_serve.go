@@ -53,7 +53,9 @@ separated specs), APPXIMO_STATIC_SPA, APPXIMO_STATIC_CSP (a verbatim policy,
 or "off").
 
 Optional env: APPXIMO_ENV, APPXIMO_AUTH_SIGNUP_ROLE,
-APPXIMO_CORS_ORIGINS, APPXIMO_FILES_DIR, GOMEMLIMIT — the full table lives in
+APPXIMO_AUTH_LOGIN_ATTEMPTS_PER_MINUTE (default 5 — the brute-force guard;
+raise it only for a shared read-only demo identity), APPXIMO_CORS_ORIGINS,
+APPXIMO_FILES_DIR, GOMEMLIMIT — the full table lives in
 docs/PRODUCTION.md; 'appximo quickstart' prints the operations contract.`,
 	// ADR-024: `serve` takes NO positional arguments. It used to accept and
 	// silently ignore them, so `appximo serve myapp.json` booted whatever

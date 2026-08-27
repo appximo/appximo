@@ -66,6 +66,9 @@
         "updated_at": {
           "type": "time",
           "auto": true
+        },
+        "owner_id": {
+          "type": "uuid"
         }
       },
       "relations": {
@@ -110,6 +113,23 @@
           "title",
           "status"
         ]
+      },
+      "owner": {
+        "permissions": {
+          "notes": {
+            "actions": [
+              "read",
+              "create",
+              "update",
+              "delete"
+            ],
+            "conditions": {
+              "field": "owner_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          }
+        }
       }
     },
     "public": {
