@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787779197960,
+  "lastUpdate": 1787791979672,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -3744,6 +3744,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36664750 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "f9c6ba4071e20f9908b40ad0b6bed5422e4254fc",
+          "message": "docs(backlog): TIENDITA-VITRINA-S1 — el panel visible desde el primer segundo en las dos demos, la tienda sobre el sistema, y tres hallazgos abiertos\n\nDONE: el control de dos modos persistente (0 px de scroll y 0,4-0,5 s para\nenterarse de que hay panel, 1,0-2,3 s para estar dentro; antes el único enlace\nestaba en el pie a 1.466/1.736 px), la tienda portada al sistema con láminas\ntejidas para los productos sin foto admisible, movimiento solo con CSS, el\nmodo demostración probado por las dos vías y dos huecos silenciosos suyos\ncerrados, deploy y rollback ensayados en ambas demos. Motor sin tocar: commerce\nreconstruido contra el MISMO commit que corre en la caja (dec6614).\n\nNuevos OPEN:\n- ENG-47 — el limitador de login no tiene variable de entorno y una demo\n  pública comparte UNA identidad (5/min): el sexto visitante del minuto recibe\n  429. Acotado en la SPA; el motor no se puede aflojar.\n- OPS-33 — un valor de entorno con espacios DEBE ir entre comillas: sin ellas\n  rompía el `. env` de redate-demo.sh y el reset dorado nocturno habría fallado\n  en su próxima corrida. Corregido y probado de punta a punta.\n- COMMERCE-11 — las seis fotos de producto pesan 1,55 MB (una de 676 KB) para\n  mosaicos de ~260 px. No se tocó: arreglarlo exige regenerar el dorado.",
+          "timestamp": "2026-08-26T23:48:41Z",
+          "tree_id": "ce6e61d5c98500314c63a8137617b0398dc219d8",
+          "url": "https://github.com/appximo/appximo/commit/f9c6ba4071e20f9908b40ad0b6bed5422e4254fc"
+        },
+        "date": 1787791978959,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6254,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "380012 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6254,
+            "unit": "ns/op",
+            "extra": "380012 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "380012 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "380012 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 65.95,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36601410 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 65.95,
+            "unit": "ns/op",
+            "extra": "36601410 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36601410 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36601410 times\n4 procs"
           }
         ]
       }
