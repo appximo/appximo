@@ -207,7 +207,11 @@ docs — that's the method, not an apology. The strongest evidence, in order:
 repository access, real apps built from the public docs and printed specs
 alone; one of them was driven end to end by the evaluator's AI agent — each
 answered finding-by-finding in
-[docs/FIELD_FEEDBACK_RESPONSE.md](docs/FIELD_FEEDBACK_RESPONSE.md):
+[docs/FIELD_FEEDBACK_RESPONSE.md](docs/FIELD_FEEDBACK_RESPONSE.md). A fifth
+field report — a **real migration** (Symfony 7.2, 23 tables, 46,119 rows,
+1.2 GB of JSON, five sessions) — is answered the same way in
+[§5 of that document](docs/FIELD_FEEDBACK_RESPONSE.md#response-to-the-fifth-field-report-a-real-migration--migracion-confianza-s1--motor-fields-s1-2026-08-28),
+including the three points where the report's own diagnosis was wrong:
 
 - **[atina — the case study](docs/CASE_STUDY_ATINA.md), open today at
   [atina.appximo.com](https://atina.appximo.com):** a multi-client recruiting
@@ -310,7 +314,11 @@ runs the same suite against *your* server and prints *your* report.
 - **CRUD**: list/get/create/replace/patch/delete per resource; typed filters
   (`eq` everywhere; `partial`/`start` on strings; `gt/gte/lt/lte` on numbers and
   time; `after`/`before` on time), single-field sort (`?sort=created_at&order=desc`),
-  keyset pagination (`?after=<uuid>`, no OFFSET)
+  keyset pagination (`?after=<uuid>`, no OFFSET), and **`?fields=a,b`** — pushed
+  into the SQL `SELECT` so an unlisted `json`/`text` document is never read from
+  disk (a migrated system's page of 20: 961 KB / 53 ms → 3 KB / 1.2 ms,
+  [BENCHMARKS §4b](docs/BENCHMARKS.md#4b-field-selection--the-disk-not-the-wire-motor-fields-s1));
+  every generated read carries a `Server-Timing` header with the engine's stages
 - **Aggregation**: `count`/`sum`/`avg`/`min`/`max` + `group_by` per resource
   (`GET /api/{resource}/aggregate` and `<resource>Aggregate` in GraphQL), plus
   opt-in `?count=true` total on lists — all scoped by the SAME RBAC row condition,
@@ -492,6 +500,12 @@ before it).
   how far one cheap box goes).
 - Observability is Prometheus + an internal trace ring — **no OTLP export**.
 - No hosted/SaaS version. Self-hosted only, by design, for now.
+- **Receiving an existing system has limits, written down:** no `COPY`/file
+  import (the bulk door is `/api/transaction`, 100 ops and 1 MiB per request —
+  minutes for 46k rows, not hours); JSON numbers pass through float64 (integers
+  past 2^53 lose digits, ENG-50); `?fields=` projects the root row only
+  (`?include=` embeds stay whole); `?page=` is OFFSET. The full list, each with
+  its tracker: [GUIDE §9](docs/GUIDE.md#9-what-it-does-not-do).
 
 Beyond the API surface, the binary also embeds **Appximo Studio** at `/editor`
 — a visual schema designer (full ERD over the schema grammar, visual RBAC,

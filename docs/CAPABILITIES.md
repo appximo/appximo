@@ -85,6 +85,8 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 - Keyset pagination — `?after=<uuid>` / `?before=<uuid>`, `per_page` default 20 / max 100, no OFFSET.
 - Field selection — `?fields=a,b` projects the SQL `SELECT` itself (an unlisted TOASTed column is never read); `id` always; unknown → 400, hidden by the role → omitted (the allowlist). GraphQL's selection set is pushed down the same way.
 - In-memory response cache — validated-token GETs served from RAM; `PUT`/`PATCH` and reload evict it.
+- `Server-Timing` on every generated read — the engine's stage durations (`query`, `count`, `app`; `cache;desc="hit"` on a cache hit), the number the embedded `/app` prints in its footer.
+- Atomic batches from outside the binary — `POST /api/transaction`, up to 100 create/update/delete ops in ONE Postgres transaction, each op validated and authorized like its single-row twin; published in `/openapi.json` (the bulk door a migration uses: ~460 batches for 46k rows).
 
 ## Real-time & events
 
@@ -121,10 +123,12 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 ## Operations
 
 - One static Go binary — ~64 MB release build (`scripts/build-engine.sh`; a plain `go build` is ~85 MB) — no CGO, any Linux, multi-arch (amd64/arm64). ([DEPLOY.md](DEPLOY.md))
-- ~22 MB Docker image — `docker compose up` to a working API in ~9 s.
+- ~41 MB Docker image (compressed pull) — `docker compose up` to a working API in ~9 s.
 - Graceful shutdown — SIGTERM → `/readyz` 503 → drains in-flight requests → exits clean.
 - Per-tenant rate limiting — token bucket (default 1000 RPS / 100 burst), over limit → 429 + `Retry-After`.
-- Circuit breaker — if Postgres fails (≥10 req & ≥60% error), 503 + `Retry-After` instead of hanging.
+- Circuit breaker — if Postgres is UNAVAILABLE (connection refused / timeouts; ≥10 req & ≥60% of them), 503 + `Retry-After` instead of hanging. Client errors (422s) never open it (ENG-49, 2026-08-28 — six unknown-field 422s used to open it for every writer).
+- Host memory guard — while `MemAvailable + SwapFree` is under a floor (`APPXIMO_MEMORY_GUARD_MIN_MB`, default max(32 MiB, 2 % of RAM)), data-plane WRITES answer an explained 503 + `Retry-After`; reads continue. Degradation, not capacity: it stops a bulk load from making the kernel OOM-kill a shared PostgreSQL; it does not make a swapless 1 GB box absorb one.
+- The installer verifies what it installed — binary sha256, `/health` version locally AND through Caddy, the schema on disk — and refuses to reuse another app's schema on a re-run over an existing `--app` (MIGRACION-CONFIANZA-S1).
 - Per-tenant backup — `POST /admin/backup?tenant=X` runs `pg_dump` of that tenant's schema.
 - Three health probes — `/healthz` (liveness), `/readyz` (readiness), `/health` (version).
 - Hardening — security headers, sanitized identifiers, masked DB errors, 1 MB body cap, fuzzed parsers.
@@ -203,6 +207,9 @@ engineering. Re-verified against the running engine and the field reports on
   much as a default worth knowing: a single-tenant load test above it gets `429`s.
   Raise it with `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST`.
 - **No hosted/SaaS version** — self-hosted only, by design.
+- **No `COPY` / file import.** The bulk write door is `/api/transaction` (100 ops per request, 1 MiB per request). Minutes for tens of thousands of rows; a `COPY`-class door is registered (MIG-FRONT #1), not built.
+- **JSON numbers pass through float64** on every door: integers past 2^53 lose digits (ENG-50); a `json` field is a JSON VALUE (ADR-028) stored as canonical text — keys sorted, `1.50` → `1.5`. The exact door is a JSON-text STRING on a `json` field.
+- **`?fields=` projects the root row only** — `?include=` embeds and SSE events stay whole. `?page=` is OFFSET (deep pages cost; cursors don't).
 
 (Former limits now closed and documented elsewhere: declarative relations + real
 FKs (`?include=`), CORS (`APPXIMO_CORS_ORIGINS`), GraphQL `update` mutation,

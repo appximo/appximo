@@ -17,12 +17,11 @@ Two tracks, side by side, for every step:
 > raw minute-by-minute table is in the session record; the ten-minute script
 > is [at the end of §2](#the-ten-minute-script-measured).
 
-**Version note.** Everything below — `appximo up`, `new`, `down`, `prompt` and
-the embedded `/app` back-office — ships in the current release (`v0.1.5`,
-2026-08-08). `appximo upgrade` and the update check in `version` land in the
-next one; until then they exist in a source build or the Docker image
-(`neodevtrix/appximo`, published from `main`). **If you installed Appximo
-before, update first** — see [§1-bis](#1-bis-already-had-appximo-installed).
+**Version note.** Everything below — `appximo up`, `new`, `down`, `prompt`,
+`upgrade` and the embedded `/app` back-office — ships in the current release
+(`v0.1.13`, 2026-08-28; everything from `v0.1.5` on has `up`/`new`/`prompt`
+and `/app`). **If you installed Appximo before, update first** — `appximo
+upgrade` does it in place, or see [§1-bis](#1-bis-already-had-appximo-installed).
 
 ---
 
@@ -43,14 +42,17 @@ No Node, no Redis, no message broker. Go is *not* needed to run the engine.
 
 ```bash
 # Pick your platform: linux-amd64, linux-arm64, darwin-amd64, darwin-arm64
-curl -LO https://github.com/appximo/appximo/releases/download/v0.1.1/appximo-v0.1.1-linux-amd64
-chmod +x appximo-v0.1.1-linux-amd64
-sudo mv appximo-v0.1.1-linux-amd64 /usr/local/bin/appximo
+curl -LO https://github.com/appximo/appximo/releases/latest/download/appximo-linux-amd64
+curl -LO https://github.com/appximo/appximo/releases/latest/download/checksums.txt
+grep " appximo-linux-amd64$" checksums.txt | sha256sum -c -
+chmod +x appximo-linux-amd64
+sudo mv appximo-linux-amd64 /usr/local/bin/appximo
 
 appximo version
 ```
 
-**You should see:** `appximo v0.1.1 (commit a587095…)`.
+**You should see:** `appximo v0.1.13 (commit c655ce7…)` — or whatever the
+newest release is; `version` also says when a newer one exists.
 
 **If it fails:** `Permission denied` → you skipped `chmod +x`. `cannot execute
 binary file` → wrong platform; `uname -m` says which one you need (`x86_64` →

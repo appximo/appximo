@@ -111,9 +111,11 @@ source.
 > use it when a piece needs diagnosing.
 
 > **Availability.** Three paths work today: **download the binary from
-> [GitHub Releases](https://github.com/appximo/appximo/releases)** (v0.1.1,
-> linux/darwin × amd64/arm64, checksums published — the installer downloads
-> and verifies it automatically when you omit `--binary`), **build from a
+> [GitHub Releases](https://github.com/appximo/appximo/releases)** (v0.1.13
+> as of 2026-08-28; every release ships linux/darwin × amd64/arm64 and
+> windows-amd64, `checksums.txt` and a Sigstore bundle — the installer
+> downloads and verifies the latest automatically when you omit `--binary`,
+> and `appximo upgrade` replaces an installed binary with the newest release), **build from a
 > checkout**, or the **published Docker image**
 > (`neodevtrix/appximo`, multi-arch) with the
 > self-contained `docker-compose.yml` at the repo root. The image itself is
@@ -499,6 +501,22 @@ separate `routes` block (§5.4).
   named 400s.
 - **Totals are opt-in:** `?count=true` adds `meta.total` (a real COUNT over
   the same filtered, RBAC-scoped set). The plain list never pays for a COUNT.
+- **Field selection — `?fields=a,b,c`:** the projection is pushed into the
+  SQL `SELECT`, so a column you did not ask for is NOT READ — the point is the
+  disk, not the wire: a large `json`/`jsonb`/`text` value lives in TOAST and
+  `SELECT *` detoasts it for every row of a page that never shows it. Measured
+  on a migrated system's list (46k rows × ~52 KB documents): a page of 20 went
+  from 961 KB / 53 ms to 3 KB / 1.2 ms, and at 10 rps the p99 from 2.8 s to
+  175 ms ([BENCHMARKS §4b](BENCHMARKS.md#4b-field-selection--the-disk-not-the-wire-motor-fields-s1)).
+  `id` always comes back; an unknown name is a 400 listing the available set;
+  a field your role's allowlist hides is simply omitted. Works on the list,
+  get-by-id, relation subroutes and the ROOT of `?include=` (embeds stay
+  whole — no nested projection); GraphQL pushes its selection set the same way.
+  Not on aggregates, SSE or writes. Without it the SQL is byte-identical.
+- **Every generated read carries `Server-Timing`:** the engine's stage
+  durations (`query;dur=4.2, count;dur=2.9, app;dur=7.3`, or
+  `cache;desc="hit"` when the response cache answered). The embedded `/app`
+  prints it in its footer; your UI can too.
 - **Aggregation:** `GET /api/{resource}/aggregate?count&sum=total&group_by=status`
   — `count/sum/avg/min/max` + `group_by`, same filters, same RBAC scope (a
   row-scoped role aggregates only its own rows; a field outside the allowlist
@@ -692,7 +710,7 @@ Let's Encrypt certificate:
 sudo bash scripts/install.sh --domain=api.example.com --email=you@example.com
 # (add --binary=./appximo to deploy a binary you built yourself — e.g. a
 #  framework-mode consumer app; without it the installer downloads the
-#  v0.1.1 release asset and verifies its checksum)
+#  latest release asset and verifies its checksum)
 ```
 
 Box-to-HTTPS was walked end-to-end on a real DigitalOcean droplet, twice (the
@@ -831,8 +849,8 @@ build SHA when built by the official scripts).
 
 ## 9. What it does NOT do
 
-The honest list, current as of 2026-08-02 — each with where it is tracked.
-If your project needs one of these today, factor that in *now*:
+The honest list, current as of **2026-08-28 (v0.1.13)** — each with where it
+is tracked. If your project needs one of these today, factor that in *now*:
 
 **Scale & availability**
 
@@ -844,38 +862,69 @@ If your project needs one of these today, factor that in *now*:
 
 **Distribution — the honest state of "today"**
 
-- **Released: v0.1.1** — binaries for linux/darwin (amd64/arm64) with
-  checksums on GitHub Releases; the installer's download path is enabled.
-- **The Go module is fetchable** — `go get github.com/appximo/appximo@v0.1.1`
-  works from the public proxy (verified live 2026-08-05), so framework mode
-  (§5) builds on any machine and in CI
-  (DOC-2). The docs are already written for the published state.
+- **Released: v0.1.13 (2026-08-28)** — binaries for linux/darwin (amd64/arm64)
+  and windows (amd64) with `checksums.txt` and a Sigstore bundle on GitHub
+  Releases; `appximo upgrade` updates an installed binary in place.
+- **The Go module is fetchable** — `go get github.com/appximo/appximo@latest`
+  resolves from the public proxy, so framework mode (§5) builds on any machine
+  and in CI. The built `/admin` and `/editor` assets ship IN the module
+  (ADR-025), so a consumer binary embeds working UIs.
 - **Self-hosted only. No SaaS.** By design.
+
+**Receiving a system that already exists — the limits a migration hits**
+
+- **No `COPY`, no file importer, no streaming write door.** The bulk door is
+  `POST /api/transaction`: up to **100 operations per request**, atomic, each
+  op validated and authorized like its single-row twin (measured ≈ 50–70 ms
+  per 100 creates on a 1-vCPU box; 46k rows ≈ 460 batches ≈ minutes, not
+  hours). A `COPY`-class door is registered, not built (MIG-FRONT #1).
+- **1 MiB per request**, on every door — a single `json` document bigger than
+  that is a 413. (A constant in the engine, not a knob.)
+- **JSON numbers pass through float64** in both directions: an integer past
+  2^53 is truncated (`12345678901234567890` → `…67000`), `1.50` re-renders as
+  `1.5`, keys come back sorted. Same float64, no loss except the big integers
+  — ENG-50. Money is `int64` minor units by doctrine, so the known apps never
+  hit it; a document store carrying big integers or exact decimals will. The
+  one exact door: a JSON-text STRING written to a `json` (TEXT) field keeps
+  its numeric text and key order. Parity recipe: canonicalize both sides
+  before comparing (backend-spec §2, ADR-028).
+- **Historical timestamps** need the declared door — `"import": {"roles":
+  [...], "fields": ["id", "created_at"]}` on the resource — otherwise `auto`
+  fields answer 422 `read_only` to any client value. Create-only, by design.
+- **`?include=` embeds are whole** — `?fields=` projects the ROOT row only;
+  there is no nested projection. SSE events carry the whole row too.
+- **`?page=` is OFFSET**: a deep page walks the index (~15–60 ms at page 1000+
+  of 46k rows, more under load). Keyset cursors (`?after=`) avoid it; the
+  `/app` pages by number on purpose and shows the cost in its footer.
+- **The memory guard degrades, it does not hold**: under
+  `MemAvailable + SwapFree < floor` the engine refuses WRITES with an
+  explained 503 so the kernel does not OOM-kill the shared PostgreSQL. It does
+  not make a 1 GB box absorb a firehose — give the box swap first
+  (PRODUCTION.md §Prerequisites).
 
 **Declarative surface (each deliberate, with its ADR)**
 
-- No filtering by NULL (SCHEMA-6, ADR-022) — the 400 is honest but it is a
-  dead end today.
 - No `neq`/`in`/`nin`/`like`/`ilike` filter operators; no multi-field sort.
+  (`is_null` exists — SCHEMA-6 closed 2026-08-05.)
 - No partial indexes in the schema (Postgres normalizes predicates → diff
-  churn; put them in your own boot DDL, ADR-022).
+  churn; put them in your own boot DDL, ADR-022). No composite primary key
+  (the implicit `id` + a composite `unique` index expresses the constraint).
 - No `decimal`/`money` type (deliberate — int64 minor units, §4).
 - No delete hooks; `workflows` parses but has no executor; no per-transition
   RBAC in the schema (the custom-route pattern covers it, ADR-021/022).
 - Aggregation is exactly `count/sum/avg/min/max` + `group_by`.
+- Default omission of heavy fields from collections is not a thing — it would
+  break the read contract; the declared form is registered as SCHEMA-8.
 
 **Operations**
 
 - **No engine `restore` command** — `backup.sh`/`restore.sh` are scripts and
-  the restore drill is proven (1.8 s), but it's a runbook, not a subcommand;
-  the installer creates no backup timer yet (ENG-3).
-- `install.sh --app` (second app on one box) has never run against a real
-  multi-app server — staged verification only (OPS-11).
-- The platform super-admin is created from a terminal only (`appximo admin
-  create`).
+  the restore drill is proven (1.8 s), but it's a runbook, not a subcommand
+  (ENG-3).
 - No OTLP/OpenTelemetry export (Prometheus + internal traces only, ENG-4).
 - Webhooks refuse plain HTTP and private/loopback addresses — always
   (SSRF guard); test against a public HTTPS receiver.
+- Custom routes carry no `Server-Timing` yet (ENG-51) — only generated reads do.
 
 **Benchmarks — what may NOT be claimed**
 
@@ -887,6 +936,9 @@ If your project needs one of these today, factor that in *now*:
   1.53 ms; with the response cache fully bypassed (every request reaching
   Postgres): 2.44 ms. A filtered, sorted page over **1 M rows: ~3 ms**
   engine-side, ~4.2 ms through Caddy+TLS.
+- **The `?fields=` figures are with-vs-without on the SAME binary** (BENCHMARKS
+  §4b); the base-vs-new comparison of the plain list is `no_change` — the
+  feature costs nothing when unused, and is a client opt-in.
 - **No comparative claims against other frameworks.** A NestJS comparison
   existed (2026-06-10) and its conditions are gone; it was deliberately NOT
   re-verified and is not cited here (OPS-12).
@@ -904,7 +956,7 @@ is re-checkable on your own hardware with tools that ship in the repo:
 | Your deploy, end to end | `scripts/verify-production/run-all.sh --target=https://your.domain --server-ssh=root@box` | TLS, headers, isolation, resilience — the same suite that certified the live demos |
 | The whole API surface | `scripts/acceptance-test.sh` against a booted engine | CRUD, RBAC, validation, GraphQL, files — the generic layer is schema-aware |
 | Performance, statistically | `scripts/bench-protocol.sh 10 my-label 2000 30s` (external loader; see BENCHMARKS.md §1 for the env) | warmup + N runs + bootstrap CIs; every run appends to `benchmarks/history.tsv` |
-| Behavioral changes between two binaries | `scripts/binary-diff-gate.sh <base> <new>` — a 92-case paired-request corpus | the technique that has caught what green tests did not |
+| Behavioral changes between two binaries | `scripts/binary-diff-gate.sh <base> <new>` — a 163-case paired-request corpus | the technique that has caught what green tests did not |
 | The engine's own lanes | `make test` (unit, ~7 s) · `make test-all` (integration + e2e + resilience, Docker) | the same gates CI runs |
 
 And the standing proof: two production apps built on the engine are live —

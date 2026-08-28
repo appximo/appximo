@@ -314,6 +314,9 @@
         "updated_at": {
           "auto": true,
           "type": "time"
+        },
+        "amenities": {
+          "type": "jsonb"
         }
       },
       "indexes": [

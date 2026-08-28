@@ -26,7 +26,20 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-28 (MIGRACION-CONFIANZA-S1, 3rd session)** — a real
+**Last reviewed: 2026-08-28 (DOC-VITRINA-S1, 5th session)** — the technical
+site and `docs/` synchronized with the released **v0.1.13**: the browser tour
+re-recorded on the current `/app` (87.6 s, real time, ES+EN subtitles; the
+2026-08-17 tour ARCHIVED, not deleted), every capture of the pre-redesign
+panel / the "Appitools" brand re-taken (site + QUICKSTART + README), the six
+sessions since APP-VITRINA told where an HN visitor reads them (site
+§"What changed", GUIDE §4/§9, CAPABILITIES, README) with the known limits
+written (ENG-50, 1 MiB, no `COPY`, `?include=` whole, OFFSET, the guard
+degrades), `?fields=` with its measured row, stale numbers fixed (92→163-case
+corpus, ~22→~41 MB image, v0.1.1→v0.1.13, `is_null` "does not exist" gone,
+1.58→1.60 ms), the migration report answered point by point in PUBLIC
+(FIELD_FEEDBACK_RESPONSE §5) and the evaluation count kept at four under
+A-25 pending one written confirmation. Every claim re-verified with
+requests against the v0.1.13 binary. Before that: **MIGRACION-CONFIANZA-S1** — a real
 migration's nine findings, closed by DAMAGE order: `install.sh` reproduced
 (the summary's own "Update" line kept another app's schema → `GET
 /api/asambleas → 200` on the wrong domain) and now VERIFIES installed == asked
@@ -1296,6 +1309,7 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | Item | Why it needs him |
 |---|---|
 | **Open the "receive an existing system" front?** (MIGRACION-CONFIANZA-S1, MIG-FRONT) | Six findings from a real migration are registered with evidence and a reading each. Whether migrations are a product path — and therefore whether `?fields=`, a `COPY`-class import, `Route.AsRole` and the rest get built — is a product decision, not a sprint. The documentation halves (the batch endpoint, `import` for history, the DDL translation table) are done or cheap regardless. Also for him: ~~the 58 has NO swap~~ — done, `/swapfile 2G` is active (seen 2026-08-28 during MOTOR-FIELDS-S1). #5 (`?fields=`) is built. |
+| **Does the migration report count as the FIFTH external evaluation?** (DOC-VITRINA-S1, A-25) | Under A-25 it now meets (2) — `docs/FIELD_FEEDBACK_RESPONSE.md` §5 answers the nine points in public, with the report's three wrong diagnoses counted in both directions — and (3). What is missing is (1): a WRITTEN confirmation that the migration ran without our direction (the report is addressed to us and its box is the external developer's who built atina/crisblogs/VecinGo). With that line, README/FAQ/site say "five independent field evaluations, one of them a real 23-table migration" and link §5; without it the material says what it says today: four evaluations + a migration report answered point by point. |
 | **v0.1.10 as a SECURITY release** (MOTOR-AUTORIZACION-S1) | The row give-away (ENG-45 #1) is exploitable in EVERY published version by an ordinary account; the fix is on `main` (`6429a00`) and both demos run it. The tag is Miguel's; the release text AND the recommendation (yes, a GitHub Security Advisory, medium-high severity: privilege escalation between users of one tenant, no cross-tenant effect, rows cannot be stolen) are written in the internal repo `RELEASE_NOTE_v0.1.10.md`. Cutting the tag without the advisory leaves every v0.1.8/v0.1.9 deployment unwarned. |
 | **Response-time promise on the landing** (FRENTE-COMERCIAL-S1 B.2) | The research's strongest lever (5 vs 30 min = 21× qualification, MIT/InsideSales). NOT published: no confirmed number. If Miguel can sustain e.g. "le respondemos en menos de 30 minutos en horario laboral", it is one line under the hero CTA (`.cta-trust`) on index.html and conjuntos.html. An auto-acknowledgement on WhatsApp Business (away message) is the zero-cost floor. |
 | **Name + face next to the CTA** (FRENTE-COMERCIAL-S1 B.1) | The research (founder photo +34.7 %, personal trust in LATAM) says name + photo + city. Registered decision **A-32** (Miguel, 2026-08-24) says the proper name stays OUT of the CTA ("el equipo"), and no photo exists (FOTO-PENDIENTE since A-26). The session published city + phone with country code and kept "el equipo" — A-32 wins until Miguel re-decides. Reversing it: one sentence + one `.webp` ≤ 40 KB. |
@@ -1311,7 +1325,25 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 
 ---
 
-## DONE in MOTOR-FIELDS-S1 (2026-08-28, 4th session)
+## DONE in DOC-VITRINA-S1 (2026-08-28, 5th session)
+
+Site + docs, engine untouched. The thesis: the technical site is the first
+thing an HN visitor opens and it showed a panel that no longer exists
+(`app-tour.mp4` from 2026-08-17, captures with the "Appitools" brand from
+2026-08-05) while six engine sessions had changed more than the site said.
+Rule: zero claims without a request against the released **v0.1.13**
+(`c655ce7`, downloaded from Releases, checksum verified).
+
+| Item | What landed | Proof |
+|---|---|---|
+| **Audit first** (Part A) | 14 stale/false media + 12 stale text claims listed BEFORE any fix (`evidencia/DOC-VITRINA-S1/A-hallazgos.md`); "exact bytes preserved" confirmed at 0 live copies (only the audit, the ADR's rejected alternative and the backlog mention it — historically, correctly). | `verify-v0.1.13.log`: `?count=true` meta shape (page: `page/per_page/has_next/has_prev/total/total_pages`; cursor: `per_page/has_next`; cursor+count 400), `?fields=` (valid, unknown→400 listing the set, empty/double-comma→400, on aggregate→400, get-by-id, 100 rows 48 KB → 10 KB), `Server-Timing` (`query;dur=4.25, count;dur=2.90, app;dur=7.28`; `cache;desc="hit"` on the second GET), `/api/transaction` (2 creates 200, GET 405, 101→400, in `/openapi.json` with `x-appximo-transaction`), `jsonb` value (object→201 native; non-JSON string→422 `type`; JSON-text string accepted), governed fields (`created_at`→422 `read_only`), state null→422 `state`, illegal transition→422, `is_null`, GraphQL selection, the memory-guard and login knobs in `serve --help` |
+| **The tour re-recorded** (Part B) | Playwright on the released v0.1.13 binary booted with `appximo up` on the demo's own `schema.json` (+ ONE `jsonb` field added by hand for the JSON editor, declared in docs/demo/README): login → home → list footer «Page 1 of 8 · 15 of 112 · query 2.8 ms» → next page → state filter → detail with parents/children → edit + JSON editor (invalid named before send, format, save) → columns + saved view → CSV → bulk transition of 15 rows via `/api/transaction` with progress → `/docs`, `/editor`, `/admin` (`engine v0.1.13`). **87.6 s, real time**, top bar «GRABACIÓN REAL · SIN ACELERAR · tiempo real HH:MM:SS.mmm», Spanish subtitles with an English line, bars padded OUTSIDE the frame so nothing overlaps (1280×960), H.264 crf 24 + faststart (`moov` at byte 36), 3.47 MB, no audio. Poster = frame 14.8 s. Frames verified visually at 18 points + OCR. Old tour + poster + GIF **archived** (`docs/demo/archive/`, gh-pages `assets/archive/`); no GIF for the new one (said). | `evidencia/DOC-VITRINA-S1/{tour.mjs,cues.json,subs.ass,seed.py,tour-poster.jpg}` |
+| **Captures re-taken** | site: shot-app (footer visible), shot-docs / shot-studio / shot-admin (Appximo brand, v0.1.13), shot-tiendita (the current store, phone), shot-petfriendly + shot-https (the demo landing over HTTPS, Let's Encrypt checked with `curl -vI`); docs: quickstart `app-list` (starter todo-api on v0.1.13), `app-form` (the offers form: state chips + relation search), `live-https-demo`; README `app-record` (detail), `app-properties`, `app-offers`. Zero captures of the old panel or the old brand remain in any property; the landing was checked and NOT touched (its video was already on the redesigned panel). | thumbnails reviewed; `imgcheck.mjs` all 8 site images load after scroll |
+| **Told where it is read** (Part C) | site: nav + §"What changed (v0.1.10 → v0.1.13)" (9 items) + "Known limits — said, not hidden" (7) + a `?fields=` row in the numbers table + captions; GUIDE §4 (`?fields=`, `Server-Timing`), §9 rewritten as of v0.1.13 (a "receiving an existing system" block; `is_null` no longer listed as missing; v0.1.1→v0.1.13; the first admin from `/admin` is no longer "terminal only"; OPS-11 line dropped — `--app` ran on real multi-app boxes); CAPABILITIES (Server-Timing, batches, breaker semantics, memory guard, installer verification, the migration limits); README (fields + Server-Timing in the box, the limits with links, the fifth report); QUICKSTART (v0.1.13, `latest` downloads with checksum, `upgrade`); docs/demo/README (the tour section). | requests above; `verify-site.mjs` |
+| **The launch material** (Part D) | SHOWHN_MATERIAL addendum: the security FAQ updated to v0.1.13 (ownership on update), a new migration FAQ, the release/go-get rows to v0.1.13, OPS-29 closed by reality; **verdict on the count: stays at four** — see the Miguel table. `docs/FIELD_FEEDBACK_RESPONSE.md` §5 written (public, nine points, three corrections counted). | internal repo commit |
+| **Verification** | 22 outbound links → 200, none behind a sign-in; desktop 1440×900 + mobile 390×844: 0 px overflow, 0 console errors, all images/assets 200; load before (live) 657 ms / 789 KB desktop · 440 ms / 527 KB mobile → after (local) 674 ms / 563 KB · 640 ms / 563 KB (the HTML grew 94.6 → 102.8 KB with the new section; the images shrank). Engine untouched (docs + media only); landing untouched; tags NOT cut. | `links.txt`, `site-changed.png`, `site-tour.png` |
+
+
 
 Engine + `/app` + docs. The thesis: the migrated system's first screen
 (`GET /api/declarations`, ~940 KB and a p99 of 3.8 s per page of 20 for a
