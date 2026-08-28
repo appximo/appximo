@@ -26,7 +26,19 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-28 (APP-PODER-S1)** — the embedded `/app` uses what
+**Last reviewed: 2026-08-28 (MIGRACION-CONFIANZA-S1, 3rd session)** — a real
+migration's nine findings, closed by DAMAGE order: `install.sh` reproduced
+(the summary's own "Update" line kept another app's schema → `GET
+/api/asambleas → 200` on the wrong domain) and now VERIFIES installed == asked
+under a written upgrade criterion (three real paths in LXD); the validator's
+identity check reworded as a question that never asks for a rename (rule
+written); `json` canonicalization documented with the verified values, the
+exact door and the parity recipe; `/api/transaction` proven present in every
+published version and PUBLISHED in `/openapi.json` (the hole was the
+contract); RAM+swap warning in the installer; the minimal host memory guard
+(`MemAvailable+SwapFree`) as degradation, never capacity; the six
+migration-front findings registered as MIG-FRONT for Miguel's decision.
+Gate 149 SAME + 1 DIFF (the contract). Before that: **APP-PODER-S1** — the embedded `/app` uses what
 the contract already allowed, still derived from `/openapi.json` alone: honest
 page-numbered paging with the engine's exact COUNT («Página 3 de 47 · 15 de
 703»), the engine's query time on screen (a new `Server-Timing` header on
@@ -221,6 +233,56 @@ refreshed).
 ---
 
 ## OPEN
+
+### MIG-FRONT — The "receive a system that already exists" front (six findings from a real migration, a PRODUCT decision pending Miguel)
+
+**Origin:** MIGRACION-CONFIANZA-S1 (2026-08-28). An external agent migrated a
+real system to Appximo v0.1.10 — Symfony 7.2 / API Platform, 23 tables,
+46,119 tax declarations, 1.2 GB — in five sessions and wrote a nine-point
+report (internal: `FEEDBACK_APPXIMO_MIGRACION-RT.md`). Every finding came from
+ONE path the engine had never exercised: **receiving an existing system**.
+Building new apps (atina, VecinGo, the vitrinas) never touches it. Three of
+the nine were closed in that session (the installer, the validator false
+positive, the `/api/transaction` documentation — DONE table below); the six
+below are **registered, not built**: opening this front is a product
+decision, not a sprint. Each carries the report's evidence and a one-line
+reading of whose problem it is (engine / documentation / environment).
+
+| # | Finding (report's severity) | Evidence from the report | Reading |
+|---|---|---|---|
+| **#1 Bulk import** (blocking) | "The only write path is one row per request; 46,119 declarations are 46,119 HTTP requests." Half of it was FALSE — `/api/transaction` exists in every version, 100 ops/request, measured 100 creates ≈ 50–70 ms on the dev box — and is now published in `/openapi.json` and backend-spec §2b. What remains true: no `COPY`, no file importer, no streaming door. 46k rows = ~460 batches = minutes. | **Documentation first, engine second.** The cost of a real import with batches is minutes; a `COPY`-class door is worth building only if a customer's volume makes minutes unacceptable. Decision: Miguel. |
+| **#2 Memory backpressure** (blocking, "the most expensive") | Postgres on a 957 MiB box shared by five apps died `oom-kill` during the load; the engine "kept accepting writes until the kernel killed the database". The migrator's own correction: the box had NO SWAP; with 2 GB of swap the same load was absorbed. | **Environmental, with an engine seam.** The engine did not cause the OOM and no engine change makes 957 MiB hold five apps + a firehose — that must never be promised. The seam that WAS the engine's — no notion of host pressure — is closed minimally (D-ter: `APPXIMO_MEMORY_GUARD_MIN_MB`, writes 503 under `MemAvailable+SwapFree`), and the installer warns about swap. What stays open: a host-derived pool/concurrency limit instead of the fixed 10 connections (`DB_MAX_CONNS`) — an engine item, low priority until a second box shows it. |
+| **#4 Historical timestamps** (high for migrations) | `created_at`/`updated_at` declared `auto` reject the value with 422; 4,715 users and every declaration got the migration date. The agent identified `import` (WRITE-ASYMMETRY-S1) as the legitimate door and did not use it because it changes the schema. | **Documentation.** The door exists by design (`"import": {"roles": [...], "fields": ["id","created_at"]}` — create-only, role-named, greppable) — it is the DECLARED way to bring history in, and the report reads as if it did not exist. Put it in backend-spec §2b and the lifecycle spec's migration checklist; no engine work unless a migration needs update-side history (which `import` refuses on purpose). |
+| **#5 Heavy fields in lists** (medium, performance) | `GET /api/declarations` returns the whole `data` column per row: ~940 KB per page of 20, p99 3,821 ms. | **Engine** (a real, small feature): `?fields=` (a response projection, RBAC-allowlist-bounded) or a per-field `list: false`/`heavy` declaration that lists omit by default. Until then the documented mitigations are a smaller `per_page`, the aggregate endpoint for counts, and — where the app owns the schema — moving the blob to a child resource. Ready: `GET /api/x?fields=a,b` projects (unknown/hidden field → 400/403), pinned by the gate, `no_change` on the plain list. |
+| **#6 `Ctx` limits for custom routes** (medium) | (a) no response-header setter → no `ETag` from a handler, and the response cache skips custom routes; (b) no event subscription to invalidate an in-memory cache; (c) a `Public` route leaves the caller anonymous so `ctx.Query` is `forbidden` unless `rbac.public` is declared, which also opens the generated endpoints → they used `UnsafeTx` with hand-enumerated columns. | **Engine, three small seams.** (a) `Ctx.SetHeader`/`Ctx.ETag` + opt-in caching for custom GETs; (b) an in-process `OnChange(resource, fn)` fed by the same post-commit fan-out SSE uses; (c) a `Route.AsRole` (run `ctx.Query` as a NAMED read-only role for a public handler) — this one is the clean answer to "public catalogue endpoint without opening `rbac.public`". Each is a session with the parity table and the gate; none blocks a migration. |
+| **#8 Schema expressivity** (low) | Partial unique indexes (`UNIQUE (code) WHERE form_year IS NULL`), composite primary keys (`PRIMARY KEY (form_id, field_id)`), `rate_limit` not in the schema grammar. | **Decided / documented.** Partial indexes are CLOSED by ADR-022 D2 (structured form reopens as SCHEMA-2); a composite PK is by design (the implicit `id` + a composite `unique` index expresses the constraint; the FK side is `foreign_keys`); `rate_limit` per resource is a defensible schema key — a small SCHEMA item if a second app asks. The migration note: these are the three things a DDL-for-DDL migration cannot express, so write them down in backend-spec §2 as the known translation table. |
+
+**Ready (for the front as a whole):** Miguel decides whether "receive an
+existing system" is a product path. If yes, the order by damage is #5
+(`?fields=`), #4 (documentation of `import`), #6c (`Route.AsRole`), #1 (a
+`COPY`-class door only with a customer number), #6a/#6b, #8. If no, the
+documentation halves (#1, #4, #8) are still worth doing — they cost a page
+and they are what the next migrator reads first.
+
+### OPS-34 — Two builds of the SAME source measure ~9 % apart on the 105: the ABBA base must be built like the new binary
+- **Origin:** MIGRACION-CONFIANZA-S1. The frozen ABBA on the PATCH protocol
+  read +10–15 % for the new binary with base-vs-base identical (4.689 /
+  4.685 ms). Attribution and a bisection showed the base commit REBUILT from
+  a clean worktree measuring 5.101 ms — the new family's number — while the
+  original base file (built in the main tree: buildinfo `v0.1.11+dirty` +
+  vcs stamps, 24 MB of differing bytes vs the rebuild) kept measuring 4.64–
+  4.69 across three arms. Same code, two layouts, ~9 % apart on this 1-vCPU
+  box. The session's verdict was recovered by comparing same-session builds
+  (guard ON 5.036 vs rebuilt base 5.101 → −1.3 %).
+- **Impact:** medium for the measurement discipline: a base binary built
+  earlier / elsewhere can turn a `no_change` into a false `regression` (or
+  hide a real one), and the protocol's max(0.5 ms, 3 %) gate is below this
+  artifact's size.
+- **Ready:** `scripts/bench-protocol.sh` / the ABBA recipe document and
+  enforce "build BASE and NEW in the same session, from the same kind of
+  tree (both worktrees, or both the main tree), with the same version-stamp
+  shape"; ideally the ABBA script builds both from commits itself. A note in
+  docs/BENCHMARKS.md about the artifact size measured here.
 
 ### ENG-51 — Custom routes carry no `Server-Timing`
 
@@ -833,6 +895,13 @@ would close it better, and is Miguel's call.
 - **Ready:** install a third, ephemeral app on the 58 with `--app`, confirm the
   tienda and petfriendly do not blink (a purchase + a CRUD call through each), then
   `--uninstall --app=<that app>` and confirm the two survivors are untouched.
+- **Update (MIGRACION-CONFIANZA-S1, 2026-08-28):** the multi-app path WAS run for
+  real — two apps (`vecingo`, `retotr`) side by side in an LXD Ubuntu 22.04
+  container with native Postgres + Caddy + systemd, clean install / upgrade in
+  place / foreign schema / port collision, all verified — so the "never run
+  live" part now applies only to the 58 itself (its pre-OPS-10 inline Caddyfile
+  migration). The container's Caddyfile was the OPS-10 layout from the start,
+  so the inline-block migration remains unexercised.
 
 
 ### OPS-12 — The NestJS comparative benchmark cannot be re-run
@@ -1204,6 +1273,7 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 
 | Item | Why it needs him |
 |---|---|
+| **Open the "receive an existing system" front?** (MIGRACION-CONFIANZA-S1, MIG-FRONT) | Six findings from a real migration are registered with evidence and a reading each. Whether migrations are a product path — and therefore whether `?fields=`, a `COPY`-class import, `Route.AsRole` and the rest get built — is a product decision, not a sprint. The documentation halves (the batch endpoint, `import` for history, the DDL translation table) are done or cheap regardless. Also for him: the 58 has NO swap (`swapon --show` empty on a 2 GB box) — the installer would now warn there; a 2 GB swapfile is a one-line action. |
 | **v0.1.10 as a SECURITY release** (MOTOR-AUTORIZACION-S1) | The row give-away (ENG-45 #1) is exploitable in EVERY published version by an ordinary account; the fix is on `main` (`6429a00`) and both demos run it. The tag is Miguel's; the release text AND the recommendation (yes, a GitHub Security Advisory, medium-high severity: privilege escalation between users of one tenant, no cross-tenant effect, rows cannot be stolen) are written in the internal repo `RELEASE_NOTE_v0.1.10.md`. Cutting the tag without the advisory leaves every v0.1.8/v0.1.9 deployment unwarned. |
 | **Response-time promise on the landing** (FRENTE-COMERCIAL-S1 B.2) | The research's strongest lever (5 vs 30 min = 21× qualification, MIT/InsideSales). NOT published: no confirmed number. If Miguel can sustain e.g. "le respondemos en menos de 30 minutos en horario laboral", it is one line under the hero CTA (`.cta-trust`) on index.html and conjuntos.html. An auto-acknowledgement on WhatsApp Business (away message) is the zero-cost floor. |
 | **Name + face next to the CTA** (FRENTE-COMERCIAL-S1 B.1) | The research (founder photo +34.7 %, personal trust in LATAM) says name + photo + city. Registered decision **A-32** (Miguel, 2026-08-24) says the proper name stays OUT of the CTA ("el equipo"), and no photo exists (FOTO-PENDIENTE since A-26). The session published city + phone with country code and kept "el equipo" — A-32 wins until Miguel re-decides. Reversing it: one sentence + one `.webp` ≤ 40 KB. |
@@ -1218,6 +1288,36 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in MIGRACION-CONFIANZA-S1 (2026-08-28, 3rd session)
+
+Engine + installer + docs. The thesis: every finding of a real migration
+(Symfony 7.2 → v0.1.10, 23 tables, 46,119 rows, 1.2 GB) came from the
+"receive a system that already exists" path the engine never exercised; this
+session closes what costs SECURITY and TRUST and documents what is already
+true, in damage order — and does NOT open the migration front (MIG-FRONT
+above). Engine `bc69fe6` → this session's commits; Miguel cuts the tag.
+
+| Item | What landed | Proof |
+|---|---|---|
+| **A · `install.sh` verifies what it installed** (the worst finding, the cheapest to fix) | Reproduced FIRST with real installs in an LXD container (Ubuntu 22.04, native Postgres + Caddy + systemd): a re-run over an existing `--app` by the "Update" line the summary itself prints (no `--schema`) KEEPS whatever schema is there — with VecinGo's under `/etc/retotr/`, `GET /api/asambleas → 200` on the retotr domain. (With `--binary` AND `--schema` both are replaced; the report's "kept the binary" did not reproduce — the verification covers it regardless of cause.) Now: the upgrade criterion is WRITTEN (kept: secrets/db/data/control port; always replaced: binary/unit/env layout/Caddy site/companions; schema: `--schema` replaces, else kept AND verified — byte-identical to, or same `name` as, a sibling `/etc/<other>/schema.json` → stops BEFORE any mutation, naming the app; the owner is the app whose schema `name` matches it); post-install `verify_installed`: binary sha256 == `--binary`, `/health` version locally AND through Caddy == the installed binary's `version`, schema on disk == `--schema`, companions executable, `appximo-cli tenant --help` answers — any mismatch = exit 1 with the service up. Also: the port preflight decides "ours" by the PID holding the port (the old "our unit is active" test let a re-run take a neighbour's port); companions resolve from `SELF_DIR` captured before any `cd` (the `cd /tmp` in the postgres step made a relative `$0` resolve to /tmp — the report's "no exec bit" was the wrong diagnosis; install(1) sets 0755 anyway); a stale `appximo-cli` symlink to a CONSUMER binary is removed and named; `--internal-tls`, `--scripts=DIR`; apt waits for the dpkg lock (unattended-upgrades on a fresh box killed re-runs); the Caddyfile is no longer backed up on every OPS-10 re-run. | Three real paths + two extras: clean install (vecingo, v0.1.9) `verified — installed == asked`; legitimate upgrade (vecingo → v0.1.10, no `--schema`, while retotr held a copy of its schema) EXIT 0 verified; foreign schema (retotr on v0.1.9 + vecingo's schema, re-run v0.1.10 without `--schema`) EXIT 1 with binary/env/unit/`/health` byte-identical before and after; with `--schema=retotr.json` EXIT 0, `/health` v0.1.10 locally and via Caddy; port collision (`--port=8094` held by vecingo) EXIT 1 "nothing was installed"; consumer stale symlink removed+named. Logs: `evidencia/MIGRACION-CONFIANZA-S1/inst/` (internal) |
+| **D-bis · RAM + swap** | The installer reads MemTotal + SwapTotal; ≤ 2 GiB with NO swap → a loud warning with the swapfile recipe and the risk written (a bulk load makes the kernel OOM-kill the PostgreSQL every app shares — the migrator's own root-cause correction: 957 MiB, no swap, five apps down; the same load absorbed with 2 GB swap); repeated in the summary; never blocks. Documented in PRODUCTION.md §Prerequisites (+ two troubleshooting rows) and the lifecycle spec. | The container (1963 MiB, no swap) shows the warning on every run; `docs/PRODUCTION.md` |
+| **B · The validator false positive** | Reproduced with the report's shape (`declarations.related_user_id` → `users`, `contador` scoped by it): runtime admin 6 · U1 5 · U2 1 · cross GET 404 · cross filter 0 — while `validate` said "matches NO rows, ever" and proposed a rename. Decision: KEEP the check (it caught a real zero-rows deployment, AUTHORING_JOURNEY 5-1), reword it as a QUESTION (both id spaces named, "the validator cannot tell which; you can — one request as a scoped role answers it"), put "keep the column exactly as it is" FIRST, never say rename; the other answer is a declaration (`references: "user_id"`). Same treatment for `identity_condition_on_implied_relation`. Swept the other name heuristics (`bare_condition_variable`, `auto_update_intent`, `missing_timestamps_convention`, `required_text_without_min_length`, `graphql_list_query_shadowed`): none asks for a rename of a DDL name (one asks to DECLARE, one to add). **Rule written** (warnings.go + AGENTS.md): the validator never pushes an author to change a name that comes from an existing DDL; parity with the source is a value. Rejected: removing the check (loses a real catch) and a new grammar key to declare identity (meta-schema + Studio + LLM grammar for a non-blocking warning). | `pkg/schema` `TestWarnings_IdentityConditionIsAQuestionNeverARename` (bans "rename"/"NO rows, ever"/"shows nothing", requires "CHECK"/"cannot tell"/"keep the column" first); the probe log `evidencia/…/probe.log` |
+| **C · Canonicalization documented** | Verified with requests on `json` AND `jsonb`: keys re-sorted (recursively; array order kept), `0.0100…0859375` → `0.01` and `1.50` → `1.5` (same float64, no loss), `12345678901234567890` → `…67000` (ENG-50, the one loss, both directions, both types); the JSON-text STRING door on a `json` field keeps numeric text + key order (compacted) — the exact door, verified. Written in backend-spec §2 (with the parity recipe: canonicalize both sides — Python/Go/PostgreSQL one-liners), SCHEMA_REFERENCE §3, AGENTS.md, and an ADR-028 addendum with the table. "exact bytes preserved" swept: 0 in docs/README/site (the only mentions are historical — the audit and the ADR's rejected alternative). | `probe.log`; `grep -c 'exact bytes'` = 0 on backend-spec/README/site/SCHEMA_REFERENCE/GUIDE |
+| **D · `/api/transaction` — the truth, and why it was "missing"** | Real requests against the PUBLISHED v0.1.9 and v0.1.10 binaries and HEAD: exists in all (admin 200, read-only role 403 naming op 0, per-resource role 200 on its own row, no token 401, GET 405, 101 ops → 400 "max 100", 100 ops → 200 ×100); since 2026-06 (`cf22c66`). **Why not found: `/openapi.json` — the document the engine calls the authority for EXISTENCE — did not list it in any version**; backend-spec mentioned it in one passing line. Now published (`x-appximo-transaction: true`, `TransactionRequest/Operation/Guard/Response/ErrorResponse`, `maxItems` = `DefaultMaxTxOps`) and backend-spec §2b "Writing from OUTSIDE the binary" carries the example, the measured cost (100 creates ≈ 50–70 ms; with 3 KB `json` docs each ≈ 100 ms; 100 single POSTs ≈ 1.06 s) and what does NOT exist (COPY, file importer, streaming). Reply for the external agent: internal `RESPUESTA_AGENTE_EXTERNO_MIGRACION.md`. | `TestOpenAPI_TransactionEndpointIsPublished`; gate DIFF `openapi-served-contract` (the ONE diff, this feature); `probe.log` |
+| **D-ter · Backpressure — audit, then the minimal guard** | Audit (written in `pkg/resilience/memguard.go` and AGENTS.md): the engine had NO notion of host memory pressure — `GOMEMLIMIT` bounds its own heap only (never the problem: the memory that grows under a load is PostgreSQL's), the pool is a fixed 10 (`DB_MAX_CONNS`), the rate limiter counts requests, Route.Timeout bounds handlers, body/tx caps bound size — nothing host-derived. Guard: `APPXIMO_MEMORY_GUARD_MIN_MB` — while **`MemAvailable + SwapFree`** (never `MemAvailable` alone: on a Postgres box `shared_buffers` is Cached-not-reclaimable, tens of MiB at rest) is under the floor, data-plane WRITES (POST/PUT/PATCH/DELETE on `/api/*`, `/graphql`) answer `503` + `Retry-After: 5` + a body naming the measurement, the floor and the knob; reads/probes/auth flow. `/proc/meminfo` sampled ≤ 1/s by the first stale writer (CAS, no stampede); one atomic load on the hot path; unreadable meminfo never refuses. Default `max(32 MiB, 2 % of MemTotal)` — deliberately low; `0` disables; non-integer refuses to boot (ENG-47 rule). Wired after the tenant limiter in `app.go`. **Degradation, not capacity — said so in every doc.** | `pkg/resilience` 5 tests (available+swap, writes-only 503 with the named body, unreadable passes, ≤ 1 sample/interval, env contract); PRODUCTION.md env row + troubleshooting; ABBA below |
+| **Gates** | unit ok · **full lane** (no `-short`): 43 ok + `pkg/extensions` `TestRunHook_WatchdogInterruptsInUnder100ms` red under load (the known watchdog flake — it ran while the gate, the LXD installs and three builds shared the one vCPU; green alone and green for the whole package re-run, untouched by this session) · lint 0 (after two cosmetic findings in the new file) · vet/gofmt · **gate 150 = 149 SAME + 1 DIFF** on the final binary (`openapi-served-contract`: the served contract now carries `/api/transaction` + its five components — the feature) · **ABBA — dirty first, then attributed, then clean.** PATCH protocol (erp_patch.js, nimbus, 100 rps × 30 s): A 4.689 / B 5.371 / B2 5.129 / A2 4.685 ms — the two NEW arms +10–15 % with base-vs-base identical: a signal, not noise. Attribution at the same hour (8 runs): new with the guard OFF (`APPXIMO_MEMORY_GUARD_MIN_MB=0`) 5.070, new with the guard ON 5.036, base 4.636 → the guard is exonerated (−0.7 %); microbench `Allow()` 70 ns, the whole middleware 433 ns, one `/proc/meminfo` read 30 µs ≤ 1/s. Bisection (5 runs each): the base commit REBUILT from a clean worktree 5.101, HEAD minus the guard wiring 5.099, minus the OpenAPI change 5.350, minus the warnings change 5.071 — **the same base source, rebuilt, measures like the new family**; the original base file differs from its rebuild in 24 MB of bytes (buildinfo: `v0.1.11+dirty` + vcs stamps in the main tree vs `(devel)` in a worktree → a different layout of identical code), so the +10 % was a build-artifact effect on this host, not the change. Apples-to-apples (same-session builds): guard ON 5.036 vs base 5.101 → −1.3 %, `no_change`. Read protocol with same-session builds: A 0.602 / B 0.637 / B2 0.643 / A2 0.621 ms, crossings +5.8 % / +3.5 % with same-binary drift 3 % / 1 % — `no_change` ×4, said as "not resolvable above the noise". New OPEN: OPS-34 (the ABBA base must be built in the same session and tree kind as the new binary). | `evidencia/MIGRACION-CONFIANZA-S1/{gate,abba-patch,abba-patch-attrib,abba-patch-bisect,abba-read}.log`; `benchmarks/history.tsv` `mc-patch-{A,B,B2,A2,C,D,E,base2,F,G,H}` / `mc-read-*` |
+| **The 58** | Backups first (`backup.sh` → `appitools-20260828-081125.dump`, vetapp `vetapp-20260828-081125.pre-mc.dump`, binaries/CLI/env/schema `.pre-mc`, golden dump md5 `7dcffa84…` untouched). Deploy: tiendita `deploy-update.sh --binary --cli` → `commerce 95f5735-mc` + CLI; vetapp swap+restart. Both journals log `memory guard: writes answer 503 while MemAvailable+SwapFree < 39 MiB` (2 % of the 2 GB box — the floor, not a refusal). From outside: `/health` new on both, `/openapi.json` lists `/api/transaction` on both. **Rollback drilled both ways** (tiendita → `95f5735-app`, vetapp → `46fab38-app`, `openapi-tx=0`; forward again, `=1`). **A regression of my own, caught by the outside-in suite:** `verify-petfriendly` 18/20 — the embedded `/app` listed `transaction` as a resource and GET'd it (405 in the console); fixed in `pkg/backofficeui/web/contract.js` + the teaching copy (skip `x-appximo-transaction`, and any collection path without GET), committed `25d66f5`, rebuilt, redeployed: vetapp `25d66f5-mc`, tiendita `commerce 95f5735-mc` (engine 25d66f5). Suites after: `verify-petfriendly` 20/20, `verify-vitrina` 22/22; the two e2e purchases swept off the golden data (13/13/9). | `evidencia/MIGRACION-CONFIANZA-S1/58.log` |
+| **Docs** | AGENTS.md (installer criterion + verification, memory guard, the validator rule, canonicalization), PRODUCTION.md (prereqs RAM/swap, flags, the upgrade table, verification, env row, troubleshooting), backend-spec §2 + §2b, SCHEMA_REFERENCE §3, ADR-028 addendum, lifecycle spec §6, backoffice-spec (the batch door is an action, not a resource), README (one line), `serve --help`; handoff 03 (A-50), 04, 00, 05, registro; the external reply `RESPUESTA_AGENTE_EXTERNO_MIGRACION.md`. Commits `cac3eba` (engine/installer/specs) + `25d66f5` (the /app fix) + the backlog commit. | |
+
+**What did NOT enter, and why:** the six migration-front findings (MIG-FRONT
+above — a product decision); a grammar key to declare an identity column
+(rejected, see B); a host-derived pool size (registered under MIG-FRONT #2);
+`install.sh --app` on the LIVE 58 (OPS-11 stays OPEN — this session exercised
+the multi-app path for real, but in a container, not on the box with two
+public demos). Environmental note for the 58: `swapon --show` is EMPTY on the
+2 GB box — the new installer would warn there; adding a 2 GB swapfile is a
+one-line ops action recommended to Miguel, not done by this session.
 
 ## DONE in APP-PODER-S1 (2026-08-28)
 
