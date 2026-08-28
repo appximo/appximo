@@ -31,7 +31,9 @@ FIELD TYPES (exact set — nothing else; "number" is INVALID):
     the unit is unmissable (price_cents, total_cents). There is NO decimal/money
     type, and float64 money is a rounding bug waiting to happen.
   - DOCUMENTS: prefer "jsonb" (a real jsonb column: containment "@>" and a GIN
-    index) over "json" (stored as TEXT — exact bytes, but not queryable).
+    index) over "json" (stored as canonical JSON text — not queryable). BOTH
+    take and return a JSON VALUE on every door (an object/array/number/boolean;
+    a string is read as JSON text); a string that is not JSON is a 422.
 
 FIELD KEYS (all optional unless noted):
   "type" (required), "required": true, "unique": true,

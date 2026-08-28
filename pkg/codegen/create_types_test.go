@@ -197,3 +197,40 @@ func TestValidateCreateTypes_EngineInjectedDefaultsAreNotCallerInput(t *testing.
 		t.Errorf("the guard must not disable checking of real caller input: %+v", errs)
 	}
 }
+
+// ADR-028: the shared cores normalize a json value to canonical text and name
+// a non-JSON string — PrepareCreate, PrepareUpdate and CollectUpdate alike.
+func TestWriteCores_CoerceJSONFields(t *testing.T) {
+	res := &schema.ResourceSchema{Fields: map[string]schema.FieldDef{
+		"title": {Type: "string"},
+		"data":  {Type: "json"},
+		"meta":  {Type: "jsonb"},
+	}}
+	body := map[string]any{"title": "t", "data": map[string]any{"b": 1, "a": []any{true}}, "meta": map[string]any{"k": 1}}
+	if errs := PrepareCreate(res, nil, body, "admin"); len(errs) != 0 {
+		t.Fatalf("PrepareCreate: %v", errs)
+	}
+	if body["data"] != `{"a":[true],"b":1}` {
+		t.Fatalf("PrepareCreate must store canonical JSON text, got %v", body["data"])
+	}
+	if _, ok := body["meta"].(map[string]any); !ok {
+		t.Fatalf("PrepareCreate must leave a jsonb map for pgx, got %T", body["meta"])
+	}
+	bad := map[string]any{"data": "hola mundo"}
+	errs := PrepareCreate(res, nil, bad, "admin")
+	if len(errs) != 1 || errs[0].Field != "data" || errs[0].Rule != "type" {
+		t.Fatalf("PrepareCreate must name a non-JSON string with rule type, got %v", errs)
+	}
+	upd := map[string]any{"data": []any{1, 2}}
+	if errs := PrepareUpdate(res, nil, upd); len(errs) != 0 || upd["data"] != `[1,2]` {
+		t.Fatalf("PrepareUpdate: %v %v", errs, upd["data"])
+	}
+	sets, cerrs := CollectUpdate(res, map[string]any{"data": 42.0, "meta": "{\"x\":1}"}, false, func(string) bool { return true })
+	if len(cerrs) != 0 || sets["data"] != `42` || sets["meta"] != `{"x":1}` {
+		t.Fatalf("CollectUpdate must coerce json and pass a jsonb JSON-text string, got %v %v", cerrs, sets)
+	}
+	_, cerrs = CollectUpdate(res, map[string]any{"data": "", "meta": "[1,"}, false, func(string) bool { return true })
+	if len(cerrs) != 2 {
+		t.Fatalf("CollectUpdate must reject a non-JSON string on both types, got %v", cerrs)
+	}
+}

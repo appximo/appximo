@@ -417,7 +417,12 @@ naming the valid set). **Money has no type on purpose:** use `int64` in the
 currency's minor unit with the unit in the name (`price_cents`) — a
 `float64` price is a rounding bug, and payment APIs already speak minor units.
 Prefer `jsonb` over `json` for anything you might query (`jsonb` is a real
-Postgres document; it is the only type a `gin` index may cover).
+Postgres document; it is the only type a `gin` index may cover). Both hold a
+JSON VALUE on every door: send `{"data": {"nit": "900"}}` (or an array, a
+number, a boolean — a string is read as JSON text) and the same value comes
+back natively on every read; a string that is not valid JSON is a named 422
+(ADR-028 — before it, an object on a `json` field was a 500 and reads came
+back as an escaped string).
 
 ### Validation is declarative, and errors arrive all at once
 

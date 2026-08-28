@@ -9,6 +9,7 @@ import (
 	"github.com/appximo/appximo/pkg/db"
 	pkghandlers "github.com/appximo/appximo/pkg/handlers"
 	"github.com/appximo/appximo/pkg/query"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // ErrResourceNotFound is returned when a tenant has no such resource (or no schema).
@@ -125,6 +126,7 @@ func (s *Service) ListData(ctx context.Context, tenantID, resource string, param
 	if err != nil {
 		return nil, err
 	}
+	schema.PromoteJSONTextRows(out, res.JSONTextColumns()) // ADR-028: a json column is a value here too
 	return map[string]any{
 		"data": out,
 		"meta": map[string]any{

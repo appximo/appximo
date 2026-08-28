@@ -157,7 +157,7 @@ func GenerateGraphQL(s *schema.APISchema) string {
 func schemaHasJSONB(s *schema.APISchema) bool {
 	for _, res := range s.Resources {
 		for _, fd := range res.Fields {
-			if fd.Type == "jsonb" {
+			if fd.Type == "jsonb" || fd.Type == "json" {
 				return true
 			}
 		}
@@ -175,12 +175,13 @@ func gqlFieldType(fd schema.FieldDef) string {
 		return "Boolean"
 	case "uuid", "file":
 		return "ID"
-	case "jsonb":
+	case "jsonb", "json":
 		// A jsonb column is an arbitrary document — the JSON scalar carries it
-		// through unchanged (pkg/graphql.jsonScalar). `json` (TEXT-backed) stays
-		// String, so every pre-existing schema's SDL is byte-unchanged.
+		// through unchanged (pkg/graphql.jsonScalar). Since ADR-028 a `json`
+		// (TEXT-backed) field is the same scalar: as a String it could not take
+		// an object and its reads came back escaped (declared SDL change).
 		return "JSON"
-	default: // string, text, time, json
+	default: // string, text, time
 		return "String"
 	}
 }

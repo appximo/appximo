@@ -258,7 +258,9 @@ type TenantDB struct {
 }
 
 func NewTenantDB(pool *pgxpool.Pool) *TenantDB {
-	return &TenantDB{pool: pool, breaker: resilience.NewQueryBreaker("tenant-db")}
+	// The breaker counts ONLY unavailability (ENG-49): the same predicate that
+	// turns an error into a 503 decides whether it counts against the database.
+	return &TenantDB{pool: pool, breaker: resilience.NewQueryBreakerWith("tenant-db", isUnavailableCause)}
 }
 
 // exec runs fn through the circuit breaker (if configured). When the breaker is

@@ -55,6 +55,9 @@
         "ref": {
           "type": "uuid"
         },
+        "extra": {
+          "type": "json"
+        },
         "attrs": {
           "type": "jsonb"
         },

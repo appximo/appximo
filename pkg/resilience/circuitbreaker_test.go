@@ -220,3 +220,36 @@ func BenchmarkRateLimiterAllow(b *testing.B) {
 
 // Ensure gobreaker import is used (type assertion in tests).
 var _ = gobreaker.StateOpen
+
+// ENG-49 (MOTOR-TIPO-JSON-S1): a breaker built with a failure predicate counts
+// ONLY what the predicate calls a failure. Before it, six client-caused 422s
+// (unknown column, unique violation, a bad json value) opened the production
+// breaker and every write of the process answered 503 for 8 s.
+func TestNewQueryBreakerWith_StatementErrorsDoNotCount(t *testing.T) {
+	unavailable := errors.New("db down")
+	rejected := errors.New("42703 undefined_column")
+	cb := resilience.NewQueryBreakerWith("stmt", func(err error) bool { return errors.Is(err, unavailable) })
+	for i := 0; i < 40; i++ {
+		_, _ = cb.Execute(func() (any, error) { return nil, rejected })
+	}
+	if cb.State() != gobreaker.StateClosed {
+		t.Fatalf("40 statement rejections must leave the breaker CLOSED, got %v", cb.State())
+	}
+	// Counted as successes, the 40 rejections dilute the ratio (40 ok : 12 down
+	// = 23 %), so a FRESH breaker shows the unavailability path still trips.
+	down := resilience.NewQueryBreakerWith("down", func(err error) bool { return errors.Is(err, unavailable) })
+	for i := 0; i < 12; i++ {
+		_, _ = down.Execute(func() (any, error) { return nil, unavailable })
+	}
+	if down.State() != gobreaker.StateOpen {
+		t.Fatalf("12 unavailability errors must OPEN the breaker, got %v", down.State())
+	}
+	// nil predicate keeps the historical default: every error counts
+	def := resilience.NewQueryBreakerWith("default", nil)
+	for i := 0; i < 12; i++ {
+		_, _ = def.Execute(func() (any, error) { return nil, rejected })
+	}
+	if def.State() != gobreaker.StateOpen {
+		t.Fatalf("with no predicate every error counts (the default), got %v", def.State())
+	}
+}

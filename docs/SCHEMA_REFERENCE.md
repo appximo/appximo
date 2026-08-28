@@ -428,7 +428,7 @@ the filter operators a type accepts are fixed by `operatorsForType`
 | `bool` | boolean | `BOOLEAN` | `eq`, `is_null` |
 | `uuid` | UUID | `UUID` | `eq`, `is_null` |
 | `time` | timestamp with time zone | `TIMESTAMPTZ` | `eq`, `gt`, `gte`, `lt`, `lte`, `after` (→ `>`), `before` (→ `<`), `is_null` |
-| `json` | JSON stored as text | `TEXT` | `eq`, `is_null` |
+| `json` | a JSON value, stored as canonical JSON text (ADR-028) | `TEXT` | `eq`, `is_null` |
 | `jsonb` | a real JSON document (LIBRARY-GAPS-S1) | `JSONB` | `eq`, `is_null` |
 | `file` | reference to an uploaded file (FILES-LINK-S1) | `UUID` + a real FK to the tenant's `files(id)` | `eq`, `is_null` |
 
@@ -451,20 +451,47 @@ Notes verified in code:
   (`numericTypes = {int, int64, float64}`, `validator.go`).
 - `after`/`before` on `time` are aliases: `filterToSQL` maps `after`→`>`,
   `before`→`<` (`builder.go`).
-- **`json` vs `jsonb`** — two different storage decisions, both kept:
-  - `json` maps to **TEXT** (`TypeForAPIType`): the bytes you sent come back
-    unchanged, but Postgres sees an opaque string. Not indexable as a document, no
-    containment. Every pre-LIBRARY-GAPS-S1 column stays exactly as it was.
+- **`json` vs `jsonb`** — two storage decisions, ONE value contract
+  (ADR-028, MOTOR-TIPO-JSON-S1). Both hold a JSON VALUE:
+  - **Write, every door** (REST POST/PUT/PATCH, GraphQL, `/api/transaction`,
+    `Ctx.Insert`/`Update`): an object, array, number, boolean — nested as deep
+    as you like — is stored as the value. A **string is read as JSON TEXT**
+    (the document's source; the convention Postgres and pgx use for
+    `'…'::jsonb`): `"{\"nit\":\"900\"}"` is the object, `"123"` the number.
+    A string that is not valid JSON (`"hola mundo"`, `""`, `"[1,"`) is a **422**
+    `fields[{field, rule:"type"}]` naming the field, on both types
+    (`schema.CoerceJSONFields`, called from the shared write cores). `null`
+    is NULL, governed by `required`. Free text belongs in `string`/`text`.
+  - **Read, every HTTP surface**: the value comes back natively — never an
+    escaped string — on list/get/create/update responses, relation subroutes,
+    `?include=` embeds (a `::json` cast in the SQL), GraphQL (BOTH types are
+    the `JSON` scalar), SSE, batch results, the admin data browse and the
+    after-hook webhook payload (`schema.PromoteJSONText`). Round trip: what you
+    write is what you read.
+  - `json` maps to **TEXT** (`TypeForAPIType`) holding **canonical compact JSON
+    text** (Go's encoding: keys sorted, numbers through float64 — the HTTP
+    path's ~2^53 limit; a JSON-text string is compacted with its numeric text
+    and key order kept). Not indexable as a document, no containment; a legacy
+    text that is not JSON (written before ADR-028, when any string was
+    accepted) reads back as a string on the Go surfaces and breaks the
+    `::json` cast of an `?include=` embed — the release note carries the query
+    to find such rows. No existing tenant column changes shape.
   - `jsonb` maps to **JSONB**: a parsed, binary document. It is the only type a
     `gin` index may cover (`{"fields":["attrs"],"method":"gin"}` — §9.1), which is
     what makes `attrs @> '{"brand":"Acme"}'` an index lookup instead of a
     sequential scan. pgx decodes it into a Go `map[string]any` on read and encodes
-    a Go map (or a pre-encoded JSON string) on write.
-  - **Prefer `jsonb`** for anything you may query. Reach for `json` only when the
-    exact byte representation matters (a stored signature payload).
+    a Go map (or a JSON-text string) on write.
+  - **Prefer `jsonb`** for anything you may query. `json` is the lighter
+    option when you only store and return a document.
+  - The library read (`Ctx.Query`) hands a `json` column to the handler as the
+    stored text, a Go `string` (documented row type, unchanged); `jsonb` as the
+    decoded map/slice.
   - Neither can be a `group_by` key (`groupByTypeOK`, `pkg/query/aggregate.go`),
-    and both filter with `eq` only. In GraphQL a `jsonb` field is the `JSON`
-    scalar (the document, passed through); `json` stays `String`.
+    and both filter with `eq` only (`json`: equality over the canonical text).
+  - Before ADR-028 (≤ v0.1.9) a `json` field took ONLY a string (any string,
+    unvalidated, 201), answered **500** to an object/array/number/boolean, and
+    every read returned the escaped string — audited in
+    [docs/audits/JSON_TYPE_AUDIT_S1.md](audits/JSON_TYPE_AUDIT_S1.md).
 - **Money has no type of its own.** There is no `decimal`/`money`; `float64` money
   is a rounding bug. Use `int64` in the currency's MINOR unit and name the field
   for it (`price_cents`, `total_cents`) — the industry-standard representation, and
@@ -807,7 +834,7 @@ Covered in detail in §3 (field types / state machines). For validation complete
   | `bool` | a JSON boolean | `default must be a boolean` |
   | `uuid` | a string that `uuid.Parse` accepts | `default must be a uuid string` / `default must be a valid uuid string` |
   | `time` | a string (RFC3339 literal, or `"now"`) | `default must be a string (an RFC3339 timestamp, or "now" for the insert moment)` |
-  | `json` | **any** JSON value (no check) | — |
+  | `json`, `jsonb` | **any** JSON value (no check at load; applied on create it goes through the same write-time coercion as a client value — ADR-028) | — |
 
   NOTE: `validateDefault` only type-checks the default; it is **not** cross-checked against `min`/`max`/`minLength`/`maxLength`/`pattern`/`format`. A contradictory default (e.g. `default: ""` with `minLength: 1`) loads cleanly but, being applied before `ValidateWrite`, makes every omitted-field create 422 (see findings).
 

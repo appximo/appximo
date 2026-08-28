@@ -56,9 +56,11 @@ export async function loadContract(fetchJSON) {
         // names, which rendered a Spanish `modificado_en` as an editable field
         // the engine then rejected 422 read_only on save (SILENT-CORRUPTION-S1).
         auto: p['x-appximo-auto'] !== undefined || (p.format === 'date-time' && !!p.readOnly),
-        // A jsonb column is published as a TYPE-LESS property (any JSON document,
-        // described as such); json (TEXT) is a plain string. Structural again.
-        json: p.type === undefined && !p.enum && !p.format && !p['x-appximo-relation'],
+        // A jsonb AND a json column are published as a TYPE-LESS property (any
+        // JSON document, tagged x-appximo-json: "jsonb" | "text" — ADR-028; a
+        // json field used to be a plain string that came back escaped).
+        // Structural first, the tag as the explicit signal.
+        json: p['x-appximo-json'] !== undefined || (p.type === undefined && !p.enum && !p.format && !p['x-appximo-relation']),
       };
       f.label = labelFor(f);
       f.states = f.transitions ? orderedStates(f) : null;

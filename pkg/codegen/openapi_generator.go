@@ -959,7 +959,19 @@ func oaFieldType(fd schema.FieldDef) map[string]any {
 		// An arbitrary JSON document (a real jsonb column): no fixed shape, and
 		// clients send/receive the document itself, not a serialized string.
 		return map[string]any{
-			"description": "an arbitrary JSON document (jsonb column)",
+			"description":    "an arbitrary JSON document (jsonb column)",
+			"x-appximo-json": "jsonb",
+		}
+	case "json":
+		// ADR-028: the same document contract as jsonb — clients send and
+		// receive the VALUE (object, array, number, boolean; a string is read
+		// as JSON text). It used to be published as `"type": "string"`, which
+		// made every generic form render a text input (and the value, once
+		// native, print as `[object Object]`). The tag tells a generic tool
+		// which storage it is (TEXT: not queryable, `eq` over canonical text).
+		return map[string]any{
+			"description":    "an arbitrary JSON document (json column, stored as canonical JSON text)",
+			"x-appximo-json": "text",
 		}
 	default:
 		return map[string]any{"type": "string"}

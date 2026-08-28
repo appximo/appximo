@@ -1264,6 +1264,7 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		// declaration the input type already rejected the keys structurally.
 		verrs := schema.GovernedFieldViolations(res, norm, schema.GovernedCreate, callerRole(p.Context))
 		verrs = append(verrs, rv.ValidateWrite(norm, true)...)
+		verrs = append(verrs, schema.CoerceJSONFields(res, norm)...) // ADR-028: same rule as every create door
 		if len(verrs) > 0 {
 			return nil, &validationError{fields: verrs}
 		}
@@ -1280,6 +1281,13 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 			return nil, fmt.Errorf("%s", hookRes.Error)
 		}
 		body := hookRes.Data
+		// The hook ran on the ORIGINAL input (and may have rewritten a json
+		// field as an object): the inserted body is coerced again (ADR-028,
+		// idempotent) — before this, the coerced copy above was validated and
+		// the un-coerced input inserted, so an object literal still hit pgx.
+		if verrs := schema.CoerceJSONFields(res, body); len(verrs) > 0 {
+			return nil, &validationError{fields: verrs}
+		}
 
 		// HALLAZGO-2 / FASE3-SEC: enforce the role's row-level condition + field
 		// allowlist on the create, identically to the REST POST path — same shared
@@ -1312,6 +1320,7 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 
 		// SSE broadcast (S45): same post-commit point as the REST create path.
 		if len(result) > 0 {
+			schema.PromoteJSONText(result[0], res.JSONTextColumns()) // ADR-028: the SSE record is the value, like REST's
 			gqlPublish(hub, tc.ID, name, "create", result[0], "")
 		}
 
@@ -1445,6 +1454,7 @@ func updateResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 			return nil, fmt.Errorf("%s", msg)
 		}
 		record := rows[0]
+		schema.PromoteJSONText(record, res.JSONTextColumns()) // ADR-028
 
 		// SSE broadcast (post-commit, unfiltered — delivery applies per-sub RBAC).
 		gqlPublish(hub, tc.ID, name, "update", record, "")
@@ -1623,7 +1633,7 @@ func scalarOutput(fd schema.FieldDef) gql.Output {
 		return gql.Boolean
 	case "uuid", "file":
 		return gql.ID
-	case "jsonb":
+	case "jsonb", "json":
 		return jsonScalar
 	default:
 		return gql.String
@@ -1640,7 +1650,7 @@ func scalarInput(fd schema.FieldDef) gql.Input {
 		return gql.Boolean
 	case "uuid", "file":
 		return gql.ID
-	case "jsonb":
+	case "jsonb", "json":
 		return jsonScalar
 	default:
 		return gql.String
@@ -1653,15 +1663,26 @@ func scalarInput(fd schema.FieldDef) gql.Input {
 // would print Go syntax (`map[marca:Acme]`) — a lie about the contract. The
 // scalar carries the real document instead.
 //
-// `json` (the TEXT-backed type) deliberately stays gql.String: its column value
-// IS a string, so every existing schema's SDL is byte-unchanged.
+// A `json` field (TEXT-backed) is the SAME scalar since ADR-028: a `String`
+// field structurally could not accept an object — the report's defect at the
+// GraphQL door — and its reads came back escaped. The SDL change (`String` →
+// `JSON` for json fields) is declared in the ADR. On the way out the column's
+// stored JSON text is emitted as the value it is (serializeJSONValue); a
+// string that is not JSON (a row written before ADR-028) stays a string.
 var jsonScalar = gql.NewScalar(gql.ScalarConfig{
 	Name:         "JSON",
-	Description:  "An arbitrary JSON document (a jsonb column), passed through unchanged.",
-	Serialize:    func(v any) any { return v },
-	ParseValue:   func(v any) any { return v }, // a variable already carries real JSON
+	Description:  "An arbitrary JSON document (a jsonb or json column), passed through unchanged.",
+	Serialize:    serializeJSONValue,
+	ParseValue:   func(v any) any { return v }, // a variable already carries real JSON (a string is JSON text)
 	ParseLiteral: parseJSONLiteral,
 })
+
+func serializeJSONValue(v any) any {
+	if s, ok := v.(string); ok && json.Valid([]byte(s)) {
+		return json.RawMessage(s)
+	}
+	return v
+}
 
 // parseJSONLiteral converts an inline GraphQL literal into the Go value a jsonb
 // column takes (map / slice / scalar). Inline literals are the awkward half of a

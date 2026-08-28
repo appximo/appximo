@@ -66,6 +66,12 @@ func PrepareCreate(res *schema.ResourceSchema, rv *schema.ResourceValidator, bod
 		errs = append(errs, rv.ValidateWrite(body, true)...)
 	}
 	errs = append(errs, validateCreateTypes(res, body)...)
+	// json/jsonb values normalized IN PLACE to the one representation the
+	// column takes (ADR-028): an object on a `json` field becomes canonical
+	// JSON text (it used to reach pgx as a Go map → 500 "cannot find encode
+	// plan"), a non-JSON string is a named 422 on both types. ONE function,
+	// so REST, the batch and Ctx.Insert cannot diverge.
+	errs = append(errs, schema.CoerceJSONFields(res, body)...)
 	if len(errs) > 0 {
 		return errs
 	}
@@ -96,6 +102,7 @@ func PrepareUpdate(res *schema.ResourceSchema, rv *schema.ResourceValidator, bod
 		errs = append(errs, rv.ValidateWrite(body, false)...)
 	}
 	errs = append(errs, validateCreateTypes(res, body)...)
+	errs = append(errs, schema.CoerceJSONFields(res, body)...) // ADR-028, same rule as create
 	errs = append(errs, StateFieldNullViolations(res, body, false)...)
 	return errs
 }

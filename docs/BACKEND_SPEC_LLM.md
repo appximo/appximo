@@ -99,10 +99,45 @@ display at the edge, never in the database.
 **Documents go in `jsonb`, not `json`.** `jsonb` is a real Postgres jsonb column:
 containment (`@>`) works and an `indexes` entry can declare
 `"method": "gin"` (with `"opclass": "jsonb_path_ops"` when the index only ever
-answers `@>`). `json` is stored as TEXT — exact bytes preserved, but nothing you
-can query or index. Use `jsonb` for merchant-defined attributes, settings blobs,
-raw webhook payloads you may need to search. pgx decodes a `jsonb` column straight
-into a Go `map[string]any` and encodes a Go map back — no manual marshalling.
+answers `@>`). `json` is stored as TEXT — nothing you can query or index. Use
+`jsonb` for merchant-defined attributes, settings blobs, raw webhook payloads
+you may need to search. pgx decodes a `jsonb` column straight into a Go
+`map[string]any` and encodes a Go map back — no manual marshalling.
+
+**What a `json` (or `jsonb`) field ACCEPTS and RETURNS — the same on every
+door (ADR-028, MOTOR-TIPO-JSON-S1).** Both types hold a JSON VALUE:
+
+- **Write** (REST POST/PUT/PATCH, GraphQL, `/api/transaction`, `Ctx.Insert`/
+  `Ctx.Update`): any JSON value — an object `{"nit":"900"}`, an array
+  `[1,2,3]`, a number, a boolean, nested as deep as you like — is stored as
+  the value. A **string is read as JSON TEXT** (the document's source, the
+  same convention Postgres and pgx use for `'…'::jsonb`): `"{\"nit\":\"900\"}"`
+  is the object, `"123"` is the number 123. A string that is not valid JSON
+  (`"hola mundo"`, `""`, `"[1,"`) is a **422** `{"field":"data","rule":"type",
+  "message":"field \"data\" must be a JSON value; a string is read as JSON
+  text and this one is not valid JSON"}` — on both types (it used to be a
+  500 on `json` for an object and an anonymous 400 on `jsonb` for a bad
+  string). `null` is NULL, governed by `required`. There is no way to store
+  free text in a `json` field: declare `string`/`text` for that.
+- **Read over HTTP**: the value comes back NATIVELY — `"data": {"nit":"900"}`,
+  never `"data": "{\"nit\":\"900\"}"` — on REST list/get/create/update
+  responses, relation subroutes, `?include=` embeds, GraphQL (a `json` field
+  is the `JSON` scalar, like `jsonb`), SSE events, batch results, the admin
+  data browse and the after-hook webhook payload. Round trip: what you write
+  is what you read.
+- **Storage**: `json` is TEXT holding canonical compact JSON (Go's encoding:
+  keys sorted, numbers through float64 — the HTTP path's ~2^53 limit, which
+  is also what a `jsonb` read gives you); `jsonb` is the Postgres document.
+  `?filter[<json>][eq]=` compares that canonical text — fragile by nature;
+  real document queries are `jsonb` + `@>`.
+- **Library read**: `ctx.Query`/`QueryOne` return a `json` column as the
+  stored **`string`** (unchanged — unmarshal it yourself when you need the
+  document) and a `jsonb` column as the decoded `map[string]any`/`[]any`.
+  `ctx.Insert`/`ctx.Update` take the same values the HTTP doors take:
+  `{"data": map[string]any{...}}` and `{"data": "{\"k\":1}"}` both store the
+  object; a non-JSON string is a `*ValidationError` with the 422 fields.
+- Before ADR-028 (v0.1.9 and earlier) a `json` field accepted ONLY a string
+  and returned it escaped; a client that parsed the string must stop parsing.
 
 **Undeclared columns: still supported, no longer the default answer.** Creating
 your own column with `BeforeStart` DDL works — the engine's migration is additive
@@ -460,7 +495,9 @@ row, err := ctx.Insert("orders", map[string]any{"total_cents": int64(45_000)})
 arrives as a canonical **`string`**; `int` as **`int32`**, `int64` as
 **`int64`**, `float64` as `float64`; `bool` as `bool`; `string`/`text` as
 `string`; `time` (and `auto` timestamps) as **`time.Time`**; `jsonb` as a
-decoded **`map[string]any`**; `json` as `string`; a `file` field as its file-id
+decoded **`map[string]any`** (or `[]any` for an array document); `json` as the
+stored JSON text, a `string` (ADR-028 — the HTTP surfaces return it natively,
+the library hands you the text); a `file` field as its file-id
 `string`; SQL NULL as `nil`. A numeric you'll do arithmetic on: assert the type
 above directly (e.g. `row["precio_hora_centavos"].(int64)` for an `int64`
 field) — no switch needed.

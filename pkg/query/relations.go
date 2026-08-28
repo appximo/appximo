@@ -207,7 +207,15 @@ func (b *includeBuilder) rowObject(alias, resource string, node *includeNode, de
 	pairs = append(pairs, "'id', "+alias+"."+quoteIdent("id"))
 	for _, c := range cols {
 		if unrestricted || allowSet[c] {
-			pairs = append(pairs, "'"+c+"', "+alias+"."+quoteIdent(c))
+			expr := alias + "." + quoteIdent(c)
+			if res.Fields[c].Type == "json" {
+				// ADR-028: the TEXT column holds canonical JSON text; without the
+				// cast json_build_object would wrap it as an escaped STRING while
+				// the plain list/get returns the value — the embed is the one
+				// read Postgres builds, so the promotion happens in SQL here.
+				expr += "::json"
+			}
+			pairs = append(pairs, "'"+c+"', "+expr)
 		}
 	}
 

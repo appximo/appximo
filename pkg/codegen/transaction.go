@@ -110,6 +110,10 @@ type preparedOp struct {
 	// cost on the common path.
 	filePolicyRes  *schema.ResourceSchema
 	filePolicyVals map[string]any
+
+	// ADR-028: the resource's `json` (TEXT) columns, promoted to native values
+	// in the returned row. nil for a resource without them — zero cost.
+	jsonCols []string
 }
 
 // registerTransactionRoute mounts POST /api/transaction (G4): an atomic
@@ -282,6 +286,11 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 				return nil, &txError{status: st, op: op.Op, resource: op.Resource, msg: msg}
 			}
 			data = nd
+			// A hook may rewrite a json field as an object: re-coerce (ADR-028,
+			// idempotent) so the value binds instead of failing in the driver.
+			if verrs := schema.CoerceJSONFields(&ref.res, data); len(verrs) > 0 {
+				return nil, &txError{status: http.StatusUnprocessableEntity, op: op.Op, resource: op.Resource, msg: "validation_failed", fields: verrs}
+			}
 		}
 		if st, msg := EnforceCreateRBAC(data, &eval); st != 0 {
 			return nil, &txError{status: st, op: op.Op, resource: op.Resource, msg: msg}
@@ -294,6 +303,7 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 			resource: op.Resource,
 			emit:     ref.emitCreate,
 			allowed:  eval.AllowedFields,
+			jsonCols: ref.res.JSONTextColumns(),
 		}
 		if resourceHasFilePolicy(&ref.res) {
 			pop.filePolicyRes, pop.filePolicyVals = &ref.res, data
@@ -334,13 +344,17 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 					sets[col] = nv
 				}
 			}
+			// The hook may have rewritten a json field as an object (ADR-028).
+			if verrs := schema.CoerceJSONFields(&ref.res, sets); len(verrs) > 0 {
+				return nil, &txError{status: http.StatusUnprocessableEntity, op: op.Op, resource: op.Resource, msg: "validation_failed", fields: verrs}
+			}
 		}
 		q, args, terr := buildUpdateSQL(&ref.res, ref.tbl, op.ID, sets, eval.Condition, op.Guard)
 		if terr != nil {
 			terr.op, terr.resource = op.Op, op.Resource
 			return nil, terr
 		}
-		pop := &preparedOp{kind: "update", sql: q, args: args, resource: op.Resource, emit: ref.emitUpdate, allowed: eval.AllowedFields}
+		pop := &preparedOp{kind: "update", sql: q, args: args, resource: op.Resource, emit: ref.emitUpdate, allowed: eval.AllowedFields, jsonCols: ref.res.JSONTextColumns()}
 		if resourceHasFilePolicy(&ref.res) {
 			pop.filePolicyRes, pop.filePolicyVals = &ref.res, sets
 		}
@@ -409,6 +423,7 @@ func execPreparedOp(ctx context.Context, tx pgx.Tx, tenantID string, p *prepared
 		return nil, dbTxError(err)
 	}
 	out, rerr := pkghandlers.RowsToMaps(rows)
+	schema.PromoteJSONTextRows(out, p.jsonCols) // ADR-028: the batch result carries the value, like the single-op response
 	rows.Close()
 	if rerr != nil {
 		return nil, dbTxError(rerr)

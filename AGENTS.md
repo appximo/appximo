@@ -645,7 +645,7 @@ silently dead config.
 | `time` | TIMESTAMPTZ | `eq`, `gt`, `gte`, `lt`, `lte`, `after`, `before`, `is_null` |
 | `uuid` | UUID | `eq`, `is_null` |
 | `bool` | BOOLEAN | `eq`, `is_null` |
-| `json` | TEXT (stored as text) | `eq` (exact match on the stored text), `is_null` |
+| `json` | TEXT holding canonical JSON text — a JSON VALUE on every door (ADR-028) | `eq` (exact match on the stored canonical text), `is_null` |
 | `jsonb` | JSONB (a real document) | `eq`, `is_null` — plus `@>` containment via a `gin` index |
 | `file` | UUID + a real FK to the tenant's `files` table | `eq`, `is_null` |
 
@@ -657,13 +657,24 @@ implicit `id` or a `required` field it is a 400 naming why. GraphQL parity:
 `jsonb` fields (otherwise unfilterable in GraphQL) take `NullFilter`. The
 aggregate endpoint inherits it like any filter.
 
-**`json` vs `jsonb`** (LIBRARY-GAPS-S1): `json` is stored as TEXT — exact bytes,
-nothing queryable. `jsonb` is a real Postgres document: it is the only type a `gin`
-index may cover (`{"fields":["attrs"],"method":"gin","opclass":"jsonb_path_ops"}`),
-which turns `attrs @> '{"brand":"Acme"}'` into an index lookup. **Prefer `jsonb`**
-for anything you might query; pgx decodes it into a Go map and encodes one back.
-Neither can be a `group_by` key. In GraphQL `jsonb` is the `JSON` scalar (the
-document itself), `json` stays `String`.
+**`json` vs `jsonb`** (LIBRARY-GAPS-S1, value contract ADR-028 /
+MOTOR-TIPO-JSON-S1): BOTH hold a JSON VALUE. On EVERY write door (REST,
+GraphQL, batch, `Ctx.Insert`/`Update`) an object/array/number/boolean is
+stored as the value and a **string is read as JSON text** (`"{\"k\":1}"` is the
+object — the Postgres/pgx convention); a string that is not valid JSON is a
+**422 `rule: "type"`** naming the field (both types; it used to be a **500** on
+`json` for an object and an anonymous 400 on `jsonb` for a bad string). On
+EVERY HTTP read the value comes back natively (REST, embeds, subroutes,
+GraphQL — both types are the `JSON` scalar —, SSE, batch results, admin
+browse, webhooks); `Ctx.Query` hands `json` to a handler as the stored text
+`string`. `json` is stored as TEXT holding canonical JSON text (keys sorted,
+numbers through float64) — nothing queryable; `jsonb` is a real Postgres
+document: the only type a `gin` index may cover
+(`{"fields":["attrs"],"method":"gin","opclass":"jsonb_path_ops"}`), which
+turns `attrs @> '{"brand":"Acme"}'` into an index lookup. **Prefer `jsonb`**
+for anything you might query. Neither can be a `group_by` key. `/openapi.json`
+publishes both as type-less document properties tagged `x-appximo-json:
+"text"|"jsonb"`, so `/app` renders a JSON editor for either.
 
 **Money has no type of its own** — and shouldn't: use `int64` in the currency's
 MINOR unit with the unit in the name (`price_cents`, `total_cents`). `float64`

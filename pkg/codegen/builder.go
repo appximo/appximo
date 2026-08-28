@@ -290,6 +290,10 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		emitCreate := res.EmitsOn("create")
 		emitUpdate := res.EmitsOn("update")
 		emitDelete := res.EmitsOn("delete")
+		// ADR-028: the resource's `json` (TEXT) columns, promoted to native
+		// values on every HTTP read of this resource. Empty for most resources
+		// — computed once here so the read path pays nothing for them.
+		jsonCols := res.JSONTextColumns()
 
 		// Quoted table identifier, computed ONCE at boot (BUG1 — consistent
 		// quoting). The search_path write/get paths (create/get/delete/update/
@@ -425,6 +429,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				return
 			}
 			markSpan(req, "query")
+			schema.PromoteJSONTextRows(data, jsonCols) // ADR-028: a json column is emitted as its value
 
 			if evalResult != nil && len(evalResult.AllowedFields) > 0 {
 				for i, rec := range data {
@@ -591,6 +596,12 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			body = hookRes.Data
 			if beforeHook != nil {
 				markSpan(req, "hook")
+				// The hook may rewrite a json field as an object: re-coerce
+				// (ADR-028, idempotent) so it binds instead of failing in pgx.
+				if verrs := schema.CoerceJSONFields(wres, body); len(verrs) > 0 {
+					writeValidationErrs(w, verrs)
+					return
+				}
 			}
 
 			// HALLAZGO-2 / FASE3-SEC: enforce the role's row-level condition + field
@@ -652,6 +663,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// dispatch below, but unconditional (subscriptions are not gated on a
 			// hook being configured). Non-blocking; no-op with zero subscribers.
 			if len(result) > 0 {
+				schema.PromoteJSONText(result[0], jsonCols) // ADR-028: response, SSE and after-hook all carry the value
 				publishEvent(hub, tc.ID, name, "create", result[0], "")
 			}
 
@@ -760,6 +772,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				return
 			}
 			record := result[0]
+			schema.PromoteJSONText(record, jsonCols) // ADR-028
 			if evalResult != nil && len(evalResult.AllowedFields) > 0 {
 				record = pkghandlers.FilterFields(record, evalResult.AllowedFields)
 			}
@@ -973,6 +986,11 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 							sets[col] = nv
 						}
 					}
+					// The hook may have rewritten a json field as an object (ADR-028).
+					if verrs := schema.CoerceJSONFields(wres, sets); len(verrs) > 0 {
+						writeValidationErrs(w, verrs)
+						return
+					}
 				}
 
 				// Per-field file attach policy (FILES-1) on the final SET values —
@@ -1024,6 +1042,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 
 				// SSE broadcast (S45): post-commit, with the UNfiltered record —
 				// each subscriber gets its own RBAC field filtering at delivery.
+				schema.PromoteJSONText(record, jsonCols) // ADR-028
 				publishEvent(hub, tc.ID, name, "update", record, "")
 
 				// Drop this tenant's cached GETs so the next read is fresh (no TTL wait).
@@ -1059,6 +1078,12 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// defaulting to the target's id — the shared resolution the ?include=
 			// embeds use too, so subroute and embed can never diverge.
 			refCol := fd.ReferencedColumn()
+			relJSONCols := func() []string { // ADR-028: the referenced resource's json columns
+				if target, ok := s.Resources[relResource]; ok {
+					return target.JSONTextColumns()
+				}
+				return nil
+			}()
 
 			r.Get("/api/"+name+"/{id}/"+relRoute, pkghandlers.CachedGet(func(w http.ResponseWriter, req *http.Request) {
 				tc := tenant.MustFromCtx(req.Context())
@@ -1112,6 +1137,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					writeDBErr(w, req, err)
 					return
 				}
+				schema.PromoteJSONTextRows(result, relJSONCols) // ADR-028
 				if len(result) == 0 {
 					// Not found OR hidden by the related resource's row condition — a
 					// 404 either way (never reveal a row the role may not see).
@@ -1573,6 +1599,9 @@ func CollectUpdate(res *schema.ResourceSchema, body map[string]any, put bool, wr
 	// update op never permits them, import declaration or not. The messages are
 	// byte-compatible with what this function answered inline before.
 	errs := schema.GovernedFieldViolations(res, body, schema.GovernedUpdate, "")
+	// json/jsonb values to the one representation the column takes (ADR-028)
+	// — in place, before the sets are built from the body.
+	errs = append(errs, schema.CoerceJSONFields(res, body)...)
 	// Reject unknown keys, then type-check each present value (governed keys
 	// were already judged above).
 	for k, v := range body {
