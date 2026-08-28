@@ -19,6 +19,13 @@ export async function loadContract(fetchJSON) {
     .filter((n) => !virtual.has(n))
     .filter((n) => !Object.values(paths['/api/' + n] ?? {})
       .some((op) => op && typeof op === 'object' && op['x-appximo-custom-route']))
+    // A collection path with no GET is an engine ACTION, not a browsable
+    // resource: POST /api/transaction (x-appximo-transaction) is the batch
+    // door the bulk actions use, published in the contract since
+    // MIGRACION-CONFIANZA-S1 — listing it as a resource asked GET on it (405).
+    .filter((n) => !Object.values(paths['/api/' + n] ?? {})
+      .some((op) => op && typeof op === 'object' && op['x-appximo-transaction']))
+    .filter((n) => typeof (paths['/api/' + n] ?? {}).get === 'object')
     .sort();
 
   const resources = names.map((name) => {
