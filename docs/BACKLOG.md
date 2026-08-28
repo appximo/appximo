@@ -26,7 +26,19 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-28 (MOTOR-TIPO-JSON-S1)** — an external report on
+**Last reviewed: 2026-08-28 (APP-PODER-S1)** — the embedded `/app` uses what
+the contract already allowed, still derived from `/openapi.json` alone: honest
+page-numbered paging with the engine's exact COUNT («Página 3 de 47 · 15 de
+703»), the engine's query time on screen (a new `Server-Timing` header on
+every generated read — a small engine change), a detail with parents and
+children resolved from the FKs (no `?include=`, so legacy non-JSON text
+cannot break it), a JSON editor that warns the 1 MiB cap and the ENG-50
+precision loss before sending, columns + saved views + the view in the URL,
+CSV, batched bulk actions with named partial failure, and an API-search
+relation selector past 100 rows. Gate 150 SAME, ABBA `no_change` ×8 (the
+read crossings +5–8 % with a same-binary drift of ±2 % — not resolvable
+above host noise, said as such), four schemas in a browser desktop + 390×844,
+both demos deployed with rollback drilled. New OPEN: ENG-51. Before that: an external report on
 v0.1.9 (`POST {"data": {"nit":"900"}}` on a `json` field → 500; the escaped
 string → 201; the GET returns the escaped string) AUDITED request by request
 against HEAD, v0.1.9 and v0.1.8 before any fix (docs/audits/
@@ -209,6 +221,19 @@ refreshed).
 ---
 
 ## OPEN
+
+### ENG-51 — Custom routes carry no `Server-Timing`
+
+**Origin:** APP-PODER-S1. Every GENERATED read (list, get, subroute, embed,
+aggregate) sets `Server-Timing` from the span tracker right before writing
+its body; a consumer's custom route (`appximo.Route` handler, e.g. the
+tiendita's `/api/catalogo`) ends with `ctx.JSON(...)` and sets nothing, so a
+UI built on custom routes cannot show the engine's time. Low: the panel is
+generic and reads generated routes; the header is a read-side courtesy.
+
+**Ready:** `Ctx.JSON` (and the other terminal helpers) set the same header
+from the tracker, or a documented `Ctx.ServerTiming()` a handler calls
+before its own write — pinned by a library integration test.
 
 ### ENG-50 — JSON number fidelity beyond float64, in both directions (`json`/`jsonb`)
 
@@ -1193,6 +1218,39 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in APP-PODER-S1 (2026-08-28)
+
+Engine + the embedded `/app`. The thesis: the panel is the vitrina every
+visitor touches and it had contract left unused — a footer that said
+«Página 1 · 15 en esta página» without saying of how many, a detail that was a
+field list, an `x-appximo-json` tag with no editor. Six parts, in damage
+order, all of them derived from `/openapi.json` (a condition per resource
+would have failed the session). Engine `cdf4e85` → `46fab38`; Miguel cuts
+the tag.
+
+| Item | What landed | Proof |
+|---|---|---|
+| **A · Honest pagination** | Audit first: the engine DID return the total (`?count=true` → `meta.total`/`total_pages`, the exact `COUNT(*)` over the same filtered, RBAC-scoped set) and the panel already asked for it on page 1 — it just never showed it in the footer. Every list now pages by NUMBER (a cursor gives no «de N» and no «ir a»); footer «Página 1 de 2.414 · 15 de 36.201»; sizes 15/25/50/100/250 (15 stays the default, remembered per resource in the browser); first/prev/go-to/next/last. No estimated count: the exact one, and its cost on screen. | 36k-row ERP fixture (`nimbus.solicitudes`) in a real browser: page 1 with the count `query 10 ms`, sorted 27 ms, `search` ILIKE 15 ms + COUNT ~225 ms, page 2000 by OFFSET 343 ms — all visible |
+| **A · The query time** | A small ENGINE change: every generated read publishes `Server-Timing` (`jwt`, `rbac`, `query`, `count` — its own stage now —, `app`; a response-cache HIT says `cache;desc="hit"`; the singleflight miss replays the producer's header, which used to be lost). Set by the handlers that own the response — no wrapper writer (the FILES-FIX-SENDFILE lesson). The footer shows «consulta 7,8 ms · respuesta 66 ms»: the engine's number + the round trip, independent of how many rows are painted. | `pkg/observability` unit test (Spans/ElapsedUS), `pkg/cache` unit test (replay on miss, `cache` on hit), `pkg/integration TestTracing_EndToEnd` (header on a served read; the HIT assertion conditional on `X-Cache`) |
+| **B · Detail with relations both ways** | Audit: the schema's `relations`/`?include=` block is NOT in `/openapi.json`; what is: every FK (`x-appximo-relation`/`-references`) and the read subroute paths. So the detail resolves PARENTS through the published subroute (target RBAC enforced there; a lookup on the referenced column otherwise) and CHILDREN as every resource whose FK points here (a filtered list with count, peek, «Ver todos» → the list pre-filtered with a pinned chip; junction rows named by their other relations); the state machine as an ordered strip with the legal moves as buttons; files via signed URL/preview; each block fetches on its own and degrades to an inline notice; a legacy non-JSON text shows with a badge (no `::json` cast can run). Row click → detail (the pencil still opens the form); the detail has its own URL. | fresco `alquileres` (2 parents, 2 children, lifecycle), conjunto `pqrs` (files, 2 parents) desktop + 390×844; `see all` → pinned filter «Alquiler: ALQ-2026-207» |
+| **C · JSON editor** | For `x-appximo-json: text|jsonb`: highlight layer (keys/strings/numbers/literals) under a transparent textarea, validation as you type with the parse error named, Formatear/Compactar, a foldable tree view, Tab indents; invalid JSON never leaves the browser (field painted) and the engine's 422 paints the same field. The two limits SAID: 1 MiB per request (≥ 900 KB warns, ≥ 1 MiB blocks: «responde 413») and ENG-50 (16+ digit integers / decimals with trailing zeros found on the RAW text before the parse loses them, named). What is saved re-opens natively. | `jsoned.mjs` 12/12 on fresco (jsonb) and tiendita (json): invalid flagged + blocked, `12345678901234567890, 1.50` named, format, tree, save → parity, 1.1 MB blocked |
+| **D · Columns, views, URL** | Column picker over every listable field (structural order = default), saved views per resource in `localStorage` (columns, filters, sort, search, size) — zero engine state — and the current view in the hash (`#/res?cols=…&f.k=v&sort=…&per=…&page=…`; detail `#/res/id`). | `views.mjs` 8/8: a fresh page on the shared URL restores the columns; the detail URL opens the detail on a phone |
+| **E · CSV + bulk** | CSV of the loaded page (visible columns + id, RFC 4180, BOM) or — saying first how many pages of 250 and the 10,000-row ceiling — everything filtered. Selection (a «Seleccionar página» button on phones) → bulk bar: change state (targets = union of legal moves; rows without one counted and skipped) or delete, via `/api/transaction` in batches ≤ 100 with a progress bar; a failed atomic batch is retried row by row so the failure is NAMED («cannot delete: still referenced by "alquileres"») while the rest goes through; failed rows stay selected; explicit confirmation listing how many and which. Demo: the overlay is applied row by row, ZERO requests leave the browser (verified by request capture), and a hand-made `/api/transaction` with the demo token is 403. | `bulk.mjs`: 50 selected → 45 deleted, 5 named 409; transition ×3; `demo-bulk.mjs` (390×844) 5/5 |
+| **F · Relation search** | Past 100 rows (the `per_page` cap = the most a select can hold completely) the relation control becomes a debounced `?search=` box showing the target's title field; the list resolves labels the cached page lacks (≤ 40 lookups/page). | `relsearch.mjs` 6/6 with 121 clients |
+| **Four schemas** | Generic browser e2e (driver adapted to detail-first rows) on the fixed SPA: vet 11/11 · conjunto 16/16 · fresco 12/12 · tiendita 15/15; report shots desktop + 390×844 for the four + the ERP, 0 px overflow, console clean. Found and fixed on the way: a popover with `display:flex` ignored the `hidden` attribute (painted over the headers, invisible to the eye at first, fatal to a click) → `[hidden]{display:none!important}`; an inline `style=` (CSP) → CSSOM only, and never re-serialize a styled node. | `/tmp/ap/logs/e2e-*.log`, `evidencia/APP-PODER-S1/shots` (internal) |
+| **Gates** | unit 44 ok · full lane 43 ok + the tracing test (HIT assertion made conditional, green) · integration/e2e/resilience ok · lint 0 · vet/gofmt · **gate 150 SAME / 0 DIFF** (`/app` is not in the corpus; `Server-Timing` excluded from the header diff as timing noise — documented in the script — and pinned by the tracing test instead) · **binary +81,540 B**: SPA +75,761 B (app.js 59,915 → 112,570; style.css +12.8 KB; i18n +9.2 KB; contract +1.1 KB; gzip app.js 17.6 → 31.8 KB) + ~5.8 KB of Go. **ABBA frozen no_change ×8**: PATCH (8×4) clean-run medians A 4.472 / B 4.480 / B2 4.483 / A2 4.507 ms (≤ 0.8 % apart, 1–3 host stall runs per arm, declared); read (5×4) A 0.610 / B 0.639 / B2 0.649 / A2 0.597 — the cross deltas +4.8 % / +8.7 % with same-binary drift −2.1 % / +1.6 %: a ≤ 0.05 ms read-side cost (the header build) cannot be excluded; per protocol `no_change`, said as «not resolvable above the noise», not «zero». | `benchmarks/history.tsv` app-patch-*/app-read-*; `/tmp/ap/logs/{gate,full-lane,abba-*}.log` |
+| **The 58** | Backups (`appitools-20260828-051040.dump`, vetapp `.pre-app.dump`, binaries/CLI/env/schema `.pre-app`, golden md5 `7dcffa84…` intact). Deploy: tiendita `deploy-update.sh --cli` → `commerce 95f5735-app` + CLI `46fab38-app`; vetapp swap+restart → `46fab38-app`. **From outside as a visitor** (demo account, desktop + 390×844): tiendita footer «Página 1 de 1 · 14 de 14 · consulta 2,6 ms · respuesta 133 ms», detail with 6 blocks, bulk delete simulated 14 → 0 with ZERO write requests, JSON editor on `tipos_producto`, 0 overflow, console clean; petfriendly footer/detail likewise. `verify-vitrina` 22/22 · `demo-check` 8/8 · `verify-petfriendly` 20/20. **Rollback drilled both ways** (tiendita → `95f5735-json` → `-app`, vetapp → `f45d80c-json` → `46fab38-app`). **Two slips, declared:** the live script first used the vet TEST user (not a demo role) on petfriendly, so two bulk deletes were really sent — both **403 by RBAC** (`veterinarian` may not delete `appointments`), 17 rows intact, the panel reported the failure; and my residue sweep used a `created_at ≥ today` window that also matched 3 golden orders re-dated by the nightly reset → restored from the golden dump with the drilled `restore.sh` (13/13/9, new binary, PID 467526). | `live.log`, `58-suites.log` (internal) |
+| **Docs** | backoffice-spec §10 (limits) + §10b (the seven additions), AGENTS.md (`/app` paragraph + the `Server-Timing` contract line), frontend-spec (timing from the engine), the gate script comment; handoff 03 (A-49), 04, 00, registro. | |
+
+**What did NOT enter, and why:** nothing of the six parts was deferred. Not
+built on purpose: an estimated count (no evidence it is needed at real
+sizes; the exact one is measured and shown), `relations` in OpenAPI to use
+`?include=` (the FKs + subroutes suffice and it would couple the panel to
+the embed cast), a cross-page persistent selection (selection is per loaded
+page; other pages are said and skipped). Left as a row: ENG-51 (custom routes
+without `Server-Timing`). Tooling note: `/tmp/vit/tools/e2e-app.mjs` expects
+the OLD row-click-opens-form UX; the adapted driver is `/tmp/ap/e2e-app.mjs`.
 
 ## DONE in MOTOR-TIPO-JSON-S1 (2026-08-28)
 
