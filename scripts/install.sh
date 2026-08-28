@@ -15,8 +15,30 @@
 #
 # The whole program is wrapped in main() and only invoked on the LAST line, so a
 # truncated download (the classic curl|bash failure mode) never executes a
-# half-written script. Idempotent: safe to re-run (it reuses existing secrets and
-# only swaps the binary + restarts). `--uninstall` reverses it for a clean retry.
+# half-written script. Idempotent: safe to re-run. `--uninstall` reverses it for
+# a clean retry.
+#
+# THE UPGRADE-IN-PLACE CRITERION (MIGRACION-CONFIANZA-S1 — written down because
+# it used to be implicit, and an implicit criterion is what let a re-run keep
+# another application's schema under a new domain):
+#   KEPT on purpose   secrets (JWT/admin key/db password — every issued token
+#                     stays valid), the database and its data, the data dir,
+#                     the control port, an existing Caddy/Postgres setup.
+#   ALWAYS REPLACED   the binary (from --binary / the release download), the
+#                     systemd unit, the env file (same secrets, current layout),
+#                     this app's Caddy site, the companion scripts.
+#   THE SCHEMA        replaced when --schema is given; KEPT when it is not — and
+#                     a kept schema is VERIFIED to belong to THIS app (a schema
+#                     that is byte-identical to, or carries the `name` of,
+#                     another app installed on this box stops the install).
+# And the installer does not trust its own log: at the end it VERIFIES what it
+# installed — the installed binary's checksum against --binary, the running
+# service's /health version against that binary (locally AND through Caddy —
+# a proxy pointed at a neighbour's port answers with the neighbour's version),
+# and the schema on disk against what was asked. A mismatch FAILS the install,
+# loudly, even though the service is up. Measured field failure that motivated
+# it: a re-install left `GET /api/asambleas` (another app's resource) answering
+# 200 under the new app's domain.
 #
 # Binary source: there are no public GitHub Releases yet, so pass --binary=/path
 # to the appximo binary you built/copied (scripts/build-engine.sh, or scp it
@@ -43,7 +65,15 @@ readonly RELEASE_VERSION="v0.1.1"
 # ── Defaults (overridable by flags) ──────────────────────────────────────────
 DOMAIN=""; EMAIL=""; BINARY=""; CLI=""; SCHEMA=""; PORT="8090"; CONTROL_PORT=""
 ASSUME_YES="no"; HARDEN="no"; DRY_RUN="no"; PREFIX=""; UNINSTALL="no"; PURGE="no"
-SHOW_SECRETS="no"; APP_EXPLICIT="no"
+SHOW_SECRETS="no"; APP_EXPLICIT="no"; SCRIPTS_DIR=""; INTERNAL_TLS="no"; UPGRADE="no"; SWAP_MB=0; PUBLIC_OK="no"; CURL_TLS=""
+# The directory this script was started from — resolved BEFORE any `cd` (the
+# postgres steps cd /tmp, and a relative $0 resolved after that pointed the
+# companion-script lookup at /tmp: "deploy-update.sh weren't next to the
+# installer" while they were — field report, MIGRACION-CONFIANZA-S1).
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+# The installer's own invocations of the binary must never wait on the
+# release-check network call (the service env is untouched by this).
+export APPXIMO_NO_VERSION_CHECK=1
 
 # ── Output helpers ───────────────────────────────────────────────────────────
 if [ -t 1 ]; then C_G=$'\033[0;32m'; C_Y=$'\033[1;33m'; C_R=$'\033[0;31m'; C_B=$'\033[1;34m'; C_N=$'\033[0m'
@@ -82,7 +112,11 @@ Options:
                        admin create). When --binary IS the engine it is symlinked
                        automatically and this flag is unnecessary; a consumer
                        binary serves but cannot operate its database (ADR-023)
-  --schema=PATH        boot schema JSON (default: a todo-api starter you replace later)
+  --schema=PATH        boot schema JSON (default: a todo-api starter you replace later).
+                       On a re-run: given → replaces the installed schema; omitted →
+                       the installed schema is KEPT and verified to be THIS app's
+  --scripts=DIR        where deploy-update.sh / backup.sh live (default: next to
+                       this installer); they are installed into /opt/<app>/scripts
   --port=PORT          internal engine port Caddy proxies to        [default 8090]
   --app=NAME           install as a SEPARATE app on this box (OPS-10). Namespaces
                        everything: unit <NAME>.service, /etc/<NAME>, /opt/<NAME>,
@@ -98,6 +132,9 @@ Options:
                        only their path — transcripts and CI logs are forever)
   --harden             also apply ufw (SSH+80+443) + fail2ban + unattended-upgrades
   --dry-run            generate every config file + print the plan, run NO system steps
+  --internal-tls       Caddy issues a LOCAL (self-signed) certificate instead of
+                       Let's Encrypt — for a LAN/staging box whose domain is not
+                       public. The verification then talks to Caddy with -k.
   --root=DIR           prefix all paths with DIR (for --dry-run testing only)
   --uninstall          stop + remove THIS app's service, unit, files and Caddy site
                        (combine with --app=NAME to remove a specific app; other
@@ -117,6 +154,8 @@ parse_args() {
 			--binary=*) BINARY="${arg#*=}" ;;
 			--cli=*)    CLI="${arg#*=}" ;;
 			--schema=*) SCHEMA="${arg#*=}" ;;
+			--scripts=*) SCRIPTS_DIR="${arg#*=}" ;;
+			--internal-tls) INTERNAL_TLS="yes" ;;
 			--show-secrets) SHOW_SECRETS="yes" ;;
 			--port=*)   PORT="${arg#*=}" ;;
 			--app=*)    APP_NAME="${arg#*=}"; APP_EXPLICIT="yes" ;;
@@ -276,6 +315,9 @@ preflight() {
 	# never tightens before the box is already dead.
 	local mem_kb; mem_kb="$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || echo 0)"
 	MEM_MB=$(( mem_kb / 1024 ))
+	local swap_kb; swap_kb="$(awk '/^SwapTotal:/{print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+	SWAP_MB=$(( swap_kb / 1024 ))
+	warn_about_swap
 	GOMEMLIMIT_VAL=""
 	if [ "$MEM_MB" -gt 0 ]; then
 		local lim=$(( MEM_MB * 30 / 100 ))
@@ -289,6 +331,33 @@ preflight() {
 	fi
 }
 
+# warn_about_swap (MIGRACION-CONFIANZA-S1, D-bis). A real migration on a 957 MiB
+# box with NO swap: the kernel could not page anything out, so under a bulk load
+# it OOM-killed PostgreSQL — the PostgreSQL that FIVE apps on that box shared.
+# All five went down. With 2 GB of swap the same load was absorbed. The engine
+# did not cause that OOM, but this installer deployed onto that box without a
+# word about it. It warns — loudly, with the recipe — and never blocks: the
+# operator decides; what they cannot do is not know.
+SWAP_WARNING=""
+warn_about_swap() {
+	[ "${MEM_MB:-0}" -gt 0 ] || return 0
+	if [ "$MEM_MB" -le 2048 ] && [ "${SWAP_MB:-0}" -eq 0 ]; then
+		SWAP_WARNING="this box has ~${MEM_MB} MiB RAM and NO swap"
+		warn "$SWAP_WARNING.
+  With no swap the kernel cannot page anything out under pressure: a bulk load (a data
+  import, a big migration) can make it OOM-kill PostgreSQL — and PostgreSQL is SHARED by
+  every app on this box, so one app loading data takes ALL of them down (measured in the
+  field: 5 apps, 957 MiB, no swap → postgresql 'oom-kill'). Add swap BEFORE loading data:
+    fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab && sysctl -w vm.swappiness=10
+  The engine refuses new writes with a 503 when MemAvailable+SwapFree drops under a floor
+  (APPXIMO_MEMORY_GUARD_MIN_MB) — that is degradation, not capacity. Swap is what gives the
+  kernel room; the guard only keeps the failure from being silent."
+	elif [ "$MEM_MB" -le 1280 ]; then
+		info "small box (~${MEM_MB} MiB RAM, ${SWAP_MB} MiB swap) — load data in batches; see docs/PRODUCTION.md §Prerequisites"
+	fi
+}
+
 # preflight_conflicts: DETECT before we mutate. A port held by a stranger, an
 # existing non-ours Caddyfile, or a prior install are reported (and the risky
 # ones abort with a clear fix) rather than blindly clobbered.
@@ -296,7 +365,11 @@ preflight_conflicts() {
 	[ "$DRY_RUN" = "yes" ] && return 0
 	# Existing appximo install → this is an upgrade; say so (secrets are reused).
 	if [ -f "$ENV_FILE" ] || [ -f "$UNIT_FILE" ]; then
-		info "existing Appximo install detected — upgrading in place (secrets reused)"
+		UPGRADE="yes"
+		info "existing install of \"$APP_NAME\" detected — upgrading in place:
+    KEPT      secrets, database + data, data dir, control port
+    REPLACED  binary ($( [ -n "$BINARY" ] && printf '%s' "$BINARY" || printf 'release download')), unit, env layout, Caddy site, companion scripts
+    SCHEMA    $( [ -n "$SCHEMA" ] && printf 'replaced by %s' "$SCHEMA" || printf 'KEPT (no --schema) — verified to belong to this app before the service starts' )"
 	fi
 	# PORT PREFLIGHT (CTX-PARITY-S1, field report C2). EVERY port this install
 	# will bind is checked HERE — before a single file is written — so a
@@ -312,8 +385,13 @@ preflight_conflicts() {
 		for pair in "$PORT:--port" "$CONTROL_PORT:--control-port"; do
 			p="${pair%%:*}"; label="${pair##*:}"
 			ss -ltn "( sport = :$p )" 2>/dev/null | grep -q ":$p " || continue
-			# Our OWN service holding it is an upgrade, not a conflict.
-			if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then continue; fi
+			# Our OWN service holding it is an upgrade, not a conflict — decided by
+			# the PID that holds the port, never by "our unit is active" (that
+			# test let a re-run of a live app take a NEIGHBOUR's port: the unit
+			# was active, the port was somebody else's, and Caddy was then pointed
+			# at the neighbour's engine — MIGRACION-CONFIANZA-S1).
+			local our_pid; our_pid="$(systemctl show -p MainPID --value "$SERVICE_NAME" 2>/dev/null || true)"
+			if [ -n "$our_pid" ] && [ "$our_pid" != "0" ] && ss -ltnp "( sport = :$p )" 2>/dev/null | grep -q "pid=${our_pid},"; then continue; fi
 			owner="$(ss -ltnp "( sport = :$p )" 2>/dev/null | awk 'NR>1{print $NF}' | head -1)"
 			[ -n "$owner" ] || owner="an unidentified process"
 			busy="${busy}
@@ -327,7 +405,10 @@ preflight_conflicts() {
 		fi
 	fi
 	# An existing Caddyfile that isn't ours would be overwritten — back it up first.
-	if [ -f "$CADDYFILE" ] && ! grep -q "127.0.0.1:${PORT}" "$CADDYFILE" 2>/dev/null; then
+	# "Ours" = it proxies this port (pre-OPS-10 inline layout) OR it already
+	# imports the per-app site files (the OPS-10 layout, where the port lives in
+	# sites/<app>.caddy — the old test backed the file up on EVERY re-run).
+	if [ -f "$CADDYFILE" ] && ! grep -q "127.0.0.1:${PORT}" "$CADDYFILE" 2>/dev/null && ! grep -qF "import sites/*.caddy" "$CADDYFILE" 2>/dev/null; then
 		local bak; bak="${CADDYFILE}.pre-appximo.$(date +%Y%m%d-%H%M%S)"
 		warn "an existing Caddyfile is present and is NOT ours — backing it up to ${bak} before writing appximo' config"
 		cp -p "$CADDYFILE" "$bak"
@@ -415,10 +496,14 @@ install_packages() {
 	# `apt-get update` is NON-fatal: a single slow/broken THIRD-PARTY repo left on
 	# the box (e.g. a stale docker/cloudsmith list) must not block installing
 	# postgresql from the working Ubuntu mirrors. The install below still guards.
-	run apt-get -o Acquire::Retries=3 update -qq \
+	# DPkg::Lock::Timeout: on a fresh box unattended-upgrades often holds the
+	# dpkg lock for the first minutes after boot; without a timeout apt fails
+	# instantly ("Could not get lock … held by process N (unattended-upgr)")
+	# and the install aborts for a reason that fixes itself — wait instead.
+	run apt-get -o Acquire::Retries=3 -o DPkg::Lock::Timeout=300 update -qq \
 		|| warn "apt-get update had an issue (a slow extra repo?); continuing — postgresql installs from the base mirrors"
-	run apt-get install -y -qq -o Acquire::Retries=3 ca-certificates curl gnupg openssl tar postgresql \
-		|| die "apt-get install failed. Check network/apt sources, then re-run this installer (it resumes safely)."
+	run apt-get install -y -qq -o Acquire::Retries=3 -o DPkg::Lock::Timeout=300 ca-certificates curl gnupg openssl tar postgresql \
+		|| die "apt-get install failed. Check network/apt sources (and that no other apt/dpkg is running: ps -C apt-get,dpkg,unattended-upgr), then re-run this installer (it resumes safely)."
 	ok "packages ready"
 }
 
@@ -548,17 +633,23 @@ verify_service_can_read() {
 # hint instead of pretending. (Caught in PROD-PATH-HARDEN-S1: the docs pointed at
 # /opt/appximo/scripts but nothing put the scripts there.)
 install_companion_scripts() {
-	local self_dir; self_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd)" || { self_dir=""; }
-	local any="no" s
+	# Resolved at parse time (SELF_DIR) — never from a relative $0 after the
+	# postgres steps `cd /tmp`. The exec bit of the SOURCE is irrelevant:
+	# install(1) sets 0755 on the copy.
+	local dir="${SCRIPTS_DIR:-$SELF_DIR}" any="no" missing="" s
 	for s in deploy-update.sh backup.sh; do
-		if [ -n "$self_dir" ] && [ -f "$self_dir/$s" ]; then
-			run install -m 0755 "$self_dir/$s" "$OPT_DIR/scripts/$s"; any="yes"
+		if [ -n "$dir" ] && [ -f "$dir/$s" ]; then
+			run install -m 0755 "$dir/$s" "$OPT_DIR/scripts/$s"; any="yes"
+		else
+			missing="$missing $s"
 		fi
 	done
-	if [ "$any" = "yes" ]; then
-		ok "companion scripts installed in ${OPT_DIR#"$PREFIX"}/scripts (deploy-update.sh, backup.sh)"
+	if [ "$any" = "yes" ] && [ -z "$missing" ]; then
+		ok "companion scripts installed in ${OPT_DIR#"$PREFIX"}/scripts (deploy-update.sh, backup.sh — from $dir)"
+	elif [ "$any" = "yes" ]; then
+		warn "companion scripts: installed what was in $dir; MISSING:$missing — pass --scripts=DIR or copy them into ${OPT_DIR#"$PREFIX"}/scripts"
 	else
-		info "companion scripts (deploy-update.sh/backup.sh) weren't next to the installer — grab them from the repo into ${OPT_DIR#"$PREFIX"}/scripts when you need updates/backups"
+		info "companion scripts (deploy-update.sh/backup.sh) not found in ${dir:-<unknown>} — pass --scripts=DIR pointing at the repo's scripts/ (or copy them into ${OPT_DIR#"$PREFIX"}/scripts) when you need updates/backups"
 	fi
 }
 
@@ -728,14 +819,77 @@ install_ops_cli() {
 		ln -sfn "$BIN_PATH" "$cli_path"
 		ok "ops CLI: this binary IS the engine — appximo-cli symlinked to it"
 	else
+		# A symlink left by an EARLIER install of the stock engine now points at
+		# a consumer binary that has no ops subcommands: the CLI is broken
+		# silently ("appximo-cli tenant list" → unknown subcommand). Remove it
+		# and say so — a dangling companion is worse than a named gap.
+		if [ -L "$cli_path" ] && [ "$(readlink -f "$cli_path" 2>/dev/null)" = "$(readlink -f "$BIN_PATH" 2>/dev/null)" ]; then
+			rm -f "$cli_path"
+			warn "removed the stale ${cli_path#"$PREFIX"} symlink: it pointed at this app's own binary, which is a CONSUMER build with no ops subcommands"
+		fi
 		warn "this is a CONSUMER binary (serves, but has no ops subcommands). To operate its database (register tenants, migrate, mint tokens, create the super-admin) install the engine CLI: re-run with --cli=/path/to/appximo (build: scripts/build-engine.sh) — see docs/adr/ADR-023"
 	fi
 }
 
 # ── Boot schema ──────────────────────────────────────────────────────────────
+# schema_name FILE — the top-level "name" of a schema JSON (python3 when
+# present, else a first-key grep — the top-level name precedes any resource).
+schema_name() {
+	[ -f "$1" ] || { printf ''; return; }
+	if command -v python3 >/dev/null 2>&1; then
+		python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1])).get("name",""))
+except Exception: print("")' "$1" 2>/dev/null
+	else
+		grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$1" 2>/dev/null | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/'
+	fi
+}
+
+# foreign_schema_guard FILE — refuse a schema that belongs to ANOTHER app on
+# this box: byte-identical to, or carrying the `name` of, a sibling
+# /etc/<other>/schema.json. This is the check that would have stopped
+# "GET /api/asambleas → 200 under the new domain": a re-run without --schema
+# kept a schema a previous session had left there, and the tenant registration
+# the summary prints (`$(cat /etc/<app>/schema.json)`) then served another
+# application's resources. Never registers a tenant with someone else's schema.
+foreign_schema_guard() {
+	local file="$1" name other oname osum sum
+	[ -f "$file" ] || return 0
+	name="$(schema_name "$file")"
+	# A schema whose `name` IS this app's name is this app's, whatever a sibling
+	# holds: when two apps carry identical bytes, the one whose name matches its
+	# app is the owner and the other one is the copy — the guard fires on the
+	# copy, never on the owner (a legitimate upgrade of the victim must proceed).
+	[ -n "$name" ] && [ "$name" = "$APP_NAME" ] && return 0
+	sum="$(sha256sum "$file" 2>/dev/null | cut -d' ' -f1)"
+	for other in "$PREFIX"/etc/*/schema.json; do
+		[ -f "$other" ] || continue
+		[ "$other" = "$file" ] && continue
+		case "$other" in "$PREFIX/etc/$APP_NAME/"*) continue ;; esac
+		osum="$(sha256sum "$other" 2>/dev/null | cut -d' ' -f1)"
+		oname="$(schema_name "$other")"
+		if [ -n "$sum" ] && [ "$sum" = "$osum" ]; then
+			die "the schema at ${file#"$PREFIX"} is BYTE-IDENTICAL to ${other#"$PREFIX"} — it is another application's schema, not \"$APP_NAME\"'s.
+  Continuing would register tenants of \"$APP_NAME\" with that other app's resources and serve them under $DOMAIN.
+  Fix: re-run with --schema=/path/to/${APP_NAME}-schema.json (the model THIS app should serve)."
+		fi
+		if [ -n "$name" ] && [ "$name" = "$oname" ]; then
+			die "the schema at ${file#"$PREFIX"} is named \"$name\" — the same name as ${other#"$PREFIX"}, another application on this box.
+  Continuing would serve that application's resources under $DOMAIN.
+  Fix: re-run with --schema=/path/to/${APP_NAME}-schema.json (the model THIS app should serve)."
+		fi
+	done
+	return 0
+}
+
 write_schema() {
 	if [ -f "$SCHEMA_FILE" ] && [ -z "$SCHEMA" ]; then
-		info "keeping existing $SCHEMA_FILE"
+		foreign_schema_guard "$SCHEMA_FILE"
+		local kept; kept="$(schema_name "$SCHEMA_FILE")"
+		info "keeping existing $SCHEMA_FILE (schema name: \"${kept:-?}\"; pass --schema to replace it)"
+		if [ -n "$kept" ] && [ "$kept" != "$APP_NAME" ]; then
+			info "note: the schema's name (\"$kept\") differs from the app name (\"$APP_NAME\") — fine if intended; no other app on this box carries it"
+		fi
 		schema_perms
 		return
 	fi
@@ -845,8 +999,11 @@ write_caddyfile() {
 	# main Caddyfile only IMPORTS that directory. Installing a second app appends a
 	# file; it can never erase the first app's site — which is exactly what the
 	# previous wholesale overwrite did.
+	local tls_line=""
+	[ "$INTERNAL_TLS" = "yes" ] && tls_line="
+	tls internal"
 	write_file "$CADDY_SITE_FILE" "# Appximo app: ${APP_NAME}  (managed by scripts/install.sh — edits are overwritten on re-run)
-${DOMAIN} {
+${DOMAIN} {${tls_line}
 	request_body {
 		max_size 25MB
 	}
@@ -925,21 +1082,96 @@ verify() {
 		[ "$i" = "30" ] && { journalctl -u "$SERVICE_NAME" -n 40 --no-pager 2>/dev/null || true; die "engine did not become healthy — see the log above (journalctl -u $SERVICE_NAME -f)"; }
 		sleep 1
 	done
-	info "waiting for public HTTPS (Caddy is issuing the Let's Encrypt certificate — first issue can take ~30s)…"
+	CURL_TLS=""; [ "$INTERNAL_TLS" = "yes" ] && CURL_TLS="-k"
+	PUBLIC_OK="no"
+	if [ "$INTERNAL_TLS" = "yes" ]; then info "waiting for public HTTPS (Caddy is issuing a LOCAL certificate — --internal-tls)…"
+	else info "waiting for public HTTPS (Caddy is issuing the Let's Encrypt certificate — first issue can take ~30s)…"; fi
 	for i in $(seq 1 40); do
-		if curl -fsS "https://${DOMAIN}/healthz" >/dev/null 2>&1; then
-			ok "public HTTPS live: https://${DOMAIN}/healthz"; return
+		# shellcheck disable=SC2086
+		if curl -fsS $CURL_TLS "https://${DOMAIN}/healthz" >/dev/null 2>&1; then
+			ok "public HTTPS live: https://${DOMAIN}/healthz"; PUBLIC_OK="yes"; return
 		fi
 		sleep 3
 	done
 	warn "https://${DOMAIN}/healthz not answering yet. The engine is up locally; this is almost always DNS or the firewall. Check: dig +short ${DOMAIN} (should be this box's IP); ports 80+443 open; journalctl -u caddy -f"
 }
 
+# ── Post-install verification: what was ASKED == what is INSTALLED ───────────
+# The installer's log said "✓ engine installed" on a box whose /health kept
+# answering an older version and whose schema belonged to another app. A log
+# line is a claim; this is the check. Every mismatch is FATAL (exit 1) even
+# though the service is up — an install that is not what was asked for is not
+# a success with a footnote.
+VERIFIED_LINES=""
+vline() { VERIFIED_LINES="${VERIFIED_LINES}
+    $*"; }
+health_version() { curl -fsS -m 5 "$@" 2>/dev/null | grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4; }
+verify_installed() {
+	[ "$DRY_RUN" = "yes" ] && return 0
+	info "verifying the install against what was asked…"
+	# 1. The installed binary IS the one given (checksum, not name).
+	if [ -n "$BINARY" ]; then
+		local want have
+		want="$(sha256sum "$BINARY" | cut -d' ' -f1)"; have="$(sha256sum "$BIN_PATH" | cut -d' ' -f1)"
+		[ "$want" = "$have" ] || die "VERIFY FAILED: ${BIN_PATH#"$PREFIX"} (sha256 ${have:0:12}…) is NOT the --binary you gave (${want:0:12}…). Nothing else was checked. Re-run; if it persists, inspect ${OPT_DIR#"$PREFIX"}/bin by hand."
+		vline "binary    ${BIN_PATH#"$PREFIX"} == $BINARY (sha256 ${have:0:12}…)"
+	fi
+	# 2. The RUNNING service reports the installed binary's version — locally…
+	local expect_id got
+	expect_id="$("$BIN_PATH" version 2>/dev/null | head -1)"
+	got="$(health_version "http://127.0.0.1:${PORT}/health")"
+	if [ -z "$got" ]; then
+		die "VERIFY FAILED: http://127.0.0.1:${PORT}/health returned no version (the service answered /healthz a moment ago). journalctl -u $SERVICE_NAME -n 40"
+	fi
+	case "$expect_id" in
+		*"$got"*) vline "version   /health on 127.0.0.1:${PORT} reports \"$got\" — matches the installed binary (\"$expect_id\")" ;;
+		*) die "VERIFY FAILED: the service on 127.0.0.1:${PORT} reports version \"$got\" but the installed binary identifies as \"$expect_id\".
+  Another process is answering on that port, or the restart did not pick the new binary.
+    ss -ltnp | grep ':${PORT} '        # who holds the port
+    systemctl status $SERVICE_NAME     # MainPID + the binary it runs" ;;
+	esac
+	# …and through Caddy, when the public door answered: a site file that proxies
+	# to a NEIGHBOUR's port serves the neighbour's app under this domain.
+	if [ "${PUBLIC_OK:-no}" = "yes" ]; then
+		local pub
+		# shellcheck disable=SC2086
+		pub="$(health_version $CURL_TLS "https://${DOMAIN}/health")"
+		if [ -n "$pub" ] && [ "$pub" != "$got" ]; then
+			die "VERIFY FAILED: https://${DOMAIN}/health reports version \"$pub\" but the engine on 127.0.0.1:${PORT} reports \"$got\" — Caddy is proxying $DOMAIN to ANOTHER upstream (another app on this box?).
+  Check ${CADDY_SITE_FILE#"$PREFIX"} (reverse_proxy must be 127.0.0.1:${PORT}) and every other site in ${CADDY_SITES_DIR#"$PREFIX"} / ${CADDYFILE#"$PREFIX"} for a duplicate of $DOMAIN."
+		fi
+		[ -n "$pub" ] && vline "public    https://${DOMAIN}/health reports \"$pub\" — same engine"
+	fi
+	# 3. The schema on disk is the one asked for, and this app's.
+	if [ -n "$SCHEMA" ]; then
+		local sw sh; sw="$(sha256sum "$SCHEMA" | cut -d' ' -f1)"; sh="$(sha256sum "$SCHEMA_FILE" | cut -d' ' -f1)"
+		[ "$sw" = "$sh" ] || die "VERIFY FAILED: ${SCHEMA_FILE#"$PREFIX"} is not the --schema you gave ($SCHEMA)."
+		vline "schema    ${SCHEMA_FILE#"$PREFIX"} == $SCHEMA (name \"$(schema_name "$SCHEMA_FILE")\")"
+	else
+		foreign_schema_guard "$SCHEMA_FILE"
+		local nm; nm="$(schema_name "$SCHEMA_FILE")"
+		if [ -n "$nm" ] && [ "$nm" != "$APP_NAME" ]; then
+			vline "schema    ${SCHEMA_FILE#"$PREFIX"} kept — name \"$nm\" (app \"$APP_NAME\"; no other app on this box carries that schema)"
+		else
+			vline "schema    ${SCHEMA_FILE#"$PREFIX"} kept — name \"${nm:-?}\""
+		fi
+	fi
+	# 4. The companions: executable, and the ops CLI actually operates.
+	local s present=""
+	for s in deploy-update.sh backup.sh; do [ -x "$OPT_DIR/scripts/$s" ] && present="$present $s"; done
+	[ -n "$present" ] && vline "scripts   ${OPT_DIR#"$PREFIX"}/scripts:$present (executable)"
+	if [ -e "$OPT_DIR/bin/appximo-cli" ]; then
+		if "$OPT_DIR/bin/appximo-cli" tenant --help >/dev/null 2>&1; then vline "ops CLI   ${OPT_DIR#"$PREFIX"}/bin/appximo-cli operates (tenant/migrate/token/admin)"
+		else warn "${OPT_DIR#"$PREFIX"}/bin/appximo-cli does not answer 'tenant --help' — it is not the engine CLI; re-run with --cli=/path/to/appximo"; fi
+	fi
+	ok "verified — installed == asked:${VERIFIED_LINES}"
+}
+
 # ── Optional hardening ───────────────────────────────────────────────────────
 maybe_harden() {
 	[ "$HARDEN" = "yes" ] || return 0
 	info "hardening: ufw + fail2ban + unattended-upgrades"
-	run apt-get install -y -qq ufw fail2ban unattended-upgrades
+	run apt-get install -y -qq -o DPkg::Lock::Timeout=300 ufw fail2ban unattended-upgrades
 	if [ "$DRY_RUN" != "yes" ]; then
 		command -v ufw >/dev/null 2>&1 || die "hardening needs ufw and apt could not provide it on this box.
   Fix:  install it yourself (apt-get install -y ufw) and re-run, or drop --harden and firewall this box your own way.
@@ -1081,7 +1313,9 @@ summary() {
 	echo
 	printf '  Logs     journalctl -u %s -f\n' "$SERVICE_NAME"
 	printf '  Ops CLI  %s/bin/appximo-cli  (tenant / migrate / token / admin create)\n' "${OPT_DIR#"$PREFIX"}"
-	printf '  Update   build a new binary → scp up → sudo bash %s --binary=/path --domain=%s --email=%s --yes\n' "$0" "$DOMAIN" "${EMAIL:-you@example.com}"
+	printf '  Schema   %s (name "%s") — a re-run KEEPS it unless you pass --schema=PATH\n' "${SCHEMA_FILE#"$PREFIX"}" "$(schema_name "$SCHEMA_FILE")"
+	printf '  Update   build a new binary → scp up → sudo bash %s --binary=/path --domain=%s --email=%s --yes   (add --schema=PATH to change the model; secrets + data are kept, binary is replaced, the end is verified)\n' "$0" "$DOMAIN" "${EMAIL:-you@example.com}"
+	[ -n "$SWAP_WARNING" ] && printf '  %s!%s Memory   %s — add swap before loading data (see the warning above / docs/PRODUCTION.md §Prerequisites)\n' "$C_Y" "$C_N" "$SWAP_WARNING"
 	printf '  Remove   sudo bash %s --uninstall   (add --purge to also drop the database)\n' "$0"
 	printf '  Guide    docs/PRODUCTION.md\n'
 	printf '  AI agent building on this app?  appximo-cli spec | backend-spec | frontend-spec | backoffice-spec | quickstart\n'
@@ -1110,6 +1344,10 @@ main() {
 	gather_input
 	guard_existing_app   # OPS-10: never clobber a DIFFERENT app that is already live
 	preflight_conflicts
+	# A kept schema is judged BEFORE any mutation (not when it is written, by
+	# which point the binary has already been replaced): a foreign schema stops
+	# the run with the box exactly as it was.
+	if [ -z "$SCHEMA" ] && [ "$DRY_RUN" != "yes" ]; then foreign_schema_guard "$SCHEMA_FILE"; fi
 	load_or_generate_secrets
 	install_packages
 	install_caddy
@@ -1124,6 +1362,7 @@ main() {
 	verify_service_can_read
 	start_services
 	verify
+	verify_installed
 	maybe_harden
 	trap - EXIT
 	summary

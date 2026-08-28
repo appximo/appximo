@@ -458,8 +458,9 @@ curl -fsSL https://raw.githubusercontent.com/appximo/appximo/main/scripts/instal
 ```
 
 The installer asks one thing — your domain — then generates every secret, writes
-the systemd unit + Caddyfile, installs PostgreSQL and Caddy, and brings the API
-up on HTTPS. Updates are one script ([`scripts/deploy-update.sh`](scripts/deploy-update.sh),
+the systemd unit + Caddyfile, installs PostgreSQL and Caddy, brings the API up
+on HTTPS, and **verifies what it installed** (binary checksum, `/health` version
+locally and through the proxy, the schema on disk) before saying so. Updates are one script ([`scripts/deploy-update.sh`](scripts/deploy-update.sh),
 atomic swap + auto-rollback), backups another
 ([`scripts/backup.sh`](scripts/backup.sh), `pg_dump` + rotation).
 

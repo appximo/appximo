@@ -337,3 +337,50 @@ func TestOpenAPIAggregatePath(t *testing.T) {
 		t.Error("missing AggregateResponse component")
 	}
 }
+
+// TestOpenAPI_TransactionEndpointIsPublished — MIGRACION-CONFIANZA-S1. The
+// batch endpoint has existed in every published version, yet an external
+// migration on v0.1.10 concluded "it does not exist" because /openapi.json —
+// the document this engine calls the authority for EXISTENCE — did not list
+// it. The served contract must name it, with the request/response shapes.
+func TestOpenAPI_TransactionEndpointIsPublished(t *testing.T) {
+	s := &schema.APISchema{Resources: map[string]schema.ResourceSchema{
+		"tasks": {Fields: map[string]schema.FieldDef{"title": {Type: "string"}}},
+	}}
+	raw, err := GenerateOpenAPIJSON(s, "http://x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	paths := doc["paths"].(map[string]any)
+	tx, ok := paths["/api/transaction"].(map[string]any)
+	if !ok {
+		t.Fatal("/api/transaction is missing from the served contract")
+	}
+	post, ok := tx["post"].(map[string]any)
+	if !ok || post["x-appximo-transaction"] != true {
+		t.Fatalf("/api/transaction must be a POST flagged x-appximo-transaction: %v", tx)
+	}
+	if _, has := tx["get"]; has {
+		t.Error("the batch endpoint is POST-only (GET answers 405)")
+	}
+	resp := post["responses"].(map[string]any)
+	for _, code := range []string{"200", "400", "401", "403", "404", "409", "413", "422"} {
+		if _, ok := resp[code]; !ok {
+			t.Errorf("response %s missing", code)
+		}
+	}
+	schemas := doc["components"].(map[string]any)["schemas"].(map[string]any)
+	for _, name := range []string{"TransactionRequest", "TransactionOperation", "TransactionGuard", "TransactionResponse", "TransactionErrorResponse"} {
+		if _, ok := schemas[name]; !ok {
+			t.Errorf("component %s missing", name)
+		}
+	}
+	req := schemas["TransactionRequest"].(map[string]any)["properties"].(map[string]any)["operations"].(map[string]any)
+	if req["maxItems"] != float64(DefaultMaxTxOps) {
+		t.Errorf("the published cap must equal DefaultMaxTxOps (%d), got %v", DefaultMaxTxOps, req["maxItems"])
+	}
+}

@@ -130,6 +130,37 @@ door (ADR-028, MOTOR-TIPO-JSON-S1).** Both types hold a JSON VALUE:
   is also what a `jsonb` read gives you); `jsonb` is the Postgres document.
   `?filter[<json>][eq]=` compares that canonical text — fragile by nature;
   real document queries are `jsonb` + `@>`.
+- **Canonicalization — byte identity is NOT reachable through the API, and
+  that is not data loss (verified with real requests, MIGRACION-CONFIANZA-S1).**
+  What you send is decoded into Go values and re-encoded, on the way in AND
+  on the way out, for BOTH types. Concretely — sent
+  `{"zeta":1,"alpha":{"y":2,"x":1},"ratio":0.01000000000000000020816681711721685132943093776702880859375,"big":12345678901234567890,"dec":1.50,"list":[3,1,2]}`,
+  stored and returned:
+  `{"alpha":{"x":1,"y":2},"big":12345678901234567000,"dec":1.5,"list":[3,1,2],"ratio":0.01,"zeta":1}`.
+  Three transformations: (1) **object keys come back sorted** (nested ones
+  too; array ORDER is kept); (2) **floats are re-rendered in shortest
+  round-trip form** — `0.01000…0859375` IS the float64 `0.01`, same IEEE-754
+  bits, printed shorter; `1.50` → `1.5` (the trailing zero is not a value);
+  (3) **integers beyond 2^53 lose digits** — `12345678901234567890` →
+  `12345678901234567000` (ENG-50: the only one of the three that IS a loss;
+  it applies in both directions on both types — `jsonb` is decoded to
+  float64 on read too). Whitespace is never kept. `jsonb` additionally
+  applies Postgres's own normalization (duplicate keys collapse, its own key
+  order), which the read path re-sorts anyway.
+  **The exact-fidelity door, if you need one:** write the document as a
+  JSON-TEXT STRING on a `json` (TEXT) field — `{"data": "{\"big\": 12345678901234567890, \"dec\": 1.50}"}`
+  — the engine validates and COMPACTS it but keeps its numeric text and key
+  order, and the read path emits the stored text verbatim; only whitespace
+  differs. That is the migration path for documents with big integers or
+  exact decimals; it does not exist for `jsonb`.
+  **Parity note for migrations:** a migrator that checks "source == Appximo"
+  must canonicalize BOTH sides before comparing — parse each side, sort keys
+  recursively, and compare VALUES (numbers as float64, or as `Decimal` when
+  the source has them and the target used the string door), never bytes. In
+  Python: `json.dumps(json.loads(x), sort_keys=True, separators=(",", ":"))`
+  on both; in Go: `json.Unmarshal` into `any` + `reflect.DeepEqual`; in
+  PostgreSQL: cast both to `jsonb` and compare with `=` (jsonb equality is
+  value equality). Diffs that survive that are real.
 - **Library read**: `ctx.Query`/`QueryOne` return a `json` column as the
   stored **`string`** (unchanged — unmarshal it yourself when you need the
   document) and a `jsonb` column as the decoded `map[string]any`/`[]any`.
@@ -138,6 +169,62 @@ door (ADR-028, MOTOR-TIPO-JSON-S1).** Both types hold a JSON VALUE:
   object; a non-JSON string is a `*ValidationError` with the 422 fields.
 - Before ADR-028 (v0.1.9 and earlier) a `json` field accepted ONLY a string
   and returned it escaped; a client that parsed the string must stop parsing.
+
+### 2b. Writing from OUTSIDE the binary — loading data through the API
+
+An external process (a migration, an importer, a script) has three write
+doors and no fourth:
+
+| Door | Per request | Atomicity | Cost measured (dev box, 1 vCPU, local Postgres) |
+|---|---|---|---|
+| `POST /api/<resource>` | one row | one row | 100 sequential POSTs ≈ 1.06 s (~10.6 ms each, connection reuse off) |
+| **`POST /api/transaction`** | up to **100** create/update/delete ops, any mix of resources | **all-or-nothing** — one Postgres transaction | 100 creates ≈ **50–70 ms** (~0.6 ms/row); 100 creates carrying a 3 KB `json` document each (120 KB body) ≈ 100 ms |
+| a custom Go route + `ctx.Insert`/`UnsafeTx` (§3) | whatever you write | your transaction | in-process, no HTTP per row |
+
+**`POST /api/transaction` has existed since 2026-06 and is in every published
+version (v0.1.8, v0.1.9, v0.1.10 and later — verified request by request).**
+It was missing from the served `/openapi.json` until MIGRACION-CONFIANZA-S1,
+which is why an agent reading the contract could conclude it did not exist;
+it is published there now (`x-appximo-transaction: true`, with the request/
+response components). The full contract is AGENTS.md §Atomic multi-resource
+transactions and SCHEMA_REFERENCE §10.3; the shape:
+
+```bash
+curl -X POST https://acme.example.com/api/transaction \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{
+  "operations": [
+    {"op": "create", "resource": "declarations", "data": {"code": "D-1", "data": {"nit": "900123"}}},
+    {"op": "create", "resource": "declarations", "data": {"code": "D-2", "data": {"nit": "900124"}}},
+    {"op": "update", "resource": "products", "id": "…", "data": {"stock": 7},
+     "guard": [{"field": "stock", "op": "eq", "value": 10}]}
+  ]}'
+# 200 {"results":[{…row…},{…row…},{…row…}]}
+# any failure → the failing op's status + {"error","failed_operation":<index>,"op","resource"[,"fields"]}
+```
+
+- **Every op is authorized and validated exactly like its single-op twin**
+  (per-resource RBAC incl. row conditions and the create mass-assignment
+  block, declarative rules, state machines, `before_*` hooks); a role that
+  may not perform one op fails the whole batch with `403` naming the index.
+  A read-only role gets `403 forbidden` on op 0 — that is the batch working,
+  not the endpoint missing. `GET /api/transaction` is `405`.
+- **Limits, and they are real:** 100 ops per request (`APPXIMO_MAX_TX_OPS`;
+  101 → `400 too many operations: 101 (max 100)`), the 1 MiB body cap
+  (`413`), one tenant per request (Host). Governed fields (`id`, `auto`
+  timestamps) are `422 read_only` inside a batch too — an import that must
+  keep its source ids/timestamps declares `import` on the resource
+  (AGENTS.md §Importing rows).
+- **What does NOT exist (do not design around it):** a `COPY`/bulk-import
+  endpoint, a file-driven importer, streaming writes, or memory backpressure
+  that makes a small box HOLD a firehose. A 46k-row migration is ~460
+  batches of 100 — minutes, not hours — but plan the load: batch, pause on
+  `503`/`429`, and give the box swap (docs/PRODUCTION.md §Prerequisites).
+  Under host memory pressure the engine refuses NEW writes with a `503` that
+  names `MemAvailable+SwapFree` and the floor (`APPXIMO_MEMORY_GUARD_MIN_MB`);
+  reads continue. That is degradation, not capacity.
+- Not in v1 for batch ops: `after_*` webhooks and SSE do not fire (react to
+  the outbox events instead); no GraphQL batch; no in-place arithmetic (use
+  a compare-and-set `guard`).
 
 **Undeclared columns: still supported, no longer the default answer.** Creating
 your own column with `BeforeStart` DDL works — the engine's migration is additive

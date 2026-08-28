@@ -46,6 +46,45 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   file compiles *only* `main.go`, producing a binary with **zero
   subcommands** (no `serve`). Use the package path:
   `go run ./cmd/appximo serve …`.
+- **`scripts/install.sh` verifies what it installed** (MIGRACION-CONFIANZA-S1): a
+  re-run over an existing `--app` used to say "upgrading in place (secrets reused)"
+  and — without `--schema` — keep whatever schema was there, so a box where a
+  previous session had left VecinGo's schema under `/etc/retotr/` served
+  `GET /api/asambleas → 200` on the Reto Tributario domain. The upgrade criterion is
+  now WRITTEN (header of the script + docs/PRODUCTION.md): secrets/database/data
+  KEPT; binary/unit/Caddy site/companions ALWAYS REPLACED; schema replaced with
+  `--schema`, else KEPT and verified to be THIS app's (byte-identical to, or same
+  `name` as, a sibling `/etc/<other>/schema.json` → the install STOPS, naming the
+  other app). At the end it verifies installed == asked — binary sha256 against
+  `--binary`, `/health` version locally AND through Caddy against that binary (a
+  site proxying a neighbour's port answers with the neighbour's version), the
+  schema on disk against `--schema` — and FAILS loudly on any mismatch even with the
+  service up. Also: the port preflight decides "our own service holds it" by the
+  PID, never by "our unit is active"; companion scripts resolve from the script's
+  own directory captured before any `cd` (the old relative `$0` after `cd /tmp` made
+  them "not next to the installer" while they were); a stale `appximo-cli` symlink
+  pointing at a CONSUMER binary is removed and named; `--internal-tls` (Caddy
+  `tls internal`) for a LAN/staging box; `--scripts=DIR`; apt waits for the dpkg
+  lock (unattended-upgrades on a fresh box). **RAM + swap:** ≤ 2 GiB with NO swap is a
+  loud warning with the recipe — with no swap a bulk load makes the kernel OOM-kill
+  the PostgreSQL every app on the box shares (measured in the field: 5 apps, 957 MiB,
+  no swap → `postgresql 'oom-kill'`; the same load was absorbed with 2 GB of swap).
+  Warn, never block. Three real paths verified in an LXD container (clean, legitimate
+  upgrade, foreign schema) plus the port collision.
+- **Host memory guard** (`APPXIMO_MEMORY_GUARD_MIN_MB`, MIGRACION-CONFIANZA-S1 D-ter):
+  the engine had NO notion of host memory pressure — `GOMEMLIMIT` bounds only its own
+  heap, the pool is a fixed 10 connections, the limiter counts requests — and the
+  memory that grows under a bulk load is PostgreSQL's. Now data-plane WRITES
+  (POST/PUT/PATCH/DELETE on `/api/*`, `/graphql`) answer a **503 that names
+  `MemAvailable+SwapFree`, the floor and the knob** (+ `Retry-After: 5`) while the
+  host is under the floor; reads and probes keep flowing. Measured as
+  `MemAvailable + SwapFree` — never `MemAvailable` alone: on a Postgres box
+  `shared_buffers` shows as Cached but is not reclaimable, so MemAvailable sits at
+  tens of MiB at rest and a guard on it alone would trip forever. `/proc/meminfo` is
+  read at most once per second; the hot path pays one atomic load. Default floor
+  `max(32 MiB, 2 % of MemTotal)` — deliberately low; `0` disables; a non-integer
+  refuses to boot. **This is degradation, not capacity: the engine does not "hold" a
+  bulk load on a small box — it stops making the failure silent.**
 - **`appximo up`** (FIRST-TEN-MINUTES-S1, ENG-38): ONE command from an empty
   directory to a running app — resolves Postgres (`DATABASE_URL`, else
   `postgres:16` in Docker: container `appximo-pg`, loopback-published,
@@ -622,14 +661,23 @@ without them). A complete, working example:
 
 **Validation answers "may this run?"; WARNINGS answer "will this do what you meant?"**
 (SCHEMA-5). `schema.Warnings` is a separate, NON-BLOCKING layer for schemas that are
-valid, deployable and almost certainly wrong. Its first rule: a row condition
+valid, deployable and probably not what was meant. Its first rule: a row condition
 comparing `$user_id` (or `$external_client_id`) against a column declared as a
-`relation` — the JWT subject and a foreign key to another resource are different id
-spaces, so the rule matches **zero rows forever** with no error at any layer (measured
-in production: the app just shows nothing). It is a warning, not an error, because the
-pattern is legal when the FK genuinely holds login ids — and it is SUPPRESSED when the
-relation points at a column named `user_id`/`auth_user_id`/`login_id`, i.e. once you
-apply the suggested fix. Warnings surface in `appximo validate`, `validate --json`
+`relation` — when the JWT subject and the FK's target are different id spaces the
+rule matches zero rows with no error at any layer (measured in production: the app
+just shows nothing). **It is worded as a QUESTION, never a verdict, and it never asks
+for a rename** (MIGRACION-CONFIANZA-S1): the schema cannot express "this column holds
+login ids" (the identity table is not a resource), and a column name is never its
+semantics — a Symfony system migrated table-for-table scoped accountants by
+`related_user_id` → `users`, whose ids ARE the JWT subjects, and the condition worked
+(admin 6, one accountant 5, another 1, cross read 404) while the old text asserted
+"matches NO rows, ever" and suggested renaming a column that came from the source
+DDL. The rule now names both id spaces, says which case is fine and which is not,
+puts "keep the column exactly as it is" FIRST, and offers the declared bridge
+(`references: "user_id"`) as the other answer. It is SUPPRESSED when the relation
+points at a column named `user_id`/`auth_user_id`/`login_id`. **The written rule for
+every name-based check: the validator never pushes an author to change a name that
+comes from an existing DDL — parity with the source is a value, not an obstacle.** Warnings surface in `appximo validate`, `validate --json`
 (`warnings[]`, with `valid` untouched, so the AI correction loop can act on them), the
 control-plane / `/admin` deploy response, engine boot, and `ai-generate`'s report.
 
@@ -678,7 +726,12 @@ EVERY HTTP read the value comes back natively (REST, embeds, subroutes,
 GraphQL — both types are the `JSON` scalar —, SSE, batch results, admin
 browse, webhooks); `Ctx.Query` hands `json` to a handler as the stored text
 `string`. `json` is stored as TEXT holding canonical JSON text (keys sorted,
-numbers through float64) — nothing queryable; `jsonb` is a real Postgres
+numbers through float64) — nothing queryable; **canonical means byte identity is
+not reachable through the API for a value written as a value** (keys re-sorted,
+`1.50`→`1.5`, `0.0100…0859375`→`0.01` — the same float64, no loss; integers past
+2^53 truncated — ENG-50, the one loss; both types, both directions), and the exact
+door is a JSON-text STRING on a `json` field (compacted, numeric text + key order
+kept) — verified with requests, backend-spec §2 carries the parity recipe; `jsonb` is a real Postgres
 document: the only type a `gin` index may cover
 (`{"fields":["attrs"],"method":"gin","opclass":"jsonb_path_ops"}`), which
 turns `attrs @> '{"brand":"Acme"}'` into an index lookup. **Prefer `jsonb`**

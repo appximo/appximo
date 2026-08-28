@@ -55,7 +55,9 @@ or "off").
 Optional env: APPXIMO_ENV, APPXIMO_AUTH_SIGNUP_ROLE,
 APPXIMO_AUTH_LOGIN_ATTEMPTS_PER_MINUTE (default 5 — the brute-force guard;
 raise it only for a shared read-only demo identity), APPXIMO_CORS_ORIGINS,
-APPXIMO_FILES_DIR, GOMEMLIMIT — the full table lives in
+APPXIMO_FILES_DIR, GOMEMLIMIT, APPXIMO_MEMORY_GUARD_MIN_MB (writes answer 503
+while MemAvailable+SwapFree is under the floor; default max(32, 2% of RAM);
+0 disables — degradation, not capacity) — the full table lives in
 docs/PRODUCTION.md; 'appximo quickstart' prints the operations contract.`,
 	// ADR-024: `serve` takes NO positional arguments. It used to accept and
 	// silently ignore them, so `appximo serve myapp.json` booted whatever

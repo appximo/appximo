@@ -36,8 +36,19 @@ ssh you@server 'sudo bash /path/to/install.sh --domain api.example.com --email y
 
 Flags: `--domain` `--email` `--binary=PATH` `--schema=PATH` (your model; default
 is a `todo-api` starter you replace later) `--port` (internal, default 8090)
-`--yes` (non-interactive) `--harden` (ufw + fail2ban + unattended-upgrades)
-`--dry-run` (generate configs + print the plan, change nothing).
+`--app=NAME` (a second app on the same box, §2b) `--yes` (non-interactive)
+`--harden` (ufw + fail2ban + unattended-upgrades) `--scripts=DIR` (where
+`deploy-update.sh`/`backup.sh` live; default: next to the installer)
+`--internal-tls` (Caddy issues a local certificate — a LAN/staging box whose
+domain is not public) `--dry-run` (generate configs + print the plan, change
+nothing).
+
+**The installer verifies what it installed** and fails loudly on a mismatch,
+even with the service up: the installed binary's sha256 against `--binary`,
+the running service's `/health` version against that binary — locally **and
+through Caddy** (a site that proxies to a neighbour's port answers with the
+neighbour's version) — and the schema on disk against `--schema`. The summary's
+`✓ verified — installed == asked` block lists what was checked.
 
 When it finishes it prints your API URL, the generated `ADMIN_KEY`/`JWT_SECRET`,
 and the exact command to register your first tenant.
@@ -63,10 +74,33 @@ If you'd rather not run a script, `docs/DEPLOY.md` Level 3 walks the identical
 setup step by step (system user, `EnvironmentFile`, systemd unit, Caddy). The
 installer is just those steps, scripted and idempotent.
 
-**Prerequisites either way:** a VPS (1 vCPU / 1 GB is enough), a domain with an
-`A`/`AAAA` record pointing at it, and ports **80 + 443** reachable (Let's
-Encrypt's HTTP challenge needs 80; TLS serves on 443). Keep everything else —
-including the engine's own port and the control plane on 9090 — off the internet.
+**Prerequisites either way:** a VPS (1 vCPU / 1 GB is enough **to serve**), a
+domain with an `A`/`AAAA` record pointing at it, and ports **80 + 443**
+reachable (Let's Encrypt's HTTP challenge needs 80; TLS serves on 443). Keep
+everything else — including the engine's own port and the control plane on
+9090 — off the internet.
+
+**RAM and swap — read this before loading data.** The engine itself idles at
+~70–80 MB; the memory that grows under a bulk load (a migration, an import, a
+big schema change) is **PostgreSQL's**, and on this stack PostgreSQL is
+**shared by every app on the box**. Measured in the field (2026-08): a 957 MiB
+box with **no swap** serving five apps took a 46k-row migration through one of
+them; the kernel could not page anything out and OOM-killed PostgreSQL —
+`postgresql@14-main.service: Failed with result 'oom-kill'` — and **all five
+apps went down**. The same load on the same box was absorbed once 2 GB of swap
+existed. So: **give a box of ≤ 2 GiB swap before you load data** —
+
+```bash
+fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab && sysctl -w vm.swappiness=10
+```
+
+The installer detects RAM and swap and **warns loudly** (never blocks) when a
+small box has none. The engine, for its part, refuses NEW writes with an
+explained `503` when `MemAvailable + SwapFree` drops under a floor
+(`APPXIMO_MEMORY_GUARD_MIN_MB`, §8) — that is **degradation, not capacity**: it
+keeps the failure from being silent, it does not make the box hold the load.
+Load in batches (`POST /api/transaction`, ≤ 100 ops), pause on `503`/`429`.
 
 ---
 
@@ -190,13 +224,25 @@ It backs up the live binary to `<dir>-rollback/`, renames the new one over it
 polls `/healthz` + `/readyz`. If they don't come green it **restores the backup
 and restarts** automatically (verified: a binary that won't boot rolls back and
 the old one is serving again in ~1 s). Re-running the **installer** with
-`--binary=` does the same swap + restart (and reuses your existing secrets), so
-either path is a safe upgrade.
+`--binary=` does the same swap + restart, so either path is a safe upgrade —
+under a **written criterion** (the script's header says the same):
+
+| On a re-run over an existing app | |
+|---|---|
+| **KEPT** on purpose | secrets (every issued token stays valid), the database and its data, the data dir, the control port |
+| **ALWAYS REPLACED** | the binary, the systemd unit, the env file layout (same secrets), this app's Caddy site, the companion scripts |
+| **The schema** | replaced when `--schema` is given; **KEPT** when it is not — and a kept schema is verified to be THIS app's: one byte-identical to, or carrying the `name` of, another app's `/etc/<other>/schema.json` **stops the install**, naming that app. It used to be kept silently, which once left another application's resources answering `200` under a new domain. |
+
+The summary prints the kept schema's `name`; the "Update" line it prints
+omits `--schema` on purpose (your model is kept) — pass it when the model
+changed.
 
 > `deploy-update.sh` and `backup.sh` are placed in `/opt/appximo/scripts/` by
-> the installer **when you run it from a checkout** (they sit next to
-> `install.sh`). Under `curl | bash` there are no sibling files to copy, so fetch
-> them from the repo into that directory when you need them.
+> the installer when they sit next to `install.sh` (a checkout, or scp'd
+> together — their exec bit does not matter) or under `--scripts=DIR`. Under
+> `curl | bash` there are no sibling files to copy, so fetch them from the repo
+> into that directory when you need them; the verification block says which
+> ones are installed and executable.
 
 **What activates when.** A per-tenant migration (new column) is live immediately.
 Anything compiled at boot — new resources, validation rules, GraphQL fields,
@@ -436,6 +482,7 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `GOMAXPROCS` | no | auto | cgroup-aware (automaxprocs). |
 | `APPXIMO_NO_VERSION_CHECK` | no | (off) | Set to `1` to silence the "a newer release exists" line in `appximo version`. That check runs **only** in a human `version` run — never at `serve` boot, never on the request path — sends nothing about you or the machine (an anonymous GET of a public URL), times out in 2 s, and is skipped automatically whenever `CI` is set or `--json` is used. |
 | `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | no | 1000 / 100 | Per-tenant token bucket. |
+| `APPXIMO_MEMORY_GUARD_MIN_MB` | no | max(32, 2 % of RAM) | **Host memory guard.** While `MemAvailable + SwapFree` (from `/proc/meminfo`, sampled ≤ 1/s) is under this many MiB, data-plane WRITES answer `503` + `Retry-After: 5` with a body naming the measurement, the floor and this knob; reads and probes keep flowing. Measured with swap included on purpose: on a Postgres box `shared_buffers` is Cached-but-not-reclaimable, so `MemAvailable` alone sits at tens of MiB at rest. `0` disables; a non-integer refuses to boot. Degradation, not capacity — give the box swap (§Prerequisites). |
 | `OBS_DB_PATH` | no | `/var/lib/appximo/obs/obs.db` | Trace/snapshot history (SQLite). Keep it on a persistent path. |
 | `APPXIMO_FILES_DIR` | no | `/var/lib/appximo/files` | Local file-store root (or use `APPXIMO_FILES_BACKEND=s3`). |
 | `APPXIMO_FILES_BACKEND` / `APPXIMO_FILES_S3_*` | no | `local` | S3/R2/Spaces/MinIO backend — see [docs/FILES.md](FILES.md). |
@@ -497,6 +544,8 @@ per-field docs are in [config.go](../config.go) and the README config table.
 |---|---|
 | `https://domain` — certificate never issues | DNS for `domain` doesn't point at this box, or port **80** is blocked (Let's Encrypt's HTTP challenge needs it). Check `journalctl -u caddy -f`; confirm `dig +short domain` = your IP. |
 | **502 Bad Gateway** from Caddy | The engine is down or not on the expected port. `systemctl status appximo`; `journalctl -u appximo -n 50`. A bad schema fails boot loudly there. |
+| Writes answer **503 "host memory pressure"** during a load | The box is at the kernel's OOM edge (`MemAvailable+SwapFree` under the floor). Add swap (§Prerequisites), load in smaller batches, or — knowing the risk — raise/disable `APPXIMO_MEMORY_GUARD_MIN_MB`. `free -m` and `dmesg | grep -i oom` tell the story. |
+| **PostgreSQL OOM-killed** during an import (`postgresql: Failed with result 'oom-kill'`) — every app on the box down | No swap on a small box: the kernel could not page out and killed the biggest process, which is the SHARED PostgreSQL. Add swap (§Prerequisites) BEFORE re-running the load; `systemctl restart postgresql` brings the apps back. |
 | Engine **OOM-killed** / restarts under load | No `GOMEMLIMIT` on a small box. Set `GOMEMLIMIT=512MiB` (1 GB) in `/etc/appximo/appximo.env` and `systemctl restart appximo`. `dmesg | grep -i oom` confirms. |
 | `serve` exits immediately | Missing a required var (`DATABASE_URL`/`JWT_SECRET`/`ADMIN_KEY`) or Postgres unreachable. The log names which. Check `DATABASE_URL` and `systemctl status postgresql`. |
 | Registering a tenant returns an error about the tenant id | The id must match `^[a-z][a-z0-9]{1,29}$` (it is BOTH the Postgres schema and the host's first label) — no hyphens, no underscores, no uppercase. |

@@ -154,3 +154,28 @@ the database REJECTED proves the database is up.
 - Hot path: a resource with no json/jsonb field pays one precomputed-flag
   check per write and nothing on read (measured `no_change`, ABBA on the write
   protocol); a json write pays one `json.Marshal`/`json.Compact` of the value.
+
+## Addendum (MIGRACION-CONFIANZA-S1, 2026-08-28) — canonicalization, verified with requests
+
+A real migration (Symfony 7.2, 23 tables, 46,119 rows, 1.2 GB in one `json`
+column) measured what "canonical compact JSON text" means in practice and
+reported it as undocumented. Verified on HEAD with real requests, on `json`
+and `jsonb` alike:
+
+| Sent | Stored / returned | Class |
+|---|---|---|
+| `{"zeta":1,"alpha":{"y":2,"x":1}}` | `{"alpha":{"x":1,"y":2},"zeta":1}` | keys sorted, recursively (array order kept) — **no loss** |
+| `0.01000000000000000020816681711721685132943093776702880859375` | `0.01` | shortest round-trip rendering of the SAME float64 — **no loss** |
+| `1.50` | `1.5` | a trailing zero is not a value — **no loss** |
+| `12345678901234567890` | `12345678901234567000` | beyond 2^53 — **LOSS** (ENG-50, both directions, both types) |
+| `"{\"zeta\": 1, \"dec\": 1.50, \"big\": 12345678901234567890}"` (a JSON-text STRING on a `json` field) | `{"zeta":1,"dec":1.50,"big":12345678901234567890}` | compacted, numeric text and key order kept, emitted verbatim on read — **the exact door** |
+
+Consequence, now written where a migrator looks (backend-spec §2 and §2b):
+**byte identity is not reachable through the API** for a value written as a
+value; a parity check must canonicalize both sides (parse → sort keys →
+compare values), and a document that needs exact numeric text takes the
+JSON-text-string door on a `json` (TEXT) field. "Exact bytes preserved" was
+retracted in this ADR and survives in no doc, README or site copy (swept
+2026-08-28; the only remaining mentions are historical, in the audit and in
+this ADR's own rejected-alternative bullet).
+

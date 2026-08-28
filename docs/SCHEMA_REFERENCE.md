@@ -476,6 +476,13 @@ Notes verified in code:
     accepted) reads back as a string on the Go surfaces and breaks the
     `::json` cast of an `?include=` embed — the release note carries the query
     to find such rows. No existing tenant column changes shape.
+    Canonical means: object keys re-sorted (recursively), floats in
+    shortest round-trip form (`1.50` → `1.5`, `0.0100…0859375` → `0.01` —
+    the same float64), integers beyond 2^53 truncated (ENG-50, the only
+    loss). Byte identity is not reachable through the API for a value
+    written as a value; a JSON-text STRING written to a `json` field keeps
+    its numeric text and key order (compacted) — the exact door. Parity
+    checks canonicalize both sides (backend-spec §2, ADR-028 addendum).
   - `jsonb` maps to **JSONB**: a parsed, binary document. It is the only type a
     `gin` index may cover (`{"fields":["attrs"],"method":"gin"}` — §9.1), which is
     what makes `attrs @> '{"brand":"Acme"}'` an index lookup instead of a

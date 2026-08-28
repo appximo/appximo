@@ -229,6 +229,18 @@ Your production tenant id must be the first label of the domain (`app` for
   the installer copies it but does NOT schedule it. A backup you have not
   restored is a hope, not a backup: run a restore drill on a scratch box.
 - **Never `git pull` on a production box.** A deploy is a binary swap.
+- **A re-run of `install.sh` over an existing app** KEEPS secrets/database/data,
+  ALWAYS replaces the binary, and keeps the schema unless you pass `--schema`
+  — then VERIFIES installed == asked (binary sha256, `/health` version locally
+  and through Caddy, the schema on disk) and fails loudly on a mismatch. A
+  kept schema that belongs to another app on the box (same bytes or same
+  `name`) stops the install: never register a tenant with someone else's
+  schema.
+- **Swap before a data load.** A ≤ 2 GiB box with no swap is warned by the
+  installer: without swap a bulk import makes the kernel OOM-kill the
+  PostgreSQL every app on the box shares (measured: five apps down). Load in
+  batches of ≤ 100 via `POST /api/transaction`; a `503 host memory pressure`
+  means stop and add swap, not retry harder.
 
 ## 7. The traps that bite operators (each verified in the field)
 

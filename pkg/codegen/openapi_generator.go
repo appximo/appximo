@@ -98,6 +98,7 @@ func buildOAPaths(s *schema.APISchema) map[string]any {
 	// Auth-as-product endpoints (AUTH-CORE-V1 …): always part of the engine's API
 	// surface, independent of the schema, so they are always documented.
 	addOAAuthPaths(paths)
+	addOATransactionPath(paths)
 	// File store routes exist whenever no schema resource is literally named "files".
 	if _, taken := s.Resources["files"]; !taken {
 		addOAFilePaths(paths)
@@ -246,6 +247,39 @@ func addOAAuthPaths(paths map[string]any) {
 		"tags":        []string{"auth"}, "security": noAuth,
 		"requestBody": oaReqBody("MFAVerifyRequest"),
 		"responses":   map[string]any{"200": oaSuccessResp(oaSchemaRef("AuthResult")), "401": oaRespRef("Error401"), "429": oaRespRef("Error429")},
+	}}
+}
+
+// addOATransactionPath documents the atomic multi-resource batch endpoint
+// (G4, POST /api/transaction). It has existed since 2026-06 (cf22c66, in every
+// published version) but was absent from the served contract until
+// MIGRACION-CONFIANZA-S1: an external migration on v0.1.10 read /openapi.json —
+// the document the engine itself names "the authority for EXISTENCE" — found
+// no /api/transaction, concluded the endpoint did not exist, and rebuilt its
+// migrator one row per request. A hole in the contract costs exactly what a
+// hole in the engine costs. The shapes below mirror pkg/codegen/transaction.go
+// (txRequest / txOp / txGuard / the results and the failed_operation error).
+func addOATransactionPath(paths map[string]any) {
+	paths["/api/transaction"] = map[string]any{"post": map[string]any{
+		"x-appximo-transaction": true,
+		"operationId":           "runTransaction",
+		"summary":               "Run up to 100 create/update/delete operations across resources in ONE Postgres transaction — all-or-nothing",
+		"description": "Every operation is authorized and validated exactly like its single-op counterpart (per-resource RBAC incl. row conditions and the mass-assignment block, declarative validators, state machines, before_create/before_update hooks); outbox events emit in the same transaction. " +
+			"Any failure rolls the whole batch back and answers the failing operation's status with its index (failed_operation). " +
+			"Operations run in order. Limit: 100 operations per request (APPXIMO_MAX_TX_OPS) and the 1 MiB body cap; a delete/update matching no row (not found, RBAC-excluded, or a guard not met) fails the batch. " +
+			"Not in v1: after_* webhooks and SSE do not fire for batch ops (use the outbox events); no GraphQL equivalent; no in-place arithmetic (use a compare-and-set guard).",
+		"tags":        []string{"transaction"},
+		"requestBody": oaReqBody("TransactionRequest"),
+		"responses": map[string]any{
+			"200": map[string]any{"description": "Committed — one result per operation, in order", "content": oaJSONContent(oaSchemaRef("TransactionResponse"))},
+			"400": map[string]any{"description": "Bad request — malformed body, unknown op/resource, empty operations, or over the 100-op cap", "content": oaJSONContent(oaSchemaRef("TransactionErrorResponse"))},
+			"401": oaRespRef("Error401"),
+			"403": map[string]any{"description": "An operation the role may not perform (the batch is rolled back)", "content": oaJSONContent(oaSchemaRef("TransactionErrorResponse"))},
+			"404": map[string]any{"description": "An update/delete matched no row (not found, RBAC-excluded, or a guard not met)", "content": oaJSONContent(oaSchemaRef("TransactionErrorResponse"))},
+			"409": map[string]any{"description": "A unique collision or a foreign-key conflict in one operation", "content": oaJSONContent(oaSchemaRef("TransactionErrorResponse"))},
+			"413": oaRespRef("Error413"),
+			"422": map[string]any{"description": "Validation failed on one operation — `fields` carries every failing field of that op", "content": oaJSONContent(oaSchemaRef("TransactionErrorResponse"))},
+		},
 	}}
 }
 
@@ -621,6 +655,53 @@ func buildOAComponents(s *schema.APISchema) map[string]any {
 				"field":   map[string]any{"type": "string"},
 				"rule":    map[string]any{"type": "string"},
 				"message": map[string]any{"type": "string"},
+			},
+		},
+		// POST /api/transaction (G4): the request, the committed results and the
+		// failure shape — one failing op names its index, op and resource.
+		"TransactionGuard": map[string]any{
+			"type":     "object",
+			"required": []string{"field", "op", "value"},
+			"properties": map[string]any{
+				"field": map[string]any{"type": "string", "description": "a declared column of the op's resource"},
+				"op":    map[string]any{"type": "string", "enum": []string{"eq", "ne", "gt", "gte", "lt", "lte"}},
+				"value": map[string]any{"description": "type-checked against the column and bound as a parameter"},
+			},
+		},
+		"TransactionOperation": map[string]any{
+			"type":     "object",
+			"required": []string{"op", "resource"},
+			"properties": map[string]any{
+				"op":       map[string]any{"type": "string", "enum": []string{"create", "update", "delete"}},
+				"resource": map[string]any{"type": "string", "description": "a schema resource (never \"transaction\")"},
+				"id":       map[string]any{"type": "string", "format": "uuid", "description": "update/delete: the row id"},
+				"data":     map[string]any{"type": "object", "additionalProperties": true, "description": "create: the full row; update: the fields to change (PATCH semantics)"},
+				"guard":    map[string]any{"type": "array", "items": oaSchemaRef("TransactionGuard"), "description": "update/delete: compare-and-set predicates the row must satisfy, else the op matches no row and the batch fails"},
+			},
+		},
+		"TransactionRequest": map[string]any{
+			"type":     "object",
+			"required": []string{"operations"},
+			"properties": map[string]any{
+				"operations": map[string]any{"type": "array", "minItems": 1, "maxItems": 100, "items": oaSchemaRef("TransactionOperation")},
+			},
+		},
+		"TransactionResponse": map[string]any{
+			"type":     "object",
+			"required": []string{"results"},
+			"properties": map[string]any{
+				"results": map[string]any{"type": "array", "description": "one entry per operation, in order: the created/updated row, or {\"deleted\": true, \"id\": …}", "items": map[string]any{"type": "object", "additionalProperties": true}},
+			},
+		},
+		"TransactionErrorResponse": map[string]any{
+			"type":     "object",
+			"required": []string{"error", "failed_operation", "op", "resource"},
+			"properties": map[string]any{
+				"error":            map[string]any{"type": "string"},
+				"failed_operation": map[string]any{"type": "integer", "description": "0-based index of the operation that failed; the whole batch was rolled back"},
+				"op":               map[string]any{"type": "string"},
+				"resource":         map[string]any{"type": "string"},
+				"fields":           map[string]any{"type": "array", "items": oaSchemaRef("ValidationError"), "description": "present on a 422: every failing field of that operation"},
 			},
 		},
 		"ValidationErrorResponse": map[string]any{

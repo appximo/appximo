@@ -93,6 +93,13 @@ type App struct {
 	// per-tenant limiter, because an anonymous endpoint is abuse surface by
 	// definition (LIBRARY-EXTEND-S1).
 	publicLimiter *resilience.TenantLimiter
+	// memGuard refuses data-plane WRITES while the host is under memory
+	// pressure (MemAvailable+SwapFree under a floor) — a 503 that says why,
+	// instead of accepting until the kernel OOM-kills the shared PostgreSQL
+	// (MIGRACION-CONFIANZA-S1, D-ter). nil when disabled
+	// (APPXIMO_MEMORY_GUARD_MIN_MB=0) or unmeasurable. It is degradation, not
+	// capacity: it never makes a small box hold a load it cannot hold.
+	memGuard *resilience.MemoryGuard
 
 	// observability stack
 	hist      *observability.TenantHistogram
@@ -515,6 +522,21 @@ func New(cfg Config) (*App, error) {
 	}
 	app.tenantLimiter = resilience.NewConfiguredLimiter(resilience.RateLimitConfig{RPS: rlRPS, Burst: rlBurst})
 	log.Printf("rate limiter: %.0f RPS / %d burst per tenant", rlRPS, rlBurst)
+
+	// Host memory guard (MIGRACION-CONFIANZA-S1, D-ter): the engine had no
+	// notion of host memory pressure — GOMEMLIMIT bounds only its own heap,
+	// and the memory that grows under a bulk load is PostgreSQL's. A bad knob
+	// value refuses to boot (a safety knob never falls back silently).
+	mg, err := resilience.NewMemoryGuardFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("appximo: %w", err)
+	}
+	app.memGuard = mg
+	if mg != nil {
+		log.Printf("memory guard: writes answer 503 while MemAvailable+SwapFree < %d MiB (%s; 0 disables) — degradation, not capacity", mg.MinBytes()>>20, resilience.MemoryGuardEnvVar)
+	} else {
+		log.Printf("memory guard: disabled (%s=0 or /proc/meminfo unreadable)", resilience.MemoryGuardEnvVar)
+	}
 
 	// Public custom-route limiter (LIBRARY-EXTEND-S1): per (tenant, client IP),
 	// deliberately conservative by default — a Route.Public endpoint is
@@ -1153,6 +1175,10 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 	// as a 500. Tenant-agnostic surfaces (/admin, /editor, /docs, probes) pass.
 	r.Use(tenant.RequireForTenantAPI)
 	r.Use(resilience.RateLimit(a.tenantLimiter))
+	// Memory guard: after the limiter (a refused write is still a counted
+	// request), before the logger/cache/JWT (a saturated host pays nothing
+	// more for the refusal). Writes only; reads and probes keep flowing.
+	r.Use(a.memGuard.Middleware)
 
 	tracePersistSem := make(chan struct{}, 64)
 	r.Use(logging.RequestLogger(

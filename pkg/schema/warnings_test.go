@@ -60,13 +60,94 @@ func TestWarnings_IdentityConditionOnRelation(t *testing.T) {
 		t.Errorf("path = %q", w.Field)
 	}
 	// The message must name BOTH sides of the mismatch, in the reader's terms.
-	for _, want := range []string{"veterinarian_id", "veterinarians", "shows nothing"} {
+	for _, want := range []string{"veterinarian_id", "veterinarians", "matches no rows"} {
 		if !strings.Contains(w.Message, want) {
 			t.Errorf("message does not mention %q: %s", want, w.Message)
 		}
 	}
 	if !strings.Contains(w.Fix, "references") || !strings.Contains(w.Fix, "user_id") {
 		t.Errorf("fix does not name the bridge column: %s", w.Fix)
+	}
+}
+
+// migratedSchemaJSON is the field shape MIGRACION-CONFIANZA-S1 answered: a system
+// migrated table-for-table whose `users` table IS the identity (its ids are the JWT
+// subjects) and whose FK column keeps its source name, `related_user_id`. Valid,
+// deployable, and the condition WORKS at runtime (measured: admin 6, one accountant
+// 5, another 1, cross read 404). The validator cannot know that; it may only ask.
+const migratedSchemaJSON = `{
+  "$schema": "https://appximo.com/schema/v1",
+  "version": "1",
+  "name": "retotr",
+  "resources": {
+    "users": { "fields": { "email": { "type": "string", "required": true, "unique": true, "minLength": 1 } } },
+    "declarations": {
+      "fields": {
+        "code": { "type": "string", "required": true, "minLength": 1 },
+        "related_user_id": { "type": "uuid", "relation": "users" }
+      }
+    }
+  },
+  "rbac": { "roles": {
+    "admin": { "resources": "*", "actions": ["*"] },
+    "contador": { "permissions": { "declarations": {
+      "actions": ["read"],
+      "conditions": { "field": "related_user_id", "op": "eq", "val": "$user_id" }
+    } } }
+  } }
+}`
+
+// TestWarnings_IdentityConditionIsAQuestionNeverARename pins the rule written in
+// identityConditionWarnings: the check names both id spaces, states that it cannot
+// tell which holds, says the "keep it exactly as it is" branch FIRST, and never asks
+// the author to rename a column — a name that comes from an existing DDL is parity
+// with the source, not a defect.
+func TestWarnings_IdentityConditionIsAQuestionNeverARename(t *testing.T) {
+	for name, raw := range map[string]string{"relation": migratedSchemaJSON, "vet": vetSchemaJSON} {
+		t.Run(name, func(t *testing.T) {
+			var found *ValidationError
+			for _, w := range Warnings(mustLoad(t, raw)) {
+				if w.Rule == "identity_condition_on_relation" {
+					w := w
+					found = &w
+				}
+			}
+			if found == nil {
+				t.Fatal("the identity check must still fire — it caught a real zero-rows deployment (AUTHORING_JOURNEY 5-1)")
+			}
+			text := found.Message + " " + found.Fix
+			for _, banned := range []string{"rename", "NO rows, ever", "shows nothing", "almost certainly"} {
+				if strings.Contains(text, banned) {
+					t.Errorf("the warning must not assert a verdict or push a rename; found %q in: %s", banned, text)
+				}
+			}
+			for _, want := range []string{"CHECK", "cannot tell", "keep the column", "ignore this warning", "references"} {
+				if !strings.Contains(text, want) {
+					t.Errorf("the warning must contain %q (it is a question with both answers written): %s", want, text)
+				}
+			}
+			if strings.Index(found.Fix, "keep the column") > strings.Index(found.Fix, "references") {
+				t.Errorf("the keep-it-as-it-is branch must come FIRST in the fix: %s", found.Fix)
+			}
+		})
+	}
+	// The implied-relation form (no relation declared, name-derived) follows the
+	// same rule — it is the shape an AI generates most often.
+	implied := strings.Replace(migratedSchemaJSON, `"related_user_id": { "type": "uuid", "relation": "users" }`, `"user_id_ref": { "type": "uuid" }, "declaration_user_id": { "type": "uuid" }`, 1)
+	implied = strings.Replace(implied, `"users": { "fields"`, `"declaration_users": { "fields": { "x": { "type": "string" } } }, "users": { "fields"`, 1)
+	implied = strings.Replace(implied, `"field": "related_user_id"`, `"field": "declaration_user_id"`, 1)
+	var got *ValidationError
+	for _, w := range Warnings(mustLoad(t, implied)) {
+		if w.Rule == "identity_condition_on_implied_relation" {
+			w := w
+			got = &w
+		}
+	}
+	if got == nil {
+		t.Fatal("implied-relation check must fire for declaration_user_id ↔ declaration_users")
+	}
+	if strings.Contains(got.Message+got.Fix, "rename") || !strings.Contains(got.Fix, "keep the column") {
+		t.Errorf("implied form must follow the same rule: %s %s", got.Message, got.Fix)
 	}
 }
 

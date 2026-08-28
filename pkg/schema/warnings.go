@@ -456,8 +456,8 @@ func bareVariableConditionWarnings(s *APISchema) []ValidationError {
 
 // identityColumnNames are the column names that conventionally hold the id of the
 // LOGGED-IN user (the JWT subject). A relation pointing at one of these is the
-// documented bridge between a catalogue table and the login — exactly the fix this
-// warning recommends — so it is not flagged.
+// documented bridge between a catalogue table and the login — exactly the shape the
+// check suggests — so it is not flagged.
 var identityColumnNames = map[string]bool{
 	"user_id":      true,
 	"auth_user_id": true,
@@ -465,18 +465,33 @@ var identityColumnNames = map[string]bool{
 }
 
 // identityConditionWarnings finds row conditions that compare the LOGGED-IN user's
-// id against a column holding a FOREIGN KEY to another resource.
+// id against a column holding a FOREIGN KEY to another resource — and asks the
+// author to CHECK which id space that column holds. It cannot know.
 //
 // Measured in production (docs/AUTHORING_JOURNEY.md 5-1 and 5-8): a generated schema
 // scoped vets with `{field: "veterinarian_id", op: "eq", val: "$user_id"}`.
-// `veterinarian_id` holds the id of a row in `veterinarians` — a different id space
+// `veterinarian_id` held the id of a row in `veterinarians` — a different id space
 // from the JWT subject. The schema validated, deployed, and returned ZERO ROWS
 // forever, with no error at any layer. The vet's app simply showed nothing.
 //
-// The pattern is legal (an FK column CAN legitimately hold login ids — that is the
-// bridge pattern), so this is a warning, not an error. It is suppressed when the
-// relation points at a column whose name says it holds a login id, which is what the
-// suggested fix produces: apply the fix and the warning goes away.
+// Measured in the field the OTHER way (MIGRACION-CONFIANZA-S1, a Symfony system
+// migrated table-for-table): `declarations.related_user_id` is a relation to the
+// migrated `users` table, and the JWT subject IS that table's id — the condition
+// works (admin sees 6, one accountant 5, another 1, a cross read is 404). The
+// previous wording asserted "matches NO rows, ever" and suggested renaming the
+// column: a false verdict, and a fix that breaks parity with the source DDL to
+// silence a validator that was guessing from a name.
+//
+// THE RULE (written here because it is the one that gets re-litigated): the
+// schema cannot express "this column holds login ids" — the identity table is
+// not a resource, so no relation can point at it — and a column NAME is never
+// its semantics (C-DOCTRINA-2). So this check is a QUESTION, worded as one: it
+// names the two id spaces that could be in play and what happens in each case,
+// it never claims to know which one holds, and it NEVER asks for a rename — a
+// name that comes from an existing DDL is a value (parity with the source), not
+// an obstacle. The two ways to silence it are both declarations, not renames:
+// point the relation at a column whose name says it holds login ids
+// (`references: "user_id"`), or ignore it knowingly (it never blocks).
 func identityConditionWarnings(s *APISchema) []ValidationError {
 	var out []ValidationError
 	for _, roleName := range sortedNames(s.RBAC.Roles) {
@@ -515,10 +530,14 @@ func identityConditionWarning(path, resName string, cond *Condition, s *APISchem
 	if !ok {
 		return nil
 	}
+	who := "the user who is logged in (the JWT subject)"
+	if cond.Val == "$external_client_id" {
+		who = "the external client making the request"
+	}
 	if f.Relation == "" {
 		// S1 (FIELD-FEEDBACK-S1): no relation declared, but the column's NAME
 		// derives from a sibling resource (instructor_id ↔ instructores) — the
-		// same id-space mismatch, one declaration short of the relation case,
+		// same id-space question, one declaration short of the relation case,
 		// and the shape an AI most often generates. Deliberately NOT flagged:
 		// owner_id / author_id / created_by — the documented CORRECT pattern
 		// stores login ids in columns whose base names no declared resource.
@@ -529,22 +548,19 @@ func identityConditionWarning(path, resName string, cond *Condition, s *APISchem
 		if implied == "" {
 			return nil
 		}
-		who := "the user who is logged in"
-		if cond.Val == "$external_client_id" {
-			who = "the external client making the request"
-		}
 		return []ValidationError{{
 			Field: path + ".field",
 			Rule:  "identity_condition_on_implied_relation",
 			Got:   cond.Field,
 			Message: fmt.Sprintf(
-				"this rule only shows rows of %q where %q equals the id of %s — but the column's name says it holds ids of %q rows, a different kind of id. "+
-					"As written the rule would match NO rows, ever, and nothing reports an error: the app just shows nothing.",
-				resName, cond.Field, who, implied),
+				"CHECK which id %q holds: this rule shows the rows of %q where %q equals the id of %s. "+
+					"If %q stores login ids, the rule works as written. If it stores ids of %q rows (its name suggests so, but a name is not a contract), "+
+					"the two id spaces never coincide and the rule matches no rows — with no error at any layer. The validator cannot tell which; you can.",
+				cond.Field, resName, cond.Field, who, cond.Field, implied),
 			Fix: fmt.Sprintf(
-				"if %q holds ids of %q: give %q a unique login-id column (\"user_id\") and declare %q with \"relation\": %q, \"references\": \"user_id\". "+
-					"If %q really stores login ids already, rename it (e.g. \"user_id\") or ignore this warning.",
-				cond.Field, implied, implied, cond.Field, implied, cond.Field),
+				"if %q already holds login ids: keep the column exactly as it is (a name that comes from your source data is worth keeping) and ignore this warning. "+
+					"If it holds ids of %q rows: give %q a unique column holding the login id (e.g. \"user_id\") and declare %q with \"relation\": %q, \"references\": \"user_id\" — the warning then goes away without renaming anything.",
+				cond.Field, implied, implied, cond.Field, implied),
 		}}
 	}
 	target := f.References
@@ -552,26 +568,22 @@ func identityConditionWarning(path, resName string, cond *Condition, s *APISchem
 		target = "id"
 	}
 	if identityColumnNames[target] {
-		return nil // already pointed at a login id — this is the fix, not the bug
+		return nil // already pointed at a login id — the declared bridge; nothing to ask
 	}
-
-	who := "the user who is logged in"
-	if cond.Val == "$external_client_id" {
-		who = "the external client making the request"
-	}
-	bridge := "user_id"
 	return []ValidationError{{
 		Field: path + ".field",
 		Rule:  "identity_condition_on_relation",
 		Got:   cond.Field,
 		Message: fmt.Sprintf(
-			"this rule only shows rows of %q where %q equals the id of %s — but %q holds the id of a row in %q, which is a different kind of id. "+
-				"As written the rule matches NO rows, ever, and nothing reports an error: the app just shows nothing.",
-			resName, cond.Field, who, cond.Field, f.Relation),
+			"CHECK which id %q holds: this rule shows the rows of %q where %q equals the id of %s, and %q is a relation to %q (its %q column). "+
+				"If %q.%q IS the login id — a migrated users table whose ids are the JWT subjects, or tokens minted with that id — the rule works as written. "+
+				"If %q.%q is a different id space, the rule matches no rows — with no error at any layer. The validator cannot tell which; you can (one request as a scoped role answers it).",
+			cond.Field, resName, cond.Field, who, cond.Field, f.Relation, target,
+			f.Relation, target, f.Relation, target),
 		Fix: fmt.Sprintf(
-			"give %q a column that stores the login id (call it %q and mark it unique), point %q at it with \"references\": %q, and fill it in for the rows that already exist. "+
-				"If %q already holds login ids, this warning does not apply.",
-			f.Relation, bridge, cond.Field, bridge, cond.Field),
+			"if %q.%q is the login id: keep the column and the relation exactly as they are (a name that comes from your source data is worth keeping) and ignore this warning. "+
+				"If it is not: give %q a unique column holding the login id (e.g. \"user_id\"), point %q at it with \"references\": \"user_id\", and fill it in for the rows that already exist — the warning then goes away without renaming anything.",
+			f.Relation, target, f.Relation, cond.Field),
 	}}
 }
 
