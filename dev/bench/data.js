@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787937657763,
+  "lastUpdate": 1787946058239,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -4320,6 +4320,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "57648276 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "3030dd8f13c1f673a48b9ce194dd89ea0997b567",
+          "message": "docs(site): the technical site and docs synchronized with the released v0.1.13 — the browser tour re-recorded on the current /app (87.6 s, real time, ES+EN subtitles; the 2026-08-17 tour archived), every capture of the old panel / old brand re-taken, the six sessions since APP-VITRINA told where an HN visitor reads them with the known limits written, stale numbers fixed (163-case corpus, ~41 MB image, v0.1.13, is_null exists), the migration report answered point by point in public (FIELD_FEEDBACK_RESPONSE §5) — every claim re-verified with requests against the v0.1.13 binary (DOC-VITRINA-S1)\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-28T19:40:27Z",
+          "tree_id": "8ae78955b27f1e4fb00fcc239775b40ba57369f7",
+          "url": "https://github.com/appximo/appximo/commit/3030dd8f13c1f673a48b9ce194dd89ea0997b567"
+        },
+        "date": 1787946057455,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6264,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "367471 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6264,
+            "unit": "ns/op",
+            "extra": "367471 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "367471 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "367471 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 71.06,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36245038 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 71.06,
+            "unit": "ns/op",
+            "extra": "36245038 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36245038 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36245038 times\n4 procs"
           }
         ]
       }
