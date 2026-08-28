@@ -322,6 +322,7 @@
     <a href="#steps">What happens</a>
     <a href="#start">Under the hood</a>
     <a href="#ai">The AI path</a>
+    <a href="#changed">What changed</a>
     <a href="#numbers">Numbers</a>
     <a href="#not-for">Who it's not for</a>
     <a href="#demos">Live demos</a>
@@ -366,7 +367,7 @@
   </div>
   <div class="status"><strong>Status, honestly:</strong> the code is production-verified; four apps run on it in production today — two of them <strong>built end-to-end by third parties</strong> (one is a 32-resource recruiting platform you can open: <a href="https://atina.appximo.com" rel="noopener">atina.appximo.com</a>). The repository is <a href="https://github.com/appximo/appximo" rel="noopener">public</a>, binaries + checksums are released, the Go module is fetchable, the Docker image is published. Version note: every release from <strong>v0.1.5 (2026-08-08)</strong> onward ships <code>appximo prompt</code>, <code>up</code>, <code>new</code> and the <code>/app</code> back-office, so the install prompt below leaves you a binary with everything this page describes.</div>
 </div></header>
-<div class="marquee" aria-hidden="true"><div class="anim"><span class="track"><span>REST + GraphQL + OpenAPI from one schema</span><span>schema-per-tenant PostgreSQL</span><span>JWT · OAuth · TOTP MFA</span><span>row + field RBAC</span><span>state machines in the UPDATE</span><span>migrations with a destructive gate</span><span>files: local or S3</span><span>outbox + worker</span><span>SSE</span><span>p50 1.58 ms @ 2,000 rps</span><span>one static Go binary</span><span>Apache 2.0</span></span><span class="track" aria-hidden="true"><span>REST + GraphQL + OpenAPI from one schema</span><span>schema-per-tenant PostgreSQL</span><span>JWT · OAuth · TOTP MFA</span><span>row + field RBAC</span><span>state machines in the UPDATE</span><span>migrations with a destructive gate</span><span>files: local or S3</span><span>outbox + worker</span><span>SSE</span><span>p50 1.58 ms @ 2,000 rps</span><span>one static Go binary</span><span>Apache 2.0</span></span></div></div>
+<div class="marquee" aria-hidden="true"><div class="anim"><span class="track"><span>REST + GraphQL + OpenAPI from one schema</span><span>schema-per-tenant PostgreSQL</span><span>JWT · OAuth · TOTP MFA</span><span>row + field RBAC</span><span>state machines in the UPDATE</span><span>migrations with a destructive gate</span><span>files: local or S3</span><span>outbox + worker</span><span>SSE</span><span>?fields= pushed into the SELECT</span><span>p50 1.60 ms @ 2,000 rps</span><span>one static Go binary</span><span>Apache 2.0</span></span><span class="track" aria-hidden="true"><span>REST + GraphQL + OpenAPI from one schema</span><span>schema-per-tenant PostgreSQL</span><span>JWT · OAuth · TOTP MFA</span><span>row + field RBAC</span><span>state machines in the UPDATE</span><span>migrations with a destructive gate</span><span>files: local or S3</span><span>outbox + worker</span><span>SSE</span><span>?fields= pushed into the SELECT</span><span>p50 1.60 ms @ 2,000 rps</span><span>one static Go binary</span><span>Apache 2.0</span></span></div></div>
 
 <section class="startup" id="start-here"><div class="wrap">
   <p class="kicker">Get started</p>
@@ -462,15 +463,15 @@
   <div class="step"><div class="step-n">2</div><div>
     <h3>Your app runs</h3>
     <p><code>appximo up</code> boots everything in one command — Postgres, secrets, your tenant, the first admin — and prints the URLs, the one-time credentials and a curl that already works. You get <code>/app</code> (a back-office generated live from your API's contract), <code>/docs</code>, <code>/admin</code> and <code>/editor</code>, with no code written.</p>
-    <figure class="shot" style="margin-top:.9rem;max-width:620px"><img src="assets/shot-app.png" alt="The /app generated back-office listing records right after appximo up" loading="lazy">
-      <figcaption><strong>/app</strong> — generated from the OpenAPI contract at runtime: forms, validation, state machines, permissions. Zero screens written.</figcaption></figure>
+    <figure class="shot" style="margin-top:.9rem;max-width:620px"><img src="assets/shot-app.png" alt="The /app generated back-office on v0.1.13: a list of 112 records with the footer — page 1 of 8, 15 of 112, the engine's query time" loading="lazy">
+      <figcaption><strong>/app</strong> — generated from the OpenAPI contract at runtime: forms, validation, state machines, permissions, and an honest footer (the exact total, the engine's own query time from its <code>Server-Timing</code> header). Zero screens written. v0.1.13.</figcaption></figure>
   </div></div>
 
   <div class="step"><div class="step-n">3</div><div>
     <h3>It publishes with HTTPS</h3>
     <p>Say yes to the production question and give it a domain + a VPS. The same prompt drives the one-command installer — native PostgreSQL, a hardened systemd unit, Caddy with automatic Let's Encrypt — on an <em>empty</em> box or <em>next to what already runs there</em> (<code>--app</code> namespaces everything). The final checklist is a valid certificate, a 201 over HTTPS, and a service that survives reboots.</p>
-    <figure class="shot" style="margin-top:.9rem;max-width:620px"><img src="assets/shot-https.png" alt="A production Appximo app served over HTTPS with a real certificate" loading="lazy">
-      <figcaption>A real deploy of exactly this path — one of the three production apps linked below.</figcaption></figure>
+    <figure class="shot" style="margin-top:.9rem;max-width:620px"><img src="assets/shot-https.png" alt="petfriendly.appximo.com — a production Appximo app served over HTTPS with a Let's Encrypt certificate" loading="lazy">
+      <figcaption>A real deploy of exactly this path — <a href="https://petfriendly.appximo.com" rel="noopener">petfriendly.appximo.com</a>, Let's Encrypt, one of the four production apps linked below.</figcaption></figure>
   </div></div>
 </div></section>
 
@@ -574,6 +575,36 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
 
 <hr class="divider">
 
+<section class="reveal-s" id="changed"><div class="wrap">
+  <p class="kicker">Recent</p>
+  <h2>What v0.1.10 → v0.1.13 changed (2026-08-27/28)</h2>
+  <p class="lead">Six engine sessions in two days, each opened by a field report — one of them a <strong>real migration</strong> (Symfony 7.2, 23 tables, 46,119 rows, 1.2 GB of JSON) — and each closed against the released binary. Every line below was re-verified with a request against v0.1.13 before this page said it.</p>
+  <ul class="check" style="margin-top:1.2rem">
+    <li><strong>Writes you can't forge.</strong> <code>id</code> and every <code>auto</code> timestamp are the engine's on every door (REST, GraphQL, the batch, <code>Ctx</code>): a client value is a <code>422 read_only</code>, and a resource that must import history declares <code>"import": {"roles": […]}</code>. An owner-scoped role can no longer hand its row to another user — the identity column is server-owned on update too (<code>403</code> on every door). That hole was present in v0.1.8 and v0.1.9; the audit with 61 real requests per door is <a href="https://github.com/appximo/appximo/blob/main/docs/audits/AUTHZ_WRITE_AUDIT_S1.md" rel="noopener">published</a>.</li>
+    <li><strong><code>json</code> is a JSON value.</strong> An object written to a <code>json</code> field used to be a <strong>500</strong> and a string came back escaped; now every door stores the value and every read returns it natively (<a href="https://github.com/appximo/appximo/blob/main/docs/adr/ADR-028-json-field-is-a-json-value.md" rel="noopener">ADR-028</a>). A string that is not JSON is a named 422. The limits are written, not hidden: canonical text (keys sorted, <code>1.50</code> → <code>1.5</code>), integers past 2<sup>53</sup> lose digits, 1 MiB per request.</li>
+    <li><strong>The circuit breaker counts outages, not clients.</strong> Six unknown-field 422s in a row used to open it and answer 503 to every writer for 8 s.</li>
+    <li><strong><code>Server-Timing</code> on every generated read</strong> — <code>query;dur=4.2, count;dur=2.9, app;dur=7.3</code>, or <code>cache;desc="hit"</code>. The <code>/app</code> prints it in its footer; yours can too.</li>
+    <li><strong><code>/app</code> grew up</strong> — still zero resource-specific screens, all of it from <code>/openapi.json</code>: page-numbered lists with the exact <code>COUNT</code> and the query time, a record's detail with parents and children resolved through the published foreign keys, a JSON editor that names the 1 MiB and 2<sup>53</sup> limits before sending, columns + saved views + the view in the URL, CSV, bulk transitions and deletes through <code>/api/transaction</code> with named partial failure. The tour below shows it on v0.1.13.</li>
+    <li><strong>The installer verifies what it installed.</strong> A re-run over an existing <code>--app</code> used to keep whatever schema was there — the migration above got another application's resources served under its new domain, with no error anywhere. Now the upgrade criterion is written, a foreign schema stops the install before it mutates anything, and the end checks the binary's sha256, <code>/health</code> locally <em>and through Caddy</em>, and the schema on disk — failing loudly on any mismatch. Plus a swap warning on a small box.</li>
+    <li><strong>A host memory guard.</strong> While <code>MemAvailable + SwapFree</code> is under a floor, writes answer an explained 503 with <code>Retry-After</code> and reads continue — so a bulk load stops before the kernel OOM-kills the PostgreSQL every app on the box shares. Degradation, not capacity: it does not make a swapless 1 GB box absorb a firehose.</li>
+    <li><strong><code>?fields=a,b</code> pushed into the SQL <code>SELECT</code></strong> (and GraphQL's selection set with it). The number is in the table below. Unknown name → 400 listing the available set; a field your role hides → omitted; <code>id</code> always.</li>
+    <li><strong><code>POST /api/transaction</code> is in <code>/openapi.json</code>.</strong> It always existed (100 ops, one Postgres transaction, each op validated and authorized like its single-row twin) — the served contract hid it, and an agent migrating a real system concluded it did not exist. The contract was the bug; fixed.</li>
+  </ul>
+  <h3 style="margin-top:2rem">Known limits — said, not hidden</h3>
+  <ul class="notfor" style="margin-top:1rem">
+    <li><strong>JSON numbers pass through float64</strong> in both directions: an integer past 2<sup>53</sup> is truncated (<code>12345678901234567890</code> → <code>…67000</code>). Money is <code>int64</code> minor units by doctrine, so the known apps never hit it; a document store with big integers or exact decimals will (ENG-50). The one exact door: a JSON-text string on a <code>json</code> field.</li>
+    <li><strong>1 MiB per request</strong>, every door — a single document bigger than that is a 413.</li>
+    <li><strong>No <code>COPY</code>, no file importer.</strong> The bulk door is <code>/api/transaction</code>, 100 ops per request: 46k rows ≈ 460 batches ≈ minutes, not hours — and not seconds.</li>
+    <li><strong><code>?fields=</code> projects the root row only</strong> — <code>?include=</code> embeds and SSE events stay whole.</li>
+    <li><strong><code>?page=</code> is OFFSET</strong>: a deep page walks the index (page 1000 of 46k rows: ~15 ms; more under load). Cursors (<code>?after=</code>) avoid it; the <code>/app</code> pages by number on purpose and shows the cost.</li>
+    <li><strong>The memory guard degrades; it does not hold</strong> — give a ≤ 2 GiB box swap before loading data (the installer now says so).</li>
+    <li><strong>Custom routes carry no <code>Server-Timing</code> yet</strong> — only generated reads do (ENG-51).</li>
+  </ul>
+  <p class="small muted" style="margin-top:.9rem">The full list with its trackers: <a href="https://github.com/appximo/appximo/blob/main/docs/GUIDE.md#9-what-it-does-not-do" rel="noopener">GUIDE §9</a>. The migration report that drove most of this, answered point by point — including the three points where the report's own diagnosis was wrong: <a href="https://github.com/appximo/appximo/blob/main/docs/FIELD_FEEDBACK_RESPONSE.md" rel="noopener">FIELD_FEEDBACK_RESPONSE.md §5</a>.</p>
+</div></section>
+
+<hr class="divider">
+
 <section class="reveal-s" id="numbers"><div class="wrap">
   <p class="kicker">Numbers</p>
   <h2>Measured, dated, with their conditions</h2>
@@ -599,10 +630,12 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
         <td>Executed on the live shop (2026-07-31): schema dropped, restored, row counts identical, a new purchase completed. Rehearsed, not hoped.</td></tr>
       <tr><td>AI schema generation</td><td class="num">~90 % first-try · 100 % convergence · ~$0.006/schema</td>
         <td>120-case stratified NL→schema corpus, validator-guided loop, cheap model (Haiku), Wilson CIs / McNemar.</td></tr>
+      <tr><td>Field selection (<code>?fields=</code>)</td><td class="num">a page of 20: 961 KB / 53 ms → 3 KB / 1.2 ms · p99 @ 10 rps: 2.8 s → 175 ms</td>
+        <td>A migrated system's list rebuilt: 46,119 rows × ~52 KB <code>json</code> documents (TOAST 1.8 GB), 1-vCPU dev box, 2026-08-28 — with vs without on the SAME binary (the projection reaches the SQL <code>SELECT</code>, so the document is never detoasted). <span class="cond">Opt-in per request; the plain list is byte-identical. The deep-page cost that remains is the OFFSET (page 1000: 15 ms), not the document.</span></td></tr>
     </tbody>
   </table>
   </div>
-  <p class="small muted" style="margin-top:.9rem">Sources and reproduction recipes: <a href="https://github.com/appximo/appximo/blob/main/docs/CERTIFICATION_2026-08-01.md">the certification report</a> · <a href="https://github.com/appximo/appximo/blob/main/docs/BENCHMARKS.md">BENCHMARKS.md</a>. The repo ships the harness (<code>scripts/bench-protocol.sh</code>, <code>scripts/verify-production/</code>) so you can re-measure on your own hardware. No comparative claims against other frameworks are made here: the last such measurement (2026-06-10) predates today's conditions and was deliberately not re-run.</p>
+  <p class="small muted" style="margin-top:.9rem">Sources and reproduction recipes: <a href="https://github.com/appximo/appximo/blob/main/docs/CERTIFICATION_2026-08-01.md">the certification report</a> · <a href="https://github.com/appximo/appximo/blob/main/docs/BENCHMARKS.md">BENCHMARKS.md</a> (§4b for the <code>?fields=</code> row). The repo ships the harness (<code>scripts/bench-protocol.sh</code>, <code>scripts/verify-production/</code>) so you can re-measure on your own hardware. No comparative claims against other frameworks are made here: the last such measurement (2026-06-10) predates today's conditions and was deliberately not re-run.</p>
 </div></section>
 
 <hr class="divider">
@@ -646,7 +679,7 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
   </div>
   <div class="grid3" style="margin-top:1.4rem">
     <figure class="shot demo-card tilt reveal">
-      <img src="assets/shot-tiendita.png" alt="La Tiendita — the storefront on a phone viewport" loading="lazy">
+      <img src="assets/shot-tiendita.png" alt="La Tiendita — the storefront on a phone viewport, with the customers/owner switch" loading="lazy">
       <div class="demo-body">
         <h4>tiendita.appximo.com</h4>
         <p>A commerce platform in framework mode: jsonb catalogue with GIN indexes, inventory that cannot oversell, order lifecycles, signed payment webhooks, storefront + back-office embedded in the binary.</p>
@@ -654,7 +687,7 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
       </div>
     </figure>
     <figure class="shot demo-card tilt reveal">
-      <img src="assets/shot-petfriendly.png" alt="Petfriendly — the generated OpenAPI docs of the AI-authored veterinary app" loading="lazy">
+      <img src="assets/shot-petfriendly.png" alt="Petfriendly — the demo landing: the owner's panel behind one click, the API docs behind another" loading="lazy">
       <div class="demo-body">
         <h4>petfriendly.appximo.com</h4>
         <p>A veterinary appointment API whose schema was <strong>AI-generated from one paragraph of Spanish</strong> — enforced lifecycles, per-vet row access — deployed through the same path as any hand-written schema.</p>
@@ -677,11 +710,11 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
   <figure class="media" style="margin-top:1.8rem">
     <div class="media-bar">
       <span class="media-dots"><i></i><i></i><i></i></span>
-      <span class="media-title">the browser tour</span>
-      <span class="media-hint">play · pause · scrub</span>
+      <span class="media-title">the browser tour · v0.1.13 · 1:28</span>
+      <span class="media-hint">real time · subtitles ES + EN</span>
     </div>
-    <video controls muted playsinline preload="metadata" poster="assets/tour-poster.jpg" aria-label="Browser tour: the generated back-office, Swagger docs, the Studio ERD and the admin panel"><source src="assets/app-tour.mp4" type="video/mp4"></video>
-    <figcaption>What that one command leaves you in the browser — <code>/app</code> (the back-office generated from your own OpenAPI), <code>/docs</code>, <code>/editor</code> (the ERD in Appximo Studio) and <code>/admin</code> — on the demo's own generated schema.</figcaption>
+    <video controls muted playsinline preload="metadata" poster="assets/tour-poster.jpg" aria-label="Browser tour on v0.1.13: the generated back-office with its honest footer, a record's detail, the JSON editor, columns and views, CSV, a bulk transition, then Swagger docs, the Studio ERD and the admin panel"><source src="assets/app-tour.mp4" type="video/mp4"></video>
+    <figcaption>What that one command leaves you in the browser, on the released <strong>v0.1.13</strong>: <code>/app</code> with its footer (page 1 of 8 · 15 of 112 · the engine's query time), a record's detail with its relations both ways, the JSON editor naming an invalid document before it is sent, columns and a saved view, CSV, a bulk transition of 15 rows through <code>/api/transaction</code> — then <code>/docs</code>, <code>/editor</code> and <code>/admin</code>. Real time, no speed-up (the top bar carries the clock). The schema is the demo's generated one plus one <code>jsonb</code> field added for the editor — <a href="https://github.com/appximo/appximo/blob/main/docs/demo/README.md" rel="noopener">how it was recorded, step by step</a>. The previous tour is archived, not deleted.</figcaption>
   </figure>
 </div></section>
 
@@ -712,7 +745,7 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
 <section><div class="wrap">
   <p class="kicker">Trust</p>
   <h2>Don't believe this page — re-run it</h2>
-  <p class="lead">The repo ships the instruments that produced every claim above: the benchmark protocol with statistical gates, a production-verification suite that runs against <em>your</em> server, an acceptance suite for the whole API surface, and a binary-diff gate with a 92-case behavioral corpus. The certification report documents what was verified, what was corrected, and what could <em>not</em> be re-verified — including the claims this project deliberately no longer makes.</p>
+  <p class="lead">The repo ships the instruments that produced every claim above: the benchmark protocol with statistical gates, a production-verification suite that runs against <em>your</em> server, an acceptance suite for the whole API surface, and a binary-diff gate with a 163-case behavioral corpus. The certification report documents what was verified, what was corrected, and what could <em>not</em> be re-verified — including the claims this project deliberately no longer makes.</p>
   <div class="cta-row" style="margin-top:1.4rem">
     <a class="btn btn-primary" href="https://github.com/appximo/appximo/blob/main/docs/GUIDE.md">Read the guide</a>
     <a class="btn btn-ghost" href="https://github.com/appximo/appximo/blob/main/docs/CERTIFICATION_2026-08-01.md">Read the certification</a>
