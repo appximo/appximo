@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787894390778,
+  "lastUpdate": 1787905290168,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -4176,6 +4176,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "37248816 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "2902d4fc4c9c24b3556bad2cf0fc4759643713e1",
+          "message": "docs(backlog): MIGRACION-CONFIANZA-S1 — the real migration's findings closed by damage order (installer verification, the validator question, canonicalization, the batch door in the contract, the memory guard), MIG-FRONT registered for a product decision, OPS-34 (the ABBA base must be built like the new binary), ABBA attributed and no_change, both demos deployed with rollback drilled\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-28T08:20:55Z",
+          "tree_id": "4572b3ab718085894cd3256eab5fdbd1c1b1ce3c",
+          "url": "https://github.com/appximo/appximo/commit/2902d4fc4c9c24b3556bad2cf0fc4759643713e1"
+        },
+        "date": 1787905289011,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6264,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "367886 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6264,
+            "unit": "ns/op",
+            "extra": "367886 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "367886 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "367886 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 71.95,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "34582324 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 71.95,
+            "unit": "ns/op",
+            "extra": "34582324 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "34582324 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "34582324 times\n4 procs"
           }
         ]
       }
