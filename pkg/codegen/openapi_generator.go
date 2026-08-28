@@ -537,13 +537,13 @@ func oaCreateOp(name, title string) map[string]any {
 
 // oaFieldsParam documents `?fields=` (MOTOR-FIELDS-S1): the select-list
 // projection every row-returning generated read accepts. The description
-// carries the contract a generic client needs — id always present, the 400/403
-// rules, embeds untouched — and the available names, so a tool can validate
-// before sending.
+// carries the contract a generic client needs — id always present, the 400
+// rule, the allowlist's omission, embeds untouched — and the available names,
+// so a tool can validate before sending.
 func oaFieldsParam(res *schema.ResourceSchema) map[string]any {
 	names := append([]string{"id"}, sortedFieldKeys(res)...)
 	return oaQueryParamDesc("fields", map[string]any{"type": "string"},
-		"Comma-separated fields to return (e.g. fields=a,b). The projection is pushed into the SQL SELECT: a column not listed is never read, so a large json/text value is not detoasted for a list that does not show it. id is always included. An unknown name is a 400 naming it; a field the role's allowlist hides is a 403; an empty or repeated parameter is a 400. Embedded relations (?include=) are returned whole. Available: "+strings.Join(names, ", "))
+		"Comma-separated fields to return (e.g. fields=a,b). The projection is pushed into the SQL SELECT: a column not listed is never read, so a large json/text value is not detoasted for a list that does not show it. id is always included. An unknown name is a 400 naming it; a field the role's allowlist hides is omitted (as on every read); an empty or repeated parameter is a 400. Embedded relations (?include=) are returned whole. Available: "+strings.Join(names, ", "))
 }
 
 func oaGetOp(name, title string, res *schema.ResourceSchema) map[string]any {

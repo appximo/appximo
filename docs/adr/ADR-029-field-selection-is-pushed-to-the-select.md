@@ -59,10 +59,15 @@ SSE (a push of the changed row) or writes.
 every generic client break). An unknown name is a **400 naming it and listing
 the available set**, exactly like `?sort=ghost` — never silently dropped,
 which would hand the caller a page missing a column under a 200. A name the
-role's allowlist hides is a **403** (`ErrForbiddenField`, the `?filter[hidden]=`
-rule — the defense exists wherever a field can be NAMED; the allowlist keeps
-applying afterwards, so `fields=` can narrow a role's view and never widen
-it). `?fields=` empty, an empty entry, a repeated parameter — named 400s
+role's allowlist hides is **omitted** — the allowlist wins, as on every read
+(RBAC-2 registers that hidden-attempt contract). It is deliberately NOT the
+`403` of `?filter[hidden]=`/`?sort=hidden`: that defense exists against a
+VALUE oracle (a hidden column revealed by match/no-match), and a projection
+reveals nothing; a 403 would also break every role-agnostic client — the
+contract does not publish allowlists, so the embedded `/app` cannot know
+which of its columns a role may see before asking (the first cut WAS a 403
+and the browser pass on a scoped role broke on it). `fields=` can narrow a
+role's view and never widen it. `?fields=` empty, an empty entry, a repeated parameter — named 400s
 (ENG-30/24/17). A repeated NAME is a set. The universe is the tenant's
 deployed surface (a hot-migrated column is selectable). It is a **400 and not
 a 422** on purpose: in this engine `422 validation_failed` is the write-body

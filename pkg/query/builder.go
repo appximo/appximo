@@ -502,9 +502,9 @@ func BuildQuery(
 	}
 
 	// `?fields=` (MOTOR-FIELDS-S1): the select-list projection, validated
-	// against the same field universe and the same allowlist as filter/sort,
-	// so an unknown name is a named 400 and a hidden one the same 403 — never
-	// a silently missing column under a 200.
+	// against the same field universe as filter/sort (an unknown name is a
+	// named 400) and intersected with the role's allowlist (a hidden name is
+	// omitted, as on every read).
 	fields, err := ParseFields(res, params, allowedFields)
 	if err != nil {
 		return nil, err
@@ -531,8 +531,14 @@ var errFieldsEmpty = errors.New("fields parameter has an empty value (use fields
 //   - a name that is not a declared field of res (nor the implicit `id`) → an
 //     error naming it and listing the available set (ADR-024, like sort);
 //   - a name outside allowedFields (nil = unrestricted; `id` always allowed)
-//     → ErrForbiddenField, mapped to 403 by the callers (SEC-5: the defense
-//     exists wherever a field can be NAMED, and a projection names fields).
+//     is DROPPED from the projection — the role's allowlist wins, exactly as
+//     it does on a read without `fields=` (the column is omitted from the
+//     response; RBAC-2 registers that hidden-attempt contract). Not the
+//     ErrForbiddenField of filter/sort: that 403 defends against a VALUE
+//     oracle (`?filter[hidden][eq]=x` reveals a hidden column by match), and
+//     a projection reveals nothing. A 403 here would also break every
+//     generic client — the contract is role-agnostic, so the embedded /app
+//     cannot know the allowlist before asking (it broke exactly so).
 //
 // The names are validated identifiers from the schema, so SelectList may quote
 // them straight into SQL; values never enter the statement.
@@ -559,7 +565,7 @@ func ParseFields(res *schema.ResourceSchema, params url.Values, allowedFields []
 				return nil, fmt.Errorf("unknown field in fields: %s (available: %s)", name, availableFieldNames(res))
 			}
 			if !fieldAllowed(name, allowedFields) {
-				return nil, fmt.Errorf("%w: fields=%s", ErrForbiddenField, name)
+				continue // hidden by the role's allowlist: omitted, as on every read
 			}
 		}
 		if !seen[name] {

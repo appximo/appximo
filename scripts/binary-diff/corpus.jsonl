@@ -153,7 +153,7 @@
 {"name": "list-fields-empty", "method": "GET", "path": "/api/notes?fields=", "expect": "MOTOR-FIELDS-S1: 400 'fields parameter has an empty value' (base: 200 full list)"}
 {"name": "list-fields-extra-comma", "method": "GET", "path": "/api/notes?fields=title,,status", "expect": "MOTOR-FIELDS-S1: 400 naming the extra comma (base: 200)"}
 {"name": "list-fields-repeated", "method": "GET", "path": "/api/notes?fields=title&fields=status", "expect": "MOTOR-FIELDS-S1: 400 repeated parameter (base: 200)"}
-{"name": "list-fields-hidden-viewer", "method": "GET", "path": "/api/notes?fields=title,amount", "auth": "viewer", "expect": "MOTOR-FIELDS-S1: 403 — amount is outside the viewer allowlist (SEC-5: a field can be named nowhere the role cannot read it); base: 200 with the allowlist projection"}
+{"name": "list-fields-hidden-viewer", "method": "GET", "path": "/api/notes?fields=title,amount&per_page=2", "auth": "viewer", "expect": "MOTOR-FIELDS-S1: 200 rows with id,title — amount is outside the viewer allowlist and is OMITTED (the allowlist wins, as on every read; not the filter/sort 403, which defends a value oracle); base: 200 with id,title,status (the parameter ignored)"}
 {"name": "list-fields-allowed-viewer", "method": "GET", "path": "/api/notes?fields=title&per_page=2", "auth": "viewer", "expect": "MOTOR-FIELDS-S1: 200 rows with id,title only (base: id,title,status — the allowlist)"}
 {"name": "get-fields-projection", "method": "GET", "path": "/api/notes/{{ID}}?fields=title", "expect": "MOTOR-FIELDS-S1: 200 {id,title} (base: the whole record)"}
 {"name": "get-fields-unknown", "method": "GET", "path": "/api/notes/{{ID}}?fields=nope", "expect": "MOTOR-FIELDS-S1: 400 naming nope (base: 200 whole record)"}

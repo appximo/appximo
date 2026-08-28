@@ -1,7 +1,6 @@
 package query
 
 import (
-	"errors"
 	"net/url"
 	"strings"
 	"testing"
@@ -100,21 +99,30 @@ func TestFields_RepeatedParameterIsRejected(t *testing.T) {
 	}
 }
 
-func TestFields_HiddenFieldIsForbiddenNotSilent(t *testing.T) {
-	_, err := BuildQuery("orders", fieldsResource(), url.Values{"fields": {"nit,data"}}, nil, []string{"id", "nit", "anio"})
-	if !errors.Is(err, ErrForbiddenField) {
-		t.Fatalf("naming a field the allowlist hides is ErrForbiddenField (403), got %v", err)
-	}
-	if err == nil || !strings.Contains(err.Error(), "fields=data") {
-		t.Fatalf("the error names the offending field: %v", err)
-	}
-	// the allowed subset works, id implied
-	qb, err := BuildQuery("orders", fieldsResource(), url.Values{"fields": {"nit"}}, nil, []string{"id", "nit", "anio"})
+func TestFields_HiddenFieldIsOmittedByTheAllowlist(t *testing.T) {
+	// The role's allowlist wins, as on every read: the hidden name is dropped
+	// from the projection (not a 403 — that is the VALUE-oracle defense of
+	// filter/sort, and a projection reveals nothing; a 403 would break every
+	// role-agnostic client, the /app first).
+	qb, err := BuildQuery("orders", fieldsResource(), url.Values{"fields": {"nit,data,anio"}}, nil, []string{"id", "nit", "anio"})
 	if err != nil {
-		t.Fatalf("allowed projection: %v", err)
+		t.Fatalf("hidden field must not error: %v", err)
 	}
-	if got := strings.Join(qb.Fields(), ","); got != "id,nit" {
+	if got := strings.Join(qb.Fields(), ","); got != "id,nit,anio" {
+		t.Fatalf("hidden field dropped, the rest kept in order: %s", got)
+	}
+	sel, _, _, _ := qb.SQL()
+	if strings.Contains(sel, "data") {
+		t.Fatalf("the hidden column must not be read either: %s", sel)
+	}
+	// only hidden names → id alone (never an empty select list)
+	qb, _ = BuildQuery("orders", fieldsResource(), url.Values{"fields": {"data"}}, nil, []string{"id", "nit"})
+	if got := strings.Join(qb.Fields(), ","); got != "id" {
 		t.Fatalf("got %s", got)
+	}
+	// an UNKNOWN name is still a named error, allowlist or not
+	if _, err := BuildQuery("orders", fieldsResource(), url.Values{"fields": {"ghost"}}, nil, []string{"id", "nit"}); err == nil || !strings.Contains(err.Error(), "unknown field in fields: ghost") {
+		t.Fatalf("unknown stays a 400: %v", err)
 	}
 }
 

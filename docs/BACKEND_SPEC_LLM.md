@@ -270,11 +270,16 @@ else, so they are the SAME rules (ADR-024 / ENG-14…ENG-30), not new ones:**
   validation_failed` is the WRITE-BODY contract — `{"error","fields":[…]}` on
   create/update — and every query-parameter error is a `400` with a message;
   one client parser per class.)
-- **A name the role's RBAC allowlist hides is a `403`** (`request references a
-  field not permitted for this role: fields=data`) — the `?filter[hidden]=` /
-  `?sort=hidden` rule (SEC-5): the defense exists wherever a field can be
-  NAMED. The allowlist keeps applying to the response afterwards, so `fields=`
-  can never widen what a role reads — only narrow it.
+- **A name the role's RBAC allowlist hides is OMITTED** — the allowlist wins,
+  exactly as it does on a read without `fields=` (the column is simply not in
+  the response; that hidden-attempt contract is registered as RBAC-2). It is
+  deliberately NOT the `403` of `?filter[hidden]=` / `?sort=hidden`: that one
+  defends against a VALUE oracle (a hidden column revealed by match/no-match),
+  and a projection reveals nothing. A 403 would also break every role-agnostic
+  client — the contract does not publish allowlists, so the embedded `/app`
+  cannot know which of its columns a role may see before asking (it broke
+  exactly so in the browser). `fields=` can never widen what a role reads —
+  only narrow it.
 - **Empty and malformed values are named `400`s:** `?fields=` (an empty form
   field), `?fields=a,,b` and `?fields=a,` ("empty entry in the field list —
   remove the extra comma"), `?fields=a&fields=b` (a repeated parameter — the
@@ -295,8 +300,8 @@ implementation (`query.ParseFields` + the projected select list):**
 | `GET /api/{res}/{id}` | yes | a detail is usually where you WANT everything — but a label lookup by id, a status poll, a relation resolver are details too |
 | `GET /api/{res}/{id}/{relation}` (subroute) | yes | names fields of the TARGET resource; the target's allowlist decides the 403 |
 | `?include=` (list and get) | yes, on the ROOT | the embedded objects stay whole — there is no nested syntax (`fields[lines]=`), documented, not silent: a `fields=` entry never reaches an embed |
-| GraphQL `{ res { data { a b } } }` / `{ singular(id) { a b } }` | **automatic** | the selection set IS the projection and is pushed into the SQL since MOTOR-FIELDS-S1 — before, GraphQL selected fields in Go over `SELECT *`, so it read the TOAST exactly like REST; a hidden field selected by a scoped role still resolves `null` (unchanged contract) |
-| `ctx.Query` (library) | `QueryOpts.Fields` | same validation, same 403/400 as `Filters`/`OrderBy` |
+| GraphQL `{ res { data { a b } } }` / `{ singular(id) { a b } }` | **automatic** | the selection set IS the projection and is pushed into the SQL since MOTOR-FIELDS-S1 — before, GraphQL selected fields in Go over `SELECT *`, so it read the TOAST exactly like REST; a hidden field selected by a scoped role still resolves `null` (unchanged contract, the same omission REST applies) |
+| `ctx.Query` (library) | `QueryOpts.Fields` | same validation (unknown → error naming it), the allowlist's omission |
 | `/admin/tenants/{id}/data/{res}` (admin browse) | yes | same builder |
 | `GET /api/{res}/aggregate` | no | returns no rows; a `fields=` there is an unknown function, a named 400 as before |
 | `GET /api/{res}/events` (SSE) | no | the event carries the row that changed, allowlist-scoped; a projection of a push is a different feature |

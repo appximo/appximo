@@ -447,9 +447,11 @@ screen paints, and ONLY those. The engine pushes the list into the SQL
 `SELECT`, so a column you do not name is not even read from disk: a list over
 rows with a large `json`/`text` document went from 1.4 MB and ~100 ms of
 query per page of 20 to 1.8 KB and ~4 ms (MOTOR-FIELDS-S1). `id` always comes
-back. Rules, all named errors: an unknown name → `400` listing the available
-fields; a field the role's allowlist hides → `403` (you cannot widen a role's
-view, only narrow it); empty `fields=`, `a,,b`, a repeated parameter → `400`.
+back. Rules: an unknown name → `400` listing the available fields; a field
+the role's allowlist hides is simply OMITTED (the allowlist, as on every read
+— you cannot widen a role's view, only narrow it; so a screen may ask for its
+columns without knowing the role and paint what comes back); empty `fields=`,
+`a,,b`, a repeated parameter → `400`.
 Works on the list, the get-by-id, the relation subroute (fields of the
 TARGET) and the root of an `?include=` read (embeds come whole); a detail
 screen usually wants everything — leave it off there. GraphQL needs nothing:

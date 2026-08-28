@@ -1767,10 +1767,11 @@ subroutes.
   rebuilt case: 1.4 MB → 1.8 KB and the query stage 100 ms → 4 ms). `id`
   always comes back. An unknown name is a **400 naming it and listing the
   available set** (like `?sort=ghost`); a field the role's allowlist hides is
-  a **403** (the `?filter[hidden]=` rule — the defense exists wherever a
-  field can be NAMED; `fields=` can only narrow a role's view, never widen
-  it); `?fields=`, `a,,b`, and a repeated parameter are named 400s; a repeated
-  NAME is a set. Applies to the list, the get-by-id, the relation subroute
+  **omitted** — the allowlist wins, as on every read (NOT the filter/sort
+  403, which defends a VALUE oracle; a projection reveals nothing, and a 403
+  would break every role-agnostic client — `fields=` can only narrow a role's
+  view, never widen it); `?fields=`, `a,,b`, and a repeated parameter are
+  named 400s; a repeated NAME is a set. Applies to the list, the get-by-id, the relation subroute
   (fields of the TARGET), the ROOT of a `?include=` read (the embeds stay
   whole — no nested syntax), the admin data browse and `ctx.Query`
   (`QueryOpts.Fields`); **GraphQL pushes its selection set into the SQL

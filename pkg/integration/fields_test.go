@@ -371,12 +371,20 @@ func TestFields_ProjectionIsPushedToTheSelect(t *testing.T) {
 		}
 	})
 
-	t.Run("RBAC: a hidden field named in fields= is a 403, an allowed subset works", func(t *testing.T) {
-		st, body, _ := rawGet(t, srv, "/api/declarations?fields=nit,data", contador)
-		if st != 403 || !strings.Contains(string(body), "fields=data") {
-			t.Fatalf("hidden field: want 403 naming it, got %d %s", st, body)
+	t.Run("RBAC: a hidden field named in fields= is omitted (the allowlist, as on every read), an allowed subset works", func(t *testing.T) {
+		st, body, v := rawGet(t, srv, "/api/declarations?fields=nit,data&per_page=2", contador)
+		if st != 200 {
+			t.Fatalf("hidden field: the allowlist omits it, got %d %s", st, body)
 		}
-		st, _, v := rawGet(t, srv, "/api/declarations?fields=nit&per_page=3", contador)
+		for _, r := range rowsOf(t, v) {
+			if keyList(r) != "id,nit" {
+				t.Fatalf("data omitted, nit kept: %s", keyList(r))
+			}
+		}
+		if sql := rec.lastMatching(`"declarations"`, "LIMIT"); !strings.HasPrefix(sql, `SELECT "id", "nit" FROM`) {
+			t.Fatalf("the hidden column is not read either: %s", sql)
+		}
+		st, _, v = rawGet(t, srv, "/api/declarations?fields=nit&per_page=3", contador)
 		if st != 200 {
 			t.Fatalf("allowed subset: %d", st)
 		}
@@ -392,7 +400,7 @@ func TestFields_ProjectionIsPushedToTheSelect(t *testing.T) {
 		}
 	})
 
-	t.Run("get by id: projected, validated, 403 for the role", func(t *testing.T) {
+	t.Run("get by id: projected, validated, hidden omitted for the role", func(t *testing.T) {
 		st, _, v := rawGet(t, srv, "/api/declarations/"+firstID+"?fields=nit", super)
 		if st != 200 || keyList(v.(map[string]any)) != "id,nit" {
 			t.Fatalf("get with fields: %d %v", st, v)
@@ -403,8 +411,8 @@ func TestFields_ProjectionIsPushedToTheSelect(t *testing.T) {
 		if st, body, _ := rawGet(t, srv, "/api/declarations/"+firstID+"?fields=ghost", super); st != 400 || !strings.Contains(string(body), "unknown field in fields: ghost") {
 			t.Fatalf("get unknown: %d %s", st, body)
 		}
-		if st, _, _ := rawGet(t, srv, "/api/declarations/"+firstID+"?fields=data", contador); st != 403 {
-			t.Fatalf("get hidden: %d", st)
+		if st, _, v := rawGet(t, srv, "/api/declarations/"+firstID+"?fields=data,nit", contador); st != 200 || keyList(v.(map[string]any)) != "id,nit" {
+			t.Fatalf("get hidden omitted: %d %v", st, v)
 		}
 		// without fields the record is whole, as before
 		st, _, v = rawGet(t, srv, "/api/declarations/"+firstID, super)
@@ -424,8 +432,8 @@ func TestFields_ProjectionIsPushedToTheSelect(t *testing.T) {
 		if st, body, _ := rawGet(t, srv, "/api/declarations/"+firstID+"/contador?fields=nit", super); st != 400 || !strings.Contains(string(body), "unknown field in fields: nit (available: id, nombre, notas)") {
 			t.Fatalf("subroute names the TARGET's fields: %d %s", st, body)
 		}
-		if st, _, _ := rawGet(t, srv, "/api/declarations/"+firstID+"/contador?fields=notas", contador); st != 403 {
-			t.Fatalf("subroute hidden on the target: %d", st)
+		if st, _, v := rawGet(t, srv, "/api/declarations/"+firstID+"/contador?fields=notas,nombre", contador); st != 200 || keyList(v.(map[string]any)) != "id,nombre" {
+			t.Fatalf("subroute hidden on the target omitted: %d %v", st, v)
 		}
 	})
 

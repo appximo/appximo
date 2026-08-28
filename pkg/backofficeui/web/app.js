@@ -20,7 +20,7 @@
 // one accent, Inter, tabular figures, positional lifecycle chips, drawer
 // forms, toasts, skeletons, empty states with an action) — same contract,
 // same five rules, same demo overlay.
-import { loadContract, controlFor, isTerminal, rowLabel, titleField, namePref } from './contract.js';
+import { loadContract, controlFor, isTerminal, rowLabel, titleField, titleFields, namePref } from './contract.js';
 import { t, lang, setLang } from './i18n.js';
 
 const $ = (sel) => document.querySelector(sel);
