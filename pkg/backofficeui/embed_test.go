@@ -89,6 +89,16 @@ func TestGenericBehaviorsPinned(t *testing.T) {
 		"paint them ALL",       // rule 4
 		"only legal moves",     // rule 5
 		"x-appximo",            // extension-driven (via contract.js import)
+		// APP-PODER-S1: what the contract already allowed, now used
+		"parseServerTiming",                    // the engine's query time shown, not guessed
+		"PER_CHOICES = [15, 25, 50, 100, 250]", // the page-size selector; 15 stays the default
+		"total_pages",                          // honest paging: "page N of M · n of total"
+		"renderDetail",                         // the detail with relations both ways
+		"jsonPrecisionRisks",                   // ENG-50 warned before the value is lost
+		"JSON_MAX_BYTES = 1048576",             // the 1 MiB request cap said in the UI
+		"stateToHash",                          // views live in the URL, never in the engine
+		"TX_MAX = 100",                         // bulk actions batched at the engine's cap
+		"retried row by row",                   // partial failure named, never a silent 'done'
 	} {
 		if !strings.Contains(app, marker) && marker != "x-appximo" {
 			t.Errorf("app.js lost the %q behavior marker", marker)
@@ -98,6 +108,9 @@ func TestGenericBehaviorsPinned(t *testing.T) {
 	for _, ext := range []string{
 		"x-appximo-relation", "x-appximo-references", "x-appximo-file",
 		"x-appximo-transitions", "x-appximo-initial", "x-appximo-virtual-resources",
+		"x-appximo-json", // ADR-028: the JSON editor keys off the tag
+		"children",       // APP-PODER-S1: reverse relations derived from the FKs
+		"subroute",       // the published /api/{res}/{id}/{seg} path used for parents
 	} {
 		if !strings.Contains(contract, ext) {
 			t.Errorf("contract.js lost the %s reader", ext)

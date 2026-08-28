@@ -270,9 +270,13 @@ is your SPA's own tokens — nothing here dictates a look.
 
 ## 10. Honest limits
 
-- `jsonb` fields: a raw-JSON textarea by default. A structured editor is
-  resource-specific work (an override widget).
-- No bulk actions or CSV export by default — natural §9 extensions.
+- `json`/`jsonb` fields: the embedded `/app` ships a real JSON editor
+  (§10b); in YOUR SPA a validated textarea is the floor, a structured editor
+  is resource-specific work (an override widget).
+- Bulk actions and CSV export: the embedded `/app` has them (§10b, through
+  `/api/transaction` in batches of 100 and a client-side CSV); in your SPA
+  they are natural §9 extensions — copy the batching and the partial-failure
+  reporting, not just the buttons.
 - The permission probe costs one request per resource at index open.
 - A brand-NEW resource appears in `/openapi.json` only after the engine
   restarts with a schema that includes it (the deploy flow tells you when) —
@@ -332,6 +336,72 @@ the sections above, all of it from the contract:
 - **Designed states**: shimmer skeletons while loading (the only looping
   animation, gone with the data), an empty state with the create action, an
   inline error with retry, 422s painted per field with a scroll to the first.
+
+APP-PODER-S1 added what the contract already allowed — still nothing per
+resource, all of it derived:
+
+- **Honest pagination**: every list pages by number (`?page=` + `per_page`),
+  never by cursor — a cursor gives no page number, no "of N" and no "go to".
+  The footer says «Página 3 de 47 · 15 de 703»: the total is the engine's
+  exact `COUNT(*)` over the same filtered, RBAC-scoped set (`?count=true`),
+  requested once per query and kept across pages. Page size 15 by default
+  (unchanged), selector 15 / 25 / 50 / 100 / 250 remembered per resource in
+  the browser; first / previous / go-to / next / last. **250 is the ceiling on
+  purpose**: painting half a million rows measures the browser, not the
+  engine; for volume the tool is a load test against the API.
+- **The query time, visible**: the engine publishes its stage durations on
+  every generated read as a standard `Server-Timing` header
+  (`query;dur=17.86, app;dur=31.00`, or `cache;desc="hit"` when the response
+  cache answered and no query ran). The footer shows «consulta 7,8 ms ·
+  respuesta 66 ms» — the engine's number and the round trip, independent of
+  how many rows are painted. On the 36k-row ERP fixture: page 1 with the
+  count 18 ms, page 2000 (OFFSET) 343 ms — the cost is on screen, not hidden.
+- **Detail with relations both ways**: a row click opens a detail (the pencil
+  still opens the form): the fields, the state machine as an ordered strip
+  with the current state and its legal moves as buttons, the files with a
+  signed download/preview, every PARENT resolved through the published
+  subroute (`/api/{res}/{id}/{segment}`, the target's RBAC enforced there)
+  or a lookup on `x-appximo-references`, and every CHILD: each resource whose
+  FK (`x-appximo-relation`) points here, as a filtered list with its count and
+  «Ver todos» → the list pre-filtered (a pinned chip). The schema's
+  `relations`/`?include=` block is NOT in the contract, so it is not used —
+  which also means a legacy non-JSON text in a `json` column (pre-ADR-028)
+  cannot break the read: it shows as text with a badge. Each block fetches
+  on its own and degrades to an inline notice. The detail has its own URL
+  (`#/{res}/{id}`).
+- **JSON editor** for `x-appximo-json: text|jsonb`: a highlighted editor
+  (keys, strings, numbers, literals), validation as you type with the parse
+  error named, Formatear / Compactar, a foldable tree view, Tab indents; an
+  invalid document never leaves the browser (painted on the field), a 422 from
+  the engine paints the same field. Two limits SAID in the interface: the
+  engine's 1 MiB per request (≥ 900 KB warns, ≥ 1 MiB blocks with the message
+  — a bigger document would be a 413) and ENG-50 (an integer of 16+ digits or
+  a decimal with trailing zeros passes through float64 both ways — detected
+  on the raw text before the parse loses it, named with the offending
+  numbers). What is saved re-opens natively.
+- **Columns, saved views, shareable URL**: a column picker over every
+  listable field (the structural order is the default), views saved per
+  resource in `localStorage` (columns, filters, sort, search, page size) —
+  zero engine state — and the CURRENT view in the URL hash
+  (`#/res?cols=…&f.estado=…&sort=…&per=…&page=…`), so a view is one link.
+- **CSV + bulk**: «CSV» exports exactly the loaded page (visible columns +
+  id, RFC 4180, UTF-8 BOM) or — saying first how many pages of 250 it will
+  ask for and that the browser ceiling is 10,000 rows — everything filtered.
+  A selection column (a «Seleccionar página» button on phones) opens a bulk
+  bar: change state (targets = the union of legal transitions of the
+  selected rows; rows without a legal move are counted and skipped) or delete,
+  through `/api/transaction` in batches of at most 100 ops with a progress
+  bar. A batch is atomic, so a failed batch is retried row by row to NAME
+  exactly which rows failed and why (e.g. «still referenced by "alquileres"»)
+  while the rest goes through; the failed rows stay selected. Delete asks an
+  explicit confirmation listing how many and which. In demo mode nothing
+  leaves the browser (the overlay is applied row by row; a hand-made
+  `/api/transaction` with the demo token is a 403 anyway).
+- **Relation search past 100 rows**: the relation select is complete only up
+  to the API's `per_page` cap; past it the control becomes a search box
+  (`?search=` on the target, debounced 250 ms) showing the target's title
+  field, and the list resolves the labels the cached page lacks (bounded to
+  40 lookups per page).
 
 Three product knobs a consumer controls without rebuilding anything:
 

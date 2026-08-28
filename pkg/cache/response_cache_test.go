@@ -426,3 +426,26 @@ func TestInvalidateDropsInFlightStore(t *testing.T) {
 		t.Fatal("a store with the current epoch must land")
 	}
 }
+
+// APP-PODER-S1: the handler's Server-Timing survives the singleflight miss
+// path (the item is rendered from memory) and a HIT says so instead of
+// replaying a duration no query paid on this request.
+func TestServerTimingReplayedOnMissAndMarkedOnHit(t *testing.T) {
+	rc := New(time.Minute)
+	h := http.Header{}
+	h.Set("Content-Type", "application/json")
+	h.Set("Server-Timing", "query;dur=1.50, app;dur=2.00")
+	item := rc.buildItem(http.StatusOK, h, []byte(`{"ok":true}`))
+	req := httptest.NewRequest(http.MethodGet, "/api/x", nil)
+
+	miss := httptest.NewRecorder()
+	writeItem(miss, req, item, false)
+	if got := miss.Header().Get("Server-Timing"); got != "query;dur=1.50, app;dur=2.00" {
+		t.Fatalf("miss must replay the handler's Server-Timing, got %q", got)
+	}
+	hit := httptest.NewRecorder()
+	writeItem(hit, req, item, true)
+	if got := hit.Header().Get("Server-Timing"); got != `cache;desc="hit"` {
+		t.Fatalf("hit must say cache, got %q", got)
+	}
+}

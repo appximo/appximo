@@ -33,6 +33,13 @@ type cacheItem struct {
 	status      int
 	contentType string
 	etag        string
+	// serverTiming is the handler's Server-Timing header (APP-PODER-S1) —
+	// the engine-side stage durations of the response that was PRODUCED. It
+	// is replayed only on the request that produced it (the singleflight
+	// miss path renders the item from memory, so the header would otherwise
+	// be lost); a HIT says `cache;desc=hit` instead — a hit's truth is that
+	// no query ran, not the duration of a query some earlier caller paid.
+	serverTiming string
 	// secHeaders are the SECURITY headers captured from the handler chain, so a
 	// cache HIT carries the same posture as a MISS (SEC-1).
 	//
@@ -380,12 +387,13 @@ func (rc *ResponseCache) refresh(r *http.Request, tenantID, key string, next htt
 // body with gzip BestSpeed (fast, not BestCompression) for 200 responses.
 func (rc *ResponseCache) buildItem(status int, header http.Header, plain []byte) *cacheItem {
 	item := &cacheItem{
-		status:      status,
-		contentType: header.Get("Content-Type"),
-		etag:        header.Get("Etag"),
-		secHeaders:  captureSecurityHeaders(header),
-		plain:       plain,
-		expiresAt:   time.Now().Add(rc.ttl),
+		status:       status,
+		contentType:  header.Get("Content-Type"),
+		etag:         header.Get("Etag"),
+		serverTiming: header.Get("Server-Timing"),
+		secHeaders:   captureSecurityHeaders(header),
+		plain:        plain,
+		expiresAt:    time.Now().Add(rc.ttl),
 	}
 	if status == http.StatusOK && len(plain) > 0 {
 		item.gzipped = gzipBytes(plain)
@@ -407,6 +415,11 @@ func writeItem(w http.ResponseWriter, r *http.Request, item *cacheItem, hit bool
 	}
 	if item.etag != "" {
 		h.Set("Etag", item.etag)
+	}
+	if hit {
+		h.Set("Server-Timing", `cache;desc="hit"`)
+	} else if item.serverTiming != "" {
+		h.Set("Server-Timing", item.serverTiming)
 	}
 	// SEC-1: re-apply the security headers the handler chain set, so a HIT and a
 	// MISS answer with the same posture. Set (not Add) so re-applying a header the

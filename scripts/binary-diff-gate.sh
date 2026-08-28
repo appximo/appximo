@@ -206,8 +206,11 @@ normalize_headers() {
   # not on a MISS, and hit-vs-miss is timing-dependent — measured flipping
   # between identical binaries across runs. A contract change to the header
   # itself would still show up in a dedicated corpus case, not as run noise.
+  # server-timing (APP-PODER-S1) carries per-request durations and, on a HIT,
+  # `cache;desc="hit"` instead — timing noise by definition; its presence is
+  # pinned by pkg/integration TestServerTimingOnReads, not by this diff.
   tr -d '\r' | awk 'NR>1 && NF' | tr 'A-Z' 'a-z' \
-    | grep -Ev '^(date|content-length|transfer-encoding|etag|x-trace-id|x-ratelimit|traceparent|vary|cache-control|x-cache):' \
+    | grep -Ev '^(date|content-length|transfer-encoding|etag|x-trace-id|x-ratelimit|traceparent|vary|cache-control|x-cache|server-timing):' \
     | sort
 }
 

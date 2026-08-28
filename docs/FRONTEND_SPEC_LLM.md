@@ -391,6 +391,14 @@ The complete operator set, by field type — **this table is closed**:
 | `uuid`, `bool`, `json`, `jsonb`, `file` | `eq`, `is_null` |
 | `id` (the implicit PK) | `eq` (never `is_null` — a PK is never null) |
 
+**Timing, from the engine (APP-PODER-S1):** every generated read answers
+with a `Server-Timing` header — `query;dur=<ms>` (the database stage) and
+`app;dur=<ms>` (engine time until the body starts), or `cache;desc="hit"`
+when the response cache answered. Read it with
+`res.headers.get('server-timing')` and show it next to your own round-trip
+time: that is the honest "how long did the query take", independent of how
+many rows you paint (the embedded `/app` footer does exactly this).
+
 Facts an agent must not learn the hard way:
 
 - **`neq`, `in`, `nin`, `like`, `ilike` DO NOT EXIST.** An unknown

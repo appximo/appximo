@@ -77,10 +77,33 @@ export async function loadContract(fetchJSON) {
     };
   });
 
+  // APP-PODER-S1 — relations in BOTH directions, from the contract alone.
+  // The schema's `relations` block (the ?include= embeds) is not published in
+  // /openapi.json; what IS published is every FK field (x-appximo-relation /
+  // x-appximo-references) and, for each, the read subroute path
+  // `/api/{res}/{id}/{segment}` the engine generates. So a detail resolves a
+  // parent through its subroute (RBAC of the target enforced there), and the
+  // children of a row are every OTHER resource with an FK pointing here —
+  // fetched as a filtered list (`?filter[fk][eq]=`). Nothing per resource.
+  const byName = Object.fromEntries(resources.map((r) => [r.name, r]));
+  for (const r of resources) {
+    for (const f of r.fields) {
+      if (!f.relation) continue;
+      const seg = f.key.endsWith('_id') ? f.key.slice(0, -3) : f.key;   // the engine's RelationSubroute derivation
+      f.subroute = paths[`/api/${r.name}/{id}/${seg}`] ? seg : null;
+    }
+    r.children = [];
+  }
+  for (const r of resources) {
+    for (const f of r.fields) {
+      if (f.relation && byName[f.relation]) byName[f.relation].children.push({ res: r, field: f });
+    }
+  }
+
   cache = {
     appTitle: doc.info?.title ?? 'app',
     resources,
-    byName: Object.fromEntries(resources.map((r) => [r.name, r])),
+    byName,
     virtual: virtualDecl,
   };
   return cache;

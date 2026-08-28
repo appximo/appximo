@@ -197,6 +197,28 @@ func markSpan(req *http.Request, name string) {
 // capture500 records the error message + a symbolized stack on the request's
 // SpanTracker, enriched with the user/role/method the handler knows. Call ONLY
 // for server errors (500) — it pays for runtime.Callers; never on the happy path.
+// serverTiming publishes the engine-side stage durations of a READ as the
+// standard `Server-Timing` header (APP-PODER-S1): every stage marked so far
+// (`validate`, `query`, …) plus `app` = the engine time until this point.
+// Set right before the body is written, so a client — the embedded /app
+// first — can show "the query took 4.2 ms" honestly, independent of how many
+// rows it paints or how slow the network is. Reads only: a write's stages
+// end after the commit. No wrapper writer (a wrapper without io.ReaderFrom
+// would suppress sendfile on the byte-serving routes — the FILES-FIX-SENDFILE
+// lesson), just a header set by the handlers that own the response.
+func serverTiming(w http.ResponseWriter, req *http.Request) {
+	t := observability.SpanTrackerFromCtx(req.Context())
+	if t == nil {
+		return
+	}
+	var b strings.Builder
+	for _, s := range t.Spans() {
+		fmt.Fprintf(&b, "%s;dur=%.2f, ", s.Name, float64(s.DurUS)/1000)
+	}
+	fmt.Fprintf(&b, "app;dur=%.2f", float64(t.ElapsedUS())/1000)
+	w.Header().Set("Server-Timing", b.String())
+}
+
 func capture500(req *http.Request, err error) {
 	t := observability.SpanTrackerFromCtx(req.Context())
 	if t == nil {
@@ -366,6 +388,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					writeDBErr(w, req, qerr)
 					return nil, nil, false
 				}
+				markSpan(req, "count") // its own stage: a COUNT(*) over a filtered/searched set can cost more than the page (visible in Server-Timing)
 				per := int64(qb.PerPage())
 				tp := (t + per - 1) / per
 				if tp == 0 {
@@ -408,6 +431,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					return
 				}
 				markSpan(req, "query")
+				serverTiming(w, req)
 				writeIncludeList(w, data, listMeta(qb, int(n), total, totalPages))
 				markSpan(req, "serialize")
 				return
@@ -452,6 +476,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			}
 
 			w.Header().Set("Content-Type", "application/json")
+			serverTiming(w, req)
 			pkghandlers.WriteJSON(w, map[string]any{ //nolint:errcheck
 				"data": data,
 				"meta": listMeta(qb, len(data), total, totalPages),
@@ -505,6 +530,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			markSpan(req, "query")
 
 			w.Header().Set("Content-Type", "application/json")
+			serverTiming(w, req)
 			pkghandlers.WriteJSON(w, aggregateResponse(aq, recs)) //nolint:errcheck
 			markSpan(req, "serialize")
 		}))
@@ -748,6 +774,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					return
 				}
 				w.Header().Set("Content-Type", "application/json")
+				serverTiming(w, req)
 				w.Write(data) //nolint:errcheck
 				markSpan(req, "serialize")
 				return
@@ -777,6 +804,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				record = pkghandlers.FilterFields(record, evalResult.AllowedFields)
 			}
 			w.Header().Set("Content-Type", "application/json")
+			serverTiming(w, req)
 			pkghandlers.WriteJSON(w, record) //nolint:errcheck
 			markSpan(req, "serialize")
 		}))
@@ -1153,6 +1181,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					rec = pkghandlers.FilterFields(rec, allowedFields)
 				}
 				w.Header().Set("Content-Type", "application/json")
+				serverTiming(w, req)
 				pkghandlers.WriteJSON(w, rec) //nolint:errcheck
 			}))
 		}

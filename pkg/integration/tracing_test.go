@@ -194,13 +194,28 @@ INSERT INTO tenant_acmetest.guides (code, status) VALUES ('A','pending'), ('B','
 		return resp
 	}
 
-	// Warmup (populates cache + pool); not asserted.
-	get("/api/guides?per_page=5").Body.Close()
+	// Warmup (populates cache + pool). APP-PODER-S1: a MISS publishes the
+	// engine's stage durations as Server-Timing (the query stage included), so
+	// a client can show "the query took N ms" honestly.
+	warm := get("/api/guides?per_page=5")
+	warm.Body.Close()
+	if st := warm.Header.Get("Server-Timing"); !strings.Contains(st, "query;dur=") || !strings.Contains(st, "app;dur=") {
+		t.Fatalf("a cache MISS must carry Server-Timing with query and app durations, got %q", st)
+	}
 
 	// FAST request — cache HIT, well under 50ms.
 	respFast := get("/api/guides?per_page=5")
 	tidFast := respFast.Header.Get("X-Trace-ID")
 	respFast.Body.Close()
+	// Whether this second read is a HIT depends on the fixture's cache policy;
+	// whichever it is, Server-Timing tells the truth about it.
+	if st := respFast.Header.Get("Server-Timing"); respFast.Header.Get("X-Cache") == "HIT" {
+		if st != `cache;desc="hit"` {
+			t.Fatalf("a cache HIT must say Server-Timing: cache;desc=\"hit\" (no query ran), got %q", st)
+		}
+	} else if !strings.Contains(st, "query;dur=") {
+		t.Fatalf("a served read must carry its query duration, got %q", st)
+	}
 
 	// 1. X-Trace-ID header is a 16-hex id.
 	if len(tidFast) != 16 {

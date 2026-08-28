@@ -278,7 +278,17 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   → served at /app/theme.css) and supports DEMO MODE (`Config.AppDemoRoles` /
   `APPXIMO_APP_DEMO_ROLES`: the SPA simulates writes in a per-session
   in-memory overlay, reload resets; pair with a READ-ONLY role — the RBAC is
-  the security boundary, verified 403). See docs/BACKOFFICE_SPEC_LLM.md §10b.
+  the security boundary, verified 403). APP-PODER-S1 added, still derived
+  from the contract alone: honest page-numbered pagination («Página 3 de 47
+  · 15 de 703» from `?count=true`, sizes 15/25/50/100/250, 15 default), the
+  engine's query time on screen (the new `Server-Timing` header every
+  generated read carries), a detail screen with parents (published
+  subroutes) and children (every FK pointing here) resolved, a JSON editor
+  for `x-appximo-json` that warns the 1 MiB cap and the ENG-50 precision
+  loss before sending, a column picker + saved views in `localStorage` +
+  the view in the URL hash, CSV export, batched bulk transitions/deletes via
+  `/api/transaction` with named partial failure, and an API-search relation
+  selector past 100 rows. See docs/BACKOFFICE_SPEC_LLM.md §10b.
 - `pkg/editorui/` is the **visual schema editor** (Appximo Studio, UI-F0-S1):
   a static Svelte 5 SPA (plain Vite, `pkg/editorui/web/`) `go:embed`-served at
   **`/editor`** — a graphical ERD over the schema, no AI, zero Node in prod. The
@@ -1694,6 +1704,14 @@ subroutes.
   selected (SEC-AUDIT-V2), so a GraphQL list that doesn't ask for the total pays no
   COUNT either.
 - Responses are `{"data": [...], "meta": {...}}`.
+- **Every generated read carries a `Server-Timing` header** (APP-PODER-S1):
+  the engine's stage durations so far (`jwt;dur=0.3, rbac;dur=0.0,
+  query;dur=17.9, app;dur=31.0` — `query` is the database stage, `app` the
+  engine time until the body starts) on list, get, subroute, embed and
+  aggregate; a response-cache HIT says `cache;desc="hit"` (no query ran).
+  Writes carry none (their stages end after the commit). Timing noise by
+  definition, so the binary-diff gate ignores the header; its presence is
+  pinned by `pkg/integration` `TestTracing_EndToEnd`.
 
 ## Aggregation (G3)
 

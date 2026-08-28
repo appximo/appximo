@@ -75,6 +75,20 @@ func (t *SpanTracker) SetCapture(c *ErrorCapture) {
 }
 
 // TotalUS returns the sum of all recorded span durations.
+// Spans returns the stages marked so far (a copy) — what a handler can
+// publish to the client BEFORE the response is written (Server-Timing).
+func (t *SpanTracker) Spans() []Span {
+	out := make([]Span, t.count)
+	copy(out, t.spans[:t.count])
+	return out
+}
+
+// ElapsedUS is the engine time spent on the request so far: the marked
+// stages plus the tail since the last mark. TotalUS counts only the marks.
+func (t *SpanTracker) ElapsedUS() int64 {
+	return int64(t.TotalUS()) + time.Since(t.last).Microseconds()
+}
+
 func (t *SpanTracker) TotalUS() int32 {
 	var sum int32
 	for i := 0; i < t.count; i++ {
