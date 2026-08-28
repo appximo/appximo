@@ -413,9 +413,11 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				return
 			}
 			if query.HasInclude(include) {
-				baseSelect, _, baseArgs, _ := qb.SQL()
+				// MOTOR-FIELDS-S1: a `?fields=` projection reaches the ROOT row
+				// object of the embed query; the base subquery stays whole (the
+				// embeds join on its FKs) and the embeds themselves stay whole.
 				of, od := qb.EffectiveOrder()
-				incSQL, incArgs, ierr := query.BuildListInclude(name, include, baseSelect, baseArgs, of, od, s, schema.DefaultMaxIncludeDepth, makeRelationRBAC(policy, req))
+				incSQL, incArgs, ierr := query.BuildListIncludeFields(name, include, qb.SQLProjected, qb.Fields(), of, od, s, schema.DefaultMaxIncludeDepth, makeRelationRBAC(policy, req))
 				if ierr != nil {
 					writeJSONErr(w, ierr.Status, ierr.Msg)
 					return
@@ -733,11 +735,36 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// Enforce the row-level RBAC condition (if any) so a restricted role
 			// cannot read another principal's row by guessing its id.
 			evalResult := rbac.EvalResultFromCtx(req.Context())
-			q := fmt.Sprintf("SELECT * FROM %s WHERE id = $1", tbl)
-			args := []any{id}
+			var allowedFields []string
 			if evalResult != nil {
-				var ok bool
-				if q, args, ok = applyRowCondition(q, args, evalResult.Condition); !ok {
+				allowedFields = evalResult.AllowedFields
+			}
+			// MOTOR-FIELDS-S1: `?fields=` on a single record — the same parser,
+			// universe (deployed surface) and 400/403 as the list, pushed into
+			// the SELECT so an unrequested large column is never detoasted.
+			fields, ferr := query.ParseFields(readSurface(req.Context(), tc.ID, name, &res), req.URL.Query(), allowedFields)
+			if ferr != nil {
+				status := http.StatusBadRequest
+				if errors.Is(ferr, query.ErrForbiddenField) {
+					status = http.StatusForbidden
+				}
+				writeJSONErr(w, status, ferr.Error())
+				return
+			}
+			// baseFor builds the single-row statement for a column list (nil =
+			// every column): the plain read uses the projection, the ?include=
+			// wrapper asks for the projection plus the columns its joins need.
+			baseFor := func(cols []string) (string, []any) {
+				q := fmt.Sprintf("SELECT %s FROM %s WHERE id = $1", query.SelectList(cols), tbl)
+				args := []any{id}
+				if evalResult != nil {
+					q, args, _ = applyRowCondition(q, args, evalResult.Condition)
+				}
+				return q, args
+			}
+			q, args := baseFor(fields)
+			if evalResult != nil {
+				if _, _, ok := applyRowCondition("", nil, evalResult.Condition); !ok {
 					writeDBErr(w, req, fmt.Errorf("invalid rbac condition field"))
 					return
 				}
@@ -758,7 +785,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 				return
 			}
 			if query.HasInclude(include) {
-				incSQL, incArgs, ierr := query.BuildGetInclude(name, include, q, args, s, schema.DefaultMaxIncludeDepth, makeRelationRBAC(policy, req))
+				incSQL, incArgs, ierr := query.BuildGetIncludeFields(name, include, baseFor, fields, s, schema.DefaultMaxIncludeDepth, makeRelationRBAC(policy, req))
 				if ierr != nil {
 					writeJSONErr(w, ierr.Status, ierr.Msg)
 					return
@@ -1140,10 +1167,26 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					writeJSONErr(w, http.StatusForbidden, "forbidden")
 					return
 				}
+				// MOTOR-FIELDS-S1: `?fields=` names fields of the TARGET resource
+				// (the record this route returns), validated against the target's
+				// deployed surface and the role's allowlist ON THE TARGET.
+				var fields []string
+				if target, ok := s.Resources[relResource]; ok {
+					var ferr error
+					fields, ferr = query.ParseFields(readSurface(req.Context(), tc.ID, relResource, &target), req.URL.Query(), allowedFields)
+					if ferr != nil {
+						status := http.StatusBadRequest
+						if errors.Is(ferr, query.ErrForbiddenField) {
+							status = http.StatusForbidden
+						}
+						writeJSONErr(w, status, ferr.Error())
+						return
+					}
+				}
 
 				q := fmt.Sprintf(
-					"SELECT r.* FROM %s r JOIN %s src ON src.%s = r.%s WHERE src.id = $1",
-					pgx.Identifier{relResource}.Sanitize(), tbl, pgx.Identifier{fn}.Sanitize(), pgx.Identifier{refCol}.Sanitize(),
+					"SELECT %s FROM %s r JOIN %s src ON src.%s = r.%s WHERE src.id = $1",
+					query.SelectListAliased("r", fields), pgx.Identifier{relResource}.Sanitize(), tbl, pgx.Identifier{fn}.Sanitize(), pgx.Identifier{refCol}.Sanitize(),
 				)
 				args := []any{parentID}
 				// The related resource's row condition is ANDed in, qualified by the

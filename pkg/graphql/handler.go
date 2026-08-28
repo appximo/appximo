@@ -964,6 +964,16 @@ func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, pol
 		if err != nil {
 			return nil, err
 		}
+		// MOTOR-FIELDS-S1: the selection set IS the projection — push it into
+		// the SQL. GraphQL used to select fields in Go over `SELECT *`, so a
+		// `data { id nit }` over rows with a large document detoasted every
+		// document exactly like the REST list did. A selection the walker
+		// cannot vouch for keeps `SELECT *`; a hidden field stays `null`.
+		if proj := listProjection(p.Info, res, allowedFields); proj != nil {
+			if err := qb.SelectOnly(proj); err != nil {
+				return nil, err
+			}
+		}
 
 		selectQ, countQ, selectArgs, countArgs := qb.SQL()
 
@@ -1002,7 +1012,7 @@ func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, pol
 		// flat select runs.
 		if includePaths := listIncludePaths(p.Info, name, s); len(includePaths) > 0 {
 			of, od := qb.EffectiveOrder()
-			incSQL, incArgs, ierr := query.BuildListInclude(name, joinPaths(includePaths), selectQ, selectArgs, of, od, s, schema.DefaultMaxIncludeDepth, makeRelRBAC(p.Context, policy))
+			incSQL, incArgs, ierr := query.BuildListIncludeFields(name, joinPaths(includePaths), qb.SQLProjected, qb.Fields(), of, od, s, schema.DefaultMaxIncludeDepth, makeRelRBAC(p.Context, policy))
 			if ierr != nil {
 				return nil, fmt.Errorf("%s", ierr.Msg)
 			}
@@ -1152,17 +1162,34 @@ func getByIDResolver(name string, tdb *db.TenantDB, policy *rbac.Policy, s *sche
 			return nil, fmt.Errorf("invalid id format")
 		}
 
+		// MOTOR-FIELDS-S1: the selection set as the SELECT list (see the list
+		// resolver); nil keeps `SELECT *`.
+		var projection []string
+		if res, ok := s.Resources[name]; ok {
+			var allowed []string
+			if evalResult != nil {
+				allowed = evalResult.AllowedFields
+			}
+			projection = objectProjection(p.Info, &res, allowed)
+		}
+
 		// Enforce the row-level RBAC condition (BOLA guard) — a restricted role
 		// must not read another principal's row by guessing its id. Mirrors the
 		// REST get-by-id path.
-		q := "SELECT * FROM " + pgx.Identifier{name}.Sanitize() + " WHERE id = $1"
-		qargs := []any{idStr}
+		baseFor := func(cols []string) (string, []any) {
+			q := "SELECT " + query.SelectList(cols) + " FROM " + pgx.Identifier{name}.Sanitize() + " WHERE id = $1"
+			qargs := []any{idStr}
+			if evalResult != nil {
+				q, qargs, _ = query.AppendRowCondition(q, qargs, evalResult.Condition)
+			}
+			return q, qargs
+		}
 		if evalResult != nil {
-			q, qargs, err = query.AppendRowCondition(q, qargs, evalResult.Condition)
-			if err != nil {
+			if _, _, err := query.AppendRowCondition("", nil, evalResult.Condition); err != nil {
 				return nil, err
 			}
 		}
+		q, qargs := baseFor(projection)
 
 		// RELATIONS-V1: nested selection → one json_agg+LATERAL query (the embed
 		// cannot resurrect a row the base WHERE + row-cond excluded).
@@ -1172,7 +1199,7 @@ func getByIDResolver(name string, tdb *db.TenantDB, policy *rbac.Policy, s *sche
 					fs.store(p.Info.FieldName, evalResult.AllowedFields)
 				}
 			}
-			incSQL, incArgs, ierr := query.BuildGetInclude(name, joinPaths(includePaths), q, qargs, s, schema.DefaultMaxIncludeDepth, makeRelRBAC(p.Context, policy))
+			incSQL, incArgs, ierr := query.BuildGetIncludeFields(name, joinPaths(includePaths), baseFor, projection, s, schema.DefaultMaxIncludeDepth, makeRelRBAC(p.Context, policy))
 			if ierr != nil {
 				return nil, fmt.Errorf("%s", ierr.Msg)
 			}

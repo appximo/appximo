@@ -83,6 +83,7 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 - Substring text search — `?search=` runs `ILIKE` across the resource's string/text fields (not a ranked full-text engine).
 - Single-field sort — `?sort=field&order=asc|desc`, or `?order[field]=desc` (which wins if both are sent).
 - Keyset pagination — `?after=<uuid>` / `?before=<uuid>`, `per_page` default 20 / max 100, no OFFSET.
+- Field selection — `?fields=a,b` projects the SQL `SELECT` itself (an unlisted TOASTed column is never read); `id` always; unknown → 400, hidden by the role → 403. GraphQL's selection set is pushed down the same way.
 - In-memory response cache — validated-token GETs served from RAM; `PUT`/`PATCH` and reload evict it.
 
 ## Real-time & events

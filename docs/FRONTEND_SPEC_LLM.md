@@ -442,6 +442,20 @@ named 400s. **A repeated parameter is a 400** (`?per_page=20&per_page=100` —
 send each parameter once; watch out for URL-building code that appends instead
 of replacing).
 
+**Field selection**: `?fields=nit,anio,estado` — ask for the columns the
+screen paints, and ONLY those. The engine pushes the list into the SQL
+`SELECT`, so a column you do not name is not even read from disk: a list over
+rows with a large `json`/`text` document went from 1.4 MB and ~100 ms of
+query per page of 20 to 1.8 KB and ~4 ms (MOTOR-FIELDS-S1). `id` always comes
+back. Rules, all named errors: an unknown name → `400` listing the available
+fields; a field the role's allowlist hides → `403` (you cannot widen a role's
+view, only narrow it); empty `fields=`, `a,,b`, a repeated parameter → `400`.
+Works on the list, the get-by-id, the relation subroute (fields of the
+TARGET) and the root of an `?include=` read (embeds come whole); a detail
+screen usually wants everything — leave it off there. GraphQL needs nothing:
+its selection set IS the projection and reaches the SQL. `Server-Timing`
+shows the difference (`query;dur=`), which is how you know it worked.
+
 **Count**: `?count=true` on a list adds `meta.total` + `meta.total_pages` (a
 real COUNT over the same filtered, RBAC-scoped set). The flag is read **by
 value**: `count=false`/`count=0` (and omitting it) mean OFF, bare `?count` and

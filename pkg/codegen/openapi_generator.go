@@ -116,7 +116,7 @@ func buildOAPaths(s *schema.APISchema) map[string]any {
 		res := s.Resources[name]
 		title := toPascalCase(name)
 		_, publicRead := s.RBAC.Public[name]
-		listOp, getOp := oaListOp(name, title, &res), oaGetOp(name, title)
+		listOp, getOp := oaListOp(name, title, &res), oaGetOp(name, title, &res)
 		if publicRead {
 			listOp, getOp = markPublic(listOp), markPublic(getOp)
 		}
@@ -148,7 +148,8 @@ func buildOAPaths(s *schema.APISchema) map[string]any {
 			}
 			relName := schema.RelationSubroute(fname) // the ONE derivation, load-validated against collisions
 			relTitle := toPascalCase(fd.Relation)
-			subOp := oaSubresourceOp(name, title, relName, relTitle, fd.Relation, fname)
+			target := s.Resources[fd.Relation]
+			subOp := oaSubresourceOp(name, title, relName, relTitle, fd.Relation, fname, &target)
 			if publicRead {
 				if _, targetPublic := s.RBAC.Public[fd.Relation]; targetPublic {
 					subOp = markPublic(subOp)
@@ -381,6 +382,7 @@ func oaListOp(name, title string, res *schema.ResourceSchema) map[string]any {
 			"Sort direction for the sort field (legacy)"),
 		oaQueryParamDesc("search", map[string]any{"type": "string"},
 			"Full-text search across all string fields (ILIKE)"),
+		oaFieldsParam(res),
 	}
 
 	// order[field] params
@@ -533,12 +535,23 @@ func oaCreateOp(name, title string) map[string]any {
 	}
 }
 
-func oaGetOp(name, title string) map[string]any {
+// oaFieldsParam documents `?fields=` (MOTOR-FIELDS-S1): the select-list
+// projection every row-returning generated read accepts. The description
+// carries the contract a generic client needs — id always present, the 400/403
+// rules, embeds untouched — and the available names, so a tool can validate
+// before sending.
+func oaFieldsParam(res *schema.ResourceSchema) map[string]any {
+	names := append([]string{"id"}, sortedFieldKeys(res)...)
+	return oaQueryParamDesc("fields", map[string]any{"type": "string"},
+		"Comma-separated fields to return (e.g. fields=a,b). The projection is pushed into the SQL SELECT: a column not listed is never read, so a large json/text value is not detoasted for a list that does not show it. id is always included. An unknown name is a 400 naming it; a field the role's allowlist hides is a 403; an empty or repeated parameter is a 400. Embedded relations (?include=) are returned whole. Available: "+strings.Join(names, ", "))
+}
+
+func oaGetOp(name, title string, res *schema.ResourceSchema) map[string]any {
 	return map[string]any{
 		"operationId": "get" + title,
 		"summary":     "Get " + name + " by ID",
 		"tags":        []string{name},
-		"parameters":  []any{oaPathIDParam()},
+		"parameters":  []any{oaPathIDParam(), oaFieldsParam(res)},
 		"responses": map[string]any{
 			"200": oaSuccessResp(oaSchemaRef(title)),
 			"400": oaRespRef("Error400"),
@@ -619,12 +632,12 @@ func oaDeleteOp(name, title string) map[string]any {
 	}
 }
 
-func oaSubresourceOp(resName, resTitle, relName, relTitle, relResource, fieldName string) map[string]any {
+func oaSubresourceOp(resName, resTitle, relName, relTitle, relResource, fieldName string, target *schema.ResourceSchema) map[string]any {
 	return map[string]any{
 		"operationId": "get" + resTitle + toPascalCase(relName),
 		"summary":     "Get " + relResource + " related to " + resName + " via " + fieldName,
 		"tags":        []string{resName},
-		"parameters":  []any{oaPathIDParam()},
+		"parameters":  []any{oaPathIDParam(), oaFieldsParam(target)}, // fields of the TARGET (MOTOR-FIELDS-S1)
 		"responses": map[string]any{
 			"200": oaSuccessResp(oaSchemaRef(relTitle)),
 			"400": oaRespRef("Error400"),

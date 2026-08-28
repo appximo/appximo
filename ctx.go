@@ -65,6 +65,13 @@ type QueryOpts struct {
 	Limit   int
 	OrderBy string
 	Desc    bool
+	// Fields projects the SELECT list (MOTOR-FIELDS-S1, the `?fields=` of the
+	// generated list): only these columns (plus `id`, always) are READ — a
+	// large json/text value that lives in TOAST is not detoasted for a row
+	// that does not ask for it. nil = every column, as before. An unknown
+	// name is an error naming it; a name the role's allowlist hides is the
+	// same forbidden error `Filters` on a hidden column gets.
+	Fields []string
 }
 
 // Ctx is the single argument to a Class-1 Handler (ADR-016 Decision 3). It
@@ -588,6 +595,9 @@ func (c *requestCtx) Query(resource string, opts QueryOpts) ([]map[string]any, e
 		} else {
 			params.Set("order", "asc")
 		}
+	}
+	if len(opts.Fields) > 0 {
+		params.Set("fields", strings.Join(opts.Fields, ","))
 	}
 
 	// The role's field allowlist bounds Filters/OrderBy too (SEC-5 closed

@@ -195,6 +195,71 @@ cache it, or maintain a rollup table. `?count=true` has the same shape (44.8 ms 
 
 ---
 
+## 4b. Field selection — the disk, not the wire (MOTOR-FIELDS-S1)
+
+The case a real migration reported (Symfony → v0.1.10): `GET
+/api/declarations` returned the whole `data` document of every row although
+it paginated — ~940 KB per page of 20, p99 3.8 s — for a list showing a
+NIT, a year and a status. Rebuilt on the dev box (1 vCPU, local Postgres 16
+in Docker): **46,119 rows, a ~52 KB `json` document each, TOAST 1.8 GB, heap
+7.5 MB**. Measured 2026-08-28.
+
+**Why `?fields=` has to reach the SELECT.** The document lives in TOAST; a
+`SELECT *` sent to a client detoasts it for every row (the server's output
+function must). `EXPLAIN (ANALYZE, BUFFERS)` cannot show this — it discards
+the rows, so both plans of page 1000 report the same 20,094 buffers — but the
+cumulative statistics can: with the rows consumed, **10 pages of 20 read 1,300
+TOAST blocks without `fields=` and 0 with it** (`pg_statio_user_tables`,
+engine requests, forced flush). A projection applied in Go would keep every
+one of those blocks.
+
+**Single pages, `Server-Timing` of the engine (same binary):**
+
+| Page | without `fields=` | `fields=nit,anio,estado,contador_id` |
+|---|---|---|
+| 1 | 961,702 B · query **53 ms** | 3,059 B · query **1.2 ms** |
+| 1000 | 961,721 B · query **294 ms** | 3,065 B · query **15 ms** |
+| 2305 (last) | 961,757 B · query **139 ms** | 3,068 B · query **59 ms** |
+
+The last row is the honest part: the deep-page cost that remains with
+`fields=` is the OFFSET (the index scan walks 46k entries: ~20k buffers,
+10–13 ms in the plan, more under load) — not the document. Keyset cursors
+avoid it; the `/app` pages by number on purpose and shows the cost.
+
+**Under load — k6, 10 rps × 60 s, a random page of the 2,305, same binary:**
+
+| Arm | bytes received | p50 | p95 | p99 | max | dropped |
+|---|---|---|---|---|---|---|
+| without `fields=` | 575 MB | 174 ms | 2.25 s | **2.8 s** | 3.33 s | 4 |
+| `fields=nit,anio,estado,contador_id` | 2.2 MB | 20 ms | 81 ms | **175 ms** | 356 ms | 0 |
+
+Same 10 rps: the plain list saturates a 1-vCPU box (each response is ~1 MB
+of JSON to detoast, encode and ship — the queue builds and the tail goes to
+seconds, the report's regime); the projected list is a small indexed read.
+The `/app` sends `fields=` on every list, board, CSV and label request.
+
+**The pre-feature binary on the same URL** (built from the base commit in a
+worktree, `build-engine.sh`): ignores `fields=` — page 1 is 961,702 B with
+and without it, query 56 / 175 ms — so a client that adopts `fields=` before
+its engine is upgraded gets the old behaviour, never an error. Its plain-list
+arm in the 10 rps series measured p50 2.76 s / p99 6.06 s with 30 dropped —
+NOT the code: it is the same statement as the new binary's plain arm (the
+binary-diff gate says so), and 10 rps of 1 MB responses sits at the
+saturation edge of a 1-vCPU box, where the arm that runs last (hot box,
+queue already built) loses. Attributed with an alternating series at 6 rps
+(30 s each, A B A B, then fields): base-plain med **116 / 93 ms**, new-plain
+med **102 / 77 ms** (p99 165 / 150 vs 420 / 124 ms — noise of the box, not a
+direction), new-fields med **19 ms** (p99 75 ms). The controlled base-vs-new
+comparison of the PLAIN list is the frozen ABBA protocol on benchblank
+(`no_change`, see the session report); this section answers "with vs without
+`fields=`", which is what the report asked.
+
+**GraphQL** pushes its selection set into the same projection (it used to
+select in Go over `SELECT *` and read every document): `{ declarations { data
+{ id nit } } }` runs `SELECT "id", "nit" FROM …`.
+
+---
+
 ## 5. REST vs GraphQL — the same data, both ways
 
 Same logical query (orders with their customer and their line items), 100 rps,

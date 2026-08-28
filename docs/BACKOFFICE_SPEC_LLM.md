@@ -398,6 +398,16 @@ resource, all of it derived:
   explicit confirmation listing how many and which. In demo mode nothing
   leaves the browser (the overlay is applied row by row; a hand-made
   `/api/transaction` with the demo token is a 403 anyway).
+- **Only the columns it paints (MOTOR-FIELDS-S1)**: every list, board, CSV
+  and label request carries `?fields=` with the visible columns plus the
+  state field (chips, moves, the board) and the title candidates (row labels)
+  — `id` always comes back. The engine pushes the list into the SQL `SELECT`,
+  so a `json`/`text` document (never a list column) is not read for the
+  page: on rows with a ~50 KB document, a page of 20 went from 1.4 MB /
+  ~100 ms of query to 1.8 KB / ~4 ms, visible in the footer's «consulta».
+  A row that must be WHOLE — the edit form, the detail — is re-fetched by id
+  first (`wholeRow`), so a projected list row never reaches a screen that
+  would save or show missing fields.
 - **Relation search past 100 rows**: the relation select is complete only up
   to the API's `per_page` cap; past it the control becomes a search box
   (`?search=` on the target, debounced 250 ms) showing the target's title

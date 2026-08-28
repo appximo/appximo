@@ -718,6 +718,7 @@ async function exportAllCSV(res, st) {
       if (st.search) q.set('search', st.search);
       for (const [k, v] of Object.entries(st.filters)) q.set(`filter[${k}][eq]`, v);
       if (st.sort) { q.set('sort', st.sort); q.set('order', st.order); }
+      q.set('fields', listFields(res, columnsFor(res, st)));   // the exported columns only
       const d = await api(`/api/${res.name}?` + q.toString());
       all.push(...(demo ? demoMergeList(res.name, d.data, p === 1 ? { ...st, page: 1 } : { page: p }) : d.data));
       bar.set(p, pages, t('csv.progress', { p, pages, n: new Intl.NumberFormat(locale()).format(all.length) }));
@@ -743,6 +744,43 @@ function skeletonTable() {
   return `<div class="card list"><div class="skel-rows">${'<div class="skel-row"><div class="skel w80"></div><div class="skel pill"></div><div class="skel w60"></div><div class="skel w40"></div><div class="skel w60"></div></div>'.repeat(6)}</div></div>`;
 }
 
+// ── field selection (MOTOR-FIELDS-S1): the list asks the engine ONLY for the
+// columns it will paint. `?fields=` is pushed down to the SQL SELECT, so a
+// large json/text column (never a list column — see allColumnsFor) is not
+// even read from disk for the page: on the migrated system this was ~940 KB
+// and a p99 of 3.8 s per page of 20 that showed a title and a status. The
+// footer's «consulta N ms» (Server-Timing) is where the difference shows.
+// What a list row must carry besides the visible columns: the state field
+// (chips, bulk moves, the board), the title candidates (row labels in the
+// bulk bar, the drawer title) and the FKs of visible relation columns (they
+// ARE the columns). `id` always comes back. A row that has to be WHOLE (the
+// form, the detail) is re-fetched by id — see wholeRow.
+function listFields(res, cols) {
+  const keys = new Set(['id']);
+  for (const c of cols) keys.add(c.key);
+  if (res.stateField) keys.add(res.stateField.key);
+  for (const f of titleFields(res).slice(0, 2)) keys.add(f.key);
+  return [...keys].join(',');
+}
+// The fields a row needs to be LABELLED (relation targets, peek lists): the
+// referenced column + the title candidates. A resource with no title
+// candidate is not projected — rowLabel then falls back to scanning the row.
+function labelFields(tres, refCol = 'id') {
+  if (!tres) return null;
+  const tf = titleFields(tres);
+  if (!tf.length) return null;
+  const keys = new Set(['id', refCol, ...tf.map((f) => f.key)]);
+  if (tres.stateField) keys.add(tres.stateField.key);
+  return [...keys].join(',');
+}
+// A projected list row re-fetched whole before a screen that needs every
+// field (the edit form, the detail). Falls back to the row it was given (a
+// demo-overlay row exists only in the browser; an offline engine).
+async function wholeRow(res, row) {
+  if (!row || !row.id || row.__whole) return row;
+  try { const full = await api(`/api/${res.name}/${row.id}`); full.__whole = true; return full; } catch { return row; }
+}
+
 function listQuery(st) {
   // Page-numbered (OFFSET) paging on every list (APP-PODER-S1): a cursor gives
   // no page number, no "of N" and no "go to page" — the orientation a person
@@ -756,6 +794,7 @@ function listQuery(st) {
   for (const [k, v] of Object.entries(st.filters)) q.set(`filter[${k}][eq]`, v);
   if (st.sort) { q.set('sort', st.sort); q.set('order', st.order); }
   if (st.total == null) q.set('count', 'true');
+  if (st.res) q.set('fields', listFields(st.res, columnsFor(st.res, st)));
   return q;
 }
 function timingHTML(st) {
@@ -772,6 +811,7 @@ function timingHTML(st) {
 async function renderList() {
   const res = current, st = listState[res.name];
   st.view = 'list';
+  st.res = res;
   stateToHash(res, st);
   $('#main').innerHTML = `<div class="reveal">${pageHeader(res, st)}${toolbarHTML(res, st)}${skeletonTable()}</div>`;
   wireToolbar(st, renderList);
@@ -880,12 +920,12 @@ async function paintList(res, st, data) {
   if ($('#pg-per')) $('#pg-per').onchange = (e) => { st.per = Number(e.target.value); store.set(PER_KEY(res.name), String(st.per)); st.page = 1; st.pages = st.total != null ? Math.max(1, Math.ceil(st.total / st.per)) : null; renderList(); };
   document.querySelectorAll('tbody tr').forEach((tr) => tr.onclick = (ev) => {
     if (ev.target.closest('.act-del') || ev.target.closest('.selc')) return;
-    if (ev.target.closest('.act-open')) return renderForm(st.rows[Number(tr.dataset.i)]);
-    renderDetail(res, st.rows[Number(tr.dataset.i)]);
+    if (ev.target.closest('.act-open')) return wholeRow(res, st.rows[Number(tr.dataset.i)]).then((r) => renderForm(r));
+    wholeRow(res, st.rows[Number(tr.dataset.i)]).then((r) => renderDetail(res, r));
   });
   document.querySelectorAll('.act-del').forEach((b) => b.onclick = (ev) => {
     ev.stopPropagation();
-    renderForm(st.rows[Number(b.dataset.i)], { confirmDelete: true });
+    wholeRow(res, st.rows[Number(b.dataset.i)]).then((r) => renderForm(r, { confirmDelete: true }));
   });
 }
 
@@ -999,10 +1039,11 @@ async function loadRelLabels(f) {
   if (relLabels[target]) return relLabels[target];           // in flight
   relLabels[target] = (async () => {
     let rows = [];
-    try { rows = (await api(`/api/${target}?per_page=100`)).data; } catch { rows = []; }
+    const tres = contract.byName[target] ?? null;
+    const lf = labelFields(tres, f.references);
+    try { rows = (await api(`/api/${target}?per_page=100${lf ? '&fields=' + lf : ''}`)).data; } catch { rows = []; }
     if (demo) rows = demoMergeList(target, rows, null);
     const m = new Map();
-    const tres = contract.byName[target] ?? null;
     for (const r of rows) m.set(String(r[f.references] ?? r.id), rowLabel(r, f.references, tres));
     m.rows = rows;
     return m;
@@ -1021,7 +1062,8 @@ async function resolveMissingRelLabels(relCols, rows) {
     if (!(m instanceof Map) || (m.rows?.length ?? 0) < REL_SELECT_MAX) continue;
     const missing = [...new Set(rows.map((r) => r[f.key]).filter((v) => v != null && v !== '' && !m.has(String(v))))].slice(0, REL_LOOKUP_MAX);
     const tres = contract.byName[f.relation] ?? null;
-    for (const v of missing) jobs.push(api(`/api/${f.relation}?filter[${f.references}][eq]=${encodeURIComponent(v)}&per_page=1`)
+    const lf = labelFields(tres, f.references);
+    for (const v of missing) jobs.push(api(`/api/${f.relation}?filter[${f.references}][eq]=${encodeURIComponent(v)}&per_page=1${lf ? '&fields=' + lf : ''}`)
       .then((r) => { const row = r.data?.[0]; if (row) m.set(String(v), rowLabel(row, f.references, tres)); }).catch(() => {}));
   }
   if (jobs.length) await Promise.all(jobs);
@@ -1081,6 +1123,7 @@ async function renderBoard() {
   if (st.search) q.set('search', st.search);
   for (const [k, v] of Object.entries(st.filters)) q.set(`filter[${k}][eq]`, v);
   if (st.total == null) q.set('count', 'true');
+  q.set('fields', listFields(res, columnsFor(res).filter((c) => c.key !== sf.key).slice(0, 3)));
   let data;
   try { data = await api(`/api/${res.name}?` + q.toString()); } catch (e) {
     if (current !== res) return;
@@ -1119,7 +1162,7 @@ function drawBoard(res, st, sf, cols, hasMore) {
   const rowById = (id) => st.rows.find((r) => r.id === id);
 
   board.querySelectorAll('.kcard').forEach((card) => {
-    card.onclick = (ev) => { if (ev.target.closest('.mv')) return; renderForm(rowById(card.dataset.id)); };
+    card.onclick = (ev) => { if (ev.target.closest('.mv')) return; wholeRow(res, rowById(card.dataset.id)).then((r) => renderForm(r)); };
     card.ondragstart = (ev) => {
       ev.dataTransfer.setData('text/plain', card.dataset.id);
       ev.dataTransfer.effectAllowed = 'move';
@@ -1599,7 +1642,8 @@ function wireRelSearch() {
       tm = setTimeout(async () => {
         const my = ++seq;
         try {
-          const r = await api(`/api/${target}?search=${encodeURIComponent(term)}&per_page=20`);
+          const lf = labelFields(tres, ref);
+          const r = await api(`/api/${target}?search=${encodeURIComponent(term)}&per_page=20${lf ? '&fields=' + lf : ''}`);
           if (my !== seq) return;
           let rows = r.data ?? [];
           if (demo) rows = demoMergeList(target, rows, { page: 1, search: term, filters: {} });

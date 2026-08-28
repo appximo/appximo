@@ -131,6 +131,11 @@ async function renderList() {
   const st = listState[current.name];
   const q = new URLSearchParams();
   q.set('per_page', '10');
+  // MOTOR-FIELDS-S1: ask ONLY for the columns this table paints (+ id, always
+  // returned). The engine pushes the list into the SQL SELECT, so a big
+  // json/text column is not even read for the page. A row that needs every
+  // field (the edit form) is re-fetched by id — see the tr.onclick below.
+  q.set('fields', columnsFor(current).map((c) => c.key).join(','));
   if (st.sort) { q.set('sort', st.sort); q.set('order', st.order); }
   if (st.search) q.set('search', st.search);
   const cursor = st.after[st.after.length - 1];
@@ -177,7 +182,7 @@ async function renderList() {
   if ($('#pg-first')) $('#pg-first').onclick = () => { st.after = []; renderList(); };
   document.querySelectorAll('tbody tr').forEach((tr) => tr.onclick = (ev) => {
     if (ev.target.classList.contains('del')) return;
-    if (current.canEdit) renderForm(st.rows[Number(tr.dataset.i)]);
+    if (current.canEdit) api(`/api/${current.name}/${st.rows[Number(tr.dataset.i)].id}`).then(renderForm).catch(() => renderForm(st.rows[Number(tr.dataset.i)]));
   });
   document.querySelectorAll('.del').forEach((b) => b.onclick = async () => {
     const row = st.rows[Number(b.dataset.i)];

@@ -327,7 +327,10 @@ JWT_SECRET='a-secret-of-at-least-32-characters' ADMIN_KEY='dev-admin' \
   loss before sending, a column picker + saved views in `localStorage` +
   the view in the URL hash, CSV export, batched bulk transitions/deletes via
   `/api/transaction` with named partial failure, and an API-search relation
-  selector past 100 rows. See docs/BACKOFFICE_SPEC_LLM.md §10b.
+  selector past 100 rows. MOTOR-FIELDS-S1: every list/board/CSV/label
+  request carries `?fields=` with the columns it paints (+ the state field
+  and the title candidates), and a row that must be WHOLE (the form, the
+  detail) is re-fetched by id first. See docs/BACKOFFICE_SPEC_LLM.md §10b.
 - `pkg/editorui/` is the **visual schema editor** (Appximo Studio, UI-F0-S1):
   a static Svelte 5 SPA (plain Vite, `pkg/editorui/web/`) `go:embed`-served at
   **`/editor`** — a graphical ERD over the schema, no AI, zero Node in prod. The
@@ -1756,6 +1759,27 @@ subroutes.
   `meta.total_pages` are **lazy** — the `COUNT(*)` runs only when those fields are
   selected (SEC-AUDIT-V2), so a GraphQL list that doesn't ask for the total pays no
   COUNT either.
+- **Field selection — `?fields=a,b,c`** (MOTOR-FIELDS-S1): the projection is
+  pushed into the SQL `SELECT` list, so a column that is not asked for is NOT
+  READ — a large `json`/`jsonb`/`text` value lives in TOAST and `SELECT *`
+  detoasts it for every row of a page that never shows it (a migrated
+  system's list: ~940 KB and a p99 of 3.8 s per page of 20; measured on the
+  rebuilt case: 1.4 MB → 1.8 KB and the query stage 100 ms → 4 ms). `id`
+  always comes back. An unknown name is a **400 naming it and listing the
+  available set** (like `?sort=ghost`); a field the role's allowlist hides is
+  a **403** (the `?filter[hidden]=` rule — the defense exists wherever a
+  field can be NAMED; `fields=` can only narrow a role's view, never widen
+  it); `?fields=`, `a,,b`, and a repeated parameter are named 400s; a repeated
+  NAME is a set. Applies to the list, the get-by-id, the relation subroute
+  (fields of the TARGET), the ROOT of a `?include=` read (the embeds stay
+  whole — no nested syntax), the admin data browse and `ctx.Query`
+  (`QueryOpts.Fields`); **GraphQL pushes its selection set into the SQL
+  automatically** (it used to select in Go over `SELECT *` and read the TOAST
+  exactly like REST). Not on aggregates (a 400, the endpoint owns its
+  namespace), SSE or writes. Without `fields=` the SQL is byte-identical to
+  before. The `/app` asks for its visible columns only. Default omission of
+  heavy fields from collections is NOT built — it is a contract break; the
+  declared alternative is registered as SCHEMA-7 (backend-spec §2c).
 - Responses are `{"data": [...], "meta": {...}}`.
 - **Every generated read carries a `Server-Timing` header** (APP-PODER-S1):
   the engine's stage durations so far (`jwt;dur=0.3, rbac;dur=0.0,

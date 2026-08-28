@@ -101,6 +101,15 @@ type QueryBuilder struct {
 	// which fields may be filtered/sorted (ErrForbiddenField at parse) and which
 	// text columns the ?search= sweep touches (searchableFields).
 	allowed []string
+
+	// fields is the projected SELECT list (MOTOR-FIELDS-S1, `?fields=`): nil
+	// means every column (`SELECT *`, byte-identical to before the feature);
+	// otherwise the validated, deduplicated column names with `id` first. The
+	// projection is pushed into the SQL — a column that is not listed is not
+	// read, which is the whole point: a large json/text value lives in TOAST
+	// and is detoasted only when the SELECT names it. Trimming in Go after a
+	// `SELECT *` would save bytes on the wire and none of the disk time.
+	fields []string
 }
 
 // searchableFields lists the string/text columns the role may read, sorted —
@@ -492,7 +501,149 @@ func BuildQuery(
 		qb.search = search
 	}
 
+	// `?fields=` (MOTOR-FIELDS-S1): the select-list projection, validated
+	// against the same field universe and the same allowlist as filter/sort,
+	// so an unknown name is a named 400 and a hidden one the same 403 — never
+	// a silently missing column under a 200.
+	fields, err := ParseFields(res, params, allowedFields)
+	if err != nil {
+		return nil, err
+	}
+	qb.fields = fields
+
 	return qb, nil
+}
+
+// ErrFieldsEmpty is the ParseFields error for a present-but-empty `?fields=`
+// (ENG-30's presence rule: an empty form field is a sent parameter).
+var errFieldsEmpty = errors.New("fields parameter has an empty value (use fields=a,b,c — id is always included)")
+
+// ParseFields reads the `?fields=` projection (MOTOR-FIELDS-S1) and returns the
+// validated column list — `id` first, duplicates collapsed, request order kept
+// — or nil when the parameter is absent (the caller keeps `SELECT *`).
+//
+// Rules, each the engine's existing rule for a NAMED field re-applied here:
+//   - absent → nil, nil (no projection; the SQL is byte-identical to before);
+//   - present but empty (`?fields=`) → a named error (ENG-30: presence is the
+//     gate, an empty form field must not silently mean "everything");
+//   - repeated (`?fields=a&fields=b`) → the ENG-17 repeated-parameter error;
+//   - an empty ENTRY (`a,,b`, `a,`) → an error naming the extra comma (ENG-24);
+//   - a name that is not a declared field of res (nor the implicit `id`) → an
+//     error naming it and listing the available set (ADR-024, like sort);
+//   - a name outside allowedFields (nil = unrestricted; `id` always allowed)
+//     → ErrForbiddenField, mapped to 403 by the callers (SEC-5: the defense
+//     exists wherever a field can be NAMED, and a projection names fields).
+//
+// The names are validated identifiers from the schema, so SelectList may quote
+// them straight into SQL; values never enter the statement.
+func ParseFields(res *schema.ResourceSchema, params url.Values, allowedFields []string) ([]string, error) {
+	raw, present, err := singleValue(params, "fields")
+	if err != nil {
+		return nil, err
+	}
+	if !present {
+		return nil, nil
+	}
+	if strings.TrimSpace(raw) == "" {
+		return nil, errFieldsEmpty
+	}
+	out := []string{"id"}
+	seen := map[string]bool{"id": true}
+	for _, part := range strings.Split(raw, ",") {
+		name := strings.TrimSpace(part)
+		if name == "" {
+			return nil, fmt.Errorf("fields: empty entry in the field list %q — remove the extra comma", raw)
+		}
+		if name != "id" {
+			if _, ok := res.Fields[name]; !ok {
+				return nil, fmt.Errorf("unknown field in fields: %s (available: %s)", name, availableFieldNames(res))
+			}
+			if !fieldAllowed(name, allowedFields) {
+				return nil, fmt.Errorf("%w: fields=%s", ErrForbiddenField, name)
+			}
+		}
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return out, nil
+}
+
+// Fields returns the `?fields=` projection (id first) or nil when the request
+// asked for every column. Callers that wrap the base SELECT (the ?include=
+// builders) need it to project the root row object the same way.
+func (qb *QueryBuilder) Fields() []string { return qb.fields }
+
+// SQLProjected is the BaseSelect of the ?include= wrappers (MOTOR-FIELDS-S1):
+// the list statement with the given column list in place of the `?fields=`
+// projection — nil is the historical `SELECT *`. The wrapper asks for the
+// requested fields plus the FK/order columns its joins need; the builder is
+// left unchanged.
+func (qb *QueryBuilder) SQLProjected(cols []string) (selectQ string, selectArgs []any) {
+	saved := qb.fields
+	qb.fields = cols
+	selectQ, _, selectArgs, _ = qb.SQL()
+	qb.fields = saved
+	return selectQ, selectArgs
+}
+
+// SelectOnly sets the projection from a caller that already knows which
+// columns it will use — the GraphQL resolvers, whose selection set IS the
+// projection (a GraphQL client can only name fields the generated type has).
+// Every name must be a declared field of the resource or `id`; anything else
+// is an error so no unvalidated identifier can reach the SQL. nil/empty
+// restores `SELECT *`. The role's allowlist is NOT re-checked here: GraphQL's
+// contract for a hidden selected field is `null` (the result scrubber), not an
+// error, so its callers intersect with the allowlist before calling.
+func (qb *QueryBuilder) SelectOnly(cols []string) error {
+	if len(cols) == 0 {
+		qb.fields = nil
+		return nil
+	}
+	out := []string{"id"}
+	seen := map[string]bool{"id": true}
+	for _, name := range cols {
+		if name != "id" {
+			if _, ok := qb.res.Fields[name]; !ok {
+				return fmt.Errorf("unknown field in projection: %s (available: %s)", name, availableFieldNames(qb.res))
+			}
+		}
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	qb.fields = out
+	return nil
+}
+
+// SelectList renders a projection as a SQL select list: `*` for nil (every
+// column — the historical statement, byte for byte), else the quoted column
+// names. The names come from ParseFields/SelectOnly, i.e. validated schema
+// identifiers, never client text.
+func SelectList(cols []string) string {
+	if len(cols) == 0 {
+		return "*"
+	}
+	quoted := make([]string, len(cols))
+	for i, c := range cols {
+		quoted[i] = quoteIdent(c)
+	}
+	return strings.Join(quoted, ", ")
+}
+
+// SelectListAliased is SelectList with every column qualified by a table alias
+// (`r.*` / `r."id", r."name"`) for the JOINed relation subroute statement.
+func SelectListAliased(alias string, cols []string) string {
+	if len(cols) == 0 {
+		return alias + ".*"
+	}
+	quoted := make([]string, len(cols))
+	for i, c := range cols {
+		quoted[i] = alias + "." + quoteIdent(c)
+	}
+	return strings.Join(quoted, ", ")
 }
 
 // resourceHasTextField reports whether the resource has at least one column
@@ -562,8 +713,8 @@ func (qb *QueryBuilder) SQL() (selectQ, countQ string, selectArgs, countArgs []a
 		selectArgs = make([]any, len(whereArgs)+1)
 		copy(selectArgs, whereArgs)
 		selectArgs[len(whereArgs)] = qb.perPage
-		selectQ = fmt.Sprintf("SELECT * FROM %s%s %s LIMIT $%d",
-			tbl, whereClause, orderClause, limitIdx)
+		selectQ = fmt.Sprintf("SELECT %s FROM %s%s %s LIMIT $%d",
+			SelectList(qb.fields), tbl, whereClause, orderClause, limitIdx)
 		countQ = fmt.Sprintf("SELECT COUNT(*) FROM %s%s", tbl, whereClause)
 		return
 	}
@@ -583,8 +734,8 @@ func (qb *QueryBuilder) SQL() (selectQ, countQ string, selectArgs, countArgs []a
 	selectArgs[len(whereArgs)] = qb.perPage
 	selectArgs[len(whereArgs)+1] = offset
 
-	selectQ = fmt.Sprintf("SELECT * FROM %s%s %s LIMIT $%d OFFSET $%d",
-		tbl, whereClause, orderClause, limitIdx, offsetIdx)
+	selectQ = fmt.Sprintf("SELECT %s FROM %s%s %s LIMIT $%d OFFSET $%d",
+		SelectList(qb.fields), tbl, whereClause, orderClause, limitIdx, offsetIdx)
 	countQ = fmt.Sprintf("SELECT COUNT(*) FROM %s%s", tbl, whereClause)
 	return
 }

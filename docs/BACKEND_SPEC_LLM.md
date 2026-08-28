@@ -226,6 +226,134 @@ curl -X POST https://acme.example.com/api/transaction \
   the outbox events instead); no GraphQL batch; no in-place arithmetic (use
   a compare-and-set `guard`).
 
+### 2c. Reading from OUTSIDE the binary — `?fields=`: ask for the columns you will use
+
+**The problem it solves is not bandwidth, it is disk.** A `json`/`jsonb`/`text`
+column past ~2 KB lives in Postgres's TOAST storage; a `SELECT *` detoasts (and
+decompresses) it for EVERY row of the page even when the caller only paints a
+title and a status. A migrated system measured it on its very first screen:
+`GET /api/declarations` — 20 rows, each with a large `data` document — was
+**~940 KB per page and a p99 of 3.8 s**, for a list that never shows the
+document. A projection applied in Go after the read would save the bytes on the
+wire and none of the seconds: the TOAST is read before Go sees the row. **So
+the engine pushes the selection down to the `SELECT` list** — a column that is
+not asked for is not read — and says so honestly wherever it cannot.
+
+**Syntax.** `?fields=id,nit,anio,estado` — one engine-owned parameter, a
+comma-separated list of field names, on the routes that return rows of ONE
+resource:
+
+```
+GET /api/declarations?fields=nit,anio,estado&filter[estado][eq]=radicada&per_page=20
+GET /api/declarations/{id}?fields=nit,estado
+GET /api/declarations/{id}/contador?fields=nombre,email      ← fields of the TARGET (contadores)
+GET /api/declarations?fields=nit&include=contador             ← the root is projected; the embed is whole
+```
+
+It is the same shape as every other engine-owned list parameter (`sum=a,b`,
+`group_by=a,b`, `include=a,b.c`) and the convention of every REST API that
+has it (JSON:API `fields[type]`, Google APIs `fields=`, Stripe `expand`):
+a name the caller reads in the contract and pastes, no new grammar.
+
+**The rules — each one is a case the engine used to answer wrong somewhere
+else, so they are the SAME rules (ADR-024 / ENG-14…ENG-30), not new ones:**
+
+- **`id` always comes back**, asked for or not. Without it the references, the
+  cursors and every generic client (the embedded `/app`) break; a projection
+  that could drop the primary key is a footgun with no use.
+- **A name that is not a declared field is a `400` naming it and listing the
+  available set** — `unknown field in fields: datax (available: anio, created_at,
+  data, estado, id, nit)` — exactly like `?sort=ghost` and `?filter[ghost]=`.
+  Never silently ignored: a dropped name would hand the caller a page MISSING
+  a column they asked for under a `200`, indistinguishable from "that column is
+  empty". (It is a 400 and not a 422 on purpose: in this engine `422
+  validation_failed` is the WRITE-BODY contract — `{"error","fields":[…]}` on
+  create/update — and every query-parameter error is a `400` with a message;
+  one client parser per class.)
+- **A name the role's RBAC allowlist hides is a `403`** (`request references a
+  field not permitted for this role: fields=data`) — the `?filter[hidden]=` /
+  `?sort=hidden` rule (SEC-5): the defense exists wherever a field can be
+  NAMED. The allowlist keeps applying to the response afterwards, so `fields=`
+  can never widen what a role reads — only narrow it.
+- **Empty and malformed values are named `400`s:** `?fields=` (an empty form
+  field), `?fields=a,,b` and `?fields=a,` ("empty entry in the field list —
+  remove the extra comma"), `?fields=a&fields=b` (a repeated parameter — the
+  engine will not guess which you meant). Whitespace around a name is trimmed;
+  a repeated NAME (`fields=nit,nit`) is a set and is simply deduplicated.
+- **The universe is the tenant's DEPLOYED surface**, like filters and sort: a
+  column added by a hot migration is selectable without a restart.
+- **Filters, search and sort are unaffected** — they live in the `WHERE`/
+  `ORDER BY`, and Postgres orders by a column that is not in the select list
+  without complaint. `?fields=nit&sort=anio` works.
+
+**Where it applies — every door that returns rows of a resource, from ONE
+implementation (`query.ParseFields` + the projected select list):**
+
+| Door | `?fields=` | Notes |
+|---|---|---|
+| `GET /api/{res}` (list, page and cursor) | yes | the case that motivated it |
+| `GET /api/{res}/{id}` | yes | a detail is usually where you WANT everything — but a label lookup by id, a status poll, a relation resolver are details too |
+| `GET /api/{res}/{id}/{relation}` (subroute) | yes | names fields of the TARGET resource; the target's allowlist decides the 403 |
+| `?include=` (list and get) | yes, on the ROOT | the embedded objects stay whole — there is no nested syntax (`fields[lines]=`), documented, not silent: a `fields=` entry never reaches an embed |
+| GraphQL `{ res { data { a b } } }` / `{ singular(id) { a b } }` | **automatic** | the selection set IS the projection and is pushed into the SQL since MOTOR-FIELDS-S1 — before, GraphQL selected fields in Go over `SELECT *`, so it read the TOAST exactly like REST; a hidden field selected by a scoped role still resolves `null` (unchanged contract) |
+| `ctx.Query` (library) | `QueryOpts.Fields` | same validation, same 403/400 as `Filters`/`OrderBy` |
+| `/admin/tenants/{id}/data/{res}` (admin browse) | yes | same builder |
+| `GET /api/{res}/aggregate` | no | returns no rows; a `fields=` there is an unknown function, a named 400 as before |
+| `GET /api/{res}/events` (SSE) | no | the event carries the row that changed, allowlist-scoped; a projection of a push is a different feature |
+| `POST /api/transaction`, writes | no | write doors return the written row |
+
+**What it is NOT.** It does not change the default: a request without
+`fields=` is byte-identical to before (`SELECT *`, same plan, same bytes — the
+binary-diff gate and the frozen ABBA say so). It is not a per-field
+`select: false` in the schema, and heavy fields are NOT dropped from
+collections by default — see the proposal below. It does not project embeds
+(`?include=`), it does not exist on aggregates or SSE, and it is not sparse
+WRITES (a `PATCH` already is).
+
+**How to know it worked — the plan, not the intuition.** The `Server-Timing`
+header on every generated read carries the database stage (`query;dur=…`);
+compare the same page with and without `fields=`. In the database,
+`EXPLAIN (ANALYZE, BUFFERS)` of the two statements shows the difference as
+buffers: the projected query touches the heap pages only; the `SELECT *`
+touches the heap AND the TOAST relation (`pg_statio_user_tables.toast_blks_*`
+moves). The integration test `pkg/integration/fields_test.go` pins all three
+at once: the SQL the engine emitted (through a pgx tracer), the TOAST buffers
+of that SQL, and the bytes on the wire.
+
+**Measured (MOTOR-FIELDS-S1, the report's case rebuilt: 46,119 rows, a ~52 KB
+`json` document each, 20 per page, dev box 1 vCPU + local Postgres —
+docs/BENCHMARKS.md §4b):** page 1 is **961,702 B / query 53 ms** without
+`fields=` and **3,059 B / 1.2 ms** with `fields=nit,anio,estado,contador_id`;
+10 pages read **1,300 TOAST blocks vs 0**; under 10 rps of random pages the
+p50/p95/p99 go from **174 ms / 2.25 s / 2.8 s** (575 MB received in a
+minute — the report's regime) to **20 ms / 81 ms / 175 ms** (2.2 MB). What the
+projection does NOT remove: the OFFSET of a deep page (the last page still
+costs ~59 ms with `fields=`: the index scan walks 46k entries) and the
+`COUNT(*)` — different features (keyset cursors, `?count=`).
+
+**PROPOSED, NOT BUILT — omitting heavy fields from collections by default.**
+The report's alternative ("or exclude large fields from collections by
+default") is a CONTRACT BREAK: every existing client that lists a resource and
+reads `row.data` would get `undefined` after an upgrade, silently — the exact
+class ADR-024 forbids. It also cannot be decided by the engine: "heavy" is not
+a type (`text` can be 3 bytes or 3 MB; a `jsonb` of attrs is what a catalogue
+list SHOWS). So the migration path, if a second app asks for it, is a
+DECLARATION on the field, never a flipped default:
+
+```json
+"data": { "type": "json", "list": "on_request" }
+```
+
+— list and subroute reads omit the field unless `fields=` names it; the
+detail keeps it; `/openapi.json` publishes `x-appximo-list: "on_request"` on
+the property so a generic client knows why a column is absent; `validate`
+warns when a resource has no such declaration on a `json`/`jsonb`/`text`
+field and a list page exceeds a size the author can set. Opt-in per schema
+means the author breaks their own clients on purpose, at a version of their
+choosing, and the contract says it. Registered as SCHEMA-8 in docs/BACKLOG.md;
+`?fields=` is the half that is safe to ship today and the half a client can
+adopt without touching the schema.
+
 **Undeclared columns: still supported, no longer the default answer.** Creating
 your own column with `BeforeStart` DDL works — the engine's migration is additive
 and reports a column it does not know about as `gated_drops` (drift) rather than

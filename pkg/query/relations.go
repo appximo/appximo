@@ -88,6 +88,60 @@ type includeBuilder struct {
 	args     []any // starts as the base query's args; embeds append more
 	aliasN   int
 	nodes    int
+	// rootFields is the `?fields=` projection of the BASE row (MOTOR-FIELDS-S1):
+	// nil = every column. The base SELECT the caller hands in is already
+	// projected, so the root json_build_object must name only those columns —
+	// a column absent from the subquery is a SQL error, and naming every
+	// column would read the TOAST the projection was meant to skip. Embeds are
+	// never projected (no nested syntax exists; documented, not silent).
+	rootFields map[string]bool
+	// baseRefs collects every column of the BASE row the wrapper's joins
+	// reference (a belongs_to FK, a has_many/m2m referenced column): with a
+	// projection they must be in the base subquery even when the caller did
+	// not ask for them — and only they. (A `SELECT *` base would NOT detoast
+	// the unrequested document — a TOAST pointer that only travels inside a
+	// subquery tuple is dereferenced by nothing, measured 0 blocks with and
+	// without a sort — but it copies the wide tuple through the sort and the
+	// join for no reason; the projected base is the honest statement.)
+	baseRefs map[string]bool
+}
+
+// parentRef renders parentAlias."col", recording a base-row reference.
+func (b *includeBuilder) parentRef(parentAlias, col string) string {
+	if parentAlias == "_base" {
+		if b.baseRefs == nil {
+			b.baseRefs = map[string]bool{}
+		}
+		b.baseRefs[col] = true
+	}
+	return parentAlias + "." + quoteIdent(col)
+}
+
+// BaseSelect builds the base statement for the include wrappers: cols nil →
+// the historical `SELECT *` (no projection); otherwise exactly those columns.
+// The args must not depend on cols (a projection changes no parameter).
+type BaseSelect func(cols []string) (sql string, args []any)
+
+// baseColumns is the projected base subquery's column list: the requested
+// fields (id first), then every column the joins reference, then the order
+// column — deduplicated, extras sorted for deterministic SQL.
+func (b *includeBuilder) baseColumns(rootFields []string, orderField string) []string {
+	if rootFields == nil {
+		return nil
+	}
+	out := append([]string(nil), rootFields...)
+	seen := fieldSet(rootFields)
+	var extra []string
+	for c := range b.baseRefs {
+		if !seen[c] {
+			extra = append(extra, c)
+		}
+	}
+	if orderField != "" && !seen[orderField] && !b.baseRefs[orderField] {
+		extra = append(extra, orderField)
+	}
+	sort.Strings(extra)
+	return append(out, extra...)
 }
 
 func (b *includeBuilder) next() string {
@@ -115,7 +169,18 @@ func quoteIdent(s string) string { return `"` + s + `"` }
 // them) and `n` (the row count, for has_next). baseSelect/baseArgs come from
 // QueryBuilder.SQL(); orderField/orderDir from QueryBuilder.EffectiveOrder().
 func BuildListInclude(baseResource, include, baseSelect string, baseArgs []any, orderField, orderDir string, s *schema.APISchema, maxDepth int, rbacFor RelationRBAC) (sql string, args []any, ierr *IncludeError) {
-	b := &includeBuilder{s: s, rbacFor: rbacFor, maxDepth: maxDepth, args: append([]any(nil), baseArgs...)}
+	return BuildListIncludeFields(baseResource, include, func([]string) (string, []any) { return baseSelect, baseArgs }, nil, orderField, orderDir, s, maxDepth, rbacFor)
+}
+
+// BuildListIncludeFields is BuildListInclude with a `?fields=` projection
+// (MOTOR-FIELDS-S1): rootFields is QueryBuilder.Fields() — nil keeps the
+// historical statement byte for byte. base builds the base subquery for the
+// column list the wrapper needs: the requested fields plus the columns its
+// joins and its ORDER BY reference (baseColumns); the root json object names
+// the requested fields only.
+func BuildListIncludeFields(baseResource, include string, base BaseSelect, rootFields []string, orderField, orderDir string, s *schema.APISchema, maxDepth int, rbacFor RelationRBAC) (sql string, args []any, ierr *IncludeError) {
+	baseSelect, baseArgs := base(nil)
+	b := &includeBuilder{s: s, rbacFor: rbacFor, maxDepth: maxDepth, args: append([]any(nil), baseArgs...), rootFields: fieldSet(rootFields)}
 	root, perr := parseIncludeTree(include)
 	if perr != nil {
 		return "", nil, perr
@@ -124,6 +189,9 @@ func BuildListInclude(baseResource, include, baseSelect string, baseArgs []any, 
 	rowObj, joins, e := b.rowObject("_base", baseResource, root, 0)
 	if e != nil {
 		return "", nil, e
+	}
+	if cols := b.baseColumns(rootFields, orderField); cols != nil {
+		baseSelect, _ = base(cols)
 	}
 
 	var sb strings.Builder
@@ -148,7 +216,14 @@ func BuildListInclude(baseResource, include, baseSelect string, baseArgs []any, 
 // cond]) so the result is one nested JSON object (column `data`), or zero rows
 // (→ 404). baseSelect/baseArgs come from the caller's get-by-id SQL.
 func BuildGetInclude(baseResource, include, baseSelect string, baseArgs []any, s *schema.APISchema, maxDepth int, rbacFor RelationRBAC) (sql string, args []any, ierr *IncludeError) {
-	b := &includeBuilder{s: s, rbacFor: rbacFor, maxDepth: maxDepth, args: append([]any(nil), baseArgs...)}
+	return BuildGetIncludeFields(baseResource, include, func([]string) (string, []any) { return baseSelect, baseArgs }, nil, s, maxDepth, rbacFor)
+}
+
+// BuildGetIncludeFields is BuildGetInclude with a `?fields=` projection (see
+// BuildListIncludeFields; a single row has no order column).
+func BuildGetIncludeFields(baseResource, include string, base BaseSelect, rootFields []string, s *schema.APISchema, maxDepth int, rbacFor RelationRBAC) (sql string, args []any, ierr *IncludeError) {
+	baseSelect, baseArgs := base(nil)
+	b := &includeBuilder{s: s, rbacFor: rbacFor, maxDepth: maxDepth, args: append([]any(nil), baseArgs...), rootFields: fieldSet(rootFields)}
 	root, perr := parseIncludeTree(include)
 	if perr != nil {
 		return "", nil, perr
@@ -157,6 +232,9 @@ func BuildGetInclude(baseResource, include, baseSelect string, baseArgs []any, s
 	rowObj, joins, e := b.rowObject("_base", baseResource, root, 0)
 	if e != nil {
 		return "", nil, e
+	}
+	if cols := b.baseColumns(rootFields, ""); cols != nil {
+		baseSelect, _ = base(cols)
 	}
 
 	var sb strings.Builder
@@ -206,6 +284,9 @@ func (b *includeBuilder) rowObject(alias, resource string, node *includeNode, de
 	pairs := make([]string, 0, len(cols)+1+len(node.children))
 	pairs = append(pairs, "'id', "+alias+"."+quoteIdent("id"))
 	for _, c := range cols {
+		if depth == 0 && b.rootFields != nil && !b.rootFields[c] {
+			continue // the base row is projected (?fields=); this column was not asked for
+		}
 		if unrestricted || allowSet[c] {
 			expr := alias + "." + quoteIdent(c)
 			if res.Fields[c].Type == "json" {
@@ -352,9 +433,7 @@ func (b *includeBuilder) buildEmbed(parentAlias, sourceResource string, rel sche
 		sb.WriteString(".")
 		sb.WriteString(quoteIdent(b.refColumnOf(sourceResource, rel.FK, rel.Target)))
 		sb.WriteString(" = ")
-		sb.WriteString(parentAlias)
-		sb.WriteString(".")
-		sb.WriteString(quoteIdent(rel.FK))
+		sb.WriteString(b.parentRef(parentAlias, rel.FK))
 		sb.WriteString(rowCond)
 		sb.WriteString(" LIMIT 1) ")
 		sb.WriteString(latAlias)
@@ -379,9 +458,7 @@ func (b *includeBuilder) buildEmbed(parentAlias, sourceResource string, rel sche
 		sb.WriteString(".")
 		sb.WriteString(quoteIdent(rel.FK))
 		sb.WriteString(" = ")
-		sb.WriteString(parentAlias)
-		sb.WriteString(".")
-		sb.WriteString(quoteIdent(b.refColumnOf(rel.Target, rel.FK, sourceResource)))
+		sb.WriteString(b.parentRef(parentAlias, b.refColumnOf(rel.Target, rel.FK, sourceResource)))
 		sb.WriteString(rowCond)
 		sb.WriteString(" ORDER BY ")
 		sb.WriteString(childAlias)
@@ -426,9 +503,7 @@ func (b *includeBuilder) buildEmbed(parentAlias, sourceResource string, rel sche
 		sb.WriteString(".")
 		sb.WriteString(quoteIdent(rel.FK))
 		sb.WriteString(" = ")
-		sb.WriteString(parentAlias)
-		sb.WriteString(".")
-		sb.WriteString(quoteIdent(b.refColumnOf(rel.Through, rel.FK, sourceResource)))
+		sb.WriteString(b.parentRef(parentAlias, b.refColumnOf(rel.Through, rel.FK, sourceResource)))
 		sb.WriteString(rowCond)
 		sb.WriteString(" ORDER BY ")
 		sb.WriteString(childAlias)
@@ -450,3 +525,15 @@ func (b *includeBuilder) buildEmbed(parentAlias, sourceResource string, rel sche
 // HasInclude reports whether the request opted into relation embedding. Kept tiny
 // so the no-include hot path is a single empty-string check at the call site.
 func HasInclude(include string) bool { return strings.TrimSpace(include) != "" }
+
+// fieldSet turns a projection into a lookup set; nil for nil (no projection).
+func fieldSet(fields []string) map[string]bool {
+	if len(fields) == 0 {
+		return nil
+	}
+	m := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		m[f] = true
+	}
+	return m
+}

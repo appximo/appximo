@@ -1019,6 +1019,27 @@ would close it better, and is Miguel's call.
 - **Ready:** fixed per the privately-delivered description, with a regression
   test and a binary-diff-gate corpus row.
 
+### SCHEMA-8 — Omit a declared-heavy field from collections by default (`"list": "on_request"`) — PROPOSED, not built
+- **Origin:** MOTOR-FIELDS-S1 (ADR-029). The migration report's alternative to
+  `?fields=` was "exclude large fields from collections by default". Rejected
+  as a flipped default: it is a contract break (every client reading
+  `row.data` from a list gets `undefined` after an upgrade, silently — the
+  ADR-024 class) and "heavy" is not a type the engine can decide. `?fields=`
+  ships instead (opt-in per request, no schema change).
+- **The declared form, if a second app asks:** a per-field key
+  `"data": {"type": "json", "list": "on_request"}` — list and subroute reads
+  omit the field unless `fields=` names it; the detail keeps it;
+  `/openapi.json` publishes `x-appximo-list: "on_request"` on the property so
+  a generic client (the `/app`) knows why a column is absent; `validate`
+  warns when a `json`/`jsonb`/`text` field without it sits on a resource the
+  author marks as large. Opt-in per schema: the author breaks their own
+  clients on purpose, at a version of their choosing, and the contract says it.
+- **Impact:** low today — `?fields=` covers the migrated case and the `/app`
+  uses it; a client that does not send `fields=` keeps paying the document.
+- **Ready:** the key parsed/validated at load (strict-key, json/jsonb/text
+  only), honoured by list/subroute/GraphQL-list/admin-browse, published in
+  the contract, pinned by the gate; measured `no_change` on the plain list.
+
 ### SCHEMA-1 — Computed / derived fields
 - **Origin:** docs/MODEL_LAB.md G7 ("order totals as a computed field").
 - **Impact:** Medium. Totals, counts and balances are recomputed by the client or
