@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787881035734,
+  "lastUpdate": 1787894390778,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -4104,6 +4104,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36576458 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "bc69fe6bb85a0846b7005a4c15deab449d638979",
+          "message": "docs(backlog): APP-PODER-S1 — the /app uses the contract it already had (honest paging + Server-Timing, detail by FKs, JSON editor, views/URL, CSV + batched bulk, relation search); ENG-51 opened; the tracing test's HIT assertion made conditional on X-Cache; ABBA app-patch/app-read no_change ×8\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-28T05:19:22Z",
+          "tree_id": "5fde4d7221035ede3c03040f3eaa782452cde7cd",
+          "url": "https://github.com/appximo/appximo/commit/bc69fe6bb85a0846b7005a4c15deab449d638979"
+        },
+        "date": 1787894389807,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6299,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "392666 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6299,
+            "unit": "ns/op",
+            "extra": "392666 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "392666 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "392666 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 66.49,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "37248816 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 66.49,
+            "unit": "ns/op",
+            "extra": "37248816 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "37248816 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "37248816 times\n4 procs"
           }
         ]
       }
