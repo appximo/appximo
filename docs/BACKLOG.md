@@ -26,7 +26,22 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-27 (MOTOR-AUTORIZACION-S1)** — the class of fields
+**Last reviewed: 2026-08-28 (MOTOR-TIPO-JSON-S1)** — an external report on
+v0.1.9 (`POST {"data": {"nit":"900"}}` on a `json` field → 500; the escaped
+string → 201; the GET returns the escaped string) AUDITED request by request
+against HEAD, v0.1.9 and v0.1.8 before any fix (docs/audits/
+JSON_TYPE_AUDIT_S1.md): identical in the three, as old as the type, the
+driver (pgx cannot bind a Go map into TEXT), no read parity anywhere, and a
+collateral class defect — six client 422s opened the query breaker and every
+write of the process answered 503 for 8 s. The design decision that had never
+been written was taken (ADR-028): a `json` field holds a JSON VALUE on every
+door and every HTTP read; the breaker counts only unavailability (ENG-49).
+Gate 150 = 141 SAME + 9 DIFF (all the feature), full lane + integration + e2e
++ resilience green, ABBA `no_change` ×8 (PATCH and read protocols), 1-B
+suites 23/26/50/21, four schemas in a browser, both demos deployed with the
+report's case reproduced live before (500) and after (201 + native GET),
+rollback drilled both ways. New OPEN: ENG-50 (number fidelity beyond float64,
+engine-wide). Before that: the class of fields
 the client must never write, AUDITED request by request through every write
 door against HEAD and the published v0.1.8/v0.1.9 (docs/audits/
 AUTHZ_WRITE_AUDIT_S1.md), then closed as ONE policy: the identity column of
@@ -194,6 +209,29 @@ refreshed).
 ---
 
 ## OPEN
+
+### ENG-50 — JSON number fidelity beyond float64, in both directions (`json`/`jsonb`)
+
+**Origin:** MOTOR-TIPO-JSON-S1 (ADR-028, alternative "preserve the client's
+exact bytes", deferred). Every HTTP door decodes the request body into Go
+values (`encoding/json` → float64), so a number inside a `json`/`jsonb`
+document loses precision past ~2^53 (`12345678901234567890` → `…67000`) and
+a decimal literal is re-rendered (`1.50` → `1.5`) before it reaches the
+column; on the way OUT pgx decodes a `jsonb` document into Go values with the
+same loss. A `json` field written as a JSON-text STRING keeps its numeric text
+(compacted verbatim) — the one path that is exact today.
+
+**Impact:** low for the known apps (money is `int64` minor units by doctrine;
+ids are strings); real for a document store carrying big integers or exact
+decimals. Documented in backend-spec §2 and SCHEMA_REFERENCE §3 as the ~2^53
+limit.
+
+**Ready:** an engine-wide decision — decode bodies with `UseNumber` (and
+teach the type checks `json.Number`) or capture `json.RawMessage` for
+json/jsonb fields on the way in, AND scan json/jsonb columns as
+`json.RawMessage` on the way out (a pgx type-map change that also changes
+`Ctx.Query`'s documented row types) — measured on the write and read
+protocols. Not a `json`-only fix: half of it is worthless without the other.
 
 ### ENG-48 — The platform-admin login throttle has no knob either (same shape as ENG-47)
 
@@ -1155,6 +1193,39 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in MOTOR-TIPO-JSON-S1 (2026-08-28)
+
+Engine. The thesis: a type that accepts an escaped string and answers 500 to
+the same content as an object is not rejecting, it is failing — two defects
+(acceptance, failure form) judged separately, and a design decision nobody
+had written. Audit before any fix
+([docs/audits/JSON_TYPE_AUDIT_S1.md](audits/JSON_TYPE_AUDIT_S1.md)), decision
+in [ADR-028](adr/ADR-028-json-field-is-a-json-value.md). Engine `5bc6dda` →
+`f45d80c`; Miguel cuts the tag.
+
+| Item | What landed | Proof |
+|---|---|---|
+| **A · The seven probes** | 35 real requests per binary (REST create/PATCH/PUT, batch, GraphQL, jsonb as the reference) against HEAD, v0.1.9 and v0.1.8: object/array/number/boolean on `json` → **500** everywhere (`failed to encode args[0]: unable to encode map[string]interface {} into text format for text (OID 25)` — captured only in the trace store, NOT in the log); a string, ANY string, → 201 stored verbatim (`"hola mundo"`); every read returned the escaped string (get, list, GraphQL `String`); batch 500 `failed_operation: 0`; GraphQL rejected an object structurally; identical in v0.1.8 → the defect is as old as the type (`b32c969`). Branch: the driver, not a type dispatch. One code path (`BuildInsertArgs` / the SET builder) — the demos' seeders all send strings, which is why nobody saw it. | `evidencia/MOTOR-TIPO-JSON-S1/probe-{v019,v018,base,new}.txt` (internal repo); the audit doc |
+| **A · The collateral finding** | The query breaker (`pkg/db.TenantDB.exec`) counted EVERY error as a database failure: 40 object POSTs → 500 ×22 then 503 ×18; **six ghost-field 422s → every write of the process 503 for 8 s** (reads unaffected), renewable by any caller with `create`. All versions. | reproduced on HEAD and on the 58 before the deploy |
+| **B · The decision (ADR-028)** | A `json` field holds a JSON VALUE: on write every door takes object/array/number/boolean, a **string is JSON text** (the jsonb/Postgres/pgx convention), a non-JSON string is a **422 `rule:"type"`** naming the field — on `jsonb` too (it was an anonymous 400 from 22P02); on read every HTTP surface returns the value natively (list/get/create/update, subroutes, `?include=` via `::json` in SQL, GraphQL as the `JSON` scalar — SDL `String`→`JSON` declared —, SSE, batch results, admin browse, webhook payload). Column stays TEXT (canonical compact JSON text; no migration). `Ctx.Query` keeps the text as a `string`. OpenAPI: type-less document property + `x-appximo-json: "text"|"jsonb"` so `/app` renders a JSON editor for both. Rejected alternatives and the migration note in the ADR; "exact bytes preserved" retracted from every doc. | `docs/adr/ADR-028-json-field-is-a-json-value.md`; backend-spec §2 (+ the row-types line) |
+| **C · One function each way** | `schema.CoerceJSONFields` (pkg/schema/jsonvalue.go) called from PrepareCreate, PrepareUpdate, CollectUpdate, the GraphQL create, and re-run after a before-hook on REST/batch/GraphQL (idempotent); `schema.PromoteJSONText` at every REST read site with a per-resource precomputed column list (empty → zero cost), in the batch results, the admin browse and the GraphQL `JSON` scalar's Serialize; `alias.col::json` in `rowObject` for embeds. | unit tests `jsonvalue_test.go`, `TestWriteCores_CoerceJSONFields`; integration `json_field_integration_test.go` (5 tests, every door, parity, embeds, subroute, filter, a 36 KB realistic declaration, the breaker) — **fails on the pre-fix worktree on every door, passes on the fix** |
+| **C · ENG-49 closed** | `resilience.NewQueryBreakerWith(name, isFailure)`; pkg/db passes `isUnavailableCause` — the SAME predicate that decides the 503 (timeouts, connection failures, class 08/53/57P0x). 40 ghost-field 422s → 40 × 422 and the next write 201, on HEAD and on the 58 after the deploy. | `TestNewQueryBreakerWith_StatementErrorsDoNotCount`, `TestJSONField_ClientErrorsNeverOpenTheBreaker` |
+| **C · Volume** | A complete declaration (contribuyente, 120 renglones with soportes, totales): 36,534 B → POST 15 ms, GET 10 ms on the dev box, byte-equal round trip; `?include=` embed of a json row + a json child; subroute; `filter[eq]` over the canonical text. | the integration test's log |
+| **C · Four schemas + 1-B** | vet 11/11 · conjunto 12/12 · fresco 11/11 · tiendita 15/15 (generic CRUD in a real browser on the fixed engine; the state/board coverage of APP-VITRINA-S1 was not re-driven — resources without a lifecycle were chosen) + json probes: fresco `equipos.especificaciones` (jsonb) object round-trip, tiendita `tipos_producto.atributos_def` (json) object round-trip and the seeded string rows now read as objects, `/app` renders the JSON editor for it and a PATCH of an edited object saves and re-opens natively. 1-B against commerce `95f5735-json` on a scratch DB: `verify.sh` 23/23 · `verify-webhook.sh` 26/26 · `e2e-1b.sh` 50/50 · `e2e-browser.mjs` 21/21. | `/tmp/mj/logs/{vit-e2e,1b-*}.log` (copied to the internal repo) |
+| **D · Gates** | unit `-race -short` 0 · full lane (no `-short`) 44 ok · integration ok · e2e ok · resilience ok · lint 0 · vet/gofmt clean · **binary-diff gate 150 = 141 SAME + 9 DIFF** — the 8 new json corpus rows (object 500→201, array 500→201, string-as-text 201→201 with the OBJECT back, invalid string 201→422, jsonb invalid 400→422, PATCH object 500→200, PATCH `""` 200→422, GraphQL object structural-error→object) + `openapi-served-contract` (the `extra`/`attrs` properties: type-less + `x-appximo-json`). **ABBA frozen** (`appximo-base` = pre-fix HEAD, `appximo-new`): PATCH protocol (`erp_patch.js`, nimbus, 100 rps × 30 s × 8 × 4 arms) **`no_change` ×4** — with host stalls named: two whole runs at p50 ≈ 1.3–1.5 s (B2#2, A2#6) and p95 spikes on both binaries, sign-symmetric; clean-run medians A 4.27 / B 4.73 / B2 4.53 / A2 4.55 ms (A→B +11 %, A2→B2 −0.3 %, same-binary A→A2 +6 %: the cross deltas invert and the same-binary drift exceeds the B2/A2 delta → no binary effect resolvable above host noise). Read protocol (`sustained_2krps.js`, benchblank, 5 × 4 arms): **`no_change` ×4** (−0.3 %, +4.2 %, control −4.2 %, +0.1 %; p50 0.59–0.61 ms). | `benchmarks/history.tsv` json-patch-*/json-read-*; `abba-{patch,read}.log` |
+| **E · The 58** | Backups first (`backup.sh` dump `appitools-20260828-012912.dump`, `pg_dump` of vetapp `vetapp-20260828-012924.pre-json.dump`, binaries/CLI/env/schema `.pre-json`, golden dump untouched md5 `7dcffa84…`). **The report's case reproduced LIVE before the deploy** on the tiendita as `dueno`: `POST /api/tipos_producto {"atributos_def": {...}}` → **500**, the GET an escaped `str`. Deploy: tiendita `deploy-update.sh --cli` → `commerce 95f5735-json` + CLI `appximo f45d80c-json` (PIDs 447329 → 461585); vetapp swap+restart → `appximo f45d80c-json` (445453 → 461771). **After: 201, GET returns the object, PATCH object 200, escaped string still 200, `"hola mundo"` 422 naming the field, the three seeded rows read as objects, 40 ghost 422s then a legal write 200, OpenAPI `x-appximo-json: text`.** Outside: tiendita `verify-vitrina` 22/22 (desktop + mobile, e2e purchase in both), `demo-check` 8/8 (both ways, zero writes, 403 ×4), petfriendly 20/20. **Rollback drilled both ways** (tiendita → `95f5735-authz` → `95f5735-json`, PIDs 462075 → 462202; vetapp → `6429a00-authz` → `f45d80c-json`, 462308 → 462392). Probe row deleted; the two e2e purchases + their clients swept — demo back on the golden counts (13/13/9). | `/tmp/mj/deploy/*.sh`, `58-verify*.log` |
+| **F · Docs** | AGENTS.md (type table + the json/jsonb paragraph), backend-spec §2 + row types, SCHEMA_REFERENCE §3/§4.8, GUIDE, backoffice-spec §2 row, the LLM grammar (`pkg/aigen/prompt.go`), the audit, ADR-028; release-note draft extended (`RELEASE_NOTE_v0.1.10.md`, internal) with the migration note + the query for legacy non-JSON rows; the answer to the external agent (`RESPUESTA_AGENTE_EXTERNO_JSON.md`, internal — the five questions were not in the repo verbatim; they are answered as the report's five diagnostic questions, for Miguel to adjust before forwarding); handoff 03 (A-48) / 04 / 05 / 00 / registro. | |
+
+**Found and NOT fixed (each with its row):** ENG-50 (number fidelity beyond
+float64 — engine-wide, both directions). **Known and documented, not a row:**
+a legacy `json` row holding non-JSON text (only possible from an engine before
+ADR-028) reads back as a string on the Go surfaces but breaks the `::json`
+cast of an `?include=` embed of that resource with a 400 until fixed — the
+release note carries the query; the project's own apps have none (checked on
+the 58: 2/2 rows valid JSON). `examples/backoffice-guide/web/contract.js` (the
+teaching copy) has no JSON control at all — left as is (documented as "may
+diverge in polish"); the embedded `/app` is the reference.
 
 ## DONE in MOTOR-AUTORIZACION-S1 (2026-08-27)
 
