@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787905290168,
+  "lastUpdate": 1787937657763,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -4248,6 +4248,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "34582324 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "c655ce7f1bb3a8add660ba7249d5540680cac2a2",
+          "message": "docs(backlog): MOTOR-FIELDS-S1 — MIG-FRONT #5 DONE (?fields= pushed to the SELECT + GraphQL pushdown, ADR-029), SCHEMA-8 registered (default omission as a declaration, not built), the 58 has swap; gate 151+12 explained, ABBA read no_change ×4 (host drift declared), both demos deployed with rollback drilled, bench history\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-28T17:20:23Z",
+          "tree_id": "5c96d9f13ac141237e3a3f8536701f137e9d8258",
+          "url": "https://github.com/appximo/appximo/commit/c655ce7f1bb3a8add660ba7249d5540680cac2a2"
+        },
+        "date": 1787937656073,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 4036,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "574842 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 4036,
+            "unit": "ns/op",
+            "extra": "574842 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "574842 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "574842 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 41.95,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "57648276 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 41.95,
+            "unit": "ns/op",
+            "extra": "57648276 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "57648276 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "57648276 times\n4 procs"
           }
         ]
       }
