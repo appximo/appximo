@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788022815047,
+  "lastUpdate": 1788026926070,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -4680,6 +4680,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "37393034 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "b65ab4bd11d2c656231ac1878dd47f9847e8776f",
+          "message": "feat(lab): the ephemeral capacity laboratory — guarded droplets (refusal before the network, tested), a deterministic two-size dataset, and six commands (LAB-CAPACIDAD-S1)\n\nThe leash lives in the wrapper, not the token: DO scopes are per resource\nTYPE, so tools/lab creates only applab-prefix+tag droplets, refuses any\ndestroy that lacks EITHER (or answers to a production IP) with zero network\ncalls — pinned by tests — caps simultaneous droplets at 4, ships a reaper,\nand every mutating command is a dry-run unless -apply. lab down's verdict\ncomes from a final API re-listing, survives partial failure, and is\nidempotent. The topology separates the generator (dedicated c-4) from the\ntargets (shared s-2vcpu-2gb = the customer number; dedicated c-2 = the\nregression box), all in one private VPC, targets provisioned via install.sh.\nA run in which the generator box exceeded 70 % busy is INVALID and named.\ndocs/BENCHMARKS.md §4e declares this the official measurement procedure,\nreplacing the single-host method; the first live run is OPS-37 (blocked on\nthe scoped token).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-29T18:07:46Z",
+          "tree_id": "3b55cd7c05e9f261802455cc778009df7f5ddaad",
+          "url": "https://github.com/appximo/appximo/commit/b65ab4bd11d2c656231ac1878dd47f9847e8776f"
+        },
+        "date": 1788026924598,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 4867,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "484166 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 4867,
+            "unit": "ns/op",
+            "extra": "484166 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "484166 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "484166 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 48.88,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "50338812 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 48.88,
+            "unit": "ns/op",
+            "extra": "50338812 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "50338812 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "50338812 times\n4 procs"
           }
         ]
       }
