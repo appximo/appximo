@@ -178,6 +178,7 @@ type DBClientStats struct {
 	NewConnsCount         int64   `json:"new_conns_count"`
 	MaxLifetimeDestroy    int64   `json:"max_lifetime_destroy_count"`
 	MaxIdleDestroy        int64   `json:"max_idle_destroy_count"`
+	NewConnsDelta         int64   `json:"new_conns_delta"`
 	AcquireDelta          int64   `json:"acquire_delta"`
 	EmptyAcquireDelta     int64   `json:"empty_acquire_delta"`
 	EmptyAcquireWaitDelta float64 `json:"empty_acquire_wait_delta_ms"`
@@ -187,6 +188,15 @@ type DBClientStats struct {
 	QueryLatencyP99Ms     float64 `json:"query_latency_p99_ms"`
 	QueryCount            int64   `json:"query_count"`
 	Saturated             bool    `json:"saturated"` // acquired == max && idle == 0
+	// Warming is the COLD-START of the pool, not a wall: the pool has not
+	// reached MaxConns yet and it opened at least one connection during this
+	// tick, so the goroutines that "found no free connection" were waiting for
+	// a connection to be CONSTRUCTED (TCP + TLS + auth + the session's SET),
+	// which every process pays exactly once per connection. The pool_exhausted
+	// rule ignores a warming tick (CAPACIDAD-USL-S1): the first second of every
+	// load run used to read pool_exhausted and a false positive in the first
+	// tick of every run poisons every later reading of the same series.
+	Warming bool `json:"warming"`
 }
 
 // DBServerStats is layer 4b — pg_stat_* views, ONLY when the database is

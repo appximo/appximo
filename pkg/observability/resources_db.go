@@ -99,8 +99,15 @@ func (r *dbReader) fillClient(st *DBClientStats) {
 			st.AcquireWaitDeltaMs = float64(d) / float64(time.Millisecond)
 		}
 		st.CanceledAcquireDelta = max64(0, s.CanceledAcquireCount-r.last.CanceledAcquireCount)
+		st.NewConnsDelta = max64(0, s.NewConnsCount-r.last.NewConnsCount)
 	}
 	st.Saturated = s.MaxConns > 0 && s.AcquiredConns >= s.MaxConns && s.IdleConns == 0
+	// Cold start, not a wall: the pool is still GROWING towards MaxConns and it
+	// opened connections during this tick, so the waiters were queued behind a
+	// connection being CONSTRUCTED, not behind a saturated pool. A pool that is
+	// genuinely undersized always reaches MaxConns — at worst this delays the
+	// verdict by one tick; it never calls a warm-up a wall (CAPACIDAD-USL-S1).
+	st.Warming = s.MaxConns > 0 && s.TotalConns < s.MaxConns && st.NewConnsDelta > 0
 	r.last = s
 	r.primed = true
 }

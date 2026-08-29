@@ -203,9 +203,19 @@ func attribute(s *ResourceSnapshot, t AttributionThresholds, baselineP99 float64
 	// a 40 ms database) showed the pool oscillating between 1/2 and 2/2 while
 	// 3 empty acquires per tick queued behind it, and the snapshot at the tick
 	// boundary read 1/2 "healthy". Saturated at the instant is corroboration.
+	//
+	// And a WARMING pool is never exhausted (CAPACIDAD-USL-S1): on the first
+	// tick of every load run the pool holds zero connections, so every waiter
+	// queues behind a connection being CONSTRUCTED (TCP + auth + the session's
+	// SET) — a one-off cost every process pays, not a wall. Reading
+	// pool_exhausted in the first second of every run poisons every later
+	// reading of the series, so the rule requires the pool to have GROWN to
+	// MaxConns (DBClientStats.Warming is false). A genuinely undersized pool
+	// always reaches MaxConns: at worst the verdict is one tick late.
 	poolWaitFrac := db.EmptyAcquireWaitDelta / (secs * 1000)
-	poolExhausted := db.EmptyAcquireDelta > 0 &&
+	poolExhausted := db.EmptyAcquireDelta > 0 && !db.Warming &&
 		(poolWaitFrac >= t.PoolWaitFraction || (latencyHigh && (db.Saturated || poolWaitFrac >= t.PoolWaitFraction/5)))
+	sig("pool_warming", b2f(db.Warming), 0, "pool below max_conns and still opening", db.Warming)
 	sig("pool_acquired_of_max", float64(db.AcquiredConns), float64(db.MaxConns), "connections", db.Saturated)
 	sig("pool_empty_acquire_delta", float64(db.EmptyAcquireDelta), 1, "count", db.EmptyAcquireDelta > 0)
 	sig("pool_empty_acquire_wait_fraction", poolWaitFrac, t.PoolWaitFraction, "fraction of interval", poolWaitFrac >= t.PoolWaitFraction)
@@ -310,6 +320,13 @@ func (s *ResourceSnapshot) describeWith(t AttributionThresholds) {
 		rt.SchedLatencyP99S*1000, rt.GCPauseTotalP99S*1000, float64(rt.GCCyclesDelta)/secs,
 		db.EmptyAcquireWaitDelta/(secs*1000), math.Min(1, safeDiv(db.QueryLatencyP99Ms, rq.LatencyP99Ms)),
 		rt.MutexWaitDeltaS/secs, s.Verdict.BaselineP99)
+}
+
+func b2f(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func safeDiv(a, b float64) float64 {

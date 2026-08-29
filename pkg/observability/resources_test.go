@@ -329,3 +329,45 @@ func TestDBReader_ServerProbe(t *testing.T) {
 		t.Fatalf("third probe = %+v", sv)
 	}
 }
+
+// Cold start is not a wall: on the first tick of a load run the pool holds no
+// connections, so every waiter queues behind a connection being CONSTRUCTED.
+// The reader marks the tick Warming and the pool_exhausted rule stands down;
+// once the pool has grown to MaxConns the same numbers ARE the verdict
+// (CAPACIDAD-USL-S1).
+func TestDBReader_ColdStartIsWarmingNotExhaustion(t *testing.T) {
+	calls := 0
+	stats := []PoolStat{
+		// t0: empty pool, nothing asked yet.
+		{MaxConns: 10, TotalConns: 0, AcquiredConns: 0, IdleConns: 0},
+		// t1: traffic arrives — 40 goroutines found no connection and waited
+		// 2 s in total while the pool opened 6 connections. Still below max.
+		{MaxConns: 10, TotalConns: 6, AcquiredConns: 6, IdleConns: 0, NewConnsCount: 6,
+			AcquireCount: 300, EmptyAcquireCount: 40, EmptyAcquireWaitTime: 2 * time.Second},
+		// t2: pool fully grown, the same waiting continues — real exhaustion.
+		{MaxConns: 10, TotalConns: 10, AcquiredConns: 10, IdleConns: 0, NewConnsCount: 10,
+			AcquireCount: 600, EmptyAcquireCount: 90, EmptyAcquireWaitTime: 4 * time.Second},
+	}
+	r := newDBReader(func() PoolStat { s := stats[calls]; calls++; return s }, nil, true, time.Second)
+	r.readClient()
+
+	warm := ResourceSnapshot{IntervalMs: 1000}
+	r.fillClient(&warm.DBClient)
+	if !warm.DBClient.Warming || warm.DBClient.NewConnsDelta != 6 {
+		t.Fatalf("cold start must be Warming with the new-conn delta: %+v", warm.DBClient)
+	}
+	warm.Request = RequestStats{Count: 300, RPS: 300, LatencyP99Ms: 400}
+	if a, _ := attribute(&warm, AttributionThresholds{}.withDefaults(), 5, false); a == AttrPoolExhausted {
+		t.Fatalf("a warming pool must never be attributed pool_exhausted (got %s)", a)
+	}
+
+	grown := ResourceSnapshot{IntervalMs: 1000}
+	r.fillClient(&grown.DBClient)
+	if grown.DBClient.Warming {
+		t.Fatalf("a pool at max_conns is not warming: %+v", grown.DBClient)
+	}
+	grown.Request = RequestStats{Count: 300, RPS: 300, LatencyP99Ms: 400}
+	if a, _ := attribute(&grown, AttributionThresholds{}.withDefaults(), 5, false); a != AttrPoolExhausted {
+		t.Fatalf("a grown, saturated, waiting pool IS pool_exhausted (got %s)", a)
+	}
+}
