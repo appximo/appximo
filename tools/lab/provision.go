@@ -131,8 +131,11 @@ func buildArtifacts(root string) (engineBin, capacityBin, version string, err er
 	engineBin = filepath.Join(dir, "appximo")
 	capacityBin = filepath.Join(dir, "capacity")
 	env := append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
+	rev, _ := sh("git", "-C", root, "rev-parse", "--short", "HEAD")
+	rev = strings.TrimSpace(rev)
+	ldflags := fmt.Sprintf("-s -w -X main.version=lab-%s -X main.revision=%s", rev, rev)
 	for _, b := range []struct{ out, pkg string }{{engineBin, "./cmd/appximo"}, {capacityBin, "./tools/capacity"}} {
-		cmd := exec.Command("go", "build", "-o", b.out, b.pkg)
+		cmd := exec.Command("go", "build", "-ldflags", ldflags, "-o", b.out, b.pkg)
 		cmd.Dir = root
 		cmd.Env = env
 		var out []byte
@@ -233,10 +236,13 @@ func provisionTarget(root string, n *NodeState, engineBin, dataset string) error
 	}
 	// 1. The installer — the same one a customer runs. If it fails or its
 	// post-install verification complains, that IS a finding; surface it whole.
+	// install.sh's parser takes ONLY the --flag=value form (its case patterns
+	// are `--domain=*` etc.) — learned live: the space-separated form fails
+	// as `unknown flag: --domain`.
 	install := fmt.Sprintf(`chmod +x /root/lab/appximo
-bash /root/lab/install.sh --domain %s.internal --email lab@appximo.dev \
-  --binary /root/lab/appximo --schema /root/lab/schema.json \
-  --port %d --internal-tls --yes`, n.Name, enginePort)
+bash /root/lab/install.sh --domain=%s.internal --email=lab@appximo.dev \
+  --binary=/root/lab/appximo --schema=/root/lab/schema.json \
+  --port=%d --internal-tls --yes`, n.Name, enginePort)
 	if out, err := sshRun(n.PublicIP, install); err != nil {
 		return fmt.Errorf("install.sh FAILED on %s (a finding — the customer path broke):\n%s\n%w", n.Name, truncate(out, 3000), err)
 	}
@@ -267,7 +273,9 @@ CODE=$(curl -s -o /root/lab/register.out -w '%%{http_code}' -X POST http://127.0
   -H "X-Admin-Key: $KEY" -H 'Content-Type: application/json' \
   -d "{\"tenant_id\":\"%[1]s\",\"display_name\":\"Lab\",\"email\":\"lab@appximo.dev\",\"plan\":\"free\",\"schema\":$(cat /root/lab/schema.json)}")
 case "$CODE" in 2*|409) : ;; *) echo "tenant registration: HTTP $CODE"; cat /root/lab/register.out; exit 1;; esac
-sudo -u postgres psql -q appximo %[2]s -f /root/lab/seed.sql
+# Seed via STDIN: the postgres user cannot read under /root (learned live),
+# and ON_ERROR_STOP because psql otherwise exits 0 over a failed script.
+sudo -u postgres psql -q -v ON_ERROR_STOP=1 appximo %[2]s < /root/lab/seed.sql
 TOK=$(/opt/appximo/bin/appximo token --secret "$SEC" --tenant %[1]s --role %[3]s | tail -1)
 curl -fsS -H "Host: %[1]s.%[4]s.internal" -H "Authorization: Bearer $TOK" \
   "http://127.0.0.1:%[5]d/api/productos?per_page=1&fields=id" >/dev/null

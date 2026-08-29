@@ -314,8 +314,19 @@ func BuildReport(rows []RunResult, metric, thinks string, resamples int) Report 
 		}
 	}
 
+	// Where the generator ran is read off the data, not asserted: engine
+	// CPU-seconds are measurable only when the engine shares the box (they
+	// come from local /proc). Zero engine CPU across every row means the
+	// generator had its own host — the isolated-lab mode (LAB-CAPACIDAD-S2).
+	genOn := "its own host (isolated lab); the CPU columns describe the GENERATOR box"
+	for _, r := range rows {
+		if r.CPU.EngineS > 0 {
+			genOn = "same host as the engine (declared confound)"
+			break
+		}
+	}
 	rep.Conditions = Conditions{
-		CPUs: rows[0].CPU.CPUs, GeneratorOn: "same host as the engine (declared confound)",
+		CPUs: rows[0].CPU.CPUs, GeneratorOn: genOn,
 		Started: time.UnixMilli(tMin).UTC().Format(time.RFC3339),
 		Ended:   time.UnixMilli(tMax).UTC().Format(time.RFC3339),
 	}

@@ -92,15 +92,45 @@ func TestDestroyRefusesForeignName(t *testing.T) {
 	}
 }
 
-func TestDestroyRefusesMissingTag(t *testing.T) {
+func TestDestroyRefusesMissingTagAndFingerprint(t *testing.T) {
 	rt := &recordingTransport{}
 	c := testClient(true, rt)
+	// No tag AND no lab-size fingerprint: the prefix alone never authorizes.
 	err := c.Destroy(context.Background(), labDroplet(8, "applab-gen", nil, "203.0.113.9", time.Hour))
 	if !errors.Is(err, ErrGuard) {
 		t.Fatalf("prefix alone must not authorize; got %v", err)
 	}
 	if n := rt.count(); n != 0 {
 		t.Fatalf("guard refusal must not touch the network; calls: %v", rt.calls)
+	}
+}
+
+func TestDestroyRefusesUntaggedForeignSize(t *testing.T) {
+	rt := &recordingTransport{}
+	c := testClient(true, rt)
+	d := labDroplet(15, "applab-imposter", nil, "203.0.113.9", time.Hour)
+	d.SizeSlug = "s-8vcpu-32gb" // prefix, no tag, NOT a lab size → refuse
+	err := c.Destroy(context.Background(), d)
+	if !errors.Is(err, ErrGuard) {
+		t.Fatalf("foreign size without tag must be refused; got %v", err)
+	}
+	if n := rt.count(); n != 0 {
+		t.Fatalf("refusal must not touch the network; calls: %v", rt.calls)
+	}
+}
+
+func TestDestroyAcceptsUntaggedLabFingerprint(t *testing.T) {
+	// The degraded mode the live token forces (no tag scopes): an untagged
+	// droplet IS destroyable when name prefix AND lab size both match.
+	rt := &recordingTransport{}
+	c := testClient(false, rt) // dry-run: authorization decided, nothing mutated
+	d := labDroplet(16, "applab-gen", nil, "203.0.113.9", time.Hour)
+	d.SizeSlug = "c-4"
+	if err := c.Destroy(context.Background(), d); err != nil {
+		t.Fatalf("prefix + lab-size fingerprint must authorize, got %v", err)
+	}
+	if m := rt.mutations(); len(m) != 0 {
+		t.Fatalf("dry-run made mutating calls: %v", m)
 	}
 }
 

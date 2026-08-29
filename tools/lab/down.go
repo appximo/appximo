@@ -46,11 +46,22 @@ func downAll(ctx context.Context, c *Client, retries int, backoff time.Duration)
 		// A dry-run destroys nothing; re-listing would "fail" forever.
 		return nil, nil
 	}
-	// The verdict is the API's, not ours.
-	time.Sleep(backoff)
-	survivors, err := c.ListLab(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("down: destroys issued but the verification listing failed — re-run `lab down`: %w", err)
+	// The verdict is the API's, not ours — and deletion is asynchronous on
+	// DO's side (learned live: an immediate re-list still shows droplets
+	// whose DELETE was just accepted), so poll until the listing is empty
+	// or the deadline passes.
+	var survivors []Droplet
+	for attempt := 0; attempt < 12; attempt++ {
+		time.Sleep(backoff)
+		var err error
+		survivors, err = c.ListLab(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("down: destroys issued but the verification listing failed — re-run `lab down`: %w", err)
+		}
+		if len(survivors) == 0 {
+			break
+		}
+		c.logf("down: %d droplet(s) still listed — deletion is async, re-checking…", len(survivors))
 	}
 	if len(survivors) > 0 {
 		names := ""

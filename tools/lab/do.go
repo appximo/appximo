@@ -138,18 +138,29 @@ func truncate(s string, n int) string {
 	return s
 }
 
-// ListLab returns every droplet carrying the lab tag. Read-only; runs in
-// dry-run too (the plan needs the truth).
+// ListLab returns every droplet that claims lab identity: the `applab-` name
+// prefix, or the lab tag (so a mis-named-but-tagged stray still surfaces for
+// the reaper to REPORT). It pages through the full droplet listing and
+// filters client-side — the scoped token has no tag:read, so `?tag_name=`
+// listing is not available (LAB-CAPACIDAD-S2). Read-only; runs in dry-run too.
 func (c *Client) ListLab(ctx context.Context) ([]Droplet, error) {
-	var env struct {
-		Droplets []apiDroplet `json:"droplets"`
-	}
-	if err := c.do(ctx, http.MethodGet, "/v2/droplets?tag_name="+LabTag+"&per_page=100", nil, &env); err != nil {
-		return nil, err
-	}
-	ds := make([]Droplet, 0, len(env.Droplets))
-	for _, a := range env.Droplets {
-		ds = append(ds, a.droplet())
+	var ds []Droplet
+	for page := 1; page <= 20; page++ {
+		var env struct {
+			Droplets []apiDroplet `json:"droplets"`
+		}
+		if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/v2/droplets?per_page=200&page=%d", page), nil, &env); err != nil {
+			return nil, err
+		}
+		for _, a := range env.Droplets {
+			d := a.droplet()
+			if ValidLabName(d.Name) || hasTag(d.Tags, LabTag) {
+				ds = append(ds, d)
+			}
+		}
+		if len(env.Droplets) < 200 {
+			break
+		}
 	}
 	return ds, nil
 }
@@ -210,7 +221,17 @@ func (c *Client) Create(ctx context.Context, r CreateRequest) (Droplet, error) {
 	var env struct {
 		Droplet apiDroplet `json:"droplet"`
 	}
-	if err := c.do(ctx, http.MethodPost, "/v2/droplets", body, &env); err != nil {
+	err = c.do(ctx, http.MethodPost, "/v2/droplets", body, &env)
+	if err != nil && strings.Contains(err.Error(), "tag:create") {
+		// The scoped token cannot create/apply tags (verified live in
+		// LAB-CAPACIDAD-S2: POST /v2/tags is 403 too). Degrade LOUDLY to an
+		// untagged create — the guard's second factor for these droplets is
+		// the lab size fingerprint, and listing is by name prefix.
+		c.logf("WARNING: the token lacks tag scopes — creating %s WITHOUT the %q tag; destroy will rely on the name prefix + lab-size fingerprint (grant tag:create to restore the tag factor, OPS-38)", r.Name, LabTag)
+		delete(body, "tags")
+		err = c.do(ctx, http.MethodPost, "/v2/droplets", body, &env)
+	}
+	if err != nil {
 		return Droplet{}, err
 	}
 	c.logf("created %s (id %d)", r.Name, env.Droplet.ID)

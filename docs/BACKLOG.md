@@ -26,17 +26,24 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-29 (LAB-CAPACIDAD-S1)** — the isolated capacity
-laboratory BUILT and tested: `tools/lab` (guarded DO droplets — `applab-`
-prefix + tag both required, refusal before any network call, cap 4, reaper,
-dry-run default, token from a file and never printed; the guards pinned by
-zero-network tests), the deterministic two-size dataset
-(`tools/lab/dataset/`), the six commands (`up/sweep/soak/report/down/reap`),
-`lab report` exercised against the real CAPACIDAD-USL-S1 JSONL, and
-docs/BENCHMARKS.md §4e declares the procedure OFFICIAL, replacing the
-single-host method. The scientific deliverable — the clean re-run and the
-curve overlay — is BLOCKED: the scoped token is absent from the 105; new OPEN
-**OPS-37** with the exact ready criterion. Before that: **CENTINELA-C-S1** — Module C of the Centinela package BUILT (the engine observes its own resources out of band and attributes the bottleneck with eight ranked deterministic verdicts, each provoked and verified; `/admin` → Resources; the overhead stated on allocs/op + CPU-seconds + RSS with the p99 as an upper bound — ADR-030) and two spec promises corrected (A-53 the personal-data default, A-54 the unmeasurable "< 1 % of p99"); new OPEN: OPS-35 (the tail test in `compare-groups`). Before that: **DOC-VITRINA-S1 (2026-08-28, 5th session)** — the technical
+**Last reviewed: 2026-08-29 (LAB-CAPACIDAD-S2)** — the first ISOLATED run of
+the capacity laboratory (OPS-37 → DONE): the old ~400 rps ceiling and the
+420 rps bistability were the instrument + the 1-vCPU box (9/9 runs at 420
+clean, every old level served at ms-scale p50); the TIPPING itself is the
+app's and reproduces at the real ceilings (shared 2-vCPU ~1100, dedicated
+~1600 — ENG-52 confirmed and updated in place, ENG-53 reframed, ENG-55
+corroborated: on 2 vCPU the 10-conn pool is the first queue); USL R² 0.800 →
+0.918/0.945 with the gate still refusing a single-number ceiling at the
+bistable levels (the honest range is in §4e); shared-vs-dedicated
+quantified (+40 % clean ceiling, ~10× tighter p99, 2.3× price); zero runs
+invalidated (worst generator 7 % busy); install.sh clean on two fresh boxes;
+cost $0.53; lab torn down and verified empty by API re-listing. New OPEN:
+**OPS-38** (token lacks tag/snapshot scopes — fingerprint second factor in
+force, tested), **OPS-39** (remote service-demand input). Before that:
+**LAB-CAPACIDAD-S1** — the laboratory BUILT and tested: `tools/lab` (guarded
+DO droplets, refusal before any network call, cap 4, reaper, dry-run
+default; guards pinned by zero-network tests), the deterministic two-size
+dataset, the six commands, §4e as the official procedure. Before that: **CENTINELA-C-S1** — Module C of the Centinela package BUILT (the engine observes its own resources out of band and attributes the bottleneck with eight ranked deterministic verdicts, each provoked and verified; `/admin` → Resources; the overhead stated on allocs/op + CPU-seconds + RSS with the p99 as an upper bound — ADR-030) and two spec promises corrected (A-53 the personal-data default, A-54 the unmeasurable "< 1 % of p99"); new OPEN: OPS-35 (the tail test in `compare-groups`). Before that: **DOC-VITRINA-S1 (2026-08-28, 5th session)** — the technical
 site and `docs/` synchronized with the released **v0.1.13**: the browser tour
 re-recorded on the current `/app` (87.6 s, real time, ES+EN subtitles; the
 2026-08-17 tour ARCHIVED, not deleted), every capture of the pre-redesign
@@ -298,6 +305,16 @@ and they are what the next migrator reads first.
   450 rps the slow mode dominates — while the system can still, on a good
   run, serve 500 rps at a 2 ms p50. Once the queue builds, serving it costs
   more per request, which builds it further.
+- **Update (LAB-CAPACIDAD-S2, 2026-08-29): CONFIRMED in the isolated lab —
+  and the numbers move.** With the generator on its own dedicated box (worst
+  7 % busy), 420 rps never tips (9/9 runs at 2.5–2.7 ms — the OLD tipping
+  point was generator contention), but the same tip reproduces at each box's
+  REAL ceiling: shared 2-vCPU (s-2vcpu-2gb) clean through ~1000, 6/8 runs
+  tipped at 1100, plateau ≈1180; dedicated 2-vCPU (c-2) clean through 1400,
+  tips ~1600. In tipped runs the service p50 jumps to ~450–650 ms in the
+  database/pool stage and abandonment is massive. The item's premise holds
+  exactly; only the ceiling it fires at was understated by the old
+  instrument.
 - **Why it happens:** the engine accepts unbounded concurrency. There is no
   cap on in-flight requests and no queue-length shed; the only backstop is
   `queryTimeout = 5 s` (`pkg/db/tenant.go:28`), which fires far too late —
@@ -319,6 +336,14 @@ and they are what the next migrator reads first.
   p50 bounded. Must be `no_change` on the read path below the limit.
 
 ### ENG-53 — The shipped per-tenant rate limit (1000 rps) sits above the app's own ceiling, so it protects nothing
+
+- **Update (LAB-CAPACIDAD-S2):** on the 1-vCPU reference box the premise
+  holds as written. On the customer-grade 2-vCPU boxes measured in the
+  isolated lab the default 1000 rps lands BY COINCIDENCE right at the shared
+  box's tipping region (~1000–1100) and BELOW the dedicated box's ceiling
+  (~1600) — i.e. the default is not "above the ceiling" everywhere, it is
+  UNRELATED to the ceiling. The fix direction is unchanged: the limit must
+  derive from measured capacity for the box/plan, not ship as one number.
 
 - **Origin:** CAPACIDAD-USL-S1 (2026-08-29). `app.go:527` defaults
   `RATE_LIMIT_RPS` to **1000 rps / burst 100 per tenant**. The same session
@@ -392,6 +417,16 @@ and they are what the next migrator reads first.
 
 ### ENG-55 — 25 writes per second multiply the read tail by ~130×: reads and writes share one 10-connection pool with no separation
 
+- **Update (LAB-CAPACIDAD-S2):** corroborated from another angle in the
+  isolated lab, read-only: at ~1000 rps on a 2-vCPU box the self-monitor's
+  dominant verdict is already `pool_exhausted` with real evidence (341
+  requests/tick finding no free connection, 18 % of the interval summed in
+  waiters) while latency is still single-digit ms — on 2+ vCPU the fixed
+  10-connection pool becomes the FIRST queue, before CPU. The tipped mode's
+  service p50 (~450–650 ms, all in the query stage) is that queue collapsing.
+  The pool-separation/sizing experiment this item proposes is the right next
+  bench, and the isolated lab is the right place to run it.
+
 - **Origin:** CAPACIDAD-USL-S1 (2026-08-29), found in the 4-hour endurance run
   and then isolated with a controlled A/B (two rounds, alternated):
 
@@ -448,36 +483,41 @@ and they are what the next migrator reads first.
   index that `?search=` could use, plus a line in `docs/BENCHMARKS.md §4d`
   (written) and in `frontend-spec`. (c) is a session; (a) is the real fix.
 
-### OPS-37 — The isolated laboratory is built and tested, but its first live run is blocked on the API token
+### OPS-38 — The lab token's scopes are narrower than the lab's design assumed: no tags, no snapshots
 
-- **Origin:** LAB-CAPACIDAD-S1 (2026-08-29). The session's scientific
-  deliverable — re-running the CAPACIDAD-USL-S1 ladder with the generator on
-  its own box, overlaying the two curves, answering whether the 420 rps
-  bistability is the app or the instrument, re-fitting the USL on clean data,
-  and quantifying shared-vs-dedicated vCPU — requires creating droplets, and
-  the scoped DigitalOcean token the session brief places at
-  `/root/.do-lab-token` (mode 600) **does not exist on the 105** (verified:
-  not at that path, not under `/root`, no `doctl` auth context). The token is
-  Miguel's to create; the lab never rotates or prints it. Everything that does
-  not need the API shipped and is tested: `tools/lab` (guards proven with
-  zero-network refusal tests, dry-run default, infallible `down` pinned at
-  unit level, reaper), the deterministic two-size dataset, the six commands,
-  `lab report` exercised end-to-end against the real CAPACIDAD-USL-S1
-  JSONL (fit + overlay + bistability verdict all work), and
-  docs/BENCHMARKS.md §4e names the procedure official.
-- **Impact: high** for the measurement program — until the clean re-run, every
-  §4d ceiling stays "measured with the instrument on the same box", and no
-  engine optimization (ENG-52's admission control above all) can be judged
-  against a trustworthy baseline.
-- **Ready:** Miguel creates the token (scopes: droplet:create, droplet:read,
-  droplet:delete, ssh_key:read, vpc:read) at `/root/.do-lab-token`, mode 600,
-  on the 105. Then, in one session: `lab up -apply` → `lab sweep -apply` →
-  `lab report -baseline` (the CAPACIDAD-USL-S1 sweep2.jsonl) → `lab soak` if
-  time allows → `lab down -apply` + `lab reap -apply`, and §4e gets the
-  measured curves. First `lab up` should also confirm whether the scoped
-  token can take snapshots (droplet actions); if not and the reinstall time
-  hurts, add the image scopes or accept the reinstall (which re-exercises
-  install.sh).
+- **Origin:** LAB-CAPACIDAD-S2 (2026-08-29), the first live run. Verified
+  against the API: creating a droplet WITH a tag 403s on `tag:create`, and
+  POST/GET `/v2/tags` 403 too — so lab droplets exist UNTAGGED and the
+  destroy guard's second factor degraded (loudly, by design) from "prefix AND
+  tag" to "prefix AND lab-size fingerprint" (c-4/c-2/s-2vcpu-2gb; tests
+  cover both modes); listing is by name prefix over the full droplet list.
+  Snapshotting the provisioned target also 403s (droplet actions are outside
+  the granted scopes), so every `lab up` reinstalls from scratch (~8 min —
+  which also re-exercises install.sh, so it is tolerable, not free).
+- **Impact: low-medium.** The leash still holds (prefix + fingerprint +
+  protected-IP belt + cap + reaper), but the tag factor is the stronger
+  second factor and the reinstall costs ~8 min per `up`.
+- **Ready:** Miguel adds `tag:create` (+ ideally `tag:read`) to the token —
+  the code already tries tags first and uses them when granted — and decides
+  on snapshot scopes (droplet action + image read/delete) vs accepting the
+  reinstall. `lab up`'s output names both degradations when they happen.
+
+### OPS-39 — The isolated lab loses the service-demand cross-check: engine/PG CPU per request is not readable cross-box
+
+- **Origin:** LAB-CAPACIDAD-S2 (2026-08-29). `tools/capacity`'s CPU
+  accounting reads local /proc — on the generator box that now measures the
+  GENERATOR (exactly what the saturation gate needs), but the engine's and
+  PostgreSQL's CPU-seconds per request (the `X_max = C/D` generator-free
+  bound, §4d) are zero in remote runs, and the fit report prints an empty
+  service-demand block.
+- **Impact: low.** The USL no longer carries the co-resident-generator
+  pollution the cross-check existed to bound; but a second, assumption-free
+  estimate is still worth having, and Module C already computes CPU on the
+  target.
+- **Ready:** `capacity` derives per-request engine CPU from the target's own
+  self-monitor (`/admin/resources?since=` already travels with every run —
+  the ticks carry CPU) and prints the service-demand block from that when
+  /proc yields nothing; suppress the misleading zero block meanwhile.
 
 ### OPS-36 — The capacity procedure exists but runs only on our box: it needs a customer-side form
 
@@ -1579,6 +1619,26 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in LAB-CAPACIDAD-S2 (2026-08-29) — the first isolated run: the old ceiling was the instrument, the tipping is the app
+
+- **OPS-37 — the live run of the isolated laboratory: DONE.** Token present,
+  full sequence executed: `lab up -apply` (nyc1, private VPC RTT 0.73–0.76
+  ms, targets by install.sh — clean on both fresh boxes), the authoritative
+  ladder + probes on both targets (zero runs invalidated; worst generator
+  busy 7 % vs the 70 % gate), `lab report -baseline` overlay, `lab down` +
+  `lab reap` + empty re-listing. Cost $0.53. Results: the 420 rps
+  bistability was generator contention (9/9 clean at 420); the tip is real
+  at the real ceilings (shared ~1100, dedicated ~1600); USL R² 0.800 →
+  0.918/0.945; shared-vs-dedicated quantified (+40 % clean ceiling, ~10×
+  tighter p99). docs/BENCHMARKS.md §4e carries the live numbers; ENG-52/53/55
+  updated in place. Live fixes to the lab itself: tag-scope degradation with
+  fingerprint second factor (tested), `--flag=value` install invocation,
+  rollback that actually runs on provisioning failure (fatal/os.Exit was
+  skipping the defer), seed via stdin + ON_ERROR_STOP, async-deletion-aware
+  down verification, honest generator-location line in the fit conditions,
+  ldflags version injection. New: OPS-38 (token scopes), OPS-39 (remote
+  service demand).
 
 ## DONE in CENTINELA-C-S1 (2026-08-29) — Module C built: the engine observes its own resources and attributes the bottleneck; two Centinela spec promises corrected
 

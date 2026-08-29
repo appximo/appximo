@@ -125,35 +125,35 @@ func cmdUp(args []string) {
 		return
 	}
 
+	if err := upApply(ctx, cl, st, root, *dataset); err != nil {
+		if !*keep {
+			fmt.Println("up FAILED — tearing the laboratory down (pass -keep-on-failure to debug in place)")
+			if _, derr := downAll(ctx, cl, 3, 5*time.Second); derr != nil {
+				fmt.Fprintln(os.Stderr, "rollback:", derr)
+			}
+		}
+		fatal(err)
+	}
+}
+
+func upApply(ctx context.Context, cl *Client, st *State, root, dataset string) error {
 	engineBin, capacityBin, version, err := buildArtifacts(root)
 	if err != nil {
-		fatal(err)
+		return err
 	}
 	st.EngineVersion = version
 	fmt.Println("built engine + capacity binaries; engine:", version)
 
-	vpc, vpcRange, err := cl.DefaultVPC(ctx, c.region)
+	vpc, vpcRange, err := cl.DefaultVPC(ctx, st.Region)
 	if err != nil {
-		fatal(err)
+		return err
 	}
 	st.VPCUUID, st.VPCRange = vpc, vpcRange
 	keys, err := cl.SSHKeyIDs(ctx)
 	if err != nil {
-		fatal(err)
+		return err
 	}
 	ud := userData()
-
-	// Rollback on failure: a half-provisioned laboratory must not stay alive.
-	ok := false
-	defer func() {
-		if ok || *keep {
-			return
-		}
-		fmt.Println("up FAILED — tearing the laboratory down (pass -keep-on-failure to debug in place)")
-		if _, derr := downAll(ctx, cl, 3, 5*time.Second); derr != nil {
-			fmt.Fprintln(os.Stderr, "rollback:", derr)
-		}
-	}()
 
 	image := baseImage
 	if st.SnapshotImage != 0 {
@@ -168,7 +168,7 @@ func cmdUp(args []string) {
 		}
 		n, err := ensureNode(ctx, cl, st, spec, img, vpc, keys, ud)
 		if err != nil {
-			fatal(err)
+			return err
 		}
 		fmt.Printf("  %-22s id=%d public=%s private=%s\n", n.Name, n.ID, n.PublicIP, n.PrivateIP)
 		nodes[spec.role] = n
@@ -180,24 +180,24 @@ func cmdUp(args []string) {
 			fresh := st.SnapshotImage == 0
 			if fresh {
 				fmt.Println("provisioning", n.Name, "through install.sh (the customer path)…")
-				if err := provisionTarget(root, &n, engineBin, *dataset); err != nil {
-					fatal(err)
+				if err := provisionTarget(root, &n, engineBin, dataset); err != nil {
+					return err
 				}
 			} else {
 				fmt.Println(n.Name, "from snapshot — verifying the service instead of reinstalling…")
-				if err := provisionTarget(root, &n, engineBin, *dataset); err != nil {
-					fatal(err) // install.sh is idempotent; re-run verifies installed==asked
+				if err := provisionTarget(root, &n, engineBin, dataset); err != nil {
+					return err // install.sh is idempotent; re-run verifies installed==asked
 				}
 			}
 		} else {
 			if err := provisionGen(&n, capacityBin); err != nil {
-				fatal(err)
+				return err
 			}
 		}
 		nodes[spec.role] = n
 		st.Nodes[spec.role] = n
 		if err := st.save(); err != nil {
-			fatal(err)
+			return err
 		}
 	}
 
@@ -230,10 +230,10 @@ func cmdUp(args []string) {
 		}
 	}
 	if err := st.save(); err != nil {
-		fatal(err)
+		return err
 	}
-	ok = true
 	fmt.Println("laboratory is UP. Next: lab sweep -apply · lab report · lab down -apply")
+	return nil
 }
 
 // ── sweep ──────────────────────────────────────────────────────────────────

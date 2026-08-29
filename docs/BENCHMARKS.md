@@ -652,11 +652,71 @@ overlays the old and new curves point by point — so the first isolated run
 answers directly whether the bistability was the app (ENG-52 stands) or the
 instrument.
 
-**Status:** the tooling, guards (tested), dataset and procedure shipped in
-LAB-CAPACIDAD-S1; the first live isolated run is pending the scoped API token
-on the orchestrator box (docs/BACKLOG.md OPS-37). Until that run, §4d's
-ceiling figures remain the best available estimate — with the caveat above
-attached.
+### The first isolated run (LAB-CAPACIDAD-S2, 2026-08-29) — how much was the instrument
+
+The re-run happened: same workload byte-for-byte, same ladder (25→350 ×3,
+380→700 ×4, plus probes), same deterministic 490 k-row dataset, engine
+`b65ab4b`, region nyc1, private VPC (base RTT 0.73–0.76 ms), targets
+provisioned by `install.sh` (which passed clean on both fresh Ubuntu 24.04
+boxes), generator on its own dedicated c-4 — **worst generator busy 7 %
+against the 70 % gate; zero runs invalidated**. Full evidence and both
+reports in the internal evidence set; cost of the whole session $0.53 in
+droplet-hours.
+
+**The old ceiling was the instrument plus the box, not the app.** Point by
+point against the §4d baseline: every level the old lab struggled with is
+served exactly on the customer-grade box —
+
+| offered | old X̄ (1 vCPU, gen on box) | old p50 | new X̄ (s-2vcpu-2gb, isolated) | new p50 |
+|--:|--:|--:|--:|--:|
+| 380 | 380 | 11.1 ms | 380 | 2.6 ms |
+| 420 | 402 | 1 108 ms | 420 | 2.6 ms |
+| 500 | 442 | 2 116 ms | 500 | 2.7 ms |
+| 700 | 580 | 5 652 ms | 700 | 2.5 ms |
+
+**The 420 rps bistability was generator contention** — nine runs at 420 on
+the shared target (4 ladder + 5 probe), zero tips, p50 2.5–2.7 ms.
+
+**But the tipping behavior itself is the app's, and it reproduces — at the
+box's real ceiling.** Shared 2-vCPU target: clean through ~1000 rps, then at
+1100 the same phenomenology as the old 420 — a run tips to seconds-scale p50
+with LESS goodput and never recovers (6 of 8 runs at 1100 tipped), plateau
+≈ 1 180 rps at 1400 offered with mass abandonment. Dedicated 2-vCPU target:
+clean through 1400, tips at ~1600, plateau ≈ 1 530–1 700 achieved with
+goodput falling. **ENG-52 stands, restated: the engine does not degrade at
+its ceiling, it tips — the ceiling is just 2.5–4× higher than the
+contaminated number said.** The visible mechanism in tipped runs is the
+database/pool stage (service p50 jumps to ~450–650 ms; the self-monitor says
+`pool_exhausted` with real evidence — at 1000 rps on 2 vCPU the default
+10-connection pool is already the first queue, before CPU).
+
+**The USL, re-fitted on clean data** (76/77 points per target, bootstrap
+2000): shared γ = 390.6 (CI 359.7–401.7), α = 0.318 (CI 0.205–0.358),
+β = 2.6e-5 (CI 0.9–5.2e-5), **R² = 0.918**, N_max = 161 (CI 123–262) →
+X_max = 1 197 rps (CI 1 038–1 718). Dedicated γ = 562.5 (CI 537.7–586.1),
+α = 0.280 (CI 0.165–0.329), β = 2.3e-5 (CI 1.8–3.8e-5), **R² = 0.945**,
+N_max = 175 (CI 148–195) → X_max = 1 952 rps (CI 1 720–3 066). R² rose from
+0.800 to 0.918/0.945 — **the misfit largely WAS the instrument** — and the
+trust gate still refuses to publish a single-number ceiling on either box,
+now for the right reason: worst between-repeat CV 11 % / 9.7 %, all of it at
+the tipping levels, where the system is bistable by nature. The honest
+ceiling is a range: **shared ≈ 1 000 clean / 1 180 plateau · dedicated
+≈ 1 400 clean / ~1 600 tip.**
+
+**Shared vs dedicated, quantified** (the number that justifies a plan
+upgrade): +40 % usable clean ceiling (1 000 → 1 400 rps), a ~35 % faster
+median at mid-load (p50 2.4–3.3 ms vs 1.6–2.0 ms), and an order of magnitude
+tighter tail (at 800–1 000 rps the shared box's p99 wandered 10–314 ms
+between repeats; the dedicated box held 3.8–5.8 ms) — for 2.3× the price
+($18 vs $42/mo).
+
+Known gap of the isolated mode: the engine/PostgreSQL CPU-seconds per request
+(the service-demand law's input) are not readable cross-box, so that
+generator-free cross-check is absent from remote runs — deriving it from the
+self-monitor is the registered follow-up (OPS-38 notes). §4d's absolute
+numbers stay as history of the contaminated setup; its per-endpoint COST
+ratios (the 20× spread) were measured as CPU per request and remain the best
+available estimate until re-measured here.
 
 ## 5. REST vs GraphQL — the same data, both ways
 

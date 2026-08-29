@@ -77,6 +77,20 @@ func loadProtectedIPs() int {
 	return len(protectedIPs)
 }
 
+// labSizes is the laboratory's droplet-size fingerprint — exactly the sizes
+// the topology in provision.go uses. It is the SUBSTITUTE second factor for
+// destroy when the droplet carries no tag: the scoped token turned out to
+// lack every tag:* permission (LAB-CAPACIDAD-S2, verified live — creating a
+// droplet WITH a tag 403s on `tag:create`, and POST/GET /v2/tags 403 too),
+// so droplets may exist untagged. "Prefix alone never authorizes" still
+// holds: an untagged droplet must ALSO match the lab fingerprint. Restoring
+// the real tag factor is a token-scope change (BACKLOG OPS-38).
+var labSizes = map[string]bool{
+	"c-4":         true,
+	"c-2":         true,
+	"s-2vcpu-2gb": true,
+}
+
 // ErrGuard marks a refusal by the leash. Every ErrGuard is returned BEFORE any
 // API call is made — the tests in guard_test.go and do_test.go pin that.
 var ErrGuard = errors.New("lab guard refusal")
@@ -111,8 +125,8 @@ func GuardDestroy(d Droplet) error {
 	if !ValidLabName(d.Name) {
 		return guardErr("destroy %q (id %d): not an applab droplet — name lacks the %q prefix", d.Name, d.ID, NamePrefix)
 	}
-	if !hasTag(d.Tags, LabTag) {
-		return guardErr("destroy %q (id %d): not an applab droplet — missing the %q tag (prefix alone does not authorize)", d.Name, d.ID, LabTag)
+	if !hasTag(d.Tags, LabTag) && !labSizes[d.SizeSlug] {
+		return guardErr("destroy %q (id %d): prefix alone does not authorize — needs the %q tag or the lab size fingerprint (size %q is not one of the lab's)", d.Name, d.ID, LabTag, d.SizeSlug)
 	}
 	for _, ip := range append(append([]string{}, d.PublicIPs...), d.PrivateIPs...) {
 		if who, bad := protectedIPs[ip]; bad {
