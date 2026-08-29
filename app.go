@@ -112,6 +112,7 @@ type App struct {
 	synthmon  *observability.SyntheticMonitor
 	geo       *observability.GeoLookup
 	obsServer *observability.ObsServer
+	selfmon   *observability.ResourceCollector // the engine's own resources + attribution (CENTINELA-C-S1)
 
 	cpSvc controlplane.Service
 	cpSrv *http.Server
@@ -256,6 +257,9 @@ func New(cfg Config) (*App, error) {
 	}
 	clearBootMarker(cfg.SchemaPath)
 	app := &App{cfg: cfg, version: cfg.Version, schema: s}
+	if cfg.Version != "" {
+		observability.ResourcesVersion = cfg.Version // the exported resource snapshot names its build
+	}
 	if app.version == "" {
 		app.version = defaultVersion
 	}
@@ -424,6 +428,17 @@ func New(cfg Config) (*App, error) {
 	app.geo = observability.DefaultGeoLookup()
 	app.obsServer = observability.NewObsServer(app.hist, app.errStore, app.anomaly, app.synthmon, app.rings, app.sloEngine, app.obsStore)
 	app.obsServer.SetGeo(app.geo)
+	// Self-monitoring of the engine's OWN resources (CENTINELA-C-S1, ADR-030).
+	if sm, smErr := newSelfMon(cfg, pool); smErr != nil {
+		pool.Close()
+		return nil, smErr
+	} else if sm != nil {
+		app.selfmon = sm
+		app.obsServer.SetResources(sm)
+		if regErr := app.metrics.Register(sm.PromCollector()); regErr != nil {
+			log.Printf("WARNING: self-monitoring gauges not registered on /metrics: %v", regErr)
+		}
+	}
 
 	// /debug/traces HTML page — accept ?key= OR X-Admin-Key, browser-openable.
 	adminKey := cfg.AdminKey
@@ -1042,6 +1057,9 @@ func (a *App) startBackground(ctx context.Context) {
 	a.started = true
 
 	go a.sloEngine.Run(ctx)
+	if a.selfmon != nil {
+		go a.selfmon.Run(ctx)
+	}
 	if a.obsStore != nil {
 		go flushObsSnapshots(ctx, a.obsStore, a.rings, a.hist, a.sloEngine)
 	}
@@ -1194,7 +1212,16 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 			}
 		},
 		func(t logging.RequestTap) {
-			if t.TenantID == "" || isInfraPath(t.Path) {
+			if isInfraPath(t.Path) {
+				return
+			}
+			// Self-monitoring (CENTINELA-C-S1): two atomic adds + one HDR record,
+			// for EVERY non-infra request (tenant-less /admin work is real work
+			// too); the "query" span is the client-side database stage.
+			if a.selfmon != nil {
+				a.selfmon.Observe(t.DurationUS, querySpanUS(t.Spans), t.Status)
+			}
+			if t.TenantID == "" {
 				return
 			}
 			a.metrics.ObserveRequest(t.TenantID, t.Method, t.Route,

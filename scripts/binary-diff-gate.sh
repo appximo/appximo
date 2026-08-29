@@ -34,7 +34,7 @@
 # The corpus is DATA (scripts/binary-diff/corpus.jsonl), one JSON object per
 # line — extend it there, not here. Fields: name, method, path (may contain
 # {{ID}} = the seeded note's id, {{OWNED_ID}} = the note the `owner` principal
-# owns), auth (admin|viewer|ghost|owner|none), authstyle
+# owns), auth (admin|viewer|ghost|owner|none|adminkey), authstyle
 # (lowercase|basic, optional), host (optional override), body (optional JSON),
 # expect (prose: the CURRENT contract, for the human reading a diff).
 #
@@ -244,6 +244,9 @@ fire() { # $1=port $2=seeded-id $3=case-json $4=out-prefix $5=owned-id → write
     ghost)  tok=$TOKEN_GHOST ;;
     owner)  tok=$TOKEN_OWNER ;;
     none)   tok="" ;;
+    # adminkey: the operator credential (X-Admin-Key), for the machine-facing
+    # /admin and /debug routes (CENTINELA-C-S1 added the first corpus rows).
+    adminkey) tok=""; args+=( -H "X-Admin-Key: $ADMIN_KEY_GATE" ) ;;
   esac
   case "$style" in
     lowercase) [ -n "$tok" ] && args+=( -H "Authorization: bearer $tok" ) ;;

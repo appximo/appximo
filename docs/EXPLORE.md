@@ -124,6 +124,49 @@ exists, instead of failing. Overrides: `APPXIMO_SYNTHETIC_TENANT` /
 `APPXIMO_SYNTHETIC_RESOURCE`; disable the monitor entirely with
 `APPXIMO_SYNTHETIC=off`.
 
+## The engine's own resources (`/debug/resources`) — and whose fault it is
+
+The per-tenant state above says WHAT is slow. This one says WHY, from the
+resources' side (CENTINELA-C-S1, [ADR-030](adr/ADR-030-self-observability-and-deterministic-attribution.md)):
+
+```bash
+curl -s -H "X-Admin-Key: $ADMIN_KEY" 'localhost:8080/debug/resources?live=1&series=60' | python3 -m json.tool
+```
+
+`latest` is the newest tick with four layers — `runtime` (`runtime/metrics`:
+scheduler wait p99, GC pauses and GC share of CPU, goroutines, mutex wait,
+heap), `process_cgroup` (`memory.current/max/peak`, `cpu.stat` incl.
+**`throttled_usec`**, `cpu.max`, pids; `/proc/self` when there is no cgroup;
+`cgroup_shared` when the cgroup holds more than this process), `pressure`
+(PSI of the cgroup, or of the host — `source` says which), `db_client`
+(`pgxpool.Stat`: acquired/max, **empty acquires**, wait time, plus the
+client-side query stage p99) and `db_server_local_only` (`pg_stat_*`, ONLY
+when Postgres is on this box — otherwise `observable: false` with the reason,
+which is the correct answer). Then the product:
+
+```json
+"attribution": "db_bound",
+"verdict": {
+  "owner": "database",
+  "reason": "the database is the bottleneck, not Appximo — the query stage is 88% of the request p99 (query p99 71.2 ms of 80.9 ms) while CPU (sched p99 0.05 ms), GC (2%) and the pool (3/10) are healthy. Look at the statement, its indexes, the Postgres box or the network to it.",
+  "signals": [ {"name": "query_p99_share_of_request_p99", "value": 0.88, "threshold": 0.5, "fired": true}, … ],
+  "also": []
+}
+```
+
+Eight verdicts, deterministic, ranked so the cause furthest from your code
+wins: `cpu_throttled` (the plan's quota) › `memory_pressure` › `gc_pressure`
+› `cpu_saturated` › `pool_exhausted` › `db_bound` › `lock_contention` ›
+`healthy`. `window` is the verdict over the `series` (the load-test view:
+the dominant non-healthy verdict if it covers ≥ 10 % of the traffic ticks);
+`?live=1` puts the collector on its 1 s cadence for a minute — send it while
+a k6 runs and read the window when it ends. `/debug/resources/snapshot`
+exports the whole ring as one JSON document (`appximo.selfmon.snapshot/v1`)
+to attach to a report. The same data lives at `/admin` → **Resources** (three
+views) and as `appximo_selfmon_*` gauges on `/metrics`. Knobs:
+`APPXIMO_SELFMON=off`, `APPXIMO_SELFMON_INTERVAL`, `APPXIMO_SELFMON_LIVE_INTERVAL`,
+`APPXIMO_SELFMON_P99_MS`.
+
 ## The generated APIs
 
 Full syntax (filters, sort, pagination, GraphQL, error shapes) is in

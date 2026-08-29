@@ -32,6 +32,9 @@ const NAV = [
     items: [
       // Observability (ADMIN-UI-V2): metrics charts, trace waterfall, anomalies.
       { href: "/observability", title: "Observability", icon: "◔", enabled: true },
+      // Resources (CENTINELA-C-S1): the engine's own footprint + the attribution
+      // verdict — "is it me, the database, or the plan's quota?" under load.
+      { href: "/resources", title: "Resources", icon: "◉", enabled: true },
     ],
   },
 ]
@@ -108,12 +111,13 @@ export function Shell(props) {
 
       <div class="main">
         <header class="topbar">
+          <button class="btn btn-ghost btn-icon nav-toggle" aria-label="Menu" onClick={() => document.querySelector(".shell")?.classList.toggle("nav-open")}>☰</button>
           <strong>{titleFor(location.pathname)}</strong>
           <div class="spacer" />
           <TenantSelect />
           <ThemeToggle />
           <Show when={admin()}>
-            <span class="secondary" style={{ "font-size": "13px" }}>{admin().email}</span>
+            <span class="secondary topbar-email" style={{ "font-size": "13px" }}>{admin().email}</span>
           </Show>
           <Button variant="ghost" size="sm" onClick={() => { logout(); navigate("/login") }}>Log out</Button>
         </header>
@@ -132,5 +136,6 @@ function titleFor(path) {
   if (path.startsWith("/files")) return "Files"
   if (path.startsWith("/history")) return "History"
   if (path.startsWith("/observability")) return "Observability"
+  if (path.startsWith("/resources")) return "Resources"
   return "Overview"
 }

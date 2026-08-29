@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/appximo/appximo/pkg/auth"
@@ -167,5 +168,80 @@ func TestParseSchema(t *testing.T) {
 	}
 	if _, errs := parseSchema(json.RawMessage(`null`)); len(errs) == 0 {
 		t.Fatal("null schema should be rejected")
+	}
+}
+
+// The engine's own resources (CENTINELA-C-S1): platform-only routes, registered
+// only when the obs handler implements ResourceHandler, and every non-platform
+// caller is a 403 — never a tenant admin (the box's RAM/cgroup/pool are not a
+// tenant's to see).
+type obsResStub struct{ hits int }
+
+func (o *obsResStub) ServeTenantData(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }
+func (o *obsResStub) ServeResources(w http.ResponseWriter, _ *http.Request) {
+	o.hits++
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"latest":{"attribution":"healthy"}}`)) //nolint:errcheck
+}
+func (o *obsResStub) ServeResourcesSnapshot(w http.ResponseWriter, _ *http.Request) {
+	o.hits++
+	w.Write([]byte(`{"schema":"appximo.selfmon.snapshot/v1"}`)) //nolint:errcheck
+}
+
+type obsPlainStub struct{}
+
+func (obsPlainStub) ServeTenantData(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }
+
+func TestResourcesRoutes(t *testing.T) {
+	svc := &Service{cfg: Config{JWTSecret: unitSecret, TenantAdminRole: func(string) bool { return true }}}
+	stub := &obsResStub{}
+	r := chi.NewRouter()
+	svc.Register(r, stub, "unit-admin-key")
+
+	do := func(path string, hdr map[string]string) int {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if c := do("/admin/resources", nil); c != http.StatusForbidden {
+		t.Fatalf("anonymous: %d, want 403", c)
+	}
+	if c := do("/admin/resources", map[string]string{"X-Admin-Key": "wrong"}); c != http.StatusForbidden {
+		t.Fatalf("wrong key: %d, want 403", c)
+	}
+	// A tenant admin token opens the tenant observability route but NOT the
+	// process resources.
+	tenantTok, err := auth.GenerateToken(auth.Claims{UserID: "u1", Role: "admin", TenantID: "acme"}, unitSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := do("/admin/observability/tenants/acme", map[string]string{"Authorization": "Bearer " + tenantTok}); c != http.StatusOK {
+		t.Fatalf("tenant admin on its own observability: %d, want 200", c)
+	}
+	if c := do("/admin/resources", map[string]string{"Authorization": "Bearer " + tenantTok}); c != http.StatusForbidden {
+		t.Fatalf("tenant admin on /admin/resources: %d, want 403", c)
+	}
+	if c := do("/admin/resources", map[string]string{"X-Admin-Key": "unit-admin-key"}); c != http.StatusOK {
+		t.Fatalf("admin key: %d, want 200", c)
+	}
+	if c := do("/admin/resources/snapshot?ticks=5", map[string]string{"X-Admin-Key": "unit-admin-key"}); c != http.StatusOK {
+		t.Fatalf("snapshot with admin key: %d, want 200", c)
+	}
+	if stub.hits != 2 {
+		t.Fatalf("handler hits = %d, want 2", stub.hits)
+	}
+	// A plain obs handler (no ResourceHandler) registers nothing: 404, not 403.
+	r2 := chi.NewRouter()
+	(&Service{cfg: Config{JWTSecret: unitSecret}}).Register(r2, obsPlainStub{}, "k")
+	req := httptest.NewRequest(http.MethodGet, "/admin/resources", nil)
+	req.Header.Set("X-Admin-Key", "k")
+	rec := httptest.NewRecorder()
+	r2.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("plain obs stub: %d, want 404 (route not registered)", rec.Code)
 	}
 }

@@ -57,7 +57,12 @@ APPXIMO_AUTH_LOGIN_ATTEMPTS_PER_MINUTE (default 5 — the brute-force guard;
 raise it only for a shared read-only demo identity), APPXIMO_CORS_ORIGINS,
 APPXIMO_FILES_DIR, GOMEMLIMIT, APPXIMO_MEMORY_GUARD_MIN_MB (writes answer 503
 while MemAvailable+SwapFree is under the floor; default max(32, 2% of RAM);
-0 disables — degradation, not capacity) — the full table lives in
+0 disables — degradation, not capacity), APPXIMO_SELFMON (off disables the
+engine's own resource collector: runtime/cgroup/PSI/pool + the attribution
+verdict at /admin/resources), APPXIMO_SELFMON_INTERVAL (background cadence,
+default 10s), APPXIMO_SELFMON_LIVE_INTERVAL (while /admin polls, default 1s),
+APPXIMO_SELFMON_P99_MS (the "slow" floor of the verdict, default 50) — the
+full table lives in
 docs/PRODUCTION.md; 'appximo quickstart' prints the operations contract.`,
 	// ADR-024: `serve` takes NO positional arguments. It used to accept and
 	// silently ignore them, so `appximo serve myapp.json` booted whatever

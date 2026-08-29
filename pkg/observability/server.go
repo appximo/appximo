@@ -11,6 +11,7 @@ import (
 
 // ObsServer exposes internal observability data over HTTP.
 type ObsServer struct {
+	resources     *ResourceCollector // self-monitoring (nil = disabled)
 	hist          *TenantHistogram
 	errors        *ErrorStore
 	anomaly       *AnomalyDetector
@@ -68,6 +69,9 @@ func (s *ObsServer) DebugRouter(adminKey string) http.Handler {
 		})
 		gr.Get("/tenant/{id}", s.handleTenant)
 		gr.Get("/synthetic", s.handleSynthetic)
+		// The engine's OWN resources + the attribution verdict (CENTINELA-C-S1).
+		gr.Get("/resources", s.ServeResources)
+		gr.Get("/resources/snapshot", s.ServeResourcesSnapshot)
 	})
 	// HTML trace explorer: NOT in the header-only group. The injected handler does
 	// its own auth (?key= OR X-Admin-Key) so it opens directly in a browser.

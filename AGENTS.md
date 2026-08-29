@@ -2418,6 +2418,29 @@ chartjunk). Status uses the **double channel** (colour + icon + text). An opt-in
 place (true streaming SSE for metrics is a documented V2.1 increment — the obs API
 is a JSON snapshot, not a stream).
 
+- **Resources (CENTINELA-C-S1, ADR-030)** — the engine's OWN footprint and the
+  **attribution verdict**: four layers read by ONE collector goroutine on a
+  timer (`pkg/observability/resources*.go` — `runtime/metrics` with a
+  pre-allocated sample set, the process cgroup v2 + `/proc/self` fallback,
+  PSI of the cgroup, `pgxpool.Stat` + the client-side query stage; the server
+  side `pg_stat_*` ONLY when Postgres is local — remote = "not observable from
+  the app", by design); the request path pays two atomic adds + one HDR record
+  and allocates nothing. A fixed 900-tick ring; background 10 s, live 1 s while
+  the view polls (`?live=1`). The verdict is DETERMINISTIC (`attribution.go`:
+  `cpu_throttled > memory_pressure > gc_pressure > cpu_saturated >
+  pool_exhausted > db_bound > lock_contention > healthy`, each with a written
+  threshold and its evidence signals; no language model on the path) and
+  each of the eight was PROVOKED against a live engine and verified. Three
+  views: live board, load-test window (correlation charts + the verdict per
+  tick and over the window), snapshot export (`appximo.selfmon.snapshot/v1`)
+  with before/after comparison. Surfaces: `GET /admin/resources[/snapshot]`
+  (platform token or admin key — NEVER a tenant admin), `GET /debug/resources`
+  (admin key), 21 `appximo_selfmon_*` gauges on `/metrics`. Knobs:
+  `APPXIMO_SELFMON=off`, `APPXIMO_SELFMON_INTERVAL` (10s),
+  `APPXIMO_SELFMON_LIVE_INTERVAL` (1s), `APPXIMO_SELFMON_P99_MS` (50). The
+  overhead budget is stated on allocs/op + CPU-seconds + RSS, with the p99 as
+  an UPPER BOUND — never "< 1 % of p99" (A-54; docs/BENCHMARKS.md §4c). The
+  console shell gained its first mobile layout (a drawer under 720 px) with it.
 - **Source**: `pkg/adminui/web/` (Solid + Vite). Stack: `@solidjs/router` (HASH
   routing), `@tanstack/solid-table` (headless sorting; a plain fixed-layout table —
   virtualization was removed to fix row-overlap and is re-added only past ~1000

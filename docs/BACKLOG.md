@@ -278,6 +278,31 @@ by damage is #4 (documentation of `import`), #6c (`Route.AsRole`), #1 (a
 documentation halves (#1, #4, #8) are still worth doing — they cost a page
 and they are what the next migrator reads first.
 
+### OPS-35 — Mann-Whitney does not test the tail: a claim about the p99 needs a permutation test on Δp99, and `compare-groups` does not run one yet
+- **Origin:** CENTINELA-C-S1 (2026-08-29), from the Centinela research report
+  §Bloque 2 and decision A-54. The house's ABBA verdict is Mann-Whitney U on
+  the pooled samples with the max(0.5 ms, 3 %) gate — correct for what it
+  gates (the median: stochastic dominance), and BLIND to a change that moves
+  only the tail. A p99 promise ("< 1 % of p99") is not measurable on this box
+  at all (≈ 0.016 ms against a 0.5 ms EMD), and the overhead of the resource
+  collector was therefore stated on allocs/op, CPU-seconds and RSS with the
+  p99 as an upper bound (docs/BENCHMARKS.md §4c).
+- **Shipped this session:** `tools/devhub/stats.PermutationQuantileDiff(a, b,
+  p, resamples)` — a two-sided permutation test on the difference of the
+  p-th percentile (deterministic RNG, +1 correction), pinned by a test with
+  identical medians and a 2 % tail shift; the methodology note in
+  docs/BENCHMARKS.md §7 and in the Centinela specs (C §6, B §6).
+- **Impact:** medium for the measurement discipline: every "no_change"
+  verdict so far is a MEDIAN verdict. Nothing published claims a p99 delta,
+  so nothing is wrong today — the gap is that the protocol cannot yet SAY
+  "and the tail did not move either".
+- **Ready:** `POST /api/bench/compare-groups` (DevHub) reports, next to the
+  Mann-Whitney verdict, `p99_delta_ms` + `p99_perm_p` (≥ 2000 resamples) and
+  a bootstrap CI of the Δp99; `scripts/bench-protocol.sh`'s summary prints
+  them; docs/BENCHMARKS.md §7 states the rule "a median verdict and a tail
+  verdict are two verdicts". Runs on the DevHub's stored k6 samples — no new
+  data collection.
+
 ### OPS-34 — Two builds of the SAME source measure ~9 % apart on the 105: the ABBA base must be built like the new binary
 - **Origin:** MIGRACION-CONFIANZA-S1. The frozen ABBA on the PATCH protocol
   read +10–15 % for the new binary with base-vs-base identical (4.689 /

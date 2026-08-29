@@ -73,7 +73,7 @@ compiled surfaces of the same process, all derived from the schema:
 |---|---|---|
 | **REST + GraphQL + OpenAPI**, generated per resource | **Auth as a product**: signup/login/refresh, argon2id, password reset + email verify, OAuth (Google/GitHub/Microsoft), TOTP MFA | **RBAC** per role/resource/action/field + row conditions, deny-by-default, the identity column server-owned on create AND update |
 | **Migrations with a conscience**: diff-based, data-preserving renames, destructive drops behind a dry-run + approval gate, resumable multi-tenant fan-out, version history + rollback | **Multi-tenancy**: schema-per-tenant Postgres isolation, subdomain routing, per-tenant rate limits | **File store**: content-addressed, OWASP upload validation, signed URLs, local disk or any S3 |
-| **`/app`** — a back-office CRUD UI generated at runtime from your API's own OpenAPI | **`/admin`** — tenants, users, and an observability dashboard (latency, SLO burn rate, trace waterfalls) | **`/editor`** — Appximo Studio: a visual ERD schema designer that deploys, migrates and restarts the engine |
+| **`/app`** — a back-office CRUD UI generated at runtime from your API's own OpenAPI | **`/admin`** — tenants, users, an observability dashboard (latency, SLO burn rate, trace waterfalls) and the engine's own **Resources** view: RAM/CPU/GC/pool/PSI with a deterministic **bottleneck verdict** under load ("the database, not Appximo") | **`/editor`** — Appximo Studio: a visual ERD schema designer that deploys, migrates and restarts the engine |
 | **State machines** enforced race-safely in SQL | **Atomic multi-resource transactions** with compare-and-set guards | **SSE real-time**, signed webhooks, JS/WASM sandboxed hooks, Prometheus + trace ring |
 
 The same generated schema from the demo, seen through three of those surfaces:
@@ -580,6 +580,7 @@ the trilogy in one stream) — and it can build the full stack.
 | `APPXIMO_GRAPHQL_PLAYGROUND` | env | no | allow GraphQL introspection + serve the GraphiQL explorer at `/graphiql` outside development; **empty = off** (the safe default — `APPXIMO_ENV=development` already enables both). Per-app in the fleet |
 | `APPXIMO_PLATFORM_SUPER_ADMIN_ROLE` / `APPXIMO_PLATFORM_MFA_ISSUER` | env | no | admin API: platform super-admin role marker (default `platform_super_admin`); platform authenticator label. Bootstrap the first super-admin with `appximo admin create` |
 | `OBS_DB_PATH` | env | no | observability SQLite path; default `/var/lib/appximo/obs.db` (persistent — survives restarts). See [docs/DEPLOY.md](docs/DEPLOY.md#observability-store-obs_db_path) |
+| `APPXIMO_SELFMON` | env | no | `off` disables the engine's own resource collector (runtime / cgroup / PSI / pool + the attribution verdict at `/admin` → Resources, `/debug/resources`, `appximo_selfmon_*` on `/metrics`). On by default; `APPXIMO_SELFMON_INTERVAL` (10s background), `APPXIMO_SELFMON_LIVE_INTERVAL` (1s while the view polls), `APPXIMO_SELFMON_P99_MS` (the verdict's "slow" floor, 50). See [ADR-030](docs/adr/ADR-030-self-observability-and-deterministic-attribution.md) |
 | `DB_MAX_CONNS`, `GOMAXPROCS`, `SLACK_WEBHOOK_URL`, `REDIS_URL` | env | no | see [docs/DEPLOY.md](docs/DEPLOY.md) |
 | `--schema` | flag | **yes** | path to the JSON schema |
 | `--port` | flag | no | data-plane port (default 8080) |

@@ -1526,6 +1526,21 @@ app, err := appximo.New(appximo.Config{
 iframe, keep the **checkout** page free of third-party scripts (analytics, chat,
 tag managers). One extra script there moves the merchant from SAQ A to SAQ A-EP.
 
+**Your binary also observes itself.** The stock surfaces include the engine's
+own resource collector (ADR-030): `/admin` → Resources shows RAM / CPU / GC /
+goroutines / pool / PSI from ONE out-of-band goroutine and a deterministic
+**bottleneck verdict** under load — `db_bound` ("the database, not Appximo"),
+`pool_exhausted`, `cpu_throttled` (the plan's quota), `cpu_saturated`,
+`gc_pressure`, `memory_pressure`, `lock_contention`, `healthy` — with the
+evidence behind it, and `/admin/resources/snapshot` exports a run as JSON.
+Your custom routes are counted like generated ones (the request tap runs for
+every non-infra request); the `query` stage your handler's `ctx.Query`/`Get`
+mark is what the `db_bound` rule reads, so a handler that spends its time in
+an external HTTP call reads as "the handler itself" — which is the truth.
+A mutex your handlers contend on shows up as `lock_contention` from
+`/sync/mutex/wait/total`; nothing to instrument. Knobs: `APPXIMO_SELFMON=off`,
+`APPXIMO_SELFMON_INTERVAL`, `APPXIMO_SELFMON_P99_MS` (docs/PRODUCTION.md).
+
 In the in-process fleet a mount belongs to the app that declares it; the
 manifest-driven fleet declares none. Runnable example:
 [examples/fullstack/](../examples/fullstack/).

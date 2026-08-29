@@ -78,6 +78,24 @@ export const api = {
     const qs = params ? new URLSearchParams(params).toString() : ""
     return request("GET", `/admin/observability/tenants/${encodeURIComponent(tid)}${qs ? "?" + qs : ""}`)
   },
+  // the engine's OWN resources (CENTINELA-C-S1): runtime/cgroup/PSI/pool + the
+  // attribution verdict. Process-level (no tenant). `live=1` keeps the collector
+  // on its 1 s cadence while the panel polls; `series` = ticks of correlation.
+  resources: (params) => {
+    const qs = params ? new URLSearchParams(params).toString() : ""
+    return request("GET", `/admin/resources${qs ? "?" + qs : ""}`)
+  },
+  // The exportable snapshot of a run: fetched with the Bearer (a plain link
+  // cannot send it), returned as text so the caller can save it as a file.
+  resourcesSnapshot: async (ticks) => {
+    const headers = {}
+    const t = getToken()
+    if (t) headers["Authorization"] = "Bearer " + t
+    const res = await fetch(`/admin/resources/snapshot${ticks ? "?ticks=" + ticks : ""}`, { headers })
+    const text = await res.text()
+    if (!res.ok) { let data = null; try { data = JSON.parse(text) } catch { data = { raw: text } }; throw new ApiError(res.status, data) }
+    return text
+  },
   // files (per tenant; UI-F5-S1 admin routes — same Store as the tenant API)
   listFiles: (tid, page = 1) => request("GET", `/admin/tenants/${encodeURIComponent(tid)}/files?page=${page}&per_page=50`),
   fileURL: (tid, fid) => request("GET", `/admin/tenants/${encodeURIComponent(tid)}/files/${encodeURIComponent(fid)}/url`),

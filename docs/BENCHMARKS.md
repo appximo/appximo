@@ -341,6 +341,31 @@ max(0.5 ms, 3%)). Everything else is reported as `no_change` and dropped.
 | Caddy upstream keep-alive pool sizing | — | — | — | `no_change` — rejected |
 | Disabling Caddy's access log | — | — | — | `no_change` — rejected |
 
+### What Mann-Whitney does NOT tell you — the tail needs its own test (CENTINELA-C-S1, OPS-35)
+
+The verdict above is the right one for what it gates: the **median**. Mann-Whitney
+U compares stochastic dominance between two samples — in practice, whether one
+tends to be larger than the other — **not a specific percentile**. A change that
+moves only the tail (the p99) while the bulk stays put passes it with p ≈ 1. So a
+claim about the p99 needs a test on the p99: a **permutation test on the
+Δp99** (pool both samples, re-label them thousands of times, recompute the
+difference of p99s; the fraction of permuted differences at least as large as
+the observed one is the p-value) or a **bootstrap of the difference of p99s**.
+The DevHub statistics package ships `stats.PermutationQuantileDiff` for exactly
+this (pinned by a test where the medians are identical and 2 % of one sample
+carries a 20 ms tail). Two honest limits come with it: (1) the p99 of a
+30-second run at 100 rps is estimated from ~30 tail points, so its confidence
+interval is wide by construction; (2) on this box the smallest effect the
+protocol resolves is **0.5 ms** — a "< 1 % of p99" promise (≈ 0.016 ms on a
+1.6 ms p50) is **not measurable here at all**, and the project stops making it.
+A cost that small is stated on the proxies that DO resolve it — allocations per
+operation and bytes per operation (`go test -bench -benchmem -count=10` +
+`benchstat`), CPU-seconds accumulated under identical load (`cpu.stat
+usage_usec` of the process cgroup, ON vs OFF, alternated), and steady-state RSS
+after GC — and the p99 is reported as an **upper bound** («Δp99 within the
+instrument's resolution, ≤ 0.5 ms»), never as "no effect". §4c below applies
+this to the engine's own resource collector.
+
 ### The composite index — the biggest finding in this document
 
 This is a **schema-design lesson every Appximo user will hit**, and it is

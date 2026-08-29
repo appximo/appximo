@@ -11,6 +11,8 @@ import { History } from "./routes/History"
 // Observability pulls in ECharts — lazy-load it so the charting bundle ships in its
 // own chunk, fetched only when the panel is opened (the rest of the SPA stays light).
 const Observability = lazy(() => import("./routes/Observability").then((m) => ({ default: m.Observability })))
+// Resources (CENTINELA-C-S1) charts the correlation window with ECharts too — same lazy chunk discipline.
+const Resources = lazy(() => import("./routes/Resources").then((m) => ({ default: m.Resources })))
 import { isAuthed } from "./lib/auth"
 import { Toaster } from "./components/ui"
 
@@ -41,6 +43,7 @@ export default function App() {
       <Route path="/files" component={Files} />
       <Route path="/history" component={History} />
       <Route path="/observability" component={Observability} />
+      <Route path="/resources" component={Resources} />
       <Route path="*" component={() => <Navigate href="/" />} />
     </HashRouter>
   )

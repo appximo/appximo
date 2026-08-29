@@ -25,6 +25,16 @@ type ObsHandler interface {
 	ServeTenantData(w http.ResponseWriter, r *http.Request)
 }
 
+// ResourceHandler is the OPTIONAL second slice of the observability server:
+// the engine's own resources + attribution verdict (CENTINELA-C-S1). Optional
+// (a type assertion, not a widening of ObsHandler) so a test stub that only
+// serves tenant data keeps compiling; an ObsHandler that implements it gets
+// the /admin/resources routes registered.
+type ResourceHandler interface {
+	ServeResources(w http.ResponseWriter, r *http.Request)
+	ServeResourcesSnapshot(w http.ResponseWriter, r *http.Request)
+}
+
 type platformCtxKey struct{}
 
 // Register wires the admin API onto the data-plane router r. Routes live under
@@ -130,6 +140,17 @@ func (s *Service) Register(r chi.Router, obs ObsHandler, adminKey string) {
 
 	// --- observability (platform → any tenant; tenant admin → its own) ---
 	r.Get("/admin/observability/tenants/{id}", s.observabilityHandler(obs))
+
+	// --- the engine's OWN resources (CENTINELA-C-S1; platform token OR admin key) ---
+	// Process-level, not tenant-scoped: the live board, the correlation series
+	// with the attribution verdict, and the exportable snapshot of a run. Only
+	// the platform operator — a tenant admin must not learn the box's RAM,
+	// cgroup or pool. nil-safe: an engine with self-monitoring off answers 503
+	// from the handler itself; an obs stub without the routes registers nothing.
+	if rh, ok := obs.(ResourceHandler); ok && rh != nil {
+		r.With(s.requirePlatform).Get("/admin/resources", rh.ServeResources)
+		r.With(s.requirePlatform).Get("/admin/resources/snapshot", rh.ServeResourcesSnapshot)
+	}
 }
 
 // handleServedResources returns the resource names the engine serves live (from the

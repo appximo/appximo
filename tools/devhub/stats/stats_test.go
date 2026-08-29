@@ -2,6 +2,7 @@ package stats
 
 import (
 	"math"
+	"math/rand"
 	"testing"
 )
 
@@ -100,5 +101,37 @@ func TestBootstrapMedianDiffCI(t *testing.T) {
 	}
 	if lower <= 0 && upper >= 0 {
 		t.Errorf("CI [%v, %v] must NOT contain 0", lower, upper)
+	}
+}
+
+// The OPS-35 case: two samples with the SAME median and a shifted TAIL.
+// Mann-Whitney must NOT see it (that is the finding), the permutation test on
+// the p99 must.
+func TestPermutationQuantileDiff_TailOnlyShift(t *testing.T) {
+	rng := rand.New(rand.NewSource(7))
+	a := make([]float64, 2000)
+	b := make([]float64, 2000)
+	for i := range a {
+		a[i] = 1.5 + rng.Float64()*0.2 // 1.5–1.7 ms, flat
+		b[i] = 1.5 + rng.Float64()*0.2
+		if i%50 == 0 { // 2 % of b carries a 20 ms tail
+			b[i] = 20 + rng.Float64()
+		}
+	}
+	_, mw := MannWhitneyU(a, b)
+	obs, pp := PermutationQuantileDiff(a, b, 99, 2000)
+	if obs < 10 {
+		t.Fatalf("observed Δp99 = %.2f, want the injected ~18 ms tail", obs)
+	}
+	if pp > 0.01 {
+		t.Fatalf("permutation p = %.4f, want < 0.01 for a tail-only shift", pp)
+	}
+	if mw < 0.05 {
+		t.Logf("note: Mann-Whitney ALSO flagged this one (p=%.3f) — the finding is that it need not", mw)
+	}
+	// Same distribution → no evidence.
+	_, pNull := PermutationQuantileDiff(a, a, 99, 500)
+	if pNull < 0.5 {
+		t.Fatalf("identical samples: p = %.3f, want ≈ 1", pNull)
 	}
 }

@@ -82,6 +82,10 @@ func NewMetrics() *Metrics {
 	return m
 }
 
+// Register adds a collector to the dedicated registry — how the resource
+// collector's gauges reach /metrics without a second registry or endpoint.
+func (m *Metrics) Register(c prometheus.Collector) error { return m.reg.Register(c) }
+
 // IncRequestPanic records one panic recovered by the request-chain Recoverer.
 func (m *Metrics) IncRequestPanic() { m.requestPanics.Inc() }
 

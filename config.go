@@ -14,6 +14,7 @@ package appximo
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -61,6 +62,27 @@ type Config struct {
 	// env-only) since MT-STRUCT-S3: N in-process apps share the process env,
 	// and each app needs its OWN obs store.
 	ObsDBPath string
+
+	// --- Self-monitoring of the engine's own resources (CENTINELA-C-S1, ADR-030) ---
+	//
+	// SelfMonDisabled turns the resource collector off (APPXIMO_SELFMON=off).
+	// On by default: one goroutine on a timer reads runtime/metrics, the
+	// process cgroup / PSI and pgxpool.Stat, and computes the attribution
+	// verdict served at /admin/resources and /debug/resources. The request
+	// path pays two atomic adds and one HDR record per request — measured on
+	// the proxies A-54 names (allocs/op, CPU-seconds, RSS), see docs/BENCHMARKS.md §4c.
+	SelfMonDisabled bool
+	// SelfMonInterval is the BACKGROUND cadence (default 10 s; env
+	// APPXIMO_SELFMON_INTERVAL, a Go duration). SelfMonLiveInterval is the
+	// cadence while the /admin correlation view is being polled (default 1 s;
+	// APPXIMO_SELFMON_LIVE_INTERVAL); it decays back after 60 s without a poll.
+	SelfMonInterval     time.Duration
+	SelfMonLiveInterval time.Duration
+	// SelfMonHighP99Ms is the absolute "slow" floor of the attribution rules
+	// (default 50 ms; APPXIMO_SELFMON_P99_MS): "what is slow for MY app" is
+	// the one threshold an operator plausibly tunes. The relative rule (3× the
+	// healthy baseline) applies regardless.
+	SelfMonHighP99Ms float64
 
 	// BannerWriter is where Start's human boot banner ("Appximo serving on …",
 	// the foreground note, the Try-it line) is printed. nil keeps the historical

@@ -223,3 +223,48 @@ func BootstrapMedianDiffCI(a, b []float64) (lower, upper float64) {
 	}
 	return Percentile(diffs, 2.5), Percentile(diffs, 97.5)
 }
+
+// PermutationQuantileDiff answers the question Mann-Whitney U does NOT: "did
+// the p-th percentile move?" (CENTINELA-C-S1, OPS-35). Mann-Whitney compares
+// stochastic dominance — in practice the medians — so a change that shifts only
+// the tail (p99) can pass it with p ≈ 1. This is a two-sided permutation test on
+// the statistic of interest itself: observed = P_p(b) − P_p(a); under the null
+// (the two samples come from one distribution) the labels are exchangeable, so
+// the samples are pooled, re-labelled `resamples` times with a deterministic
+// RNG, and the fraction of |permuted diff| ≥ |observed| is the p-value (with the
+// +1 correction so it never reports exactly 0). It is exact in spirit (no
+// normality, no variance formula) and its resolution is bounded by the sample
+// sizes: a percentile of the tail estimated from a few hundred points is wide by
+// construction — that is the caveat A-54 writes down, not a defect of the test.
+//
+// p is the percentile (99 for p99); resamples ≥ 1000 is the practical floor.
+func PermutationQuantileDiff(a, b []float64, p float64, resamples int) (observed float64, pValue float64) {
+	if len(a) == 0 || len(b) == 0 {
+		return 0, 1
+	}
+	if resamples < 1 {
+		resamples = 1
+	}
+	observed = Percentile(b, p) - Percentile(a, p)
+	pooled := make([]float64, 0, len(a)+len(b))
+	pooled = append(pooled, a...)
+	pooled = append(pooled, b...)
+	rng := rand.New(rand.NewSource(42)) //nolint:gosec // determinism wanted, not crypto
+	pa := make([]float64, len(a))
+	pb := make([]float64, len(b))
+	extreme := 0
+	absObs := math.Abs(observed)
+	for i := 0; i < resamples; i++ {
+		rng.Shuffle(len(pooled), func(x, y int) { pooled[x], pooled[y] = pooled[y], pooled[x] })
+		copy(pa, pooled[:len(a)])
+		copy(pb, pooled[len(a):])
+		if math.Abs(Percentile(pb, p)-Percentile(pa, p)) >= absObs {
+			extreme++
+		}
+	}
+	pValue = float64(extreme+1) / float64(resamples+1)
+	if pValue > 1 {
+		pValue = 1
+	}
+	return observed, pValue
+}
