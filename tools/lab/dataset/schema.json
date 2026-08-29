@@ -1,0 +1,1254 @@
+{
+  "$schema": "https://appitools.dev/schema/v1",
+  "version": "1",
+  "name": "commerce-core",
+  "resources": {
+    "tipos_producto": {
+      "fields": {
+        "nombre": {
+          "type": "string",
+          "required": true,
+          "maxLength": 80,
+          "unique": true,
+          "minLength": 1
+        },
+        "vertical": {
+          "type": "string",
+          "enum": [
+            "retail",
+            "alimentos",
+            "servicios"
+          ],
+          "default": "retail"
+        },
+        "regimen_iva": {
+          "type": "string",
+          "enum": [
+            "gravado",
+            "exento",
+            "excluido"
+          ],
+          "default": "gravado"
+        },
+        "tarifa_iva_pct": {
+          "type": "int",
+          "min": 0,
+          "max": 100,
+          "default": 19
+        },
+        "atributos_def": {
+          "type": "json"
+        },
+        "activo": {
+          "type": "bool",
+          "default": true
+        },
+        "created_at": {
+          "type": "time",
+          "auto": true
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "vertical"
+          ]
+        }
+      ]
+    },
+    "categorias": {
+      "fields": {
+        "nombre": {
+          "type": "string",
+          "required": true,
+          "maxLength": 100,
+          "minLength": 1
+        },
+        "slug": {
+          "type": "string",
+          "required": true,
+          "maxLength": 100,
+          "unique": true,
+          "minLength": 1
+        },
+        "parent_id": {
+          "type": "uuid",
+          "relation": "categorias",
+          "on_delete": "set_null"
+        },
+        "orden": {
+          "type": "int",
+          "default": 0
+        },
+        "activa": {
+          "type": "bool",
+          "default": true
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "parent_id"
+          ]
+        },
+        {
+          "fields": [
+            "activa"
+          ]
+        }
+      ]
+    },
+    "productos": {
+      "fields": {
+        "nombre": {
+          "type": "string",
+          "required": true,
+          "maxLength": 200,
+          "minLength": 1
+        },
+        "descripcion": {
+          "type": "text"
+        },
+        "sku": {
+          "type": "string",
+          "required": true,
+          "maxLength": 64,
+          "unique": true,
+          "minLength": 1
+        },
+        "precio_centavos": {
+          "type": "int64",
+          "required": true,
+          "min": 0
+        },
+        "tipo_producto_id": {
+          "type": "uuid",
+          "relation": "tipos_producto",
+          "on_delete": "restrict"
+        },
+        "categoria_id": {
+          "type": "uuid",
+          "relation": "categorias",
+          "on_delete": "set_null"
+        },
+        "imagen_id": {
+          "type": "file",
+          "on_delete": "set_null",
+          "accept": "image",
+          "max_bytes": 5242880
+        },
+        "atributos": {
+          "type": "jsonb",
+          "default": {}
+        },
+        "destacado": {
+          "type": "bool",
+          "default": false
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "borrador",
+            "activo",
+            "archivado"
+          ],
+          "default": "borrador",
+          "state_machine": {
+            "initial": "borrador",
+            "transitions": {
+              "borrador": [
+                "activo",
+                "archivado"
+              ],
+              "activo": [
+                "borrador",
+                "archivado"
+              ],
+              "archivado": []
+            }
+          }
+        },
+        "created_at": {
+          "type": "time",
+          "auto": true
+        },
+        "updated_at": {
+          "type": "time",
+          "auto": true
+        }
+      },
+      "relations": {
+        "variantes": {
+          "type": "has_many",
+          "target": "variantes",
+          "fk": "producto_id",
+          "limit": 50
+        },
+        "categoria": {
+          "type": "belongs_to",
+          "target": "categorias",
+          "fk": "categoria_id"
+        },
+        "tipo": {
+          "type": "belongs_to",
+          "target": "tipos_producto",
+          "fk": "tipo_producto_id"
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "estado",
+            "created_at"
+          ]
+        },
+        {
+          "fields": [
+            "categoria_id"
+          ]
+        },
+        {
+          "fields": [
+            "tipo_producto_id"
+          ]
+        },
+        {
+          "fields": [
+            "atributos"
+          ],
+          "method": "gin",
+          "opclass": "jsonb_path_ops"
+        }
+      ]
+    },
+    "variantes": {
+      "fields": {
+        "producto_id": {
+          "type": "uuid",
+          "relation": "productos",
+          "on_delete": "cascade"
+        },
+        "sku": {
+          "type": "string",
+          "required": true,
+          "maxLength": 64,
+          "unique": true,
+          "minLength": 1
+        },
+        "nombre": {
+          "type": "string",
+          "required": true,
+          "maxLength": 120,
+          "minLength": 1
+        },
+        "precio_centavos": {
+          "type": "int64",
+          "required": true,
+          "min": 0
+        },
+        "stock": {
+          "type": "int",
+          "required": true,
+          "default": 0,
+          "min": 0
+        },
+        "stock_reservado": {
+          "type": "int",
+          "required": true,
+          "default": 0,
+          "min": 0
+        },
+        "activa": {
+          "type": "bool",
+          "default": true
+        },
+        "opciones": {
+          "type": "jsonb",
+          "default": {}
+        },
+        "created_at": {
+          "type": "time",
+          "auto": true
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "producto_id"
+          ]
+        },
+        {
+          "fields": [
+            "activa"
+          ]
+        },
+        {
+          "fields": [
+            "opciones"
+          ],
+          "method": "gin",
+          "opclass": "jsonb_path_ops"
+        }
+      ]
+    },
+    "reservas_stock": {
+      "fields": {
+        "variante_id": {
+          "type": "uuid",
+          "relation": "variantes",
+          "on_delete": "cascade"
+        },
+        "orden_id": {
+          "type": "uuid"
+        },
+        "cantidad": {
+          "type": "int",
+          "required": true,
+          "min": 1
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "activa",
+            "confirmada",
+            "liberada"
+          ],
+          "default": "activa",
+          "state_machine": {
+            "initial": "activa",
+            "transitions": {
+              "activa": [
+                "confirmada",
+                "liberada"
+              ],
+              "confirmada": [],
+              "liberada": []
+            }
+          }
+        },
+        "expira_en": {
+          "type": "time",
+          "required": true
+        },
+        "created_at": {
+          "type": "time",
+          "auto": true
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "variante_id"
+          ]
+        },
+        {
+          "fields": [
+            "estado",
+            "expira_en"
+          ]
+        },
+        {
+          "fields": [
+            "orden_id"
+          ]
+        }
+      ]
+    },
+    "clientes": {
+      "fields": {
+        "user_id": {
+          "type": "uuid",
+          "unique": true
+        },
+        "email": {
+          "type": "string",
+          "required": true,
+          "maxLength": 160,
+          "format": "email",
+          "minLength": 1
+        },
+        "nombre": {
+          "type": "string",
+          "required": true,
+          "maxLength": 160,
+          "minLength": 1
+        },
+        "telefono": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "documento_tipo": {
+          "type": "string",
+          "enum": [
+            "CC",
+            "CE",
+            "NIT",
+            "PP"
+          ],
+          "default": "CC"
+        },
+        "documento_numero": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "es_invitado": {
+          "type": "bool",
+          "default": false
+        },
+        "created_at": {
+          "type": "time",
+          "auto": true
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "email"
+          ]
+        }
+      ]
+    },
+    "direcciones": {
+      "fields": {
+        "cliente_id": {
+          "type": "uuid",
+          "relation": "clientes",
+          "on_delete": "cascade"
+        },
+        "linea1": {
+          "type": "string",
+          "required": true,
+          "maxLength": 200,
+          "minLength": 1
+        },
+        "ciudad": {
+          "type": "string",
+          "required": true,
+          "maxLength": 80,
+          "minLength": 1
+        },
+        "departamento": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "codigo_postal": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "pais": {
+          "type": "string",
+          "maxLength": 2,
+          "default": "CO"
+        },
+        "es_principal": {
+          "type": "bool",
+          "default": false
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "cliente_id"
+          ]
+        }
+      ]
+    },
+    "cupones": {
+      "fields": {
+        "codigo": {
+          "type": "string",
+          "required": true,
+          "maxLength": 40,
+          "unique": true,
+          "minLength": 1
+        },
+        "descuento_pct": {
+          "type": "int",
+          "required": true,
+          "min": 1,
+          "max": 100
+        },
+        "activo": {
+          "type": "bool",
+          "default": true
+        },
+        "vence_en": {
+          "type": "time",
+          "required": true
+        },
+        "created_at": {
+          "type": "time",
+          "auto": true
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "activo"
+          ]
+        }
+      ]
+    },
+    "envio_config": {
+      "fields": {
+        "retiro_habilitado": {
+          "type": "bool",
+          "default": true
+        },
+        "envio_habilitado": {
+          "type": "bool",
+          "default": true
+        },
+        "tarifa_plana_centavos": {
+          "type": "int64",
+          "required": true,
+          "min": 0,
+          "default": 0
+        },
+        "nota": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "updated_at": {
+          "type": "time",
+          "auto": true
+        }
+      }
+    },
+    "ordenes": {
+      "fields": {
+        "numero": {
+          "type": "string",
+          "required": true,
+          "maxLength": 32,
+          "unique": true,
+          "minLength": 1
+        },
+        "cliente_id": {
+          "type": "uuid",
+          "relation": "clientes",
+          "on_delete": "restrict"
+        },
+        "user_id": {
+          "type": "uuid"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "creada",
+            "pendiente_pago",
+            "pagada",
+            "preparando",
+            "enviada",
+            "entregada",
+            "cerrada",
+            "cancelada",
+            "reembolsada"
+          ],
+          "default": "creada",
+          "state_machine": {
+            "initial": "creada",
+            "transitions": {
+              "creada": [
+                "pendiente_pago",
+                "cancelada"
+              ],
+              "pendiente_pago": [
+                "pagada",
+                "cancelada"
+              ],
+              "pagada": [
+                "preparando",
+                "reembolsada",
+                "cancelada"
+              ],
+              "preparando": [
+                "enviada",
+                "cancelada"
+              ],
+              "enviada": [
+                "entregada"
+              ],
+              "entregada": [
+                "cerrada",
+                "reembolsada"
+              ],
+              "cerrada": [],
+              "cancelada": [],
+              "reembolsada": []
+            }
+          }
+        },
+        "subtotal_centavos": {
+          "type": "int64",
+          "required": true,
+          "min": 0
+        },
+        "impuestos_centavos": {
+          "type": "int64",
+          "default": 0,
+          "min": 0
+        },
+        "envio_centavos": {
+          "type": "int64",
+          "default": 0,
+          "min": 0
+        },
+        "envio_metodo": {
+          "type": "string",
+          "enum": [
+            "retiro",
+            "envio"
+          ],
+          "default": "retiro"
+        },
+        "direccion_id": {
+          "type": "uuid",
+          "relation": "direcciones",
+          "on_delete": "set_null"
+        },
+        "total_centavos": {
+          "type": "int64",
+          "required": true,
+          "min": 0
+        },
+        "cupon_id": {
+          "type": "uuid",
+          "relation": "cupones",
+          "on_delete": "set_null"
+        },
+        "descuento_centavos": {
+          "type": "int64",
+          "default": 0,
+          "min": 0
+        },
+        "moneda": {
+          "type": "string",
+          "maxLength": 3,
+          "default": "COP"
+        },
+        "created_at": {
+          "type": "time",
+          "auto": true
+        },
+        "updated_at": {
+          "type": "time",
+          "auto": true
+        }
+      },
+      "relations": {
+        "lineas": {
+          "type": "has_many",
+          "target": "orden_lineas",
+          "fk": "orden_id",
+          "limit": 100
+        },
+        "cliente": {
+          "type": "belongs_to",
+          "target": "clientes",
+          "fk": "cliente_id"
+        },
+        "direccion": {
+          "type": "belongs_to",
+          "target": "direcciones",
+          "fk": "direccion_id"
+        }
+      },
+      "events": [
+        "create",
+        "update"
+      ],
+      "indexes": [
+        {
+          "fields": [
+            "estado",
+            "created_at"
+          ]
+        },
+        {
+          "fields": [
+            "cliente_id"
+          ]
+        },
+        {
+          "fields": [
+            "user_id"
+          ]
+        }
+      ]
+    },
+    "orden_lineas": {
+      "fields": {
+        "orden_id": {
+          "type": "uuid",
+          "relation": "ordenes",
+          "on_delete": "cascade"
+        },
+        "user_id": {
+          "type": "uuid"
+        },
+        "producto_id": {
+          "type": "uuid"
+        },
+        "variante_id": {
+          "type": "uuid"
+        },
+        "sku": {
+          "type": "string",
+          "required": true,
+          "maxLength": 64,
+          "minLength": 1
+        },
+        "nombre_producto": {
+          "type": "string",
+          "required": true,
+          "maxLength": 200,
+          "minLength": 1
+        },
+        "cantidad": {
+          "type": "int",
+          "required": true,
+          "min": 1
+        },
+        "precio_unitario_centavos": {
+          "type": "int64",
+          "required": true,
+          "min": 0
+        },
+        "total_linea_centavos": {
+          "type": "int64",
+          "required": true,
+          "min": 0
+        },
+        "tarifa_iva_pct": {
+          "type": "int",
+          "min": 0,
+          "max": 100
+        },
+        "iva_centavos": {
+          "type": "int64",
+          "min": 0
+        },
+        "descuento_centavos": {
+          "type": "int64",
+          "min": 0
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "orden_id"
+          ]
+        },
+        {
+          "fields": [
+            "user_id"
+          ]
+        }
+      ]
+    },
+    "pagos": {
+      "fields": {
+        "orden_id": {
+          "type": "uuid"
+        },
+        "user_id": {
+          "type": "uuid"
+        },
+        "proveedor": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "wompi",
+            "mock"
+          ],
+          "maxLength": 32
+        },
+        "metodo": {
+          "type": "string",
+          "enum": [
+            "CARD",
+            "PSE",
+            "NEQUI",
+            "BANCOLOMBIA_TRANSFER",
+            "BREB_QR"
+          ],
+          "maxLength": 32
+        },
+        "monto_centavos": {
+          "type": "int64",
+          "required": true,
+          "min": 0
+        },
+        "moneda": {
+          "type": "string",
+          "maxLength": 3,
+          "default": "COP"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "pendiente",
+            "aprobado",
+            "rechazado",
+            "error",
+            "reembolsado",
+            "cancelado"
+          ],
+          "default": "pendiente",
+          "state_machine": {
+            "initial": "pendiente",
+            "transitions": {
+              "pendiente": [
+                "aprobado",
+                "rechazado",
+                "error",
+                "cancelado"
+              ],
+              "aprobado": [
+                "reembolsado"
+              ],
+              "rechazado": [],
+              "error": [],
+              "cancelado": [],
+              "reembolsado": []
+            }
+          }
+        },
+        "referencia": {
+          "type": "string",
+          "required": true,
+          "maxLength": 80,
+          "unique": true,
+          "minLength": 1
+        },
+        "referencia_externa": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "response_code": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "signature_ok": {
+          "type": "bool",
+          "default": false
+        },
+        "monto_reembolsado_centavos": {
+          "type": "int64",
+          "default": 0,
+          "min": 0
+        },
+        "checkout_url": {
+          "type": "text"
+        },
+        "estado_actualizado_en": {
+          "type": "time"
+        },
+        "created_at": {
+          "type": "time",
+          "auto": true
+        },
+        "updated_at": {
+          "type": "time",
+          "auto": true
+        }
+      },
+      "events": [
+        "create",
+        "update"
+      ],
+      "indexes": [
+        {
+          "fields": [
+            "orden_id"
+          ]
+        },
+        {
+          "fields": [
+            "estado",
+            "created_at"
+          ]
+        },
+        {
+          "fields": [
+            "referencia_externa"
+          ]
+        },
+        {
+          "fields": [
+            "user_id"
+          ]
+        }
+      ]
+    },
+    "pago_eventos": {
+      "fields": {
+        "event_id": {
+          "type": "string",
+          "required": true,
+          "maxLength": 160,
+          "unique": true,
+          "minLength": 1
+        },
+        "pago_id": {
+          "type": "uuid"
+        },
+        "proveedor": {
+          "type": "string",
+          "required": true,
+          "maxLength": 32,
+          "minLength": 1
+        },
+        "tipo": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "estado_reportado": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "signature_ok": {
+          "type": "bool",
+          "default": false
+        },
+        "idempotency_status": {
+          "type": "string",
+          "enum": [
+            "procesado",
+            "duplicado",
+            "ignorado_fuera_de_orden",
+            "firma_invalida"
+          ],
+          "maxLength": 40
+        },
+        "monto_centavos": {
+          "type": "int64",
+          "default": 0
+        },
+        "response_code": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "event_timestamp": {
+          "type": "time"
+        },
+        "payload": {
+          "type": "text"
+        },
+        "created_at": {
+          "type": "time",
+          "auto": true
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "pago_id"
+          ]
+        },
+        {
+          "fields": [
+            "proveedor",
+            "created_at"
+          ]
+        }
+      ]
+    },
+    "facturas": {
+      "fields": {
+        "orden_id": {
+          "type": "uuid"
+        },
+        "pago_id": {
+          "type": "uuid"
+        },
+        "tipo": {
+          "type": "string",
+          "enum": [
+            "factura",
+            "nota_credito"
+          ],
+          "default": "factura"
+        },
+        "factura_origen_id": {
+          "type": "uuid"
+        },
+        "cufe_origen": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "pendiente",
+            "emitida",
+            "error"
+          ],
+          "default": "pendiente",
+          "state_machine": {
+            "initial": "pendiente",
+            "transitions": {
+              "pendiente": [
+                "emitida",
+                "error"
+              ],
+              "error": [
+                "pendiente"
+              ],
+              "emitida": []
+            }
+          }
+        },
+        "proveedor_tecnologico": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "cufe": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "numero_factura": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "xml_url": {
+          "type": "text"
+        },
+        "pdf_url": {
+          "type": "text"
+        },
+        "error_mensaje": {
+          "type": "text"
+        },
+        "created_at": {
+          "type": "time",
+          "auto": true
+        },
+        "updated_at": {
+          "type": "time",
+          "auto": true
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "orden_id"
+          ]
+        },
+        {
+          "fields": [
+            "estado",
+            "created_at"
+          ]
+        }
+      ]
+    }
+  },
+  "rbac": {
+    "roles": {
+      "dueno": {
+        "resources": "*",
+        "actions": [
+          "*"
+        ]
+      },
+      "empleado": {
+        "permissions": {
+          "productos": {
+            "actions": [
+              "read",
+              "create",
+              "update"
+            ]
+          },
+          "variantes": {
+            "actions": [
+              "read",
+              "create",
+              "update"
+            ]
+          },
+          "categorias": {
+            "actions": [
+              "read",
+              "create",
+              "update"
+            ]
+          },
+          "tipos_producto": {
+            "actions": [
+              "read"
+            ]
+          },
+          "clientes": {
+            "actions": [
+              "read"
+            ]
+          },
+          "direcciones": {
+            "actions": [
+              "read"
+            ]
+          },
+          "ordenes": {
+            "actions": [
+              "read"
+            ]
+          },
+          "orden_lineas": {
+            "actions": [
+              "read"
+            ]
+          },
+          "cupones": {
+            "actions": [
+              "read"
+            ]
+          },
+          "reservas_stock": {
+            "actions": [
+              "read"
+            ]
+          },
+          "pagos": {
+            "actions": [
+              "read"
+            ]
+          },
+          "facturas": {
+            "actions": [
+              "read"
+            ]
+          },
+          "envio_config": {
+            "actions": [
+              "read"
+            ]
+          },
+          "files": {
+            "actions": [
+              "read",
+              "create"
+            ]
+          }
+        },
+        "routes": {
+          "ordenes-transicion": {
+            "actions": [
+              "create"
+            ]
+          }
+        }
+      },
+      "cliente": {
+        "permissions": {
+          "ordenes": {
+            "actions": [
+              "read"
+            ],
+            "conditions": {
+              "field": "user_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "orden_lineas": {
+            "actions": [
+              "read"
+            ],
+            "conditions": {
+              "field": "user_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "pagos": {
+            "actions": [
+              "read"
+            ],
+            "conditions": {
+              "field": "user_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          }
+        }
+      },
+      "demo": {
+        "permissions": {
+          "productos": {
+            "actions": [
+              "read"
+            ]
+          },
+          "variantes": {
+            "actions": [
+              "read"
+            ]
+          },
+          "categorias": {
+            "actions": [
+              "read"
+            ]
+          },
+          "tipos_producto": {
+            "actions": [
+              "read"
+            ]
+          },
+          "clientes": {
+            "actions": [
+              "read"
+            ]
+          },
+          "direcciones": {
+            "actions": [
+              "read"
+            ]
+          },
+          "ordenes": {
+            "actions": [
+              "read"
+            ]
+          },
+          "orden_lineas": {
+            "actions": [
+              "read"
+            ]
+          },
+          "cupones": {
+            "actions": [
+              "read"
+            ]
+          },
+          "reservas_stock": {
+            "actions": [
+              "read"
+            ]
+          },
+          "pagos": {
+            "actions": [
+              "read"
+            ]
+          },
+          "facturas": {
+            "actions": [
+              "read"
+            ]
+          },
+          "envio_config": {
+            "actions": [
+              "read"
+            ]
+          },
+          "files": {
+            "actions": [
+              "read"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

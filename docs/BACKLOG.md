@@ -26,7 +26,17 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-29 (CENTINELA-C-S1)** — Module C of the Centinela package BUILT (the engine observes its own resources out of band and attributes the bottleneck with eight ranked deterministic verdicts, each provoked and verified; `/admin` → Resources; the overhead stated on allocs/op + CPU-seconds + RSS with the p99 as an upper bound — ADR-030) and two spec promises corrected (A-53 the personal-data default, A-54 the unmeasurable "< 1 % of p99"); new OPEN: OPS-35 (the tail test in `compare-groups`). Before that: **DOC-VITRINA-S1 (2026-08-28, 5th session)** — the technical
+**Last reviewed: 2026-08-29 (LAB-CAPACIDAD-S1)** — the isolated capacity
+laboratory BUILT and tested: `tools/lab` (guarded DO droplets — `applab-`
+prefix + tag both required, refusal before any network call, cap 4, reaper,
+dry-run default, token from a file and never printed; the guards pinned by
+zero-network tests), the deterministic two-size dataset
+(`tools/lab/dataset/`), the six commands (`up/sweep/soak/report/down/reap`),
+`lab report` exercised against the real CAPACIDAD-USL-S1 JSONL, and
+docs/BENCHMARKS.md §4e declares the procedure OFFICIAL, replacing the
+single-host method. The scientific deliverable — the clean re-run and the
+curve overlay — is BLOCKED: the scoped token is absent from the 105; new OPEN
+**OPS-37** with the exact ready criterion. Before that: **CENTINELA-C-S1** — Module C of the Centinela package BUILT (the engine observes its own resources out of band and attributes the bottleneck with eight ranked deterministic verdicts, each provoked and verified; `/admin` → Resources; the overhead stated on allocs/op + CPU-seconds + RSS with the p99 as an upper bound — ADR-030) and two spec promises corrected (A-53 the personal-data default, A-54 the unmeasurable "< 1 % of p99"); new OPEN: OPS-35 (the tail test in `compare-groups`). Before that: **DOC-VITRINA-S1 (2026-08-28, 5th session)** — the technical
 site and `docs/` synchronized with the released **v0.1.13**: the browser tour
 re-recorded on the current `/app` (87.6 s, real time, ES+EN subtitles; the
 2026-08-17 tour ARCHIVED, not deleted), every capture of the pre-redesign
@@ -437,6 +447,37 @@ and they are what the next migrator reads first.
   SCHEMA-5 **warning** at load when a resource has a `text` field and no
   index that `?search=` could use, plus a line in `docs/BENCHMARKS.md §4d`
   (written) and in `frontend-spec`. (c) is a session; (a) is the real fix.
+
+### OPS-37 — The isolated laboratory is built and tested, but its first live run is blocked on the API token
+
+- **Origin:** LAB-CAPACIDAD-S1 (2026-08-29). The session's scientific
+  deliverable — re-running the CAPACIDAD-USL-S1 ladder with the generator on
+  its own box, overlaying the two curves, answering whether the 420 rps
+  bistability is the app or the instrument, re-fitting the USL on clean data,
+  and quantifying shared-vs-dedicated vCPU — requires creating droplets, and
+  the scoped DigitalOcean token the session brief places at
+  `/root/.do-lab-token` (mode 600) **does not exist on the 105** (verified:
+  not at that path, not under `/root`, no `doctl` auth context). The token is
+  Miguel's to create; the lab never rotates or prints it. Everything that does
+  not need the API shipped and is tested: `tools/lab` (guards proven with
+  zero-network refusal tests, dry-run default, infallible `down` pinned at
+  unit level, reaper), the deterministic two-size dataset, the six commands,
+  `lab report` exercised end-to-end against the real CAPACIDAD-USL-S1
+  JSONL (fit + overlay + bistability verdict all work), and
+  docs/BENCHMARKS.md §4e names the procedure official.
+- **Impact: high** for the measurement program — until the clean re-run, every
+  §4d ceiling stays "measured with the instrument on the same box", and no
+  engine optimization (ENG-52's admission control above all) can be judged
+  against a trustworthy baseline.
+- **Ready:** Miguel creates the token (scopes: droplet:create, droplet:read,
+  droplet:delete, ssh_key:read, vpc:read) at `/root/.do-lab-token`, mode 600,
+  on the 105. Then, in one session: `lab up -apply` → `lab sweep -apply` →
+  `lab report -baseline` (the CAPACIDAD-USL-S1 sweep2.jsonl) → `lab soak` if
+  time allows → `lab down -apply` + `lab reap -apply`, and §4e gets the
+  measured curves. First `lab up` should also confirm whether the scoped
+  token can take snapshots (droplet actions); if not and the reinstall time
+  hurts, add the image scopes or accept the reinstall (which re-exercises
+  install.sh).
 
 ### OPS-36 — The capacity procedure exists but runs only on our box: it needs a customer-side form
 

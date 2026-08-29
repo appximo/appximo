@@ -86,3 +86,6 @@ pkg/editorui/web/node_modules/
 # Per-run output of scripts/verify-production (curated evidence lives in
 # benchmarks/data/verify-production-2vcpu-2gb/).
 verify-results/
+
+# the laboratory orchestrator binary (build with: go build -o lab ./tools/lab)
+/lab

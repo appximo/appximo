@@ -594,6 +594,70 @@ therefore every dashboard that shows only a median — perfectly healthy.
   a second core. The doubled figures in the table are labelled as the bound
   they are.
 
+## 4e. The isolated laboratory — the house measurement procedure (LAB-CAPACIDAD-S1)
+
+**This procedure REPLACES the single-host method of §4d for every future
+capacity measurement.** §4d's numbers stand as what they are — measured with
+the load generator ON THE SAME BOX as the engine and PostgreSQL, a confound
+that was declared and quantified (13–16 % of the only core) but not removed.
+Near saturation that is not a footnote: the 420 rps bistability may be the
+app, the generator, or both, and the same-box setup cannot say which. **An
+engine that will take real customers is not optimized against a dirty
+instrument** — every improvement from here on must be distinguishable from
+noise, and on one shared box it is not.
+
+The laboratory is `tools/lab` (its README is the operating manual): ephemeral,
+guarded DigitalOcean droplets — created only with the `applab-` prefix + tag,
+destroy refuses anything else *before* touching the API, hard cap of 4, a
+reaper for anything older than N hours, dry-run by default, token read at
+runtime from a file and never printed. One command each: `lab up`, `lab
+sweep`, `lab soak`, `lab report`, `lab down`, `lab reap`.
+
+What makes a number from this laboratory trustworthy where §4d's could not be:
+
+1. **The generator is its own box** (`c-4`, 4 *dedicated* vCPU — bigger than
+   the target, because a generator that saturates first measures itself), and
+   every run records the generator box's CPU: **a run in which the generator
+   exceeded 70 % busy is INVALID and the report names it.** Applying that
+   criterion retroactively is instructive: in the §4d baseline the box was
+   71–95 % busy in every run at 380 rps and beyond — target and instrument
+   inseparable in the same figure, which is precisely why that setup cannot
+   certify its own knee region.
+2. **Two targets, two questions.** `s-2vcpu-2gb` (Basic, shared vCPU) is what
+   a customer actually buys — it yields the honest customer number, neighbour
+   noise included. `c-2` (dedicated) is the low-variance box for detecting
+   regressions between versions — under 21 % steal a regression and a noisy
+   neighbour are indistinguishable. The difference between the two curves is
+   the measured cost of shared CPU, a number a customer can use to choose a
+   plan.
+3. **Same region, private VPC** — otherwise you measure the internet. The
+   private link's base RTT is measured at `up` and printed in every report.
+4. **The target is provisioned by `scripts/install.sh`** — the customer path,
+   so every lab run also exercises the installer, and an installer failure is
+   a finding.
+5. **The dataset is deterministic and skewed on purpose**
+   (`tools/lab/dataset/`): power-law FKs, correlated columns, temporal
+   clustering, TOAST — seeded with `setseed()` so every run measures the same
+   data, in two sizes (small shop / migration scale). Uniform `random()` data
+   lies in the system's favour (§4d).
+6. **Every report prints its exact conditions** — boxes, region, engine
+   version, dataset, endpoint, date, VPC RTT, generator gate — because a
+   number without its conditions cannot be compared with another. It also
+   prints the run's actual cost (≈ $0.21/h for the full topology; a typical
+   sweep session ≈ $0.55, an 8 h soak ≈ $1.90, list prices).
+
+The sweep default is the §4d authoritative ladder, byte-identical workload
+included, plus a five-repeat probe at 420 rps, and `lab report -baseline`
+overlays the old and new curves point by point — so the first isolated run
+answers directly whether the bistability was the app (ENG-52 stands) or the
+instrument.
+
+**Status:** the tooling, guards (tested), dataset and procedure shipped in
+LAB-CAPACIDAD-S1; the first live isolated run is pending the scoped API token
+on the orchestrator box (docs/BACKLOG.md OPS-37). Until that run, §4d's
+ceiling figures remain the best available estimate — with the caveat above
+attached.
+
 ## 5. REST vs GraphQL — the same data, both ways
 
 Same logical query (orders with their customer and their line items), 100 rps,
