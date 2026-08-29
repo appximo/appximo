@@ -102,12 +102,20 @@ func (r *dbReader) fillClient(st *DBClientStats) {
 		st.NewConnsDelta = max64(0, s.NewConnsCount-r.last.NewConnsCount)
 	}
 	st.Saturated = s.MaxConns > 0 && s.AcquiredConns >= s.MaxConns && s.IdleConns == 0
-	// Cold start, not a wall: the pool is still GROWING towards MaxConns and it
-	// opened connections during this tick, so the waiters were queued behind a
-	// connection being CONSTRUCTED, not behind a saturated pool. A pool that is
-	// genuinely undersized always reaches MaxConns — at worst this delays the
-	// verdict by one tick; it never calls a warm-up a wall (CAPACIDAD-USL-S1).
-	st.Warming = s.MaxConns > 0 && s.TotalConns < s.MaxConns && st.NewConnsDelta > 0
+	// Cold start, not a wall: the pool GREW during this tick, so the goroutines
+	// that "found no free connection" were queued behind a connection being
+	// CONSTRUCTED (TCP + auth + the session's SET) — a cost every process pays
+	// once per connection, not a saturated pool.
+	//
+	// "Grew" is a DELTA, never the instantaneous size, for the same reason
+	// Saturated is corroboration and not the test: at 400 rps onto a pool
+	// configured 20 → 40 the tick boundary already reads 40/40 while 19 of
+	// those 40 were opened inside the tick that is being judged (measured,
+	// CAPACIDAD-USL-S1). A pool that is genuinely undersized cannot grow — it
+	// is already at MaxConns — so no real exhaustion is hidden; at worst the
+	// verdict arrives one tick later.
+	grew := s.TotalConns > r.last.TotalConns || (s.MaxConns > 0 && s.TotalConns < s.MaxConns)
+	st.Warming = r.primed && st.NewConnsDelta > 0 && grew
 	r.last = s
 	r.primed = true
 }

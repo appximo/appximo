@@ -341,10 +341,13 @@ func TestDBReader_ColdStartIsWarmingNotExhaustion(t *testing.T) {
 		// t0: empty pool, nothing asked yet.
 		{MaxConns: 10, TotalConns: 0, AcquiredConns: 0, IdleConns: 0},
 		// t1: traffic arrives — 40 goroutines found no connection and waited
-		// 2 s in total while the pool opened 6 connections. Still below max.
-		{MaxConns: 10, TotalConns: 6, AcquiredConns: 6, IdleConns: 0, NewConnsCount: 6,
+		// 2 s in total while the pool opened all 10 connections. The tick
+		// boundary already reads 10/10, which is exactly why the test is the
+		// DELTA and not the instantaneous size.
+		{MaxConns: 10, TotalConns: 10, AcquiredConns: 10, IdleConns: 0, NewConnsCount: 10,
 			AcquireCount: 300, EmptyAcquireCount: 40, EmptyAcquireWaitTime: 2 * time.Second},
-		// t2: pool fully grown, the same waiting continues — real exhaustion.
+		// t2: pool fully grown and NOT growing, the same waiting continues —
+		// real exhaustion.
 		{MaxConns: 10, TotalConns: 10, AcquiredConns: 10, IdleConns: 0, NewConnsCount: 10,
 			AcquireCount: 600, EmptyAcquireCount: 90, EmptyAcquireWaitTime: 4 * time.Second},
 	}
@@ -353,7 +356,7 @@ func TestDBReader_ColdStartIsWarmingNotExhaustion(t *testing.T) {
 
 	warm := ResourceSnapshot{IntervalMs: 1000}
 	r.fillClient(&warm.DBClient)
-	if !warm.DBClient.Warming || warm.DBClient.NewConnsDelta != 6 {
+	if !warm.DBClient.Warming || warm.DBClient.NewConnsDelta != 10 {
 		t.Fatalf("cold start must be Warming with the new-conn delta: %+v", warm.DBClient)
 	}
 	warm.Request = RequestStats{Count: 300, RPS: 300, LatencyP99Ms: 400}
