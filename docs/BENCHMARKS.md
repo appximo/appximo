@@ -260,6 +260,85 @@ select in Go over `SELECT *` and read every document): `{ declarations { data
 
 ---
 
+## 4c. The engine watching itself — what the self-monitor costs (CENTINELA-C-S1)
+
+The resource collector ([ADR-030](adr/ADR-030-self-observability-and-deterministic-attribution.md))
+reads `runtime/metrics`, the process cgroup, PSI and `pgxpool.Stat` on ONE
+goroutine every 10 s (1 s while `/admin` → Resources is open) and attributes
+a bottleneck deterministically. Its cost is stated on the proxies decision
+A-54 names — not on "< 1 % of p99", which this box cannot resolve (§7 above).
+
+**1. Allocations and bytes per request — the deterministic proxy.** A full
+generated read (`GET /api/tasks?per_page=20`, cache bypassed, the real
+middleware chain, Postgres in a container) through `App.buildRouter`, collector
+ON (ticking in the background) vs OFF, `go test -bench Request_SelfMon
+-benchmem -count 10 -benchtime 2000x` + `benchstat`:
+
+| | sec/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| collector ON | 1.114 ms ± 23 % | **86.99 KiB ± 0 %** | **800.0 ± 0 %** |
+| collector OFF | 1.969 ms ± 25 % | **86.99 KiB ± 0 %** | **800.0 ± 0 %** |
+
+The request path adds **zero allocations and zero bytes** — the two atomic
+adds and the HDR record are the whole cost, and `TestResourceCollector_ObserveAllocatesNothing`
+pins it. (The sec/op column is what a shared 1-vCPU box does to a wall-clock
+microbenchmark: ±25 % and the ON arm "faster" — noise, reported as such.)
+
+**2. CPU-seconds under identical load** — `cpu.stat usage_usec` of the
+engine's own cgroup over 60 s of 100 rps (k6, `constant-arrival-rate`,
+cache bypassed), 10 runs per arm alternated ABBA-style; the ON arm is the
+WORST case (1 s ticks AND a client polling `/debug/resources` every second):
+
+| arm | n | CPU-seconds median | mean | min–max |
+|---|---:|---:|---:|---|
+| ON, 1 s + polled every second | 10 | 6.29 | 6.65 | 5.59–8.96 |
+| OFF | 10 | 6.62 | 6.78 | 5.89–8.49 |
+| ON, background 10 s, nobody polling | 3 | 7.17 | 7.40 | 7.03–7.98 |
+
+Δmedian ON−OFF = **−4.9 %**, Mann-Whitney p = 0.68, bootstrap 95 % CI of the
+median difference **[−14.7 %, +16.1 %]**; between-run CV 13–15 % (two host
+stalls of 8–9 s in ten runs, one per arm). **This box does not resolve a 1 %
+effect on CPU-seconds either**: the research's premise ("integrating over 60 s
+averages the noise") holds on a quiet host, not on a $16 shared vCPU where the
+neighbours stall for whole seconds. What the numbers DO bound: the collector's
+CPU cost is inside the ±15 % run-to-run noise — an upper bound of a few
+percent, not a measurement of 0.x %. The analytic cost is smaller: one tick
+reads ~17 `runtime/metrics` samples, 12 pseudo-files and one `pool.Stat()`
+(microseconds), and the 10 s cadence makes that 0.01 % of a core.
+
+**3. Steady-state RSS after GC** (20 s idle after the load, `VmRSS`):
+
+| arm | n | RSS median (MiB) | spread |
+|---|---:|---:|---|
+| ON, 1 s + polled | 10 | 55.4 | 54.5–58.3 |
+| OFF | 10 | 53.1 | 50.8–54.4 |
+| ON, background, no polling | 3 | 54.3 | 54.1–54.4 |
+
+Δ = **+2.3 MiB (+4.4 %) polled, +1.15 MiB (+2.2 %) in background**
+(MWU p = 0.0002; CI [+1.7, +4.5] MiB). This is the one proxy that resolves
+the collector, and it is **over the 1 % budget** the spec set (≈ 0.55 MiB of a
+55 MiB process). Declared in bytes, not measured through the noise
+(`TestResourceCollector_FootprintBytes`): the fixed footprint is
+**1,118,992 B (1.07 MiB)** — the 900-slot ring at 1,152 B per snapshot
+(1,036,800 B) plus four windowed HDR histograms at 2 significant figures
+(~82 KB). The session already cut it from 2.2 MiB (the verdict's evidence
+slices no longer live in the ring — they are recomputed on read — and the
+HDRs went from 3 to 2 significant figures). What remains IS the ring: 15
+minutes of 1 s correlation or 2.5 hours of background history for 1 MiB. The
+polled arm's extra ~1.2 MiB is heap the JSON serving of a 60-tick series
+leaves behind — a client's cost while it looks, not the box's 24/7 cost. The
+budget is missed at 2.2 %, deliberately, and said.
+
+**4. The p99, as an upper bound.** 60,010 per-request latencies per arm
+(the ten runs pooled): p50 2.02 → 1.98 ms, p99 15.43 → 12.89 ms (ON faster,
+Δp99 −2.5 ms, permutation p = 0.015, bootstrap CI [−4.2, −0.3] ms). A
+"significant" improvement from a collector that adds no allocation is the
+lesson of A-54 in one line: at 60 k samples the tests resolve the HOST's
+drift between minutes, not the code. Reported as: **the collector's effect on
+the p99 is not distinguishable from ±2.5 ms of host drift; upper bound
+≤ 2.5 ms, direction unknown**. The frozen ABBA read protocol (§the verdict
+below) gates the change on the median as every change is.
+
 ## 5. REST vs GraphQL — the same data, both ways
 
 Same logical query (orders with their customer and their line items), 100 rps,
