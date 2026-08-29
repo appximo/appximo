@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787977029897,
+  "lastUpdate": 1787998648519,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -4536,6 +4536,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "38377311 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "9fd34f58476d2020a0ae62033d5e28dd96ecceee",
+          "message": "chore: ignore the laboratory engine binary (appximo-lab)\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>",
+          "timestamp": "2026-08-29T10:16:39Z",
+          "tree_id": "102fa7745e6438c878038fe8268975529422d44c",
+          "url": "https://github.com/appximo/appximo/commit/9fd34f58476d2020a0ae62033d5e28dd96ecceee"
+        },
+        "date": 1787998647838,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 5097,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "471687 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 5097,
+            "unit": "ns/op",
+            "extra": "471687 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "471687 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "471687 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 50.83,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "47182810 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 50.83,
+            "unit": "ns/op",
+            "extra": "47182810 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "47182810 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "47182810 times\n4 procs"
           }
         ]
       }
