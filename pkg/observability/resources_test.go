@@ -371,3 +371,21 @@ func TestDBReader_ColdStartIsWarmingNotExhaustion(t *testing.T) {
 		t.Fatalf("a grown, saturated, waiting pool IS pool_exhausted (got %s)", a)
 	}
 }
+
+// ?since= must cut the series at the instant a run started, so the window
+// verdict is the run's and not the history's (CAPACIDAD-USL-S1).
+func TestSinceFilter(t *testing.T) {
+	s := []ResourceSnapshot{{TS: 100}, {TS: 200}, {TS: 300}, {TS: 400}}
+	if got := sinceFilter(s, "250"); len(got) != 2 || got[0].TS != 300 {
+		t.Fatalf("since=250 must keep the last two ticks, got %+v", got)
+	}
+	if got := sinceFilter(s, ""); len(got) != 4 {
+		t.Fatal("no since must keep everything")
+	}
+	if got := sinceFilter(s, "not-a-number"); len(got) != 4 {
+		t.Fatal("an unparseable since must keep everything, never silently narrow a verdict")
+	}
+	if got := sinceFilter(s, "500"); len(got) != 0 {
+		t.Fatal("a since past every tick keeps nothing")
+	}
+}

@@ -17,9 +17,19 @@ import (
 // Query parameters:
 //
 //	?series=N   the last N ticks in the correlation series (default 120, ≤ ring)
+//	?since=MS   keep only ticks at or after this Unix-millisecond instant, so
+//	            the window verdict covers EXACTLY one load run and not the
+//	            history behind it. Without it the caller has to guess a tick
+//	            count from the collector's cadence, and guessing wrong reads a
+//	            previous, heavier run as if it were this one — measured in
+//	            CAPACIDAD-USL-S1, where a 42-tick request at the 10 s
+//	            background cadence covered seven minutes and reported
+//	            `pool_exhausted` over a 25 rps run that never queued for
+//	            anything. Combines with ?series= (the count is applied first).
 //	?live=1     switch the collector to the live cadence for LiveWindow (the
 //	            panel sends it on every poll; a curl can too)
 //	?ticks=N    (snapshot) how many ticks to export (default: the whole ring)
+//	?since=MS   (snapshot) the same filter, so an exported run is only the run
 //
 // The resources are the PROCESS's, not a tenant's, so there is no tenant
 // scope here and no tenant-admin path: only the platform operator sees them
@@ -68,7 +78,7 @@ func (s *ObsServer) ServeResources(w http.ResponseWriter, r *http.Request) {
 			n = k
 		}
 	}
-	series := rc.Series(n)
+	series := sinceFilter(rc.Series(n), q.Get("since"))
 	cfg := rc.Config()
 	payload := map[string]any{
 		"collector": map[string]any{
@@ -93,6 +103,25 @@ func (s *ObsServer) ServeResources(w http.ResponseWriter, r *http.Request) {
 	writeJSONStatus(w, http.StatusOK, payload)
 }
 
+// sinceFilter keeps the ticks at or after a Unix-millisecond instant. An
+// absent or unparseable value keeps everything: a bad query parameter must
+// never silently narrow a verdict.
+func sinceFilter(series []ResourceSnapshot, since string) []ResourceSnapshot {
+	if since == "" {
+		return series
+	}
+	ms, err := strconv.ParseInt(since, 10, 64)
+	if err != nil || ms <= 0 {
+		return series
+	}
+	for i := range series {
+		if series[i].TS >= ms {
+			return series[i:]
+		}
+	}
+	return nil
+}
+
 // ServeResourcesSnapshot is the exportable document of a run (spec §5, §7):
 // engine + host identity, the window verdict, every tick. Served as an
 // attachment so the browser saves it.
@@ -107,7 +136,7 @@ func (s *ObsServer) ServeResourcesSnapshot(w http.ResponseWriter, r *http.Reques
 			n = k
 		}
 	}
-	series := rc.Series(n)
+	series := sinceFilter(rc.Series(n), r.URL.Query().Get("since"))
 	now := time.Now()
 	doc := map[string]any{
 		"schema":      "appximo.selfmon.snapshot/v1",
