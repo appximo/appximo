@@ -54,6 +54,7 @@ tools/devhub/db/*.db
 tools/devhub/db/*.db-shm
 tools/devhub/db/*.db-wal
 /appximo-dev
+/appximo-lab
 /devhub
 
 # devhub UI build output (placeholder index.html stays committed for go:embed)
