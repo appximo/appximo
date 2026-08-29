@@ -336,6 +336,16 @@ generic and reads generated routes; the header is a read-side courtesy.
 from the tracker, or a documented `Ctx.ServerTiming()` a handler calls
 before its own write — pinned by a library integration test.
 
+**CENTINELA-C-S1 (2026-08-29) widened the impact:** the self-monitor's
+`db_bound` rule reads the request's `query`/`count` spans, and a custom
+route marks none (`ctx.Query`/`Get`/`UnsafeTx` run inside the handler
+without a span) — so on the tiendita's `/api/catalogo` the query stage reads
+0 ms and the verdict can only ever say `pool_exhausted` ("undersized"), never
+"the queries hold the connections / the database is slow". Verified live: the
+100 rps k6 read `pool_exhausted` with query99 = 0.0. The same fix closes
+both: `Ctx`'s data helpers mark a `query` span on the request's tracker
+(one line each), which also gives custom routes their `Server-Timing`.
+
 ### ENG-50 — JSON number fidelity beyond float64, in both directions (`json`/`jsonb`)
 
 **Origin:** MOTOR-TIPO-JSON-S1 (ADR-028, alternative "preserve the client's
