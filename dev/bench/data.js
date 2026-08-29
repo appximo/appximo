@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787974420963,
+  "lastUpdate": 1787977029897,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -4464,6 +4464,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "34378540 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "aa081d692926f8128bef9050c0a10e0955ef5c1a",
+          "message": "docs(backlog): ENG-51 — a custom route marks no query span, so the self-monitor's db_bound rule is blind on it (seen live on the tiendita's /api/catalogo) (CENTINELA-C-S1)\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-29T04:16:35Z",
+          "tree_id": "a93a07454a16f79020a098ff02a29e6b079bb5ad",
+          "url": "https://github.com/appximo/appximo/commit/aa081d692926f8128bef9050c0a10e0955ef5c1a"
+        },
+        "date": 1787977028723,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6074,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "379832 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6074,
+            "unit": "ns/op",
+            "extra": "379832 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "379832 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "379832 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 71.36,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "38377311 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 71.36,
+            "unit": "ns/op",
+            "extra": "38377311 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "38377311 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "38377311 times\n4 procs"
           }
         ]
       }
