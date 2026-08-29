@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788026926070,
+  "lastUpdate": 1788043973232,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -4752,6 +4752,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "50338812 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "5bc510a83a312758e029f9a4f68f32bc8b77b88c",
+          "message": "feat(lab): first live isolated run — the old ceiling was the instrument; the tipping is the app's, at ~1100/~1600 rps (LAB-CAPACIDAD-S2)\n\nThe re-run of the CAPACIDAD-USL-S1 ladder with the generator on its own\ndedicated box (worst 7 % busy vs the 70 % gate, zero runs invalidated)\nshows every old level served at ms-scale p50 and ZERO tips in 9 runs at\n420 rps — the old bistability was generator contention. The tip itself is\nreal and reproduces at each box's true ceiling (shared s-2vcpu-2gb: clean\nto ~1000, 6/8 tipped at 1100, plateau ~1180; dedicated c-2: clean to 1400,\ntips ~1600) — ENG-52 confirmed with clean numbers, ENG-53 reframed, ENG-55\ncorroborated (on 2 vCPU the 10-conn pool is the first queue). USL R²\n0.800 → 0.918/0.945; the gate still refuses a single-number ceiling at the\nbistable levels, so §4e publishes the range. install.sh passed clean on\nboth fresh Ubuntu 24.04 boxes.\n\nLive fixes to the lab, all tested: the scoped token has NO tag permissions\n(tag:create 403s on droplet create; /v2/tags 403) → untagged creation with\na loud warning, prefix listing over the full droplet list, and the destroy\nguard's second factor degrades to the lab-size fingerprint (prefix alone\nstill never authorizes; OPS-38 restores the tag factor); install.sh takes\nonly --flag=value; up's rollback actually runs on provisioning failure\n(fatal/os.Exit skipped the defer); seed via stdin + ON_ERROR_STOP (postgres\ncannot read /root); down's verification polls past DO's async deletion;\ncapacity's fit conditions read the generator location off the data instead\nof asserting the same-host confound; lab builds inject the git revision.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-29T22:52:10Z",
+          "tree_id": "03ccb836bb2d1ef603ad336ff8fab87d2764733f",
+          "url": "https://github.com/appximo/appximo/commit/5bc510a83a312758e029f9a4f68f32bc8b77b88c"
+        },
+        "date": 1788043972035,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6378,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "379064 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6378,
+            "unit": "ns/op",
+            "extra": "379064 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "379064 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "379064 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 67.36,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36734062 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 67.36,
+            "unit": "ns/op",
+            "extra": "36734062 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36734062 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36734062 times\n4 procs"
           }
         ]
       }
