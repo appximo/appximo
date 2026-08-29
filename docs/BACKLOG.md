@@ -278,6 +278,132 @@ by damage is #4 (documentation of `import`), #6c (`Route.AsRole`), #1 (a
 documentation halves (#1, #4, #8) are still worth doing — they cost a page
 and they are what the next migrator reads first.
 
+### ENG-52 — The engine has no admission control, so past its ceiling it does not degrade — it tips
+
+- **Origin:** CAPACIDAD-USL-S1 (2026-08-29). The capacity ladder found that
+  near saturation the engine is **bistable**, not gradual. On the reference
+  1-vCPU box, the canonical read holds 380 rps in every run at a 2–3 ms p50;
+  at 420 rps one run in four tips into a mode with a **4 427 ms** p50 and
+  *lower* goodput (339 vs 420 rps) and never recovers within the run; past
+  450 rps the slow mode dominates — while the system can still, on a good
+  run, serve 500 rps at a 2 ms p50. Once the queue builds, serving it costs
+  more per request, which builds it further.
+- **Why it happens:** the engine accepts unbounded concurrency. There is no
+  cap on in-flight requests and no queue-length shed; the only backstop is
+  `queryTimeout = 5 s` (`pkg/db/tenant.go:28`), which fires far too late —
+  by then the client has waited five seconds and the work is thrown away
+  after being paid for. The per-tenant rate limiter cannot help: it is a
+  RATE limit, and the collapse is a CONCURRENCY phenomenon (see ENG-53).
+- **Impact: high, and it is the difference between "slow" and "down".** A
+  system that flattens at its ceiling serves 400 rps at 50 ms under a 700 rps
+  storm. This one serves 292–494 rps at ~6 s, so every caller times out and
+  every retry makes it worse. It is also what makes the capacity number hard
+  to publish (the USL fit lands at R² 0.80 with a 21 % CV precisely because
+  of the two modes).
+- **Ready:** an in-flight admission limit (per app, sized from measured
+  service demand or configured), that answers **503 + `Retry-After`
+  immediately** when the queue exceeds it instead of accepting work it cannot
+  finish — the shape the memory guard already uses for host memory. Measured
+  by re-running `capacity sweep` over the same ladder and showing the
+  goodput plateau HOLDS past the tipping point instead of falling, with the
+  p50 bounded. Must be `no_change` on the read path below the limit.
+
+### ENG-53 — The shipped per-tenant rate limit (1000 rps) sits above the app's own ceiling, so it protects nothing
+
+- **Origin:** CAPACIDAD-USL-S1 (2026-08-29). `app.go:527` defaults
+  `RATE_LIMIT_RPS` to **1000 rps / burst 100 per tenant**. The same session
+  measured the app's own ceiling on the reference box at **~400 rps** for a
+  normal authenticated list and **~1 rps** for `?search=&count=true`. For
+  authenticated traffic the limiter therefore never fires: the engine reaches
+  its own wall first and fails as 5 s timeouts and 5xx rather than as a clean,
+  cheap `429` with `Retry-After`.
+- **Corroborated in the field:** the live demo's authenticated collapse at
+  120–250 rps (2026-08-29 04:55) was NOT the limiter — the log shows
+  `query p99 5013.5 ms`, i.e. exactly `queryTimeout`. The limiter was never
+  reached.
+- **Note what is NOT wrong:** the anonymous / `Route.Public` default (5 rps,
+  burst 10, keyed tenant+IP) is well below any ceiling and does its job; a
+  consumer's own `Route.RateLimit` (the tiendita's 200 rps/IP) also fires
+  exactly as declared — measured, 33 % / 67 % / 83 % shed at 300 / 600 / 1200
+  rps offered. The defect is the *authenticated* default only.
+- **Impact: medium.** A default that cannot fire is not a safety net, and an
+  operator reading `rate limiter: 1000 RPS / 100 burst per tenant` at boot
+  reasonably believes they have one.
+- **Ready:** either (a) the boot line states the limit alongside a measured
+  or estimated capacity and warns when the limit exceeds it, or (b) the
+  default is derived (e.g. from `GOMAXPROCS` and a measured service demand),
+  or (c) ENG-52's admission control makes the rate limit the second line of
+  defence and the documentation says so. Whichever is chosen, `docs/PRODUCTION.md`
+  gains the sizing rule; today it has none.
+
+### ENG-54 — `cpu_saturated` silences itself exactly when the queue is longest: the rule's floor scales with the p99 it is judging
+
+- **Origin:** CAPACIDAD-USL-S1 (2026-08-29). The saturation sequence across
+  the ladder inverts: `cpu_saturated` dominates from 150 to 380 rps, and then
+  **`pool_exhausted` takes over from 420 to 700 rps** — where the CPU is more
+  saturated, not less.
+- **Suspected mechanism (to confirm first):** `attribution.go` computes
+  `schedFloor := math.Max(t.SchedLatP99Ms, 0.05*p99)`. The relative half was
+  added for a good reason (a 1 ms scheduler wait next to a 690 ms p99 caused
+  by a mutex must not be called CPU), but it means that at a p99 of 5 000 ms
+  the floor is **250 ms** — a scheduler latency the Go runtime will never
+  report — so the rule cannot fire at deep saturation and the verdict falls
+  through to the pool, which is a SYMPTOM of the CPU wall rather than a
+  second wall.
+- **Impact: medium.** The verdict is what an operator acts on. Being told
+  "the pool is exhausted" at the exact load where the answer is "you are out
+  of CPU" sends them to `DB_MAX_CONNS`, which moves the queue and not the
+  ceiling.
+- **Ready:** confirm from a single tick's `signals` at ≥ 500 rps
+  (`sched_latency_p99_ms` against its threshold) that the relative floor is
+  what suppresses it; then either cap the relative term (e.g.
+  `min(0.05*p99, 20 ms)`) or corroborate CPU saturation with the busy
+  fraction / PSI when the pool is also queueing — and re-run the eight
+  provocations of CENTINELA-C-S1 to prove the lock provocation still reads
+  `lock_contention`. Do not change the ranking without that suite.
+
+### SCHEMA-9 — `?search=` is an unindexable full scan across every text column, and the engine offers it with no guard
+
+- **Origin:** CAPACIDAD-USL-S1 (2026-08-29). Measured on a 20 000-row table
+  whose `descripcion` averages 1.7 KB (a third of the rows TOASTed):
+  `?search=abc&count=true` costs **899 ms of PostgreSQL CPU per request** and
+  sustains **≈ 1 rps** on one vCPU. Six concurrent are already past the 5 s
+  statement timeout. `?search=` is an `ILIKE '%term%'` OR-ed across every
+  `string`/`text` column (`pkg/query`), so no btree index can serve it, and
+  `count=true` adds a `COUNT(*)` over the same predicate.
+- **This is not hypothetical:** it is the exact shape that took the live
+  tiendita demo down at 120 rps on 2026-08-29 (`query p99 5013.5 ms`), and
+  the `db_bound` verdict the self-monitor gave there was correct.
+- **Impact: high for anyone who puts a search box on a table with a large
+  text column** — which the generic `/app` does by default.
+- **Ready:** one of, in order of preference — (a) a declarative trigram
+  index (`{"fields":["descripcion"],"method":"gin","opclass":"gin_trgm_ops"}`
+  plus `CREATE EXTENSION pg_trgm`, and `?search=` planned to use it); (b) a
+  per-resource `searchable: [...]` allowlist so a heavy column can be left
+  out, with the default being the small columns only; (c) at minimum, a
+  SCHEMA-5 **warning** at load when a resource has a `text` field and no
+  index that `?search=` could use, plus a line in `docs/BENCHMARKS.md §4d`
+  (written) and in `frontend-spec`. (c) is a session; (a) is the real fix.
+
+### OPS-36 — The capacity procedure exists but runs only on our box: it needs a customer-side form
+
+- **Origin:** CAPACIDAD-USL-S1 (2026-08-29). `tools/capacity` +
+  `docs/BENCHMARKS.md §4d` make the ladder, the USL fit, the trust gate and
+  the user translation reproducible in one command, and they were run
+  end-to-end on the 105. What is NOT done is the part that answers a customer:
+  the procedure assumes a laboratory instance, a seeded dataset and a raised
+  rate limit, all of which a customer's production box does not have.
+- **Impact: medium.** Without it the answer to "does it hold my business?"
+  stays "here is what it held on ours, with these assumptions".
+- **Ready:** a documented safe form of the sweep against a customer
+  instance — a read-only ladder bounded well below the estimated ceiling, run
+  against a staging copy or in a maintenance window, that stops at the first
+  level where the p50 leaves its baseline instead of driving to collapse; plus
+  the service-demand-only variant, which needs no ladder at all (it reads
+  CPU-seconds per request off `/admin/resources` under whatever real traffic
+  exists and divides). The second is the one that is safe on production and
+  should come first.
+
 ### OPS-35 — Mann-Whitney does not test the tail: a claim about the p99 needs a permutation test on Δp99, and `compare-groups` does not run one yet
 - **Origin:** CENTINELA-C-S1 (2026-08-29), from the Centinela research report
   §Bloque 2 and decision A-54. The house's ABBA verdict is Mann-Whitney U on

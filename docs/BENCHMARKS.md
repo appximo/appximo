@@ -339,6 +339,205 @@ the p99 is not distinguishable from ±2.5 ms of host drift; upper bound
 ≤ 2.5 ms, direction unknown**. The frozen ABBA read protocol (§the verdict
 below) gates the change on the median as every change is.
 
+## 4d. Capacity planning — "how many users does it hold?" (CAPACIDAD-USL-S1)
+
+Every number above answers *how fast is one request*. This section answers the
+question a customer actually asks, which is a different question and needs a
+different method: **how much load does this hold, what breaks first, and how
+many users is that?**
+
+The procedure is reproducible in one command (`tools/capacity`, see its
+README) and is written here so it can be re-run on a customer's box, not only
+on ours. **It is an estimate until it is checked against that customer's real
+traffic**, and the report says so on every run.
+
+### The method, in six steps
+
+1. **Measure in an OPEN model.** A closed-loop generator (a fixed number of
+   virtual users, each sending the next request only after the previous answer
+   arrives) throttles ITSELF when the server slows down, so it never measures
+   degradation. Requests must go out on a schedule that does not wait.
+2. **Correct coordinated omission, and prove it.** Record two latencies per
+   request: from the actual send (`service`) and from the SCHEDULED send
+   (`response`). They agree at low load and diverge under stall; the
+   divergence is the evidence the correction is real. In the table below the
+   gap is 1.0–1.4 ms while the system keeps up and 4 955 ms at 700 rps.
+3. **Sweep at least six levels, including levels PAST the apparent peak.**
+   Without points past the peak, a ceiling is an extrapolation and the report
+   must say so.
+4. **Fit the Universal Scalability Law** — `X(N) = γN / (1 + α(N−1) + βN(N−1))`
+   — by nonlinear least squares, with a bootstrap over the repeated
+   measurements for the interval. α is contention, β is coherency; β > 0 is
+   what makes throughput go DOWN past the peak instead of merely flat.
+5. **Gate the fit before publishing it.** R² ≥ 0.90, worst between-repeat
+   CV ≤ 5 %, ≥ 6 levels, and at least one level past the peak. Below any of
+   them the ceiling is NOT published as a ceiling.
+6. **Translate to users only under a DECLARED profile** (Little:
+   `users = λ × (think time + response time)`), and cross-check the ceiling
+   against two models that do not share the USL's assumptions — the M/M/1
+   knee (`R = S/(1−ρ)`) and the service demand law (`X_max = C/D`, from
+   measured CPU-seconds per request).
+
+### The measurement — the reference laboratory
+
+**1 vCPU / 1 963 MiB, `GOMAXPROCS=1`**, engine + PostgreSQL 16 + the load
+generator all on the SAME box (declared confound, quantified below), commerce
+schema (14 resources), **490 k rows / 171 MB** seeded with deliberate skew: a
+power law over the foreign keys (the top 1 % of customers hold 21 % of the
+orders, one has 2 360 and many have 1), status correlated with age, city
+correlated with department, and a third of the products long enough to TOAST.
+Uniform synthetic data lies in favour of the system — PostgreSQL's planner
+estimates uniform columns almost perfectly and under-estimates clustered ones,
+here `orden_lineas.producto_id` at 15 428 distinct against 19 802 actual.
+
+The canonical read is the list an admin panel actually sends —
+`?fields=` + filter + sort — with a cache-busting parameter, because **the
+engine caches GET responses for 5 s keyed by tenant + URI, and pointing a
+generator at one URL measures the cache**.
+
+| offered | N (Little) | X rps | CV | p50 resp | p99 resp | CO gap p99 | engine ms CPU/req | pg ms CPU/req | gen CPU | verdict |
+|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|:--|
+| 25 | 0.07 | 25.0 | 0.0 % | 2.85 | 6.66 | 1.22 | 1.907 | 0.974 | 1 % | healthy |
+| 100 | 0.32 | 100.0 | 0.0 % | 2.99 | 8.94 | 1.31 | 1.749 | 0.955 | 6 % | healthy |
+| 200 | 13.71 | 200.0 | 0.0 % | 3.01 | 596.69 | 11.85 | 1.525 | 0.916 | 11 % | healthy |
+| 300 | 0.99 | 300.0 | 0.0 % | 2.58 | 20.18 | 1.36 | 1.279 | 0.786 | 12 % | cpu_saturated |
+| 380 | 57.71 | 380.0 | 0.0 % | 11.12 | 506.80 | 5.13 | 1.201 | 0.737 | 14 % | cpu_saturated |
+| 420 | 324.65 | 399.6 | 10.2 % | 1108.44 | 1854.97 | 974.80 | 1.144 | 0.693 | 13 % | pool_exhausted |
+| 450 | 943.63 | 413.0 | 7.5 % | 1714.30 | 4994.69 | 2223.67 | 1.242 | 0.679 | 13 % | cpu_saturated |
+| 500 | 1123.07 | 420.4 | 16.1 % | 2115.94 | 4896.71 | 2333.27 | 1.160 | 0.652 | 14 % | pool_exhausted |
+| 550 | 1853.10 | 425.2 | 2.7 % | 4011.02 | 6808.28 | 3776.19 | 1.141 | 0.586 | 13 % | pool_exhausted |
+| 700 | 3158.61 | 408.4 | 21.2 % | 5651.73 | 7174.58 | 4741.98 | 0.919 | 0.462 | 13 % | pool_exhausted |
+
+*(14 levels × 3–4 repeats; the four omitted rows are 50, 150, 250 and 350 rps
+and are on the same line as their neighbours. Full ladders for eight
+workloads in the session evidence.)*
+
+### The result: a tipping point, not a knee
+
+The fit is **γ = 260.7 rps, α = 0.650, β = 0 → an Amdahl ceiling of
+γ/α = 401 rps, R² = 0.800**, and the gate **refuses to publish it**: R² below
+0.90 and a worst-level CV of 21 %. Adding levels and repeats did not rescue
+it, and that is the finding, not a failure of the sample — **near saturation
+the system is bistable.** The per-run goodput at each level shows it plainly:
+
+| offered | the four runs (goodput @ p50) |
+|--:|:--|
+| 380 | 380@3 ms · 380@2 ms · 380@2 ms · 380@37 ms |
+| 420 | 420@3 ms · 420@2 ms · 420@2 ms · **339@4 427 ms** |
+| 500 | 335@6 110 ms · 418@2 340 ms · **500@2 ms** · 428@11 ms |
+| 700 | 401@5 756 ms · 494@5 050 ms · 292@5 885 ms · 447@5 916 ms |
+
+Below 380 rps every run stays in the fast mode. At 420 one run in four tips
+into the slow one and never comes back within the run. Past 450 the slow mode
+dominates, though the system can still occasionally serve 500 rps at 2 ms.
+Once the queue builds, serving it costs more per request, which builds the
+queue further: that positive feedback is what β is meant to capture, and what
+a single averaged number at each level would have hidden completely.
+
+**Four independent estimates of the ceiling, which agree:**
+
+| estimate | value | assumes |
+|---|--:|---|
+| measured plateau | 400–425 rps | nothing |
+| USL Amdahl asymptote γ/α | 401 rps | the law describes the system (R² 0.80 — it half does) |
+| M/M/1 from the service time | µ = 456 rps | exponential service |
+| service demand `X_max = C/D` | 579 rps | the whole CPU free for the app — **an upper bound** |
+
+The service-demand estimate is the generator-free one: it is computed from
+CPU-seconds actually burned per request and therefore does not care that the
+load generator ate 13–16 % of the only core. The USL bounds from below (the
+generator is inside it), the service demand from above.
+
+**Planning point: 70 % of the safe ceiling ≈ 265 rps**, where the M/M/1
+overlay puts the response time at ~7 ms. At ρ = 0.8 it is already ~11 ms; the
+latency knee is why one plans at 70 % and not at 95 %.
+
+### What breaks first, second, third
+
+The engine's own self-monitor (§4c) was read beside every rung, with the
+window bounded by `?since=` to that run alone:
+
+| offered | dominant verdict | ticks |
+|--:|:--|:--|
+| 25 – 100 | `healthy` | 40/40 |
+| 150 – 380 | **`cpu_saturated`** | up to 14/40 |
+| 420 – 700 | **`pool_exhausted`** | 38/45 at 700 |
+
+**CPU first, the connection pool second, the database never.** On this
+workload PostgreSQL is not the bottleneck at any level — its CPU per request
+*falls* as load rises (0.97 → 0.46 ms), because the work per request is fixed
+and the engine's own per-request overhead amortises. The pool (10 connections
+by default) becomes the visible queue only after the CPU is already the
+constraint: it is a symptom of the CPU wall, not a second wall. Raising
+`DB_MAX_CONNS` past the CPU ceiling moves the queue, not the ceiling.
+
+### Capacity is per endpoint, and the spread is 20×
+
+Same engine, same box, same dataset, same second:
+
+| workload | CPU ms/request (engine + PG) | sustained | breaks as |
+|---|--:|--:|:--|
+| list, FIXED URI (the 5 s response cache) | 0.28 | **2 400 rps** | cpu_saturated |
+| list + `?fields=` + filter + sort, cache bypassed | 1.73 | **380 rps** | cpu → pool |
+| `POST` create | 2.01 | **250 rps** | pool_exhausted |
+| `POST /api/transaction`, 2 ops | 3.47 | **180 rps** | pool_exhausted |
+| list `SELECT *` (detoasts `descripcion`) | 4.42 | **100 rps** | cpu → pool |
+| list + `?include=lineas` | 7.40 | **100 rps** | pool_exhausted |
+| aggregate `count`+`sum`+`group_by` | 36.5 | **20 rps** | pool_exhausted |
+| `?search=` + `count=true` | **904** | **≈ 1 rps** | pool_exhausted |
+
+Two of these deserve to be read twice.
+
+**The cached number is 6× the real one.** Quoting 2 400 rps as "the capacity"
+would be wrong by that factor for any screen whose URL varies — which is every
+screen with a filter, a page number or a search box.
+
+**`?search=` + `count=true` costs 899 ms of PostgreSQL CPU per request.**
+`?search=` is an `ILIKE '%term%'` OR-ed across *every* string and text column
+— here including a `descripcion` averaging 1.7 KB and stored in TOAST — and
+`count=true` adds a `COUNT(*)` over the same predicate. Neither can use an
+index. One vCPU therefore serves about one such request per second, and the
+sixth concurrent one is already past the 5 s statement timeout. This is not a
+hypothetical: it is the exact shape that took a live demo down at 120 rps
+(`query p99 5 013 ms` = the timeout), and the reason that reading was
+`db_bound` was correct. If a screen offers a search box over a table with a
+large text column, it needs a real index (`gin` + `pg_trgm`, outside the
+engine's declarative surface) or it needs to not offer it.
+
+### Users, which is not requests
+
+Little's law converts a rate into a population, and the conversion is entirely
+governed by the think time — which is an ASSUMPTION about the product, not a
+measurement of the engine. At the 265 rps planning point:
+
+| profile | think time | concurrent users |
+|---|--:|--:|
+| browsing — a request every 30 s | 30 s | **≈ 8 000** |
+| active use — a request every 5 s | 5 s | **≈ 1 400** |
+| a burst with no pause | 0 s | **1** |
+
+Three answers differing by four orders of magnitude, from one measurement.
+**A capacity number without its load profile is not an answer**, and no number
+in this document should be quoted without the row it came from.
+
+### What this procedure cannot tell you
+
+- **Whether a slow second was yours or a neighbour's.** CPU *steal* is
+  visible from inside (`/proc/stat`, and it reached 21 % in one run here), so
+  the hypervisor taking the CPU IS detectable. What is not detectable from
+  inside is a co-tenant saturating the shared disk or memory bandwidth while
+  steal reads zero. Separating those needs identical instances on several
+  hosts, which this project does not have. Every number here is from one box.
+- **What a real load profile looks like.** The peer-reviewed bar for this
+  (Vögele et al., *SoSyM* 17(2), 2018) is a workload extracted from production
+  session logs, which reproduces invocation frequencies to near 100 % and CPU
+  to within 12 %. A hand-built profile is not that, and results built on one
+  stay estimates until real traffic checks them.
+- **A 2-vCPU box's number by doubling.** The service-demand column doubles
+  honestly (`X_max = C/D`), the USL's α does not — contention is not halved by
+  a second core. The doubled figures in the table are labelled as the bound
+  they are.
+
 ## 5. REST vs GraphQL — the same data, both ways
 
 Same logical query (orders with their customer and their line items), 100 rps,
