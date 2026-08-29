@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787998648519,
+  "lastUpdate": 1788022815047,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -4608,6 +4608,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "47182810 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "372dc315d75c02153725df120490e52bc381088d",
+          "message": "docs(benchmarks): the endurance run and the finding a single-workload benchmark cannot produce (CAPACIDAD-USL-S1)\n\nTwo additions to §4d, both from measurement.\n\nTHE 4-HOUR SOAK. 3,397,227 requests at 240 rps of reads plus 25 rps of PATCH,\nzero transport errors, zero 5xx, goodput median exactly 240.0 rps. Judged by\nSLOPE, never by a value: the live heap after GC has no trend at all (R² 0.00 —\nsawtooth, not staircase), RSS falls, and the only rising signal is Go's total\nmapped memory at +1.5 MiB/h with the live heap flat, which is arena growth and\nnot retained objects. Latency drift first hour to last: p50 −4.4 %, p99\n−27.1 %. No leak, no degradation.\n\nTHE MIXED-LOAD FINDING. The soak's p90 across slices has a median of 500 ms\nwhile its p50 is 2.7 ms — not a tail, a second mode, present from the first\nslice. One controlled A/B, alternated twice, isolates it: 240 rps of reads\nALONE reads p90 3.50 / 3.55 ms; the same reads plus 25 rps of PATCH read p90\n489.7 / 378.0 ms, with the median untouched (2.51 → 2.56 ms). Twenty-five\nwrites per second multiply the read p90 by ~130×.\n\nEvery other benchmark in this document measures one workload at a time and\ntherefore cannot see it, while a real application is never one workload at a\ntime. What it is NOT was measured rather than assumed: not autovacuum (96.5 %\nHOT updates, dead tuples flat at ~4,000 across 374k updates), not host memory\n(PSI 0.05 %), not the disk (IO PSI 0.83 %), not paging, not a leak. The\nremaining candidate is connection occupancy — a write holds a pool connection\nthrough its whole transaction including the commit fsync, and reads and writes\nshare one 10-connection pool with no separation. Filed as ENG-55 with the\nexperiment that would settle it.\n\nBACKLOG. ENG-54 promoted from suspected to CONFIRMED with the tick signals\nbehind it: at 900 rps the scheduler latency plateaus at 25–60 ms while the\nrule's threshold — 5 % of the request p99 — grows past 130 ms, so the ratio\ncan never reach 1 and `cpu_saturated` cannot fire; the engine reported\n`pool_exhausted` while `cpu_busy_fraction` was 0.91–1.10, i.e. with the CPU\npegged. Recorded with its numbers rather than patched blind: the relative\nfloor exists to keep the lock provocation reading `lock_contention`, so any\nfix has to re-run the eight provocations of CENTINELA-C-S1.\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>",
+          "timestamp": "2026-08-29T16:58:26Z",
+          "tree_id": "d28978bca4446b495985a44200d2a97c4937d087",
+          "url": "https://github.com/appximo/appximo/commit/372dc315d75c02153725df120490e52bc381088d"
+        },
+        "date": 1788022814300,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 5969,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "391905 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 5969,
+            "unit": "ns/op",
+            "extra": "391905 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "391905 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "391905 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 67.11,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "37393034 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 67.11,
+            "unit": "ns/op",
+            "extra": "37393034 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "37393034 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "37393034 times\n4 procs"
           }
         ]
       }
