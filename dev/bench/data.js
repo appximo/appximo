@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787946058239,
+  "lastUpdate": 1787974420963,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -4392,6 +4392,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36245038 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "29f3ec0b881bc7c9afa374768bb533aa2d5f3718",
+          "message": "docs(backlog): CENTINELA-C-S1 — Module C DONE (the collector, the eight provoked verdicts, /admin Resources, the overhead on allocs/op + CPU-seconds + RSS with the p99 as an upper bound), OPS-35 registered (Mann-Whitney does not test the tail), BENCHMARKS §4c + §7; gate 163+3 explained, ABBA read no_change ×4, both demos deployed with rollback drilled and the tiendita's first wall read by its own verdict; four list-fields corpus rows made deterministic (sort=title)\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-29T03:33:09Z",
+          "tree_id": "4689da5565076960d91cbaa561a21a65f034fef8",
+          "url": "https://github.com/appximo/appximo/commit/29f3ec0b881bc7c9afa374768bb533aa2d5f3718"
+        },
+        "date": 1787974420024,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6224,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "377263 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6224,
+            "unit": "ns/op",
+            "extra": "377263 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "377263 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "377263 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 71.76,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "34378540 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 71.76,
+            "unit": "ns/op",
+            "extra": "34378540 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "34378540 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "34378540 times\n4 procs"
           }
         ]
       }
