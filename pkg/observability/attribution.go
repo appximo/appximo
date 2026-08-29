@@ -235,7 +235,7 @@ func attribute(s *ResourceSnapshot, t AttributionThresholds, baselineP99 float64
 		{AttrDBBound, dbBound},
 		{AttrLockContention, lockContention},
 	}
-	var first Attribution = AttrHealthy
+	first := AttrHealthy
 	for _, f := range fired {
 		if !f.ok {
 			continue

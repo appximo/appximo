@@ -41,7 +41,7 @@ func openP(path string) *pfile {
 
 func (p *pfile) reopen() {
 	if p.f != nil {
-		p.f.Close()
+		_ = p.f.Close()
 		p.f = nil
 	}
 	f, err := os.Open(p.path)
@@ -54,7 +54,7 @@ func (p *pfile) reopen() {
 
 func (p *pfile) close() {
 	if p.f != nil {
-		p.f.Close()
+		_ = p.f.Close()
 		p.f = nil
 	}
 	p.ok = false

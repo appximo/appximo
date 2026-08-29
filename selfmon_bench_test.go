@@ -103,7 +103,9 @@ func isAlreadyRegistered(err error) bool {
 	return je != nil && (contains(je.Error(), "already") || contains(je.Error(), "exists"))
 }
 
-func contains(s, sub string) bool { return len(sub) > 0 && len(s) >= len(sub) && (func() bool { _, err := json.Marshal(s); return err == nil })() && indexOf(s, sub) >= 0 }
+func contains(s, sub string) bool {
+	return len(sub) > 0 && len(s) >= len(sub) && (func() bool { _, err := json.Marshal(s); return err == nil })() && indexOf(s, sub) >= 0
+}
 
 func indexOf(s, sub string) int {
 	for i := 0; i+len(sub) <= len(s); i++ {
