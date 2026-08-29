@@ -520,6 +520,62 @@ Three answers differing by four orders of magnitude, from one measurement.
 **A capacity number without its load profile is not an answer**, and no number
 in this document should be quoted without the row it came from.
 
+### Four hours at 70 % of the ceiling: no leak, and a tail that is a second mode
+
+The endurance run is the part a 60-second benchmark cannot see. **3.9 h,
+240 rps of reads plus 25 rps of `PATCH`, 3 397 227 requests, zero transport
+errors, zero 5xx, goodput median exactly 240.0 rps.** Judged by slope, never
+by a value:
+
+| signal | first | last | slope / hour | R² |
+|:--|--:|--:|--:|--:|
+| live heap after GC | 16.21 MiB | 10.81 MiB | **−0.151** | **0.00** |
+| runtime memory total | 79.09 MiB | 83.65 MiB | +1.512 | 0.74 |
+| RSS | 70.91 MiB | 46.32 MiB | −3.352 | 0.52 |
+| goroutines | 128 | 54 | −2.933 | 0.01 |
+| pool connections | 10 | 10 | 0.000 | — |
+| p50 response | 2.78 ms | 2.95 ms | −0.029 | 0.06 |
+
+**No leak.** The live heap after GC has no trend at all (R² 0.00) — sawtooth,
+not staircase. RSS *falls* (the kernel reclaiming on a memory-tight box), and
+the only rising signal is Go's total mapped memory at +1.5 MiB/h with the live
+heap flat, which is arena growth, not retained objects. Latency drift from the
+first hour to the last: **p50 −4.4 %, p99 −27.1 %** — nothing degraded.
+
+**But the p90 across slices has a median of 500 ms while the p50 is 2.7 ms.**
+That is not a tail, it is a second mode, present from the first slice and not
+degrading; slice p90 ranges from 5.6 ms to 4 716 ms, and the engine says
+`pool_exhausted` in 45 of 48 slices. `service` ≈ `response` latency (498 vs
+500 ms at p90) proves the stall is server-side, not generator queueing.
+
+### The finding a single-workload benchmark cannot produce
+
+Isolating that second mode took one controlled A/B — the same reads, with and
+without the write half, alternated twice:
+
+| load | p50 | **p90** | p95 | p99 | verdict |
+|---|--:|--:|--:|--:|:--|
+| 240 rps read **alone** | 2.51 / 2.53 ms | **3.50 / 3.55 ms** | 5.6 / 6.9 ms | 424 / 873 ms | cpu_saturated |
+| the same **+ 25 rps `PATCH`** | 2.56 / 2.46 ms | **489.7 / 378.0 ms** | 889 / 1 267 ms | 1 237 / 2 136 ms | pool_exhausted |
+
+**Twenty-five writes per second multiply the read p90 by roughly 130×, and
+leave the median untouched.** Every other benchmark in this document measures
+one workload at a time, and none of them can see this: a real application is
+never one workload at a time, and the number a user feels is the mixed one.
+
+What it is *not*, all measured rather than assumed: not autovacuum (96.5 % HOT
+updates, dead tuples flat at ~4 000 across 374 k updates), not host memory
+(memory PSI 0.05 %), not the disk (IO PSI 0.83 %), not paging (2.5 MB of the
+engine swapped), not a leak. The remaining candidate is connection occupancy:
+a write holds a pool connection for its whole transaction including the commit
+`fsync`, and the pool is **10 connections shared by reads and writes with no
+separation**. Registered as ENG-55 with the experiment that would settle it.
+
+**Practical consequence for sizing:** measure the mix, not the endpoints. A
+capacity figure taken from a read-only ladder is an upper bound that a
+modest write rate can invalidate for the p90 while leaving the median — and
+therefore every dashboard that shows only a median — perfectly healthy.
+
 ### What this procedure cannot tell you
 
 - **Whether a slow second was yours or a neighbour's.** CPU *steal* is

@@ -342,7 +342,23 @@ and they are what the next migrator reads first.
   the ladder inverts: `cpu_saturated` dominates from 150 to 380 rps, and then
   **`pool_exhausted` takes over from 420 to 700 rps** — where the CPU is more
   saturated, not less.
-- **Suspected mechanism (to confirm first):** `attribution.go` computes
+- **CONFIRMED against a live engine (2026-08-29, same session).** 900 rps on
+  the canonical read, signals read straight out of the verdict:
+
+  | request p99 | sched p99 | its threshold | ratio | cpu_busy_fraction | PSI cpu | verdict |
+  |--:|--:|--:|--:|--:|--:|:--|
+  | 1 138.7 ms | 469.8 ms | 56.9 ms | 8.25 | 0.36 | 17 % | cpu_saturated |
+  | 1 466.4 ms | 29.4 ms | 73.3 ms | **0.40** | **1.07** | 33 % | pool_exhausted |
+  | 1 597.4 ms | 29.4 ms | 79.9 ms | **0.37** | **0.95** | 39 % | pool_exhausted |
+  | 2 621.4 ms | 58.7 ms | 131.1 ms | **0.45** | **1.10** | 60 % | pool_exhausted |
+
+  The scheduler latency PLATEAUS around 25–60 ms (the runnable queue is
+  bounded by GOMAXPROCS and the in-flight cap) while the threshold — 5 % of
+  the request p99 — keeps growing with the queue. Past roughly 600 ms of p99
+  the ratio can no longer reach 1, so the rule cannot fire. **The engine was
+  reporting `pool_exhausted` while `cpu_busy_fraction` was 0.91–1.10, i.e.
+  with the CPU pegged.**
+- **Mechanism:** `attribution.go` computes
   `schedFloor := math.Max(t.SchedLatP99Ms, 0.05*p99)`. The relative half was
   added for a good reason (a 1 ms scheduler wait next to a 690 ms p99 caused
   by a mutex must not be called CPU), but it means that at a p99 of 5 000 ms
@@ -354,13 +370,50 @@ and they are what the next migrator reads first.
   "the pool is exhausted" at the exact load where the answer is "you are out
   of CPU" sends them to `DB_MAX_CONNS`, which moves the queue and not the
   ceiling.
-- **Ready:** confirm from a single tick's `signals` at ≥ 500 rps
-  (`sched_latency_p99_ms` against its threshold) that the relative floor is
-  what suppresses it; then either cap the relative term (e.g.
-  `min(0.05*p99, 20 ms)`) or corroborate CPU saturation with the busy
-  fraction / PSI when the pool is also queueing — and re-run the eight
-  provocations of CENTINELA-C-S1 to prove the lock provocation still reads
-  `lock_contention`. Do not change the ranking without that suite.
+- **Ready:** cap the relative term (e.g. `min(0.05*p99, 20–50 ms)`), or let a
+  `cpu_busy_fraction` at/above 1.0 corroborate on its own when the pool is
+  also queueing — the CPU being 100 % busy is not ambiguous. **Then re-run
+  the eight provocations of CENTINELA-C-S1**, the lock one above all: the
+  relative floor exists because a 1.0–1.5 ms scheduler wait next to a 690 ms
+  p99 caused by a mutex must NOT be called CPU, and any fix has to keep that
+  provocation reading `lock_contention`. Do not change the ranking without
+  that suite — which is why this session recorded the defect with its numbers
+  instead of patching it blind.
+
+### ENG-55 — 25 writes per second multiply the read tail by ~130×: reads and writes share one 10-connection pool with no separation
+
+- **Origin:** CAPACIDAD-USL-S1 (2026-08-29), found in the 4-hour endurance run
+  and then isolated with a controlled A/B (two rounds, alternated):
+
+  | load | p50 | **p90** | p95 | p99 | verdict |
+  |---|--:|--:|--:|--:|:--|
+  | 240 rps read ALONE | 2.51 / 2.53 ms | **3.50 / 3.55 ms** | 5.6 / 6.9 ms | 424 / 873 ms | cpu_saturated |
+  | the same + **25 rps PATCH** | 2.56 / 2.46 ms | **489.7 / 378.0 ms** | 889 / 1 267 ms | 1 237 / 2 136 ms | pool_exhausted |
+
+  The median does not move (2.51 → 2.56 ms). The p90 moves by two orders of
+  magnitude. `service` ≈ `response` latency (487.6 vs 489.7 ms), so the stall
+  is server-side, not generator queueing.
+- **What it is NOT:** autovacuum kept up (**96.5 % HOT updates**, dead tuples
+  flat at ~4 000 across 374 k updates, 24 autovacuums); host memory PSI 0.05 %,
+  IO PSI 0.83 %, engine swap 2.5 MB; no leak (live-heap slope R² = 0.00 over
+  3.9 h). All measured, not assumed.
+- **What it plausibly is:** a write holds a pool connection for the whole
+  transaction (BEGIN → validate → INSERT/UPDATE → outbox → COMMIT, plus
+  `fsync` on commit), so a handful of concurrent writes occupy a large share
+  of a **10-connection** pool and every read queues behind them. The engine
+  offers no separation — no read/write pool split, no priority, no reserved
+  read capacity — and `DB_MAX_CONNS` is a single global number.
+- **Impact: high, and it is invisible in every benchmark this project has
+  published**, because they measure one workload at a time. A real app is
+  never one workload at a time: the number a customer feels is the mixed one.
+- **Ready:** measure whether the cause is connection occupancy (split the
+  pool, or reserve N connections for reads, and re-run the same A/B — the p90
+  must come back toward the read-alone figure) or commit `fsync` latency
+  (compare with `synchronous_commit=off` on a scratch database, for
+  diagnosis only). Then either ship the separation or document the sizing
+  rule with this measurement in `docs/BENCHMARKS.md §4d` and
+  `docs/PRODUCTION.md`. Related: ENG-52 (the same queue, at the ceiling
+  rather than below it).
 
 ### SCHEMA-9 — `?search=` is an unindexable full scan across every text column, and the engine offers it with no guard
 
