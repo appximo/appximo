@@ -225,9 +225,15 @@ Your production tenant id must be the first label of the domain (`app` for
 - **Update:** `deploy-update.sh --binary=/tmp/new-binary` — atomic swap,
   health-polled, auto-rollback that re-verifies recovery. Custom consumer
   binaries deploy the same way (`--cli` keeps the ops CLI updated beside it).
-- **Backup:** `scripts/backup.sh` (pg_dump + rotation) — schedule it in cron;
-  the installer copies it but does NOT schedule it. A backup you have not
-  restored is a hope, not a backup: run a restore drill on a scratch box.
+- **Backup:** `scripts/backup.sh` — one SET per run (database dump + uploads +
+  `/etc/<app>` secrets/schema + a manifest of row counts). The installer
+  installs it AND schedules it (`<app>-backup.timer`, nightly 03:30;
+  `--backup-schedule=…`); set `BACKUP_COPY_TO` (+ `BACKUP_PASSPHRASE_FILE`)
+  in the env for the off-box copy. The restore is `scripts/restore.sh
+  --app=<app> --set=<prefix>` — timed and verified count-for-count against
+  the manifest (13.6 s for 251k rows on a 2 GB box; ~4 min + DNS from an
+  empty machine). A backup you have not restored is a hope, not a backup:
+  run the drill once (docs/PRODUCTION.md §4 has the numbers and the runbook).
 - **Never `git pull` on a production box.** A deploy is a binary swap.
 - **A re-run of `install.sh` over an existing app** KEEPS secrets/database/data,
   ALWAYS replaces the binary, and keeps the schema unless you pass `--schema`

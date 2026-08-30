@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -63,6 +64,14 @@ func newSelfMon(cfg Config, pool *pgxpool.Pool) (*observability.ResourceCollecto
 	// operator who set a rate of their own (a pprof session) keeps it.
 	if runtime.SetMutexProfileFraction(-1) == 0 {
 		runtime.SetMutexProfileFraction(1_000_000)
+	}
+	// Layer 5 (RESILIENCIA-S1 §D): the disk under the data and the backup's
+	// liveness. Watched paths come from the env the installer writes; a bare
+	// `serve`/`up` with none of them set watches nothing but its own cwd.
+	if h, herr := hostConfigFromEnv(); herr != nil {
+		return nil, herr
+	} else {
+		rc.Host = h
 	}
 	c := observability.NewResourceCollector(rc)
 	if pool != nil {
@@ -157,4 +166,51 @@ func querySpanUS(spans []observability.Span) int64 {
 		}
 	}
 	return total
+}
+
+// hostConfigFromEnv maps the installer's env onto layer 5. APPXIMO_BACKUP_DIR
+// turns the backup watch on (install.sh writes it); the disk watch covers the
+// files dir, the obs db's dir, the backup dir and the root — deduplicated by
+// filesystem at read time. 0 disables a floor; an unparseable value refuses to
+// boot, naming the variable.
+func hostConfigFromEnv() (observability.HostConfig, error) {
+	h := observability.HostConfig{BackupDir: strings.TrimSpace(os.Getenv("APPXIMO_BACKUP_DIR"))}
+	seen := map[string]bool{}
+	add := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		h.DiskPaths = append(h.DiskPaths, p)
+	}
+	add(os.Getenv("APPXIMO_FILES_DIR"))
+	if v := strings.TrimSpace(os.Getenv("OBS_DB_PATH")); v != "" {
+		add(filepath.Dir(v))
+	}
+	add(h.BackupDir)
+	if len(h.DiskPaths) > 0 {
+		add("/")
+	}
+	var err error
+	if h.BackupMaxAge, err = envDuration("APPXIMO_BACKUP_MAX_AGE", observability.DefaultBackupMaxAge); err != nil {
+		return h, err
+	}
+	h.DiskMinFreePct = observability.DefaultDiskMinFreePct
+	h.DiskMinFreeBytes = observability.DefaultDiskMinFreeBytes
+	if v := strings.TrimSpace(os.Getenv("APPXIMO_DISK_MIN_FREE_PCT")); v != "" {
+		f, perr := strconv.ParseFloat(v, 64)
+		if perr != nil || f < 0 || f > 100 {
+			return h, fmt.Errorf("APPXIMO_DISK_MIN_FREE_PCT=%q is not a percentage (0 disables the percent floor; default %.0f)", v, observability.DefaultDiskMinFreePct)
+		}
+		h.DiskMinFreePct = f
+	}
+	if v := strings.TrimSpace(os.Getenv("APPXIMO_DISK_MIN_FREE_MB")); v != "" {
+		n, perr := strconv.ParseInt(v, 10, 64)
+		if perr != nil || n < 0 {
+			return h, fmt.Errorf("APPXIMO_DISK_MIN_FREE_MB=%q is not a non-negative integer of MiB (0 disables the byte floor; default %d)", v, observability.DefaultDiskMinFreeBytes>>20)
+		}
+		h.DiskMinFreeBytes = n << 20
+	}
+	return h, nil
 }

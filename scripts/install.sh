@@ -66,6 +66,11 @@ readonly RELEASE_VERSION="v0.1.1"
 DOMAIN=""; EMAIL=""; BINARY=""; CLI=""; SCHEMA=""; PORT="8090"; CONTROL_PORT=""
 ASSUME_YES="no"; HARDEN="no"; DRY_RUN="no"; PREFIX=""; UNINSTALL="no"; PURGE="no"
 SHOW_SECRETS="no"; APP_EXPLICIT="no"; SCRIPTS_DIR=""; INTERNAL_TLS="no"; UPGRADE="no"; SWAP_MB=0; PUBLIC_OK="no"; CURL_TLS=""
+# RESILIENCIA-S1: the nightly backup is INSTALLED, not suggested. A backup that
+# depends on someone remembering a cron line is the one that is missing the
+# night it is needed (the 58 had its timer written by hand; every other install
+# had none). systemd OnCalendar syntax; --no-backup-timer opts out.
+BACKUP_SCHEDULE="*-*-* 03:30:00"; BACKUP_TIMER="yes"
 # The directory this script was started from — resolved BEFORE any `cd` (the
 # postgres steps cd /tmp, and a relative $0 resolved after that pointed the
 # companion-script lookup at /tmp: "deploy-update.sh weren't next to the
@@ -115,8 +120,13 @@ Options:
   --schema=PATH        boot schema JSON (default: a todo-api starter you replace later).
                        On a re-run: given → replaces the installed schema; omitted →
                        the installed schema is KEPT and verified to be THIS app's
-  --scripts=DIR        where deploy-update.sh / backup.sh live (default: next to
-                       this installer); they are installed into /opt/<app>/scripts
+  --scripts=DIR        where deploy-update.sh / backup.sh / restore.sh live (default:
+                       next to this installer); they are installed into /opt/<app>/scripts
+  --backup-schedule=C  when the installed <app>-backup.timer runs (systemd OnCalendar
+                       syntax; default "*-*-* 03:30:00" = nightly at 03:30). Sets
+                       are kept 14 days in /var/backups/<app>; off-box copy via
+                       BACKUP_COPY_TO in the env file (docs/PRODUCTION.md §4)
+  --no-backup-timer    do not install the backup timer (you schedule backup.sh yourself)
   --port=PORT          internal engine port Caddy proxies to        [default 8090]
   --app=NAME           install as a SEPARATE app on this box (OPS-10). Namespaces
                        everything: unit <NAME>.service, /etc/<NAME>, /opt/<NAME>,
@@ -155,6 +165,8 @@ parse_args() {
 			--cli=*)    CLI="${arg#*=}" ;;
 			--schema=*) SCHEMA="${arg#*=}" ;;
 			--scripts=*) SCRIPTS_DIR="${arg#*=}" ;;
+			--backup-schedule=*) BACKUP_SCHEDULE="${arg#*=}" ;;
+			--no-backup-timer) BACKUP_TIMER="no" ;;
 			--internal-tls) INTERNAL_TLS="yes" ;;
 			--show-secrets) SHOW_SECRETS="yes" ;;
 			--port=*)   PORT="${arg#*=}" ;;
@@ -200,6 +212,9 @@ parse_args() {
 	CADDY_SITES_DIR="$PREFIX/etc/caddy/sites"
 	CADDY_SITE_FILE="$CADDY_SITES_DIR/${APP_NAME}.caddy"
 	UNIT_FILE="$PREFIX/etc/systemd/system/${SERVICE_NAME}.service"
+	BACKUP_SERVICE_FILE="$PREFIX/etc/systemd/system/${SERVICE_NAME}-backup.service"
+	BACKUP_TIMER_FILE="$PREFIX/etc/systemd/system/${SERVICE_NAME}-backup.timer"
+	BACKUP_DIR="$PREFIX/var/backups/$APP_NAME"
 	[ -n "$CONTROL_PORT" ] || CONTROL_PORT="$(default_control_port "$APP_NAME")"
 }
 
@@ -626,7 +641,7 @@ verify_service_can_read() {
 	ok "service user can read its schema + binary (verified as $SERVICE_USER)"
 }
 
-# install_companion_scripts: place deploy-update.sh + backup.sh in
+# install_companion_scripts: place deploy-update.sh + backup.sh + restore.sh in
 # $OPT_DIR/scripts (the path docs/PRODUCTION.md references) when they sit next to
 # this installer — i.e. `bash scripts/install.sh` from a checkout, or scp'd
 # together. Under `curl | bash` there are no sibling files, so it skips with a
@@ -637,7 +652,7 @@ install_companion_scripts() {
 	# postgres steps `cd /tmp`. The exec bit of the SOURCE is irrelevant:
 	# install(1) sets 0755 on the copy.
 	local dir="${SCRIPTS_DIR:-$SELF_DIR}" any="no" missing="" s
-	for s in deploy-update.sh backup.sh; do
+	for s in deploy-update.sh backup.sh restore.sh; do
 		if [ -n "$dir" ] && [ -f "$dir/$s" ]; then
 			run install -m 0755 "$dir/$s" "$OPT_DIR/scripts/$s"; any="yes"
 		else
@@ -645,11 +660,11 @@ install_companion_scripts() {
 		fi
 	done
 	if [ "$any" = "yes" ] && [ -z "$missing" ]; then
-		ok "companion scripts installed in ${OPT_DIR#"$PREFIX"}/scripts (deploy-update.sh, backup.sh — from $dir)"
+		ok "companion scripts installed in ${OPT_DIR#"$PREFIX"}/scripts (deploy-update.sh, backup.sh, restore.sh — from $dir)"
 	elif [ "$any" = "yes" ]; then
 		warn "companion scripts: installed what was in $dir; MISSING:$missing — pass --scripts=DIR or copy them into ${OPT_DIR#"$PREFIX"}/scripts"
 	else
-		info "companion scripts (deploy-update.sh/backup.sh) not found in ${dir:-<unknown>} — pass --scripts=DIR pointing at the repo's scripts/ (or copy them into ${OPT_DIR#"$PREFIX"}/scripts) when you need updates/backups"
+		info "companion scripts (deploy-update.sh/backup.sh/restore.sh) not found in ${dir:-<unknown>} — pass --scripts=DIR pointing at the repo's scripts/ (or copy them into ${OPT_DIR#"$PREFIX"}/scripts) when you need updates/backups"
 	fi
 }
 
@@ -951,7 +966,13 @@ ADMIN_KEY=${ADMIN_KEY}
 APPXIMO_ENV=production
 APPXIMO_CONTROL_PORT=${CONTROL_PORT}
 APPXIMO_FILES_DIR=${VARLIB#"$PREFIX"}/files
-OBS_DB_PATH=${VARLIB#"$PREFIX"}/obs/obs.db"
+OBS_DB_PATH=${VARLIB#"$PREFIX"}/obs/obs.db
+# Where backup.sh writes its sets; the engine's self-monitor reads the age of
+# the newest one and last-backup.status here and alerts when a backup is
+# missing or failed (docs/PRODUCTION.md §4). BACKUP_COPY_TO=user@host:/dir or
+# remote:bucket/path ships each set off this box (BACKUP_PASSPHRASE_FILE to
+# include the encrypted secrets).
+APPXIMO_BACKUP_DIR=${BACKUP_DIR#"$PREFIX"}"
 	[ -n "$GOMEMLIMIT_VAL" ] && body="${body}
 GOMEMLIMIT=${GOMEMLIMIT_VAL}"
 	write_file "$ENV_FILE" "$body"
@@ -966,6 +987,12 @@ Description=Appximo app ${APP_NAME}
 Documentation=https://github.com/${REPO}/blob/main/docs/PRODUCTION.md
 Wants=network-online.target
 After=network-online.target postgresql.service
+# RESILIENCIA-S1: never give up restarting. A database that fails to come up
+# at boot makes the engine exit every RestartSec; with systemd's default start
+# limit (5 in 10 s) a 2 s RestartSec would reach it and the unit would stay
+# DOWN after PostgreSQL recovered. Provoked and measured: with the limit off
+# the engine loops harmlessly and is serving 6 s after the database returns.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -974,7 +1001,7 @@ Group=${SERVICE_USER}
 EnvironmentFile=${ENV_FILE#"$PREFIX"}
 ExecStart=${BIN_PATH#"$PREFIX"} serve --schema ${SCHEMA_FILE#"$PREFIX"} --port ${PORT} --control-port ${CONTROL_PORT}
 Restart=always
-RestartSec=5
+RestartSec=2
 LimitNOFILE=4096
 NoNewPrivileges=true
 ProtectSystem=strict
@@ -986,6 +1013,39 @@ StateDirectory=${APP_NAME}
 [Install]
 WantedBy=multi-user.target"
 	ok "wrote $UNIT_FILE"
+}
+
+# write_backup_timer: <app>-backup.service (oneshot → backup.sh --app) + a
+# calendar timer. Persistent=true runs a missed backup at the next boot;
+# RandomizedDelaySec spreads several apps on one box. The unit exists only when
+# backup.sh was installed (no silent timer firing a missing script).
+write_backup_timer() {
+	if [ "$BACKUP_TIMER" != "yes" ]; then info "backup timer not installed (--no-backup-timer)"; return 0; fi
+	if [ ! -x "$OPT_DIR/scripts/backup.sh" ] && [ "$DRY_RUN" != "yes" ]; then
+		warn "backup timer NOT installed: ${OPT_DIR#"$PREFIX"}/scripts/backup.sh is missing (pass --scripts=DIR) — this app has NO scheduled backup"
+		return 0
+	fi
+	write_file "$BACKUP_SERVICE_FILE" "[Unit]
+Description=Appximo backup of app ${APP_NAME} (pg_dump + files + config → ${BACKUP_DIR#"$PREFIX"})
+Documentation=https://github.com/${REPO}/blob/main/docs/PRODUCTION.md
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=${OPT_DIR#"$PREFIX"}/scripts/backup.sh --app=${APP_NAME}
+Nice=10
+IOSchedulingClass=idle"
+	write_file "$BACKUP_TIMER_FILE" "[Unit]
+Description=Nightly backup timer of app ${APP_NAME}
+
+[Timer]
+OnCalendar=${BACKUP_SCHEDULE}
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target"
+	ok "wrote ${BACKUP_SERVICE_FILE#"$PREFIX"} + ${BACKUP_TIMER_FILE#"$PREFIX"} (OnCalendar=${BACKUP_SCHEDULE}, keeps 14 sets in ${BACKUP_DIR#"$PREFIX"})"
 }
 
 write_caddyfile() {
@@ -1065,6 +1125,12 @@ start_services() {
 	systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null \
 		|| warn "could not (re)start caddy — check: caddy validate --config $CADDYFILE ; journalctl -u caddy -f"
 	ok "services started (appximo + caddy)"
+	if [ -f "$BACKUP_TIMER_FILE" ]; then
+		mkdir -p "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR"
+		systemctl enable --now "${SERVICE_NAME}-backup.timer" >/dev/null 2>&1 \
+			&& ok "backup timer enabled (next: $(systemctl show -p NextElapseUSecRealtime --value "${SERVICE_NAME}-backup.timer" 2>/dev/null || echo '?'))" \
+			|| warn "could not enable ${SERVICE_NAME}-backup.timer — systemctl status ${SERVICE_NAME}-backup.timer"
+	fi
 }
 
 # ── Health verification ──────────────────────────────────────────────────────
@@ -1158,8 +1224,12 @@ verify_installed() {
 	fi
 	# 4. The companions: executable, and the ops CLI actually operates.
 	local s present=""
-	for s in deploy-update.sh backup.sh; do [ -x "$OPT_DIR/scripts/$s" ] && present="$present $s"; done
+	for s in deploy-update.sh backup.sh restore.sh; do [ -x "$OPT_DIR/scripts/$s" ] && present="$present $s"; done
 	[ -n "$present" ] && vline "scripts   ${OPT_DIR#"$PREFIX"}/scripts:$present (executable)"
+	if [ "$BACKUP_TIMER" = "yes" ]; then
+		if systemctl is-active --quiet "${SERVICE_NAME}-backup.timer" 2>/dev/null; then vline "backup    ${SERVICE_NAME}-backup.timer active (OnCalendar=${BACKUP_SCHEDULE} → ${BACKUP_DIR#"$PREFIX"})"
+		else warn "${SERVICE_NAME}-backup.timer is NOT active — this app has no scheduled backup (systemctl status ${SERVICE_NAME}-backup.timer)"; fi
+	fi
 	if [ -e "$OPT_DIR/bin/appximo-cli" ]; then
 		if "$OPT_DIR/bin/appximo-cli" tenant --help >/dev/null 2>&1; then vline "ops CLI   ${OPT_DIR#"$PREFIX"}/bin/appximo-cli operates (tenant/migrate/token/admin)"
 		else warn "${OPT_DIR#"$PREFIX"}/bin/appximo-cli does not answer 'tenant --help' — it is not the engine CLI; re-run with --cli=/path/to/appximo"; fi
@@ -1236,7 +1306,8 @@ uninstall() {
 	fi
 	[ "$(id -u)" = "0" ] || die "must run as root (sudo)"
 	systemctl disable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
-	rm -f "$UNIT_FILE"; systemctl daemon-reload >/dev/null 2>&1 || true
+	systemctl disable --now "${SERVICE_NAME}-backup.timer" >/dev/null 2>&1 || true
+	rm -f "$UNIT_FILE" "$BACKUP_SERVICE_FILE" "$BACKUP_TIMER_FILE"; systemctl daemon-reload >/dev/null 2>&1 || true
 	rm -rf "$OPT_DIR" "$ETC_DIR"
 	# OPS-10: removing an app removes ITS site file and nothing else — a sibling
 	# app's site (and the shared Caddyfile) survive untouched.
@@ -1263,6 +1334,7 @@ uninstall() {
 	else
 		info "database + data dir kept (they hold your data). To also drop them: --uninstall --purge"
 	fi
+	[ -d "$BACKUP_DIR" ] && info "backups in $BACKUP_DIR were KEPT (even with --purge — they are the last copy; rm -rf it yourself if you mean it)"
 	info "postgresql and caddy packages were left installed (they may be shared). Remove with apt if unused."
 	ok "the app \"$APP_NAME\" was uninstalled (other apps on this box are untouched)."
 }
@@ -1312,6 +1384,10 @@ summary() {
 	printf '      -d "{\\"tenant_id\\":\\"acme\\",\\"display_name\\":\\"Acme\\",\\"email\\":\\"a@acme.com\\",\\"plan\\":\\"free\\",\\"schema\\":$(cat %s)}"\n' "${SCHEMA_FILE#"$PREFIX"}"
 	echo
 	printf '  Logs     journalctl -u %s -f\n' "$SERVICE_NAME"
+	if [ -f "$BACKUP_TIMER_FILE" ]; then
+		printf '  Backup   %s-backup.timer (OnCalendar=%s) → %s — 14 sets kept; NOT off-box until you set BACKUP_COPY_TO in %s\n' "$SERVICE_NAME" "$BACKUP_SCHEDULE" "${BACKUP_DIR#"$PREFIX"}" "${ENV_FILE#"$PREFIX"}"
+		printf '  Restore  sudo bash %s/scripts/restore.sh --app=%s --set=%s/%s-<stamp>   (timed + verified; drill it once: docs/PRODUCTION.md §4)\n' "${OPT_DIR#"$PREFIX"}" "$APP_NAME" "${BACKUP_DIR#"$PREFIX"}" "$APP_NAME"
+	fi
 	printf '  Ops CLI  %s/bin/appximo-cli  (tenant / migrate / token / admin create)\n' "${OPT_DIR#"$PREFIX"}"
 	printf '  Schema   %s (name "%s") — a re-run KEEPS it unless you pass --schema=PATH\n' "${SCHEMA_FILE#"$PREFIX"}" "$(schema_name "$SCHEMA_FILE")"
 	printf '  Update   build a new binary → scp up → sudo bash %s --binary=/path --domain=%s --email=%s --yes   (add --schema=PATH to change the model; secrets + data are kept, binary is replaced, the end is verified)\n' "$0" "$DOMAIN" "${EMAIL:-you@example.com}"
@@ -1358,6 +1434,7 @@ main() {
 	write_schema
 	write_env_file
 	write_systemd_unit
+	write_backup_timer
 	write_caddyfile
 	verify_service_can_read
 	start_services

@@ -453,6 +453,7 @@ func New(cfg Config) (*App, error) {
 		return nil, smErr
 	} else if sm != nil {
 		app.selfmon = sm
+		sm.SetAlerter(alerter) // disk-low / backup-missing alerts ride the same channel (RESILIENCIA-S1)
 		app.obsServer.SetResources(sm)
 		if regErr := app.metrics.Register(sm.PromCollector()); regErr != nil {
 			log.Printf("WARNING: self-monitoring gauges not registered on /metrics: %v", regErr)

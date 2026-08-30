@@ -38,7 +38,9 @@ Flags: `--domain` `--email` `--binary=PATH` `--schema=PATH` (your model; default
 is a `todo-api` starter you replace later) `--port` (internal, default 8090)
 `--app=NAME` (a second app on the same box, §2b) `--yes` (non-interactive)
 `--harden` (ufw + fail2ban + unattended-upgrades) `--scripts=DIR` (where
-`deploy-update.sh`/`backup.sh` live; default: next to the installer)
+`deploy-update.sh`/`backup.sh`/`restore.sh` live; default: next to the
+installer) `--backup-schedule=CAL` (the nightly backup timer's `OnCalendar`,
+default 03:30; `--no-backup-timer` to opt out — §4)
 `--internal-tls` (Caddy issues a local certificate — a LAN/staging box whose
 domain is not public) `--dry-run` (generate configs + print the plan, change
 nothing).
@@ -251,30 +253,289 @@ hooks, `/docs` — activates on the restart with the new schema. See
 
 ---
 
-## 4. Backups
+## 4. Backups, restore and recovery — the promise, measured
 
-[`scripts/backup.sh`](../scripts/backup.sh) dumps the whole database — every
-tenant's schema **and** the control plane — as one compressed custom-format file,
-and rotates old dumps. Wire it into cron:
+> **A backup you have never restored is not a backup; it is a folder.** Every
+> number in this section was MEASURED in RESILIENCIA-S1 (2026-08-30) on a box
+> installed with `install.sh` — a 2 vCPU / 2 GB DigitalOcean droplet, the box a
+> customer buys — holding a realistic dataset (**251 248 rows, 124 MB, 23
+> tables, 3 uploaded files**; the migration-scale set the capacity laboratory
+> uses). Nothing here is estimated. The evidence (logs, timings, screenshots)
+> is in the internal package under `evidencia/RESILIENCIA-S1/`.
 
-```cron
-# nightly at 03:30, keep 14 days (as root)
-30 3 * * *  /opt/appximo/scripts/backup.sh --env-file=/etc/appximo/appximo.env \
-            >> /var/log/appximo-backup.log 2>&1
-```
+### 4.1 What a backup is (one SET, four files)
 
-**A backup you have never restored is not a backup.** Test the restore:
+`install.sh` installs [`scripts/backup.sh`](../scripts/backup.sh) and
+[`scripts/restore.sh`](../scripts/restore.sh) into `/opt/<app>/scripts/` and
+writes **`<app>-backup.timer`** — a nightly backup at **03:30** (`--backup-schedule`
+to change it, `--no-backup-timer` to opt out). One run writes one **set** with
+one stamp into `/var/backups/<app>/`:
+
+| file | holds | why it is in the set |
+|---|---|---|
+| `<app>-<stamp>.dump` | the whole database: every tenant schema + the control plane (`pg_dump -Fc`, compressed) | the data |
+| `<app>-<stamp>.files.tar.gz` | the uploaded files (`APPXIMO_FILES_DIR`) | the database holds only their **metadata**; without the bytes a restored app answers 404 on every attachment while the rows claim they exist |
+| `<app>-<stamp>.conf.tar` (0600) | `/etc/<app>`: the env (**`JWT_SECRET`**, `ADMIN_KEY`, ports, paths, tuning) and the boot schema | a new box cannot regenerate these: every issued token, every TOTP enrolment and the platform MFA are bound to the JWT secret |
+| `<app>-<stamp>.manifest` | exact per-table row counts, sizes, the dump's sha256, the files count | what `restore.sh` VERIFIES the restored database against — count by count |
+
+Plus `last-backup.status` (`ok …` / `failed …`), which the engine's self-monitor
+reads (§4.6). **14 sets are kept**; the sets of one stamp are pruned together.
+
+**Measured on the reference box: a backup takes 7.3 s** (dump 38 MB in 6 s +
+files + conf + manifest); `Nice=10` / `IOSchedulingClass=idle`, so the app
+does not feel it. A failed run leaves **no partial file**, writes `failed` to
+the status file and posts ONE message to `SLACK_WEBHOOK_URL` if the env has
+one.
+
+**Off-box copy — set it, or the backup dies with the disk.** A backup on the
+disk that holds the database is one failure away from gone: a dead host takes
+both. In `/etc/<app>/<app>.env`:
 
 ```bash
-createdb appximo_restore_test
-pg_restore -d appximo_restore_test /var/backups/appximo/appximo-<stamp>.dump
-# inspect, then: dropdb appximo_restore_test
+BACKUP_COPY_TO=user@otherbox:/var/backups/myapp     # scp to a box you own …
+BACKUP_COPY_TO=spaces:mybucket/myapp                 # … or an rclone remote (DO Spaces, S3, R2, B2)
+BACKUP_PASSPHRASE_FILE=/root/.backup-passphrase      # 0600; the conf bundle (secrets) goes ONLY encrypted
 ```
 
-Point-in-time recovery (WAL archiving) is a PostgreSQL-level concern beyond this
-script; for most single-box deployments nightly `pg_dump` + off-box copy is the
-right trade-off. Copy the dumps off the box (another host, object storage) —
-a backup on the same disk as the database is one failure away from gone.
+Every set is then copied after it is written (measured: a 38 MB set to another
+box over the private network added under a second to the run). **Without `BACKUP_PASSPHRASE_FILE` the conf bundle
+never leaves the box** — the dump and the files still do, and the run says so
+every night. Keep the passphrase in your password manager, not on the box: it
+is what turns the encrypted bundle back into your secrets on the day the box
+is gone. Where it should live, and what it costs (DO list prices, 2026-08):
+
+| destination | cost | what it survives | what it does not |
+|---|---|---|---|
+| the same disk (the default when nothing is set) | $0 | a corrupt database, a bad migration, a deleted tenant | **the disk, the host, the account** |
+| another VPS you already run (`scp`) | $0 if it exists, else from $4/mo | the host | the provider/account, a fire in the region |
+| **DO Spaces / S3-compatible object storage (`rclone`)** — recommended | **$5/mo for 250 GB** (a year of nightly sets of this app is ~15 GB) | the host, the region if you pick another, accidental deletion if versioning is on | the account, unless the bucket is in another one |
+| a second provider (Backblaze B2 via `rclone`) | ~$0.006/GB/mo → cents | the provider | — |
+
+A one-liner to set up the recommended one: `apt-get install rclone && rclone
+config` (an S3-type remote named `spaces` with your Spaces key), then the two
+lines above and `systemctl start <app>-backup.service` to see the first copy
+land.
+
+### 4.2 The two numbers: how long it takes to come back, how much is lost
+
+Two scenarios, because they cost differently. Both were executed, timed stage by
+stage, and verified in a browser — not "pg_restore exited 0".
+
+**Scenario 1 — the database is corrupt or destroyed, the box is fine.** The
+heap of the biggest table (`ordenes`, 60 000 rows) was overwritten with random
+bytes while PostgreSQL was stopped, then PostgreSQL started again. The engine
+kept answering **200** — the first page of results did not touch the damaged
+blocks. The nightly `pg_dump` did: `invalid page in block 0 of relation …`,
+`backup FAILED`. **The backup is the corruption detector**; that is why its
+failure must reach a human (§4.6).
+
+```
+sudo bash /opt/appximo/scripts/restore.sh --app=appximo --set=/var/backups/appximo/appximo-20260830-174054
+```
+
+| stage | measured |
+|---|--:|
+| stop the engine (graceful drain — a fixed 5 s while `/readyz` says 503) | 5.0 s |
+| restore `/etc/appximo` from the conf bundle (secrets + schema) | 0.1 s |
+| drop + recreate the database | 0.5 s |
+| `pg_restore` of 251 248 rows / 124 MB, as the service role | 6.5 s |
+| restore the 3 uploaded files | 0.0 s |
+| start the engine, `/healthz` + `/readyz` green | 0.6 s |
+| verify: 23 tables count-for-count against the manifest, files on disk, every FK validated, sequences ahead of their tables, the engine listing its tenants | 0.7 s |
+| **total, corrupt → verified back** | **13.6 s** |
+
+Add the human: noticing, opening a terminal, finding the set. **Promise for a
+corrupt database on a live box: back in under 15 s of execution once someone
+runs the command; a few minutes end to end.** Verified afterwards in a real
+browser (the same product list, the same detail, the same counts as before the
+corruption) and with a NEW write (`201`).
+
+**Scenario 2 — the box is gone (host dead, account lost, disk fried).**
+A fresh droplet, the installer, the set from off-box storage, the restore —
+following §4.3 literally, on a clean machine, with a stopwatch:
+
+| stage | measured |
+|---|--:|
+| create the droplet (DigitalOcean, until SSH answers) | 71 s |
+| copy `install.sh` + companions + the binary up | 0.7 s |
+| `install.sh` (PostgreSQL + Caddy + the engine, from `apt`, verified) | 150.0 s |
+| copy the set to the new box (38 MB over the private network) + the passphrase | 2.1 s |
+| `restore.sh --set` (the same stages: stop 5.0 · conf 0.0 · drop/create 0.2 · load 5.5 · files 0.0 · start 0.6 · verify 0.4) | 12.1 s |
+| **total, empty machine → verified back** | **≈ 4 min (236 s)** — 165 s of it hands-on |
+
+**plus DNS.** The A record has to move to the new IP; with a 300 s TTL that is
+minutes, with a day-long TTL it is a day. **Set the TTL of the app's record to
+300 s now, while nothing is wrong** — it is the only part of this number you
+cannot buy back later. Caddy issues the certificate by itself the moment the
+name resolves to the new box.
+
+**How much is lost — the RPO.** Everything written after the last set. With
+the default nightly timer that is **up to 24 h** (on average 12 h): the drill
+wrote a row after the last backup and, as promised, it was NOT on the restored
+box — the manifest said 42 categories, the live box had 43. The number scales
+with the cadence, and the cadence is one line:
+
+| cadence (`--backup-schedule=…` / the timer's `OnCalendar`) | worst-case loss | what it costs on the reference box |
+|---|---|---|
+| nightly (`*-*-* 03:30:00`, the default) | 24 h | 7 s of `nice` CPU + 38 MB a night; 14 sets = 530 MB |
+| every 6 h (`00/6:30`) | 6 h | 4× that: ~2 GB kept, still nothing the app notices |
+| **hourly** (`hourly`) | **1 h** | 7 s and 38 MB an hour; keep 48 sets (`BACKUP_KEEP=48`): 1.8 GB. Off-box: 38 MB × 24 a day, cents |
+| every 15 min | 15 min | still 7 s each; 14 GB for a week of sets — object storage, not the box |
+| **point-in-time (WAL archiving)** | seconds | a PostgreSQL-level setup this script does not do (`archive_command` + base backups, or `pgBackRest`) — the right tool when minutes of loss are unacceptable; see §4.5 |
+
+The engine does nothing between backups that would help; the loss is exactly
+the interval. **Pick the interval from the value of an hour of your data, not
+from what feels frequent.**
+
+### 4.3 The recovery procedure — for 3 a.m., no memory, no shortcuts
+
+This was followed letter by letter on a clean machine (§4.2 scenario 2) by the
+session that wrote it. If a step is wrong, the step is wrong — fix the text,
+not the operator.
+
+**A. The app is down or broken and the box answers SSH — restore the last set**
+
+```bash
+# 1. see what is wrong (30 s) — most outages are not a restore
+systemctl status appximo postgresql caddy --no-pager | head -30
+journalctl -u appximo -n 40 --no-pager
+curl -s http://127.0.0.1:8090/readyz; echo
+
+# 2. if the DATA is wrong (corrupt table, dropped tenant, bad migration, garbage writes):
+ls -lt /var/backups/appximo/ | head          # the newest set is first; pick the stamp BEFORE the damage
+cat /var/backups/appximo/last-backup.status  # "ok …" = last night's set is complete
+
+# 3. restore it — the script stops the app, restores secrets+schema+database+files,
+#    starts the app and VERIFIES; it prints every stage with its time
+sudo bash /opt/appximo/scripts/restore.sh --app=appximo --set=/var/backups/appximo/appximo-<stamp>
+
+# 4. "RESTORE VERIFIED" → open the app in a browser, log in, read one record you know.
+#    Anything else → it says what did not match; the app is STOPPED; do not guess — read the message.
+```
+
+A named app (`--app=vetapp` at install) uses `/opt/vetapp/scripts/restore.sh
+--app=vetapp --set=/var/backups/vetapp/vetapp-<stamp>`. The previous env and
+schema are kept next to the restored ones as `*.pre-restore-<stamp>`.
+
+**B. The box is gone — rebuild on a new one**
+
+You need: a new VPS (Ubuntu 22.04/24.04 or Debian 12), the **last set** from
+off-box storage (four files), the **passphrase** of the conf bundle (your
+password manager), the **binary** you were running (a release, or build it),
+and the repo's `scripts/` (`install.sh`, `backup.sh`, `restore.sh`,
+`deploy-update.sh`).
+
+```bash
+# 1. from your machine: put the installer, the companions and the binary on the new box
+scp scripts/install.sh scripts/backup.sh scripts/restore.sh scripts/deploy-update.sh appximo root@NEW:/root/recover/
+
+# 2. on the new box: install the app EMPTY, with the SAME domain and app name it had
+#    (secrets are generated fresh here and replaced by the restore in step 4)
+ssh root@NEW
+bash /root/recover/install.sh --domain=api.example.com --email=you@example.com --binary=/root/recover/appximo --yes
+#    (a named app: add --app=NAME; a box without public DNS yet: add --internal-tls, re-run without it later)
+
+# 3. bring the set and the passphrase
+mkdir -p /var/backups/appximo && chmod 700 /var/backups/appximo
+#    from wherever the sets live — scp from the other box, or: rclone copy spaces:mybucket/myapp/<stamp>… /var/backups/appximo/
+scp otherbox:/var/backups/myapp/appximo-<stamp>.* /var/backups/appximo/
+printf '%s' '<the passphrase>' > /root/.backup-passphrase && chmod 600 /root/.backup-passphrase
+
+# 4. restore — same command as scenario A, plus the passphrase for the encrypted secrets
+BACKUP_PASSPHRASE_FILE=/root/.backup-passphrase \
+  bash /opt/appximo/scripts/restore.sh --app=appximo --set=/var/backups/appximo/appximo-<stamp>
+
+# 5. "RESTORE VERIFIED" → move the DNS A record to the new IP. Until it propagates the app
+#    is unreachable at the old address; Caddy issues the certificate when the name lands here.
+
+# 6. in a browser: log in with the OLD credentials (they came back with the database), read one
+#    record. Then run one backup by hand and check the copy lands off-box:
+bash /opt/appximo/scripts/backup.sh --app=appximo && cat /var/backups/appximo/last-backup.status
+```
+
+Users' passwords, MFA enrolments and issued tokens all keep working: the
+password hashes are in the database and the JWT secret came back with the conf
+bundle. What is NOT back: anything written after the set (§4.2), and the
+observability history (`obs.db` — traces, not data; it starts empty).
+
+### 4.4 What comes back on its own, and what does not (verified by provoking it)
+
+Every case below was PROVOKED on the reference box, not read from a unit file.
+
+| what happens | what the box does by itself | measured | needs a human? |
+|---|---|---|---|
+| the engine process dies (`kill -9`) | systemd restarts it (`Restart=always`, `RestartSec=2` — it was 5: the same kill measured 5.6 s / 103 failed) | back in **2.96 s**; a 20 rps client saw **52 of 547** requests fail in a 2.8 s window (through Caddy those are 502s) | no |
+| the box reboots (kernel update, provider maintenance) | everything comes up in the right order: `postgresql@16-main` (17.6 s after the kernel), then the engine 40 ms later, Caddy, the backup timer; `NRestarts=0` | **25.8 s** of outage seen by a 10 rps client (200 failed requests); SSH back after 28 s | no |
+| **PostgreSQL is slow to start** (crash recovery, a big WAL replay, a slow disk) | the engine **waits** — the unit is ordered after the PostgreSQL instance, whose `Type=forking` start completes only when it accepts connections | provoked with a 60 s delay in the instance's start: the engine started 50 ms after PostgreSQL was ready, `NRestarts=0`, no request touched a half-up database | no |
+| **PostgreSQL fails to start at boot** (a bad config, a full disk, a broken upgrade) — the case that strands most single-box apps | the engine exits (it refuses to serve without its database), systemd relaunches it every 2 s **and never gives up** (`StartLimitIntervalSec=0` — with systemd's default limit of 5 starts per 10 s the unit would go `failed` and STAY down after PostgreSQL was fixed); the moment the database accepts connections the next attempt succeeds | provoked twice: 60 s down → +16 restarts, unit `activating (auto-restart)`, never `failed`; serving **0.5 s** after PostgreSQL came back, nobody touched the engine | **yes, for PostgreSQL** (`journalctl -u postgresql@16-main`); the engine needs nothing |
+| the disk fills up | **the app does not notice at first** — at 100 % full, reads answered 200 and small writes 201 (PostgreSQL recycles pre-allocated WAL segments and fills free space in existing pages); the failure comes later and is catastrophic (a new WAL segment or a checkpoint → `PANIC … No space left` → PostgreSQL restarts, the engine answers 503). What DID fail at once: the backup (`could not write to output file` → `failed` in the status file → alert), and journald stopped writing. Freed the space: everything kept working, zero restarts | the guard is §4.6 — the disk alert fires at 10 % / 1 GiB, hours or days before this | **yes** — free space (old sets, `journalctl --vacuum-size`, apt cache); if PostgreSQL already panicked: free space, `systemctl start postgresql` |
+| PostgreSQL dies / is stopped while the app runs | the engine **stays up** and answers **503 + Retry-After** fast (the breaker opens on connection refusals: max 0.1 s per failed request), then reconnects by itself | 20 s stop → **24.8 s** of clean 503s at 10 rps (232 requests), first 200 **4.3 s** after PostgreSQL was back, engine never restarted | no |
+| the network to the database drops packets (a remote database) | the engine stays up and answers 503 — but **slowly**: a black-holed connection is not a refusal, each request waits the 5 s query/acquire deadline before its 503, and the breaker does not shed them (ENG-59) | 30 s drop → **28.4 s** of 503s at 10 rps (248 requests, **p50 5.0 s each**); first 200 **250 ms** after the link returned, engine never restarted | no — but until ENG-59 a dead link costs 5 s per request instead of 0.1 s |
+| the database is corrupt | **nothing** — the app keeps serving what it can read; the nightly backup fails and alerts (§4.6) | restore in 13.6 s (§4.2) | **yes** — run §4.3-A |
+| **the host is gone** | **nothing.** The app is DOWN until someone acts | rebuild in ≈ 4 min + DNS (§4.2) | **yes** — run §4.3-B |
+
+### 4.5 What ONE box does not cover — said, not hidden
+
+This product runs one app on one box. That is a decision (cost, simplicity,
+the customer it is for), and it has a price that has to be on the table:
+
+- **If the host dies, the app is down until a person rebuilds it** (§4.3-B) —
+  minutes of work plus the DNS TTL, but ZERO of it happens by itself. There is
+  no standby, no failover, no second box. Provider host failures are rare, not
+  impossible (DigitalOcean's SLA credits start at 99.99 %, i.e. ~1 h a year).
+- **Everything written since the last backup is lost** when a restore is
+  needed (§4.2). The nightly default means a day; the cadence is yours to set.
+  Seconds-level loss needs WAL archiving (PostgreSQL's `archive_command` or
+  `pgBackRest` to the same object storage) — supported by PostgreSQL, not
+  wired by these scripts; a documented next step for a customer who needs it.
+- **A backup that stays on the box protects against the database, not the
+  box.** Until `BACKUP_COPY_TO` is set, the status line says so every night.
+- **The restore is a full replace** — the whole database, all tenants. A
+  per-tenant selective restore is not built (`pg_restore --schema=tenant_x`
+  into a scratch database is the manual path).
+
+If any of those is unacceptable for an app, the answer is a second box — which
+is the next design, not a flag in this one.
+
+### 4.6 Knowing BEFORE it is too late — backup and disk alerts
+
+The two silent killers are a backup that stopped running weeks ago and a disk
+that fills up. Nothing new was built to watch them: the engine's self-monitor
+(§8 `APPXIMO_SELFMON`, the collector that already reads the runtime, the
+cgroup, PSI and the pool once a tick, out of the request path) gained a
+fifth layer, and the alert goes out through the **same alerter** the SLO and
+first-occurrence error alerts use (`SLACK_WEBHOOK_URL`; without it, a log
+line `alert (no webhook configured — recorded only)`):
+
+| condition | how it is read (every tick, ~10 s, allocation-free) | the alert | on `/metrics` |
+|---|---|---|---|
+| **the last backup FAILED** | `last-backup.status` in `APPXIMO_BACKUP_DIR` (the installer sets it) says `failed …` | critical, at once, once per 6 h: the status line + where to look | `appximo_selfmon_backup_ok 0` |
+| **the backup is STALE** — no run for longer than `APPXIMO_BACKUP_MAX_AGE` (36 h) | the status file's age | critical: the age, the floor, `systemctl list-timers '*backup*'`, the command to run one now | `appximo_selfmon_backup_age_seconds` |
+| **no backup has ever run** and the app has been up longer than the floor | no status file | critical: "is the timer installed?" | `backup_ok -1` until the first run |
+| **disk low** — under `APPXIMO_DISK_MIN_FREE_PCT` (10 %) or `_MB` (1024) on the filesystem under the files dir, the obs db, the backup dir or `/` | one `statfs` per path, deduplicated by filesystem | warning (critical under half the floor), once per 6 h: path, free of total, and what to free first | `appximo_selfmon_disk_free_bytes{path}` / `_total_bytes{path}` |
+
+`backup.sh` itself posts to the same webhook when it fails — so a failed run
+is heard twice: by the script, and by the engine on the next tick, whether or
+not the script was still alive to say it. The JSON of the tick is
+`/admin/resources` → `latest.host`. Provoked on the reference box: a `failed`
+status line → alert within one tick; a status touched to 3 days old → the
+stale alert; the floor raised to 99 % → the disk alert naming `/var/lib/appximo`
+and the free bytes. An unparseable floor refuses to boot, naming the variable.
+
+### 4.7 Recommended cadence by kind of app
+
+| the app | cadence | why |
+|---|---|---|
+| a content site, a catalogue, a brochure with a form | nightly (default) | a day of lost submissions is recoverable by asking |
+| a back-office (orders, appointments, inventory) — the typical app | **every 6 h, or hourly** | an afternoon of orders re-typed from paper is a bad day; an hour is a phone call |
+| money movements, invoices with legal numbering, anything a regulator can ask for | **hourly + WAL archiving** | the sequence of legal invoice numbers cannot have a hole; minutes of loss are the ceiling |
+| a demo, a staging box | nightly, `BACKUP_KEEP=3` | it exists to be reset |
+
+And, for every kind: **off-box, always** (§4.1), and **run the restore once**
+after the first real week of data — `restore.sh` on a scratch app (`install.sh
+--app=drill --port=8095` on the same box, restore the set into it, look, then
+`install.sh --uninstall --purge --app=drill`) takes ten minutes and turns the
+folder into a backup.
 
 ---
 
@@ -484,6 +745,8 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | no | 1000 / 100 | Per-tenant token bucket. |
 | `APPXIMO_MEMORY_GUARD_MIN_MB` | no | max(32, 2 % of RAM) | **Host memory guard.** While `MemAvailable + SwapFree` (from `/proc/meminfo`, sampled ≤ 1/s) is under this many MiB, data-plane WRITES answer `503` + `Retry-After: 5` with a body naming the measurement, the floor and this knob; reads and probes keep flowing. Measured with swap included on purpose: on a Postgres box `shared_buffers` is Cached-but-not-reclaimable, so `MemAvailable` alone sits at tens of MiB at rest. `0` disables; a non-integer refuses to boot. Degradation, not capacity — give the box swap (§Prerequisites). |
 | `OBS_DB_PATH` | no | `/var/lib/appximo/obs/obs.db` | Trace/snapshot history (SQLite). Keep it on a persistent path. |
+| `APPXIMO_BACKUP_DIR` | no | — (installer: `/var/backups/<app>`) | Where `backup.sh` writes its sets. **Setting it turns the self-monitor's backup watch on**: `last-backup.status` is read every tick (out of band); `failed`, or an `ok` older than `APPXIMO_BACKUP_MAX_AGE` (default `36h`), or no run ever after that much uptime → ONE alert per 6 h on `SLACK_WEBHOOK_URL` + `appximo_selfmon_backup_ok` / `_backup_age_seconds` on `/metrics` + `host.backup` in `/admin/resources` (§4.6). |
+| `APPXIMO_DISK_MIN_FREE_PCT` / `APPXIMO_DISK_MIN_FREE_MB` | no | `10` / `1024` | The disk floor of the self-monitor: the filesystems under `APPXIMO_FILES_DIR`, `OBS_DB_PATH`, `APPXIMO_BACKUP_DIR` and `/` (deduplicated) are `statfs`'d every tick; under either floor → ONE alert per 6 h (critical under half the floor) naming the path, the free bytes and what to delete, plus `appximo_selfmon_disk_free_bytes{path}`. `0` disables a floor. Nothing on the request path. |
 | `APPXIMO_SELFMON` | no | on | **The engine's own resource collector** (ADR-030): runtime / cgroup v2 / PSI / pool read out of band by one goroutine, and a deterministic bottleneck verdict (`cpu_throttled`, `memory_pressure`, `gc_pressure`, `cpu_saturated`, `pool_exhausted`, `db_bound`, `lock_contention`, `healthy`) at `/admin` → Resources, `/debug/resources` and `appximo_selfmon_*` on `/metrics`. `off` disables it. On a systemd unit the cgroup is the service's own; `cpu.stat throttled_usec` is what says "the plan's quota, not the code". |
 | `APPXIMO_SELFMON_INTERVAL` | no | `10s` | Background cadence (floor 250ms). The view's polling switches to `APPXIMO_SELFMON_LIVE_INTERVAL` (`1s`) for a minute after each poll. A value that does not parse refuses to boot. |
 | `APPXIMO_SELFMON_P99_MS` | no | `50` | The verdict's absolute "slow" floor in ms ("what is slow for MY app"); the relative rule (3× the healthy baseline) applies regardless. |
@@ -501,7 +764,7 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `APPXIMO_MFA_KEY` / `APPXIMO_MFA_ISSUER` | no | JWT secret / `Appximo` | TOTP secret encryption + issuer label. |
 | `APPXIMO_PLATFORM_SUPER_ADMIN_ROLE` / `_MFA_ISSUER` | no | `platform_super_admin` | Admin API super-admin. Bootstrap with `appximo admin create`. |
 | `APPXIMO_EMAIL_TOPIC`, `SMTP_*` | no | — | Outbox email worker (`APPXIMO_WORKER_MODE=email`). |
-| `SLACK_WEBHOOK_URL` | no | — | SLO burn-rate alerts. |
+| `SLACK_WEBHOOK_URL` | no | — | SLO burn-rate alerts, first-occurrence error alerts, and (§4.6) backup-failed/stale and disk-low alerts; `backup.sh` posts its own failure here too. Without it every alert is only a log line. |
 | `REDIS_URL` | no | — | Optional async migration worker. |
 | `BACKUP_DIR` | no | `/tmp/appximo-backups` | Output dir for `POST /admin/backup`. |
 | `APPXIMO_SAFEGO_TIMEOUT` / `APPXIMO_PUBLIC_ROUTE_RPS` / `_BURST` | no | 30 s / 5 / 10 | Library-mode custom-handler tuning. |

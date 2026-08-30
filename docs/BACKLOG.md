@@ -26,7 +26,19 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-30 (OBSERVABILIDAD-ERRORES-S1)** — a 500 explains
+**Last reviewed: 2026-08-30 (RESILIENCIA-S1)** — the backup was a folder
+until it was restored: `restore.sh` (stop → secrets+schema → drop/create →
+load AS the service role → files → start → VERIFY counts/files/FKs/sequences/
+tenants, every stage timed), one backup SET (dump + uploads + conf + manifest),
+the installer's nightly timer + off-box copy with encrypted secrets, the
+3 a.m. runbook followed literally on a wiped box (it failed once — fixed),
+six recovery scenarios PROVOKED (engine kill 5.6 → 2.8 s with the new unit,
+reboot 25.8 s, slow PG waited, failing PG loops and self-heals, PG stop = clean
+503s + reconnect, net drop = breaker), layer 5 of the self-monitor (disk +
+backup liveness alerts, alloc-free). Measured: corrupt DB → verified back
+13.6 s; lost box → ~4 min + DNS; RPO = the timer interval. ENG-3 → DONE.
+New OPEN: OPS-40, OPS-41, OPS-42, OPS-43, ENG-58. Before that:
+**(OBSERVABILIDAD-ERRORES-S1)** — a 500 explains
 itself: message + call-site stack + failed statement + identity on every
 trace, JSON cause line at `level:"error"` tied to the trace, `done`
 subdivided with the failing stage marked, fingerprint groups (real data: 158
@@ -1071,22 +1083,93 @@ would close it better, and is Miguel's call.
   the chaos suite. Candidates: socket hand-off (`SO_REUSEPORT`) between old and
   new process, or a symlink + blue/green pair behind the existing `/readyz` drain.
 
-### ENG-3 — Restore command + scheduled backups (NARROWED — the drill now exists and passed)
-- **Origin:** PROD_PATH_AUDIT §1.5 / §2.8; docs/CAPABILITIES.md ("Backup has no
-  restore command and no scheduling").
-- **Impact:** was **High**; now Medium. PROD-JOURNEY-1B (2026-07-31) wrote and
-  EXECUTED a restore on the 58 with real data: commerce `scripts/restore.sh`
-  (stop engine → drop/recreate DB → `pg_restore --exit-on-error` → re-own
-  schemas/tables/sequences/**functions** → health-wait → row counts). The drill
-  caught a real bug theory couldn't: restored functions owned by `postgres`
-  crash-loop the engine's bootstrap (`CREATE OR REPLACE notify_schema_updated`,
-  SQLSTATE 42501). Full cycle verified: backup → DROP SCHEMA CASCADE → restore
-  1.8 s → identical counts → pre-backup order retrievable → NEW purchase
-  completed. A nightly `appximo-backup.timer` (03:30) is installed on the 58
-  by hand — the installer still doesn't provide it.
-- **Ready (what remains):** `appximo restore` as a first-class engine command
-  (per-tenant selective restore included), the backup timer written by
-  `install.sh`, and the restore drill wired into `scripts/verify-production/`.
+### OPS-43 — Per-tenant selective restore (ENG-3's last third)
+- **Origin:** ENG-3 (PROD_PATH_AUDIT §1.5 / §2.8), narrowed by RESILIENCIA-S1
+  (2026-08-30), which made the rest DONE: `scripts/restore.sh` (timed, verified
+  against the manifest), the nightly timer written by `install.sh`, the set
+  with uploads + secrets + manifest, the off-box copy.
+- **Impact:** Low-Medium. `restore.sh` is a FULL replace — every tenant goes
+  back to the set's instant. Restoring ONE tenant that deleted its own data
+  while the others keep working is a manual path today (`pg_restore
+  --schema=tenant_x` into a scratch database, then copy).
+- **Ready:** `restore.sh --tenant=X` (or `appximo restore`) that restores one
+  tenant schema from a set into the live database under the tenant's advisory
+  lock, verified against the manifest's rows for that schema; and the drill in
+  `scripts/verify-production/`.
+
+### OPS-40 — Layer 5 (disk + backup) is not on the `/admin` Resources screen
+- **Origin:** RESILIENCIA-S1 §D. The self-monitor reads the disk under the
+  data and `last-backup.status` every tick and alerts through the alerter; the
+  data is in `/admin/resources` (`latest.host`) and on `/metrics`, but the
+  SolidJS Resources view has no card for it (the session did not rebuild the
+  admin bundle for one card).
+- **Impact:** Low. The alert and the gauges exist; an operator who opens the
+  panel does not SEE "disk 92 % / last backup 14 h ago" there.
+- **Ready:** two cards on the Resources live board (disk per path with the
+  floor; backup status + age with the floor), reading `latest.host`; `make
+  admin-ui` + the committed dist (ADR-025).
+
+### OPS-41 — Point-in-time recovery (WAL archiving) is not wired
+- **Origin:** RESILIENCIA-S1 §4.2/§4.5. The RPO of this stack is the backup
+  interval — a night by default, an hour at best with `hourly`. Seconds-level
+  loss needs PostgreSQL WAL archiving (`archive_command` to the same object
+  storage + periodic base backups, or `pgBackRest`).
+- **Impact:** Medium for a money-moving app, none for the catalogue/back-office
+  profile the product targets first. Documented as a limit in PRODUCTION §4.5.
+- **Ready:** an `install.sh --pitr=rclone-remote` that configures
+  `archive_mode=on` + `archive_command` via rclone, a weekly base backup in the
+  timer, and a `restore.sh --to=<timestamp>` that performs the PITR restore —
+  drilled and timed like the rest. Only with a customer who needs it.
+
+### OPS-42 — PostgreSQL data checksums are OFF on the installer's cluster: corruption is served as 200
+- **Origin:** RESILIENCIA-S1 scenario 1. The heap of `ordenes` was overwritten
+  with random bytes; the engine kept answering **200** (the first page did not
+  touch the damaged blocks) and only the nightly `pg_dump` said `invalid page
+  in block 0`. Ubuntu's `pg_createcluster` initialises without
+  `--data-checksums`, so a bit flip in a rarely-read block is served as data
+  until something scans it.
+- **Impact:** Low probability, high cost when it happens (silent wrong data).
+- **Ready:** `install.sh` enables checksums on a cluster it is INSTALLING
+  FRESH (`pg_checksums --enable` with the cluster stopped, seconds on an empty
+  cluster; never on an existing one with data — that is the operator's
+  maintenance window), and `restore.sh` prints the cluster's checksum state.
+  Then re-run scenario 1: the first read of a damaged block must be an ERROR
+  (503, breaker) — not a 200.
+
+### ENG-59 — A black-holed database costs 5 s per request: acquire failures never reach the breaker
+- **Origin:** RESILIENCIA-S1 §B6, provoked on the customer box: `iptables DROP`
+  on the database port for 30 s under a 10 rps cache-busting probe → 248
+  requests answered 503 with a **p50 of 5.00 s each** (the query/acquire
+  deadline), against 0.1 s when PostgreSQL is STOPPED (a refusal: the breaker
+  opened at once, `circuit breaker is open` in the log). Reading of the code:
+  `TenantDB.exec` runs the STATEMENT through the breaker, but a black hole
+  kills the pooled connections (health check) and every request then dies in
+  `acquire conn: context deadline exceeded` — the acquire happens outside the
+  breaker, so nothing counts and nothing sheds.
+- **Impact:** Medium for a REMOTE database (a managed Postgres, a second box —
+  the layout a bigger customer will have): a dead link makes every request
+  wait 5 s for its 503 instead of failing fast, which is exactly the queueing
+  the admission control (ENG-52) exists to avoid.
+- **Ready:** the pool acquire is inside the breaker (or acquire deadline
+  failures are counted by the same predicate), so ten of them open it; the
+  B6 provocation re-run must show failures at ≤ 0.1 s p50 after the first
+  5 s, with the recovery still immediate when the link returns; gate + ABBA
+  (it is the request path).
+
+### ENG-58 — The graceful stop always waits the full 5 s drain, so a restore/restart pays 5 s even with zero in-flight requests
+- **Origin:** RESILIENCIA-S1 scenario 1 timings: `systemctl stop` = 5.0 s of
+  the 13.6 s restore; `app.go` passes a fixed `5*time.Second` to
+  `shutdown.Serve` (the LB-drain delay: `/readyz`→503, then sleep, then
+  `Shutdown`).
+- **Impact:** Low. Every restart (deploy, restore, the editor's self-restart)
+  costs 5 s of unavailability behind Caddy by design, because the delay is
+  what lets a load balancer notice the 503 before the listener closes — on a
+  single box with Caddy retrying the upstream, the useful part of that wait is
+  the time in-flight requests need, which is milliseconds.
+- **Ready:** `APPXIMO_SHUTDOWN_DRAIN` (default 5 s, the installer may set 1 s
+  on a single-box layout) + drain that ends EARLY when in-flight reaches zero,
+  measured with `deploy-update.sh` under a probe (B1's 2.8 s crash-restart
+  is the floor a graceful restart should approach, not exceed).
 
 ### ENG-4 — OTLP / OpenTelemetry export
 - **Origin:** README "Known limits"; docs/CAPABILITIES.md.
@@ -1554,6 +1637,80 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in RESILIENCIA-S1 (2026-08-30, night) — the backup was a folder: restore timed and verified, recovery provoked, the promise written
+
+- **ENG-3 → DONE (except the per-tenant third, now OPS-43).** The engine
+  repo had `backup.sh` and NO restore; the installer wrote NO timer and did
+  not even install `backup.sh` unless it sat next to `install.sh` (the lab's
+  customer box: `/opt/appximo/scripts/` EMPTY — the `curl | bash` path). Now:
+  `scripts/restore.sh --app=X --set=PREFIX` (stop → `/etc/<app>` from the
+  conf bundle keeping THIS box's `DATABASE_URL` → drop/create → `pg_restore`
+  AS THE SERVICE ROLE (no ownership hand-back, so the 42501 crash-loop of the
+  first drill is structurally gone) → uploads → start → VERIFY: every table's
+  count against the manifest, files on disk, every FK `convalidated`,
+  sequences ahead of their tables, the engine's tenant list == `public.tenants`;
+  every stage timed). `backup.sh` writes a SET (`.dump` + `.files.tar.gz` +
+  `.conf.tar` 0600 + `.manifest`), prunes sets together, copies off-box
+  (`BACKUP_COPY_TO` scp / rclone; the conf bundle ONLY encrypted with
+  `BACKUP_PASSPHRASE_FILE`, else it stays and the run says so), leaves no
+  `.partial`, writes `last-backup.status`, posts a failure to
+  `SLACK_WEBHOOK_URL`. `install.sh` installs the three companions, writes
+  `<app>-backup.service/.timer` (03:30, `Persistent`, `--backup-schedule`,
+  `--no-backup-timer`), puts `APPXIMO_BACKUP_DIR` in the env, verifies the
+  timer is active, removes the units on `--uninstall` and KEEPS the backups
+  even on `--purge`.
+- **The two numbers, measured on the customer box (251 248 rows / 124 MB):**
+  corrupt database → verified back in **13.6 s** (stop 5.0 · conf 0.1 ·
+  drop/create 0.5 · load 6.5 · files 0.0 · start 0.6 · verify 0.7); lost box
+  → **≈ 4 min (236 s)** = droplet 71 s + copy 0.7 + `install.sh` 150.0 + set
+  2.1 + `restore.sh` 12.1, plus the DNS TTL. RPO = the timer interval,
+  demonstrated (a row written after the set was absent on the rebuilt box).
+  Verified in a real browser before/after (counts, rows, detail identical),
+  a new write 201, the old user's login 200, identical `JWT_SECRET`.
+- **The runbook (PRODUCTION §4.3) was followed literally on a wiped box and
+  FAILED twice — both fixed:** `restore.sh` validated the dump as the
+  `postgres` user against a 0700 root backup dir; and its last `stage ""` was
+  a `[ … ] && echo` that returned 1 under `set -e` AFTER every check passed.
+- **Six recovery scenarios PROVOKED, not read:** engine `kill -9` → 5.6 s /
+  103 of 827 failed at 20 rps with `RestartSec=5`; **2.96 s / 52 of 547 with
+  the new unit** (`RestartSec=2` + `StartLimitIntervalSec=0`). Reboot →
+  25.8 s outage, boot order correct (`postgresql@16-main` `Type=forking`
+  completes when it accepts connections; engine 40 ms later; `NRestarts=0`).
+  PostgreSQL slow (60 s) → the engine WAITS. PostgreSQL failing at boot → a
+  2 s loop that never gives up (+16 restarts in 60 s, `activating
+  auto-restart`, never `failed`) and recovers 0.5 s after the database
+  returns — WITHOUT `StartLimitIntervalSec=0` the 2 s cadence hits systemd's
+  5-in-10 s limit and the app stays down. PostgreSQL stopped hot → clean fast
+  503s (≤ 0.1 s, breaker), reconnect 4.3 s after. Network DROP to the
+  database → 503s at 5.0 s each (ENG-59). Disk full → the app does not
+  notice (reads 200, small writes 201 on WAL preallocation), the backup fails
+  at once with a status, journald stops; freed → nothing restarted.
+- **§D with what exists:** layer 5 of the self-monitor
+  (`pkg/observability/resources_host*.go`): `statfs` on the files/obs/backup
+  dirs and `/` (deduplicated by fsid) + `last-backup.status`, raw syscalls
+  over NUL paths prepared once → **1 alloc/tick, the collector's budget**
+  (the first attempt was 5: `syscall.Statfs(string)` allocates). Alerts via
+  the SAME `Alerter` (`KindHost`, 6 h cooldown per kind): backup failed /
+  EMPTY (a full-disk run) / stale > `APPXIMO_BACKUP_MAX_AGE` (36 h) / never;
+  disk under `APPXIMO_DISK_MIN_FREE_PCT`/`_MB` (10 % / 1 GiB). Gauges
+  `appximo_selfmon_backup_ok`, `_backup_age_seconds`, `_disk_free_bytes{path}`,
+  `_disk_total_bytes{path}`; `latest.host` in `/admin/resources`. Provoked on
+  the lab box with the new binary deployed by `deploy-update.sh`.
+- **Docs:** PRODUCTION §4 rewritten (the set, off-box with costs, the two
+  numbers, the runbook A/B, what recovers alone, what one box does not cover,
+  §4.6 alerts, cadence by app kind), §8 env rows; README + AGENTS.
+- **Gates:** unit ok · gofmt/vet 0 · lint 0 · shellcheck on the three
+  scripts · `install.sh --dry-run` · binary-diff gate **171 = 171 SAME, 0 DIFF**
+  ×2 on the final binary (a first pass under a parallel `make test -race`
+  flagged `admission-shed-burst` — host-load sensitive; SAME with the box
+  quiet) · full lane `go test ./...` (no `-short`) + `make test-all` exit 0 ·
+  ABBA frozen in the lab (dedic, 300 rps, 8/arm, worktree builds):
+  **no_change** median and tail (Δp50 −0.001 ms p=0.64; Δp99 −0.02 ms p=0.74).
+- **New OPEN:** OPS-40 (layer 5 not on the Resources screen), OPS-41 (PITR
+  not wired), OPS-42 (data checksums off — corruption served as 200), OPS-43
+  (per-tenant restore), ENG-58 (the fixed 5 s drain), ENG-59 (acquire
+  failures bypass the breaker).
 
 ## DONE in OBSERVABILIDAD-ERRORES-S1 (2026-08-30) — a 500 explains itself: message, stack at the site, the failed statement, identity, level, group, first-occurrence alert
 

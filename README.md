@@ -470,7 +470,12 @@ the systemd unit + Caddyfile, installs PostgreSQL and Caddy, brings the API up
 on HTTPS, and **verifies what it installed** (binary checksum, `/health` version
 locally and through the proxy, the schema on disk) before saying so. Updates are one script ([`scripts/deploy-update.sh`](scripts/deploy-update.sh),
 atomic swap + auto-rollback), backups another
-([`scripts/backup.sh`](scripts/backup.sh), `pg_dump` + rotation).
+([`scripts/backup.sh`](scripts/backup.sh) — the installer schedules it
+nightly; one set = database + uploads + secrets + a manifest, optional off-box
+copy) and the restore a third ([`scripts/restore.sh`](scripts/restore.sh) —
+timed and verified count-for-count against the manifest; measured
+**13.6 s** for a 251k-row database on a 2 GB box, **~4 min + DNS** from an
+empty machine — [docs/PRODUCTION.md §4](docs/PRODUCTION.md#4-backups-restore-and-recovery--the-promise-measured)).
 
 Prefer containers or a PaaS? The Docker paths still work:
 

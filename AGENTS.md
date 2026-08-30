@@ -1587,7 +1587,22 @@ The **official production path** is the one-command installer
 Caddy — Docker is a documented variant, not the default), fully walked in
 [docs/PRODUCTION.md](docs/PRODUCTION.md); updates are
 `scripts/deploy-update.sh` (atomic swap + auto-rollback), backups
-`scripts/backup.sh`. The lower-level three-tier path (compose / native by
+`scripts/backup.sh` (RESILIENCIA-S1: the installer writes `<app>-backup.timer`
+— nightly 03:30, `--backup-schedule`/`--no-backup-timer`; one run = one SET:
+`.dump` + `.files.tar.gz` (uploads) + `.conf.tar` (env/secrets + schema, 0600)
++ `.manifest` (exact per-table counts); `BACKUP_COPY_TO` scp/rclone off-box
+with the conf bundle ONLY encrypted via `BACKUP_PASSPHRASE_FILE`; a failed run
+writes `last-backup.status` + posts to `SLACK_WEBHOOK_URL`) and the restore
+`scripts/restore.sh --app=X --set=PREFIX` (stop → conf → drop/create + load AS
+THE SERVICE ROLE → files → start → VERIFY counts/files/FKs/sequences/tenants;
+every stage timed). Measured on the customer box (251 248 rows / 124 MB):
+corrupt DB → verified back **13.6 s**; lost box → install.sh 150 s + restore
+12 s + droplet ~70 s + DNS. Unit: `RestartSec=2` + `StartLimitIntervalSec=0`
+(provoked: PG failing at boot → the engine loops and recovers alone). The
+engine's self-monitor layer 5 (`APPXIMO_BACKUP_DIR`, `APPXIMO_BACKUP_MAX_AGE`,
+`APPXIMO_DISK_MIN_FREE_PCT/_MB`) alerts on a failed/stale backup and a low
+disk through the same alerter; PRODUCTION.md §4 carries the promise and the
+3 a.m. runbook, followed literally in the drill. The lower-level three-tier path (compose / native by
 hand) is [docs/DEPLOY.md](docs/DEPLOY.md). Two production facts worth
 knowing: `appximo serve` **self-bootstraps the control-plane tables** on a
 fresh empty database (no manual `migrations/001_control_plane.sql`), and

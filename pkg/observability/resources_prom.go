@@ -14,6 +14,8 @@ type resourceCollectorProm struct {
 	rc          *ResourceCollector
 	attribution *prometheus.Desc
 	gauges      []promGauge
+	diskFree    *prometheus.Desc
+	diskTotal   *prometheus.Desc
 }
 
 type promGauge struct {
@@ -29,7 +31,26 @@ func (c *ResourceCollector) PromCollector() prometheus.Collector {
 	return &resourceCollectorProm{
 		rc:          c,
 		attribution: prometheus.NewDesc("appximo_selfmon_attribution", "1 for the verdict of the latest tick (cpu_saturated|gc_pressure|cpu_throttled|pool_exhausted|db_bound|memory_pressure|lock_contention|healthy), 0 for the others", []string{"verdict"}, nil),
+		diskFree:    prometheus.NewDesc("appximo_selfmon_disk_free_bytes", "bytes available to the app on a watched filesystem (statfs f_bavail)", []string{"path"}, nil),
+		diskTotal:   prometheus.NewDesc("appximo_selfmon_disk_total_bytes", "size of a watched filesystem", []string{"path"}, nil),
 		gauges: []promGauge{
+			g("backup_age_seconds", "seconds since the last backup run wrote last-backup.status (-1 = none / not watched)", func(s *ResourceSnapshot) float64 {
+				if !s.Host.Enabled || s.Host.Backup.Dir == "" || s.Host.Backup.LastAt == 0 {
+					return -1
+				}
+				return s.Host.Backup.AgeS
+			}),
+			g("backup_ok", "1 = the last backup succeeded and is fresh; 0 = failed or stale; -1 = none yet / not watched", func(s *ResourceSnapshot) float64 {
+				switch {
+				case !s.Host.Enabled || s.Host.Backup.Dir == "":
+					return -1
+				case s.Host.Backup.Status == BackupOK && !s.Host.Backup.Stale:
+					return 1
+				case s.Host.Backup.Status == BackupNone && !s.Host.Backup.Stale:
+					return -1
+				}
+				return 0
+			}),
 			g("rps", "requests per second in the latest tick", func(s *ResourceSnapshot) float64 { return s.Request.RPS }),
 			g("request_p99_seconds", "request latency p99 of the latest tick", func(s *ResourceSnapshot) float64 { return s.Request.LatencyP99Ms / 1000 }),
 			g("query_p99_seconds", "client-side query stage p99 of the latest tick", func(s *ResourceSnapshot) float64 { return s.DBClient.QueryLatencyP99Ms / 1000 }),
@@ -56,6 +77,8 @@ func (c *ResourceCollector) PromCollector() prometheus.Collector {
 
 func (p *resourceCollectorProm) Describe(ch chan<- *prometheus.Desc) {
 	ch <- p.attribution
+	ch <- p.diskFree
+	ch <- p.diskTotal
 	for _, g := range p.gauges {
 		ch <- g.desc
 	}
@@ -75,5 +98,13 @@ func (p *resourceCollectorProm) Collect(ch chan<- prometheus.Metric) {
 	}
 	for _, g := range p.gauges {
 		ch <- prometheus.MustNewConstMetric(g.desc, prometheus.GaugeValue, g.get(s))
+	}
+	for i := 0; i < s.Host.Count; i++ {
+		d := s.Host.Disks[i]
+		if d.Err != "" {
+			continue
+		}
+		ch <- prometheus.MustNewConstMetric(p.diskFree, prometheus.GaugeValue, float64(d.FreeBytes), d.Path)
+		ch <- prometheus.MustNewConstMetric(p.diskTotal, prometheus.GaugeValue, float64(d.TotalBytes), d.Path)
 	}
 }

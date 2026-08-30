@@ -70,6 +70,9 @@ type ResourceConfig struct {
 	// Thresholds for the attribution rules; zero values take the documented
 	// defaults (see attribution.go).
 	Thresholds AttributionThresholds
+	// Host is layer 5 (resources_host.go): the disk under the data and the
+	// backup's liveness. Off unless paths are given.
+	Host HostConfig
 }
 
 // RuntimeStats is layer 1 — the Go runtime, per tick. Cumulative fields are
@@ -246,6 +249,7 @@ type ResourceSnapshot struct {
 	DBClient   DBClientStats `json:"db_client"`
 	DBServer   DBServerStats `json:"db_server_local_only"`
 	Request    RequestStats  `json:"request"`
+	Host       HostStats     `json:"host"`
 	// Attribution is the verdict of the §4 table for THIS tick; Verdict
 	// carries its reason and the signals that fired.
 	Attribution Attribution `json:"attribution"`
@@ -281,6 +285,7 @@ type ResourceCollector struct {
 	rt   *runtimeReader
 	proc *processReader
 	db   *dbReader
+	host *hostReader
 
 	ring      [ResourceRingSize]ResourceSnapshot
 	ringMu    sync.RWMutex
@@ -311,7 +316,9 @@ func NewResourceCollector(cfg ResourceConfig) *ResourceCollector {
 		cfg.DBServerEvery = 10 * time.Second
 	}
 	cfg.Thresholds = cfg.Thresholds.withDefaults()
+	cfg.Host = cfg.Host.withDefaults()
 	c := &ResourceCollector{cfg: cfg, wake: make(chan struct{}, 1)}
+	c.host = newHostReader(cfg.Host, time.Now())
 	c.latCur = hdrhistogram.New(1, 60_000_000, 2)
 	c.latPrev = hdrhistogram.New(1, 60_000_000, 2)
 	c.qCur = hdrhistogram.New(1, 60_000_000, 2)
@@ -326,6 +333,14 @@ func NewResourceCollector(cfg ResourceConfig) *ResourceCollector {
 // declared local (nil ⇒ never). Call before Run.
 func (c *ResourceCollector) SetDB(stat func() PoolStat, probe DBServerProbe) {
 	c.db = newDBReader(stat, probe, c.cfg.DBServerLocal, c.cfg.DBServerEvery)
+}
+
+// SetAlerter wires the channel layer 5 alerts go out on (the same Alerter
+// the SLO and new-error alerts use). Call before Run; nil keeps alerts off.
+func (c *ResourceCollector) SetAlerter(a Alerter) {
+	if c.host != nil {
+		c.host.alerter = a
+	}
 }
 
 // Observe is THE request-path entry point. It is called from the logging
@@ -480,6 +495,8 @@ func (c *ResourceCollector) tick(now time.Time) {
 	} else {
 		slot.DBServer = DBServerStats{Observable: false, Reason: "no database wired"}
 	}
+	// Layer 5 — the host: disk under the data, backup liveness.
+	c.host.fill(&slot.Host, now)
 	slot.DBClient.QueryCount = qn
 	if q.TotalCount() > 0 {
 		slot.DBClient.QueryLatencyP50Ms = float64(q.ValueAtQuantile(50)) / 1000
