@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788110561526,
+  "lastUpdate": 1788115011665,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -4968,6 +4968,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "35362669 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "4e873b5fc8df40795986d616d01b205111cb1a74",
+          "message": "feat(ops): a backup that restores — restore.sh timed and verified against a manifest, one backup SET (dump + uploads + secrets + counts), the installer's nightly timer, off-box copy with encrypted secrets, never-give-up unit, disk + backup liveness alerts in the self-monitor, the recovery promise written with measured numbers (RESILIENCIA-S1)\n\nThe engine had backup.sh and no restore; the installer wrote no timer and did\nnot even install backup.sh unless it sat next to install.sh. Measured on the\ncustomer box in the laboratory (251 248 rows / 124 MB): corrupt database →\nverified back in 13.6 s; lost box → ≈ 4 min + DNS (install.sh 150 s, restore\n12 s); RPO = the timer interval. The 3 a.m. runbook was followed literally\non a wiped box and failed twice (postgres could not read the 0700 backup dir;\na trailing `[ … ] &&` under set -e) — both fixed here. Six failures provoked:\nkill -9 5.6 → 2.96 s (RestartSec=2 + StartLimitIntervalSec=0, which is what\nkeeps a PostgreSQL that fails at boot from stranding the app), reboot 25.8 s,\nslow PostgreSQL waited for, PostgreSQL stopped hot = fast 503s, network DROP =\n503s at 5 s each (ENG-59), disk full unseen until catastrophic (the alert at\n10 % is the guard; an empty status file is an alarm). Layer 5 of the\ncollector reads statfs + last-backup.status with raw syscalls over paths\nprepared once — 1 alloc/tick — and alerts through the existing Alerter.\n\nGates: unit + full lane + make test-all green; lint 0; binary-diff gate\n171 = 171 SAME ×2 on the final binary; ABBA frozen in the lab no_change in\nmedian and tail. ENG-3 → DONE; new OPS-40..43, ENG-58, ENG-59.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-30T18:36:11Z",
+          "tree_id": "d739a12213b9fceb031f1695424976dd004a00c6",
+          "url": "https://github.com/appximo/appximo/commit/4e873b5fc8df40795986d616d01b205111cb1a74"
+        },
+        "date": 1788115010246,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6034,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "394442 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6034,
+            "unit": "ns/op",
+            "extra": "394442 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "394442 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "394442 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 66.03,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36484375 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 66.03,
+            "unit": "ns/op",
+            "extra": "36484375 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36484375 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36484375 times\n4 procs"
           }
         ]
       }
