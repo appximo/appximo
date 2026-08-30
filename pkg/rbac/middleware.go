@@ -3,7 +3,8 @@ package rbac
 import (
 	"context"
 	"encoding/json"
-	"log"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/rs/zerolog"
 	"net/http"
 	"strings"
 
@@ -65,8 +66,15 @@ func RBACMiddlewareWithPublic(policyJSON []byte, isPublic func(method, path stri
 				// the same code from here on — same lookup, same log write, same
 				// response bytes — so neither the body, the status, the response
 				// length nor the timing distinguishes them for the caller.
-				log.Printf("rbac: denied %s %s — %s (user_id=%q)",
-					r.Method, r.URL.Path, policy.DenyDetail(evalCtx.Role, resource, action), evalCtx.UserID)
+				// Structured, and tied to the trace (OBSERVABILIDAD-ERRORES-S1):
+				// a deny is a WARN — the caller's verdict, not a server fault.
+				zerolog.Ctx(r.Context()).Warn().
+					Str("request_id", chimiddleware.GetReqID(r.Context())).
+					Str("method", r.Method).Str("path", r.URL.Path).
+					Str("user_id", evalCtx.UserID).Str("role", evalCtx.Role).
+					Str("resource", resource).Str("action", action).
+					Str("detail", policy.DenyDetail(evalCtx.Role, resource, action)).
+					Msg("rbac: denied")
 				// Mark the rbac stage so a persisted 403 trace shows it reached
 				// (and was stopped at) RBAC (no stack — 403 is a client error).
 				if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {

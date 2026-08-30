@@ -115,6 +115,7 @@ function MetricsTab(props) {
   const latOpt = createMemo(() => { themeTick(); return latencyOption(history(), chartTheme()) })
   const burnOpt = createMemo(() => { themeTick(); return burnOption(history(), chartTheme()) })
 
+
   return (
     <div class="col" style={{ gap: "var(--space-4)" }}>
       <div class="statgrid">
@@ -186,6 +187,25 @@ function TracesTab(props) {
   )
 }
 
+// curlFor rebuilds the request from what the trace persisted: method, full URL,
+// the filtered headers (credentials were replaced by "[Filtered]" at capture —
+// they become $TOKEN here) and the redacted body when APPXIMO_TRACE_BODY was on.
+function curlFor(t) {
+  const parts = ["curl", "-i", "-X", t.method || "GET"]
+  const h = t.headers || {}
+  for (const k of Object.keys(h)) {
+    const lk = k.toLowerCase()
+    if (lk === "content-length" || lk === "host" || lk === "accept-encoding") continue
+    let v = h[k]
+    if (lk === "authorization") v = "Bearer $TOKEN"
+    else if (v === "[Filtered]") continue
+    parts.push("-H", JSON.stringify(k + ": " + v))
+  }
+  if (t.body) parts.push("--data-binary", JSON.stringify(t.body))
+  parts.push(JSON.stringify(t.full_url))
+  return parts.join(" ")
+}
+
 function TraceDetail(props) {
   return (
     <div class="card trace-detail">
@@ -198,7 +218,30 @@ function TraceDetail(props) {
         <Button size="sm" variant="ghost" onClick={props.onClose}>Close</Button>
       </div>
       <Show when={props.trace.error_msg}><div class="errbar">{props.trace.error_msg}</div></Show>
+      <Show when={props.trace.user_id || props.trace.role || props.trace.country}>
+        <div class="muted" style={{ "font-size": "12px", "margin-bottom": "var(--space-3)" }}>
+          {props.trace.user_id ? <span>user <span style={MONO}>{props.trace.user_id}</span> </span> : null}
+          {props.trace.role ? <span>· role <strong>{props.trace.role}</strong> </span> : null}
+          {props.trace.browser ? <span>· {props.trace.browser} / {props.trace.os} </span> : null}
+          {props.trace.country ? <span>· {props.trace.country}</span> : null}
+        </div>
+      </Show>
+      <Show when={props.trace.sql}>
+        <details class="stack" open>
+          <summary class="muted">Failed statement (the query the driver rejected)</summary>
+          <pre class="sqlblock" style={MONO}>{props.trace.sql}</pre>
+        </details>
+      </Show>
       <Waterfall trace={props.trace} />
+      <Show when={props.trace.full_url}>
+        <div class="row" style={{ "margin-top": "var(--space-3)", gap: "var(--space-2)" }}>
+          <Button size="sm" variant="ghost" onClick={() => navigator.clipboard.writeText(curlFor(props.trace))}>Copy as curl</Button>
+          <span class="muted" style={{ "font-size": "12px" }}>Authorization is never stored — the curl carries <span style={MONO}>$TOKEN</span>.</span>
+        </div>
+        <Show when={props.trace.body}>
+          <details class="stack"><summary class="muted">Request body (redacted, {props.trace.body.length} bytes)</summary><pre class="sqlblock" style={MONO}>{props.trace.body}</pre></details>
+        </Show>
+      </Show>
       <Show when={props.trace.stack && props.trace.stack.length}>
         <details class="stack">
           <summary class="muted">Stack ({props.trace.stack.length} frames)</summary>
@@ -237,10 +280,10 @@ function Waterfall(props) {
             <button class={"wf-row" + (sel() === i() ? " active" : "")} onClick={() => setSel(i())}>
               <span class="wf-name" title={s.name}>{s.name}</span>
               <span class="wf-track">
-                <span class={"wf-bar" + (errored() ? " err" : "")}
+                <span class={"wf-bar" + (s.err ? " fail" : (errored() ? " err" : ""))}
                   style={{ left: (offsets()[i()] / total()) * 100 + "%", width: Math.max((s.dur_us / total()) * 100, 0.6) + "%" }} />
               </span>
-              <span class="wf-dur num">{fmtMs(s.dur_us)} ms</span>
+              <span class="wf-dur num">{fmtMs(s.dur_us)} ms{s.err ? <span class="wf-failtag" title="the error was recorded during this stage"> ✗ failed here</span> : null}</span>
             </button>
           )}</For>
         </div>
@@ -271,6 +314,16 @@ function IssuesTab(props) {
   const slo = () => props.data().slo || {}
   const anomalies = () => props.data().anomalies || []
   const errors = () => props.data().errors || []
+  const groups = () => props.data().error_groups || []
+  const groupCols = [
+    { accessorKey: "route", header: "Endpoint", size: 200, cell: (c) => <span style={MONO} title={c.getValue()}>{c.getValue() || "—"}</span> },
+    { accessorKey: "message", header: "Problem (normalized)", size: 380, cell: (c) => <span title={c.getValue()}>{c.getValue() || "(no message)"}</span> },
+    { accessorKey: "count", header: "Events", size: 80, meta: { align: "right" }, cell: (c) => <span class="num">{c.getValue()}</span> },
+    { id: "users", header: "Users", size: 70, meta: { align: "right" }, cell: (c) => <span class="num">{(c.row.original.users || []).length}</span> },
+    { accessorKey: "first_seen", header: "Since", size: 110, cell: (c) => <span class="secondary">{fmtClock(c.getValue())}</span> },
+    { accessorKey: "last_seen", header: "Last", size: 110, cell: (c) => <span class="secondary">{fmtClock(c.getValue())}</span> },
+    { accessorKey: "sample_trace_id", header: "Trace", size: 110, cell: (c) => <span class="muted" style={MONO} title={c.getValue()}>{shortId(c.getValue())}</span> },
+  ]
 
   const anomalyCols = [
     { accessorKey: "ts", header: "Time", size: 170, cell: (c) => <span class="secondary">{fmtClock(c.getValue())}</span> },
@@ -295,7 +348,12 @@ function IssuesTab(props) {
         <StatCard label="Error ratio" sub="5-minute window">{(((slo().error_ratio_5m ?? 0) * 100).toFixed(2))} <span class="unit">%</span></StatCard>
         <StatCard label="Burn rate" sub="1-hour window">{(slo().burn_rate_1h ?? 0).toFixed(2)} <span class="unit">×</span></StatCard>
         <StatCard label="Anomalies" sub="since start">{props.data().anomaly_count ?? 0}</StatCard>
-        <StatCard label="Error groups">{errors().length}</StatCard>
+        <StatCard label="Problems · 24h" sub={groups().reduce((a, g) => a + (g.count || 0), 0) + " events"}>{groups().length}</StatCard>
+      </div>
+
+      <div class="col" style={{ gap: "var(--space-2)" }}>
+        <h3>Problems <span class="muted" style={{ "font-weight": "400", "font-size": "13px" }}>(5xx grouped by route + normalized message + top frame — one row per defect, not per occurrence)</span></h3>
+        <DataTable data={groups()} columns={groupCols} emptyMessage="No server errors in the last 24h." maxHeight="32vh" />
       </div>
 
       <div class="col" style={{ gap: "var(--space-2)" }}>

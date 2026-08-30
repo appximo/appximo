@@ -8,8 +8,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	zlog "github.com/rs/zerolog/log"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -100,13 +100,13 @@ func NewSSRFSafeClient(timeout time.Duration) *http.Client {
 // and exponential backoff (1s, 2s, 4s). Failures are logged but never returned.
 func (d *WebhookDispatcher) Dispatch(ctx context.Context, hook *schema.HookConfig, event string, payload map[string]any, tenantID string) {
 	if d.enforceHTTPS && !strings.HasPrefix(hook.URL, "https://") {
-		log.Printf("WEBHOOK [%s] rejected: only HTTPS endpoints are allowed (got %q)", tenantID, hook.URL)
+		zlog.Warn().Str("tenant_id", tenantID).Str("url", hook.URL).Msg("webhook rejected: only HTTPS endpoints are allowed")
 		return
 	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("WEBHOOK [%s] marshal error: %v", tenantID, err)
+		zlog.Error().Str("tenant_id", tenantID).Err(err).Msg("webhook: marshal error")
 		return
 	}
 
@@ -126,7 +126,7 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, hook *schema.HookConfi
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, hook.URL, bytes.NewReader(body))
 		if err != nil {
-			log.Printf("WEBHOOK [%s] build request error: %v", tenantID, err)
+			zlog.Error().Str("tenant_id", tenantID).Err(err).Msg("webhook: build request error")
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
@@ -135,7 +135,7 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, hook *schema.HookConfi
 
 		resp, err := d.client.Do(req)
 		if err != nil {
-			log.Printf("WEBHOOK [%s] attempt %d/%d error: %v", tenantID, attempt+1, maxAttempts, err)
+			zlog.Warn().Str("tenant_id", tenantID).Int("attempt", attempt+1).Int("max_attempts", maxAttempts).Err(err).Msg("webhook: attempt failed")
 			continue
 		}
 		// Bounded drain: read at most maxWebhookRespBytes so the connection can be
@@ -146,9 +146,9 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, hook *schema.HookConfi
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return
 		}
-		log.Printf("WEBHOOK [%s] attempt %d/%d status %d", tenantID, attempt+1, maxAttempts, resp.StatusCode)
+		zlog.Warn().Str("tenant_id", tenantID).Int("attempt", attempt+1).Int("max_attempts", maxAttempts).Int("status", resp.StatusCode).Msg("webhook: non-2xx")
 	}
-	log.Printf("WEBHOOK [%s] all attempts failed for %s", tenantID, hook.URL)
+	zlog.Error().Str("tenant_id", tenantID).Str("url", hook.URL).Msg("webhook: all attempts failed")
 }
 
 func signHMAC(secret string, body []byte) string {

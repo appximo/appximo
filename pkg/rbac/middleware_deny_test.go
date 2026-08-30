@@ -2,7 +2,7 @@ package rbac
 
 import (
 	"bytes"
-	"log"
+	"github.com/rs/zerolog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,17 +29,21 @@ func TestDeny_UndeclaredRoleIndistinguishableToClient(t *testing.T) {
 	handler := RBACMiddleware(policyJSON)(next)
 
 	deny := func(role, method string) (*httptest.ResponseRecorder, string) {
+		// The deny line is structured (zerolog, via the context logger); capture
+		// it through zerolog's context fallback, not the std logger.
 		var logBuf bytes.Buffer
-		prev := log.Writer()
-		log.SetOutput(&logBuf)
-		defer log.SetOutput(prev)
+		lg := zerolog.New(&logBuf)
+		prev := zerolog.DefaultContextLogger
+		zerolog.DefaultContextLogger = &lg
+		defer func() { zerolog.DefaultContextLogger = prev }()
 
 		req := httptest.NewRequest(method, "/api/tasks", nil)
 		req.Header.Set("X-User-Role", role)
 		req.Header.Set("X-User-ID", "u1")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
-		return rec, logBuf.String()
+		// JSON escapes the quotes inside the detail field; compare unescaped.
+		return rec, strings.ReplaceAll(logBuf.String(), `\"`, `"`)
 	}
 
 	// A role NO schema role declares, on an action a real role would also lack.

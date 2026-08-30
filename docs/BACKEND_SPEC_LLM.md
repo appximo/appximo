@@ -1602,6 +1602,66 @@ response-cache-served traffic the limiter cannot distinguish) now sees 429s
 it did not see before: set `RATE_LIMIT_RPS` explicitly to restore the old
 number. Anyone who already sets the variable is unaffected.
 
+### 3.9 When a handler fails: what the trace carries, and what it cannot (OBSERVABILIDAD-ERRORES-S1)
+
+A field report ("EL 500 MUDO") measured it: 0 of 33 custom-route 500s reached
+the trace with a message or a stack, the cause went to a plain-text log line
+with no trace_id, and the request line said `level:"info"`. Fixed at the
+engine, for every route, generated or custom — nothing to do in a handler,
+but the contract is worth knowing:
+
+- **Message.** A `ctx.Error(status, msg, cause)` puts `cause` (or `msg`) on
+  the trace; a plain `return err` puts `err`. The client body stays masked
+  (`internal error`); the trace and the log carry the truth.
+- **Stack — captured AT the call site, not in the middleware.** For a
+  `ctx.Error(5xx, …)` the stack is captured inside that call, so the first
+  frame is the handler's own file and line. A handler that returns a bare
+  error gets the response writer's stack instead, with a `stack_note` saying
+  so — **prefer `ctx.Error(500, "what failed", err)` for the site**. A panic
+  gets its own site: the capture runs on the panicking goroutine before it
+  unwinds. 4xx never pay for a stack (a caller's problem is not a bug).
+- **The failed statement.** The pool's driver tracer notes the exact SQL a
+  query failed with (template only — bound values are never recorded); a 5xx
+  trace shows it next to the driver's message. In the report's case the
+  panel would have read `cannot scan NULL into *bool` beside the `SELECT`
+  that produced it.
+- **Who.** `user_id` and `role` from the JWT on every persisted trace.
+- **The log line is JSON, level `error`, tied to the trace:**
+  `{"level":"error","trace_id":…,"request_id":…,"tenant_id":…,"user_id":…,
+  "route":"POST /api/x","status":500,"error":"…","sql":"…","site":"file.go:42",
+  "message":"custom route error: …"}`. The request line itself is
+  `level:"error"` for any 5xx (it used to say `info` with the status in a
+  field — the first alert anyone mounts on `level=error` never fired).
+  **Migration note:** a log filter on `level=error` now sees every 5xx and
+  every custom-route cause; RBAC denials are `warn`. Nothing was removed.
+- **The waterfall.** A custom route's `done` bar is subdivided: `tx` (pool
+  acquire + BEGIN + search_path), one `query` stage per Ctx database call,
+  `encode` for `ctx.JSON`; the stage during which the error was recorded is
+  marked `"err": true` — the panel labels it "failed here". Eight stages per
+  request are kept (the tracker is a fixed array); extras are dropped.
+- **Groups and the first-occurrence alert.** Every 5xx is fingerprinted by
+  route + normalized message (uuids, hex ids, quoted literals and numbers
+  replaced; SQLSTATE kept) + top application frame, persisted as an error
+  GROUP with occurrences, first/last seen and up to 50 affected users. A
+  group's FIRST occurrence sends an alert through the configured alerter
+  (Slack when `SLACK_WEBHOOK_URL` is set) — braked at 5 new groups per
+  tenant per minute, then one storm summary per 5 minutes.
+- **Reproducing it.** The trace persists the full URL and the request headers
+  with credentials replaced by `[Filtered]`; the panel builds a `curl` from
+  them (Authorization becomes `$TOKEN`). Request BODIES are **off by default**
+  — a body can carry passwords, tokens or personal data, and the data-
+  minimization rule the house adopted for IPs (A-53: country + ASN, not the
+  address) governs anything kept to reproduce an error. `APPXIMO_TRACE_BODY=on`
+  keeps the first 4 KiB of the body on persisted error traces with
+  `token`/`password`/`secret`/`authorization` JSON fields redacted; turn it on
+  where the data allows it, never by default.
+
+**What this is not, said plainly:** Sentry captures local variables because
+it instruments the language runtime. Go without a panic gives you the stack
+with file and line at the error site, the exact statement and the driver's
+message. That resolves the large majority of cases — the report's in a
+minute — but it is not a variable inspector, and nothing here pretends to be.
+
 ## 4. Hooks — declarative per-record validation
 
 A hook runs on the CRUD path of a resource, declared in the **schema** (not code

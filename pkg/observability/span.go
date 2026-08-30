@@ -14,6 +14,10 @@ const maxSpans = 8
 type Span struct {
 	Name  string `json:"name"`
 	DurUS int32  `json:"dur_us"`
+	// Err marks the stage during which the request's error was recorded — the
+	// bar in the waterfall where the failure happened (OBSERVABILIDAD-ERRORES-S1).
+	// omitempty keeps the JSON of a healthy span byte-identical to before.
+	Err bool `json:"err,omitempty"`
 }
 
 // SpanTracker records up to maxSpans stage durations for a single request. It is
@@ -30,6 +34,22 @@ type SpanTracker struct {
 	HasError bool
 	ErrMsg   string
 	Capture  *ErrorCapture
+	// failPending flags the stage in flight when the error was recorded so the
+	// NEXT Mark/Finish (which closes that stage) carries Err=true.
+	failPending bool
+	anyFailed   bool
+	// UserID/Role are set by the JWT middleware once the token is validated,
+	// so the request line and the trace can say WHO even though the claims
+	// live in a derived context the logger never sees.
+	UserID, Role string
+	// LastSQL/LastSQLErr are the most recent FAILED statement seen by the
+	// database tracer (QueryTracer) on this request — the exact query the
+	// driver rejected, kept as data (never logged here) for the 5xx capture.
+	// A handled failure (a 404 after a miss, a 409 after a unique violation)
+	// leaves them set but harmless: only the 5xx writers read them.
+	LastSQL    string
+	LastSQLErr string
+	pendingSQL string // the statement in flight (set by the tracer at start)
 }
 
 // NewSpanTracker starts a tracker whose clock begins now.
@@ -43,10 +63,40 @@ func NewSpanTracker() *SpanTracker {
 func (t *SpanTracker) Mark(name string) {
 	now := time.Now()
 	if t.count < maxSpans {
-		t.spans[t.count] = Span{Name: name, DurUS: int32(now.Sub(t.last).Microseconds())}
+		t.spans[t.count] = Span{Name: name, DurUS: int32(now.Sub(t.last).Microseconds()), Err: t.failPending}
 		t.count++
 	}
+	if t.failPending {
+		t.anyFailed = true
+	}
+	t.failPending = false
 	t.last = now
+}
+
+// MarkFailed closes the stage that just FAILED — called at the source (the
+// driver tracer on a rejected statement, the route on a handler's error), so
+// the waterfall marks the bar the failure happened in, not the next one.
+func (t *SpanTracker) MarkFailed(name string) {
+	t.failPending = true
+	t.Mark(name)
+}
+
+// Failed reports whether some stage has already been marked as the failure.
+func (t *SpanTracker) Failed() bool { return t.anyFailed || t.failPending }
+
+// flagLast marks the most recently closed stage as the failing one when no
+// stage has been marked yet — the shape of every middleware error path (mark
+// the stage, then record the error).
+func (t *SpanTracker) flagLast() {
+	if t.anyFailed {
+		return
+	}
+	if t.count > 0 {
+		t.spans[t.count-1].Err = true
+		t.anyFailed = true
+		return
+	}
+	t.failPending = true
 }
 
 // Finish records a final "done" span (the tail since the last mark) and returns
@@ -62,12 +112,21 @@ func (t *SpanTracker) Finish() []Span {
 func (t *SpanTracker) RecordError(msg string) {
 	t.HasError = true
 	t.ErrMsg = msg
+	t.flagLast()
+}
+
+// NoteFailedQuery remembers the statement the driver just rejected. Called by
+// the QueryTracer on EVERY failed query; two string assignments, no allocation.
+func (t *SpanTracker) NoteFailedQuery(sql string, err error) {
+	t.LastSQL = sql
+	t.LastSQLErr = err.Error()
 }
 
 // SetCapture attaches a symbolized error capture (the stack) to the request — used
 // only for server errors (500). Implies HasError.
 func (t *SpanTracker) SetCapture(c *ErrorCapture) {
 	t.HasError = true
+	t.flagLast()
 	t.Capture = c
 	if t.ErrMsg == "" && c != nil {
 		t.ErrMsg = c.ErrMsg

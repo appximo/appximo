@@ -227,6 +227,12 @@ type TraceView struct {
 	// full URL. Method (above) completes the curl reconstruction.
 	Headers map[string]string `json:"headers,omitempty"`
 	FullURL string            `json:"full_url,omitempty"`
+	// OBSERVABILIDAD-ERRORES-S1: the statement the driver rejected (5xx from
+	// the database), the redacted request body (opt-in, APPXIMO_TRACE_BODY),
+	// and the error group this trace belongs to.
+	SQL         string `json:"sql,omitempty"`
+	Body        string `json:"body,omitempty"`
+	Fingerprint uint64 `json:"fingerprint,omitempty"`
 }
 
 // RecentTraces returns up to n of the tenant's most recent requests projected as

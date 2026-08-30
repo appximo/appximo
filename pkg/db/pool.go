@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"github.com/appximo/appximo/pkg/observability"
 	"log"
 	"os"
 	"strconv"
@@ -44,6 +45,11 @@ func NewPool(ctx context.Context, connStr string) (*pgxpool.Pool, error) {
 	// pgx pipelines describe+execute, so the overhead is minimal and only hits
 	// cache-miss queries (the response cache absorbs most reads).
 	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeDescribeExec
+	// The driver-level tracer notes the exact statement a query FAILED with on
+	// the request's trace — for every route, generated or custom — so a 5xx
+	// names the query the driver rejected (OBSERVABILIDAD-ERRORES-S1). It stores
+	// nothing on success and never records bound values.
+	cfg.ConnConfig.Tracer = observability.QueryTracer{}
 	log.Printf("db pool: MAX_CONNS=%d MIN_CONNS=%d", maxConns, minConns)
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)

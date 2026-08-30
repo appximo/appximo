@@ -349,6 +349,36 @@ else
   printf '      expect: the default is now DERIVED (350 rps/vCPU x GOMAXPROCS, 70%% of the measured per-core ceiling — ENG-53); RATE_LIMIT_RPS still overrides\n'
 fi
 
+# c) Error-trace projection (OBSERVABILIDAD-ERRORES-S1): provoke an error on
+#    both sides, then compare what the PERSISTED TRACE says about it — as a
+#    STABLE projection (presence/shape, never durations or ids): status,
+#    whether a message/stack/user/fingerprint/sql are present, the span names
+#    and which span is marked failed. A logging/tracing change cannot appear in
+#    a response body; it appears here.
+trace_probe() { # $1=port $2=ctrl → projection line
+  local port=$1
+  # A write the database refuses (bigint overflow sent as a string defers to
+  # Postgres — ADR-024), so the server error path runs on both binaries.
+  curl -s -o /dev/null -X POST "http://127.0.0.1:$port/api/notes" \
+    -H "Authorization: Bearer $TOKEN_ADMIN" -H "Host: $HOST_DEFAULT" -H "Content-Type: application/json" \
+    -d '{"title":"overflow probe","code":"OVF1","amount":"999999999999999999999999"}'
+  sleep 1.5
+  curl -s "http://127.0.0.1:$port/admin/observability/tenants/$TENANT?traces=slow" -H "X-Admin-Key: $ADMIN_KEY_GATE" \
+    | jq -c '[.slow_traces[]? | select(.route=="/api/notes" and .method=="POST" and .status>=400)] | sort_by(.ts) | last
+             | {status, has_msg: ((.error_msg // "") != ""), has_stack: ((.stack // []) | length > 0),
+                has_user: ((.user_id // "") != ""), has_fp: ((.fingerprint // 0) != 0), has_sql: ((.sql // "") != ""),
+                spans: [.spans[]?.name], failed_span: ([.spans[]? | select(.err == true) | .name] | first)}' 2>/dev/null || echo "probe-failed"
+}
+total=$((total+1))
+b_tr=$(trace_probe "$PORT_BASE"); n_tr=$(trace_probe "$PORT_NEW")
+if [ "$b_tr" = "$n_tr" ]; then
+  same=$((same+1)); printf 'SAME  %-38s %s\n' "error-trace-projection" "$b_tr"
+else
+  diff=$((diff+1)); DIFF_NAMES+=("error-trace-projection")
+  printf 'DIFF  %-38s\n      base=%s\n      new =%s\n' "error-trace-projection" "$b_tr" "$n_tr"
+  printf '      expect: the persisted trace of a server error now carries user_id/role, the failed SQL, a fingerprint and the failed span (OBSERVABILIDAD-ERRORES-S1)\n'
+fi
+
 echo
 echo "── $total cases: $same same, $diff diff"
 if [ "$diff" -gt 0 ]; then

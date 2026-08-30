@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/appximo/appximo/pkg/logging"
+	"github.com/appximo/appximo/pkg/observability"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -539,7 +543,7 @@ func (a *App) customHandler(rt Route) http.HandlerFunc {
 				writeErr(w, http.StatusServiceUnavailable, "service unavailable")
 				return
 			}
-			a.logf("custom route %s %s: begin tx: %v", rt.Method, rt.Path, err)
+			a.logRouteError(r, rt, http.StatusInternalServerError, err, nil, "begin tx")
 			writeErr(w, http.StatusInternalServerError, "internal error")
 			return
 		}
@@ -555,17 +559,33 @@ func (a *App) customHandler(rt Route) http.HandlerFunc {
 		// local (reverts on commit/rollback; the pooled conn returns clean).
 		// NEVER "SET LOCAL search_path = $1" (syntax error) or string concat.
 		if _, err := tx.Exec(ctx, "SELECT set_config('search_path', $1, true)", tc.PGSchema); err != nil {
+			a.logRouteError(r, rt, http.StatusInternalServerError, err, nil, "search_path")
 			writeErr(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		if t := observability.SpanTrackerFromCtx(ctx); t != nil {
+			t.Mark("tx") // the stage up to the handler: pool acquire + BEGIN + search_path
+		}
 
 		rc := &requestCtx{w: w, r: r, ctx: ctx, tx: tx, eng: a.eng, tc: tc, cl: cl, byteServing: rt.ByteServing}
-		if herr := rt.Handler(rc); herr != nil {
+		herr := rt.Handler(rc)
+		// The handler's own Go time is a stage of its own ("handler"); when
+		// it returned an error and no earlier stage (a rejected query) was
+		// already marked as the failure, this is the stage that failed.
+		if t := observability.SpanTrackerFromCtx(ctx); t != nil {
+			if herr != nil && !t.Failed() {
+				t.MarkFailed("handler")
+			} else {
+				t.Mark("handler")
+			}
+		}
+		if herr != nil {
 			a.writeHandlerError(w, rc, rt, herr)
 			return // rollback runs via defer
 		}
 
 		if err := tx.Commit(ctx); err != nil {
+			a.logRouteError(r, rt, http.StatusInternalServerError, err, nil, "commit")
 			writeErr(w, http.StatusInternalServerError, "internal error")
 			return
 		}
@@ -616,8 +636,24 @@ func (a *App) writeHandlerError(w http.ResponseWriter, rc *requestCtx, rt Route,
 	var he *handledError
 	if errors.As(err, &he) {
 		rc.flush(w)
-		if he.cause != nil {
-			a.logf("custom route %s %s: %v", rt.Method, rt.Path, he.cause)
+		// The field report's number was 0 of 33: a custom route's 500 reached
+		// the trace with NO message and NO stack, because nothing here ever
+		// told the tracker. Now: the cause (or the handler's message) is the
+		// trace's error, a 5xx carries the stack captured AT the ctx.Error
+		// call site, and the cause line goes out structured and tied to the
+		// trace (OBSERVABILIDAD-ERRORES-S1, Partes A + B).
+		cause := he.cause
+		if cause == nil {
+			cause = errors.New(he.msg)
+		}
+		if he.status >= 500 {
+			a.logRouteError(rc.r, rt, he.status, cause, he.pcs, he.msg)
+		} else if t := observability.SpanTrackerFromCtx(rc.ctx); t != nil {
+			t.RecordError(cause.Error())
+			if he.cause != nil { // a 4xx with a wrapped cause: structured, warn
+				logging.FromCtx(rc.ctx).Warn().Str("route", rt.Method+" "+rt.Path).
+					Int("status", he.status).Err(he.cause).Msg("custom route: " + he.msg)
+			}
 		}
 		return
 	}
@@ -680,9 +716,59 @@ func (a *App) writeHandlerError(w http.ResponseWriter, rc *requestCtx, rt Route,
 		return
 	}
 	// Unknown error: mask it (Postgres errors never reach the client body) but
-	// log the cause for the operator.
-	a.logf("custom route %s %s: %v", rt.Method, rt.Path, err)
+	// log the cause for the operator — structured, with the trace, and with
+	// the stack of the Ctx database call that produced it when there was one.
+	a.logRouteError(rc.r, rt, http.StatusInternalServerError, err, nil, "unhandled error")
 	writeErr(w, http.StatusInternalServerError, "internal error")
+}
+
+// logRouteError is the ONE place a custom route's server error is turned into
+// evidence: the tracker gets the message, the stack (from the ctx.Error call
+// site when the handler chose the status, otherwise from this point — which
+// only names the middleware and says so), the failed statement the driver
+// noted, and the identity from the JWT; the log line goes out as JSON at
+// level error with trace_id/request_id/tenant_id/user_id, so the cause and
+// the trace join without anyone crossing timestamps in journalctl.
+func (a *App) logRouteError(r *http.Request, rt Route, status int, err error, sitePCs []uintptr, what string) {
+	ctx := r.Context()
+	t := observability.SpanTrackerFromCtx(ctx)
+	var cap observability.ErrorCapture
+	stackNote := ""
+	if len(sitePCs) > 0 {
+		cap = observability.CaptureFromPCs(ctx, err, sitePCs)
+	} else {
+		cap = observability.CaptureError(ctx, err)
+		stackNote = "stack is the response writer's (the handler returned a plain error — use ctx.Error(5xx, msg, err) for the handler's own call site)"
+	}
+	cap.Method, cap.Route = r.Method, rt.Path
+	if claims := auth.ClaimsFromCtx(ctx); claims != nil {
+		cap.UserID, cap.Role = claims.UserID, claims.Role
+	}
+	if t != nil {
+		cap.SQL = t.LastSQL
+		t.RecordError(err.Error())
+		t.SetCapture(&cap)
+	}
+	tenantID := ""
+	if tc := tenant.FromCtx(ctx); tc != nil {
+		tenantID = tc.ID
+	}
+	evt := logging.FromCtx(ctx).Error().
+		Str("request_id", chimiddleware.GetReqID(ctx)).
+		Str("tenant_id", tenantID).
+		Str("user_id", cap.UserID).Str("role", cap.Role).
+		Str("route", rt.Method+" "+rt.Path).Int("status", status).
+		Err(err)
+	if cap.SQL != "" {
+		evt = evt.Str("sql", cap.SQL)
+	}
+	if len(cap.Stack) > 0 {
+		evt = evt.Str("site", cap.Stack[0].File+":"+strconv.Itoa(cap.Stack[0].Line))
+	}
+	if stackNote != "" {
+		evt = evt.Str("stack_note", stackNote)
+	}
+	evt.Msg("custom route error: " + what)
 }
 
 // writeErr writes {"error": msg} with the given status and JSON content type.

@@ -222,15 +222,18 @@ func trimGoPath(path string) string {
 // runtime.Callers. UserID/Role/Route/Method are filled by the caller (the
 // handler) because observability must not import auth (auth imports observability).
 type ErrorCapture struct {
-	TraceID   string  `json:"trace_id"`
-	TenantID  string  `json:"tenant_id"`
-	Route     string  `json:"route"`
-	Method    string  `json:"method"`
-	ErrMsg    string  `json:"error_msg"`
-	Stack     []Frame `json:"stack"`
-	UserID    string  `json:"user_id"`
-	Role      string  `json:"role"`
-	Timestamp int64   `json:"ts"`
+	TraceID  string  `json:"trace_id"`
+	TenantID string  `json:"tenant_id"`
+	Route    string  `json:"route"`
+	Method   string  `json:"method"`
+	ErrMsg   string  `json:"error_msg"`
+	Stack    []Frame `json:"stack"`
+	// SQL is the exact statement the driver rejected, when the error came
+	// from the database (the QueryTracer noted it on the request's tracker).
+	SQL       string `json:"sql,omitempty"`
+	UserID    string `json:"user_id"`
+	Role      string `json:"role"`
+	Timestamp int64  `json:"ts"`
 }
 
 // captureSymCache caches symbolized frames per fingerprint (message + call site).
@@ -263,6 +266,27 @@ func CaptureError(ctx context.Context, err error) ErrorCapture {
 		frames = storeCaptureFrames(fp, captureAndSymbolize())
 	}
 
+	return ErrorCapture{
+		TraceID:   TraceIDFromCtx(ctx),
+		TenantID:  tenantIDFromCtx(ctx),
+		ErrMsg:    msg,
+		Stack:     frames,
+		Timestamp: time.Now().UnixMilli(),
+	}
+}
+
+// CaptureFromPCs builds a capture from program counters collected EARLIER, at
+// the site that mattered — a Ctx.Error(5xx, …) call inside a handler, or the
+// Ctx database method the handler called — rather than in the middleware that
+// eventually writes the response (whose own stack would only name the
+// middleware). Symbolized once per (message, site) like CaptureError.
+func CaptureFromPCs(ctx context.Context, err error, pcs []uintptr) ErrorCapture {
+	msg := err.Error()
+	fp := captureFingerprint(msg, pcs)
+	frames, ok := loadCaptureFrames(fp)
+	if !ok {
+		frames = storeCaptureFrames(fp, symbolizeCapture(pcs))
+	}
 	return ErrorCapture{
 		TraceID:   TraceIDFromCtx(ctx),
 		TenantID:  tenantIDFromCtx(ctx),
@@ -328,7 +352,10 @@ func symbolizeCapture(pcs []uintptr) []Frame {
 	var result []Frame
 	for {
 		f, more := cf.Next()
-		if f.Function != "" && !isInfraFrame(f.Function) {
+		// The Recoverer's deferred closure is INLINED into the app's router
+		// builder, so its FUNCTION name carries the app package — only its
+		// FILE says pkg/middleware. Filter by both.
+		if f.Function != "" && !isInfraFrame(f.Function) && !strings.Contains(f.File, "/pkg/middleware/") {
 			result = append(result, Frame{
 				Function: f.Function,
 				File:     trimGoPath(f.File),
@@ -349,7 +376,10 @@ func isInfraFrame(fn string) bool {
 	case strings.HasPrefix(fn, "runtime."),
 		strings.Contains(fn, "net/http."),
 		strings.Contains(fn, "go-chi/chi"),
-		strings.Contains(fn, "/pkg/observability."):
+		strings.Contains(fn, "/pkg/observability."),
+		// The Recoverer's deferred function is on the stack of a captured
+		// panic ABOVE the handler that panicked — noise, like runtime.gopanic.
+		strings.Contains(fn, "/pkg/middleware."):
 		return true
 	}
 	return false

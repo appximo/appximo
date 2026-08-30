@@ -228,6 +228,9 @@ func capture500(req *http.Request, err error) {
 	c := observability.CaptureError(req.Context(), err)
 	c.Method = req.Method
 	c.Route = req.URL.Path
+	// The statement the driver rejected, noted by the pool's QueryTracer —
+	// the panel can then show WHICH query, not only the driver's message.
+	c.SQL = t.LastSQL
 	if claims := auth.ClaimsFromCtx(req.Context()); claims != nil {
 		c.UserID = claims.UserID
 		c.Role = claims.Role
@@ -241,6 +244,11 @@ func capture500(req *http.Request, err error) {
 func writeDBErr(w http.ResponseWriter, req *http.Request, err error) {
 	if pkghandlers.IsServerError(err) {
 		capture500(req, err)
+	} else if t := observability.SpanTrackerFromCtx(req.Context()); t != nil {
+		// A client-classified database error (a 400/409/422 the classifier
+		// derived from the driver) still leaves its CAUSE on the trace — the
+		// body is the masked contract, the trace is the operator's truth.
+		t.RecordError(err.Error())
 	}
 	pkghandlers.WriteDBError(w, err)
 }
@@ -383,8 +391,8 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 					// ENG-23: a failed COUNT(*) used to be swallowed — the 200 went
 					// out with meta.total simply missing, indistinguishable from
 					// "you didn't ask". The caller asked; failing to answer is an
-					// error, not an omission.
-					markSpan(req, "query")
+					// error, not an omission. (The failed COUNT's stage is
+					// marked by the driver tracer.)
 					writeDBErr(w, req, qerr)
 					return nil, nil, false
 				}
@@ -444,7 +452,6 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// QueryDirect: schema-qualified table name — no transaction, no SET LOCAL.
 			rows, err := tdb.QueryDirect(req.Context(), tc.PGSchema, name, selectQ, selectArgs...)
 			if err != nil {
-				markSpan(req, "query") // mark the attempted query so 5xx traces show it
 				writeDBErr(w, req, err)
 				return
 			}

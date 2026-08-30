@@ -2,6 +2,7 @@ package logging
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net"
 	"net/http"
@@ -109,6 +110,12 @@ func Init(env string) {
 		Log = zerolog.New(base).
 			With().Timestamp().Logger()
 	}
+	// zerolog.Ctx(ctx) outside a request (no logger in the context) must fall
+	// back to THIS logger, never to a silent one: the RBAC deny line, the
+	// route error line and the webhook lines all go through the context
+	// logger so they carry trace_id when there is one — and still print when
+	// there is not (OBSERVABILIDAD-ERRORES-S1).
+	zerolog.DefaultContextLogger = &Log
 }
 
 // RequestTap carries the per-request facts a downstream consumer (Prometheus
@@ -132,6 +139,70 @@ type RequestTap struct {
 	UserAgent  string                      // raw User-Agent header
 	Headers    map[string]string           // filtered request headers (persisted traces only)
 	FullURL    string                      // scheme://host/path?query (persisted traces only)
+	// OBSERVABILIDAD-ERRORES-S1: who (from the JWT, populated for EVERY trace,
+	// not only captured 500s), the failed statement the driver noted, and the
+	// redacted request body when APPXIMO_TRACE_BODY is on.
+	UserID string
+	Role   string
+	SQL    string
+	Body   string
+}
+
+// ClaimsExtractor reads (user_id, role) off a request context. Set by the app
+// at boot (auth.ClaimsFromCtx) — logging cannot import auth without a cycle.
+var ClaimsExtractor func(ctx context.Context) (userID, role string)
+
+// TraceBodyEnvVar opts request BODIES into persisted error traces. Off by
+// default: a body can carry passwords, tokens or personal data — the trade-off
+// is written in docs/BACKEND_SPEC_LLM.md §3.9. When on, at most TraceBodyMax
+// bytes are kept and sensitive JSON fields are redacted before persistence.
+const (
+	TraceBodyEnvVar = "APPXIMO_TRACE_BODY"
+	TraceBodyMax    = 4 << 10
+)
+
+// traceBodyOn is read once at package init (an env knob, not a hot-path read).
+var traceBodyOn = func() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(TraceBodyEnvVar))) {
+	case "1", "on", "true", "yes":
+		return true
+	}
+	return false
+}()
+
+// RedactBody replaces the values of sensitive JSON keys and caps the length.
+func RedactBody(b []byte) string {
+	if len(b) > TraceBodyMax {
+		b = b[:TraceBodyMax]
+	}
+	return string(sensitiveFieldRe.ReplaceAll(b, []byte(`${1}"[Filtered]"`)))
+}
+
+// bodyTee captures the first TraceBodyMax bytes of a body as it is read.
+type bodyTee struct {
+	io.ReadCloser
+	buf bytes.Buffer
+}
+
+func (t *bodyTee) Read(p []byte) (int, error) {
+	n, err := t.ReadCloser.Read(p)
+	if n > 0 && t.buf.Len() < TraceBodyMax {
+		room := TraceBodyMax - t.buf.Len()
+		if n < room {
+			room = n
+		}
+		t.buf.Write(p[:room])
+	}
+	return n, err
+}
+
+// FromCtx returns the request-scoped logger (carries trace_id). Falls back to
+// the global logger outside a request.
+func FromCtx(ctx context.Context) *zerolog.Logger {
+	if ctx == nil { // a test-built ctx; zerolog.Ctx(nil) would dereference it
+		return &Log
+	}
+	return zerolog.Ctx(ctx)
 }
 
 // requestFullURL reconstructs the request URL: scheme (from X-Forwarded-Proto,
@@ -172,6 +243,11 @@ func RequestLogger(
 
 			ww := chimiddleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			ww.Header().Set("X-Trace-ID", traceID)
+			var tee *bodyTee
+			if traceBodyOn && r.Body != nil && r.Body != http.NoBody {
+				tee = &bodyTee{ReadCloser: r.Body}
+				r.Body = tee
+			}
 			next.ServeHTTP(ww, r)
 			elapsed := time.Since(start)
 
@@ -192,8 +268,25 @@ func RequestLogger(
 			if tc != nil {
 				tenantID = tc.ID
 			}
+			// The LEVEL carries the verdict (OBSERVABILIDAD-ERRORES-S1, Parte C):
+			// a 5xx is an error, and any alert an operator mounts on
+			// level=error must see it. 4xx stay info — they are the caller's
+			// verdict, and probes would drown a warn stream. Before this the
+			// status travelled only in a field while the level said "info".
+			evt := Log.Info()
+			if ww.Status() >= 500 {
+				evt = Log.Error()
+			}
+			userID, role := "", ""
+			if t := observability.SpanTrackerFromCtx(r.Context()); t != nil && t.UserID != "" {
+				userID, role = t.UserID, t.Role // set by the JWT middleware on the shared tracker
+			} else if ClaimsExtractor != nil {
+				userID, role = ClaimsExtractor(r.Context())
+			}
 			// Authorization header is deliberately excluded from the log event.
-			Log.Info().
+			evt.
+				Str("user_id", userID).
+				Str("role", role).
 				Str("trace_id", traceID).
 				Str("tenant_id", tenantID).
 				Str("method", r.Method).
@@ -242,7 +335,18 @@ func RequestLogger(
 					reqHeaders = observability.FilterHeaders(r.Header)
 					fullURL = requestFullURL(r)
 				}
+				var body, failedSQL string
+				if t := observability.SpanTrackerFromCtx(r.Context()); t != nil && ww.Status() >= 500 {
+					failedSQL = t.LastSQL
+				}
+				if tee != nil && reqHeaders != nil { // persisted traces only
+					body = RedactBody(tee.buf.Bytes())
+				}
 				tap(RequestTap{
+					UserID:     userID,
+					Role:       role,
+					SQL:        failedSQL,
+					Body:       body,
 					TenantID:   tenantID,
 					Method:     r.Method,
 					Path:       r.URL.Path,

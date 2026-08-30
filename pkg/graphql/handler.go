@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"github.com/rs/zerolog"
 	"net/http"
 	"net/url"
 	"sort"
@@ -1579,8 +1579,11 @@ func checkRBAC(ctx context.Context, policy *rbac.Policy, resource, action string
 	if !result.Allowed {
 		// ENG-27: log whether the role exists at all — the GraphQL error stays
 		// the bare "forbidden" (same asymmetry as the REST middleware).
-		log.Printf("rbac: denied graphql %s %s — %s (user_id=%q)",
-			action, resource, policy.DenyDetail(evalCtx.Role, resource, action), evalCtx.UserID)
+		zerolog.Ctx(ctx).Warn().
+			Str("action", action).Str("resource", resource).
+			Str("user_id", evalCtx.UserID).Str("role", evalCtx.Role).
+			Str("detail", policy.DenyDetail(evalCtx.Role, resource, action)).
+			Msg("rbac: denied graphql")
 		return nil, fmt.Errorf("forbidden")
 	}
 	return &result, nil

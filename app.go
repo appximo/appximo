@@ -98,6 +98,8 @@ type App struct {
 	// cheap early 429s instead of the metastable tip ENG-52 measured
 	// (pkg/resilience/admission.go carries the whole argument). Nil = disabled.
 	admission *resilience.Admission
+	// newErrNotifier fires the first-occurrence alert of an error group.
+	newErrNotifier *observability.NewErrorNotifier
 	// memGuard refuses data-plane WRITES while the host is under memory
 	// pressure (MemAvailable+SwapFree under a floor) — a 503 that says why,
 	// instead of accepting until the kernel OOM-kills the shared PostgreSQL
@@ -416,6 +418,18 @@ func New(cfg Config) (*App, error) {
 	app.rings = observability.NewRings()
 	alerter := observability.NewSlackAlerterFromEnv()
 	app.sloEngine = observability.NewSLOEngine(app.rings, app.hist, alerter)
+	// First-occurrence alerts (OBSERVABILIDAD-ERRORES-S1): a NEW error group
+	// alerts on its first trace, not when the SLO burns; braked at 5 per tenant
+	// per minute with one storm summary per 5 minutes past that.
+	app.newErrNotifier = observability.NewNewErrorNotifier(alerter, 5, 5*time.Minute)
+	// The request logger tags every line and trace with who (from the JWT);
+	// logging cannot import auth (cycle), so the extractor is injected here.
+	logging.ClaimsExtractor = func(ctx context.Context) (string, string) {
+		if c := auth.ClaimsFromCtx(ctx); c != nil {
+			return c.UserID, c.Role
+		}
+		return "", ""
+	}
 
 	if st, openErr := observability.OpenStore(coalesce(cfg.ObsDBPath, os.Getenv("OBS_DB_PATH"))); openErr != nil {
 		log.Printf("WARNING: observability store disabled: %v", openErr)
@@ -1344,12 +1358,26 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 					FullURL:   t.FullURL,
 					Headers:   t.Headers,
 				}
+				// Who it happened to — from the JWT, for EVERY persisted trace,
+				// not only the captured 500s (Parte B.3); the failed statement
+				// and the redacted body ride along (Partes A.4, F).
+				tv.UserID, tv.Role, tv.SQL, tv.Body = t.UserID, t.Role, t.SQL, t.Body
 				if t.Capture != nil {
 					tv.Stack = t.Capture.Stack
-					tv.UserID, tv.Role = t.Capture.UserID, t.Capture.Role
+					if tv.UserID == "" {
+						tv.UserID, tv.Role = t.Capture.UserID, t.Capture.Role
+					}
+					if tv.SQL == "" {
+						tv.SQL = t.Capture.SQL
+					}
 					if tv.ErrMsg == "" {
 						tv.ErrMsg = t.Capture.ErrMsg
 					}
+				}
+				// The GROUP (Parte E): a 5xx is fingerprinted by route +
+				// normalized message + top application frame.
+				if t.Status >= 500 {
+					tv.Fingerprint = observability.Fingerprint(t.Route, tv.ErrMsg, observability.TopFrame(tv.Stack))
 				}
 				tenantID := t.TenantID
 				ip, ua := t.IP, t.UserAgent
@@ -1360,7 +1388,22 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 						tv.Browser, tv.OS = observability.ParseUserAgent(ua)
 						tv.Country = a.geo.Country(ip)
 						if err := a.obsStore.SaveSlowTrace(tenantID, tv); err != nil {
-							log.Printf("save slow trace [%s]: %v", tenantID, err)
+							logging.Log.Error().Str("tenant_id", tenantID).Str("trace_id", tv.TraceID).Err(err).Msg("save slow trace")
+						}
+						if tv.Fingerprint != 0 {
+							g := observability.ErrorGroup{
+								Fingerprint: tv.Fingerprint, Route: tv.Route, Status: int(tv.Status),
+								Message: observability.NormalizeMessage(tv.ErrMsg), TopFrame: observability.TopFrame(tv.Stack),
+								LastSeen: tv.TS, SampleTraceID: tv.TraceID,
+							}
+							isNew, gerr := a.obsStore.UpsertErrorGroup(tenantID, g, tv.UserID)
+							if gerr != nil {
+								logging.Log.Error().Str("tenant_id", tenantID).Err(gerr).Msg("upsert error group")
+							} else if isNew && a.newErrNotifier != nil {
+								a.newErrNotifier.NewGroup(context.Background(), observability.Alert{
+									TenantID: tenantID, Route: tv.Route, Message: g.Message, TraceID: tv.TraceID,
+								})
+							}
 						}
 					}()
 				default:
@@ -1458,7 +1501,25 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 		if tc := tenant.FromCtx(req.Context()); tc != nil {
 			tenantID = tc.ID
 		}
-		a.errStore.Record(tenantID, fmt.Errorf("panic: %v", recovered))
+		perr := fmt.Errorf("panic: %v", recovered)
+		a.errStore.Record(tenantID, perr)
+		// The trace gets the panic's message AND its stack (OBSERVABILIDAD-
+		// ERRORES-S1): this callback runs inside the Recoverer's deferred
+		// function, on the panicking goroutine BEFORE it unwinds, so
+		// runtime.Callers here still sees the frames through the handler to
+		// the panic site — the handler's file and line, not the middleware's.
+		if t := observability.SpanTrackerFromCtx(req.Context()); t != nil {
+			var pcs [32]uintptr
+			n := runtime.Callers(2, pcs[:])
+			c := observability.CaptureFromPCs(req.Context(), perr, pcs[:n])
+			c.Method, c.Route, c.SQL = req.Method, req.URL.Path, t.LastSQL
+			if claims := auth.ClaimsFromCtx(req.Context()); claims != nil {
+				c.UserID, c.Role = claims.UserID, claims.Role
+			}
+			t.MarkFailed("handler") // the panic happened in the handler's stage
+			t.RecordError(perr.Error())
+			t.SetCapture(&c)
+		}
 		logging.Log.Error().
 			Str("tenant_id", tenantID).
 			Str("request_id", chimiddleware.GetReqID(req.Context())).

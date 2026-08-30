@@ -141,8 +141,34 @@ func OpenStore(path string) (*ObsStore, error) {
 		`status INTEGER NOT NULL DEFAULT 0`, `err_msg TEXT`, `stack_json TEXT`,
 		`ip TEXT`, `user_agent TEXT`, `browser TEXT`, `os TEXT`, `country TEXT`,
 		`method TEXT`, `full_url TEXT`, `headers_json TEXT`,
+		// OBSERVABILIDAD-ERRORES-S1: who it happened to, which statement the
+		// driver rejected, the (redacted, opt-in) request body, and the group.
+		`user_id TEXT`, `role TEXT`, `sql_text TEXT`, `req_body TEXT`, `fingerprint INTEGER`,
 	} {
 		_, _ = db.Exec(`ALTER TABLE slow_traces ADD COLUMN ` + col)
+	}
+	// Error groups: one row per (tenant, fingerprint) — the counter that turns
+	// N traces of one defect into ONE problem with first/last seen, occurrences
+	// and affected users (a bounded sample of distinct user ids, JSON array).
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS error_groups (
+			tenant_id   TEXT NOT NULL,
+			fingerprint INTEGER NOT NULL,
+			route       TEXT,
+			status      INTEGER,
+			message     TEXT,              -- normalized message (the group's name)
+			top_frame   TEXT,
+			first_seen  INTEGER NOT NULL,  -- unix µs
+			last_seen   INTEGER NOT NULL,
+			count       INTEGER NOT NULL DEFAULT 0,
+			users_json  TEXT,              -- up to 50 distinct user ids
+			sample_trace_id TEXT,          -- a trace to open (the latest)
+			PRIMARY KEY (tenant_id, fingerprint)
+		);
+		CREATE INDEX IF NOT EXISTS idx_egroups_tenant_last ON error_groups(tenant_id, last_seen DESC);
+	`); err != nil {
+		db.Close() //nolint:errcheck
+		return nil, fmt.Errorf("init error_groups: %w", err)
 	}
 	return &ObsStore{db: db, path: resolved}, nil
 }
@@ -286,10 +312,12 @@ func (s *ObsStore) SaveSlowTrace(tenantID string, tv TraceView) error {
 	_, err = s.db.Exec(
 		`INSERT OR REPLACE INTO slow_traces
 			(trace_id, tenant_id, ts, route, total_us, status, err_msg, stack_json,
-			 ip, user_agent, browser, os, country, method, full_url, headers_json, spans_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 ip, user_agent, browser, os, country, method, full_url, headers_json, spans_json,
+			 user_id, role, sql_text, req_body, fingerprint)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tv.TraceID, tenantID, tv.TS, tv.Route, tv.TotalUS, tv.Status, tv.ErrMsg, stackJSON,
 		tv.IP, tv.UserAgent, tv.Browser, tv.OS, tv.Country, tv.Method, tv.FullURL, headersJSON, string(spansJSON),
+		tv.UserID, tv.Role, tv.SQL, tv.Body, int64(tv.Fingerprint),
 	)
 	if err != nil {
 		return fmt.Errorf("save slow trace: %w", err)
@@ -303,7 +331,8 @@ func (s *ObsStore) SlowTraces(tenantID string, hours int) ([]TraceView, error) {
 	cutoff := (time.Now().Unix() - int64(hours)*3600) * 1_000_000 // µs, matches ts unit
 	rows, err := s.db.Query(
 		`SELECT trace_id, ts, route, total_us, status, err_msg, stack_json,
-			ip, user_agent, browser, os, country, method, full_url, headers_json, spans_json
+			ip, user_agent, browser, os, country, method, full_url, headers_json, spans_json,
+			user_id, role, sql_text, req_body, fingerprint
 			FROM slow_traces
 			WHERE tenant_id = ? AND ts > ?
 			ORDER BY ts DESC
@@ -320,13 +349,18 @@ func (s *ObsStore) SlowTraces(tenantID string, hours int) ([]TraceView, error) {
 		var tv TraceView
 		var errMsg, stackJSON, spansJSON sql.NullString
 		var ip, ua, browser, os, country, method, fullURL, headersJSON sql.NullString
+		var userID, role, sqlText, reqBody sql.NullString
+		var fingerprint sql.NullInt64
 		var status int
 		if err := rows.Scan(&tv.TraceID, &tv.TS, &tv.Route, &tv.TotalUS, &status, &errMsg, &stackJSON,
-			&ip, &ua, &browser, &os, &country, &method, &fullURL, &headersJSON, &spansJSON); err != nil {
+			&ip, &ua, &browser, &os, &country, &method, &fullURL, &headersJSON, &spansJSON,
+			&userID, &role, &sqlText, &reqBody, &fingerprint); err != nil {
 			return nil, fmt.Errorf("scan slow trace: %w", err)
 		}
 		tv.Status = uint16(status)
 		tv.ErrMsg = errMsg.String
+		tv.UserID, tv.Role, tv.SQL, tv.Body = userID.String, role.String, sqlText.String, reqBody.String
+		tv.Fingerprint = uint64(fingerprint.Int64)
 		tv.IP, tv.UserAgent, tv.Browser, tv.OS, tv.Country = ip.String, ua.String, browser.String, os.String, country.String
 		tv.Method, tv.FullURL = method.String, fullURL.String
 		if spansJSON.String != "" {
@@ -339,6 +373,108 @@ func (s *ObsStore) SlowTraces(tenantID string, hours int) ([]TraceView, error) {
 			_ = json.Unmarshal([]byte(headersJSON.String), &tv.Headers)
 		}
 		out = append(out, tv)
+	}
+	return out, rows.Err()
+}
+
+// ErrorGroup is one row of error_groups — a defect, not an occurrence.
+type ErrorGroup struct {
+	Fingerprint   uint64   `json:"fingerprint"`
+	Route         string   `json:"route"`
+	Status        int      `json:"status"`
+	Message       string   `json:"message"`
+	TopFrame      string   `json:"top_frame,omitempty"`
+	FirstSeen     int64    `json:"first_seen"` // unix µs
+	LastSeen      int64    `json:"last_seen"`
+	Count         int64    `json:"count"`
+	Users         []string `json:"users"`
+	SampleTraceID string   `json:"sample_trace_id"`
+}
+
+// maxGroupUsers bounds the distinct-user sample kept per group.
+const maxGroupUsers = 50
+
+// UpsertErrorGroup records one occurrence of a fingerprint for a tenant and
+// reports whether the group is NEW (first occurrence ever for this tenant) —
+// the signal the first-occurrence alert fires on. One transaction, so two
+// concurrent occurrences of a brand-new group cannot both read "new".
+func (s *ObsStore) UpsertErrorGroup(tenantID string, g ErrorGroup, userID string) (isNew bool, err error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	var count int64
+	var usersJSON sql.NullString
+	row := tx.QueryRow(`SELECT count, users_json FROM error_groups WHERE tenant_id = ? AND fingerprint = ?`, tenantID, int64(g.Fingerprint))
+	switch err := row.Scan(&count, &usersJSON); {
+	case err == sql.ErrNoRows:
+		users := "[]"
+		if userID != "" {
+			b, _ := json.Marshal([]string{userID})
+			users = string(b)
+		}
+		if _, err := tx.Exec(`INSERT INTO error_groups
+			(tenant_id, fingerprint, route, status, message, top_frame, first_seen, last_seen, count, users_json, sample_trace_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+			tenantID, int64(g.Fingerprint), g.Route, g.Status, g.Message, g.TopFrame, g.LastSeen, g.LastSeen, users, g.SampleTraceID); err != nil {
+			return false, err
+		}
+		isNew = true
+	case err != nil:
+		return false, err
+	default:
+		var users []string
+		if usersJSON.Valid && usersJSON.String != "" {
+			_ = json.Unmarshal([]byte(usersJSON.String), &users)
+		}
+		if userID != "" && len(users) < maxGroupUsers {
+			seen := false
+			for _, u := range users {
+				if u == userID {
+					seen = true
+					break
+				}
+			}
+			if !seen {
+				users = append(users, userID)
+			}
+		}
+		b, _ := json.Marshal(users)
+		if _, err := tx.Exec(`UPDATE error_groups SET count = count + 1, last_seen = ?, users_json = ?, sample_trace_id = ?, message = ?, status = ?
+			WHERE tenant_id = ? AND fingerprint = ?`,
+			g.LastSeen, string(b), g.SampleTraceID, g.Message, g.Status, tenantID, int64(g.Fingerprint)); err != nil {
+			return false, err
+		}
+	}
+	return isNew, tx.Commit()
+}
+
+// ErrorGroups lists a tenant's groups seen in the last `hours`, most recent
+// first (capped at 100).
+func (s *ObsStore) ErrorGroups(tenantID string, hours int) ([]ErrorGroup, error) {
+	cutoff := (time.Now().Unix() - int64(hours)*3600) * 1_000_000
+	rows, err := s.db.Query(`SELECT fingerprint, route, status, message, top_frame, first_seen, last_seen, count, users_json, sample_trace_id
+		FROM error_groups WHERE tenant_id = ? AND last_seen > ? ORDER BY last_seen DESC LIMIT 100`, tenantID, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("query error groups: %w", err)
+	}
+	defer rows.Close()
+	out := []ErrorGroup{}
+	for rows.Next() {
+		var g ErrorGroup
+		var fp int64
+		var topFrame, usersJSON, sample sql.NullString
+		if err := rows.Scan(&fp, &g.Route, &g.Status, &g.Message, &topFrame, &g.FirstSeen, &g.LastSeen, &g.Count, &usersJSON, &sample); err != nil {
+			return nil, fmt.Errorf("scan error group: %w", err)
+		}
+		g.Fingerprint = uint64(fp)
+		g.TopFrame, g.SampleTraceID = topFrame.String, sample.String
+		g.Users = []string{}
+		if usersJSON.Valid {
+			_ = json.Unmarshal([]byte(usersJSON.String), &g.Users)
+		}
+		out = append(out, g)
 	}
 	return out, rows.Err()
 }

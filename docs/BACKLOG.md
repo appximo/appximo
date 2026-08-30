@@ -26,7 +26,15 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-30 (MOTOR-PRODUCCION-S2)** — the engine DEGRADES
+**Last reviewed: 2026-08-30 (OBSERVABILIDAD-ERRORES-S1)** — a 500 explains
+itself: message + call-site stack + failed statement + identity on every
+trace, JSON cause line at `level:"error"` tied to the trace, `done`
+subdivided with the failing stage marked, fingerprint groups (real data: 158
+5xx → 41 problems) with a first-occurrence alert and a noise brake, repro
+data decided (bodies opt-in, A-53). Eight provocations verified on the
+panel. New OPEN: ENG-56 (GraphQL 200+errors[] never traced as error),
+ENG-57 (bare-error custom routes have no handler site). Before that:
+**(MOTOR-PRODUCCION-S2)** — the engine DEGRADES
 instead of tipping: admission control (ENG-52 → DONE; paired 8×8 at the tip:
 goodput +20 %, p50 1 728 → 36 ms, timeouts 79 013 → 0, ABBA no_change in
 median and tail), the rate-limit default DERIVED from measured capacity
@@ -376,6 +384,39 @@ and they are what the next migrator reads first.
   SCHEMA-5 **warning** at load when a resource has a `text` field and no
   index that `?search=` could use, plus a line in `docs/BENCHMARKS.md §4d`
   (written) and in `frontend-spec`. (c) is a session; (a) is the real fix.
+
+### ENG-56 — A GraphQL resolver failure is a 200 with `errors[]`, so it never reaches the trace as an error
+
+- **Origin:** OBSERVABILIDAD-ERRORES-S1 (2026-08-30), the sweep of 5xx paths.
+  The REST/custom-route/panic/driver paths now all reach the persisted trace
+  with message, stack (at the call site), the failed statement, identity,
+  `level:"error"` and a fingerprint group. GraphQL answers HTTP 200 for
+  anything it can execute (by contract, §GraphQL in AGENTS.md), so a resolver
+  that hits a database error produces a trace with status 200 and no
+  `error_msg`: the request logger keys everything on the HTTP status.
+- **Impact: medium** for a GraphQL-first frontend: the same NULL-into-bool
+  would be a silent 200 in the panel. REST users are unaffected.
+- **Ready:** the GraphQL handler calls `RecordError`/`SetCapture` on the
+  request's tracker for resolver errors that would have been a 5xx on REST
+  (the same `IsServerError` classifier), so the trace persists with the
+  message and joins a group; the request line's level follows the
+  `errors[]` presence for those. Provocation #9 for GraphQL, then.
+
+### ENG-57 — A custom route that returns a bare `err` gets the response writer's stack, not the handler's
+
+- **Origin:** OBSERVABILIDAD-ERRORES-S1 (2026-08-30), provocation #1. The
+  stack is captured at the `ctx.Error(5xx, …)` call site (the handler's
+  file:line); a handler that does `return err` has no such site, so the
+  trace carries the writer's stack plus a `stack_note` saying so. When the
+  error came from a Ctx database method the failed statement is still
+  attached (the driver tracer), which locates it anyway; a bare error from
+  the handler's own Go code is the only case with no site.
+- **Impact: low.** Documented in backend-spec §3.9 ("prefer ctx.Error");
+  the message and the group still arrive.
+- **Ready:** Ctx database methods wrap their error in a type carrying the
+  caller's PCs (`runtime.Callers` at the Ctx method — the handler is
+  frame 1) with `Unwrap` so `errors.As/Is` keep working; `writeHandlerError`
+  prefers those PCs. Measure with ABBA (the wrap allocates only on error).
 
 ### OPS-38 — The lab token's scopes are narrower than the lab's design assumed: no tags, no snapshots
 
@@ -1513,6 +1554,55 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in OBSERVABILIDAD-ERRORES-S1 (2026-08-30) — a 500 explains itself: message, stack at the site, the failed statement, identity, level, group, first-occurrence alert
+
+- **The field report's number, 0 of 33, closed at the engine.** Custom-route
+  errors reach the trace: `writeHandlerError` records the cause (or the
+  handler's message), a `ctx.Error(5xx, …)` captures `runtime.Callers` AT
+  THAT CALL (the handler's file:line, never the middleware's), a panic is
+  captured inside the Recoverer's defer on the panicking goroutine (the
+  handler's frame, the recoverer's inlined closure filtered by file), and
+  the pool's driver tracer (`observability.QueryTracer`, wired into
+  pgxpool) notes the exact FAILED statement on every route — the panel shows
+  `cannot scan NULL into *bool` beside `SELECT NULL::bool AS activo`.
+  Client-classified driver errors (400/409/422) leave their cause on the
+  trace too.
+- **The cause line is JSON at `level:"error"` with `trace_id`, `request_id`,
+  `tenant_id`, `user_id`, `role`, `route`, `status`, `error`, `sql`, `site`.**
+  The request line is `level:"error"` for any 5xx (it said `info`). The
+  plain-text sweep: RBAC denials (REST + GraphQL) → structured `warn` via the
+  context logger, webhook dispatcher → structured, ServeFile → structured,
+  the noop alerter → structured; `zerolog.DefaultContextLogger` falls back
+  to the engine logger so a context without a logger never swallows a line.
+  Identity on EVERY persisted trace and request line: the JWT middleware
+  writes user/role onto the shared span tracker (the logger runs before it
+  and never sees the derived context).
+- **`done` subdivided, generically:** custom routes get `tx`, one `query`
+  stage per Ctx database call, `encode`, `handler`; the failing stage is
+  marked at its source (`"err":true` → "failed here" in the waterfall), one
+  stage per request. Spans keep the 8-slot cap.
+- **Fingerprint + groups + first-occurrence alert:** route + normalized
+  message (uuid/hex/quoted/number → placeholders, SQLSTATE kept) + top
+  frame; `error_groups` table with count/first/last/users(≤50)/sample trace;
+  `/admin/observability/…` carries `error_groups`; the panel's Issues tab
+  shows "Problems · 24h · N events". Against the REAL traces of the 105's
+  dev engine: 158 5xx → 41 groups (44 timestamp-syntax traces → 1 group);
+  48 863 ≥400 traces → 175 groups. A NEW group alerts on its first trace
+  through the configured alerter, braked at 5/tenant/minute with one storm
+  summary per 5 minutes (tested).
+- **Repro data, decided:** full URL + filtered headers already persisted;
+  the panel builds `curl` (Authorization → `$TOKEN`); bodies OFF by default
+  (A-53 data-minimization), `APPXIMO_TRACE_BODY=on` keeps 4 KiB redacted.
+  Trade-off written in backend-spec §3.9, with the honest "not Sentry's
+  variable inspector".
+- **Eight provocations + one extra verified end to end on the panel**
+  (evidence): plain error, NULL→bool, panic, DB timeout (→ 503), driver
+  type error, RBAC (403, message), validation escalated to 500, hook failure
+  (a JS runtime error is a 422 with the JS message — not a 5xx; recorded),
+  unknown column. Gaps registered: ENG-56 (GraphQL 200 + errors[]), ENG-57
+  (bare-error site). The binary-diff gate gained an error-trace projection
+  probe (expected DIFF, explained).
 
 ## DONE in MOTOR-PRODUCCION-S2 (2026-08-30) — the engine degrades instead of tipping; defaults derive from measured capacity
 

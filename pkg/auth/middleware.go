@@ -212,6 +212,7 @@ func jwtMiddleware(secret string, isPublic PublicMatcher, isStatic func(path str
 				if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {
 					t.Mark("jwt")
 				}
+				noteIdentity(r.Context(), claims)
 				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), claimsKey{}, claims)))
 				return
 			}
@@ -244,6 +245,7 @@ func jwtMiddleware(secret string, isPublic PublicMatcher, isStatic func(path str
 					if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {
 						t.Mark("jwt")
 					}
+					noteIdentity(r.Context(), claims)
 					next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), claimsKey{}, claims)))
 					return
 				}
@@ -266,6 +268,7 @@ func jwtMiddleware(secret string, isPublic PublicMatcher, isStatic func(path str
 			if t := observability.SpanTrackerFromCtx(r.Context()); t != nil {
 				t.Mark("jwt")
 			}
+			noteIdentity(r.Context(), claims)
 			ctx := context.WithValue(r.Context(), claimsKey{}, claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -290,4 +293,18 @@ func domainOf(host string) string {
 		return host[i+1:]
 	}
 	return host
+}
+
+// noteIdentity writes the validated identity onto the request's span tracker,
+// which downstream AND upstream code share by pointer — the request logger
+// (which runs before this middleware and never sees the derived context) reads
+// it from there, so the request line and every persisted trace name WHO
+// (OBSERVABILIDAD-ERRORES-S1, Parte B.3).
+func noteIdentity(ctx context.Context, claims *Claims) {
+	if claims == nil {
+		return
+	}
+	if t := observability.SpanTrackerFromCtx(ctx); t != nil {
+		t.UserID, t.Role = claims.UserID, claims.Role
+	}
 }

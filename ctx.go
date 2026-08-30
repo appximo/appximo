@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/appximo/appximo/pkg/logging"
+	"github.com/appximo/appximo/pkg/observability"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -450,6 +452,13 @@ func (e *ValidationError) Error() string { return "validation_failed" }
 type handledError struct {
 	cause error
 	msg   string
+	// status the handler chose; pcs is the call site of ctx.Error when the
+	// status is a 5xx — captured THERE, in the handler, so the persisted stack
+	// names the handler's file and line, never the middleware that later
+	// writes the response (OBSERVABILIDAD-ERRORES-S1). nil for 4xx: a caller
+	// problem is not a server bug and never pays for runtime.Callers.
+	status int
+	pcs    []uintptr
 }
 
 func (e *handledError) Error() string {
@@ -611,15 +620,31 @@ func (c *requestCtx) Query(resource string, opts QueryOpts) ([]map[string]any, e
 
 	rows, err := c.tx.Query(c.ctx, selectQ, selectArgs...)
 	if err != nil {
-		return nil, err
+		return nil, err // the driver tracer already marked the failed "query" stage
 	}
 	defer rows.Close()
 	out, err := pkghandlers.RowsToMaps(rows)
+	c.mark("query")
 	if err != nil {
 		return nil, err
 	}
 	projectAll(out, eval.AllowedFields)
 	return out, nil
+}
+
+// mark closes a handler stage on the request's trace — the span the panel's
+// waterfall shows instead of one opaque "done" bar (OBSERVABILIDAD-ERRORES-S1,
+// Parte D). Derived from the Ctx contract, so every custom route gets it for
+// free: each database operation is a "query" stage, the JSON encoding an
+// "encode" stage; the handler's own Go time is whatever remains. Cost: one
+// time.Now per marked stage, no allocation (the tracker is a fixed array).
+func (c *requestCtx) mark(name string) {
+	if c.ctx == nil { // a test-built ctx carries no request context
+		return
+	}
+	if t := observability.SpanTrackerFromCtx(c.ctx); t != nil {
+		t.Mark(name)
+	}
 }
 
 // Get implements Ctx.Get: SELECT one row by id, under the role's row-level
@@ -818,10 +843,11 @@ func (c *requestCtx) Update(resource, id string, data map[string]any) (map[strin
 func (c *requestCtx) queryOne(q string, args []any) (map[string]any, error) {
 	rows, err := c.tx.Query(c.ctx, q, args...)
 	if err != nil {
-		return nil, err
+		return nil, err // the driver tracer already marked the failed "query" stage
 	}
 	defer rows.Close()
 	out, err := pkghandlers.RowsToMaps(rows)
+	c.mark("query")
 	if err != nil {
 		return nil, err
 	}
@@ -1002,7 +1028,7 @@ func (c *requestCtx) ServeFile(fileID string, opts ...ServeFileOption) error {
 // → a masked 500 (logged), mirroring the engine's own download handlers.
 func (c *requestCtx) serveRegisteredFile(w http.ResponseWriter) {
 	if c.eng == nil || c.eng.files == nil {
-		log.Printf("appximo: ServeFile: no file store wired (test-built ctx?)")
+		logging.FromCtx(c.ctx).Error().Msg("appximo: ServeFile: no file store wired (test-built ctx?)")
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -1026,7 +1052,7 @@ func (c *requestCtx) serveRegisteredFile(w http.ResponseWriter) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
 	}
-	log.Printf("appximo: ServeFile %s (tenant %s): %v", c.serveFileID, c.tc.ID, err)
+	logging.FromCtx(c.ctx).Error().Str("tenant_id", c.tc.ID).Str("file_id", c.serveFileID).Err(err).Msg("appximo: ServeFile failed")
 	writeErr(w, http.StatusInternalServerError, "download failed")
 }
 
@@ -1036,6 +1062,7 @@ func (c *requestCtx) JSON(status int, v any) error {
 		return err
 	}
 	c.status, c.body, c.set = status, b, true
+	c.mark("encode")
 	return nil
 }
 
@@ -1053,7 +1080,13 @@ func (c *requestCtx) Error(status int, msg string, cause error) error {
 	}
 	b, _ := json.Marshal(map[string]string{"error": msg})
 	c.status, c.body, c.set = status, b, true
-	return &handledError{cause: cause, msg: msg}
+	he := &handledError{cause: cause, msg: msg, status: status}
+	if status >= 500 {
+		var pcs [24]uintptr
+		n := runtime.Callers(2, pcs[:]) // 0=Callers 1=Error → frame[0] is the handler
+		he.pcs = append([]uintptr(nil), pcs[:n]...)
+	}
+	return he
 }
 
 func (c *requestCtx) Request() *http.Request   { return c.r }

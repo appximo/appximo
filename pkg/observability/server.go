@@ -147,6 +147,16 @@ func (s *ObsServer) handleTenant(w http.ResponseWriter, r *http.Request) {
 			payload["history"] = s.historyPoints(id, hours)
 		}
 	}
+	// Error GROUPS (OBSERVABILIDAD-ERRORES-S1): defects, not occurrences — the
+	// persisted fingerprint counters of the last 24h, always present when a
+	// store exists (the Issues tab reads them).
+	if s.store != nil {
+		groups, err := s.store.ErrorGroups(id, 24)
+		if err != nil {
+			groups = []ErrorGroup{}
+		}
+		payload["error_groups"] = groups
+	}
 	// ?traces=slow adds the tenant's persisted slow traces from the last 24h.
 	if r.URL.Query().Get("traces") == "slow" && s.store != nil {
 		traces, err := s.store.SlowTraces(id, 24)
