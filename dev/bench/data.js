@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788043973232,
+  "lastUpdate": 1788057276004,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -4824,6 +4824,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36734062 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "fe30b5d4fbe6ee66f01f34dfd5b4fcdb911a01b2",
+          "message": "feat(engine): admission control — the engine degrades instead of tipping; the rate-limit default derives from measured capacity (ENG-52+ENG-53, MOTOR-PRODUCCION-S2)\n\nThe cause of the tip, named with lab evidence: unbounded in-flight\nconcurrency — every queued request pays parse/tenant/JWT/RBAC before dying\nlate at the 5s query timeout, so wasted work grows with the backlog and\neats exactly the CPU the admitted work needed; that feedback is why tipped\nruns never recovered. The fix caps in-flight data-plane requests at the\nFRONT of the chain (before the tenant limiter, cache, JWT, pool) and sheds\nthe excess as an immediate 429 + Retry-After: 1. APPXIMO_MAX_INFLIGHT,\nauto = max(32, 4×(GOMAXPROCS + pool)); 0 disables; non-integer refuses to\nboot. Concurrency self-adapts by Little's law to plan and workload — no\nestimator, no per-deploy recalibration; SSE, byte-serving, probes, admin\nsurfaces and OPTIONS are out of scope by design.\n\nMeasured in the isolated laboratory, paired on the same instances at each\nbox's tip: shared s-2vcpu-2gb @4800 rps OFF → goodput 3679, p50 1728 ms,\n79k timeouts; ON → 4405 (+20%), 36 ms, ZERO timeouts, 8/8 runs alike.\nDedicated c-2 @6000: 5194/695ms/26.6k → 5676 (+9%)/23ms/0. Zero false\nrejections at every level with headroom. Frozen ABBA at 300 rps:\nno_change in median (Δp50 −0.001 ms, p=0.806) AND tail (Δp99 +0.01 ms,\npermutation p=0.877).\n\nThe per-tenant rate limit's default is now DERIVED: 350 rps × GOMAXPROCS —\n70% of the measured per-core clean ceiling of the canonical uncached read\non the customer-grade shared box (§4e) — instead of a hand-set 1000\nunrelated to capacity. RATE_LIMIT_RPS still overrides; migration note and\nthe composition of the four load defenses in backend-spec §3.8.\n\nAlso: the ENG-55 130× write-interference premise does not reproduce in the\nclean lab (read p90 ×1.02 beside 25 writes/s; pool-30 falsification arm\nunmoved) — §4d says so at the claim, §4e carries the experiment. The\nbinary-diff gate gains a concurrency shed probe and prints both binaries'\nrate-limit defaults (two expected, self-explaining DIFFs); dead capacity\nfigures corrected across docs/site with their conditions.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-30T02:27:16Z",
+          "tree_id": "1ddf3866fe4cb197058214615a6ec0755f3e8c78",
+          "url": "https://github.com/appximo/appximo/commit/fe30b5d4fbe6ee66f01f34dfd5b4fcdb911a01b2"
+        },
+        "date": 1788057274897,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 7335,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "311700 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 7335,
+            "unit": "ns/op",
+            "extra": "311700 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "311700 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "311700 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 69.72,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "34187980 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 69.72,
+            "unit": "ns/op",
+            "extra": "34187980 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "34187980 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "34187980 times\n4 procs"
           }
         ]
       }
