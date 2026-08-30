@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788115011665,
+  "lastUpdate": 1788130019556,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -5040,6 +5040,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36484375 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "bc3b735044afe0084c4dee883356367574a361af",
+          "message": "feat(resilience,ops): break what we can repair — the breaker sheds a black-holed DB (ENG-59), PostgreSQL auto-restarts after an OOM-kill, checksums default on fresh installs, a fleet audit that says what's missing, ten chaos experiments (CAOS-S1)\n\nENG-59: the breaker's count ledger used gobreaker's default Interval=0 (never\ncleared), so a process warmed by normal traffic could never reach the 60%\ntrip ratio — and a black-holed database keeps in-flight Requests ahead of the\n5-s-lagging TotalFailures so the ratio never crosses it even windowed. Fix:\nInterval=10s + a 20-consecutive-failure rule (an unbroken run = the DB is not\nanswering). Measured on the customer box, warmed process, 30s iptables DROP:\np50 of a failed request 5.00s -> 0.00s, 70% under 200ms; recovery still +0.1s.\nHealthy-path ABBA no_change; binary-diff gate 171/171 SAME.\n\nTwo findings from breaking things, both fixed:\n- PostgreSQL had no auto-restart (Ubuntu ships Restart=no) — an OOM-killed or\n  crashed postmaster left every app on the box down until a human acted (the\n  field OOM incident). install.sh now writes a Restart=on-failure drop-in with\n  RestartPreventExitStatus=SIGINT SIGTERM; provoked -> self-recovers in 5s,\n  intentional stop still stops.\n- RESILIENCIA's layer-5 backup watch never worked on a real install: the 0700\n  root backup dir blocked the unprivileged engine from reading last-backup.status\n  (always \"none\", no alert). Dir is now 0711 (conf bundle stays 0600).\n\nOPS-42: data_checksums default-on for a fresh cluster (enable 0.9s/372MB,\nruntime cost no_change); on a cluster with data, warn + recipe. backup.sh now\nnames the corrupt table in its status and notification, captured in memory so\na full-disk run still reports the cause.\n\nOPS-40: disk + backup cards on /admin Resources (layer 5). fleet-audit.sh:\nper-app \"what is missing\" + box facts (swap, disk, checksums, PG restart).\ninstall.sh preserves operator env keys on a re-run (theme, demo roles, limits).\n\nTen chaos experiments, each with a written hypothesis first (all PASA or\nfixed). PRODUCTION §4.4/§4.5/§4.5b/§4.6 + backend-spec §3.8 updated.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-30T22:45:15Z",
+          "tree_id": "b7624a69de59b0336cb019d983331ff952a01818",
+          "url": "https://github.com/appximo/appximo/commit/bc3b735044afe0084c4dee883356367574a361af"
+        },
+        "date": 1788130018852,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6335,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "376908 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6335,
+            "unit": "ns/op",
+            "extra": "376908 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "376908 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "376908 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 73.88,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "31965632 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 73.88,
+            "unit": "ns/op",
+            "extra": "31965632 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "31965632 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "31965632 times\n4 procs"
           }
         ]
       }
