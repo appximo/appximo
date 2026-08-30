@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788057276004,
+  "lastUpdate": 1788110561526,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -4896,6 +4896,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "34187980 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "85018bd9604e7360080dc544c9f53b7709af06dc",
+          "message": "feat(observability): a 500 explains itself — message and call-site stack on the trace, the failed statement from the driver, identity on every trace, JSON cause at level error, the failing stage marked, fingerprint groups with a first-occurrence alert (OBSERVABILIDAD-ERRORES-S1)\n\nThe field report's number was 0 of 33: a custom route's 500 reached the\npersisted trace with no message and no stack, its cause went to a\nplain-text log line with no trace_id, and the request line said\nlevel:\"info\". The expensive infrastructure existed; the wires did not.\n\n- writeHandlerError records the cause (or the handler's message) on the\n  trace; ctx.Error(5xx, …) captures runtime.Callers AT THAT CALL, so the\n  first frame is the handler's file:line — never the middleware's; a\n  panic is captured inside the Recoverer's defer on the panicking\n  goroutine (the inlined closure filtered by file); a bare returned error\n  gets the writer's stack with a stack_note saying so (ENG-57).\n- observability.QueryTracer, wired into the pool: the exact statement a\n  query FAILED with is noted on the request's tracker for every route —\n  generated, Ctx or UnsafeTx — template only, never bound values. A 5xx\n  trace shows the driver's message beside the query; client-classified\n  driver errors (400/409/422) leave their cause too.\n- The cause line is JSON at level error with trace_id, request_id,\n  tenant_id, user_id, role, route, status, error, sql, site. The request\n  line is level error for any 5xx. Plain-text sweep: RBAC denials (REST +\n  GraphQL) → structured warn through the context logger, webhook\n  dispatcher, ServeFile, the noop alerter; zerolog.DefaultContextLogger is\n  the engine logger so no context ever swallows a line. Identity on every\n  persisted trace and request line: the JWT middleware writes user/role\n  onto the shared span tracker (the logger runs before it).\n- done is subdivided for custom routes (tx, one query per Ctx call,\n  encode, handler); the failing stage is marked at its source and shown\n  as \"failed here\"; one per request; the 8-slot cap stands.\n- Fingerprint = route + normalized message (uuid/hex/quoted/number →\n  placeholders, SQLSTATE kept) + top frame; error_groups table with\n  count/first/last/users/sample; the panel's Issues tab shows Problems.\n  Against the 105's real traces: 158 5xx → 41 problems. A NEW group alerts\n  on its first trace, braked at 5/tenant/minute with a storm summary.\n- Repro: the panel builds curl from the persisted URL + filtered headers;\n  bodies are OFF by default (A-53), APPXIMO_TRACE_BODY=on keeps 4 KiB\n  redacted. backend-spec §3.9 states what Go can and cannot give.\n- The binary-diff gate gains an error-trace projection probe (an expected,\n  explained DIFF). ABBA on the lab: no_change (median and tail).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-30T17:17:56Z",
+          "tree_id": "f2796eb5a15e9dd1eac0cfb5c19485e1e3b101fb",
+          "url": "https://github.com/appximo/appximo/commit/85018bd9604e7360080dc544c9f53b7709af06dc"
+        },
+        "date": 1788110560786,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6267,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "375828 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6267,
+            "unit": "ns/op",
+            "extra": "375828 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "375828 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "375828 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 67.51,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "35362669 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 67.51,
+            "unit": "ns/op",
+            "extra": "35362669 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "35362669 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "35362669 times\n4 procs"
           }
         ]
       }
