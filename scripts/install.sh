@@ -652,7 +652,7 @@ install_companion_scripts() {
 	# postgres steps `cd /tmp`. The exec bit of the SOURCE is irrelevant:
 	# install(1) sets 0755 on the copy.
 	local dir="${SCRIPTS_DIR:-$SELF_DIR}" any="no" missing="" s
-	for s in deploy-update.sh backup.sh restore.sh; do
+	for s in deploy-update.sh backup.sh restore.sh fleet-audit.sh; do
 		if [ -n "$dir" ] && [ -f "$dir/$s" ]; then
 			run install -m 0755 "$dir/$s" "$OPT_DIR/scripts/$s"; any="yes"
 		else
@@ -660,12 +660,81 @@ install_companion_scripts() {
 		fi
 	done
 	if [ "$any" = "yes" ] && [ -z "$missing" ]; then
-		ok "companion scripts installed in ${OPT_DIR#"$PREFIX"}/scripts (deploy-update.sh, backup.sh, restore.sh — from $dir)"
+		ok "companion scripts installed in ${OPT_DIR#"$PREFIX"}/scripts (deploy-update.sh, backup.sh, restore.sh, fleet-audit.sh — from $dir)"
 	elif [ "$any" = "yes" ]; then
 		warn "companion scripts: installed what was in $dir; MISSING:$missing — pass --scripts=DIR or copy them into ${OPT_DIR#"$PREFIX"}/scripts"
 	else
 		info "companion scripts (deploy-update.sh/backup.sh/restore.sh) not found in ${dir:-<unknown>} — pass --scripts=DIR pointing at the repo's scripts/ (or copy them into ${OPT_DIR#"$PREFIX"}/scripts) when you need updates/backups"
 	fi
+}
+
+# enable_checksums_if_fresh: turn on PostgreSQL data_checksums so page corruption
+# is a loud ERROR on first read instead of silent bad data (CAOS-S1 / OPS-42:
+# a corrupt table was served 200s; the nightly backup was the only detector).
+# Cost measured: 0.9 s on a 372 MB cluster — instant on the EMPTY cluster of a
+# fresh install. But it is CLUSTER-WIDE and needs the cluster stopped, so it runs
+# ONLY when this is a fresh cluster (no user database but the one we just made):
+# on a box already serving another app, enabling means downtime over its data —
+# the operator's maintenance window, not the installer's. Otherwise: warn + recipe.
+enable_checksums_if_fresh() {
+	[ "$DRY_RUN" = "yes" ] && { printf '  [dry-run] enable data_checksums if this is a fresh cluster
+'; return 0; }
+	command -v pg_checksums >/dev/null 2>&1 || return 0
+	local cur; cur="$(runuser -u postgres -- psql -tAX -c 'SHOW data_checksums' 2>/dev/null || echo '?')"
+	[ "$cur" = "on" ] && { ok "PostgreSQL data_checksums already on (corruption is a loud error, not silent)"; return 0; }
+	[ "$cur" = "off" ] || { info "could not read data_checksums — skipping"; return 0; }
+	# Fresh? No user DB other than the one this install created (and it is empty).
+	local others; others="$(runuser -u postgres -- psql -tAX -c "SELECT count(*) FROM pg_database WHERE datname NOT IN ('template0','template1','postgres','${DB_NAME}') AND datistemplate=false" 2>/dev/null || echo '?')"
+	local mysize; mysize="$(runuser -u postgres -- psql -tAX -d "${DB_NAME}" -c "SELECT count(*) FROM pg_stat_user_tables" 2>/dev/null || echo '?')"
+	if [ "$others" != "0" ] || [ "${mysize:-1}" != "0" ]; then
+		warn "data_checksums is OFF and this cluster already holds data (other apps / existing tables) — NOT enabling (it needs the whole cluster stopped, downtime over that data). Enable in your window: systemctl stop postgresql@*-main; runuser -u postgres -- pg_checksums --enable -D <datadir>; systemctl start postgresql@*-main  (~1 s per 400 MB). docs/PRODUCTION.md §4"
+		return 0
+	fi
+	local unit datadir t0 t1
+	unit="$(systemctl list-units --type=service --all --no-legend 'postgresql@*-main.service' 2>/dev/null | awk '{print $1}' | head -1)"
+	datadir="$(runuser -u postgres -- psql -tAX -c 'SHOW data_directory' 2>/dev/null)"
+	[ -n "$unit" ] && [ -n "$datadir" ] || { info "could not resolve the cluster unit/datadir — skipping checksums"; return 0; }
+	info "fresh cluster — enabling data_checksums (page-corruption becomes a loud error)…"
+	systemctl stop "$unit"
+	t0="$(date +%s.%N)"
+	if runuser -u postgres -- pg_checksums --enable -D "$datadir" >/dev/null 2>&1; then
+		t1="$(date +%s.%N)"
+		systemctl start "$unit"; for _ in $(seq 1 30); do runuser -u postgres -- psql -tAX -c 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
+		ok "data_checksums enabled ($(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.1f", b-a}') s) — corruption is now an ERROR on read, not silent"
+	else
+		systemctl start "$unit"
+		warn "pg_checksums --enable failed — cluster restarted with checksums still off; enable manually later (docs/PRODUCTION.md §4)"
+	fi
+}
+
+# ensure_postgres_restart: Ubuntu/Debian ship postgresql@NN-main with Restart=no
+# ("restarting automatically will prevent pg_ctlcluster stop from working"), so an
+# OOM-KILLED or crashed POSTMASTER stays down — and with it every app on the box —
+# until a human runs `systemctl start`. That is precisely the field OOM incident
+# (MIGRACION-CONFIANZA-S1: 5 apps down on an oom-kill) and CAOS-S1 D2 reproduced
+# it. A drop-in restores auto-recovery WITHOUT fighting an intentional stop
+# (RestartPreventExitStatus keeps SIGINT/SIGTERM from triggering a restart), and
+# the default start limit (5/10 s) still lets a genuinely broken cluster give up
+# instead of crash-looping. Idempotent; only touches the instance systemd finds.
+ensure_postgres_restart() {
+	[ "$DRY_RUN" = "yes" ] && { printf '  [dry-run] systemd drop-in: postgresql instance Restart=on-failure (survive an OOM-kill)
+'; return 0; }
+	local unit; unit="$(systemctl list-units --type=service --all --no-legend 'postgresql@*-main.service' 2>/dev/null | awk '{print $1}' | head -1)"
+	[ -n "$unit" ] || unit="$(ls /lib/systemd/system/postgresql@*.service 2>/dev/null | head -1 | xargs -r basename)"
+	[ -n "$unit" ] || { info "no postgresql@NN-main unit found — skipping the restart drop-in (is Postgres native systemd-managed?)"; return 0; }
+	local dir="/etc/systemd/system/${unit}.d"
+	mkdir -p "$dir"
+	cat > "$dir/restart.conf" <<-EOF
+		# Appximo installer (CAOS-S1): survive an OOM-kill / postmaster crash so the
+		# apps that share this database come back without a human. An intentional
+		# stop (pg_ctlcluster / systemctl stop → SIGINT/SIGTERM) still stops.
+		[Service]
+		Restart=on-failure
+		RestartSec=2
+		RestartPreventExitStatus=SIGINT SIGTERM
+	EOF
+	systemctl daemon-reload
+	ok "postgresql auto-restart ensured ($unit: Restart=on-failure — survives an OOM-kill; intentional stop still stops)"
 }
 
 # ── PostgreSQL: role + database (idempotent) ─────────────────────────────────
@@ -958,6 +1027,32 @@ write_file() {
 }
 
 write_env_file() {
+	# CAOS-S1: a re-run must not destroy OPERATOR CONFIG. The 58's real envs
+	# carry keys this template never writes (a theme, demo roles, a banner, a
+	# raised login limit, legacy dual-prefix keys) — the old wholesale rewrite
+	# silently dropped them all, which would have stripped the public demo of
+	# its demo mode on the first upgrade. Every line of an EXISTING env that is
+	# not one of the MANAGED keys below (and not the template's own header) is
+	# carried over verbatim — comments included, order kept.
+	local managed=" DATABASE_URL JWT_SECRET ADMIN_KEY APPXIMO_ENV APPXIMO_CONTROL_PORT APPXIMO_FILES_DIR OBS_DB_PATH GOMEMLIMIT APPXIMO_BACKUP_DIR "
+	local extra=""
+	if [ -f "$ENV_FILE" ]; then
+		local line key
+		while IFS= read -r line; do
+			case "$line" in
+				"# Appximo engine environment"*|"# Appitools engine environment"*|"# Generated by scripts/install.sh"*|"# Where backup.sh writes its sets"*|"# the newest one and last-backup.status"*|"# missing or failed (docs/PRODUCTION.md"*|"# remote:bucket/path ships each set"*|"# include the encrypted secrets)."*|"# ── kept from the previous env"*) continue ;;
+				"") continue ;;
+				"#"*) extra="${extra}${line}
+"; continue ;;
+			esac
+			key="${line%%=*}"
+			case "$managed" in
+				*" $key "*) : ;;
+				*) extra="${extra}${line}
+" ;;
+			esac
+		done < "$ENV_FILE"
+	fi
 	local body="# Appximo engine environment (systemd EnvironmentFile — plain KEY=value, no export, no quotes).
 # Generated by scripts/install.sh. Secrets are reused on re-run; keep this file 0600.
 DATABASE_URL=${DATABASE_URL}
@@ -975,6 +1070,13 @@ OBS_DB_PATH=${VARLIB#"$PREFIX"}/obs/obs.db
 APPXIMO_BACKUP_DIR=${BACKUP_DIR#"$PREFIX"}"
 	[ -n "$GOMEMLIMIT_VAL" ] && body="${body}
 GOMEMLIMIT=${GOMEMLIMIT_VAL}"
+	if [ -n "$extra" ]; then
+		body="${body}
+
+# ── kept from the previous env (operator config — not managed by the installer) ──
+${extra%
+}"
+	fi
 	write_file "$ENV_FILE" "$body"
 	run chmod 600 "$ENV_FILE"
 	run chown "root:$SERVICE_USER" "$ENV_FILE"
@@ -1126,7 +1228,7 @@ start_services() {
 		|| warn "could not (re)start caddy — check: caddy validate --config $CADDYFILE ; journalctl -u caddy -f"
 	ok "services started (appximo + caddy)"
 	if [ -f "$BACKUP_TIMER_FILE" ]; then
-		mkdir -p "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR"
+		mkdir -p "$BACKUP_DIR" && chmod 711 "$BACKUP_DIR"  # 0711: the engine (unprivileged) must traverse to read last-backup.status; conf bundle stays 0600
 		systemctl enable --now "${SERVICE_NAME}-backup.timer" >/dev/null 2>&1 \
 			&& ok "backup timer enabled (next: $(systemctl show -p NextElapseUSecRealtime --value "${SERVICE_NAME}-backup.timer" 2>/dev/null || echo '?'))" \
 			|| warn "could not enable ${SERVICE_NAME}-backup.timer — systemctl status ${SERVICE_NAME}-backup.timer"
@@ -1224,7 +1326,7 @@ verify_installed() {
 	fi
 	# 4. The companions: executable, and the ops CLI actually operates.
 	local s present=""
-	for s in deploy-update.sh backup.sh restore.sh; do [ -x "$OPT_DIR/scripts/$s" ] && present="$present $s"; done
+	for s in deploy-update.sh backup.sh restore.sh fleet-audit.sh; do [ -x "$OPT_DIR/scripts/$s" ] && present="$present $s"; done
 	[ -n "$present" ] && vline "scripts   ${OPT_DIR#"$PREFIX"}/scripts:$present (executable)"
 	if [ "$BACKUP_TIMER" = "yes" ]; then
 		if systemctl is-active --quiet "${SERVICE_NAME}-backup.timer" 2>/dev/null; then vline "backup    ${SERVICE_NAME}-backup.timer active (OnCalendar=${BACKUP_SCHEDULE} → ${BACKUP_DIR#"$PREFIX"})"
@@ -1429,6 +1531,8 @@ main() {
 	install_caddy
 	setup_user_dirs
 	setup_postgres
+	enable_checksums_if_fresh
+	ensure_postgres_restart
 	install_binary
 	install_companion_scripts
 	write_schema

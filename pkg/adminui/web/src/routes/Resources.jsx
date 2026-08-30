@@ -127,6 +127,18 @@ function LiveTab(props) {
   const db = () => s()?.db_client || {}
   const sv = () => s()?.db_server_local_only || {}
   const rq = () => s()?.request || {}
+  const ho = () => s()?.host || {}
+  const bk = () => ho().backup || {}
+  const fmtAge = (sec) => (sec == null || sec <= 0 ? "—" : sec >= 172800 ? (sec / 86400).toFixed(1) + " d" : sec >= 7200 ? (sec / 3600).toFixed(1) + " h" : (sec / 60).toFixed(0) + " min")
+  const bkKind = () => (!ho().enabled || !bk().dir ? "ok" : bk().alarm ? "crit" : bk().status === "ok" ? "ok" : "warn")
+  const bkText = () => {
+    if (!ho().enabled || !bk().dir) return "not watched (APPXIMO_BACKUP_DIR unset)"
+    if (bk().status === "ok" && !bk().stale) return "ok"
+    if (bk().status === "ok" && bk().stale) return "STALE"
+    if (bk().status === "failed") return "FAILED"
+    if (bk().status === "none") return bk().stale ? "NEVER RAN" : "no run yet"
+    return "EMPTY STATUS"
+  }
   const memMax = () => (pc().mem_max_bytes > 0 ? fmtMiB(pc().mem_max_bytes) + " MiB max" : "no cgroup limit")
   const quota = () => (pc().cpu_quota_usec > 0 && pc().cpu_period_usec > 0 ? (pc().cpu_quota_usec / pc().cpu_period_usec).toFixed(2) + " CPU quota" : "no CPU quota")
   return (
@@ -182,6 +194,17 @@ function LiveTab(props) {
           <Stat label="Deadlocks · temp" sub={`temp ${fmtMiB(sv().temp_bytes)} MiB · ${sv().pg_stat_statements ? "pg_stat_statements on" : "no pg_stat_statements"}`}>{fmtNum(sv().deadlocks)}</Stat>
         </div>
       </Show>
+
+      <h3 class="res-h">Disk &amp; backup <span class="muted">· layer 5 — the silent killers (RESILIENCIA-S1 §4.6)</span></h3>
+      <div class="statgrid">
+        <For each={(ho().disks || []).filter((d) => !d.err)}>{(d) => (
+          <Stat label={`Disk ${d.path}`} sub={<><Badge kind={d.low ? "crit" : "ok"}>{d.low ? "LOW" : "ok"}</Badge> {fmtMiB(d.total_bytes)} MiB total</>}>{(d.free_pct ?? 0).toFixed(1)} <span class="unit">% free · {fmtMiB(d.free_bytes)} MiB</span></Stat>
+        )}</For>
+        <Stat label="Last backup" sub={<><Badge kind={bkKind()}>{bkText()}</Badge> {bk().dir ? `${bk().dir} · floor ${fmtAge(bk().max_age_s)}` : "the installer sets APPXIMO_BACKUP_DIR"}</>}>{fmtAge(bk().age_s)} <span class="unit">ago</span></Stat>
+        <Show when={ho().enabled && (ho().disks || []).length === 0}>
+          <div class="card res-note">No watched filesystem answered statfs.</div>
+        </Show>
+      </div>
 
       <h3 class="res-h">Host pressure <span class="muted">· PSI {pr().source === "cgroup" ? "of this cgroup" : pr().source === "host" ? "of the whole host" : "unavailable"}</span></h3>
       <div class="statgrid">

@@ -26,7 +26,25 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-30 (RESILIENCIA-S1)** — the backup was a folder
+**Last reviewed: 2026-08-30 (CAOS-S1)** — broke on purpose what we know how to
+repair, and closed RESILIENCIA's three loose ends. The 58 brought up to date
+SURGICALLY (unit policy, new backup SET format, `APPXIMO_BACKUP_DIR`,
+companions, vetapp timer, demo-reset repointed + tested) — Caddy left alone on
+purpose (its migration is OPS-11, untested-live, zero protection value); a
+`fleet-audit.sh` that says what is MISSING per app; the §4.5b upgrade
+procedure followed literally on a degraded lab box. ENG-59 fixed for real (the
+breaker's ledger was never cleared → a warmed process never tripped; now a
+20-consecutive-failure rule: black-holed DB p50 5.00 s → 0.00 s). OPS-42:
+data_checksums default-on for fresh installs (0.9 s/372 MB) + the backup names
+the corrupt table — but detection is on-access, the backup stays the
+guaranteed scan. OPS-40 done (disk+backup cards on /admin Resources). Ten
+chaos experiments with written hypotheses (all PASA or fixed). TWO new engine-
+side findings FIXED: PostgreSQL had no auto-restart (Ubuntu `Restart=no` — the
+field OOM-kill left apps down until a human; now a `Restart=on-failure`
+drop-in, provoked → self-recovers in 5 s), and the layer-5 backup watch never
+worked on a real install (the 0700 backup dir blocked the unprivileged engine
+from reading the status → always "none"; now 0711). New OPEN: SCHEMA/ENG minor
+notes below. Before that: **(RESILIENCIA-S1)** — the backup was a folder
 until it was restored: `restore.sh` (stop → secrets+schema → drop/create →
 load AS the service role → files → start → VERIFY counts/files/FKs/sequences/
 tenants, every stage timed), one backup SET (dump + uploads + conf + manifest),
@@ -1097,64 +1115,43 @@ would close it better, and is Miguel's call.
   lock, verified against the manifest's rows for that schema; and the drill in
   `scripts/verify-production/`.
 
-### OPS-40 — Layer 5 (disk + backup) is not on the `/admin` Resources screen
-- **Origin:** RESILIENCIA-S1 §D. The self-monitor reads the disk under the
-  data and `last-backup.status` every tick and alerts through the alerter; the
-  data is in `/admin/resources` (`latest.host`) and on `/metrics`, but the
-  SolidJS Resources view has no card for it (the session did not rebuild the
-  admin bundle for one card).
-- **Impact:** Low. The alert and the gauges exist; an operator who opens the
-  panel does not SEE "disk 92 % / last backup 14 h ago" there.
-- **Ready:** two cards on the Resources live board (disk per path with the
-  floor; backup status + age with the floor), reading `latest.host`; `make
-  admin-ui` + the committed dist (ADR-025).
+### OPS-44 — Faster guaranteed corruption detection than the nightly backup (pg_amcheck)
+- **Origin:** CAOS-S1 Part B. data_checksums make a corrupt page a loud error
+  ON READ, but index-only/count plans skip the heap, so a live app may not hit
+  a bad block for a long time; the guaranteed full-scan detector is the nightly
+  backup (`pg_dump` COPYs every block). That is up to ~24 h of latency to learn
+  of corruption.
+- **Impact:** Low-Medium. For most apps the nightly backup is soon enough; for
+  a fintech it may not be.
+- **Ready:** an optional `pg_amcheck` (heap + btree) pass wired into the backup
+  timer (or its own timer), reporting per-relation, with the same alert path as
+  a failed backup; measured cost on the customer box. Only when a customer
+  needs sub-day corruption detection.
 
-### OPS-41 — Point-in-time recovery (WAL archiving) is not wired
-- **Origin:** RESILIENCIA-S1 §4.2/§4.5. The RPO of this stack is the backup
-  interval — a night by default, an hour at best with `hourly`. Seconds-level
-  loss needs PostgreSQL WAL archiving (`archive_command` to the same object
-  storage + periodic base backups, or `pgBackRest`).
-- **Impact:** Medium for a money-moving app, none for the catalogue/back-office
-  profile the product targets first. Documented as a limit in PRODUCTION §4.5.
-- **Ready:** an `install.sh --pitr=rclone-remote` that configures
-  `archive_mode=on` + `archive_command` via rclone, a weekly base backup in the
-  timer, and a `restore.sh --to=<timestamp>` that performs the PITR restore —
-  drilled and timed like the rest. Only with a customer who needs it.
+### OPS-45 — The 58's engine binaries predate ENG-59 and the layer-5 host watch
+- **Origin:** CAOS-S1 Part A. The 58 was brought up to date at the CONFIG level
+  (units, backup format, timers, pg auto-restart, `APPXIMO_BACKUP_DIR`), but
+  its running binaries are `commerce 95f5735-obs` (tiendita) and `appximo
+  85018bd-obs` (vetapp) — both predate ENG-59 (breaker consecutive trip) and
+  layer 5 (the engine-side disk/backup gauges + alert). Its backup liveness is
+  covered by `fleet-audit` reading the status file + `backup.sh`'s own failure
+  notification, but the engine gauge shows `KeyError: host`.
+- **Impact:** Low. Operational protection is in place; the engine-side niceties
+  land on the next normal `deploy-update` of each app.
+- **Ready:** deploy a current binary to each 58 app (tiendita needs a commerce
+  rebuild on the new engine; vetapp is a straight engine swap), drilled with
+  rollback, golden md5 verified.
 
-### OPS-42 — PostgreSQL data checksums are OFF on the installer's cluster: corruption is served as 200
-- **Origin:** RESILIENCIA-S1 scenario 1. The heap of `ordenes` was overwritten
-  with random bytes; the engine kept answering **200** (the first page did not
-  touch the damaged blocks) and only the nightly `pg_dump` said `invalid page
-  in block 0`. Ubuntu's `pg_createcluster` initialises without
-  `--data-checksums`, so a bit flip in a rarely-read block is served as data
-  until something scans it.
-- **Impact:** Low probability, high cost when it happens (silent wrong data).
-- **Ready:** `install.sh` enables checksums on a cluster it is INSTALLING
-  FRESH (`pg_checksums --enable` with the cluster stopped, seconds on an empty
-  cluster; never on an existing one with data — that is the operator's
-  maintenance window), and `restore.sh` prints the cluster's checksum state.
-  Then re-run scenario 1: the first read of a damaged block must be an ERROR
-  (503, breaker) — not a 200.
-
-### ENG-59 — A black-holed database costs 5 s per request: acquire failures never reach the breaker
-- **Origin:** RESILIENCIA-S1 §B6, provoked on the customer box: `iptables DROP`
-  on the database port for 30 s under a 10 rps cache-busting probe → 248
-  requests answered 503 with a **p50 of 5.00 s each** (the query/acquire
-  deadline), against 0.1 s when PostgreSQL is STOPPED (a refusal: the breaker
-  opened at once, `circuit breaker is open` in the log). Reading of the code:
-  `TenantDB.exec` runs the STATEMENT through the breaker, but a black hole
-  kills the pooled connections (health check) and every request then dies in
-  `acquire conn: context deadline exceeded` — the acquire happens outside the
-  breaker, so nothing counts and nothing sheds.
-- **Impact:** Medium for a REMOTE database (a managed Postgres, a second box —
-  the layout a bigger customer will have): a dead link makes every request
-  wait 5 s for its 503 instead of failing fast, which is exactly the queueing
-  the admission control (ENG-52) exists to avoid.
-- **Ready:** the pool acquire is inside the breaker (or acquire deadline
-  failures are counted by the same predicate), so ten of them open it; the
-  B6 provocation re-run must show failures at ≤ 0.1 s p50 after the first
-  5 s, with the recovery still immediate when the link returns; gate + ABBA
-  (it is the request path).
+### ENG-60 — The memory guard 503s GraphQL reads (all /graphql is POST)
+- **Origin:** CAOS-S1 D5. The host memory guard covers data-plane WRITE verbs
+  (POST/PUT/PATCH/DELETE on /api/* and /graphql). Because EVERY GraphQL request
+  is a POST to /graphql, a GraphQL READ is refused with 503 under memory
+  pressure while the equivalent REST read keeps flowing.
+- **Impact:** Low. Under memory pressure (already a degraded state) GraphQL is
+  read-blocked; REST reads are the escape. No data risk.
+- **Ready:** distinguish a GraphQL query from a mutation before the guard (parse
+  the operation, or a cheap heuristic), and only guard mutations — without
+  adding a parse to the hot path for REST. Measured no_change on the REST path.
 
 ### ENG-58 — The graceful stop always waits the full 5 s drain, so a restore/restart pays 5 s even with zero in-flight requests
 - **Origin:** RESILIENCIA-S1 scenario 1 timings: `systemctl stop` = 5.0 s of
@@ -1637,6 +1634,86 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in CAOS-S1 (2026-08-30, night) — broke what we can repair, closed RESILIENCIA's three loose ends, found two more
+
+- **ENG-59 → DONE (the real mechanism, not the first guess).** The breaker's
+  count ledger used gobreaker's default `Interval=0` = never cleared while
+  closed, so on a process warmed by normal traffic the 60 % trip ratio was
+  unreachable AND a black-holed database (all requests hang the 5 s deadline,
+  ~50 in flight) keeps `Requests` ahead of the 5-s-lagging `TotalFailures` so
+  the ratio never crosses 0.6 even windowed. Fix: `Interval: 10 s` + a SECOND
+  trip rule, **20 consecutive failures** (an unbroken run = the DB is not
+  answering at all). Measured on the customer-class box, warmed process, 30 s
+  `iptables DROP`: **p50 of a failed request 5.00 s → 0.00 s, 70 % under
+  200 ms**, recovery still +0.1 s. Healthy path ABBA no_change (§ session
+  report). 20 (not 10) leaves headroom for a pool-full blip where waiters
+  resolve into successes. Tests: `circuitbreaker_window_test.go`.
+- **OPS-42 → RESOLVED (with the honest limit).** `install.sh` enables
+  `data_checksums` on a cluster it creates FRESH (measured 0.9 s / 372 MB,
+  instant on an empty cluster); on a cluster with existing data it warns +
+  gives the offline recipe (it needs the whole cluster stopped). `fleet-audit`
+  reports the state. And `backup.sh` now NAMES the corrupt table in its status
+  + notification (`Dumping the contents of table "X" failed … invalid page in
+  block N`). **The limit, measured and stated:** checksums fire only when the
+  bad page is physically READ — index-only and count-via-index plans skip the
+  heap, so a live app may not hit it; the guaranteed detector is the nightly
+  backup (COPYs every block). So: checksums on (loud, not silent) + the backup
+  as the scheduled full scan. Faster guaranteed detection (periodic
+  `pg_amcheck`) is registered as OPS-44.
+- **OPS-40 → DONE.** The `/admin` Resources view has a "Disk & backup" card
+  row (per-path free % with the low flag; last-backup status/age with the
+  floor), reading `latest.host`; admin SPA rebuilt + committed (ADR-025).
+- **The 58 brought up to date (Part A).** Both apps: unit `RestartSec=2` +
+  `StartLimitIntervalSec=0`, `APPXIMO_BACKUP_DIR`, the new SET-format
+  `backup.sh` + `restore.sh` + `fleet-audit.sh`; vetapp gained a backup
+  service+timer it never had (its last backup was 41 h old); demo-reset
+  repointed to the engine `restore.sh --app=appitools` and the golden reset
+  re-tested (Result=success, golden md5 `7dcffa84…` intact). Verified from
+  outside both viewports (tiendita e2e purchase, demo mode 403s, petfriendly
+  20/20). Rollback drilled ida-y-vuelta. Off-box left for Miguel (needs a
+  destination he owns). The Caddy migration (OPS-11) deliberately NOT run —
+  untested-live, zero protection value.
+- **`scripts/fleet-audit.sh` (new).** Run on any box, says per app WHAT IS
+  MISSING (unit policy, binary contract, companions, backup timer, last set's
+  age + completeness, off-box, passphrase) + box facts (swap, disk, checksums,
+  PostgreSQL Restart policy). Exit 1 if anything is missing. Installed as a
+  companion; the §4.5b upgrade procedure uses it.
+- **NEW FINDING FIXED — PostgreSQL had no auto-restart.** Ubuntu/Debian ship
+  `postgresql@NN-main` with `Restart=no` ("restarting … will prevent
+  pg_ctlcluster stop from working"). CAOS-S1 D2 (SIGKILL the postmaster) and
+  the field OOM incident both leave PostgreSQL — and every app on the box —
+  DOWN until a human runs `systemctl start`. Fix: `install.sh` writes a
+  `Restart=on-failure` + `RestartPreventExitStatus=SIGINT SIGTERM` drop-in.
+  Provoked: killed the postmaster, **self-recovered in 5 s, no human**;
+  intentional stop still stops. Applied to the 58. `fleet-audit` checks it.
+- **NEW FINDING FIXED — RESILIENCIA's layer-5 backup watch never worked on a
+  real install.** The backup dir is `0700 root` (it holds the 0600 conf
+  bundle), but the engine runs as the unprivileged service user and could not
+  traverse it to read `last-backup.status` → the self-monitor always reported
+  `status: none` and the backup alert never fired. Fix: the dir is `0711`
+  (traversable, not listable; conf bundle stays 0600 unreadable), status file
+  0644. Verified: `appximo_selfmon_backup_ok` now reads 1/0 correctly.
+- **The ten chaos experiments (each with a written hypothesis BEFORE the run,
+  evidencia/CAOS-S1/d0-hipotesis.md):** D1 kill engine mid-write (PASA:
+  113 reported = 113 rows, zero half-written, back 2.1 s), D2 kill Postgres
+  (PASA on data + the auto-restart finding above), D3 reboot under load (PASA:
+  12 s outage, boot order correct, zero data loss), D4 disk full (PASA: 200/201
+  a while on WAL preallocation, backup fails naming cause; the disk alert at
+  10 % is the guard), D5 memory to the OOM edge (PASA: guard 503s writes /
+  200s reads deterministically; at ~20 MiB available nothing died; note:
+  GraphQL reads are POST so the guard 503s them too — coarse, documented), D6
+  net black-hole (= ENG-59, fixed), D7 `tc netem` 200 ms (PASA: degrades,
+  admission sheds 429, recovers), D8 clock −2 h (PASA: tokens fine, engine
+  survives — the engine validates neither iat nor nbf), D9 concurrent writes
+  (PASA: last-write-wins deterministic; the state-machine race rejected both
+  illegal transitions — no double transition), D10 pool saturation (PASA:
+  admission shed 149×429, the DB-saturating overflow tripped the breaker for
+  ≤ 8 s, full recovery to 2 ms).
+- **New OPEN:** OPS-44 (periodic pg_amcheck for faster guaranteed corruption
+  detection), OPS-45 (the 58's engine binaries predate ENG-59 + layer 5 — they
+  land on the next deploy), ENG-60 (the memory guard 503s GraphQL reads because
+  all `/graphql` is POST).
 
 ## DONE in RESILIENCIA-S1 (2026-08-30, night) — the backup was a folder: restore timed and verified, recovery provoked, the promise written
 

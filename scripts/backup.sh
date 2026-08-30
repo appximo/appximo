@@ -106,6 +106,12 @@ command -v pg_dump >/dev/null || { echo "pg_dump not found (apt-get install post
 [ -n "$FILES_DIR" ] || { [ -n "$APP_NAME" ] && FILES_DIR="/var/lib/$APP_NAME/files"; } || true
 
 mkdir -p "$BACKUP_DIR"
+# 0711 (not 0700): the dir holds the 0600 conf bundle (secrets), but the engine's
+# self-monitor runs as the UNPRIVILEGED service user and must TRAVERSE the dir to
+# read last-backup.status (CAOS-S1: a 0700 dir made the backup watch silently
+# report "none" and never alert). 0711 lets it open the known status path without
+# being able to LIST the dir; the conf bundle stays 0600 (unreadable by others).
+chmod 711 "$BACKUP_DIR" 2>/dev/null || true
 STAMP="$(date +%Y%m%d-%H%M%S)"
 PREFIX="${APP_NAME:-appximo}"
 SET="$BACKUP_DIR/$PREFIX-$STAMP"
@@ -120,21 +126,40 @@ notify() {
 	curl -fsS -m 10 -X POST -H 'Content-Type: application/json' \
 		-d "$(printf '{"text":"%s"}' "$(printf '%s' "$1" | sed 's/"/\\"/g')")" "$SLACK_WEBHOOK_URL" >/dev/null 2>&1 || true
 }
+FAIL_CAUSE=""; DETAIL=""
 on_fail() {
 	local rc=$? line=$1
 	[ "$rc" -eq 0 ] && return 0
-	rm -f "$SET".*.partial 2>/dev/null || true
-	printf 'failed %s app=%s exit=%d line=%d\n' "$(date -u +%FT%TZ)" "$PREFIX" "$rc" "$line" > "$STATUS_FILE" 2>/dev/null || true
-	echo "$(date -u +%FT%TZ) backup FAILED (exit $rc at line $line) — status written to $STATUS_FILE" >&2
-	notify "🔴 [$PREFIX] backup FAILED on $(hostname) (exit $rc at line $line of backup.sh) — no new backup set exists; the last good one is $(ls -1t "$BACKUP_DIR/$PREFIX"-*.dump 2>/dev/null | head -1 || echo none)"
+	rm -f "$SET".*.partial "$SET.dump.stderr" 2>/dev/null || true
+	local cause="${FAIL_CAUSE:-exit $rc at line $line of backup.sh}"
+	printf 'failed %s app=%s exit=%d line=%d cause=%s\n' "$(date -u +%FT%TZ)" "$PREFIX" "$rc" "$line" "${cause}${DETAIL:+ — $DETAIL}" > "$STATUS_FILE" 2>/dev/null || true
+	chmod 644 "$STATUS_FILE" 2>/dev/null || true
+	echo "$(date -u +%FT%TZ) backup FAILED (${cause}${DETAIL:+ — $DETAIL}) — status written to $STATUS_FILE" >&2
+	notify "🔴 [$PREFIX] backup FAILED on $(hostname): ${cause}${DETAIL:+ — $DETAIL}. No new backup set exists; the last good one is $(ls -1t "$BACKUP_DIR/$PREFIX"-*.dump 2>/dev/null | head -1 || echo none). A 'Dumping the contents of table … invalid page' cause is CORRUPTION — restore that table's data from the last good set (docs/PRODUCTION.md §4.3-A)."
 	exit "$rc"
 }
 trap 'on_fail $LINENO' ERR
 
 # ── 1. the database ──────────────────────────────────────────────────────────
 # Dump to a .partial then rename, so a crashed run never leaves a truncated file
-# that looks like a good backup.
-pg_dump -Fc --no-owner --dbname="$DATABASE_URL" -f "$SET.dump.partial"
+# that looks like a good backup. stderr is captured so a FAILURE can name its
+# cause — "Dumping the contents of table X failed: invalid page in block N" is
+# the corruption detector firing (CAOS-S1 §B: the alert must carry the table,
+# not just "failed").
+# stderr is captured into a VARIABLE (memory), not a temp file: on the disk-full
+# case the file itself could not be written, which erased the very cause we need
+# (CAOS-S1 D4). pg_dump writes the archive to -f, so its stdout is free; 2>&1
+# onto the substitution captures the error.
+DUMP_ERR="$(pg_dump -Fc --no-owner --dbname="$DATABASE_URL" -f "$SET.dump.partial" 2>&1 >/dev/null)" && DUMP_RC=0 || DUMP_RC=$?
+if [ "${DUMP_RC:-0}" -ne 0 ]; then
+	FAIL_CAUSE="$(printf '%s' "$DUMP_ERR" | grep -m1 -oE 'Dumping the contents of table "[^"]+" failed' || true)"
+	[ -n "$FAIL_CAUSE" ] || FAIL_CAUSE="$(printf '%s' "$DUMP_ERR" | grep -m1 -oiE '(no space left|permission denied|could not|error:).*' | cut -c1-200 || true)"
+	DETAIL="$(printf '%s' "$DUMP_ERR" | grep -m1 'Error message from server' | cut -c1-200 || true)"
+	printf '%s
+' "$DUMP_ERR" >&2
+	echo "pg_dump failed: ${FAIL_CAUSE:-see stderr above}${DETAIL:+ — $DETAIL}" >&2
+	false
+fi
 mv -f "$SET.dump.partial" "$SET.dump"
 DUMP_SHA="$(sha256sum "$SET.dump" | cut -d' ' -f1)"
 echo "$(date -u +%FT%TZ) dump ok: $SET.dump ($(du -h "$SET.dump" | cut -f1))"
@@ -232,6 +257,7 @@ fi
 # ── 6. status + rotation ─────────────────────────────────────────────────────
 ELAPSED="$(awk -v a="$T0" -v b="$(date +%s.%N)" 'BEGIN{printf "%.1f", b-a}')"
 printf 'ok %s app=%s set=%s rows=%s files=%s offbox=%s seconds=%s\n' "$(date -u +%FT%TZ)" "$PREFIX" "$SET" "$ROWS" "$FILES_COUNT" "$COPIED" "$ELAPSED" > "$STATUS_FILE"
+chmod 644 "$STATUS_FILE" 2>/dev/null || true
 echo "$(date -u +%FT%TZ) backup ok: $SET.* in ${ELAPSED}s (rows=$ROWS files=$FILES_COUNT offbox=$COPIED)"
 
 # Rotation: keep the newest $BACKUP_KEEP SETS of this app — every file of an

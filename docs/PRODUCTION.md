@@ -326,8 +326,13 @@ heap of the biggest table (`ordenes`, 60 000 rows) was overwritten with random
 bytes while PostgreSQL was stopped, then PostgreSQL started again. The engine
 kept answering **200** — the first page of results did not touch the damaged
 blocks. The nightly `pg_dump` did: `invalid page in block 0 of relation …`,
-`backup FAILED`. **The backup is the corruption detector**; that is why its
-failure must reach a human (§4.6).
+`backup FAILED` — and since CAOS-S1 the failure NAMES ITS CAUSE (the exact
+table, from pg_dump's own stderr) in `last-backup.status` and in the alert,
+so the 3 a.m. reader knows it is corruption and which table to restore. With
+PostgreSQL data checksums ON (§4.8) the FIRST read of a damaged page is an
+ERROR instead of silently served data — the detector moves from "tonight's
+backup" to "the next touch". **Either way the failure must reach a human
+(§4.6).**
 
 ```
 sudo bash /opt/appximo/scripts/restore.sh --app=appximo --set=/var/backups/appximo/appximo-20260830-174054
@@ -469,9 +474,11 @@ Every case below was PROVOKED on the reference box, not read from a unit file.
 | **PostgreSQL is slow to start** (crash recovery, a big WAL replay, a slow disk) | the engine **waits** — the unit is ordered after the PostgreSQL instance, whose `Type=forking` start completes only when it accepts connections | provoked with a 60 s delay in the instance's start: the engine started 50 ms after PostgreSQL was ready, `NRestarts=0`, no request touched a half-up database | no |
 | **PostgreSQL fails to start at boot** (a bad config, a full disk, a broken upgrade) — the case that strands most single-box apps | the engine exits (it refuses to serve without its database), systemd relaunches it every 2 s **and never gives up** (`StartLimitIntervalSec=0` — with systemd's default limit of 5 starts per 10 s the unit would go `failed` and STAY down after PostgreSQL was fixed); the moment the database accepts connections the next attempt succeeds | provoked twice: 60 s down → +16 restarts, unit `activating (auto-restart)`, never `failed`; serving **0.5 s** after PostgreSQL came back, nobody touched the engine | **yes, for PostgreSQL** (`journalctl -u postgresql@16-main`); the engine needs nothing |
 | the disk fills up | **the app does not notice at first** — at 100 % full, reads answered 200 and small writes 201 (PostgreSQL recycles pre-allocated WAL segments and fills free space in existing pages); the failure comes later and is catastrophic (a new WAL segment or a checkpoint → `PANIC … No space left` → PostgreSQL restarts, the engine answers 503). What DID fail at once: the backup (`could not write to output file` → `failed` in the status file → alert), and journald stopped writing. Freed the space: everything kept working, zero restarts | the guard is §4.6 — the disk alert fires at 10 % / 1 GiB, hours or days before this | **yes** — free space (old sets, `journalctl --vacuum-size`, apt cache); if PostgreSQL already panicked: free space, `systemctl start postgresql` |
-| PostgreSQL dies / is stopped while the app runs | the engine **stays up** and answers **503 + Retry-After** fast (the breaker opens on connection refusals: max 0.1 s per failed request), then reconnects by itself | 20 s stop → **24.8 s** of clean 503s at 10 rps (232 requests), first 200 **4.3 s** after PostgreSQL was back, engine never restarted | no |
+| **PostgreSQL is OOM-killed or its postmaster crashes** — the field OOM incident's failure mode | since CAOS-S1 the installer adds a `Restart=on-failure` drop-in for the `postgresql@NN-main` instance, so systemd **brings PostgreSQL back by itself** (Ubuntu/Debian ship it `Restart=no`, which left it — and every app on the box — down until a human ran `systemctl start`). The engine answers fast 503s meanwhile and reconnects | provoked (SIGKILL the postmaster): **without any intervention** PostgreSQL + the engine were serving again in **5 s**; an intentional `systemctl stop` still stops (`RestartPreventExitStatus`) | **no** (was: yes — the pre-CAOS-S1 gap) |
+| PostgreSQL is stopped/killed while the app runs (the connection refused) | the engine **stays up** and answers **503 + Retry-After** fast, then reconnects by itself | 20 s stop → clean 503s (≤ 0.1 s each), first 200 ~4 s after PostgreSQL is back, engine never restarted | no |
+| **the network to a REMOTE database is black-holed** (link down / packets dropped, not refused) | the engine stays up and sheds fast: since CAOS-S1 (ENG-59) the circuit breaker trips on a run of consecutive failures, not only a lost-count ratio | provoked (30 s `iptables DROP` under a warmed process): **p50 of a failed request 5.00 s → 0.00 s, 70 % under 200 ms**; recovery still immediate (+0.1 s after the link returns) | no |
 | the network to the database drops packets (a remote database) | the engine stays up and answers 503 — but **slowly**: a black-holed connection is not a refusal, each request waits the 5 s query/acquire deadline before its 503, and the breaker does not shed them (ENG-59) | 30 s drop → **28.4 s** of 503s at 10 rps (248 requests, **p50 5.0 s each**); first 200 **250 ms** after the link returned, engine never restarted | no — but until ENG-59 a dead link costs 5 s per request instead of 0.1 s |
-| the database is corrupt | **nothing** — the app keeps serving what it can read; the nightly backup fails and alerts (§4.6) | restore in 13.6 s (§4.2) | **yes** — run §4.3-A |
+| a data page is corrupt | with **data_checksums on** (installer default on a fresh cluster since CAOS-S1) any query that READS the bad page gets a loud error instead of silent wrong data — but index/count-only plans can skip it, so the **guaranteed** detector remains the nightly backup (it COPYs every block), whose failure now **names the table** (`Dumping the contents of table "X" failed … invalid page in block N`) and alerts (§4.6) | enabling checksums measured **0.9 s per ~372 MB** offline; restore the affected data in 13.6 s (§4.2) | **yes** — run §4.3-A |
 | **the host is gone** | **nothing.** The app is DOWN until someone acts | rebuild in ≈ 4 min + DNS (§4.2) | **yes** — run §4.3-B |
 
 ### 4.5 What ONE box does not cover — said, not hidden
@@ -497,6 +504,68 @@ the customer it is for), and it has a price that has to be on the table:
 If any of those is unacceptable for an app, the answer is a second box — which
 is the next design, not a flag in this one.
 
+**PostgreSQL data checksums** are ON by default on a cluster the installer
+creates fresh (CAOS-S1): a corrupt page is then a loud error on read, not
+silent wrong data. On a cluster that already holds data the installer will not
+enable them (it needs the whole cluster stopped — your maintenance window):
+`systemctl stop postgresql@*-main; runuser -u postgres -- pg_checksums --enable
+-D <datadir>; systemctl start postgresql@*-main` (measured ~0.9 s per 372 MB
+offline). `fleet-audit.sh` reports the state. The RUNTIME cost is negligible —
+measured A/B on the same box: read p50 1.83→1.82 ms, write p50 3.26→3.22 ms
+(both `no_change`), +1 MiB of WAL over a 30 s write arm. Checksums catch
+corruption **on access** (an index-only or count-by-index plan can skip the
+bad block); the nightly backup remains the guaranteed full-scan detector.
+
+### 4.5b Bringing an OLD install up to date (and auditing any box in ten seconds)
+
+Fixing the installer does not fix what it already installed. Every box
+installed before 2026-08-30 is missing some of §4: no backup timer, a backup
+that was never a full set, a unit that can give up after a burst of restarts.
+Two tools close the gap — both were followed literally on a degraded lab box
+and then on the production demo box before landing here:
+
+**Audit first.** `scripts/fleet-audit.sh` (installed alongside the other companions in `/opt/<app>/scripts/`) says
+per app WHAT IS MISSING, never just "ok" — service + unit policy, binary
+contract, companions, timer, the last set's age and completeness, off-box +
+passphrase — plus the box facts (swap, disk, PostgreSQL checksums):
+
+```bash
+sudo bash /opt/<app>/scripts/fleet-audit.sh          # every app on the box; exit 1 = something missing
+```
+
+**Then upgrade — it is just the installer, re-run.** For EACH app on the box:
+
+```bash
+# 0. safety: a backup with what exists today, and copies of what the run replaces
+sudo bash /opt/<app>/scripts/backup.sh --env-file=/etc/<app>/<app>.env 2>/dev/null   || pg_dump -Fc -f /root/pre-upgrade-<app>.dump --dbname="$(grep ^DATABASE_URL= /etc/<app>/<app>.env | cut -d= -f2-)"
+cp -a /etc/systemd/system/<app>.service /root/<app>.service.pre-upgrade
+cp -a /etc/<app>/<app>.env /root/<app>.env.pre-upgrade
+
+# 1. the same install command, with the binary it ALREADY runs (or a new one):
+sudo bash install.sh --app=<app> --domain=<its domain> --email=<email>   --binary=/opt/<app>/bin/<its binary> --port=<its port> --control-port=<its control port> --yes
+```
+
+What the re-run does (§3's criterion table still governs): secrets, database,
+data and schema KEPT; the unit REWRITTEN with the current policy
+(`RestartSec=2`, `StartLimitIntervalSec=0`); the companions and the backup
+timer installed; `APPXIMO_BACKUP_DIR` added to the env — and **every env key
+the installer does not manage is carried over verbatim** (a theme, demo roles,
+a raised limit, comments included) under a "kept from the previous env"
+marker. Pass `--port`/`--control-port` explicitly on a hand-installed box —
+the derived defaults may not match what it runs.
+
+Re-run the audit; it must end `✓ this box is protected` except what needs
+YOUR input (`BACKUP_COPY_TO` — §4.1). **Rollback** (drilled): restore the two
+`.pre-upgrade` copies, `systemctl daemon-reload && systemctl restart <app>` —
+the data was never touched.
+
+Boxes with units under names the current installer would not derive (a
+pre-rename `appitools`, a by-hand second app) work the same — `--app=<that
+name>`. One box-specific caveat from the field: an app whose OTHER units
+reference a companion script by path (a demo-reset calling `restore.sh`)
+keeps working only if those references match the NEW script's flags; the
+audit's `!` line about a non-set restore.sh is that warning.
+
 ### 4.6 Knowing BEFORE it is too late — backup and disk alerts
 
 The two silent killers are a backup that stopped running weeks ago and a disk
@@ -514,9 +583,17 @@ line `alert (no webhook configured — recorded only)`):
 | **no backup has ever run** and the app has been up longer than the floor | no status file | critical: "is the timer installed?" | `backup_ok -1` until the first run |
 | **disk low** — under `APPXIMO_DISK_MIN_FREE_PCT` (10 %) or `_MB` (1024) on the filesystem under the files dir, the obs db, the backup dir or `/` | one `statfs` per path, deduplicated by filesystem | warning (critical under half the floor), once per 6 h: path, free of total, and what to free first | `appximo_selfmon_disk_free_bytes{path}` / `_total_bytes{path}` |
 
-`backup.sh` itself posts to the same webhook when it fails — so a failed run
-is heard twice: by the script, and by the engine on the next tick, whether or
-not the script was still alive to say it. The JSON of the tick is
+A failed backup's status now **names the failing table** when the cause is
+corruption (`failed … cause=Dumping the contents of table "orders" failed …
+invalid page in block N`) — that line IS the corruption report, and it is the
+guaranteed one (the backup reads every block; a live query may not). The
+status file lives in the backup dir at mode 0644 and the dir is **0711** (not
+0700): the engine's self-monitor runs as the unprivileged service user and
+must traverse the dir to read the status — a 0700 dir silently made the watch
+report "none" and never alert (CAOS-S1 fixed it; the 0600 conf bundle stays
+unreadable). `backup.sh` itself posts to the same webhook when it fails — so a
+failed run is heard twice: by the script, and by the engine on the next tick,
+whether or not the script was still alive to say it. The JSON of the tick is
 `/admin/resources` → `latest.host`. Provoked on the reference box: a `failed`
 status line → alert within one tick; a status touched to 3 days old → the
 stale alert; the floor raised to 99 % → the disk alert naming `/var/lib/appximo`

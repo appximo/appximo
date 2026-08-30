@@ -1593,6 +1593,25 @@ global); that is why both exist. The memory guard (§2b) stays what it was:
 host-OOM degradation for writes. All four answer 429/503 with `Retry-After`
 — a client that honors it composes with every layer.
 
+A fifth actor is NOT a load defense and composes underneath all four: the
+**database circuit breaker**. It sheds only UNAVAILABILITY (timeouts,
+connection failures, class 08/53/57P0x — the same predicate that decides a
+503; a statement the database REJECTED proves it is up and never counts).
+Since CAOS-S1 it trips on EITHER a 60 % failure ratio over a rolling 10 s
+window OR **20 consecutive failures**. The consecutive rule is what catches a
+black-holed database (link down / packets dropped): every request then hangs
+the full 5 s query deadline, so ~50 are in flight at once and the completed-
+failures/started ratio never crosses 60 % — but the completions are an
+unbroken run, so the consecutive counter climbs and trips in ~2 s. Before,
+the counts were never cleared (default `Interval=0`), so on a warmed process
+neither rule fired and a black-holed database cost every request the full 5 s
+deadline for its 503 (measured: p50 5.00 s → 0.00 s, 70 % under 200 ms after
+the fix). 20 (not 10) consecutive leaves headroom so a brief pool-full blip
+under legitimate load — where waiters resolve into successes and reset the
+counter — never trips it. Open = immediate 503 +
+`Retry-After`; half-open probes every 8 s; recovery is the next successful
+probe. Nothing to configure.
+
 **Migration note (defaults changed in MOTOR-PRODUCCION-S2):** admission ships
 ON (`auto`); a deployment that must reproduce the old tip-instead-of-shed
 behavior sets `APPXIMO_MAX_INFLIGHT=0`. The per-tenant default moved from a
