@@ -835,10 +835,15 @@ build SHA when built by the official scripts).
 
 ### The defaults that will surprise you (by design)
 
-- **Per-tenant rate limit: 1000 rps / 100 burst.** The first ceiling a
-  single-tenant load test hits — well before CPU. Raise with
-  `RATE_LIMIT_RPS`/`RATE_LIMIT_BURST` (the flagship benchmark declares
-  exactly that).
+- **Per-tenant rate limit: 350 rps × vCPU / 100 burst** (derived from the
+  measured per-core ceiling at a 70 % margin, docs/BENCHMARKS.md §4e; a
+  hand-set 1000 before MOTOR-PRODUCCION-S2). Often the first ceiling a
+  single-tenant load test hits. Raise with `RATE_LIMIT_RPS`/
+  `RATE_LIMIT_BURST` (the flagship benchmark declares exactly that).
+- **Admission control: `APPXIMO_MAX_INFLIGHT`, auto = max(32, 4×(vCPU +
+  DB pool)).** Past the box's capacity the excess is shed as an immediate
+  `429` + `Retry-After: 1` instead of queueing into 5-second timeouts;
+  `0` disables.
 - **Suspension, not revocation:** JWTs are stateless; suspending a user or
   tenant blocks new logins, already-issued tokens live to their `exp`.
 - Response cache: GETs are served from RAM per tenant; every write path
@@ -931,7 +936,7 @@ is tracked. If your project needs one of these today, factor that in *now*:
 - The engine's flagship figure — **p50 1.60 ms at 2,000 rps sustained, 0
   errors in 597,461 requests** on a 2-vCPU $16 droplet (re-measured
   2026-08-01) — holds **only with the per-tenant limiter raised**
-  (`RATE_LIMIT_RPS=3000`), as the benchmark doc declares; on defaults, ~half
+  (`RATE_LIMIT_RPS=3000`), as the benchmark doc declares; on the then-default 1,000 rps/tenant, ~half
   of a single-tenant 2,000 rps load is 429 by design. At 500 rps: p50
   1.53 ms; with the response cache fully bypassed (every request reaching
   Postgres): 2.44 ms. A filtered, sorted page over **1 M rows: ~3 ms**

@@ -584,7 +584,7 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
     <thead><tr><th>Figure</th><th>Value</th><th>Condition — read it</th></tr></thead>
     <tbody>
       <tr><td>Sustained throughput</td><td class="num">2,000 req/s · p50 1.60 ms · 0 errors in 597,461 requests</td>
-        <td>2-vCPU $16 droplet, external loader over a real network; JWT + RBAC + multi-tenancy + validation active. <span class="cond">Requires raising the per-tenant rate limiter (<code>RATE_LIMIT_RPS=3000</code>) — on the default 1,000 rps/tenant, ~half of a single-tenant 2,000 rps load is 429 <em>by design</em>.</span></td></tr>
+        <td>2-vCPU $16 droplet, external loader over a real network; JWT + RBAC + multi-tenancy + validation active. <span class="cond">Requires raising the per-tenant rate limiter (<code>RATE_LIMIT_RPS=3000</code>) — on the then-default 1,000 rps/tenant, ~half of a single-tenant 2,000 rps load was 429 <em>by design</em>; the default is now derived from the box (350 rps × vCPU).</span></td></tr>
       <tr><td>Median latency, comfortable load</td><td class="num">p50 1.53 ms @ 500 req/s</td>
         <td>Same stack; response cache on.<span class="cond">With the cache <strong>fully bypassed</strong> — every request reaching PostgreSQL — p50 2.44 ms.</span></td></tr>
       <tr><td>A million-row query</td><td class="num">~3 ms engine · ~4.2 ms over HTTPS</td>

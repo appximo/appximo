@@ -100,8 +100,12 @@ boot() { # $1=side $2=binary $3=port $4=ctrl
   local side=$1 bin=$2 port=$3 ctrl=$4 dbname="appximo_bdg_$1"
   sql "DROP DATABASE IF EXISTS $dbname" >/dev/null
   sql "CREATE DATABASE $dbname" >/dev/null
+  # APPXIMO_MAX_INFLIGHT=1 (MOTOR-PRODUCCION-S2): the sequential corpus never
+  # overlaps (each curl completes before the next), so a cap of 1 changes NO
+  # sequential case — and it makes the concurrency shed probe below
+  # deterministic on the new binary. The base binary ignores the variable.
   DATABASE_URL="$(db_url_for "$dbname")" JWT_SECRET="$JWT_SECRET_GATE" ADMIN_KEY="$ADMIN_KEY_GATE" \
-    APPXIMO_CONTROL_PORT="$ctrl" APPXIMO_ENV="" \
+    APPXIMO_CONTROL_PORT="$ctrl" APPXIMO_ENV="" APPXIMO_MAX_INFLIGHT="${BDG_MAX_INFLIGHT:-1}" \
     "$bin" serve --schema "$SCHEMA" --port "$port" >"$WORK/$side.log" 2>&1 &
   PIDS+=($!)
   for _ in $(seq 1 100); do
@@ -305,6 +309,45 @@ while IFS= read -r line; do
     printf '      expect: %s\n' "$(echo "$line" | jq -r '.expect // "(no note)"')"
   fi
 done <"$CORPUS"
+
+# ── beyond-the-corpus probes (MOTOR-PRODUCCION-S2) ───────────────────────────
+# The corpus is sequential BY DESIGN, so two contract changes cannot appear in
+# it: admission control (a CONCURRENCY behavior) and the derived rate-limit
+# default (a boot-time value). Both are made visible here, in the same
+# same/diff accounting, so they are never an invisible change.
+
+# a) Concurrency shed probe: 64 cache-busted reads, 32 in parallel, against an
+#    in-flight cap of 1 (boot env above). An admission-controlled binary sheds
+#    some of them with 429; a binary without admission serves all 64 (the
+#    tenant limiter's burst of 100 is not reached).
+shed_probe() { # $1=port → yes|no
+  local port=$1
+  seq 1 64 | xargs -P 32 -I{} curl -s -o /dev/null -w '%{http_code}\n' \
+      -H "Host: $HOST_DEFAULT" -H "Authorization: Bearer $TOKEN_ADMIN" \
+      "http://127.0.0.1:$port/api/notes?per_page=1&probe={}" \
+    | grep -q '^429$' && echo yes || echo no
+}
+total=$((total+1))
+b_shed=$(shed_probe "$PORT_BASE"); n_shed=$(shed_probe "$PORT_NEW")
+if [ "$b_shed" = "$n_shed" ]; then
+  same=$((same+1)); printf 'SAME  %-38s shed=%s\n' "admission-shed-burst" "$b_shed"
+else
+  diff=$((diff+1)); DIFF_NAMES+=("admission-shed-burst")
+  printf 'DIFF  %-38s base_shed=%s new_shed=%s\n' "admission-shed-burst" "$b_shed" "$n_shed"
+  printf '      expect: an admission-controlled binary sheds part of a 32-parallel burst with 429 at cap 1; one without serves all 64 (ENG-52)\n'
+fi
+
+# b) The rate-limiter default, read from each binary's own boot log.
+total=$((total+1))
+b_rl=$(grep -m1 -o 'rate limiter: [0-9]* RPS' "$WORK/base.log" || echo "rate limiter: ?")
+n_rl=$(grep -m1 -o 'rate limiter: [0-9]* RPS' "$WORK/new.log"  || echo "rate limiter: ?")
+if [ "$b_rl" = "$n_rl" ]; then
+  same=$((same+1)); printf 'SAME  %-38s %s\n' "rate-limit-default" "$b_rl"
+else
+  diff=$((diff+1)); DIFF_NAMES+=("rate-limit-default")
+  printf 'DIFF  %-38s base="%s" new="%s"\n' "rate-limit-default" "$b_rl" "$n_rl"
+  printf '      expect: the default is now DERIVED (350 rps/vCPU x GOMAXPROCS, 70%% of the measured per-core ceiling — ENG-53); RATE_LIMIT_RPS still overrides\n'
+fi
 
 echo
 echo "── $total cases: $same same, $diff diff"

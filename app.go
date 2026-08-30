@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -93,6 +94,10 @@ type App struct {
 	// per-tenant limiter, because an anonymous endpoint is abuse surface by
 	// definition (LIBRARY-EXTEND-S1).
 	publicLimiter *resilience.TenantLimiter
+	// admission caps in-flight data-plane requests so overload degrades into
+	// cheap early 429s instead of the metastable tip ENG-52 measured
+	// (pkg/resilience/admission.go carries the whole argument). Nil = disabled.
+	admission *resilience.Admission
 	// memGuard refuses data-plane WRITES while the host is under memory
 	// pressure (MemAvailable+SwapFree under a floor) — a 503 that says why,
 	// instead of accepting until the kernel OOM-kills the shared PostgreSQL
@@ -522,11 +527,26 @@ func New(cfg Config) (*App, error) {
 	// app must never short-circuit this app's chain.
 	app.responseCache.SetJWTSecret(cfg.JWTSecret)
 
-	// Rate limiter.
-	rlRPS := 1000.0
+	// Per-tenant rate limiter. The DEFAULT is DERIVED from the box, not set by
+	// hand (ENG-53, MOTOR-PRODUCCION-S2): the shipped 1000 rps was UNRELATED
+	// to capacity — measured in the isolated lab (§4e) it landed by
+	// coincidence right at the shared 2-vCPU box's tipping region and below
+	// the dedicated box's ceiling. The derivation: the canonical uncached
+	// read's clean per-core ceiling on the customer-grade shared box is
+	// ≈ 500 rps/vCPU (1 000 rps / 2 vCPU, §4e); the planning margin is the
+	// M/M/1 latency knee at ρ = 0.7 → 350 rps × GOMAXPROCS. Roles, not
+	// duplicates: ADMISSION (above) protects the BOX by concurrency and
+	// adapts to the real workload; this limiter is per-tenant FAIRNESS and
+	// abuse policy — N tenants can sum past the box, and cheap cached traffic
+	// is throttled the same as expensive traffic (a rate cannot tell them
+	// apart; the migration note in docs/BENCHMARKS.md §4e says how to raise
+	// it for cache-heavy tenants). RATE_LIMIT_RPS overrides, as always.
+	rlRPS := 350.0 * float64(runtime.GOMAXPROCS(0))
+	rlDerived := true
 	if v := os.Getenv("RATE_LIMIT_RPS"); v != "" {
 		if f, perr := strconv.ParseFloat(v, 64); perr == nil && f > 0 {
 			rlRPS = f
+			rlDerived = false
 		}
 	}
 	rlBurst := 100
@@ -536,7 +556,37 @@ func New(cfg Config) (*App, error) {
 		}
 	}
 	app.tenantLimiter = resilience.NewConfiguredLimiter(resilience.RateLimitConfig{RPS: rlRPS, Burst: rlBurst})
-	log.Printf("rate limiter: %.0f RPS / %d burst per tenant", rlRPS, rlBurst)
+	if rlDerived {
+		log.Printf("rate limiter: %.0f RPS / %d burst per tenant (derived: 350 rps/vCPU × GOMAXPROCS=%d — 70%% of the measured per-core ceiling, docs/BENCHMARKS.md §4e; RATE_LIMIT_RPS overrides)", rlRPS, rlBurst, runtime.GOMAXPROCS(0))
+	} else {
+		log.Printf("rate limiter: %.0f RPS / %d burst per tenant (RATE_LIMIT_RPS)", rlRPS, rlBurst)
+	}
+
+	// Admission control (ENG-52, MOTOR-PRODUCCION-S2): a hard cap on in-flight
+	// data-plane requests, shed as an immediate 429 + Retry-After BEFORE any
+	// per-request work. This is what turns the measured overload tip (§4e:
+	// 6/8 runs at 1 100 rps collapse to a seconds-scale p50 and never return)
+	// into bounded degradation. Auto limit = max(32, 4×(GOMAXPROCS + pool)).
+	adm, admErr := resilience.NewAdmissionFromEnv(
+		runtime.GOMAXPROCS(0), int(pool.Config().MaxConns),
+		func(req *http.Request) bool {
+			// Byte-serving downloads are client-paced sendfile streams, not
+			// CPU — same predicate the compression bypass uses.
+			return files.IsByteServingPath(req.Method, req.URL.Path)
+		})
+	if admErr != nil {
+		pool.Close()
+		return nil, fmt.Errorf("appximo: %w", admErr)
+	}
+	app.admission = adm
+	if adm != nil {
+		if regErr := app.metrics.Register(adm.PromCollector()); regErr != nil {
+			log.Printf("WARNING: admission gauges not registered on /metrics: %v", regErr)
+		}
+		log.Printf("admission control: max %d requests in flight (%s; 0 disables) — overload sheds 429 early instead of tipping", adm.Limit(), resilience.AdmissionEnvVar)
+	} else {
+		log.Printf("admission control: DISABLED (%s=0) — past its ceiling the engine tips instead of degrading (docs/BENCHMARKS.md §4e)", resilience.AdmissionEnvVar)
+	}
 
 	// Host memory guard (MIGRACION-CONFIANZA-S1, D-ter): the engine had no
 	// notion of host memory pressure — GOMEMLIMIT bounds only its own heap,
@@ -1192,6 +1242,30 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 	// the edge — it used to reach the handlers, panic in MustFromCtx and mask
 	// as a 500. Tenant-agnostic surfaces (/admin, /editor, /docs, probes) pass.
 	r.Use(tenant.RequireForTenantAPI)
+	// Admission (ENG-52): the outermost LOAD guard — before the tenant
+	// limiter (a shed request must not consume the tenant's tokens), before
+	// the logger/cache/JWT/pool (the refusal costs one atomic and a path
+	// check). Custom routes registered ByteServing join the same exemption as
+	// the built-in file downloads: client-paced streams, not CPU.
+	if a.admission != nil {
+		adm := a.admission
+		inner := adm.Middleware
+		if byteServingPaths != nil {
+			bsp := byteServingPaths
+			r.Use(func(next http.Handler) http.Handler {
+				guarded := inner(next)
+				return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					if req.Method == http.MethodGet && bsp[req.URL.Path] {
+						next.ServeHTTP(w, req)
+						return
+					}
+					guarded.ServeHTTP(w, req)
+				})
+			})
+		} else {
+			r.Use(inner)
+		}
+	}
 	r.Use(resilience.RateLimit(a.tenantLimiter))
 	// Memory guard: after the limiter (a refused write is still a counted
 	// request), before the logger/cache/JWT (a saturated host pays nothing

@@ -26,7 +26,15 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-29 (LAB-CAPACIDAD-S2)** — the first ISOLATED run of
+**Last reviewed: 2026-08-30 (MOTOR-PRODUCCION-S2)** — the engine DEGRADES
+instead of tipping: admission control (ENG-52 → DONE; paired 8×8 at the tip:
+goodput +20 %, p50 1 728 → 36 ms, timeouts 79 013 → 0, ABBA no_change in
+median and tail), the rate-limit default DERIVED from measured capacity
+(ENG-53 → DONE, 350 rps × vCPU, migration note in backend-spec §3.8), and
+the 130× write-interference premise REFUTED in the clean lab (ENG-55 →
+DONE/closed with the sizing rule; ×1.02 measured). ENG-54 deferred with its
+reason (the eight provocations are the price of touching the threshold).
+Before that: **(LAB-CAPACIDAD-S2)** — the first ISOLATED run of
 the capacity laboratory (OPS-37 → DONE): the old ~400 rps ceiling and the
 420 rps bistability were the instrument + the 1-vCPU box (9/9 runs at 420
 clean, every old level served at ms-scale p50); the TIPPING itself is the
@@ -295,83 +303,14 @@ by damage is #4 (documentation of `import`), #6c (`Route.AsRole`), #1 (a
 documentation halves (#1, #4, #8) are still worth doing — they cost a page
 and they are what the next migrator reads first.
 
-### ENG-52 — The engine has no admission control, so past its ceiling it does not degrade — it tips
-
-- **Origin:** CAPACIDAD-USL-S1 (2026-08-29). The capacity ladder found that
-  near saturation the engine is **bistable**, not gradual. On the reference
-  1-vCPU box, the canonical read holds 380 rps in every run at a 2–3 ms p50;
-  at 420 rps one run in four tips into a mode with a **4 427 ms** p50 and
-  *lower* goodput (339 vs 420 rps) and never recovers within the run; past
-  450 rps the slow mode dominates — while the system can still, on a good
-  run, serve 500 rps at a 2 ms p50. Once the queue builds, serving it costs
-  more per request, which builds it further.
-- **Update (LAB-CAPACIDAD-S2, 2026-08-29): CONFIRMED in the isolated lab —
-  and the numbers move.** With the generator on its own dedicated box (worst
-  7 % busy), 420 rps never tips (9/9 runs at 2.5–2.7 ms — the OLD tipping
-  point was generator contention), but the same tip reproduces at each box's
-  REAL ceiling: shared 2-vCPU (s-2vcpu-2gb) clean through ~1000, 6/8 runs
-  tipped at 1100, plateau ≈1180; dedicated 2-vCPU (c-2) clean through 1400,
-  tips ~1600. In tipped runs the service p50 jumps to ~450–650 ms in the
-  database/pool stage and abandonment is massive. The item's premise holds
-  exactly; only the ceiling it fires at was understated by the old
-  instrument.
-- **Why it happens:** the engine accepts unbounded concurrency. There is no
-  cap on in-flight requests and no queue-length shed; the only backstop is
-  `queryTimeout = 5 s` (`pkg/db/tenant.go:28`), which fires far too late —
-  by then the client has waited five seconds and the work is thrown away
-  after being paid for. The per-tenant rate limiter cannot help: it is a
-  RATE limit, and the collapse is a CONCURRENCY phenomenon (see ENG-53).
-- **Impact: high, and it is the difference between "slow" and "down".** A
-  system that flattens at its ceiling serves 400 rps at 50 ms under a 700 rps
-  storm. This one serves 292–494 rps at ~6 s, so every caller times out and
-  every retry makes it worse. It is also what makes the capacity number hard
-  to publish (the USL fit lands at R² 0.80 with a 21 % CV precisely because
-  of the two modes).
-- **Ready:** an in-flight admission limit (per app, sized from measured
-  service demand or configured), that answers **503 + `Retry-After`
-  immediately** when the queue exceeds it instead of accepting work it cannot
-  finish — the shape the memory guard already uses for host memory. Measured
-  by re-running `capacity sweep` over the same ladder and showing the
-  goodput plateau HOLDS past the tipping point instead of falling, with the
-  p50 bounded. Must be `no_change` on the read path below the limit.
-
-### ENG-53 — The shipped per-tenant rate limit (1000 rps) sits above the app's own ceiling, so it protects nothing
-
-- **Update (LAB-CAPACIDAD-S2):** on the 1-vCPU reference box the premise
-  holds as written. On the customer-grade 2-vCPU boxes measured in the
-  isolated lab the default 1000 rps lands BY COINCIDENCE right at the shared
-  box's tipping region (~1000–1100) and BELOW the dedicated box's ceiling
-  (~1600) — i.e. the default is not "above the ceiling" everywhere, it is
-  UNRELATED to the ceiling. The fix direction is unchanged: the limit must
-  derive from measured capacity for the box/plan, not ship as one number.
-
-- **Origin:** CAPACIDAD-USL-S1 (2026-08-29). `app.go:527` defaults
-  `RATE_LIMIT_RPS` to **1000 rps / burst 100 per tenant**. The same session
-  measured the app's own ceiling on the reference box at **~400 rps** for a
-  normal authenticated list and **~1 rps** for `?search=&count=true`. For
-  authenticated traffic the limiter therefore never fires: the engine reaches
-  its own wall first and fails as 5 s timeouts and 5xx rather than as a clean,
-  cheap `429` with `Retry-After`.
-- **Corroborated in the field:** the live demo's authenticated collapse at
-  120–250 rps (2026-08-29 04:55) was NOT the limiter — the log shows
-  `query p99 5013.5 ms`, i.e. exactly `queryTimeout`. The limiter was never
-  reached.
-- **Note what is NOT wrong:** the anonymous / `Route.Public` default (5 rps,
-  burst 10, keyed tenant+IP) is well below any ceiling and does its job; a
-  consumer's own `Route.RateLimit` (the tiendita's 200 rps/IP) also fires
-  exactly as declared — measured, 33 % / 67 % / 83 % shed at 300 / 600 / 1200
-  rps offered. The defect is the *authenticated* default only.
-- **Impact: medium.** A default that cannot fire is not a safety net, and an
-  operator reading `rate limiter: 1000 RPS / 100 burst per tenant` at boot
-  reasonably believes they have one.
-- **Ready:** either (a) the boot line states the limit alongside a measured
-  or estimated capacity and warns when the limit exceeds it, or (b) the
-  default is derived (e.g. from `GOMAXPROCS` and a measured service demand),
-  or (c) ENG-52's admission control makes the rate limit the second line of
-  defence and the documentation says so. Whichever is chosen, `docs/PRODUCTION.md`
-  gains the sizing rule; today it has none.
-
 ### ENG-54 — `cpu_saturated` silences itself exactly when the queue is longest: the rule's floor scales with the p99 it is judging
+
+- **Deferred in MOTOR-PRODUCCION-S2 (2026-08-30), deliberately.** The session
+  had the clean laboratory and fresh numbers, but the rule stands: the
+  threshold is not touched without re-running ALL EIGHT provocations (the
+  relative floor exists so the lock provocation keeps reading
+  `lock_contention`), and that harness is its own evening. A wrong verdict is
+  worse than a missing one; an unverified fix is worse than both. Unchanged.
 
 - **Origin:** CAPACIDAD-USL-S1 (2026-08-29). The saturation sequence across
   the ladder inverts: `cpu_saturated` dominates from 150 to 380 rps, and then
@@ -414,51 +353,6 @@ and they are what the next migrator reads first.
   provocation reading `lock_contention`. Do not change the ranking without
   that suite — which is why this session recorded the defect with its numbers
   instead of patching it blind.
-
-### ENG-55 — 25 writes per second multiply the read tail by ~130×: reads and writes share one 10-connection pool with no separation
-
-- **Update (LAB-CAPACIDAD-S2):** corroborated from another angle in the
-  isolated lab, read-only: at ~1000 rps on a 2-vCPU box the self-monitor's
-  dominant verdict is already `pool_exhausted` with real evidence (341
-  requests/tick finding no free connection, 18 % of the interval summed in
-  waiters) while latency is still single-digit ms — on 2+ vCPU the fixed
-  10-connection pool becomes the FIRST queue, before CPU. The tipped mode's
-  service p50 (~450–650 ms, all in the query stage) is that queue collapsing.
-  The pool-separation/sizing experiment this item proposes is the right next
-  bench, and the isolated lab is the right place to run it.
-
-- **Origin:** CAPACIDAD-USL-S1 (2026-08-29), found in the 4-hour endurance run
-  and then isolated with a controlled A/B (two rounds, alternated):
-
-  | load | p50 | **p90** | p95 | p99 | verdict |
-  |---|--:|--:|--:|--:|:--|
-  | 240 rps read ALONE | 2.51 / 2.53 ms | **3.50 / 3.55 ms** | 5.6 / 6.9 ms | 424 / 873 ms | cpu_saturated |
-  | the same + **25 rps PATCH** | 2.56 / 2.46 ms | **489.7 / 378.0 ms** | 889 / 1 267 ms | 1 237 / 2 136 ms | pool_exhausted |
-
-  The median does not move (2.51 → 2.56 ms). The p90 moves by two orders of
-  magnitude. `service` ≈ `response` latency (487.6 vs 489.7 ms), so the stall
-  is server-side, not generator queueing.
-- **What it is NOT:** autovacuum kept up (**96.5 % HOT updates**, dead tuples
-  flat at ~4 000 across 374 k updates, 24 autovacuums); host memory PSI 0.05 %,
-  IO PSI 0.83 %, engine swap 2.5 MB; no leak (live-heap slope R² = 0.00 over
-  3.9 h). All measured, not assumed.
-- **What it plausibly is:** a write holds a pool connection for the whole
-  transaction (BEGIN → validate → INSERT/UPDATE → outbox → COMMIT, plus
-  `fsync` on commit), so a handful of concurrent writes occupy a large share
-  of a **10-connection** pool and every read queues behind them. The engine
-  offers no separation — no read/write pool split, no priority, no reserved
-  read capacity — and `DB_MAX_CONNS` is a single global number.
-- **Impact: high, and it is invisible in every benchmark this project has
-  published**, because they measure one workload at a time. A real app is
-  never one workload at a time: the number a customer feels is the mixed one.
-- **Ready:** measure whether the cause is connection occupancy (split the
-  pool, or reserve N connections for reads, and re-run the same A/B — the p90
-  must come back toward the read-alone figure) or commit `fsync` latency
-  (compare with `synchronous_commit=off` on a scratch database, for
-  diagnosis only). Then either ship the separation or document the sizing
-  rule with this measurement in `docs/BENCHMARKS.md §4d` and
-  `docs/PRODUCTION.md`. Related: ENG-52 (the same queue, at the ceiling
-  rather than below it).
 
 ### SCHEMA-9 — `?search=` is an unindexable full scan across every text column, and the engine offers it with no guard
 
@@ -1619,6 +1513,40 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in MOTOR-PRODUCCION-S2 (2026-08-30) — the engine degrades instead of tipping; defaults derive from measured capacity
+
+- **ENG-52 — admission control: DONE.** The tip's cause, named with evidence:
+  unbounded in-flight concurrency + every queued request paying the whole
+  pre-pool pipeline before dying late at the 5 s timeout — wasted work eats
+  admitted capacity, a metastable feedback (the reason runs "never came
+  back"). The mechanism: a hard in-flight cap shed as an immediate 429 +
+  Retry-After BEFORE any per-request work (`APPXIMO_MAX_INFLIGHT`, auto =
+  max(32, 4×(GOMAXPROCS+pool)); argued in pkg/resilience/admission.go against
+  gradient limits — estimator whipsaw on shared-vCPU noise — CoDel queues and
+  pool-pressure triggers; concurrency self-adapts by Little's law where any
+  rate would need the 20×-per-endpoint ceiling). Measured paired on the SAME
+  lab instances at each one's tip: shared @4800 OFF → goodput 3 679 / p50
+  1 728 ms / 79 013 timeouts; ON → 4 405 (+20 %) / 36 ms / ZERO timeouts,
+  8/8 runs alike; dedicated @6000 OFF 5 194/695 ms/26.6 k → ON 5 676 (+9 %)/
+  23 ms/0. No false rejection at any level with headroom (0×429 everywhere
+  ≤1 200/1 800). ABBA frozen on the lab: no_change in median AND tail.
+  BENCHMARKS §4e; backend-spec §3.8.
+- **ENG-53 — derived rate-limit default: DONE.** Default = 350 rps ×
+  GOMAXPROCS (70 % of the measured per-core clean ceiling of the canonical
+  uncached read on the customer shared box, §4e), overridable as always; the
+  limiter's role re-scoped to per-tenant fairness/abuse (admission owns
+  capacity). Composition of the four defenses + migration note:
+  backend-spec §3.8. Boot log names the derivation; the binary-diff gate now
+  prints both binaries' defaults (a visible, explained DIFF).
+- **ENG-55 — the 130× write interference: experiment run in the clean lab,
+  premise REFUTED there.** 240 r/s ± 25 w/s, A/B/B/A, both boxes: read p90
+  ×1.02 on the shared box (2.03 → 2.08–2.13 ms), unmoved on the dedicated;
+  the DB_MAX_CONNS=30 falsification arm changed nothing (no pool occupancy
+  to remove at this load). The 130× was measured on the contaminated
+  same-box 1-vCPU setup; §4d now says so at the claim. Closed with the
+  sizing rule documented (§4e); reopen only if a clean 1-vCPU measurement
+  reproduces it.
 
 ## DONE in LAB-CAPACIDAD-S2 (2026-08-29) — the first isolated run: the old ceiling was the instrument, the tipping is the app
 

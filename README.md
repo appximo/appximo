@@ -281,7 +281,7 @@ No number below is valid without its condition column. That is deliberate.
 
 | Number | What it measures | Condition — read it |
 |---|---|---|
-| **2,000 req/s, p50 1.60 ms** (CI95 [1.57, 1.67]), 0 errors / 597k reqs | the engine: JWT + RBAC + multi-tenancy + validation + rate limiting active, external load generator over a real network | $16/mo 2-vCPU droplet; **single-tenant load needs the per-tenant limiter raised** (`RATE_LIMIT_RPS=3000 RATE_LIMIT_BURST=300`, as the benchmark declares — on the defaults, ~half of 2,000 rps to ONE tenant is answered `429`, by design); re-measured 2026-08-01, reproducing 2026-06-10's 1.58 ms |
+| **2,000 req/s, p50 1.60 ms** (CI95 [1.57, 1.67]), 0 errors / 597k reqs | the engine: JWT + RBAC + multi-tenancy + validation + rate limiting active, external load generator over a real network | $16/mo 2-vCPU droplet; **single-tenant load needs the per-tenant limiter raised** (`RATE_LIMIT_RPS=3000 RATE_LIMIT_BURST=300`, as the benchmark declares — on the THEN-default 1,000 rps/tenant, ~half of 2,000 rps to ONE tenant was answered `429`, by design (the default is derived from the box since MOTOR-PRODUCCION-S2)); re-measured 2026-08-01, reproducing 2026-06-10's 1.58 ms |
 | **p50 2.44 ms @ 500 req/s** | the same engine with the response cache **fully bypassed** — every request reaches PostgreSQL | same box; the uncached truth next to the cached one |
 | **+1.2 ms p50** | the full production stack's overhead: Caddy + Let's Encrypt TLS → systemd → native PostgreSQL | re-measured 2026-08-01; see [docs/BENCHMARKS.md](docs/BENCHMARKS.md) |
 | **~4.2 ms** end-to-end | a filtered page over **1M rows**, whole stack | re-measured 2026-08-01 |
@@ -561,7 +561,8 @@ the trilogy in one stream) — and it can build the full stack.
 | `DATABASE_URL` | env | **yes** | PostgreSQL connection string |
 | `JWT_SECRET` | env | **yes** | HS256 signing secret (≥ 32 chars — **enforced**: the engine refuses to boot with a shorter one) |
 | `ADMIN_KEY` | env | **yes** | `X-Admin-Key` for `/metrics`, `/debug`, `/admin`, control plane |
-| `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | env | no | per-tenant token bucket (default 1000/100) |
+| `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | env | no | per-tenant token bucket (default DERIVED: 350 rps × vCPU / 100 — docs/BENCHMARKS.md §4e) |
+| `APPXIMO_MAX_INFLIGHT` | env | no | admission control: max in-flight data-plane requests (auto = max(32, 4×(vCPU+pool)); `0` disables; excess → cheap early `429` + `Retry-After`) |
 | `APPXIMO_MAX_TX_OPS` | env | no | max operations per `POST /api/transaction` (default 100) |
 | `APPXIMO_FILES_BACKEND` | env | no | file-store storage: `local` (default, this box's disk) or `s3` (R2/Spaces/MinIO/AWS). See [docs/FILES.md](docs/FILES.md) |
 | `APPXIMO_FILES_S3_*` | env | with `s3` | `BUCKET`,`ENDPOINT`,`REGION`,`ACCESS_KEY`,`SECRET_KEY`,`FORCE_PATH_STYLE`,`PREFIX`,`SERVE` — provider-agnostic S3 config |

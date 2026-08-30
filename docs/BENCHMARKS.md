@@ -508,7 +508,10 @@ engine's declarative surface) or it needs to not offer it.
 
 Little's law converts a rate into a population, and the conversion is entirely
 governed by the think time — which is an ASSUMPTION about the product, not a
-measurement of the engine. At the 265 rps planning point:
+measurement of the engine. **(Historical: this 265 rps planning point came
+from the contaminated same-box measurement — §4e's isolated numbers put the
+shared-box clean ceiling at ~1 000 rps; scale the table accordingly.)** At
+the 265 rps planning point:
 
 | profile | think time | concurrent users |
 |---|--:|--:|
@@ -559,7 +562,10 @@ without the write half, alternated twice:
 | the same **+ 25 rps `PATCH`** | 2.56 / 2.46 ms | **489.7 / 378.0 ms** | 889 / 1 267 ms | 1 237 / 2 136 ms | pool_exhausted |
 
 **Twenty-five writes per second multiply the read p90 by roughly 130×, and
-leave the median untouched.** Every other benchmark in this document measures
+leave the median untouched** *(same-box 1-vCPU measurement — in the isolated
+2-vCPU laboratory this does NOT reproduce: ×1.02, see §4e "the
+write-interference finding"; treat this 130× as a property of the
+contaminated setup until re-measured clean on 1 vCPU)*. Every other benchmark in this document measures
 one workload at a time, and none of them can see this: a real application is
 never one workload at a time, and the number a user feels is the mixed one.
 
@@ -709,6 +715,64 @@ median at mid-load (p50 2.4–3.3 ms vs 1.6–2.0 ms), and an order of magnitude
 tighter tail (at 800–1 000 rps the shared box's p99 wandered 10–314 ms
 between repeats; the dedicated box held 3.8–5.8 ms) — for 2.3× the price
 ($18 vs $42/mo).
+
+### Admission control, measured (MOTOR-PRODUCCION-S2, 2026-08-30)
+
+ENG-52's fix — a hard cap on in-flight requests, shed as an immediate `429` +
+`Retry-After` before any per-request work (`APPXIMO_MAX_INFLIGHT`, auto =
+max(32, 4×(vCPU + pool)); the whole argument is in
+`pkg/resilience/admission.go`) — was measured in this same laboratory, same
+workload, same deterministic dataset, engine at the session commit, with the
+paired OFF/ON comparison on the SAME instances. Two field notes first: this
+run's droplets landed on hosts ~2–4× faster per core than LAB-CAPACIDAD-S2's
+(shared-vCPU instance variance, again — the tip on THESE boxes sits at
+~4 800 rps shared / ~6 000 dedicated, found by probing), and one dedicated
+probe at 6 600 rps pushed the generator to 84 % busy — **invalidated by the
+70 % gate and discarded**, which is the gate doing its job.
+
+**The paired verdict at the tip (8×8 shared, 4×4 dedicated):**
+
+| box @ rate | arm | goodput (median) | p50 | p99 | timeouts |
+|---|---|--:|--:|--:|--:|
+| s-2vcpu-2gb @ 4 800 | admission OFF | 3 679 rps | **1 728 ms** | 6 413 ms | 79 013 |
+| s-2vcpu-2gb @ 4 800 | admission ON | **4 405 rps (+20 %)** | **36 ms** | 487 ms | **0** |
+| c-2 @ 6 000 | admission OFF | 5 194 rps | 695 ms | 5 026 ms | 26 581 |
+| c-2 @ 6 000 | admission ON | **5 676 rps (+9 %)** | **23 ms** | 256 ms | **0** |
+
+The curve flattens instead of tipping: OFF, every run at the tip collapses to
+a seconds-scale p50 and mass timeouts; ON, **all repeats look alike** (p50
+range 31–50 ms across eight runs on the shared box), the excess is shed as
+fast 429s, and the goodput is HIGHER than anything the uncontrolled engine
+achieves at the same offered load — shedding early recovers the CPU that
+wasted-then-timed-out work was burning. Below the ceiling the controller is
+invisible: at every level up to 1 200 rps shared / 1 800 dedicated, **zero
+429s in every run** (no false rejection), and the only sheds seen mid-range
+(110 requests of 45 000 in one run) coincide exactly with neighbour
+micro-stalls — a handful shed during the stall instead of a queue built.
+
+**Cost under normal load: `no_change`, measured, not assumed.** Frozen ABBA
+on the dedicated box (base binary without admission vs the session binary
+with it ON, built the same way minutes apart, 8 runs per arm, A-B-B-A at
+300 rps): Δp50 −0.001 ms (MWU p = 0.806), Δp99 +0.01 ms (permutation
+p = 0.877) — no change in the median AND no change in the tail (OPS-35).
+
+**The write-interference finding (ENG-55) does not reproduce in the clean
+lab.** The same A/B that once measured 25 writes/s multiplying the read p90
+by ~130× (same-box, 1 vCPU, §"the finding a single-workload benchmark cannot
+produce") reads, on the isolated 2-vCPU customer box: read p90 2.03 ms alone
+→ 2.08–2.13 ms beside 25 writes/s (**×1.02**), p99 2.6 → 7.4–8.8 ms; the
+dedicated box does not move at all (1.65 → 1.67 ms); and the falsification
+arm (DB_MAX_CONNS=30) changes nothing — there is no pool occupancy to
+remove at this load. The 130× belongs to the contaminated single-box setup.
+The sizing rule that stands: on 2 + vCPU with the default 10-connection
+pool, light write traffic beside reads costs ~2 % of read p90; re-measure on
+1-vCPU boxes before promising anything there.
+
+The per-tenant rate-limit default is now DERIVED from this section's
+numbers: 350 rps × GOMAXPROCS = 70 % of the measured per-core clean ceiling
+of the canonical uncached read on the customer-grade shared box (the M/M/1
+ρ = 0.7 planning margin). See the migration note in `appximo backend-spec`
+§3.8 — the four load defenses and how they compose.
 
 Known gap of the isolated mode: the engine/PostgreSQL CPU-seconds per request
 (the service-demand law's input) are not readable cross-box, so that

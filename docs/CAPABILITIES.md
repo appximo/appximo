@@ -203,9 +203,16 @@ engineering. Re-verified against the running engine and the field reports on
   multi-app server.** It is verified in the installer's staged dry-run mode only
   (backlog **OPS-11**); the migration of an existing monolithic Caddyfile is the
   untested part.
-- **The default per-tenant rate limit is 1000 rps / 100 burst.** Not a limitation so
-  much as a default worth knowing: a single-tenant load test above it gets `429`s.
-  Raise it with `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST`.
+- **The default per-tenant rate limit is DERIVED from the box: 350 rps × vCPU
+  (GOMAXPROCS), 100 burst** — 70 % of the measured per-core ceiling of the
+  canonical uncached read (docs/BENCHMARKS.md §4e; before MOTOR-PRODUCCION-S2
+  it was a hand-set 1000 unrelated to capacity). A single-tenant load test
+  above it gets `429`s; cached traffic is throttled the same as expensive
+  traffic (a rate cannot tell them apart). Raise it with `RATE_LIMIT_RPS` /
+  `RATE_LIMIT_BURST`. Separately, **admission control** caps in-flight
+  requests (`APPXIMO_MAX_INFLIGHT`, auto by default): past the box's real
+  ceiling the excess gets a cheap early `429 Retry-After` instead of the
+  5-second timeouts a tip used to produce.
 - **No hosted/SaaS version** — self-hosted only, by design.
 - **No `COPY` / file import.** The bulk write door is `/api/transaction` (100 ops per request, 1 MiB per request). Minutes for tens of thousands of rows; a `COPY`-class door is registered (MIG-FRONT #1), not built.
 - **JSON numbers pass through float64** on every door: integers past 2^53 lose digits (ENG-50); a `json` field is a JSON VALUE (ADR-028) stored as canonical text — keys sorted, `1.50` → `1.5`. The exact door is a JSON-text STRING on a `json` field.

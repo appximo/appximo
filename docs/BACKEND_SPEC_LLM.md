@@ -1547,6 +1547,61 @@ manifest-driven fleet declares none. Runnable example:
 
 ---
 
+### 3.8 Overload: the four load defenses, and how they compose
+
+Measured in the isolated laboratory (docs/BENCHMARKS.md §4e): past its
+ceiling the engine used to TIP, not degrade — at ~1 100 rps on a customer
+2-vCPU box, in-flight requests pile up without bound, every queued request
+still pays parse/JWT/RBAC before dying at the 5 s query timeout, and that
+wasted work eats the capacity the admitted work needed (a metastable
+collapse: p50 jumps to seconds with LESS goodput and does not recover).
+Since MOTOR-PRODUCCION-S2 there are four defenses, each with ONE job:
+
+1. **Admission control** (`APPXIMO_MAX_INFLIGHT`) — protects the BOX. A hard
+   cap on in-flight data-plane requests, enforced before ANY per-request work
+   (before the tenant limiter, the cache, JWT, the pool). Over the cap →
+   immediate `429` + `Retry-After: 1` + a body naming the knob. Default
+   `auto` = max(32, 4×(GOMAXPROCS + DB pool size)); `0` disables; a
+   non-integer refuses to boot. It caps CONCURRENCY, not rate, so it adapts
+   by Little's law to the plan and the workload: a heavier screen admits
+   fewer rps, a faster box admits more, with no estimator and no
+   recalibration. Out of scope (never counted): probes, /admin, /metrics,
+   /debug, /editor, /app, /docs, /openapi, OPTIONS preflight, SSE
+   (`…/events` — held open by design), and byte-serving downloads
+   (client-paced sendfile). A custom `ByteServing` route joins the same
+   exemption automatically.
+2. **The per-tenant rate limiter** (`RATE_LIMIT_RPS` / `RATE_LIMIT_BURST`) —
+   FAIRNESS and abuse policy between tenants, NOT capacity (a rate cannot
+   tell a cached read from a 900 ms search — capacity is admission's job).
+   The default is DERIVED, not hand-set: 350 rps × GOMAXPROCS — 70 % of the
+   measured per-core clean ceiling of the canonical uncached read on a
+   customer-grade shared-vCPU box (§4e). N tenants can sum past the box;
+   admission is what holds then.
+3. **`Route.RateLimit`** — one endpoint's own budget, per (tenant, IP), for
+   routes whose cost or audience differs from the app's norm (a catalogue, a
+   webhook, an export).
+4. **The public limiter** (`APPXIMO_PUBLIC_ROUTE_RPS`, default 5 rps / burst
+   10 per tenant+IP) — pre-authentication surface protection for
+   `Route.Public` and anonymous `rbac.public` reads.
+
+Composition, outermost first: **admission → per-tenant rate → memory guard →
+… → per-route / public limiters at their routes**. Admission runs FIRST so a
+shed request consumes nothing — not even the tenant's rate tokens. The
+limiters can never mask the tip (they are rate-keyed; the collapse is a
+concurrency phenomenon), and admission can never enforce fairness (it is
+global); that is why both exist. The memory guard (§2b) stays what it was:
+host-OOM degradation for writes. All four answer 429/503 with `Retry-After`
+— a client that honors it composes with every layer.
+
+**Migration note (defaults changed in MOTOR-PRODUCCION-S2):** admission ships
+ON (`auto`); a deployment that must reproduce the old tip-instead-of-shed
+behavior sets `APPXIMO_MAX_INFLIGHT=0`. The per-tenant default moved from a
+hand-set 1000 rps to the derived 350 × GOMAXPROCS — on a 1-vCPU box that is
+350 rps, so a tenant legitimately pushing more than that (typically CHEAP,
+response-cache-served traffic the limiter cannot distinguish) now sees 429s
+it did not see before: set `RATE_LIMIT_RPS` explicitly to restore the old
+number. Anyone who already sets the variable is unaffected.
+
 ## 4. Hooks — declarative per-record validation
 
 A hook runs on the CRUD path of a resource, declared in the **schema** (not code
