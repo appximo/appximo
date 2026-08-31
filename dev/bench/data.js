@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788141325568,
+  "lastUpdate": 1788146593901,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -5184,6 +5184,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "35476705 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "2a85e0c1da24a0af92558ecc6d1049c86b341f6c",
+          "message": "docs: the operator's manual in Spanish (what the engine does, where each thing shows with real screens, every knob with its default and its origin, the recipes with commands and measured times, deploy and upgrading an old box, drill, what it does not do) + the one-page index of the engine kept from rotting by a test; PRODUCTION env table corrected (derived rate limit, APPXIMO_MAX_INFLIGHT, SSE cap); backlog: MANUAL-OPERACION-S1 reviewed, OPS-48/OPS-49/DOC-4 opened (MANUAL-OPERACION-S1)\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-31T03:17:20Z",
+          "tree_id": "8afa8469b7ca9bce5fb6daef6a860a91f18f54a7",
+          "url": "https://github.com/appximo/appximo/commit/2a85e0c1da24a0af92558ecc6d1049c86b341f6c"
+        },
+        "date": 1788146592644,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6388,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "349862 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6388,
+            "unit": "ns/op",
+            "extra": "349862 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "349862 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "349862 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 66.77,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36329575 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 66.77,
+            "unit": "ns/op",
+            "extra": "36329575 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36329575 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36329575 times\n4 procs"
           }
         ]
       }
