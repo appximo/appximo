@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788146593901,
+  "lastUpdate": 1788151915544,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -5256,6 +5256,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36329575 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "68e5bb37fa08417d5efef1f5350a511c485f8870",
+          "message": "docs: the command center — manual §9 (an app built ON Appximo, on its own box in another region, that shows the whole operation, fills itself from /health, /admin/resources, fleet-audit.sh, the backlog and the handoff, and never leaves the owner without a next step: the three forms, the failure block, «pedir ayuda»); the engine index row; backlog: CENTRO-MANDO-S1 reviewed (the 58's backups verified restorable, the 105's disk 87→69 %, the migration chain rehearsed 58→throwaway, the deleted-corrida near-miss reverted and fixed), OPS-50/51/52 opened (CENTRO-MANDO-S1)\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-31T04:51:20Z",
+          "tree_id": "35467bd8b1d3dd5da3d5ff764705f0e3de0554ae",
+          "url": "https://github.com/appximo/appximo/commit/68e5bb37fa08417d5efef1f5350a511c485f8870"
+        },
+        "date": 1788151914588,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6535,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "328461 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6535,
+            "unit": "ns/op",
+            "extra": "328461 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "328461 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "328461 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 65.4,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "37163934 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 65.4,
+            "unit": "ns/op",
+            "extra": "37163934 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "37163934 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "37163934 times\n4 procs"
           }
         ]
       }
