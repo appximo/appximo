@@ -1,11 +1,13 @@
 import { createSignal, createMemo, createEffect, onMount, onCleanup, Show, For } from "solid-js"
-import { useNavigate } from "@solidjs/router"
+import { useNavigate, useSearchParams } from "@solidjs/router"
 import { Chart } from "../components/Chart"
 import { Button, toast } from "../components/ui"
 import { api, ApiError } from "../lib/api"
 import { logout } from "../lib/auth"
 import { registerCommands } from "../lib/commands"
 import { chartTheme, themeTick } from "../lib/theme"
+import { PageIntro } from "../shell/Shell"
+import { t } from "../lib/i18n"
 
 // Resources (CENTINELA-C-S1, Module C) — the engine's OWN footprint on the box
 // and the ATTRIBUTION verdict under load: "is it me (CPU, GC, locks, memory),
@@ -20,18 +22,10 @@ import { chartTheme, themeTick } from "../lib/theme"
 const MONO = { "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace" }
 
 // ── attribution vocabulary → label, owner reading, status kind ──────────────
-const ATTR = {
-  healthy:         { label: "Healthy",          kind: "ok",   who: "nothing to attribute" },
-  cpu_saturated:   { label: "CPU saturated",    kind: "warn", who: "Appximo — or the box's sizing" },
-  gc_pressure:     { label: "GC pressure",      kind: "warn", who: "Appximo — allocation in the code path" },
-  cpu_throttled:   { label: "CPU throttled",    kind: "crit", who: "the host — the plan's quota, not the code" },
-  pool_exhausted:  { label: "Pool exhausted",   kind: "crit", who: "the database / the pool config" },
-  db_bound:        { label: "Database-bound",   kind: "crit", who: "the database (or the network to it) — not Appximo" },
-  memory_pressure: { label: "Memory pressure",  kind: "crit", who: "memory — this process, or the box" },
-  lock_contention: { label: "Lock contention",  kind: "warn", who: "Appximo — locks inside the process" },
-}
+const KIND = { healthy: "ok", cpu_saturated: "warn", gc_pressure: "warn", cpu_throttled: "crit", pool_exhausted: "crit", db_bound: "crit", memory_pressure: "crit", lock_contention: "warn" }
+const ATTR = Object.fromEntries(Object.keys(KIND).map((k) => [k, { label: t("r.a." + k), kind: KIND[k], who: t("r.w." + k) }]))
 const attr = (a) => ATTR[a] || { label: a || "—", kind: "ok", who: "" }
-const ownerLabel = (o) => ({ appximo: "Appximo", database: "the database", host: "the host", none: "no one" }[o] || o)
+const ownerLabel = (o) => (["appximo", "database", "host", "none"].includes(o) ? t("r.o." + o) : o)
 
 // ── formatting ──────────────────────────────────────────────────────────────
 const fmtMs = (ms) => (ms == null ? "—" : ms >= 100 ? ms.toFixed(0) : ms >= 10 ? ms.toFixed(1) : ms.toFixed(2))
@@ -88,26 +82,26 @@ function VerdictBanner(props) {
         <span class="spacer" />
         <Badge kind={a().kind} label={a().label} />
       </div>
-      <div class="verdict-title">{props.title || (v()?.attribution === "healthy" ? "No bottleneck" : "Bottleneck: " + a().label.toLowerCase())}</div>
+      <div class="verdict-title">{props.title || (v()?.attribution === "healthy" ? t("r.noBottleneck") : t("r.bottleneck", { a: a().label.toLowerCase() }))}</div>
       <Show when={v()?.owner && v()?.owner !== "none"}>
-        <div class="verdict-owner">Whose problem: <strong>{ownerLabel(v().owner)}</strong> · {a().who}</div>
+        <div class="verdict-owner">{t("r.whose")} <strong>{ownerLabel(v().owner)}</strong> · {a().who}</div>
       </Show>
       <div class="verdict-reason">{v()?.reason || "—"}</div>
       <Show when={(v()?.also || []).length > 0}>
-        <div class="verdict-also">Also firing: <For each={v().also}>{(x) => <span class="chip">{attr(x).label}</span>}</For></div>
+        <div class="verdict-also">{t("r.alsoFiring")} <For each={v().also}>{(x) => <span class="chip">{attr(x).label}</span>}</For></div>
       </Show>
       <Show when={(v()?.signals || []).length > 0}>
-        <button class="verdict-toggle" onClick={() => setOpen(!open())}>{open() ? "Hide evidence" : `Evidence — ${fired().length} of ${v().signals.length} signals fired`}</button>
+        <button class="verdict-toggle" onClick={() => setOpen(!open())}>{open() ? t("r.hide") : t("r.evidence", { f: fired().length, n: v().signals.length })}</button>
         <Show when={open()}>
           <table class="sigtable">
-            <thead><tr><th>Signal</th><th class="num-h">Value</th><th class="num-h">Rule</th><th></th></tr></thead>
+            <thead><tr><th>{t("r.th.signal")}</th><th class="num-h">{t("r.th.value")}</th><th class="num-h">{t("r.th.rule")}</th><th></th></tr></thead>
             <tbody>
               <For each={[...fired(), ...rest()]}>{(s) => (
                 <tr class={s.fired ? "fired" : ""}>
                   <td style={MONO}>{s.name}</td>
                   <td class="num">{fmtSig(s)}</td>
                   <td class="num muted">{fmtThr(s)}</td>
-                  <td>{s.fired ? <Badge kind="warn" label="fired" /> : <span class="muted">—</span>}</td>
+                  <td>{s.fired ? <Badge kind="warn" label={t("r.fired")} /> : <span class="muted">—</span>}</td>
                 </tr>
               )}</For>
             </tbody>
@@ -132,84 +126,84 @@ function LiveTab(props) {
   const fmtAge = (sec) => (sec == null || sec <= 0 ? "—" : sec >= 172800 ? (sec / 86400).toFixed(1) + " d" : sec >= 7200 ? (sec / 3600).toFixed(1) + " h" : (sec / 60).toFixed(0) + " min")
   const bkKind = () => (!ho().enabled || !bk().dir ? "ok" : bk().alarm ? "crit" : bk().status === "ok" ? "ok" : "warn")
   const bkText = () => {
-    if (!ho().enabled || !bk().dir) return "not watched (APPXIMO_BACKUP_DIR unset)"
-    if (bk().status === "ok" && !bk().stale) return "ok"
-    if (bk().status === "ok" && bk().stale) return "STALE"
-    if (bk().status === "failed") return "FAILED"
-    if (bk().status === "none") return bk().stale ? "NEVER RAN" : "no run yet"
-    return "EMPTY STATUS"
+    if (!ho().enabled || !bk().dir) return t("r.notWatched")
+    if (bk().status === "ok" && !bk().stale) return t("r.ok")
+    if (bk().status === "ok" && bk().stale) return t("r.stale")
+    if (bk().status === "failed") return t("r.failed")
+    if (bk().status === "none") return bk().stale ? t("r.neverRan") : t("r.noRunYet")
+    return t("r.emptyStatus")
   }
-  const memMax = () => (pc().mem_max_bytes > 0 ? fmtMiB(pc().mem_max_bytes) + " MiB max" : "no cgroup limit")
-  const quota = () => (pc().cpu_quota_usec > 0 && pc().cpu_period_usec > 0 ? (pc().cpu_quota_usec / pc().cpu_period_usec).toFixed(2) + " CPU quota" : "no CPU quota")
+  const memMax = () => (pc().mem_max_bytes > 0 ? t("r.maxOf", { v: fmtMiB(pc().mem_max_bytes) }) : t("r.noLimit"))
+  const quota = () => (pc().cpu_quota_usec > 0 && pc().cpu_period_usec > 0 ? t("r.quota", { v: (pc().cpu_quota_usec / pc().cpu_period_usec).toFixed(2) }) : t("r.noQuota"))
   return (
     <div class="col" style={{ gap: "var(--space-4)" }}>
-      <VerdictBanner verdict={s()?.verdict} eyebrow={`Latest tick · ${fmtClock(s()?.ts)} · ${s()?.mode} ${(s()?.interval_ms / 1000).toFixed(0)} s`} />
+      <VerdictBanner verdict={s()?.verdict} eyebrow={`${t("r.latestTick")} · ${fmtClock(s()?.ts)} · ${s()?.mode} ${(s()?.interval_ms / 1000).toFixed(0)} s`} />
 
-      <h3 class="res-h">Requests</h3>
+      <h3 class="res-h">{t("r.requests")}</h3>
       <div class="statgrid">
-        <Stat label="Throughput" sub={`${fmtNum(rq().count)} requests in the tick`}>{(rq().rps ?? 0).toFixed(0)} <span class="unit">rps</span></Stat>
-        <Stat label="p50 / p95" sub="ms, this tick">{fmtMs(rq().latency_p50_ms)} <span class="unit">/ {fmtMs(rq().latency_p95_ms)}</span></Stat>
-        <Stat label="p99" sub={`max ${fmtMs(rq().latency_max_ms)} ms`}>{fmtMs(rq().latency_p99_ms)} <span class="unit">ms</span></Stat>
-        <Stat label="Shed / errors" sub="429+503 · 5xx">{fmtNum((rq().status_429 || 0) + (rq().status_503 || 0))} <span class="unit">/ {fmtNum(rq().errors_5xx)}</span></Stat>
+        <Stat label={t("r.throughput")} sub={t("r.inTick", { n: fmtNum(rq().count) })}>{(rq().rps ?? 0).toFixed(0)} <span class="unit">rps</span></Stat>
+        <Stat label={t("r.p50p95")} sub={t("r.msTick")}>{fmtMs(rq().latency_p50_ms)} <span class="unit">/ {fmtMs(rq().latency_p95_ms)}</span></Stat>
+        <Stat label="p99" sub={t("r.max", { v: fmtMs(rq().latency_max_ms) })}>{fmtMs(rq().latency_p99_ms)} <span class="unit">ms</span></Stat>
+        <Stat label={t("r.shed")} sub={t("r.shedSub")}>{fmtNum((rq().status_429 || 0) + (rq().status_503 || 0))} <span class="unit">/ {fmtNum(rq().errors_5xx)}</span></Stat>
       </div>
 
-      <h3 class="res-h">Memory <span class="muted">· cgroup v2 {pc().source === "cgroup" ? "" : "(unavailable — /proc fallback)"}</span></h3>
+      <h3 class="res-h">{t("r.memory")} <span class="muted">· cgroup v2 {pc().source === "cgroup" ? "" : t("r.cgroupUnavail")}</span></h3>
       <div class="statgrid">
-        <Stat label="RSS" sub={`peak ${fmtMiB(pc().mem_peak_bytes)} MiB`}>{fmtMiB(pc().rss_bytes)} <span class="unit">MiB</span></Stat>
-        <Stat label="cgroup memory.current" sub={pc().cgroup_shared ? "shared cgroup — includes other processes" : memMax()}>{fmtMiB(pc().mem_current_bytes)} <span class="unit">MiB</span></Stat>
-        <Stat label="Live heap" sub={`goal ${fmtMiB(rt().heap_goal_bytes)} MiB · GOGC ${rt().gogc_percent ?? "—"}`}>{fmtMiB(rt().heap_objects_bytes)} <span class="unit">MiB</span></Stat>
-        <Stat label="Runtime mapped" sub={rt().gomemlimit_bytes && rt().gomemlimit_bytes < 9e18 ? `GOMEMLIMIT ${fmtMiB(rt().gomemlimit_bytes)} MiB` : "GOMEMLIMIT unset"}>{fmtMiB(rt().memory_total_bytes)} <span class="unit">MiB</span></Stat>
+        <Stat label={t("r.rss")} sub={t("r.peak", { v: fmtMiB(pc().mem_peak_bytes) })}>{fmtMiB(pc().rss_bytes)} <span class="unit">MiB</span></Stat>
+        <Stat label={t("r.cgroupMem")} sub={pc().cgroup_shared ? t("r.sharedCgroup") : memMax()}>{fmtMiB(pc().mem_current_bytes)} <span class="unit">MiB</span></Stat>
+        <Stat label={t("r.liveHeap")} sub={t("r.goal", { v: fmtMiB(rt().heap_goal_bytes), g: rt().gogc_percent ?? "—" })}>{fmtMiB(rt().heap_objects_bytes)} <span class="unit">MiB</span></Stat>
+        <Stat label={t("r.mapped")} sub={rt().gomemlimit_bytes && rt().gomemlimit_bytes < 9e18 ? t("r.gomemlimit", { v: fmtMiB(rt().gomemlimit_bytes) }) : t("r.gomemlimitUnset")}>{fmtMiB(rt().memory_total_bytes)} <span class="unit">MiB</span></Stat>
       </div>
 
-      <h3 class="res-h">CPU <span class="muted">· runtime/metrics + cpu.stat</span></h3>
+      <h3 class="res-h">{t("r.cpu")} <span class="muted">· runtime/metrics + cpu.stat</span></h3>
       <div class="statgrid">
-        <Stat label="Busy" sub={`of GOMAXPROCS ${rt().gomaxprocs ?? "—"} · ${quota()}`}>{fmtPct(rt().cpu_busy_fraction)} <span class="unit">%</span></Stat>
-        <Stat label="Scheduler wait p99" sub="runnable goroutines waiting for a CPU">{fmtMs((rt().sched_latency_p99_s || 0) * 1000)} <span class="unit">ms</span></Stat>
-        <Stat label="Throttled" sub={`cgroup: ${fmtNum(pc().cpu_nr_throttled_delta)} periods this tick`}>{fmtPct((pc().cpu_throttled_delta_usec || 0) / Math.max(1, (s()?.interval_ms || 1000) * 1000))} <span class="unit">%</span></Stat>
-        <Stat label="Process CPU" sub="user + system, cumulative">{((pc().cpu_usage_usec || 0) / 1e6).toFixed(0)} <span class="unit">s</span></Stat>
+        <Stat label={t("r.busy")} sub={t("r.ofGomaxprocs", { g: rt().gomaxprocs ?? "—", q: quota() })}>{fmtPct(rt().cpu_busy_fraction)} <span class="unit">%</span></Stat>
+        <Stat label={t("r.schedWait")} sub={t("r.schedWaitSub")}>{fmtMs((rt().sched_latency_p99_s || 0) * 1000)} <span class="unit">ms</span></Stat>
+        <Stat label={t("r.throttled")} sub={t("r.throttledSub", { n: fmtNum(pc().cpu_nr_throttled_delta) })}>{fmtPct((pc().cpu_throttled_delta_usec || 0) / Math.max(1, (s()?.interval_ms || 1000) * 1000))} <span class="unit">%</span></Stat>
+        <Stat label={t("r.processCpu")} sub={t("r.processCpuSub")}>{((pc().cpu_usage_usec || 0) / 1e6).toFixed(0)} <span class="unit">s</span></Stat>
       </div>
 
-      <h3 class="res-h">GC · goroutines · locks</h3>
+      <h3 class="res-h">{t("r.gc")}</h3>
       <div class="statgrid">
-        <Stat label="GC share of CPU" sub={`${(rt().gc_cycles_delta ?? 0)} cycles this tick`}>{fmtPct(rt().gc_cpu_fraction)} <span class="unit">%</span></Stat>
-        <Stat label="GC pause p99" sub={`max ${fmtMs((rt().gc_pause_total_max_s || 0) * 1000)} ms`}>{fmtMs((rt().gc_pause_total_p99_s || 0) * 1000)} <span class="unit">ms</span></Stat>
-        <Stat label="Goroutines" sub={`${pc().threads ?? "—"} OS threads`}>{fmtNum(rt().goroutines)}</Stat>
-        <Stat label="Mutex wait" sub={`${(rt().mutex_wait_total_s || 0).toFixed(3)} s total`}>{((rt().mutex_wait_delta_s || 0) * 1000).toFixed(2)} <span class="unit">ms/tick</span></Stat>
+        <Stat label={t("r.gcShare")} sub={t("r.cycles", { n: rt().gc_cycles_delta ?? 0 })}>{fmtPct(rt().gc_cpu_fraction)} <span class="unit">%</span></Stat>
+        <Stat label={t("r.gcPause")} sub={t("r.max", { v: fmtMs((rt().gc_pause_total_max_s || 0) * 1000) })}>{fmtMs((rt().gc_pause_total_p99_s || 0) * 1000)} <span class="unit">ms</span></Stat>
+        <Stat label={t("r.goroutines")} sub={t("r.threads", { n: pc().threads ?? "—" })}>{fmtNum(rt().goroutines)}</Stat>
+        <Stat label={t("r.mutex")} sub={t("r.mutexTotal", { v: (rt().mutex_wait_total_s || 0).toFixed(3) })}>{((rt().mutex_wait_delta_s || 0) * 1000).toFixed(2)} <span class="unit">ms/tick</span></Stat>
       </div>
 
-      <h3 class="res-h">Database <span class="muted">· pool (client side)</span></h3>
+      <h3 class="res-h">{t("r.database")} <span class="muted">· {t("r.poolClient")}</span></h3>
       <div class="statgrid">
-        <Stat label="Pool" sub={db().saturated ? "SATURATED — no idle connection" : `${db().idle_conns ?? 0} idle · ${db().constructing_conns ?? 0} constructing`}>{db().acquired_conns ?? 0} <span class="unit">/ {db().max_conns ?? 0}</span></Stat>
-        <Stat label="Empty acquires" sub={`${fmtNum(db().empty_acquire_count)} total`}>{fmtNum(db().empty_acquire_delta)} <span class="unit">this tick</span></Stat>
-        <Stat label="Waited for a connection" sub="this tick">{fmtMs(db().empty_acquire_wait_delta_ms)} <span class="unit">ms</span></Stat>
-        <Stat label="Query p99" sub={`${fmtNum(db().query_count)} queries · p50 ${fmtMs(db().query_latency_p50_ms)} ms`}>{fmtMs(db().query_latency_p99_ms)} <span class="unit">ms</span></Stat>
+        <Stat label={t("r.pool")} sub={db().saturated ? t("r.saturated") : t("r.idle", { i: db().idle_conns ?? 0, c: db().constructing_conns ?? 0 })}>{db().acquired_conns ?? 0} <span class="unit">/ {db().max_conns ?? 0}</span></Stat>
+        <Stat label={t("r.emptyAcq")} sub={t("r.total", { n: fmtNum(db().empty_acquire_count) })}>{fmtNum(db().empty_acquire_delta)} <span class="unit">{t("r.thisTick")}</span></Stat>
+        <Stat label={t("r.waited")} sub={t("r.thisTick")}>{fmtMs(db().empty_acquire_wait_delta_ms)} <span class="unit">ms</span></Stat>
+        <Stat label={t("r.queryP99")} sub={t("r.queries", { n: fmtNum(db().query_count), v: fmtMs(db().query_latency_p50_ms) })}>{fmtMs(db().query_latency_p99_ms)} <span class="unit">ms</span></Stat>
       </div>
       <Show when={sv().observable} fallback={
-        <div class="card res-note"><strong>Postgres server: not observable from the app.</strong> {sv().reason || "The database is remote — its RAM, CPU and I/O are not this process's to read. That is by design: the client side above is what Appximo controls."}</div>
+        <div class="card res-note"><strong>{t("r.pgNotObs")}</strong> {sv().reason || t("r.pgRemote")}</div>
       }>
         <div class="statgrid">
-          <Stat label="Database size" sub={sv().reason ? sv().reason : `probed ${fmtClock(sv().probed_at)}`}>{fmtMiB(sv().db_size_bytes)} <span class="unit">MiB</span></Stat>
-          <Stat label="Cache hit ratio" sub={`${fmtNum(sv().blks_read)} blocks read from disk`}>{fmtPct(sv().cache_hit_ratio)} <span class="unit">%</span></Stat>
-          <Stat label="Backends" sub={`${sv().active_conns ?? 0} active · ${sv().waiting ?? 0} waiting · ${sv().idle_in_transaction ?? 0} idle in tx`}>{fmtNum(sv().total_backends)}</Stat>
-          <Stat label="Deadlocks · temp" sub={`temp ${fmtMiB(sv().temp_bytes)} MiB · ${sv().pg_stat_statements ? "pg_stat_statements on" : "no pg_stat_statements"}`}>{fmtNum(sv().deadlocks)}</Stat>
+          <Stat label={t("r.dbSize")} sub={sv().reason ? sv().reason : t("r.probed", { v: fmtClock(sv().probed_at) })}>{fmtMiB(sv().db_size_bytes)} <span class="unit">MiB</span></Stat>
+          <Stat label={t("r.cacheHit")} sub={t("r.blocksRead", { n: fmtNum(sv().blks_read) })}>{fmtPct(sv().cache_hit_ratio)} <span class="unit">%</span></Stat>
+          <Stat label={t("r.backends")} sub={t("r.backendsSub", { a: sv().active_conns ?? 0, w: sv().waiting ?? 0, i: sv().idle_in_transaction ?? 0 })}>{fmtNum(sv().total_backends)}</Stat>
+          <Stat label={t("r.deadlocks")} sub={t("r.deadlocksSub", { v: fmtMiB(sv().temp_bytes), s: sv().pg_stat_statements ? t("r.pss") : t("r.noPss") })}>{fmtNum(sv().deadlocks)}</Stat>
         </div>
       </Show>
 
-      <h3 class="res-h">Disk &amp; backup <span class="muted">· layer 5 — the silent killers (RESILIENCIA-S1 §4.6)</span></h3>
+      <h3 class="res-h">{t("r.diskBackup")} <span class="muted">· {t("r.diskBackupSub")} · {t("r.diskBackupDoc")}</span></h3>
       <div class="statgrid">
         <For each={(ho().disks || []).filter((d) => !d.err)}>{(d) => (
-          <Stat label={`Disk ${d.path}`} sub={<><Badge kind={d.low ? "crit" : "ok"}>{d.low ? "LOW" : "ok"}</Badge> {fmtMiB(d.total_bytes)} MiB total</>}>{(d.free_pct ?? 0).toFixed(1)} <span class="unit">% free · {fmtMiB(d.free_bytes)} MiB</span></Stat>
+          <Stat label={t("r.disk", { p: d.path })} sub={<><Badge kind={d.low ? "crit" : "ok"} label={d.low ? t("r.low") : t("r.ok")} /> {t("r.totalMiB", { v: fmtMiB(d.total_bytes) })}</>}>{(d.free_pct ?? 0).toFixed(1)} <span class="unit">{t("r.free", { v: fmtMiB(d.free_bytes) })}</span></Stat>
         )}</For>
-        <Stat label="Last backup" sub={<><Badge kind={bkKind()}>{bkText()}</Badge> {bk().dir ? `${bk().dir} · floor ${fmtAge(bk().max_age_s)}` : "the installer sets APPXIMO_BACKUP_DIR"}</>}>{fmtAge(bk().age_s)} <span class="unit">ago</span></Stat>
+        <Stat label={t("r.lastBackup")} sub={<><Badge kind={bkKind()} label={bkText()} /> {bk().dir ? t("r.floor", { d: bk().dir, v: fmtAge(bk().max_age_s) }) : t("r.installerSets")}<Show when={bk().line}><br /><span style={MONO}>{t("r.statusLine")} {bk().line}</span></Show></>}>{fmtAge(bk().age_s)} <span class="unit">{t("r.ago")}</span></Stat>
         <Show when={ho().enabled && (ho().disks || []).length === 0}>
-          <div class="card res-note">No watched filesystem answered statfs.</div>
+          <div class="card res-note">{t("r.noStatfs")}</div>
         </Show>
       </div>
 
-      <h3 class="res-h">Host pressure <span class="muted">· PSI {pr().source === "cgroup" ? "of this cgroup" : pr().source === "host" ? "of the whole host" : "unavailable"}</span></h3>
+      <h3 class="res-h">{t("r.hostPressure")} <span class="muted">· {pr().source === "cgroup" ? t("r.psiCgroup") : pr().source === "host" ? t("r.psiHost") : t("r.psiUnavail")}</span></h3>
       <div class="statgrid">
-        <For each={[["CPU", pr().cpu], ["Memory", pr().memory], ["I/O", pr().io]]}>{([name, l]) => (
-          <Stat label={name + " stall (some)"} sub={`60 s ${(l?.some_avg60 ?? 0).toFixed(1)} % · 300 s ${(l?.some_avg300 ?? 0).toFixed(1)} % · full ${(l?.full_avg10 ?? 0).toFixed(1)} %`}>{(l?.some_avg10 ?? 0).toFixed(1)} <span class="unit">% / 10 s</span></Stat>
+        <For each={[["CPU", pr().cpu], [t("r.memory"), pr().memory], ["I/O", pr().io]]}>{([name, l]) => (
+          <Stat label={t("r.stall", { n: name })} sub={t("r.stallSub", { a: (l?.some_avg60 ?? 0).toFixed(1), b: (l?.some_avg300 ?? 0).toFixed(1), c: (l?.full_avg10 ?? 0).toFixed(1) })}>{(l?.some_avg10 ?? 0).toFixed(1)} <span class="unit">% / 10 s</span></Stat>
         )}</For>
       </div>
     </div>
@@ -272,12 +266,12 @@ function LoadTab(props) {
     <div class="col" style={{ gap: "var(--space-4)" }}>
       <VerdictBanner
         verdict={{ attribution: win().dominant, owner: win().owner, reason: win().reason, signals: win().peak_tick?.verdict?.signals || [], also: win().peak_tick?.verdict?.also || [] }}
-        eyebrow={`Window · ${series().length} ticks · ${series().length ? fmtClock(series()[0].ts) + " → " + fmtClock(series()[series().length - 1].ts) : "—"} · peak ${(win().peak_rps || 0).toFixed(0)} rps · peak p99 ${fmtMs(win().peak_p99_ms)} ms`}
-        title={win().dominant === "healthy" ? "No bottleneck in the window" : "Bottleneck: " + attr(win().dominant).label.toLowerCase()}
+        eyebrow={`${t("r.window")} · ${t("r.ticks", { n: series().length })} · ${series().length ? fmtClock(series()[0].ts) + " → " + fmtClock(series()[series().length - 1].ts) : "—"} · ${t("r.peakRps", { v: (win().peak_rps || 0).toFixed(0) })} · ${t("r.peakP99", { v: fmtMs(win().peak_p99_ms) })}`}
+        title={win().dominant === "healthy" ? t("r.noBottleneckWin") : t("r.bottleneck", { a: attr(win().dominant).label.toLowerCase() })}
       />
 
       <div class="card res-timeline">
-        <div class="chart-head"><h3>Attribution per tick</h3><span class="muted">click a tick for its verdict · {fmtNum(win().requests)} requests · {fmtNum(win().shed_429_503)} shed · {fmtNum(win().errors_5xx)} 5xx</span></div>
+        <div class="chart-head"><h3>{t("r.attrPerTick")}</h3><span class="muted">{t("r.attrSub", { r: fmtNum(win().requests), s: fmtNum(win().shed_429_503), e: fmtNum(win().errors_5xx) })}</span></div>
         <div class="ticks" role="list">
           <For each={series()}>{(s, i) => (
             <button role="listitem" class={"tick tick-" + attr(s.attribution).kind + (s.attribution === "healthy" ? " tick-healthy" : "") + (pick() === i() ? " active" : "")}
@@ -289,17 +283,17 @@ function LoadTab(props) {
           <For each={dist()}>{(d) => <span class="chip"><Badge kind={attr(d.k).kind} label={attr(d.k).label} /> {d.n} · {d.pct.toFixed(0)} %</span>}</For>
         </div>
         <Show when={picked()}>
-          <VerdictBanner verdict={picked().verdict} eyebrow={`Tick ${fmtClock(picked().ts)} · ${(picked().request?.rps || 0).toFixed(0)} rps · p99 ${fmtMs(picked().request?.latency_p99_ms)} ms · pool ${picked().db_client?.acquired_conns}/${picked().db_client?.max_conns} · sched ${fmtMs((picked().runtime?.sched_latency_p99_s || 0) * 1000)} ms`} />
+          <VerdictBanner verdict={picked().verdict} eyebrow={`${t("r.tick")} ${fmtClock(picked().ts)} · ${(picked().request?.rps || 0).toFixed(0)} rps · p99 ${fmtMs(picked().request?.latency_p99_ms)} ms · pool ${picked().db_client?.acquired_conns}/${picked().db_client?.max_conns} · sched ${fmtMs((picked().runtime?.sched_latency_p99_s || 0) * 1000)} ms`} />
         </Show>
       </div>
 
-      <Show when={series().length > 1} fallback={<div class="card chart-empty muted">The correlation series builds at 1 s while this view is open. Start a k6 (or wait for traffic) and the ticks appear here.</div>}>
+      <Show when={series().length > 1} fallback={<div class="card chart-empty muted">{t("r.seriesEmpty")}</div>}>
         <div class="res-charts">
-          <div class="card chart-card"><div class="chart-head"><h3>Latency</h3><span class="muted">p99 · query p99 · p50</span></div><Chart option={latOpt()} height="200px" /></div>
-          <div class="card chart-card"><div class="chart-head"><h3>Throughput</h3><span class="muted">rps · shed</span></div><Chart option={rpsOpt()} height="200px" /></div>
-          <div class="card chart-card"><div class="chart-head"><h3>CPU · GC · locks · quota</h3><span class="muted">sched wait · GC share · throttled · mutex</span></div><Chart option={cpuOpt()} height="200px" /></div>
-          <div class="card chart-card"><div class="chart-head"><h3>Connection pool</h3><span class="muted">acquired of max · empty acquires</span></div><Chart option={poolOpt()} height="200px" /></div>
-          <div class="card chart-card"><div class="chart-head"><h3>Host pressure · memory</h3><span class="muted">PSI some avg10 · RSS</span></div><Chart option={psiOpt()} height="200px" /></div>
+          <div class="card chart-card"><div class="chart-head"><h3>{t("r.chart.latency")}</h3><span class="muted">p99 · query p99 · p50</span></div><Chart option={latOpt()} height="200px" /></div>
+          <div class="card chart-card"><div class="chart-head"><h3>{t("r.chart.throughput")}</h3><span class="muted">rps · shed</span></div><Chart option={rpsOpt()} height="200px" /></div>
+          <div class="card chart-card"><div class="chart-head"><h3>{t("r.chart.cpu")}</h3><span class="muted">sched wait · GC share · throttled · mutex</span></div><Chart option={cpuOpt()} height="200px" /></div>
+          <div class="card chart-card"><div class="chart-head"><h3>{t("r.chart.pool")}</h3><span class="muted">acquired of max · empty acquires</span></div><Chart option={poolOpt()} height="200px" /></div>
+          <div class="card chart-card"><div class="chart-head"><h3>{t("r.chart.host")}</h3><span class="muted">PSI some avg10 · RSS</span></div><Chart option={psiOpt()} height="200px" /></div>
         </div>
       </Show>
     </div>
@@ -321,18 +315,18 @@ function SnapshotTab(props) {
       a.href = url; a.download = `appximo-resources-${new Date().toISOString().replace(/[:.]/g, "-")}.json`
       document.body.appendChild(a); a.click(); a.remove()
       setTimeout(() => URL.revokeObjectURL(url), 2000)
-      toast("Snapshot downloaded")
-    } catch (e) { toast("Could not export: " + (e.message || e), "err") }
+      toast(t("r.snap.downloaded"))
+    } catch (e) { toast(t("r.snap.exportFailed", { e: e.message || e }), "err") }
     setBusy(false)
   }
   const copy = async () => {
-    try { await navigator.clipboard.writeText(await api.resourcesSnapshot()); toast("Snapshot copied to the clipboard") }
-    catch (e) { toast("Could not copy: " + (e.message || e), "err") }
+    try { await navigator.clipboard.writeText(await api.resourcesSnapshot()); toast(t("r.snap.copied")) }
+    catch (e) { toast(t("r.snap.copyFailed", { e: e.message || e }), "err") }
   }
   const load = (file) => {
     if (!file) return
     const r = new FileReader()
-    r.onload = () => { try { setOther(JSON.parse(r.result)); setOtherName(file.name) } catch { toast("Not a snapshot JSON", "err") } }
+    r.onload = () => { try { setOther(JSON.parse(r.result)); setOtherName(file.name) } catch { toast(t("r.snap.notJson"), "err") } }
     r.readAsText(file)
   }
   const win = () => props.window() || {}
@@ -341,29 +335,29 @@ function SnapshotTab(props) {
   return (
     <div class="col" style={{ gap: "var(--space-4)" }}>
       <div class="card res-note">
-        <strong>Export this run.</strong> The snapshot is the collector's ring — every tick with its four layers and its verdict, plus the engine build and the host — as one JSON document (schema <span style={MONO}>appximo.selfmon.snapshot/v1</span>). Attach it to a report, or load a previous one below to compare before and after a change. Nothing in it was produced by a language model: the verdicts are the deterministic rules and their evidence.
+        <strong>{t("r.snap.export")}</strong> {t("r.snap.desc")}
         <div class="row" style={{ "margin-top": "var(--space-3)", "flex-wrap": "wrap" }}>
-          <Button variant="primary" onClick={download} disabled={busy()}>Download JSON</Button>
-          <Button variant="ghost" onClick={copy}>Copy to clipboard</Button>
-          <label class="btn btn-ghost">Load a previous snapshot… <input type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => load(e.currentTarget.files?.[0])} /></label>
+          <Button variant="primary" onClick={download} disabled={busy()}>{t("r.snap.download")}</Button>
+          <Button variant="ghost" onClick={copy}>{t("r.snap.copy")}</Button>
+          <label class="btn btn-ghost">{t("r.snap.load")} <input type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => load(e.currentTarget.files?.[0])} /></label>
         </div>
       </div>
       <div class="card" style={{ padding: "var(--space-3)" }}>
-        <div class="row" style={{ "margin-bottom": "var(--space-2)" }}><strong style={{ "font-size": "13px" }}>Window summary</strong><span class="spacer" /><span class="muted" style={{ "font-size": "12px" }}>{other() ? `this run vs ${otherName()}` : "this run"}</span></div>
+        <div class="row" style={{ "margin-bottom": "var(--space-2)" }}><strong style={{ "font-size": "13px" }}>{t("r.snap.summary")}</strong><span class="spacer" /><span class="muted" style={{ "font-size": "12px" }}>{other() ? t("r.snap.vs", { n: otherName() }) : t("r.snap.thisRun")}</span></div>
         <table class="minitable">
-          <thead><tr><th>Metric</th><th class="num-h">Now</th><Show when={other()}><th class="num-h">Loaded</th></Show></tr></thead>
+          <thead><tr><th>{t("r.snap.metric")}</th><th class="num-h">{t("r.snap.now")}</th><Show when={other()}><th class="num-h">{t("r.snap.loaded")}</th></Show></tr></thead>
           <tbody>
-            <Row label="Dominant verdict" a={attr(win().dominant).label} b={attr(ow().dominant).label} />
-            <Row label="Ticks (with traffic)" a={`${win().ticks ?? 0} (${win().traffic_ticks ?? 0})`} b={`${ow().ticks ?? 0} (${ow().traffic_ticks ?? 0})`} />
-            <Row label="Requests" a={fmtNum(win().requests)} b={fmtNum(ow().requests)} />
-            <Row label="Peak rps" a={(win().peak_rps || 0).toFixed(0)} b={(ow().peak_rps || 0).toFixed(0)} />
-            <Row label="Peak p99 (ms)" a={fmtMs(win().peak_p99_ms)} b={fmtMs(ow().peak_p99_ms)} />
-            <Row label="Shed (429+503)" a={fmtNum(win().shed_429_503)} b={fmtNum(ow().shed_429_503)} />
+            <Row label={t("r.snap.dominant")} a={attr(win().dominant).label} b={attr(ow().dominant).label} />
+            <Row label={t("r.snap.ticks")} a={`${win().ticks ?? 0} (${win().traffic_ticks ?? 0})`} b={`${ow().ticks ?? 0} (${ow().traffic_ticks ?? 0})`} />
+            <Row label={t("r.snap.requests")} a={fmtNum(win().requests)} b={fmtNum(ow().requests)} />
+            <Row label={t("r.snap.peakRps")} a={(win().peak_rps || 0).toFixed(0)} b={(ow().peak_rps || 0).toFixed(0)} />
+            <Row label={t("r.snap.peakP99")} a={fmtMs(win().peak_p99_ms)} b={fmtMs(ow().peak_p99_ms)} />
+            <Row label={t("r.snap.shed")} a={fmtNum(win().shed_429_503)} b={fmtNum(ow().shed_429_503)} />
             <Row label="5xx" a={fmtNum(win().errors_5xx)} b={fmtNum(ow().errors_5xx)} />
-            <Row label="Engine" a={props.version() || "—"} b={other()?.engine?.version || "—"} />
+            <Row label={t("r.snap.engine")} a={props.version() || "—"} b={other()?.engine?.version || "—"} />
           </tbody>
         </table>
-        <Show when={other()}><div class="muted" style={{ "font-size": "12px", "margin-top": "var(--space-2)" }}>Loaded verdict: {ow().reason}</div></Show>
+        <Show when={other()}><div class="muted" style={{ "font-size": "12px", "margin-top": "var(--space-2)" }}>{t("r.snap.loadedVerdict", { r: ow().reason })}</div></Show>
       </div>
     </div>
   )
@@ -372,7 +366,10 @@ function SnapshotTab(props) {
 // ── the route ───────────────────────────────────────────────────────────────
 export function Resources() {
   const navigate = useNavigate()
-  const [tab, setTab] = createSignal("live")
+  // The tab lives in the URL (#/resources?tab=load) so a runbook can point at it.
+  const [params, setParams] = useSearchParams()
+  const tab = () => (["live", "load", "snapshot"].includes(params.tab) ? params.tab : "live")
+  const setTab = (v) => setParams({ tab: v })
   const [data, setData] = createSignal(null)
   const [err, setErr] = createSignal("")
   const [health, setHealth] = createSignal(null)
@@ -392,9 +389,9 @@ export function Resources() {
     timer = setInterval(poll, 1000)
     onCleanup(() => clearInterval(timer))
     onCleanup(registerCommands([
-      { id: "res:live", label: "Resources: live board", hint: "Resources", run: () => setTab("live") },
-      { id: "res:load", label: "Resources: load test window", hint: "Resources", run: () => setTab("load") },
-      { id: "res:snap", label: "Resources: export snapshot", hint: "Resources", run: () => setTab("snapshot") },
+      { id: "res:live", label: t("r.cmd.live"), hint: t("r.title"), run: () => setTab("live") },
+      { id: "res:load", label: t("r.cmd.load"), hint: t("r.title"), run: () => setTab("load") },
+      { id: "res:snap", label: t("r.cmd.snap"), hint: t("r.title"), run: () => setTab("snapshot") },
     ]))
   })
   const latest = () => data()?.latest
@@ -404,18 +401,20 @@ export function Resources() {
   return (
     <>
       <div class="pagehead res-head">
-        <h1>Resources</h1>
-        <span class="muted res-sub">the engine's own footprint · is it me, the database or the host?</span>
+        <h1>{t("r.title")}</h1>
+        <span class="muted res-sub">{t("r.sub")}</span>
         <span class="spacer" />
+        <Button variant="ghost" size="sm" onClick={() => navigate("/observability?tab=issues")}>{t("r.toObs")}</Button>
         <Show when={data()}><span class={"badge " + (col().live ? "badge-ok" : "badge-warn")}><span aria-hidden="true">{col().live ? "●" : "○"}</span><span>{col().mode} · {(col().interval_ms / 1000).toFixed(0)} s</span></span></Show>
         <div class="seg">
-          <button class={"seg-btn" + (tab() === "live" ? " active" : "")} onClick={() => setTab("live")}>Live</button>
-          <button class={"seg-btn" + (tab() === "load" ? " active" : "")} onClick={() => setTab("load")}>Load test</button>
-          <button class={"seg-btn" + (tab() === "snapshot" ? " active" : "")} onClick={() => setTab("snapshot")}>Snapshot</button>
+          <button class={"seg-btn" + (tab() === "live" ? " active" : "")} onClick={() => setTab("live")}>{t("r.tab.live")}</button>
+          <button class={"seg-btn" + (tab() === "load" ? " active" : "")} onClick={() => setTab("load")}>{t("r.tab.load")}</button>
+          <button class={"seg-btn" + (tab() === "snapshot" ? " active" : "")} onClick={() => setTab("snapshot")}>{t("r.tab.snapshot")}</button>
         </div>
       </div>
+      <PageIntro>{t("intro.resources")}</PageIntro>
       <Show when={err()}><div class="errbar">{err()}</div></Show>
-      <Show when={data()} fallback={<div class="empty">{err() ? "" : "Reading the collector…"}</div>}>
+      <Show when={data()} fallback={<div class="empty">{err() ? "" : t("r.reading")}</div>}>
         <Show when={tab() === "live"}><LiveTab latest={latest} /></Show>
         <Show when={tab() === "load"}><LoadTab series={series} window={window_} /></Show>
         <Show when={tab() === "snapshot"}><SnapshotTab window={window_} version={() => health()?.version} /></Show>

@@ -7,6 +7,8 @@ import { api, ApiError } from "../lib/api"
 import { logout } from "../lib/auth"
 import { setSelectedTenant, bumpTenants } from "../lib/tenantContext"
 import { registerCommands } from "../lib/commands"
+import { PageIntro } from "../shell/Shell"
+import { t as tr } from "../lib/i18n"
 
 const DEFAULT_SCHEMA = JSON.stringify({
   $schema: "https://appximo.com/schema/v1",
@@ -33,18 +35,18 @@ export function Tenants() {
 
   onMount(() => {
     const cleanup = registerCommands([
-      { id: "tenant:create", label: "Create tenant", hint: "Tenants", run: () => setShowCreate(true) },
-      { id: "tenant:refresh", label: "Refresh tenants", hint: "Tenants", run: () => refetch() },
+      { id: "tenant:create", label: tr("t.create.title"), hint: tr("t.title"), run: () => setShowCreate(true) },
+      { id: "tenant:refresh", label: tr("c.refresh") + " · " + tr("t.title"), hint: tr("t.title"), run: () => refetch() },
     ])
     onCleanup(cleanup)
   })
 
   const toggleSuspend = async (t) => {
     try {
-      if (t.suspended) { await api.activateTenant(t.id); toast(`Activated ${t.id}`) }
-      else { await api.suspendTenant(t.id); toast(`Suspended ${t.id}`) }
+      if (t.suspended) { await api.activateTenant(t.id); toast(tr("t.activated", { id: t.id })) }
+      else { await api.suspendTenant(t.id); toast(tr("t.suspendedMsg", { id: t.id })) }
       refetch(); bumpTenants()
-    } catch (ex) { toast(ex.message || "Operation failed", "err") }
+    } catch (ex) { toast(ex.message || tr("c.opFailed"), "err") }
   }
 
   // Clicking a tenant's name enters it: sets the tenant context and opens its
@@ -54,43 +56,43 @@ export function Tenants() {
   const columns = [
     {
       accessorKey: "display_name",
-      header: "Tenant",
+      header: tr("t.th.tenant"),
       size: 170,
       cell: (c) => (
-        <button class="linklike cell-id" title={`Browse ${c.row.original.id}'s data`} onClick={() => openTenant(c.row.original)}>
+        <button class="linklike cell-id" title={tr("t.browse", { id: c.row.original.id })} onClick={() => openTenant(c.row.original)}>
           {c.getValue() || c.row.original.id}
         </button>
       ),
     },
-    { accessorKey: "id", header: "ID", size: 170, cell: (c) => <span class="secondary" title={c.getValue()}>{c.getValue()}</span> },
+    { accessorKey: "id", header: tr("t.th.id"), size: 170, cell: (c) => <span class="secondary" title={c.getValue()}>{c.getValue()}</span> },
     {
       accessorKey: "suspended",
-      header: "Status",
+      header: tr("t.th.status"),
       size: 110,
-      cell: (c) => <StatusBadge kind={c.getValue() ? "warn" : "ok"} okLabel="Active" warnLabel="Suspended" />,
+      cell: (c) => <StatusBadge kind={c.getValue() ? "warn" : "ok"} okLabel={tr("c.active")} warnLabel={tr("c.suspended")} />,
     },
-    { accessorKey: "plan", header: "Plan", size: 80, cell: (c) => <span class="secondary">{c.getValue() || "—"}</span> },
+    { accessorKey: "plan", header: tr("t.th.plan"), size: 80, cell: (c) => <span class="secondary">{c.getValue() || "—"}</span> },
     {
-      accessorKey: "resource_count", header: "Resources",
+      accessorKey: "resource_count", header: tr("t.th.resources"),
       size: 90,
       meta: { align: "right" },
       cell: (c) => <span class="num">{c.getValue() ?? 0}</span>,
     },
     {
       // pg_stat estimate — the same inventory `appximo tenant list` prints.
-      accessorKey: "data_rows", header: "Rows(~)",
+      accessorKey: "data_rows", header: tr("t.th.rows"),
       size: 85,
       meta: { align: "right" },
-      cell: (c) => <span class="num">{Number(c.getValue() || 0).toLocaleString("en-US")}</span>,
+      cell: (c) => <span class="num">{Number(c.getValue() || 0).toLocaleString()}</span>,
     },
     {
-      accessorKey: "user_count", header: "Users",
+      accessorKey: "user_count", header: tr("t.th.users"),
       size: 70,
       meta: { align: "right" },
-      cell: (c) => <span class="num">{Number(c.getValue() || 0).toLocaleString("en-US")}</span>,
+      cell: (c) => <span class="num">{Number(c.getValue() || 0).toLocaleString()}</span>,
     },
     {
-      accessorKey: "created_at", header: "Created",
+      accessorKey: "created_at", header: tr("t.th.created"),
       size: 110,
       cell: (c) => <span class="secondary">{fmtDate(c.getValue())}</span>,
     },
@@ -102,9 +104,9 @@ export function Tenants() {
         return (
           <div class="cell-actions row" style={{ "justify-content": "flex-end" }}>
             <Button size="sm" variant="ghost" onClick={() => toggleSuspend(t)}>
-              {t.suspended ? "Activate" : "Suspend"}
+              {t.suspended ? tr("c.activate") : tr("c.suspend")}
             </Button>
-            <Button size="sm" variant="ghost" class="btn-danger" onClick={() => setDelTarget(t)}>Delete</Button>
+            <Button size="sm" variant="ghost" class="btn-danger" onClick={() => setDelTarget(t)}>{tr("c.delete")}</Button>
           </div>
         )
       },
@@ -114,18 +116,19 @@ export function Tenants() {
   return (
     <>
       <div class="pagehead">
-        <h1>Tenants</h1>
+        <h1>{tr("t.title")}</h1>
         <span class="spacer" />
-        <Button variant="ghost" size="sm" onClick={() => refetch()}>Refresh</Button>
-        <Button variant="primary" onClick={() => setShowCreate(true)}>New tenant</Button>
+        <Button variant="ghost" size="sm" onClick={() => refetch()}>{tr("c.refresh")}</Button>
+        <Button variant="primary" onClick={() => setShowCreate(true)}>{tr("t.new")}</Button>
       </div>
+      <PageIntro>{tr("intro.tenants")}</PageIntro>
 
-      <Show when={tenants.error}><div class="errbar">Could not load tenants: {tenants.error.message}</div></Show>
+      <Show when={tenants.error}><div class="errbar">{tr("ov.couldNotLoad", { e: tenants.error.message })}</div></Show>
 
       <DataTable
         data={tenants() || []}
         columns={columns}
-        emptyMessage={tenants.loading ? "Loading…" : "No tenants yet. Create the first one."}
+        emptyMessage={tenants.loading ? tr("c.loading") : tr("t.empty")}
       />
 
       <CreateTenantDialog open={showCreate()} onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); refetch(); bumpTenants() }} navigate={navigate} />
@@ -140,12 +143,12 @@ export function Tenants() {
 const TENANT_ID_RE = /^[a-z][a-z0-9]{1,29}$/ // ENG-11: schema alphabet ∩ DNS-label alphabet
 function tenantIdIssue(raw) {
   if (raw === "") return null
-  if (/[A-Z]/.test(raw)) return "Uppercase is not allowed — use lowercase."
-  if (/_/.test(raw)) return "Underscores are not allowed — a web address cannot contain one, so the app would never answer."
-  if (/[-\s.]/.test(raw)) return "Hyphens, spaces and dots are not allowed — the database name cannot contain them."
-  if (!/^[a-z]/.test(raw)) return "Must start with a lowercase letter."
-  if (raw.length < 2 || raw.length > 30) return "Must be 2–30 characters."
-  if (!TENANT_ID_RE.test(raw)) return "Only lowercase letters and digits."
+  if (/[A-Z]/.test(raw)) return tr("t.id.upper")
+  if (/_/.test(raw)) return tr("t.id.under")
+  if (/[-\s.]/.test(raw)) return tr("t.id.dash")
+  if (!/^[a-z]/.test(raw)) return tr("t.id.start")
+  if (raw.length < 2 || raw.length > 30) return tr("t.id.len")
+  if (!TENANT_ID_RE.test(raw)) return tr("t.id.chars")
   return null
 }
 function suggestTenantId(raw) {
@@ -167,50 +170,50 @@ function CreateTenantDialog(props) {
   const submit = async () => {
     setErr(""); setBusy(true)
     let parsed
-    try { parsed = JSON.parse(schema()) } catch { setErr("Schema is not valid JSON."); setBusy(false); return }
+    try { parsed = JSON.parse(schema()) } catch { setErr(tr("t.create.badJson")); setBusy(false); return }
     try {
       await api.createTenant({ tenant_id: id().trim(), display_name: name().trim() || id().trim(), email: email().trim(), plan: plan().trim(), schema: parsed })
-      toast(`Created tenant ${id().trim()}`)
+      toast(tr("t.created", { id: id().trim() }))
       reset()
       props.onCreated()
     } catch (ex) {
       const e = ex
-      setErr((e.body && (e.body.error || (e.body.errors && e.body.errors.join("; ")))) || e.message || "Create failed")
+      setErr((e.body && (e.body.error || (e.body.errors && e.body.errors.join("; ")))) || e.message || tr("t.create.failed"))
     } finally { setBusy(false) }
   }
 
   return (
-    <Modal open={props.open} onClose={(o) => !o && props.onClose()} busy={busy()} title="Create tenant"
-      description="Provisions an isolated Postgres schema and tables for a new tenant.">
+    <Modal open={props.open} onClose={(o) => !o && props.onClose()} busy={busy()} title={tr("t.create.title")}
+      description={tr("t.create.desc")}>
       <Show when={err()}><div class="errbar">{err()}</div></Show>
-      <Field id="t-id" label="Tenant ID" value={id()} onInput={setId} placeholder="acme"
+      <Field id="t-id" label={tr("t.create.id")} value={id()} onInput={setId} placeholder="acme"
         hint={tenantIdIssue(id().trim())
           ? undefined
           : id().trim()
-            ? `→ schema tenant_${id().trim()} · subdomain ${id().trim()}.<host>`
-            : "lowercase letter first, then lowercase/digits/'_' (2–30); no hyphens, uppercase or spaces"} />
+            ? tr("t.create.idOk", { id: id().trim() })
+            : tr("t.create.idHint")} />
       <Show when={tenantIdIssue(id().trim())}>
         <div class="errbar" style={{ "margin-top": "-8px" }}>
           {tenantIdIssue(id().trim())}
           <Show when={suggestTenantId(id().trim())}>
             {" "}
             <button class="linklike" onClick={() => setId(suggestTenantId(id().trim()))}>
-              use "{suggestTenantId(id().trim())}"
+              {tr("t.create.use", { s: suggestTenantId(id().trim()) })}
             </button>
           </Show>
         </div>
       </Show>
-      <Field id="t-name" label="Display name" value={name()} onInput={setName} placeholder="Acme Inc." />
-      <Field id="t-email" label="Contact email" type="email" value={email()} onInput={setEmail} placeholder="ops@acme.com" />
-      <Field id="t-plan" label="Plan" value={plan()} onInput={setPlan} placeholder="free" />
+      <Field id="t-name" label={tr("t.create.name")} value={name()} onInput={setName} placeholder="Acme Inc." />
+      <Field id="t-email" label={tr("t.create.email")} type="email" value={email()} onInput={setEmail} placeholder="ops@acme.com" />
+      <Field id="t-plan" label={tr("t.create.plan")} value={plan()} onInput={setPlan} placeholder="free" />
       <div class="field">
-        <label for="t-schema">Schema (JSON)</label>
+        <label for="t-schema">{tr("t.create.schema")}</label>
         <textarea id="t-schema" rows="10" style={{ width: "100%", "font-family": "ui-monospace, monospace", "font-size": "12px" }}
           value={schema()} onInput={(e) => setSchema(e.currentTarget.value)} />
       </div>
       <div class="actions">
-        <Button variant="ghost" onClick={props.onClose} disabled={busy()}>Cancel</Button>
-        <Button variant="primary" onClick={submit} disabled={busy() || !id().trim() || tenantIdIssue(id().trim()) !== null}>{busy() ? "Creating…" : "Create tenant"}</Button>
+        <Button variant="ghost" onClick={props.onClose} disabled={busy()}>{tr("c.cancel")}</Button>
+        <Button variant="primary" onClick={submit} disabled={busy() || !id().trim() || tenantIdIssue(id().trim()) !== null}>{busy() ? tr("c.creating") : tr("t.create.btn")}</Button>
       </div>
     </Modal>
   )
@@ -226,22 +229,22 @@ function DeleteTenantDialog(props) {
     setErr(""); setBusy(true)
     try {
       await api.deleteTenant(id(), confirm().trim())
-      toast(`Deleted tenant ${id()}`)
+      toast(tr("t.deleted", { id: id() }))
       setConfirm("")
       props.onDeleted()
-    } catch (ex) { setErr(ex.message || "Delete failed") }
+    } catch (ex) { setErr(ex.message || tr("t.del.failed")) }
     finally { setBusy(false) }
   }
 
   return (
     <Modal open={!!props.target} onClose={(o) => !o && (setConfirm(""), props.onClose())} busy={busy()}
-      title="Delete tenant"
-      description={`This permanently drops the "${id()}" schema and ALL its data. This cannot be undone.`}>
+      title={tr("t.del.title")}
+      description={tr("t.del.desc", { id: id() })}>
       <Show when={err()}><div class="errbar">{err()}</div></Show>
-      <Field id="del-confirm" label={`Type "${id()}" to confirm`} value={confirm()} onInput={setConfirm} placeholder={id()} />
+      <Field id="del-confirm" label={tr("t.del.confirm", { id: id() })} value={confirm()} onInput={setConfirm} placeholder={id()} />
       <div class="actions">
-        <Button variant="ghost" onClick={() => { setConfirm(""); props.onClose() }} disabled={busy()}>Cancel</Button>
-        <Button variant="danger" onClick={submit} disabled={busy() || confirm().trim() !== id()}>{busy() ? "Deleting…" : "Delete forever"}</Button>
+        <Button variant="ghost" onClick={() => { setConfirm(""); props.onClose() }} disabled={busy()}>{tr("c.cancel")}</Button>
+        <Button variant="danger" onClick={submit} disabled={busy() || confirm().trim() !== id()}>{busy() ? tr("c.deleting") : tr("t.del.btn")}</Button>
       </div>
     </Modal>
   )

@@ -1,5 +1,6 @@
 import { createResource, For, Show, createEffect } from "solid-js"
 import { api } from "../lib/api"
+import { t as tr } from "../lib/i18n"
 import { selectedTenant, setSelectedTenant, tenantsVersion }
   from "../lib/tenantContext"
 
@@ -23,16 +24,16 @@ export function TenantSelect() {
 
   return (
     <div class="row" style={{ gap: "var(--space-2)" }}>
-      <span class="muted" style={{ "font-size": "12px" }}>Tenant</span>
-      <Show when={(tenants() || []).length > 0} fallback={<span class="muted" style={{ "font-size": "13px" }}>no tenants</span>}>
+      <span class="muted" style={{ "font-size": "12px" }}>{tr("top.tenant")}</span>
+      <Show when={(tenants() || []).length > 0} fallback={<span class="muted" style={{ "font-size": "13px" }}>{tr("top.noTenants")}</span>}>
         <select
-          aria-label="Selected tenant"
+          aria-label={tr("top.tenantSel")}
           value={selectedTenant()}
           onChange={(e) => setSelectedTenant(e.currentTarget.value)}
           style={{ "min-width": "160px" }}
         >
           <For each={tenants()}>{(t) => (
-            <option value={t.id}>{t.display_name || t.id}{t.suspended ? " (suspended)" : ""}</option>
+            <option value={t.id}>{t.display_name || t.id}{t.suspended ? " " + tr("top.suspended") : ""}</option>
           )}</For>
         </select>
       </Show>

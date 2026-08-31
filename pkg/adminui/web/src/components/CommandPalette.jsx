@@ -1,4 +1,5 @@
 import { createSignal, createMemo, For, Show, onMount, onCleanup } from "solid-js"
+import { t as tr } from "../lib/i18n"
 
 // CommandPalette — Cmd/Ctrl+K. Implemented natively (≈70 lines) instead of pulling
 // cmdk-solid: it keeps the bundle lean and dependency surface minimal (the project
@@ -47,7 +48,7 @@ export function CommandPalette(props) {
         <div class="cmdk" role="dialog" aria-label="Command palette">
           <input
             ref={(el) => { inputEl = el; queueMicrotask(() => el.focus()) }}
-            placeholder="Type a command or search…"
+            placeholder={tr("cmd.placeholder")}
             value={query()}
             onInput={(e) => { setQuery(e.currentTarget.value); setActive(0) }}
             onKeyDown={onInputKey}
@@ -63,7 +64,7 @@ export function CommandPalette(props) {
               </li>
             )}</For>
             <Show when={filtered().length === 0}>
-              <li class="muted" aria-disabled="true">No matches</li>
+              <li class="muted" aria-disabled="true">{tr("cmd.none")}</li>
             </Show>
           </ul>
         </div>

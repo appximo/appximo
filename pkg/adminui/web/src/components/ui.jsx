@@ -1,4 +1,5 @@
 import { createSignal, For, Show, onMount } from "solid-js"
+import { t, lang, otherLang, setLang } from "../lib/i18n"
 
 export function Button(props) {
   const variant = () => props.variant || "default"
@@ -42,8 +43,8 @@ export function Field(props) {
 // label, so status is never conveyed by colour alone (WCAG 1.4.1).
 export function StatusBadge(props) {
   const map = {
-    ok:   { cls: "badge-ok",   icon: "●", label: props.okLabel || "Active" },
-    warn: { cls: "badge-warn", icon: "⏸", label: props.warnLabel || "Suspended" },
+    ok:   { cls: "badge-ok",   icon: "●", label: props.okLabel || t("c.active") },
+    warn: { cls: "badge-warn", icon: "⏸", label: props.warnLabel || t("c.suspended") },
     crit: { cls: "badge-crit", icon: "✕", label: props.critLabel || "Error" },
   }
   const s = () => map[props.kind] || map.ok
@@ -71,11 +72,22 @@ export function ThemeToggle() {
     setTheme(next)
   }
   return (
-    <Button variant="ghost" class="btn-icon" ariaLabel="Toggle theme" onClick={toggle}>
+    <Button variant="ghost" class="btn-icon" ariaLabel={t("top.theme")} onClick={toggle}>
       {theme() === "dark" ? "☀" : "☾"}
     </Button>
   )
 }
+
+// LangToggle — shows the OTHER language's code (the same convention as the /app
+// back-office); the choice persists and the page reloads with it.
+export function LangToggle() {
+  return (
+    <button class="btn btn-ghost btn-sm lang-toggle" type="button" title={t("top.lang")} aria-label={t("top.lang")} onClick={() => setLang(otherLang)}>
+      {otherLang.toUpperCase()}
+    </button>
+  )
+}
+export { lang }
 
 // Toasts — minimal store + viewport. No skeletons/spinners for fast ops; a toast
 // confirms the result of an action instead.

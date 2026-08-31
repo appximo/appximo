@@ -1,6 +1,7 @@
 import { createSignal, onMount, Show } from "solid-js"
 import { useNavigate } from "@solidjs/router"
-import { Button, Field } from "../components/ui"
+import { Button, Field, LangToggle } from "../components/ui"
+import { t } from "../lib/i18n"
 import { login, completeMfa, bootstrap } from "../lib/auth"
 import { api } from "../lib/api"
 
@@ -34,7 +35,7 @@ export function Login() {
       else navigate("/")
     } catch (ex) {
       // Generic message, consistent with the backend's anti-enumeration response.
-      setErr(ex.status === 401 ? "Invalid credentials." : "Sign-in failed. Try again.")
+      setErr(ex.status === 401 ? t("l.invalid") : t("l.failed"))
     } finally { setBusy(false) }
   }
 
@@ -45,7 +46,7 @@ export function Login() {
       await completeMfa(mfaToken(), code().trim())
       navigate("/")
     } catch (ex) {
-      setErr(ex.status === 401 ? "Invalid code." : "Verification failed.")
+      setErr(ex.status === 401 ? t("l.badCode") : t("l.verifyFailed"))
     } finally { setBusy(false) }
   }
 
@@ -56,65 +57,61 @@ export function Login() {
       await bootstrap(adminKey().trim(), email().trim(), password())
       navigate("/")
     } catch (ex) {
-      if (ex.status === 403) setErr("Wrong admin key. Use the exact ADMIN_KEY value the server was started with.")
-      else if (ex.status === 409) { setErr("An admin already exists — sign in instead."); setStep("creds") }
-      else setErr((ex.body && ex.body.error) || "Could not create the admin. Try again.")
+      if (ex.status === 403) setErr(t("l.wrongKey"))
+      else if (ex.status === 409) { setErr(t("l.exists")); setStep("creds") }
+      else setErr((ex.body && ex.body.error) || t("l.createFailed"))
     } finally { setBusy(false) }
   }
 
   return (
     <div class="login-wrap">
       <div class="card login-card">
-        <h1>Appximo Admin</h1>
+        <div class="row"><h1 style={{ margin: 0 }}>{t("l.title")}</h1><span class="spacer" /><LangToggle /></div>
         <Show when={step() === "creds"}>
-          <p class="sub">Sign in to the platform admin panel.</p>
+          <p class="sub">{t("l.sub")}</p>
           <form onSubmit={submitCreds}>
             <Show when={err()}><div class="errbar">{err()}</div></Show>
-            <Field id="email" label="Email" type="email" value={email()} onInput={setEmail}
+            <Field id="email" label={t("l.email")} type="email" value={email()} onInput={setEmail}
               placeholder="you@example.com" autocomplete="username" />
-            <Field id="password" label="Password" type="password" value={password()} onInput={setPassword}
+            <Field id="password" label={t("l.password")} type="password" value={password()} onInput={setPassword}
               autocomplete="current-password" />
             <Button type="submit" variant="primary" disabled={busy()}>
-              {busy() ? "Signing in…" : "Sign in"}
+              {busy() ? t("l.signingIn") : t("l.signin")}
             </Button>
           </form>
         </Show>
         <Show when={step() === "mfa"}>
-          <p class="sub">Enter the 6-digit code from your authenticator (or a backup code).</p>
+          <p class="sub">{t("l.mfa")}</p>
           <form onSubmit={submitMfa}>
             <Show when={err()}><div class="errbar">{err()}</div></Show>
-            <Field id="code" label="Authentication code" value={code()} onInput={setCode}
+            <Field id="code" label={t("l.code")} value={code()} onInput={setCode}
               placeholder="123456" autocomplete="one-time-code" inputmode="numeric" />
             <Button type="submit" variant="primary" disabled={busy()} class="btn" >
-              {busy() ? "Verifying…" : "Verify"}
+              {busy() ? t("l.verifying") : t("l.verify")}
             </Button>
-            <Button variant="ghost" class="btn" onClick={() => { setStep("creds"); setErr(""); setCode("") }}>Back</Button>
+            <Button variant="ghost" class="btn" onClick={() => { setStep("creds"); setErr(""); setCode("") }}>{t("l.back")}</Button>
           </form>
         </Show>
         <Show when={step() === "bootstrap"}>
-          <p class="sub">
-            <strong>No admin exists yet.</strong> This server has just been set up —
-            create the first platform admin now. You'll need the <code>ADMIN_KEY</code> the
-            server was started with (it's in the environment / .env of whoever runs it).
-          </p>
+          <p class="sub" innerHTML={t("l.boot")} />
           <form onSubmit={submitBootstrap}>
             <Show when={err()}><div class="errbar">{err()}</div></Show>
-            <Field id="adminkey" label="Admin key (the server's ADMIN_KEY)" type="password"
+            <Field id="adminkey" label={t("l.adminKey")} type="password"
               value={adminKey()} onInput={setAdminKey} autocomplete="off" />
-            <Field id="email" label="Your email" type="email" value={email()} onInput={setEmail}
+            <Field id="email" label={t("l.yourEmail")} type="email" value={email()} onInput={setEmail}
               placeholder="you@example.com" autocomplete="username" />
-            <Field id="password" label="Choose a password (12+ characters)" type="password"
+            <Field id="password" label={t("l.choosePw")} type="password"
               value={password()} onInput={setPassword} autocomplete="new-password" />
             <Button type="submit" variant="primary" disabled={busy()}>
-              {busy() ? "Creating…" : "Create the first admin"}
+              {busy() ? t("c.creating") : t("l.createFirst")}
             </Button>
           </form>
           <p class="sub" style="margin-top:12px">
-            Prefer the terminal? The same thing:
+            {t("l.terminal")}
             <br /><code>appximo admin create --email you@example.com --password '…'</code>
           </p>
           <Button variant="ghost" class="btn" onClick={() => { setStep("creds"); setErr("") }}>
-            I already have an admin — sign in
+            {t("l.haveAdmin")}
           </Button>
         </Show>
       </div>

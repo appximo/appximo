@@ -7,6 +7,8 @@ import { api, ApiError } from "../lib/api"
 import { logout } from "../lib/auth"
 import { selectedTenant } from "../lib/tenantContext"
 import { registerCommands } from "../lib/commands"
+import { PageIntro } from "../shell/Shell"
+import { t } from "../lib/i18n"
 
 // Files — the selected tenant's file store, in the console (ADMIN-CONSOLE-S1).
 // Thin face over the UI-F5-S1 admin file routes: the SAME files.Store the
@@ -36,8 +38,8 @@ export function Files() {
 
   onMount(() => {
     onCleanup(registerCommands([
-      { id: "files:upload", label: "Upload file", hint: "Files", run: () => fileInput?.click() },
-      { id: "files:refresh", label: "Refresh files", hint: "Files", run: () => refetch() },
+      { id: "files:upload", label: t("f.upload"), hint: t("f.title"), run: () => fileInput?.click() },
+      { id: "files:refresh", label: t("c.refresh") + " · " + t("f.title"), hint: t("f.title"), run: () => refetch() },
     ]))
   })
 
@@ -48,10 +50,10 @@ export function Files() {
     setBusy(true)
     try {
       await api.uploadFile(tid(), f)
-      toast(`Uploaded ${f.name}`)
+      toast(t("f.uploaded", { n: f.name }))
       refetch()
     } catch (ex) {
-      toast((ex.body && ex.body.error) || ex.message || "Upload failed", "err")
+      toast((ex.body && ex.body.error) || ex.message || t("f.uploadFailed"), "err")
     } finally { setBusy(false) }
   }
 
@@ -59,7 +61,7 @@ export function Files() {
     try {
       const { url } = await api.fileURL(tid(), f.id)
       window.open(url, "_blank")
-    } catch (ex) { toast(ex.message || "Could not mint download URL", "err") }
+    } catch (ex) { toast(ex.message || t("f.urlFailed"), "err") }
   }
 
   const doDelete = async () => {
@@ -68,19 +70,19 @@ export function Files() {
     setBusy(true)
     try {
       await api.deleteFile(tid(), f.id)
-      toast(`Deleted ${f.original_name || f.id}`)
+      toast(t("f.deleted", { n: f.original_name || f.id }))
       setDelTarget(null)
       refetch()
     } catch (ex) {
-      toast((ex.body && ex.body.error) || ex.message || "Delete failed", "err")
+      toast((ex.body && ex.body.error) || ex.message || t("f.deleteFailed"), "err")
     } finally { setBusy(false) }
   }
 
   const columns = [
-    { accessorKey: "original_name", header: "Name", size: 260, cell: (c) => <span class="cell-id" title={c.getValue()}>{c.getValue() || "—"}</span> },
-    { accessorKey: "content_type", header: "Type", size: 150, cell: (c) => <span class="secondary">{c.getValue() || "—"}</span> },
-    { accessorKey: "size", header: "Size", size: 90, meta: { align: "right" }, cell: (c) => <span class="num">{fmtSize(c.getValue())}</span> },
-    { accessorKey: "created_at", header: "Uploaded", size: 150, cell: (c) => <span class="secondary">{fmtDateTime(c.getValue())}</span> },
+    { accessorKey: "original_name", header: t("f.th.name"), size: 260, cell: (c) => <span class="cell-id" title={c.getValue()}>{c.getValue() || "—"}</span> },
+    { accessorKey: "content_type", header: t("f.th.type"), size: 150, cell: (c) => <span class="secondary">{c.getValue() || "—"}</span> },
+    { accessorKey: "size", header: t("f.th.size"), size: 90, meta: { align: "right" }, cell: (c) => <span class="num">{fmtSize(c.getValue())}</span> },
+    { accessorKey: "created_at", header: t("f.th.uploaded"), size: 150, cell: (c) => <span class="secondary">{fmtDateTime(c.getValue())}</span> },
     {
       accessorKey: "id", header: "id", size: 110,
       cell: (c) => <span class="muted" style={{ "font-family": "ui-monospace, monospace", "font-size": "11px" }} title={c.getValue()}>{String(c.getValue()).slice(0, 8)}…</span>,
@@ -91,8 +93,8 @@ export function Files() {
         const f = c.row.original
         return (
           <div class="cell-actions row" style={{ "justify-content": "flex-end", gap: "4px" }}>
-            <Button size="sm" variant="ghost" onClick={() => download(f)}>Download</Button>
-            <Button size="sm" variant="ghost" class="btn-danger" onClick={() => setDelTarget(f)}>Delete</Button>
+            <Button size="sm" variant="ghost" onClick={() => download(f)}>{t("f.download")}</Button>
+            <Button size="sm" variant="ghost" class="btn-danger" onClick={() => setDelTarget(f)}>{t("c.delete")}</Button>
           </div>
         )
       },
@@ -106,39 +108,40 @@ export function Files() {
   return (
     <>
       <div class="pagehead">
-        <h1>Files</h1>
+        <h1>{t("f.title")}</h1>
         <Show when={tid()}><span class="muted">· {tid()}</span></Show>
         <span class="spacer" />
-        <Show when={res() && res().backend}><span class="muted" style={{ "font-size": "12px" }}>backend: {res().backend}</span></Show>
-        <Button variant="ghost" size="sm" onClick={() => refetch()}>Refresh</Button>
+        <Show when={res() && res().backend}><span class="muted" style={{ "font-size": "12px" }}>{t("f.backend", { b: res().backend })}</span></Show>
+        <Button variant="ghost" size="sm" onClick={() => refetch()}>{t("c.refresh")}</Button>
         <Button variant="primary" size="sm" onClick={() => fileInput?.click()} disabled={busy() || !tid()}>
-          {busy() ? "Uploading…" : "Upload file"}
+          {busy() ? t("f.uploading") : t("f.upload")}
         </Button>
         <input type="file" ref={fileInput} style={{ display: "none" }} onChange={upload} />
       </div>
+      <PageIntro>{t("intro.files")}</PageIntro>
 
-      <Show when={tid()} fallback={<div class="empty">Select a tenant to manage its files.</div>}>
-        <Show when={!res()?.disabled} fallback={<div class="empty">The file store is disabled on this deployment.</div>}>
+      <Show when={tid()} fallback={<div class="empty">{t("f.select")}</div>}>
+        <Show when={!res()?.disabled} fallback={<div class="empty">{t("f.disabled")}</div>}>
           <DataTable
             data={files()}
             columns={columns}
-            emptyMessage={res.loading ? "Loading…" : "No files uploaded yet."}
+            emptyMessage={res.loading ? t("c.loading") : t("f.empty")}
           />
           <Show when={total() > perPage()}>
             <div class="row" style={{ "justify-content": "center", gap: "var(--space-2)", "margin-top": "var(--space-3)" }}>
-              <Button variant="ghost" size="sm" disabled={page() <= 1} onClick={() => setPage(page() - 1)}>Previous</Button>
-              <span class="muted" style={{ "font-size": "12px" }}>page {page()} · {total()} file(s)</span>
-              <Button variant="ghost" size="sm" disabled={page() * perPage() >= total()} onClick={() => setPage(page() + 1)}>Next</Button>
+              <Button variant="ghost" size="sm" disabled={page() <= 1} onClick={() => setPage(page() - 1)}>{t("c.prev")}</Button>
+              <span class="muted" style={{ "font-size": "12px" }}>{t("f.pageOf", { p: page(), n: total() })}</span>
+              <Button variant="ghost" size="sm" disabled={page() * perPage() >= total()} onClick={() => setPage(page() + 1)}>{t("c.next")}</Button>
             </div>
           </Show>
         </Show>
       </Show>
 
-      <Modal open={!!delTarget()} onClose={(o) => !o && setDelTarget(null)} busy={busy()} title="Delete file"
-        description={`Deletes "${delTarget()?.original_name || delTarget()?.id}" from the tenant's store. A file still attached to a record is protected (409).`}>
+      <Modal open={!!delTarget()} onClose={(o) => !o && setDelTarget(null)} busy={busy()} title={t("f.del.title")}
+        description={t("f.del.desc", { n: delTarget()?.original_name || delTarget()?.id })}>
         <div class="actions">
-          <Button variant="ghost" onClick={() => setDelTarget(null)} disabled={busy()}>Cancel</Button>
-          <Button variant="danger" onClick={doDelete} disabled={busy()}>{busy() ? "Deleting…" : "Delete file"}</Button>
+          <Button variant="ghost" onClick={() => setDelTarget(null)} disabled={busy()}>{t("c.cancel")}</Button>
+          <Button variant="danger" onClick={doDelete} disabled={busy()}>{busy() ? t("c.deleting") : t("f.del.btn")}</Button>
         </div>
       </Modal>
     </>

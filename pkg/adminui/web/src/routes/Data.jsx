@@ -7,6 +7,8 @@ import { api, ApiError } from "../lib/api"
 import { logout } from "../lib/auth"
 import { selectedTenant } from "../lib/tenantContext"
 import { registerCommands } from "../lib/commands"
+import { PageIntro } from "../shell/Shell"
+import { t } from "../lib/i18n"
 
 const NUMERIC = new Set(["int", "int64", "float64"])
 // Field names that make a good human-readable FIRST column (so the table never
@@ -67,7 +69,7 @@ export function Data() {
       const data = res.data || []
       setRows((prev) => after ? [...prev, ...data] : data)
       setHasNext(!!(res.meta && res.meta.has_next))
-    } catch (ex) { onAuthErr(ex); setErr(ex.message || "Load failed") }
+    } catch (ex) { onAuthErr(ex); setErr(ex.message || t("d.loadFailed")) }
     finally { setLoading(false) }
   }
 
@@ -78,7 +80,7 @@ export function Data() {
 
   onMount(() => {
     onCleanup(registerCommands([
-      { id: "data:refresh", label: "Refresh data", hint: "Data", run: () => selected() && pick(selected()) },
+      { id: "data:refresh", label: t("c.refresh") + " · " + t("d.title"), hint: t("d.title"), run: () => selected() && pick(selected()) },
     ]))
   })
 
@@ -110,7 +112,7 @@ export function Data() {
     cols.push({
       id: "_open", header: "",
       size: 70,
-      cell: (c) => <div class="cell-actions"><Button size="sm" variant="ghost" onClick={() => setDetail(c.row.original)}>View</Button></div>,
+      cell: (c) => <div class="cell-actions"><Button size="sm" variant="ghost" onClick={() => setDetail(c.row.original)}>{t("c.view")}</Button></div>,
     })
     return cols
   }
@@ -118,18 +120,19 @@ export function Data() {
   return (
     <>
       <div class="pagehead">
-        <h1>Data</h1>
+        <h1>{t("d.title")}</h1>
         <Show when={tid()}><span class="muted">· {tid()}</span></Show>
         <span class="spacer" />
-        <Show when={selected()}><Button variant="ghost" size="sm" onClick={() => pick(selected())}>Refresh</Button></Show>
+        <Show when={selected()}><Button variant="ghost" size="sm" onClick={() => pick(selected())}>{t("c.refresh")}</Button></Show>
       </div>
+      <PageIntro>{t("intro.data")}</PageIntro>
 
-      <Show when={tid()} fallback={<div class="empty">Select a tenant to browse its data.</div>}>
+      <Show when={tid()} fallback={<div class="empty">{t("d.select")}</div>}>
         <div class="data-layout">
           <aside class="reslist card">
             <div class="navgroup">
-              <div class="label">Resources</div>
-              <Show when={(resources() || []).length > 0} fallback={<span class="muted" style={{ padding: "8px", "font-size": "13px" }}>{resources.loading ? "Loading…" : "No resources"}</span>}>
+              <div class="label">{t("d.resources")}</div>
+              <Show when={(resources() || []).length > 0} fallback={<span class="muted" style={{ padding: "8px", "font-size": "13px" }}>{resources.loading ? t("c.loading") : t("d.noResources")}</span>}>
                 <For each={resources()}>{(r) => (
                   <button class={"navitem" + (selected() === r.name ? " active" : "")}
                     style={{ border: "none", background: "transparent", "text-align": "left", width: "100%" }}
@@ -143,16 +146,16 @@ export function Data() {
 
           <div class="col" style={{ "min-width": 0, gap: "var(--space-3)" }}>
             <Show when={err()}><div class="errbar">{err()}</div></Show>
-            <Show when={selected()} fallback={<div class="empty">Pick a resource on the left.</div>}>
+            <Show when={selected()} fallback={<div class="empty">{t("d.pick")}</div>}>
               <DataTable
                 data={rows()}
                 columns={columns()}
-                emptyMessage={loading() ? "Loading…" : "No records."}
+                emptyMessage={loading() ? t("c.loading") : t("d.empty")}
                 maxHeight="calc(100vh - 260px)"
               />
               <Show when={hasNext()}>
                 <div class="row" style={{ "justify-content": "center" }}>
-                  <Button variant="ghost" onClick={loadMore} disabled={loading()}>{loading() ? "Loading…" : "Load more"}</Button>
+                  <Button variant="ghost" onClick={loadMore} disabled={loading()}>{loading() ? t("c.loading") : t("d.more")}</Button>
                 </div>
               </Show>
             </Show>
@@ -167,7 +170,7 @@ export function Data() {
 
 function RecordDetail(props) {
   return (
-    <Modal open={!!props.record} onClose={(o) => !o && props.onClose()} title="Record">
+    <Modal open={!!props.record} onClose={(o) => !o && props.onClose()} title={t("d.record")}>
       <Show when={props.record}>
         <div class="col" style={{ gap: "var(--space-2)", "max-height": "60vh", overflow: "auto" }}>
           <For each={Object.keys(props.record)}>{(k) => (
@@ -179,7 +182,7 @@ function RecordDetail(props) {
         </div>
       </Show>
       <div class="actions">
-        <Button variant="ghost" onClick={props.onClose}>Close</Button>
+        <Button variant="ghost" onClick={props.onClose}>{t("c.close")}</Button>
       </div>
     </Modal>
   )
@@ -188,7 +191,7 @@ function RecordDetail(props) {
 function renderCell(v, type) {
   if (v === null || v === undefined) return <span class="muted">—</span>
   if (NUMERIC.has(type)) return <span class="num">{v}</span>
-  if (type === "bool") return <span>{v ? "Yes" : "No"}</span>
+  if (type === "bool") return <span>{v ? t("c.yes") : t("c.no")}</span>
   if (type === "time") return <span class="secondary">{fmtDateTime(v)}</span>
   const s = String(v)
   return <span title={s}>{s.length > 80 ? s.slice(0, 80) + "…" : s}</span>
