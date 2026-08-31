@@ -1,6 +1,7 @@
 package graphql
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"testing"
@@ -56,14 +57,14 @@ func TestAnalyzeQuery_AliasAmplificationRejected(t *testing.T) {
 func TestSafeDBErr_MasksInternals(t *testing.T) {
 	// A raw unknown-column PG error must be masked to a generic message.
 	raw := &pgconn.PgError{Code: "42703", Message: `column "secret_col" does not exist`}
-	if got := safeDBErr(raw).Error(); strings.Contains(got, "secret_col") || got != "internal error" {
+	if got := safeDBErr(context.Background(), raw).Error(); strings.Contains(got, "secret_col") || got != "internal error" {
 		t.Fatalf("safeDBErr leaked internals or wrong message: %q", got)
 	}
 	// Classified errors map to their safe messages.
-	if got := safeDBErr(&pgconn.PgError{Code: "42P01"}).Error(); got != "invalid tenant" {
+	if got := safeDBErr(context.Background(), &pgconn.PgError{Code: "42P01"}).Error(); got != "invalid tenant" {
 		t.Fatalf("missing-tenant mapping: got %q", got)
 	}
-	if got := safeDBErr(&pgconn.PgError{Code: "22P02"}).Error(); got != "invalid request" {
+	if got := safeDBErr(context.Background(), &pgconn.PgError{Code: "22P02"}).Error(); got != "invalid request" {
 		t.Fatalf("bad-input mapping: got %q", got)
 	}
 }

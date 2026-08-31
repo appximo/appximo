@@ -34,6 +34,38 @@ import (
 
 type httpReqKey struct{}
 
+// resolverErrKey carries the per-request capture state (ENG-56): graphql-go
+// resolves sibling fields CONCURRENTLY and the span tracker is single-writer,
+// so the first server-class resolver failure captures and the rest of the
+// same request do not (one request is one event in the panel anyway).
+type resolverErrKey struct{}
+
+type resolverErrState struct {
+	mu       sync.Mutex
+	captured bool
+}
+
+// captureResolverError records a resolver failure that REST would have
+// answered 500 on the request's trace — message, stack, the failed statement,
+// identity — through the SAME seam the generated 500s use, so the request
+// persists, joins a fingerprint group and can raise the first-occurrence alert
+// even though the wire status stays 200 (the GraphQL contract). The message
+// says so, because the panel shows the logical status, not the wire's.
+func captureResolverError(ctx context.Context, err error) {
+	st, _ := ctx.Value(resolverErrKey{}).(*resolverErrState)
+	req, _ := ctx.Value(httpReqKey{}).(*http.Request)
+	if st == nil || req == nil {
+		return
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.captured {
+		return
+	}
+	st.captured = true
+	codegen.CaptureServerError(req, fmt.Errorf("graphql resolver (HTTP 200 on the wire): %w", err))
+}
+
 // rbacResultFilterKey is the per-request context key for RBAC field scrubbing.
 type rbacResultFilterKey struct{}
 
@@ -73,6 +105,7 @@ func BuildHandler(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunn
 		filterStore := &rbacResultFilter{fields: make(map[string][]string)}
 		ctx := context.WithValue(r.Context(), httpReqKey{}, r)
 		ctx = context.WithValue(ctx, rbacResultFilterKey{}, filterStore)
+		ctx = context.WithValue(ctx, resolverErrKey{}, &resolverErrState{})
 
 		var params struct {
 			Query         string         `json:"query"`
@@ -329,7 +362,10 @@ func (e *validationError) Extensions() map[string]any {
 // (handlers.ClassifyWriteError, ENG-42) — the same ladder REST, the batch
 // transaction and Ctx.Insert/Update render from. Always returns a safe message —
 // never the original error.
-func safeDBErr(err error) error {
+func safeDBErr(ctx context.Context, err error) error {
+	if pkghandlers.IsServerError(err) {
+		captureResolverError(ctx, err) // ENG-56: a masked 500 still reaches the trace
+	}
 	switch v := pkghandlers.ClassifyWriteError(err); v.Kind {
 	case pkghandlers.WriteErrUnique:
 		// A unique-constraint collision is a clean conflict (G6), identical on
@@ -844,12 +880,12 @@ func aggregateResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB
 		sql, args := aq.SQL()
 		rows, err := tdb.QueryTenant(p.Context, tc.PGSchema, sql, args...)
 		if err != nil {
-			return nil, safeDBErr(err)
+			return nil, safeDBErr(p.Context, err)
 		}
 		defer rows.Close()
 		recs, err := pkghandlers.RowsToMaps(rows)
 		if err != nil {
-			return nil, safeDBErr(err)
+			return nil, safeDBErr(p.Context, err)
 		}
 		return shapeGQLAggregate(aq, recs), nil
 	}
@@ -1018,19 +1054,19 @@ func listResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, pol
 			}
 			dataBytes, _, derr := tdb.IncludeListJSON(p.Context, tc.PGSchema, incSQL, incArgs...)
 			if derr != nil {
-				return nil, safeDBErr(derr)
+				return nil, safeDBErr(p.Context, derr)
 			}
 			if data, err = unmarshalList(dataBytes); err != nil {
-				return nil, safeDBErr(err)
+				return nil, safeDBErr(p.Context, err)
 			}
 		} else {
 			rows, rerr := tdb.QueryTenant(p.Context, tc.PGSchema, selectQ, selectArgs...)
 			if rerr != nil {
-				return nil, safeDBErr(rerr)
+				return nil, safeDBErr(p.Context, rerr)
 			}
 			defer rows.Close()
 			if data, err = pkghandlers.RowsToMaps(rows); err != nil {
-				return nil, safeDBErr(err)
+				return nil, safeDBErr(p.Context, err)
 			}
 			if evalResult != nil && len(evalResult.AllowedFields) > 0 {
 				for i, rec := range data {
@@ -1205,26 +1241,26 @@ func getByIDResolver(name string, tdb *db.TenantDB, policy *rbac.Policy, s *sche
 			}
 			dataBytes, found, derr := tdb.IncludeOneJSON(p.Context, tc.PGSchema, incSQL, incArgs...)
 			if derr != nil {
-				return nil, safeDBErr(derr)
+				return nil, safeDBErr(p.Context, derr)
 			}
 			if !found {
 				return nil, nil
 			}
 			var rec map[string]any
 			if err := json.Unmarshal(dataBytes, &rec); err != nil {
-				return nil, safeDBErr(err)
+				return nil, safeDBErr(p.Context, err)
 			}
 			return rec, nil
 		}
 
 		rows, err := tdb.QueryTenant(p.Context, tc.PGSchema, q, qargs...)
 		if err != nil {
-			return nil, safeDBErr(err)
+			return nil, safeDBErr(p.Context, err)
 		}
 		defer rows.Close()
 		result, err := pkghandlers.RowsToMaps(rows)
 		if err != nil {
-			return nil, safeDBErr(err)
+			return nil, safeDBErr(p.Context, err)
 		}
 		if len(result) == 0 {
 			return nil, nil
@@ -1302,6 +1338,7 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		hc := hookCfg(name, "before_create", res)
 		hookRes, err := hr.RunBeforeHook(p.Context, hc, input, auth.HookUserContext(p.Context))
 		if err != nil {
+			captureResolverError(p.Context, err) // a hook that failed to EXECUTE is a 500 on REST
 			return nil, err
 		}
 		if !hookRes.Proceed {
@@ -1327,7 +1364,7 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		// Per-field file attach policy (FILES-1) — same check, same S44 fields
 		// as the REST create (a violation lands in errors[].extensions.fields).
 		if fpErrs, fpErr := codegen.CheckFilePoliciesTenant(p.Context, tdb, tc.PGSchema, res, body); fpErr != nil {
-			return nil, safeDBErr(fpErr)
+			return nil, safeDBErr(p.Context, fpErr)
 		} else if len(fpErrs) > 0 {
 			return nil, &validationError{fields: fpErrs}
 		}
@@ -1342,7 +1379,7 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		if err != nil {
 			// safeDBErr renders the shared classifier — the unique-collision
 			// conflict (G6) included, identically to the update resolver.
-			return nil, safeDBErr(err)
+			return nil, safeDBErr(p.Context, err)
 		}
 
 		// SSE broadcast (S45): same post-commit point as the REST create path.
@@ -1440,6 +1477,7 @@ func updateResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		hc := hookCfg(name, "before_update", res)
 		hookRes, herr := hr.RunBeforeHook(p.Context, hc, input, auth.HookUserContext(p.Context))
 		if herr != nil {
+			captureResolverError(p.Context, herr) // a hook that failed to EXECUTE is a 500 on REST
 			return nil, herr
 		}
 		if !hookRes.Proceed {
@@ -1456,7 +1494,7 @@ func updateResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		// Per-field file attach policy (FILES-1) on the final SET values — same
 		// check, same S44 fields as the REST update.
 		if fpErrs, fpErr := codegen.CheckFilePoliciesTenant(p.Context, tdb, tc.PGSchema, res, sets); fpErr != nil {
-			return nil, safeDBErr(fpErr)
+			return nil, safeDBErr(p.Context, fpErr)
 		} else if len(fpErrs) > 0 {
 			return nil, &validationError{fields: fpErrs}
 		}
@@ -1471,7 +1509,7 @@ func updateResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 			if err == codegen.ErrNoWritableUpdate {
 				return nil, fmt.Errorf("no writable fields in request")
 			}
-			return nil, safeDBErr(err)
+			return nil, safeDBErr(p.Context, err)
 		}
 		if len(rows) == 0 {
 			// Zero rows: not found, RBAC-excluded, or a state-machine transition
@@ -1527,7 +1565,7 @@ func deleteResolver(name string, res *schema.ResourceSchema, tdb *db.TenantDB, p
 		}
 		affected, err := codegen.RunDelete(p.Context, tdb, tbl, name, tc.ID, tc.PGSchema, idStr, cond, emitDelete)
 		if err != nil {
-			return false, safeDBErr(err)
+			return false, safeDBErr(p.Context, err)
 		}
 		if affected > 0 {
 			// SSE broadcast (S45): row is gone → id with null record.

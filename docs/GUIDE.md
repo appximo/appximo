@@ -744,12 +744,18 @@ What you must know that the installer cannot decide for you:
    binary rolled itself back with **zero human help** (~17 s to verified
    recovery). This is honest sub-second-blip deployment, **not** zero-downtime
    (ENG-2).
-6. **Backups:** `backup.sh` dumps per-app; schedule it (the runbook's
-   `appximo-backup.timer` at 03:30 — the installer does not create it yet,
-   ENG-3), and **rehearse restore**: `restore.sh` exists and the drill was
-   executed on the live shop — schema dropped with the catalogue answering
-   500, **restored in 1.8 s**, row counts identical, a new purchase completed.
-   An unrehearsed backup is a hope, not a backup.
+6. **Backups:** the installer schedules `backup.sh` nightly
+   (`<app>-backup.timer`, 03:30; `--backup-schedule=hourly` for a back-office)
+   and one run writes one SET — dump + uploads + secrets + a manifest of exact
+   per-table counts, with `pg_amcheck` over every heap page and index inside
+   the run. **Rehearse the restore**: `restore.sh --app=X --set=PREFIX` stops,
+   loads, starts and VERIFIES the counts against the manifest — measured
+   **13.6 s** for a 251 k-row database on a 2 GB box, **~4 min + the DNS TTL**
+   from an empty machine (docs/PRODUCTION.md §4, followed literally in the
+   drill). `fleet-audit.sh` says what a box is still missing (the off-box copy
+   is the one that needs YOUR destination). An unrehearsed backup is a hope,
+   not a backup — and one box is one box: if the host dies, the app is down
+   until someone acts.
 
 ### What the box actually does under stress — measured, consumer app, 2026-07-31
 
@@ -923,9 +929,9 @@ is tracked. If your project needs one of these today, factor that in *now*:
 
 **Operations**
 
-- **No engine `restore` command** — `backup.sh`/`restore.sh` are scripts and
-  the restore drill is proven (1.8 s), but it's a runbook, not a subcommand
-  (ENG-3).
+- **No engine `restore` command** — `backup.sh`/`restore.sh` are scripts the
+  installer places and schedules; the restore is timed and verified (13.6 s on
+  251 k rows), but it's a shell on the box, not a subcommand (ENG-3).
 - No OTLP/OpenTelemetry export (Prometheus + internal traces only, ENG-4).
 - Webhooks refuse plain HTTP and private/loopback addresses — always
   (SSRF guard); test against a public HTTPS receiver.

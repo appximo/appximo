@@ -1639,6 +1639,15 @@ but the contract is worth knowing:
   so — **prefer `ctx.Error(500, "what failed", err)` for the site**. A panic
   gets its own site: the capture runs on the panicking goroutine before it
   unwinds. 4xx never pay for a stack (a caller's problem is not a bug).
+  **This is the documented answer, not a gap waiting for a fix (ENG-57,
+  closed DEPLOY-FLOTA-S1):** the only way to give a bare `return err` a site
+  would be for every `Ctx` database method to wrap its error with the
+  caller's program counters — and a bare error that came from a `Ctx` method
+  already carries the FAILED STATEMENT on the trace, which locates it; a bare
+  error from the handler's own Go code never passes through `Ctx`, so the
+  wrap could not see it either. The wrap would add allocation on the error
+  path to cover exactly the case that is already located, and nothing else.
+  One line in the handler (`ctx.Error`) does what no engine seam can.
 - **The failed statement.** The pool's driver tracer notes the exact SQL a
   query failed with (template only — bound values are never recorded); a 5xx
   trace shows it next to the driver's message. In the report's case the

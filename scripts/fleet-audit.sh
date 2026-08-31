@@ -83,7 +83,10 @@ audit_app() {
 		else meh "no last-backup.status yet (first run of the new backup.sh writes it)"; fi
 	fi
 
-	# 6. off-box
+	# 6. off-box + an alert destination
+	local hook; hook="$(envval "$envf" SLACK_WEBHOOK_URL)"
+	if [ -n "$hook" ]; then ok "alert destination set (SLACK_WEBHOOK_URL) — backup/disk/SLO/first-error alerts reach a human"
+	else bad "NO alert destination (SLACK_WEBHOOK_URL unset) — every alert (failed/stale backup, low disk, SLO burn, first occurrence of an error) is a journal line nobody reads; set it in $envf and restart (OPS-47)"; fi
 	local cpto pass; cpto="$(envval "$envf" BACKUP_COPY_TO)"; pass="$(envval "$envf" BACKUP_PASSPHRASE_FILE)"
 	if [ -n "$cpto" ]; then
 		ok "off-box copy configured → $cpto"

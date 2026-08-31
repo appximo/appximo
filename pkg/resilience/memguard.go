@@ -2,8 +2,10 @@ package resilience
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -58,7 +60,19 @@ type MemoryGuard struct {
 	mu         sync.Mutex   // guards lastRefuse (the rate-limited log)
 	nowFn      func() time.Time
 	lastRefuse time.Time
+	// GraphQLMutation decides whether a POST /graphql body is a MUTATION
+	// (ENG-60, DEPLOY-FLOTA-S1). Every GraphQL request is a POST to one path,
+	// so a verb-keyed guard refused GraphQL READS under memory pressure while
+	// the equivalent REST read kept flowing (CAOS-S1 D5). The classifier runs
+	// ONLY once the guard has already decided to refuse — the hot path pays
+	// nothing for it, and a healthy host never parses a body here. nil keeps
+	// the old behavior (every /graphql POST is a write).
+	GraphQLMutation func(body []byte) bool
 }
+
+// graphqlBodyCap mirrors the GraphQL handler's own body cap (1 MiB): a
+// refused request is read up to that much and no more.
+const graphqlBodyCap = 1 << 20
 
 // MemoryGuardEnvVar is the operator knob (MiB floor; 0 disables).
 const MemoryGuardEnvVar = "APPXIMO_MEMORY_GUARD_MIN_MB"
@@ -171,6 +185,18 @@ func (g *MemoryGuard) Middleware(next http.Handler) http.Handler {
 		if ok {
 			next.ServeHTTP(w, r)
 			return
+		}
+		// Under pressure, and the request is GraphQL: a QUERY is a read and
+		// reads keep flowing — only a mutation is refused. The body is read
+		// once (bounded) and handed back to the handler untouched.
+		if r.URL.Path == "/graphql" && g.GraphQLMutation != nil && r.Body != nil {
+			body, rerr := io.ReadAll(io.LimitReader(r.Body, graphqlBodyCap+1))
+			_ = r.Body.Close()
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			if rerr == nil && len(body) <= graphqlBodyCap && !g.GraphQLMutation(body) {
+				next.ServeHTTP(w, r)
+				return
+			}
 		}
 		g.logRefusal(avail)
 		w.Header().Set("Content-Type", "application/json")

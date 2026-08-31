@@ -415,39 +415,6 @@ and they are what the next migrator reads first.
   index that `?search=` could use, plus a line in `docs/BENCHMARKS.md §4d`
   (written) and in `frontend-spec`. (c) is a session; (a) is the real fix.
 
-### ENG-56 — A GraphQL resolver failure is a 200 with `errors[]`, so it never reaches the trace as an error
-
-- **Origin:** OBSERVABILIDAD-ERRORES-S1 (2026-08-30), the sweep of 5xx paths.
-  The REST/custom-route/panic/driver paths now all reach the persisted trace
-  with message, stack (at the call site), the failed statement, identity,
-  `level:"error"` and a fingerprint group. GraphQL answers HTTP 200 for
-  anything it can execute (by contract, §GraphQL in AGENTS.md), so a resolver
-  that hits a database error produces a trace with status 200 and no
-  `error_msg`: the request logger keys everything on the HTTP status.
-- **Impact: medium** for a GraphQL-first frontend: the same NULL-into-bool
-  would be a silent 200 in the panel. REST users are unaffected.
-- **Ready:** the GraphQL handler calls `RecordError`/`SetCapture` on the
-  request's tracker for resolver errors that would have been a 5xx on REST
-  (the same `IsServerError` classifier), so the trace persists with the
-  message and joins a group; the request line's level follows the
-  `errors[]` presence for those. Provocation #9 for GraphQL, then.
-
-### ENG-57 — A custom route that returns a bare `err` gets the response writer's stack, not the handler's
-
-- **Origin:** OBSERVABILIDAD-ERRORES-S1 (2026-08-30), provocation #1. The
-  stack is captured at the `ctx.Error(5xx, …)` call site (the handler's
-  file:line); a handler that does `return err` has no such site, so the
-  trace carries the writer's stack plus a `stack_note` saying so. When the
-  error came from a Ctx database method the failed statement is still
-  attached (the driver tracer), which locates it anyway; a bare error from
-  the handler's own Go code is the only case with no site.
-- **Impact: low.** Documented in backend-spec §3.9 ("prefer ctx.Error");
-  the message and the group still arrive.
-- **Ready:** Ctx database methods wrap their error in a type carrying the
-  caller's PCs (`runtime.Callers` at the Ctx method — the handler is
-  frame 1) with `Unwrap` so `errors.As/Is` keep working; `writeHandlerError`
-  prefers those PCs. Measure with ABBA (the wrap allocates only on error).
-
 ### OPS-38 — The lab token's scopes are narrower than the lab's design assumed: no tags, no snapshots
 
 - **Origin:** LAB-CAPACIDAD-S2 (2026-08-29), the first live run. Verified
@@ -1115,44 +1082,6 @@ would close it better, and is Miguel's call.
   lock, verified against the manifest's rows for that schema; and the drill in
   `scripts/verify-production/`.
 
-### OPS-44 — Faster guaranteed corruption detection than the nightly backup (pg_amcheck)
-- **Origin:** CAOS-S1 Part B. data_checksums make a corrupt page a loud error
-  ON READ, but index-only/count plans skip the heap, so a live app may not hit
-  a bad block for a long time; the guaranteed full-scan detector is the nightly
-  backup (`pg_dump` COPYs every block). That is up to ~24 h of latency to learn
-  of corruption.
-- **Impact:** Low-Medium. For most apps the nightly backup is soon enough; for
-  a fintech it may not be.
-- **Ready:** an optional `pg_amcheck` (heap + btree) pass wired into the backup
-  timer (or its own timer), reporting per-relation, with the same alert path as
-  a failed backup; measured cost on the customer box. Only when a customer
-  needs sub-day corruption detection.
-
-### OPS-45 — The 58's engine binaries predate ENG-59 and the layer-5 host watch
-- **Origin:** CAOS-S1 Part A. The 58 was brought up to date at the CONFIG level
-  (units, backup format, timers, pg auto-restart, `APPXIMO_BACKUP_DIR`), but
-  its running binaries are `commerce 95f5735-obs` (tiendita) and `appximo
-  85018bd-obs` (vetapp) — both predate ENG-59 (breaker consecutive trip) and
-  layer 5 (the engine-side disk/backup gauges + alert). Its backup liveness is
-  covered by `fleet-audit` reading the status file + `backup.sh`'s own failure
-  notification, but the engine gauge shows `KeyError: host`.
-- **Impact:** Low. Operational protection is in place; the engine-side niceties
-  land on the next normal `deploy-update` of each app.
-- **Ready:** deploy a current binary to each 58 app (tiendita needs a commerce
-  rebuild on the new engine; vetapp is a straight engine swap), drilled with
-  rollback, golden md5 verified.
-
-### ENG-60 — The memory guard 503s GraphQL reads (all /graphql is POST)
-- **Origin:** CAOS-S1 D5. The host memory guard covers data-plane WRITE verbs
-  (POST/PUT/PATCH/DELETE on /api/* and /graphql). Because EVERY GraphQL request
-  is a POST to /graphql, a GraphQL READ is refused with 503 under memory
-  pressure while the equivalent REST read keeps flowing.
-- **Impact:** Low. Under memory pressure (already a degraded state) GraphQL is
-  read-blocked; REST reads are the escape. No data risk.
-- **Ready:** distinguish a GraphQL query from a mutation before the guard (parse
-  the operation, or a cheap heuristic), and only guard mutations — without
-  adding a parse to the hot path for REST. Measured no_change on the REST path.
-
 ### ENG-58 — The graceful stop always waits the full 5 s drain, so a restore/restart pays 5 s even with zero in-flight requests
 - **Origin:** RESILIENCIA-S1 scenario 1 timings: `systemctl stop` = 5.0 s of
   the 13.6 s restore; `app.go` passes a fixed `5*time.Second` to
@@ -1601,6 +1530,56 @@ would close it better, and is Miguel's call.
   no Postgres, the downloaded runtime is checksum-verified, and `appximo down`
   knows how to stop it; dependency cost measured and accepted.
 
+### ENG-61 — A GraphQL resolver PANIC is recovered by graphql-go into `errors[]` and never captured
+
+- **Origin:** DEPLOY-FLOTA-S1 (2026-08-31), while closing ENG-56. graphql-go's
+  executor recovers a panic inside a resolver (`executor.go` `handleFieldError`)
+  and formats it as a field error, so the engine's Recoverer never sees it: the
+  request is a 200 + `errors[]` with the panic's message and NO capture — the
+  REST equivalent is captured on the panicking goroutine with its site.
+  ENG-56 closed the database/hook-execution failures (the ones the field
+  report measured); this is the remaining resolver failure class.
+- **Impact: low.** The engine's own resolvers do not panic on known inputs;
+  the message still reaches the client's `errors[]`.
+- **Ready:** wrap each generated resolver's `Resolve` in a deferred recover
+  that calls `captureResolverError` with the panic value and re-panics (so
+  graphql-go still formats the field error); one provocation through the
+  tracing integration test (a resolver that panics on a declared trigger
+  field) persisted as a 500 with the site.
+
+### OPS-46 — The stock `serve` binds every interface; on the 58 vetapp's `:8091` and control `:9098` listen on `*` and the firewall is the only line
+
+- **Origin:** DEPLOY-FLOTA-S1 (2026-08-31), the pre-provocation port review
+  of the 58: `ss -ltnp` shows vetapp on `*:8091` and `*:9098` (the tiendita's
+  commerce binary binds `127.0.0.1` because its `main()` sets `Config.Host`);
+  `ufw` blocks both from the internet (verified from the 105: 000 on all
+  four ports), so this is defence-in-depth, not an exposure. `Config.Host` /
+  `Config.ControlHost` exist for a library consumer (LIBRARY-GAPS-S2) but the
+  stock `appximo serve` has no flag or env to set them, and `install.sh`
+  cannot ask for it.
+- **Impact:** Low-Medium. A box whose firewall is reset (a cloud console
+  "reset firewall", an image without ufw) exposes the control plane
+  (`X-Admin-Key`-gated) and the engine directly.
+- **Ready:** `APPXIMO_HOST` / `APPXIMO_CONTROL_HOST` env knobs (default
+  unchanged; `127.0.0.1` enforces localhost at the socket), the installer
+  writes `APPXIMO_CONTROL_HOST=127.0.0.1` and, behind Caddy, `APPXIMO_HOST=
+  127.0.0.1`; `fleet-audit.sh` flags a control port that listens on `*`.
+
+### OPS-47 — Neither app on the 58 has an alert destination (`SLACK_WEBHOOK_URL` unset): every alert is "recorded only"
+
+- **Origin:** DEPLOY-FLOTA-S1 (2026-08-31), before provoking layer 5 on
+  vetapp: `grep SLACK_WEBHOOK_URL /etc/*/*.env` is empty on both apps. The
+  first-occurrence error alert, the SLO burn alert, the failed/stale backup
+  alert and the low-disk alert all end in a journal line nobody reads
+  (`alert (no webhook configured — recorded only)`); `backup.sh`'s own
+  failure post has nowhere to go either.
+- **Impact:** Medium. Everything RESILIENCIA/CAOS/OBSERVABILIDAD built to
+  say "before it is too late" is silent on the fleet until a destination
+  exists. Needs Miguel (a webhook he owns) — listed under decisions.
+- **Ready:** `SLACK_WEBHOOK_URL=` in both env files + a restart; one provoked
+  alert (touch `last-backup.status` to `failed …`) arriving in the channel;
+  `fleet-audit.sh` reports `NO alert destination` as a ✗ (added with this item).
+
 ## CLOSED (decided, with the reasoning written down)
 
 | ID | Item | Decision & where it is justified |
@@ -1608,6 +1587,7 @@ would close it better, and is Miguel's call.
 | **RBAC-C1** | Join / subquery row conditions | **No.** Unbounded per-row cost inside the embed LATERAL, and an unauditable compiled policy. Denormalize the ownership column — [ADR-022](adr/ADR-022-declarative-surface-boundaries.md) Decision 1b. Reconsider if a case needs ownership through a relation AND the denormalized column is genuinely unmaintainable. |
 | **SCHEMA-C1** | Raw-SQL index predicates | **No.** Arbitrary SQL rendered into DDL from a surface that `ai-generate` and Studio also write. (The previously-stated churn objection was measured and **retracted** — normalization is deterministic.) [ADR-022](adr/ADR-022-declarative-surface-boundaries.md) Decision 2. Reopens as SCHEMA-2 (structured form). |
 | **SCHEMA-C2** | A `decimal`/`money` field type | **No.** `int64` in minor units is the industry representation and what payment APIs speak; a `numeric` would still reach a JSON client as a float, recreating the bug. Documented in AGENTS.md, SCHEMA_REFERENCE §3.2, BACKEND_SPEC §2 and the LLM grammar so generated schemas use it. Reconsider if a client needs exact decimals the JSON layer can carry (a string-typed money scalar). |
+| **ENG-57** | A custom route's bare `return err` has no call site on the trace | **No engine seam — documented instead** (DEPLOY-FLOTA-S1). The only wrap that could give a bare error a site lives in the `Ctx` database methods, and an error from there already carries the FAILED STATEMENT, which locates it; a bare error from the handler's own Go code never passes through `Ctx`, so the wrap could not see it either — it would add allocation on the error path to cover exactly the case that is already located. backend-spec §3.9 says it in one paragraph: `ctx.Error(500, "what failed", err)` is the site. Reconsider only if a field report shows a bare, non-`Ctx` error class that recurs and cannot be located by message + route. |
 | **DOC-C1** | "The binary cannot serve a frontend" | **Fixed, not merely closed** — `Config.Static` ships (this session). Listed here because PROD_PATH_AUDIT §1.4 and PRODUCTION.md §6(c) both asserted it; both are corrected. |
 
 ---
@@ -1618,6 +1598,9 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 
 | Item | Why it needs him |
 |---|---|
+| **An off-box destination for the 58's backups** (RESILIENCIA-S1 → DEPLOY-FLOTA-S1) | The ONLY ✗ `fleet-audit.sh` leaves on both apps of the 58: `BACKUP_COPY_TO` is unset, so every backup set dies with that disk (a lost droplet = the golden dump, the vetapp data and both apps' secrets gone). It needs a destination Miguel owns: a DO Space ($5/mo, `rclone` remote) or an scp target on a box he controls, plus `BACKUP_PASSPHRASE_FILE` so the secrets travel encrypted (PRODUCTION §4.1). One line per env file + a passphrase file; the next backup run proves it (`offbox=yes`). **If not done this week it will hurt**: the recovery promise (§4.2) is measured FROM the set, and today the set has one copy. |
+| **An alert destination for the fleet** (OPS-47) | Neither app on the 58 has `SLACK_WEBHOOK_URL`: the first-occurrence error alert, the SLO burn alert, the failed/stale backup and low-disk alerts all end in a journal line nobody reads. A webhook he owns (Slack/Discord-compatible), one line per env file + restart; `fleet-audit.sh` now reports it as ✗. |
+| **Cut the tag with this session inside** (DEPLOY-FLOTA-S1) | `main` carries the breaker fix, layer 5, the error observability, the verified deploy and the fleet audit; the fleet RUNS it (the 58 was deployed from this session's commit) but no published release has it — the QUICKSTART's `latest` download still hands a user v0.1.13. One tag, once, Miguel's. |
 | **Open the "receive an existing system" front?** (MIGRACION-CONFIANZA-S1, MIG-FRONT) | Six findings from a real migration are registered with evidence and a reading each. Whether migrations are a product path — and therefore whether `?fields=`, a `COPY`-class import, `Route.AsRole` and the rest get built — is a product decision, not a sprint. The documentation halves (the batch endpoint, `import` for history, the DDL translation table) are done or cheap regardless. Also for him: ~~the 58 has NO swap~~ — done, `/swapfile 2G` is active (seen 2026-08-28 during MOTOR-FIELDS-S1). #5 (`?fields=`) is built. |
 | **Does the migration report count as the FIFTH external evaluation?** (DOC-VITRINA-S1, A-25) | Under A-25 it now meets (2) — `docs/FIELD_FEEDBACK_RESPONSE.md` §5 answers the nine points in public, with the report's three wrong diagnoses counted in both directions — and (3). What is missing is (1): a WRITTEN confirmation that the migration ran without our direction (the report is addressed to us and its box is the external developer's who built atina/crisblogs/VecinGo). With that line, README/FAQ/site say "five independent field evaluations, one of them a real 23-table migration" and link §5; without it the material says what it says today: four evaluations + a migration report answered point by point. |
 | **v0.1.10 as a SECURITY release** (MOTOR-AUTORIZACION-S1) | The row give-away (ENG-45 #1) is exploitable in EVERY published version by an ordinary account; the fix is on `main` (`6429a00`) and both demos run it. The tag is Miguel's; the release text AND the recommendation (yes, a GitHub Security Advisory, medium-high severity: privilege escalation between users of one tenant, no cross-tenant effect, rows cannot be stolen) are written in the internal repo `RELEASE_NOTE_v0.1.10.md`. Cutting the tag without the advisory leaves every v0.1.8/v0.1.9 deployment unwarned. |
@@ -1634,6 +1617,80 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in DEPLOY-FLOTA-S1 (2026-08-31) — the fleet at the current binary, a deploy that verifies itself and rolls back alone, the loose ends of the engine
+
+- **OPS-45 → DONE (pending the final lines of this session's deploy — see the
+  session report).** Both apps of the 58 deployed with `scripts/deploy-app.sh`
+  from the commit of this session: backup set first, atomic swap, verification
+  from OUTSIDE over the public HTTPS, golden md5 guarded, rollback drilled both
+  ways, audit at the end. The breaker (ENG-59), layer 5 and the error
+  observability provoked LIVE on petfriendly (surgically: a uid-scoped black
+  hole to PostgreSQL, a flipped status file, an ephemeral tenant with a
+  RAISE trigger) — numbers in the report.
+- **A deploy that does not depend on memory → DONE.** `scripts/deploy-app.sh`
+  (docs/PRODUCTION.md §3): the whole protocol from the operator's machine —
+  contract, inventory from systemd, backup set, swap through
+  `deploy-update.sh`, `/health` version through the proxy, an authenticated
+  read, a write probe that rolls back by construction, AUTOMATIC rollback
+  re-verified from outside, `--keep` md5, `fleet-audit.sh` at the end (exit 3
+  on gaps). Drilled on the lab customer box both ways: a good binary (17 s,
+  exit 0) and a poisoned one — boots, answers `/health` and `/readyz`, 500s
+  every data-plane request — caught by the read probe at 15 s, rolled back
+  and re-verified at 23 s (exit 1). Three defects of the script were found by
+  that first lab run, not by reading it (an `eval` on a version string with
+  parentheses, the mint note on stderr read as an error — with the TOKEN
+  printed into the log —, the remote `| sed` hiding exit codes); all fixed
+  before it touched the 58.
+- **ENG-60 → DONE.** The memory guard classifies a `/graphql` POST ONLY once
+  it has decided to refuse (the hot path is unchanged: one atomic load): a
+  QUERY passes as the read it is, a MUTATION is refused, anything unreadable
+  (bad JSON, parse error, no matching `operationName`, over the 1 MiB cap)
+  is refused like a write — conservative by construction. The classifier is
+  the real parser (`graphql.IsMutationRequest`, honors `operationName`),
+  wired by `app.go`; nil keeps the old contract. Tests: the classifier's 13
+  cases + the guard under pressure (read passes, body handed back intact,
+  mutation 503, no classifier = old behavior, oversize 503).
+- **ENG-56 → DONE.** A GraphQL resolver failure that REST would answer 500 —
+  a database error the classifier has no verdict for, a hook that fails to
+  EXECUTE — is captured through the SAME seam the generated 500s use
+  (`codegen.CaptureServerError`: message, call-site stack, the failed
+  statement from the driver, identity), once per request (graphql-go resolves
+  siblings concurrently; the tracker is single-writer). The request logger
+  now keys everything on the LOGICAL status: a capture on a wire-200 request
+  makes it a 500 for the level, the failed statement, persistence, the
+  fingerprint group, the first-occurrence alert and the SLO error ratio — the
+  wire status rides beside it (`wire_status` on the line, `RequestTap.
+  WireStatus`), and the message says "graphql resolver (HTTP 200 on the
+  wire)". Verified end to end in `pkg/integration` `TestTracing_EndToEnd`
+  (the GraphQL mutation over the never-returning hook persists as a 500 with
+  the stack, the message and the wire status). The remaining class — a
+  resolver PANIC recovered by graphql-go — is ENG-61.
+- **ENG-57 → CLOSED** (table above, backend-spec §3.9).
+- **OPS-44 → DONE, with the cost measured and the limit written.**
+  `pg_amcheck --heapallindexed` runs inside every `backup.sh` (`BACKUP_AMCHECK`
+  / `--no-amcheck`): every heap page AND every btree index, cross-checked —
+  what `pg_dump` (heap only via COPY) and `data_checksums` (on-access only)
+  cannot see. **0.9 s for 124 MB / 251 k rows / 406 relations** on the lab
+  customer box. Provoked: one random 8 KiB page into `productos_sku_key` — the
+  app's list kept answering 200 (invisible to it; the index-scan read was a
+  500), the backup FAILED naming the index on the status line and alert
+  path, `REINDEX` → `amcheck=ok`. Runs as the local postgres superuser under
+  the timer; a role without the privilege is a named `skipped(…)`, never
+  silence. Sub-day detection = the same run on the `hourly` timer
+  (PRODUCTION §4.6/§4.7) — no second mechanism.
+- **Documentation swept to the binary (Part D):** CAPABILITIES (breaker
+  rules, derived limiter, admission control, backup/restore/amcheck, the
+  self-watching engine, the 500 that explains itself, the verified deploy,
+  PostgreSQL auto-restart + checksums; the false "no restore, no scheduling",
+  "super-admin terminal-only" and "--app never run live" not-yet lines
+  removed; "one box is one box" written), README (ops bullets + the
+  production paragraph), GUIDE (restore 13.6 s / 4 min + DNS, the timer the
+  installer writes), QUICKSTART (§8/§10), PRODUCTION (§3 the one command, §4.5b
+  pointer, §4.6 amcheck), MASTER_PROMPT + site (companion fetch line now
+  fetches restore.sh + fleet-audit.sh; the restore row carries the measured
+  numbers; the deploy row says "verified from outside"). Every figure checked
+  against BENCHMARKS §4e.
 
 ## DONE in CAOS-S1 (2026-08-30, night) — broke what we can repair, closed RESILIENCIA's three loose ends, found two more
 

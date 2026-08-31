@@ -89,3 +89,6 @@ verify-results/
 
 # the laboratory orchestrator binary (build with: go build -o lab ./tools/lab)
 /lab
+
+# tools/capacity build dropped in the root by a lab session (like appximo-lab)
+/capacity

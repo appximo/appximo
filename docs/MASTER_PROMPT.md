@@ -144,7 +144,7 @@ production, continue.
    NEXT TO ITSELF — fetched alone, backups and updates have no script):
    ```
    base=https://raw.githubusercontent.com/appximo/appximo/main/scripts
-   curl -fsSLO $base/install.sh -O $base/backup.sh -O $base/deploy-update.sh
+   curl -fsSLO $base/install.sh -O $base/backup.sh -O $base/restore.sh -O $base/deploy-update.sh -O $base/fleet-audit.sh
    ```
 2. **Install** (as root). One script covers both box states:
    - Empty box:

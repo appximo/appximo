@@ -219,6 +219,14 @@ func serverTiming(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Server-Timing", b.String())
 }
 
+// CaptureServerError puts a server-class failure on the request's trace the
+// way every generated 500 does — message, call-site stack, the statement the
+// driver rejected, identity — for a surface whose WIRE status is not 500. The
+// GraphQL handler is the caller (ENG-56, DEPLOY-FLOTA-S1): a resolver that
+// hits a database fault answers HTTP 200 + errors[] by contract, and until
+// this seam existed such a request never reached the panel as an error.
+func CaptureServerError(req *http.Request, err error) { capture500(req, err) }
+
 func capture500(req *http.Request, err error) {
 	t := observability.SpanTrackerFromCtx(req.Context())
 	if t == nil {

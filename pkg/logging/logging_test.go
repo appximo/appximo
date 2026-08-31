@@ -3,6 +3,7 @@ package logging_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/appximo/appximo/pkg/logging"
+	"github.com/appximo/appximo/pkg/observability"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -166,5 +168,35 @@ func TestRequestLogger_MatchedRoutePatternWins(t *testing.T) {
 
 	if got.Route != "/api/things/{id}" {
 		t.Fatalf("matched route: Route = %q, want %q (chi pattern must win)", got.Route, "/api/things/{id}")
+	}
+}
+
+// TestRequestLogger_CaptureMakesTheRequestAnError pins ENG-56 (DEPLOY-FLOTA-S1):
+// a handler that answers 200 on the wire but records a server-error CAPTURE on
+// the span tracker (GraphQL's resolver contract) reaches the tap as a 500 —
+// the status everything downstream keys on — with the wire status kept beside
+// it; a plain 200 stays a 200 with no wire status divergence.
+func TestRequestLogger_CaptureMakesTheRequestAnError(t *testing.T) {
+	var got logging.RequestTap
+	mw := logging.RequestLogger(nil, nil, func(rt logging.RequestTap) { got = rt })
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("fail") == "1" {
+			if tr := observability.SpanTrackerFromCtx(r.Context()); tr != nil {
+				c := observability.CaptureError(r.Context(), errors.New("graphql resolver (HTTP 200 on the wire): boom"))
+				tr.SetCapture(&c)
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/graphql?fail=1", nil))
+	if got.Status != http.StatusInternalServerError || got.WireStatus != http.StatusOK {
+		t.Fatalf("captured 200: Status=%d WireStatus=%d, want 500/200", got.Status, got.WireStatus)
+	}
+	if got.Capture == nil || got.ErrMsg == "" {
+		t.Fatalf("captured 200: the tap must carry the capture and the message; got capture=%v msg=%q", got.Capture != nil, got.ErrMsg)
+	}
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/graphql", nil))
+	if got.Status != http.StatusOK || got.WireStatus != http.StatusOK || got.Capture != nil {
+		t.Fatalf("plain 200: Status=%d WireStatus=%d capture=%v, want 200/200/none", got.Status, got.WireStatus, got.Capture != nil)
 	}
 }

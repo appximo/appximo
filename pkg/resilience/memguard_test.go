@@ -1,6 +1,7 @@
 package resilience
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -153,5 +154,51 @@ func TestMemoryGuard_FromEnv(t *testing.T) {
 	t.Setenv(MemoryGuardEnvVar, "256")
 	if g, err := NewMemoryGuardFromEnv(); err != nil || g == nil || g.MinBytes() != 256<<20 {
 		t.Fatalf("explicit 256 → 256 MiB floor: g=%v err=%v", g, err)
+	}
+}
+
+// TestMemoryGuard_GraphQLReadPassesUnderPressure pins ENG-60 (DEPLOY-FLOTA-S1):
+// with the host under the floor, a GraphQL QUERY (a read that happens to travel
+// as a POST) is served, a GraphQL MUTATION is refused, an unreadable body is
+// refused (conservative), the body reaches the handler intact, and with no
+// classifier wired every /graphql POST stays a write (the old contract).
+func TestMemoryGuard_GraphQLReadPassesUnderPressure(t *testing.T) {
+	dir := t.TempDir()
+	p := writeMeminfo(t, dir, 10*1024, 0) // 10 MiB available, no swap → under a 64 MiB floor
+	g := NewMemoryGuard(64<<20, p, time.Hour)
+	g.GraphQLMutation = func(body []byte) bool { return strings.Contains(string(body), "mutation") }
+	var seen string
+	h := g.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		seen = string(b)
+		w.WriteHeader(http.StatusOK)
+	}))
+	do := func(path, body string) int {
+		seen = ""
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
+		return rec.Code
+	}
+	if c := do("/graphql", `{"query":"{ guides { id } }"}`); c != http.StatusOK {
+		t.Fatalf("GraphQL query under pressure = %d, want 200 (a read is not a write)", c)
+	}
+	if seen != `{"query":"{ guides { id } }"}` {
+		t.Fatalf("handler saw body %q — the guard must hand the body back untouched", seen)
+	}
+	if c := do("/graphql", `{"query":"mutation { x }"}`); c != http.StatusServiceUnavailable {
+		t.Fatalf("GraphQL mutation under pressure = %d, want 503", c)
+	}
+	if c := do("/api/things", `{}`); c != http.StatusServiceUnavailable {
+		t.Fatalf("REST write under pressure = %d, want 503", c)
+	}
+	// No classifier → the old contract: every /graphql POST is a write.
+	g.GraphQLMutation = nil
+	if c := do("/graphql", `{"query":"{ guides { id } }"}`); c != http.StatusServiceUnavailable {
+		t.Fatalf("GraphQL POST with no classifier = %d, want 503 (old contract kept)", c)
+	}
+	// Oversized body → refused like a write (never parsed past the cap).
+	g.GraphQLMutation = func([]byte) bool { return false }
+	if c := do("/graphql", strings.Repeat("x", graphqlBodyCap+1)); c != http.StatusServiceUnavailable {
+		t.Fatalf("oversized GraphQL body under pressure = %d, want 503", c)
 	}
 }

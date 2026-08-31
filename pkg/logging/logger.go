@@ -123,11 +123,15 @@ func Init(env string) {
 // measurement point. Route is the chi route pattern (e.g. "/api/{entity}"),
 // preferred over the raw Path for bounded metric/label cardinality.
 type RequestTap struct {
-	TenantID   string
-	Method     string
-	Path       string
-	Route      string
-	Status     int
+	TenantID string
+	Method   string
+	Path     string
+	Route    string
+	Status   int
+	// WireStatus is the HTTP status the client actually received; it differs
+	// from Status only when a surface that answers 200 by contract (GraphQL)
+	// suffered a server-class failure — Status is then 500 (ENG-56).
+	WireStatus int
 	StartUS    int64 // request start, unix microseconds
 	DurationUS int64
 	FromCache  bool
@@ -273,8 +277,20 @@ func RequestLogger(
 			// level=error must see it. 4xx stay info — they are the caller's
 			// verdict, and probes would drown a warn stream. Before this the
 			// status travelled only in a field while the level said "info".
+			// The LOGICAL status (ENG-56, DEPLOY-FLOTA-S1): a surface whose
+			// contract answers 200 on the wire (GraphQL: 200 + errors[]) can
+			// still have suffered a server-class failure, recorded as a capture
+			// by its resolver. Everything downstream — the level, the failed
+			// statement, persistence, the fingerprint group, the alert, the SLO
+			// error ratio — keys on THIS status, so such a request is an error
+			// everywhere an error is counted; the wire status is kept beside it.
+			wireStatus := ww.Status()
+			status := wireStatus
+			if capture != nil && status < 500 {
+				status = http.StatusInternalServerError
+			}
 			evt := Log.Info()
-			if ww.Status() >= 500 {
+			if status >= 500 {
 				evt = Log.Error()
 			}
 			userID, role := "", ""
@@ -291,10 +307,13 @@ func RequestLogger(
 				Str("tenant_id", tenantID).
 				Str("method", r.Method).
 				Str("path", r.URL.Path).
-				Int("status", ww.Status()).
+				Int("status", status).
 				Int64("duration_ms", elapsed.Milliseconds()).
-				Str("request_id", chimiddleware.GetReqID(r.Context())).
-				Msg("request")
+				Str("request_id", chimiddleware.GetReqID(r.Context()))
+			if wireStatus != status {
+				evt = evt.Int("wire_status", wireStatus)
+			}
+			evt.Msg("request")
 			// X-Cache: HIT is written by the response cache middleware on cache hits.
 			fromCache := ww.Header().Get("X-Cache") == "HIT"
 			if record != nil {
@@ -330,13 +349,13 @@ func RequestLogger(
 				var fullURL string
 				if observability.ShouldPersistTrace(observability.Sample{
 					DurUS:  int32(elapsed.Microseconds()),
-					Status: uint16(ww.Status()),
+					Status: uint16(status),
 				}) {
 					reqHeaders = observability.FilterHeaders(r.Header)
 					fullURL = requestFullURL(r)
 				}
 				var body, failedSQL string
-				if t := observability.SpanTrackerFromCtx(r.Context()); t != nil && ww.Status() >= 500 {
+				if t := observability.SpanTrackerFromCtx(r.Context()); t != nil && status >= 500 {
 					failedSQL = t.LastSQL
 				}
 				if tee != nil && reqHeaders != nil { // persisted traces only
@@ -351,7 +370,8 @@ func RequestLogger(
 					Method:     r.Method,
 					Path:       r.URL.Path,
 					Route:      route,
-					Status:     ww.Status(),
+					Status:     status,
+					WireStatus: wireStatus,
 					StartUS:    start.UnixMicro(),
 					DurationUS: elapsed.Microseconds(),
 					FromCache:  fromCache,

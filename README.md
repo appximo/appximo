@@ -443,10 +443,21 @@ runs the same suite against *your* server and prints *your* report.
   PASS/FAIL output — re-run after a deploy as a **regression suite whose verdict is
   anchored to the schema version** it ran against ("Flows" in the visual editor)
 - **Ops**: Prometheus `/metrics`, per-request trace ring with stage breakdown,
-  SLO burn-rate alerts (Slack), graceful drain on SIGTERM, circuit breaker
-  (verified open/recover with toxiproxy), zero-downtime additive migrations —
-  the full observable surface (trace explorer, per-tenant debug, health
-  probes) is mapped in [docs/EXPLORE.md](docs/EXPLORE.md)
+  SLO burn-rate alerts (Slack), graceful drain on SIGTERM, a circuit breaker
+  that sheds a black-holed database in ~20 failures instead of one 5 s
+  timeout per request (ENG-59, provoked), admission control that degrades
+  instead of tipping (excess → early `429`, measured +20 % goodput at the
+  tipping point), zero-downtime additive migrations — the full observable
+  surface (trace explorer, per-tenant debug, health probes) is mapped in
+  [docs/EXPLORE.md](docs/EXPLORE.md)
+- **A 500 explains itself**: message + call-site stack + the exact failed
+  statement + who, on the persisted trace; the request line at `level:"error"`;
+  errors grouped by fingerprint with a first-occurrence alert (158 real 5xx →
+  41 problems); GraphQL resolver failures included (ENG-56)
+- **The engine watches its own box**: a collector out of the request path
+  (runtime, cgroup, PSI, pool, disk, the last backup's status) with a
+  deterministic attribution verdict, `/admin` → Resources, 21 gauges; a
+  failed or stale backup and a low disk alert through the same alerter
 - **Security hardening**: HS256-pinned JWT (alg-confusion rejected), sanitized
   identifiers everywhere, masked DB errors, 1 MB body cap, fuzzed parsers
   (0 crashers), per-tenant cache isolation
@@ -466,16 +477,26 @@ curl -fsSL https://raw.githubusercontent.com/appximo/appximo/main/scripts/instal
 ```
 
 The installer asks one thing — your domain — then generates every secret, writes
-the systemd unit + Caddyfile, installs PostgreSQL and Caddy, brings the API up
-on HTTPS, and **verifies what it installed** (binary checksum, `/health` version
-locally and through the proxy, the schema on disk) before saying so. Updates are one script ([`scripts/deploy-update.sh`](scripts/deploy-update.sh),
-atomic swap + auto-rollback), backups another
+the systemd unit + Caddyfile, installs PostgreSQL and Caddy (with
+`data_checksums` on and a `Restart=on-failure` drop-in — Ubuntu ships
+PostgreSQL with `Restart=no`), brings the API up on HTTPS, and **verifies what
+it installed** (binary checksum, `/health` version locally and through the
+proxy, the schema on disk) before saying so. Updates are one command from
+your machine ([`scripts/deploy-app.sh`](scripts/deploy-app.sh) — backup set
+first, atomic swap, then **verification from outside**: the version through
+the proxy, an authenticated read, a write probe that rolls back by
+construction, and an **automatic rollback re-verified from outside** when any
+of it fails; a `/health` 200 is not a verified deploy), backups another
 ([`scripts/backup.sh`](scripts/backup.sh) — the installer schedules it
-nightly; one set = database + uploads + secrets + a manifest, optional off-box
-copy) and the restore a third ([`scripts/restore.sh`](scripts/restore.sh) —
-timed and verified count-for-count against the manifest; measured
-**13.6 s** for a 251k-row database on a 2 GB box, **~4 min + DNS** from an
-empty machine — [docs/PRODUCTION.md §4](docs/PRODUCTION.md#4-backups-restore-and-recovery--the-promise-measured)).
+nightly; one set = database + uploads + secrets + a manifest, `pg_amcheck`
+over every heap page and index inside the run, optional off-box copy), the
+restore a third ([`scripts/restore.sh`](scripts/restore.sh) — timed and
+verified count-for-count against the manifest; measured **13.6 s** for a
+251k-row database on a 2 GB box, **~4 min + DNS** from an empty machine —
+[docs/PRODUCTION.md §4](docs/PRODUCTION.md#4-backups-restore-and-recovery--the-promise-measured)),
+and [`scripts/fleet-audit.sh`](scripts/fleet-audit.sh) says per app what a
+box is MISSING (timer, set completeness, off-box copy, unit policy, swap,
+checksums) — exit 1 until it is protected.
 
 Prefer containers or a PaaS? The Docker paths still work:
 

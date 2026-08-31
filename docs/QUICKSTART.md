@@ -572,9 +572,12 @@ with a real certificate. Live examples of exactly this setup:
 
 ![A production Appximo app behind HTTPS](img/quickstart/live-https-demo.png)
 
-Updates are `scripts/deploy-update.sh` (atomic swap, auto-rollback — measured
-0.28 s of unavailability), backups `scripts/backup.sh` (schedule it yourself —
-see step 10), and the full runbook is [PRODUCTION.md](PRODUCTION.md).
+Updates are one command from your machine, `scripts/deploy-app.sh` (backup
+set first, atomic swap — measured 0.28 s of unavailability —, then the
+version through the proxy + an authenticated read + a write probe from
+OUTSIDE, and an automatic, re-verified rollback if any of it fails), backups
+`scripts/backup.sh` (the installer schedules it nightly — see step 10), and
+the full runbook is [PRODUCTION.md](PRODUCTION.md).
 
 ## 9. Change something and redeploy
 
@@ -605,11 +608,15 @@ It shells out to `pg_dump`, so the PostgreSQL **client tools** must be on the
 PATH (`apt install postgresql-client` — the engine itself doesn't need them;
 without them the command fails naming exactly this).
 
-In production, wire `scripts/backup.sh` into cron or a systemd timer yourself —
-the installer copies the script but does **not** schedule it (a tracked
-backlog item, ENG-3). Restore is a manual `pg_restore` drill, documented in
-[PRODUCTION.md](PRODUCTION.md) §backups — run it once before you need it: the
-restore you never tested is not a backup.
+In production the installer schedules `scripts/backup.sh` for you
+(`<app>-backup.timer`, nightly at 03:30; `--backup-schedule=hourly` for a
+back-office) and one run writes one SET — dump + uploads + secrets + a
+manifest of exact counts, with `pg_amcheck` over every page and index. The
+restore is `scripts/restore.sh --app=X --set=PREFIX`: it stops, loads, starts
+and VERIFIES the counts — measured 13.6 s on a 251 k-row database
+([PRODUCTION.md](PRODUCTION.md) §4). Run it once before you need it: the
+restore you never tested is not a backup. `scripts/fleet-audit.sh` tells you
+what a box is still missing — the off-box copy is the one only you can set.
 
 ---
 

@@ -39,8 +39,20 @@
 #                          leaves the box — the dump and the files still do.
 #   SLACK_WEBHOOK_URL      a FAILED run posts one message here (read from the
 #                          env file too — the same webhook the engine alerts on)
+#   BACKUP_AMCHECK         on|off [default on]: after the dump, pg_amcheck
+#                          (--heapallindexed) verifies EVERY heap page and
+#                          every btree index of the database, cross-checking
+#                          index against heap. pg_dump reads every heap block
+#                          (COPY) but never an index — a corrupt index page
+#                          serves wrong rows to index-only plans with no error
+#                          until it is rebuilt. Measured (DEPLOY-FLOTA-S1,
+#                          OPS-44): 0.94 s for a 124 MB / 251 k-row database,
+#                          406 relations. A finding FAILS the backup, naming the
+#                          relation (the same alert path as a bad dump).
+#                          Skipped with a note when pg_amcheck or the amcheck
+#                          extension is unavailable — never silently.
 # Flags: --app=NAME --env-file=PATH --dir=PATH --keep=N --copy-to=DEST
-#        --files-dir=PATH --no-files --no-conf
+#        --files-dir=PATH --no-files --no-conf --no-amcheck
 set -euo pipefail
 
 # OPS-10: --app=NAME points the backup at THAT app's env file and its own backup
@@ -54,6 +66,7 @@ ENV_FILE=""
 FILES_DIR=""
 WITH_FILES="yes"
 WITH_CONF="yes"
+BACKUP_AMCHECK="${BACKUP_AMCHECK:-on}"
 for arg in "$@"; do
 	case "$arg" in
 		--app=*)       APP_NAME="${arg#*=}" ;;
@@ -64,7 +77,8 @@ for arg in "$@"; do
 		--files-dir=*) FILES_DIR="${arg#*=}" ;;
 		--no-files)    WITH_FILES="no" ;;
 		--no-conf)     WITH_CONF="no" ;;
-		--help|-h)     sed -n '3,45p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		--no-amcheck)  BACKUP_AMCHECK="off" ;;
+		--help|-h)     sed -n '3,55p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "unknown flag: $arg" >&2; exit 1 ;;
 	esac
 done
@@ -164,6 +178,54 @@ mv -f "$SET.dump.partial" "$SET.dump"
 DUMP_SHA="$(sha256sum "$SET.dump" | cut -d' ' -f1)"
 echo "$(date -u +%FT%TZ) dump ok: $SET.dump ($(du -h "$SET.dump" | cut -f1))"
 
+# ── 1b. amcheck: the indexes too (OPS-44) ────────────────────────────────────
+# The dump above read every heap block; pg_amcheck reads every heap page AND
+# every btree index and cross-checks them (--heapallindexed). A corrupt index
+# is the corruption a running app does not notice: index-only and count plans
+# never touch the heap, and data_checksums cover pages only when they are read.
+# This step is the scheduled full scan of what pg_dump cannot see. A finding is
+# a FAILED backup naming the relation — the same status line and alert as a
+# bad dump — because a set taken over a broken index is a set you will restore
+# from without knowing. Cost measured on the customer-size lab box: 0.94 s for
+# 124 MB / 251 k rows / 406 relations (DEPLOY-FLOTA-S1).
+AMCHECK="off"
+if [ "$BACKUP_AMCHECK" = "on" ]; then
+	PGA="$(command -v pg_amcheck 2>/dev/null || ls /usr/lib/postgresql/*/bin/pg_amcheck 2>/dev/null | sort -V | tail -1 || true)"
+	if [ -z "$PGA" ]; then
+		AMCHECK="skipped(no pg_amcheck binary — apt-get install postgresql-client-16)"
+	elif ! psql -qAtX --dbname="$DATABASE_URL" -c 'CREATE EXTENSION IF NOT EXISTS amcheck' >/dev/null 2>&1 	     && ! psql -qAtX --dbname="$DATABASE_URL" -c "SELECT 1 FROM pg_extension WHERE extname='amcheck'" 2>/dev/null | grep -q 1; then
+		AMCHECK="skipped(amcheck extension not installed and the backup role may not create it — as a superuser: CREATE EXTENSION amcheck)"
+	else
+		AM_T0="$(date +%s.%N)"
+		# The check functions need a superuser (or an explicit GRANT). Under the
+		# installer's timer this script runs as root on the box that hosts the
+		# database, so it runs pg_amcheck as the local postgres superuser over
+		# the database the URL names; anywhere else it connects with the URL
+		# itself (a role without the privilege is a SKIP with the reason, not a
+		# failed backup — the dump is still good, the index check is what is missing).
+		AM_DB="$(printf '%s' "$DATABASE_URL" | sed -E 's#.*/([^/?]+)(\?.*)?$#\1#')"
+		AM_HOST="$(printf '%s' "$DATABASE_URL" | sed -E 's#.*@([^:/?]+).*#\1#')"
+		if [ "$(id -u)" = 0 ] && id postgres >/dev/null 2>&1 && { [ "$AM_HOST" = localhost ] || [ "$AM_HOST" = 127.0.0.1 ]; }; then
+			AM_ERR="$(runuser -u postgres -- "$PGA" --heapallindexed -j 2 -d "$AM_DB" 2>&1)" && AM_RC=0 || AM_RC=$?
+		else
+			AM_ERR="$("$PGA" --heapallindexed -j 2 "$DATABASE_URL" 2>&1)" && AM_RC=0 || AM_RC=$?
+		fi
+		if [ "${AM_RC:-0}" -ne 0 ] && printf '%s' "$AM_ERR" | grep -qiE 'permission denied|must be superuser'; then
+			AMCHECK="skipped(the backup role may not run amcheck — run backup.sh as root on the database box, or GRANT EXECUTE ON FUNCTION bt_index_check, verify_heapam TO the role)"
+		elif [ "${AM_RC:-0}" -ne 0 ]; then
+			FAIL_CAUSE="amcheck: $(printf '%s' "$AM_ERR" | grep -m1 -iE 'error|corrupt|invalid|relation|index|heap' | cut -c1-200)"
+			[ "$FAIL_CAUSE" != "amcheck: " ] || FAIL_CAUSE="amcheck: exit $AM_RC"
+			DETAIL="CORRUPTION in the live database (pg_amcheck) — the dump was taken but is NOT trusted; see the last good set"
+			printf '%s\n' "$AM_ERR" >&2
+			false
+		else
+			AMCHECK="ok($(awk -v a="$AM_T0" -v b="$(date +%s.%N)" 'BEGIN{printf "%.1fs", b-a}'))"
+			echo "$(date -u +%FT%TZ) amcheck ok: every heap page and btree index verified in ${AMCHECK#ok}"
+		fi
+	fi
+	case "$AMCHECK" in skipped*) echo "$(date -u +%FT%TZ) amcheck ${AMCHECK}" >&2 ;; esac
+fi
+
 # ── 2. the uploads ───────────────────────────────────────────────────────────
 # The database holds the files' metadata (tenant_<id>.files); the bytes live in
 # APPXIMO_FILES_DIR (content-addressed). A restore without them answers 404 on
@@ -204,6 +266,7 @@ fi
 	printf 'pg_version=%s\n' "$(psql -tAX --dbname="$DATABASE_URL" -c 'SHOW server_version')"
 	printf 'db_size_bytes=%s\n' "$(psql -tAX --dbname="$DATABASE_URL" -c 'SELECT pg_database_size(current_database())')"
 	printf 'dump_sha256=%s\ndump_bytes=%s\n' "$DUMP_SHA" "$(stat -c %s "$SET.dump")"
+	printf 'amcheck=%s\n' "$AMCHECK"
 	printf 'files_dir=%s\nfiles_count=%s\nfiles_bytes=%s\n' "${FILES_DIR:-}" "$FILES_COUNT" "$FILES_BYTES"
 	[ -n "$CONF_DIR" ] && [ "$WITH_CONF" = "yes" ] && printf 'conf_dir=%s\n' "$CONF_DIR"
 	# One statement, exact counts (a full scan per table — milliseconds for a
@@ -256,9 +319,9 @@ fi
 
 # ── 6. status + rotation ─────────────────────────────────────────────────────
 ELAPSED="$(awk -v a="$T0" -v b="$(date +%s.%N)" 'BEGIN{printf "%.1f", b-a}')"
-printf 'ok %s app=%s set=%s rows=%s files=%s offbox=%s seconds=%s\n' "$(date -u +%FT%TZ)" "$PREFIX" "$SET" "$ROWS" "$FILES_COUNT" "$COPIED" "$ELAPSED" > "$STATUS_FILE"
+printf 'ok %s app=%s set=%s rows=%s files=%s offbox=%s amcheck=%s seconds=%s\n' "$(date -u +%FT%TZ)" "$PREFIX" "$SET" "$ROWS" "$FILES_COUNT" "$COPIED" "$AMCHECK" "$ELAPSED" > "$STATUS_FILE"
 chmod 644 "$STATUS_FILE" 2>/dev/null || true
-echo "$(date -u +%FT%TZ) backup ok: $SET.* in ${ELAPSED}s (rows=$ROWS files=$FILES_COUNT offbox=$COPIED)"
+echo "$(date -u +%FT%TZ) backup ok: $SET.* in ${ELAPSED}s (rows=$ROWS files=$FILES_COUNT offbox=$COPIED amcheck=$AMCHECK)"
 
 # Rotation: keep the newest $BACKUP_KEEP SETS of this app — every file of an
 # older stamp goes together. The glob must match what this run writes —

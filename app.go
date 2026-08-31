@@ -611,6 +611,12 @@ func New(cfg Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("appximo: %w", err)
 	}
+	// ENG-60: under pressure a GraphQL QUERY is a read and keeps flowing; only
+	// a mutation is refused. The classifier runs only once the guard has
+	// decided to refuse — the hot path is unchanged.
+	if mg != nil {
+		mg.GraphQLMutation = gqlhandler.IsMutationRequest
+	}
 	app.memGuard = mg
 	if mg != nil {
 		log.Printf("memory guard: writes answer 503 while MemAvailable+SwapFree < %d MiB (%s; 0 disables) — degradation, not capacity", mg.MinBytes()>>20, resilience.MemoryGuardEnvVar)

@@ -125,11 +125,17 @@ Syntax details live in [AGENTS.md](../AGENTS.md); the running surface in
 - One static Go binary — ~64 MB release build (`scripts/build-engine.sh`; a plain `go build` is ~85 MB) — no CGO, any Linux, multi-arch (amd64/arm64). ([DEPLOY.md](DEPLOY.md))
 - ~41 MB Docker image (compressed pull) — `docker compose up` to a working API in ~9 s.
 - Graceful shutdown — SIGTERM → `/readyz` 503 → drains in-flight requests → exits clean.
-- Per-tenant rate limiting — token bucket (default 1000 RPS / 100 burst), over limit → 429 + `Retry-After`.
-- Circuit breaker — if Postgres is UNAVAILABLE (connection refused / timeouts; ≥10 req & ≥60% of them), 503 + `Retry-After` instead of hanging. Client errors (422s) never open it (ENG-49, 2026-08-28 — six unknown-field 422s used to open it for every writer).
+- Per-tenant rate limiting — token bucket, default DERIVED from the box: 350 rps × vCPU (GOMAXPROCS), 100 burst — 70 % of the measured per-core clean ceiling (docs/BENCHMARKS.md §4e; `RATE_LIMIT_RPS`/`RATE_LIMIT_BURST` override); over limit → 429 + `Retry-After`.
+- Admission control — a cap on in-flight data-plane requests (`APPXIMO_MAX_INFLIGHT`, auto = max(32, 4×(vCPU+pool))); past the box's real ceiling the excess is a cheap early `429 Retry-After` instead of the seconds-scale timeouts a tip used to produce (measured on the customer box at the tipping point: goodput +20 %, p50 1 728 → 36 ms, timeouts 79 013 → 0 — BENCHMARKS §4e).
+- Circuit breaker — if Postgres is UNAVAILABLE (connection refused / timeouts — never a client error, ENG-49), 503 + `Retry-After` instead of hanging. Two trip rules over a 10 s ledger (ENG-59, CAOS-S1): ≥ 60 % failures of ≥ 10 requests, OR **20 consecutive failures** — the signal of a black-holed database (link down, packets dropped), where every request used to wait the full 5 s query deadline for its 503 (measured p50 5.00 s → 0.00 s per failed request over a 30 s outage; recovery +0.1 s).
 - Host memory guard — while `MemAvailable + SwapFree` is under a floor (`APPXIMO_MEMORY_GUARD_MIN_MB`, default max(32 MiB, 2 % of RAM)), data-plane WRITES answer an explained 503 + `Retry-After`; reads continue. Degradation, not capacity: it stops a bulk load from making the kernel OOM-kill a shared PostgreSQL; it does not make a swapless 1 GB box absorb one.
 - The installer verifies what it installed — binary sha256, `/health` version locally AND through Caddy, the schema on disk — and refuses to reuse another app's schema on a re-run over an existing `--app` (MIGRACION-CONFIANZA-S1).
 - Per-tenant backup — `POST /admin/backup?tenant=X` runs `pg_dump` of that tenant's schema.
+- A backup that RESTORES (RESILIENCIA-S1) — `scripts/backup.sh` writes one SET (dump + uploads + secrets + a manifest of exact per-table counts), scheduled nightly by the installer's timer, optional off-box copy with the secrets encrypted; `scripts/restore.sh --app=X --set=PREFIX` restores and VERIFIES counts/files/FKs/sequences/tenants, every stage timed — measured 13.6 s for a 251 k-row database, ~4 min + DNS from an empty machine (docs/PRODUCTION.md §4). `pg_amcheck` runs inside every backup (OPS-44): every heap page and btree index verified, 0.9 s per 124 MB; a finding fails the backup naming the relation.
+- The engine watches its own box (CENTINELA-C-S1 + RESILIENCIA layer 5) — a collector out of the request path reads the runtime, the cgroup, PSI, the pool, disk and the last backup's status every tick; a deterministic attribution verdict (`cpu_throttled` … `healthy`), 21 `appximo_selfmon_*` gauges, `/admin` → Resources; a failed/stale backup or a low disk alerts through the same alerter as the SLO.
+- A 500 explains itself (OBSERVABILIDAD-ERRORES-S1) — message and call-site stack on the trace, the exact failed statement from the driver, identity on every trace, the request line at `level:"error"`, fingerprint groups (route + normalized message + top frame) with a first-occurrence alert. A GraphQL resolver failure that would be a 5xx on REST reaches the same trace as a 500 with the wire status kept beside it (ENG-56, DEPLOY-FLOTA-S1).
+- A verified deploy (DEPLOY-FLOTA-S1) — `scripts/deploy-app.sh` runs the whole protocol from outside the box: backup set first, atomic swap, `/health` version through the proxy, an authenticated read, a write probe that rolls back by construction, AUTOMATIC rollback re-verified from outside on any failure, `fleet-audit.sh` at the end. `scripts/fleet-audit.sh` says per app what is MISSING on a box (timer, set completeness, off-box, unit policy, swap, checksums, PostgreSQL restart policy).
+- PostgreSQL survives its own death — the installer adds a `Restart=on-failure` drop-in (Ubuntu ships `Restart=no`; an OOM-killed PostgreSQL used to stay down for every app on the box) and enables `data_checksums` on a fresh cluster (a corrupt page is an ERROR on read, not silent bad data — and the nightly backup + amcheck is the guaranteed full scan, because checksums fire only on the page being read).
 - Three health probes — `/healthz` (liveness), `/readyz` (readiness), `/health` (version).
 - Hardening — security headers, sanitized identifiers, masked DB errors, 1 MB body cap, fuzzed parsers.
 
@@ -183,10 +189,14 @@ engineering. Re-verified against the running engine and the field reports on
 - **No shipped WASM business module** — only a test identity module; DIAN logic is a JS built-in, not WASM.
 - **Webhooks can't reach localhost/LAN** — HTTPS-only + SSRF guard, always.
 - **No OTLP/OpenTelemetry export** — Prometheus `/metrics` + an internal trace ring.
-- **Backup has no restore command and no scheduling.** `scripts/backup.sh` dumps;
-  restoring is a documented `pg_restore` procedure a human runs, not an engine
-  subcommand (backlog **ENG-3**). The drill has been rehearsed on a real box (1.8 s),
-  but it is a runbook, not a feature.
+- **Backup and restore are scripts, not engine subcommands** (`scripts/backup.sh`
+  / `scripts/restore.sh`, installed and scheduled by the installer — docs/PRODUCTION.md §4).
+  The restore is timed and verified count-for-count (13.6 s on 251 k rows), but it
+  runs from a shell on the box, not from `appximo restore` (backlog **ENG-3**).
+- **One box is one box.** No HA, no failover: if the host dies, the app is down
+  until someone acts (the measured recovery on a new machine is ~4 min + the DNS
+  TTL, from the off-box set). Checksums and amcheck detect corruption; they do
+  not prevent it, and the guaranteed detector runs on the backup's cadence.
 - **No zero-downtime binary upgrade** (backlog **ENG-2**). `deploy-update.sh` swaps
   the binary atomically and auto-rolls-back, but the restart costs a measured ~0.5 s
   of `502`s under live traffic. There is no socket handover.
@@ -196,13 +206,11 @@ engineering. Re-verified against the running engine and the field reports on
   github.com/appximo/appximo` does not work, so a project using the framework
   mode does not build on a teammate's machine or in CI. This is a publishing
   decision, not a code gap — see `docs/BACKEND_SPEC_LLM.md` §3.0.
-- **The platform super-admin is created from a terminal only** (`appximo admin
-  create`, needs `DATABASE_URL`). Studio's deploy flow requires one and says so, but
-  cannot create it — so the visual path stops at the moment it becomes useful.
-- **`install.sh --app=NAME` (several apps on one box) has never run on a real
-  multi-app server.** It is verified in the installer's staged dry-run mode only
-  (backlog **OPS-11**); the migration of an existing monolithic Caddyfile is the
-  untested part.
+- **`install.sh --app=NAME` has run on real multi-app boxes** (LXD, two apps side
+  by side, and the demo box) — what has NOT run live is the migration of a
+  pre-existing hand-written monolithic Caddyfile into `import sites/*.caddy`
+  (backlog **OPS-11**): on such a box the installer's Caddy step is left alone on
+  purpose and the site block is edited by hand.
 - **The default per-tenant rate limit is DERIVED from the box: 350 rps × vCPU
   (GOMAXPROCS), 100 burst** — 70 % of the measured per-core ceiling of the
   canonical uncached read (docs/BENCHMARKS.md §4e; before MOTOR-PRODUCCION-S2

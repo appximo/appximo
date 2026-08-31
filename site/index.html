@@ -594,9 +594,9 @@ appximo validate --json app.json   # the oracle: path/rule/expected/fix per erro
       <tr><td>Footprint</td><td class="num">engine ~21 MiB RSS idle · full stack ~186 MiB PSS under load</td>
         <td>Idle engine on a small dataset (2026-08-01); full stack = engine + PostgreSQL + Caddy serving the live shop at 200 req/s (2026-07-31).</td></tr>
       <tr><td>Deploy blip</td><td class="num">~0.3–0.6 s of 502s</td>
-        <td>Binary swap under live traffic (2026-07-31), health-polled, <strong>auto-rollback</strong> if the new binary fails (a deliberately broken deploy rolled itself back, unattended, in ~17 s). Honest sub-second blip — <em>not</em> zero-downtime.</td></tr>
-      <tr><td>Backup → restore drill</td><td class="num">restore in 1.8 s</td>
-        <td>Executed on the live shop (2026-07-31): schema dropped, restored, row counts identical, a new purchase completed. Rehearsed, not hoped.</td></tr>
+        <td>Binary swap under live traffic (2026-07-31), health-polled, <strong>auto-rollback</strong> if the new binary fails (a deliberately broken deploy rolled itself back, unattended, in ~17 s). Since 2026-08-31 the deploy is verified <strong>from outside</strong> — version through the proxy, an authenticated read, a write probe that rolls back by construction — and a binary that boots and answers <code>/health</code> but fails the data plane is rolled back and re-verified by itself (drilled: 23 s end to end). Honest sub-second blip — <em>not</em> zero-downtime.</td></tr>
+      <tr><td>Backup → restore drill</td><td class="num">corrupt database → verified back in 13.6 s · lost box → ~4 min + DNS</td>
+        <td>Measured 2026-08-30 on a 251,243-row database (2 GB box): one backup SET (dump + uploads + secrets + a manifest of exact per-table counts), <code>restore.sh</code> stops, loads, starts and verifies count-for-count; from an empty machine <code>install.sh</code> 150 s + restore 12 s + the droplet + the DNS TTL. Rehearsed, not hoped — and one box is one box: if the host dies, the app is down until someone acts.</td></tr>
       <tr><td>AI schema generation</td><td class="num">~90 % first-try · 100 % convergence · ~$0.006/schema</td>
         <td>120-case stratified NL→schema corpus, validator-guided loop, cheap model (Haiku), Wilson CIs / McNemar.</td></tr>
     </tbody>
@@ -1076,7 +1076,7 @@ production, continue.
    NEXT TO ITSELF — fetched alone, backups and updates have no script):
    ```
    base=https://raw.githubusercontent.com/appximo/appximo/main/scripts
-   curl -fsSLO $base/install.sh -O $base/backup.sh -O $base/deploy-update.sh
+   curl -fsSLO $base/install.sh -O $base/backup.sh -O $base/restore.sh -O $base/deploy-update.sh -O $base/fleet-audit.sh
    ```
 2. **Install** (as root). One script covers both box states:
    - Empty box:

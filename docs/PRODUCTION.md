@@ -208,8 +208,49 @@ app name so re-running the installer always picks the same one; pin it with
 > PostgreSQL), flip the domain, then remove the old unit — or simply keep the
 > old unit name; nothing in the engine depends on it.
 
-The official flow is **build → copy → atomic swap → restart**, wrapped in
-[`scripts/deploy-update.sh`](../scripts/deploy-update.sh) (which also
+**The one command (DEPLOY-FLOTA-S1) — from your machine, the whole
+protocol, verified from outside, rolled back by itself:**
+
+```bash
+scripts/deploy-app.sh --host=root@BOX --app=appximo --binary=/tmp/appximo \
+  --url=https://api.example.com [--cli=/tmp/appximo] [--keep=/var/backups/appximo/golden.dump]
+```
+
+[`scripts/deploy-app.sh`](../scripts/deploy-app.sh) runs over SSH what an
+operator used to do from memory — and a step nobody remembers is a step that
+eventually gets skipped: (0) the deployable contract (`<binary> version`
+answers, and what it prints is what `/health` must say afterwards); (1) the
+inventory of the app ON the box from systemd — unit, binary path, port,
+schema — never guessed, so a hand-installed app keeps its own names; (2) a
+full backup SET first (§4.1) — a backup that fails ABORTS the deploy before
+anything is touched — plus copies of the binary/env/schema about to be
+replaced (`/root/<app>-{bin,env,schema}.pre-<version>`); (3) the swap through
+`deploy-update.sh` below; (4) **verification from OUTSIDE, over the public
+URL, as a client would**: `/health` through the proxy says the expected
+version (a site proxying a neighbour's port answers with the neighbour's
+version), `/readyz` is 200, an **authenticated read** with a token minted on
+the box by the app's own secret (never printed) → `GET /api/<resource>` →
+200 with data, and a **write probe that changes nothing by construction** —
+a one-op `POST /api/transaction` deleting a uuid that does not exist answers
+`404 failed_operation=0` only after authenticating, authorizing the delete,
+opening the tenant transaction and running the statement, so the write path
+executed and rolled back with zero rows moved. **Any failure → automatic
+rollback to the pre-deploy binary → the same verification again**, and the
+outcome is reported as what it is (exit 1 = rolled back and re-verified; exit
+2 = the rollback did not recover, a human now). (5) `--keep` md5's a file
+that must not change (a golden dump) before and after. (6) `fleet-audit.sh
+--app=<app>` at the end — a box left with gaps is exit 3 even though the
+deploy succeeded, with the ✗ lines saying what to fix. **A `/health` 200 is
+not a verified deploy**; the script's verdict is the read + the write probe
++ the version through the proxy, or a verified rollback. Drilled on the lab
+box both ways: a good binary (17 s, exit 0) and a binary that boots and
+answers `/health` but 500s every data-plane request — a health-only check
+would have blessed it; the read probe failed at 15 s, the rollback ran, the
+old binary was re-verified from outside at 23 s (exit 1). Lab/staging flags:
+`--tenant-host`, `--resolve=IP`, `--insecure`.
+
+The building block it wraps — **build → copy → atomic swap → restart** —
+is [`scripts/deploy-update.sh`](../scripts/deploy-update.sh) (which also
 health-checks and **auto-rolls-back** if the new binary won't come up):
 
 ```bash
@@ -555,7 +596,9 @@ marker. Pass `--port`/`--control-port` explicitly on a hand-installed box —
 the derived defaults may not match what it runs.
 
 Re-run the audit; it must end `✓ this box is protected` except what needs
-YOUR input (`BACKUP_COPY_TO` — §4.1). **Rollback** (drilled): restore the two
+YOUR input (`BACKUP_COPY_TO` — §4.1). From then on, every binary goes out
+with `scripts/deploy-app.sh` (§3), which runs this audit at the end of every
+deploy — a box that regresses is exit 3, not a surprise next quarter. **Rollback** (drilled): restore the two
 `.pre-upgrade` copies, `systemctl daemon-reload && systemctl restart <app>` —
 the data was never touched.
 
@@ -582,6 +625,23 @@ line `alert (no webhook configured — recorded only)`):
 | **the backup is STALE** — no run for longer than `APPXIMO_BACKUP_MAX_AGE` (36 h) | the status file's age | critical: the age, the floor, `systemctl list-timers '*backup*'`, the command to run one now | `appximo_selfmon_backup_age_seconds` |
 | **no backup has ever run** and the app has been up longer than the floor | no status file | critical: "is the timer installed?" | `backup_ok -1` until the first run |
 | **disk low** — under `APPXIMO_DISK_MIN_FREE_PCT` (10 %) or `_MB` (1024) on the filesystem under the files dir, the obs db, the backup dir or `/` | one `statfs` per path, deduplicated by filesystem | warning (critical under half the floor), once per 6 h: path, free of total, and what to free first | `appximo_selfmon_disk_free_bytes{path}` / `_total_bytes{path}` |
+
+**The indexes too (OPS-44, DEPLOY-FLOTA-S1).** After the dump, `backup.sh`
+runs `pg_amcheck --heapallindexed` over the whole database: every heap page
+AND every btree index, cross-checked against the heap. `pg_dump` reads every
+heap block (COPY) but never an index — a corrupt index page keeps serving
+index-only and count plans with no error until something rebuilds it, and
+`data_checksums` fire only on the page being read. Cost measured on the
+customer-size lab box: **0.9 s for 124 MB / 251 k rows / 406 relations**. A
+finding FAILS the backup naming the relation (`cause=amcheck: btree index
+"…productos_sku_key"`), on the same status line and alert as a bad dump —
+provoked with one random 8 KiB page written into an index: the app's list
+kept answering 200 (the corruption was invisible to it), the backup failed
+and named the index, `REINDEX` fixed it, the next run said `amcheck=ok`. Off
+with `BACKUP_AMCHECK=off` / `--no-amcheck`; a box without `pg_amcheck` or the
+`amcheck` extension gets a `skipped(…)` with the reason, never silence.
+Sub-day detection is the same tool on a shorter cadence: an `hourly` timer
+(§4.7) runs the check every hour with the backup.
 
 A failed backup's status now **names the failing table** when the cause is
 corruption (`failed … cause=Dumping the contents of table "orders" failed …

@@ -21,7 +21,9 @@ import (
 	"github.com/appximo/appximo/pkg/cache"
 	"github.com/appximo/appximo/pkg/codegen"
 	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/events"
 	"github.com/appximo/appximo/pkg/extensions"
+	gqlhandler "github.com/appximo/appximo/pkg/graphql"
 	"github.com/appximo/appximo/pkg/logging"
 	"github.com/appximo/appximo/pkg/observability"
 	rbacpkg "github.com/appximo/appximo/pkg/rbac"
@@ -120,6 +122,12 @@ func buildTracedStack(pool *db.TenantDB, rings *observability.Rings, store *obse
 	inner.Use(rc.Middleware)
 	inner.Use(auth.JWTMiddleware(jwtSecret))
 	inner.Use(rbacpkg.RBACMiddleware(policyJSON))
+	// GraphQL on the SAME traced chain (ENG-56): its resolvers answer 200 +
+	// errors[] by contract, and a server-class resolver failure must still
+	// reach the trace as a 500 through the logger's logical status.
+	var rbacPolicy rbacpkg.Policy
+	_ = json.Unmarshal(policyJSON, &rbacPolicy)
+	inner.Handle("/graphql", gqlhandler.BuildHandler(s, pool, hr, &rbacPolicy, events.NewHub(0), false))
 	inner.Mount("/", codegen.BuildRouter(s, pool, hr, nil, nil))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -164,7 +172,7 @@ INSERT INTO tenant_acmetest.guides (code, status) VALUES ('A','pending'), ('B','
 					// captured stack (a thrown JS exception maps to Proceed:false → 422
 					// by design, and an unknown column is a 422 too since FIX 7 — the
 					// 500-persistence test below needs a real engine-side failure).
-					"before_create": {Type: "js", Script: `if (data.reject) { result.proceed = false; result.error = "rejected by test"; } if (data.boom) { while (true) {} }`},
+					"before_create": {Type: "js", Script: `if (data.reject) { result.proceed = false; result.error = "rejected by test"; } if (data.boom || data.status == "boom") { while (true) {} }`},
 				},
 			},
 		},
@@ -391,6 +399,58 @@ INSERT INTO tenant_acmetest.guides (code, status) VALUES ('A','pending'), ('B','
 	}
 	if tv500.ErrMsg == "" {
 		t.Errorf("500 trace must carry an error message")
+	}
+
+	// 8c. The SAME failure through GraphQL (ENG-56): the wire says 200 +
+	// errors[] (the contract), but the trace must persist as a 500 with the
+	// stack, the message and a fingerprint — the panel sees it like REST's.
+	gqlBody, _ := json.Marshal(map[string]any{"query": `mutation { createGuide(input: {code: "G500", status: "boom"}) { id } }`})
+	reqG, _ := http.NewRequest(http.MethodPost, srv.URL+"/graphql", bytes.NewReader(gqlBody))
+	reqG.Header.Set("Authorization", "Bearer "+token)
+	reqG.Header.Set("Content-Type", "application/json")
+	respG, err := srv.Client().Do(reqG)
+	if err != nil {
+		t.Fatalf("POST /graphql: %v", err)
+	}
+	tidG := respG.Header.Get("X-Trace-ID")
+	var gqlRes map[string]any
+	_ = json.NewDecoder(respG.Body).Decode(&gqlRes)
+	respG.Body.Close()
+	if respG.StatusCode != http.StatusOK {
+		t.Fatalf("GraphQL answers 200 by contract, got %d", respG.StatusCode)
+	}
+	if errs, _ := gqlRes["errors"].([]any); len(errs) == 0 {
+		t.Fatalf("expected errors[] from the hook that never returns, got %v", gqlRes)
+	}
+	var tvG observability.TraceView
+	foundG := false
+	if sg, err := store.SlowTraces(tenantID, 24); err == nil {
+		for _, tv := range sg {
+			if tv.TraceID == tidG {
+				tvG, foundG = tv, true
+			}
+		}
+	}
+	if !foundG {
+		t.Fatalf("GraphQL resolver 500 trace %s was not persisted (ENG-56)", tidG)
+	}
+	if tvG.Status != 500 {
+		t.Errorf("GraphQL resolver failure persisted with status %d, want 500 (logical status; the wire was 200)", tvG.Status)
+	}
+	if len(tvG.Stack) == 0 {
+		t.Errorf("GraphQL resolver 500 must carry a stack; got none")
+	}
+	if !strings.Contains(tvG.ErrMsg, "graphql resolver (HTTP 200 on the wire)") {
+		t.Errorf("GraphQL resolver 500 message must say the wire was 200; got %q", tvG.ErrMsg)
+	}
+	if !strings.Contains(logBuf.String(), `"wire_status":200`) {
+		t.Errorf("the request line must carry wire_status=200 beside status=500; log:\n%s", func() string {
+			l := logBuf.String()
+			if len(l) > 1200 {
+				return l[len(l)-1200:]
+			}
+			return l
+		}())
 	}
 
 	// The 401 and 422 traces must have NO stack (client errors, not bugs).
