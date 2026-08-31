@@ -652,7 +652,7 @@ install_companion_scripts() {
 	# postgres steps `cd /tmp`. The exec bit of the SOURCE is irrelevant:
 	# install(1) sets 0755 on the copy.
 	local dir="${SCRIPTS_DIR:-$SELF_DIR}" any="no" missing="" s
-	for s in deploy-update.sh backup.sh restore.sh fleet-audit.sh; do
+	for s in deploy-update.sh backup.sh restore.sh fleet-audit.sh drill.sh; do
 		if [ -n "$dir" ] && [ -f "$dir/$s" ]; then
 			run install -m 0755 "$dir/$s" "$OPT_DIR/scripts/$s"; any="yes"
 		else
@@ -660,7 +660,7 @@ install_companion_scripts() {
 		fi
 	done
 	if [ "$any" = "yes" ] && [ -z "$missing" ]; then
-		ok "companion scripts installed in ${OPT_DIR#"$PREFIX"}/scripts (deploy-update.sh, backup.sh, restore.sh, fleet-audit.sh — from $dir)"
+		ok "companion scripts installed in ${OPT_DIR#"$PREFIX"}/scripts (deploy-update.sh, backup.sh, restore.sh, fleet-audit.sh, drill.sh — from $dir)"
 	elif [ "$any" = "yes" ]; then
 		warn "companion scripts: installed what was in $dir; MISSING:$missing — pass --scripts=DIR or copy them into ${OPT_DIR#"$PREFIX"}/scripts"
 	else
@@ -1326,7 +1326,7 @@ verify_installed() {
 	fi
 	# 4. The companions: executable, and the ops CLI actually operates.
 	local s present=""
-	for s in deploy-update.sh backup.sh restore.sh fleet-audit.sh; do [ -x "$OPT_DIR/scripts/$s" ] && present="$present $s"; done
+	for s in deploy-update.sh backup.sh restore.sh fleet-audit.sh drill.sh; do [ -x "$OPT_DIR/scripts/$s" ] && present="$present $s"; done
 	[ -n "$present" ] && vline "scripts   ${OPT_DIR#"$PREFIX"}/scripts:$present (executable)"
 	if [ "$BACKUP_TIMER" = "yes" ]; then
 		if systemctl is-active --quiet "${SERVICE_NAME}-backup.timer" 2>/dev/null; then vline "backup    ${SERVICE_NAME}-backup.timer active (OnCalendar=${BACKUP_SCHEDULE} → ${BACKUP_DIR#"$PREFIX"})"
