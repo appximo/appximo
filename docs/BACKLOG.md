@@ -26,7 +26,55 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-31, second session (MANUAL-OPERACION-S1)** — what
+**Reviewed 2026-08-31 (CENTRO-MANDO-S1, third session)** — the command
+center: an app built ON Appximo (private repo `centro-mando/`: a schema of
+servidores/apps/dominios/clientes/contactos/lugares/corridas/lecturas + Go
+routes `/api/centro/*` + a no-build Spanish SPA) running on ITS OWN droplet in
+another region (centro-mando, tor1, $12/mo, HTTPS through sslip.io with a real
+certificate until `centro.appximo.com` exists), that shows the whole operation
+and fills itself: per app `/health` on the box and from outside, the Resources
+verdict, disk, last backup, 24 h problems, running commit vs `main` («N commits
+ahead» + what an update brings) and the latest release; per box
+`fleet-audit.sh` with every ✗ and what to do; the OPEN items and the decisions
+pending Miguel read from THIS file in the public repo; the A-XX decisions read
+from the handoff package; the monthly cost summed from the inventory. Every
+action shows one of three forms — «I do it» (button + what + how long), «you do
+it» (exact command with the values filled in + why the panel cannot + a
+server-side Verify), «blocked» (why + what unblocks) — and every failure says
+what failed, what was left half done, how to go back; «Ask for help» copies a
+package (app, version, failure, trace, box state, what was tried, no secrets).
+Actions chain only the proven scripts: `deploy-app.sh` (exercised 6× on the
+panel itself incl. one REAL rollback — the consumer binary has no `token`
+subcommand, so `--cli=<engine>` is required), `drill.sh`/`fleet-audit.sh`,
+`restore.sh`, and a MIGRATION chain (backup.sh on the origin → install.sh +
+restore.sh on the destination → authenticated read with the tenant Host → DNS
+and switching the origin off as the owner's steps with Verify) rehearsed for
+real from the 58 (vetapp) to a throwaway box: 45 s to the DNS step, RESTORE
+VERIFIED 7.7 s, the real data read through the destination. **Two urgencies
+closed first:** the 58's `backup.sh`/`restore.sh`/`fleet-audit.sh`/`drill.sh`
+refreshed in both apps and `drill restore` VERIFIED on the pre-fix sets (the
+`amcheck` TOC filter works) and on fresh sets (clean from the second run —
+the first run after the fix still dumps the extension it then drops); the
+105's root disk 87 % → 69 % (`go clean -cache` 18 GB, old agent scratchpads,
+`/tmp` binaries; the small files of the old session dirs archived in
+`/root/archivo-tmp-sesiones/`). **Three real findings on the way, all closed
+in the panel and registered:** (1) a corrida DELETED through the API kept
+running in memory and a test migration whose destination was the 105 ran
+`install.sh` on the dev box for 68 s (native PG 14, a user, dirs, `caddy.service`
+— reverted exactly by the apt-history line; ufw never reached) → the runner
+now kills its child process when the row disappears or is cancelled, and only
+a server marked `uso=libre` can be a migration destination; (2) a newer
+`pg_dump` (the 58 runs PG 18) cannot be read by a fresh Ubuntu's `pg_restore`
+16 → the chain adds a manual pre-step with the PGDG command and a Verify;
+(3) `APPXIMO_STATIC_DIR` (vetapp's landing page) does NOT travel in the backup
+set and the restored env refused to boot → the chain ships it beside the set,
+and OPS-50 registers the gap in the set itself. New OPEN: OPS-50, OPS-51 (an
+undocumented $7/mo droplet in Miguel's account: crisblogs' box), OPS-52 (the
+panel's own domain, MFA and alert destination — Miguel's). Browser-verified
+desktop + 390×844 (0 console errors, 0 failed requests, no horizontal scroll,
+no English). Engine untouched (docs only in the public repo: manual §9, the
+index row, this file) — no gate, no ABBA, stated. Lab: the throwaway droplet
+destroyed, `reap` zero. **Last reviewed: 2026-08-31, second session (MANUAL-OPERACION-S1)** — what
 was built can now be seen, understood and repeated by its owner: the operator's
 manual in Spanish (`docs/MANUAL_OPERACION.md` — what the engine does, where each
 thing shows in `/admin` with real screens, every knob with its default AND where
@@ -1667,6 +1715,56 @@ would close it better, and is Miguel's call.
   alert (touch `last-backup.status` to `failed …`) arriving in the channel;
   `fleet-audit.sh` reports `NO alert destination` as a ✗ (added with this item).
 
+### OPS-50 — The backup SET does not carry what the env references OUTSIDE it: a static mount (`APPXIMO_STATIC_DIR`) makes a restored box refuse to boot
+
+- **Origin:** CENTRO-MANDO-S1 (2026-08-31). The migration rehearsal (vetapp,
+  the 58 → a fresh box) restored the set and the engine restart-looped: the
+  restored `/etc/vetapp/vetapp.env` mounts `APPXIMO_STATIC_DIR=/opt/vetapp/web`
+  (the landing page) and that directory is not in the set (dump + uploads +
+  `/etc/<app>` + manifest). `restore.sh` reported "engine did not become
+  healthy" and left the app stopped — correct, but the set had promised a
+  complete restore.
+- **Impact: medium.** The 3 a.m. runbook (§4.3 scenario B, a lost box) is
+  incomplete for any app whose env points outside `/etc/<app>`: a static
+  mount, a theme CSS outside `/etc`, a custom `APPXIMO_FILES_DIR` on another
+  disk. The panel's migration chain works around it (ships the static dir
+  beside the set), the plain runbook does not.
+- **Ready:** `backup.sh` includes every path the env references outside the set
+  (`APPXIMO_STATIC_DIR`, `APPXIMO_APP_THEME_CSS` when outside `/etc`) as
+  `<set>.extra.tar.gz` + a manifest line, and `restore.sh` restores it; or,
+  at minimum, `restore.sh` PRE-CHECKS the restored env against the box and
+  names the missing path before stopping the app.
+
+### OPS-51 — An undocumented droplet in Miguel's DigitalOcean account: crisblogs' box (`do-amd-1cpu-7`, 147.182.163.170, $7/mo)
+
+- **Origin:** CENTRO-MANDO-S1 (2026-08-31), building the inventory: `doctl
+  compute droplet list` with the lab token shows THREE droplets in the account
+  — the 58, the new centro-mando, and `do-amd-1cpu-7` (nyc1, 1 vCPU/1 GB),
+  which is the box `crisblogs.appximo.com` resolves to (OPS-27: the external
+  evaluator's install). The 105 is NOT in that account (another account/team).
+  Nobody had written down that Miguel pays for the evaluator's box; the panel
+  cannot ssh into it (no key).
+- **Impact: low ($7/mo) but exactly the class the inventory exists for.**
+- **Ready:** Miguel decides — ask the evaluator for the key (and mark the
+  box `apps` in the inventory) or power it off and stop paying; either way
+  the inventory row (marked `ajeno`) says which.
+
+### OPS-52 — The command center's own loose ends that only Miguel can close: its domain, MFA, an alert destination
+
+- **Origin:** CENTRO-MANDO-S1 (2026-08-31). The panel serves at
+  `https://centro.159-203-57-144.sslip.io` (a public wildcard DNS + a real
+  Let's Encrypt certificate) because appximo.com's DNS lives in Cloudflare
+  and no token for it exists on the 105 — deliberately. Its login is the
+  tenant's password login (no TOTP on the panel's SPA; `/admin` has it). Its
+  `fleet-audit.sh` leaves ONE ✗: `SLACK_WEBHOOK_URL` (OPS-47's twin).
+- **Ready:** (a) an A record `centro.appximo.com → 159.203.57.144` (DNS only)
+  and `install.sh --app=centro --domain=centro.appximo.com …` re-run on the
+  box (secrets/data kept); (b) `SLACK_WEBHOOK_URL` in `/etc/centro/centro.env`;
+  (c) optional: a super-admin with TOTP for `/admin` and the panel's SPA
+  learning the `mfa_required` branch. Also: the panel holds ssh keys to the
+  boxes it operates (inherent to an orchestrator) — its own box is hardened
+  (`--harden`, swap, off-box encrypted backup to the 105, restore rehearsed).
+
 ## CLOSED (decided, with the reasoning written down)
 
 | ID | Item | Decision & where it is justified |
@@ -1704,6 +1802,28 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in CENTRO-MANDO-S1 (2026-08-31, third session) — the command center: one box that shows the whole operation, fills itself, and never leaves the owner without a next step
+
+Built WITH Appximo (a consumer app), on its own droplet; engine untouched.
+Public repo: docs only (manual §9, the engine index row, this file). Private
+repo: `centro-mando/` (schema, Go, SPA) + evidence.
+
+| Item | What shipped | Verified by |
+|---|---|---|
+| **The 58's backups restorable** (urgency 1) | `backup.sh`, `restore.sh`, `fleet-audit.sh`, `drill.sh` refreshed in `/opt/appitools/scripts` and `/opt/vetapp/scripts` (old ones kept in `/root/scripts-pre-centro/<app>/`) | `drill.sh restore --app=<app>` REHEARSAL VERIFIED on the pre-fix sets (2 `amcheck` TOC entries each, filtered) and on fresh sets; the second backup after the fix dumps 0 `amcheck` entries; the golden dump has none; demo-reset last exit 0 |
+| **The 105's disk** (urgency 2) | 87 % → 69 % (22 GB free): `go clean -cache` (18 GB), old agent scratchpads (4.3 GB), `/tmp` build binaries and >2 MB logs, apt cache, journal; the small files (scripts, shots, logs) of `/tmp/{cent,mc,mf,mj,df,ap,vit,mo}` archived in `/root/archivo-tmp-sesiones/*.tar.gz` (130 MB). KEPT and listed: docker volumes `backend_*`/`caddy_*` (1.2 GB, old compose, content unknown), `/root/go` module cache (3.6 GB), `ms-playwright` (1.3 GB), `/root/appitools` (976 MB, the RO archive) | `df -h /` |
+| **The box** | `centro-mando`, DigitalOcean tor1 (the apps are in nyc), `s-1vcpu-2gb` $12/mo, Ubuntu 24.04, created ONCE with the lab token from the 105 (the panel holds no DO token); IP in the lab's protected belt; `install.sh --app=centro --harden` + swap 2 GB; off-box encrypted backup to the 105 (`/var/backups/offbox/centro`, `BACKUP_PASSPHRASE_FILE`); `fleet-audit.sh` on itself: one ✗ (`SLACK_WEBHOOK_URL`, OPS-52); `drill restore` on itself VERIFIED | install.sh's own verification; `last-backup.status … offbox=yes`; the encrypted `.conf.tar.enc` on the 105 |
+| **The app** | Schema (8 resources, RBAC `dueno`/`lectura` + the `routes` grant for `centro`), `/api/centro/{config,plan,corridas,continuar,cancelar,verificar,refrescar,ayuda,sets}`, a serialized runner with per-second progress and a watcher that kills a deleted/cancelled corrida, readers (salud per app, auditoría per box, backlog, decisiones, GitHub) on a 10-min cadence + on demand, a no-build SPA in Spanish (Inicio, Acciones + corrida view, Inventario ×6, Pendientes, Decisiones, Caja fuerte, Manual) with the three forms and the failure block as reusable components | `deploy-app.sh` ×6 on the panel itself (one real rollback, 21 s); Playwright desktop + 390×844: 0 console errors/warnings, 0 failed requests, no horizontal scroll, no English; the plan modal, the `Verificar` command box, the failure block and the help package all rendered from real data |
+| **The actions, incl. the failure path** | `auditoria` (58: 5 ✗ named), `restauracion` rehearsal (vetapp: VERIFIED), a provoked failure (nonexistent set → «qué falló / a medias / cómo volver»), `drill` blocked forms (a CLI without `drill` → «se destraba actualizando»; chaos without the production tick → «márquelo»), a real restore without the typed confirmation → 422, `migracion` refused on a non-`libre` destination, `continuar` on the DNS step refused honestly («resuelve a 162.243.64.58, no a 159.203.63.99»), `cancelar` | The corridas' rows and outputs (evidence dir) |
+| **The migration chain** | vetapp (the 58, PG 18) → a throwaway tor1 box: inventory → `backup.sh` → copy (set + binary + CLI + schema + companions + the static mount) → `install.sh` (same app/domain/ports, `--harden`) → `restore.sh` → authenticated read with `Host: petfriendly.appximo.com` → waits for the owner's DNS step. Three attempts: #1 failed at restore (`pg_restore` 16 vs a PG 18 dump → the PGDG pre-step with Verify), #2 failed at boot (`APPXIMO_STATIC_DIR` not in the set → shipped beside it, OPS-50), #3 reached the DNS step in **45 s** (`RESTORE VERIFIED 7.7 s`, `GET /api/pets → 200` with the real rows on the destination). The origin was never touched (the 58's serving never changed) | The corridas + the destination's journal; the throwaway destroyed, `lab reap` zero |
+| **The near-miss** | A migration created through the API with the 105 as destination was DELETED before the runner reached it — and ran anyway (the runner kept the row in memory): `install.sh --app=vetapp --harden` ran on the dev box for 68 s (native PG 14 on :5433, the `vetapp` user, `/etc /opt /var/lib/vetapp`, `caddy.service` without a binary; ufw and the harden step NOT reached). Reverted exactly by the apt history line; Docker PG on :5432, ufw rules, DevHub verified intact. Two fixes: the watcher, and `servidores.uso` (`libre` is the only valid destination) — «the panel can enter a box» ≠ «it may install there» | `dpkg -l` shows no postgresql; `ss` :5432 = docker-proxy only; `ufw status numbered` unchanged |
+
+**Gates:** no engine change (`go build`/`go vet` on the consumer module; the
+docs test `TestOperatorDocsDoNotRot` green after the manual §9 + index row).
+No binary-diff gate, no ABBA — stated. Cost: the panel $12/mo (permanent,
+declared); the rehearsal box ≈ $0.02 (destroyed). Dev tenants: none created
+on the 105.
 
 ## DONE in MANUAL-OPERACION-S1 (2026-08-31, second session) — what was built can be seen, understood and repeated: the manual in Spanish, `appximo drill`, the panel that explains itself, the index of the engine
 

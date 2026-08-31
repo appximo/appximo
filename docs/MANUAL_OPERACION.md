@@ -14,6 +14,7 @@ Regla del manual: **ninguna afirmación sin el comando o la ruta que la respalda
 6. [Repetir cualquier escenario: `appximo drill`](#6-repetir-cualquier-escenario-appximo-drill)
 7. [Qué NO hace el motor](#7-qué-no-hace-el-motor)
 8. [Apéndice: dónde vive cada cosa en la caja](#8-apéndice-dónde-vive-cada-cosa-en-la-caja)
+9. [El centro de mando: toda la operación en una pantalla](#9-el-centro-de-mando-toda-la-operación-en-una-pantalla)
 
 ---
 
@@ -481,3 +482,28 @@ appximo migrate --tenant app --schema nuevo.json --dry-run                      
 sudo bash /opt/appximo/scripts/backup.sh --app=appximo                                              # un backup ahora
 appximo drill audit --app=appximo                                                                   # ¿qué falta?
 ```
+
+---
+
+## 9. El centro de mando: toda la operación en una pantalla
+
+Todo lo anterior existe en tres lugares distintos: la caja (scripts), el panel de cada app (`/admin`) y el repositorio (backlog, decisiones). El **centro de mando** (CENTRO-MANDO-S1) es una app hecha **con Appximo** — un `schema.json` de inventario más rutas propias en Go, en el repositorio interno `centro-mando/` — que corre en **su propia caja, en otra región que las apps que vigila**, y junta todo eso en una pantalla en español, usable desde el celular. Si Appximo tiene un bug, el centro de mando lo sufre primero.
+
+**Dónde:** la URL y la contraseña están en la caja fuerte del dueño (hoy `https://centro.<ip con guiones>.sslip.io`, provisional hasta que exista `centro.appximo.com`). Se entra con un usuario del tenant `centro` (rol `dueno` opera, rol `lectura` solo mira); los usuarios se crean en su `/admin` → Usuarios.
+
+**La regla de interfaz.** Toda acción, en todo estado, muestra una de tres cosas — nunca un texto suelto:
+
+1. **«Esto lo hago yo»** — un botón, con qué va a pasar y cuánto tarda. Antes de correr, la pantalla «Qué va a hacer» lista los pasos con el comando exacto.
+2. **«Esto lo hacés vos»** — el comando exacto para copiar, con las IPs y valores ya puestos, una línea que dice por qué no lo hace el panel, y un botón **Verificar** que comprueba (en el servidor, no en el navegador) antes de dejar avanzar.
+3. **«Esto está bloqueado»** — por qué, y qué lo destraba.
+
+Y cuando algo falla: **qué falló, qué quedó a medias y cómo volver**, siempre los tres. El botón **Pedir ayuda** arma y copia un paquete con la app, la versión, lo que falló, la traza (la salida del script), el estado de la caja y lo ya intentado — sin secretos — para pegarlo en un chat sin explicar desde cero.
+
+**Lo que se llena solo** (cada dato lleva «leído hace N min»; lo viejo se marca): por app, `/health` en la caja y desde afuera, el veredicto de **Recursos**, el disco, el último backup (`last-backup.status`), los problemas de 24 h de **Observabilidad**, la versión que corre contra `main` («main N commits adelante», con la lista de qué gana) y el último release; por caja, `fleet-audit.sh` con cada ✗ y qué hacer; los pendientes, leídos de `docs/BACKLOG.md` en el repositorio público; las decisiones A-XX, leídas del paquete de traspaso en la caja de build; el costo mensual, sumado del inventario. Nada se marca a mano.
+
+**El inventario** (lo que su hermana necesitaría si mañana usted no está): servidores (qué son, quién paga, cuánto), apps, dominios (dónde está el DNS, cuándo vencen), clientes (qué cobra, cada cuánto, a quién llamar), contactos y «dónde está cada cosa» (repos, backups, cuentas — y dónde está la caja fuerte). **Las claves no van ahí**, y la pantalla «Caja fuerte» explica cómo configurar el acceso de emergencia de un gestor (Bitwarden/1Password) para un familiar.
+
+**Las acciones**, todas sobre los scripts de este manual, nunca sobre un camino nuevo: **Actualizar** (`deploy-app.sh`: backup → swap → verificación desde afuera → rollback automático; el binario se construye en la caja de build desde `main`, o se descarga del último release con su sha256), **Simulacro** (`drill.sh` / `fleet-audit.sh` / el CLI con `drill`), **Auditar**, **Ensayar restauración** y **Restaurar de verdad** (`restore.sh`, escribiendo el nombre de la app), y **Migrar a otro servidor** — que encadena `backup.sh` en el origen, `install.sh` y `restore.sh` en el destino y la verificación con el `Host` del tenant, y deja como pasos suyos, listados **antes** de empezar, el DNS (registro exacto + Verificar) y apagar el origen (comando exacto + Verificar). Solo un servidor marcado **«libre»** en el inventario puede ser destino: una migración instala PostgreSQL, Caddy y el endurecimiento en él. Cada acción queda registrada con su salida completa; una corrida se puede **cancelar** y el panel corta su proceso.
+
+**Lo que no hace:** no guarda claves; no crea ni borra servidores (no tiene token del proveedor, a propósito); no cambia DNS; no tiene MFA propio (el `/admin` de cada app sí); y si su propia caja muere, se reconstruye como cualquier app (§4.6) desde su set fuera de la caja.
+
