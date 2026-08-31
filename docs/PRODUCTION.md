@@ -659,6 +659,29 @@ status line → alert within one tick; a status touched to 3 days old → the
 stale alert; the floor raised to 99 % → the disk alert naming `/var/lib/appximo`
 and the free bytes. An unparseable floor refuses to boot, naming the variable.
 
+### 4.6b Rehearsing all of it with one command — `appximo drill`
+
+Every scenario in this section can be REPEATED on demand, with the engine
+telling you what will happen and where to look before it runs
+(MANUAL-OPERACION-S1): `appximo drill restore --app=<app>` restores the
+newest set into a scratch database next to the live one and verifies it
+against the manifest (the app never stops; `--real` runs `restore.sh`);
+`appximo drill chaos <1-10>` runs one of the ten CAOS-S1 experiments (engine
+kill, PostgreSQL kill, reboot, disk full, memory to the OOM edge, database
+black-hole, 200 ms of latency, clock skew, concurrent writes, a full pool)
+and restores what it broke on exit; `appximo drill error` provokes a real
+500 on an ephemeral tenant; `drill load` / `drill saturate` read the
+self-monitor's verdict live; `drill audit` is `fleet-audit.sh` with a
+legend. A drill that loads, breaks or restores refuses a production-looking
+target without `--production`. The operator's manual (Spanish) that walks
+each one with its screen: [docs/MANUAL_OPERACION.md](MANUAL_OPERACION.md).
+
+The first `drill restore` found that every set taken since OPS-44 carried the
+`amcheck` extension (created for `pg_amcheck`, never dropped), which
+`pg_restore` as the service role cannot recreate — `backup.sh` now drops it
+after the check and `restore.sh` filters those TOC entries, so older sets
+restore too.
+
 ### 4.7 Recommended cadence by kind of app
 
 | the app | cadence | why |
@@ -879,7 +902,8 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `GOMEMLIMIT` | no | auto | Soft heap ceiling. Unset → the engine uses 90 % of an explicit **cgroup** limit if present, else warns on a small box. **Set it on a bare small box** — the installer sets **30 % of RAM** (min 256 MiB). Field-verified range on a 1 GB / 1 vCPU droplet (2026-08): the engine idles at ~70–80 MB RSS with `GOMEMLIMIT=180MiB`, so anything in **180–300 MiB works comfortably on 1 GB** — the installer's 287 MiB default included; below ~128 MiB the GC starts thrashing under load. Never derived from total RAM as if the engine were alone on the box (PostgreSQL needs the rest). |
 | `GOMAXPROCS` | no | auto | cgroup-aware (automaxprocs). |
 | `APPXIMO_NO_VERSION_CHECK` | no | (off) | Set to `1` to silence the "a newer release exists" line in `appximo version`. That check runs **only** in a human `version` run — never at `serve` boot, never on the request path — sends nothing about you or the machine (an anonymous GET of a public URL), times out in 2 s, and is skipped automatically whenever `CI` is set or `--json` is used. |
-| `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | no | 1000 / 100 | Per-tenant token bucket. |
+| `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | no | 350 × vCPU / 100 | Per-tenant token bucket — fairness between tenants, not capacity. The default is DERIVED from the measured per-core ceiling (ENG-53, [BENCHMARKS §4e](BENCHMARKS.md)); the boot log prints it. |
+| `APPXIMO_MAX_INFLIGHT` | no | auto = max(32, 4 × (vCPU + pool)) | Admission control (ENG-52): the cap on requests in flight; the excess is shed with `429` + `Retry-After: 1` BEFORE any work. `0` disables. |
 | `APPXIMO_MEMORY_GUARD_MIN_MB` | no | max(32, 2 % of RAM) | **Host memory guard.** While `MemAvailable + SwapFree` (from `/proc/meminfo`, sampled ≤ 1/s) is under this many MiB, data-plane WRITES answer `503` + `Retry-After: 5` with a body naming the measurement, the floor and this knob; reads and probes keep flowing. Measured with swap included on purpose: on a Postgres box `shared_buffers` is Cached-but-not-reclaimable, so `MemAvailable` alone sits at tens of MiB at rest. `0` disables; a non-integer refuses to boot. Degradation, not capacity — give the box swap (§Prerequisites). |
 | `OBS_DB_PATH` | no | `/var/lib/appximo/obs/obs.db` | Trace/snapshot history (SQLite). Keep it on a persistent path. |
 | `APPXIMO_BACKUP_DIR` | no | — (installer: `/var/backups/<app>`) | Where `backup.sh` writes its sets. **Setting it turns the self-monitor's backup watch on**: `last-backup.status` is read every tick (out of band); `failed`, or an `ok` older than `APPXIMO_BACKUP_MAX_AGE` (default `36h`), or no run ever after that much uptime → ONE alert per 6 h on `SLACK_WEBHOOK_URL` + `appximo_selfmon_backup_ok` / `_backup_age_seconds` on `/metrics` + `host.backup` in `/admin/resources` (§4.6). |
@@ -892,7 +916,7 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `APPXIMO_FILES_MAX_BYTES` / `_TOKEN_TTL` / `_ALLOWED_EXT` | no | 256 MiB / 180 s / curated | Upload cap, signed-URL TTL, extension allowlist. |
 | `DB_MAX_CONNS` | no | 10 | Postgres pool size. |
 | `APPXIMO_MAX_TX_OPS` | no | 100 | Max ops per `POST /api/transaction`. |
-| `APPXIMO_MAX_SSE_PER_TENANT` | no | unbounded | Cap concurrent SSE streams per tenant. |
+| `APPXIMO_MAX_SSE_PER_TENANT` | no | 1000 | Cap concurrent SSE streams per tenant (`429` at the cap). |
 | `APPXIMO_CORS_ORIGINS` (+ `_METHODS`/`_HEADERS`/`_EXPOSE_HEADERS`/`_CREDENTIALS`/`_MAX_AGE`) | no | off | Browser CORS; empty = disabled. |
 | `APPXIMO_GRAPHQL_PLAYGROUND` | no | off | Serve GraphiQL + allow introspection outside dev. |
 | `APPXIMO_AUTH_SIGNUP_ROLE` / `_MIN_PASSWORD` / `_REQUIRE_VERIFIED` / `_BASE_URL` | no | off / 8 / off / — | Public signup (opt-in, role-gated) + reset/verify email links. |

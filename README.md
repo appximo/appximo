@@ -510,6 +510,14 @@ Full guide — updates, backups, framework mode, serving your frontend, the
 complete env-var table, security checklist, troubleshooting:
 [**docs/PRODUCTION.md**](docs/PRODUCTION.md).
 
+**Operating it, in Spanish, for the owner and the customer's developer:**
+[docs/MANUAL_OPERACION.md](docs/MANUAL_OPERACION.md) — what the engine does,
+where each thing shows in `/admin` (with screens), every knob with its default
+and where the default comes from, the recipes for when something happens, and
+`appximo drill` to repeat any scenario (a 500, load, saturation, ten chaos
+experiments, a restore rehearsal, the box audit) with one command. The
+one-page index of everything built, by area: [docs/ESTADO_DEL_MOTOR.md](docs/ESTADO_DEL_MOTOR.md).
+
 ## Status — what's real and what's missing
 
 **Production-ready and test-backed** (`make test-all`: unit + integration + E2E +

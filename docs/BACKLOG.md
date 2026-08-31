@@ -26,7 +26,35 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-31 (DEPLOY-FLOTA-S1)** — the fleet runs `main`
+**Last reviewed: 2026-08-31, second session (MANUAL-OPERACION-S1)** — what
+was built can now be seen, understood and repeated by its owner: the operator's
+manual in Spanish (`docs/MANUAL_OPERACION.md` — what the engine does, where each
+thing shows in `/admin` with real screens, every knob with its default AND where
+the default comes from, the recipes with commands and measured times, deploy and
+the upgrade of an old box, what it does NOT do), `appximo drill` (list / error /
+load / saturate / probe / chaos 1–10 / restore / audit — each prints what it will
+provoke, what should happen and where to look; refuses a production-looking
+target without `--production`; `error` on an ephemeral tenant it deletes; the box
+experiments restore what they break on exit; `scripts/drill.sh` is the companion
+the installer places), the `/admin` panel in Spanish/English (browser-derived,
+persisted toggle; a context line under every title; "Health now" on Overview —
+verdict, backup, disk, problems — closing the half of OPS-40 that lived only at
+the bottom of Resources; Issues → Traces linked; Resources ↔ Observability
+linked; tabs in the URL), and `docs/ESTADO_DEL_MOTOR.md` (the one-page index by
+area, kept from rotting by `cmd/appximo/docs_index_test.go`). **A real defect
+found by the first `drill restore`: every backup set taken since OPS-44 carried
+the `amcheck` extension and was NOT restorable by `restore.sh` as the service
+role — fixed on both ends (`backup.sh` drops the extension after the check;
+`restore.sh`/the drill filter the TOC entries), verified on the lab.** Every
+manual command executed; every drill run on the lab box (and `deploy-app.sh`
+end-to-end, exit 3 = verified + audit gaps). New OPEN: OPS-48 (the dev box's
+disk hit 99 % — trimmed to 87 %, the rest is Miguel's), OPS-49 (deploy-app's
+outside probe reports a bare ✗ when Caddy answers an unknown Host with an empty
+200), DOC-4 (a Spanish AUTHORING guide for a customer's developer — the manual
+covers operating only). Gates: unit + docs test, lint 0, gofmt/vet, shellcheck
+on the four scripts; no data-path change (CLI + SPA + scripts), so no binary-diff
+gate and no ABBA — stated, not skipped silently. Lab: down + reap, zero
+droplets, ≈ $0.15. Previous review: 2026-08-31 (DEPLOY-FLOTA-S1) — the fleet runs `main`
 (the 58's two apps deployed from commit `ba20391` with the NEW
 `scripts/deploy-app.sh`: backup set → swap → verification FROM OUTSIDE —
 version through the proxy, an authenticated read, a write probe that rolls
@@ -1542,6 +1570,53 @@ would close it better, and is Miguel's call.
   no Postgres, the downloaded runtime is checksum-verified, and `appximo down`
   knows how to stop it; dependency cost measured and accepted.
 
+### OPS-48 — The dev box (the 105) ran its root disk to 99 %; the alert existed and nobody was looking
+- **Origin:** MANUAL-OPERACION-S1. The first screenshot of the new "Health now"
+  strip showed `Disco BAJO · 1.4 % libre` — true: `/` at 99 % (893 MB free).
+  Consumers: `/root/.cache` 19 GB (Go build cache), `/tmp/claude-0` 4.4 GB
+  (agent scratch), stale `/tmp/go-build*` 3 GB (removed: → 87 %), `/root/go`
+  3.6 GB (module cache), `/var/lib/docker` 2.5 GB, `/var/log` 1.4 GB, old
+  session scratch (`/tmp/cent`, `/tmp/mf`, `/tmp/mc` ~2.4 GB).
+- **Impact:** medium — the box that builds, benches and drives the lab; a full
+  disk fails a build or a Postgres write mid-session, silently.
+- **Ready:** `go clean -cache` (or a cron that trims `/root/.cache/go-build` to
+  a size), the old session scratch dirs deleted by Miguel (they are copies —
+  the evidence lives in the internal repo), `journalctl --vacuum-size=200M`,
+  and the 105 running its own self-monitor with `APPXIMO_DISK_MIN_FREE_PCT`
+  pointed at `/` so the panel says it before it bites.
+
+### OPS-49 — `deploy-app.sh`'s outside probe reports a bare `✗ … → 200` when the proxy answers an unknown Host with an empty body
+- **Origin:** MANUAL-OPERACION-S1, first `deploy-app.sh` against the lab with
+  `--tenant-host=lab.applab-target-basic.internal` (a host Caddy did not
+  serve): Caddy answers `200` with an EMPTY body for an unknown site, the
+  version check reads `""`, the read probe sees 200 without `data[]`, and the
+  script rolled back a good binary and exited 2 ("rollback did not recover")
+  — correct behaviour (it refused to call it verified) with an unhelpful
+  message.
+- **Impact:** low — a lab/first-setup trap; on a box whose Caddy site matches
+  the tenant host it never fires.
+- **Ready:** when `/health` through the proxy answers 200 with an empty or
+  non-JSON body, the ✗ line says "the proxy answered for an unknown Host —
+  does Caddy serve <host>?", and the rollback is skipped when the on-box
+  health passed and the outside failure is that shape (the binary is not the
+  problem). Pinned by a test with a stub proxy.
+
+### DOC-4 — A Spanish AUTHORING guide for a customer's developer (schema change → migrate → deploy → verify) does not exist; the manual covers operating
+- **Origin:** MANUAL-OPERACION-S1's honest reading. `docs/MANUAL_OPERACION.md`
+  answers "how do I run it, see it, change a knob, recover, repeat a
+  scenario". The next question a customer's developer asks — "how do I add a
+  field, a resource, a role, and get it live without breaking anything" — is
+  answered only in English (`GUIDE.md`, `AUTHORING_JOURNEY.md`,
+  `SCHEMA_SPEC_LLM.md`) and in Studio's own UI.
+- **Impact:** medium once the two customers' developers start changing
+  schemas: the safe path (dry-run → approve drops → hot vs restart) is the one
+  they most need in their language.
+- **Ready:** `docs/GUIA_AUTORIA.md` (Spanish): the schema in ten minutes, the
+  four kinds of change and what each activates (hot column / restart for a
+  resource), `appximo migrate --dry-run` read aloud, Studio's deploy with the
+  destructive gate, and the regression flows — every command executed, one
+  screen per step.
+
 ### ENG-61 — A GraphQL resolver PANIC is recovered by graphql-go into `errors[]` and never captured
 
 - **Origin:** DEPLOY-FLOTA-S1 (2026-08-31), while closing ENG-56. graphql-go's
@@ -1629,6 +1704,28 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
 | ~~**Where `site/` lives**~~ (PHASE3-GUIDE-S1) | **RESOLVED by HOUSEKEEPING-S1 (2026-08-05):** GitHub Pages over the repo — https://appximo.github.io/appximo/ is LIVE (gh-pages root; doc links now absolute so they survive Pages). Moving to `appximo.com` later is a DNS + Pages-custom-domain change, nothing structural. |
 
 ---
+
+## DONE in MANUAL-OPERACION-S1 (2026-08-31, second session) — what was built can be seen, understood and repeated: the manual in Spanish, `appximo drill`, the panel that explains itself, the index of the engine
+
+Documentation + tooling; engine untouched on the data path (a new CLI
+subcommand, the admin SPA, four scripts). Commits on `main`.
+
+| Item | What shipped | Verified by |
+|---|---|---|
+| **`docs/MANUAL_OPERACION.md`** | The operator's manual in Spanish for the owner and a customer's developer: what the engine does (one page), what you see and where (with real screens of the Spanish panel: a 500 explained, the verdict, disk & backup, metrics), every knob with its default and WHERE the default comes from (measured / convention / runtime), the recipes (slow, 500, corrupt DB, disk full, dead host, restore) with the command and the measured time, deploy + upgrading an old box, `drill`, what it does NOT do, where everything lives on the box | every command in it executed on the lab box (`tools/lab`, s-2vcpu-2gb, install.sh) or the dev engine; `docs_index_test.go` pins its links, env names and drill names |
+| **`appximo drill`** (`cmd/appximo/cmd_drill.go` + `scripts/drill.sh`) | `list`, `error` (ephemeral tenant, BEFORE INSERT trigger that RAISEs — or a RAISEing view over the renamed table when no resource can be filled blindly, since a dropped table is 400 "invalid tenant" on purpose), `load` / `saturate` (open-model generator, the self-monitor's verdict per second, the window verdict; which door shed — limiter / admission / breaker), `probe` (outside, with the CAOS-S1 outage arithmetic), `chaos 1–10` (the ten CAOS-S1 experiments with their hypotheses, restored on exit incl. Ctrl-C — iptables scoped to the app's uid, tc netem by port, clock by epoch with the time daemon paused, filler removed, lock released), `restore` (scratch-DB rehearsal verified against the manifest; `--real` = restore.sh), `audit`. Production guard: public domain in Caddy / protected belt → refuse unless `--production`; texts es/en; `drill.sh` installed as a companion by `install.sh` | lab: error ✓, chaos 1 (2.6 s), 2 (11.0 s, engine 0 restarts), 3 (reboot, outside probe 19.2 s), 4 (alert in a tick), 5 (503 at 34 < 39 MiB, no OOM), 6 (p50 0.01 s, 81 % < 200 ms), 7 (pool_exhausted), 8, 9 (final = one value), 10 (144×429 + 276×503, 200 in 3 ms after), restore (7.5 s, 22 tables match), audit; `drill saturate` on the lab: admission sheds at 1600 offered; unit tests for the guard, the body builder, the probe summary, the text completeness |
+| **The `amcheck` restore defect** | Every set since OPS-44 carried `CREATE EXTENSION amcheck` + `COMMENT ON EXTENSION`; `pg_restore` as the service role fails on both → `restore.sh` (the 3 a.m. path) would have failed on the 58's newest sets. `backup.sh` drops the extension after the check; `restore.sh` and the drill filter those TOC entries (`pg_restore -L`) so the sets already taken restore too | found by the first `drill restore`; both the old set (filtered) and a new set (clean) restore and match the manifest on the lab |
+| **`/admin` in Spanish/English** (`pkg/adminui/web/src/lib/i18n.js`, every route) | Browser-derived language with a persisted `ES`/`EN` toggle (chrome only — resource names, enum values and engine messages stay verbatim, the `/app` rule); a context line under every title saying what the section answers; **"Health now"** on Overview (verdict · last backup · disk · problems 24 h, each a link) — OPS-40's other half; Issues → Traces (the sample trace opens its waterfall), Observability ↔ Resources links; tabs in the URL (`#/observability?tab=issues`, `#/resources?tab=load`); "Problems" vs "Recent errors (in memory)" named for what they are; the backup card shows the status line; a latent bug fixed (the disk badge rendered no label) | Playwright in `es-CO`: 12 screens, zero console errors; the screens are the manual's |
+| **`docs/ESTADO_DEL_MOTOR.md`** | The one-page index of everything built, by area: what, first release, where it shows, doc, how to repeat with `drill` | `cmd/appximo/docs_index_test.go`: drill names, doc links, images and `APPXIMO_*` names checked against the tree — hand-written by decision (no structured source to generate from), machine-checked so it cannot rot |
+| **Docs** | `PRODUCTION.md` env table: `RATE_LIMIT_RPS` default corrected to the derived 350 × vCPU (it still said 1000), `APPXIMO_MAX_INFLIGHT` added, SSE cap corrected to 1000; §4.6b `drill`; README points at the manual and the index | — |
+
+**Gates:** `make test` (unit, incl. the new drill + docs tests) · full lane
+without `-short` (see the session report for the count) · golangci-lint 0 ·
+gofmt/vet 0 · shellcheck on `drill.sh`, `backup.sh`, `restore.sh`,
+`install.sh`. No data-path change → no binary-diff gate, no ABBA (stated).
+Lab: `down` + `reap`, zero droplets, ≈ $0.15. Dev tenants: the ephemeral
+`drill*` tenants deleted by the drill itself (schemas left: 0); the dev DB
+`manual_demo` (tenant `nimbus`, the screenshots' data) kept on the 105.
 
 ## DONE in DEPLOY-FLOTA-S1 (2026-08-31) — the fleet at the current binary, a deploy that verifies itself and rolls back alone, the loose ends of the engine
 
