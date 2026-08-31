@@ -672,8 +672,15 @@ func caddyDomainFor(app string, port int) string {
 				continue
 			}
 			if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") && strings.HasSuffix(trim, "{") {
-				site = strings.TrimSpace(strings.TrimSuffix(trim, "{"))
-				site = strings.Fields(site + " ")[0]
+				// A block-opening line with nothing before the "{" — Caddy's
+				// global options block `{`, or a snippet head — leaves no field;
+				// Fields("")[0] used to panic here (found by `drill error` on
+				// the 58's inline Caddyfile). No site name: skip the block.
+				if f := strings.Fields(strings.TrimSuffix(trim, "{")); len(f) > 0 {
+					site = f[0]
+				} else {
+					site = ""
+				}
 				continue
 			}
 			if port > 0 && strings.Contains(trim, "reverse_proxy") && strings.Contains(trim, ":"+strconv.Itoa(port)) && site != "" && !strings.HasPrefix(site, ":") {
