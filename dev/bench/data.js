@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788151915544,
+  "lastUpdate": 1788211445563,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -5328,6 +5328,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "37163934 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "6222f8dc47c227ebc2c36c5e564f515b87216e9a",
+          "message": "fix(cli): appximo drill no longer panics on a Caddyfile with a global options block — caddyDomainFor did strings.Fields(\"\")[0] on a line that is just '{' (Caddy's global block, or a snippet head), index out of range; found by 'drill error' on the 58's inline Caddyfile. Guard the empty field, skip the block\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-31T21:23:31Z",
+          "tree_id": "5f6a5d7611ffddc6539fa4a929f421bb20c97da2",
+          "url": "https://github.com/appximo/appximo/commit/6222f8dc47c227ebc2c36c5e564f515b87216e9a"
+        },
+        "date": 1788211444840,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6571,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "317916 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6571,
+            "unit": "ns/op",
+            "extra": "317916 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "317916 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "317916 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 67.55,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "37003770 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 67.55,
+            "unit": "ns/op",
+            "extra": "37003770 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "37003770 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "37003770 times\n4 procs"
           }
         ]
       }
