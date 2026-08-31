@@ -158,8 +158,11 @@ ok "probe: tenant $TENANT (Host $THOST) · role $ROLE · resource $RESOURCE"
 
 # ── 2. backup first ─────────────────────────────────────────────────────────
 step "2 · backup set + copies of what the deploy replaces"
-if ! "${SSH[@]}" bash -s "$APP" "$R_ENVF" "$R_SDIR" "$R_BIN" "$R_SCHEMA" "$TAG" "$R_CLIB" <<'REMOTE'
-set -u; APP=$1; ENVF=$2; SDIR=$3; BIN=$4; SCHEMA=$5; TAG=$6; CLIB=$7
+# ssh joins its arguments into one command line, so an EMPTY argument
+# vanishes on the far side (measured: "$7: unbound variable" on an app with
+# no ops companion) — a placeholder travels instead.
+if ! "${SSH[@]}" bash -s "$APP" "$R_ENVF" "$R_SDIR" "$R_BIN" "$R_SCHEMA" "$TAG" "${R_CLIB:--}" <<'REMOTE'
+set -u; APP=$1; ENVF=$2; SDIR=$3; BIN=$4; SCHEMA=$5; TAG=$6; CLIB=$7; [ "$CLIB" = "-" ] && CLIB=""
 out="$(bash "$SDIR/backup.sh" --app="$APP" 2>&1)"; rc=$?
 printf '%s\n' "$out" | tail -3 | sed 's/^/  /'
 [ $rc -eq 0 ] || { echo "  backup.sh exit $rc — DEPLOY ABORTED before touching anything"; exit 1; }

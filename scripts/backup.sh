@@ -191,21 +191,29 @@ echo "$(date -u +%FT%TZ) dump ok: $SET.dump ($(du -h "$SET.dump" | cut -f1))"
 AMCHECK="off"
 if [ "$BACKUP_AMCHECK" = "on" ]; then
 	PGA="$(command -v pg_amcheck 2>/dev/null || ls /usr/lib/postgresql/*/bin/pg_amcheck 2>/dev/null | sort -V | tail -1 || true)"
+	# The check functions need a superuser (or an explicit GRANT). Under the
+	# installer's timer this script runs as root on the box that hosts the
+	# database, so it creates the extension and runs pg_amcheck as the local
+	# postgres superuser over the database the URL names; anywhere else it
+	# connects with the URL itself (a role without the privilege is a SKIP with
+	# the reason, not a failed backup — the dump is still good, the index check
+	# is what is missing).
+	AM_DB="$(printf '%s' "$DATABASE_URL" | sed -E 's#.*/([^/?]+)(\?.*)?$#\1#')"
+	AM_HOST="$(printf '%s' "$DATABASE_URL" | sed -E 's#.*@([^:/?]+).*#\1#')"
+	AM_LOCAL="no"
+	if [ "$(id -u)" = 0 ] && id postgres >/dev/null 2>&1 && { [ "$AM_HOST" = localhost ] || [ "$AM_HOST" = 127.0.0.1 ]; }; then AM_LOCAL="yes"; fi
+	am_ext() { # install the extension (idempotent) — as the local superuser when possible
+		if [ "$AM_LOCAL" = yes ]; then runuser -u postgres -- psql -qAtX -d "$AM_DB" -c 'CREATE EXTENSION IF NOT EXISTS amcheck' >/dev/null 2>&1 && return 0; fi
+		psql -qAtX --dbname="$DATABASE_URL" -c 'CREATE EXTENSION IF NOT EXISTS amcheck' >/dev/null 2>&1 && return 0
+		psql -qAtX --dbname="$DATABASE_URL" -c "SELECT 1 FROM pg_extension WHERE extname='amcheck'" 2>/dev/null | grep -q 1
+	}
 	if [ -z "$PGA" ]; then
-		AMCHECK="skipped(no pg_amcheck binary — apt-get install postgresql-client-16)"
-	elif ! psql -qAtX --dbname="$DATABASE_URL" -c 'CREATE EXTENSION IF NOT EXISTS amcheck' >/dev/null 2>&1 	     && ! psql -qAtX --dbname="$DATABASE_URL" -c "SELECT 1 FROM pg_extension WHERE extname='amcheck'" 2>/dev/null | grep -q 1; then
+		AMCHECK="skipped(no pg_amcheck binary — apt-get install postgresql-client)"
+	elif ! am_ext; then
 		AMCHECK="skipped(amcheck extension not installed and the backup role may not create it — as a superuser: CREATE EXTENSION amcheck)"
 	else
 		AM_T0="$(date +%s.%N)"
-		# The check functions need a superuser (or an explicit GRANT). Under the
-		# installer's timer this script runs as root on the box that hosts the
-		# database, so it runs pg_amcheck as the local postgres superuser over
-		# the database the URL names; anywhere else it connects with the URL
-		# itself (a role without the privilege is a SKIP with the reason, not a
-		# failed backup — the dump is still good, the index check is what is missing).
-		AM_DB="$(printf '%s' "$DATABASE_URL" | sed -E 's#.*/([^/?]+)(\?.*)?$#\1#')"
-		AM_HOST="$(printf '%s' "$DATABASE_URL" | sed -E 's#.*@([^:/?]+).*#\1#')"
-		if [ "$(id -u)" = 0 ] && id postgres >/dev/null 2>&1 && { [ "$AM_HOST" = localhost ] || [ "$AM_HOST" = 127.0.0.1 ]; }; then
+		if [ "$AM_LOCAL" = yes ]; then
 			AM_ERR="$(runuser -u postgres -- "$PGA" --heapallindexed -j 2 -d "$AM_DB" 2>&1)" && AM_RC=0 || AM_RC=$?
 		else
 			AM_ERR="$("$PGA" --heapallindexed -j 2 "$DATABASE_URL" 2>&1)" && AM_RC=0 || AM_RC=$?
