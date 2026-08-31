@@ -81,7 +81,7 @@ for arg in "$@"; do
 		--tag=*) TAG="${arg#*=}" ;;
 		--no-audit) AUDIT=0 ;;
 		--timeout=*) TIMEOUT="${arg#*=}" ;;
-		--help|-h) sed -n '3,66p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		--help|-h) sed -n '3,62p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "unknown flag: $arg" >&2; exit 4 ;;
 	esac
 done

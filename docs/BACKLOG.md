@@ -26,7 +26,19 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 `COMMERCE-*` the commerce backend (a separate repo, tracked here because the
 engine's roadmap depends on what building it revealed).
 
-**Last reviewed: 2026-08-30 (CAOS-S1)** — broke on purpose what we know how to
+**Last reviewed: 2026-08-31 (DEPLOY-FLOTA-S1)** — the fleet runs `main`
+(the 58's two apps deployed from commit `ba20391` with the NEW
+`scripts/deploy-app.sh`: backup set → swap → verification FROM OUTSIDE —
+version through the proxy, an authenticated read, a write probe that rolls
+back by construction — automatic re-verified rollback, golden md5,
+`fleet-audit.sh`; drilled on the lab both ways, a poisoned binary that passed
+`/health` was caught by the read probe and rolled back alone); the breaker,
+layer 5 and the error observability PROVOKED live on petfriendly; ENG-60 and
+ENG-56 done, ENG-57 closed, OPS-44 done (pg_amcheck inside every backup,
+0.9 s/124 MB, a corrupt index the app did not see was caught); docs swept to
+the binary. New OPEN: ENG-61, OPS-46, OPS-47. The 58's only ✗ are Miguel's:
+an off-box destination and an alert destination. Before that: **(CAOS-S1)**
+— broke on purpose what we know how to
 repair, and closed RESILIENCIA's three loose ends. The 58 brought up to date
 SURGICALLY (unit policy, new backup SET format, `APPXIMO_BACKUP_DIR`,
 companions, vetapp timer, demo-reset repointed + tested) — Caddy left alone on
@@ -1679,6 +1691,15 @@ All three were **re-verified as still open on 2026-07-29**; the FRENTE-COMERCIAL
   the timer; a role without the privilege is a named `skipped(…)`, never
   silence. Sub-day detection = the same run on the `hourly` timer
   (PRODUCTION §4.6/§4.7) — no second mechanism.
+- **Frozen ABBA on the lab's dedicated box (OPS-34):** base `bc3b735` vs
+  the new binary, canonical read at 300 rps, 8 runs per arm, A-B-B-A —
+  **no_change in every cross** (base→new Δp50 +0.034 ms, MWU p=0.128,
+  CI [−0.009, +0.054] against the 0.5 ms gate; new→new −0.025; new→base
+  −0.021; base→base −0.013 — the base's own drift is the size of the
+  difference; Δp99 ≤ 0.07 ms; p50 1.83–1.88 ms, CV ≤ 1.5 %). The first run
+  was polluted by the killed driver's surviving remote sweep (a wrong path →
+  4xx counted silently); relaunched clean after `pkill -x capacity` on the
+  generator — the lesson is in the agent memory.
 - **Documentation swept to the binary (Part D):** CAPABILITIES (breaker
   rules, derived limiter, admission control, backup/restore/amcheck, the
   self-watching engine, the 500 that explains itself, the verified deploy,
