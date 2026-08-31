@@ -212,6 +212,12 @@ if [ "$BACKUP_AMCHECK" = "on" ]; then
 	elif ! am_ext; then
 		AMCHECK="skipped(amcheck extension not installed and the backup role may not create it — as a superuser: CREATE EXTENSION amcheck)"
 	else
+		# MANUAL-OPERACION-S1: the extension is DROPPED again after the check. Left
+		# in place it rides into the NEXT run's dump as `CREATE EXTENSION amcheck`
+		# + `COMMENT ON EXTENSION`, and pg_restore AS THE SERVICE ROLE (restore.sh,
+		# the documented path) fails on both — found by the first `appximo drill
+		# restore`: every set taken after OPS-44 was un-restorable as-is.
+		am_drop() { if [ "$AM_LOCAL" = yes ]; then runuser -u postgres -- psql -qAtX -d "$AM_DB" -c 'DROP EXTENSION IF EXISTS amcheck' >/dev/null 2>&1 || true; else psql -qAtX --dbname="$DATABASE_URL" -c 'DROP EXTENSION IF EXISTS amcheck' >/dev/null 2>&1 || true; fi; }
 		AM_T0="$(date +%s.%N)"
 		if [ "$AM_LOCAL" = yes ]; then
 			AM_ERR="$(runuser -u postgres -- "$PGA" --heapallindexed -j 2 -d "$AM_DB" 2>&1)" && AM_RC=0 || AM_RC=$?
@@ -231,7 +237,7 @@ if [ "$BACKUP_AMCHECK" = "on" ]; then
 			echo "$(date -u +%FT%TZ) amcheck ok: every heap page and btree index verified in ${AMCHECK#ok}"
 		fi
 	fi
-	case "$AMCHECK" in skipped*) echo "$(date -u +%FT%TZ) amcheck ${AMCHECK}" >&2 ;; esac
+	case "$AMCHECK" in skipped*) echo "$(date -u +%FT%TZ) amcheck ${AMCHECK}" >&2 ;; *) am_drop ;; esac
 fi
 
 # ── 2. the uploads ───────────────────────────────────────────────────────────

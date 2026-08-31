@@ -151,9 +151,16 @@ ok "fresh database $DB (owner $ROLE)"
 stage "loading the dump as $ROLE (pg_restore, exit-on-error)"
 # As the service role, through the same DSN the engine uses: every restored
 # object is owned by the role that will operate it — no ownership hand-back.
-if ! pg_restore --exit-on-error --no-owner --no-privileges --dbname="$DATABASE_URL" "$DUMP"; then
+# A set taken while the amcheck extension existed (backup.sh between OPS-44 and
+# MANUAL-OPERACION-S1) carries CREATE EXTENSION amcheck + COMMENT ON EXTENSION,
+# which the service role cannot run; they are not data — filter them out of the
+# TOC instead of failing the whole restore (`pg_restore -L`).
+RESTORE_LIST="$(mktemp)"; pg_restore -l "$DUMP" | grep -vE '^[0-9]+; [0-9]+ [0-9]+ (EXTENSION|COMMENT) - (EXTENSION )?amcheck' > "$RESTORE_LIST"
+if ! pg_restore --exit-on-error --no-owner --no-privileges --use-list="$RESTORE_LIST" --dbname="$DATABASE_URL" "$DUMP"; then
+	rm -f "$RESTORE_LIST"
 	die "restore FAILED loading the dump — the database is fresh/empty and $SERVICE is STOPPED. Investigate the dump (pg_restore --list), then re-run."
 fi
+rm -f "$RESTORE_LIST"
 ok "dump loaded"
 
 # ── 4. files ─────────────────────────────────────────────────────────────────
