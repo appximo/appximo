@@ -688,6 +688,11 @@ would close it better, and is Miguel's call.
   buttons are removed from crisblogs' login, or the subdomain points at a
   replacement we operate. Needs: Miguel's call between (a)/(b)/(c).
 
+- **Update (CENTRO-MANDO-S2, 2026-09-17):** the box is now operated (see
+  OPS-51's update — retotr-prod, panel key authorized), so option (a)
+  re-seeding the two demo users no longer depends on a third party; the
+  choice is now simply fix-or-retire, executable in-house.
+
 ### OPS-23 — `install.sh` has no `--static` flag for a frontend directory
 - **Origin:** LAUNCHPAD-S1, second fresh-agent run. An agent deploying an app
   with its own SPA (served by the stock binary, not a consumer build) has to
@@ -1395,6 +1400,17 @@ would close it better, and is Miguel's call.
 - **Ready:** Miguel decides — ask the evaluator for the key (and mark the
   box `apps` in the inventory) or power it off and stop paying; either way
   the inventory row (marked `ajeno`) says which.
+
+
+- **Update (CENTRO-MANDO-S2, 2026-09-17, observed from the panel):** the box is
+  no longer keyless or unnamed — the live inventory shows `147.182.163.170` as
+  **retotr-prod** (activo, uso `apps`, the panel's ssh key authorized) serving
+  **Reto Tributario** (`https://retotr.appximo.com`, unit active, public 200)
+  alongside the evaluator's old crisblogs install (public 200; its `/health`
+  is not readable from inside — a foreign layout). What remains open shifted:
+  the box is REAL PRODUCTION now and is still absent from the handoff's
+  `05_SERVIDORES` and has no companions (`fleet-audit.sh` cannot run there);
+  and the old crisblogs install still needs OPS-27's decision.
 
 ### OPS-52 — The command center's own loose ends that only Miguel can close: its domain, MFA, an alert destination
 

@@ -5,7 +5,11 @@
     "estado": "pausada_deliberada",
     "desde": "2026-08-29",
     "ultimo_release_publicado": "v0.1.13",
-    "tags_sin_release": ["v0.1.14", "v0.1.15", "v0.1.16"],
+    "tags_sin_release": [
+      "v0.1.14",
+      "v0.1.15",
+      "v0.1.16"
+    ],
     "porque": "Miguel decidió no publicar más releases al público por ahora mientras revisa el licenciamiento. El CI está rojo desde 29f3ec0 (2026-08-29) por una causa conocida y trivial (max64 definido solo en resources_linux.go y usado desde resources_db.go, que compila en todo GOOS: el Windows gate no compila), así que la cadena de release salta los tags. Las dos cosas se cancelan: no hay urgencia. NO leer el CI rojo como abandono — es un estado deliberado con la reparación escrita.",
     "reparacion": "repo interno: nuevo_chat_web/prompts/PROMPT_REPARAR_PUBLICACION.md — para cuando se decida publicar, no antes",
     "advisory": "El aviso de seguridad de v0.1.10 NUNCA se publicó (0 GHSA en el repo; el release v0.1.10 salió solo con el changelog automático). El texto listo está en el repo interno (RELEASE_NOTE_v0.1.10.md). El fix de autorización (ADR-027, commit 6429a00) SÍ está en v0.1.10 y en TODA versión posterior, v0.1.13 incluida — verificado por git el 2026-09-17. Quien corre ≥v0.1.10 tiene el fix; los sin avisar son v0.1.8/v0.1.9."
@@ -103,7 +107,9 @@
       "prioridad": "P1",
       "decide": "agente",
       "depende_de": [],
-      "bloquea": ["AUTO-7"],
+      "bloquea": [
+        "AUTO-7"
+      ],
       "origen": "TRASPASO_AUTOMATIZACION (frente de automatización)",
       "estado": "abierto"
     },
@@ -135,7 +141,9 @@
       "prioridad": "P1",
       "decide": "agente",
       "depende_de": [],
-      "bloquea": ["AUTO-9"],
+      "bloquea": [
+        "AUTO-9"
+      ],
       "origen": "TRASPASO_AUTOMATIZACION · decisión A-68",
       "estado": "abierto"
     },
@@ -150,7 +158,10 @@
       "dano": "medio",
       "prioridad": "P2",
       "decide": "miguel",
-      "depende_de": ["AUTO-1", "COMMERCE-4"],
+      "depende_de": [
+        "AUTO-1",
+        "COMMERCE-4"
+      ],
       "bloquea": [],
       "origen": "TRASPASO_AUTOMATIZACION · verificado en el 58",
       "estado": "abierto"
@@ -166,7 +177,9 @@
       "dano": "medio",
       "prioridad": "P2",
       "decide": "agente",
-      "depende_de": ["OPS-13"],
+      "depende_de": [
+        "OPS-13"
+      ],
       "bloquea": [],
       "origen": "TRASPASO_AUTOMATIZACION",
       "estado": "abierto"
@@ -214,7 +227,10 @@
       "dano": "medio",
       "prioridad": "P2",
       "decide": "agente",
-      "depende_de": ["AUTO-1", "AUTO-2"],
+      "depende_de": [
+        "AUTO-1",
+        "AUTO-2"
+      ],
       "bloquea": [],
       "origen": "TRASPASO_AUTOMATIZACION · decisión A-67",
       "estado": "abierto"
@@ -230,7 +246,14 @@
       "dano": "medio",
       "prioridad": "P2",
       "decide": "agente",
-      "depende_de": ["AUTO-1", "AUTO-2", "AUTO-3", "AUTO-4", "AUTO-5", "AUTO-6"],
+      "depende_de": [
+        "AUTO-1",
+        "AUTO-2",
+        "AUTO-3",
+        "AUTO-4",
+        "AUTO-5",
+        "AUTO-6"
+      ],
       "bloquea": [],
       "origen": "TRASPASO_AUTOMATIZACION",
       "estado": "abierto"
@@ -518,7 +541,9 @@
       "dano": "bajo",
       "prioridad": "P3",
       "decide": "miguel",
-      "depende_de": ["DEC-2"],
+      "depende_de": [
+        "DEC-2"
+      ],
       "bloquea": [],
       "origen": "SHOWHN-MATERIAL-S1",
       "estado": "abierto"
@@ -527,14 +552,16 @@
       "id": "OPS-27",
       "titulo": "Los botones demo de crisblogs fallan y la caja no es nuestra",
       "frente": "comercial",
-      "que_es": "El showcase del tercero responde 401 a sus propios botones demo; los links muertos ya salieron de todas las superficies públicas; la caja es del evaluador (misma caja de OPS-51).",
+      "que_es": "El showcase del tercero responde 401 a sus propios botones demo; los links muertos ya salieron de todas las superficies públicas; la caja es del evaluador (misma caja de OPS-51). ACTUALIZADO 2026-09-17: la caja ya está operada (retotr-prod, con llave del panel), así que la opción (a) re-seedear los usuarios demo ya no depende de un tercero — o se retira el install viejo.",
       "por_que_importa": "Solo queda roto el sitio en sí; la historia «lo construyó un tercero» sobrevive sin URL.",
       "que_lo_destraba": "La misma decisión de OPS-51: pedir la llave (y re-seedear los usuarios demo) o apagar la caja y descontarla.",
       "costo": "decision",
       "dano": "bajo",
       "prioridad": "P3",
       "decide": "miguel",
-      "depende_de": ["OPS-51"],
+      "depende_de": [
+        "OPS-51"
+      ],
       "bloquea": [],
       "origen": "LANDING-COMMERCIAL-S1",
       "estado": "abierto"
@@ -775,7 +802,9 @@
       "prioridad": "P2",
       "decide": "agente",
       "depende_de": [],
-      "bloquea": ["AUTO-2"],
+      "bloquea": [
+        "AUTO-2"
+      ],
       "origen": "SILENT-FAILURE-S1",
       "estado": "abierto"
     },
@@ -967,7 +996,9 @@
       "prioridad": "P2",
       "decide": "miguel",
       "depende_de": [],
-      "bloquea": ["OPS-2"],
+      "bloquea": [
+        "OPS-2"
+      ],
       "origen": "ESTADO_Y_PLAN_MAESTRO",
       "estado": "abierto"
     },
@@ -982,7 +1013,9 @@
       "dano": "medio",
       "prioridad": "P3",
       "decide": "agente",
-      "depende_de": ["OPS-1"],
+      "depende_de": [
+        "OPS-1"
+      ],
       "bloquea": [],
       "origen": "ESTADO_Y_PLAN_MAESTRO",
       "estado": "abierto"
@@ -1047,7 +1080,9 @@
       "prioridad": "P2",
       "decide": "miguel",
       "depende_de": [],
-      "bloquea": ["AUTO-7"],
+      "bloquea": [
+        "AUTO-7"
+      ],
       "origen": "docs/DIAN.md",
       "estado": "abierto"
     },
@@ -1062,7 +1097,9 @@
       "dano": "bajo",
       "prioridad": "P3",
       "decide": "miguel",
-      "depende_de": ["DEC-2"],
+      "depende_de": [
+        "DEC-2"
+      ],
       "bloquea": [],
       "origen": "RENAME-AND-PUBLISH-PREP-S1",
       "estado": "abierto"
@@ -1142,7 +1179,9 @@
       "dano": "medio",
       "prioridad": "P3",
       "decide": "agente",
-      "depende_de": ["DEC-2"],
+      "depende_de": [
+        "DEC-2"
+      ],
       "bloquea": [],
       "origen": "FIELD-FEEDBACK-S1",
       "estado": "abierto"
@@ -1261,17 +1300,19 @@
     },
     {
       "id": "OPS-51",
-      "titulo": "Un droplet sin documentar en la cuenta de Miguel: la caja de crisblogs ($7/mes)",
+      "titulo": "La caja de crisblogs ya es retotr-prod (operada, con Reto Tributario vivo) — falta el papel: documentarla y decidir qué pasa con el install viejo de crisblogs",
       "frente": "flota",
-      "que_es": "147.182.163.170 (nyc1, 1 vCPU/1 GB) es la caja del evaluador tercero — pagada por Miguel, sin llave nuestra, sin documentar hasta el inventario del panel.",
-      "por_que_importa": "Exactamente la clase de cosa para la que existe el inventario: plata saliendo hacia una caja que nadie opera.",
-      "que_lo_destraba": "Miguel decide: pedir la llave al evaluador (y marcarla apps) o apagarla y dejar de pagar; el inventario dice cuál.",
+      "que_es": "OBSERVADO 2026-09-17 en el panel: 147.182.163.170 figura como retotr-prod (activo, uso apps, con llave del panel) y sirve Reto Tributario (arriba, 200 público) junto al install viejo de crisblogs. El item original («droplet sin documentar, sin llave») quedó superado por los hechos — pero la caja sigue SIN documentar en el handoff (05_SERVIDORES) y sin companions (fleet-audit no corre ahí).",
+      "por_que_importa": "Una caja de producción real (Reto Tributario) operando fuera del papel del handoff y sin backup/audit verificables es exactamente la clase de hueco que el inventario existe para cerrar.",
+      "que_lo_destraba": "Miguel confirma el estado de esa caja (quién la instaló, con qué layout) → una sesión la pone al día: 05_SERVIDORES, companions (backup/restore/fleet-audit), y la decisión sobre el install viejo de crisblogs (OPS-27).",
       "costo": "decision",
-      "dano": "bajo",
+      "dano": "medio",
       "prioridad": "P2",
       "decide": "miguel",
       "depende_de": [],
-      "bloquea": ["OPS-27"],
+      "bloquea": [
+        "OPS-27"
+      ],
       "origen": "CENTRO-MANDO-S1",
       "estado": "abierto"
     },
@@ -1303,7 +1344,12 @@
       "prioridad": "P3",
       "decide": "miguel",
       "depende_de": [],
-      "bloquea": ["OPS-18", "OPS-22", "OPS-29", "DEC-3"],
+      "bloquea": [
+        "OPS-18",
+        "OPS-22",
+        "OPS-29",
+        "DEC-3"
+      ],
       "origen": "decisión de Miguel · CENTRO-MANDO-S2 la registra",
       "estado": "abierto"
     },
@@ -1318,7 +1364,9 @@
       "dano": "medio",
       "prioridad": "P2",
       "decide": "miguel",
-      "depende_de": ["DEC-2"],
+      "depende_de": [
+        "DEC-2"
+      ],
       "bloquea": [],
       "origen": "MOTOR-AUTORIZACION-S1 · verificado por CENTRO-MANDO-S2",
       "estado": "abierto"
