@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788211445563,
+  "lastUpdate": 1789683348079,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -5400,6 +5400,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "37003770 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "7fd5319857481a0307547c05a73e6d589dbe870b",
+          "message": "docs(backlog): the register grows a STRUCTURED half the panel can order — docs/backlog/items.json (88 items: que_es / por_que_importa / que_lo_destraba / costo / dano / prioridad by damage×cost / decide / depende_de / bloquea / frente), kept in sync with BACKLOG.md by a unit-lane test (an item without its fields FAILS); CLOSED + every DONE section + the review history swept to BACKLOG_ARCHIVO.md (3641 → 1602 lines); the automation front consolidated as AUTO-1..9 (the worker/outbox traps, the 34 factura.emitir verified live on the fleet — never drain them with the stock echo mode —, the worker-ships and workflows-gets-built decisions, the five-step voice plan with its warnings); the old requires-Miguel table becomes stable DEC-1..9 ids, incl. DEC-2 (publication PAUSED on purpose while licensing is reviewed — the red CI is the known max64 linux-only build break, repair parked, NOT neglect) and DEC-3 (the v0.1.10 advisory never went out — verified: zero GHSAs, auto-changelog release body — while the authz fix IS in v0.1.10..v0.1.16, so the 'v0.1.13 lacks the fix' claim is false); manual §9 documents the panel's new ordering (CENTRO-MANDO-S2)\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-17T22:15:08Z",
+          "tree_id": "5ea9658b765457b9fadbf22a7d1c904378ef3f65",
+          "url": "https://github.com/appximo/appximo/commit/7fd5319857481a0307547c05a73e6d589dbe870b"
+        },
+        "date": 1789683346213,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 3632,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "671486 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 3632,
+            "unit": "ns/op",
+            "extra": "671486 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "671486 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "671486 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 37.75,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "58018990 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 37.75,
+            "unit": "ns/op",
+            "extra": "58018990 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "58018990 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "58018990 times\n4 procs"
           }
         ]
       }
