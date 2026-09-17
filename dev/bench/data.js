@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789683348079,
+  "lastUpdate": 1789684642907,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -5472,6 +5472,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "58018990 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "60cfad0129328ae906d02187a407edcd1fce9019",
+          "message": "docs(backlog): OPS-51/OPS-27 updated with what the panel observed live — 147.182.163.170 is now retotr-prod (operated, panel key, Reto Tributario serving 200) with the old crisblogs install alongside; the box still needs its handoff row and companions, and crisblogs stays fix-or-retire, now executable in-house (CENTRO-MANDO-S2)\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-17T22:36:40Z",
+          "tree_id": "88b65375843f9ed6e745d9a711c92031b80cbbcb",
+          "url": "https://github.com/appximo/appximo/commit/60cfad0129328ae906d02187a407edcd1fce9019"
+        },
+        "date": 1789684641440,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6472,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "371356 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6472,
+            "unit": "ns/op",
+            "extra": "371356 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "371356 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "371356 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 68.11,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36515876 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 68.11,
+            "unit": "ns/op",
+            "extra": "36515876 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36515876 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36515876 times\n4 procs"
           }
         ]
       }
