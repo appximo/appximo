@@ -66,6 +66,14 @@ readonly RELEASE_VERSION="v0.1.1"
 DOMAIN=""; EMAIL=""; BINARY=""; CLI=""; SCHEMA=""; PORT="8090"; CONTROL_PORT=""
 ASSUME_YES="no"; HARDEN="no"; DRY_RUN="no"; PREFIX=""; UNINSTALL="no"; PURGE="no"
 SHOW_SECRETS="no"; APP_EXPLICIT="no"; SCRIPTS_DIR=""; INTERNAL_TLS="no"; UPGRADE="no"; SWAP_MB=0; PUBLIC_OK="no"; CURL_TLS=""
+# AUTOMATIZACION-S1 (decision A-67): appximo-worker is product capability, not a
+# library for Go consumers. WORKER=auto installs it when the schema declares
+# `events` or `workflows` (the declaration IS the request for a consumer) and a
+# worker binary is available; --worker forces it, --no-worker opts out. The
+# worker was published ONLY after the echo trap was closed (claims are
+# topic-scoped; nothing acks foreign events) — shipping it earlier would have
+# distributed the trap.
+WORKER="auto"; WORKER_BINARY=""
 # RESILIENCIA-S1: the nightly backup is INSTALLED, not suggested. A backup that
 # depends on someone remembering a cron line is the one that is missing the
 # night it is needed (the 58 had its timer written by hand; every other install
@@ -120,6 +128,14 @@ Options:
   --schema=PATH        boot schema JSON (default: a todo-api starter you replace later).
                        On a re-run: given → replaces the installed schema; omitted →
                        the installed schema is KEPT and verified to be THIS app's
+  --worker-binary=PATH the appximo-worker binary (build: scripts/build-worker.sh; also
+                       auto-detected as a sibling of --binary named appximo-worker).
+                       Installed as <app>-worker.service when the schema declares
+                       `events` or `workflows` (mode auto: workflow executor + email
+                       delivery when SMTP is configured; claims are topic-scoped)
+  --worker             install the worker even if the schema declares no automation
+  --no-worker          never install the worker (declared events then sit pending,
+                       visibly, until a worker runs)
   --scripts=DIR        where deploy-update.sh / backup.sh / restore.sh live (default:
                        next to this installer); they are installed into /opt/<app>/scripts
   --backup-schedule=C  when the installed <app>-backup.timer runs (systemd OnCalendar
@@ -163,6 +179,9 @@ parse_args() {
 			--email=*)  EMAIL="${arg#*=}" ;;
 			--binary=*) BINARY="${arg#*=}" ;;
 			--cli=*)    CLI="${arg#*=}" ;;
+			--worker-binary=*) WORKER_BINARY="${arg#*=}" ;;
+			--worker)   WORKER="yes" ;;
+			--no-worker) WORKER="no" ;;
 			--schema=*) SCHEMA="${arg#*=}" ;;
 			--scripts=*) SCRIPTS_DIR="${arg#*=}" ;;
 			--backup-schedule=*) BACKUP_SCHEDULE="${arg#*=}" ;;
@@ -212,6 +231,8 @@ parse_args() {
 	CADDY_SITES_DIR="$PREFIX/etc/caddy/sites"
 	CADDY_SITE_FILE="$CADDY_SITES_DIR/${APP_NAME}.caddy"
 	UNIT_FILE="$PREFIX/etc/systemd/system/${SERVICE_NAME}.service"
+	WORKER_UNIT_FILE="$PREFIX/etc/systemd/system/${SERVICE_NAME}-worker.service"
+	WORKER_BIN_PATH="$OPT_DIR/bin/appximo-worker"
 	BACKUP_SERVICE_FILE="$PREFIX/etc/systemd/system/${SERVICE_NAME}-backup.service"
 	BACKUP_TIMER_FILE="$PREFIX/etc/systemd/system/${SERVICE_NAME}-backup.timer"
 	BACKUP_DIR="$PREFIX/var/backups/$APP_NAME"
@@ -929,6 +950,96 @@ except Exception: print("")' "$1" 2>/dev/null
 	fi
 }
 
+# schema_declares_automation FILE — does the schema declare `events` on any
+# resource, or a `workflows` block? Either is a PROMISE of a consumer: the
+# worker is what honors it (AUTOMATIZACION-S1). python3 when present (a real
+# key check), else a conservative grep.
+schema_declares_automation() {
+	[ -f "$1" ] || return 1
+	if command -v python3 >/dev/null 2>&1; then
+		python3 -c 'import json,sys
+try:
+    d=json.load(open(sys.argv[1]))
+    wf=d.get("workflows") or {}
+    ev=any((r or {}).get("events") for r in (d.get("resources") or {}).values())
+    sys.exit(0 if (wf or ev) else 1)
+except Exception:
+    sys.exit(1)' "$1" 2>/dev/null
+	else
+		grep -q '"events"[[:space:]]*:\|"workflows"[[:space:]]*:' "$1" 2>/dev/null
+	fi
+}
+
+# install_worker + write_worker_unit — the outbox consumer / workflow executor
+# as an OPTIONAL sibling service (decision A-67). Same guarantees as the engine
+# unit: RestartSec=2, StartLimitIntervalSec=0, after PostgreSQL. It shares the
+# app's env file (DATABASE_URL/JWT_SECRET) plus the worker keys write_env_file
+# adds; default mode `auto` = the tenants' declared workflows + email delivery
+# when SMTP is configured — and NOTHING else (claims are topic-scoped).
+WORKER_INSTALLED="no"
+install_worker() {
+	case "$WORKER" in
+		no) info "worker not installed (--no-worker)"; return 0 ;;
+		auto)
+			if ! schema_declares_automation "$SCHEMA_FILE" && [ ! -f "$WORKER_BIN_PATH" ]; then
+				info "worker not installed: the schema declares no events/workflows (add --worker to force)"
+				return 0
+			fi
+			;;
+	esac
+	# A worker binary source: --worker-binary, a sibling of --binary named
+	# appximo-worker, or an already-installed one (upgrade keeps it).
+	local src="$WORKER_BINARY"
+	if [ -z "$src" ] && [ -n "$BINARY" ] && [ -f "$(dirname "$BINARY")/appximo-worker" ]; then
+		src="$(dirname "$BINARY")/appximo-worker"
+	fi
+	if [ -z "$src" ]; then
+		if [ -f "$WORKER_BIN_PATH" ]; then
+			info "worker: keeping the installed binary at ${WORKER_BIN_PATH#"$PREFIX"} (pass --worker-binary to replace it)"
+		else
+			warn "the schema declares events/workflows but NO worker binary was given (--worker-binary=/path/to/appximo-worker, build: scripts/build-worker.sh) — the declared events will sit pending in public.outbox until a worker runs. The engine's oldest-pending-age alert will name this."
+			return 0
+		fi
+	else
+		[ -f "$src" ] || die "--worker-binary '$src' not found"
+		[ -x "$src" ] || die "--worker-binary '$src' is not executable (chmod +x it)"
+		run install -m 0755 "$src" "$WORKER_BIN_PATH"
+		ok "worker binary installed at ${WORKER_BIN_PATH#"$PREFIX"}"
+	fi
+	write_worker_unit
+	WORKER_INSTALLED="yes"
+}
+
+write_worker_unit() {
+	write_file "$WORKER_UNIT_FILE" "[Unit]
+Description=Appximo worker for app ${APP_NAME} (outbox consumer + workflow executor)
+Documentation=https://github.com/${REPO}/blob/main/docs/PRODUCTION.md
+Wants=network-online.target
+After=network-online.target postgresql.service ${SERVICE_NAME}.service
+# Same RESILIENCIA-S1 stance as the engine: never give up restarting — a
+# database late at boot must not leave the worker down after it recovers.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=${SERVICE_USER}
+Group=${SERVICE_USER}
+EnvironmentFile=${ENV_FILE#"$PREFIX"}
+ExecStart=${WORKER_BIN_PATH#"$PREFIX"}
+Restart=always
+RestartSec=2
+LimitNOFILE=1024
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=${VARLIB#"$PREFIX"}
+
+[Install]
+WantedBy=multi-user.target"
+	ok "wrote $WORKER_UNIT_FILE"
+}
+
 # foreign_schema_guard FILE — refuse a schema that belongs to ANOTHER app on
 # this box: byte-identical to, or carrying the `name` of, a sibling
 # /etc/<other>/schema.json. This is the check that would have stopped
@@ -1034,7 +1145,7 @@ write_env_file() {
 	# its demo mode on the first upgrade. Every line of an EXISTING env that is
 	# not one of the MANAGED keys below (and not the template's own header) is
 	# carried over verbatim — comments included, order kept.
-	local managed=" DATABASE_URL JWT_SECRET ADMIN_KEY APPXIMO_ENV APPXIMO_CONTROL_PORT APPXIMO_FILES_DIR OBS_DB_PATH GOMEMLIMIT APPXIMO_BACKUP_DIR "
+	local managed=" DATABASE_URL JWT_SECRET ADMIN_KEY APPXIMO_ENV APPXIMO_CONTROL_PORT APPXIMO_FILES_DIR OBS_DB_PATH GOMEMLIMIT APPXIMO_BACKUP_DIR APPXIMO_WORKER_MODE APPXIMO_ENGINE_URL APPXIMO_TENANT_DOMAIN "
 	local extra=""
 	if [ -f "$ENV_FILE" ]; then
 		local line key
@@ -1067,7 +1178,14 @@ OBS_DB_PATH=${VARLIB#"$PREFIX"}/obs/obs.db
 # missing or failed (docs/PRODUCTION.md §4). BACKUP_COPY_TO=user@host:/dir or
 # remote:bucket/path ships each set off this box (BACKUP_PASSPHRASE_FILE to
 # include the encrypted secrets).
-APPXIMO_BACKUP_DIR=${BACKUP_DIR#"$PREFIX"}"
+APPXIMO_BACKUP_DIR=${BACKUP_DIR#"$PREFIX"}
+# appximo-worker (the <app>-worker.service unit shares this file): mode `auto`
+# runs the schema's declared workflows + email delivery when SMTP_HOST is set,
+# and consumes NOTHING else (claims are topic-scoped — a topic with no consumer
+# stays pending and visible, never acknowledged). See docs/PRODUCTION.md §worker.
+APPXIMO_WORKER_MODE=auto
+APPXIMO_ENGINE_URL=http://127.0.0.1:${PORT}
+APPXIMO_TENANT_DOMAIN=${DOMAIN#*.}"
 	[ -n "$GOMEMLIMIT_VAL" ] && body="${body}
 GOMEMLIMIT=${GOMEMLIMIT_VAL}"
 	if [ -n "$extra" ]; then
@@ -1227,6 +1345,12 @@ start_services() {
 	systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null \
 		|| warn "could not (re)start caddy — check: caddy validate --config $CADDYFILE ; journalctl -u caddy -f"
 	ok "services started (appximo + caddy)"
+	if [ "$WORKER_INSTALLED" = "yes" ]; then
+		systemctl enable "${SERVICE_NAME}-worker" >/dev/null 2>&1 || true
+		systemctl restart "${SERVICE_NAME}-worker" \
+			&& ok "worker started (${SERVICE_NAME}-worker: outbox consumer + workflow executor, mode auto)" \
+			|| { journalctl -u "${SERVICE_NAME}-worker" -n 20 --no-pager 2>/dev/null || true; die "the worker failed to start — see the log above (journalctl -u ${SERVICE_NAME}-worker -f)"; }
+	fi
 	if [ -f "$BACKUP_TIMER_FILE" ]; then
 		mkdir -p "$BACKUP_DIR" && chmod 711 "$BACKUP_DIR"  # 0711: the engine (unprivileged) must traverse to read last-backup.status; conf bundle stays 0600
 		systemctl enable --now "${SERVICE_NAME}-backup.timer" >/dev/null 2>&1 \
@@ -1336,6 +1460,16 @@ verify_installed() {
 		if "$OPT_DIR/bin/appximo-cli" tenant --help >/dev/null 2>&1; then vline "ops CLI   ${OPT_DIR#"$PREFIX"}/bin/appximo-cli operates (tenant/migrate/token/admin)"
 		else warn "${OPT_DIR#"$PREFIX"}/bin/appximo-cli does not answer 'tenant --help' — it is not the engine CLI; re-run with --cli=/path/to/appximo"; fi
 	fi
+	# 5. The worker, when installed, is RUNNING and is the binary given.
+	if [ "$WORKER_INSTALLED" = "yes" ]; then
+		if systemctl is-active --quiet "${SERVICE_NAME}-worker" 2>/dev/null; then
+			vline "worker    ${SERVICE_NAME}-worker active ($("$WORKER_BIN_PATH" --version 2>/dev/null || echo '?'))"
+		else
+			die "VERIFY FAILED: ${SERVICE_NAME}-worker is not active — journalctl -u ${SERVICE_NAME}-worker -n 40"
+		fi
+	elif schema_declares_automation "$SCHEMA_FILE" && [ "$WORKER" != "no" ]; then
+		warn "the schema declares events/workflows and NO worker is running: those events will sit pending in public.outbox (visible in GET /admin/outbox and the oldest-pending-age alert). Re-run with --worker-binary=/path/to/appximo-worker."
+	fi
 	ok "verified — installed == asked:${VERIFIED_LINES}"
 }
 
@@ -1408,8 +1542,9 @@ uninstall() {
 	fi
 	[ "$(id -u)" = "0" ] || die "must run as root (sudo)"
 	systemctl disable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
+	systemctl disable --now "${SERVICE_NAME}-worker" >/dev/null 2>&1 || true
 	systemctl disable --now "${SERVICE_NAME}-backup.timer" >/dev/null 2>&1 || true
-	rm -f "$UNIT_FILE" "$BACKUP_SERVICE_FILE" "$BACKUP_TIMER_FILE"; systemctl daemon-reload >/dev/null 2>&1 || true
+	rm -f "$UNIT_FILE" "$WORKER_UNIT_FILE" "$BACKUP_SERVICE_FILE" "$BACKUP_TIMER_FILE"; systemctl daemon-reload >/dev/null 2>&1 || true
 	rm -rf "$OPT_DIR" "$ETC_DIR"
 	# OPS-10: removing an app removes ITS site file and nothing else — a sibling
 	# app's site (and the shared Caddyfile) survive untouched.
@@ -1490,6 +1625,9 @@ summary() {
 		printf '  Backup   %s-backup.timer (OnCalendar=%s) → %s — 14 sets kept; NOT off-box until you set BACKUP_COPY_TO in %s\n' "$SERVICE_NAME" "$BACKUP_SCHEDULE" "${BACKUP_DIR#"$PREFIX"}" "${ENV_FILE#"$PREFIX"}"
 		printf '  Restore  sudo bash %s/scripts/restore.sh --app=%s --set=%s/%s-<stamp>   (timed + verified; drill it once: docs/PRODUCTION.md §4)\n' "${OPT_DIR#"$PREFIX"}" "$APP_NAME" "${BACKUP_DIR#"$PREFIX"}" "$APP_NAME"
 	fi
+	if [ "$WORKER_INSTALLED" = "yes" ]; then
+		printf '  Worker   %s-worker.service (outbox consumer + workflow executor, mode auto) — logs: journalctl -u %s-worker -f; queue health: GET /admin/outbox + /admin/workflows\n' "$SERVICE_NAME" "$SERVICE_NAME"
+	fi
 	printf '  Ops CLI  %s/bin/appximo-cli  (tenant / migrate / token / admin create)\n' "${OPT_DIR#"$PREFIX"}"
 	printf '  Schema   %s (name "%s") — a re-run KEEPS it unless you pass --schema=PATH\n' "${SCHEMA_FILE#"$PREFIX"}" "$(schema_name "$SCHEMA_FILE")"
 	printf '  Update   build a new binary → scp up → sudo bash %s --binary=/path --domain=%s --email=%s --yes   (add --schema=PATH to change the model; secrets + data are kept, binary is replaced, the end is verified)\n' "$0" "$DOMAIN" "${EMAIL:-you@example.com}"
@@ -1538,6 +1676,7 @@ main() {
 	write_schema
 	write_env_file
 	write_systemd_unit
+	install_worker
 	write_backup_timer
 	write_caddyfile
 	verify_service_can_read

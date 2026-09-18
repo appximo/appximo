@@ -63,7 +63,7 @@ services:
       # scoped service JWT to write results back through the engine API.
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}
       # echo (default, logs+acks) | writeback (demo PATCH) | xlsx (FileJob consumer).
-      APPXIMO_WORKER_MODE: ${APPXIMO_WORKER_MODE:-echo}
+      APPXIMO_WORKER_MODE: ${APPXIMO_WORKER_MODE:-auto}
       APPXIMO_ENGINE_URL: http://engine:8080
       # Internal Host-header suffix for the engine API call ({tenant}.{suffix});
       # the engine reads the tenant from the SUBDOMAIN, so "localhost" is correct

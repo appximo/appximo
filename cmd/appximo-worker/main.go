@@ -1,35 +1,57 @@
-// Command appximo-worker is the outbox consumer (ADR-016 §Class 2): a SEPARATE
-// process that drains public.outbox and runs each event through a Processor. It
-// connects to the SAME Postgres as the engine (DATABASE_URL) with DEDICATED
-// connections (never the engine's pool), LISTENs on outbox.NotifyChannel as a
-// wake-up hint, and polls the table — the durable source of truth — as a fallback.
+// Command appximo-worker is the outbox consumer AND the workflow executor
+// (ADR-016 §Class 2 + ADR-031): a SEPARATE process that drains public.outbox,
+// runs each event through its consumer, and drives the schema's `workflows`
+// (event triggers as outbox consumers; cron triggers on a leader-elected
+// scheduler — pg_try_advisory_lock, no extra infrastructure). It connects to the
+// SAME Postgres as the engine (DATABASE_URL) with DEDICATED connections (never
+// the engine's pool), LISTENs on outbox.NotifyChannel as a wake-up hint, and
+// polls the table — the durable source of truth — as a fallback.
 //
-// Scope: by default the Processor is the echo consumer, which logs the event and
-// marks it sent — the minimal end-to-end proof that the async Class 2 loop lives.
+// THE CLAIM IS TOPIC-SCOPED (AUTO-1, AUTOMATIZACION-S1): every consumer declares
+// the topics it owns, and the worker never claims — never acknowledges, never
+// destroys — a row outside that set. A pending row nobody owns stays pending,
+// where the engine's outbox observability names it (oldest-pending-age gauge,
+// /admin/outbox, the alerter) and this process warns about it once a minute.
+// The old default (echo: ack EVERYTHING) silently destroyed business events
+// with a success face; nobody in the industry marks a job done because no
+// handler exists.
 //
-// SERVICE-JWT-V1: setting APPXIMO_WORKER_WRITEBACK=on swaps in the write-back
-// demo consumer, which mints a SHORT-LIVED, SCOPED service JWT and PATCHes the
-// created row's status back through the engine API — proving authenticated
-// write-back (event → mint JWT → engine API → RBAC accepts the scoped role). It
-// is a demo, not real business logic; real consumers (XLSX, email) are later
-// bricks (ADR-016).
+// Modes (APPXIMO_WORKER_MODE):
+//
+//	auto      (default) the shipped, generic worker: executes the tenants'
+//	          declared `workflows` (event + cron) and — when SMTP_HOST is set —
+//	          delivers `email.send` (auth reset/verification mail). Consumes
+//	          NOTHING else: app-specific topics need an app consumer (a Router
+//	          in a consumer binary; `appximo backend-spec` explains).
+//	echo      DEV loopback: acks ONLY echo.* topics, loudly refuses the rest.
+//	writeback SERVICE-JWT-V1 demo (PATCHes created rows' status).
+//	xlsx      the FileJob consumer (one resource's .created events).
+//	email     the transactional email consumer alone.
 package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
 
 	"github.com/appximo/appximo/pkg/consumers"
 	"github.com/appximo/appximo/pkg/db"
+	"github.com/appximo/appximo/pkg/dotenv"
+	"github.com/appximo/appximo/pkg/extensions"
 	"github.com/appximo/appximo/pkg/files"
 	"github.com/appximo/appximo/pkg/logging"
+	"github.com/appximo/appximo/pkg/outbox"
 	"github.com/appximo/appximo/pkg/worker"
+	"github.com/appximo/appximo/pkg/workflows"
 )
 
 // version / revision are stamped at build time by scripts/build-worker.sh via
@@ -41,12 +63,61 @@ var (
 )
 
 func main() {
-	logging.Init(os.Getenv("APPXIMO_ENV"))
-
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		logging.Log.Fatal().Msg("DATABASE_URL environment variable is required")
+	// --version: what fleet-audit.sh and a deploy verification ask.
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "version") {
+		fmt.Printf("appximo-worker %s (%s)\n", version, revision)
+		return
 	}
+
+	// Same .env contract as the engine (F1): the real environment wins, .env
+	// fills gaps — so the systemd unit's EnvironmentFile and a bare terminal run
+	// see the same config.
+	dotenvLoaded := dotenv.Load()
+	logging.Init(os.Getenv("APPXIMO_ENV"))
+	log := logging.Log
+	if dotenvLoaded > 0 {
+		log.Info().Int("vars", dotenvLoaded).Msg("worker: loaded .env from the working directory (environment wins over it)")
+	}
+
+	// ── configuration: strict, fail-fast, defaults reported (AUTO-2) ──
+	env := newEnvSet()
+	dsn := env.Require("DATABASE_URL", "the Postgres the engine writes the outbox to")
+	mode := env.Enum("APPXIMO_WORKER_MODE", "auto", "auto", "echo", "writeback", "xlsx", "email")
+	if os.Getenv("APPXIMO_WORKER_MODE") == "" && env.Opt("APPXIMO_WORKER_WRITEBACK") == "on" {
+		mode = "writeback" // legacy flag, still honored
+	}
+	batch := env.Int("APPXIMO_WORKER_BATCH", 50, 1)
+	maxAttempts := env.Int("APPXIMO_WORKER_MAX_ATTEMPTS", 5, 1)
+	poll := env.Dur("APPXIMO_WORKER_POLL", 5*time.Second)
+	refresh := env.Dur("APPXIMO_WORKER_SCHEMA_REFRESH", time.Minute)
+
+	// Engine-client settings (used by auto/writeback/xlsx; harmless otherwise).
+	engineURL := env.Str("APPXIMO_ENGINE_URL", "http://localhost:8080")
+	tenantDomain := env.Str("APPXIMO_TENANT_DOMAIN", "localhost")
+	role := env.Str("APPXIMO_WORKER_ROLE", "service_worker")
+	resource := env.Str("APPXIMO_WORKER_RESOURCE", "filejobs")
+	filesDir := env.Opt("APPXIMO_FILES_DIR")
+	emailTopic := env.Str("APPXIMO_EMAIL_TOPIC", consumers.DefaultEmailTopic)
+	smtpHost := env.Opt("SMTP_HOST")
+	smtpPort := env.Str("SMTP_PORT", "587")
+	smtpUser := env.Opt("SMTP_USER")
+	smtpPass := env.Opt("SMTP_PASS")
+	smtpFrom := env.Opt("SMTP_FROM")
+	jwtSecret := env.Opt("JWT_SECRET")
+
+	needsEngine := mode == "auto" || mode == "writeback" || mode == "xlsx"
+	if needsEngine && jwtSecret == "" {
+		env.invalid = append(env.invalid, fmt.Sprintf("JWT_SECRET is required for mode %q (it signs the scoped service JWT the worker uses on the engine API)", mode))
+	}
+	if (mode == "email" || (mode == "auto" && smtpHost != "")) && smtpFrom == "" && smtpHost != "" {
+		env.invalid = append(env.invalid, "SMTP_FROM is required when SMTP_HOST is set (the sender identity)")
+	}
+	if mode == "email" && smtpHost == "" {
+		env.invalid = append(env.invalid, `APPXIMO_WORKER_MODE=email requires SMTP_HOST (and SMTP_PORT/SMTP_FROM)`)
+	}
+	env.CheckUnknown("APPXIMO_WORKER_")
+	env.FailFast(log)
+	env.Report(log)
 
 	// Cancelled on SIGINT/SIGTERM → the worker finishes its current batch, joins
 	// the listener goroutine, closes its connections, and Run returns cleanly.
@@ -55,55 +126,144 @@ func main() {
 
 	// DEDICATED connection factory: pgx.Connect, NOT the engine pool. A LISTEN
 	// connection must be permanent, and a pool would rotate it out from under the
-	// listener (breaking LISTEN silently). The worker calls this for the listen
-	// conn, the drain conn, and again on every reconnect.
+	// listener (breaking LISTEN silently). Also used for the scheduler's
+	// leadership connection (the advisory lock IS the session).
 	connect := func(ctx context.Context) (*pgx.Conn, error) {
 		return pgx.Connect(ctx, dsn)
 	}
 
-	// Pick the consumer. APPXIMO_WORKER_MODE = echo (default) | writeback | xlsx
-	// | email. The legacy APPXIMO_WORKER_WRITEBACK=on still maps to "writeback".
-	//
-	// One mode = one consumer for the WHOLE worker; a mode acks the topics it does
-	// not own. Running two DIFFERENT single-mode workers against the SAME outbox is
-	// unsafe (each acks/drops the other's events under SKIP LOCKED) — to handle more
-	// than one event type, compose a consumers.Router in a custom worker main.go
-	// (ADR-016 library model) and run N identical Router workers. See docs/DEPLOY.md.
-	mode := os.Getenv("APPXIMO_WORKER_MODE")
-	if mode == "" && os.Getenv("APPXIMO_WORKER_WRITEBACK") == "on" {
-		mode = "writeback"
-	}
+	clients := newClientCache(engineURL, tenantDomain, jwtSecret, role)
+
 	var proc worker.Processor
 	switch mode {
+	case "auto":
+		proc = buildAuto(ctx, dsn, connect, clients, refresh, smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, emailTopic, log)
 	case "writeback":
-		proc = newWritebackProcessor()
+		log.Info().Str("engine_url", engineURL).Str("tenant_domain", tenantDomain).Str("role", role).
+			Msg("worker: write-back demo enabled (authenticated PATCH via engine API; owns *.created)")
+		proc = worker.NewWritebackProcessor(clients.raw(role), "done", log)
 	case "xlsx":
-		proc = newXLSXProcessor(ctx, dsn)
+		proc = newXLSXProcessor(ctx, dsn, clients.raw(role), resource, filesDir, log)
 	case "email":
-		proc = newEmailProcessor()
-	default:
-		proc = echoProcessor{log: logging.Log}
+		proc = newEmailProcessor(smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, emailTopic, log)
+	case "echo":
+		log.Warn().Msg("worker: ECHO mode is a dev loopback — it acknowledges ONLY echo.* topics; any business event stays pending (and this worker names it once a minute). It never marks foreign topics sent (AUTO-1).")
+		proc = echoProcessor{log: log}
 	}
 
-	w := worker.New(connect, proc, worker.Config{}, logging.Log)
+	w := worker.New(connect, proc, worker.Config{
+		BatchSize:    batch,
+		MaxAttempts:  maxAttempts,
+		PollInterval: poll,
+	}, log)
 
-	logging.Log.Info().Str("version", version).Str("revision", revision).Msg("appximo-worker starting")
+	if owner, ok := proc.(worker.TopicOwner); ok {
+		set := owner.Topics()
+		log.Info().Str("mode", mode).
+			Str("topics_exact", strings.Join(set.Exact, ",")).
+			Str("topics_prefixes", strings.Join(set.Prefixes, ",")).
+			Str("topics_suffixes", strings.Join(set.Suffixes, ",")).
+			Msg("worker: claim is SCOPED to these topics (dynamic sets refresh with the tenant schemas); everything else stays pending and visible")
+	}
+
+	log.Info().Str("version", version).Str("revision", revision).Str("mode", mode).Msg("appximo-worker starting")
 	if err := w.Run(ctx); err != nil && ctx.Err() == nil {
-		logging.Log.Fatal().Err(err).Msg("appximo-worker exited with error")
+		log.Fatal().Err(err).Msg("appximo-worker exited with error")
 	}
-	logging.Log.Info().Msg("appximo-worker stopped")
+	log.Info().Msg("appximo-worker stopped")
 }
 
-// echoProcessor is the WORKER-V1 consumer: it logs the event and returns nil. It
-// is trivially idempotent (a redelivery just logs twice), which is exactly the
-// property at-least-once delivery requires — see worker.Processor for where a real
-// consumer with side-effects would place its idempotency-key check.
+// buildAuto assembles the shipped generic worker: the workflow executor (event
+// consumers + leader-elected cron scheduler) plus, when SMTP is configured, the
+// email consumer — everything topic-scoped through one Router.
+func buildAuto(ctx context.Context, dsn string, connect worker.Connector, clients *clientCache, refresh time.Duration, smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, emailTopic string, log zerolog.Logger) worker.Processor {
+	pool, err := db.NewPool(ctx, dsn)
+	if err != nil {
+		log.Fatal().Err(err).Msg("worker: open pool (workflows store + schema source)")
+	}
+	if err := outbox.EnsureTable(ctx, pool); err != nil {
+		log.Fatal().Err(err).Msg("worker: ensure outbox table")
+	}
+	if err := workflows.EnsureTables(ctx, pool); err != nil {
+		log.Fatal().Err(err).Msg("worker: ensure workflow tables")
+	}
+
+	src := workflows.NewSource(pool, refresh, log)
+	store := workflows.NewStore(pool)
+	exec := &workflows.Executor{
+		Clients:    clients.factory(),
+		Store:      store,
+		Dispatcher: extensions.NewWebhookDispatcher(),
+		Log:        log,
+	}
+	go src.Run(ctx)
+
+	scheduler := &workflows.Scheduler{
+		Connect: connect,
+		Src:     src,
+		Exec:    exec,
+		Store:   store,
+		Log:     log,
+	}
+	go scheduler.Run(ctx)
+
+	router := consumers.NewRouter(log)
+	router.HandleOwner("workflows(dynamic)", &workflows.EventConsumer{Src: src, Exec: exec, Log: log})
+	if smtpHost != "" {
+		router.Handle(emailTopic, newEmailProcessor(smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, emailTopic, log))
+	}
+	log.Info().Bool("email", smtpHost != "").
+		Msg("worker: AUTO mode — workflow executor (event + leader-elected cron) enabled; topics follow the tenants' deployed schemas")
+	return router
+}
+
+// clientCache builds one EngineClient per role, lazily.
+type clientCache struct {
+	engineURL, domain, secret, defaultRole string
+
+	mu    sync.Mutex
+	cache map[string]*worker.EngineClient
+}
+
+func newClientCache(engineURL, domain, secret, defaultRole string) *clientCache {
+	return &clientCache{engineURL: engineURL, domain: domain, secret: secret, defaultRole: defaultRole, cache: map[string]*worker.EngineClient{}}
+}
+
+func (c *clientCache) raw(role string) *worker.EngineClient {
+	if role == "" {
+		role = c.defaultRole
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cl, ok := c.cache[role]
+	if !ok {
+		cl = worker.NewEngineClient(c.engineURL, c.domain, c.secret, role, worker.DefaultServiceTokenTTL)
+		c.cache[role] = cl
+	}
+	return cl
+}
+
+func (c *clientCache) factory() workflows.ClientFactory {
+	return func(role string) workflows.EngineDoer { return c.raw(role) }
+}
+
+// echoProcessor is the DEV loopback: it acks echo.* topics (logging them) and
+// owns nothing else. Before AUTOMATIZACION-S1 it was the DEFAULT and acked
+// EVERY topic — the trap that would have destroyed 34 real factura.emitir rows.
 type echoProcessor struct {
 	log zerolog.Logger
 }
 
-// Process implements worker.Processor for the echo.test topic.
+// Topics implements worker.TopicOwner: echo owns exactly the echo.* namespace.
+func (p echoProcessor) Topics() worker.TopicSet {
+	return worker.TopicSet{Prefixes: []string{"echo."}}
+}
+
+// Process implements worker.Processor for echo.* topics.
 func (p echoProcessor) Process(_ context.Context, row worker.Row) error {
+	if !strings.HasPrefix(row.Topic, "echo.") {
+		return fmt.Errorf("echo consumer owns only echo.* topics, got %q — refusing to acknowledge", row.Topic)
+	}
 	p.log.Info().
 		Int64("id", row.ID).
 		Str("tenant_id", row.TenantID).
@@ -113,65 +273,16 @@ func (p echoProcessor) Process(_ context.Context, row worker.Row) error {
 	return nil
 }
 
-// newWritebackProcessor builds the SERVICE-JWT-V1 demo consumer from env:
-//
-//	JWT_SECRET                  (required) — shared with the engine, signs the service JWT
-//	APPXIMO_ENGINE_URL        engine data-plane URL   (default http://localhost:8080)
-//	APPXIMO_TENANT_DOMAIN     Host suffix per tenant  (default localhost → acme.localhost)
-//	APPXIMO_WORKER_ROLE       scoped service role     (default service_worker)
-//
-// The role MUST be a minimally-scoped role in the schema RBAC — never admin.
-func newWritebackProcessor() worker.Processor {
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		logging.Log.Fatal().Msg("APPXIMO_WORKER_WRITEBACK=on requires JWT_SECRET (shared with the engine)")
-	}
-	engineURL := envOr("APPXIMO_ENGINE_URL", "http://localhost:8080")
-	tenantDomain := envOr("APPXIMO_TENANT_DOMAIN", "localhost")
-	role := envOr("APPXIMO_WORKER_ROLE", "service_worker")
-
-	client := worker.NewEngineClient(engineURL, tenantDomain, secret, role, worker.DefaultServiceTokenTTL)
-	logging.Log.Info().
-		Str("engine_url", engineURL).
-		Str("tenant_domain", tenantDomain).
-		Str("role", role).
-		Dur("token_ttl", worker.DefaultServiceTokenTTL).
-		Msg("worker: write-back demo enabled (authenticated PATCH via engine API)")
-	return worker.NewWritebackProcessor(client, "done", logging.Log)
-}
-
 // newXLSXProcessor builds the XLSX-CONSUMER-V1 real consumer (FileJob pattern).
-// Same engine-client env as the write-back demo, plus:
-//
-//	APPXIMO_WORKER_RESOURCE   the jobs resource (default filejobs)
-//
-// The service role (APPXIMO_WORKER_ROLE, default service_worker) must have
-// read+update on that resource — read to fetch the job's file_ref, update to
-// write {status, result}.
-//
 // File source (FILES-V1): when APPXIMO_FILES_DIR is set, file_ref is a VFS
-// file_id and the consumer streams the content-addressed blob via VFS.Get (the
-// worker opens a dedicated pool for the per-tenant metadata lookup, sharing the
-// SAME blob root as the engine on this host). Without it, file_ref is read as a
-// local path (back-compat).
-func newXLSXProcessor(ctx context.Context, dsn string) worker.Processor {
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		logging.Log.Fatal().Msg("APPXIMO_WORKER_MODE=xlsx requires JWT_SECRET (shared with the engine)")
-	}
-	engineURL := envOr("APPXIMO_ENGINE_URL", "http://localhost:8080")
-	tenantDomain := envOr("APPXIMO_TENANT_DOMAIN", "localhost")
-	role := envOr("APPXIMO_WORKER_ROLE", "service_worker")
-	resource := envOr("APPXIMO_WORKER_RESOURCE", "filejobs")
-
-	client := worker.NewEngineClient(engineURL, tenantDomain, secret, role, worker.DefaultServiceTokenTTL)
-	proc := consumers.NewXLSXProcessor(client, resource, logging.Log)
-
+// file_id and the consumer streams the content-addressed blob via VFS.Get.
+func newXLSXProcessor(ctx context.Context, dsn string, client *worker.EngineClient, resource, filesDir string, log zerolog.Logger) worker.Processor {
+	proc := consumers.NewXLSXProcessor(client, resource, log)
 	source := "local-path"
-	if filesDir := os.Getenv("APPXIMO_FILES_DIR"); filesDir != "" {
+	if filesDir != "" {
 		pool, err := db.NewPool(ctx, dsn)
 		if err != nil {
-			logging.Log.Fatal().Err(err).Msg("worker: open pool for VFS metadata")
+			log.Fatal().Err(err).Msg("worker: open pool for VFS metadata")
 		}
 		vfs := files.NewLocal(filesDir, files.NewPGStore(pool))
 		proc = proc.WithFileOpener(func(ctx context.Context, tenant, fileRef string) (io.ReadCloser, error) {
@@ -180,55 +291,22 @@ func newXLSXProcessor(ctx context.Context, dsn string) worker.Processor {
 		})
 		source = "vfs:" + filesDir
 	}
-
-	logging.Log.Info().
-		Str("engine_url", engineURL).
-		Str("tenant_domain", tenantDomain).
-		Str("role", role).
-		Str("resource", resource).
-		Str("file_source", source).
+	log.Info().Str("resource", resource).Str("file_source", source).
 		Msg("worker: xlsx consumer enabled (streaming parse + authenticated write-back)")
 	return proc
 }
 
-// newEmailProcessor builds the EMAIL-CONSUMER-V1 transactional-email consumer.
-// It needs NO engine client (an email is not written back) — only an external
-// SMTP provider, configured entirely by env:
-//
-//	SMTP_HOST   (required)  e.g. smtp-relay.brevo.com
-//	SMTP_PORT   (required)  e.g. 587
-//	SMTP_FROM   (required)  e.g. "My App <no-reply@myapp.com>"
-//	SMTP_USER / SMTP_PASS   provider credentials (omit for an open/test relay)
-//	APPXIMO_EMAIL_TOPIC   outbox topic to consume (default email.send)
-//
-// Provider-agnostic: STARTTLS + AUTH PLAIN is the common denominator, so Brevo,
-// Resend, Mailgun, SES… all work by changing only these vars.
-func newEmailProcessor() worker.Processor {
-	cfg := consumers.SMTPConfig{
-		Host:     os.Getenv("SMTP_HOST"),
-		Port:     envOr("SMTP_PORT", "587"),
-		Username: os.Getenv("SMTP_USER"),
-		Password: os.Getenv("SMTP_PASS"),
-		From:     os.Getenv("SMTP_FROM"),
-	}
-	sender, err := consumers.NewSMTPSender(cfg)
+// newEmailProcessor builds the EMAIL-CONSUMER-V1 transactional-email consumer:
+// STARTTLS + AUTH PLAIN via an external provider (Brevo, Resend, Mailgun, SES…).
+func newEmailProcessor(host, port, user, pass, from, topic string, log zerolog.Logger) worker.Processor {
+	sender, err := consumers.NewSMTPSender(consumers.SMTPConfig{
+		Host: host, Port: port, Username: user, Password: pass, From: from,
+	})
 	if err != nil {
-		logging.Log.Fatal().Err(err).Msg("APPXIMO_WORKER_MODE=email requires SMTP_HOST, SMTP_PORT and SMTP_FROM")
+		log.Fatal().Err(err).Msg("worker: email consumer requires SMTP_HOST, SMTP_PORT and SMTP_FROM")
 	}
-	topic := envOr("APPXIMO_EMAIL_TOPIC", consumers.DefaultEmailTopic)
-	logging.Log.Info().
-		Str("smtp_host", cfg.Host).
-		Str("smtp_port", cfg.Port).
-		Str("from", cfg.From).
-		Bool("auth", cfg.Username != "").
-		Str("topic", topic).
+	log.Info().Str("smtp_host", host).Str("smtp_port", port).Str("from", from).
+		Bool("auth", user != "").Str("topic", topic).
 		Msg("worker: email consumer enabled (external SMTP, templated)")
-	return consumers.NewEmailProcessor(sender, logging.Log).WithTopic(topic)
-}
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
+	return consumers.NewEmailProcessor(sender, log).WithTopic(topic)
 }

@@ -72,11 +72,17 @@ jobs:
           # compile is exactly the same as the others). NOT smoke-tested here
           # (no Windows runner in this job) — the quick start marks the Windows
           # path as community-verified.
+          # appximo-worker ships alongside the engine (A-67, AUTOMATIZACION-S1):
+          # `events: […]` and `workflows` in the schema promise a consumer, and
+          # honoring that promise must not require writing Go. Same canonical
+          # build script discipline (scripts/build-worker.sh).
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
             os="${target%/*}" arch="${target#*/}"
             ext=""; [ "$os" = "windows" ] && ext=".exe"
             GOOS="$os" GOARCH="$arch" \
               ./scripts/build-engine.sh "dist/appximo-${VERSION}-${os}-${arch}${ext}" "$VERSION" "$REVISION"
+            GOOS="$os" GOARCH="$arch" \
+              ./scripts/build-worker.sh "dist/appximo-worker-${VERSION}-${os}-${arch}${ext}" "$VERSION" "$REVISION"
           done
           ls -lh dist/
 
@@ -88,6 +94,9 @@ jobs:
           OUT="$("dist/appximo-${VERSION}-linux-amd64" version)"
           echo "$OUT"
           echo "$OUT" | grep -F "$VERSION"
+          WOUT="$("dist/appximo-worker-${VERSION}-linux-amd64" --version)"
+          echo "$WOUT"
+          echo "$WOUT" | grep -F "$VERSION"
 
       - name: Version-less aliases (stable latest/download URLs — D1)
         env:
@@ -100,6 +109,10 @@ jobs:
           for f in dist/appximo-"${VERSION}"-*; do
             base="${f##*/}"
             cp "$f" "dist/${base/appximo-${VERSION}-/appximo-}"
+          done
+          for f in dist/appximo-worker-"${VERSION}"-*; do
+            base="${f##*/}"
+            cp "$f" "dist/${base/appximo-worker-${VERSION}-/appximo-worker-}"
           done
           ls -lh dist/
 

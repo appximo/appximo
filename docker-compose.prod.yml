@@ -67,7 +67,7 @@ services:
       # MUST match the engine's JWT_SECRET (the worker mints scoped service JWTs).
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (min 32 chars)}
       # echo (default) | writeback | xlsx — see docs/DEPLOY.md → Background worker.
-      APPXIMO_WORKER_MODE: ${APPXIMO_WORKER_MODE:-echo}
+      APPXIMO_WORKER_MODE: ${APPXIMO_WORKER_MODE:-auto}
       APPXIMO_ENGINE_URL: http://engine:8080
       # Internal Host-header suffix ({tenant}.{suffix}); the engine reads the
       # SUBDOMAIN, so "localhost" is correct even in prod (not a DNS name).

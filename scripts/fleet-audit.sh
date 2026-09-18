@@ -83,6 +83,21 @@ audit_app() {
 		else meh "no last-backup.status yet (first run of the new backup.sh writes it)"; fi
 	fi
 
+	# 5b. automation: a schema that declares events/workflows PROMISES a consumer
+	# (AUTOMATIZACION-S1). A box where that promise has no running worker is a ✗:
+	# the events sit pending in public.outbox forever, invisible without this.
+	local schemaf="/etc/$app/schema.json"
+	if [ -f "$schemaf" ] && grep -q '"events"[[:space:]]*:\|"workflows"[[:space:]]*:' "$schemaf" 2>/dev/null; then
+		if systemctl is-active --quiet "$app-worker" 2>/dev/null; then
+			local wbin wver
+			wbin="/opt/$app/bin/appximo-worker"
+			wver="$([ -x "$wbin" ] && "$wbin" --version 2>/dev/null | head -1)"
+			ok "worker $app-worker active (${wver:-?}) — the schema's events/workflows have their consumer"
+		else
+			bad "the schema declares events/workflows and $app-worker is NOT running — those events pile up pending in public.outbox (check GET /admin/outbox; appximo_outbox_oldest_pending_age_seconds will grow). Install it: re-run install.sh with --worker-binary=/path/to/appximo-worker, or systemctl enable --now $app-worker"
+		fi
+	fi
+
 	# 6. off-box + an alert destination
 	local hook; hook="$(envval "$envf" SLACK_WEBHOOK_URL)"
 	if [ -n "$hook" ]; then ok "alert destination set (SLACK_WEBHOOK_URL) — backup/disk/SLO/first-error alerts reach a human"
