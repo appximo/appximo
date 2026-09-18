@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789741355671,
+  "lastUpdate": 1789751815030,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -5832,6 +5832,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "57521061 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "ed40121821bbe89d78f24472033430d4528b9472",
+          "message": "feat(summary): the digest reads at a glance — server-rendered image, declared `summary.resources` filter, and the VOZ-2 vocabulary (VOZ-VISUAL-S1)\n\nPart A — the digest as an IMAGE. GET /api/summary?format=png (or Accept:\nimage/png) renders the SAME Report the text comes from as a PNG on the server\n(pkg/summary/render.go): pure Go — golang.org/x/image opentype rasterizer + the\nGo fonts — no browser, no cgo, no model; deterministic (same input → same\nbytes, pinned). Hierarchy, not a table: a traffic light + headline readable in\nthree seconds, one big row per resource that WAITS (red = declared, amber =\ninferred), today's motion, the rest folded — twenty resources fit one phone\nscreen. Binary +860,160 B (300,420 of them the two TTFs), 43/64 ms per render\n(5/20 resources), produced only when asked, never on a CRUD path. Telegram\ndelivers picture + text (telegram.SendPhoto/SendPhotoWithText: caption ≤ 1024\nelse photo + full text; a refused photo falls back to text; transport/429 →\nretry) from both the `resumen` command and the scheduled consumer; an engine\nwithout the image door degrades to text — never image-only, never silence.\n\nPart B — `summary.resources` (top-level): which resources the digest reports\nand in what ORDER. Load-validated (unknown resource / duplicate / empty are\nnamed errors), strict-keyed, Studio round-trips it, `explain` reads it back,\n`spec` teaches it. Default argued from a twenty-resource app (ADR-032 §4):\nEVERY readable resource, ranked attention-first — never a heuristic cut. The\ndeclared list also cuts the queries to the listed resources.\n\nPart C — VOZ-2, `state_machine.pending`: declared → \"esperan acción\" (each a\nknown NON-terminal state, else a load error); `[]` → nothing here waits;\nabsent → the digest INFERS the initial non-terminal states as \"sin avanzar\n(recién creados, nadie los movió)\" and reports the rest as neutral \"en curso\"\ncounts. \"pendientes de alguien\" is gone; terminal states never count. The\ntiendita's `productos: activo` no longer reads as pending. nil-vs-[] survives\nJSON (StateMachine.MarshalJSON).\n\nPart D — ADR-033 designs the next rung (read questions by voice: a model\ntranslates to a CLOSED read plan over the schema's vocabulary, never SQL; the\nengine rejects unknown names; proper names resolved server-side; \"no entendí\"\nfirst-class; the model never writes a number) without building it. Backlog:\nVOZ-2 done; VOZ-3/4/5 opened with the agreed order; the \"workflows v1 is cron\nonly\" claim corrected (event triggers execute — ADR-031 §1).\n\nExamples: examples/model-lab/conjunto.json — 20 resources, 8 state machines,\n`pending` in its three forms, a 6-resource filter.\n\nVerified: unit + full DB lane; lint 0; gofmt/vet; binary-diff gate 175 cases →\n171 SAME, 4 DIFF all on /api/summary and all expected (corpus updated);\nbrowser 4 schemas × desktop/390×844 (36/36, console clean); live on the dev\nbox: empty day, 20 resources with and without the filter, unknown resource →\nload error, terminal never pending, Telegram unreachable → pending ×5 →\nreachable → delivered with the image (real bot), 50–210 ms per PNG end to end.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011rDUyYUzqSQX5hzrLZxLbD",
+          "timestamp": "2026-09-18T17:09:10Z",
+          "tree_id": "17561fc873b3582904fa83b1ccf8bbbf3b9d7793",
+          "url": "https://github.com/appximo/appximo/commit/ed40121821bbe89d78f24472033430d4528b9472"
+        },
+        "date": 1789751813859,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6355,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "367940 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6355,
+            "unit": "ns/op",
+            "extra": "367940 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "367940 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "367940 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 65.23,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36990243 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 65.23,
+            "unit": "ns/op",
+            "extra": "36990243 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36990243 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36990243 times\n4 procs"
           }
         ]
       }
