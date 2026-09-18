@@ -2,12 +2,17 @@ package outbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// isNoRows reports the empty-queue case of a LIMIT 1 probe.
+func isNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
 
 // Observer makes the outbox VISIBLE (AUTO-3, AUTOMATIZACION-S1). The outbox was
 // the best-built and worst-delivered piece of the engine: at-least-once delivery,
@@ -54,14 +59,21 @@ type TopicCount struct {
 
 // Stats is one collected snapshot of the queue's health.
 type Stats struct {
-	CollectedAt        time.Time    `json:"collected_at"`
-	Pending            int64        `json:"pending"`
-	Failed             int64        `json:"failed"`
-	SentLastHour       int64        `json:"sent_last_hour"`
+	CollectedAt  time.Time `json:"collected_at"`
+	Pending      int64     `json:"pending"`
+	Failed       int64     `json:"failed"`
+	SentLastHour int64     `json:"sent_last_hour"`
+	// Capped reports that Pending/Failed hit the counting bound (countCap): the
+	// real number is AT LEAST the reported one. Counting is bounded on purpose —
+	// measured on a real backlog (868 962 pending rows, 1-vCPU box) an unbounded
+	// count(*) cost ~1.1 s PER AGGREGATE every collection tick, so the observer
+	// would have added serious background load exactly during the incident it
+	// exists to surface. A queue at the cap is already every alarm firing.
+	Capped             bool         `json:"capped,omitempty"`
 	OldestPendingAge   float64      `json:"oldest_pending_age_seconds"` // 0 when no pending rows
 	OldestFailedAge    float64      `json:"oldest_failed_age_seconds"`  // 0 when no failed rows
 	OldestPendingTopic string       `json:"oldest_pending_topic,omitempty"`
-	PendingByTopic     []TopicCount `json:"pending_by_topic,omitempty"`
+	PendingByTopic     []TopicCount `json:"pending_by_topic,omitempty"` // omitted when Pending > topicBreakdownMax
 
 	// Workflow health (ADR-031) — collected from public.workflow_runs /
 	// public.workflow_cron when they exist (the engine ensures them at boot).
@@ -114,40 +126,75 @@ func (o *Observer) Run(ctx context.Context) {
 	}
 }
 
-// Collect runs one collection pass. Each query rides a partial index
-// (idx_outbox_pending / idx_outbox_failed / idx_outbox_sent_at), so the pass
-// stays cheap even over a table with a long sent history.
+// countCap bounds every count the observer runs: the cost of counting must not
+// grow with the size of the incident being counted. 100k is far past every
+// alerting threshold; the Capped flag says "at least this many".
+const countCap = 100000
+
+// topicBreakdownMax bounds the per-topic GROUP BY, the one aggregate whose cost
+// grows with backlog size (measured 1.1s over 869k rows): past this many
+// pending rows the breakdown is skipped and only the O(1) oldest row is named.
+const topicBreakdownMax = 20000
+
+// Collect runs one collection pass with BOUNDED cost whatever the backlog size:
+// the oldest-pending age (the headline) is an O(1) index probe, counts stop at
+// countCap, and the per-topic breakdown only runs on backlogs small enough that
+// a GROUP BY over the partial index is cheap.
 func (o *Observer) Collect(ctx context.Context) (*Stats, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	s := &Stats{CollectedAt: time.Now()}
+	now := time.Now()
 
-	var oldestPending, oldestFailed *time.Time
-	if err := o.pool.QueryRow(ctx,
-		`SELECT count(*), min(created_at) FROM public.outbox WHERE state = 'pending'`,
-	).Scan(&s.Pending, &oldestPending); err != nil {
+	// Oldest pending: one index probe, never a scan.
+	var oldestPending time.Time
+	var oldestTopic string
+	err := o.pool.QueryRow(ctx,
+		`SELECT created_at, topic FROM public.outbox WHERE state = 'pending' ORDER BY created_at LIMIT 1`,
+	).Scan(&oldestPending, &oldestTopic)
+	switch {
+	case err == nil:
+		s.OldestPendingAge = now.Sub(oldestPending).Seconds()
+		s.OldestPendingTopic = oldestTopic
+	case isNoRows(err):
+	default:
+		return nil, fmt.Errorf("outbox: observe oldest pending: %w", err)
+	}
+	var oldestFailed time.Time
+	err = o.pool.QueryRow(ctx,
+		`SELECT created_at FROM public.outbox WHERE state = 'failed' ORDER BY created_at LIMIT 1`,
+	).Scan(&oldestFailed)
+	switch {
+	case err == nil:
+		s.OldestFailedAge = now.Sub(oldestFailed).Seconds()
+	case isNoRows(err):
+	default:
+		return nil, fmt.Errorf("outbox: observe oldest failed: %w", err)
+	}
+
+	// Bounded counts: the subquery stops at countCap rows.
+	boundedCount := func(state string) (int64, error) {
+		var n int64
+		err := o.pool.QueryRow(ctx, fmt.Sprintf(
+			`SELECT count(*) FROM (SELECT 1 FROM public.outbox WHERE state = '%s' LIMIT %d) t`,
+			state, countCap)).Scan(&n)
+		return n, err
+	}
+	if s.Pending, err = boundedCount("pending"); err != nil {
 		return nil, fmt.Errorf("outbox: observe pending: %w", err)
 	}
-	if err := o.pool.QueryRow(ctx,
-		`SELECT count(*), min(created_at) FROM public.outbox WHERE state = 'failed'`,
-	).Scan(&s.Failed, &oldestFailed); err != nil {
+	if s.Failed, err = boundedCount("failed"); err != nil {
 		return nil, fmt.Errorf("outbox: observe failed: %w", err)
 	}
+	s.Capped = s.Pending >= countCap || s.Failed >= countCap
 	if err := o.pool.QueryRow(ctx,
-		`SELECT count(*) FROM public.outbox WHERE state = 'sent' AND sent_at > now() - interval '1 hour'`,
+		`SELECT count(*) FROM (SELECT 1 FROM public.outbox WHERE state = 'sent' AND sent_at > now() - interval '1 hour' LIMIT 100000) t`,
 	).Scan(&s.SentLastHour); err != nil {
 		return nil, fmt.Errorf("outbox: observe sent: %w", err)
 	}
-	now := time.Now()
-	if oldestPending != nil {
-		s.OldestPendingAge = now.Sub(*oldestPending).Seconds()
-	}
-	if oldestFailed != nil {
-		s.OldestFailedAge = now.Sub(*oldestFailed).Seconds()
-	}
 
-	if s.Pending > 0 {
+	if s.Pending > 0 && s.Pending <= topicBreakdownMax {
 		// Per-topic backlog, cardinality bounded: at most 20 topics per snapshot,
 		// oldest-first so the stuck ones always make the cut. The topic value is
 		// producer-controlled, so the bound is what keeps /metrics from exploding.
@@ -174,9 +221,6 @@ func (o *Observer) Collect(ctx context.Context) (*Stats, error) {
 		}
 		if err := rows.Err(); err != nil {
 			return nil, fmt.Errorf("outbox: iterate topics: %w", err)
-		}
-		if len(s.PendingByTopic) > 0 {
-			s.OldestPendingTopic = s.PendingByTopic[0].Topic
 		}
 	}
 
