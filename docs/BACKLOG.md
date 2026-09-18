@@ -361,6 +361,14 @@ deploy docs write env values quoted and say why, or (b) the scripts that only
 need `DATABASE_URL` stop sourcing the whole env file. A test that writes a
 value with a space and asserts both consumers survive.
 
+- **Recurred (VOZ-DELTA-S1, 2026-09-18):** ALERTAS-TELEGRAM-S1 wrote
+  `APPXIMO_ALERT_APP_NAME=La Tiendita` unquoted into the tiendita's env; the
+  nightly `demo-reset.service` would have failed again at `redate-demo.sh` (it
+  did, on the first manual run this session: `Tiendita: command not found`,
+  exit 127). Quoted on the box (`/root/appitools-env.pre-quote`), reset re-run
+  end to end. The fix this item asks for — a check in `install.sh`/`fleet-audit.sh`
+  that every value with spaces is quoted — is still not built; until it is,
+  every session that adds an env value must quote it.
 ### COMMERCE-11 — The tiendita's six product photos weigh 1.55 MB (one of them 676 KB)
 
 **Origin:** TIENDITA-VITRINA-S1's image audit. The photos are licence-verified,
@@ -1496,18 +1504,22 @@ decisions are already taken by Miguel and recorded (internal A-67, A-68): the
 worker SHIPS with the installer, and the `workflows` executor GETS BUILT.
 Structured fields for every item: [backlog/items.json](backlog/items.json).
 
-### AUTO-7 — The 34 `factura.emitir` pending on the 58 since July 31 — resolve with the REAL consumer (COMMERCE-4)
+### OPS-55 — `deploy-app.sh` rolls back the BINARY but not the SCHEMA it was deployed with
 
-Verified live 2026-09-17 on the tiendita's database: 34 `factura.emitir`
-pending, oldest 2026-07-31 23:11 UTC. **Since AUTOMATIZACION-S1 they are no
-longer in danger and no longer invisible**: the worker's claim is topic-scoped
-(echo owns only `echo.*` — NO product binary can mark them sent anymore), and
-the queue shows them — `GET /admin/outbox`, the
-`appximo_outbox_oldest_pending_age_seconds` gauge and its alert name the topic
-and the age. What remains is the FISCAL flow itself: the invoices were never
-emitted. **Ready:** COMMERCE-4 (the real DIAN adapter in commerce-worker) +
-Miguel's call — drain them with that consumer when it exists, or void them with
-the 34 rows archived first (pg_dump of the table). Never with anything else.
+- **Origin:** VOZ-DELTA-S1 (2026-09-18), found doing the rollback leg on vetapp: the
+  new engine had been deployed together with a schema that declares keys the
+  previous binary does not know (`summary.notify`, `quiet_days`), so `deploy-app.sh
+  --binary=<previous>` failed the old binary's boot ("unknown key") and its own
+  4b safety net rolled forward again. The pre-deploy schema copy exists
+  (`/root/<app>-schema.pre-<tag>`) but nothing restores it. The session rolled back
+  by hand (schema first, then the binary) and forward again — both verified.
+- **Impact:** medium. A rollback after a deploy that shipped a schema change is
+  a two-step operation the tool does not know; done blind it "succeeds" by
+  staying on the new binary.
+- **Ready:** `deploy-app.sh` records the schema's md5 at deploy and, on an
+  explicit rollback (`--rollback-to=<tag>`), restores `/root/<app>-schema.pre-<tag>`
+  together with the binary (and refuses the automatic 4b rollback when the boot
+  error names an unknown schema key, saying which file to restore).
 
 ### AUTO-9 — The voice plan: five steps, with what the research already settled
 

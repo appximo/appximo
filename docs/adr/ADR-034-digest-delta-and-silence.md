@@ -142,6 +142,15 @@ the workflow (`resumen_matinal`) — the worker reads `public.tenants.json_schem
 not the boot file — so a schema change is deployed to the tenant with
 `migrate`/the admin PUT as always.
 
+### 7. Found by provocation on the 58: a changed cron must re-arm
+
+The one-off cron used to prove the scheduled send (a spec two minutes ahead,
+deployed to the tenant) never fired: `public.workflow_cron` kept the stale
+`next_run` of the previous spec (`ON CONFLICT DO NOTHING`), so a daily 07:00
+moved to 14:38 would have fired the next day. The spec is now stored beside
+`next_run`; an unchanged spec never re-arms (a restart must not move a
+schedule), a changed one re-arms at the next tick. Pinned by a Postgres test.
+
 ## Consequences
 
 - The JSON of `/api/summary` gains `baseline`, `changed`, `change_reasons`,

@@ -418,6 +418,32 @@ refreshed).
 ---
 
 
+## DONE in VOZ-DELTA-S1 (2026-09-18) — the digest becomes a habit: the delta against yesterday, a send that speaks only on change, the worker in production, the 42 stuck invoice events resolved
+
+ADR-032's own verdict ("a dashboard you will look at for three days") set the
+brief. Design and rules: [ADR-034](adr/ADR-034-digest-delta-and-silence.md).
+
+| Item | What shipped | Verified by |
+|---|---|---|
+| **The delta** | ONE snapshot per (tenant, role, day) in `public.summary_snapshots`; baseline = the last row from a previous day; today upserted, the rest pruned (never a history). `+3 desde ayer` / `−2` / `igual que ayer` (folded, small) / `nuevo desde ayer`, and separately `N llegaron hoy` (attention rows created today). Traffic light = "is there NEWS?" (red novelty, amber same stock, green nothing — "ayer esperaban 26"). First digest: "primer resumen, sin comparación todavía". Delta chips in the picture; the headline's comparison wraps to its own line. | `pkg/summary/delta_test.go`; `pkg/integration` five simulated days on Postgres; live on the dev box (day 1 first → day 2 silent → day 3 `+1 desde ayer · 2 llegaron hoy` → day 4 green → day 5 heartbeat) with the pictures in `evidencia/VOZ-DELTA-S1/` |
+| **The silence** | `summary.notify` (`changes` default / `always`), `summary.quiet_days` (7; 0 = never). `?mode=scheduled` applies it, records the decision, answers `should_send`; the consumer obeys. "Changed" = an attention count/state changed, rows arrived today, the light went UP or to GREEN; plain motion never; **red → amber never** (found by provocation — the first digest's red aging into amber sent one message too many). Heartbeat after `quiet_days`; `estado` prints the last scheduled evaluation; the manual `resumen` always answers. The worker and the receiver ask for uncached digests (`Cache-Control: no-cache`). | unit + integration tests; `estado` line seen live |
+| **The worker in production** | `deploy-app.sh --worker-binary=PATH`: installs the worker, writes `<app>-worker.service` (install.sh's unit), adds env keys, enables, verifies ACTIVE (exit 3 otherwise). Both 58 apps now run `appximo-worker` (leader elected, `resumen_matinal` 07:00 Bogotá in both DEPLOYED tenant schemas); `fleet-audit.sh` ✓. **Root cause written:** the apps predate A-67 and the fleet's deploy path carried no worker. | deploy logs `d1/d2`; `systemctl is-active` ×3; `/admin/workflows` on both apps |
+| **AUTO-7 — the 42 `factura.emitir`** (34 in July, 42 by today) | The legitimate consumer EXISTS (`commerce-worker`, issuer `stub` when no `PT_PROVIDER` — the demo has mock payments; COMMERCE-4 stays open for a real client) but (a) it was not running on the 58 and (b) it was a plain `ProcessorFunc` that would have ACKED every foreign topic (the echo trap). Fixed to a `TopicOwner` and installed as `appitools-fiscal.service`. Outcome on the real data, with the acta CSV taken first (`acta-factura-emitir-58-20260918.csv`, 42 rows): **24 orphans** (their orders no longer exist — a reset demo) → `state='discarded'` with the reason on the row (the new `worker.Discard`, never `sent`); **18 with an invoice row** → processed by the real handler → `facturas.estado='error'`: "customer document number is required (DIAN rejects an invoice without an identified adquiriente)" — the demo's customers have no fiscal document, and that is the truth the handler wrote. The GOLDEN dump was regenerated the same way (scratch restore → real consumer → new dump; old kept as `golden-demo.dump.pre-voz-delta`, md5 `7dcffa84…` → `56b49942…`) so the nightly reset no longer resurrects the backlog. `/admin/outbox`: pending 0, failed 0, discarded 24; the age alert quiet **because the queue is empty**, no threshold touched. | SQL on the 58 before/after; `appitools-fiscal` journal; scratch restore of the new golden loads clean |
+| **`discarded` — a third outbox outcome** | `worker.Discard(reason)` → `state='discarded'`, reason in `last_error`, never retried, never `sent`; `Router.Discard` uses it; counted apart (`appximo_outbox_discarded`, `/admin/outbox`), never alerting. | `pkg/worker` DB test; live on the 58 |
+| **Cron re-arm (found on the 58)** | A deployed cron whose SPEC changes was NOT re-armed (`ON CONFLICT DO NOTHING` kept the stale `next_run` — a daily 07:00 moved to 14:38 would fire the next day). The spec is now stored beside `next_run` and a changed spec re-arms at the next tick. | `TestScheduler_ChangedSpecReArms` on Postgres; the one-off cron on the tiendita fired and delivered after the fix |
+
+Gates: unit 49/0 · full DB lane 49 ok · lint 0 · gofmt/vet · binary-diff gate
+176 cases: 171 SAME, 5 DIFF = the five `/api/summary` cases (new fields, delta
+text, a changed picture) — an admission-probe flip seen once under a loaded box
+disappeared on the quiet re-run · browser 4 schemas × desktop/390×844 36/36 ·
+ABBA by rule (no CRUD path touched; the gate corroborates byte for byte).
+Deploy: both 58 apps, rollback ida y vuelta (vetapp: schema + binary, which
+surfaced OPS-55), golden md5 guarded on every pass except the one that
+deliberately replaced it (kept as `.pre-voz-delta`), demos 22/22 + 20/20.
+
+---
+
+
 ## DONE in VOZ-VISUAL-S1 (2026-09-18) — the digest reads at a glance: a server-rendered picture, a declared filter, and the VOZ-2 vocabulary
 
 The tiendita's five-resource digest read fine; VecinGo's eighteen would not.

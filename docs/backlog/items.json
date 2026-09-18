@@ -1,6 +1,6 @@
 {
   "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo).",
-  "actualizado": "2026-09-18 (VOZ-VISUAL-S1: VOZ-2 hecho; VOZ-3/4/5 abiertos con el orden A-73)",
+  "actualizado": "2026-09-18 (VOZ-DELTA-S1: AUTO-7 hecho; OPS-55 abierto)",
   "publicacion": {
     "estado": "pausada_deliberada",
     "desde": "2026-08-29",
@@ -77,24 +77,6 @@
       "depende_de": [],
       "bloquea": [],
       "origen": "CAPACIDAD-USL-S1",
-      "estado": "abierto"
-    },
-    {
-      "id": "AUTO-7",
-      "titulo": "Las 34 factura.emitir pendientes en el 58 desde el 31 de julio — resolver con el consumidor real (COMMERCE-4)",
-      "frente": "automatizacion",
-      "que_es": "El outbox de la tiendita tiene 34 eventos factura.emitir en pending (la más vieja 2026-07-31 23:11 UTC). Desde AUTOMATIZACION-S1 ya NO corren peligro: el worker oficial reclama solo temas con consumidor (echo quedó acotado a echo.*), así que ningún binario del producto puede marcarlas enviadas; y ya SE VEN — /admin/outbox, appximo_outbox_oldest_pending_age_seconds y su alerta las nombran.",
-      "por_que_importa": "Son el flujo fiscal parado de la tiendita: facturas que nunca se emitieron ante la DIAN. La evidencia está a salvo y visible; lo que falta es EMITIRLAS.",
-      "que_lo_destraba": "COMMERCE-4 (el adaptador DIAN real en commerce-worker) + decisión de Miguel: drenarlas con ese consumidor cuando exista, o anularlas con las 34 filas archivadas primero (pg_dump de la tabla).",
-      "costo": "decision",
-      "dano": "medio",
-      "prioridad": "P2",
-      "decide": "miguel",
-      "depende_de": [
-        "COMMERCE-4"
-      ],
-      "bloquea": [],
-      "origen": "TRASPASO_AUTOMATIZACION · verificado en el 58 · re-evaluado por AUTOMATIZACION-S1 (trampa cerrada, cola visible)",
       "estado": "abierto"
     },
     {
@@ -295,7 +277,7 @@
       "id": "OPS-33",
       "titulo": "Un valor de env con espacios sin comillas rompe los scripts que lo sourcean",
       "frente": "flota",
-      "que_es": "systemd lo parsea bien pero un `. env` de bash lo ejecuta como comando; ya casi mata el reset dorado nocturno de la tiendita.",
+      "que_es": "systemd lo parsea bien pero un `. env` de bash lo ejecuta como comando; ya casi mata el reset dorado nocturno de la tiendita. RECURRIÓ en VOZ-DELTA-S1 (2026-09-18): ALERTAS-TELEGRAM-S1 escribió APPXIMO_ALERT_APP_NAME=La Tiendita sin comillas en el env de la tiendita y el reset nocturno volvió a fallar en redate-demo.sh (exit 127) — corregido a mano en la caja; el chequeo automático sigue sin existir.",
       "por_que_importa": "La clase puede volver con cualquier valor nuevo con espacios; el fallo aparece horas después, en el timer de la madrugada.",
       "que_lo_destraba": "Una sesión chica: install.sh y los docs escriben valores ENTRE COMILLAS y por qué + un test que mete un espacio y verifica los dos consumidores.",
       "costo": "chico",
@@ -935,9 +917,7 @@
       "prioridad": "P2",
       "decide": "miguel",
       "depende_de": [],
-      "bloquea": [
-        "AUTO-7"
-      ],
+      "bloquea": [],
       "origen": "docs/DIAN.md",
       "estado": "abierto"
     },
@@ -1444,6 +1424,22 @@
       ],
       "bloquea": [],
       "origen": "A-70 escalones 4/5 · ordenado último en VOZ-VISUAL-S1 (A-73)",
+      "estado": "abierto"
+    },
+    {
+      "id": "OPS-55",
+      "titulo": "deploy-app.sh revierte el BINARIO pero no el SCHEMA con el que se desplegó",
+      "frente": "flota",
+      "que_es": "Hallado en VOZ-DELTA-S1 al probar el rollback de vetapp: el motor nuevo se desplegó junto con un schema que declara llaves que el binario anterior no conoce (summary.notify, quiet_days); deploy-app.sh --binary=<anterior> hizo fallar el boot del binario viejo («unknown key») y su propia red 4b volvió a dejar el nuevo. La copia previa del schema existe (/root/<app>-schema.pre-<tag>) pero nadie la restaura. Se revirtió a mano (schema primero, binario después) y se volvió adelante, verificado.",
+      "por_que_importa": "Un rollback después de un deploy que trajo cambio de schema es una operación de dos pasos que la herramienta no conoce; a ciegas «funciona» quedándose en el binario nuevo.",
+      "que_lo_destraba": "Una sesión chica de flota: deploy-app.sh registra el md5 del schema al desplegar y, con --rollback-to=<tag>, restaura /root/<app>-schema.pre-<tag> junto con el binario; y rechaza el rollback automático 4b cuando el error de boot nombra una llave desconocida, diciendo qué archivo restaurar.",
+      "costo": "chico",
+      "dano": "medio",
+      "prioridad": "P2",
+      "decide": "agente",
+      "depende_de": [],
+      "bloquea": [],
+      "origen": "VOZ-DELTA-S1 (2026-09-18)",
       "estado": "abierto"
     }
   ]

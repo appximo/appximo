@@ -1239,6 +1239,10 @@ topics (a `factura.emitir`, a `jobs.render`) need an app consumer — a
    `appximo_workflow_*` (a growing `appximo_workflow_overdue_seconds` means the
    worker — or its scheduler — is not running).
 
+**Changing a cron** in the deployed schema takes effect at the scheduler's
+next tick (≤ 30 s): the stored `next_run` is re-armed when the spec differs
+(VOZ-DELTA-S1 — before, the old occurrence had to pass first, up to a day).
+
 **A `discarded` row** (VOZ-DELTA-S1) is a third terminal state: the consumer
 DECIDED the event can never be delivered — a malformed payload, an event whose
 subject no longer exists (an invoice job for an order a demo reset removed), a
