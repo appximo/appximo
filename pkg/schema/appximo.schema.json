@@ -28,10 +28,11 @@
     "summary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["resources"],
-      "description": "Which resources the daily digest (GET /api/summary, the Telegram `resumen`) reports and in what ORDER. Absent = every resource the role may read, ordered attention-first. Every name must be a declared resource. VOZ-VISUAL-S1.",
+      "description": "The daily digest (GET /api/summary, the Telegram `resumen`): which resources it reports and in what ORDER (absent = every readable resource, attention first; every name must be a declared resource — VOZ-VISUAL-S1), and the SCHEDULED send policy (VOZ-DELTA-S1): notify \"changes\" (default — only when something changed since the last digest) or \"always\"; quiet_days = heartbeat after N consecutive silent runs (default 7, 0 = never).",
       "properties": {
-        "resources": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ident" } }
+        "resources": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ident" } },
+        "notify": { "type": "string", "enum": ["changes", "always"] },
+        "quiet_days": { "type": "integer", "minimum": 0 }
       }
     }
   },

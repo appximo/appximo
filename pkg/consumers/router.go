@@ -115,7 +115,8 @@ func (r *Router) Discard(topic string) *Router {
 	log := r.log
 	return r.Handle(topic, worker.ProcessorFunc(func(_ context.Context, row worker.Row) error {
 		log.Info().Int64("id", row.ID).Str("topic", row.Topic).Msg("router: topic explicitly discarded (registered with Discard)")
-		return nil
+		// state='discarded' with the reason — never 'sent' (VOZ-DELTA-S1).
+		return worker.Discard("topic " + topic + " is registered with Router.Discard in this consumer")
 	}))
 }
 

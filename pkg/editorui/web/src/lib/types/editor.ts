@@ -13,6 +13,7 @@
 // types reshaped for editing.
 
 import type {
+	SummaryBlock,
 	FieldDef,
 	RelationDef,
 	IndexDef,
@@ -86,5 +87,5 @@ export interface SchemaModel {
 	entities: EntityModel[];
 	rbac: RBACPolicy; // roles + the anonymous rbac.public block — both preserved AND authored (RbacModal, UI-F2-S1/UI-2)
 	workflows?: Record<string, unknown>; // preserved verbatim
-	summary?: { resources: string[] }; // preserved verbatim (VOZ-VISUAL-S1)
+	summary?: SummaryBlock; // preserved verbatim (VOZ-VISUAL-S1)
 }

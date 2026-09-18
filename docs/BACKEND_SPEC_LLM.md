@@ -244,10 +244,17 @@ Returns `{"text","has_motion","level","headline","attention_total",…}`
 on the server as a PNG (deterministic, pure Go — a traffic light + what waits
 on top; ~50 ms). The top-level `summary.resources` block chooses which
 resources enter and in what order (absent = all readable, attention first).
-It powers the Telegram `resumen`/`estado` command channel (picture + text) and
-the canonical `resumen_matinal` cron workflow (a cron → `enqueue
-summary.telegram` → the worker's digest consumer sends picture + text).
-Operator + Siri setup: docs/PRODUCTION.md §4.6d.
+It compares against yesterday (ADR-034: one snapshot per tenant/role/day in
+`public.summary_snapshots`, no history) — `+3 desde ayer`, `N llegaron hoy`,
+`igual que ayer` folded — and the JSON carries `baseline`/`changed`/
+`change_reasons`. `?mode=scheduled` applies `summary.notify`
+(`changes` default | `always`) and `summary.quiet_days` (heartbeat, default 7)
+and answers `should_send`/`send_reason`, recording the decision. It powers the
+Telegram `resumen`/`estado` command channel (picture + text; `estado` prints
+the last scheduled evaluation) and the canonical `resumen_matinal` cron
+workflow (a cron → `enqueue summary.telegram` → the worker's digest consumer
+sends picture + text only when the engine says so). A worker calling it sends
+`Cache-Control: no-cache`. Operator + Siri setup: docs/PRODUCTION.md §4.6d.
 
 ### 2c. Reading from OUTSIDE the binary — `?fields=`: ask for the columns you will use
 

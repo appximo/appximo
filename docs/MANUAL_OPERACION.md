@@ -281,6 +281,34 @@ lo que ese rol puede ver — un rol acotado a sus filas cuenta solo las suyas, y
 nunca aparece un recurso que no puede leer. Un día sin movimiento dice «Sin
 movimiento hoy», no una lista de ceros.
 
+**El resumen dice qué cambió desde ayer, y el de la mañana calla si no cambió
+nada.** Cada resumen se compara con el anterior (el motor guarda UNA foto por
+día; no es un historial) y lo dice con números: «16 facturas esperan acción
+(+3 desde ayer · 3 llegaron hoy)», «igual que ayer» (plegado en una línea
+chica), «Nada que atender — ayer esperaban 26». Tres facturas que llegaron hoy
+no pesan lo mismo que dieciséis que llevan meses: el semáforo es rojo solo
+cuando hay NOVEDAD (algo creció o llegó hoy), ámbar cuando es el mismo stock
+de ayer, verde cuando no hay nada. El primer resumen dice «primer resumen, sin
+comparación todavía» — nunca inventa un más-dieciséis.
+
+**El parte automático habla solo cuando importa.** En el schema:
+
+```json
+"summary": { "resources": ["ordenes", "pagos", "facturas"], "notify": "changes", "quiet_days": 7 }
+```
+
+- `notify: "changes"` (el default): el resumen de las 7 llega solo si algo
+  cambió de verdad — un conteo de lo que espera, sus estados, algo que llegó
+  hoy, o el semáforo subiendo o quedando en verde. Un «9 nuevos» solo no
+  cuenta. `"always"`: el parte todos los días, cambie o no.
+- `quiet_days: 7` (default; `0` = nunca): después de siete mañanas calladas
+  llega un mensaje corto («🔕 7 días sin novedad. Sigo acá — todo igual») y la
+  cuenta arranca de nuevo. Así un canal callado no se confunde con uno roto.
+  Además, el comando `estado` termina diciendo cuándo corrió el último parte
+  automático y qué decidió («callado a propósito, 3 días sin novedad»).
+- El comando `resumen` a mano contesta SIEMPRE. El silencio es del envío
+  automático, no de su pregunta.
+
 **Elegir qué entra al resumen.** Si su app tiene muchos recursos, declare en el
 schema cuáles entran y en qué orden:
 
@@ -314,10 +342,16 @@ hora que usted quiera — es el ejemplo canónico de `workflows`
 ```
 
 Con el `appximo-worker` en modo `auto` y el mismo token de Telegram +
-`APPXIMO_TELEGRAM_SUMMARY_ROLE`, cada mañana (7 AM Bogotá, días hábiles) llega
-el resumen al chat — con la imagen, igual que el pedido a mano. Si Telegram no
-responde, el resumen queda `pending` y se reintenta solo hasta entregarse; si
-el worker está caído, queda `pending` y la alerta de edad de la cola lo delata.
+`APPXIMO_TELEGRAM_SUMMARY_ROLE`, cada mañana (7 AM Bogotá) el worker evalúa el
+resumen y lo manda al chat — con la imagen — solo si cambió algo (o siempre,
+según `notify`). Si Telegram no responde, queda `pending` y se reintenta solo
+hasta entregarse; si el worker está caído, la métrica `appximo_workflow_overdue_seconds`
+crece y su alerta lo delata. **El workflow tiene que estar en el schema
+DESPLEGADO del inquilino** (el worker lee el schema guardado, no el archivo de
+arranque): `appximo migrate --tenant <inquilino> --schema <archivo>`. En una
+caja desplegada con `deploy-app.sh`, agregue `--worker-binary=/ruta/appximo-worker`
+y el script instala el worker, escribe su unidad de systemd, completa el env y
+verifica que quede activo.
 
 **Desde el iPhone (Siri / Atajos), sin Telegram:** un atajo con una acción
 «Obtener contenido de URL» a

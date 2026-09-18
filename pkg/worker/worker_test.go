@@ -439,3 +439,36 @@ func TestNextBackoff(t *testing.T) {
 		}
 	}
 }
+
+// VOZ-DELTA-S1: a Processor's DECISION to drop an event is a third terminal
+// state — 'discarded', reason on the row — never 'sent' (a success face on
+// work that never happened) and never a retry.
+func TestWorker_DiscardIsADecisionNotADelivery(t *testing.T) {
+	pool := requirePG(t)
+	ctx := context.Background()
+	id := enqueue(t, pool, "tenant-orphan", "echo.test", map[string]any{"orden_id": "gone"})
+
+	proc := ProcessorFunc(func(_ context.Context, _ Row) error {
+		return Discard("no invoice row for order gone (order absent — nothing to emit)")
+	})
+	res, err := Drain(ctx, pool, proc, 50, 5, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Discarded != 1 || res.Processed != 0 || res.Failed != 0 {
+		t.Fatalf("result = %+v, want 1 discarded", res)
+	}
+	state, sentAt, attempts := rowState(t, pool, id)
+	if state != "discarded" || sentAt != nil || attempts != 1 {
+		t.Errorf("state=%q sent_at=%v attempts=%d — want discarded, NULL, 1", state, sentAt, attempts)
+	}
+	var reason string
+	if err := pool.QueryRow(ctx, `SELECT last_error FROM public.outbox WHERE id=$1`, id).Scan(&reason); err != nil || !strings.Contains(reason, "order absent") {
+		t.Errorf("the reason must be on the row: %q (%v)", reason, err)
+	}
+	// Never re-claimed.
+	res, _ = Drain(ctx, pool, proc, 50, 5, nil)
+	if res.Claimed() != 0 {
+		t.Errorf("a discarded row was re-claimed: %+v", res)
+	}
+}

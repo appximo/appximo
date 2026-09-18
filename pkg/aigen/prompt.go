@@ -19,12 +19,16 @@ const GrammarCore = `REQUIRED top-level keys: "$schema", "version", "name", "res
 - "name" is a short kebab-case app name, e.g. "optica-crm"
 - "resources" is an object mapping resource name -> { "fields": {...}, ... }
 - Optional top-level "rbac": { "roles": {...} }
-- Optional top-level "summary": { "resources": ["orders", "payments"] } — which
-  resources the owner's DAILY DIGEST (GET /api/summary, the Telegram "resumen" command)
-  reports and in what ORDER. Every name must be a declared resource. Declare it
-  when the app has many resources (an app with twenty names the four the owner
-  reads every morning); omit it and every readable resource is reported,
-  attention first.
+- Optional top-level "summary": { "resources": ["orders", "payments"],
+  "notify": "changes", "quiet_days": 7 } — "resources": which resources the
+  owner's DAILY DIGEST (GET /api/summary, the Telegram "resumen" command) reports
+  and in what ORDER (every name must be a declared resource; declare it when the
+  app has many resources; omit it and every readable resource is reported,
+  attention first). "notify": the SCHEDULED send policy — "changes" (default:
+  the morning digest goes out only when something changed since the last one)
+  or "always" (the daily report regardless). "quiet_days": after that many
+  consecutive silent mornings one short "all quiet, still alive" message goes
+  out (default 7; 0 = never). All three keys optional.
 
 NAMING: resource names AND field names match ^[a-z][a-z0-9_]*$ (lowercase, start
 with a letter, underscore for multi-word: order_items). Hyphens are NOT allowed

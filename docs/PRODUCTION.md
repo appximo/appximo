@@ -784,6 +784,44 @@ text**: the text rides as the caption (or follows as a second message when it
 exceeds Telegram's 1024-character caption) — never image-only, so a reader
 without the picture still has everything.
 
+**The digest says what CHANGED, and the morning send stays quiet when nothing
+did (VOZ-DELTA-S1, ADR-034).** Every digest is compared against yesterday's —
+the engine keeps ONE snapshot per tenant/role/day in `public.summary_snapshots`
+(the previous day's row is the baseline; older rows are pruned; there is no
+history) — and words the change: `16 facturas esperan acción (+3 desde ayer ·
+3 llegaron hoy)`, `igual que ayer` (folded into one line, small), `nuevo desde
+ayer`, `Nada que atender — ayer esperaban 26`. The traffic light answers "is
+there NEWS?": red = something waits AND it is new (grew, or arrived today);
+amber = the same stock as yesterday, nothing new; green = nothing waits. The
+first digest ever says `primer resumen, sin comparación todavía` — never an
+invented `+16`.
+
+**The scheduled send speaks only when it matters.** The cron workflow's
+consumer asks the engine for the SCHEDULED evaluation (`?mode=scheduled`);
+the engine applies the policy the schema declares and records the decision:
+
+```json
+"summary": { "resources": ["ordenes", "pagos", "facturas"], "notify": "changes", "quiet_days": 7 }
+```
+
+- `notify: "changes"` (default) — the morning digest goes out only when
+  something changed since the last one: an attention count, its states, rows
+  that arrived today, or the light going up or landing on green. Plain
+  motion (`9 nuevos`) is not a change; a light that goes from red to amber
+  because the novelty aged is not a change either. `"always"` — the daily
+  report regardless, for the owner who wants the morning paper.
+- `quiet_days: 7` (default; `0` = never) — the heartbeat: after seven silent
+  mornings one short message goes out (`🔕 7 días sin novedad. Sigo acá — todo
+  igual que la última vez.`) and the count restarts. **A quiet channel must
+  be distinguishable from a dead one**, and there are three ways to tell:
+  the heartbeat; the `estado` command, which ends with the last scheduled
+  evaluation (`⏰ Último parte automático: 2026-09-18 07:00 — callado a
+  propósito, 3 días sin novedad.` / `— enviado (changes)` / `nunca corrió
+  todavía`); and the workflow observability (§8b — `GET /admin/workflows`,
+  `appximo_workflow_overdue_seconds` climbing when no worker fires).
+- The manual `resumen` ALWAYS answers, changed or not. Silence belongs to
+  the automatic send only.
+
 **Choosing what enters — `summary.resources`.** A wide schema declares which
 resources the digest reports and in what order:
 
@@ -860,8 +898,18 @@ shape, pure schema on the workflow side:
 Run `appximo-worker` in `auto` mode with the same Telegram env plus
 `APPXIMO_TELEGRAM_SUMMARY_ROLE` (and optionally
 `APPXIMO_TELEGRAM_SUMMARY_TOPIC`, default `summary.telegram`): it fetches
-`GET /api/summary` as that role and sends it as **picture + text** (an engine
-that predates the image door still gets the text). At-least-once ⇒ a rare
+`GET /api/summary?mode=scheduled` as that role and sends it as **picture +
+text** when the engine says `should_send` (an engine that predates the image
+door still gets the text; one that predates the decision is treated as
+"always"). **The workflow must be in the tenant's DEPLOYED schema** (the
+worker reads `public.tenants.json_schema`, not the boot file): deploy it with
+`appximo migrate --tenant <id> --schema <file>` or the admin `PUT`. **On a box
+deployed with `deploy-app.sh`, pass `--worker-binary=/path/to/appximo-worker`**:
+it installs the worker beside the engine, writes `<app>-worker.service` (the
+same unit `install.sh` writes) when the box has none, adds the worker's env
+keys when missing, enables it and verifies it is ACTIVE — `fleet-audit.sh`
+then reports ✓. The 58's apps had no worker for weeks for exactly this reason:
+they predate the installer's worker and the deploy path carried none. At-least-once ⇒ a rare
 double morning summary on a retry is accepted (harmless for a read-only
 digest); a transient engine/Telegram failure keeps the row pending and it
 delivers on recovery (provoked: Telegram unreachable → `pending`, attempts
@@ -1190,6 +1238,17 @@ topics (a `factura.emitir`, a `jobs.render`) need an app consumer — a
    detail), next run, 24h counters. On `/metrics`: `appximo_outbox_*` and
    `appximo_workflow_*` (a growing `appximo_workflow_overdue_seconds` means the
    worker — or its scheduler — is not running).
+
+**A `discarded` row** (VOZ-DELTA-S1) is a third terminal state: the consumer
+DECIDED the event can never be delivered — a malformed payload, an event whose
+subject no longer exists (an invoice job for an order a demo reset removed), a
+topic the consumer registers with `Router.Discard` — and parked it with the
+reason in `last_error` (`worker.Discard(reason)`). It is never `sent` (that
+would be a success face on work that never happened) and never retried.
+Counted apart — `discarded` in `GET /admin/outbox`, `appximo_outbox_discarded`
+on `/metrics` — and it never alerts: it is a record, not an incident. Export
+the rows first if you want an acta (`COPY (SELECT … FROM public.outbox WHERE
+state='discarded') TO STDOUT WITH CSV HEADER`).
 
 **Recovering a `failed` row** (retries exhausted; the error is in
 `last_error`): fix the cause, then re-arm it —

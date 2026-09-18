@@ -792,3 +792,7 @@ func normalizeDBValue(v any) any {
 	}
 	return v
 }
+
+// Pool exposes the underlying pool for control-plane (public schema) reads and
+// writes that need no tenant search_path — e.g. the digest's snapshot table.
+func (tdb *TenantDB) Pool() *pgxpool.Pool { return tdb.pool }

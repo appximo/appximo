@@ -58,7 +58,7 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 	// typo ("resource" for "resources") is rejected, never a digest that
 	// silently reports everything while the author believes it is filtered.
 	if sum := object("summary", top["summary"]); sum != nil {
-		addUnknown("summary", sum, "resources")
+		addUnknown("summary", sum, "resources", "notify", "quiet_days")
 	}
 
 	for resName, rawRes := range object("resources", top["resources"]) {

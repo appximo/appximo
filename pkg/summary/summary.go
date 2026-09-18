@@ -159,6 +159,38 @@ type Facts struct {
 	// Total carries the census view's row count (the `estado` command).
 	Total    int64
 	HasTotal bool
+	// The delta (VOZ-DELTA-S1, ADR-034): HasPrev = a baseline snapshot exists;
+	// Prev = that day's attention by state (empty map = the resource had no
+	// attention then); PrevTotal its total. NewToday = attention rows CREATED
+	// today (the "3 llegaron hoy" that weigh differently from 16 that have
+	// been waiting for months); HasNewToday = the resource could measure it.
+	HasPrev     bool
+	Prev        map[string]int64
+	PrevTotal   int64
+	NewToday    int64
+	HasNewToday bool
+}
+
+// Delta is the attention change since the baseline (meaningful only with HasPrev).
+func (f Facts) Delta() int64 { return f.AttentionTotal - f.PrevTotal }
+
+// novel reports whether this resource carries NEWS in its attention: it grew
+// since the baseline, or rows arrived today. Without a baseline, only rows
+// created today count as novelty.
+func (f Facts) novel() bool {
+	if f.AttentionTotal == 0 {
+		return false
+	}
+	if f.HasNewToday && f.NewToday > 0 {
+		return true
+	}
+	return f.HasPrev && f.Delta() > 0
+}
+
+// stale reports "the same as yesterday and nothing moved": the rows the
+// picture folds into one small line instead of repeating the same red.
+func (f Facts) stale() bool {
+	return f.HasPrev && f.AttentionTotal > 0 && f.Delta() == 0 && !(f.HasNewToday && f.NewToday > 0) && !f.hasMotion()
 }
 
 // hasMotion reports whether anything happened to this resource TODAY.
@@ -224,12 +256,28 @@ func Order(cfg *schema.SummaryConfig, facts []Facts) []Facts {
 	return out
 }
 
-// Level is the digest's traffic light.
+// Level is the digest's traffic light. Since VOZ-DELTA-S1 it answers "is
+// there NEWS to attend?", not "is there stock?": the same red every morning
+// is what kills the habit.
 const (
-	LevelRed   = "red"   // something DECLARED as waiting has rows
-	LevelAmber = "amber" // only INFERRED waiting rows (created, not moved)
+	LevelRed   = "red"   // declared attention with NOVELTY (grew since yesterday, or rows arrived today) — or, with no baseline yet, any declared attention
+	LevelAmber = "amber" // attention exists but nothing new (the old stock), or only inferred attention
 	LevelGreen = "green" // nothing to attend
 )
+
+// Policy is the schema's `summary` send policy (schema.SummaryConfig, with
+// defaults applied): Notify "changes" (default) sends the scheduled digest only
+// when something changed; "always" sends the daily report regardless.
+// QuietDays (default 7; 0 = never) is the heartbeat: after that many
+// consecutive silent scheduled runs one short message goes out so a quiet
+// channel is distinguishable from a dead one.
+type Policy struct {
+	Notify    string
+	QuietDays int
+}
+
+// DefaultPolicy is what an undeclared block means.
+var DefaultPolicy = Policy{Notify: "changes", QuietDays: 7}
 
 // Report is the whole digest.
 type Report struct {
@@ -246,37 +294,70 @@ type Report struct {
 	Headline       string `json:"headline"`
 	AttentionTotal int64  `json:"attention_total"`
 	Census         bool   `json:"-"`
+	// The delta (VOZ-DELTA-S1): Baseline is the day compared against ("" on the
+	// first digest ever); Changed says whether anything WORTH A MESSAGE changed
+	// since it (level, any attention count, rows that arrived today); the
+	// reasons are plain words for the log.
+	Baseline      string   `json:"baseline,omitempty"`
+	Changed       bool     `json:"changed"`
+	ChangeReasons []string `json:"change_reasons,omitempty"`
+	// The scheduled decision (only when computed with ?mode=scheduled):
+	// ShouldSend + SendReason ("always" | "changes" | "heartbeat" | "silent"),
+	// SilentStreak = consecutive silent scheduled runs after this one.
+	ShouldSend   bool   `json:"should_send"`
+	SendReason   string `json:"send_reason,omitempty"`
+	SilentStreak int    `json:"silent_streak"`
+	// LastScheduled is a one-line account of the last scheduled evaluation
+	// (the census view prints it so a quiet channel proves it is alive).
+	LastScheduled string `json:"last_scheduled,omitempty"`
 }
 
-// Compose fills Text (Spanish, phone-first Telegram HTML), Level, Headline and
-// HasMotion from ORDERED facts. Empty-with-dignity: a day with nothing to say
-// is "Sin movimiento hoy", never a wall of zeros. Only resources with
-// something to report get a block; resources with only flow counts are folded
-// into one closing line so a wide app stays readable.
-func Compose(appName, tenant, day string, facts []Facts) Report {
+// Compose fills Text (Spanish, phone-first Telegram HTML), Level, Headline,
+// Changed and HasMotion from ORDERED facts, compared against base (nil = the
+// first digest ever, said with dignity — never an invented zero). Empty-with-
+// dignity: a day with nothing to say is "Sin movimiento hoy", never a wall of
+// zeros. Resources that are exactly as yesterday and did not move are folded
+// into one closing line — the picture and the text stop repeating the same
+// red every morning.
+func Compose(appName, tenant, day string, facts []Facts, base *Snapshot) Report {
 	r := Report{AppName: appName, Tenant: tenant, Day: day, Facts: facts}
+	if base != nil {
+		r.Baseline = base.Day
+	}
 
 	app := esc(appName)
 	if app == "" {
 		app = "tu app"
 	}
 
-	var declared, inferred int64
+	var declared, inferred, prevTotal, newToday int64
+	var declaredNovel, inferredNovel bool
 	for _, f := range facts {
 		if f.AttentionInferred {
 			inferred += f.AttentionTotal
+			inferredNovel = inferredNovel || f.novel()
 		} else {
 			declared += f.AttentionTotal
+			declaredNovel = declaredNovel || f.novel()
+		}
+		if f.HasPrev {
+			prevTotal += f.PrevTotal
+		}
+		if f.HasNewToday {
+			newToday += f.NewToday
 		}
 	}
 	r.AttentionTotal = declared + inferred
+	total := declared + inferred
+	delta := total - prevTotal
+
 	switch {
-	case declared > 0:
+	case declared > 0 && (base == nil || declaredNovel):
 		r.Level = LevelRed
 		r.Headline = fmt.Sprintf("%d %s acción", declared, esperan(declared))
-		if inferred > 0 {
-			r.Headline += fmt.Sprintf(" · %d sin avanzar", inferred)
-		}
+	case declared > 0:
+		r.Level = LevelAmber
+		r.Headline = fmt.Sprintf("%d %s acción", declared, esperan(declared))
 	case inferred > 0:
 		r.Level = LevelAmber
 		r.Headline = fmt.Sprintf("%d sin avanzar (recién %s, nadie %s movió)", inferred, creados(inferred), losLo(inferred))
@@ -284,17 +365,63 @@ func Compose(appName, tenant, day string, facts []Facts) Report {
 		r.Level = LevelGreen
 		r.Headline = "Nada que atender"
 	}
+	// The comparison, in the headline — the part that makes it worth opening.
+	switch {
+	case base == nil && total > 0:
+		r.Headline += " · primer resumen, sin comparación todavía"
+	case base != nil && total == 0 && prevTotal > 0:
+		r.Headline += fmt.Sprintf(" — ayer %s %d", esperabanN(prevTotal), prevTotal)
+	case base != nil && total > 0:
+		r.Headline += " · " + deltaWords(delta)
+		if newToday > 0 {
+			r.Headline += fmt.Sprintf(" · %d %s hoy", newToday, llegaron(newToday))
+		}
+	}
+
+	// Changed: what deserves a message (the silence rule, ADR-034).
+	if base == nil {
+		r.Changed = true
+		r.ChangeReasons = []string{"primer resumen"}
+	} else {
+		// A traffic-light change is news when it goes UP (more to attend) or
+		// lands on GREEN (good news). red → amber is not: it only means the
+		// novelty aged — the same stock, one day older — and reporting it
+		// would be the "same red every morning" wearing a different colour.
+		if r.Level != base.Level && (levelRank(r.Level) > levelRank(base.Level) || r.Level == LevelGreen) {
+			r.ChangeReasons = append(r.ChangeReasons, "semáforo "+base.Level+" → "+r.Level)
+		}
+		for _, f := range facts {
+			if !f.HasState {
+				continue
+			}
+			switch {
+			case f.HasPrev && f.Delta() != 0:
+				r.ChangeReasons = append(r.ChangeReasons, fmt.Sprintf("%s %s", f.Resource, deltaWords(f.Delta())))
+			case f.HasPrev && f.AttentionTotal > 0 && !sameStates(f.Attention, f.Prev):
+				r.ChangeReasons = append(r.ChangeReasons, f.Resource+" cambió de estado")
+			case f.HasNewToday && f.NewToday > 0:
+				r.ChangeReasons = append(r.ChangeReasons, fmt.Sprintf("%s: %d %s hoy", f.Resource, f.NewToday, llegaron(f.NewToday)))
+			}
+		}
+		r.Changed = len(r.ChangeReasons) > 0
+	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "📋 <b>Resumen de %s</b> · %s\n", app, esc(day))
 	fmt.Fprintf(&b, "%s <b>%s</b>\n", levelDot(r.Level), esc(r.Headline))
 
 	blocks := 0
-	var folded []string
+	var folded, stale []string
 	for _, f := range facts {
+		if f.stale() {
+			stale = append(stale, fmt.Sprintf("%s (%s)", esc(f.Resource), stateDetail(f.Attention)))
+			continue
+		}
 		var parts []string
 		if f.AttentionTotal > 0 {
-			parts = append(parts, attentionPhrase(f))
+			parts = append(parts, attentionPhrase(f, base != nil))
+		} else if f.HasPrev && f.PrevTotal > 0 {
+			parts = append(parts, fmt.Sprintf("✅ ya no espera nada (ayer %s %d)", esperabanN(f.PrevTotal), f.PrevTotal))
 		}
 		var motion []string
 		if f.HasCreated && f.CreatedToday > 0 {
@@ -319,10 +446,14 @@ func Compose(appName, tenant, day string, facts []Facts) Report {
 		blocks++
 	}
 
-	if blocks == 0 {
+	if blocks == 0 && len(stale) == 0 {
 		b.WriteString("\nSin movimiento hoy.\n")
-	} else {
+	}
+	if blocks > 0 || len(stale) > 0 {
 		r.HasMotion = true
+	}
+	if len(stale) > 0 {
+		b.WriteString("\n⏸ Igual que ayer: " + strings.Join(stale, " · ") + "\n")
 	}
 	if len(folded) > 0 {
 		b.WriteString("\n▫️ Sin novedad hoy: " + strings.Join(folded, " · ") + "\n")
@@ -331,15 +462,128 @@ func Compose(appName, tenant, day string, facts []Facts) Report {
 	return r
 }
 
-// attentionPhrase renders the attention line in the schema's own words:
-// declared → "⏳ 3 esperan acción (pagada: 2, preparando: 1)";
-// inferred → "🕐 2 sin avanzar (creada: 2)".
-func attentionPhrase(f Facts) string {
-	detail := stateDetail(f.Attention)
-	if f.AttentionInferred {
-		return fmt.Sprintf("🕐 %d sin avanzar (%s)", f.AttentionTotal, detail)
+// Decide applies the send policy to a scheduled run: always → send; changes →
+// send iff Changed; otherwise stay silent, except the heartbeat after
+// QuietDays consecutive silent runs (prevStreak is the baseline's streak).
+// The heartbeat line is appended to Text so the reader knows the silence was
+// a choice, not a crash.
+func Decide(r *Report, p Policy, prevStreak int) {
+	if p.Notify == "" {
+		p.Notify = DefaultPolicy.Notify
 	}
-	return fmt.Sprintf("⏳ %d %s acción (%s)", f.AttentionTotal, esperan(f.AttentionTotal), detail)
+	switch {
+	case p.Notify == "always":
+		r.ShouldSend, r.SendReason, r.SilentStreak = true, "always", 0
+	case r.Changed:
+		r.ShouldSend, r.SendReason, r.SilentStreak = true, "changes", 0
+	default:
+		r.SilentStreak = prevStreak + 1
+		if p.QuietDays > 0 && r.SilentStreak >= p.QuietDays {
+			r.ShouldSend, r.SendReason = true, "heartbeat"
+			r.Text += fmt.Sprintf("\n\n🔕 %d %s sin novedad. Sigo acá — todo igual que la última vez.", r.SilentStreak, dias(r.SilentStreak))
+			r.SilentStreak = 0
+		} else {
+			r.ShouldSend, r.SendReason = false, "silent"
+		}
+	}
+}
+
+// ScheduledLine words the last scheduled evaluation for the census view.
+func ScheduledLine(s *Snapshot) string {
+	if s == nil || s.ScheduledAt == nil {
+		return "⏰ Parte automático: nunca corrió todavía (¿corre el worker? ¿está el workflow?)."
+	}
+	when := s.ScheduledAt.Format("2006-01-02 15:04")
+	switch {
+	case strings.HasPrefix(s.Decision, "sent"):
+		return fmt.Sprintf("⏰ Último parte automático: %s — enviado (%s).", when, strings.TrimPrefix(s.Decision, "sent:"))
+	case s.SilentStreak > 0:
+		return fmt.Sprintf("⏰ Último parte automático: %s — callado a propósito, %d %s sin novedad.", when, s.SilentStreak, dias(s.SilentStreak))
+	default:
+		return fmt.Sprintf("⏰ Último parte automático: %s — callado, nada cambió.", when)
+	}
+}
+
+func levelRank(l string) int {
+	switch l {
+	case LevelRed:
+		return 2
+	case LevelAmber:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func sameStates(a, b map[string]int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func deltaWords(d int64) string {
+	switch {
+	case d > 0:
+		return fmt.Sprintf("+%d desde ayer", d)
+	case d < 0:
+		return fmt.Sprintf("−%d desde ayer", -d)
+	default:
+		return "igual que ayer"
+	}
+}
+
+func llegaron(n int64) string {
+	if n == 1 {
+		return "llegó"
+	}
+	return "llegaron"
+}
+
+func esperabanN(n int64) string {
+	if n == 1 {
+		return "esperaba"
+	}
+	return "esperaban"
+}
+
+func dias(n int) string {
+	if n == 1 {
+		return "día"
+	}
+	return "días"
+}
+
+// attentionPhrase renders the attention line in the schema's own words, with
+// the delta when a baseline exists:
+// declared → "⏳ 16 esperan acción (+3 desde ayer · 3 llegaron hoy) (pendiente: 16)";
+// inferred → "🕐 2 sin avanzar (igual que ayer) (creada: 2)".
+func attentionPhrase(f Facts, compared bool) string {
+	detail := stateDetail(f.Attention)
+	var cmp []string
+	if compared {
+		if f.HasPrev && f.PrevTotal == 0 && len(f.Prev) == 0 {
+			cmp = append(cmp, "nuevo desde ayer")
+		} else if f.HasPrev {
+			cmp = append(cmp, deltaWords(f.Delta()))
+		}
+	}
+	if f.HasNewToday && f.NewToday > 0 {
+		cmp = append(cmp, fmt.Sprintf("%d %s hoy", f.NewToday, llegaron(f.NewToday)))
+	}
+	suffix := ""
+	if len(cmp) > 0 {
+		suffix = " (" + strings.Join(cmp, " · ") + ")"
+	}
+	if f.AttentionInferred {
+		return fmt.Sprintf("🕐 %d sin avanzar%s (%s)", f.AttentionTotal, suffix, detail)
+	}
+	return fmt.Sprintf("⏳ %d %s acción%s (%s)", f.AttentionTotal, esperan(f.AttentionTotal), suffix, detail)
 }
 
 func flowDetail(f Facts) string { return stateDetail(f.Flow) }
@@ -373,8 +617,8 @@ func stateDetail(m map[string]int64) string {
 // ComposeCensus renders the `estado` view: how big the business is right now
 // (total rows per resource the role may read) — an owner census, not system
 // metrics. Facts must be ORDERED; only facts with HasTotal are listed.
-func ComposeCensus(appName, tenant string, facts []Facts) Report {
-	rep := Report{AppName: appName, Tenant: tenant, Facts: facts, Census: true, Level: LevelGreen}
+func ComposeCensus(appName, tenant string, facts []Facts, last *Snapshot) Report {
+	rep := Report{AppName: appName, Tenant: tenant, Facts: facts, Census: true, Level: LevelGreen, LastScheduled: ScheduledLine(last)}
 	app := esc(appName)
 	if app == "" {
 		app = "tu app"
@@ -390,12 +634,13 @@ func ComposeCensus(appName, tenant string, facts []Facts) Report {
 		fmt.Fprintf(&b, "• <b>%s</b>: %d\n", esc(f.Resource), f.Total)
 	}
 	if !any {
-		rep.Text = "📊 <b>Estado de " + app + "</b>\n\nNo hay datos todavía."
+		rep.Text = "📊 <b>Estado de " + app + "</b>\n\nNo hay datos todavía.\n\n" + rep.LastScheduled
 		rep.Headline = "No hay datos todavía"
 		return rep
 	}
 	rep.HasMotion = true
 	rep.Headline = "Cuántos hay de cada cosa"
+	b.WriteString("\n" + rep.LastScheduled + "\n")
 	rep.Text = strings.TrimRight(b.String(), "\n")
 	return rep
 }

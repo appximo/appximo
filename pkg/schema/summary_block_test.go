@@ -39,6 +39,12 @@ func TestSummaryBlock_Validation(t *testing.T) {
 		{"duplicate", `, "summary": { "resources": ["ordenes", "ordenes"] }`, "summary_duplicate_resource"},
 		{"empty list is dead config", `, "summary": { "resources": [] }`, "summary_resources_empty"},
 		{"empty name", `, "summary": { "resources": [""] }`, "summary_resource_empty"},
+		// VOZ-DELTA-S1: the send policy
+		{"policy only, no resources", `, "summary": { "notify": "always" }`, ""},
+		{"notify changes + quiet_days", `, "summary": { "resources": ["ordenes"], "notify": "changes", "quiet_days": 3 }`, ""},
+		{"quiet_days zero = never", `, "summary": { "quiet_days": 0 }`, ""},
+		{"bad notify", `, "summary": { "notify": "daily" }`, "summary_notify_invalid"},
+		{"negative quiet_days", `, "summary": { "quiet_days": -1 }`, "summary_quiet_days_negative"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -61,6 +67,11 @@ func TestSummaryBlock_StrictKeys(t *testing.T) {
 	errs := CheckUnknownKeys([]byte(raw))
 	if len(errs) == 0 || !strings.Contains(errs[0].Message, "resources") {
 		t.Fatalf("a typo'd summary key must be rejected listing the valid keys, got %v", errs)
+	}
+	raw = summarySchemaJSON(`, "summary": { "notify": "changes", "quietdays": 2 }`, "")
+	errs = CheckUnknownKeys([]byte(raw))
+	if len(errs) == 0 || !strings.Contains(errs[0].Message, "quiet_days") {
+		t.Fatalf("a typo'd quiet_days key must be rejected listing the valid keys, got %v", errs)
 	}
 	raw = summarySchemaJSON(``, `, "pendin": ["creada"]`)
 	errs = CheckUnknownKeys([]byte(raw))

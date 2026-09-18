@@ -51,7 +51,12 @@ func (p *SummaryProcessor) Topics() worker.TopicSet {
 
 // Process computes the digest for the event's tenant and sends it.
 func (p *SummaryProcessor) Process(ctx context.Context, row worker.Row) error {
-	status, body, err := p.client.Do(ctx, row.TenantID, http.MethodGet, "/api/summary", nil)
+	// ?mode=scheduled (VOZ-DELTA-S1): the engine compares against yesterday,
+	// applies the schema's send policy and records the decision. This consumer
+	// OBEYS should_send: a silent morning is acked as processed (the outbox row
+	// is done — the decision is on record in the digest's snapshot and visible
+	// through the `estado` command), never retried into noise.
+	status, body, err := p.client.Do(ctx, row.TenantID, http.MethodGet, "/api/summary?mode=scheduled", nil)
 	if err != nil {
 		return fmt.Errorf("summary: fetch digest for tenant %s: %w", row.TenantID, err) // transient → retry
 	}
@@ -59,11 +64,23 @@ func (p *SummaryProcessor) Process(ctx context.Context, row worker.Row) error {
 		return fmt.Errorf("summary: engine answered %d fetching the digest for tenant %s (retrying)", status, row.TenantID)
 	}
 	var rep struct {
-		Text string `json:"text"`
+		Text       string   `json:"text"`
+		ShouldSend *bool    `json:"should_send"`
+		SendReason string   `json:"send_reason"`
+		Reasons    []string `json:"change_reasons"`
+		Level      string   `json:"level"`
 	}
 	if jerr := json.Unmarshal(body, &rep); jerr != nil || rep.Text == "" {
 		return fmt.Errorf("summary: empty or unparseable digest for tenant %s", row.TenantID)
 	}
+	// An engine that predates the policy (no should_send in the JSON) is
+	// treated as "always" — the historical behavior, never a silent drop.
+	if rep.ShouldSend != nil && !*rep.ShouldSend {
+		p.log.Info().Str("tenant", row.TenantID).Str("topic", p.topic).Str("level", rep.Level).Str("reason", rep.SendReason).
+			Msg("summary: scheduled digest evaluated — nothing changed since the last one, staying SILENT by policy (summary.notify=changes)")
+		return nil
+	}
+	p.log.Info().Str("tenant", row.TenantID).Str("reason", rep.SendReason).Strs("changes", rep.Reasons).Msg("summary: scheduled digest will be sent")
 
 	// The IMAGE (VOZ-VISUAL-S1): same endpoint, ?format=png, rendered by the
 	// engine from the same counts. Any failure here degrades to text-only —

@@ -25,6 +25,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -76,6 +77,21 @@ type Row struct {
 type Processor interface {
 	Process(ctx context.Context, row Row) error
 }
+
+// DiscardError is the THIRD outcome a Processor can return (VOZ-DELTA-S1):
+// "this event can never be delivered and that is a DECISION, not a failure".
+// The row is parked state='discarded' with the reason in last_error — never
+// 'sent' (that would be a success face on work that never happened, the echo
+// trap through another door) and never 'failed' (nothing failed; retrying
+// would be pointless). A malformed payload, an event whose subject no longer
+// exists, a topic a Router registered with Discard — all are discards.
+// GET /admin/outbox counts them; they do not alert.
+type DiscardError struct{ Reason string }
+
+func (e *DiscardError) Error() string { return "discarded: " + e.Reason }
+
+// Discard builds the discard outcome with its reason (the record).
+func Discard(reason string) error { return &DiscardError{Reason: reason} }
 
 // ProcessorFunc adapts a plain function to the Processor interface.
 type ProcessorFunc func(ctx context.Context, row Row) error
@@ -171,10 +187,11 @@ type TopicOwner interface {
 type DrainResult struct {
 	Processed int // rows marked 'sent' this batch
 	Failed    int // rows that errored this batch (incl. those parked 'failed')
+	Discarded int // rows parked 'discarded' by the processor's decision (VOZ-DELTA-S1)
 }
 
-// Claimed is the number of rows locked this batch (Processed + Failed).
-func (r DrainResult) Claimed() int { return r.Processed + r.Failed }
+// Claimed is the number of rows locked this batch (Processed + Failed + Discarded).
+func (r DrainResult) Claimed() int { return r.Processed + r.Failed + r.Discarded }
 
 // Drain claims up to batchSize pending rows with FOR UPDATE SKIP LOCKED, runs each
 // through proc, and records the outcome — all inside ONE transaction. A processing
@@ -270,6 +287,21 @@ func Drain(ctx context.Context, db Beginner, proc Processor, batchSize, maxAttem
 		// SAVEPOINT (or be handed the tx) so a failure can roll back JUST that row
 		// without poisoning the batch — that is the documented extension point.
 		if perr := proc.Process(ctx, r); perr != nil {
+			var disc *DiscardError
+			if errors.As(perr, &disc) {
+				// A decided outcome: parked with its reason, never retried, never
+				// counted as delivered.
+				if _, err := tx.Exec(ctx,
+					`UPDATE public.outbox SET attempts = attempts + 1, state = 'discarded', last_error = $2 WHERE id = $1`,
+					r.ID, truncateErr(disc),
+				); err != nil {
+					return res, fmt.Errorf("worker: record discard id=%d: %w", r.ID, err)
+				}
+				res.Discarded++
+				log.Info().Int64("id", r.ID).Str("tenant_id", r.TenantID).Str("topic", r.Topic).Str("reason", disc.Reason).
+					Msg("worker: outbox row DISCARDED by the processor's decision (state='discarded', reason in last_error)")
+				continue
+			}
 			// Failure: keep the row pending for retry (sent_at stays NULL); park it
 			// in 'failed' once attempts reaches the cap so it is never retried again.
 			state := "pending"

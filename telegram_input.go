@@ -252,6 +252,7 @@ func (rcv *telegramReceiver) selfCall(ctx context.Context, path string) *httptes
 	req := httptest.NewRequest(http.MethodGet, "http://placeholder"+path, nil).WithContext(rctx)
 	req.Host = rcv.tenant + rcv.hostSuffix
 	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Cache-Control", "no-cache") // the digest is never served stale to the owner
 	h.ServeHTTP(rec, req)
 	return rec
 }

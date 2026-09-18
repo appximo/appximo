@@ -250,3 +250,19 @@ describe('summary block round-trip', () => {
 		expect('summary' in roundTrip(s)).toBe(false);
 	});
 });
+
+// VOZ-DELTA-S1: the send policy keys ride along with the resources.
+describe('summary policy round-trip', () => {
+	it('preserves notify and quiet_days, with or without resources', () => {
+		const s: APISchema = {
+			$schema: 'https://appximo.com/schema/v1',
+			version: '1',
+			name: 'x',
+			resources: { a: { fields: { b: { type: 'string' } } } },
+			summary: { notify: 'always', quiet_days: 3 }
+		};
+		expect(roundTrip(s).summary).toEqual({ notify: 'always', quiet_days: 3 });
+		const s2: APISchema = { ...s, summary: { resources: ['a'], notify: 'changes', quiet_days: 0 } };
+		expect(roundTrip(s2).summary).toEqual({ resources: ['a'], notify: 'changes', quiet_days: 0 });
+	});
+});

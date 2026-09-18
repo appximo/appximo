@@ -29,7 +29,8 @@ import type {
 	RBACPolicy,
 	ResourcePermission,
 	RolePolicy,
-	StateMachine
+	StateMachine,
+	SummaryBlock
 } from '../types/schema';
 import { IDENT_RE, RBAC_ACTIONS, HOOK_EVENTS, PUBLIC_ROLE_NAME } from '../types/schema';
 import type {
@@ -114,7 +115,7 @@ class EditorStore {
 	schemaUrl = $state('https://appximo.com/schema/v1');
 	rbac = $state<RBACPolicy>({ roles: {} });
 	workflows = $state<Record<string, unknown> | undefined>(undefined);
-	summary = $state<{ resources: string[] } | undefined>(undefined);
+	summary = $state<SummaryBlock | undefined>(undefined);
 
 	// ── canvas (raw) ─────────────────────────────────────────────────────────
 	nodes = $state.raw<FlowNode[]>([]);
@@ -224,7 +225,7 @@ class EditorStore {
 			entities: $state.snapshot(this.entities) as EntityModel[],
 			rbac: $state.snapshot(this.rbac) as RBACPolicy,
 			workflows: this.workflows ? ($state.snapshot(this.workflows) as Record<string, unknown>) : undefined,
-			summary: this.summary ? ($state.snapshot(this.summary) as { resources: string[] }) : undefined
+			summary: this.summary ? ($state.snapshot(this.summary) as SummaryBlock) : undefined
 		});
 	}
 

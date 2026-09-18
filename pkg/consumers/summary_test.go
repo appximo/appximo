@@ -155,3 +155,49 @@ func TestSummaryProcessor_EngineWithoutImageSendsText(t *testing.T) {
 		t.Fatalf("older engine → text only; photos=%v messages=%v", tg.photos, tg.messages)
 	}
 }
+
+// VOZ-DELTA-S1: the consumer asks for the SCHEDULED evaluation and obeys it —
+// a morning with nothing new is acknowledged in silence (nil error, nothing
+// sent); an engine that predates the decision field is treated as "always".
+func TestSummaryProcessor_ObeysSilence(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		json     string
+		wantSend bool
+	}{
+		{"silent by policy", `{"text":"📋 <b>Resumen</b>\n🟡 igual","should_send":false,"send_reason":"silent"}`, false},
+		{"changes → send", `{"text":"📋 <b>Resumen</b>\n🔴 +3","should_send":true,"send_reason":"changes"}`, true},
+		{"old engine without the field → send", `{"text":"📋 <b>Resumen</b>"}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sawMode bool
+			engSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("mode") == "scheduled" {
+					sawMode = true
+				}
+				if r.URL.Query().Get("format") == "png" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				w.Write([]byte(tc.json)) //nolint:errcheck
+			}))
+			defer engSrv.Close()
+			tg := &fakeTGAPI{}
+			tgSrv := tg.server(t)
+			client := worker.NewEngineClient(engSrv.URL, "localhost", "a-test-secret-of-at-least-32-characters!!", "dueno", 0)
+			tgc, _ := telegram.New("123456:AAExampleExampleExampleExample01", "8851136988")
+			tgc.SetHTTPClient(tgSrv.Client())
+			tgc.SetAPIBase(tgSrv.URL)
+			p := NewSummaryProcessor(client, tgc, "summary.telegram", zerolog.Nop())
+			if err := p.Process(context.Background(), worker.Row{TenantID: "t"}); err != nil {
+				t.Fatal(err)
+			}
+			if !sawMode {
+				t.Error("the scheduled consumer must ask for ?mode=scheduled")
+			}
+			if got := len(tg.messages) > 0; got != tc.wantSend {
+				t.Errorf("sent=%v want %v (messages=%v)", got, tc.wantSend, tg.messages)
+			}
+		})
+	}
+}

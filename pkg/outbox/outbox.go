@@ -48,6 +48,10 @@ CREATE INDEX IF NOT EXISTS idx_outbox_failed
     ON public.outbox (created_at) WHERE state = 'failed';
 CREATE INDEX IF NOT EXISTS idx_outbox_sent_at
     ON public.outbox (sent_at) WHERE state = 'sent';
+-- VOZ-DELTA-S1: a processor may DISCARD a row (a decision with its reason in
+-- last_error) — a third terminal state beside sent/failed, counted apart.
+CREATE INDEX IF NOT EXISTS idx_outbox_discarded
+    ON public.outbox (created_at) WHERE state = 'discarded';
 `)
 	if err != nil {
 		return fmt.Errorf("outbox: ensure table: %w", err)

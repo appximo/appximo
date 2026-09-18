@@ -13,6 +13,7 @@ type Collector struct {
 
 	pending      *prometheus.Desc
 	failed       *prometheus.Desc
+	discarded    *prometheus.Desc
 	sentLastHour *prometheus.Desc
 	oldestPend   *prometheus.Desc
 	oldestFail   *prometheus.Desc
@@ -30,6 +31,8 @@ func NewCollector(obs *Observer) *Collector {
 			"Outbox rows in state='pending' (enqueued, not yet delivered)", nil, nil),
 		failed: prometheus.NewDesc("appximo_outbox_failed",
 			"Outbox rows parked in state='failed' (retries exhausted; each carries last_error)", nil, nil),
+		discarded: prometheus.NewDesc("appximo_outbox_discarded",
+			"Outbox rows parked in state='discarded' by a processor's decision (reason in last_error; never delivered, never retried)", nil, nil),
 		sentLastHour: prometheus.NewDesc("appximo_outbox_sent_last_hour",
 			"Outbox rows marked sent in the last hour (drain-rate proxy)", nil, nil),
 		oldestPend: prometheus.NewDesc("appximo_outbox_oldest_pending_age_seconds",
@@ -51,6 +54,7 @@ func NewCollector(obs *Observer) *Collector {
 func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.pending
 	ch <- c.failed
+	ch <- c.discarded
 	ch <- c.sentLastHour
 	ch <- c.oldestPend
 	ch <- c.oldestFail
@@ -68,6 +72,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	}
 	ch <- prometheus.MustNewConstMetric(c.pending, prometheus.GaugeValue, float64(s.Pending))
 	ch <- prometheus.MustNewConstMetric(c.failed, prometheus.GaugeValue, float64(s.Failed))
+	ch <- prometheus.MustNewConstMetric(c.discarded, prometheus.GaugeValue, float64(s.Discarded))
 	ch <- prometheus.MustNewConstMetric(c.sentLastHour, prometheus.GaugeValue, float64(s.SentLastHour))
 	ch <- prometheus.MustNewConstMetric(c.oldestPend, prometheus.GaugeValue, s.OldestPendingAge)
 	ch <- prometheus.MustNewConstMetric(c.oldestFail, prometheus.GaugeValue, s.OldestFailedAge)

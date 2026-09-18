@@ -208,7 +208,14 @@ export interface APISchema {
 	workflows?: Record<string, unknown>;
 	// VOZ-VISUAL-S1: which resources the daily digest reports, in order.
 	// Preserved verbatim on round-trip (authored in the Code view).
-	summary?: { resources: string[] };
+	summary?: SummaryBlock;
+}
+
+/** The top-level `summary` block (VOZ-VISUAL-S1 / VOZ-DELTA-S1): all keys optional. */
+export interface SummaryBlock {
+	resources?: string[];
+	notify?: 'changes' | 'always';
+	quiet_days?: number;
 }
 
 export const SCHEMA_URL = 'https://appximo.com/schema/v1';

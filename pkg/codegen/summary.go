@@ -90,6 +90,15 @@ func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, p
 		q := req.URL.Query()
 		census := q.Get("view") == "census"
 		wantPNG := q.Get("format") == "png" || strings.HasPrefix(req.Header.Get("Accept"), "image/png")
+		// ?mode=scheduled (VOZ-DELTA-S1): the morning run. The digest is
+		// compared against the baseline like any other call, but this one also
+		// APPLIES the send policy (summary.notify / quiet_days) and records its
+		// decision on today's snapshot, so the caller (the worker's consumer)
+		// only has to obey should_send — and a quiet channel stays provable.
+		scheduled := q.Get("mode") == "scheduled"
+		day := startOfDay.Format("2006-01-02")
+		role := evalCtx.Role
+		pool := tdb.Pool()
 
 		facts := make([]summary.Facts, 0, len(names))
 		for _, name := range names {
@@ -167,6 +176,22 @@ func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, p
 				if m, total, got := countStates(p.Attention); got {
 					f.HasState = true
 					f.Attention, f.AttentionTotal, f.AttentionInferred = m, total, p.AttentionInferred
+					// What ARRIVED today among the waiting rows — the news, as
+					// opposed to the stock that has waited for months.
+					if p.CreatedTsField != "" && total > 0 {
+						var newToday int64
+						gotNew := false
+						for _, st := range p.Attention {
+							params := url.Values{"count": {"true"}}
+							params.Set("filter["+p.StateField+"][eq]", st)
+							params.Set("filter["+p.CreatedTsField+"][gte]", startISO)
+							if n, ok := scopedCount(params); ok {
+								gotNew = true
+								newToday += n
+							}
+						}
+						f.NewToday, f.HasNewToday = newToday, gotNew
+					}
 				}
 				if m, total, got := countStates(p.Flow); got {
 					f.HasState = true
@@ -180,14 +205,54 @@ func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, p
 		if appName == "" {
 			appName = s.Name
 		}
-		day := startOfDay.Format("2006-01-02")
 
 		ordered := summary.Order(s.Summary, facts)
 		var rep summary.Report
 		if census {
-			rep = summary.ComposeCensus(appName, tc.ID, ordered)
+			// The census carries the last scheduled evaluation (today's row if
+			// it ran today, else the baseline's) so `estado` proves the automatic
+			// send is alive even when it chose to stay silent.
+			last, _ := summary.LoadDay(req.Context(), pool, tc.ID, role, day)
+			if last == nil || last.ScheduledAt == nil {
+				if b, _ := summary.LoadBaseline(req.Context(), pool, tc.ID, role, day); b != nil && b.ScheduledAt != nil {
+					last = b
+				}
+			}
+			rep = summary.ComposeCensus(appName, tc.ID, ordered, last)
 		} else {
-			rep = summary.Compose(appName, tc.ID, day, ordered)
+			// The delta: compare against the most recent snapshot from a previous
+			// day, then remember today (one row per day; older rows pruned).
+			base, berr := summary.LoadBaseline(req.Context(), pool, tc.ID, role, day)
+			if berr != nil {
+				// A snapshot problem must never take the digest down: no
+				// comparison is "first summary", said plainly, never a fake zero.
+				base = nil
+			}
+			summary.ApplyBaseline(ordered, base)
+			rep = summary.Compose(appName, tc.ID, day, ordered, base)
+			snap := summary.SnapshotOf(tc.ID, role, day, rep.Level, ordered)
+			baselineDay := ""
+			prevStreak := 0
+			if base != nil {
+				baselineDay, prevStreak = base.Day, base.SilentStreak
+			}
+			if scheduled {
+				summary.Decide(&rep, policyOf(s.Summary), prevStreak)
+				snap.SilentStreak = rep.SilentStreak
+				if rep.ShouldSend {
+					snap.Decision = "sent:" + rep.SendReason
+				} else {
+					snap.Decision = "silent"
+				}
+			} else if today, _ := summary.LoadDay(req.Context(), pool, tc.ID, role, day); today != nil {
+				snap.SilentStreak = today.SilentStreak
+			}
+			if berr == nil {
+				if uerr := summary.Upsert(req.Context(), pool, snap, scheduled, baselineDay); uerr != nil {
+					// Logged by the pool layer; the digest still answers.
+					_ = uerr
+				}
+			}
 		}
 		markSpan(req, "query")
 
@@ -213,6 +278,21 @@ func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, p
 		json.NewEncoder(w).Encode(rep) //nolint:errcheck
 		markSpan(req, "serialize")
 	}))
+}
+
+// policyOf maps the schema's summary block onto the send policy with defaults.
+func policyOf(cfg *schema.SummaryConfig) summary.Policy {
+	p := summary.DefaultPolicy
+	if cfg == nil {
+		return p
+	}
+	if cfg.Notify != "" {
+		p.Notify = cfg.Notify
+	}
+	if cfg.QuietDays != nil {
+		p.QuietDays = *cfg.QuietDays
+	}
+	return p
 }
 
 func toInt64(v any) int64 {

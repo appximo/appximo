@@ -54,6 +54,7 @@ import (
 	"github.com/appximo/appximo/pkg/schema"
 	"github.com/appximo/appximo/pkg/schemahistory"
 	"github.com/appximo/appximo/pkg/shutdown"
+	"github.com/appximo/appximo/pkg/summary"
 	"github.com/appximo/appximo/pkg/tenant"
 	"github.com/appximo/appximo/pkg/userauth"
 	"github.com/appximo/appximo/pkg/workflows"
@@ -338,6 +339,10 @@ func New(cfg Config) (*App, error) {
 	// lives in appximo-worker, but the engine ensures the tables (same pattern)
 	// so GET /admin/workflows and the workflow gauges work from the first boot,
 	// and a worker joining later finds them ready.
+	if err := summary.EnsureSnapshotTable(context.Background(), pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("appximo: %w", err)
+	}
 	if err := workflows.EnsureTables(context.Background(), pool); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("appximo: %w", err)

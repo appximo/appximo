@@ -118,8 +118,9 @@ export function modelToSchema(model: SchemaModel): APISchema {
 	if (model.workflows && Object.keys(model.workflows).length > 0) {
 		out.workflows = model.workflows;
 	}
-	if (model.summary && Array.isArray(model.summary.resources) && model.summary.resources.length > 0) {
-		out.summary = { resources: [...model.summary.resources] };
+	if (model.summary && Object.keys(model.summary).length > 0) {
+		out.summary = { ...model.summary };
+		if (Array.isArray(model.summary.resources)) out.summary.resources = [...model.summary.resources];
 	}
 	return out;
 }

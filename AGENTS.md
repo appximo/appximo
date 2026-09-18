@@ -561,7 +561,13 @@ One line per layer — navigate the code for the rest:
   names it once a minute, and the engine's age alert screams. NOTHING marks a
   topic sent because no handler exists (the old echo default did exactly that —
   it would have destroyed 34 real factura.emitir rows with a success face).
-  Failures record WHY in `public.outbox.last_error`. The worker's env is strict
+  Failures record WHY in `public.outbox.last_error`. **A processor can also
+  DISCARD** (VOZ-DELTA-S1): returning `worker.Discard(reason)` parks the row
+  `state='discarded'` with the reason in `last_error` — a decision, never a
+  delivery (`sent` would be a success face on work that never happened) and
+  never a retry; `Router.Discard(topic)` uses it. Counted apart
+  (`appximo_outbox_discarded`, `GET /admin/outbox`), never alerting. The
+  worker's env is strict
   (AUTO-2): an invalid value or a misspelled `APPXIMO_WORKER_*` refuses to boot
   naming every offender; unset vars are reported in one "defaults in effect"
   boot line. Run it with `DATABASE_URL=… JWT_SECRET=… go run ./cmd/appximo-worker`
@@ -2047,6 +2053,32 @@ which resources enter and in what order (load-validated; absent = every
 readable resource ranked attention-first; `?view=census` honors it too).
 It is served the same for every tenant (contract-global) and requires a token
 (tokenless → 401).
+**The delta and the silence (ADR-034, VOZ-DELTA-S1):** every digest compares
+against ONE remembered snapshot — the most recent row from a previous day in
+`public.summary_snapshots` (one row per tenant/role/day, older rows pruned;
+never a history) — and says the change: `+3 desde ayer`, `igual que ayer`,
+`nuevo desde ayer`, and separately `N llegaron hoy` (attention rows created
+today — the news, as opposed to the stock that has waited for months);
+resources exactly as yesterday are folded into one `⏸ Igual que ayer` line
+(text and picture); the first digest says `primer resumen, sin comparación
+todavía`, never an invented `+16`. The traffic light answers "is there NEWS?":
+red = declared attention with novelty (grew, or arrived today; or no
+comparison yet), amber = attention without novelty (the old stock) or
+inferred, green = nothing (`— ayer esperaban 26` when it just cleared).
+`?mode=scheduled` applies the schema's policy — `summary.notify` `changes`
+(default; `changed` = any attention count/state changed, rows arrived today,
+or the light went UP or to GREEN; red→amber is NOT a change — the novelty
+merely aged; plain motion never is) or `always`; `summary.quiet_days` (default
+7, 0 = never) = a heartbeat after N consecutive silent runs — and answers
+`should_send`/`send_reason`, recording the decision. The worker's consumer
+obeys it (a silent morning is a processed event); `estado` prints the last
+scheduled evaluation (`callado a propósito, 3 días sin novedad`) so silence is
+provable; the manual `resumen` ALWAYS answers. The worker's engine client and
+the receiver's self-call send `Cache-Control: no-cache` (a scheduled
+evaluation is a side effect; the cache honors the header, no hot-path
+change). Deploy the worker with `scripts/deploy-app.sh --worker-binary=PATH`
+(unit + env keys + active check) — the tenant's DEPLOYED schema must declare
+the `resumen_matinal` workflow (the worker reads `public.tenants.json_schema`).
 
 The engine can also RECEIVE it (`APPXIMO_TELEGRAM_SUMMARY_TENANT` +
 `_ROLE`): the alert bot answers `resumen`/`estado`/`ayuda` from the one

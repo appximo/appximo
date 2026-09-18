@@ -51,7 +51,7 @@ func decode(t *testing.T, b []byte) (w, h int) {
 }
 
 func TestRender_Deterministic(t *testing.T) {
-	r := Compose("La Tiendita", "t", "2026-09-18", Order(nil, twenty()))
+	r := Compose("La Tiendita", "t", "2026-09-18", Order(nil, twenty()), nil)
 	a, err := Render(r)
 	if err != nil {
 		t.Fatal(err)
@@ -72,8 +72,8 @@ func TestRender_Deterministic(t *testing.T) {
 // Twenty resources must fold, not stretch: the image height stays bounded
 // and does not grow linearly with the resource count.
 func TestRender_TwentyResourcesFold(t *testing.T) {
-	five := Compose("A", "t", "2026-09-18", Order(nil, twenty()[:5]))
-	big := Compose("A", "t", "2026-09-18", Order(nil, twenty()))
+	five := Compose("A", "t", "2026-09-18", Order(nil, twenty()[:5]), nil)
+	big := Compose("A", "t", "2026-09-18", Order(nil, twenty()), nil)
 	b5, _ := Render(five)
 	b20, _ := Render(big)
 	_, h5 := decode(t, b5)
@@ -81,13 +81,15 @@ func TestRender_TwentyResourcesFold(t *testing.T) {
 	if h20 > 2*h5+200 {
 		t.Fatalf("20 resources must fold: h5=%d h20=%d", h5, h20)
 	}
-	if h20 > 1700 {
+	// One phone screen at 2× is ~1 700 px; the first-digest note (a one-day
+	// artifact) adds a line, so the guard is 1 760.
+	if h20 > 1760 {
 		t.Fatalf("20 resources render taller than a phone can take in: %d px", h20)
 	}
 }
 
 func TestRender_EmptyDayAndCensus(t *testing.T) {
-	empty := Compose("Vet", "t", "2026-09-18", []Facts{{Resource: "pets", HasCreated: true}})
+	empty := Compose("Vet", "t", "2026-09-18", []Facts{{Resource: "pets", HasCreated: true}}, nil)
 	b, err := Render(empty)
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +98,7 @@ func TestRender_EmptyDayAndCensus(t *testing.T) {
 	if h < 300 || h > 900 {
 		t.Fatalf("empty day card height: %d", h)
 	}
-	census := ComposeCensus("Vet", "t", []Facts{{Resource: "pets", Total: 12, HasTotal: true}})
+	census := ComposeCensus("Vet", "t", []Facts{{Resource: "pets", Total: 12, HasTotal: true}}, nil)
 	if _, err := Render(census); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +112,7 @@ func TestRender_WriteSamples(t *testing.T) {
 		t.Skip("set SUMMARY_RENDER_OUT=<dir> to write sample PNGs")
 	}
 	cases := map[string]Report{
-		"twenty": Compose("VecinGo", "vecingo", "2026-09-18", Order(nil, twenty())),
+		"twenty": Compose("VecinGo", "vecingo", "2026-09-18", Order(nil, twenty()), nil),
 		"five": Compose("La Tiendita", "tiendita", "2026-09-18", Order(nil, []Facts{
 			{Resource: "ordenes", CreatedToday: 4, HasCreated: true, UpdatedToday: 2, HasUpdated: true, HasState: true,
 				Attention: map[string]int64{"pagada": 2, "preparando": 1}, AttentionTotal: 3, Flow: map[string]int64{"enviada": 5}, FlowTotal: 5},
@@ -118,8 +120,8 @@ func TestRender_WriteSamples(t *testing.T) {
 			{Resource: "clientes", CreatedToday: 2, HasCreated: true},
 			{Resource: "productos", HasState: true, Flow: map[string]int64{"activo": 9, "borrador": 2}, FlowTotal: 11},
 			{Resource: "cupones", HasCreated: true},
-		})),
-		"empty": Compose("PetFriendly", "pet", "2026-09-18", []Facts{{Resource: "pets", HasCreated: true}}),
+		}), nil),
+		"empty": Compose("PetFriendly", "pet", "2026-09-18", []Facts{{Resource: "pets", HasCreated: true}}, nil),
 	}
 	for name, rep := range cases {
 		b, err := Render(rep)
@@ -133,7 +135,7 @@ func TestRender_WriteSamples(t *testing.T) {
 }
 
 func BenchmarkRender_Five(b *testing.B) {
-	r := Compose("La Tiendita", "t", "2026-09-18", Order(nil, twenty()[:5]))
+	r := Compose("La Tiendita", "t", "2026-09-18", Order(nil, twenty()[:5]), nil)
 	for i := 0; i < b.N; i++ {
 		if _, err := Render(r); err != nil {
 			b.Fatal(err)
@@ -142,7 +144,7 @@ func BenchmarkRender_Five(b *testing.B) {
 }
 
 func BenchmarkRender_Twenty(b *testing.B) {
-	r := Compose("VecinGo", "t", "2026-09-18", Order(nil, twenty()))
+	r := Compose("VecinGo", "t", "2026-09-18", Order(nil, twenty()), nil)
 	for i := 0; i < b.N; i++ {
 		if _, err := Render(r); err != nil {
 			b.Fatal(err)

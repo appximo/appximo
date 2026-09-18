@@ -32,7 +32,17 @@ type APISchema struct {
 // SummaryConfig is the top-level `summary` block. Strict-keyed like every
 // other level (keys.go); validated at load (validateSummary).
 type SummaryConfig struct {
-	Resources []string `json:"resources"`
+	Resources []string `json:"resources,omitempty"`
+	// Notify (VOZ-DELTA-S1, ADR-034) is the SCHEDULED send policy: "changes"
+	// (default) sends only when something changed since the last digest
+	// (the traffic light, an attention count, rows that arrived today);
+	// "always" sends the daily report regardless. The manual `resumen`
+	// command always answers — silence is a property of the automatic send.
+	Notify string `json:"notify,omitempty"`
+	// QuietDays is the heartbeat: after this many consecutive silent
+	// scheduled runs, one short "sigo acá, todo igual" goes out so a quiet
+	// channel is distinguishable from a dead one. Default 7; 0 = never.
+	QuietDays *int `json:"quiet_days,omitempty"`
 }
 
 // ResourceSchema defines a single entity (table) with its fields, hooks, and indexes.

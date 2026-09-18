@@ -96,6 +96,11 @@ func (c *EngineClient) Do(ctx context.Context, tenant, method, path string, body
 	// the tenant — the same split the engine's own tests use.
 	req.Host = tenant + "." + c.tenantDomain
 	req.Header.Set("Authorization", "Bearer "+token)
+	// A worker never wants a cached read: what it fetches it acts on (a
+	// write-back, a digest whose scheduled decision is a side effect). The
+	// engine's response cache honors this header per request, so no
+	// middleware changes and the hot path stays untouched (VOZ-DELTA-S1).
+	req.Header.Set("Cache-Control", "no-cache")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

@@ -221,7 +221,7 @@ const SpecExampleAdvanced = `{
       "vendedor": { "resources": ["productos", "proveedores"], "actions": ["read"] }
     }
   },
-  "summary": { "resources": ["citas", "pacientes", "formulas"] }
+  "summary": { "resources": ["citas", "pacientes", "formulas"], "notify": "changes", "quiet_days": 7 }
 }`
 
 // specFooter documents the correction loop — the same validator-guided loop the

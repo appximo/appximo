@@ -9,9 +9,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/appximo/appximo/pkg/controlplane"
 	"github.com/appximo/appximo/pkg/outbox"
 	"github.com/appximo/appximo/pkg/schema"
+	"github.com/appximo/appximo/pkg/summary"
 )
 
 // VOZ-ESCALON1-S1: GET /api/summary — the owner-language daily digest, generic
@@ -252,16 +255,33 @@ func sumSchemaVisual() *schema.APISchema {
 	}
 }
 
+// lastVisualPool lets a test reach the control-plane tables the harness
+// created (the digest's snapshots live in public.summary_snapshots).
+var lastVisualPool *pgxpool.Pool
+
+func integrationPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	if lastVisualPool == nil {
+		t.Fatal("no pool — call setupSummaryVisual first")
+	}
+	return lastVisualPool
+}
+
 func setupSummaryVisual(t *testing.T) (*httptest.Server, func(role, uid string) string, func()) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("summary: skipping in -short mode")
 	}
 	pool, cleanPG := startPG(t)
+	lastVisualPool = pool
 	applyControlPlane(t, pool)
 	if err := outbox.EnsureTable(context.Background(), pool); err != nil {
 		cleanPG()
 		t.Fatalf("ensure outbox: %v", err)
+	}
+	if err := summary.EnsureSnapshotTable(context.Background(), pool); err != nil {
+		cleanPG()
+		t.Fatalf("ensure snapshots: %v", err)
 	}
 	s := sumSchemaVisual()
 	if errs := schema.Validate(s); len(errs) != 0 {
@@ -365,5 +385,140 @@ func TestSummary_PNGDoor(t *testing.T) {
 	resp.Body.Close()
 	if resp.Header.Get("Content-Type") != "image/png" {
 		t.Errorf("Accept: image/png must render the image, got %s", resp.Header.Get("Content-Type"))
+	}
+}
+
+// ── VOZ-DELTA-S1 ─────────────────────────────────────────────────────────────
+// The delta against yesterday and the scheduled decision, on Postgres: the
+// first digest says so; a baseline moved to "yesterday" yields +N / igual que
+// ayer; ?mode=scheduled decides by policy and records it; the census proves
+// the last scheduled run.
+
+func TestSummary_DeltaAndScheduledDecision(t *testing.T) {
+	rest, tok, done := setupSummaryVisual(t)
+	defer done()
+	super := tok("super_admin", superID)
+	pool := integrationPool(t)
+
+	mk := func(n int) []string {
+		var ids []string
+		for i := 0; i < n; i++ {
+			got := dpDo(t, rest, "POST", "/api/ordenes", super, map[string]any{"titulo": "o"}, http.StatusCreated)
+			ids = append(ids, got["id"].(string))
+		}
+		return ids
+	}
+	ids := mk(2)
+	for _, id := range ids {
+		dpDo(t, rest, "PATCH", "/api/ordenes/"+id, super, map[string]any{"estado": "pagada"}, http.StatusOK)
+	}
+
+	// The scheduled evaluation is a side effect: never a cached answer.
+	sched := func() map[string]any {
+		req, _ := http.NewRequest(http.MethodGet, rest.URL+"/api/summary?mode=scheduled", nil)
+		req.Header.Set("Authorization", "Bearer "+super)
+		req.Header.Set("Cache-Control", "no-cache")
+		req.Host = tenantID + ".localhost"
+		resp, err := rest.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("scheduled: %d %v", resp.StatusCode, err)
+		}
+		return out
+	}
+	// Day 1, scheduled: first digest → changed, should_send=changes.
+	d1 := sched()
+	if d1["baseline"] != nil || d1["changed"] != true || d1["should_send"] != true || d1["send_reason"] != "changes" {
+		t.Fatalf("day 1: %v", d1)
+	}
+	if !strings.Contains(d1["text"].(string), "primer resumen") {
+		t.Errorf("day 1 must say it is the first: %s", d1["text"])
+	}
+	// The row exists for today, with the decision.
+	var decision string
+	if err := pool.QueryRow(context.Background(), `SELECT decision FROM public.summary_snapshots WHERE tenant_id=$1 AND role='super_admin' AND day=current_date`, tenantID).Scan(&decision); err != nil || decision != "sent:changes" {
+		t.Fatalf("snapshot decision: %q err=%v", decision, err)
+	}
+
+	// Pretend a night passed: today's row becomes yesterday's, and what was
+	// created "today" was created yesterday (so it is not news again).
+	shift := func() {
+		for _, q := range []string{
+			`DELETE FROM public.summary_snapshots WHERE tenant_id=$1 AND day = current_date - 1`,
+			`UPDATE public.summary_snapshots SET day = current_date - 1 WHERE tenant_id=$1 AND day=current_date`,
+		} {
+			if _, err := pool.Exec(context.Background(), q, tenantID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := pool.Exec(context.Background(), `UPDATE tenant_`+tenantID+`.ordenes SET creado_en = creado_en - interval '1 day'`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shift()
+
+	// Day 2, same state → NOT a change → silent, streak 1; the "2 esperan" is
+	// worded as igual que ayer and the level drops to amber.
+	d2 := sched()
+	if d2["changed"] != false || d2["should_send"] != false || d2["send_reason"] != "silent" || d2["silent_streak"].(float64) != 1 || d2["level"] != "amber" {
+		t.Fatalf("day 2 same state: %v", d2)
+	}
+	if !strings.Contains(d2["text"].(string), "igual que ayer") {
+		t.Errorf("day 2 text: %s", d2["text"])
+	}
+	// The census says the automatic run was silent on purpose.
+	c := dpDo(t, rest, "GET", "/api/summary?view=census", super, nil, http.StatusOK)
+	if !strings.Contains(c["text"].(string), "callado a propósito, 1 día sin novedad") {
+		t.Errorf("census must prove the silence: %s", c["text"])
+	}
+
+	// Day 3: three more orders paid today → +3, 3 llegaron hoy → red, send.
+	shift()
+	ids3 := mk(3)
+	for _, id := range ids3 {
+		dpDo(t, rest, "PATCH", "/api/ordenes/"+id, super, map[string]any{"estado": "pagada"}, http.StatusOK)
+	}
+	d3 := sched()
+	if d3["changed"] != true || d3["should_send"] != true || d3["level"] != "red" {
+		t.Fatalf("day 3: %v", d3)
+	}
+	for _, want := range []string{"5 esperan acción · +3 desde ayer · 3 llegaron hoy", "⏳ 5 esperan acción (+3 desde ayer · 3 llegaron hoy) (pagada: 5)"} {
+		if !strings.Contains(d3["text"].(string), want) {
+			t.Errorf("day 3 want %q in %s", want, d3["text"])
+		}
+	}
+
+	// Day 4: everything closed → green, "ayer esperaban 5" → a change (good news).
+	shift()
+	for _, id := range append(ids, ids3...) {
+		for _, st := range []string{"enviada", "entregada", "cerrada"} {
+			dpDo(t, rest, "PATCH", "/api/ordenes/"+id, super, map[string]any{"estado": st}, http.StatusOK)
+		}
+	}
+	d4 := sched()
+	if d4["changed"] != true || d4["should_send"] != true || d4["level"] != "green" || !strings.Contains(d4["text"].(string), "ayer esperaban 5") {
+		t.Fatalf("day 4 red→green: %v", d4)
+	}
+
+	// Heartbeat: quiet for 6 runs already, quiet_days default 7 → the 7th silent
+	// run speaks once and resets the streak.
+	shift()
+	if _, err := pool.Exec(context.Background(), `UPDATE public.summary_snapshots SET silent_streak = 6, decision='silent' WHERE tenant_id=$1 AND day=current_date-1`, tenantID); err != nil {
+		t.Fatal(err)
+	}
+	d5 := sched()
+	if d5["changed"] != false || d5["should_send"] != true || d5["send_reason"] != "heartbeat" || d5["silent_streak"].(float64) != 0 || !strings.Contains(d5["text"].(string), "7 días sin novedad. Sigo acá") {
+		t.Fatalf("heartbeat: %v", d5)
+	}
+
+	// Pruning: at most two rows (today + baseline) survive.
+	var rows int
+	pool.QueryRow(context.Background(), `SELECT count(*) FROM public.summary_snapshots WHERE tenant_id=$1`, tenantID).Scan(&rows) //nolint:errcheck
+	if rows > 2 {
+		t.Errorf("snapshots are not a history: %d rows", rows)
 	}
 }

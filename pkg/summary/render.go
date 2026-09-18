@@ -271,7 +271,20 @@ func RenderImage(r Report) (*image.RGBA, error) {
 	fg, bg := levelColors(r.Level)
 	c.y += 26
 	c.fillCircle(renderPad+22, c.y-14, 22, fg)
-	c.text(fs.headline, renderPad+64, c.y, fg, fit(fs.headline, r.Headline, contentW-64))
+	// The headline is "<what> · <the comparison>": when it does not fit on one
+	// line the comparison — the part worth opening the picture for — moves to
+	// its own line instead of being cut off with an ellipsis.
+	head, tail := r.Headline, ""
+	if measure(fs.headline, head) > contentW-64 {
+		if i := strings.Index(head, " · "); i > 0 {
+			head, tail = head[:i], head[i+len(" · "):]
+		}
+	}
+	c.text(fs.headline, renderPad+64, c.y, fg, fit(fs.headline, head, contentW-64))
+	if tail != "" {
+		c.y += 34
+		c.text(fs.body, renderPad+64, c.y, fg, fit(fs.body, tail, contentW-64))
+	}
 	c.y += 36
 	c.hline(c.y)
 	c.y += 16
@@ -282,13 +295,54 @@ func RenderImage(r Report) (*image.RGBA, error) {
 	}
 
 	// ── Attention bands: declared (red) then inferred (amber) ────────────
-	declared := filter(r.Facts, func(f Facts) bool { return f.AttentionTotal > 0 && !f.AttentionInferred })
-	inferred := filter(r.Facts, func(f Facts) bool { return f.AttentionTotal > 0 && f.AttentionInferred })
+	// Since VOZ-DELTA-S1 a band holds only what has NEWS or moved; rows that
+	// are exactly as yesterday are folded below in one small grey line —
+	// the picture stops repeating the same red every morning.
+	declared := filter(r.Facts, func(f Facts) bool { return f.AttentionTotal > 0 && !f.AttentionInferred && !f.stale() })
+	inferred := filter(r.Facts, func(f Facts) bool { return f.AttentionTotal > 0 && f.AttentionInferred && !f.stale() })
+	staleRows := filter(r.Facts, func(f Facts) bool { return f.stale() })
+	if r.Baseline == "" && r.AttentionTotal > 0 {
+		c.y += 22
+		c.text(fs.small, renderPad, c.y, mutedColor, "Primer resumen: sin comparación todavía.")
+		c.y += 10
+	}
 	if len(declared) > 0 {
-		renderAttentionBand(c, declared, "ESPERAN ACCIÓN", "", redFg, redBg)
+		bandFg, bandBg := redFg, redBg
+		if r.Level != LevelRed {
+			bandFg, bandBg = amberFg, amberBg // stock without news
+		}
+		renderAttentionBand(c, declared, "ESPERAN ACCIÓN", "", bandFg, bandBg)
 	}
 	if len(inferred) > 0 {
 		renderAttentionBand(c, inferred, "SIN AVANZAR", "recién creados, nadie los movió", amberFg, amberBg)
+	}
+	if len(staleRows) > 0 {
+		c.y += 6
+		c.text(fs.caption, renderPad, c.y+20, mutedColor, "IGUAL QUE AYER")
+		c.y += 34
+		// Wrap into as many lines as needed (a wide app can have ten): the
+		// line is small and grey, but it must not be cut off — it is the
+		// reader's proof that the rest is accounted for.
+		line := ""
+		for _, f := range staleRows {
+			item := fmt.Sprintf("%s %d", f.Resource, f.AttentionTotal)
+			next := item
+			if line != "" {
+				next = line + " · " + item
+			}
+			if measure(fs.small, next) > contentW && line != "" {
+				c.y += 30
+				c.text(fs.small, renderPad, c.y, mutedColor, line)
+				line = item
+				continue
+			}
+			line = next
+		}
+		if line != "" {
+			c.y += 30
+			c.text(fs.small, renderPad, c.y, mutedColor, fit(fs.small, line, contentW))
+		}
+		c.y += 16
 	}
 
 	// ── Today's motion ───────────────────────────────────────────────────
@@ -377,7 +431,7 @@ func renderAttentionBand(c *canvas, facts []Facts, caption, subcaption string, f
 			break
 		}
 		bandH += 98
-		if f.hasMotion() {
+		if f.hasMotion() || (f.HasNewToday && f.NewToday > 0) {
 			bandH += 28
 		}
 	}
@@ -414,12 +468,23 @@ func renderAttentionBand(c *canvas, facts []Facts, caption, subcaption string, f
 		if x < renderPad+170 {
 			x = renderPad + 170
 		}
-		c.text(fs.name, x, c.y-32, inkColor, fit(fs.name, f.Resource, renderWidth-renderPad-24-x))
+		// The delta chip next to the name: "+3" / "−2" / "nuevo" — the change is
+		// the news; the total is context.
+		nameW := renderWidth - renderPad - 24 - x
+		if chip := deltaChip(f); chip != "" {
+			cw := measure(fs.name, chip) + 12
+			c.text(fs.name, renderWidth-renderPad-24-cw+12, c.y-32, fg, chip)
+			nameW -= cw + 12
+		}
+		c.text(fs.name, x, c.y-32, inkColor, fit(fs.name, f.Resource, nameW))
 		c.text(fs.small, x, c.y+2, mutedColor, fit(fs.small, plainDetail(f.Attention), renderWidth-renderPad-24-x))
-		if f.hasMotion() {
+		if f.hasMotion() || (f.HasNewToday && f.NewToday > 0) {
 			var m []string
+			if f.HasNewToday && f.NewToday > 0 {
+				m = append(m, fmt.Sprintf("%d %s hoy", f.NewToday, llegaron(f.NewToday)))
+			}
 			if f.HasCreated && f.CreatedToday > 0 {
-				m = append(m, fmt.Sprintf("%d %s hoy", f.CreatedToday, nuevos(f.CreatedToday)))
+				m = append(m, fmt.Sprintf("%d %s", f.CreatedToday, nuevos(f.CreatedToday)))
 			}
 			if f.HasUpdated && f.UpdatedToday > 0 {
 				m = append(m, fmt.Sprintf("%d actualizad%s", f.UpdatedToday, oS(f.UpdatedToday)))
@@ -482,6 +547,24 @@ func plainDetail(m map[string]int64) string {
 		parts = append(parts, fmt.Sprintf("%s %d", e.k, e.v))
 	}
 	return strings.Join(parts, " · ")
+}
+
+// deltaChip is the short change label painted beside a band row.
+func deltaChip(f Facts) string {
+	if !f.HasPrev {
+		return ""
+	}
+	if f.PrevTotal == 0 && len(f.Prev) == 0 {
+		return "nuevo"
+	}
+	switch d := f.Delta(); {
+	case d > 0:
+		return fmt.Sprintf("+%d", d)
+	case d < 0:
+		return fmt.Sprintf("−%d", -d)
+	default:
+		return "="
+	}
 }
 
 func filter(facts []Facts, keep func(Facts) bool) []Facts {

@@ -64,6 +64,7 @@ type Stats struct {
 	CollectedAt  time.Time `json:"collected_at"`
 	Pending      int64     `json:"pending"`
 	Failed       int64     `json:"failed"`
+	Discarded    int64     `json:"discarded"` // parked by a processor's DECISION (reason in last_error); visible, never alerting
 	SentLastHour int64     `json:"sent_last_hour"`
 	// Capped reports that Pending/Failed hit the counting bound (countCap): the
 	// real number is AT LEAST the reported one. Counting is bounded on purpose —
@@ -188,6 +189,9 @@ func (o *Observer) Collect(ctx context.Context) (*Stats, error) {
 	}
 	if s.Failed, err = boundedCount("failed"); err != nil {
 		return nil, fmt.Errorf("outbox: observe failed: %w", err)
+	}
+	if s.Discarded, err = boundedCount("discarded"); err != nil {
+		return nil, fmt.Errorf("outbox: observe discarded: %w", err)
 	}
 	s.Capped = s.Pending >= countCap || s.Failed >= countCap
 	if err := o.pool.QueryRow(ctx,

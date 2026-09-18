@@ -1855,12 +1855,34 @@ func validateSummary(s *APISchema) []ValidationError {
 		declared = append(declared, name)
 	}
 	sort.Strings(declared)
+	if s.Summary.Notify != "" && s.Summary.Notify != "changes" && s.Summary.Notify != "always" {
+		errs = append(errs, ValidationError{
+			Field:    "summary.notify",
+			Rule:     "summary_notify_invalid",
+			Got:      s.Summary.Notify,
+			Expected: []string{"changes", "always"},
+			Message:  fmt.Sprintf("summary.notify %q is not a send policy (valid: \"changes\" — only when something changed since the last digest, the default; \"always\" — the daily report regardless)", s.Summary.Notify),
+			Fix:      `use "changes" or "always"`,
+		})
+	}
+	if s.Summary.QuietDays != nil && *s.Summary.QuietDays < 0 {
+		errs = append(errs, ValidationError{
+			Field:   "summary.quiet_days",
+			Rule:    "summary_quiet_days_negative",
+			Got:     fmt.Sprint(*s.Summary.QuietDays),
+			Message: "summary.quiet_days must be 0 (never send a heartbeat) or a positive number of consecutive silent days",
+			Fix:     "use 0, or a positive integer (default 7)",
+		})
+	}
+	if s.Summary.Resources == nil {
+		return errs // a policy-only block: every readable resource, ranked
+	}
 	if len(s.Summary.Resources) == 0 {
 		errs = append(errs, ValidationError{
 			Field:   "summary.resources",
 			Rule:    "summary_resources_empty",
 			Message: `"summary.resources" is empty: the digest would report nothing (dead config)`,
-			Fix:     "list the resources the digest should report, in the order you read them — or remove the summary block to report every readable resource",
+			Fix:     "list the resources the digest should report, in the order you read them — or omit the key to report every readable resource",
 		})
 		return errs
 	}

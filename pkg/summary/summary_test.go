@@ -134,7 +134,7 @@ func TestCompose_VocabularyByTier(t *testing.T) {
 		{Resource: "productos", HasState: true, Flow: map[string]int64{"activo": 9, "borrador": 2}, FlowTotal: 11},
 		{Resource: "clientes", CreatedToday: 0, HasCreated: true}, // nothing today — omitted
 	}
-	r := Compose("La Tiendita", "tiendita", "2026-09-18", Order(nil, facts))
+	r := Compose("La Tiendita", "tiendita", "2026-09-18", Order(nil, facts), nil)
 	if !r.HasMotion || r.Level != LevelRed || r.AttentionTotal != 3 {
 		t.Fatalf("expected red motion with 3 attention, got level=%s total=%d motion=%v", r.Level, r.AttentionTotal, r.HasMotion)
 	}
@@ -156,7 +156,7 @@ func TestCompose_InferredIsHumble(t *testing.T) {
 	facts := []Facts{
 		{Resource: "reservas", HasState: true, AttentionInferred: true, Attention: map[string]int64{"activa": 2}, AttentionTotal: 2},
 	}
-	r := Compose("Vet", "vet", "2026-09-18", facts)
+	r := Compose("Vet", "vet", "2026-09-18", facts, nil)
 	if r.Level != LevelAmber {
 		t.Fatalf("inferred only → amber, got %s", r.Level)
 	}
@@ -174,7 +174,7 @@ func TestCompose_EmptyWithDignity(t *testing.T) {
 	facts := []Facts{
 		{Resource: "pedidos", CreatedToday: 0, HasCreated: true, UpdatedToday: 0, HasUpdated: true},
 	}
-	r := Compose("PetFriendly", "pet", "2026-09-18", facts)
+	r := Compose("PetFriendly", "pet", "2026-09-18", facts, nil)
 	if r.HasMotion || r.Level != LevelGreen {
 		t.Fatalf("no motion expected, green; got motion=%v level=%s", r.HasMotion, r.Level)
 	}
@@ -190,7 +190,7 @@ func TestCompose_EmptyWithDignity(t *testing.T) {
 
 func TestCompose_EscapesVocabularyButKeepsBoldMarkup(t *testing.T) {
 	facts := []Facts{{Resource: "pe<di>dos", CreatedToday: 1, HasCreated: true}}
-	r := Compose("A<b>", "t", "2026-09-18", facts)
+	r := Compose("A<b>", "t", "2026-09-18", facts, nil)
 	if strings.Contains(r.Text, "pe<di>dos") {
 		t.Errorf("resource name must be HTML-escaped, got:\n%s", r.Text)
 	}
@@ -200,11 +200,11 @@ func TestCompose_EscapesVocabularyButKeepsBoldMarkup(t *testing.T) {
 }
 
 func TestComposeCensus(t *testing.T) {
-	r := ComposeCensus("Tienda", "t", []Facts{{Resource: "ordenes", Total: 7, HasTotal: true}, {Resource: "x"}})
+	r := ComposeCensus("Tienda", "t", []Facts{{Resource: "ordenes", Total: 7, HasTotal: true}, {Resource: "x"}}, nil)
 	if !strings.Contains(r.Text, "<b>ordenes</b>: 7") || strings.Contains(r.Text, "<b>x</b>") || !r.Census {
 		t.Errorf("census text wrong:\n%s", r.Text)
 	}
-	if r := ComposeCensus("Tienda", "t", nil); !strings.Contains(r.Text, "No hay datos todavía") {
+	if r := ComposeCensus("Tienda", "t", nil, nil); !strings.Contains(r.Text, "No hay datos todavía") {
 		t.Errorf("empty census: %s", r.Text)
 	}
 }

@@ -45,6 +45,16 @@
 #   --url=BASE            the PUBLIC base URL the verification uses (through
 #                         the proxy; the tenant host is its hostname)           [required]
 #   --cli=PATH            also update the ops companion (<dir>/appximo-cli)
+#   --worker-binary=PATH  also deploy the appximo-worker (VOZ-DELTA-S1): installs
+#                         it as <dir>/appximo-worker, writes <app>-worker.service
+#                         when the box has none (the SAME unit install.sh writes),
+#                         adds the worker's env keys when missing (backup of the env
+#                         is already in /root/<app>-env.pre-<tag>), enables + restarts
+#                         it and verifies it is ACTIVE. Why here: the fleet's deploy
+#                         path is this script, not install.sh — an app installed
+#                         before A-67 never got a worker because nothing on the
+#                         deploy path carried one, and its scheduled workflows sat
+#                         dead while fleet-audit said ✗ every day.
 #   --tenant=ID           tenant for the probes          [default: first label of the URL host]
 #   --tenant-host=HOST    Host header for the probes     [default: the URL host]
 #   --resolve=IP          curl --resolve for the URL host (a lab box without DNS)
@@ -62,7 +72,7 @@
 # change (contract, backup, inventory).
 set -uo pipefail
 
-HOST=""; APP=""; BINARY=""; URL=""; CLI=""; TENANT=""; THOST=""; RESOLVE=""; INSECURE=0
+HOST=""; APP=""; BINARY=""; URL=""; CLI=""; WORKER=""; TENANT=""; THOST=""; RESOLVE=""; INSECURE=0
 ROLE="admin"; RESOURCE=""; KEEP=""; TAG=""; AUDIT=1; TIMEOUT=30
 for arg in "$@"; do
 	case "$arg" in
@@ -71,6 +81,7 @@ for arg in "$@"; do
 		--binary=*) BINARY="${arg#*=}" ;;
 		--url=*) URL="${arg#*=}" ;;
 		--cli=*) CLI="${arg#*=}" ;;
+		--worker-binary=*) WORKER="${arg#*=}" ;;
 		--tenant=*) TENANT="${arg#*=}" ;;
 		--tenant-host=*) THOST="${arg#*=}" ;;
 		--resolve=*) RESOLVE="${arg#*=}" ;;
@@ -195,6 +206,76 @@ fi
 PID1="$("${SSH[@]}" "systemctl show -p MainPID --value '$APP'")"
 ok "swapped and healthy on the box — PID $R_PID0 → $PID1"
 
+# ── 3b. the worker (optional) ───────────────────────────────────────────────
+WORKER_RESULT=""
+if [ -n "$WORKER" ]; then
+	step "3b · the worker: appximo-worker beside the engine, its unit, its env keys"
+	[ -f "$WORKER" ] || die "--worker-binary '$WORKER' not found"
+	WVER="$("$WORKER" --version 2>/dev/null | head -1)"; [ -n "$WVER" ] || WVER="$(basename "$WORKER")"
+	R_WBIN="$(dirname "$R_BIN")/appximo-worker"
+	scp -q "$WORKER" "$HOST:/tmp/appximo-worker.deploy" || die "could not copy the worker binary"
+	WOUT="$("${SSH[@]}" bash -s "$APP" "$R_ENVF" "$R_WBIN" "$R_PORT" "$TAG" "$THOST" <<'REMOTE'
+set -u; APP=$1; ENVF=$2; WBIN=$3; PORT=$4; TAG=$5; THOST=$6
+UNIT=/etc/systemd/system/$APP-worker.service
+[ -f "$WBIN" ] && [ ! -e "/root/$APP-worker.pre-$TAG" ] && cp -p "$WBIN" "/root/$APP-worker.pre-$TAG"
+install -m 0755 /tmp/appximo-worker.deploy "$WBIN"; rm -f /tmp/appximo-worker.deploy
+echo "  binary → $WBIN"
+# env keys the worker needs (the engine's own file is shared, as install.sh does)
+DOMAIN="${THOST#*.}"
+for kv in "APPXIMO_WORKER_MODE=auto" "APPXIMO_ENGINE_URL=http://127.0.0.1:$PORT" "APPXIMO_TENANT_DOMAIN=$DOMAIN"; do
+	k="${kv%%=*}"
+	if ! grep -q "^$k=" "$ENVF"; then printf '%s\n' "$kv" >> "$ENVF"; echo "  env += $kv"; fi
+done
+if grep -q '^APPXIMO_TELEGRAM_BOT_TOKEN=' "$ENVF" && ! grep -q '^APPXIMO_TELEGRAM_SUMMARY_ROLE=' "$ENVF"; then
+	echo "  WARN Telegram is configured but APPXIMO_TELEGRAM_SUMMARY_ROLE is not: the scheduled digest consumer stays DISABLED until you add it"
+fi
+if [ ! -f "$UNIT" ]; then
+	USR="$(systemctl show -p User --value "$APP")"; [ -n "$USR" ] || USR=root
+	VARLIB="/var/lib/$APP"
+	cat > "$UNIT" <<UNIT
+[Unit]
+Description=Appximo worker for app $APP (outbox consumer + workflow executor)
+Documentation=https://github.com/appximo/appximo/blob/main/docs/PRODUCTION.md
+Wants=network-online.target
+After=network-online.target postgresql.service $APP.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=$USR
+Group=$USR
+EnvironmentFile=$ENVF
+ExecStart=$WBIN
+Restart=always
+RestartSec=2
+LimitNOFILE=1024
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=$VARLIB
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+	echo "  unit written: $UNIT (user $USR)"
+fi
+systemctl daemon-reload
+systemctl enable "$APP-worker" >/dev/null 2>&1 || true
+systemctl restart "$APP-worker"
+sleep 3
+if systemctl is-active --quiet "$APP-worker"; then
+	echo "  OK $APP-worker active — $("$WBIN" --version 2>/dev/null | head -1)"
+else
+	echo "  FAIL $APP-worker is not active:"; journalctl -u "$APP-worker" -n 12 --no-pager 2>/dev/null | sed 's/^/    /'
+fi
+REMOTE
+)"
+	printf '%s\n' "$WOUT"
+	if printf '%s\n' "$WOUT" | grep -q '^  OK '; then ok "worker deployed and ACTIVE ($WVER)"; WORKER_RESULT=ok
+	else bad "the worker did not come up — the engine deploy stands; fix the worker: ssh $HOST journalctl -u $APP-worker -n 40"; WORKER_RESULT=fail; fi
+fi
+
 # ── 4. verification from OUTSIDE ────────────────────────────────────────────
 mint_token() { # never printed; the secret never leaves the box
 	"${SSH[@]}" bash -s "$R_ENVF" "${R_CLIB:-$R_BIN}" "$TENANT" "$ROLE" "$R_SCHEMA" <<'REMOTE'
@@ -271,6 +352,7 @@ fi
 if [ "$AUDIT" = 1 ]; then
 	step "6 · fleet-audit.sh --app=$APP (what is MISSING on this box)"
 	if "${SSH[@]}" "set -o pipefail; sudo bash '$R_SDIR/fleet-audit.sh' --app='$APP' 2>&1 | sed 's/^/  /'"; then ok "box protected"; else bad "the box is NOT fully protected — the ✗ lines above say what to fix (deploy itself: $( [ "$RESULT" = 0 ] && echo verified || echo 'rolled back'))"; [ "$RESULT" = 0 ] && RESULT=3; fi
+	[ "$WORKER_RESULT" = fail ] && [ "$RESULT" = 0 ] && RESULT=3
 fi
 
 step "summary"
