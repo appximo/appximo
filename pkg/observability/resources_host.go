@@ -264,7 +264,16 @@ func (r *hostReader) maybeAlert(h *HostStats, now time.Time) {
 		}
 		msg := fmt.Sprintf("disk low — %s; floor %.0f %% / %s. When it reaches 0 PostgreSQL stops accepting writes (the engine answers 503) — free space now: old backup sets (%s), journald (journalctl --vacuum-size=200M), apt cache",
 			strings.Join(parts, "; "), r.cfg.DiskMinFreePct, humanBytes(r.cfg.DiskMinFreeBytes), orDash(r.cfg.BackupDir))
-		r.send(Alert{Kind: KindHost, Level: level, Route: "disk", Message: msg})
+		fields := map[string]string{
+			"path":  low[0].Path,
+			"free":  humanBytes(low[0].FreeBytes),
+			"total": humanBytes(low[0].TotalBytes),
+			"pct":   fmt.Sprintf("%.1f", low[0].FreePct),
+		}
+		if len(low) > 1 {
+			fields["more"] = fmt.Sprintf("%d", len(low)-1)
+		}
+		r.send(Alert{Kind: KindHost, Level: level, Route: "disk", Message: msg, Fields: fields})
 	}
 	if h.Backup.Alarm && now.Sub(r.lastBackupAlert) > hostAlertCooldown {
 		r.lastBackupAlert = now
@@ -279,7 +288,13 @@ func (r *hostReader) maybeAlert(h *HostStats, now time.Time) {
 		default:
 			msg = fmt.Sprintf("the last backup is %s old (status %q, floor %s) — the timer is not running: systemctl list-timers '*backup*'; run one now: /opt/<app>/scripts/backup.sh --app=<app>", humanDuration(time.Duration(h.Backup.AgeS)*time.Second), h.Backup.Status, humanDuration(r.cfg.BackupMaxAge))
 		}
-		r.send(Alert{Kind: KindHost, Level: LevelCritical, Route: "backup", Message: msg})
+		r.send(Alert{Kind: KindHost, Level: LevelCritical, Route: "backup", Message: msg, Fields: map[string]string{
+			"status":   h.Backup.Status,
+			"age_s":    fmt.Sprintf("%.0f", h.Backup.AgeS),
+			"floor_s":  fmt.Sprintf("%.0f", r.cfg.BackupMaxAge.Seconds()),
+			"uptime_s": fmt.Sprintf("%.0f", now.Sub(r.startedAt).Seconds()),
+			"dir":      h.Backup.Dir,
+		}})
 	}
 }
 

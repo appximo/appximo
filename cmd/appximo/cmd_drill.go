@@ -232,7 +232,7 @@ var drillTexts = map[string]map[string]drillText{
 		"en": {
 			title:  "a real 500 that explains itself",
 			what:   "creates an EPHEMERAL tenant with this app's schema, breaks one table underneath the engine (a BEFORE INSERT trigger that RAISEs, or the table dropped) and sends two requests that hit it.",
-			expect: "both answer HTTP 500 with an X-Trace-ID; the trace carries the message, the failed statement, the user and role; the two occurrences collapse into ONE problem group; the first occurrence raises an alert (a journal line, or Slack if SLACK_WEBHOOK_URL is set).",
+			expect: "both answer HTTP 500 with an X-Trace-ID; the trace carries the message, the failed statement, the user and role; the two occurrences collapse into ONE problem group; the first occurrence raises an alert (a journal line — and Telegram/Slack if APPXIMO_TELEGRAM_BOT_TOKEN+APPXIMO_TELEGRAM_CHAT_ID or SLACK_WEBHOOK_URL are set).",
 			where: "/admin → pick the tenant (top right) → Observability → Issues → \"Problems (24 h)\": one row, 2 events, 1 user.\n" +
 				"                       → Traces → the 500 → Waterfall: the failing stage marked ✗, \"Failed statement\", \"Stack\", \"Copy as curl\".\n" +
 				"                       journal: journalctl -u <unit> -o cat | grep '\"level\":\"error\"'   (one JSON line per 500: trace_id, sql, site)\n" +
@@ -241,7 +241,7 @@ var drillTexts = map[string]map[string]drillText{
 		"es": {
 			title:  "un 500 real que se explica solo",
 			what:   "crea un tenant EFÍMERO con el schema de esta app, rompe una tabla por debajo del motor (un trigger BEFORE INSERT que hace RAISE, o la tabla borrada) y manda dos requests que la tocan.",
-			expect: "los dos responden HTTP 500 con un X-Trace-ID; la traza lleva el mensaje, la sentencia que falló, el usuario y el rol; las dos ocurrencias se agrupan en UN problema; la primera dispara una alerta (una línea de journal, o Slack si SLACK_WEBHOOK_URL está puesto).",
+			expect: "los dos responden HTTP 500 con un X-Trace-ID; la traza lleva el mensaje, la sentencia que falló, el usuario y el rol; las dos ocurrencias se agrupan en UN problema; la primera dispara una alerta (una línea de journal — y Telegram/Slack si APPXIMO_TELEGRAM_BOT_TOKEN+APPXIMO_TELEGRAM_CHAT_ID o SLACK_WEBHOOK_URL están puestos).",
 			where: "/admin → elija el tenant (arriba a la derecha) → Observabilidad → Problemas → «Problemas (24 h)»: una fila, 2 eventos, 1 usuario.\n" +
 				"                       → Trazas → el 500 → Cascada: la etapa que falló marcada ✗, «Sentencia que falló», «Pila», «Copiar como curl».\n" +
 				"                       journal: journalctl -u <unidad> -o cat | grep '\"level\":\"error\"'   (una línea JSON por 500: trace_id, sql, site)\n" +

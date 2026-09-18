@@ -39,6 +39,9 @@
 #                          leaves the box — the dump and the files still do.
 #   SLACK_WEBHOOK_URL      a FAILED run posts one message here (read from the
 #                          env file too — the same webhook the engine alerts on)
+#   APPXIMO_TELEGRAM_BOT_TOKEN / APPXIMO_TELEGRAM_CHAT_ID
+#                          a FAILED run posts one Spanish message to that chat
+#                          (the same destination the engine alerts on)
 #   BACKUP_AMCHECK         on|off [default on]: after the dump, pg_amcheck
 #                          (--heapallindexed) verifies EVERY heap page and
 #                          every btree index of the database, cross-checking
@@ -112,6 +115,8 @@ if [ -n "$ENV_FILE" ]; then
 	DATABASE_URL="$(envval DATABASE_URL)"
 	[ -n "$FILES_DIR" ] || FILES_DIR="$(envval APPXIMO_FILES_DIR)"
 	[ -n "${SLACK_WEBHOOK_URL:-}" ] || SLACK_WEBHOOK_URL="$(envval SLACK_WEBHOOK_URL)"
+	[ -n "${APPXIMO_TELEGRAM_BOT_TOKEN:-}" ] || APPXIMO_TELEGRAM_BOT_TOKEN="$(envval APPXIMO_TELEGRAM_BOT_TOKEN)"
+	[ -n "${APPXIMO_TELEGRAM_CHAT_ID:-}" ] || APPXIMO_TELEGRAM_CHAT_ID="$(envval APPXIMO_TELEGRAM_CHAT_ID)"
 	[ -n "$COPY_TO" ] || COPY_TO="$(envval BACKUP_COPY_TO)"
 	[ -n "${BACKUP_PASSPHRASE_FILE:-}" ] || BACKUP_PASSPHRASE_FILE="$(envval BACKUP_PASSPHRASE_FILE)"
 fi
@@ -136,6 +141,17 @@ T0=$(date +%s.%N)
 # The status file is what the engine's self-monitor reads (APPXIMO_BACKUP_DIR):
 # "failed" or a stale "ok" both raise its backup alert (RESILIENCIA-S1 §D).
 notify() {
+	# Telegram (ALERTAS-TELEGRAM-S1): the same destination the engine alerts to,
+	# in Spanish for a phone — the engine's own backup watch will alert too on
+	# its next tick, but this line carries the CAUSE the moment it happened.
+	if [ -n "${APPXIMO_TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${APPXIMO_TELEGRAM_CHAT_ID:-}" ]; then
+		local es="🔴 CRÍTICA · Backup · ${PREFIX}
+El backup de esta noche FALLÓ: $1
+Qué hacer: en el server, journalctl -u '*-backup' -n 40 y correr uno a mano al arreglarlo."
+		curl -fsS -m 10 -X POST "https://api.telegram.org/bot$APPXIMO_TELEGRAM_BOT_TOKEN/sendMessage" \
+			--data-urlencode "chat_id=$APPXIMO_TELEGRAM_CHAT_ID" \
+			--data-urlencode "text=$es" >/dev/null 2>&1 || true
+	fi
 	[ -n "${SLACK_WEBHOOK_URL:-}" ] || return 0
 	curl -fsS -m 10 -X POST -H 'Content-Type: application/json' \
 		-d "$(printf '{"text":"%s"}' "$(printf '%s' "$1" | sed 's/"/\\"/g')")" "$SLACK_WEBHOOK_URL" >/dev/null 2>&1 || true

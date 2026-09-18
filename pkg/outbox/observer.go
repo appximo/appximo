@@ -44,9 +44,11 @@ type ObserverConfig struct {
 	// (APPXIMO_OUTBOX_MAX_PENDING_AGE). Default 15m; negative disables the alert
 	// (collection continues — the gauge stays truthful either way).
 	MaxPendingAge time.Duration
-	// OnAlert receives alerts (kind, message). Nil = no alerting. Each kind is
-	// rate-limited to one alert per hour.
-	OnAlert func(kind, message string)
+	// OnAlert receives alerts (kind, message, structured fields — age/topic/
+	// pending counts, so a sink can render its own language without parsing
+	// the sentence). Nil = no alerting. Each kind is rate-limited to one
+	// alert per hour.
+	OnAlert func(kind, message string, fields map[string]string)
 }
 
 // TopicCount is one topic's pending backlog.
@@ -264,33 +266,45 @@ func (o *Observer) alert(s *Stats) {
 		return
 	}
 	const cooldown = time.Hour
-	fire := func(kind, msg string) {
+	fire := func(kind, msg string, fields map[string]string) {
 		if time.Since(o.lastAlert[kind]) < cooldown {
 			return
 		}
 		o.lastAlert[kind] = time.Now()
-		o.cfg.OnAlert(kind, msg)
+		o.cfg.OnAlert(kind, msg, fields)
 	}
 	if o.cfg.MaxPendingAge > 0 && s.OldestPendingAge > o.cfg.MaxPendingAge.Seconds() {
+		age := (time.Duration(s.OldestPendingAge) * time.Second).Round(time.Second)
 		fire("outbox_stale_pending", fmt.Sprintf(
 			"outbox: the oldest pending event is %s old (threshold %s; topic %q, %d pending). Nothing is draining it — check that appximo-worker is running and has a consumer for that topic. Details: GET /admin/outbox",
-			(time.Duration(s.OldestPendingAge)*time.Second).Round(time.Second), o.cfg.MaxPendingAge, s.OldestPendingTopic, s.Pending))
+			age, o.cfg.MaxPendingAge, s.OldestPendingTopic, s.Pending),
+			map[string]string{
+				"age_s":       fmt.Sprintf("%.0f", s.OldestPendingAge),
+				"topic":       s.OldestPendingTopic,
+				"pending":     fmt.Sprintf("%d", s.Pending),
+				"threshold_s": fmt.Sprintf("%.0f", o.cfg.MaxPendingAge.Seconds()),
+			})
 	}
 	if s.Failed > 0 {
+		oldest := (time.Duration(s.OldestFailedAge) * time.Second).Round(time.Second)
 		fire("outbox_failed", fmt.Sprintf(
 			"outbox: %d event(s) parked state='failed' (retries exhausted; oldest %s old). Each row carries its error in last_error — GET /admin/outbox lists them",
-			s.Failed, (time.Duration(s.OldestFailedAge)*time.Second).Round(time.Second)))
+			s.Failed, oldest),
+			map[string]string{"failed": fmt.Sprintf("%d", s.Failed), "oldest_failed_age_s": fmt.Sprintf("%.0f", s.OldestFailedAge)})
 	}
 	// A cron schedule more than 10 minutes past due means NO leader is firing —
 	// the worker is down, or none of the running workers has the scheduler.
 	if s.WorkflowOverdueSeconds > (10 * time.Minute).Seconds() {
+		overdue := (time.Duration(s.WorkflowOverdueSeconds) * time.Second).Round(time.Second)
 		fire("workflow_overdue", fmt.Sprintf(
 			"workflows: a cron schedule is %s past due — no scheduler is firing (is appximo-worker running?). Details: GET /admin/workflows",
-			(time.Duration(s.WorkflowOverdueSeconds)*time.Second).Round(time.Second)))
+			overdue),
+			map[string]string{"overdue_s": fmt.Sprintf("%.0f", s.WorkflowOverdueSeconds)})
 	}
 	if s.WorkflowFailed24h > 0 {
 		fire("workflow_failed", fmt.Sprintf(
 			"workflows: %d failed run(s) in the last 24h — each run's error and per-step detail is in GET /admin/workflows (public.workflow_runs)",
-			s.WorkflowFailed24h))
+			s.WorkflowFailed24h),
+			map[string]string{"failed_24h": fmt.Sprintf("%d", s.WorkflowFailed24h)})
 	}
 }

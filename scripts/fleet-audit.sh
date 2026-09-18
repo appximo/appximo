@@ -98,10 +98,41 @@ audit_app() {
 		fi
 	fi
 
-	# 6. off-box + an alert destination
-	local hook; hook="$(envval "$envf" SLACK_WEBHOOK_URL)"
-	if [ -n "$hook" ]; then ok "alert destination set (SLACK_WEBHOOK_URL) — backup/disk/SLO/first-error alerts reach a human"
-	else bad "NO alert destination (SLACK_WEBHOOK_URL unset) — every alert (failed/stale backup, low disk, SLO burn, first occurrence of an error) is a journal line nobody reads; set it in $envf and restart (OPS-47)"; fi
+	# 6. off-box + an alert destination (ANY channel — Telegram reaches a phone;
+	#    Slack still counts). ✓ only when configured AND, for Telegram, VERIFIED
+	#    live with two read-only calls (getMe + getChat — no message is sent).
+	local hook tgtok tgchat dest_ok=0
+	hook="$(envval "$envf" SLACK_WEBHOOK_URL)"
+	tgtok="$(envval "$envf" APPXIMO_TELEGRAM_BOT_TOKEN)"
+	tgchat="$(envval "$envf" APPXIMO_TELEGRAM_CHAT_ID)"
+	if [ -n "$tgtok" ] && [ -n "$tgchat" ]; then
+		local me chat botname
+		me="$(curl -sS -m 8 "https://api.telegram.org/bot$tgtok/getMe" 2>/dev/null)"
+		if printf '%s' "$me" | grep -q '"ok":true'; then
+			botname="$(printf '%s' "$me" | sed -n 's/.*"username":"\([^"]*\)".*/\1/p')"
+			chat="$(curl -sS -m 8 "https://api.telegram.org/bot$tgtok/getChat" -d "chat_id=$tgchat" 2>/dev/null)"
+			if printf '%s' "$chat" | grep -q '"ok":true'; then
+				ok "alert destination Telegram VERIFIED (bot @${botname:-?}, chat $tgchat reachable) — backup/disk/SLO/first-error/outbox alerts reach a phone"
+				dest_ok=1
+			else
+				bad "Telegram token is valid (bot @${botname:-?}) but chat_id $tgchat is NOT reachable — did that chat open/start the bot? Fix APPXIMO_TELEGRAM_CHAT_ID in $envf"
+			fi
+		elif [ -z "$me" ]; then
+			meh "Telegram destination configured but could not be verified (no answer from api.telegram.org — network?); the engine retries deliveries and journals every alert"
+			dest_ok=1
+		else
+			bad "Telegram BOT TOKEN REJECTED by api.telegram.org — alerts will NOT be delivered; rotate/reissue with @BotFather and update APPXIMO_TELEGRAM_BOT_TOKEN in $envf"
+		fi
+	elif [ -n "$tgtok" ] || [ -n "$tgchat" ]; then
+		bad "Telegram HALF-configured (only one of APPXIMO_TELEGRAM_BOT_TOKEN / APPXIMO_TELEGRAM_CHAT_ID) — the engine refuses to boot like this; set both in $envf"
+	fi
+	if [ -n "$hook" ]; then
+		ok "alert destination Slack set (SLACK_WEBHOOK_URL; not verifiable read-only)"
+		dest_ok=1
+	fi
+	if [ "$dest_ok" -eq 0 ] && [ -z "$tgtok$tgchat" ]; then
+		bad "NO alert destination — every alert (failed/stale backup, low disk, SLO burn, first error, stuck outbox) is a journal line nobody reads; set APPXIMO_TELEGRAM_BOT_TOKEN + APPXIMO_TELEGRAM_CHAT_ID (and/or SLACK_WEBHOOK_URL) in $envf and restart (OPS-47)"
+	fi
 	local cpto pass; cpto="$(envval "$envf" BACKUP_COPY_TO)"; pass="$(envval "$envf" BACKUP_PASSPHRASE_FILE)"
 	if [ -n "$cpto" ]; then
 		ok "off-box copy configured → $cpto"

@@ -477,7 +477,14 @@ func New(cfg Config) (*App, error) {
 	app.errStore = observability.NewErrorStore()
 	app.metrics = observability.NewMetrics()
 	app.rings = observability.NewRings()
-	alerter := observability.NewSlackAlerterFromEnv()
+	// Alert channel (ALERTAS-TELEGRAM-S1, OPS-47): Telegram and/or Slack, both
+	// optional, both async with retry; malformed Telegram config refuses to
+	// boot naming the variable; NO destination boots but warns loudly.
+	alerter, alerterErr := observability.NewAlerterFromEnv(s.Name)
+	if alerterErr != nil {
+		pool.Close()
+		return nil, alerterErr
+	}
 	app.sloEngine = observability.NewSLOEngine(app.rings, app.hist, alerter)
 	// First-occurrence alerts (OBSERVABILIDAD-ERRORES-S1): a NEW error group
 	// alerts on its first trace, not when the SLO burns; braked at 5 per tenant
@@ -530,11 +537,12 @@ func New(cfg Config) (*App, error) {
 	// boot (OPS-13 discipline — a guard whose knob is silently ignored is worse
 	// than no knob).
 	obsCfg := outbox.ObserverConfig{
-		OnAlert: func(kind, message string) {
+		OnAlert: func(kind, message string, fields map[string]string) {
 			_ = alerter.Send(context.Background(), observability.Alert{
 				Level:   observability.LevelWarning,
 				Kind:    kind,
 				Message: message,
+				Fields:  fields,
 			})
 		},
 	}

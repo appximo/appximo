@@ -205,7 +205,8 @@ func unmatchedApp(ss *shutdown.State, version string, nApps int, panel *fleetPan
 // engine setting that exists as a Config field). Keys OUTSIDE this set are
 // process-wide in `fleet serve` and warned loudly below (today that is the
 // process-level infra: RATE_LIMIT_*, DB_MAX_CONNS, GOMAXPROCS, REDIS_URL,
-// SLACK_WEBHOOK_URL — use `fleet run` if an app needs those isolated).
+// SLACK_WEBHOOK_URL and the Telegram alert destination APPXIMO_TELEGRAM_* /
+// APPXIMO_ALERT_* — use `fleet run` if an app needs those isolated).
 var fleetMappedEnv = map[string]bool{
 	"DATABASE_URL": true, "JWT_SECRET": true, "ADMIN_KEY": true,
 	"OBS_DB_PATH": true, "APPXIMO_ENV": true,
