@@ -94,18 +94,25 @@ type XLSXResult struct {
 	ByType map[string]float64 `json:"by_type"`
 }
 
-// Process implements worker.Processor. Non-".created" topics and other resources
-// are acked (logged) so this consumer never blocks the shared queue.
+// Topics implements worker.TopicOwner: this consumer owns exactly its resource's
+// create events, so a scoped Drain never hands it (or destroys) anything else.
+func (p *XLSXProcessor) Topics() worker.TopicSet {
+	return worker.TopicSet{Exact: []string{p.resource + ".created"}}
+}
+
+// Process implements worker.Processor. A topic outside Topics() reaching here is
+// a routing bug and FAILS (it used to be acked — the accepted-and-silent shape,
+// AUTO-1); with topic-scoped claiming it is never claimed in the first place.
 func (p *XLSXProcessor) Process(ctx context.Context, row worker.Row) error {
-	if !strings.HasSuffix(row.Topic, ".created") {
-		return nil // not a create event — ack and move on
+	if row.Topic != p.resource+".created" {
+		return fmt.Errorf("consumers: xlsx consumer owns only %q, got topic %q — refusing to acknowledge", p.resource+".created", row.Topic)
 	}
 	var ev crudEvent
 	if err := json.Unmarshal(row.Payload, &ev); err != nil {
 		return fmt.Errorf("consumers: decode event id=%d: %w", row.ID, err)
 	}
 	if ev.Resource != p.resource || ev.ID == "" {
-		return nil // not our resource — ack
+		return fmt.Errorf("consumers: event id=%d topic %q carries resource %q / id %q — malformed payload, refusing to acknowledge", row.ID, row.Topic, ev.Resource, ev.ID)
 	}
 
 	// 1. Fetch the job (read scope) to get its file_ref + current status. A

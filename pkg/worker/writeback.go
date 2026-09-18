@@ -141,12 +141,18 @@ type crudEvent struct {
 	Action   string `json:"action"`
 }
 
-// Process implements Processor. Non-".created" topics are acked (logged) so the
-// demo never loops or blocks the queue.
+// Topics implements TopicOwner: the demo owns every ".created" event (it PATCHes
+// the created row's status), so a scoped Drain never claims anything else for it.
+func (p *WritebackProcessor) Topics() TopicSet {
+	return TopicSet{Suffixes: []string{".created"}}
+}
+
+// Process implements Processor. A non-".created" topic reaching here is a routing
+// bug and FAILS (it used to be acked — AUTO-1's accepted-and-silent shape); with
+// topic-scoped claiming it is never claimed in the first place.
 func (p *WritebackProcessor) Process(ctx context.Context, row Row) error {
 	if !strings.HasSuffix(row.Topic, ".created") {
-		p.log.Debug().Int64("id", row.ID).Str("topic", row.Topic).Msg("writeback: ignoring non-created event")
-		return nil
+		return fmt.Errorf("worker: writeback demo owns only *.created events, got topic %q — refusing to acknowledge", row.Topic)
 	}
 	var ev crudEvent
 	if err := json.Unmarshal(row.Payload, &ev); err != nil {

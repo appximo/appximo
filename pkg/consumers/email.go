@@ -72,16 +72,23 @@ func (p *EmailProcessor) WithTopic(topic string) *EmailProcessor {
 	return p
 }
 
-// Process implements worker.Processor. A foreign topic is acked (this is safe ONLY
-// when the email worker is the sole consumer of those rows; for a shared outbox
-// with multiple event types, compose consumers behind a Router instead — see
-// Router). A malformed payload, unknown template, or empty recipient is a
-// permanent error: it is returned (the worker retries to maxAttempts then parks
-// the row 'failed', durably recording the bad event) and the SMTP send is never
-// attempted. A send error (transient or 5xx) is returned so the row is retried.
+// Topics implements worker.TopicOwner: the consumer owns exactly its configured
+// email topic, so a scoped Drain never claims (or destroys) any other event.
+func (p *EmailProcessor) Topics() worker.TopicSet {
+	return worker.TopicSet{Exact: []string{p.topic}}
+}
+
+// Process implements worker.Processor. A topic outside Topics() reaching here is
+// a routing bug and FAILS — it used to be acked, which silently destroyed foreign
+// events whenever this was the only consumer of a shared outbox (AUTO-1); with
+// topic-scoped claiming a foreign row is never claimed at all. A malformed
+// payload, unknown template, or empty recipient is a permanent error: it is
+// returned (the worker retries to maxAttempts then parks the row 'failed',
+// durably recording the bad event) and the SMTP send is never attempted. A send
+// error (transient or 5xx) is returned so the row is retried.
 func (p *EmailProcessor) Process(ctx context.Context, row worker.Row) error {
 	if row.Topic != p.topic {
-		return nil // not our event — ack (see the Router caveat above)
+		return fmt.Errorf("consumers: email consumer owns only %q, got topic %q — refusing to acknowledge", p.topic, row.Topic)
 	}
 	var ev emailEvent
 	if err := json.Unmarshal(row.Payload, &ev); err != nil {

@@ -54,8 +54,8 @@ echo "==> starting engine on :$PORT (control plane :9090 unused here)"
 "$WORK/appximo" serve --schema "$SCHEMA" --port "$PORT" >"$WORK/engine.log" 2>&1 &
 ENGINE_PID=$!
 
-echo "==> starting worker (separate process)"
-"$WORK/appximo-worker" >"$WORK/worker.log" 2>&1 &
+echo "==> starting worker (separate process; explicit echo mode — the dev loopback owns only echo.*)"
+APPXIMO_WORKER_MODE=echo "$WORK/appximo-worker" >"$WORK/worker.log" 2>&1 &
 WORKER_PID=$!
 
 echo -n "==> waiting for /health "

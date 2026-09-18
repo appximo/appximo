@@ -2,6 +2,7 @@ package consumers
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -29,7 +30,6 @@ func TestRouter_DispatchesByTopic(t *testing.T) {
 		{Topic: "email.send"},
 		{Topic: "filejobs.created"},
 		{Topic: "filejobs.updated"},
-		{Topic: "something.else"}, // unmatched → acked, no consumer
 	}
 	for _, row := range rows {
 		if err := r.Process(context.Background(), row); err != nil {
@@ -41,6 +41,23 @@ func TestRouter_DispatchesByTopic(t *testing.T) {
 	}
 	if files.n != 2 {
 		t.Fatalf("files got %d, want 2 (both filejobs.* topics)", files.n)
+	}
+
+	// An UNMATCHED topic is an error, never an ack (AUTO-1): the row keeps
+	// retrying and parks 'failed' carrying this message — visible, recoverable.
+	err := r.Process(context.Background(), worker.Row{Topic: "something.else"})
+	if err == nil {
+		t.Fatal("unmatched topic must error, got nil (the old ack-and-destroy trap)")
+	}
+	if !strings.Contains(err.Error(), `"something.else"`) || !strings.Contains(err.Error(), "email.send") {
+		t.Fatalf("the error must name the topic and the registered set, got: %v", err)
+	}
+
+	// The Router declares exactly what it owns, so a scoped Drain never claims
+	// the unmatched topic in the first place.
+	set := r.Topics()
+	if !set.Matches("email.send") || !set.Matches("filejobs.created") || set.Matches("something.else") {
+		t.Fatalf("Topics() ownership wrong: %+v", set)
 	}
 }
 

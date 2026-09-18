@@ -40,6 +40,14 @@ CREATE TABLE IF NOT EXISTS public.outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_outbox_pending
     ON public.outbox (created_at) WHERE state = 'pending';
+-- AUTOMATIZACION-S1: a parked row must carry WHY it failed (a failed state
+-- without its error message is only half-visible), and the failed/sent
+-- populations must be countable without scanning the whole table.
+ALTER TABLE public.outbox ADD COLUMN IF NOT EXISTS last_error TEXT;
+CREATE INDEX IF NOT EXISTS idx_outbox_failed
+    ON public.outbox (created_at) WHERE state = 'failed';
+CREATE INDEX IF NOT EXISTS idx_outbox_sent_at
+    ON public.outbox (sent_at) WHERE state = 'sent';
 `)
 	if err != nil {
 		return fmt.Errorf("outbox: ensure table: %w", err)

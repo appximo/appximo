@@ -101,12 +101,19 @@ func TestEmail_SubjectOverride(t *testing.T) {
 	}
 }
 
-func TestEmail_ForeignTopicAcked(t *testing.T) {
+// TestEmail_ForeignTopicRefused pins the AUTO-1 trap closure: a topic outside
+// Topics() is REFUSED (an error — the row is never acknowledged), where it used
+// to be acked and silently destroyed. With topic-scoped claiming it is never
+// even claimed; this is the defense-in-depth layer.
+func TestEmail_ForeignTopicRefused(t *testing.T) {
 	s := &mockSender{}
 	p := newEmailProc(s)
+	if got := p.Topics(); len(got.Exact) != 1 || got.Exact[0] != p.topic {
+		t.Fatalf("Topics() = %+v, want exactly the configured topic %q", got, p.topic)
+	}
 	row := emailRow(t, 1, "filejobs.created", map[string]any{"id": "x"})
-	if err := p.Process(context.Background(), row); err != nil {
-		t.Fatalf("foreign topic should ack with nil, got %v", err)
+	if err := p.Process(context.Background(), row); err == nil {
+		t.Fatal("foreign topic must be refused with an error, got nil (the old ack-and-destroy trap)")
 	}
 	if s.count() != 0 {
 		t.Fatalf("foreign topic must not send; sends = %d", s.count())

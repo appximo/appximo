@@ -26,6 +26,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -82,6 +83,90 @@ type ProcessorFunc func(ctx context.Context, row Row) error
 // Process implements Processor.
 func (f ProcessorFunc) Process(ctx context.Context, row Row) error { return f(ctx, row) }
 
+// TopicSet declares which outbox topics a Processor owns. Matching is by exact
+// topic, by prefix ("filejobs." matches "filejobs.created"), or by suffix
+// (".created" matches every resource's create event).
+type TopicSet struct {
+	Exact    []string
+	Prefixes []string
+	Suffixes []string
+}
+
+// Empty reports whether the set matches nothing at all.
+func (s TopicSet) Empty() bool {
+	return len(s.Exact) == 0 && len(s.Prefixes) == 0 && len(s.Suffixes) == 0
+}
+
+// Matches reports whether topic belongs to the set.
+func (s TopicSet) Matches(topic string) bool {
+	for _, e := range s.Exact {
+		if topic == e {
+			return true
+		}
+	}
+	for _, p := range s.Prefixes {
+		if strings.HasPrefix(topic, p) {
+			return true
+		}
+	}
+	for _, suf := range s.Suffixes {
+		if strings.HasSuffix(topic, suf) {
+			return true
+		}
+	}
+	return false
+}
+
+// Merge returns the union of s and other.
+func (s TopicSet) Merge(other TopicSet) TopicSet {
+	return TopicSet{
+		Exact:    append(append([]string(nil), s.Exact...), other.Exact...),
+		Prefixes: append(append([]string(nil), s.Prefixes...), other.Prefixes...),
+		Suffixes: append(append([]string(nil), s.Suffixes...), other.Suffixes...),
+	}
+}
+
+// likePatterns renders the set as SQL LIKE patterns (prefix% / %suffix), with
+// LIKE metacharacters in the declared fragments escaped so a literal "_" or "%"
+// in a topic never widens the claim.
+func (s TopicSet) likePatterns() []string {
+	esc := func(v string) string {
+		v = strings.ReplaceAll(v, `\`, `\\`)
+		v = strings.ReplaceAll(v, `%`, `\%`)
+		return strings.ReplaceAll(v, `_`, `\_`)
+	}
+	out := make([]string, 0, len(s.Prefixes)+len(s.Suffixes))
+	for _, p := range s.Prefixes {
+		out = append(out, esc(p)+"%")
+	}
+	for _, suf := range s.Suffixes {
+		out = append(out, "%"+esc(suf))
+	}
+	return out
+}
+
+// TopicOwner is implemented by a Processor that knows exactly which topics it
+// consumes (the Router, the echo loopback, the shipped consumers all do).
+//
+// THE TRAP THIS KILLS (AUTO-1, AUTOMATIZACION-S1): Drain used to claim EVERY
+// pending row regardless of topic, and the default echo consumer acknowledged
+// whatever it was handed — so an operator who started the stock worker "to see"
+// marked business events of OTHER consumers as sent, silently destroying them
+// (34 real factura.emitir rows were one echo-run away from vanishing with a
+// success face). When the Processor implements TopicOwner, the claim query is
+// SCOPED to the declared topics: a row whose topic has no consumer here is
+// never locked, never acked and never burns attempts — it stays 'pending',
+// where the outbox observability (oldest-pending-age gauge, /admin/outbox, the
+// alerter) makes it loudly visible instead of silently gone.
+//
+// A Processor that does NOT implement TopicOwner keeps the historical
+// claim-everything behavior — that is only correct when it truly is the FULL
+// set of consumers for this outbox (a custom Router composed in a consumer
+// binary). The shipped worker always drains through a TopicOwner.
+type TopicOwner interface {
+	Topics() TopicSet
+}
+
 // DrainResult summarizes one Drain (one transaction / one batch).
 type DrainResult struct {
 	Processed int // rows marked 'sent' this batch
@@ -121,13 +206,40 @@ func Drain(ctx context.Context, db Beginner, proc Processor, batchSize, maxAttem
 	// idx_outbox_pending and excludes rows already parked as 'failed' (which also
 	// carry sent_at IS NULL). sent_at IS NULL is the durable "not yet delivered"
 	// barrier — re-asserted for clarity even though 'pending' implies it.
-	rows, err := tx.Query(ctx, `
+	//
+	// When proc declares its topics (TopicOwner), the claim is SCOPED to them:
+	// foreign topics are left untouched — pending, visible, retrievable — instead
+	// of being claimed by a consumer that has nothing legitimate to do with them.
+	query := `
 		SELECT id, tenant_id, topic, payload, attempts
 		FROM public.outbox
 		WHERE state = 'pending' AND sent_at IS NULL
 		ORDER BY created_at
 		FOR UPDATE SKIP LOCKED
-		LIMIT $1`, batchSize)
+		LIMIT $1`
+	args := []any{batchSize}
+	if owner, ok := proc.(TopicOwner); ok {
+		set := owner.Topics()
+		if set.Empty() {
+			// A consumer that owns no topics claims nothing. Commit the empty tx
+			// (cheaper than rollback bookkeeping) and report an empty batch.
+			return res, tx.Commit(ctx)
+		}
+		query = `
+		SELECT id, tenant_id, topic, payload, attempts
+		FROM public.outbox
+		WHERE state = 'pending' AND sent_at IS NULL
+		  AND (topic = ANY($2) OR topic LIKE ANY($3))
+		ORDER BY created_at
+		FOR UPDATE SKIP LOCKED
+		LIMIT $1`
+		exact := set.Exact
+		if exact == nil {
+			exact = []string{}
+		}
+		args = append(args, exact, set.likePatterns())
+	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return res, fmt.Errorf("worker: claim pending: %w", err)
 	}
@@ -164,9 +276,12 @@ func Drain(ctx context.Context, db Beginner, proc Processor, batchSize, maxAttem
 			if r.Attempts+1 >= maxAttempts {
 				state = "failed"
 			}
+			// Record the error WITH the row (AUTO-3): a parked 'failed' whose cause
+			// lives only in a rotated log file is invisible; last_error is what
+			// /admin/outbox and the operator's SELECT surface.
 			if _, err := tx.Exec(ctx,
-				`UPDATE public.outbox SET attempts = attempts + 1, state = $2 WHERE id = $1`,
-				r.ID, state,
+				`UPDATE public.outbox SET attempts = attempts + 1, state = $2, last_error = $3 WHERE id = $1`,
+				r.ID, state, truncateErr(perr),
 			); err != nil {
 				return res, fmt.Errorf("worker: record failure id=%d: %w", r.ID, err)
 			}
@@ -185,7 +300,7 @@ func Drain(ctx context.Context, db Beginner, proc Processor, batchSize, maxAttem
 		// Success: sent_at is the delivery barrier. Committing it is what makes this
 		// row invisible to every future claim.
 		if _, err := tx.Exec(ctx,
-			`UPDATE public.outbox SET sent_at = now(), state = 'sent', attempts = attempts + 1 WHERE id = $1`,
+			`UPDATE public.outbox SET sent_at = now(), state = 'sent', attempts = attempts + 1, last_error = NULL WHERE id = $1`,
 			r.ID,
 		); err != nil {
 			return res, fmt.Errorf("worker: mark sent id=%d: %w", r.ID, err)
@@ -215,6 +330,10 @@ type Worker struct {
 	proc    Processor
 	cfg     Config
 	log     zerolog.Logger
+
+	// lastForeign rate-limits the foreign-pending warning (reportForeign) to one
+	// line a minute. Touched only from the single consume-loop goroutine.
+	lastForeign time.Time
 }
 
 // New builds a Worker, applying defaults for any zero Config field.
@@ -371,8 +490,83 @@ func (w *Worker) runListener(ctx context.Context, onReady func()) error {
 				}
 				return err
 			}
+			// After the owned topics are drained, say out loud what was left
+			// behind on purpose (at most once a minute).
+			if owner, ok := w.proc.(TopicOwner); ok {
+				w.reportForeign(ctx, drainConn, owner.Topics())
+			}
 		}
 	}
+}
+
+// truncateErr renders err for the outbox last_error column, bounded so a huge
+// wrapped error (a whole response body, say) never bloats the row.
+func truncateErr(err error) string {
+	const cap = 1000
+	s := err.Error()
+	if len(s) > cap {
+		return s[:cap] + "…"
+	}
+	return s
+}
+
+// reportForeign makes unclaimable rows LOUD (AUTO-1's second half): when this
+// worker's Processor owns a topic set, pending rows OUTSIDE it are deliberately
+// never claimed — but a worker that silently ignores them would just move the
+// silence one layer up. So once a minute the worker names them: how many, which
+// topics, how old the oldest is, and what to do about it.
+func (w *Worker) reportForeign(ctx context.Context, db Beginner, set TopicSet) {
+	if time.Since(w.lastForeign) < time.Minute {
+		return
+	}
+	w.lastForeign = time.Now()
+
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return // best-effort: the next poll retries
+	}
+	defer tx.Rollback(context.Background()) //nolint:errcheck
+	rows, err := tx.Query(ctx, `
+		SELECT topic, count(*), min(created_at)
+		FROM public.outbox
+		WHERE state = 'pending' AND sent_at IS NULL
+		GROUP BY topic
+		ORDER BY min(created_at)
+		LIMIT 50`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	var (
+		topics []string
+		total  int64
+		oldest time.Time
+	)
+	for rows.Next() {
+		var topic string
+		var n int64
+		var min time.Time
+		if err := rows.Scan(&topic, &n, &min); err != nil {
+			return
+		}
+		if set.Matches(topic) {
+			continue // ours; the drain loop handles it
+		}
+		topics = append(topics, fmt.Sprintf("%s(%d)", topic, n))
+		total += n
+		if oldest.IsZero() || min.Before(oldest) {
+			oldest = min
+		}
+	}
+	if total == 0 {
+		return
+	}
+	w.log.Warn().
+		Int64("pending", total).
+		Str("oldest", oldest.UTC().Format(time.RFC3339)).
+		Str("topics", strings.Join(topics, ", ")).
+		Msg("worker: outbox holds pending rows in topics this worker has NO consumer for — they will NOT be claimed, acked or retried by this process; run a worker with the right consumer (they stay visible in /admin/outbox and the appximo_outbox_oldest_pending_age_seconds metric)")
 }
 
 // drainAll repeatedly Drains until a batch comes back not-full — i.e. the queue is
