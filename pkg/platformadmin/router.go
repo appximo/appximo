@@ -138,6 +138,13 @@ func (s *Service) Register(r chi.Router, obs ObsHandler, adminKey string) {
 	// gated by the same super-admin auth as the deploy, never public.
 	r.With(s.requirePlatform).Post("/admin/engine/schema", s.handleEngineSchema)
 
+	// --- automation: outbox queue health + workflows (AUTOMATIZACION-S1) ---
+	// The queue's state (oldest-pending age, failed rows WITH last_error, per-
+	// topic backlog, breaker states) — process-level operator surface, so
+	// platform token or admin key, never a tenant admin.
+	r.With(s.requirePlatform).Get("/admin/outbox", s.handleOutbox)
+	r.With(s.requirePlatform).Get("/admin/workflows", s.handleWorkflows)
+
 	// --- observability (platform → any tenant; tenant admin → its own) ---
 	r.Get("/admin/observability/tenants/{id}", s.observabilityHandler(obs))
 

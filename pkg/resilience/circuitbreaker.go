@@ -76,6 +76,13 @@ func NewQueryBreakerWith(name string, isFailure func(error) bool) *gobreaker.Cir
 			return c.Requests >= 10 &&
 				float64(c.TotalFailures)/float64(c.Requests) >= 0.6
 		},
+		// A breaker that rejects every write for 8 s WITHOUT saying so gets
+		// diagnosed as the bug it is protecting against (AUTO-4 — it happened
+		// with the memory guard's 503s before they were named). Every transition
+		// is a structured log line AND a state gauge (appximo_breaker_state via
+		// BreakerCollector), so "the 503s started/stopped" has a timestamped,
+		// scrapeable answer.
+		OnStateChange: recordStateChange,
 	}
 	if isFailure != nil {
 		st.IsSuccessful = func(err error) bool { return err == nil || !isFailure(err) }

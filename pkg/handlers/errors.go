@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/sony/gobreaker"
 
 	"github.com/appximo/appximo/pkg/db"
 )
@@ -89,10 +92,21 @@ func ClassifyWriteError(err error) WriteErrorVerdict {
 	case db.IsBadInput(err):
 		return WriteErrorVerdict{Kind: WriteErrBadInput}
 	case db.IsUnavailable(err):
+		// A deliberate breaker rejection must SAY it is the breaker (AUTO-4):
+		// an unnamed 503 gets diagnosed as the outage it is protecting against.
+		// The message rides Verdict.Message so all renderers say the same thing.
+		if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
+			return WriteErrorVerdict{Kind: WriteErrUnavailable, Message: BreakerOpenMessage}
+		}
 		return WriteErrorVerdict{Kind: WriteErrUnavailable}
 	}
 	return WriteErrorVerdict{}
 }
+
+// BreakerOpenMessage is the one 503 body every renderer uses when the rejection
+// came from the OPEN circuit breaker rather than a live database error — so the
+// operator can tell "the breaker is shedding" from "the database just failed".
+const BreakerOpenMessage = "service unavailable: circuit breaker open (the database was not serving; the breaker re-probes within 8s — see appximo_breaker_state on /metrics)"
 
 // FileRefMessage is the one message every surface uses for a `file` field whose
 // value references no file of the tenant (REST 422, batch 422, GraphQL,
@@ -147,7 +161,13 @@ func WriteDBError(w http.ResponseWriter, err error) {
 	case WriteErrUnavailable:
 		// Tell the client this is transient and roughly when to come back. A 503
 		// WITHOUT Retry-After leaves an SDK guessing (most default to an immediate
-		// retry, which is exactly what a saturated database does not need).
+		// retry, which is exactly what a saturated database does not need). When
+		// the rejection is the OPEN breaker, the body and Retry-After say so.
+		if v.Message != "" {
+			w.Header().Set("Retry-After", "8")
+			writeJSONError(w, http.StatusServiceUnavailable, v.Message)
+			return
+		}
 		w.Header().Set("Retry-After", "1")
 		writeJSONError(w, http.StatusServiceUnavailable, "service unavailable")
 	default:

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/appximo/appximo/pkg/schema"
@@ -31,6 +32,26 @@ const maxWebhookRespBytes = 64 << 10 // 64 KB
 type WebhookDispatcher struct {
 	client       *http.Client
 	enforceHTTPS bool
+
+	// deadLetter, when set, receives every dispatch that EXHAUSTED its retries
+	// (AUTO-6). Before it existed, an exhausted webhook vanished with one log
+	// line: for the receiving system (an ERP, an accountant) the event simply
+	// never happened, and nobody on this side knew. The engine wires this to an
+	// outbox enqueue with topic "webhook.dead", so the loss becomes a durable,
+	// visible row: /admin/outbox lists it, the pending-age metric and alert name
+	// it, and the operator can re-fire it by hand (the payload carries the URL,
+	// the event and the original body). See docs/PRODUCTION.md §webhooks.
+	deadLetter func(ctx context.Context, tenantID string, deadEvent map[string]any)
+}
+
+// WebhookDeadTotal counts dispatches that exhausted their retries (exported for
+// /metrics via a CounterFunc). Incremented whether or not a dead-letter sink is
+// configured.
+var WebhookDeadTotal atomic.Int64
+
+// SetDeadLetter installs the exhausted-dispatch sink. Call before serving.
+func (d *WebhookDispatcher) SetDeadLetter(fn func(ctx context.Context, tenantID string, deadEvent map[string]any)) {
+	d.deadLetter = fn
 }
 
 // NewWebhookDispatcher creates a production dispatcher with:
@@ -114,6 +135,7 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, hook *schema.HookConfi
 	sig := "sha256=" + signHMAC(secret, body)
 
 	const maxAttempts = 4
+	var lastErr string
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			delay := time.Duration(1<<uint(attempt-1)) * time.Second // 1s, 2s, 4s
@@ -135,6 +157,7 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, hook *schema.HookConfi
 
 		resp, err := d.client.Do(req)
 		if err != nil {
+			lastErr = err.Error()
 			zlog.Warn().Str("tenant_id", tenantID).Int("attempt", attempt+1).Int("max_attempts", maxAttempts).Err(err).Msg("webhook: attempt failed")
 			continue
 		}
@@ -146,9 +169,64 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, hook *schema.HookConfi
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return
 		}
+		lastErr = fmt.Sprintf("endpoint answered %d", resp.StatusCode)
 		zlog.Warn().Str("tenant_id", tenantID).Int("attempt", attempt+1).Int("max_attempts", maxAttempts).Int("status", resp.StatusCode).Msg("webhook: non-2xx")
 	}
-	zlog.Error().Str("tenant_id", tenantID).Str("url", hook.URL).Msg("webhook: all attempts failed")
+
+	// Exhausted (AUTO-6): count it, log it, and — when a sink is wired — park a
+	// durable dead-letter row instead of letting the delivery vanish.
+	WebhookDeadTotal.Add(1)
+	zlog.Error().Str("tenant_id", tenantID).Str("url", hook.URL).Str("last_error", lastErr).
+		Msg("webhook: all attempts exhausted — dead-lettered to the outbox as topic webhook.dead (or lost if no dead-letter sink is wired)")
+	if d.deadLetter != nil {
+		// Fresh context: the request ctx may already be cancelled, and the
+		// dead-letter write must not die with it.
+		dlCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		d.deadLetter(dlCtx, tenantID, map[string]any{
+			"url":        hook.URL,
+			"event":      event,
+			"payload":    payload,
+			"error":      lastErr,
+			"attempts":   maxAttempts,
+			"exhausted":  time.Now().UTC().Format(time.RFC3339),
+			"redeliver":  "POST the payload to the url with headers X-Appximo-Event and X-Appximo-Signature (sha256 HMAC of the body with the hook's secret), or fix the endpoint and re-enqueue",
+			"secret_env": hook.HMACSecretEnv,
+		})
+	}
+}
+
+// DispatchOnce sends ONE signed POST and returns the outcome — the synchronous
+// primitive the workflow executor's `webhook` step uses (workflow retries happen
+// at the RUN level through the outbox, so the fire-and-forget retry loop of
+// Dispatch would double-retry). Same client, same SSRF guard, same HTTPS-only
+// rule, same signature scheme as Dispatch.
+func (d *WebhookDispatcher) DispatchOnce(ctx context.Context, url, secretEnv, event string, payload any) error {
+	if d.enforceHTTPS && !strings.HasPrefix(url, "https://") {
+		return fmt.Errorf("webhook: only HTTPS endpoints are allowed, got %q", url)
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("webhook: marshal payload: %w", err)
+	}
+	secret := os.Getenv(secretEnv)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("webhook: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Appximo-Event", event)
+	req.Header.Set("X-Appximo-Signature", "sha256="+signHMAC(secret, body))
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("webhook: %w", err)
+	}
+	io.Copy(io.Discard, io.LimitReader(resp.Body, maxWebhookRespBytes)) //nolint:errcheck
+	resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("webhook: endpoint answered %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func signHMAC(secret string, body []byte) string {

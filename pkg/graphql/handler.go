@@ -388,6 +388,10 @@ func safeDBErr(ctx context.Context, err error) error {
 	case pkghandlers.WriteErrBadInput:
 		return fmt.Errorf("invalid request")
 	case pkghandlers.WriteErrUnavailable:
+		// The breaker names itself (AUTO-4): same message as the REST renderer.
+		if v.Message != "" {
+			return fmt.Errorf("%s", v.Message)
+		}
 		return fmt.Errorf("service unavailable")
 	default:
 		// WriteErrUnknownColumn deliberately lands here: the GraphQL input types
