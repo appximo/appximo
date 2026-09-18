@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789684642907,
+  "lastUpdate": 1789707252298,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -5544,6 +5544,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36515876 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "80f0daa7b84d1fcdc571ec3f9499c7a72865f02c",
+          "message": "docs(backlog): OPS-53 — the lab ships install.sh but not the companions (found provoking the worker audit check on a real lab box)\n\nAUTOMATIZACION-S1's lab verification installed the worker on a real Ubuntu box\nthrough install.sh (auto-detected from the schema, unit active, verify_installed\ngreen, the workflow ran end to end) and then found /opt/<app>/scripts empty:\ntools/lab ships only install.sh + schema + seed, so fleet-audit had to be\ncopied by hand to provoke its new ✗. Registered with the fix path\n(provision.go ships scripts/*.sh). (AUTOMATIZACION-S1)\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-18T04:53:05Z",
+          "tree_id": "0cafc58b5bdec1b90cd4ce2453d92510020cbfd6",
+          "url": "https://github.com/appximo/appximo/commit/80f0daa7b84d1fcdc571ec3f9499c7a72865f02c"
+        },
+        "date": 1789707250569,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 4768,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "472167 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 4768,
+            "unit": "ns/op",
+            "extra": "472167 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "472167 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "472167 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 50.69,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "47564030 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 50.69,
+            "unit": "ns/op",
+            "extra": "47564030 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "47564030 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "47564030 times\n4 procs"
           }
         ]
       }
