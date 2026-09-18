@@ -1,6 +1,6 @@
 {
  "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo).",
- "actualizado": "2026-09-18 (AUTOMATIZACION-S1)",
+ "actualizado": "2026-09-18 (ALERTAS-TELEGRAM-S1)",
  "publicacion": {
   "estado": "pausada_deliberada",
   "desde": "2026-08-29",
@@ -29,22 +29,6 @@
    "depende_de": [],
    "bloquea": [],
    "origen": "RESILIENCIA-S1 → DEPLOY-FLOTA-S1",
-   "estado": "abierto"
-  },
-  {
-   "id": "OPS-47",
-   "titulo": "Ningún destino de alertas en la flota (SLACK_WEBHOOK_URL vacío)",
-   "frente": "flota",
-   "que_es": "Las tres apps (58 ×2 y el panel) alertan a una línea de journal que nadie lee: error nuevo, SLO quemándose, backup fallido/viejo, disco bajo — todo mudo.",
-   "por_que_importa": "Todo lo construido para avisar ANTES de que duela no avisa a nadie; el primer síntoma vuelve a ser un cliente o un demo caído.",
-   "que_lo_destraba": "Miguel crea un webhook que él lea (Slack/Discord) → una línea SLACK_WEBHOOK_URL= por env + restart; se prueba tocando last-backup.status a failed.",
-   "costo": "chico",
-   "dano": "alto",
-   "prioridad": "P1",
-   "decide": "miguel",
-   "depende_de": [],
-   "bloquea": [],
-   "origen": "DEPLOY-FLOTA-S1",
    "estado": "abierto"
   },
   {
@@ -1189,7 +1173,7 @@
    "id": "OPS-52",
    "titulo": "Los cabos del propio centro de mando que solo Miguel cierra: dominio, MFA, alertas",
    "frente": "flota",
-   "que_es": "El panel vive en sslip.io porque el DNS de appximo.com está en Cloudflare sin token en el 105 (deliberado); su login no pide TOTP; su audit deja un ✗ (SLACK_WEBHOOK_URL).",
+   "que_es": "El panel vive en sslip.io porque el DNS de appximo.com está en Cloudflare sin token en el 105 (deliberado); su login no pide TOTP; su audit deja un ✗ (el dominio y MFA).",
    "por_que_importa": "El panel es el orquestador con llaves ssh a las cajas; merece su dominio, su segundo factor y su canal de alertas.",
    "que_lo_destraba": "Miguel: A record centro.appximo.com → 159.203.57.144 + re-correr install.sh --domain en la caja; SLACK_WEBHOOK_URL en su env; opcional TOTP.",
    "costo": "chico",
@@ -1382,6 +1366,22 @@
    "depende_de": [],
    "bloquea": [],
    "origen": "AUTOMATIZACION-S1 (verificación del worker en caja real)",
+   "estado": "abierto"
+  },
+  {
+   "id": "OPS-54",
+   "titulo": "pkg/platformadmin no es idempotente dentro de un mismo proceso (falla con -count=2) y flaquea bajo carga paralela",
+   "frente": "motor",
+   "que_es": "Los tests de integración de platformadmin fallan si corren dos veces en el mismo proceso (go test -count=2, también en el commit base) y fallaron una vez en la lane completa corriendo en paralelo con la suite de browser; solos pasan siempre.",
+   "por_que_importa": "Una lane completa que flaquea por estado compartido entrena a leer FAIL como ruido — el día que el FAIL sea real, se ignora.",
+   "que_lo_destraba": "Una sesión de motor: aislar el estado (schema/BD por corrida o TRUNCATE en setup) y dejar -count=2 verde.",
+   "costo": "chico",
+   "dano": "medio",
+   "prioridad": "P3",
+   "decide": "agente",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "ALERTAS-TELEGRAM-S1 (2026-09-18): FAIL en la lane bajo carga, reproducido con -count=2 en base y HEAD",
    "estado": "abierto"
   }
  ]

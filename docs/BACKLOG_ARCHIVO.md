@@ -418,7 +418,23 @@ refreshed).
 ---
 
 
-## DONE in AUTOMATIZACION-S1 (2026-09-18) — the automation subsystem's traps closed, the worker published, the `workflows` executor built (ADR-031)
+## DONE in ALERTAS-TELEGRAM-S1 (2026-09-18) — the alerts reach a phone: Telegram native in the alerter, configured and provoked on the whole fleet
+
+The thesis: everything built to warn BEFORE it hurts (SLO burn, first-occurrence
+errors, backup/disk watch, the outbox observer) screamed into a journal nobody
+reads — the only sink was Slack and no box had a webhook (OPS-47).
+
+| Item | What shipped | Verified by |
+|---|---|---|
+| **OPS-47** (no alert destination in the fleet) | Telegram NATIVE in the alerter (`pkg/observability/telegram.go`, one Bot API POST, no new dependency): multi-destination (Telegram and/or Slack — Slack's English one-liner byte-unchanged), Spanish phone-first messages per kind (what happened · which app · WHAT TO DO · severity · panel deep link), fail-fast both ways (malformed token/chat id or half a pair refuses to boot naming the variable; NO destination boots with a LOUD banner), delivery out-of-band and lossless (journal-first `alert emitted`, per-sink queue + backoff honoring `retry_after`, `alert delivered`/`FAILED` named), the existing noise brakes unchanged; `fleet-audit.sh` criterion is now "an alert destination, ANY channel", with Telegram VERIFIED live (read-only getMe+getChat); `backup.sh` posts its failure to the same chat in Spanish; configured on the THREE apps (tiendita, petfriendly, centro) with backup, rollback ida-y-vuelta re-verified from outside per app, and the golden dump md5 intact | Provoked FOR REAL and delivered to the phone (journal `alert delivered sink=telegram attempt=1` each): the 48.3-day `factura.emitir` outbox alert (36 pending) from tiendita; backup-FAILED from petfriendly; disk-low from centro; a new-error group (ephemeral tenant + RAISE trigger, deleted after, 0 orphans) AND an SLO-burn critical from petfriendly. `evidencia/ALERTAS-TELEGRAM-S1/` |
+
+**A-70 note (the voice plan):** this channel is the OUTBOUND half the voice
+plan's step 2 ("mandame el resumen de hoy") was missing — the summary composition
+is still open, but the delivery path to Miguel's phone now exists and is
+verified. The bot (`@appximodev_bot`) is Appximo's own, NOT rt-centinela's
+(that one talks to a client's group).
+
+
 
 The thesis: the outbox was the engine's best-built, worst-delivered piece — and
 what it had were not gaps but TRAPS. Traps first, then shipping, then the

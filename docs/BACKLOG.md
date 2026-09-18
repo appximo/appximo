@@ -1352,20 +1352,6 @@ would close it better, and is Miguel's call.
   writes `APPXIMO_CONTROL_HOST=127.0.0.1` and, behind Caddy, `APPXIMO_HOST=
   127.0.0.1`; `fleet-audit.sh` flags a control port that listens on `*`.
 
-### OPS-47 — Neither app on the 58 has an alert destination (`SLACK_WEBHOOK_URL` unset): every alert is "recorded only"
-
-- **Origin:** DEPLOY-FLOTA-S1 (2026-08-31), before provoking layer 5 on
-  vetapp: `grep SLACK_WEBHOOK_URL /etc/*/*.env` is empty on both apps. The
-  first-occurrence error alert, the SLO burn alert, the failed/stale backup
-  alert and the low-disk alert all end in a journal line nobody reads
-  (`alert (no webhook configured — recorded only)`); `backup.sh`'s own
-  failure post has nowhere to go either.
-- **Impact:** Medium. Everything RESILIENCIA/CAOS/OBSERVABILIDAD built to
-  say "before it is too late" is silent on the fleet until a destination
-  exists. Needs Miguel (a webhook he owns) — listed under decisions.
-- **Ready:** `SLACK_WEBHOOK_URL=` in both env files + a restart; one provoked
-  alert (touch `last-backup.status` to `failed …`) arriving in the channel;
-  `fleet-audit.sh` reports `NO alert destination` as a ✗ (added with this item).
 
 ### OPS-50 — The backup SET does not carry what the env references OUTSIDE it: a static mount (`APPXIMO_STATIC_DIR`) makes a restored box refuse to boot
 
@@ -1419,10 +1405,11 @@ would close it better, and is Miguel's call.
   Let's Encrypt certificate) because appximo.com's DNS lives in Cloudflare
   and no token for it exists on the 105 — deliberately. Its login is the
   tenant's password login (no TOTP on the panel's SPA; `/admin` has it). Its
-  `fleet-audit.sh` leaves ONE ✗: `SLACK_WEBHOOK_URL` (OPS-47's twin).
+  `fleet-audit.sh` is green on alerts since ALERTAS-TELEGRAM-S1 (Telegram
+  verified live); the ✗ that remain are the domain/MFA halves.
 - **Ready:** (a) an A record `centro.appximo.com → 159.203.57.144` (DNS only)
   and `install.sh --app=centro --domain=centro.appximo.com …` re-run on the
-  box (secrets/data kept); (b) `SLACK_WEBHOOK_URL` in `/etc/centro/centro.env`;
+  box (secrets/data kept); (b) ~~an alert destination~~ DONE (ALERTAS-TELEGRAM-S1: Telegram verified);
   (c) optional: a super-admin with TOTP for `/admin` and the panel's SPA
   learning the `mfa_required` branch. Also: the panel holds ssh keys to the
   boxes it operates (inherent to an orchestrator) — its own box is hardened
@@ -1439,6 +1426,18 @@ to be copied up by hand). The lab promises the EXACT customer path; without
 the companions its operational half (backup/audit/deploy) is never exercised
 there. **Ready:** provision.go ships `scripts/*.sh` next to install.sh (or a
 tarball of scripts/), and the smoke runs fleet-audit once.
+
+### OPS-54 — `pkg/platformadmin` integration tests are not in-process idempotent (`-count=2` fails) and flaked once under parallel load
+
+- **Origin:** ALERTAS-TELEGRAM-S1 (2026-09-18). The full lane, running in
+  parallel with the browser suite, failed `pkg/platformadmin` once; a solo
+  re-run passed, and `go test -count=2` fails identically on the BASE commit
+  (shared DB state between in-process runs) — pre-existing, not that
+  session's change.
+- **Impact:** low-medium. A lane that flakes on shared state trains everyone
+  to read FAIL as noise; the day the FAIL is real it gets ignored.
+- **Ready:** isolate the state (schema/DB per run or TRUNCATE in setup) and
+  leave `-count=2` green.
 
 ### AUTO — The automation front (consolidated 2026-09-17, CENTRO-MANDO-S2)
 
@@ -1503,8 +1502,8 @@ pattern as the RBAC and relations panels), plus a runs view reading
 
 The old "Requires a decision from Miguel" table is now these `DEC-*` items, so
 the panel and the structured register can point at them; resolved rows moved to
-[BACKLOG_ARCHIVO.md](BACKLOG_ARCHIVO.md). OPS-47 (alert destination) and
-MIG-FRONT (the migration front) keep their own IDs above.
+[BACKLOG_ARCHIVO.md](BACKLOG_ARCHIVO.md). MIG-FRONT (the migration front)
+keeps its own ID above; OPS-47 (alert destination) is DONE — ALERTAS-TELEGRAM-S1.
 
 ### DEC-1 — An off-box destination for the 58's backups (the one catastrophic single copy)
 
