@@ -53,11 +53,21 @@ func (e *RetryAfterError) RetryAfter() time.Duration { return e.After }
 // egress client (blocks loopback/private/link-local, refuses redirects), the
 // same as every other outbound call the engine makes.
 type Client struct {
-	token   string
-	chatID  string
-	http    *http.Client
+	token  string
+	chatID string
+	http   *http.Client
+	// poll is a SEPARATE client for getUpdates: a long-poll holds the connection
+	// up to the server-side timeout (tens of seconds) before headers arrive, so
+	// it needs a far longer ResponseHeaderTimeout/Timeout than a send. Using the
+	// 15s send client here made every idle poll time out and retry (VOZ-ESCALON1
+	// field fix). Per-call context still bounds it.
+	poll    *http.Client
 	apiBase string // overridable in tests; default https://api.telegram.org
 }
+
+// pollClientTimeout must exceed the largest getUpdates long-poll (the receiver
+// uses 45s) with margin; the per-request context is the tighter real bound.
+const pollClientTimeout = 70 * time.Second
 
 // New validates the token/chat SHAPE and returns a Client. The values are never
 // echoed in the error (the token is a credential).
@@ -72,6 +82,7 @@ func New(token, chatID string) (*Client, error) {
 		token:   token,
 		chatID:  chatID,
 		http:    extensions.NewSSRFSafeClient(15 * time.Second),
+		poll:    extensions.NewSSRFSafeClient(pollClientTimeout),
 		apiBase: "https://api.telegram.org",
 	}, nil
 }
@@ -81,7 +92,7 @@ func (c *Client) ChatID() string { return c.chatID }
 
 // SetHTTPClient / SetAPIBase are test seams (127.0.0.1 fake API is rejected by
 // the production SSRF client).
-func (c *Client) SetHTTPClient(h *http.Client) { c.http = h }
+func (c *Client) SetHTTPClient(h *http.Client) { c.http = h; c.poll = h }
 func (c *Client) SetAPIBase(b string)          { c.apiBase = b }
 
 // Redact scrubs the bot token from any string that might reach a log or an
@@ -161,7 +172,7 @@ func (c *Client) GetUpdates(ctx context.Context, offset int64, timeout int) ([]U
 	if offset > 0 {
 		payload["offset"] = offset
 	}
-	if err := c.call(ctx, "getUpdates", payload, &out); err != nil {
+	if err := c.callWith(ctx, c.poll, "getUpdates", payload, &out); err != nil {
 		return nil, err
 	}
 	return out.Result, nil
@@ -188,6 +199,11 @@ func (c *Client) DeleteWebhook(ctx context.Context, drop bool) error {
 // the API's own retry_after; every other non-ok is an error with the API
 // description and NO token.
 func (c *Client) call(ctx context.Context, method string, payload map[string]any, out any) error {
+	return c.callWith(ctx, c.http, method, payload, out)
+}
+
+// callWith is call over an explicit client (getUpdates needs the long-poll one).
+func (c *Client) callWith(ctx context.Context, hc *http.Client, method string, payload map[string]any, out any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("telegram %s marshal: %w", method, err)
@@ -197,7 +213,7 @@ func (c *Client) call(ctx context.Context, method string, payload map[string]any
 		return fmt.Errorf("telegram %s request: %s", method, c.Redact(err.Error()))
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return fmt.Errorf("telegram %s send: %s", method, c.Redact(err.Error()))
 	}
