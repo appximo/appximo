@@ -21,7 +21,8 @@
     "rbac": { "$ref": "#/$defs/rbac" },
     "workflows": {
       "type": "object",
-      "description": "Reserved (parsed for forward-compat; no executor runs it).",
+      "description": "Declarative trigger→steps pipelines, executed by appximo-worker (event triggers consume the resource's outbox events; cron triggers run on a leader-elected scheduler). ADR-031.",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
       "additionalProperties": { "$ref": "#/$defs/workflow" }
     }
   },
@@ -354,32 +355,36 @@
     "workflow": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["trigger", "steps"],
       "properties": {
         "trigger": {
           "type": "object",
           "additionalProperties": false,
+          "required": ["type"],
           "properties": {
-            "type": { "type": "string" },
-            "event": { "type": "string" },
+            "type": { "enum": ["event", "cron"] },
+            "event": { "enum": ["create", "update", "delete"] },
             "resource": { "type": "string" },
             "cron": { "type": "string" },
-            "path": { "type": "string" }
+            "timezone": { "type": "string" }
           }
         },
         "steps": {
           "type": "array",
+          "minItems": 1,
           "items": {
             "type": "object",
             "additionalProperties": false,
+            "required": ["name", "type"],
             "properties": {
-              "name": { "type": "string" },
-              "type": { "type": "string" },
-              "ref": { "type": "string" },
-              "config": true,
-              "next": { "type": "string" }
+              "name": { "type": "string", "minLength": 1 },
+              "type": { "enum": ["condition", "update", "create", "webhook", "enqueue"] },
+              "config": true
             }
           }
-        }
+        },
+        "overlap": { "enum": ["skip", "allow"] },
+        "role": { "type": "string" }
       }
     }
   }

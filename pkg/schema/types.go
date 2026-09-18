@@ -625,32 +625,62 @@ type Condition struct {
 	Val   string `json:"val"` // may reference session vars like "$user_id"
 }
 
-// ── Workflows (Phase 2, ADR-012) ────────────────────────────────────────────
-// These structs only RESERVE the schema shape for the multi-step orchestration
-// engine. There is no executor yet; the validator ignores unknown fields, so a
-// schema that declares workflows loads today and stays valid when the engine
-// ships. Do not build the executor here.
+// ── Workflows (executor: AUTOMATIZACION-S1, ADR-031; formerly reserved by the
+// internal ADR-012) ──────────────────────────────────────────────────────────
+// A workflow is a declarative trigger→steps pipeline. It EXECUTES in
+// appximo-worker (event triggers consume the resource's outbox events; cron
+// triggers run on a leader-elected scheduler — pg_try_advisory_lock, no extra
+// infrastructure). Steps run SEQUENTIALLY; a `condition` step that evaluates
+// false stops the run (recorded, not an error). Expressions use expr-lang/expr
+// (sandboxed, non-Turing-complete, terminating — never JavaScript). The schema
+// is the single source of truth (Studio edits it; there is no second store to
+// diverge from). Validation is semantic and load-time: ValidateWorkflows
+// compiles every cron spec and every expression, so a broken workflow can never
+// deploy — the empty-promise era (parsed, validated clean, executed nothing)
+// ended with ADR-031.
 
 // WorkflowSchema is one named workflow: a trigger plus an ordered list of steps.
 type WorkflowSchema struct {
 	Trigger WorkflowTrigger `json:"trigger"`
-	Steps   []WorkflowStep  `json:"steps,omitempty"`
+	Steps   []WorkflowStep  `json:"steps"`
+	// Overlap declares what happens when a run would start while the previous
+	// run of the SAME workflow (same tenant) is still executing: "skip" (default
+	// — the new run is recorded as skipped_overlap and not started; the K8s
+	// concurrencyPolicy:Forbid shape) or "allow" (runs may overlap; the steps
+	// must tolerate it).
+	Overlap string `json:"overlap,omitempty"`
+	// Role is the RBAC role the steps act as through the engine API (default:
+	// the worker's APPXIMO_WORKER_ROLE). Must be a declared role.
+	Role string `json:"role,omitempty"`
 }
 
 // WorkflowTrigger describes what starts a workflow.
 type WorkflowTrigger struct {
-	Type     string `json:"type"`               // "event" | "cron" | "http"
-	Event    string `json:"event,omitempty"`    // e.g. "after_create" (with Resource)
-	Resource string `json:"resource,omitempty"` // resource the event applies to
-	Cron     string `json:"cron,omitempty"`     // cron expression for type=cron
-	Path     string `json:"path,omitempty"`     // route for type=http
+	Type string `json:"type"` // "event" | "cron"
+	// Event triggers: the emitted action ("create" | "update" | "delete") on
+	// Resource — which must declare that action in its `events` list, or the
+	// workflow could never fire (a load error, not a silent dead promise).
+	Event    string `json:"event,omitempty"`
+	Resource string `json:"resource,omitempty"`
+	// Cron triggers: a standard 5-field cron spec (plus @daily/@every descriptors),
+	// evaluated in Timezone (IANA name; default UTC — see ADR-031 §DST).
+	Cron     string `json:"cron,omitempty"`
+	Timezone string `json:"timezone,omitempty"`
 }
 
-// WorkflowStep is a single node in a workflow pipeline.
+// WorkflowStep is one sequential step. Types (ADR-031):
+//
+//	condition {expr}                        — expr false ⇒ the run stops here (ok, recorded)
+//	update    {resource, id, data}          — PATCH via the engine API (validation+RBAC intact)
+//	create    {resource, data}              — POST via the engine API
+//	webhook   {url, hmac_secret_env, data}  — signed POST (same SSRF-guarded dispatcher as hooks)
+//	enqueue   {topic, data}                 — emit an outbox event for another consumer
+//
+// String values in `data` (and `id`) starting with "=" are expr-lang expressions
+// over the run environment (event, record, tenant, now); anything else is a
+// literal. Every expression and the step shapes are compiled at schema load.
 type WorkflowStep struct {
 	Name   string         `json:"name"`
-	Type   string         `json:"type"`             // "hook" | "webhook" | "wasm" | "branch"
-	Ref    string         `json:"ref,omitempty"`    // hook/module/url reference
-	Config map[string]any `json:"config,omitempty"` // step-specific configuration
-	Next   string         `json:"next,omitempty"`   // name of the next step (or branch target)
+	Type   string         `json:"type"`
+	Config map[string]any `json:"config,omitempty"`
 }

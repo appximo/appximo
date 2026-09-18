@@ -177,16 +177,17 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 	for wfName, rawWf := range object("workflows", top["workflows"]) {
 		wfPath := "workflows." + wfName
 		wf := object(wfPath, rawWf)
-		addUnknown(wfPath, wf, "trigger", "steps")
+		addUnknown(wfPath, wf, "trigger", "steps", "overlap", "role")
 		if trig := object(wfPath+".trigger", wf["trigger"]); trig != nil {
-			addUnknown(wfPath+".trigger", trig, "type", "event", "resource", "cron", "path")
+			addUnknown(wfPath+".trigger", trig, "type", "event", "resource", "cron", "timezone")
 		}
-		// Steps: each step's keys are fixed, but step.config is free-form.
+		// Steps: name/type/config; config's per-type keys are checked by the
+		// semantic validator (ValidateWorkflows), which knows the step type.
 		var steps []json.RawMessage
 		if wf["steps"] != nil && json.Unmarshal(wf["steps"], &steps) == nil {
 			for i, rawStep := range steps {
 				stepPath := fmt.Sprintf("%s.steps[%d]", wfPath, i)
-				addUnknown(stepPath, object(stepPath, rawStep), "name", "type", "ref", "config", "next")
+				addUnknown(stepPath, object(stepPath, rawStep), "name", "type", "config")
 			}
 		}
 	}

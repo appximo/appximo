@@ -25,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/appximo/appximo/migrations"
@@ -55,6 +56,7 @@ import (
 	"github.com/appximo/appximo/pkg/shutdown"
 	"github.com/appximo/appximo/pkg/tenant"
 	"github.com/appximo/appximo/pkg/userauth"
+	"github.com/appximo/appximo/pkg/workflows"
 	"github.com/appximo/appximo/scripts"
 )
 
@@ -120,6 +122,7 @@ type App struct {
 	geo       *observability.GeoLookup
 	obsServer *observability.ObsServer
 	selfmon   *observability.ResourceCollector // the engine's own resources + attribution (CENTINELA-C-S1)
+	outboxObs *outbox.Observer                 // outbox queue health: oldest-pending age, failed rows, alerts (AUTOMATIZACION-S1)
 
 	cpSvc controlplane.Service
 	cpSrv *http.Server
@@ -325,6 +328,15 @@ func New(cfg Config) (*App, error) {
 		return nil, fmt.Errorf("appximo: %w", err)
 	}
 
+	// Workflow runs + cron schedules (AUTOMATIZACION-S1, ADR-031): the executor
+	// lives in appximo-worker, but the engine ensures the tables (same pattern)
+	// so GET /admin/workflows and the workflow gauges work from the first boot,
+	// and a worker joining later finds them ready.
+	if err := workflows.EnsureTables(context.Background(), pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("appximo: %w", err)
+	}
+
 	app.tdb = db.NewTenantDB(pool)
 
 	// Content-addressable file store (FILES-V2): the Store (tenancy + metadata +
@@ -388,12 +400,34 @@ func New(cfg Config) (*App, error) {
 	log.Printf("files: max upload %d bytes, signed URL TTL %s", app.filesMaxBytes, app.filesTokenTTL)
 
 	// HookRunner with Capa 3 (WASM) when the runtime initializes; JS+webhook only on error.
+	// The dispatcher dead-letters an EXHAUSTED webhook into the outbox as topic
+	// "webhook.dead" (AUTO-6): the delivery loss becomes a durable, visible row
+	// (per-topic gauge, /admin/outbox, the pending-age alert) instead of one log
+	// line nobody reads. No worker consumes webhook.dead on purpose — it is an
+	// operator inbox: inspect the row (it carries url, event, payload, error) and
+	// re-fire or Discard deliberately.
+	dispatcher := extensions.NewWebhookDispatcher()
+	dispatcher.SetDeadLetter(func(dlCtx context.Context, tenantID string, deadEvent map[string]any) {
+		tx, txErr := pool.Begin(dlCtx)
+		if txErr != nil {
+			log.Printf("WARNING: webhook dead-letter enqueue failed (begin): %v", txErr)
+			return
+		}
+		defer tx.Rollback(context.Background()) //nolint:errcheck
+		if _, dlErr := outbox.Enqueue(dlCtx, tx, tenantID, "webhook.dead", deadEvent); dlErr != nil {
+			log.Printf("WARNING: webhook dead-letter enqueue failed: %v", dlErr)
+			return
+		}
+		if cErr := tx.Commit(dlCtx); cErr != nil {
+			log.Printf("WARNING: webhook dead-letter enqueue failed (commit): %v", cErr)
+		}
+	})
 	sandbox := extensions.NewJSSandbox()
 	if wasmRunner, werr := extensions.NewWasmRunner(context.Background()); werr != nil {
 		log.Printf("WARNING: WASM runtime (layer 3) disabled: %v", werr)
-		app.hr = extensions.NewHookRunner(sandbox)
+		app.hr = extensions.NewHookRunnerWithDispatcher(sandbox, dispatcher, 0)
 	} else {
-		app.hr = extensions.NewHookRunnerWithWasm(sandbox, extensions.NewWebhookDispatcher(), wasmRunner)
+		app.hr = extensions.NewHookRunnerWithWasm(sandbox, dispatcher, wasmRunner)
 		log.Println("WASM runtime (layer 3) enabled")
 	}
 
@@ -409,6 +443,33 @@ func New(cfg Config) (*App, error) {
 	app.schemaCache = tenant.NewSchemaCache()
 	// ENG-12: the per-tenant DEPLOYED write surface (see deployed_surface.go).
 	app.deployed = newDeployedSurfaces(app.pool, app.schemaCache, s)
+
+	// A declared promise with nothing honoring it must say so at boot (AUTO-1's
+	// A7 half): `events` enqueue rows the ENGINE never consumes — a worker does —
+	// and `workflows` execute in the worker's scheduler. The engine cannot see
+	// whether a worker process is running (by design: the table is the contract),
+	// so it names the dependency here and the outbox observer's pending-age alert
+	// catches the case where the promise stays unhonored.
+	var eventResources []string
+	for name, r := range s.Resources {
+		if len(r.Events) > 0 {
+			eventResources = append(eventResources, name)
+		}
+	}
+	sort.Strings(eventResources)
+	if len(eventResources) > 0 {
+		log.Printf("events: %d resource(s) enqueue outbox events (%s) — run appximo-worker to consume them; unconsumed events surface in GET /admin/outbox and the appximo_outbox_oldest_pending_age_seconds alert",
+			len(eventResources), strings.Join(eventResources, ", "))
+	}
+	if len(s.Workflows) > 0 {
+		wfNames := make([]string, 0, len(s.Workflows))
+		for name := range s.Workflows {
+			wfNames = append(wfNames, name)
+		}
+		sort.Strings(wfNames)
+		log.Printf("workflows: %d declared (%s) — they execute in appximo-worker (leader-elected scheduler + event consumers); without a worker running they are a dead promise, and GET /admin/workflows shows last/next runs",
+			len(s.Workflows), strings.Join(wfNames, ", "))
+	}
 
 	// Observability stack.
 	app.hist = observability.NewTenantHistogram()
@@ -458,6 +519,51 @@ func New(cfg Config) (*App, error) {
 		if regErr := app.metrics.Register(sm.PromCollector()); regErr != nil {
 			log.Printf("WARNING: self-monitoring gauges not registered on /metrics: %v", regErr)
 		}
+	}
+
+	// Outbox observability (AUTOMATIZACION-S1, AUTO-3): the queue's health —
+	// oldest-pending AGE (the metric that matters: depth lies, age does not),
+	// failed rows with their error, per-topic backlog — collected off the hot
+	// path, exposed on /metrics + GET /admin/outbox, alerted through the same
+	// channel as everything else. APPXIMO_OUTBOX_MAX_PENDING_AGE tunes the age
+	// alert (Go duration, default 15m, 0 disables); an invalid value refuses to
+	// boot (OPS-13 discipline — a guard whose knob is silently ignored is worse
+	// than no knob).
+	obsCfg := outbox.ObserverConfig{
+		OnAlert: func(kind, message string) {
+			_ = alerter.Send(context.Background(), observability.Alert{
+				Level:   observability.LevelWarning,
+				Kind:    kind,
+				Message: message,
+			})
+		},
+	}
+	if v := os.Getenv("APPXIMO_OUTBOX_MAX_PENDING_AGE"); v != "" {
+		d, derr := time.ParseDuration(v)
+		if derr != nil {
+			pool.Close()
+			return nil, fmt.Errorf("appximo: APPXIMO_OUTBOX_MAX_PENDING_AGE=%q is not a Go duration (examples: 15m, 1h, 0 to disable): %w", v, derr)
+		}
+		if d == 0 {
+			d = -1 // explicit 0 = disable (the config's own 0 means "default")
+		}
+		obsCfg.MaxPendingAge = d
+	}
+	app.outboxObs = outbox.NewObserver(pool, obsCfg)
+	if regErr := app.metrics.Register(outbox.NewCollector(app.outboxObs)); regErr != nil {
+		log.Printf("WARNING: outbox gauges not registered on /metrics: %v", regErr)
+	}
+	// Breaker state (AUTO-4): every open/half-open/close transition is a log
+	// line (pkg/resilience) and a gauge here.
+	if regErr := app.metrics.Register(resilience.NewBreakerCollector()); regErr != nil {
+		log.Printf("WARNING: breaker gauges not registered on /metrics: %v", regErr)
+	}
+	// Exhausted webhooks (AUTO-6).
+	if regErr := app.metrics.Register(prometheus.NewCounterFunc(prometheus.CounterOpts{
+		Name: "appximo_webhook_dead_total",
+		Help: "Webhook dispatches that exhausted their retries (dead-lettered to the outbox as topic webhook.dead)",
+	}, func() float64 { return float64(extensions.WebhookDeadTotal.Load()) })); regErr != nil {
+		log.Printf("WARNING: webhook dead-letter counter not registered on /metrics: %v", regErr)
 	}
 
 	// /debug/traces HTML page — accept ?key= OR X-Admin-Key, browser-openable.
@@ -1130,6 +1236,9 @@ func (a *App) startBackground(ctx context.Context) {
 	go a.sloEngine.Run(ctx)
 	if a.selfmon != nil {
 		go a.selfmon.Run(ctx)
+	}
+	if a.outboxObs != nil {
+		go a.outboxObs.Run(ctx)
 	}
 	if a.obsStore != nil {
 		go flushObsSnapshots(ctx, a.obsStore, a.rings, a.hist, a.sloEngine)

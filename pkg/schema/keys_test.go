@@ -22,8 +22,8 @@ func TestCheckUnknownKeys_ValidSchemaPasses(t *testing.T) {
 			}
 		},
 		"rbac": {"roles": {"admin": {"resources": "*", "actions": ["*"]}}},
-		"workflows": {"w": {"trigger": {"type": "event", "event": "after_create", "resource": "tasks"},
-			"steps": [{"name": "s1", "type": "webhook", "ref": "x", "config": {"anything": "goes"}}]}}
+		"workflows": {"w": {"trigger": {"type": "event", "event": "create", "resource": "tasks"},
+			"steps": [{"name": "s1", "type": "webhook", "config": {"url": "https://x.example"}}]}}
 	}`
 	if errs := checkErrs(t, valid); len(errs) != 0 {
 		t.Fatalf("valid schema rejected: %v", errs)

@@ -84,6 +84,7 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
+	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/fatih/color v1.15.0 // indirect
 	github.com/fatih/structs v1.1.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
@@ -131,6 +132,7 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/richardlehane/mscfb v1.0.6 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/sanity-io/litter v1.5.5 // indirect
 	github.com/sergi/go-diff v1.0.0 // indirect

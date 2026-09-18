@@ -1,0 +1,42 @@
+{
+  "$schema": "https://appximo.com/schema/v1",
+  "version": "1",
+  "name": "workflows-lab",
+  "resources": {
+    "orders": {
+      "fields": {
+        "customer": { "type": "string", "required": true, "minLength": 1 },
+        "status":   { "type": "string", "enum": ["pending", "paid", "processing", "shipped"], "default": "pending" },
+        "total_cents": { "type": "int64" }
+      },
+      "events": ["create", "update"]
+    }
+  },
+  "rbac": {
+    "roles": {
+      "admin": { "resources": "*", "actions": ["*"] },
+      "service_worker": { "resources": ["orders"], "actions": ["read", "update"] }
+    }
+  },
+  "workflows": {
+    "on_paid": {
+      "trigger": { "type": "event", "event": "update", "resource": "orders" },
+      "steps": [
+        { "name": "only_paid", "type": "condition",
+          "config": { "expr": "record.status == 'paid'" } },
+        { "name": "start_processing", "type": "update",
+          "config": { "resource": "orders", "id": "event.id", "data": { "status": "processing" } } },
+        { "name": "notify_erp", "type": "webhook",
+          "config": { "url": "https://erp.example.com/hooks/order-paid", "hmac_secret_env": "ERP_HOOK_SECRET" } }
+      ]
+    },
+    "daily_report": {
+      "trigger": { "type": "cron", "cron": "0 8 * * *", "timezone": "America/Bogota" },
+      "steps": [
+        { "name": "emit", "type": "enqueue",
+          "config": { "topic": "reports.daily", "data": { "requested_at": "=string(now)" } } }
+      ],
+      "overlap": "skip"
+    }
+  }
+}
