@@ -130,3 +130,8 @@ date	commit	label	target	tenant	endpoint	script	rate	duration	runs	p50_median_ms
 2026-08-29	c8fff95	cent-read-B	http://localhost:8281	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	8	0.675	1.020	10.6	0.0000	
 2026-08-29	c8fff95	cent-read-B2	http://localhost:8281	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	8	0.636	0.967	4.2	0.0000	
 2026-08-29	c8fff95	cent-read-A2	http://localhost:8281	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	8	0.634	0.928	12.7	0.0000	
+2026-09-18	692969b	auto-read-A	http://localhost:8281	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	1	0.569	3.525	0.0	0.5936	
+2026-09-18	692969b	ar2-A	http://localhost:8281	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	8	0.632	0.914	10.7	0.0000	
+2026-09-18	692969b	ar2-B	http://localhost:8281	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	8	0.621	1.021	10.8	0.0000	
+2026-09-18	692969b	ar2-B2	http://localhost:8281	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	8	0.635	0.893	5.2	0.0000	
+2026-09-18	692969b	ar2-A2	http://localhost:8281	benchblank	/api/items?per_page=20	tests/performance/sustained_2krps.js	100	30s	8	0.655	0.943	12.0	0.0000	

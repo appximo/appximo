@@ -406,7 +406,20 @@ runs the same suite against *your* server and prints *your* report.
   the z-score anomaly + error views) — the built assets ship in the module
   (ADR-025), so every `go build` includes the panel
 - **Real-time**: per-resource SSE streams with RBAC applied at delivery
-- **Webhooks**: HMAC-SHA256-signed, async, retries with backoff, SSRF-guarded
+- **Webhooks**: HMAC-SHA256-signed, async, retries with backoff, SSRF-guarded;
+  an exhausted delivery dead-letters into the outbox (`webhook.dead`) instead of
+  vanishing
+- **Background jobs (transactional outbox)**: a resource with `events: […]`
+  enqueues `created/updated/deleted` events atomically with the write;
+  `appximo-worker` (shipped, installed by `install.sh`) consumes them with
+  **topic-scoped claims** — nothing ever acknowledges an event that has no
+  consumer; it stays pending and VISIBLE (oldest-pending-age gauge,
+  `GET /admin/outbox`, an alert). Failed rows carry their error
+- **Workflows**: declarative trigger→steps pipelines in the schema (event or
+  cron triggers; condition / update / create / signed webhook / enqueue steps;
+  expr-lang expressions compiled at validation) executed by the worker — cron on
+  a Postgres-advisory-lock leader, runs recorded and served at
+  `GET /admin/workflows` (ADR-031)
 - **Extensions**: JS sandbox (Goja, watchdog-interrupted) with built-in helpers —
   including Colombian DIAN tax compliance (CUFE SHA-384, NIT mod-11) — plus a WASM
   runtime (Wazero, no CGO)
