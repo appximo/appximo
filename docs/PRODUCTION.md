@@ -924,12 +924,69 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `APPXIMO_OAUTH_{GOOGLE,GITHUB,MICROSOFT}_CLIENT_ID`/`_SECRET`, `_CALLBACK_URL`, `_DEFAULT_ROLE`, `_SUCCESS_REDIRECT` | no | off | Social login. |
 | `APPXIMO_MFA_KEY` / `APPXIMO_MFA_ISSUER` | no | JWT secret / `Appximo` | TOTP secret encryption + issuer label. |
 | `APPXIMO_PLATFORM_SUPER_ADMIN_ROLE` / `_MFA_ISSUER` | no | `platform_super_admin` | Admin API super-admin. Bootstrap with `appximo admin create`. |
-| `APPXIMO_EMAIL_TOPIC`, `SMTP_*` | no | — | Outbox email worker (`APPXIMO_WORKER_MODE=email`). |
+| `APPXIMO_OUTBOX_MAX_PENDING_AGE` | no | `15m` | The outbox age alert (AUTOMATIZACION-S1): when the OLDEST pending event is older than this, one alert per hour on `SLACK_WEBHOOK_URL` naming the topic and the fix. `0` disables; an invalid duration refuses to boot. The gauges (`appximo_outbox_*`, `appximo_workflow_*`) and `GET /admin/outbox` are always on. |
+| `APPXIMO_EMAIL_TOPIC`, `SMTP_*` | no | — | Email delivery by the worker (mode `auto` delivers `email.send` when `SMTP_HOST` is set; mode `email` is the single-purpose variant). |
+| `APPXIMO_WORKER_MODE` + `APPXIMO_WORKER_{BATCH,MAX_ATTEMPTS,POLL,SCHEMA_REFRESH,ROLE,RESOURCE}`, `APPXIMO_ENGINE_URL`, `APPXIMO_TENANT_DOMAIN` | no | `auto` / 50 / 5 / 5s / 1m / `service_worker` / `filejobs` / `http://127.0.0.1:<port>` / (domain minus first label) | `appximo-worker`'s env (§8b). STRICT: an invalid value or a misspelled `APPXIMO_WORKER_*` refuses to boot naming every offender; unset values are reported in one "defaults in effect" boot line. |
 | `SLACK_WEBHOOK_URL` | no | — | SLO burn-rate alerts, first-occurrence error alerts, and (§4.6) backup-failed/stale and disk-low alerts; `backup.sh` posts its own failure here too. Without it every alert is only a log line. |
 | `REDIS_URL` | no | — | Optional async migration worker. |
 | `BACKUP_DIR` | no | `/tmp/appximo-backups` | Output dir for `POST /admin/backup`. |
 | `APPXIMO_SAFEGO_TIMEOUT` / `APPXIMO_PUBLIC_ROUTE_RPS` / `_BURST` | no | 30 s / 5 / 10 | Library-mode custom-handler tuning. |
 | `--port` / `--control-port` | flag | 8080 / 9090 | Data plane / control plane (control plane = **localhost only**). |
+
+---
+
+## 8b. The worker — outbox consumer + workflow executor (`appximo-worker`)
+
+A schema that declares `events: […]` or a `workflows` block PROMISES a
+consumer; `appximo-worker` is what honors it (decision A-67 — the worker is
+product capability, not a Go library). The installer installs it automatically
+when the schema declares automation and a worker binary is available:
+
+```bash
+# build both (or download both release assets: appximo-<os>-<arch> + appximo-worker-<os>-<arch>)
+./scripts/build-engine.sh /tmp/appximo
+./scripts/build-worker.sh /tmp/appximo-worker
+sudo bash scripts/install.sh --app=myapp --domain=api.example.com --email=you@example.com \
+  --binary=/tmp/appximo --worker-binary=/tmp/appximo-worker --yes
+```
+
+What that installs: the binary at `/opt/<app>/bin/appximo-worker` and the unit
+`<app>-worker.service` (same guarantees as the engine: `RestartSec=2`,
+`StartLimitIntervalSec=0`, after PostgreSQL; sharing the app's env file). Force
+with `--worker`, opt out with `--no-worker`; a schema that declares automation
+with no worker running is a NAMED warning at install and a ✗ in
+`fleet-audit.sh`.
+
+**What it does (mode `auto`, the default):** executes the tenants' declared
+`workflows` (event triggers as outbox consumers; cron triggers on a
+leader-elected scheduler — run N workers, `pg_try_advisory_lock` picks one
+leader, failover is automatic) and delivers `email.send` when `SMTP_HOST` is
+configured. **And deliberately nothing else**: the claim is topic-scoped, so an
+event whose topic has no consumer here is never claimed, never acknowledged,
+never lost — it stays `pending`, the worker names it in its log once a minute,
+and the engine's `appximo_outbox_oldest_pending_age_seconds` alert
+(`APPXIMO_OUTBOX_MAX_PENDING_AGE`, default 15m) tells a human. App-specific
+topics (a `factura.emitir`, a `jobs.render`) need an app consumer — a
+`consumers.Router` in a consumer binary (`appximo backend-spec` §6).
+
+**Is it healthy?** Three places, in order of habit:
+
+1. `journalctl -u <app>-worker -f` — every run, every claim scope, every
+   foreign-pending warning.
+2. `GET /admin/outbox` (platform token or admin key) — pending/failed counts,
+   the OLDEST pending age (the number that matters), per-topic backlog, every
+   `failed` row WITH its `last_error`, and the circuit breakers' state.
+3. `GET /admin/workflows` — per workflow: last run (status, error, per-step
+   detail), next run, 24h counters. On `/metrics`: `appximo_outbox_*` and
+   `appximo_workflow_*` (a growing `appximo_workflow_overdue_seconds` means the
+   worker — or its scheduler — is not running).
+
+**Recovering a `failed` row** (retries exhausted; the error is in
+`last_error`): fix the cause, then re-arm it —
+`UPDATE public.outbox SET state='pending', attempts=0 WHERE id=<id>;` — the
+worker redelivers on its next poll. An exhausted after-webhook dead-letters
+itself as topic `webhook.dead` (payload: url, event, body, error): re-fire it
+by hand and delete the row, or leave it as the record of the loss.
 
 ---
 

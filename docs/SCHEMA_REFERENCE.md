@@ -74,7 +74,7 @@ The root object is the `APISchema` struct (`pkg/schema/types.go`). Its complete,
 | `name` | string | No (structurally optional) | Project name. Parsed but not required by either stage. |
 | `resources` | object (`map[string]ResourceSchema`) | No (structurally optional) | The entity/table definitions, keyed by resource name. See §2. A schema with no resources serves no `/api/*` routes but is not rejected. |
 | `rbac` | object (`{ "roles": { … } }`) | No (structurally optional) | Role policies. See §7. |
-| `workflows` | object (`map[string]WorkflowSchema`) | No — **reserved, non-functional** (see §1.4) | Forward-compatibility only; no executor runs it. |
+| `workflows` | object (`map[string]WorkflowSchema`) | No | Declarative trigger→steps pipelines, executed by `appximo-worker` (ADR-031). See §1.4. |
 
 **Exact required-field rule** (`pkg/schema/loader.go`): only `$schema` and `version` are checked, and only for emptiness (the zero value of a Go `string`, which is also what an absent key unmarshals to). The exact failure messages are:
 
@@ -146,36 +146,39 @@ Identifier rule relevant at this level: resource and field names both match the 
 
 (The `id` UUID primary key is implicit — never declare it. Field/resource details are in §2–§7.)
 
-### 1.4 The `workflows` block — reserved, non-functional
+### 1.4 The `workflows` block — declarative pipelines, executed by `appximo-worker` (ADR-031)
 
-`workflows` is **parsed for forward-compatibility only; no executor runs it** (`pkg/schema/types.go`). It exists so a schema that declares workflows loads today and stays valid when the orchestration engine eventually ships. Its keys ARE strict-checked (keys.go), so typos are still caught, but nothing in the engine consults the block at runtime.
-
-Reserved shape (`pkg/schema/types.go`):
+`workflows` declares trigger→steps pipelines that **execute in `appximo-worker`** (the async subsystem — never on the engine's request path): an `event` trigger consumes the resource's transactional outbox events; a `cron` trigger fires on a leader-elected scheduler (`pg_try_advisory_lock` — no extra infrastructure). Steps run **sequentially** through the engine HTTP API with a scoped service JWT, so every write inherits validation and RBAC. The block is fully semantically validated at load (`pkg/schema/workflows_validate.go`): every cron spec and every expression COMPILES, an event trigger's resource must declare that event in `events`, and an `enqueue` of a topic that triggers a workflow is rejected as a declared infinite loop — DECLARED == EXECUTABLE.
 
 ```json
 "workflows": {
-  "<workflow_name>": {
-    "trigger": {
-      "type": "event",            // "event" | "cron" | "http"
-      "event": "after_create",    // with "resource" for type=event
-      "resource": "tasks",
-      "cron": "0 * * * *",        // for type=cron
-      "path": "/run/something"    // for type=http
-    },
+  "al_crear_orden": {
+    "trigger": { "type": "event", "event": "create", "resource": "orders" },
     "steps": [
-      {
-        "name": "notify",
-        "type": "webhook",        // "hook" | "webhook" | "wasm" | "branch"
-        "ref": "some-ref",
-        "config": { "any": "free-form map" },
-        "next": "next_step_name"
-      }
+      { "name": "solo_pagadas", "type": "condition",
+        "config": { "expr": "record.status == 'paid'" } },
+      { "name": "marcar",       "type": "update",
+        "config": { "resource": "orders", "id": "event.id",
+                    "data": { "status": "processing", "seen_at": "=string(now)" } } },
+      { "name": "avisar",       "type": "webhook",
+        "config": { "url": "https://erp.example.com/hook", "hmac_secret_env": "ERP_SECRET" } }
     ]
+  },
+  "resumen_diario": {
+    "trigger": { "type": "cron", "cron": "0 8 * * *", "timezone": "America/Bogota" },
+    "steps": [ { "name": "emitir", "type": "enqueue",
+                 "config": { "topic": "reports.daily" } } ],
+    "overlap": "skip"
   }
 }
 ```
 
-Do not rely on any of this executing — it is inert in the current engine. Note that the trigger `type`/`event`/`resource`/`cron`/`path` and step `type`/`name`/`ref`/`next` values shown in the comments are NOT validated for membership (no semantic check runs over the block); only the *key names* are strict-checked.
+- **Triggers**: `event` (`event` ∈ `create|update|delete` + `resource` — the resource MUST list that action in its `events` array, or the schema is rejected: a workflow that could never fire is a dead promise) and `cron` (5-field spec or `@daily`/`@every 1h`; optional IANA `timezone`, default UTC — the DST policy is written in ADR-031: spring-forward occurrences run once at the next valid instant, fall-back hours can never fire twice). Trigger `http` does NOT exist in v1 (a custom route's handler enqueues an event instead).
+- **Steps** (sequential; the closed set): `condition` (`{expr}` — [expr-lang](https://expr-lang.org) expression; false stops the run, recorded), `update` (`{resource, id, data}` — PATCH via the engine API), `create` (`{resource, data}` — POST), `webhook` (`{url, hmac_secret_env, data}` — ONE signed POST through the same SSRF-guarded HTTPS-only dispatcher as hooks; run-level retries ride the outbox), `enqueue` (`{topic, data}` — emit an outbox event for another consumer). In `data` (and `id`), a string starting with `=` is an expression over the run environment (`event`, `record`, `tenant`, `now`); anything else is a literal.
+- **`overlap`**: `"skip"` (default — an occurrence due while the previous run of the same workflow still executes is recorded as `skipped_overlap`, never silently dropped) or `"allow"`.
+- **`role`**: the RBAC role the steps act as (must be declared; default: the worker's `APPXIMO_WORKER_ROLE`). A workflow can never touch data its role could not touch through the front door.
+- **Delivery**: event-triggered runs are at-least-once (a failed run's outbox row retries and finally parks `state='failed'` carrying the error) — steps must be idempotent. A failed cron run is recorded; its retry is the next occurrence.
+- **Observability**: every run is a row in `public.workflow_runs` (status, error, per-step detail); `GET /admin/workflows` shows last/next runs per tenant; `/metrics` carries `appximo_workflow_runs_24h`, `appximo_workflow_failed_24h` and `appximo_workflow_overdue_seconds` (growing = no scheduler firing), with alerts on overdue schedules and failed runs.
 
 ---
 
@@ -1700,7 +1703,7 @@ The receiver verifies the delivery by recomputing `HMAC-SHA256(os.Getenv("WEBHOO
 
 ## 9. Indexes, events, the file store, and reserved blocks
 
-This section covers the remaining resource-level blocks (`indexes`, `events`), the implicit file-store routes, and the reserved `workflows` block. Field types, relations, RBAC, hooks, and foreign keys are covered in earlier sections.
+This section covers the remaining resource-level blocks (`indexes`, `events`), the implicit file-store routes, and the `workflows` block. Field types, relations, RBAC, hooks, and foreign keys are covered in earlier sections.
 
 ### 9.1 `indexes` — declarative secondary indexes
 
@@ -1868,15 +1871,15 @@ WARNING: schema declares a "files" resource — engine file-store routes (/api/f
 
 So name a resource `files` only if you intend to replace the built-in store with your own CRUD resource. Full file-store detail (size cap, dedup, `APPXIMO_FILES_DIR`, the VFS) is in §10.
 
-### 9.4 Reserved `workflows` block — inert, parse-only
+### 9.4 The `workflows` block — executed (ADR-031; see §1.4 for the full reference)
 
-`workflows` is a top-level key (sibling of `resources`/`rbac`) reserved for the Phase 2 multi-step orchestration engine (ADR-012). It is **parsed for forward compatibility but has no executor** — declaring workflows loads and validates today and does nothing at runtime. Its shape (`WorkflowSchema` and below, `pkg/schema/types.go`) is strict-key-checked (`pkg/schema/keys.go`) like every other level:
+`workflows` is a top-level key (sibling of `resources`/`rbac`) whose pipelines EXECUTE in `appximo-worker` since ADR-031 (the internal ADR-012's deferral trigger fired — that citation, which used to dangle in these docs, is reconciled in ADR-031's header). Strict keys, like every level:
 
-- `workflows.<name>` accepts `trigger`, `steps`.
-- `workflows.<name>.trigger` accepts `type`, `event`, `resource`, `cron`, `path`.
-- `workflows.<name>.steps[<i>]` accepts `name`, `type`, `ref`, `config`, `next` — where `config` is the one deliberately free-form map (its inner keys are not strict-checked).
+- `workflows.<name>` accepts `trigger`, `steps`, `overlap`, `role`.
+- `workflows.<name>.trigger` accepts `type` (`event`|`cron`), `event`, `resource`, `cron`, `timezone`.
+- `workflows.<name>.steps[<i>]` accepts `name`, `type`, `config` — and `config`'s inner keys ARE checked per step type (`condition`: `expr`; `update`: `resource`/`id`/`data`; `create`: `resource`/`data`; `webhook`: `url`/`hmac_secret_env`/`data`; `enqueue`: `topic`/`data`).
 
-Because there is no executor, do not rely on any workflow behavior; treat the block as a no-op placeholder.
+Semantic validation (`validate`, the deploy gate, boot) compiles every cron spec and expression and cross-checks the trigger against the resource's `events` — a workflow that validates is a workflow that runs.
 
 ---
 
@@ -2241,7 +2244,7 @@ The following is the exact, comment-free JSON that passed `appximo validate` (JS
 
 #### Top level
 
-`$schema` and `version` are both mandatory — `LoadFromFile` (`pkg/schema/loader.go`) returns `missing required field "$schema"` / `"version"` if either is empty, before validation even runs. The six allowed top-level keys are exactly `$schema`, `version`, `name`, `resources`, `rbac`, and the forward-compat `workflows`; any other top-level key is rejected by the strict-key checker (`CheckUnknownKeys`, `pkg/schema/keys.go`). `name` here is `"shop-api"` — note that resource *names* are constrained to `^[a-z][a-z0-9_]*$` but the schema `name` is free text.
+`$schema` and `version` are both mandatory — `LoadFromFile` (`pkg/schema/loader.go`) returns `missing required field "$schema"` / `"version"` if either is empty, before validation even runs. The six allowed top-level keys are exactly `$schema`, `version`, `name`, `resources`, `rbac`, and `workflows` (executed by appximo-worker — §1.4); any other top-level key is rejected by the strict-key checker (`CheckUnknownKeys`, `pkg/schema/keys.go`). `name` here is `"shop-api"` — note that resource *names* are constrained to `^[a-z][a-z0-9_]*$` but the schema `name` is free text.
 
 #### Resource `customers` — field types, validation rules, defaults, a rename
 
@@ -2471,12 +2474,13 @@ audit. Knowing these is essential for generating schemas that behave as intended
     field is the topic suffix `created`/`updated`/`deleted`. A consumer matching
     on `action == "create"` will never match. (`pkg/codegen/builder.go`)
 
-11. **The `workflows` block is fully parsed and strict-key validated but
-    completely inert.** Typos in `trigger`/`steps` are rejected (giving the
-    impression of a live feature), yet no executor runs it and `trigger.type` /
-    `step.type` *values* are never semantically validated. A syntactically
-    perfect workflow does nothing. (`pkg/schema/types.go`;
-    `pkg/schema/keys.go`)
+11. **The `workflows` block EXECUTES — in `appximo-worker`, not in the engine
+    process** (ADR-031). A schema that declares workflows and boots only the
+    engine runs none of them: the engine says so at boot, `GET /admin/workflows`
+    shows schedules with no runs, and `appximo_workflow_overdue_seconds` grows.
+    Semantic validation is real now: trigger/step values, cron specs and
+    expressions are all checked at load. (`pkg/schema/workflows_validate.go`;
+    `pkg/workflows`)
 
 ### A.2 Sharp edges & silent behaviors (generation-relevant gotchas)
 

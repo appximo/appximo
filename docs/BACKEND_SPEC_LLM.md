@@ -1838,11 +1838,24 @@ func main() {
 
 The rules that decide whether a consumer is correct:
 
-- **Compose a `Router`, don't run two single-topic workers.** A worker ACKs topics
-  it does not own, so two *different* single-topic workers against one outbox
-  silently drop each other's events under `SKIP LOCKED`. Scale by running **N
-  identical** copies of the same Router instead — the drain uses
-  `SELECT … FOR UPDATE SKIP LOCKED`, so instances never collide on a row.
+- **The claim is topic-scoped (AUTOMATIZACION-S1).** A Processor that implements
+  `worker.TopicOwner` (the Router does; so do all shipped consumers) only ever
+  CLAIMS the topics it owns: a foreign topic is never locked, never acked, never
+  burns attempts — it stays `pending`, where the engine's outbox observability
+  (`GET /admin/outbox`, `appximo_outbox_oldest_pending_age_seconds` + its alert)
+  makes it loudly visible. A topic that reaches a Router with no matching rule
+  is an ERROR: the row retries and parks `state='failed'` carrying the message
+  in `last_error`. NOTHING acknowledges an event because no handler exists; to
+  drop a topic on purpose, register it with `Router.Discard(topic)` — an
+  explicit, logged decision. (A bare custom Processor WITHOUT `Topics()` keeps
+  the historical claim-everything drain — only correct when it truly is the
+  outbox's full consumer set.)
+- **Compose a `Router` for multiple event types** (`Handle`/`HandlePrefix`/
+  `HandleSuffix`/`HandleOwner`). Scale by running **N identical** copies of the
+  same Router — the drain uses `SELECT … FOR UPDATE SKIP LOCKED`, so instances
+  never collide on a row. (Single-mode workers now coexist safely — each claims
+  only its own topics — but one Router is still the model that cannot leave a
+  topic orphaned by accident.)
 - **Delivery is at-least-once ⇒ Processors must be idempotent.** Make the side
   effect idempotent at the destination (a provider idempotency key, an upsert on a
   unique column), not with an `if already_done` that races with itself.
@@ -1858,6 +1871,13 @@ The rules that decide whether a consumer is correct:
   makes the engine write `<resource>.created` to the outbox inside the same
   transaction as the INSERT. The payload is lean (`{id, tenant_id, resource,
   action}`) — a consumer that needs the row reads it back.
+- **Before writing a Go consumer, check whether a `workflows` block does the
+  job** (ADR-031, SCHEMA_REFERENCE §1.4): condition → update/create via the
+  engine API / signed webhook / enqueue, on an event or a cron, executed by the
+  SHIPPED `appximo-worker` (mode `auto`, installed by install.sh) with runs
+  recorded in `public.workflow_runs` and `GET /admin/workflows`. A Go consumer
+  is for logic a sequential condition→action pipeline cannot express (external
+  reads, aggregation, branching, files).
 
 ---
 

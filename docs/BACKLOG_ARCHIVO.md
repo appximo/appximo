@@ -418,6 +418,29 @@ refreshed).
 ---
 
 
+## DONE in AUTOMATIZACION-S1 (2026-09-18) — the automation subsystem's traps closed, the worker published, the `workflows` executor built (ADR-031)
+
+The thesis: the outbox was the engine's best-built, worst-delivered piece — and
+what it had were not gaps but TRAPS. Traps first, then shipping, then the
+executor (A-67/A-68/A-70 executed in the binding order).
+
+| Item | What shipped | Verified by |
+|---|---|---|
+| **AUTO-1** (echo acks anything) | The claim is TOPIC-SCOPED at the SQL layer (`worker.TopicOwner` — foreign topics are never locked/acked/attempted; they stay pending and visible); `echo` kept as an EXPLICIT dev loopback owning only `echo.*`, screaming at boot; the Router errors on unmatched topics (parking the row `failed` with the message) and drops only via explicit `Discard`; shipped consumers refuse foreign topics | `TestDrain_TopicScopedClaim` (a factura.emitir stays byte-intact pending), `TestRouter_DispatchesByTopic`, live provocation on a scratch stack |
+| **AUTO-2** (14 silent worker env vars) | `cmd/appximo-worker` env is strict: invalid values AND misspelled `APPXIMO_WORKER_*` refuse to boot naming every offender at once; unset vars reported in one "defaults in effect" line; `.env` loaded (pkg/dotenv split from the root package) | provoked live: `APPXIMO_WORKER_POLL=rapidito` + `APPXIMO_WORKER_MODO` typo → fatal naming both; the engine-wide class stays OPS-13 |
+| **AUTO-3** (failed invisible) | `public.outbox.last_error` records WHY (cleared on delivery); engine-side `outbox.Observer` → `appximo_outbox_{pending,failed,oldest_pending_age_seconds,oldest_failed_age_seconds,sent_last_hour,pending_by_topic≤20}` on /metrics, `GET /admin/outbox` (stats + failed rows WITH errors + breaker states), alerts on failed>0 and stale age (`APPXIMO_OUTBOX_MAX_PENDING_AGE`, 15m default, invalid → no boot). ALERT ON AGE, not depth | `TestDrain_RecordsLastError`; provoked: bad-id event → 5 attempts → `failed` with the exact 400; `outbox_failed` + `outbox_stale_pending` alerts observed firing |
+| **AUTO-4** (mute breaker) | `OnStateChange` → structured log + registry + `appximo_breaker_state`/`appximo_breaker_opens_total`; the 503 NAMES the breaker (one message on REST + GraphQL via the ClassifyWriteError ladder) with `Retry-After: 8`; states in `/admin/outbox` | `TestBreaker_StateChangeIsRecorded`; provoked live: PG stopped → open (logged, gauge 2, named 503) → PG back → half-open → closed |
+| **AUTO-5** (workflows executor — A-68) | `pkg/workflows` executing in the worker: event triggers as topic-scoped consumers, cron on a leader-elected scheduler (`pg_try_advisory_lock`), expr-lang expressions, steps condition/update/create/webhook/enqueue via the engine API as a declared role, runs in `public.workflow_runs`, schedules in `public.workflow_cron`, `GET /admin/workflows`, `appximo_workflow_*` gauges + overdue/failed alerts; FULL semantic load validation (cron+expr compile, trigger↔events coherence, enqueue-loop rejection); DST policy WRITTEN (ADR-031 §5); the dangling ADR-012 citation reconciled in ADR-031 | unit + `TestScheduler_LeaderElection` + `TestScheduler_OverlapSkip` (real PG) + `TestNextAfter_DST`; live E2E: tasks.created → condition → PATCH → seen; found+fixed live: GET-by-id is a BARE object (the assumed envelope made `record` silently nil) |
+| **AUTO-6** (exhausted webhooks lost) | Dead-letter: exhaustion enqueues `webhook.dead` (url, event, payload, error, redeliver recipe) + `appximo_webhook_dead_total` + a loud log; the row is visible/alertable through the same outbox observability; deliberately NO auto-redispatch consumer (an operator inbox, documented in PRODUCTION §8b) | provoked live: NXDOMAIN webhook → 4 attempts → webhook.dead row + counter=1 |
+| **AUTO-8** (ship the worker — A-67) | `appximo-worker` in the release matrix (build-worker.sh, version-stamped, smoke-tested, version-less aliases), `install.sh --worker-binary` (auto-installs when the schema declares events/workflows; `<app>-worker.service` with RestartSec=2 + StartLimitIntervalSec=0 after PostgreSQL; env keys in the app env; verify_installed checks it ACTIVE; uninstall removes it; a declared-but-unhonored promise is a NAMED warning), `fleet-audit.sh` ✗ when events/workflows declared and no worker active; default mode `auto` = workflows + email-when-SMTP; docs in PRODUCTION §8b + the manual | shipped only AFTER the traps closed (the A-67 order condition); unit provoked via systemd-run: kill -9 → restart in 2 s, leadership reacquired; dead worker visible as growing `appximo_workflow_overdue_seconds` |
+
+Also: the `workflows` schema surface tightened while still a dead letter
+(`ref`/`next`/`path` out; `timezone`/`overlap`/`role` in; meta-schema updated);
+AGENTS.md / SCHEMA_REFERENCE / backend-spec / PRODUCTION / the manual updated;
+publication chain untouched (A-69 — the release.yml gains the worker build but
+stays paused). New items opened: AUTO-10 (agent grammar doesn't teach
+workflows), AUTO-11 (Studio workflows panel).
+
 ## DONE in CENTRO-MANDO-S1 (2026-08-31, third session) — the command center: one box that shows the whole operation, fills itself, and never leaves the owner without a next step
 
 Built WITH Appximo (a consumer app), on its own droplet; engine untouched.

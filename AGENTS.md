@@ -542,18 +542,50 @@ One line per layer — navigate the code for the rest:
   "resume" == "run again"); additive by default, it never auto-approves a drop. See
   [Evolving a schema safely](#evolving-a-schema-safely--the-destructive-approval-gate).
 - `pkg/outbox` — transactional outbox (ADR-016 §Class 2): `Enqueue` writes a job
-  in the caller's tx and emits `pg_notify(outbox_notify, <id>)` on commit.
+  in the caller's tx and emits `pg_notify(outbox_notify, <id>)` on commit. Since
+  AUTOMATIZACION-S1 the queue is OBSERVABLE: the engine runs an `outbox.Observer`
+  (background poller) feeding `/metrics` (`appximo_outbox_pending|failed|
+  oldest_pending_age_seconds|pending_by_topic{≤20}` + the `appximo_workflow_*`
+  gauges), `GET /admin/outbox` (stats + the failed rows WITH `last_error` + the
+  oldest pending + breaker states) and the alerter (stale pending age —
+  `APPXIMO_OUTBOX_MAX_PENDING_AGE`, default 15m; failed>0; workflow overdue).
+  Alert on the OLDEST PENDING AGE, never on depth: a thousand draining rows are
+  healthy, one row parked for a month is the incident.
 - `pkg/worker` — the outbox consumer behind the SEPARATE `cmd/appximo-worker`
   binary (not a goroutine in the engine): LISTEN/NOTIFY wake-up + poll fallback,
   `SELECT … FOR UPDATE SKIP LOCKED`, at-least-once (Processors must be idempotent).
-  Run it with `DATABASE_URL=… go run ./cmd/appximo-worker`; the end-to-end proof
-  is `scripts/worker-e2e.sh`. A consumer that writes results BACK does so through
-  the engine HTTP API (`worker.EngineClient`), never the tenant DB directly, so the
-  write inherits the engine's validation + RBAC. It mints a fresh, SHORT-LIVED
-  (60s), SCOPED service JWT per operation (`auth.GenerateTokenWithTTL`, shared
-  `JWT_SECRET`) carrying the event's `tenant_id` and a **scoped service role** —
-  never admin. `APPXIMO_WORKER_WRITEBACK=on` enables the demo consumer (PATCHes
-  the created row's status); off by default (echo).
+  **The claim is TOPIC-SCOPED (AUTO-1):** a Processor that implements
+  `worker.TopicOwner` (the Router, echo, every shipped consumer, the workflow
+  consumer) only ever claims the topics it owns — a foreign topic is never
+  locked, never acked, never burns attempts; it stays `pending`, the worker
+  names it once a minute, and the engine's age alert screams. NOTHING marks a
+  topic sent because no handler exists (the old echo default did exactly that —
+  it would have destroyed 34 real factura.emitir rows with a success face).
+  Failures record WHY in `public.outbox.last_error`. The worker's env is strict
+  (AUTO-2): an invalid value or a misspelled `APPXIMO_WORKER_*` refuses to boot
+  naming every offender; unset vars are reported in one "defaults in effect"
+  boot line. Run it with `DATABASE_URL=… JWT_SECRET=… go run ./cmd/appximo-worker`
+  (default mode `auto`: workflow executor + email delivery when SMTP_HOST is
+  set); e2e proof `scripts/worker-e2e.sh`. A consumer that writes results BACK
+  does so through the engine HTTP API (`worker.EngineClient`), never the tenant
+  DB directly, so the write inherits the engine's validation + RBAC. It mints a
+  fresh, SHORT-LIVED (60s), SCOPED service JWT per operation
+  (`auth.GenerateTokenWithTTL`, shared `JWT_SECRET`) carrying the event's
+  `tenant_id` and a **scoped service role** — never admin.
+- `pkg/workflows` — the `workflows` executor (ADR-031, decision A-68), running
+  INSIDE `appximo-worker`: event triggers are topic-scoped outbox consumers;
+  cron triggers fire on a leader-elected scheduler (`pg_try_advisory_lock` on a
+  dedicated conn — no Redis/etcd; N workers, one leader, failover on connection
+  loss). The SCHEMA is the only source of truth (`public.tenants.json_schema`,
+  re-read every 60s — a Studio deploy reaches execution with no restart).
+  Expressions are `expr-lang/expr` (sandboxed, non-Turing-complete; compiled at
+  schema LOAD by `pkg/schema/workflows_validate.go`, so validate ⇒ executable).
+  Steps act via the engine API as the workflow's declared `role`. Runs persist
+  in `public.workflow_runs` (status/error/per-step detail); cron schedules in
+  `public.workflow_cron` (catch-up = at most ONE run however late; `next_run`
+  advanced BEFORE the run so a crash never double-fires; overlap `skip` records
+  `skipped_overlap` rows). DST policy written in ADR-031 (default UTC; declared
+  zones: spring-forward runs once late, fall-back can never fire twice).
 - `pkg/consumers` — real business-logic Processors (kept OUT of `pkg/worker` so the
   core loop stays dependency-light; e.g. excelize lives only here). The first is
   the XLSX consumer (`XLSXProcessor`, FileJob pattern): on `{resource}.created` it
@@ -571,11 +603,15 @@ One line per layer — navigate the code for the rest:
   net/smtp + STARTTLS, env-configured — Brevo/Resend/Mailgun/SES) with no engine
   write-back. At-least-once ⇒ a rare double-send is accepted for transactional mail
   (documented), mitigated by a deterministic Message-ID per outbox row. Select
-  consumers via `APPXIMO_WORKER_MODE=echo|writeback|xlsx|email` (default echo). A
-  single-mode worker ACKS topics it doesn't own, so DON'T run two different modes
-  against one outbox (silent event loss under SKIP LOCKED) — for multiple event
-  types compose a `consumers.Router` (topic → Processor) in one dispatching worker
-  and scale that (ADR-016 library model).
+  consumers via `APPXIMO_WORKER_MODE=auto|echo|writeback|xlsx|email` (default
+  `auto` = workflows + email-when-SMTP-configured; `echo` is a DEV loopback that
+  owns ONLY `echo.*` and refuses everything else). Every shipped consumer
+  declares its topics (`worker.TopicOwner`), so single-mode workers now COEXIST
+  safely on one outbox (each claims only its own); the `consumers.Router`
+  remains the way ONE process handles several event types (`Handle`/
+  `HandlePrefix`/`HandleSuffix`/`HandleOwner`), and an UNMATCHED topic through
+  it is an ERROR that parks the row `failed` with the message — never an ack.
+  Deliberate dropping is `Router.Discard(topic)`, an explicit logged decision.
 - `pkg/files` — content-addressable file store with INTERCHANGEABLE backends
   (FILES-V2, the PocketBase pattern): a thin owned `Backend` interface
   (Put/Get/Delete/Stat/List/Serve/SignedURL over validated CAS keys
@@ -1336,6 +1372,51 @@ generated CRUD write by declaring an `events` array at the resource level
   more does its own `SELECT`; for a delete the row is already gone, so the
   id is all the event carries.
 - A delete that matches no row (404) emits nothing.
+- **Consumption**: events are consumed by `appximo-worker` (topic-scoped: a
+  worker only claims topics it has a consumer for — an event nobody consumes
+  stays `pending`, visible in `GET /admin/outbox`, the
+  `appximo_outbox_oldest_pending_age_seconds` gauge and its alert; it is NEVER
+  acknowledged by a consumer that doesn't own it). App-specific consumers are a
+  `consumers.Router` in a consumer binary (`appximo backend-spec`); the
+  schema-declarative consumer is a workflow (below).
+
+### Workflows (declarative trigger→steps pipelines, ADR-031)
+
+A top-level `workflows` block (sibling of `resources`/`rbac`) declares pipelines
+that execute in `appximo-worker` — never on the request path:
+
+```json
+"workflows": {
+  "al_pagar": {
+    "trigger": { "type": "event", "event": "update", "resource": "orders" },
+    "steps": [
+      { "name": "solo_pagadas", "type": "condition", "config": { "expr": "record.status == 'paid'" } },
+      { "name": "avisar", "type": "webhook", "config": { "url": "https://erp.example.com/hook", "hmac_secret_env": "ERP_SECRET" } }
+    ]
+  },
+  "resumen": { "trigger": { "type": "cron", "cron": "0 8 * * *", "timezone": "America/Bogota" },
+               "steps": [ { "name": "emitir", "type": "enqueue", "config": { "topic": "reports.daily" } } ] }
+}
+```
+
+- Triggers: `event` (create|update|delete — the resource MUST declare that
+  action in `events`, else load error) or `cron` (5-field / `@daily` /
+  `@every 1h`; IANA `timezone`, default UTC; DST policy in ADR-031). No `http`
+  trigger (a custom route's handler enqueues an event instead).
+- Steps run SEQUENTIALLY; the closed set: `condition` (expr-lang; false stops
+  the run), `update`, `create` (via the engine API as the workflow's `role` —
+  RBAC and validation intact), `webhook` (signed, SSRF-guarded, HTTPS-only),
+  `enqueue`. In `data`/`id`, a string starting with `=` is an expr over
+  `event`/`record`/`tenant`/`now`; everything else is a literal.
+- `overlap: "skip"` (default; recorded as `skipped_overlap`) or `"allow"`;
+  optional `role` (a declared RBAC role).
+- Everything compiles at load — cron specs, expressions, trigger coherence,
+  config keys per step type; `enqueue` of a topic that triggers a workflow is a
+  load error (declared infinite loop).
+- Observability: `public.workflow_runs` + `GET /admin/workflows` +
+  `appximo_workflow_{runs_24h,failed_24h,overdue_seconds}` and alerts. Runs are
+  at-least-once (steps must be idempotent); a failed cron run's retry is the
+  next occurrence.
 
 ### Importing rows with their own ids/timestamps (`import`, WRITE-ASYMMETRY-S1)
 
@@ -2529,7 +2610,11 @@ is a JSON snapshot, not a stream).
   level `foreign_keys` block) — all in [Relations](#relations). What still does NOT
   exist: a FK referencing a column that is neither a PK nor `unique` (Postgres
   forbids it — rejected at load), and `MATCH PARTIAL`.
-- `workflows` schema block — parsed for forward compatibility, no executor.
+- A `workflows` trigger of type `http`, step types beyond
+  `condition|update|create|webhook|enqueue`, or a workflow step graph
+  (`next`/branches — steps are strictly sequential; a false `condition` stops
+  the run). The block itself EXECUTES since ADR-031 (in `appximo-worker`) — see
+  [Workflows](#workflows) in SCHEMA_REFERENCE §1.4.
 - OTLP/OpenTelemetry export (observability is Prometheus `/metrics` + an
   internal trace ring).
 - A hosted/SaaS version — self-hosted only.

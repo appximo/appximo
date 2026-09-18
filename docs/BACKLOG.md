@@ -1440,96 +1440,52 @@ decisions are already taken by Miguel and recorded (internal A-67, A-68): the
 worker SHIPS with the installer, and the `workflows` executor GETS BUILT.
 Structured fields for every item: [backlog/items.json](backlog/items.json).
 
-### AUTO-1 — The worker's echo mode (the DEFAULT) acks ANY topic and marks it sent
+### AUTO-7 — The 34 `factura.emitir` pending on the 58 since July 31 — resolve with the REAL consumer (COMMERCE-4)
 
-`APPXIMO_WORKER_MODE` defaults to `echo`, which logs and marks `sent` every
-outbox row it claims — whatever the topic. An operator who starts the stock
-worker "to see" consumes and acks business events that belonged to a future
-consumer; under SKIP LOCKED this is silent event loss with a success face.
-Verified in `pkg/worker`: the writeback/echo processors ack topics they do not
-own by design (single-mode assumption). **Ready:** echo refuses to ack (or to
-run over) topics that look like business events, or says loudly what it is
-about to consume; test-pinned. This is what makes AUTO-7 dangerous.
-
-### AUTO-2 — The worker's env vars fall back silently (the OPS-13 class, worker edition)
-
-The handoff counts 14 variables; the session's grep of `pkg/worker` +
-`pkg/consumers` + `cmd/appximo-worker` finds `APPXIMO_WORKER_MODE`,
-`APPXIMO_WORKER_WRITEBACK`, `APPXIMO_WORKER_RESOURCE`, `APPXIMO_WORKER_ROLE`,
-`APPXIMO_EMAIL_TOPIC`, `APPXIMO_FILES_DIR`, `SMTP_HOST/USER/PASS/FROM` and the
-three engine ones — none of which warns on a bad or misspelled value. In the
-worker the silence is worse than in the engine: mode and topic decide WHICH
-events are consumed and which are lost. **Ready:** the OPS-13 helper applied
-here too; the exact list pinned when the session opens.
-
-### AUTO-3 — An outbox row parked in state='failed' is invisible everywhere
-
-After maxAttempts the row parks in `failed` and nothing counts it: no /admin
-surface, no metric, no alert — only a hand-written SELECT finds it. The outbox
-promises at-least-once; an invisible `failed` is "zero times, unannounced".
-**Ready:** a gauge + an /admin card + an alert through the existing alerter
-when failed > 0.
-
-### AUTO-4 — The DB circuit breaker opens for 8 s with no log line and no metric
-
-`pkg/resilience/circuitbreaker.go` (`Timeout: 8 * time.Second`) has no
-OnStateChange logging and no gauge: the operator sees fast 503s and cannot
-tell the breaker opened, nor when it closed. A deliberate rejection that does
-not announce itself gets diagnosed as the bug it is protecting against.
-**Ready:** state-change log + `appximo_breaker_state` gauge, visible in
-/admin Resources.
-
-### AUTO-5 — Build the `workflows` executor (today it validates clean and executes NOTHING)
-
-The `workflows` schema block is parsed "for forward compatibility" with no
-executor — an empty promise visible in `validate` and Studio. **Miguel
-decided to build it** (internal A-68): three apps already hand-roll
-trigger→condition→action in Go, and the traffickers app asks for it three
-times. The research already settled the foundations: the schema as the source
-of truth, `expr-lang/expr` for expressions, `pg_try_advisory_lock` for leader
-election, Studio as the editor. **Ready:** a written design (ADR) first, then
-build sessions; the DST/timezone danger in any scheduler is a named trap.
-
-### AUTO-6 — A webhook that exhausts its 3 retries is lost without a trace
-
-The after-webhook dispatcher retries 3× with backoff and then drops: no
-dead-letter, no metric, no redispatch path. For the receiving system the event
-never happened, and nobody on this side knows. **Ready:** a dead-letter row +
-metric + documented redispatch, or at minimum a structured log + counter.
-
-### AUTO-7 — The 34 `factura.emitir` pending on the 58 since July 31 — do NOT drain them with the stock binary
-
-Verified live 2026-09-17 on the tiendita's database: `SELECT topic, state,
-count(*) FROM public.outbox …` → `factura.emitir | pending | 34`, oldest
-2026-07-31 23:11 UTC. They are the living evidence of the worker/workflows gap
-and of the stalled fiscal flow. **WARNING (the reason this item exists):**
-running the stock worker in its default mode would mark all 34 `sent` without
-emitting anything — evidence destroyed with a success face (AUTO-1). **Ready:**
-Miguel decides — keep them until the real invoicing consumer exists
-(COMMERCE-4), or void them with the 34 rows archived first. Never echo.
-
-### AUTO-8 — Ship the worker with the installer (decided: product capability, not a library)
-
-Miguel decided (internal A-67): `appximo-worker` ships in releases and
-`install.sh` can install it as an optional unit. `events: […]` in a schema
-promises a consumer; today honoring that promise requires compiling Go, which
-is exactly what the product says is not needed. **Ready:** binary in the
-release/installer, optional `--worker` unit, mode/topic in the env, doc in
-PRODUCTION — after AUTO-1/AUTO-2 close (shipping the trap is worse than not
-shipping).
+Verified live 2026-09-17 on the tiendita's database: 34 `factura.emitir`
+pending, oldest 2026-07-31 23:11 UTC. **Since AUTOMATIZACION-S1 they are no
+longer in danger and no longer invisible**: the worker's claim is topic-scoped
+(echo owns only `echo.*` — NO product binary can mark them sent anymore), and
+the queue shows them — `GET /admin/outbox`, the
+`appximo_outbox_oldest_pending_age_seconds` gauge and its alert name the topic
+and the age. What remains is the FISCAL flow itself: the invoices were never
+emitted. **Ready:** COMMERCE-4 (the real DIAN adapter in commerce-worker) +
+Miguel's call — drain them with that consumer when it exists, or void them with
+the 34 rows archived first (pg_dump of the table). Never with anything else.
 
 ### AUTO-9 — The voice plan: five steps, with what the research already settled
 
-Operating an app by voice, in five deliberate steps: (1) close the
-worker/outbox traps (AUTO-1..4, AUTO-6) → (2) read-only by voice → (3) writes
-with confirmation → (4) declarative rules (= AUTO-5) → (5) a visual layer.
-Settled by the research: `expr-lang/expr`, `pg_try_advisory_lock`, the schema
-as source of truth, Studio as editor. **Warnings that must not be lost:**
-Spanish dictation mangles proper names — correct server-side against what
-exists, never trust the transcript; real latency will be 2–4 s — design the
-confirmations for it; DST is a real danger in any scheduler. **Ready:** step
-1 is the AUTO items above; steps 2–5 are their own sessions with Miguel
-validating the experience.
+Operating an app by voice, in five deliberate steps: **(1) close the
+worker/outbox traps — DONE (AUTOMATIZACION-S1)** → (2) read-only by voice →
+(3) writes with confirmation → **(4) declarative rules — DONE: the workflows
+executor exists (ADR-031)** → (5) a visual layer. The settled foundations
+(`expr-lang/expr`, `pg_try_advisory_lock`, the schema as source of truth) are
+now shipped code; Studio-as-the-rules-editor is AUTO-11. **Warnings that must
+not be lost:** Spanish dictation mangles proper names — correct server-side
+against what exists, never trust the transcript; real latency will be 2–4 s —
+design the confirmations for it; the scheduler's DST policy is written (ADR-031
+§5). **Ready:** steps 2–3 and 5 are their own sessions with Miguel validating
+the experience — the base beneath them is done.
+
+### AUTO-10 — The agent grammar (`spec` / ai-generate) does not teach workflows
+
+The executor exists and SCHEMA_REFERENCE §1.4 documents it, but
+`appximo spec` (pkg/aigen's GrammarCore) and the ai-generate loop never mention
+the block — an external agent generating schemas cannot declare pipelines it
+does not know exist. Deferred ON PURPOSE by AUTOMATIZACION-S1 (three parts
+closed well over five half-done). **Ready:** a workflows section in
+GrammarCore + one engine-validated worked example + an ai-eval corpus case; the
+validator is already the oracle (it compiles cron specs and expressions).
+
+### AUTO-11 — Studio has no visual workflows panel (Code view only)
+
+Workflows are authorable today as JSON (Studio's Code view validates live
+through /editor/validate), but there is no graphical panel: no
+resource/event dropdowns, no step editor, no run history in Studio. A-70
+declared Studio THE editor of the rules. **Ready:** an editor session
+(pkg/editorui): a Workflows panel faithful to `validateWorkflows` (the same
+pattern as the RBAC and relations panels), plus a runs view reading
+`GET /admin/workflows`.
 
 ### DEC — Decisions that wait on Miguel (stable IDs since CENTRO-MANDO-S2)
 

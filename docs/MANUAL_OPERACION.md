@@ -118,6 +118,19 @@ Para provocar uno y verlo con sus propios ojos: `appximo drill error --app=<app>
 | **Historial** | ¿Qué versiones del schema se desplegaron? Ver cualquiera; volver atrás desde Studio | `/admin#/history` |
 | **Studio** | Diseñar y desplegar el schema (con vista previa de la migración y aprobación de borrados) | `/editor` |
 | **Docs de la API** | El contrato OpenAPI, para probar desde el navegador | `/docs` |
+| **Cola de eventos** | ¿Hay eventos esperando o fallados? Cuántos, de qué tema, **hace cuánto el más viejo**, y cada fallado **con su error** (`last_error`); también el estado de los disyuntores | `GET /admin/outbox` (con `X-Admin-Key` o token de plataforma) |
+| **Workflows** | ¿Qué automatizaciones existen y cómo les fue? Última corrida (con el detalle por paso y el error), próxima, fallos de 24 h | `GET /admin/workflows` |
+
+**La cola de eventos, en una frase:** un recurso con `events` (o un workflow, o
+un webhook agotado) escribe filas en `public.outbox`; **`appximo-worker`** las
+consume — y solo las de temas que TIENE consumidor: un tema sin consumidor queda
+`pending`, visible, y dispara la alerta de edad
+(`APPXIMO_OUTBOX_MAX_PENDING_AGE`, default 15 min). **La métrica que importa es
+la edad del pendiente más viejo** (`appximo_outbox_oldest_pending_age_seconds`),
+nunca la profundidad: mil que drenan están sanos; uno parado un mes es el
+incidente. Un evento que agotó reintentos queda `failed` **con su error en la
+fila**; para reintentarlo después de arreglar la causa:
+`UPDATE public.outbox SET state='pending', attempts=0 WHERE id=<id>;`.
 
 ---
 
@@ -260,6 +273,10 @@ Nada automático: **una app es una caja** (§7). El plan es reconstruir en una c
 | El servicio queda en `activating (auto-restart)` sin error claro | `/etc/<app>` con permisos `0750` (umask) | `chmod 0755 /etc/<app>` |
 | `401 token tenant mismatch` | El `Host` no es el subdominio del tenant del token | `curl -H 'Host: <tenant>.<dominio>' …` |
 | El reloj de la caja se movió | Los tokens siguen valiendo (`exp` es lo único que se mira) | Nada que hacer; `appximo drill chaos 8` lo demuestra |
+| Alerta «outbox: the oldest pending event is …» | Hay eventos encolados que nadie drena — el worker no corre, o corre sin consumidor para ese tema | `systemctl status <app>-worker`; `GET /admin/outbox` dice el tema; el log del worker nombra los temas ajenos una vez por minuto |
+| Alerta «outbox: N event(s) parked state='failed'» | Un evento agotó sus reintentos; **el porqué está en la fila** | `GET /admin/outbox` → `failed[].last_error`; arreglar la causa y re-armar: `UPDATE public.outbox SET state='pending', attempts=0 WHERE id=<id>` |
+| `appximo_workflow_overdue_seconds` crece | Ningún scheduler dispara los cron — el worker está caído o ninguno tiene el liderazgo | `systemctl restart <app>-worker`; `journalctl -u <app>-worker` debe decir «cron leadership acquired» |
+| `503 … circuit breaker open` en escrituras | La base no estaba sirviendo; el disyuntor corta 8 s y se re-prueba solo | `appximo_breaker_state` en `/metrics` y el log «circuit breaker state change»; si persiste, la base: `systemctl status postgresql` |
 
 ---
 

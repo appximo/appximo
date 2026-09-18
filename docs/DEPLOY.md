@@ -372,18 +372,20 @@ request hot path, and it survives engine restarts.
 
 **Compose (Levels 1 & 2): it's already wired.** Both `docker-compose.yml` and
 `docker-compose.prod.yml` define a `worker` service that comes up with
-`docker compose up -d`. It defaults to `echo` mode (log + ack — no engine calls,
-safe out of the box). Switch modes in `.env`:
+`docker compose up -d`. It defaults to `auto` mode (the workflow executor +
+email delivery when SMTP is configured; claims are TOPIC-SCOPED, so a topic with
+no consumer stays pending and visible — it is never acknowledged). Switch modes
+in `.env`:
 
 ```bash
-APPXIMO_WORKER_MODE=xlsx   # echo (default) | writeback | xlsx | email
+APPXIMO_WORKER_MODE=xlsx   # auto (default) | echo (dev loopback: echo.* only) | writeback | xlsx | email
 ```
 
 | Env var | Default | Meaning |
 |---|---|---|
 | `DATABASE_URL` | — | the SAME Postgres as the engine (the outbox lives in `public`) |
 | `JWT_SECRET` | — | **must equal the engine's** — the worker mints a short-lived, scoped service JWT to write results back through the engine API (writeback/xlsx; email needs no JWT) |
-| `APPXIMO_WORKER_MODE` | `echo` | `echo` (log+ack) · `writeback` (demo status PATCH) · `xlsx` (FileJob consumer) · `email` (transactional email) |
+| `APPXIMO_WORKER_MODE` | `auto` | `auto` (workflow executor + email when SMTP set) · `echo` (dev loopback — acks ONLY `echo.*`, refuses the rest) · `writeback` (demo status PATCH) · `xlsx` (FileJob consumer) · `email` (transactional email). The env is STRICT: an invalid value or a misspelled `APPXIMO_WORKER_*` refuses to boot naming it. |
 | `APPXIMO_ENGINE_URL` | `http://engine:8080` | engine data-plane URL the worker calls for write-back |
 | `APPXIMO_WORKER_ROLE` | `service_worker` | scoped RBAC role the worker assumes — **never admin**; must exist in your schema (writeback/xlsx only) |
 | `APPXIMO_TENANT_DOMAIN` | `localhost` | internal Host-header suffix (`{tenant}.{suffix}`); the engine reads the **subdomain**, so `localhost` is correct even in prod — it is not a DNS name |
@@ -487,7 +489,7 @@ After=network-online.target docker.service appximo.service
 User=appximo
 Group=appximo
 EnvironmentFile=/etc/appximo/engine.env      # same DATABASE_URL + JWT_SECRET
-Environment=APPXIMO_WORKER_MODE=echo
+Environment=APPXIMO_WORKER_MODE=auto
 Environment=APPXIMO_ENGINE_URL=http://127.0.0.1:8080
 ExecStart=/usr/local/bin/appximo-worker
 Restart=on-failure
