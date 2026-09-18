@@ -1367,6 +1367,22 @@
    "bloquea": [],
    "origen": "AUTOMATIZACION-S1",
    "estado": "abierto"
+  },
+  {
+   "id": "OPS-53",
+   "titulo": "El lab no embarca los companion scripts a sus cajas (el «camino del cliente» queda a medias)",
+   "frente": "medicion",
+   "que_es": "tools/lab provisiona con install.sh pero /root/lab/ solo lleva install.sh + schema + seed: los companions (backup.sh, restore.sh, fleet-audit.sh, deploy-update.sh) no viajan, el instalador lo NOMBRA como warning y toda caja del lab queda sin ellos. Encontrado en AUTOMATIZACION-S1 al querer provocar el check de worker de fleet-audit en la caja del lab (hubo que subirlo a mano).",
+   "por_que_importa": "El lab promete ejercitar el camino EXACTO del cliente; sin companions, la mitad operativa de ese camino (backup/audit/deploy) no se ejercita nunca en el lab.",
+   "que_lo_destraba": "Una sesión chica: provision.go copia scripts/*.sh junto a install.sh (o un tarball del directorio scripts/) y el smoke corre fleet-audit una vez.",
+   "costo": "chico",
+   "dano": "bajo",
+   "prioridad": "P3",
+   "decide": "agente",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "AUTOMATIZACION-S1 (verificación del worker en caja real)",
+   "estado": "abierto"
   }
  ]
 }

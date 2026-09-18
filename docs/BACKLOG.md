@@ -1428,6 +1428,18 @@ would close it better, and is Miguel's call.
   boxes it operates (inherent to an orchestrator) — its own box is hardened
   (`--harden`, swap, off-box encrypted backup to the 105, restore rehearsed).
 
+### OPS-53 — The lab does not ship the companion scripts to its boxes (the "customer path" stops halfway)
+
+`tools/lab` provisions with install.sh, but `/root/lab/` carries only
+install.sh + schema + seed: the companions (backup.sh, restore.sh,
+fleet-audit.sh, deploy-update.sh) never travel, the installer NAMES the gap as
+a warning, and every lab box lives without them. Found in AUTOMATIZACION-S1
+while provoking fleet-audit's new worker check on the lab box (the script had
+to be copied up by hand). The lab promises the EXACT customer path; without
+the companions its operational half (backup/audit/deploy) is never exercised
+there. **Ready:** provision.go ships `scripts/*.sh` next to install.sh (or a
+tarball of scripts/), and the smoke runs fleet-audit once.
+
 ### AUTO — The automation front (consolidated 2026-09-17, CENTRO-MANDO-S2)
 
 The worker/outbox/workflows/voice front lived in a separate architecture chat
