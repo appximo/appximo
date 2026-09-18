@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789734525531,
+  "lastUpdate": 1789741355671,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -5760,6 +5760,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36880860 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "c8ffa4f184a19e2da28beadc0de3e13f41938db1",
+          "message": "docs(backlog): VOZ-1 done (command channel ON in tiendita); VOZ-2 opened (pending-state wording)\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TFikNM6K1AFdynfv9rdXiX",
+          "timestamp": "2026-09-18T14:22:05Z",
+          "tree_id": "5288cdbad049fcc3aafecf8c4d8dfde638d98aed",
+          "url": "https://github.com/appximo/appximo/commit/c8ffa4f184a19e2da28beadc0de3e13f41938db1"
+        },
+        "date": 1789741354528,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 4100,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "586078 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 4100,
+            "unit": "ns/op",
+            "extra": "586078 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "586078 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "586078 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 44.96,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "57521061 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 44.96,
+            "unit": "ns/op",
+            "extra": "57521061 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "57521061 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "57521061 times\n4 procs"
           }
         ]
       }
