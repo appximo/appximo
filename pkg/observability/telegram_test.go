@@ -27,8 +27,8 @@ func testTelegram(t *testing.T, handler http.HandlerFunc) *TelegramAlerter {
 	if err != nil {
 		t.Fatalf("NewTelegramAlerter: %v", err)
 	}
-	tg.client = srv.Client()
-	tg.apiBase = srv.URL
+	tg.client.SetHTTPClient(srv.Client())
+	tg.client.SetAPIBase(srv.URL)
 	return tg
 }
 
@@ -177,8 +177,8 @@ func TestTelegram_ErrorsNeverCarryTheToken(t *testing.T) {
 	}
 	// A transport-level error embeds the request URL (which has the token) —
 	// the redaction must scrub it too.
-	tg.apiBase = "http://127.0.0.1:1" // nothing listens
-	tg.client = &http.Client{Timeout: 200 * time.Millisecond}
+	tg.client.SetAPIBase("http://127.0.0.1:1") // nothing listens
+	tg.client.SetHTTPClient(&http.Client{Timeout: 200 * time.Millisecond})
 	err = tg.Send(context.Background(), Alert{Message: "x"})
 	if err == nil || strings.Contains(err.Error(), "AAExampleExampleExampleExample01") {
 		t.Fatalf("transport error must not carry the token: %v", err)

@@ -226,6 +226,21 @@ curl -X POST https://acme.example.com/api/transaction \
   the outbox events instead); no GraphQL batch; no in-place arithmetic (use
   a compare-and-set `guard`).
 
+### 2b-bis. The daily digest — `GET /api/summary` (built-in, read-only)
+
+A reserved cross-resource endpoint (no schema declaration; a resource may not
+be named `summary`): an owner-language "what happened today" digest composed
+deterministically from the schema — per resource the caller's role may read,
+rows **created today** (needs an `auto:"create"` field), **updated today** (an
+`auto:"update"` field), and **pending** (non-terminal `state_machine` states).
+It authorizes each resource itself (only what the role may read appears, scoped
+by its row condition + field allowlist), so it never leaks what a list would
+not. `?view=census` = totals per resource. Returns `{"text","has_motion",…}`
+(`text` is Telegram-HTML). It powers the Telegram `resumen`/`estado` command
+channel and the canonical `resumen_matinal` cron workflow (a cron → `enqueue
+summary.telegram` → the worker's digest consumer sends it). Operator + Siri
+setup: docs/PRODUCTION.md §4.6d.
+
 ### 2c. Reading from OUTSIDE the binary — `?fields=`: ask for the columns you will use
 
 **The problem it solves is not bandwidth, it is disk.** A `json`/`jsonb`/`text`

@@ -124,6 +124,12 @@ type App struct {
 	selfmon   *observability.ResourceCollector // the engine's own resources + attribution (CENTINELA-C-S1)
 	outboxObs *outbox.Observer                 // outbox queue health: oldest-pending age, failed rows, alerts (AUTOMATIZACION-S1)
 
+	// tgReceiver is the Telegram command channel (VOZ-ESCALON1-S1): it answers
+	// `resumen`/`estado`/`ayuda` from the ONE authorized chat with the digest
+	// GET /api/summary composes. nil when APPXIMO_TELEGRAM_SUMMARY_TENANT is
+	// unset; a half-configuration is a boot error, not a silent no-op.
+	tgReceiver *telegramReceiver
+
 	cpSvc controlplane.Service
 	cpSrv *http.Server
 	ss    *shutdown.State
@@ -635,6 +641,27 @@ func New(cfg Config) (*App, error) {
 		return nil, fmt.Errorf("appximo: parse RBAC policy: %w", err)
 	}
 	app.rbacPolicy = &rbacPolicy
+
+	// Telegram command channel (VOZ-ESCALON1-S1): built here so a
+	// half-configuration fails the boot (naming what is missing) instead of a
+	// silently dead channel. nil when not requested. The digest is fetched
+	// through the LIVE router (survives hot-swap), authenticated as the
+	// configured role — so a fresh agent's schema roles are the gate.
+	declaredRoles := make(map[string]bool, len(s.RBAC.Roles))
+	for roleName := range s.RBAC.Roles {
+		declaredRoles[roleName] = true
+	}
+	tgRcv, tgErr := newTelegramReceiver(cfg, declaredRoles, func() http.Handler {
+		if m := app.currentRouter.Load(); m != nil {
+			return m
+		}
+		return nil
+	})
+	if tgErr != nil {
+		pool.Close()
+		return nil, tgErr
+	}
+	app.tgReceiver = tgRcv
 
 	// SSE hub.
 	maxSSE := 0
@@ -1247,6 +1274,9 @@ func (a *App) startBackground(ctx context.Context) {
 	}
 	if a.outboxObs != nil {
 		go a.outboxObs.Run(ctx)
+	}
+	if a.tgReceiver != nil {
+		go a.tgReceiver.run(ctx)
 	}
 	if a.obsStore != nil {
 		go flushObsSnapshots(ctx, a.obsStore, a.rings, a.hist, a.sloEngine)

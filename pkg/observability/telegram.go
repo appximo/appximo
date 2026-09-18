@@ -20,78 +20,51 @@ package observability
 // error path here is scrubbed through redactToken).
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"html"
-	"io"
-	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	zlog "github.com/rs/zerolog/log"
 
-	"github.com/appximo/appximo/pkg/extensions"
+	"github.com/appximo/appximo/pkg/telegram"
 )
 
-// Telegram config shape rules, enforced at BOOT (fail-fast, the worker-env
-// discipline): a malformed token or chat id refuses to boot naming the
-// variable and the rule — never a silently dead alert channel.
-var (
-	telegramTokenRe = regexp.MustCompile(`^[0-9]+:[A-Za-z0-9_-]{20,}$`)
-	telegramChatRe  = regexp.MustCompile(`^(-?[0-9]+|@[A-Za-z0-9_]{5,})$`)
-)
+// RetryAfterError is an alias to the shared client's type so existing callers
+// (and the async alert wrapper, which matches it structurally) are unchanged.
+type RetryAfterError = telegram.RetryAfterError
 
-// RetryAfterError is returned on a Telegram 429 so the retry loop can honor
-// the API's own pacing instead of guessing.
-type RetryAfterError struct {
-	After time.Duration
-	Msg   string
-}
-
-func (e *RetryAfterError) Error() string { return e.Msg }
-
-// RetryAfter reports how long Telegram asked us to wait.
-func (e *RetryAfterError) RetryAfter() time.Duration { return e.After }
-
-// TelegramAlerter posts alerts to one Telegram chat via the Bot API.
-// The HTTP client is the shared SSRF-safe egress client, same as Slack.
+// TelegramAlerter posts alerts to one Telegram chat via the shared Bot API
+// client (pkg/telegram — one token-handling path for the alert sink, the
+// inbound receiver and the scheduled-summary consumer). This type keeps only
+// the alert-shaped concern: the Spanish, phone-first rendering.
 type TelegramAlerter struct {
-	token    string
+	client   *telegram.Client
 	chatID   string
 	appName  string // which app this engine serves — every message names it
 	panelURL string // optional public origin (https://app.example.com) for panel links
-	client   *http.Client
-	apiBase  string // overridable in tests; default https://api.telegram.org
 }
 
 // NewTelegramAlerter validates the token/chat SHAPE and returns the sink.
 // Values are never echoed back in the error (the token is a credential).
 func NewTelegramAlerter(token, chatID, appName, panelURL string) (*TelegramAlerter, error) {
-	if !telegramTokenRe.MatchString(token) {
-		return nil, fmt.Errorf("APPXIMO_TELEGRAM_BOT_TOKEN is not a Telegram bot token (expected <digits>:<token>, as issued by @BotFather); the value is deliberately not echoed here")
-	}
-	if !telegramChatRe.MatchString(chatID) {
-		return nil, fmt.Errorf("APPXIMO_TELEGRAM_CHAT_ID %q is not a Telegram chat id (an integer like 8851136988 or -100123456, or @channelname); get yours by messaging the bot and reading getUpdates", chatID)
+	c, err := telegram.New(token, chatID)
+	if err != nil {
+		return nil, err
 	}
 	return &TelegramAlerter{
-		token: token, chatID: chatID, appName: appName, panelURL: strings.TrimRight(panelURL, "/"),
-		client:  extensions.NewSSRFSafeClient(10 * time.Second),
-		apiBase: "https://api.telegram.org",
+		client:   c,
+		chatID:   chatID,
+		appName:  appName,
+		panelURL: strings.TrimRight(panelURL, "/"),
 	}, nil
 }
 
-// redactToken scrubs the bot token from any string that might reach a log or
-// an error chain (http errors embed the request URL, which carries it).
-func (t *TelegramAlerter) redactToken(s string) string {
-	if t.token == "" {
-		return s
-	}
-	return strings.ReplaceAll(s, t.token, "<token>")
-}
+// Client exposes the underlying shared client (the engine reuses it for the
+// inbound receiver and the getMe/getChat verification — one bot, one client).
+func (t *TelegramAlerter) Client() *telegram.Client { return t.client }
 
 // VerifyLive checks the token and chat against the live API — read-only, no
 // message is sent (getMe + getChat). Called on a BACKGROUND goroutine at boot:
@@ -99,88 +72,20 @@ func (t *TelegramAlerter) redactToken(s string) string {
 // api.telegram.org being reachable (a Telegram outage must never keep the app
 // down after a restart). fleet-audit.sh runs the same two calls from outside.
 func (t *TelegramAlerter) VerifyLive(ctx context.Context) error {
-	var me struct {
-		Result struct {
-			Username string `json:"username"`
-		} `json:"result"`
+	user, err := t.client.GetMe(ctx)
+	if err != nil {
+		return fmt.Errorf("telegram getMe: %s", err.Error())
 	}
-	if err := t.call(ctx, "getMe", map[string]any{}, &me); err != nil {
-		return fmt.Errorf("telegram getMe: %s", t.redactToken(err.Error()))
+	if err := t.client.GetChat(ctx); err != nil {
+		return fmt.Errorf("telegram getChat (bot @%s is fine, the CHAT is not — did the chat start the bot?): %s", user, err.Error())
 	}
-	if err := t.call(ctx, "getChat", map[string]any{"chat_id": t.chatIDValue()}, nil); err != nil {
-		return fmt.Errorf("telegram getChat (bot @%s is fine, the CHAT is not — did the chat start the bot?): %s", me.Result.Username, t.redactToken(err.Error()))
-	}
-	zlog.Info().Str("bot", "@"+me.Result.Username).Str("chat_id", t.chatID).Msg("telegram alert destination verified (getMe+getChat)")
+	zlog.Info().Str("bot", "@"+user).Str("chat_id", t.chatID).Msg("telegram alert destination verified (getMe+getChat)")
 	return nil
-}
-
-// chatIDValue sends numeric ids as numbers (the API accepts strings too, but
-// being exact costs nothing) and @channel names as strings.
-func (t *TelegramAlerter) chatIDValue() any {
-	if strings.HasPrefix(t.chatID, "@") {
-		return t.chatID
-	}
-	return json.Number(t.chatID)
 }
 
 // Send renders the Spanish phone-first message and posts it.
 func (t *TelegramAlerter) Send(ctx context.Context, a Alert) error {
-	payload := map[string]any{
-		"chat_id":                  t.chatIDValue(),
-		"text":                     telegramText(a, t.appName, t.panelURL),
-		"parse_mode":               "HTML",
-		"disable_web_page_preview": true,
-	}
-	return t.call(ctx, "sendMessage", payload, nil)
-}
-
-// call POSTs one Bot API method. A 429 comes back as *RetryAfterError carrying
-// the API's own retry_after; every other non-ok is an error with the API
-// description and NO token.
-func (t *TelegramAlerter) call(ctx context.Context, method string, payload map[string]any, out any) error {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("telegram %s marshal: %w", method, err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.apiBase+"/bot"+t.token+"/"+method, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("telegram %s request: %s", method, t.redactToken(err.Error()))
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := t.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("telegram %s send: %s", method, t.redactToken(err.Error()))
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	var apiResp struct {
-		OK          bool   `json:"ok"`
-		Description string `json:"description"`
-		Parameters  struct {
-			RetryAfter int `json:"retry_after"`
-		} `json:"parameters"`
-	}
-	_ = json.Unmarshal(raw, &apiResp)
-	if resp.StatusCode == http.StatusTooManyRequests {
-		after := time.Duration(apiResp.Parameters.RetryAfter) * time.Second
-		if after <= 0 {
-			after = 5 * time.Second
-		}
-		return &RetryAfterError{After: after, Msg: fmt.Sprintf("telegram %s: 429 rate limited, retry_after=%s", method, after)}
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 || !apiResp.OK {
-		desc := apiResp.Description
-		if desc == "" {
-			desc = strings.TrimSpace(string(raw))
-		}
-		return fmt.Errorf("telegram %s: status %d — %s", method, resp.StatusCode, t.redactToken(desc))
-	}
-	if out != nil {
-		if err := json.Unmarshal(raw, out); err != nil {
-			return fmt.Errorf("telegram %s decode: %w", method, err)
-		}
-	}
-	return nil
+	return t.client.SendMessage(ctx, telegramText(a, t.appName, t.panelURL))
 }
 
 // ── the Spanish phone-first rendering ───────────────────────────────────────

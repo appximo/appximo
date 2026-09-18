@@ -239,6 +239,65 @@ alerta de backup llega aunque el motor esté caído.
 
 ---
 
+### 3c. «Mandame el resumen de hoy» — pedirle al bot por Telegram
+
+El mismo bot que le manda alertas también **recibe** un puñado de comandos y le
+contesta con un resumen del día **en lenguaje de dueño**: qué se creó hoy, qué
+está pendiente, cuántos hay de cada cosa. Solo lectura — escribir datos por acá
+llega en una etapa próxima.
+
+**Comandos** (escríbalos al bot, del chat autorizado):
+
+- **`resumen`** — qué pasó hoy (nuevos, actualizados, pendientes por recurso).
+- **`estado`** — cuántos hay de cada cosa ahora mismo.
+- **`ayuda`** — la lista. Cualquier palabra que no entienda devuelve la ayuda,
+  nunca un error.
+
+**Cómo se activa** — en `/etc/<app>/<app>.env`, además del token/chat de §3b:
+
+```
+APPXIMO_TELEGRAM_SUMMARY_TENANT=<inquilino>   # de qué inquilino es el resumen (y ENCIENDE el canal)
+APPXIMO_TELEGRAM_SUMMARY_ROLE=<rol>           # el resumen se calcula COMO este rol (debe existir en el schema)
+```
+
+y `systemctl restart <app>`. El resumen **respeta el RBAC**: muestra exactamente
+lo que ese rol puede ver — un rol acotado a sus filas cuenta solo las suyas, y
+nunca aparece un recurso que no puede leer. Un día sin movimiento dice «Sin
+movimiento hoy», no una lista de ceros.
+
+**Quién puede preguntar:** SOLO el chat de `APPXIMO_TELEGRAM_CHAT_ID`. Un
+mensaje de cualquier otro chat se **ignora y se registra** — nunca se contesta.
+Ese es el control de acceso de todo el canal. Si el canal queda configurado a
+medias (falta el rol, o el chat no es numérico), **el motor no arranca y lo
+dice**.
+
+**El mismo resumen, agendado.** Un `workflow` de cron manda el resumen solo a la
+hora que usted quiera — es el ejemplo canónico de `workflows`
+([examples/model-lab/workflows.json](../examples/model-lab/workflows.json)):
+
+```json
+"resumen_matinal": {
+  "trigger": { "type": "cron", "cron": "0 7 * * 1-5", "timezone": "America/Bogota" },
+  "steps": [ { "name": "enviar_resumen", "type": "enqueue",
+               "config": { "topic": "summary.telegram", "data": {} } } ],
+  "overlap": "skip"
+}
+```
+
+Con el `appximo-worker` en modo `auto` y el mismo token de Telegram +
+`APPXIMO_TELEGRAM_SUMMARY_ROLE`, cada mañana (7 AM Bogotá, días hábiles) llega
+el resumen al chat. Si el worker está caído, el resumen queda `pending` y la
+alerta de edad de la cola lo delata.
+
+**Desde el iPhone (Siri / Atajos), sin Telegram:** un atajo con una acción
+«Obtener contenido de URL» a
+`https://<inquilino>.<su-dominio>/api/summary` con el encabezado
+`Authorization: Bearer <token>` (uno hecho con `appximo token`), y luego
+«Obtener valor `text` del diccionario» → «Mostrar/Decir». Cinco minutos de
+armado suyo; el motor ya sirve el endpoint.
+
+---
+
 ## 4. Qué hacer cuando pasa algo
 
 Recetas cortas, en el orden en que suele hacer falta. Todas empiezan igual: **mire antes de tocar** (30 segundos):

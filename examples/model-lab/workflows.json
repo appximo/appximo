@@ -37,6 +37,14 @@
           "config": { "topic": "reports.daily", "data": { "requested_at": "=string(now)" } } }
       ],
       "overlap": "skip"
+    },
+    "resumen_matinal": {
+      "trigger": { "type": "cron", "cron": "0 7 * * 1-5", "timezone": "America/Bogota" },
+      "steps": [
+        { "name": "enviar_resumen", "type": "enqueue",
+          "config": { "topic": "summary.telegram", "data": {} } }
+      ],
+      "overlap": "skip"
     }
   }
 }

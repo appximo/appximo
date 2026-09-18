@@ -50,6 +50,7 @@ import (
 	"github.com/appximo/appximo/pkg/files"
 	"github.com/appximo/appximo/pkg/logging"
 	"github.com/appximo/appximo/pkg/outbox"
+	"github.com/appximo/appximo/pkg/telegram"
 	"github.com/appximo/appximo/pkg/worker"
 	"github.com/appximo/appximo/pkg/workflows"
 )
@@ -104,6 +105,14 @@ func main() {
 	smtpPass := env.Opt("SMTP_PASS")
 	smtpFrom := env.Opt("SMTP_FROM")
 	jwtSecret := env.Opt("JWT_SECRET")
+	// Scheduled Telegram digest (VOZ-ESCALON1-S1): a cron workflow enqueues
+	// tgSummaryTopic; when the bot is configured here, auto mode drains it and
+	// sends the digest AS tgSummaryRole. These are APPXIMO_TELEGRAM_* (not
+	// APPXIMO_WORKER_*), so they are outside the strict-key sweep below.
+	tgToken := env.Opt("APPXIMO_TELEGRAM_BOT_TOKEN")
+	tgChat := env.Opt("APPXIMO_TELEGRAM_CHAT_ID")
+	tgSummaryRole := env.Opt("APPXIMO_TELEGRAM_SUMMARY_ROLE")
+	tgSummaryTopic := env.Str("APPXIMO_TELEGRAM_SUMMARY_TOPIC", "summary.telegram")
 
 	needsEngine := mode == "auto" || mode == "writeback" || mode == "xlsx"
 	if needsEngine && jwtSecret == "" {
@@ -137,7 +146,7 @@ func main() {
 	var proc worker.Processor
 	switch mode {
 	case "auto":
-		proc = buildAuto(ctx, dsn, connect, clients, refresh, smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, emailTopic, log)
+		proc = buildAuto(ctx, dsn, connect, clients, refresh, smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, emailTopic, tgToken, tgChat, tgSummaryRole, tgSummaryTopic, log)
 	case "writeback":
 		log.Info().Str("engine_url", engineURL).Str("tenant_domain", tenantDomain).Str("role", role).
 			Msg("worker: write-back demo enabled (authenticated PATCH via engine API; owns *.created)")
@@ -176,7 +185,7 @@ func main() {
 // buildAuto assembles the shipped generic worker: the workflow executor (event
 // consumers + leader-elected cron scheduler) plus, when SMTP is configured, the
 // email consumer — everything topic-scoped through one Router.
-func buildAuto(ctx context.Context, dsn string, connect worker.Connector, clients *clientCache, refresh time.Duration, smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, emailTopic string, log zerolog.Logger) worker.Processor {
+func buildAuto(ctx context.Context, dsn string, connect worker.Connector, clients *clientCache, refresh time.Duration, smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, emailTopic, tgToken, tgChat, tgSummaryRole, tgSummaryTopic string, log zerolog.Logger) worker.Processor {
 	pool, err := db.NewPool(ctx, dsn)
 	if err != nil {
 		log.Fatal().Err(err).Msg("worker: open pool (workflows store + schema source)")
@@ -212,7 +221,20 @@ func buildAuto(ctx context.Context, dsn string, connect worker.Connector, client
 	if smtpHost != "" {
 		router.Handle(emailTopic, newEmailProcessor(smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, emailTopic, log))
 	}
-	log.Info().Bool("email", smtpHost != "").
+	// Scheduled Telegram digest consumer (VOZ-ESCALON1-S1): only when the bot is
+	// configured AND a role is named. A cron workflow enqueues tgSummaryTopic;
+	// this drains it, fetches GET /api/summary as tgSummaryRole, and sends it.
+	summaryEnabled := tgToken != "" && tgChat != "" && tgSummaryRole != ""
+	if summaryEnabled {
+		tgClient, terr := telegram.New(tgToken, tgChat)
+		if terr != nil {
+			log.Fatal().Err(terr).Msg("worker: APPXIMO_TELEGRAM_* set for the scheduled digest but invalid")
+		}
+		router.HandleOwner("summary.telegram", consumers.NewSummaryProcessor(clients.raw(tgSummaryRole), tgClient, tgSummaryTopic, log))
+	} else if tgToken != "" || tgChat != "" || tgSummaryRole != "" {
+		log.Warn().Msg("worker: the scheduled Telegram digest needs APPXIMO_TELEGRAM_BOT_TOKEN + APPXIMO_TELEGRAM_CHAT_ID + APPXIMO_TELEGRAM_SUMMARY_ROLE together — it is DISABLED until all three are set (a cron workflow enqueuing summary.telegram would then stay pending and visible)")
+	}
+	log.Info().Bool("email", smtpHost != "").Bool("telegram_digest", summaryEnabled).
 		Msg("worker: AUTO mode — workflow executor (event + leader-elected cron) enabled; topics follow the tenants' deployed schemas")
 	return router
 }

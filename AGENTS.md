@@ -2008,6 +2008,31 @@ POST /api/transaction
   4 ms for one standalone write (the shared BEGIN/COMMIT is amortized). Example:
   [examples/model-lab/atomic-tx.json](examples/model-lab/atomic-tx.json).
 
+## Daily digest (VOZ-ESCALON1-S1)
+
+`GET /api/summary` is a read-only, cross-resource "what happened today" digest
+in the OWNER'S language, composed deterministically from the schema (no LLM) —
+the first rung of the voice plan (A-70). Like `/api/transaction` it is a
+**reserved** segment (a schema resource may not be named `summary`), and it
+authorizes EACH resource itself: only resources the caller's role may `read`
+appear, each scoped by that role's row condition and field allowlist (a
+row-scoped role counts only its own rows; a resource the role can't read never
+appears — no leak a plain list wouldn't allow). Per resource it reports rows
+**created today** (needs an `auto:"create"` timestamp), **updated today** (an
+`auto:"update"` timestamp), and **pending** (rows in the non-terminal states of
+a `state_machine`, named in the schema's own words). Empty day → "Sin
+movimiento hoy". `?view=census` returns totals-per-resource ("estado"). Returns
+`{"text","has_motion",...}`; `text` is Telegram-HTML. It is served the same for
+every tenant (contract-global) and requires a token (tokenless → 401).
+
+The engine can also RECEIVE it (`APPXIMO_TELEGRAM_SUMMARY_TENANT` +
+`_ROLE`): the alert bot answers `resumen`/`estado`/`ayuda` from the one
+authorized chat (getUpdates, off the hot path; any other chat is ignored +
+logged; half-config refuses to boot). And a cron `workflow` enqueuing
+`summary.telegram` sends the same digest each morning — the canonical
+[examples/model-lab/workflows.json](examples/model-lab/workflows.json)
+`resumen_matinal`. Operator + Siri setup: docs/PRODUCTION.md §4.6d.
+
 ## GraphQL
 
 `POST /graphql`. Queries plus `create<Singular>` / `update<Singular>` /

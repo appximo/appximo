@@ -749,6 +749,102 @@ pick the bot → it prints a NEW token; update `APPXIMO_TELEGRAM_BOT_TOKEN` in
 every `/etc/<app>/<app>.env` that used it and restart each app. The old
 token dies the moment BotFather revokes it.
 
+### 4.6d "Mandame el resumen de hoy" — the Telegram command channel (VOZ-ESCALON1-S1)
+
+The same bot that DELIVERS alerts also RECEIVES a small set of read-only
+commands and answers with an owner-language daily digest — the first rung of
+the voice plan (A-70): what happened today, in the owner's words, on a phone.
+
+**The digest endpoint — `GET /api/summary`.** Generic and derived from the
+schema (the engine does not know what a "sale" is — it knows which resources
+you declared and what happened to them today): per resource the caller's role
+may read, **created today** (a resource with an `auto:"create"` timestamp),
+**updated today** (an `auto:"update"` timestamp), and **pending of someone**
+(rows in the non-terminal states of a `state_machine`, named in the schema's
+own words). Deterministic — a template over real numbers, no language model.
+RBAC-scoped: it evaluates `read` per resource and applies that role's row
+condition and field allowlist, so a row-scoped role counts only its own rows
+and never sees a resource it cannot read. Empty day → "Sin movimiento hoy",
+never a wall of zeros. `?view=census` returns the "estado" view (how many of
+each thing there are right now). It is a reserved route (a schema resource may
+not be named `summary`).
+
+**The commands.** Set these in `/etc/<app>/<app>.env` (in addition to the
+alert token/chat from §4.6c) and restart:
+
+```
+APPXIMO_TELEGRAM_SUMMARY_TENANT=<tenant>   # which tenant the digest covers (also ENABLES the channel)
+APPXIMO_TELEGRAM_SUMMARY_ROLE=<role>       # the digest is computed AS this role (must be a declared role)
+```
+
+The engine then long-polls Telegram (getUpdates) and answers, from the ONE
+authorized chat only:
+
+- **`resumen`** — today's movement.
+- **`estado`** — the census (how many of each now).
+- **`ayuda`** — the command list. Any unrecognized word gets the same help,
+  never an error.
+
+**Access control** is the whole channel's security: only
+`APPXIMO_TELEGRAM_CHAT_ID` may command; a message from any other chat is
+**ignored and logged**, never answered (no reply = no oracle to a stranger).
+**Fail-fast:** with `APPXIMO_TELEGRAM_SUMMARY_TENANT` set, a missing/invalid
+token, chat id or role — or a chat id that is not numeric (a `@channel` can
+receive alerts but cannot be a command source) — **refuses to boot** naming
+it. The receiver runs off the request hot path in its own goroutine.
+
+**Why getUpdates, not a webhook (the decision).** A single idle long-poll
+returns sub-second on a new message (well under the 5s budget), adds **zero
+inbound attack surface**, needs no public URL and no `setWebhook` moving part,
+and works behind any NAT. A webhook's only edge — no held connection — matters
+at high message volume or many bots, not one small box; and it would put a new
+public unauthenticated route on the data plane. For the fleet's scale,
+getUpdates is simpler and safer. (An operator who prefers a webhook can front
+`/api/summary` with their own tiny receiver; the endpoint is the contract.)
+
+**The same digest, scheduled (the canonical `workflows` example).** A cron
+workflow enqueues a topic each morning; the worker's digest consumer drains it
+and sends the same summary — cron → enqueue → consumer, the canonical ADR-031
+shape, pure schema on the workflow side:
+
+```json
+"workflows": {
+  "resumen_matinal": {
+    "trigger": { "type": "cron", "cron": "0 7 * * 1-5", "timezone": "America/Bogota" },
+    "steps": [ { "name": "enviar_resumen", "type": "enqueue",
+                 "config": { "topic": "summary.telegram", "data": {} } } ],
+    "overlap": "skip"
+  }
+}
+```
+
+Run `appximo-worker` in `auto` mode with the same Telegram env plus
+`APPXIMO_TELEGRAM_SUMMARY_ROLE` (and optionally
+`APPXIMO_TELEGRAM_SUMMARY_TOPIC`, default `summary.telegram`): it fetches
+`GET /api/summary` as that role and sends the text. At-least-once ⇒ a rare
+double morning summary on a retry is accepted (harmless for a read-only
+digest); a transient engine/Telegram failure keeps the row pending and it
+delivers on recovery — and if the worker is down, the enqueued digest sits
+`pending` and the outbox age alert (§8b) says so. DST follows ADR-031 (the
+declared timezone; a spring-forward run fires once, a fall-back can't fire
+twice).
+
+**Siri / an iPhone Shortcut** can ask for the same digest without Telegram —
+build a Shortcut with one "Get Contents of URL" action, then "Get Dictionary
+Value `text`" → "Show/Speak":
+
+```
+GET https://<tenant>.<your-domain>/api/summary
+Headers:
+  Authorization: Bearer <a token minted with `appximo token --tenant <t> --role <r>`>
+Method: GET
+```
+
+The response is `{"text": "...", "has_motion": true, ...}`; read `text`.
+(Do NOT build the Shortcut for the user — this is the exact request they wire
+in five minutes; mint a long-lived token for it, or a dedicated read-only
+role.)
+
 ### 4.7 Recommended cadence by kind of app
 
 | the app | cadence | why |

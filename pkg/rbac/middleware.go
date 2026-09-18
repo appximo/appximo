@@ -136,13 +136,21 @@ func EvalResultFromCtx(ctx context.Context) *EvalResult {
 // (reserved at load), so this never shadows a real resource's policy.
 const TransactionRoute = "transaction"
 
+// SummaryRoute is the reserved single segment of the cross-resource daily
+// digest endpoint (VOZ-ESCALON1-S1): GET /api/summary. Like TransactionRoute it
+// is NOT a resource — the handler evaluates read on EACH resource itself and
+// includes only those the role may see — so the middleware passes it through
+// (a single-resource "summary" check would deny-by-default a route that spans
+// many). A schema resource may not be named "summary" (reserved at load).
+const SummaryRoute = "summary"
+
 // resourceFromPath extracts the resource name from paths like /api/guides or
 // /api/guides/{id}. Returns "" for non-/api paths AND for the reserved
 // /api/transaction batch endpoint (which does its own per-operation RBAC), so the
 // middleware enforces nothing there and the handler authorizes each op itself.
 func resourceFromPath(path string) string {
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	if len(parts) >= 2 && parts[0] == "api" && parts[1] != "" && parts[1] != TransactionRoute {
+	if len(parts) >= 2 && parts[0] == "api" && parts[1] != "" && parts[1] != TransactionRoute && parts[1] != SummaryRoute {
 		return parts[1]
 	}
 	return ""

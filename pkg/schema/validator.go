@@ -106,6 +106,12 @@ var (
 	// resource so named would have its collection route shadowed by the batch
 	// handler, so it is rejected at load (the plural "transactions" is unaffected).
 	reservedTransactionResource = "transaction"
+	// reservedSummaryResource is the read-only cross-resource digest endpoint
+	// (VOZ-ESCALON1-S1): GET /api/summary composes "what happened today" across
+	// every resource the role may read. Like `transaction`, it is not a table —
+	// a resource so named would have its collection route shadowed, so it is
+	// rejected at load (the plural "summaries" is unaffected).
+	reservedSummaryResource = "summary"
 
 	validFieldTypes = map[string]bool{
 		"string":  true,
@@ -142,6 +148,11 @@ func Validate(s *APISchema) []ValidationError {
 			errs = append(errs, ValidationError{
 				Field:   resPrefix,
 				Message: fmt.Sprintf("invalid resource name %q: reserved for the atomic multi-resource transaction endpoint (POST /api/transaction)", resName),
+			})
+		} else if resName == reservedSummaryResource {
+			errs = append(errs, ValidationError{
+				Field:   resPrefix,
+				Message: fmt.Sprintf("invalid resource name %q: reserved for the daily-digest endpoint (GET /api/summary)", resName),
 			})
 		}
 
