@@ -793,6 +793,15 @@ token, chat id or role — or a chat id that is not numeric (a `@channel` can
 receive alerts but cannot be a command source) — **refuses to boot** naming
 it. The receiver runs off the request hot path in its own goroutine.
 
+**One bot answers for ONE app.** getUpdates is a single-consumer stream: two
+engines polling the same bot token would steal each other's updates. So the
+command channel (`APPXIMO_TELEGRAM_SUMMARY_TENANT`) may be enabled on only ONE
+app per bot — give each app that needs interactive commands its own
+`@BotFather` bot, or enable commands on one and let the others use the
+**scheduled** digest (which has no such limit — each app enqueues its own
+topic). ALERTS and the scheduled digest are send-only and safely share one bot
+across every app; only the inbound command channel is single-consumer.
+
 **Why getUpdates, not a webhook (the decision).** A single idle long-poll
 returns sub-second on a new message (well under the 5s budget), adds **zero
 inbound attack surface**, needs no public URL and no `setWebhook` moving part,

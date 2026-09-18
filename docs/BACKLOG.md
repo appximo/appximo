@@ -1439,6 +1439,25 @@ tarball of scripts/), and the smoke runs fleet-audit once.
 - **Ready:** isolate the state (schema/DB per run or TRUNCATE in setup) and
   leave `-count=2` green.
 
+### VOZ-1 — Turn the Telegram command channel ON in the 58 (the payoff of step 1)
+
+- **Origin:** VOZ-ESCALON1-S1 (2026-09-18). `GET /api/summary`, the command
+  receiver (`resumen`/`estado`/`ayuda`) and the scheduled digest are built,
+  tested and provoked live; the new binary is deployed to both 58 apps. What
+  remains is switching it on in production.
+- **Impact:** medium. The capability exists but no one can text the bot yet.
+- **The constraint that needs a decision (Miguel):** getUpdates is a
+  single-consumer stream, so the INBOUND command channel
+  (`APPXIMO_TELEGRAM_SUMMARY_TENANT` + `APPXIMO_TELEGRAM_SUMMARY_ROLE`) runs on
+  only ONE app per bot — either give tiendita and vetapp their own `@BotFather`
+  bots, or enable commands on one. ALERTS and the SCHEDULED digest are
+  send-only and share one bot fine.
+- **Ready:** (commands) two env lines + restart on the chosen app; (scheduled)
+  run `appximo-worker` in `auto` mode with the same Telegram env +
+  `APPXIMO_TELEGRAM_SUMMARY_ROLE`, and add the `resumen_matinal` cron workflow
+  to that app's schema (docs/PRODUCTION.md §4.6d;
+  examples/model-lab/workflows.json).
+
 ### AUTO — The automation front (consolidated 2026-09-17, CENTRO-MANDO-S2)
 
 The worker/outbox/workflows/voice front lived in a separate architecture chat

@@ -418,6 +418,33 @@ refreshed).
 ---
 
 
+## DONE in VOZ-ESCALON1-S1 (2026-09-18) — "mandame el resumen de hoy": the read rung of the voice plan (A-70)
+
+The alert channel of ALERTAS-TELEGRAM-S1 was the OUTBOUND half; this is the
+INBOUND half plus the content. Step 1 only — read-only, no writes.
+
+| Item | What shipped | Verified by |
+|---|---|---|
+| **The digest — `GET /api/summary`** | Read-only cross-resource "what happened today" in the owner's language, GENERIC from the schema (created today / updated today / pending = non-terminal state_machine states, named in the schema's own words), DETERMINISTIC (pkg/summary, no LLM), RBAC-scoped per resource (only what the role may read; a row-scoped role counts only its own; never a resource it can't read). Empty day → "Sin movimiento hoy"; `?view=census` → totals. Reserved segment (a resource may not be named `summary`); anonymous is denied unless rbac.public grants it (then a public-only digest). | pkg/summary unit tests; pkg/integration/summary_test.go (RBAC scoping, empty-with-dignity, census, anonymous-deny) live on Postgres; live ~10ms uncached over 20k rows |
+| **The command channel (Part A/C)** | The alert bot also RECEIVES `resumen`/`estado`/`ayuda` from the ONE authorized chat (getUpdates, off the hot path; any other chat ignored+logged; half-config refuses to boot). Self-calls the LIVE router with a minted short-lived role token — the real chain. Decision getUpdates-over-webhook argued (docs/PRODUCTION.md §4.6d), incl. the one-bot-one-poller constraint. | telegram_input_test.go (access control, dispatch, help, fail-fast) against a fake TG API + router; the digest delivered live |
+| **The scheduled digest (Part D)** | Cron workflow enqueues `summary.telegram`; the worker's `consumers.SummaryProcessor` (auto mode) fetches the digest as the configured role and sends it. Canonical `resumen_matinal` in examples/model-lab/workflows.json. At-least-once; worker-down → pending + age alert. | Live: real digest delivered to Telegram; cron scheduled for 07:00 Bogota; worker-down backlog; Telegram-down → pending → recovers |
+| **Shared client — pkg/telegram** | One token-handling path (redaction, config validation, Send/GetUpdates/SetWebhook/GetMe/GetChat) reused by the alert sink (refactored onto it), the receiver and the consumer. | observability tests green after refactor |
+
+**Deployed** to both 58 apps (vetapp `appximo 1b500e6`, tiendita `commerce
+f722507-voz`), rollback ida-y-vuelta re-verified from outside, golden md5
+`7dcffa84…` intact, demos 22/22 + 20/20. The command channel is NOT switched on
+in prod yet (VOZ-1: the one-bot-one-poller decision is Miguel's). Gates: unit +
+full DB lane + lint 0 + gofmt/vet + binary-diff gate 171 same, 3 explained DIFFs
+(the new /api/summary route) + browser 29/29.
+
+**A-70 progress:** step 1 (read by voice/text) is now built and provable;
+`resumen` reaches the phone. Step 2 (writes with confirmation) is the next
+session — it needs a language layer (free text → intent), a confirmation
+protocol, and server-side correction of dictated proper names.
+
+---
+
+
 ## DONE in ALERTAS-TELEGRAM-S1 (2026-09-18) — the alerts reach a phone: Telegram native in the alerter, configured and provoked on the whole fleet
 
 The thesis: everything built to warn BEFORE it hurts (SLO burn, first-occurrence
