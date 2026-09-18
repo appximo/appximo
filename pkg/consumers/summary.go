@@ -15,6 +15,7 @@ package consumers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -63,9 +64,32 @@ func (p *SummaryProcessor) Process(ctx context.Context, row worker.Row) error {
 	if jerr := json.Unmarshal(body, &rep); jerr != nil || rep.Text == "" {
 		return fmt.Errorf("summary: empty or unparseable digest for tenant %s", row.TenantID)
 	}
-	if serr := p.tg.SendMessage(ctx, rep.Text); serr != nil {
+
+	// The IMAGE (VOZ-VISUAL-S1): same endpoint, ?format=png, rendered by the
+	// engine from the same counts. Any failure here degrades to text-only —
+	// an engine that predates the image (a mixed deploy) still delivers the
+	// words; the picture is never a reason to hold the digest back.
+	var png []byte
+	if st, img, perr := p.client.Do(ctx, row.TenantID, http.MethodGet, "/api/summary?format=png", nil); perr == nil && st == http.StatusOK && len(img) > 8 && string(img[1:4]) == "PNG" {
+		png = img
+	} else {
+		p.log.Warn().Str("tenant", row.TenantID).Int("status", st).Err(perr).Msg("summary: image not available — sending text only")
+	}
+
+	var serr error
+	if png != nil {
+		serr = p.tg.SendPhotoWithText(ctx, p.tg.ChatIDValue(), png, rep.Text)
+		var fb *telegram.PhotoFallbackError
+		if errors.As(serr, &fb) {
+			p.log.Warn().Str("tenant", row.TenantID).Err(fb.Cause).Msg("summary: photo rejected by Telegram — text delivered instead")
+			serr = nil
+		}
+	} else {
+		serr = p.tg.SendMessage(ctx, rep.Text)
+	}
+	if serr != nil {
 		return fmt.Errorf("summary: send to Telegram for tenant %s: %w", row.TenantID, serr) // transient → retry
 	}
-	p.log.Info().Str("tenant", row.TenantID).Str("topic", p.topic).Msg("summary: scheduled digest delivered to Telegram")
+	p.log.Info().Str("tenant", row.TenantID).Str("topic", p.topic).Bool("image", png != nil).Msg("summary: scheduled digest delivered to Telegram")
 	return nil
 }

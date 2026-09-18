@@ -607,6 +607,7 @@ func Validate(s *APISchema) []ValidationError {
 	errs = append(errs, validateRelationSubrouteCollisions(s)...)
 	errs = append(errs, validateRBAC(s)...)
 	errs = append(errs, validateWorkflows(s)...)
+	errs = append(errs, validateSummary(s)...)
 
 	// Deterministic order (SILENT-CORRUPTION-S1): most of the list is built by
 	// ranging over maps, and the raw slice reached clients unsorted — the
@@ -1783,7 +1784,122 @@ func validateStateMachine(fieldPrefix string, fd FieldDef) []ValidationError {
 			})
 		}
 	}
+
+	// pending (VOZ-VISUAL-S1): the states that WAIT for someone's action. Each
+	// must be a state the machine knows and must NOT be terminal — a row that
+	// can never move again is done, not waiting; declaring it pending would
+	// put a finished row on top of the owner's digest forever. Duplicates are
+	// rejected too (a copy-paste that double-counts nothing but reads wrong).
+	if sm.Pending != nil {
+		knownList := make([]string, 0, len(known))
+		for st := range known {
+			knownList = append(knownList, st)
+		}
+		sort.Strings(knownList)
+		seen := make(map[string]bool, len(sm.Pending))
+		for _, st := range sm.Pending {
+			switch {
+			case st == "":
+				errs = append(errs, ValidationError{
+					Field:   smPrefix + ".pending",
+					Rule:    "state_machine_pending_empty",
+					Message: "pending state must be a non-empty string",
+					Fix:     "name one of the machine's non-terminal states, or use [] to declare that nothing here waits for anyone",
+				})
+			case !known[st]:
+				errs = append(errs, ValidationError{
+					Field:    smPrefix + ".pending",
+					Rule:     "state_machine_pending_unknown",
+					Got:      st,
+					Expected: knownList,
+					Message:  fmt.Sprintf("pending state %q is not a state of this state_machine (known: %s)", st, joinQuoted(knownList)),
+					Fix:      "name a state that appears in initial or transitions",
+				})
+			case sm.IsTerminal(st):
+				errs = append(errs, ValidationError{
+					Field:   smPrefix + ".pending",
+					Rule:    "state_machine_pending_terminal",
+					Got:     st,
+					Message: fmt.Sprintf("pending state %q is terminal (no outgoing transition) — a row that can never move again is finished, not waiting for anyone", st),
+					Fix:     "remove it from pending, or give it an outgoing transition if it really can still move",
+				})
+			case seen[st]:
+				errs = append(errs, ValidationError{
+					Field:   smPrefix + ".pending",
+					Rule:    "state_machine_pending_duplicate",
+					Got:     st,
+					Message: fmt.Sprintf("pending state %q is listed twice", st),
+					Fix:     "list each state once",
+				})
+			}
+			seen[st] = true
+		}
+	}
 	return errs
+}
+
+// validateSummary checks the top-level `summary` block (VOZ-VISUAL-S1): the
+// resources the daily digest reports, in order. A name that is not a declared
+// resource is a LOAD error — the alternative (skip it silently) is exactly
+// the "typo becomes an app that quietly shows nothing" class the strict-key
+// rule exists to kill. Duplicates and an empty list are rejected as dead
+// config: an empty `resources` would mean "report nothing", which no owner
+// declares on purpose (delete the block to get the default instead).
+func validateSummary(s *APISchema) []ValidationError {
+	if s.Summary == nil {
+		return nil
+	}
+	var errs []ValidationError
+	declared := make([]string, 0, len(s.Resources))
+	for name := range s.Resources {
+		declared = append(declared, name)
+	}
+	sort.Strings(declared)
+	if len(s.Summary.Resources) == 0 {
+		errs = append(errs, ValidationError{
+			Field:   "summary.resources",
+			Rule:    "summary_resources_empty",
+			Message: `"summary.resources" is empty: the digest would report nothing (dead config)`,
+			Fix:     "list the resources the digest should report, in the order you read them — or remove the summary block to report every readable resource",
+		})
+		return errs
+	}
+	seen := make(map[string]bool, len(s.Summary.Resources))
+	for _, name := range s.Summary.Resources {
+		switch {
+		case name == "":
+			errs = append(errs, ValidationError{
+				Field:   "summary.resources",
+				Rule:    "summary_resource_empty",
+				Message: "summary resource name must be a non-empty string",
+				Fix:     "name a declared resource",
+			})
+		case !resourceDeclared(s, name):
+			errs = append(errs, ValidationError{
+				Field:    "summary.resources",
+				Rule:     "summary_unknown_resource",
+				Got:      name,
+				Expected: declared,
+				Message:  fmt.Sprintf("summary resource %q is not a declared resource (declared: %s) — the digest can only report resources the schema has", name, joinQuoted(declared)),
+				Fix:      "name a resource declared under resources, or remove it from summary.resources",
+			})
+		case seen[name]:
+			errs = append(errs, ValidationError{
+				Field:   "summary.resources",
+				Rule:    "summary_duplicate_resource",
+				Got:     name,
+				Message: fmt.Sprintf("summary resource %q is listed twice", name),
+				Fix:     "list each resource once, in the order you want it read",
+			})
+		}
+		seen[name] = true
+	}
+	return errs
+}
+
+func resourceDeclared(s *APISchema, name string) bool {
+	_, ok := s.Resources[name]
+	return ok
 }
 
 // numericTypes are the field types min/max apply to.

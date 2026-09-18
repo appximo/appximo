@@ -19,6 +19,12 @@ const GrammarCore = `REQUIRED top-level keys: "$schema", "version", "name", "res
 - "name" is a short kebab-case app name, e.g. "optica-crm"
 - "resources" is an object mapping resource name -> { "fields": {...}, ... }
 - Optional top-level "rbac": { "roles": {...} }
+- Optional top-level "summary": { "resources": ["orders", "payments"] } — which
+  resources the owner's DAILY DIGEST (GET /api/summary, the Telegram "resumen" command)
+  reports and in what ORDER. Every name must be a declared resource. Declare it
+  when the app has many resources (an app with twenty names the four the owner
+  reads every morning); omit it and every readable resource is reported,
+  attention first.
 
 NAMING: resource names AND field names match ^[a-z][a-z0-9_]*$ (lowercase, start
 with a letter, underscore for multi-word: order_items). Hyphens are NOT allowed
@@ -117,6 +123,13 @@ any other value, so "the system must not let steps be skipped" would not hold:
   - "transitions" maps each state to the states it may move to; [] = terminal
     (that row can never change state again). Only on string/text fields; every
     state must also be an enum member when an enum is declared.
+  - Optional "pending": ["confirmed"] — the states in which a row WAITS for
+    someone to act (the daily digest puts them on top as "esperan acción").
+    Each must be a known NON-terminal state (a terminal state is finished, not
+    waiting → load error). "pending": [] declares that nothing in this lifecycle
+    waits for anyone. Omitted → the digest infers: initial non-terminal states
+    are reported as "sin avanzar" (created, not moved), the rest as neutral
+    counts. Declare it whenever the description says who must act on what.
 
 RBAC (optional). Actions are exactly: read, create, update, delete, or "*".
 A role is EITHER role-global OR per-resource — never both keys.

@@ -1,0 +1,693 @@
+{
+  "$schema": "https://appximo.com/schema/v1",
+  "version": "1",
+  "name": "conjunto-residencial",
+  "resources": {
+    "unidades": {
+      "fields": {
+        "torre": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "numero": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "coeficiente": {
+          "type": "float64",
+          "min": 0
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      }
+    },
+    "residentes": {
+      "fields": {
+        "nombre": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "email": {
+          "type": "string",
+          "format": "email"
+        },
+        "unidad_id": {
+          "type": "uuid",
+          "relation": "unidades"
+        },
+        "user_id": {
+          "type": "uuid"
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      }
+    },
+    "vehiculos": {
+      "fields": {
+        "placa": {
+          "type": "string",
+          "required": true,
+          "minLength": 1,
+          "unique": true
+        },
+        "residente_id": {
+          "type": "uuid",
+          "relation": "residentes"
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      }
+    },
+    "mascotas": {
+      "fields": {
+        "nombre": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "residente_id": {
+          "type": "uuid",
+          "relation": "residentes"
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      }
+    },
+    "pqrs": {
+      "fields": {
+        "asunto": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "residente_id": {
+          "type": "uuid",
+          "relation": "residentes"
+        },
+        "user_id": {
+          "type": "uuid"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "radicada",
+            "en_tramite",
+            "respondida",
+            "cerrada"
+          ],
+          "default": "radicada",
+          "state_machine": {
+            "initial": "radicada",
+            "transitions": {
+              "radicada": [
+                "en_tramite",
+                "cerrada"
+              ],
+              "en_tramite": [
+                "respondida"
+              ],
+              "respondida": [
+                "cerrada"
+              ],
+              "cerrada": []
+            },
+            "pending": [
+              "radicada",
+              "en_tramite"
+            ]
+          }
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        },
+        "actualizado_en": {
+          "type": "time",
+          "auto": "update"
+        }
+      }
+    },
+    "visitas": {
+      "fields": {
+        "visitante": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "unidad_id": {
+          "type": "uuid",
+          "relation": "unidades"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "anunciada",
+            "ingreso",
+            "salida"
+          ],
+          "default": "anunciada",
+          "state_machine": {
+            "initial": "anunciada",
+            "transitions": {
+              "anunciada": [
+                "ingreso"
+              ],
+              "ingreso": [
+                "salida"
+              ],
+              "salida": []
+            }
+          }
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      }
+    },
+    "paquetes": {
+      "fields": {
+        "descripcion": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "unidad_id": {
+          "type": "uuid",
+          "relation": "unidades"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "recibido",
+            "entregado"
+          ],
+          "default": "recibido",
+          "state_machine": {
+            "initial": "recibido",
+            "transitions": {
+              "recibido": [
+                "entregado"
+              ],
+              "entregado": []
+            },
+            "pending": [
+              "recibido"
+            ]
+          }
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      }
+    },
+    "reservas_zonas": {
+      "fields": {
+        "zona_id": {
+          "type": "uuid",
+          "relation": "zonas_comunes"
+        },
+        "residente_id": {
+          "type": "uuid",
+          "relation": "residentes"
+        },
+        "user_id": {
+          "type": "uuid"
+        },
+        "fecha": {
+          "type": "time",
+          "required": true
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "solicitada",
+            "aprobada",
+            "rechazada",
+            "usada"
+          ],
+          "default": "solicitada",
+          "state_machine": {
+            "initial": "solicitada",
+            "transitions": {
+              "solicitada": [
+                "aprobada",
+                "rechazada"
+              ],
+              "aprobada": [
+                "usada"
+              ],
+              "rechazada": [],
+              "usada": []
+            },
+            "pending": [
+              "solicitada"
+            ]
+          }
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        },
+        "actualizado_en": {
+          "type": "time",
+          "auto": "update"
+        }
+      }
+    },
+    "zonas_comunes": {
+      "fields": {
+        "nombre": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "capacidad": {
+          "type": "int",
+          "min": 0
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      }
+    },
+    "cuotas": {
+      "fields": {
+        "unidad_id": {
+          "type": "uuid",
+          "relation": "unidades"
+        },
+        "periodo": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "valor_cents": {
+          "type": "int64",
+          "min": 0
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "emitida",
+            "pagada",
+            "vencida"
+          ],
+          "default": "emitida",
+          "state_machine": {
+            "initial": "emitida",
+            "transitions": {
+              "emitida": [
+                "pagada",
+                "vencida"
+              ],
+              "vencida": [
+                "pagada"
+              ],
+              "pagada": []
+            },
+            "pending": [
+              "vencida"
+            ]
+          }
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        },
+        "actualizado_en": {
+          "type": "time",
+          "auto": "update"
+        }
+      }
+    },
+    "pagos": {
+      "fields": {
+        "cuota_id": {
+          "type": "uuid",
+          "relation": "cuotas"
+        },
+        "valor_cents": {
+          "type": "int64",
+          "min": 0
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "pendiente",
+            "aprobado",
+            "rechazado"
+          ],
+          "default": "pendiente",
+          "state_machine": {
+            "initial": "pendiente",
+            "transitions": {
+              "pendiente": [
+                "aprobado",
+                "rechazado"
+              ],
+              "aprobado": [],
+              "rechazado": []
+            }
+          }
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      }
+    },
+    "asambleas": {
+      "fields": {
+        "titulo": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "fecha": {
+          "type": "time"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "convocada",
+            "realizada",
+            "cancelada"
+          ],
+          "default": "convocada",
+          "state_machine": {
+            "initial": "convocada",
+            "transitions": {
+              "convocada": [
+                "realizada",
+                "cancelada"
+              ],
+              "realizada": [],
+              "cancelada": []
+            },
+            "pending": []
+          }
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      }
+    },
+    "votaciones": {
+      "fields": {
+        "asamblea_id": {
+          "type": "uuid",
+          "relation": "asambleas"
+        },
+        "pregunta": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "resultado": {
+          "type": "jsonb"
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      }
+    },
+    "incidentes": {
+      "fields": {
+        "descripcion": {
+          "type": "text",
+          "required": true,
+          "minLength": 1
+        },
+        "zona_id": {
+          "type": "uuid",
+          "relation": "zonas_comunes"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "reportado",
+            "en_atencion",
+            "resuelto"
+          ],
+          "default": "reportado",
+          "state_machine": {
+            "initial": "reportado",
+            "transitions": {
+              "reportado": [
+                "en_atencion"
+              ],
+              "en_atencion": [
+                "resuelto"
+              ],
+              "resuelto": []
+            },
+            "pending": [
+              "reportado",
+              "en_atencion"
+            ]
+          }
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        },
+        "actualizado_en": {
+          "type": "time",
+          "auto": "update"
+        }
+      }
+    },
+    "mantenimientos": {
+      "fields": {
+        "descripcion": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "proveedor_id": {
+          "type": "uuid",
+          "relation": "proveedores"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "programado",
+            "en_curso",
+            "terminado"
+          ],
+          "default": "programado",
+          "state_machine": {
+            "initial": "programado",
+            "transitions": {
+              "programado": [
+                "en_curso"
+              ],
+              "en_curso": [
+                "terminado"
+              ],
+              "terminado": []
+            }
+          }
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        },
+        "actualizado_en": {
+          "type": "time",
+          "auto": "update"
+        }
+      }
+    },
+    "proveedores": {
+      "fields": {
+        "nombre": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "nit": {
+          "type": "string"
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      }
+    },
+    "contratos": {
+      "fields": {
+        "proveedor_id": {
+          "type": "uuid",
+          "relation": "proveedores"
+        },
+        "objeto": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "vence": {
+          "type": "time"
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      }
+    },
+    "comunicados": {
+      "fields": {
+        "titulo": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "cuerpo": {
+          "type": "text"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "borrador",
+            "publicado",
+            "archivado"
+          ],
+          "default": "borrador",
+          "state_machine": {
+            "initial": "borrador",
+            "transitions": {
+              "borrador": [
+                "publicado"
+              ],
+              "publicado": [
+                "archivado"
+              ],
+              "archivado": []
+            },
+            "pending": []
+          }
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        },
+        "actualizado_en": {
+          "type": "time",
+          "auto": "update"
+        }
+      }
+    },
+    "empleados": {
+      "fields": {
+        "nombre": {
+          "type": "string",
+          "required": true,
+          "minLength": 1
+        },
+        "cargo": {
+          "type": "string"
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      }
+    },
+    "turnos": {
+      "fields": {
+        "empleado_id": {
+          "type": "uuid",
+          "relation": "empleados"
+        },
+        "inicio": {
+          "type": "time",
+          "required": true
+        },
+        "fin": {
+          "type": "time"
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      }
+    }
+  },
+  "summary": {
+    "resources": [
+      "pqrs",
+      "incidentes",
+      "paquetes",
+      "reservas_zonas",
+      "cuotas",
+      "visitas"
+    ]
+  },
+  "rbac": {
+    "roles": {
+      "admin": {
+        "resources": "*",
+        "actions": [
+          "*"
+        ]
+      },
+      "residente": {
+        "permissions": {
+          "pqrs": {
+            "actions": [
+              "read",
+              "create"
+            ],
+            "conditions": {
+              "field": "user_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "reservas_zonas": {
+            "actions": [
+              "read",
+              "create"
+            ],
+            "conditions": {
+              "field": "user_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "comunicados": {
+            "actions": [
+              "read"
+            ],
+            "conditions": {
+              "field": "estado",
+              "op": "eq",
+              "val": "publicado"
+            }
+          },
+          "zonas_comunes": {
+            "actions": [
+              "read"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

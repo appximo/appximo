@@ -243,8 +243,24 @@ alerta de backup llega aunque el motor esté caído.
 
 El mismo bot que le manda alertas también **recibe** un puñado de comandos y le
 contesta con un resumen del día **en lenguaje de dueño**: qué se creó hoy, qué
-está pendiente, cuántos hay de cada cosa. Solo lectura — escribir datos por acá
-llega en una etapa próxima.
+espera una acción suya, cuántos hay de cada cosa. Solo lectura — escribir
+datos por acá llega en una etapa próxima.
+
+**El resumen llega como IMAGEN, con el texto debajo.** Un semáforo y una frase
+arriba («13 esperan acción · 2 sin avanzar»), lo que espera acción en grande,
+lo que se movió hoy en una lista corta, y lo demás plegado — para leerlo de un
+vistazo en el celular, aunque la app tenga veinte recursos. La imagen la
+dibuja el motor con los mismos números que cuenta (nada de inteligencia
+artificial redactando ni dibujando), y el texto viaja siempre con ella: si la
+imagen no carga, el contenido está igual.
+
+**Tres palabras, tres significados.** «Esperan acción» son los estados que su
+schema declara como `pending` en la máquina de estados (los que un humano
+tiene que mover). «Sin avanzar» aparece cuando no declaró nada: son los
+registros que siguen en su estado inicial — el motor lo infiere y lo dice
+así, con esa humildad. «En curso» son los demás estados no finales, contados
+en las palabras de su schema, sin llamarlos pendientes. Un estado final
+(cerrado, cancelado) no cuenta nunca.
 
 **Comandos** (escríbalos al bot, del chat autorizado):
 
@@ -264,6 +280,19 @@ y `systemctl restart <app>`. El resumen **respeta el RBAC**: muestra exactamente
 lo que ese rol puede ver — un rol acotado a sus filas cuenta solo las suyas, y
 nunca aparece un recurso que no puede leer. Un día sin movimiento dice «Sin
 movimiento hoy», no una lista de ceros.
+
+**Elegir qué entra al resumen.** Si su app tiene muchos recursos, declare en el
+schema cuáles entran y en qué orden:
+
+```json
+"summary": { "resources": ["ordenes", "pagos", "facturas", "clientes"] }
+```
+
+Sin ese bloque entran todos los que el rol puede leer, ordenados por lo que
+necesita atención. Un recurso mal escrito ahí **no arranca** — el error lo
+nombra. Y en cada máquina de estados, `"pending": ["pagada", "preparando"]`
+dice qué estados esperan a alguien (`[]` = ninguno; sin declarar, el motor
+infiere «sin avanzar» para los recién creados).
 
 **Quién puede preguntar:** SOLO el chat de `APPXIMO_TELEGRAM_CHAT_ID`. Un
 mensaje de cualquier otro chat se **ignora y se registra** — nunca se contesta.
@@ -286,8 +315,9 @@ hora que usted quiera — es el ejemplo canónico de `workflows`
 
 Con el `appximo-worker` en modo `auto` y el mismo token de Telegram +
 `APPXIMO_TELEGRAM_SUMMARY_ROLE`, cada mañana (7 AM Bogotá, días hábiles) llega
-el resumen al chat. Si el worker está caído, el resumen queda `pending` y la
-alerta de edad de la cola lo delata.
+el resumen al chat — con la imagen, igual que el pedido a mano. Si Telegram no
+responde, el resumen queda `pending` y se reintenta solo hasta entregarse; si
+el worker está caído, queda `pending` y la alerta de edad de la cola lo delata.
 
 **Desde el iPhone (Siri / Atajos), sin Telegram:** un atajo con una acción
 «Obtener contenido de URL» a

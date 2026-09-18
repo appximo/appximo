@@ -43,6 +43,9 @@ type explainPhrases struct {
 	smInitial       string // states list
 	smMove          string // from, to-list
 	smTerminal      string // states list
+	smPending       string // states list, verb agreement
+	smPendingNone   string
+	summaryLine     string // ordered resource list
 	relHasMany      string
 	relBelongsTo    string
 	relManyToMany   string
@@ -97,6 +100,9 @@ var explainEN = explainPhrases{
 	smInitial:       "a new record starts as %s",
 	smMove:          "from %q it can move to %s",
 	smTerminal:      "%s %s final — once there, the status can never change",
+	smPending:       "%s %s waiting for someone to act (the daily digest puts them on top)",
+	smPendingNone:   "nothing in this lifecycle waits for anyone (declared)",
+	summaryLine:     "The daily digest (resumen) reports, in this order: %s.",
 	relHasMany:      "each %s can have many %s (%q)",
 	relBelongsTo:    "each %s belongs to a %s (%q)",
 	relManyToMany:   "%s and %s are linked many-to-many (%q, via %s)",
@@ -160,6 +166,9 @@ var explainES = explainPhrases{
 	smInitial:       "un registro nuevo empieza en %s",
 	smMove:          "de %q puede pasar a %s",
 	smTerminal:      "%s %s final — una vez ahí, el estado ya no puede cambiar",
+	smPending:       "%s %s a la espera de que alguien actúe (el resumen diario los pone arriba)",
+	smPendingNone:   "nada en este ciclo espera a nadie (declarado)",
+	summaryLine:     "El resumen diario reporta, en este orden: %s.",
 	relHasMany:      "cada %s puede tener muchos %s (%q)",
 	relBelongsTo:    "cada %s pertenece a un %s (%q)",
 	relManyToMany:   "%s y %s se relacionan muchos-a-muchos (%q, vía %s)",
@@ -218,6 +227,9 @@ func Explain(s *APISchema, lang string) string {
 		b.WriteString(fmt.Sprintf(p.introOne, resNames[0]) + "\n\n")
 	} else {
 		b.WriteString(fmt.Sprintf(p.intro, len(resNames), joinList(resNames, esList)) + "\n\n")
+	}
+	if s.Summary != nil && len(s.Summary.Resources) > 0 {
+		b.WriteString(fmt.Sprintf(p.summaryLine, joinList(quoteAll(s.Summary.Resources), esList)) + "\n\n")
 	}
 
 	for _, rn := range resNames {
@@ -428,6 +440,26 @@ func explainStateMachines(b *strings.Builder, r ResourceSchema, p explainPhrases
 				isAre = "are"
 			}
 			b.WriteString("    - " + fmt.Sprintf(p.smTerminal, joinList(quoteEach(terminal), and), isAre) + "\n")
+		}
+		// pending (VOZ-VISUAL-S1): what the owner declared as "waiting for
+		// someone" — read back so a non-programmer can confirm the digest's
+		// top block is what they meant. Absent = not printed (the digest
+		// infers, and prints its own humble wording at delivery).
+		if sm.PendingDeclared() {
+			if len(sm.Pending) == 0 {
+				b.WriteString("    - " + p.smPendingNone + "\n")
+			} else {
+				isAre := "is"
+				if p.smIntro == explainES.smIntro {
+					isAre = "está"
+					if len(sm.Pending) > 1 {
+						isAre = "están"
+					}
+				} else if len(sm.Pending) > 1 {
+					isAre = "are"
+				}
+				b.WriteString("    - " + fmt.Sprintf(p.smPending, joinList(quoteEach(sm.Pending), and), isAre) + "\n")
+			}
 		}
 	}
 }

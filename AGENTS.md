@@ -940,7 +940,15 @@ no longer a free label the client advances arbitrarily.
   `state_machine` is a free string, unchanged.
 - **Validated at load:** `state_machine` only on a string/text field; at least one
   `initial`; every state coherent with `enum` when declared; a string `default` must
-  be an initial state. Strict-key (`initial`/`transitions`).
+  be an initial state. Strict-key (`initial`/`transitions`/`pending`).
+- **`pending`** (ADR-032, VOZ-VISUAL-S1): the states in which a row WAITS for
+  someone to act — what the daily digest puts on top as "esperan acción".
+  `["pagada","preparando"]` = exactly these (each a known NON-terminal state,
+  else a load error — a terminal state is finished, not waiting); `[]` = nothing
+  here waits (every non-terminal state is a neutral count); absent = the digest
+  INFERS and says so (initial non-terminal states → "sin avanzar", the rest →
+  neutral "en curso" counts; terminal never counted). Digest vocabulary only —
+  it changes no transition rule.
 - **Out of scope (documented):** per-transition RBAC ("only role X may move to
   shipped") — today the transition is validated structurally and the normal `update`
   RBAC governs WHO may update; in-place value rewriting is a transition, not arbitrary
@@ -2008,7 +2016,7 @@ POST /api/transaction
   4 ms for one standalone write (the shared BEGIN/COMMIT is amortized). Example:
   [examples/model-lab/atomic-tx.json](examples/model-lab/atomic-tx.json).
 
-## Daily digest (VOZ-ESCALON1-S1)
+## Daily digest (VOZ-ESCALON1-S1, VOZ-VISUAL-S1)
 
 `GET /api/summary` is a read-only, cross-resource "what happened today" digest
 in the OWNER'S language, composed deterministically from the schema (no LLM) —
@@ -2019,19 +2027,39 @@ appear, each scoped by that role's row condition and field allowlist (a
 row-scoped role counts only its own rows; a resource the role can't read never
 appears — no leak a plain list wouldn't allow). Per resource it reports rows
 **created today** (needs an `auto:"create"` timestamp), **updated today** (an
-`auto:"update"` timestamp), and **pending** (rows in the non-terminal states of
-a `state_machine`, named in the schema's own words). Empty day → "Sin
-movimiento hoy". `?view=census` returns totals-per-resource ("estado"). Returns
-`{"text","has_motion",...}`; `text` is Telegram-HTML. It is served the same for
-every tenant (contract-global) and requires a token (tokenless → 401).
+`auto:"update"` timestamp), and the state-machine counts in THREE tiers
+(ADR-032, the VOZ-2 vocabulary): **esperan acción** — the states the field
+declares as `state_machine.pending` (red); **sin avanzar** — when nothing is
+declared, the non-terminal INITIAL states, worded as an inference ("recién
+creados, nadie los movió", amber); **en curso** — every other non-terminal
+state, a neutral count in the schema's own words, never "pendiente"; terminal
+states are never counted. Empty day → "Sin movimiento hoy" (green). Returns
+`{"text","has_motion","level":"red|amber|green","headline","attention_total",...}`;
+`text` is Telegram-HTML. **`?format=png` (or `Accept: image/png`) answers the
+SAME digest as an IMAGE** rendered on the server (`pkg/summary/render.go`: pure
+Go, `golang.org/x/image` + the Go fonts, no browser, deterministic — same
+Report → same bytes; +860 KB on the binary, measured in ADR-032): a traffic
+light + headline readable in three seconds, one big row per resource that
+waits, the day's motion, the rest folded — twenty resources fit one phone
+screen. Rendered ONLY when asked (the bot, the consumer), never on a CRUD
+path; 40–65 ms per render. The top-level **`summary.resources`** block chooses
+which resources enter and in what order (load-validated; absent = every
+readable resource ranked attention-first; `?view=census` honors it too).
+It is served the same for every tenant (contract-global) and requires a token
+(tokenless → 401).
 
 The engine can also RECEIVE it (`APPXIMO_TELEGRAM_SUMMARY_TENANT` +
 `_ROLE`): the alert bot answers `resumen`/`estado`/`ayuda` from the one
 authorized chat (getUpdates, off the hot path; any other chat is ignored +
-logged; half-config refuses to boot). And a cron `workflow` enqueuing
-`summary.telegram` sends the same digest each morning — the canonical
+logged; half-config refuses to boot). `resumen` arrives as **picture + text**
+(`sendPhoto` with the text as caption; over 1024 chars the full text follows
+as a second message; a photo Telegram refuses falls back to text — never
+image-only, never silence). And a cron `workflow` enqueuing `summary.telegram`
+sends the same digest (with the image) each morning — the canonical
 [examples/model-lab/workflows.json](examples/model-lab/workflows.json)
-`resumen_matinal`. Operator + Siri setup: docs/PRODUCTION.md §4.6d.
+`resumen_matinal`; Telegram down → the row stays `pending` and retries.
+Operator + Siri setup: docs/PRODUCTION.md §4.6d. A twenty-resource example
+that declares both blocks: [examples/model-lab/conjunto.json](examples/model-lab/conjunto.json).
 
 ## GraphQL
 

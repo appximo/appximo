@@ -52,7 +52,14 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 		return m
 	}
 
-	addUnknown("$", top, "$schema", "version", "name", "resources", "rbac", "workflows")
+	addUnknown("$", top, "$schema", "version", "name", "resources", "rbac", "workflows", "summary")
+
+	// summary: the daily-digest declaration (VOZ-VISUAL-S1). Strict-key so a
+	// typo ("resource" for "resources") is rejected, never a digest that
+	// silently reports everything while the author believes it is filtered.
+	if sum := object("summary", top["summary"]); sum != nil {
+		addUnknown("summary", sum, "resources")
+	}
 
 	for resName, rawRes := range object("resources", top["resources"]) {
 		resPath := "resources." + resName
@@ -102,7 +109,7 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 			// state_machine has a fixed key set; `transitions` keys are user state
 			// names (free-form), so only the top-level keys are strict-checked.
 			if sm := object(fieldPath+".state_machine", fld["state_machine"]); sm != nil {
-				addUnknown(fieldPath+".state_machine", sm, "initial", "transitions")
+				addUnknown(fieldPath+".state_machine", sm, "initial", "transitions", "pending")
 			}
 		}
 

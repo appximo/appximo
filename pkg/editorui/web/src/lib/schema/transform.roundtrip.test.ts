@@ -220,3 +220,33 @@ describe('import declaration round-trip', () => {
 		expect(out.resources.legacy_rows.import).toEqual({ roles: ['admin'] });
 	});
 });
+
+// VOZ-VISUAL-S1: the top-level `summary` block (which resources the daily
+// digest reports, in order) must survive import → export, like workflows.
+describe('summary block round-trip', () => {
+	it('preserves summary.resources verbatim, in order', () => {
+		const s: APISchema = {
+			$schema: 'https://appximo.com/schema/v1',
+			version: '1',
+			name: 'conjunto',
+			resources: {
+				pqrs: { fields: { asunto: { type: 'string' } } },
+				cuotas: { fields: { periodo: { type: 'string' } } }
+			},
+			rbac: { roles: { admin: { resources: '*', actions: ['*'] } } },
+			summary: { resources: ['cuotas', 'pqrs'] }
+		};
+		const out = roundTrip(s);
+		expect(out.summary).toEqual({ resources: ['cuotas', 'pqrs'] });
+		expect(canonical(out)).toBe(canonical(s));
+	});
+	it('emits no summary key when the schema has none', () => {
+		const s: APISchema = {
+			$schema: 'https://appximo.com/schema/v1',
+			version: '1',
+			name: 'x',
+			resources: { a: { fields: { b: { type: 'string' } } } }
+		};
+		expect('summary' in roundTrip(s)).toBe(false);
+	});
+});

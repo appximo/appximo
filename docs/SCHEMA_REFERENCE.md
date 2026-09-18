@@ -75,6 +75,7 @@ The root object is the `APISchema` struct (`pkg/schema/types.go`). Its complete,
 | `resources` | object (`map[string]ResourceSchema`) | No (structurally optional) | The entity/table definitions, keyed by resource name. See §2. A schema with no resources serves no `/api/*` routes but is not rejected. |
 | `rbac` | object (`{ "roles": { … } }`) | No (structurally optional) | Role policies. See §7. |
 | `workflows` | object (`map[string]WorkflowSchema`) | No | Declarative trigger→steps pipelines, executed by `appximo-worker` (ADR-031). See §1.4. |
+| `summary` | object (`{ "resources": [ … ] }`) | No | Which resources the daily digest (`GET /api/summary`, the Telegram `resumen`) reports and in what order (ADR-032). See §1.5. |
 
 **Exact required-field rule** (`pkg/schema/loader.go`): only `$schema` and `version` are checked, and only for emptiness (the zero value of a Go `string`, which is also what an absent key unmarshals to). The exact failure messages are:
 
@@ -102,13 +103,14 @@ Note the order: strict-key (step 3) runs **before** the required-field check (st
 
 **Strict keys at EVERY level.** `CheckUnknownKeys` (`pkg/schema/keys.go`) walks the entire document and rejects any key outside the documented set *for that level*, listing the valid keys in the error. This is deliberate: an unknown key is a typo, not an extension (e.g. `webhooks` instead of `hooks`, `refcolumns` instead of `ref_columns`), and a silently-dropped key would become quietly dead config. The levels it strict-checks (each "valid keys" list below is emitted in the exact argument order shown):
 
-- root: `$schema, version, name, resources, rbac, workflows` (keys.go)
+- root: `$schema, version, name, resources, rbac, workflows, summary` (keys.go)
+- `summary`: `resources` (keys.go)
 - each resource: `fields, hooks, indexes, events, relations, renamed_from, foreign_keys` (keys.go)
 - each `foreign_keys[]` entry: `columns, target, ref_columns, on_delete, on_update` (keys.go)
 - each relation: `type, target, fk, through, target_fk, limit` (keys.go)
 - each `indexes[]` entry: `fields, unique` (keys.go)
 - each field: `type, required, unique, auto, enum, relation, on_delete, on_update, references, renamed_from, default, min, max, minLength, maxLength, pattern, format, state_machine` (keys.go)
-- each field's `state_machine`: `initial, transitions` (the `transitions` map's *keys* are user state names, so only these two top-level keys are checked) (keys.go)
+- each field's `state_machine`: `initial, transitions, pending` (the `transitions` map's *keys* are user state names, so only these three top-level keys are checked) (keys.go)
 - each hook event name must be one of `before_create, after_create, before_update, after_update` (keys.go) and each hook object: `type, script, url, hmac_secret_env, wasm_module, wasm_fn, timeout` (keys.go)
 - `rbac`: `roles` (keys.go); each role: `resources, actions, conditions, fields, permissions` (keys.go); each role `conditions`: `field, op, val` (keys.go); each `permissions.<resource>`: `actions, conditions, condition_actions, fields` (keys.go), and that permission's nested `conditions`: `field, op, val` (keys.go)
 - each workflow: `trigger, steps`; the trigger: `type, event, resource, cron, path`; each step: `name, type, ref, config, next` (keys.go) — note `step.config` is the **one deliberately free-form map** (its inner keys are not strict-checked).
@@ -179,6 +181,21 @@ Identifier rule relevant at this level: resource and field names both match the 
 - **`role`**: the RBAC role the steps act as (must be declared; default: the worker's `APPXIMO_WORKER_ROLE`). A workflow can never touch data its role could not touch through the front door.
 - **Delivery**: event-triggered runs are at-least-once (a failed run's outbox row retries and finally parks `state='failed'` carrying the error) — steps must be idempotent. A failed cron run is recorded; its retry is the next occurrence.
 - **Observability**: every run is a row in `public.workflow_runs` (status, error, per-step detail); `GET /admin/workflows` shows last/next runs per tenant; `/metrics` carries `appximo_workflow_runs_24h`, `appximo_workflow_failed_24h` and `appximo_workflow_overdue_seconds` (growing = no scheduler firing), with alerts on overdue schedules and failed runs.
+
+### 1.5 The `summary` block — which resources the daily digest reports, in order (ADR-032)
+
+`GET /api/summary` (and the Telegram `resumen`) reports, per resource the caller's role may read, what moved today and what waits for someone. A wide app does not want all of it on a phone. The top-level `summary` block chooses:
+
+```json
+"summary": { "resources": ["pqrs", "incidentes", "paquetes", "cuotas"] }
+```
+
+- **Membership + order.** Exactly the listed resources, in that order, in the text, the image and the `estado` census. A listed resource the role cannot read is skipped (RBAC wins, never a leak). The handler asks only about the listed resources, so an app with twenty that names four pays four resources' worth of queries.
+- **Absent ⇒ every readable resource, ranked** (`pkg/summary.Order`): declared attention first, then inferred attention, then what moved today, then flow-only counts, then silence; within a tier, bigger attention first, then the name. The image folds the tail; nothing is hidden by an engine heuristic — the default was argued from a twenty-resource app and written in ADR-032 §4.
+- **Validated at load** (`validateSummary`): a name that is not a declared resource → `summary_unknown_resource` (the error lists the declared resources); a duplicate → `summary_duplicate_resource`; an empty list → `summary_resources_empty` (dead config — remove the block to get the default); an empty string → `summary_resource_empty`. Strict-keyed: the only key is `resources`.
+- `appximo explain` reads it back ("El resumen diario reporta, en este orden: …"); Studio preserves it on round-trip (authored in the Code view).
+
+What "waits for someone" means is declared per state machine with `pending` — §5.
 
 ---
 
@@ -932,10 +949,15 @@ The declaration is a field-level key (`pkg/schema/types.go`, `FieldDef.StateMach
 
 ### Syntax
 
-The `state_machine` object has exactly two keys — `initial` and `transitions` — and they are **strict-checked** at load (`pkg/schema/keys.go`: `addUnknown(... ".state_machine", sm, "initial", "transitions")`). Any other key inside `state_machine` rejects the schema. The *user state names* under `transitions` are free-form (they are not strict-checked).
+The `state_machine` object has exactly three keys — `initial`, `transitions` and the optional `pending` — and they are **strict-checked** at load (`pkg/schema/keys.go`: `addUnknown(... ".state_machine", sm, "initial", "transitions", "pending")`). Any other key inside `state_machine` rejects the schema. The *user state names* under `transitions` are free-form (they are not strict-checked).
 
 - **`initial`** — the state(s) a row may be **created** in. It accepts **either a single string OR an array of strings**; `StateMachine.UnmarshalJSON` (`pkg/schema/types.go`) normalizes both to a slice, so `"initial": "pending"` and `"initial": ["pending"]` are equivalent. Internally it is always `[]string`.
 - **`transitions`** — a map from each state to the list of states it may move **to**. A state whose outgoing list is `[]` — **or that is absent from the map entirely** — has no outgoing transition and is therefore **terminal / immutable** (it can never change to another state).
+- **`pending`** (optional, ADR-032 / VOZ-2) — the states in which a row is **waiting for someone to act**: what the daily digest (`GET /api/summary`, the Telegram `resumen`) puts on top as "esperan acción" (the red light). The engine cannot know this from structure — a product's `activo` and an order's `pendiente_pago` are both non-terminal — so three declarations mean three things:
+  - `"pending": ["pagada", "preparando"]` — exactly these states wait. Validated at load: each must be a known state (`state_machine_pending_unknown`, listing the known ones) and must **not** be terminal (`state_machine_pending_terminal` — a row that can never move again is finished, not waiting); no duplicates (`state_machine_pending_duplicate`), no empty strings.
+  - `"pending": []` — an explicit "nothing in this lifecycle waits for anyone": every non-terminal state is a neutral count. The `nil`-vs-`[]` distinction survives JSON round-trips (`StateMachine.MarshalJSON`).
+  - absent — the digest **infers and says so**: the non-terminal *initial* states (a row is born there and must be moved) are reported as "sin avanzar (recién creados, nadie los movió)" — the amber light, never "esperan acción"; the other non-terminal states are neutral "en curso: activo 9" counts. Terminal states are never counted as anything.
+  `appximo explain` reads a declaration back ("… están a la espera de que alguien actúe"); the runtime enforcement below is unaffected by `pending` (it is digest vocabulary, not a transition rule).
 
 Three derived helpers drive enforcement (all in `pkg/schema/types.go`):
 

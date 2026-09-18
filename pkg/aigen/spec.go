@@ -162,7 +162,8 @@ const SpecExampleAdvanced = `{
           "type": "string", "enum": ["agendada", "atendida", "cancelada"], "default": "agendada",
           "state_machine": {
             "initial": "agendada",
-            "transitions": { "agendada": ["atendida", "cancelada"], "atendida": [], "cancelada": [] }
+            "transitions": { "agendada": ["atendida", "cancelada"], "atendida": [], "cancelada": [] },
+            "pending": ["agendada"]
           }
         }
       },
@@ -219,7 +220,8 @@ const SpecExampleAdvanced = `{
       },
       "vendedor": { "resources": ["productos", "proveedores"], "actions": ["read"] }
     }
-  }
+  },
+  "summary": { "resources": ["citas", "pacientes", "formulas"] }
 }`
 
 // specFooter documents the correction loop — the same validator-guided loop the

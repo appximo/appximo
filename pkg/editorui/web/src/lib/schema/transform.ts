@@ -8,7 +8,8 @@
 // ROUND-TRIP CONTRACT: modelToSchema(schemaToModel(x)) is semantically identical
 // to x (key order aside). Unmodeled resource-level keys ride along in
 // EntityModel.extras; rbac — BOTH rbac.roles and the anonymous rbac.public
-// block (ADR-026, UI-2) — and workflows are preserved. Editor-only data
+// block (ADR-026, UI-2) — and workflows and the `summary` block (VOZ-VISUAL-S1)
+// are preserved. Editor-only data
 // (ids, canvas positions) is never emitted. `renamed_from` (resource + field) is
 // NOT stored raw: import lifts it into the model's `originalName` baseline and
 // export derives it back (originalName !== name ⇒ renamed_from=originalName), so
@@ -43,7 +44,8 @@ export function schemaToModel(schema: APISchema): SchemaModel {
 		name: schema.name ?? 'untitled-api',
 		entities,
 		rbac: normalizeRBAC(schema.rbac),
-		workflows: schema.workflows
+		workflows: schema.workflows,
+		summary: schema.summary
 	};
 }
 
@@ -115,6 +117,9 @@ export function modelToSchema(model: SchemaModel): APISchema {
 	}
 	if (model.workflows && Object.keys(model.workflows).length > 0) {
 		out.workflows = model.workflows;
+	}
+	if (model.summary && Array.isArray(model.summary.resources) && model.summary.resources.length > 0) {
+		out.summary = { resources: [...model.summary.resources] };
 	}
 	return out;
 }

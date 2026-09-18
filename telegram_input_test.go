@@ -1,10 +1,15 @@
 package appximo
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -26,6 +31,16 @@ type fakeTG struct {
 	sent     []string
 	served   bool
 	sendChat []int64
+	photos   []fakePhoto // every sendPhoto: caption + png size
+	// rejectPhoto makes sendPhoto answer this HTTP status with ok:false
+	// (400 = refused for good, 500/429 = retryable).
+	rejectPhoto int
+}
+
+type fakePhoto struct {
+	caption string
+	size    int
+	chat    int64
 }
 
 func (f *fakeTG) server(t *testing.T) *httptest.Server {
@@ -52,6 +67,28 @@ func (f *fakeTG) server(t *testing.T) *httptest.Server {
 			f.sendChat = append(f.sendChat, n)
 			f.mu.Unlock()
 			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": 1}}) //nolint:errcheck
+		case strings.HasSuffix(r.URL.Path, "/sendPhoto"):
+			if err := r.ParseMultipartForm(8 << 20); err != nil {
+				t.Errorf("sendPhoto must be multipart: %v", err)
+			}
+			file, _, ferr := r.FormFile("photo")
+			size := 0
+			if ferr == nil {
+				b, _ := io.ReadAll(file)
+				size = len(b)
+				file.Close()
+			}
+			f.mu.Lock()
+			if f.rejectPhoto != 0 {
+				f.mu.Unlock()
+				w.WriteHeader(f.rejectPhoto)
+				json.NewEncoder(w).Encode(map[string]any{"ok": false, "description": "Bad Request: IMAGE_PROCESS_FAILED"}) //nolint:errcheck
+				return
+			}
+			chat, _ := strconv.ParseInt(r.FormValue("chat_id"), 10, 64)
+			f.photos = append(f.photos, fakePhoto{caption: r.FormValue("caption"), size: size, chat: chat})
+			f.mu.Unlock()
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": 2}}) //nolint:errcheck
 		case strings.HasSuffix(r.URL.Path, "/deleteWebhook"):
 			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": true}) //nolint:errcheck
 		default:
@@ -60,6 +97,14 @@ func (f *fakeTG) server(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+func (f *fakeTG) sentPhotos() []fakePhoto {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]fakePhoto, len(f.photos))
+	copy(out, f.photos)
+	return out
 }
 
 func (f *fakeTG) replies() []string {
@@ -92,12 +137,24 @@ func stubSummaryRouter(t *testing.T, wantTenant, wantRole string) http.Handler {
 		if !strings.HasPrefix(r.Host, wantTenant+".") {
 			t.Errorf("self-call Host must carry the tenant subdomain, got %q", r.Host)
 		}
+		if r.URL.Query().Get("format") == "png" {
+			w.Header().Set("Content-Type", "image/png")
+			w.Write(tinyPNG()) //nolint:errcheck
+			return
+		}
 		text := "📋 Resumen — 2 pedidos nuevos"
 		if r.URL.Query().Get("view") == "census" {
 			text = "📊 Estado — pedidos: 7"
 		}
 		json.NewEncoder(w).Encode(map[string]any{"text": text}) //nolint:errcheck
 	})
+}
+
+// tinyPNG is a real 1×1 PNG (the receiver only forwards bytes; Telegram is faked).
+func tinyPNG() []byte {
+	var buf bytes.Buffer
+	png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 1, 1))) //nolint:errcheck
+	return buf.Bytes()
 }
 
 func newTestReceiver(t *testing.T, tgSrv *httptest.Server, router http.Handler) *telegramReceiver {
@@ -125,9 +182,49 @@ func TestReceiver_AuthorizedResumen(t *testing.T) {
 	rcv := newTestReceiver(t, srv, stubSummaryRouter(t, "acme", "owner"))
 	rcv.handleUpdate(context.Background(), f.updates[0])
 
+	// VOZ-VISUAL-S1: resumen is PICTURE + TEXT — one sendPhoto whose caption is
+	// the digest, no separate text message when it fits.
+	photos := f.sentPhotos()
+	if len(photos) != 1 || !strings.Contains(photos[0].caption, "2 pedidos nuevos") || photos[0].size == 0 || photos[0].chat != 8851136988 {
+		t.Fatalf("resumen must send the digest as a photo with the text as caption; got %+v", photos)
+	}
+	if got := f.replies(); len(got) != 0 {
+		t.Fatalf("a digest that fits the caption must not also send a text message; got %v", got)
+	}
+}
+
+// The words are the contract: when Telegram refuses the photo for good (400),
+// the text still arrives as a message.
+func TestReceiver_ResumenPhotoRejectedFallsBackToText(t *testing.T) {
+	f := &fakeTG{rejectPhoto: http.StatusBadRequest}
+	srv := f.server(t)
+	rcv := newTestReceiver(t, srv, stubSummaryRouter(t, "acme", "owner"))
+	rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "resumen")})
 	got := f.replies()
 	if len(got) != 1 || !strings.Contains(got[0], "2 pedidos nuevos") {
-		t.Fatalf("resumen must reply with the digest; got %v", got)
+		t.Fatalf("a refused photo must fall back to the text; got %v", got)
+	}
+}
+
+// An engine that cannot render (older binary, 404/500 on ?format=png) still
+// answers: text only, never silence.
+func TestReceiver_ResumenWithoutImageSendsText(t *testing.T) {
+	f := &fakeTG{}
+	srv := f.server(t)
+	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("format") == "png" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"text": "📋 Resumen viejo"}) //nolint:errcheck
+	})
+	rcv := newTestReceiver(t, srv, router)
+	rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "resumen")})
+	if got := f.replies(); len(got) != 1 || !strings.Contains(got[0], "Resumen viejo") {
+		t.Fatalf("no image → text reply; got %v", got)
+	}
+	if len(f.sentPhotos()) != 0 {
+		t.Fatal("no photo must be sent when the engine has none")
 	}
 }
 
@@ -172,12 +269,12 @@ func TestReceiver_HelpAndSlashAndBotSuffix(t *testing.T) {
 		rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, cmd)})
 	}
 	got := f.replies()
-	if len(got) != 3 {
-		t.Fatalf("want 3 replies, got %d", len(got))
+	if len(got) != 2 {
+		t.Fatalf("want 2 text replies (the two help requests), got %d: %v", len(got), got)
 	}
-	// /resumen@bot must be parsed as resumen (the digest), the others as help.
-	if !strings.Contains(got[1], "pedidos nuevos") {
-		t.Errorf("/resumen@bot must be the digest; got %q", got[1])
+	// /resumen@bot must be parsed as resumen (the digest → a photo), the others as help.
+	if ph := f.sentPhotos(); len(ph) != 1 || !strings.Contains(ph[0].caption, "pedidos nuevos") {
+		t.Errorf("/resumen@bot must be the digest photo; got %+v", ph)
 	}
 }
 

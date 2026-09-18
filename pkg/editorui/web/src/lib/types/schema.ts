@@ -206,6 +206,9 @@ export interface APISchema {
 	rbac?: RBACPolicy;
 	// Reserved for the Phase-2 workflow engine; preserved verbatim on round-trip.
 	workflows?: Record<string, unknown>;
+	// VOZ-VISUAL-S1: which resources the daily digest reports, in order.
+	// Preserved verbatim on round-trip (authored in the Code view).
+	summary?: { resources: string[] };
 }
 
 export const SCHEMA_URL = 'https://appximo.com/schema/v1';

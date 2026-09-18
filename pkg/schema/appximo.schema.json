@@ -24,6 +24,15 @@
       "description": "Declarative trigger→steps pipelines, executed by appximo-worker (event triggers consume the resource's outbox events; cron triggers run on a leader-elected scheduler). ADR-031.",
       "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
       "additionalProperties": { "$ref": "#/$defs/workflow" }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resources"],
+      "description": "Which resources the daily digest (GET /api/summary, the Telegram `resumen`) reports and in what ORDER. Absent = every resource the role may read, ordered attention-first. Every name must be a declared resource. VOZ-VISUAL-S1.",
+      "properties": {
+        "resources": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ident" } }
+      }
     }
   },
 
@@ -129,6 +138,11 @@
         "transitions": {
           "type": "object",
           "additionalProperties": { "type": "array", "items": { "type": "string" } }
+        },
+        "pending": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The states in which a row WAITS for someone's action (the digest's 'esperan acción'): each must be a known NON-terminal state. [] declares that nothing in this lifecycle waits; absent = the digest infers (initial non-terminal states are reported as 'sin avanzar', other non-terminal states as neutral counts). VOZ-VISUAL-S1."
         }
       }
     },

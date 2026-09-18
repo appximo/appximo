@@ -759,15 +759,45 @@ the voice plan (A-70): what happened today, in the owner's words, on a phone.
 schema (the engine does not know what a "sale" is — it knows which resources
 you declared and what happened to them today): per resource the caller's role
 may read, **created today** (a resource with an `auto:"create"` timestamp),
-**updated today** (an `auto:"update"` timestamp), and **pending of someone**
-(rows in the non-terminal states of a `state_machine`, named in the schema's
-own words). Deterministic — a template over real numbers, no language model.
-RBAC-scoped: it evaluates `read` per resource and applies that role's row
-condition and field allowlist, so a row-scoped role counts only its own rows
-and never sees a resource it cannot read. Empty day → "Sin movimiento hoy",
-never a wall of zeros. `?view=census` returns the "estado" view (how many of
-each thing there are right now). It is a reserved route (a schema resource may
-not be named `summary`).
+**updated today** (an `auto:"update"` timestamp), and the state-machine rows in
+three tiers (ADR-032): **esperan acción** — the states the schema declares as
+`state_machine.pending` (the red light); **sin avanzar** — when nothing is
+declared, rows still in an initial state, worded as the inference it is
+("recién creados, nadie los movió", amber); **en curso** — every other
+non-terminal state as a neutral count in the schema's own words (never called
+"pendiente"); terminal states are never counted. Deterministic — a template
+over real numbers, no language model. RBAC-scoped: it evaluates `read` per
+resource and applies that role's row condition and field allowlist, so a
+row-scoped role counts only its own rows and never sees a resource it cannot
+read. Empty day → "Sin movimiento hoy", never a wall of zeros. `?view=census`
+returns the "estado" view (how many of each thing there are right now). It is
+a reserved route (a schema resource may not be named `summary`).
+
+**The digest as a PICTURE (VOZ-VISUAL-S1).** `GET /api/summary?format=png`
+(or `Accept: image/png`) answers the same digest rendered on the server as a
+PNG — 800 px wide (2× a phone), a traffic light and a headline you read in
+three seconds, one big row per resource that waits, today's motion, the rest
+folded — so a twenty-resource app is still one glance. Rendered in pure Go
+(no browser; the binary grows ~860 KB, mostly two fonts — ADR-032), only when
+asked, never on a CRUD request; ~50 ms. **The bot sends `resumen` as picture +
+text**: the text rides as the caption (or follows as a second message when it
+exceeds Telegram's 1024-character caption) — never image-only, so a reader
+without the picture still has everything.
+
+**Choosing what enters — `summary.resources`.** A wide schema declares which
+resources the digest reports and in what order:
+
+```json
+"summary": { "resources": ["ordenes", "pagos", "facturas", "clientes"] }
+```
+
+Absent ⇒ every resource the role may read, ranked attention-first. A name
+that is not a declared resource is a **load error** (never a silently empty
+digest). And **what "waiting" means is declared per lifecycle** —
+`"state_machine": { …, "pending": ["pagada", "preparando"] }` — the states
+whose rows wait for someone; `"pending": []` says nothing here waits; absent
+lets the engine infer (and say so). Both are documented in the schema
+reference §1.5 and §5.
 
 **The commands.** Set these in `/etc/<app>/<app>.env` (in addition to the
 alert token/chat from §4.6c) and restart:
@@ -830,11 +860,14 @@ shape, pure schema on the workflow side:
 Run `appximo-worker` in `auto` mode with the same Telegram env plus
 `APPXIMO_TELEGRAM_SUMMARY_ROLE` (and optionally
 `APPXIMO_TELEGRAM_SUMMARY_TOPIC`, default `summary.telegram`): it fetches
-`GET /api/summary` as that role and sends the text. At-least-once ⇒ a rare
+`GET /api/summary` as that role and sends it as **picture + text** (an engine
+that predates the image door still gets the text). At-least-once ⇒ a rare
 double morning summary on a retry is accepted (harmless for a read-only
 digest); a transient engine/Telegram failure keeps the row pending and it
-delivers on recovery — and if the worker is down, the enqueued digest sits
-`pending` and the outbox age alert (§8b) says so. DST follows ADR-031 (the
+delivers on recovery (provoked: Telegram unreachable → `pending`, attempts
+climbing with the reason in `last_error`; reachable again → delivered with
+the image) — and if the worker is down, the enqueued digest sits `pending`
+and the outbox age alert (§8b) says so. DST follows ADR-031 (the
 declared timezone; a spring-forward run fires once, a fall-back can't fire
 twice).
 
@@ -849,7 +882,9 @@ Headers:
 Method: GET
 ```
 
-The response is `{"text": "...", "has_motion": true, ...}`; read `text`.
+The response is `{"text": "...", "has_motion": true, "level": "red|amber|green",
+"headline": "...", ...}`; read `text` (or `headline` for a one-line Siri
+answer). Add `?format=png` to get the picture instead.
 (Do NOT build the Shortcut for the user — this is the exact request they wire
 in five minutes; mint a long-lived token for it, or a dedicated read-only
 role.)

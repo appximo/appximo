@@ -2,7 +2,6 @@ package codegen
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -28,6 +27,13 @@ import (
 // Telegram receiver returns for "resumen" and the cron workflow sends each
 // morning.
 //
+// Since VOZ-VISUAL-S1 it also answers as an IMAGE — `?format=png` (or
+// `Accept: image/png`) — rendered on the server from the SAME counts
+// (pkg/summary/render.go), so the picture can never say something the text
+// does not. The schema's top-level `summary.resources` block chooses which
+// resources enter and in what order (absent ⇒ every readable resource,
+// attention first), and `state_machine.pending` decides what "waiting" means.
+//
 // It is NOT a resource — like /api/transaction it is a reserved segment the
 // RBAC middleware passes through (schema.reservedSummaryResource), and this
 // handler authorizes EACH resource itself: only the resources the caller's role
@@ -36,11 +42,19 @@ import (
 // role scoped to its own rows counts only its own). So the digest can never leak
 // what a plain list would not.
 func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, policy *rbac.Policy) {
-	names := make([]string, 0, len(s.Resources))
-	for name := range s.Resources {
-		names = append(names, name)
+	// The resources the digest asks about: the declared list (its order), else
+	// every resource (alphabetical; Order re-ranks by attention afterwards).
+	// A declared list also means FEWER queries — an app with twenty resources
+	// that names four pays for four.
+	var names []string
+	if s.Summary != nil && len(s.Summary.Resources) > 0 {
+		names = append(names, s.Summary.Resources...)
+	} else {
+		for name := range s.Resources {
+			names = append(names, name)
+		}
+		sort.Strings(names)
 	}
-	sort.Strings(names)
 
 	// Per-resource digest plan, computed once at boot from the schema.
 	plans := make(map[string]summary.Plan, len(names))
@@ -73,7 +87,9 @@ func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, p
 		startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		startISO := startOfDay.UTC().Format(time.RFC3339)
 
-		census := req.URL.Query().Get("view") == "census"
+		q := req.URL.Query()
+		census := q.Get("view") == "census"
+		wantPNG := q.Get("format") == "png" || strings.HasPrefix(req.Header.Get("Accept"), "image/png")
 
 		facts := make([]summary.Facts, 0, len(names))
 		for _, name := range names {
@@ -110,8 +126,7 @@ func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, p
 
 			if census {
 				if n, ok := scopedCount(url.Values{"count": {"true"}}); ok {
-					f.CreatedToday = n // reuse the field to carry the census total
-					f.HasCreated = true
+					f.Total, f.HasTotal = n, true
 				}
 				facts = append(facts, f)
 				continue
@@ -131,23 +146,31 @@ func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, p
 					f.UpdatedToday, f.HasUpdated = n, true
 				}
 			}
-			if p.StateField != "" && len(p.PendingStates) > 0 {
-				pending := map[string]int64{}
-				var total int64
-				got := false
-				for _, st := range p.PendingStates {
-					params := url.Values{"count": {"true"}}
-					params.Set("filter["+p.StateField+"][eq]", st)
-					if n, ok := scopedCount(params); ok {
-						got = true
-						if n > 0 {
-							pending[st] = n
-							total += n
+			if p.StateField != "" {
+				countStates := func(states []string) (map[string]int64, int64, bool) {
+					out := map[string]int64{}
+					var total int64
+					got := false
+					for _, st := range states {
+						params := url.Values{"count": {"true"}}
+						params.Set("filter["+p.StateField+"][eq]", st)
+						if n, ok := scopedCount(params); ok {
+							got = true
+							if n > 0 {
+								out[st] = n
+								total += n
+							}
 						}
 					}
+					return out, total, got
 				}
-				if got {
-					f.HasState, f.Pending, f.PendingTotal = true, pending, total
+				if m, total, got := countStates(p.Attention); got {
+					f.HasState = true
+					f.Attention, f.AttentionTotal, f.AttentionInferred = m, total, p.AttentionInferred
+				}
+				if m, total, got := countStates(p.Flow); got {
+					f.HasState = true
+					f.Flow, f.FlowTotal = m, total
 				}
 			}
 			facts = append(facts, f)
@@ -159,44 +182,37 @@ func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, p
 		}
 		day := startOfDay.Format("2006-01-02")
 
+		ordered := summary.Order(s.Summary, facts)
 		var rep summary.Report
 		if census {
-			rep = composeCensus(appName, tc.ID, facts)
+			rep = summary.ComposeCensus(appName, tc.ID, ordered)
 		} else {
-			rep = summary.Compose(appName, tc.ID, day, facts)
+			rep = summary.Compose(appName, tc.ID, day, ordered)
+		}
+		markSpan(req, "query")
+
+		if wantPNG {
+			png, err := summary.Render(rep)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": "summary image could not be rendered — the text digest (without ?format=png) still works"}) //nolint:errcheck
+				return
+			}
+			w.Header().Set("Content-Type", "image/png")
+			w.Header().Set("X-Summary-Level", rep.Level)
+			serverTiming(w, req)
+			w.WriteHeader(http.StatusOK)
+			w.Write(png) //nolint:errcheck
+			markSpan(req, "render")
+			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		serverTiming(w, req)
-		markSpan(req, "query")
 		json.NewEncoder(w).Encode(rep) //nolint:errcheck
 		markSpan(req, "serialize")
 	}))
-}
-
-// composeCensus renders the `estado` view: how big the business is right now
-// (total rows per resource the role may read) — an owner census, not system
-// metrics. Reuses Facts.CreatedToday as the carried total.
-func composeCensus(appName, tenant string, facts []summary.Facts) summary.Report {
-	sort.Slice(facts, func(i, j int) bool { return facts[i].Resource < facts[j].Resource })
-	rep := summary.Report{AppName: appName, Tenant: tenant}
-	var b strings.Builder
-	fmt.Fprintf(&b, "📊 <b>Estado de %s</b>\n", htmlEscape(appName))
-	any := false
-	for _, f := range facts {
-		if !f.HasCreated {
-			continue
-		}
-		any = true
-		fmt.Fprintf(&b, "• <b>%s</b>: %d\n", htmlEscape(f.Resource), f.CreatedToday)
-	}
-	if !any {
-		rep.Text = "📊 <b>Estado de " + htmlEscape(appName) + "</b>\n\nNo hay datos todavía."
-		return rep
-	}
-	rep.HasMotion = true
-	rep.Text = strings.TrimRight(b.String(), "\n")
-	return rep
 }
 
 func toInt64(v any) int64 {
@@ -212,8 +228,4 @@ func toInt64(v any) int64 {
 	default:
 		return 0
 	}
-}
-
-func htmlEscape(s string) string {
-	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
 }

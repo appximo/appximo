@@ -14,8 +14,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"regexp"
 	"strings"
@@ -103,6 +105,11 @@ func (c *Client) Redact(s string) string {
 	}
 	return strings.ReplaceAll(s, c.token, "<token>")
 }
+
+// ChatIDValue is the configured chat as the API wants it: numeric ids as JSON
+// numbers, @channel names as strings (for callers that address the
+// configured chat through the explicit-chat methods).
+func (c *Client) ChatIDValue() any { return c.chatIDValue() }
 
 // chatIDValue sends numeric ids as JSON numbers and @channel names as strings.
 func (c *Client) chatIDValue() any {
@@ -208,11 +215,17 @@ func (c *Client) callWith(ctx context.Context, hc *http.Client, method string, p
 	if err != nil {
 		return fmt.Errorf("telegram %s marshal: %w", method, err)
 	}
+	return c.callRaw(ctx, hc, method, "application/json", body, out)
+}
+
+// callRaw POSTs an already-encoded body (JSON or multipart) and decodes the
+// Bot API envelope: 429 → *RetryAfterError, other non-ok → *APIError.
+func (c *Client) callRaw(ctx context.Context, hc *http.Client, method, contentType string, body []byte, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBase+"/bot"+c.token+"/"+method, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("telegram %s request: %s", method, c.Redact(err.Error()))
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	resp, err := hc.Do(req)
 	if err != nil {
 		return fmt.Errorf("telegram %s send: %s", method, c.Redact(err.Error()))
@@ -239,7 +252,7 @@ func (c *Client) callWith(ctx context.Context, hc *http.Client, method string, p
 		if desc == "" {
 			desc = strings.TrimSpace(string(raw))
 		}
-		return fmt.Errorf("telegram %s: status %d — %s", method, resp.StatusCode, c.Redact(desc))
+		return &APIError{Method: method, Status: resp.StatusCode, Description: c.Redact(desc)}
 	}
 	if out != nil {
 		if err := json.Unmarshal(raw, out); err != nil {
@@ -247,4 +260,117 @@ func (c *Client) callWith(ctx context.Context, hc *http.Client, method string, p
 		}
 	}
 	return nil
+}
+
+// Telegram caps a photo caption at 1024 characters (UTF-16 units — we count
+// runes, which is never more permissive for the BMP text the digest uses).
+const captionMax = 1024
+
+// SendPhoto posts one PNG (multipart/form-data, field "photo") with an HTML
+// caption to an explicit chat. The caption must fit captionMax; callers that
+// may exceed it use SendPhotoWithText.
+func (c *Client) SendPhoto(ctx context.Context, chatID any, png []byte, captionHTML string) error {
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	chat := fmt.Sprint(chatID)
+	if n, ok := chatID.(json.Number); ok {
+		chat = n.String()
+	}
+	_ = mw.WriteField("chat_id", chat)
+	if captionHTML != "" {
+		_ = mw.WriteField("caption", captionHTML)
+		_ = mw.WriteField("parse_mode", "HTML")
+	}
+	part, err := mw.CreateFormFile("photo", "resumen.png")
+	if err != nil {
+		return fmt.Errorf("telegram sendPhoto multipart: %w", err)
+	}
+	if _, err := part.Write(png); err != nil {
+		return fmt.Errorf("telegram sendPhoto multipart: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return fmt.Errorf("telegram sendPhoto multipart: %w", err)
+	}
+	return c.callRaw(ctx, c.http, "sendPhoto", mw.FormDataContentType(), body.Bytes(), nil)
+}
+
+// SendPhotoWithText delivers a digest as PICTURE + TEXT, never picture alone
+// (the text is the accessibility fallback and the record when the image does
+// not load). When the HTML fits Telegram's caption limit it rides as the
+// caption (one message); otherwise the photo goes with a short caption (the
+// first line) and the full text follows as a second message.
+//
+// Failure semantics for the caller's retry loop: a transport error or a 429
+// from the PHOTO comes back unchanged (retry the whole thing — nothing was
+// delivered); a non-retryable API rejection of the photo (a 400 — e.g. an
+// image Telegram will not accept) falls back to sending the TEXT so the
+// content still arrives, and the returned error is nil with the fallback
+// logged by the caller through PhotoFallbackError.
+func (c *Client) SendPhotoWithText(ctx context.Context, chatID any, png []byte, html string) error {
+	caption := html
+	var tail string
+	if len([]rune(html)) > captionMax {
+		first := html
+		if i := strings.IndexByte(html, '\n'); i >= 0 {
+			first = html[:i]
+		}
+		if len([]rune(first)) > captionMax-64 {
+			first = string([]rune(first)[:captionMax-64])
+		}
+		caption = first + "\n(el detalle completo va abajo)"
+		tail = html
+	}
+	if err := c.SendPhoto(ctx, chatID, png, caption); err != nil {
+		if IsRetryable(err) {
+			return err
+		}
+		// The photo was refused for good; deliver the words.
+		if terr := c.SendMessageTo(ctx, chatID, html); terr != nil {
+			return terr
+		}
+		return &PhotoFallbackError{Cause: err}
+	}
+	if tail != "" {
+		return c.SendMessageTo(ctx, chatID, tail)
+	}
+	return nil
+}
+
+// PhotoFallbackError reports that the TEXT was delivered but the photo was
+// rejected by the API (non-retryable). Callers treat it as success-with-a-
+// warning: the content reached the phone.
+type PhotoFallbackError struct{ Cause error }
+
+func (e *PhotoFallbackError) Error() string {
+	return "telegram: photo rejected, text delivered instead: " + e.Cause.Error()
+}
+func (e *PhotoFallbackError) Unwrap() error { return e.Cause }
+
+// IsRetryable classifies a client error: transport failures and 429s are
+// retryable (nothing was delivered, the API may accept it next time); an API
+// rejection with a 4xx status is not.
+func IsRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ra *RetryAfterError
+	if errors.As(err, &ra) {
+		return true
+	}
+	var api *APIError
+	if errors.As(err, &api) {
+		return api.Status >= 500
+	}
+	return true // transport / context errors
+}
+
+// APIError is a non-ok Bot API answer (token already scrubbed).
+type APIError struct {
+	Method      string
+	Status      int
+	Description string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("telegram %s: status %d — %s", e.Method, e.Status, e.Description)
 }

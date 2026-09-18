@@ -17,6 +17,22 @@ type APISchema struct {
 	// (ADR-012). The struct is parsed for forward compatibility, but no executor
 	// runs it yet — present so existing schemas remain valid once it ships.
 	Workflows map[string]WorkflowSchema `json:"workflows,omitempty"`
+
+	// Summary declares WHICH resources the daily digest (GET /api/summary, the
+	// Telegram `resumen`) reports and in what ORDER (VOZ-VISUAL-S1). Absent ⇒
+	// every resource the role may read, ordered by what needs attention first
+	// (see pkg/summary.Order). Present ⇒ exactly the listed resources, in that
+	// order — the cure for the "18 lines on a phone" problem: an app with
+	// twenty resources names the four the owner reads every morning. Every
+	// name must be a declared resource (load error otherwise); RBAC still
+	// wins (a listed resource the role cannot read is skipped, never leaked).
+	Summary *SummaryConfig `json:"summary,omitempty"`
+}
+
+// SummaryConfig is the top-level `summary` block. Strict-keyed like every
+// other level (keys.go); validated at load (validateSummary).
+type SummaryConfig struct {
+	Resources []string `json:"resources"`
 }
 
 // ResourceSchema defines a single entity (table) with its fields, hooks, and indexes.
@@ -296,6 +312,46 @@ func (fd *FieldDef) FileAcceptMatches(contentType string) bool {
 type StateMachine struct {
 	Initial     []string            `json:"initial"`
 	Transitions map[string][]string `json:"transitions"`
+	// Pending (VOZ-VISUAL-S1, VOZ-2) declares which states mean "a row here is
+	// WAITING for someone to act" — the states the daily digest puts on top,
+	// counted as "esperan acción". The engine cannot know this structurally:
+	// a product's `activo` and an order's `pendiente_pago` are both non-terminal,
+	// but only one is anybody's to-do. Three declarations, three meanings:
+	//   absent  → not declared; the digest INFERS (a non-terminal INITIAL state
+	//             is "created and not moved yet", reported as "sin avanzar" with
+	//             that humble wording; other non-terminal states are neutral
+	//             "en curso" counts; terminal states are never pending)
+	//   [...]   → exactly these states wait for an action (each must be a known,
+	//             NON-terminal state — a terminal state cannot wait)
+	//   []      → nothing in this lifecycle waits for anyone (an explicit "I
+	//             looked": every non-terminal state is a neutral count)
+	// nil vs empty is preserved through JSON (MarshalJSON below).
+	Pending []string `json:"pending,omitempty"`
+}
+
+// PendingDeclared reports whether the schema author declared `pending` (even as
+// an empty list) — the digest infers only when this is false.
+func (sm *StateMachine) PendingDeclared() bool { return sm.Pending != nil }
+
+// IsTerminal reports whether s has no outgoing transition (a row there can
+// never change state again).
+func (sm *StateMachine) IsTerminal(s string) bool { return len(sm.Transitions[s]) == 0 }
+
+// MarshalJSON keeps the nil-vs-empty distinction of `pending` (an explicit
+// `[]` is a declaration and must survive a round trip; `omitempty` alone would
+// drop it and silently turn "nothing waits" back into "infer").
+func (sm StateMachine) MarshalJSON() ([]byte, error) {
+	type plain struct {
+		Initial     []string            `json:"initial"`
+		Transitions map[string][]string `json:"transitions"`
+		Pending     *[]string           `json:"pending,omitempty"`
+	}
+	out := plain{Initial: sm.Initial, Transitions: sm.Transitions}
+	if sm.Pending != nil {
+		p := sm.Pending
+		out.Pending = &p
+	}
+	return json.Marshal(out)
 }
 
 // UnmarshalJSON accepts `initial` as either a string ("pending") or an array
@@ -304,11 +360,20 @@ func (sm *StateMachine) UnmarshalJSON(data []byte) error {
 	var aux struct {
 		Initial     json.RawMessage     `json:"initial"`
 		Transitions map[string][]string `json:"transitions"`
+		Pending     *[]string           `json:"pending"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 	sm.Transitions = aux.Transitions
+	sm.Pending = nil
+	if aux.Pending != nil {
+		p := *aux.Pending
+		if p == nil {
+			p = []string{} // an explicit `"pending": []` is a declaration, not an absence
+		}
+		sm.Pending = p
+	}
 	if len(aux.Initial) == 0 {
 		return nil
 	}

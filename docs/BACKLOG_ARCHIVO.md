@@ -418,6 +418,33 @@ refreshed).
 ---
 
 
+## DONE in VOZ-VISUAL-S1 (2026-09-18) — the digest reads at a glance: a server-rendered picture, a declared filter, and the VOZ-2 vocabulary
+
+The tiendita's five-resource digest read fine; VecinGo's eighteen would not.
+This session gave the digest a hierarchy (what waits on top), a picture, and
+a way to say which resources enter — the three were the same complaint. Design
+and numbers: [ADR-032](adr/ADR-032-digest-as-image-declared-attention.md);
+the next rung designed, not built: [ADR-033](adr/ADR-033-voice-read-questions.md).
+
+| Item | What shipped | Verified by |
+|---|---|---|
+| **The digest as an IMAGE** (`?format=png` / `Accept: image/png`) | Rendered on the server from the SAME Report as the text (`pkg/summary/render.go`): pure Go (`golang.org/x/image` opentype rasterizer + the Go fonts), deterministic (same input → same bytes), no browser, no model. Hierarchy, not a table: traffic light + headline, one big row per resource that waits (red declared / amber inferred), today's motion, the rest folded. Empty day = a green card. Binary +860,160 B (fonts 300,420 B of it), render 43 ms (5 resources) / 64 ms (20). Off the hot path — only when asked. | `pkg/summary/render_test.go` (determinism, fold bound, empty, census, benchmarks); live PNGs over three schemas in `evidencia/VOZ-VISUAL-S1/`; gate 171 SAME on every CRUD case |
+| **Picture + text on Telegram, never image-only** | `telegram.SendPhoto`/`SendPhotoWithText` (caption ≤ 1024 chars, else photo + full text as a second message; a photo the API refuses → text, logged; transport/429 → retry). The receiver's `resumen` and the scheduled consumer both use it; an engine without the image door degrades to text. | `pkg/telegram`, `pkg/consumers`, `telegram_input_test.go` (photo, fallback, no-image); LIVE: Telegram unreachable → `pending` ×5 attempts with the reason → reachable → delivered `image:true`, row `sent` — the real bot, a real photo on the phone |
+| **`summary.resources`** — which resources enter, in order | Top-level block, load-validated (`summary_unknown_resource` lists the declared ones; duplicates; empty list = dead config), strict-keyed, Studio round-trip, `explain` reads it back, `spec` teaches it. Default argued from a twenty-resource app: EVERYTHING readable, ranked attention-first (never a heuristic cut, never a cap); the declared list also cuts the queries. | `pkg/schema/summary_block_test.go`; `pkg/integration/summary_test.go` (order verbatim, membership, census honors it); provocation 5 live: `ventas` → load error naming the fix |
+| **VOZ-2 — `state_machine.pending`** (the vocabulary) | Declared `pending: [...]` = "esperan acción" (red; each a known NON-terminal state — terminal is a load error); `pending: []` = nothing waits; absent = the digest INFERS the initial non-terminal states as "sin avanzar (recién creados, nadie los movió)" (amber) and reports the rest as neutral "en curso: activo 9" — "pendientes de alguien" is gone; terminal never counts. nil-vs-[] survives JSON. | `pkg/schema` + `pkg/summary` tests; the tiendita schema now declares `pending` for ordenes/pagos/facturas and `[]` for productos/reservas_stock — `productos: activo` no longer reads as pending |
+| **A twenty-resource example** | `examples/model-lab/conjunto.json` (a residential complex: 20 resources, 8 state machines, `pending` in three forms, a 6-resource `summary` filter). | Provocation 2: with and without the filter the picture stays one phone screen (~1,700 px at 2×) |
+
+**Deployed** to both 58 apps (see the session report in 04_ESTADO_ACTUAL for
+versions), rollback ida-y-vuelta, golden md5 intact. Gates: unit + full DB
+lane + lint 0 + gofmt/vet + binary-diff gate 175 cases: 171 SAME, 4 DIFF all
+on `/api/summary` and all expected (new vocabulary + three JSON fields; the
+png door) + browser 4 schemas × desktop/390×844 (Studio round-trips the block,
+/app logs in, console clean). ABBA by rule: the data path was not touched (the
+gate corroborates it byte-for-byte).
+
+---
+
+
 ## DONE in VOZ-ESCALON1-S1 (2026-09-18) — "mandame el resumen de hoy": the read rung of the voice plan (A-70)
 
 The alert channel of ALERTAS-TELEGRAM-S1 was the OUTBOUND half; this is the

@@ -1440,18 +1440,49 @@ tarball of scripts/), and the smoke runs fleet-audit once.
   leave `-count=2` green.
 
 
-### VOZ-2 — The digest calls stable/terminal-ish states "pendientes de alguien"
+### VOZ-3 — Read questions by voice/text ("cuántas citas tiene el doctor Gómez hoy") — designed in ADR-033, NOT built
 
-- **Origin:** VOZ-ESCALON1-S1 (2026-09-18), observed live turning VOZ-1 on in
-  the tiendita. The digest marks every NON-terminal state_machine state as
-  "pending" (has an outgoing transition). In commerce that swept in `activo`
-  (products) and `entregada` (orders) — states the owner reads as steady/done,
-  not pending. The COUNTS are correct; the WORD is a stretch.
-- **Impact:** low. It grazes "owner language" but never leaks or miscounts.
-- **Ready:** a small design call + session — distinguish FLOW states (awaiting
-  an action) from STABLE ones without asking the owner to configure it (an
-  optional marker on the state_machine, or excluding states with no actionable
-  successor). Step 1 shipped honest and correct; this is polish.
+- **Origin:** VOZ-VISUAL-S1 (2026-09-18). The next rung after the digest-as-a-picture. The
+  design is written so the build session does not re-derive it:
+  [docs/adr/ADR-033-voice-read-questions.md](adr/ADR-033-voice-read-questions.md) — a
+  model translates free text into a CLOSED read plan over the schema's own vocabulary
+  (a filter/count/aggregate the engine already executes), never SQL; the engine
+  validates every name against the schema and REFUSES what does not exist (one
+  correction round, then "no entendí"); execution self-calls the live router as the
+  asking role, so RBAC applies unchanged; proper names are resolved server-side against
+  what exists (one match → id, several → ask, none → say so, never a zero); the reply is
+  a template over the engine's numbers — the model never writes a figure.
+- **Impact:** the first model enters the product (a real cost per question, a real
+  chance of a confident wrong answer if the seam is loose) — that is why the seam is
+  written first.
+- **Order agreed (A-73):** pictures (DONE, this session) → read questions (this) →
+  writes with confirmation (VOZ-4) → reactive rules by voice (VOZ-5).
+- **Ready:** the five verifications in ADR-033 §Verification pass, ten real dictated
+  questions by Miguel over the tiendita answered right or "no entendí", never wrong.
+
+### VOZ-4 — Writes by voice WITH confirmation ("agendá cita a las 2 con Juan — ¿sí/no?")
+
+- **Origin:** A-70 step 3; ordered after VOZ-3 in VOZ-VISUAL-S1 (A-73).
+- **Impact:** the step where the bot changes data; needs the confirmation protocol
+  (what is read back, how a "sí" is bound to exactly the write it confirms, timeouts),
+  the same name-resolution as VOZ-3, and the engine's write doors unchanged (validation,
+  RBAC, state machines all apply because the write goes through the API).
+- **Ready:** a design note (ADR) written first — the confirmation is a product decision
+  Miguel takes; then a session with Miguel validating the experience on a phone.
+
+### VOZ-5 — Reactive rules declared by voice ("cuando una orden quede pagada, avisame")
+
+- **Origin:** A-70 step 4/5; ordered last in VOZ-VISUAL-S1 (A-73). **Correction
+  recorded here:** the session brief called `workflows` v1 "cron only — it does not
+  react to data changes". Verified against the code: it DOES — event triggers are
+  outbox consumers (`pkg/workflows/consumer.go` `EventConsumer`, tested in
+  `workflows_test.go`, ADR-031 §1); a resource that declares `events` fires its
+  workflows on create/update/delete. What is missing is the AUTHORING, not the
+  engine: the grammar for agents does not teach `workflows` (AUTO-10), Studio has no
+  panel for them (AUTO-11), and nobody can declare one by voice.
+- **Impact:** without it every "avisame cuando…" is a JSON edit by the developer.
+- **Ready:** AUTO-10 and AUTO-11 first (the declaration must be teachable and
+  visible), then a voice front that produces a `workflows` entry the validator accepts.
 
 ### AUTO — The automation front (consolidated 2026-09-17, CENTRO-MANDO-S2)
 
@@ -1481,9 +1512,13 @@ the 34 rows archived first (pg_dump of the table). Never with anything else.
 ### AUTO-9 — The voice plan: five steps, with what the research already settled
 
 Operating an app by voice, in five deliberate steps: **(1) close the
-worker/outbox traps — DONE (AUTOMATIZACION-S1)** → (2) read-only by voice →
-(3) writes with confirmation → **(4) declarative rules — DONE: the workflows
-executor exists (ADR-031)** → (5) a visual layer. The settled foundations
+worker/outbox traps — DONE (AUTOMATIZACION-S1)** → (2) read-only by voice —
+**the digest is DONE (VOZ-ESCALON1-S1) and reads at a glance as a picture with
+a declared filter and an honest vocabulary (VOZ-VISUAL-S1, ADR-032); read
+QUESTIONS are VOZ-3 (ADR-033, designed, not built)** → (3) writes with
+confirmation (VOZ-4) → **(4) declarative rules — DONE: the workflows executor
+exists (ADR-031), event AND cron triggers; declaring them by voice is VOZ-5** →
+(5) a visual layer. The settled foundations
 (`expr-lang/expr`, `pg_try_advisory_lock`, the schema as source of truth) are
 now shipped code; Studio-as-the-rules-editor is AUTO-11. **Warnings that must
 not be lost:** Spanish dictation mangles proper names — correct server-side

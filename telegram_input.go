@@ -20,6 +20,7 @@ package appximo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -161,7 +162,11 @@ func (rcv *telegramReceiver) handleUpdate(ctx context.Context, u telegram.Update
 
 	switch cmd {
 	case "resumen":
-		rcv.reply(sendCtx, rcv.summary(ctx, "today"))
+		// PICTURE + TEXT (VOZ-VISUAL-S1): the digest is read at a glance as an
+		// image; the same text rides as the caption (or a second message when
+		// it does not fit) so nothing is ever image-only.
+		text := rcv.summary(ctx, "today")
+		rcv.replyWithImage(sendCtx, rcv.summaryPNG(ctx), text)
 	case "estado":
 		rcv.reply(sendCtx, rcv.summary(ctx, "census"))
 	case "ayuda", "start", "help":
@@ -177,36 +182,36 @@ const helpText = "🤖 <b>Comandos</b>\n" +
 	"• <b>ayuda</b> — esta lista\n\n" +
 	"Solo lectura: escribir datos por acá llega en una próxima etapa."
 
+// summaryPNG fetches GET /api/summary?format=png the same way summary fetches
+// the text. nil on any failure — the caller then sends text only (the image
+// is an enhancement; the words are the contract).
+func (rcv *telegramReceiver) summaryPNG(ctx context.Context) []byte {
+	rec := rcv.selfCall(ctx, "/api/summary?format=png")
+	if rec == nil || rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "image/png") {
+		if rec != nil {
+			zlog.Warn().Int("status", rec.Code).Msg("telegram summary: image not rendered — sending text only")
+		}
+		return nil
+	}
+	return rec.Body.Bytes()
+}
+
 // summary calls GET /api/summary in-process through the LIVE router (the real
 // tenant→JWT→RBAC chain, always the current surface even after a hot-swap),
 // authenticating as a freshly minted, short-lived token for the configured
 // (tenant, role). view is "today" or "census".
 func (rcv *telegramReceiver) summary(ctx context.Context, view string) string {
-	h := rcv.getRouter()
-	if h == nil {
-		return "⚠️ El motor todavía no está listo; probá en unos segundos."
-	}
-	tok, err := auth.GenerateTokenWithTTL(auth.Claims{
-		UserID:   "telegram:summary",
-		Role:     rcv.role,
-		TenantID: rcv.tenant,
-	}, rcv.jwtSecret, 60*time.Second)
-	if err != nil {
-		zlog.Error().Err(err).Msg("telegram summary: mint token")
-		return "⚠️ No pude generar el resumen (token)."
-	}
 	path := "/api/summary"
 	if view == "census" {
 		path += "?view=census"
 	}
-	// A fresh chi RouteContext isolates this re-entrant request (the flow-test
-	// runner learned this the hard way — a reused RouteContext mis-routes).
-	rctx := context.WithValue(ctx, chi.RouteCtxKey, chi.NewRouteContext())
-	req := httptest.NewRequest(http.MethodGet, "http://placeholder"+path, nil).WithContext(rctx)
-	req.Host = rcv.tenant + rcv.hostSuffix
-	req.Header.Set("Authorization", "Bearer "+tok)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	rec := rcv.selfCall(ctx, path)
+	if rec == nil {
+		return "⚠️ El motor todavía no está listo; probá en unos segundos."
+	}
+	if rec.Code == http.StatusInternalServerError && rec.Header().Get("X-Self-Call") == "token" {
+		return "⚠️ No pude generar el resumen (token)."
+	}
 
 	if rec.Code != http.StatusOK {
 		zlog.Warn().Int("status", rec.Code).Str("view", view).Msg("telegram summary: engine did not answer 200")
@@ -219,6 +224,65 @@ func (rcv *telegramReceiver) summary(ctx context.Context, view string) string {
 		return "⚠️ El resumen llegó vacío."
 	}
 	return rep.Text
+}
+
+// selfCall performs one GET against the LIVE router as the configured
+// (tenant, role) with a freshly minted short-lived token. nil when the router
+// is not up yet; a token-mint failure is reported as a 500 tagged X-Self-Call.
+func (rcv *telegramReceiver) selfCall(ctx context.Context, path string) *httptest.ResponseRecorder {
+	h := rcv.getRouter()
+	if h == nil {
+		return nil
+	}
+	rec := httptest.NewRecorder()
+	tok, err := auth.GenerateTokenWithTTL(auth.Claims{
+		UserID:   "telegram:summary",
+		Role:     rcv.role,
+		TenantID: rcv.tenant,
+	}, rcv.jwtSecret, 60*time.Second)
+	if err != nil {
+		zlog.Error().Err(err).Msg("telegram summary: mint token")
+		rec.Header().Set("X-Self-Call", "token")
+		rec.WriteHeader(http.StatusInternalServerError)
+		return rec
+	}
+	// A fresh chi RouteContext isolates this re-entrant request (the flow-test
+	// runner learned this the hard way — a reused RouteContext mis-routes).
+	rctx := context.WithValue(ctx, chi.RouteCtxKey, chi.NewRouteContext())
+	req := httptest.NewRequest(http.MethodGet, "http://placeholder"+path, nil).WithContext(rctx)
+	req.Host = rcv.tenant + rcv.hostSuffix
+	req.Header.Set("Authorization", "Bearer "+tok)
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// replyWithImage sends picture + text (text alone when png is nil), with the
+// same short retry as reply. A photo the API refuses for good falls back to
+// the text inside the client (PhotoFallbackError) — logged, never lost.
+func (rcv *telegramReceiver) replyWithImage(ctx context.Context, png []byte, text string) {
+	if len(png) == 0 {
+		rcv.reply(ctx, text)
+		return
+	}
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		err = rcv.client.SendPhotoWithText(ctx, rcv.authChatID, png, text)
+		var fb *telegram.PhotoFallbackError
+		if errors.As(err, &fb) {
+			zlog.Warn().Err(fb.Cause).Msg("telegram: photo rejected by the API — text delivered instead")
+			return
+		}
+		if err == nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Duration(attempt+1) * time.Second):
+		}
+	}
+	zlog.Error().Err(err).Msg("telegram: failed to send the digest image after retries — sending text")
+	rcv.reply(ctx, text)
 }
 
 // reply sends text to the authorized chat, tolerating a transient Telegram

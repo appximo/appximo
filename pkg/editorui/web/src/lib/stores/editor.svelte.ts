@@ -114,6 +114,7 @@ class EditorStore {
 	schemaUrl = $state('https://appximo.com/schema/v1');
 	rbac = $state<RBACPolicy>({ roles: {} });
 	workflows = $state<Record<string, unknown> | undefined>(undefined);
+	summary = $state<{ resources: string[] } | undefined>(undefined);
 
 	// ── canvas (raw) ─────────────────────────────────────────────────────────
 	nodes = $state.raw<FlowNode[]>([]);
@@ -189,6 +190,7 @@ class EditorStore {
 		this.schemaUrl = model.$schema;
 		this.rbac = model.rbac;
 		this.workflows = model.workflows;
+		this.summary = model.summary;
 		this.selectedEntityId = null;
 		this.selectedFieldId = null;
 		this.autoLayout(); // also rebuilds nodes + edges
@@ -221,7 +223,8 @@ class EditorStore {
 			name: this.schemaName,
 			entities: $state.snapshot(this.entities) as EntityModel[],
 			rbac: $state.snapshot(this.rbac) as RBACPolicy,
-			workflows: this.workflows ? ($state.snapshot(this.workflows) as Record<string, unknown>) : undefined
+			workflows: this.workflows ? ($state.snapshot(this.workflows) as Record<string, unknown>) : undefined,
+			summary: this.summary ? ($state.snapshot(this.summary) as { resources: string[] }) : undefined
 		});
 	}
 
