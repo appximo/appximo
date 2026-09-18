@@ -225,3 +225,44 @@ func TestScheduler_OverlapSkip(t *testing.T) {
 	close(release)
 	wg.Wait()
 }
+
+// VOZ-DELTA-S1 (found on the 58): a deployed cron whose SPEC changes must be
+// re-armed at the next tick. The old ON CONFLICT DO NOTHING kept the stale
+// next_run — a daily "0 7" moved to "38 14" would only take effect after the
+// old 07:00 had passed.
+func TestScheduler_ChangedSpecReArms(t *testing.T) {
+	pool := requirePG(t)
+	ctx := context.Background()
+	if err := EnsureTables(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(pool)
+	_, _ = pool.Exec(ctx, `DELETE FROM public.workflow_cron WHERE workflow='rearm'`)
+	tomorrow := time.Now().Add(24 * time.Hour)
+	if err := store.UpsertScheduleSpec(ctx, "rearm", "acme", "0 7 * * * UTC", tomorrow); err != nil {
+		t.Fatal(err)
+	}
+	// Same spec, a restart: next_run must NOT move.
+	if err := store.UpsertScheduleSpec(ctx, "rearm", "acme", "0 7 * * * UTC", time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	var next time.Time
+	if err := pool.QueryRow(ctx, `SELECT next_run FROM public.workflow_cron WHERE workflow='rearm'`).Scan(&next); err != nil {
+		t.Fatal(err)
+	}
+	if next.Sub(tomorrow).Abs() > time.Second {
+		t.Fatalf("unchanged spec must keep next_run: %v vs %v", next, tomorrow)
+	}
+	// Changed spec: re-armed to the new next.
+	soon := time.Now().Add(2 * time.Minute)
+	if err := store.UpsertScheduleSpec(ctx, "rearm", "acme", "38 14 * * * UTC", soon); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT next_run FROM public.workflow_cron WHERE workflow='rearm'`).Scan(&next); err != nil {
+		t.Fatal(err)
+	}
+	if next.Sub(soon).Abs() > time.Second {
+		t.Fatalf("changed spec must re-arm next_run: %v vs %v", next, soon)
+	}
+	_, _ = pool.Exec(ctx, `DELETE FROM public.workflow_cron WHERE workflow='rearm'`)
+}

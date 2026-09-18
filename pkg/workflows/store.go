@@ -47,6 +47,10 @@ CREATE TABLE IF NOT EXISTS public.workflow_cron (
     last_run  TIMESTAMPTZ,
     PRIMARY KEY (workflow, tenant_id)
 );
+-- VOZ-DELTA-S1: the spec the stored next_run was computed from, so a deploy
+-- that CHANGES a cron re-arms the schedule instead of waiting for the old
+-- next_run to pass (up to a day for a daily cron — found by provocation).
+ALTER TABLE public.workflow_cron ADD COLUMN IF NOT EXISTS spec TEXT;
 `)
 	if err != nil {
 		return fmt.Errorf("workflows: ensure tables: %w", err)
@@ -110,10 +114,30 @@ type CronRow struct {
 // UpsertSchedule ensures a (workflow, tenant) schedule row exists; a new row's
 // next_run is initialized to next (no catch-up for a workflow first seen).
 func (s *Store) UpsertSchedule(ctx context.Context, workflow, tenant string, next time.Time) error {
+	return s.UpsertScheduleSpec(ctx, workflow, tenant, "", next)
+}
+
+// UpsertScheduleSpec is UpsertSchedule with the cron SPEC (expr + timezone)
+// recorded beside next_run: an existing row keeps its next_run while the
+// spec is unchanged (never re-armed by a mere restart), and is RE-ARMED to
+// `next` the moment the deployed spec differs — a changed "0 7 * * *" takes
+// effect on the next tick, not after the stale next_run passes. An empty
+// spec (legacy callers/tests) means "do not compare".
+func (s *Store) UpsertScheduleSpec(ctx context.Context, workflow, tenant, spec string, next time.Time) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO public.workflow_cron (workflow, tenant_id, next_run)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (workflow, tenant_id) DO NOTHING`, workflow, tenant, next)
+		INSERT INTO public.workflow_cron (workflow, tenant_id, next_run, spec)
+		VALUES ($1, $2, $3, NULLIF($4, ''))
+		ON CONFLICT (workflow, tenant_id) DO UPDATE
+		   SET next_run = EXCLUDED.next_run, spec = EXCLUDED.spec
+		 WHERE EXCLUDED.spec IS NOT NULL
+		   AND public.workflow_cron.spec IS DISTINCT FROM EXCLUDED.spec
+		   AND public.workflow_cron.spec IS NOT NULL`, workflow, tenant, next, spec)
+	if err != nil {
+		return err
+	}
+	// A row that predates the spec column (NULL) adopts the current spec
+	// without re-arming (the stored next_run was computed from it).
+	_, err = s.pool.Exec(ctx, `UPDATE public.workflow_cron SET spec = NULLIF($3,'') WHERE workflow=$1 AND tenant_id=$2 AND spec IS NULL`, workflow, tenant, spec)
 	return err
 }
 

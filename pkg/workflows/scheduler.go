@@ -121,7 +121,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 		k := e.Workflow.Name + "\x00" + e.Tenant
 		keep[k] = true
 		byKey[k] = e
-		if err := s.Store.UpsertSchedule(ctx, e.Workflow.Name, e.Tenant, e.Workflow.NextAfter(now)); err != nil {
+		if err := s.Store.UpsertScheduleSpec(ctx, e.Workflow.Name, e.Tenant, e.Workflow.CronSpec+" "+e.Workflow.Location.String(), e.Workflow.NextAfter(now)); err != nil {
 			s.Log.Warn().Err(err).Str("workflow", e.Workflow.Name).Str("tenant", e.Tenant).Msg("workflows: schedule upsert failed")
 			return
 		}
