@@ -29,7 +29,7 @@ Appximo es **un binario** que, a partir de un archivo `schema.json`, levanta una
 | **El panel de administración** | `/admin`: tenants, usuarios, datos (solo lectura), archivos, historial de versiones del schema, **Observabilidad** (latencia, SLO, cada request con sus etapas, los 500 explicados) y **Recursos** (el motor midiéndose a sí mismo y diciendo si el cuello es la app, la base o la caja). En español o inglés (botón `ES`/`EN` arriba a la derecha) | `https://SU-DOMINIO/admin` |
 | **Protecciones bajo carga** | Control de admisión (rechaza con 429 antes de volcarse), límite de tasa por tenant, guardia de memoria (503 en escrituras cuando la caja está por quedarse sin RAM), breaker hacia la base (503 rápidos cuando la base no responde) | §3 y `appximo drill saturate` |
 | **Backup y restauración** | Un backup nocturno completo (base + archivos subidos + secretos + manifiesto de conteos), con verificación de índices (`pg_amcheck`), copia fuera de la caja opcional; una restauración cronometrada y verificada | `sudo bash /opt/<app>/scripts/backup.sh --app=<app>` · `sudo bash /opt/<app>/scripts/restore.sh --app=<app> --set=…` · `appximo drill restore` |
-| **Alertas** | Backup fallido o viejo, disco bajo, SLO quemándose, el primer 500 de cada tipo nuevo — a Slack si `SLACK_WEBHOOK_URL` está puesto; si no, una línea en el journal | `journalctl -u <app> -o cat \| grep -i alert` |
+| **Alertas** | Backup fallido o viejo, disco bajo, SLO quemándose, el primer 500 de cada tipo nuevo, cola varada, workflow vencido — **al celular por Telegram** (`APPXIMO_TELEGRAM_BOT_TOKEN` + `_CHAT_ID`, en español, con qué hacer) y/o a Slack; sin destino, una línea en el journal y un aviso FUERTE al arrancar | §3b · `journalctl -u <app> -o cat \| grep -i alert` |
 | **Despliegue** | Un comando que hace backup, cambia el binario, **verifica desde afuera** (versión, lectura, escritura que se deshace) y **se revierte solo** si algo falla | `scripts/deploy-app.sh` (§5) |
 | **Auditoría de la caja** | Un comando que dice **qué falta** (timer de backup, copia fuera, destino de alertas, swap, checksums, política de reinicio de PostgreSQL) | `appximo drill audit` |
 | **Simulacros** | Diez experimentos de caos, un 500 real, carga, saturación, restauración — cada uno con «qué va a pasar» y «dónde mirarlo» | `appximo drill list` |
@@ -61,7 +61,7 @@ Cada sección tiene una línea debajo del título que dice qué pregunta respond
   journalctl -u <app> -o cat --since -1h | grep '"level":"error"' | tail -3
   ```
 
-- La **primera vez** que aparece un tipo nuevo de 500, el motor dispara una alerta (a Slack si `SLACK_WEBHOOK_URL` está puesto; si no, `journalctl -u <app> -o cat | grep -i alert`).
+- La **primera vez** que aparece un tipo nuevo de 500, el motor dispara una alerta (al celular por Telegram y/o a Slack si hay destino configurado — §3b; siempre queda en `journalctl -u <app> -o cat | grep -i alert`).
 - **Errores recientes (en memoria)**, más abajo en la misma pestaña, es la lista corta desde el último arranque; se pierde al reiniciar. Los persistidos de 24 h son «Problemas».
 
 Para provocar uno y verlo con sus propios ojos: `appximo drill error --app=<app>` (§6).
@@ -156,7 +156,10 @@ Todo se configura con variables de entorno en **`/etc/<app>/<app>.env`** (una in
 | `BACKUP_PASSPHRASE_FILE` | Archivo (0600) con la frase para cifrar el paquete de secretos (`.conf.tar.enc`) antes de salir de la caja | vacío = **los secretos no salen** (dump y archivos sí) | — | Junto con `BACKUP_COPY_TO` | Sin ella, una caja perdida recupera los datos pero no `JWT_SECRET`/`ADMIN_KEY`: todos los tokens y el MFA se invalidan |
 | `BACKUP_KEEP` | Cuántos sets se conservan | `14` | Convención: 14 noches ≈ 530 MB en una app de 38 MB por dump | Con timer horario, `48` | Disco |
 | `BACKUP_AMCHECK` | Verifica todos los índices y páginas con `pg_amcheck` en cada backup (un índice corrupto es invisible a la app y al `pg_dump`) | `on` | Medido: 0,9 s por 124 MB / 251 k filas (DEPLOY-FLOTA-S1) | `off` solo si `pg_amcheck` no está instalado (el script ya lo salta con un aviso) | — |
-| `SLACK_WEBHOOK_URL` | **Destino de las alertas**: SLO, primer 500 de cada tipo, backup fallido/viejo, disco bajo | vacío = cada alerta es **una línea en el journal que nadie lee** | — | **Siempre** en producción. `drill audit` lo marca ✗ | — |
+| `APPXIMO_TELEGRAM_BOT_TOKEN` + `APPXIMO_TELEGRAM_CHAT_ID` | **Destino de alertas al celular** (§3b): SLO, primer 500 de cada tipo, backup fallido/viejo, disco bajo, cola varada, workflow vencido — en español, con qué hacer | vacío = ver `SLACK_WEBHOOK_URL`; sin NINGÚN destino cada alerta es **una línea en el journal que nadie lee** (era OPS-47) | — | **Siempre** en producción. Los dos o ninguno: a medias o mal formado, **no bootea** nombrando la variable. `drill audit` lo verifica EN VIVO (getMe+getChat, sin mandar mensaje) | El token es una credencial: solo en el `.env` (0600), nunca en un repo ni un log |
+| `APPXIMO_ALERT_APP_NAME` | El nombre de la app que lleva cada mensaje (varias apps alertando a UN chat necesitan decir quién habla) | el `name` del schema | — | Siempre que el nombre del schema no sea el que usted usa | — |
+| `APPXIMO_ALERT_PANEL_URL` | Origen público (`https://app.ejemplo.com`): con esto cada alerta lleva el enlace «Ver el panel» | vacío = sin enlace | — | Siempre en producción | — |
+| `SLACK_WEBHOOK_URL` | El mismo destino, por Slack (convive con Telegram: todos los destinos configurados reciben todo) | — | — | Si usted usa Slack | — |
 | `APPXIMO_TRACE_BODY` | Guardar (redactado, 4 KiB) el cuerpo de la request en las trazas con error | `off` | Convención de privacidad (OBSERVABILIDAD-ERRORES-S1): los cuerpos llevan datos personales | Mientras se persigue un 500 que depende del contenido | Cuerpos de clientes en `obs.db` |
 | `APPXIMO_SELFMON` / `_INTERVAL` / `_LIVE_INTERVAL` / `_P99_MS` | El colector de Recursos: apagarlo (`off`), su cadencia (`10s`; `1s` mientras el panel mira), y el piso absoluto de «lento» del veredicto (`50` ms) | on / 10s / 1s / 50 | Medido ([BENCHMARKS §4c](BENCHMARKS.md)): 0 asignaciones por request, 1,07 MiB de RAM fija, CPU no distinguible del ruido | El piso, si la app es de por sí lenta (informes de segundos) y todo lee «lento» | Sin colector no hay veredicto ni tarjetas de disco/backup en el panel |
 | `APPXIMO_AUTH_LOGIN_ATTEMPTS_PER_MINUTE` / `_BURST` | Intentos de login por (tenant, correo) por minuto; el 6.º recibe `429` | `5` / `5` | Convención de seguridad (defensa contra fuerza bruta); el motor **avisa al arrancar** si se sube | Una demo pública donde todos entran con la misma cuenta (la tiendita usa `60`) | Debilita proporcionalmente la defensa; el aviso de arranque lo recuerda |
@@ -175,6 +178,64 @@ Todo se configura con variables de entorno en **`/etc/<app>/<app>.env`** (una in
 ```bash
 journalctl -u <app> -b -o cat | grep -E 'rate limiter|admission|memory guard|backup|selfmon|GOMEMLIMIT' | head
 ```
+
+---
+
+### 3b. Alertas al celular — Telegram, paso a paso
+
+Todo lo que el motor sabe avisar (backup fallido o viejo, disco bajo, SLO
+quemándose, el primer 500 de cada tipo, cola varada, workflow vencido) llega
+a su celular por Telegram: en español, diciendo **qué pasó, en qué app y qué
+hacer**, con la severidad a la vista y el enlace al panel.
+
+**Configurarlo (una vez, ~3 minutos):**
+
+1. **Crear el bot**: en Telegram hable con `@BotFather` → `/newbot` → le da el
+   token (`123456789:AA…`). Un solo bot sirve para todas sus apps.
+2. **Sacar su chat id**: abra el chat con su bot nuevo, mándele cualquier
+   mensaje, y corra
+   `curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates"` — el número en
+   `"chat":{"id":…}` es su chat id.
+3. **Ponerlo en la app** — en `/etc/<app>/<app>.env` (0600; **el token es una
+   credencial: va acá y en ningún otro lado** — nunca en un repo, un log ni
+   un chat):
+
+   ```
+   APPXIMO_TELEGRAM_BOT_TOKEN=123456789:AA…
+   APPXIMO_TELEGRAM_CHAT_ID=8851136988
+   APPXIMO_ALERT_APP_NAME=La Tiendita
+   APPXIMO_ALERT_PANEL_URL=https://tienda.ejemplo.com
+   ```
+
+   y `systemctl restart <app>`.
+4. **Probar que funciona de verdad**: el journal del arranque tiene que decir
+   `telegram alert destination verified (getMe+getChat)`. Después provoque
+   UNA alerta real:
+   `printf 'failed prueba\n' > /var/backups/<app>/last-backup.status` — en el
+   siguiente tick (~10 s) suena el celular y el journal registra
+   `alert delivered sink=telegram`. (El próximo backup nocturno reescribe el
+   status; si no quiere esperar, corra `backup.sh` a mano.)
+
+**Las reglas que lo protegen:** un token o chat id **mal formado, o solo uno
+de los dos, no bootea** y nombra la variable (la misma disciplina del worker).
+Un token con forma válida pero revocado sí bootea (el arranque nunca depende
+de que api.telegram.org responda) y **grita en el journal**
+(`TELEGRAM ALERT DESTINATION NOT WORKING`); `drill audit` /`fleet-audit.sh`
+lo verifica EN VIVO con dos llamadas de solo lectura (`getMe` + `getChat`,
+sin mandar mensaje) y marca ✗ nombrando el arreglo. **Sin ningún destino la
+app arranca pero lo dice fuerte** — ese silencio era OPS-47. **Ninguna alerta
+se pierde**: queda en el journal (`alert emitted`) ANTES de intentar la
+entrega, se reintenta con retroceso, y el freno de ruido sigue igual (5
+errores nuevos por minuto + un resumen de tormenta; una alerta de host cada
+6 h por condición; una de cola por hora).
+
+**Si deja de llegar:** `journalctl -u <app> -o cat | grep -i alert` — ¿dice
+`alert delivered` o `alert delivery FAILED`? Corra
+`sudo bash /opt/<app>/scripts/fleet-audit.sh --app=<app>`: le dice si el
+token fue rechazado (rotarlo: @BotFather → `/revoke` → token nuevo → `.env` →
+restart) o si el chat no es alcanzable (el chat tiene que haber INICIADO el
+bot). `backup.sh` avisa por su cuenta al mismo chat cuando falla, así que la
+alerta de backup llega aunque el motor esté caído.
 
 ---
 

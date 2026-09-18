@@ -325,8 +325,9 @@ reads (§4.6). **14 sets are kept**; the sets of one stamp are pruned together.
 **Measured on the reference box: a backup takes 7.3 s** (dump 38 MB in 6 s +
 files + conf + manifest); `Nice=10` / `IOSchedulingClass=idle`, so the app
 does not feel it. A failed run leaves **no partial file**, writes `failed` to
-the status file and posts ONE message to `SLACK_WEBHOOK_URL` if the env has
-one.
+the status file and posts ONE message to the Telegram chat
+(`APPXIMO_TELEGRAM_BOT_TOKEN`/`_CHAT_ID`, in Spanish) and/or
+`SLACK_WEBHOOK_URL` if the env has them (§4.6c).
 
 **Off-box copy — set it, or the backup dies with the disk.** A backup on the
 disk that holds the database is one failure away from gone: a dead host takes
@@ -616,8 +617,9 @@ that fills up. Nothing new was built to watch them: the engine's self-monitor
 (§8 `APPXIMO_SELFMON`, the collector that already reads the runtime, the
 cgroup, PSI and the pool once a tick, out of the request path) gained a
 fifth layer, and the alert goes out through the **same alerter** the SLO and
-first-occurrence error alerts use (`SLACK_WEBHOOK_URL`; without it, a log
-line `alert (no webhook configured — recorded only)`):
+first-occurrence error alerts use — Telegram and/or Slack, §4.6c; without a
+destination, a log line `alert (no webhook configured — recorded only)` plus
+a LOUD boot banner naming what to set (that silence was OPS-47):
 
 | condition | how it is read (every tick, ~10 s, allocation-free) | the alert | on `/metrics` |
 |---|---|---|---|
@@ -681,6 +683,71 @@ The first `drill restore` found that every set taken since OPS-44 carried the
 `pg_restore` as the service role cannot recreate — `backup.sh` now drops it
 after the check and `restore.sh` filters those TOC entries, so older sets
 restore too.
+
+### 4.6c Alerts on your phone — the Telegram destination (ALERTAS-TELEGRAM-S1)
+
+Every alert the engine emits — SLO burn, the first occurrence of a new error
+group, failed/stale backup, low disk, a stuck outbox, an overdue workflow —
+goes to **every configured destination**. Telegram is the one that reaches a
+phone; Slack keeps working for whoever uses it. The Telegram message is
+rendered for a small screen, in Spanish: what happened, in WHICH app, what to
+do, severity at a glance, and a panel link when configured.
+
+**Setup (once per box, ~3 minutes):**
+
+1. **Create a bot**: in Telegram, talk to `@BotFather` → `/newbot` → it gives
+   you the token (`123456789:AA…`). One bot can serve every app you run.
+2. **Get your chat id**: open a chat with your new bot, send it any message,
+   then `curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates"` — the
+   `"chat":{"id":…}` number is your chat id.
+3. **Configure the app** — in `/etc/<app>/<app>.env` (mode 0600; the token is
+   a credential — it goes HERE and nowhere else, never in a repo or a log):
+
+   ```
+   APPXIMO_TELEGRAM_BOT_TOKEN=123456789:AA…
+   APPXIMO_TELEGRAM_CHAT_ID=8851136988
+   APPXIMO_ALERT_APP_NAME=La Tiendita          # names the app in every message
+   APPXIMO_ALERT_PANEL_URL=https://tienda.example.com   # optional: "Ver el panel" link
+   ```
+
+   then `systemctl restart <app>`.
+4. **Prove it works**: the boot journal must say
+   `telegram alert destination verified (getMe+getChat)`. Then provoke one
+   real alert: `printf 'failed test\n' > $APPXIMO_BACKUP_DIR/last-backup.status`
+   → within one tick (~10 s) the phone buzzes and the journal logs
+   `alert delivered sink=telegram` (restore the status file after — the next
+   nightly run rewrites it anyway). `fleet-audit.sh` now verifies the
+   destination LIVE (two read-only calls, `getMe` + `getChat`, no message
+   sent) and marks ✗ when there is none, whatever the channel.
+
+**Discipline (the worker-env rules, applied):** a malformed token or chat id
+— or only one of the pair — **refuses to boot** naming the variable. A
+syntactically valid but revoked token boots (the boot never depends on
+api.telegram.org being reachable) and screams `TELEGRAM ALERT DESTINATION NOT
+WORKING` in the journal; `fleet-audit.sh` marks it ✗ naming the fix. With NO
+destination at all the engine boots and prints a loud multi-line banner —
+the silent journal-only default was OPS-47.
+
+**Delivery is out-of-band and lossless:** nothing alert-related ever runs on
+the request path; every alert is journaled (`alert emitted`) BEFORE delivery
+is attempted, retried with backoff (honoring Telegram's own `retry_after` on
+a 429), and a delivery that still fails names the sink and points back at
+the journal — the alert is late, never lost. The noise brake is unchanged:
+at most 5 new-error alerts per tenant per minute plus one storm summary, one
+host alert per condition per 6 h, one outbox alert per kind per hour.
+
+**If alerts stop arriving:** check the journal for `alert delivered` vs
+`alert delivery FAILED` (`journalctl -u <app> -o cat | grep -i alert`); run
+`fleet-audit.sh --app=<app>` — it tells you whether the token was rejected
+(rotate it with @BotFather → `/revoke`, update the env, restart) or the chat
+is unreachable (the chat must have STARTED the bot). `backup.sh` posts its
+own failure to the same chat, so a backup alert reaches you even if the
+engine is down at 3 a.m.
+
+**Rotating the token** (do it if it ever leaks): @BotFather → `/revoke` →
+pick the bot → it prints a NEW token; update `APPXIMO_TELEGRAM_BOT_TOKEN` in
+every `/etc/<app>/<app>.env` that used it and restart each app. The old
+token dies the moment BotFather revokes it.
 
 ### 4.7 Recommended cadence by kind of app
 
@@ -906,7 +973,7 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `APPXIMO_MAX_INFLIGHT` | no | auto = max(32, 4 × (vCPU + pool)) | Admission control (ENG-52): the cap on requests in flight; the excess is shed with `429` + `Retry-After: 1` BEFORE any work. `0` disables. |
 | `APPXIMO_MEMORY_GUARD_MIN_MB` | no | max(32, 2 % of RAM) | **Host memory guard.** While `MemAvailable + SwapFree` (from `/proc/meminfo`, sampled ≤ 1/s) is under this many MiB, data-plane WRITES answer `503` + `Retry-After: 5` with a body naming the measurement, the floor and this knob; reads and probes keep flowing. Measured with swap included on purpose: on a Postgres box `shared_buffers` is Cached-but-not-reclaimable, so `MemAvailable` alone sits at tens of MiB at rest. `0` disables; a non-integer refuses to boot. Degradation, not capacity — give the box swap (§Prerequisites). |
 | `OBS_DB_PATH` | no | `/var/lib/appximo/obs/obs.db` | Trace/snapshot history (SQLite). Keep it on a persistent path. |
-| `APPXIMO_BACKUP_DIR` | no | — (installer: `/var/backups/<app>`) | Where `backup.sh` writes its sets. **Setting it turns the self-monitor's backup watch on**: `last-backup.status` is read every tick (out of band); `failed`, or an `ok` older than `APPXIMO_BACKUP_MAX_AGE` (default `36h`), or no run ever after that much uptime → ONE alert per 6 h on `SLACK_WEBHOOK_URL` + `appximo_selfmon_backup_ok` / `_backup_age_seconds` on `/metrics` + `host.backup` in `/admin/resources` (§4.6). |
+| `APPXIMO_BACKUP_DIR` | no | — (installer: `/var/backups/<app>`) | Where `backup.sh` writes its sets. **Setting it turns the self-monitor's backup watch on**: `last-backup.status` is read every tick (out of band); `failed`, or an `ok` older than `APPXIMO_BACKUP_MAX_AGE` (default `36h`), or no run ever after that much uptime → ONE alert per 6 h on the configured destinations (§4.6c) + `appximo_selfmon_backup_ok` / `_backup_age_seconds` on `/metrics` + `host.backup` in `/admin/resources` (§4.6). |
 | `APPXIMO_DISK_MIN_FREE_PCT` / `APPXIMO_DISK_MIN_FREE_MB` | no | `10` / `1024` | The disk floor of the self-monitor: the filesystems under `APPXIMO_FILES_DIR`, `OBS_DB_PATH`, `APPXIMO_BACKUP_DIR` and `/` (deduplicated) are `statfs`'d every tick; under either floor → ONE alert per 6 h (critical under half the floor) naming the path, the free bytes and what to delete, plus `appximo_selfmon_disk_free_bytes{path}`. `0` disables a floor. Nothing on the request path. |
 | `APPXIMO_SELFMON` | no | on | **The engine's own resource collector** (ADR-030): runtime / cgroup v2 / PSI / pool read out of band by one goroutine, and a deterministic bottleneck verdict (`cpu_throttled`, `memory_pressure`, `gc_pressure`, `cpu_saturated`, `pool_exhausted`, `db_bound`, `lock_contention`, `healthy`) at `/admin` → Resources, `/debug/resources` and `appximo_selfmon_*` on `/metrics`. `off` disables it. On a systemd unit the cgroup is the service's own; `cpu.stat throttled_usec` is what says "the plan's quota, not the code". |
 | `APPXIMO_SELFMON_INTERVAL` | no | `10s` | Background cadence (floor 250ms). The view's polling switches to `APPXIMO_SELFMON_LIVE_INTERVAL` (`1s`) for a minute after each poll. A value that does not parse refuses to boot. |
@@ -924,10 +991,13 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `APPXIMO_OAUTH_{GOOGLE,GITHUB,MICROSOFT}_CLIENT_ID`/`_SECRET`, `_CALLBACK_URL`, `_DEFAULT_ROLE`, `_SUCCESS_REDIRECT` | no | off | Social login. |
 | `APPXIMO_MFA_KEY` / `APPXIMO_MFA_ISSUER` | no | JWT secret / `Appximo` | TOTP secret encryption + issuer label. |
 | `APPXIMO_PLATFORM_SUPER_ADMIN_ROLE` / `_MFA_ISSUER` | no | `platform_super_admin` | Admin API super-admin. Bootstrap with `appximo admin create`. |
-| `APPXIMO_OUTBOX_MAX_PENDING_AGE` | no | `15m` | The outbox age alert (AUTOMATIZACION-S1): when the OLDEST pending event is older than this, one alert per hour on `SLACK_WEBHOOK_URL` naming the topic and the fix. `0` disables; an invalid duration refuses to boot. The gauges (`appximo_outbox_*`, `appximo_workflow_*`) and `GET /admin/outbox` are always on. |
+| `APPXIMO_OUTBOX_MAX_PENDING_AGE` | no | `15m` | The outbox age alert (AUTOMATIZACION-S1): when the OLDEST pending event is older than this, one alert per hour on the configured destinations (§4.6c) naming the topic and the fix. `0` disables; an invalid duration refuses to boot. The gauges (`appximo_outbox_*`, `appximo_workflow_*`) and `GET /admin/outbox` are always on. |
 | `APPXIMO_EMAIL_TOPIC`, `SMTP_*` | no | — | Email delivery by the worker (mode `auto` delivers `email.send` when `SMTP_HOST` is set; mode `email` is the single-purpose variant). |
 | `APPXIMO_WORKER_MODE` + `APPXIMO_WORKER_{BATCH,MAX_ATTEMPTS,POLL,SCHEMA_REFRESH,ROLE,RESOURCE}`, `APPXIMO_ENGINE_URL`, `APPXIMO_TENANT_DOMAIN` | no | `auto` / 50 / 5 / 5s / 1m / `service_worker` / `filejobs` / `http://127.0.0.1:<port>` / (domain minus first label) | `appximo-worker`'s env (§8b). STRICT: an invalid value or a misspelled `APPXIMO_WORKER_*` refuses to boot naming every offender; unset values are reported in one "defaults in effect" boot line. |
-| `SLACK_WEBHOOK_URL` | no | — | SLO burn-rate alerts, first-occurrence error alerts, and (§4.6) backup-failed/stale and disk-low alerts; `backup.sh` posts its own failure here too. Without it every alert is only a log line. |
+| `APPXIMO_TELEGRAM_BOT_TOKEN` + `APPXIMO_TELEGRAM_CHAT_ID` | no | — | The **Telegram alert destination** (§4.6c) — every alert (SLO burn, first-occurrence errors, backup failed/stale, disk low, stuck outbox, overdue workflows) reaches that chat, in Spanish, phone-first, with what-to-do. Both or neither: half a pair, or a malformed value, **refuses to boot** naming the variable; a revoked token is detected out-of-band at boot (read-only `getMe`+`getChat`) and screams in the journal. `backup.sh` posts its own failure here too. |
+| `APPXIMO_ALERT_APP_NAME` | no | the schema `name` | The app name every alert message carries (a fleet of apps alerting to ONE chat needs to say who is talking). |
+| `APPXIMO_ALERT_PANEL_URL` | no | — | Public origin (`https://app.example.com`) — when set, alerts carry a "Ver el panel" deep link (`/admin#/observability`, `/admin#/resources`, `/admin/outbox` by kind). |
+| `SLACK_WEBHOOK_URL` | no | — | The Slack destination: the same alerts, the historical English one-liner. Works alongside Telegram — every configured destination receives every alert. `backup.sh` posts its own failure here too. Without ANY destination every alert is only a log line, and the boot says so loudly (OPS-47). |
 | `REDIS_URL` | no | — | Optional async migration worker. |
 | `BACKUP_DIR` | no | `/tmp/appximo-backups` | Output dir for `POST /admin/backup`. |
 | `APPXIMO_SAFEGO_TIMEOUT` / `APPXIMO_PUBLIC_ROUTE_RPS` / `_BURST` | no | 30 s / 5 / 10 | Library-mode custom-handler tuning. |
