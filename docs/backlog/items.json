@@ -1,6 +1,6 @@
 {
  "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo).",
- "actualizado": "2026-09-18 (VOZ-ESCALON1-S1)",
+ "actualizado": "2026-09-18 (VOZ-1 encendido en tiendita)",
  "publicacion": {
   "estado": "pausada_deliberada",
   "desde": "2026-08-29",
@@ -1385,19 +1385,19 @@
    "estado": "abierto"
   },
   {
-   "id": "VOZ-1",
-   "titulo": "Encender el canal de comandos de Telegram en el 58 (resumen/estado por chat) — falta decidir el bot por app",
+   "id": "VOZ-2",
+   "titulo": "El resumen llama «pendientes de alguien» a estados que el dueño ve como estables/terminados (productos activo, ordenes entregada)",
    "frente": "automatizacion",
-   "que_es": "El endpoint /api/summary, el receptor de comandos y el resumen agendado están construidos y probados (VOZ-ESCALON1-S1). Falta ENCENDERLO en el 58: poner APPXIMO_TELEGRAM_SUMMARY_TENANT + _ROLE en el env de la app y reiniciar; y para el agendado, correr el worker en modo auto con esas vars + agregar el workflow resumen_matinal al schema.",
-   "por_que_importa": "Es el pago del escalón 1: Miguel escribe «resumen» al bot y le llega. Hoy la capacidad existe pero no está encendida en producción.",
-   "que_lo_destraba": "Decisión chica de Miguel: getUpdates es de UN consumidor por bot, así que el canal de comandos entra en UNA app por bot — o un bot por app (tiendita/vetapp) o elegir una. Las ALERTAS y el resumen AGENDADO (solo envío) comparten un bot sin problema. Con eso decidido: 2 líneas de env + restart (comandos) y worker auto + workflow en el schema (agendado).",
+   "que_es": "El resumen marca como pendiente todo estado NO-terminal de la máquina de estados (tiene transición saliente). En la tiendita eso incluye «activo» (productos) y «entregada» (ordenes), que el dueño no llama pendientes — leídos vivos en /api/summary.",
+   "por_que_importa": "Roza el «lenguaje de dueño»: contar 9 productos activos como «pendientes de alguien» confunde. Los números son correctos; la palabra no siempre.",
+   "que_lo_destraba": "Una decisión de diseño + sesión chica: distinguir estados de FLUJO (pendiente de acción) de estados ESTABLES, sin pedirle al dueño configurarlo — quizá una marca opcional en el state_machine, o excluir estados sin sucesores accionables. El escalón 1 quedó honesto y correcto; esto es pulido.",
    "costo": "chico",
-   "dano": "medio",
-   "prioridad": "P2",
-   "decide": "miguel",
+   "dano": "bajo",
+   "prioridad": "P3",
+   "decide": "agente",
    "depende_de": [],
    "bloquea": [],
-   "origen": "VOZ-ESCALON1-S1 (2026-09-18)",
+   "origen": "VOZ-ESCALON1-S1 (2026-09-18, observado al encender VOZ-1 en la tiendita)",
    "estado": "abierto"
   }
  ]

@@ -437,6 +437,16 @@ in prod yet (VOZ-1: the one-bot-one-poller decision is Miguel's). Gates: unit +
 full DB lane + lint 0 + gofmt/vet + binary-diff gate 171 same, 3 explained DIFFs
 (the new /api/summary route) + browser 29/29.
 
+**Enabled in prod (VOZ-1, 2026-09-18):** the command channel is ON in the
+tiendita (`APPXIMO_TELEGRAM_SUMMARY_TENANT=tiendita`, role `dueno`); the bot
+answers `resumen`/`estado`/`ayuda` from Miguel's chat only. A field fix shipped
+with it: getUpdates now uses a dedicated long-poll HTTP client — the 15s send
+client's ResponseHeaderTimeout was aborting every idle 45s poll (commit
+373e546), which would have added ~30s command latency. tiendita runs
+`commerce f722507-voz1`; the digest reads live commerce data (clientes,
+facturas, ordenes with state breakdown, pagos, productos). VOZ-2 opened: some
+non-terminal states (`activo`, `entregada`) read oddly as "pendientes".
+
 **A-70 progress:** step 1 (read by voice/text) is now built and provable;
 `resumen` reaches the phone. Step 2 (writes with confirmation) is the next
 session — it needs a language layer (free text → intent), a confirmation
