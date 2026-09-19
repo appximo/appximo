@@ -360,7 +360,7 @@ func TestCompose_Formats(t *testing.T) {
 func TestAnswer_ClearQuestionCountsFromTheEngine(t *testing.T) {
 	m := &scripted{replies: []string{plan(Plan{Kind: "count", Resource: "citas", Period: &Period{Range: "today"}})}}
 	e := fixtures()
-	r := Answer(context.Background(), deps(m, e), "cuántas citas tengo hoy")
+	r := Answer(context.Background(), deps(m, e), "how many citas do we have today")
 	if r.Kind != "answer" || r.Number == nil || *r.Number != 3 {
 		t.Fatalf("want answer 3, got %+v", r)
 	}
@@ -502,7 +502,7 @@ func TestAnswer_RestrictedRoleSeesOnlyItsOwn(t *testing.T) {
 
 func TestAnswer_ModelDownDegrades(t *testing.T) {
 	m := &scripted{err: errors.New("aigen: call API: context deadline exceeded")}
-	r := Answer(context.Background(), deps(m, fixtures()), "cuántas citas hay")
+	r := Answer(context.Background(), deps(m, fixtures()), "cuántas citas urgentes hay")
 	if r.Kind != "unavailable" || !strings.Contains(r.Text, "resumen") {
 		t.Fatalf("model failure must degrade to the fixed commands: %+v", r)
 	}
@@ -559,7 +559,7 @@ func TestAnswer_ListSumAndGroupBy(t *testing.T) {
 		t.Fatalf("sum: %+v", r)
 	}
 	m = &scripted{replies: []string{plan(Plan{Kind: "count", Resource: "citas", GroupBy: "estado", Period: &Period{Range: "today"}})}}
-	r = Answer(context.Background(), deps(m, e), "citas de hoy por estado")
+	r = Answer(context.Background(), deps(m, e), "citas de hoy por estado agrupadas")
 	if r.Kind != "answer" || len(r.Groups) != 2 || r.Groups[0].Label != "confirmada" || r.Groups[0].Value != 2 {
 		t.Fatalf("group_by: %+v", r)
 	}
@@ -574,5 +574,107 @@ func TestAnswer_MatchOnOwnTextField(t *testing.T) {
 	r := Answer(context.Background(), deps(m, e), "tengo un paciente Deisi Rodrigues?")
 	if r.Kind != "answer" || *r.Number != 1 || !strings.Contains(r.Text, "Deisy Rodríguez") {
 		t.Fatalf("own-field match: %+v", r)
+	}
+}
+
+// ── VOZ-SIN-IA-S1: the parser answers first, the cache second, the model last ──
+
+func TestAnswer_ParserAnswersWithoutTheModel(t *testing.T) {
+	m := &scripted{err: errors.New("the model must not be called")}
+	e := fixtures()
+	r := Answer(context.Background(), deps(m, e), "cuántas citas hay hoy")
+	if r.Kind != "answer" || r.Source != "parser" || *r.Number != 3 || m.calls != 0 || r.CostUSD != 0 {
+		t.Fatalf("parser must answer alone: %+v calls=%d", r, m.calls)
+	}
+	// Still validated, still RBAC (the executor), still name-resolved.
+	r = Answer(context.Background(), deps(m, e), "cuántos pacientes se llaman Deisi Rodrigues")
+	if r.Source == "parser" {
+		t.Fatalf("a shape the parser is not sure of must not be answered by it: %+v", r)
+	}
+	// A write verb is refused by the parser itself — no call either.
+	r = Answer(context.Background(), deps(m, e), "borrá todas las citas")
+	if r.Kind != "write_refused" || r.Source != "parser" || m.calls != 0 {
+		t.Fatalf("write refused deterministically: %+v", r)
+	}
+}
+
+func TestAnswer_CacheReusesThePlanNotTheData(t *testing.T) {
+	m := &scripted{replies: []string{plan(Plan{Kind: "count", Resource: "citas", Period: &Period{Range: "today"}})}}
+	e := fixtures()
+	c := NewPlanCache(10, time.Hour)
+	d := deps(m, e)
+	d.Cache, d.CacheScope, d.NoParser = c, "t|owner", true
+	q := "how many citas today, please"
+	r1 := Answer(context.Background(), d, q)
+	if r1.Source != "model" || *r1.Number != 3 || m.calls != 1 {
+		t.Fatalf("first: %+v", r1)
+	}
+	// The data changes; the same question (differently cased/accented) hits
+	// the cache and the NEW number comes from the executor.
+	e.rows["citas"] = e.rows["citas"][:1]
+	r2 := Answer(context.Background(), d, "  HOW MANY citas today, PLEASE?? ")
+	if r2.Source != "cache" || *r2.Number != 1 || m.calls != 1 || r2.CostUSD != 0 {
+		t.Fatalf("second must be a cache hit with fresh data: %+v calls=%d", r2, m.calls)
+	}
+	// Another role is another scope: a miss.
+	d2 := d
+	d2.CacheScope = "t|clerk"
+	m.replies = []string{plan(Plan{Kind: "count", Resource: "citas"})}
+	r3 := Answer(context.Background(), d2, q)
+	if r3.Source != "model" || m.calls != 2 {
+		t.Fatalf("a different role must not reuse the plan: calls=%d", m.calls)
+	}
+	if h, mi, sz := c.Stats(); h != 1 || mi != 2 || sz != 2 {
+		t.Fatalf("stats hits=%d misses=%d size=%d", h, mi, sz)
+	}
+	// unclear IS cached (temperature 0: re-asking only re-bills).
+	m.replies = []string{`{"kind":"unclear","reason":"no"}`}
+	Answer(context.Background(), d, "something odd")
+	r5 := Answer(context.Background(), d, "Something ODD")
+	if _, _, sz := c.Stats(); sz != 3 || r5.Kind != "unclear" || r5.Source != "cache" || m.calls != 3 {
+		t.Fatalf("unclear cached: size=%d kind=%s source=%s calls=%d", sz, r5.Kind, r5.Source, m.calls)
+	}
+}
+
+func TestAnswer_CachedRelativePeriodMovesWithTheDay(t *testing.T) {
+	// A cached "today" plan asked tomorrow filters TOMORROW's window: the token
+	// is resolved at execution, never the date the plan was made on.
+	m := &scripted{replies: []string{plan(Plan{Kind: "count", Resource: "citas", Period: &Period{Range: "today"}})}}
+	e := fixtures()
+	d := deps(m, e)
+	d.Cache, d.CacheScope, d.NoParser = NewPlanCache(10, 48*time.Hour), "t|owner", true
+	Answer(context.Background(), d, "how many citas today")
+	first := e.calls[len(e.calls)-1]
+	d.Now = now.AddDate(0, 0, 1)
+	r := Answer(context.Background(), d, "how many citas today")
+	second := e.calls[len(e.calls)-1]
+	if r.Source != "cache" || first == second || !strings.Contains(second, "2026-09-20T05%3A00%3A00Z") {
+		t.Fatalf("the cached plan must run against the NEW day: source=%s\n%s\n%s", r.Source, first, second)
+	}
+	if *r.Number != 0 {
+		t.Fatalf("tomorrow's count of today-created rows is 0 in the fixtures, got %v", *r.Number)
+	}
+}
+
+func TestAnswer_ModelOffKeepsTheParserAlive(t *testing.T) {
+	e := fixtures()
+	d := Deps{Vocab: Build(opticaSchema(), "", allRead), Exec: e, Now: now, ModelOff: "capped"}
+	r := Answer(context.Background(), d, "cuántas citas hay hoy")
+	if r.Kind != "answer" || r.Source != "parser" || *r.Number != 3 {
+		t.Fatalf("capped: the parser still answers: %+v", r)
+	}
+	r = Answer(context.Background(), d, "cuánto vendimos esta semana")
+	if r.Kind != "capped" || !strings.Contains(r.Text, "techo diario") || !strings.Contains(r.Text, "resumen") {
+		t.Fatalf("capped reply for a model question: %+v", r)
+	}
+	d.ModelOff = "minute"
+	r = Answer(context.Background(), d, "cuánto vendimos esta semana")
+	if r.Kind != "capped" || !strings.Contains(r.Text, "minuto") {
+		t.Fatalf("minute reply: %+v", r)
+	}
+	d.ModelOff = ""
+	r = Answer(context.Background(), d, "cuánto vendimos esta semana")
+	if r.Kind != "disabled" || !strings.Contains(r.Text, "ANTHROPIC_API_KEY") {
+		t.Fatalf("disabled reply: %+v", r)
 	}
 }

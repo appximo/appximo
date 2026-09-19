@@ -39,11 +39,22 @@ func (e *ExecError) Error() string { return e.Msg }
 // Deps is everything Answer needs.
 type Deps struct {
 	Vocab *Vocabulary
-	Model aigen.ModelClient // nil = the question path is disabled
+	Model aigen.ModelClient // nil = the model may not be called (see ModelOff)
 	Exec  Executor
 	Now   time.Time
 	// ModelName is used for the cost estimate.
 	ModelName string
+	// ModelOff says WHY Model is nil: "disabled" (no key) or "capped" (the
+	// daily spend cap, VOZ-SIN-IA-S1) or "minute" (the per-minute cap). The
+	// parser and the cache answer regardless; only a question they cannot
+	// solve gets the corresponding reply.
+	ModelOff string
+	// Cache is the plan cache (nil = none); CacheScope is the tenant+role
+	// prefix of its keys — a plan never crosses tenants or roles.
+	Cache      *PlanCache
+	CacheScope string
+	// NoParser skips the deterministic parser (tests of the model path).
+	NoParser bool
 }
 
 // Result is the reply, composed by the engine.
@@ -70,6 +81,9 @@ type Result struct {
 	ModelMS   int64       `json:"model_ms"`
 	TotalMS   int64       `json:"total_ms"`
 	Corrected bool        `json:"corrected,omitempty"`
+	// Source says who produced the plan: "parser" (no model, no cache),
+	// "cache" (a remembered plan), "model" (a paid call), or "" (no plan).
+	Source string `json:"source,omitempty"`
 	// Detail is the engine-side reason for the log (never the owner).
 	Detail string `json:"-"`
 }
@@ -100,26 +114,59 @@ func answer(ctx context.Context, d Deps, question string) Result {
 	if question == "" {
 		return Result{Kind: "invalid", Text: "No llegó ninguna pregunta.", Headline: "Sin pregunta"}
 	}
-	if d.Model == nil {
-		return Result{Kind: "disabled", Headline: "Preguntas no activadas",
-			Text: "Las preguntas libres no están activadas en esta app (falta la clave del modelo, ANTHROPIC_API_KEY). Los comandos fijos siguen: <b>resumen</b>, <b>estado</b>, <b>ayuda</b>."}
-	}
 	if d.Vocab == nil || d.Vocab.Len() == 0 {
 		return Result{Kind: "forbidden", Headline: "Nada que consultar",
 			Text: "Tu rol no puede leer ningún recurso, así que no hay nada que preguntar."}
 	}
-	mstart := time.Now()
-	tr, err := Translate(ctx, d.Model, d.Vocab, question, d.Now)
-	modelMS := time.Since(mstart).Milliseconds()
-	base := Result{Usage: tr.Usage, ModelMS: modelMS, Corrected: tr.Corrected}
-	if err != nil {
-		base.Kind = "unavailable"
-		base.Detail = err.Error()
-		base.Headline = "El modelo no respondió"
-		base.Text = "⚠️ No pude pensar la pregunta ahora (el modelo no respondió a tiempo). Los comandos fijos siguen funcionando: <b>resumen</b>, <b>estado</b>, <b>ayuda</b>."
-		return base
+
+	// 1. The deterministic parser — no model, no cache, microseconds. It
+	// answers only when SURE (parser.go); otherwise it says why, for the log.
+	var p Plan
+	var tr Translation
+	source := ""
+	parseReason := ""
+	if !d.NoParser {
+		if pr := Parse(question, d.Vocab); pr.Sure {
+			p, source = pr.Plan, "parser"
+		} else {
+			parseReason = pr.Reason
+		}
 	}
-	p := tr.Plan
+	// 2. The plan cache: the same question, tenant and role → the plan the
+	// model produced before; the data is recomputed below.
+	key := ""
+	if source == "" && d.Cache != nil {
+		key = Key(d.CacheScope, question)
+		if cp, _, ok := d.Cache.Get(key); ok {
+			p, source = cp, "cache"
+		}
+	}
+	// 3. The model — only for what neither could solve, and only when allowed.
+	base := Result{}
+	if source == "" {
+		if d.Model == nil {
+			return modelOffResult(d, parseReason)
+		}
+		mstart := time.Now()
+		var err error
+		tr, err = Translate(ctx, d.Model, d.Vocab, question, d.Now)
+		base = Result{Usage: tr.Usage, ModelMS: time.Since(mstart).Milliseconds(), Corrected: tr.Corrected, Source: "model"}
+		if err != nil {
+			base.Kind = "unavailable"
+			base.Detail = err.Error()
+			base.Headline = "El modelo no respondió"
+			base.Text = "⚠️ No pude pensar la pregunta ahora (el modelo no respondió a tiempo). Los comandos fijos siguen funcionando: <b>resumen</b>, <b>estado</b>, <b>ayuda</b>."
+			return base
+		}
+		p, source = tr.Plan, "model"
+		if d.Cache != nil && key != "" {
+			d.Cache.Put(key, p, "model")
+		}
+	}
+	base.Source = source
+	if parseReason != "" {
+		base.Detail = "parser: " + parseReason
+	}
 	switch p.Kind {
 	case "write":
 		base.Kind = "write_refused"
@@ -130,7 +177,7 @@ func answer(ctx context.Context, d Deps, question string) Result {
 	case "unclear":
 		base.Kind = "unclear"
 		base.Headline = "No entendí"
-		base.Detail = "unclear: " + p.Reason + " | " + tr.FailReason
+		base.Detail = strings.TrimSpace(base.Detail + " | unclear: " + p.Reason + " | " + tr.FailReason)
 		base.Text = "🤔 <b>No entendí</b> la pregunta" + reasonHint(p.Reason) + ". " + askable(d.Vocab)
 		return base
 	}
@@ -139,13 +186,16 @@ func answer(ctx context.Context, d Deps, question string) Result {
 	// Proper names → what exists.
 	resolved, nameRes, ok := resolveNames(ctx, d, p)
 	if !ok {
-		nameRes.Usage, nameRes.ModelMS, nameRes.Corrected, nameRes.Plan = base.Usage, base.ModelMS, base.Corrected, &p
+		nameRes.Usage, nameRes.ModelMS, nameRes.Corrected, nameRes.Plan, nameRes.Source = base.Usage, base.ModelMS, base.Corrected, &p, source
 		return nameRes
 	}
 	said := nameRes.Understood // "Entendí «Gomes» como Ana Gómez."
 
 	out := execute(ctx, d, resolved)
-	out.Usage, out.ModelMS, out.Corrected, out.Plan = base.Usage, base.ModelMS, base.Corrected, &p
+	out.Usage, out.ModelMS, out.Corrected, out.Plan, out.Source = base.Usage, base.ModelMS, base.Corrected, &p, source
+	if base.Detail != "" && out.Detail == "" {
+		out.Detail = base.Detail
+	}
 	if said != "" && out.Kind == "answer" {
 		out.Text = said + "\n" + out.Text
 	}
@@ -444,4 +494,25 @@ func listColumns(res *Resource) []string {
 	add(res.MoneyField())
 	add(res.DefaultTimeField())
 	return cols
+}
+
+// modelOffResult words a question that neither the parser nor the cache
+// could solve while the model may not be called.
+func modelOffResult(d Deps, parseReason string) Result {
+	r := Result{Detail: "parser: " + parseReason}
+	switch d.ModelOff {
+	case "capped":
+		r.Kind = "capped"
+		r.Headline = "Techo diario del modelo alcanzado"
+		r.Text = "🧾 Hoy ya se gastó el techo diario del modelo, así que esa pregunta no la puedo pensar hasta mañana. Las preguntas simples (contar, listar, sumar un recurso por su nombre, con estado y período) siguen respondiendo, y los comandos fijos también: <b>resumen</b>, <b>estado</b>, <b>ayuda</b>."
+	case "minute":
+		r.Kind = "capped"
+		r.Headline = "Demasiadas preguntas al modelo este minuto"
+		r.Text = "⏳ Demasiadas preguntas al modelo en este minuto. Esperá un momento y volvé a preguntar; las preguntas simples siguen respondiendo al instante."
+	default:
+		r.Kind = "disabled"
+		r.Headline = "Preguntas al modelo no activadas"
+		r.Text = "Esa pregunta necesita el modelo y las preguntas al modelo no están activadas en esta app (falta la clave, ANTHROPIC_API_KEY). Las preguntas simples (contar, listar, sumar un recurso por su nombre, con estado y período) sí responden, y los comandos fijos también: <b>resumen</b>, <b>estado</b>, <b>ayuda</b>."
+	}
+	return r
 }

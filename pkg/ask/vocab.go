@@ -350,19 +350,23 @@ func (r *Resource) renderLine() string {
 // total/monto/valor/precio/importe first (an order's descuento_centavos is
 // not its amount — seen live as "$ 0" on every line), else the first one.
 func (r *Resource) MoneyField() string {
-	first := ""
+	best, bestRank := "", 99
 	for _, f := range r.Fields {
 		if !f.Money {
 			continue
 		}
-		if first == "" {
-			first = f.Name
-		}
-		for _, p := range []string{"total", "monto", "valor", "precio", "importe", "amount", "price"} {
-			if strings.Contains(f.Name, p) {
-				return f.Name
+		rank := 10 // any money field
+		for i, p := range []string{"total", "monto", "valor", "importe", "amount", "precio", "price"} {
+			switch {
+			case strings.HasPrefix(f.Name, p):
+				rank = min(rank, i) // "total_centavos" beats "subtotal_centavos"
+			case strings.Contains(f.Name, p):
+				rank = min(rank, 5+i)
 			}
 		}
+		if rank < bestRank {
+			best, bestRank = f.Name, rank
+		}
 	}
-	return first
+	return best
 }

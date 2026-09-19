@@ -1,6 +1,7 @@
 package platformadmin
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -238,4 +239,78 @@ func (s *Service) handleWorkflows(w http.ResponseWriter, r *http.Request) {
 		"workflows":   views,
 		"failed_runs": failedRuns,
 	})
+}
+
+// SetAskStats installs the reader of the question path's live state (the
+// ledger's today rows, the plan cache counters, the caps) — app.go binds it;
+// nil leaves /admin/ask reading only the persisted ledger.
+func (s *Service) SetAskStats(fn func(ctx context.Context) map[string]any) { s.askStats = fn }
+
+// handleAsk answers GET /admin/ask (VOZ-SIN-IA-S1): what the questions cost —
+// per tenant, today and this month (from public.ask_spend, which survives a
+// restart), how many were answered by the parser / the cache / the model, the
+// caps in force, and the plan cache's hit rate. The owner reads what a
+// question costs here, never in the provider's console.
+func (s *Service) handleAsk(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	type row struct {
+		Tenant     string  `json:"tenant"`
+		Day        string  `json:"day"`
+		Questions  int     `json:"questions"`
+		ModelCalls int     `json:"model_calls"`
+		USD        float64 `json:"usd"`
+		Parser     int     `json:"parser"`
+		Cache      int     `json:"cache"`
+		Capped     bool    `json:"capped"`
+	}
+	query := func(sql string, args ...any) ([]row, error) {
+		rows, err := s.pool.Query(ctx, sql, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []row
+		for rows.Next() {
+			var x row
+			if err := rows.Scan(&x.Tenant, &x.Day, &x.Questions, &x.ModelCalls, &x.USD, &x.Parser, &x.Cache, &x.Capped); err != nil {
+				return nil, err
+			}
+			out = append(out, x)
+		}
+		return out, rows.Err()
+	}
+	today, err := query(`SELECT tenant_id, day::text, questions, model_calls, usd, parser, cache, capped
+		FROM public.ask_spend WHERE day = current_date ORDER BY tenant_id`)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ask spend unavailable: " + err.Error()})
+		return
+	}
+	month, err := query(`SELECT tenant_id, to_char(date_trunc('month', current_date), 'YYYY-MM'), sum(questions)::int, sum(model_calls)::int, sum(usd), sum(parser)::int, sum(cache)::int, bool_or(capped)
+		FROM public.ask_spend WHERE day >= date_trunc('month', current_date) GROUP BY tenant_id ORDER BY tenant_id`)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ask spend unavailable: " + err.Error()})
+		return
+	}
+	last30, err := query(`SELECT tenant_id, day::text, questions, model_calls, usd, parser, cache, capped
+		FROM public.ask_spend WHERE day >= current_date - 30 ORDER BY day DESC, tenant_id`)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ask spend unavailable: " + err.Error()})
+		return
+	}
+	if today == nil {
+		today = []row{}
+	}
+	if month == nil {
+		month = []row{}
+	}
+	if last30 == nil {
+		last30 = []row{}
+	}
+	out := map[string]any{"today": today, "month": month, "last_30_days": last30}
+	if s.askStats != nil {
+		for k, v := range s.askStats(ctx) {
+			out[k] = v
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }

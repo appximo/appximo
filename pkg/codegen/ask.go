@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/appximo/appximo/pkg/aigen"
 	"github.com/appximo/appximo/pkg/ask"
+	"github.com/appximo/appximo/pkg/askspend"
 	"github.com/appximo/appximo/pkg/db"
 	pkghandlers "github.com/appximo/appximo/pkg/handlers"
 	"github.com/appximo/appximo/pkg/query"
@@ -56,10 +56,15 @@ import (
 // failure — and the bot's help says so. APPXIMO_ASK=off disables it
 // explicitly. Every answer carries tokens, an approximate USD cost and the
 // wall time, so the owner sees what a question costs.
+//
+// Since VOZ-SIN-IA-S1 most questions never reach the model: the deterministic
+// parser (pkg/ask/parser.go) answers what the schema alone can settle, the
+// plan cache answers a repeated question, and the spend ledger (pkg/askspend,
+// installed per app through AskRuntime) caps model calls per minute and the
+// model spend per day — at the cap the model is off, the rest keeps answering.
 func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, policy *rbac.Policy) {
 	model, modelName := askModelFromEnv()
 	timeout := askTimeoutFromEnv()
-	limiter := newAskLimiter(askPerMinuteFromEnv())
 
 	var vocabMu sync.Mutex
 	vocabs := map[string]*ask.Vocabulary{} // per role: the RBAC is boot-static
@@ -92,22 +97,6 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 			writeJSONErr(w, http.StatusForbidden, "forbidden: a question requires an authenticated identity (the public role may read, not ask)")
 			return
 		}
-		if model == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-				"error":   "ask_disabled",
-				"message": "natural-language questions are not enabled on this app: set ANTHROPIC_API_KEY in the app's environment (and APPXIMO_ASK is not \"off\") — the fixed commands (resumen/estado/ayuda) keep working",
-				"kind":    "disabled",
-				"text":    "Las preguntas libres no están activadas en esta app (falta la clave del modelo, ANTHROPIC_API_KEY). Los comandos fijos siguen: resumen, estado, ayuda.",
-			})
-			return
-		}
-		if !limiter.allow(tc.ID) {
-			w.Header().Set("Retry-After", "10")
-			writeJSONErr(w, http.StatusTooManyRequests, "too many questions for this tenant this minute (APPXIMO_ASK_PER_MINUTE) — each question costs a model call")
-			return
-		}
 		body, err := io.ReadAll(io.LimitReader(req.Body, 4<<10))
 		if err != nil {
 			writeJSONErr(w, http.StatusBadRequest, "could not read the body")
@@ -132,20 +121,57 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 		exec := &askExecutor{s: s, tdb: tdb, policy: policy, evalCtx: evalCtx, tc: tc}
 		ctx, cancel := context.WithTimeout(req.Context(), 2*timeout+5*time.Second)
 		defer cancel()
-		res := ask.Answer(ctx, ask.Deps{
+
+		// The wallet guard (VOZ-SIN-IA-S1): before anything, may the MODEL be
+		// called for this tenant right now? The parser and the plan cache are
+		// free and always run; only a question they cannot solve meets the
+		// verdict — a daily cap answers "capped" until tomorrow, a per-minute
+		// cap answers "capped" for a few seconds. Neither touches the fixed
+		// commands, which never come here.
+		deps := ask.Deps{
 			Vocab:     vocabFor(evalCtx, appName),
-			Model:     &boundedModel{inner: model, timeout: timeout},
 			Exec:      exec,
 			Now:       summary.Now(),
 			ModelName: modelName,
-		}, in.Q)
+		}
+		rt := AskRuntimeFromCtx(req.Context())
+		verdict := askspend.Verdict{ModelOK: true}
+		if rt != nil {
+			if rt.Cache != nil {
+				deps.Cache, deps.CacheScope = rt.Cache, tc.ID+"|"+evalCtx.Role
+			}
+			if rt.Ledger != nil {
+				verdict = rt.Ledger.Allow(ctx, tc.ID)
+			}
+		}
+		switch {
+		case model == nil:
+			deps.ModelOff = "disabled"
+		case !verdict.ModelOK:
+			deps.ModelOff = verdict.Reason
+		default:
+			deps.Model = &boundedModel{inner: model, timeout: timeout}
+		}
+		res := ask.Answer(ctx, deps, in.Q)
 		markSpan(req, "query")
+
+		var day askspend.Day
+		if rt != nil && rt.Ledger != nil && res.Kind != "invalid" {
+			calls := 0
+			if res.Source == "model" {
+				calls = 1
+				if res.Corrected {
+					calls = 2
+				}
+			}
+			day = rt.Ledger.Record(ctx, tc.ID, res.Source, calls, res.CostUSD)
+		}
 
 		ev := zlog.Info()
 		if res.Kind == "unavailable" {
 			ev = zlog.Warn()
 		}
-		ev.Str("tenant", tc.ID).Str("role", evalCtx.Role).Str("kind", res.Kind).
+		ev.Str("tenant", tc.ID).Str("role", evalCtx.Role).Str("kind", res.Kind).Str("source", res.Source).
 			Int64("total_ms", res.TotalMS).Int64("model_ms", res.ModelMS).
 			Int("in_tokens", res.Usage.InputTokens+res.Usage.CacheReadTokens+res.Usage.CacheCreationTokens).
 			Int("out_tokens", res.Usage.OutputTokens).Float64("cost_usd", res.CostUSD).
@@ -154,8 +180,20 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 		out := map[string]any{
 			"kind": res.Kind, "text": res.Text, "speech": res.Speech, "headline": res.Headline,
 			"understood": res.Understood, "plan": res.Plan, "groups": res.Groups,
-			"usage": res.Usage, "cost_usd": res.CostUSD, "model": modelName,
+			"usage": res.Usage, "cost_usd": res.CostUSD, "model": modelName, "source": res.Source,
 			"model_ms": res.ModelMS, "total_ms": res.TotalMS, "corrected": res.Corrected,
+		}
+		if rt != nil && rt.Ledger != nil {
+			cfg := rt.Ledger.Config()
+			out["spend"] = map[string]any{"day_usd": day.USD, "day_questions": day.Questions, "day_model_calls": day.ModelCalls, "daily_cap_usd": cfg.DailyUSD, "per_minute": cfg.PerMinute}
+		}
+		status := http.StatusOK
+		if res.Kind == "disabled" && res.Source == "" {
+			// No key AND nothing the parser/cache could do: say it as before
+			// (503 ask_disabled), so an operator probe still reads the truth.
+			status = http.StatusServiceUnavailable
+			out["error"] = "ask_disabled"
+			out["message"] = "natural-language questions that need the model are not enabled on this app: set ANTHROPIC_API_KEY in the app's environment (and APPXIMO_ASK is not \"off\") — the deterministic parser and the fixed commands keep working"
 		}
 		if res.Number != nil {
 			out["number"] = *res.Number
@@ -171,6 +209,7 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		serverTiming(w, req)
+		w.WriteHeader(status)
 		json.NewEncoder(w).Encode(out) //nolint:errcheck
 		markSpan(req, "serialize")
 	})
@@ -295,47 +334,4 @@ func askTimeoutFromEnv() time.Duration {
 		}
 	}
 	return 8 * time.Second
-}
-
-func askPerMinuteFromEnv() int {
-	if v := strings.TrimSpace(os.Getenv("APPXIMO_ASK_PER_MINUTE")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
-		}
-	}
-	return 30
-}
-
-// askLimiter is a per-tenant fixed window: N questions per minute. A question
-// costs a model call, so an unbounded loop from one token must not be able to
-// run up the bill — the limit is small and named in the 429.
-type askLimiter struct {
-	mu     sync.Mutex
-	perMin int
-	win    map[string]*askWindow
-}
-
-type askWindow struct {
-	start time.Time
-	n     int
-}
-
-func newAskLimiter(perMin int) *askLimiter {
-	return &askLimiter{perMin: perMin, win: map[string]*askWindow{}}
-}
-
-func (l *askLimiter) allow(tenantID string) bool {
-	now := time.Now()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	w := l.win[tenantID]
-	if w == nil || now.Sub(w.start) >= time.Minute {
-		l.win[tenantID] = &askWindow{start: now, n: 1}
-		return true
-	}
-	if w.n >= l.perMin {
-		return false
-	}
-	w.n++
-	return true
 }

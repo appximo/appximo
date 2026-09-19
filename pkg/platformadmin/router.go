@@ -143,6 +143,7 @@ func (s *Service) Register(r chi.Router, obs ObsHandler, adminKey string) {
 	// topic backlog, breaker states) — process-level operator surface, so
 	// platform token or admin key, never a tenant admin.
 	r.With(s.requirePlatform).Get("/admin/outbox", s.handleOutbox)
+	r.With(s.requirePlatform).Get("/admin/ask", s.handleAsk)
 	r.With(s.requirePlatform).Get("/admin/workflows", s.handleWorkflows)
 
 	// --- observability (platform → any tenant; tenant admin → its own) ---

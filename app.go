@@ -30,6 +30,8 @@ import (
 
 	"github.com/appximo/appximo/migrations"
 	"github.com/appximo/appximo/pkg/adminui"
+	"github.com/appximo/appximo/pkg/ask"
+	"github.com/appximo/appximo/pkg/askspend"
 	"github.com/appximo/appximo/pkg/auth"
 	"github.com/appximo/appximo/pkg/backofficeui"
 	"github.com/appximo/appximo/pkg/cache"
@@ -130,6 +132,7 @@ type App struct {
 	// GET /api/summary composes. nil when APPXIMO_TELEGRAM_SUMMARY_TENANT is
 	// unset; a half-configuration is a boot error, not a silent no-op.
 	tgReceiver *telegramReceiver
+	askRuntime *codegen.AskRuntime // VOZ-SIN-IA-S1: the question path's wallet guard + plan cache (per app)
 
 	cpSvc controlplane.Service
 	cpSrv *http.Server
@@ -342,6 +345,18 @@ func New(cfg Config) (*App, error) {
 	if err := summary.EnsureSnapshotTable(context.Background(), pool); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("appximo: %w", err)
+	}
+	// The question path's spend ledger (VOZ-SIN-IA-S1): one row per tenant and
+	// day, so a restart never forgets the morning's spend. The caps are read
+	// FAIL-FAST here — a cap that is silently ignored is worse than none.
+	if err := askspend.EnsureTable(context.Background(), pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("appximo: %w", err)
+	}
+	askCfg, askCfgErr := askspend.ConfigFromEnv()
+	if askCfgErr != nil {
+		pool.Close()
+		return nil, askCfgErr
 	}
 	if err := workflows.EnsureTables(context.Background(), pool); err != nil {
 		pool.Close()
@@ -571,6 +586,24 @@ func New(cfg Config) (*App, error) {
 	app.outboxObs = outbox.NewObserver(pool, obsCfg)
 	if regErr := app.metrics.Register(outbox.NewCollector(app.outboxObs)); regErr != nil {
 		log.Printf("WARNING: outbox gauges not registered on /metrics: %v", regErr)
+	}
+	// The question path's wallet guard + plan cache (VOZ-SIN-IA-S1): model
+	// calls per minute and model spend per day, per tenant, alerted through
+	// the same alerter (80 % warning, cap reached) and visible on /metrics
+	// (appximo_ask_*) and GET /admin/ask. The parser and the cache never
+	// spend; at the cap only the model is off.
+	askCache := ask.NewPlanCache(2000, 24*time.Hour)
+	app.askRuntime = &codegen.AskRuntime{
+		Ledger: askspend.New(askCfg, pool, summary.Location(), alerter, s.Name),
+		Cache:  askCache,
+	}
+	if regErr := app.metrics.Register(askspend.NewCollector(app.askRuntime.Ledger, askCache.Stats)); regErr != nil {
+		log.Printf("WARNING: ask spend gauges not registered on /metrics: %v", regErr)
+	}
+	if askCfg.DailyUSD > 0 {
+		log.Printf("ask: model spend capped at US$ %.2f per tenant per day (APPXIMO_ASK_DAILY_USD), %d model calls per minute (APPXIMO_ASK_PER_MINUTE), alert at %d%% — the parser, the plan cache and the fixed commands never spend", askCfg.DailyUSD, askCfg.PerMinute, askCfg.AlertPct)
+	} else {
+		log.Printf("ask: NO daily model spend cap (APPXIMO_ASK_DAILY_USD=0), %d model calls per minute (APPXIMO_ASK_PER_MINUTE)", askCfg.PerMinute)
 	}
 	// Breaker state (AUTO-4): every open/half-open/close transition is a log
 	// line (pkg/resilience) and a gauge here.
@@ -969,6 +1002,22 @@ func New(cfg Config) (*App, error) {
 	// Read-only data browsing (ADMIN-UI-V1.2): reuses the engine's tenant-scoped DB
 	// + query builder; never touches the hot path (new /admin routes).
 	app.platformAdmin.SetTenantDB(app.tdb)
+	// What the questions cost (VOZ-SIN-IA-S1): GET /admin/ask adds the live
+	// state — today's rows in memory, the plan cache counters, the caps.
+	app.platformAdmin.SetAskStats(func(ctx context.Context) map[string]any {
+		rt := app.askRuntime
+		h, m, sz := rt.Cache.Stats()
+		hitRate := 0.0
+		if h+m > 0 {
+			hitRate = float64(h) / float64(h+m)
+		}
+		cfg := rt.Ledger.Config()
+		return map[string]any{
+			"live_today": rt.Ledger.Today(),
+			"plan_cache": map[string]any{"hits": h, "misses": m, "size": sz, "hit_rate": hitRate},
+			"caps":       map[string]any{"daily_usd": cfg.DailyUSD, "per_minute": cfg.PerMinute, "alert_pct": cfg.AlertPct},
+		}
+	})
 	// Files manager (UI-F5-S1): the Studio files view manages a tenant's files
 	// through thin /admin/tenants/{id}/files routes that delegate into the SAME
 	// files.Store as /api/files — identical OWASP validation, serve strategy and
@@ -1651,6 +1700,16 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				next.ServeHTTP(w, req.WithContext(codegen.WithDeployedProvider(req.Context(), ds)))
+			})
+		})
+	}
+	// VOZ-SIN-IA-S1: the question path's per-app runtime (spend ledger + plan
+	// cache) rides the same seam — one context value, consulted only by
+	// POST /api/ask.
+	if rt := a.askRuntime; rt != nil {
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				next.ServeHTTP(w, req.WithContext(codegen.WithAskRuntime(req.Context(), rt)))
 			})
 		})
 	}

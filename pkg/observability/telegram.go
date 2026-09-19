@@ -161,6 +161,16 @@ func telegramText(a Alert, appName, panelURL string) string {
 		fmt.Fprintf(&b, "%s evento(s) agotaron sus reintentos y quedaron parados en <code>failed</code> — el porqué exacto está guardado en cada fila.\n", f("failed"))
 		b.WriteString("<b>Qué hacer:</b> /admin/outbox lista cada uno con su <code>last_error</code>; arreglá la causa y re-armalo (la receta está en el manual, §cola).\n")
 		panelPath = "/admin/outbox"
+	case a.Kind == "ask_spend_warning":
+		fmt.Fprintf(&b, "🟡 <b>AVISO · Gasto del modelo al %s %% · %s</b>\n", f("pct"), app)
+		fmt.Fprintf(&b, "Las preguntas al modelo llevan hoy <b>US$ %s</b> de un techo de US$ %s (%s llamadas, %s preguntas). Al llegar al techo el modelo se apaga hasta mañana; las preguntas simples y los comandos fijos siguen.\n", f("usd"), f("cap"), f("model_calls"), f("questions"))
+		b.WriteString("<b>Qué hacer:</b> nada urgente. Si es uso real, subí <code>APPXIMO_ASK_DAILY_USD</code>; si no reconocés el gasto, mirá /admin/ask (quién pregunta, cuánto, desde cuándo).\n")
+		panelPath = "/admin/ask"
+	case a.Kind == "ask_spend_capped":
+		fmt.Fprintf(&b, "🔴 <b>Techo diario del modelo alcanzado · %s</b>\n", app)
+		fmt.Fprintf(&b, "Hoy se gastaron <b>US$ %s</b> (techo US$ %s, %s llamadas). Las preguntas que necesitan el modelo quedan apagadas hasta mañana; el parser, la caché de planes y los comandos fijos siguen respondiendo.\n", f("usd"), f("cap"), f("model_calls"))
+		b.WriteString("<b>Qué hacer:</b> si es uso legítimo, subí <code>APPXIMO_ASK_DAILY_USD</code> y reiniciá; si no, revisá quién tiene el token (/admin/ask lista el día por inquilino).\n")
+		panelPath = "/admin/ask"
 	case a.Kind == "workflow_overdue":
 		fmt.Fprintf(&b, "🟡 <b>AVISO · Workflow vencido · %s</b>\n", app)
 		fmt.Fprintf(&b, "Un workflow programado lleva %s vencido — ningún scheduler está disparando.\n", dur("overdue_s"))
