@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789761557673,
+  "lastUpdate": 1789784746418,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -5976,6 +5976,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36789278 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "1cb655c9153495745c81a306aeb1a70151e5fc6b",
+          "message": "fix(summary): ?format=png is the only image door — the Accept: image/png door shared its URL with the JSON and the URL-keyed response cache served a cached JSON to it (seen live on the 58); two representations, two URLs\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011rDUyYUzqSQX5hzrLZxLbD",
+          "timestamp": "2026-09-19T02:22:49Z",
+          "tree_id": "bb867cc631de562db8c817a8c1d6265aab414010",
+          "url": "https://github.com/appximo/appximo/commit/1cb655c9153495745c81a306aeb1a70151e5fc6b"
+        },
+        "date": 1789784745342,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 5861,
+            "unit": "ns/op\t    3072 B/op\t      52 allocs/op",
+            "extra": "396538 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 5861,
+            "unit": "ns/op",
+            "extra": "396538 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3072,
+            "unit": "B/op",
+            "extra": "396538 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "396538 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 54.14,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "44430717 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 54.14,
+            "unit": "ns/op",
+            "extra": "44430717 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "44430717 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "44430717 times\n4 procs"
           }
         ]
       }
