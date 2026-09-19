@@ -2011,7 +2011,8 @@ POST /api/transaction
 - **Limit**: at most **100** operations per request (`APPXIMO_MAX_TX_OPS`) →
   `400` over the cap; the 1 MiB body cap also applies.
 - **Reserved**: a schema resource may not be named `transaction` (it would shadow
-  this route).
+  this route) — nor `summary` / `ask`, the two other reserved cross-resource
+  endpoints.
 - A committed batch **invalidates the tenant's response cache** (like a single-op
   write), so a read right after a transaction reflects it (no stale cached GET).
 - **Not in v1** (documented): `after_*` webhooks and the SSE broadcast do NOT fire
@@ -2094,6 +2095,39 @@ sends the same digest (with the image) each morning — the canonical
 `resumen_matinal`; Telegram down → the row stays `pending` and retries.
 Operator + Siri setup: docs/PRODUCTION.md §4.6d. A twenty-resource example
 that declares both blocks: [examples/model-lab/conjunto.json](examples/model-lab/conjunto.json).
+
+## Questions in plain language (VOZ-PREGUNTAS-S1, ADR-033)
+
+`POST /api/ask {"q": "cuántas órdenes hay hoy"}` — the second rung of the
+voice plan and the first model in the product, through the narrowest seam:
+a language model (`pkg/aigen` transport, `ANTHROPIC_API_KEY`, Haiku by
+default) receives the schema's VOCABULARY for the caller's role (resources,
+fields with types, enum values, waiting/final states, relation targets —
+never a row) and returns a PLAN over a closed grammar (`pkg/ask`: one
+resource; REST-grammar filters; a `period` token resolved by the engine in
+`APPXIMO_SUMMARY_TIMEZONE`; `count|list|sum|avg|min|max`; `group_by`;
+`unclear`; `write`). The engine validates every name against the schema
+and REFUSES what does not exist (one correction round — which may fix the
+plan but never change the resource — then «No entendí» naming what CAN be
+asked); proper names (`match`) are resolved against the rows that exist
+through the engine's own `?search=` + Spanish phonetic folding (one → used
+and said back «Entendí «Gomes» como Gómez»; several → «¿Cuál?»; none →
+«No encuentro…», never a zero); the plan executes through the SAME
+`query.BuildQuery`/`BuildAggregate` as REST with the role's row condition
+and field allowlist (a row-scoped role gets ITS count; a hidden resource is
+not even a word the model receives); the reply is a template over the
+engine's JSON — number first, then «what was understood» in small print.
+Read-only by grammar: a write intent is `write_refused`. Reserved segment
+(a resource may not be named `ask`); Bearer required — anonymous AND the
+`$public` role are 403 (a question spends a model call). No key → `503
+ask_disabled`; model timeout (`APPXIMO_ASK_TIMEOUT`, 8 s) → `unavailable`,
+and the bot degrades to the three fixed commands, which never touch the
+model. Per-tenant cap `APPXIMO_ASK_PER_MINUTE` (30). Measured live: p50
+≈ 1 s, ≈ US$ 0.003/question. The Telegram receiver sends any non-command
+word here (with «escribiendo…» while it thinks); a grouped answer also comes
+as the digest's census picture. Operator + the Siri shortcut (Dictate Text →
+POST → Speak `speech`): docs/PRODUCTION.md §4.6e; owner manual §3d;
+`/api/summary` and `/api/ask` are both published in `/openapi.json`.
 
 ## GraphQL
 
@@ -2702,6 +2736,10 @@ is a JSON snapshot, not a stream).
   (`next`/branches — steps are strictly sequential; a false `condition` stops
   the run). The block itself EXECUTES since ADR-031 (in `appximo-worker`) — see
   [Workflows](#workflows) in SCHEMA_REFERENCE §1.4.
+- A question (`/api/ask`) that joins two resources, compares periods, ranks
+  («el más vendido»), computes a percentage, or follows up on the previous one
+  («¿y ayer?») — the plan grammar is one resource, one operator per filter,
+  and each question stands alone; those answer «No entendí» (ADR-033 §Limits).
 - OTLP/OpenTelemetry export (observability is Prometheus `/metrics` + an
   internal trace ring).
 - A hosted/SaaS version — self-hosted only.

@@ -119,7 +119,7 @@ A non-object value where an object is expected is reported (`must be a JSON obje
 
 **Stage 2 — `schema.Validate(s)` (`pkg/schema/validator.go`):** semantic validation over the already-parsed, strict-key-clean struct: identifier regexes, reserved names, type/relation/RBAC/state-machine/default coherence, etc. (covered in the later sections). On the boot path `app.New` joins all returned errors into one message prefixed `appximo: invalid schema:` (app.go). The `appximo validate <schema>` subcommand runs the same two stages.
 
-Identifier rule relevant at this level: resource and field names both match the regex `^[a-z][a-z0-9_]*$` — lowercase, start with a letter, `_` for multi-word names; `-` is rejected (`pkg/schema/validator.go`). Reserved resource names: any name with the `auth_` prefix and the exact name `transaction` are rejected (validator.go).
+Identifier rule relevant at this level: resource and field names both match the regex `^[a-z][a-z0-9_]*$` — lowercase, start with a letter, `_` for multi-word names; `-` is rejected (`pkg/schema/validator.go`). Reserved resource names: any name with the `auth_` prefix and the exact names `transaction`, `summary` and `ask` (the three reserved cross-resource endpoints: the batch transaction, the daily digest, the natural-language question) are rejected (validator.go).
 
 ### 1.3 Minimal complete example
 
@@ -242,6 +242,12 @@ A resource name may not begin with `auth_` (`reservedResourcePrefix`). This pref
 The exact name `transaction` (`reservedTransactionResource`) is rejected. The engine claims it for the atomic multi-resource batch endpoint `POST /api/transaction`; a resource literally named `transaction` would have its collection route shadowed by the batch handler. (The plural `transactions` is **not** reserved and is allowed.) Rejection message:
 
 > `invalid resource name "transaction": reserved for the atomic multi-resource transaction endpoint (POST /api/transaction)`
+
+#### Reserved names `summary` and `ask`
+
+The exact names `summary` (`reservedSummaryResource`) and `ask` (`reservedAskResource`) are rejected for the same reason: the engine claims `GET /api/summary` for the owner-language daily digest (ADR-032/034) and `POST /api/ask` for the natural-language read question (ADR-033) — both cross-resource endpoints that authorize per resource inside the handler, so a table under either segment would be shadowed. The plurals (`summaries`, `asks`) are unaffected.
+
+> `invalid resource name "ask": reserved for the natural-language question endpoint (POST /api/ask)`
 
 > Note: the implicit `id` UUID primary key is created by the engine for every resource — do not declare it as a field (see §3).
 

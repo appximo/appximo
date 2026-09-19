@@ -418,6 +418,39 @@ refreshed).
 ---
 
 
+## DONE in VOZ-PREGUNTAS-S1 (2026-09-19) — questions in plain language: a model translates, the engine validates, executes as the asking role and answers with its own numbers (VOZ-3 / ADR-033 built)
+
+The design was written a session earlier (ADR-033) so this one would not
+re-derive it; it did not — and every refinement it made came from a
+provocation, recorded in ADR-033 §Built.
+
+| Item | What shipped | Verified by |
+|---|---|---|
+| **VOZ-3 — the read plan** | `pkg/ask`: a closed grammar (one resource; REST-grammar filters; a `period` token the ENGINE resolves — `today`, `this_week`, `last_month`… — plus the one time literal `"now"`; `count/list/sum/avg/min/max`; `group_by`; `unclear`; `write`). No plan kind writes. Validated against the schema before anything runs: an unknown resource/field/enum/operator is REFUSED with the exact reason, one correction round (which may fix the plan but never change the resource), then «No entendí» + what CAN be asked. | `plan.go`/`ask_test.go` (21 grammar cases, the ten provocations with a scripted model); live: «cuántos empleados tenemos» → unclear; «cuántas facturas están con error» → 7 = SQL |
+| **The model, on a leash** | `pkg/aigen`'s raw transport, `ANTHROPIC_API_KEY`, `claude-haiku-4-5` (`APPXIMO_ASK_MODEL`), temperature 0, ≤ 8 s per call (`APPXIMO_ASK_TIMEOUT`). It receives the schema VOCABULARY for the asking role — resources, fields with types, enum values, waiting/final states, relation targets; never a row — trimmed to a budget (listed resources and state machines kept in full, the rest by name). Cost measured live: **≈ US$ 0.003/question, p50 ≈ 1 s**; every reply carries usage/cost/latency and the engine logs one line per question. No key → `503 ask_disabled`; model down → `unavailable` and the bot degrades to the fixed commands; per-tenant cap 30/min. | `vocab_test` (RBAC filter, trimming); live: 23 questions p50 0.95 s max 1.8 s; model-down instance → 3.0 s → «los comandos fijos siguen», `/api/summary` still 200 there |
+| **Proper names** | `match` filters never go into SQL as said: candidates through the engine's own `?search=` (accented and unaccented prefixes), Spanish homophone folding (b/v, s/z/c, ll/y, h, g/j, qu/k, doubles) + Jaro-Winkler, whole and token-wise. One strong → used and SAID BACK; several → «¿Cuál?»; weak → «¿Quisiste decir…?»; none → «No encuentro…» — never a zero. Also on a resource's own text field. | `names_test`: 24 real dictation pairs (Gomes→Gómez, Gimenes→Jiménez, Baldes→Valdés, Yeison→Jeison, Kintero→Quintero, Enao→Henao, Estiven→Stiven…); live: «Ana Gomes» → Ana Gómez said back, «Gómez» → asks Ana/Luis, «Wilfredo Pacheco» → not found |
+| **RBAC first (the security provocation)** | The plan runs through `query.BuildQuery`/`BuildAggregate` with the role's row condition + field allowlist — the same builders as `GET /api/{resource}`; a hidden resource is not even a word the model receives; anonymous AND `$public` are 403 (a question spends a model call). | Postgres integration: owner U1 counts ITS 2 of 3; live: the customer role gets ITS 5 of 50 and «cuántos clientes tenemos» → «No entendí» (3/3 runs after the substitution guard); the binary-diff gate caught `$public` being answered when the key leaked into the gate's env — closed on both sides |
+| **The doors** | Telegram: any non-command word is a question, «escribiendo…» while the engine thinks, a grouped answer as the digest's census picture; HTTP `POST /api/ask` with `text`/`speech`/`headline` for Siri (Dictate Text → POST → Speak `speech`, documented in PRODUCTION §4.6e and the manual §3d). | receiver tests (disabled → help, answered, photo, model down + fixed commands survive); live on the 58 over HTTPS on both apps |
+| **The declared timezone** | `APPXIMO_SUMMARY_TIMEZONE`: «hoy» for the digest AND the questions in the owner's zone — the 58 runs UTC and a Bogotá owner after 7 pm was answered about tomorrow. | `TestPeriod_Windows`; both 58 apps run `America/Bogota` |
+
+Gates: unit green · full DB lane green (after re-keying the timezone cache by
+value — a `sync.Once` leaked one test's zone into another's `current_date`) ·
+lint 0 · gofmt/vet 0 · binary-diff gate **180 cases: 175 SAME, 5 DIFF** (the
+served OpenAPI now lists `/api/summary` + `/api/ask`; the four `/api/ask` cases:
+403 with a reason for `$public`, 503 `ask_disabled` without a key ×2, 405 on GET
+— two timing DIFFs of the admission/limiter probes seen on the loaded box
+vanished on the quiet re-run) · ABBA by rule: no CRUD path touched (the gate
+corroborates byte for byte) · browser 4 schemas × desktop/390×844 **36/36**.
+Deploy: both 58 apps (`appximo 596d0a9-ask`, `commerce 1d5c2b4-ask` + CLI),
+env keys added by hand with `.pre-ask` copies (→ OPS-56), verified from outside,
+rollback back-and-forth on both (the tiendita's forward retry passed after a
+transient backup failure — see the session report), golden md5 intact, demos
+22/22 + 20/20. Schema unchanged, so OPS-55 did not bite. The one verification
+only Miguel can run — real dictation on a phone — is VOZ-6.
+
+---
+
+
 ## DONE in VOZ-DELTA-S1 (2026-09-18) — the digest becomes a habit: the delta against yesterday, a send that speaks only on change, the worker in production, the 42 stuck invoice events resolved
 
 ADR-032's own verdict ("a dashboard you will look at for three days") set the

@@ -938,6 +938,133 @@ answer). Add `?format=png` to get the picture instead.
 in five minutes; mint a long-lived token for it, or a dedicated read-only
 role.)
 
+### 4.6e "Cuántas órdenes hay hoy" — asking the bot a QUESTION (VOZ-PREGUNTAS-S1, ADR-033)
+
+The same bot — and the same `/api` — now answers a READ question in the
+owner's own words: «cuántas órdenes hay hoy», «qué pedidos están sin pagar»,
+«cuánto vendimos esta semana», «las órdenes de Ana Gómez», «órdenes por
+estado». Any word sent to the bot that is not `resumen`, `estado` or `ayuda`
+is a question. It is the second rung of the voice plan (A-70) and the first
+place a language model enters the product — through the narrowest seam the
+engine could give it:
+
+- **The model never writes SQL, never sees a row, never produces a number.**
+  It receives the schema's VOCABULARY for the asking role (resource names,
+  fields with their types, enum values, the state machine's waiting/final
+  states, relation targets — nothing else) and the question, and answers with
+  a PLAN over a closed grammar: one resource, filters in the REST filter
+  grammar, a period token (`today`, `this_week`, `last_month`…), one of
+  count/list/sum/avg/min/max, an optional group_by. There is no plan kind
+  that writes.
+- **The engine validates every name in the plan against the schema and
+  REFUSES what does not exist** — a resource, a field, an enum value, an
+  operator that does not fit the type — with the exact reason; the model gets
+  ONE correction round, then the owner gets «No entendí» plus the list of
+  what CAN be asked. A corrected plan that answers a *different* question
+  (the model swapping `clientes` for `ordenes`) is refused too. Never a
+  guess: a wrong number with a confident face is worse than no answer.
+- **Proper names are matched against what exists.** Dictation mangles them
+  (`Gomes`, `Jimenes`, `Yeison`, `Baldes`), so a name never goes into a
+  filter as said: the engine fetches candidates through its own `?search=`
+  (RBAC-scoped like any list), folds Spanish homophones (b/v, s/z/c, ll/y,
+  silent h, g/j, accents) and scores them. One clear match → used and SAID
+  BACK («Entendí «Ana Gomes» como **Ana Gómez**»); several → «¿Cuál? • Ana
+  Gómez • Luis Gómez»; none → «No encuentro ningún cliente que se llame
+  «Wilfredo Pacheco»» — never a zero presented as the answer.
+- **RBAC first.** The plan runs as the asking role through the SAME query
+  builders `GET /api/{resource}` uses, with that role's row condition and
+  field allowlist: a customer role asks «cuántas órdenes hay» and gets ITS
+  five; it asks «cuántos clientes tenemos» and — `clientes` not being in its
+  vocabulary — gets «No entendí». A resource the role cannot read is not
+  even a word the model receives.
+- **The reply is a template over the engine's JSON**, the number first,
+  then what was understood in small print («ordenes · esta semana · estado =
+  pagada») so the owner can see when the question was read differently. A
+  grouped answer («órdenes por estado») also arrives as a PICTURE — the
+  digest's own renderer, same card, same fonts.
+- **Cost and latency, measured live** (Haiku 4.5, the tiendita's 14-resource
+  schema, 23 questions): **p50 ≈ 0.9–1.0 s, max ≈ 1.8 s**, **≈ US$ 0.003 per
+  question** (≈ 2 400 input tokens for the vocabulary + ~80 output; a
+  correction round doubles it). At ten questions a day that is under a
+  dollar a month. Every reply carries `usage`, `cost_usd`, `model_ms`,
+  `total_ms`, and the engine logs one line per question — the owner can see
+  what a question costs. Note: the vocabulary prompt (~2 400 tokens) is
+  BELOW Haiku 4.5's prompt-cache minimum, so the cache does not engage on a
+  small schema; a wider schema (more resources) crosses it and gets cheaper
+  per question, not dearer.
+- **If the model does not answer, nothing breaks.** Each model call is bounded
+  (`APPXIMO_ASK_TIMEOUT`, 8 s); on a timeout or an API error the bot says «No
+  pude pensar la pregunta ahora … los comandos fijos siguen: resumen, estado,
+  ayuda» — the three fixed commands never go through the model. While the
+  engine thinks the chat shows Telegram's «escribiendo…» indicator, re-sent
+  every 4 s, so the owner is never looking at nothing.
+
+**Enable it** — add the model key to the app's env (`/etc/<app>/<app>.env`,
+0600, never in a repo, a log or a report) and restart:
+
+```
+ANTHROPIC_API_KEY=sk-ant-…              # enables POST /api/ask and the bot's question branch
+APPXIMO_SUMMARY_TIMEZONE=America/Bogota # the owner's "hoy" / "esta semana" (a UTC box is otherwise a day off after 7 pm)
+# optional:
+APPXIMO_ASK_MODEL=claude-haiku-4-5      # the cheap model is the default; any Anthropic model id
+APPXIMO_ASK_TIMEOUT=8s                  # per model call
+APPXIMO_ASK_PER_MINUTE=30               # per tenant — a question is a paid call, the limit is named in the 429
+APPXIMO_ASK=off                         # disable the question path even with a key
+```
+
+Without a key the path is DISABLED and says so: `POST /api/ask` answers
+`503 {"error":"ask_disabled", …}` naming the variable, and the bot answers a
+question with that sentence plus the help. `appximo-worker` needs nothing
+new. **The key is the operator's:** the engine reads `ANTHROPIC_API_KEY`
+from its environment only — it is never written by any tool, never printed,
+never part of a backup manifest.
+
+**`POST /api/ask`** — the HTTP door (the bot uses it too, as the configured
+role). Bearer required (an anonymous or `$public` caller is 403 — a question
+spends a model call, so it needs an identity); body `{"q": "<the question>"}`
+(≤ 500 characters). The answer:
+
+```json
+{ "kind": "answer",                                 // unclear | ambiguous | not_found | write_refused | forbidden | unavailable
+  "headline": "7 ordenes",                          // the number first — one line for a voice assistant
+  "text": "<b>7</b> ordenes\n<i>ordenes · estado = pendiente_pago</i>",   // Telegram HTML
+  "speech": "7 ordenes. ordenes · estado = pendiente_pago",               // plain words, for Siri
+  "number": 7, "understood": "ordenes · estado = pendiente_pago",
+  "plan": { "kind": "count", "resource": "ordenes", "filters": [ { "field": "estado", "op": "eq", "value": "pendiente_pago" } ] },
+  "groups": null, "png": "<base64, grouped answers only>",
+  "usage": { "input_tokens": 2357, "output_tokens": 77 }, "cost_usd": 0.0027, "model": "claude-haiku-4-5",
+  "model_ms": 1198, "total_ms": 1201, "corrected": false }
+```
+
+A question that implies a write («cancelá la orden ORD-1003», «borrá los
+pedidos viejos») is `write_refused`: «Por acá solo leo …» — writes with
+confirmation are the next rung (VOZ-4) and are not anticipated here.
+
+**Siri — "pregúntale a la tienda".** One Shortcut, three actions (build it
+yourself in two minutes — nothing here needs a developer):
+
+1. **Dictate Text** (language: Spanish) → its output is the question.
+2. **Get Contents of URL**:
+   - URL: `https://<tenant>.<your-domain>/api/ask`
+   - Method: `POST` · Headers: `Authorization: Bearer <a token minted with
+     appximo token --tenant <t> --role <r> --ttl …, or a dedicated read-only
+     role>` · `Content-Type: application/json`
+   - Request Body: JSON → one field `q` = *Dictated Text*.
+3. **Get Dictionary Value** `speech` from *Contents of URL* → **Speak Text**
+   (or `headline` for the shortest answer; `text` if you show it on screen).
+
+Ask «cuántas órdenes hay hoy» and Siri reads the engine's number back. A
+misheard name comes back as «Entendí X como Y» or as a question, never as a
+wrong count. (Do NOT build the Shortcut for the user — these are the exact
+three actions they wire; mint the token for them.)
+
+**What it cannot do (v1, by design):** one resource per question (no joins —
+«citas de pacientes de Bogotá» is «No entendí» unless the relation resolves
+to a name), no comparisons across periods («más que el mes pasado»), no
+rankings («el producto más vendido»), no percentages, no follow-ups («¿y
+ayer?» — each question stands alone), and «vendimos» means whatever the
+model maps it to in the schema's states — the small print says which.
+
 ### 4.7 Recommended cadence by kind of app
 
 | the app | cadence | why |
@@ -1183,6 +1310,9 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `APPXIMO_OUTBOX_MAX_PENDING_AGE` | no | `15m` | The outbox age alert (AUTOMATIZACION-S1): when the OLDEST pending event is older than this, one alert per hour on the configured destinations (§4.6c) naming the topic and the fix. `0` disables; an invalid duration refuses to boot. The gauges (`appximo_outbox_*`, `appximo_workflow_*`) and `GET /admin/outbox` are always on. |
 | `APPXIMO_EMAIL_TOPIC`, `SMTP_*` | no | — | Email delivery by the worker (mode `auto` delivers `email.send` when `SMTP_HOST` is set; mode `email` is the single-purpose variant). |
 | `APPXIMO_WORKER_MODE` + `APPXIMO_WORKER_{BATCH,MAX_ATTEMPTS,POLL,SCHEMA_REFRESH,ROLE,RESOURCE}`, `APPXIMO_ENGINE_URL`, `APPXIMO_TENANT_DOMAIN` | no | `auto` / 50 / 5 / 5s / 1m / `service_worker` / `filejobs` / `http://127.0.0.1:<port>` / (domain minus first label) | `appximo-worker`'s env (§8b). STRICT: an invalid value or a misspelled `APPXIMO_WORKER_*` refuses to boot naming every offender; unset values are reported in one "defaults in effect" boot line. |
+| `ANTHROPIC_API_KEY` | no | — | Enables the **question path** (§4.6e): `POST /api/ask` and the bot's free-text branch — a language model translates the question into a validated read plan. The engine reads it from its environment only; never written, printed or backed up. Without it the path answers `503 ask_disabled` and the bot says so; the fixed commands never depend on it. `APPXIMO_ASK=off` disables the path even with a key. |
+| `APPXIMO_ASK_MODEL` / `APPXIMO_ASK_TIMEOUT` / `APPXIMO_ASK_PER_MINUTE` | no | `claude-haiku-4-5` / `8s` / `30` | The question path's model (any Anthropic model id; the cheap one is the default and measured at ≈ US$ 0.003/question), the bound per model call, and the per-tenant questions-per-minute cap (a question is a paid call; over the cap is a named 429 with Retry-After). |
+| `APPXIMO_SUMMARY_TIMEZONE` | no | the process's local zone | The IANA zone «hoy» / «esta semana» / the digest's day are computed in (`America/Bogota`). A production box runs UTC, so an owner in Bogotá asking at 8 pm was answered about tomorrow. An invalid name refuses to boot. Set it on every app with an owner in one place. |
 | `APPXIMO_TELEGRAM_BOT_TOKEN` + `APPXIMO_TELEGRAM_CHAT_ID` | no | — | The **Telegram alert destination** (§4.6c) — every alert (SLO burn, first-occurrence errors, backup failed/stale, disk low, stuck outbox, overdue workflows) reaches that chat, in Spanish, phone-first, with what-to-do. Both or neither: half a pair, or a malformed value, **refuses to boot** naming the variable; a revoked token is detected out-of-band at boot (read-only `getMe`+`getChat`) and screams in the journal. `backup.sh` posts its own failure here too. |
 | `APPXIMO_ALERT_APP_NAME` | no | the schema `name` | The app name every alert message carries (a fleet of apps alerting to ONE chat needs to say who is talking). |
 | `APPXIMO_ALERT_PANEL_URL` | no | — | Public origin (`https://app.example.com`) — when set, alerts carry a "Ver el panel" deep link (`/admin#/observability`, `/admin#/resources`, `/admin/outbox` by kind). |

@@ -40,7 +40,7 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 **`DEC-*` decisions that only Miguel can take** (the old "Requires a decision
 from Miguel" table, given stable IDs).
 
-**Last reviewed: 2026-09-17 (CENTRO-MANDO-S2).** Review history + all DONE
+**Last reviewed: 2026-09-19 (VOZ-PREGUNTAS-S1).** Review history + all DONE
 session sections: [BACKLOG_ARCHIVO.md](BACKLOG_ARCHIVO.md).
 
 ## OPEN
@@ -1448,25 +1448,50 @@ tarball of scripts/), and the smoke runs fleet-audit once.
   leave `-count=2` green.
 
 
-### VOZ-3 — Read questions by voice/text ("cuántas citas tiene el doctor Gómez hoy") — designed in ADR-033, NOT built
+### VOZ-6 — Miguel dictates ten real questions to the bot from his phone — the one verification an agent cannot run
 
-- **Origin:** VOZ-VISUAL-S1 (2026-09-18). The next rung after the digest-as-a-picture. The
-  design is written so the build session does not re-derive it:
-  [docs/adr/ADR-033-voice-read-questions.md](adr/ADR-033-voice-read-questions.md) — a
-  model translates free text into a CLOSED read plan over the schema's own vocabulary
-  (a filter/count/aggregate the engine already executes), never SQL; the engine
-  validates every name against the schema and REFUSES what does not exist (one
-  correction round, then "no entendí"); execution self-calls the live router as the
-  asking role, so RBAC applies unchanged; proper names are resolved server-side against
-  what exists (one match → id, several → ask, none → say so, never a zero); the reply is
-  a template over the engine's numbers — the model never writes a figure.
-- **Impact:** the first model enters the product (a real cost per question, a real
-  chance of a confident wrong answer if the seam is loose) — that is why the seam is
-  written first.
-- **Order agreed (A-73):** pictures (DONE, this session) → read questions (this) →
-  writes with confirmation (VOZ-4) → reactive rules by voice (VOZ-5).
-- **Ready:** the five verifications in ADR-033 §Verification pass, ten real dictated
-  questions by Miguel over the tiendita answered right or "no entendí", never wrong.
+- **Origin:** VOZ-PREGUNTAS-S1 (2026-09-19). VOZ-3 is BUILT (archive): any word sent to
+  the tiendita's bot that is not `resumen`/`estado`/`ayuda` goes to `POST /api/ask`. A
+  bot cannot generate a Telegram user message, so the real ENTRY leg — Spanish
+  dictation with its mangled names — is Miguel's. 23 lab questions + 7 live over HTTPS
+  passed; the voice itself has not been heard.
+- **Impact:** without it the session claims "works by voice" with simulated dictation;
+  ADR-033 §Verification names the real dictation as the ready criterion.
+- **Ready:** ten dictated questions to `@appximodev_bot` (tiendita) — «cuántas órdenes hay
+  hoy», «qué pedidos están sin pagar», «las órdenes de <a client, said badly>», «órdenes
+  por estado», «cuánto vendimos esta semana», plus whatever an owner asks — with a note
+  of how many were right, how many «no entendí», and how many WRONG (the number that
+  decides whether this is offered to a customer). Blocks VOZ-4.
+
+### VOZ-7 — The questions the v1 grammar cannot express: cross-resource, period comparisons, rankings, percentages, follow-ups
+
+- **Origin:** VOZ-PREGUNTAS-S1 (2026-09-19). The plan is ONE resource, one operator per
+  filter, one period, and each question stands alone (ADR-033 §Limits). Measured with
+  owner questions: «cuál fue la orden más cara del mes» answers as a max (fine), but «el
+  producto más vendido», «¿vendimos más que el mes pasado?», «qué porcentaje está sin
+  pagar» and «¿y ayer?» are «No entendí». And «vendimos» means whatever the model maps to
+  the schema's states (it read `estado = pagada`) — the schema cannot declare which
+  states count as a sale.
+- **Impact:** the third or fourth question an owner asks; today it gets an honest «No
+  entendí» with what CAN be asked — honest, but short.
+- **Ready:** Miguel decides which are worth it: (a) rankings = list + sort on a numeric
+  field (small; the engine has sort); (b) period comparison = two plans and a subtraction
+  by the engine (medium); (c) a declarable vocabulary block (which states count as
+  "sold") (medium; grammar + Studio); (d) follow-ups with a one-question memory (medium,
+  and it opens the door to ambiguous answers). Each one provoked before it is built.
+
+### VOZ-8 — The prompt cache does not engage on a small schema: the vocabulary (~2 400 tokens) is under Haiku 4.5's cacheable minimum
+
+- **Origin:** VOZ-PREGUNTAS-S1 (2026-09-19). aigen sends the system prompt with
+  `cache_control`; none of the 23 live answers carried `cache_read_tokens` — the
+  tiendita's 14-resource vocabulary is shorter than the model's minimum. Real cost
+  ≈ US$ 0.003/question instead of ≈ 0.0005 with the cache; a wider schema (conjunto,
+  20 resources) crosses it.
+- **Impact:** money, little: ten questions a day ≈ US$ 0.90/month without the cache; a
+  hundred a day is US$ 9 that could be US$ 1.5.
+- **Ready:** measure the real threshold against the API (`usage.cache_read_tokens` vs
+  vocabulary length), decide between padding the prompt to the minimum (cheap, ugly)
+  and leaving it (marginal at the expected volume), and record the decision.
 
 ### VOZ-4 — Writes by voice WITH confirmation ("agendá cita a las 2 con Juan — ¿sí/no?")
 
@@ -1520,6 +1545,21 @@ Structured fields for every item: [backlog/items.json](backlog/items.json).
   explicit rollback (`--rollback-to=<tag>`), restores `/root/<app>-schema.pre-<tag>`
   together with the binary (and refuses the automatic 4b rollback when the boot
   error names an unknown schema key, saying which file to restore).
+
+### OPS-56 — deploy-app.sh carries no NEW env keys a binary needs (ANTHROPIC_API_KEY and APPXIMO_SUMMARY_TIMEZONE were added by hand)
+
+- **Origin:** VOZ-PREGUNTAS-S1 (2026-09-19). The deploy needed two new keys in both apps'
+  `/etc/<app>/<app>.env` on the 58; they were added over ssh through a pipe before the
+  deploy (copies `/root/<app>-env.pre-ask`). `deploy-app.sh` keeps the previous env but
+  has no way to DECLARE a new key (value from the operator's environment — never on a
+  command line, never in a log).
+- **Impact:** a manual step nobody remembers is a step that gets skipped: the next deploy
+  to another box starts without the key and the bot answers «no activadas» until
+  someone looks.
+- **Ready:** `--env-add=KEY[,KEY…]` taking the value from the operator's environment,
+  writing it into the box's env (0600) with a prior copy, verified present at the end;
+  `fleet-audit.sh` flags a missing `ANTHROPIC_API_KEY` when
+  `APPXIMO_TELEGRAM_SUMMARY_TENANT` is set.
 
 ### AUTO-9 — The voice plan: five steps, with what the research already settled
 

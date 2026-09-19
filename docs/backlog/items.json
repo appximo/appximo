@@ -1,6 +1,6 @@
 {
   "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo).",
-  "actualizado": "2026-09-18 (VOZ-DELTA-S1: AUTO-7 hecho; OPS-55 abierto)",
+  "actualizado": "2026-09-19 (VOZ-PREGUNTAS-S1: VOZ-3 hecho; VOZ-6/7/8 y OPS-56 abiertos)",
   "publicacion": {
     "estado": "pausada_deliberada",
     "desde": "2026-08-29",
@@ -83,7 +83,7 @@
       "id": "AUTO-9",
       "titulo": "El plan de voz: cinco escalones, con lo que la investigación ya cerró",
       "frente": "automatizacion",
-      "que_es": "Operar una app por voz/dictado en cinco escalones: (1) cerrar las trampas del worker/outbox — HECHO (AUTOMATIZACION-S1) → (2) solo lectura por voz — el resumen HECHO (VOZ-ESCALON1-S1) y ya se lee de un vistazo como imagen, con filtro declarado y vocabulario honesto (VOZ-VISUAL-S1, ADR-032); las PREGUNTAS de lectura son VOZ-3 (ADR-033, diseñado, no construido) → (3) escritura con confirmación (VOZ-4) → (4) reglas declarativas — HECHO: el ejecutor de workflows existe (ADR-031), con triggers por evento Y por cron; declararlas por voz es VOZ-5 → (5) capa visual. Orden acordado (A-73): gráficos → preguntas → escrituras con confirmación → reglas reactivas por voz. Advertencias vivas: el dictado en español destroza nombres propios (corregir server-side contra lo que existe), latencia real 2–4 s, DST resuelto por escrito en ADR-031.",
+      "que_es": "Operar una app por voz/dictado en cinco escalones: (1) cerrar las trampas del worker/outbox — HECHO (AUTOMATIZACION-S1) → (2) solo lectura por voz — el resumen HECHO (VOZ-ESCALON1-S1) y ya se lee de un vistazo como imagen, con filtro declarado y vocabulario honesto (VOZ-VISUAL-S1, ADR-032); las PREGUNTAS de lectura — HECHO (VOZ-PREGUNTAS-S1, ADR-033 construido; falta el dictado real de Miguel, VOZ-6) → (3) escritura con confirmación (VOZ-4) → (4) reglas declarativas — HECHO: el ejecutor de workflows existe (ADR-031), con triggers por evento Y por cron; declararlas por voz es VOZ-5 → (5) capa visual. Orden acordado (A-73): gráficos → preguntas → escrituras con confirmación → reglas reactivas por voz. Advertencias vivas: el dictado en español destroza nombres propios (corregir server-side contra lo que existe), latencia real 2–4 s, DST resuelto por escrito en ADR-031.",
       "por_que_importa": "Es la dirección de producto del frente de automatización; sin el plan escrito cada sesión lo redescubre. ADVERTENCIAS que no pueden perderse: el dictado en español destroza nombres propios (corregir del lado del servidor contra lo que existe), la latencia real será 2–4 s, y el cambio de horario (DST) es un peligro real en el agendador.",
       "que_lo_destraba": "Los escalones 2–3 y 5 son sesiones propias con Miguel validando la experiencia; la base (worker publicado, workflows ejecutando, cola observable) ya está.",
       "costo": "grande",
@@ -92,7 +92,7 @@
       "decide": "agente",
       "depende_de": [],
       "bloquea": [
-        "VOZ-3"
+        "VOZ-6"
       ],
       "origen": "TRASPASO_AUTOMATIZACION",
       "estado": "abierto"
@@ -1367,39 +1367,17 @@
       "estado": "abierto"
     },
     {
-      "id": "VOZ-3",
-      "titulo": "Preguntas de lectura por voz/texto («cuántas citas tiene el doctor Gómez hoy») — diseñado en ADR-033, NO construido",
-      "frente": "automatizacion",
-      "que_es": "Un modelo traduce la pregunta a un PLAN de lectura cerrado sobre el vocabulario del schema (filtro/conteo/agregado que el motor ya ejecuta), nunca SQL; el motor valida cada nombre contra el schema y rechaza lo que no existe (una ronda de corrección, luego «no entendí»); ejecuta autollamando al router vivo como el rol que pregunta (RBAC intacto); los nombres propios se resuelven server-side contra lo que existe (uno → id, varios → pregunta, ninguno → lo dice, nunca un cero); la respuesta es plantilla sobre los números del motor — el modelo jamás escribe una cifra. Diseño completo en docs/adr/ADR-033-voice-read-questions.md.",
-      "por_que_importa": "Es el primer modelo de lenguaje que entra al producto: cuesta por pregunta y puede responder mal con cara segura si la costura está floja. Por eso la costura se escribió antes de construir.",
-      "que_lo_destraba": "Una sesión de motor que construya ADR-033 tal cual (ANTHROPIC_API_KEY en la app), y Miguel dictando diez preguntas reales sobre la tiendita: cada una bien o «no entendí», nunca un número equivocado.",
-      "costo": "grande",
-      "dano": "medio",
-      "prioridad": "P2",
-      "decide": "agente",
-      "depende_de": [
-        "AUTO-9"
-      ],
-      "bloquea": [
-        "VOZ-4"
-      ],
-      "origen": "VOZ-VISUAL-S1 (2026-09-18) — orden acordado A-73: gráficos → preguntas → escrituras → reglas",
-      "estado": "abierto"
-    },
-    {
       "id": "VOZ-4",
       "titulo": "Escrituras por voz CON confirmación («agendá cita a las 2 con Juan — ¿sí/no?»)",
       "frente": "automatizacion",
       "que_es": "El escalón donde el bot cambia datos: un protocolo de confirmación (qué se lee de vuelta, cómo un «sí» queda atado exactamente a la escritura que confirma, tiempos de espera), la misma resolución de nombres de VOZ-3, y las puertas de escritura del motor sin tocar (validación, RBAC y máquinas de estado aplican porque la escritura entra por la API).",
       "por_que_importa": "Sin esto la voz solo lee; con esto mal hecho, una cita se agenda dos veces o a la persona equivocada.",
-      "que_lo_destraba": "Primero un ADR con el protocolo de confirmación — es decisión de producto de Miguel —, después una sesión con Miguel validando la experiencia en el celular. Depende de VOZ-3.",
+      "que_lo_destraba": "Primero un ADR con el protocolo de confirmación — es decisión de producto de Miguel —, después una sesión con Miguel validando la experiencia en el celular. VOZ-3 (las preguntas de lectura) ya está construido (VOZ-PREGUNTAS-S1): la resolución de nombres de pkg/ask se reutiliza tal cual.",
       "costo": "grande",
       "dano": "medio",
       "prioridad": "P2",
       "decide": "miguel",
-      "depende_de": [
-        "VOZ-3"
-      ],
+      "depende_de": [],
       "bloquea": [
         "VOZ-5"
       ],
@@ -1440,6 +1418,74 @@
       "depende_de": [],
       "bloquea": [],
       "origen": "VOZ-DELTA-S1 (2026-09-18)",
+      "estado": "abierto"
+    },
+    {
+      "id": "VOZ-6",
+      "titulo": "Miguel dicta diez preguntas reales al bot desde el celular — la única verificación que un agente no puede correr",
+      "frente": "automatizacion",
+      "que_es": "El bot de la tiendita ya responde preguntas (VOZ-PREGUNTAS-S1): cualquier palabra que no sea resumen/estado/ayuda va a POST /api/ask. Un agente no puede generar un mensaje de usuario de Telegram, así que la pata de ENTRADA real —el dictado en español con sus nombres destrozados— la prueba solo Miguel. Las 23 preguntas de laboratorio y las 7 en vivo por HTTPS pasaron; falta la voz de verdad.",
+      "por_que_importa": "Sin esta prueba la sesión afirma 'funciona por voz' con dictado simulado; el criterio de listo de ADR-033 §Verification exige el dictado real.",
+      "que_lo_destraba": "Miguel: diez preguntas dictadas al bot (@appximodev_bot, tiendita) — «cuántas órdenes hay hoy», «qué pedidos están sin pagar», «las órdenes de <cliente mal dicho>», «órdenes por estado», «cuánto vendimos esta semana», más las que se le ocurran como dueño — y anotar cuáles respondió bien, cuáles dijo «no entendí» y cuáles respondió MAL (ese es el número que decide si se ofrece a un cliente).",
+      "costo": "chico",
+      "dano": "medio",
+      "prioridad": "P1",
+      "decide": "miguel",
+      "depende_de": [],
+      "bloquea": [
+        "VOZ-4"
+      ],
+      "origen": "VOZ-PREGUNTAS-S1 (2026-09-19)",
+      "estado": "abierto"
+    },
+    {
+      "id": "VOZ-7",
+      "titulo": "Las preguntas que la gramática v1 no expresa: cruces de recursos, comparaciones entre períodos, rankings, porcentajes, seguimiento («¿y ayer?»)",
+      "frente": "automatizacion",
+      "que_es": "El plan de lectura es UN recurso, un operador por filtro, un período, y cada pregunta va sola (ADR-033 §Limits). Medido con preguntas de dueño: «cuál fue la orden más cara del mes» se responde como máximo (bien), pero «el producto más vendido», «¿vendimos más que el mes pasado?», «qué porcentaje está sin pagar» y «¿y ayer?» son «no entendí». Además «vendimos» significa lo que el modelo mapee a los estados del schema (lo leyó como estado = pagada); el schema no puede declarar qué estados cuentan como venta.",
+      "por_que_importa": "Es el tipo de pregunta que un dueño hace tercera o cuarta; hoy recibe «no entendí» con la lista de lo que sí puede — honesto, pero corto.",
+      "que_lo_destraba": "Decisión de producto de Miguel sobre qué vale: (a) rankings = list con sort por un campo numérico (chico, la gramática ya tiene sort en el motor); (b) comparación entre períodos = dos planes y una resta hecha por el motor (medio); (c) un bloque declarable en el schema («summary.vocabulary»: qué estados cuentan como venta) (medio, toca la gramática y Studio); (d) seguimiento con memoria de la última pregunta (medio, y abre la puerta a respuestas ambiguas). Cada uno con su provocación antes de construirse.",
+      "costo": "medio",
+      "dano": "bajo",
+      "prioridad": "P3",
+      "decide": "miguel",
+      "depende_de": [
+        "VOZ-6"
+      ],
+      "bloquea": [],
+      "origen": "VOZ-PREGUNTAS-S1 (2026-09-19)",
+      "estado": "abierto"
+    },
+    {
+      "id": "VOZ-8",
+      "titulo": "La caché de prompt no engancha en un schema chico: el vocabulario (~2.400 tokens) queda por debajo del mínimo de Haiku 4.5",
+      "frente": "automatizacion",
+      "que_es": "aigen manda el prompt de sistema con cache_control; en las 23 preguntas vivas ninguna respuesta trajo cache_read_tokens — el vocabulario de la tiendita (14 recursos) es más corto que el mínimo cacheable del modelo. Costo real ≈ US$ 0,003 por pregunta en vez de ≈ 0,0005 con caché. Un schema más ancho (conjunto, 20 recursos) sí lo cruza.",
+      "por_que_importa": "Es dinero, poco: diez preguntas al día ≈ US$ 0,90/mes sin caché. Pero a cien preguntas al día ya son US$ 9 que podrían ser US$ 1,5.",
+      "que_lo_destraba": "Una sesión chica: medir el umbral real con la API (ask + usage.cache_read_tokens en función del largo del vocabulario), y decidir si vale rellenar el prompt hasta el mínimo (barato, feo) o dejarlo (el costo es marginal para el uso esperado). Registrar la decisión.",
+      "costo": "chico",
+      "dano": "bajo",
+      "prioridad": "P3",
+      "decide": "agente",
+      "depende_de": [],
+      "bloquea": [],
+      "origen": "VOZ-PREGUNTAS-S1 (2026-09-19)",
+      "estado": "abierto"
+    },
+    {
+      "id": "OPS-56",
+      "titulo": "deploy-app.sh no lleva las variables de entorno NUEVAS que un binario necesita (ANTHROPIC_API_KEY, APPXIMO_SUMMARY_TIMEZONE se agregaron a mano)",
+      "frente": "flota",
+      "que_es": "El deploy de VOZ-PREGUNTAS-S1 necesitó dos llaves nuevas en /etc/<app>/<app>.env de las dos apps del 58; se agregaron por ssh con una tubería antes del deploy (copias /root/<app>-env.pre-ask). deploy-app.sh copia el env previo pero no tiene una forma de DECLARAR llaves nuevas (con valor desde el entorno del operador, nunca en la línea de comando ni en un log).",
+      "por_que_importa": "Un paso a mano que nadie recuerda es un paso que se salta: el próximo deploy a otra caja arranca sin la clave y el bot contesta «no activadas» hasta que alguien mira.",
+      "que_lo_destraba": "Una sesión chica de flota: `--env-add=KEY[,KEY…]` que toma el valor del entorno del operador, lo escribe en el env de la caja (0600) con copia previa, y lo verifica presente al final (fleet-audit puede marcar la ausencia de ANTHROPIC_API_KEY cuando APPXIMO_TELEGRAM_SUMMARY_TENANT está puesto).",
+      "costo": "chico",
+      "dano": "medio",
+      "prioridad": "P2",
+      "decide": "agente",
+      "depende_de": [],
+      "bloquea": [],
+      "origen": "VOZ-PREGUNTAS-S1 (2026-09-19)",
       "estado": "abierto"
     }
   ]

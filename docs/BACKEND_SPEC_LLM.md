@@ -256,6 +256,37 @@ workflow (a cron → `enqueue summary.telegram` → the worker's digest consumer
 sends picture + text only when the engine says so). A worker calling it sends
 `Cache-Control: no-cache`. Operator + Siri setup: docs/PRODUCTION.md §4.6d.
 
+### 2b-ter. Questions in plain language — `POST /api/ask` (built-in, read-only, ADR-033)
+
+A reserved endpoint (a resource may not be named `ask`) that answers a READ
+question in the owner's words with the ENGINE's numbers. Body `{"q": "…"}`
+(≤ 500 chars), Bearer required (anonymous and the `$public` role are 403 —
+a question spends a model call). The seam, exactly: a language model
+(`pkg/aigen`'s raw transport, `ANTHROPIC_API_KEY`, `claude-haiku-4-5` by
+default) receives the schema VOCABULARY for the caller's role — resources,
+fields with types, enum values, waiting/final states, relation targets;
+never a row — and returns a PLAN over a closed grammar (`pkg/ask`: one
+resource; filters in the REST filter grammar; a `period` token the engine
+resolves in `APPXIMO_SUMMARY_TIMEZONE`; `count|list|sum|avg|min|max`;
+`group_by`; `unclear`; `write`). The engine validates every name against
+the schema and refuses what does not exist (one correction round, then
+`kind: unclear` — a correction that changes the resource is refused too),
+resolves `match` filters (proper names) against the rows that exist via
+its own `?search=` + Spanish phonetic matching (one → used and echoed;
+several → `ambiguous`; none → `not_found`, never a zero), and executes the
+plan through `query.BuildQuery`/`BuildAggregate` with the role's row
+condition and field allowlist — the same builders as `GET /api/{resource}`.
+The reply is composed by the engine: `kind`, `headline` (number first),
+`text` (Telegram HTML), `speech` (plain), `number`, `understood`, `plan`,
+`groups` (+ `png` for a grouped answer, the digest's renderer), `usage`,
+`cost_usd` (≈ $0.003 live), `model_ms`, `total_ms`. `write` intents are
+`write_refused`; no key → `503 ask_disabled`; model timeout → `kind:
+unavailable` (the caller degrades to the fixed commands). Per-tenant limit
+`APPXIMO_ASK_PER_MINUTE` (30). A custom Go handler that wants the same
+translation calls the endpoint as its role; there is no `Ctx` seam for the
+model on purpose — the vocabulary/validation/RBAC discipline lives in one
+place. Operator + Siri: docs/PRODUCTION.md §4.6e.
+
 ### 2c. Reading from OUTSIDE the binary — `?fields=`: ask for the columns you will use
 
 **The problem it solves is not bandwidth, it is disk.** A `json`/`jsonb`/`text`

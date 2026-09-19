@@ -1,10 +1,11 @@
 # ADR-033 — Read questions by voice/text ("cuántas citas tiene el doctor Gómez hoy"): a model translates to a filter the engine already executes, never to SQL
 
-**Status:** accepted as DESIGN (VOZ-VISUAL-S1, 2026-09-18) — **NOT BUILT**. This
-document exists so the session that builds step 2 of the voice plan does not
-re-derive it. Building it is item VOZ-3 in the backlog; the order agreed in
-VOZ-VISUAL-S1 is: pictures (done, ADR-032) → read questions (this) → writes
-with confirmation (VOZ-4) → reactive workflows (VOZ-5).
+**Status:** accepted (design: VOZ-VISUAL-S1, 2026-09-18) — **BUILT in
+VOZ-PREGUNTAS-S1 (2026-09-19)** as designed, with the refinements recorded in
+§Built below (each one found by provoking the live path, none by re-deriving
+the design). The order agreed in VOZ-VISUAL-S1 holds: pictures (ADR-032) →
+read questions (this) → writes with confirmation (VOZ-4) → reactive workflows
+(VOZ-5).
 **Drivers:** A-70 (the voice plan, five steps, on the existing engine), A-72
 (step 1's frontiers: generic, deterministic, RBAC as the hard boundary,
 read-only), the two known risks from the research that fed A-70 (dictation
@@ -178,3 +179,77 @@ data exposure, invented numbers, guessed names — is structurally out of reach
 rather than discouraged by a prompt. The price is expressiveness: v1 answers
 one-resource questions with one operator per filter. That is the right price
 for the first question an owner asks a machine about their own business.
+
+## Built (VOZ-PREGUNTAS-S1, 2026-09-19) — what the build kept, what it refined, and why
+
+`pkg/ask` (pure: grammar, vocabulary, translation loop, name matching,
+composition) + `pkg/codegen/ask.go` (`POST /api/ask`, the executor) + the
+receiver's question branch (`telegram_input.go`). Every decision above holds.
+The refinements, each with the provocation that forced it:
+
+1. **Execution goes through the engine's query builders, not a router
+   self-call (§3 refined).** The handler runs the plan with
+   `query.BuildQuery`/`BuildAggregate` given the role's `EvalResult`
+   (row condition + field allowlist) — the exact code path of
+   `GET /api/{resource}` and its `/aggregate`, and the same pattern
+   `/api/summary` already uses. A re-entrant `ServeHTTP` from inside a
+   handler would need the LIVE middleware chain (built in `app.go`, not in
+   `BuildRouter`), i.e. global state shared by N in-process fleet apps. The
+   guarantee is unchanged: zero authorization code of its own.
+2. **A question needs an identity — the reserved `$public` role may read,
+   not ask.** The binary-diff gate (whose engines inherited the session's
+   `ANTHROPIC_API_KEY`) caught an ANONYMOUS caller being answered — and
+   billed — through a schema that declares `rbac.public`. `/api/ask` is 403
+   for `$public`; the gate now boots its engines without a key.
+3. **The correction round may fix the plan, never answer a different
+   question.** Live: a customer role asked «cuántos clientes tenemos»;
+   `clientes` was not in its vocabulary; the "corrected" plan counted
+   `ordenes` and answered «5 ordenes» with a straight face. A corrected plan
+   whose resource is not the rejected one (up to a spelling fix) is
+   `unclear`; the prompt also forbids substituting a related resource, and
+   the same question now answers «No entendí» three runs out of three.
+4. **One time literal: `"now"`.** «tenemos cupones vigentes?» produced a
+   valid plan with `period: today` (coupons CREATED today → 0) — a wrong
+   answer wearing a valid plan. A time field may now be compared to the
+   present (`{"field":"vence_en","op":"gte","value":"now"}`, resolved by the
+   engine); the same question answers «1 cupon · vence_en ≥ ahora · activo =
+   true». Still never a date the model computed.
+5. **`match` also on the resource's OWN text field** (not only a relation):
+   «tengo un paciente Deisi Rodrigues?» on a resource whose name is a column
+   of its own resolves against that column's values.
+6. **The declared timezone — `APPXIMO_SUMMARY_TIMEZONE`.** The 58 runs UTC;
+   «hoy» for a Bogotá owner after 7 pm was tomorrow, for the digest as much
+   as for the questions (masked before because the scheduled digest fires
+   in the morning). One `summary.Location()` for both; an invalid zone
+   refuses to boot.
+7. **Labels and amounts are chosen, not sorted.** `documento_numero`
+   matched "numero" and every client came back «Ana Gómez 333946139»; the
+   first money field alphabetically was `descuento_centavos` and every order
+   line read «$ 0». A name-like field labels alone; `total/monto/valor/
+   precio` wins as the amount.
+8. **The picture reuses the census card** (`summary.Render` with a
+   `Subtitle` and a neutral level) for grouped answers only — no new
+   drawing path.
+9. **Measured (Haiku 4.5, the tiendita's 14-resource schema, 23 live
+   questions):** p50 0.9–1.0 s, max 1.8 s, ≈ US$ 0.003 per question; a
+   correction round doubles it. The vocabulary prompt (~2 400 tokens) is
+   below the model's prompt-cache minimum, so the cache does not engage on a
+   small schema — a wider one crosses it and gets cheaper. The engine logs
+   one line per question with tokens, cost and latency.
+10. **Guards the design did not name:** a per-tenant questions-per-minute
+    cap (`APPXIMO_ASK_PER_MINUTE`, 30 — a question is a paid call), a 500-
+    character question cap, and the model's `reason` escaped and capped
+    before it reaches a screen (prompt-injection hygiene: the plan is the
+    only channel, and its free-text field is bounded).
+
+**Verification run (ADR §Verification):** the ten owner questions over the
+seeded tiendita — nine right with the engine's number, one honest
+«0 ordenes · esta semana · estado = pagada» (the model read «vendimos» as a
+state filter — the small print says so), none wrong; the field-that-does-
+not-exist path refused-corrected-or-unclear (unit + integration, and live:
+«cuántos empleados tenemos» → unclear); the row-scoped role got ITS total
+(live and in Postgres); mangled names resolved or asked (24 real dictation
+pairs in `names_test.go`, live «Yeison Ospina» → Jeison, «Gomes» → Gómez,
+«Juan Peres» → Juan Pérez, «Gómez» → asks Ana/Luis, «Wilfredo Pacheco» →
+not found); a write intent refused. Dictation by Miguel on a phone — the one
+verification only he can run — is what the deployed bot is now waiting for.

@@ -362,6 +362,81 @@ armado suyo; el motor ya sirve el endpoint.
 
 ---
 
+### 3d. «¿Cuántas órdenes hay hoy?» — preguntarle al bot con sus palabras
+
+Además de los tres comandos, el bot **responde preguntas** sobre sus datos,
+escritas o dictadas: «cuántas órdenes hay hoy», «qué pedidos están sin pagar»,
+«cuánto vendimos esta semana», «las órdenes de Ana Gómez», «órdenes por
+estado», «tenemos cupones vigentes». Cualquier cosa que no sea `resumen`,
+`estado` o `ayuda` se toma como una pregunta.
+
+**Cómo funciona, en una frase:** una inteligencia artificial TRADUCE su
+pregunta a una consulta cerrada que el motor ya sabe hacer (contar, listar,
+sumar sobre un recurso, con filtros y un período); el motor **revisa cada
+nombre contra su schema** y rechaza lo que no existe; **el número lo saca de
+la base**, nunca lo inventa la IA. La IA no ve sus datos: recibe solo la
+lista de recursos, campos y estados de su app, y la pregunta.
+
+**Lo que va a ver en el celular:**
+
+- El número arriba, en negrita, y debajo, en letra chica, **cómo entendió la
+  pregunta** («ordenes · esta semana · estado = pagada»). Si la leyó distinto
+  a lo que usted quiso, ahí se nota.
+- Un nombre mal dictado se **corrige contra los que existen** y se lo dice:
+  «Entendí «Ana Gomes» como **Ana Gómez**». Si hay varios parecidos, pregunta
+  cuál («¿Cuál? • Ana Gómez • Luis Gómez»). Si no existe, se lo dice («No
+  encuentro ningún cliente que se llame «Wilfredo Pacheco»») — nunca le
+  devuelve un cero como si fuera la respuesta.
+- «**No entendí**» cuando la pregunta no se puede responder con lo que su app
+  tiene (o cuando pregunta por algo que no existe), seguido de la lista de
+  sobre qué SÍ puede preguntar. Es la respuesta correcta: una cifra
+  inventada con cara segura es peor.
+- «**Por acá solo leo**» si pide crear, cambiar, cancelar o borrar algo. Las
+  escrituras por voz llegan en una etapa próxima, con confirmación.
+- Mientras piensa (uno o dos segundos, a veces cuatro) aparece «escribiendo…».
+  Si la IA no responde, el bot lo dice y los tres comandos siguen funcionando.
+- Una pregunta «por estado» llega también como **imagen**, con la misma
+  tarjeta del resumen.
+
+**Respeta los permisos.** La pregunta se responde COMO el rol configurado
+(`APPXIMO_TELEGRAM_SUMMARY_ROLE`): un rol acotado a sus filas cuenta solo las
+suyas, y un recurso que no puede leer no aparece ni en la lista de lo que
+puede preguntar.
+
+**Cuánto cuesta.** Cada pregunta es una llamada al modelo: medido, alrededor
+de **US$ 0,003 por pregunta** (tres décimas de centavo) y un segundo de
+espera. Diez preguntas al día son menos de un dólar al mes. Cada respuesta
+trae su costo por si quiere mirarlo, y hay un tope de 30 preguntas por minuto.
+
+**Cómo se activa** — en `/etc/<app>/<app>.env` (además de lo de §3c):
+
+```
+ANTHROPIC_API_KEY=sk-ant-…              # la clave del modelo (nunca en un repo, un log ni un reporte)
+APPXIMO_SUMMARY_TIMEZONE=America/Bogota # para que «hoy» sea su hoy (el servidor vive en UTC)
+```
+
+y `systemctl restart <app>`. Sin la clave, el bot responde a una pregunta
+«Las preguntas libres no están activadas…» y la ayuda; nada más cambia.
+
+**Preguntar por Siri (o cualquier atajo del celular).** Un atajo de tres
+pasos:
+
+1. **Dictar texto** (español) — eso es la pregunta.
+2. **Obtener contenido de URL** — `https://<inquilino>.<su-dominio>/api/ask`,
+   método `POST`, cabecera `Authorization: Bearer <token>` y
+   `Content-Type: application/json`, cuerpo JSON con un campo `q` = *Texto
+   dictado*.
+3. **Obtener valor del diccionario** `speech` → **Leer texto en voz alta**
+   (o `headline` para la versión de una línea; `text` si prefiere verlo).
+
+Diga «cuántas órdenes hay hoy» y Siri le lee el número que contó el motor.
+
+**Lo que todavía no responde (a propósito):** preguntas que cruzan dos
+recursos («clientes de Medellín con órdenes»), comparaciones contra otro
+período («¿vendimos más que el mes pasado?»), rankings («el producto más
+vendido»), porcentajes, y preguntas encadenadas («¿y ayer?» — cada pregunta
+va sola). Para esas responde «No entendí» — y le dice qué sí puede.
+
 ## 4. Qué hacer cuando pasa algo
 
 Recetas cortas, en el orden en que suele hacer falta. Todas empiezan igual: **mire antes de tocar** (30 segundos):
