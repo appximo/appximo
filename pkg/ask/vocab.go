@@ -165,15 +165,6 @@ var (
 	nameishParts = append(append([]string(nil), primaryParts...), "numero", "codigo", "sku", "placa", "referencia", "descripcion")
 )
 
-func nameish(field string) bool {
-	for _, p := range nameishParts {
-		if strings.Contains(field, p) {
-			return true
-		}
-	}
-	return false
-}
-
 // Vocabulary is what the model may name: the resources the asking ROLE may
 // read, each with the fields that role may read. Built per request from the
 // schema + the role's RBAC evaluation, so a role never even receives the word
