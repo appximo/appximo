@@ -114,7 +114,8 @@ type Config struct {
 // Service is the platform admin backend: super-admin auth (login + MFA) and the
 // consolidated tenant / user / observability admin operations.
 type Service struct {
-	askStats  func(ctx context.Context) map[string]any // VOZ-SIN-IA-S1: /admin/ask live state
+	askStats  func(ctx context.Context) map[string]any                                   // VOZ-SIN-IA-S1: /admin/ask live state
+	askLists  func(ctx context.Context, tenant string, days int) (map[string]any, error) // VOZ-TRAZABILIDAD-S1: the history lists
 	store     *Store
 	users     *userauth.Store // tenant users (auth_users), reused — not reimplemented
 	cp        controlplane.Service

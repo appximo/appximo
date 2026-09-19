@@ -296,7 +296,7 @@ func slackText(a Alert) string {
 		return fmt.Sprintf("🆕 [tenant %s] new error group on %s — %s (trace %s)", a.TenantID, a.Route, a.Message, a.TraceID)
 	case KindStorm:
 		return fmt.Sprintf("🌩 [tenant %s] %d NEW error groups in the last minute — individual alerts suppressed until it calms (%s)", a.TenantID, a.Count, a.Message)
-	case "ask_spend_warning", "ask_spend_capped":
+	case "ask_spend_warning", "ask_spend_capped", "ask_user_capped":
 		return fmt.Sprintf("🧾 [tenant %s] %s", a.TenantID, a.Message)
 	}
 	emoji := "🟡"

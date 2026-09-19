@@ -678,3 +678,81 @@ func TestAnswer_ModelOffKeepsTheParserAlive(t *testing.T) {
 		t.Fatalf("disabled reply: %+v", r)
 	}
 }
+
+// ── VOZ-TRAZABILIDAD-S1: the trace line, the fallback in words, redaction ──
+
+func TestAnswer_TraceLineOnlyWhenOnAndNeverInSpeech(t *testing.T) {
+	e := fixtures()
+	m := &scripted{err: errors.New("no")}
+	d := deps(m, e)
+	off := Answer(context.Background(), d, "cuántas citas hay hoy")
+	if strings.Contains(off.Text, "⚙︎") {
+		t.Fatalf("trace off must not mention who answered: %q", off.Text)
+	}
+	d.Trace = true
+	on := Answer(context.Background(), d, "cuántas citas hay hoy")
+	if !strings.Contains(on.Text, "⚙︎ parser") || !strings.Contains(on.Text, "US$ 0") {
+		t.Fatalf("trace on: %q", on.Text)
+	}
+	if strings.Contains(on.Speech, "⚙") || strings.Contains(on.Speech, "US$") {
+		t.Fatalf("the voice must never read the trace: %q", on.Speech)
+	}
+	if on.Headline != off.Headline || on.Number == nil || *on.Number != *off.Number {
+		t.Fatalf("trace changes nothing but the footer")
+	}
+	// A model answer says why the parser passed.
+	m2 := &scripted{replies: []string{plan(Plan{Kind: "count", Resource: "citas"})}}
+	d2 := deps(m2, e)
+	d2.Trace = true
+	r := Answer(context.Background(), d2, "cuántas citas vencidas hay")
+	if r.Source != "model" || r.Fallback != "unknown word: vencidas" || r.FallbackES != "palabra fuera del schema «vencidas»" {
+		t.Fatalf("fallback: %+v", r)
+	}
+	if !strings.Contains(r.Text, "⚙︎ modelo") || !strings.Contains(r.Text, "el parser pasó: palabra fuera del schema «vencidas»") {
+		t.Fatalf("trace must say why: %q", r.Text)
+	}
+	// The cache says so too, at zero cost.
+	c := NewPlanCache(10, time.Hour)
+	d2.Cache, d2.CacheScope = c, "t|owner"
+	m2.replies = []string{plan(Plan{Kind: "count", Resource: "citas"})}
+	Answer(context.Background(), d2, "how many citas overall")
+	r = Answer(context.Background(), d2, "How many citas overall?")
+	if r.Source != "cache" || !strings.Contains(r.Text, "⚙︎ caché") || !strings.Contains(r.Text, "US$ 0") {
+		t.Fatalf("cache trace: %q", r.Text)
+	}
+}
+
+func TestRedact_ReplacesTheNamesThePlanCarries(t *testing.T) {
+	p := &Plan{Kind: "list", Resource: "citas", Filters: []Filter{{Field: "optometra_id", Match: "Ana Gomes"}}}
+	if got := Redact("las citas de Ana Gomes de hoy", p); got != "las citas de [nombre] de hoy" {
+		t.Fatalf("redact: %q", got)
+	}
+	if got := Redact("Cuántas citas de ANA GÓMES hay", p); got != "Cuántas citas de [nombre] hay" {
+		t.Fatalf("redact folds case and accents: %q", got)
+	}
+	if got := Redact("cuántas citas hay", &Plan{Kind: "count", Resource: "citas"}); got != "cuántas citas hay" {
+		t.Fatalf("nothing to redact: %q", got)
+	}
+	if got := Redact("x", nil); got != "x" {
+		t.Fatalf("nil plan")
+	}
+}
+
+func TestCache_UnclearExpiresInAnHour(t *testing.T) {
+	c := NewPlanCache(10, 24*time.Hour)
+	base := time.Now()
+	c.now = func() time.Time { return base }
+	c.Put("k", Plan{Kind: "unclear", Reason: "no"}, "model")
+	c.Put("ok", Plan{Kind: "count", Resource: "citas"}, "model")
+	c.now = func() time.Time { return base.Add(59 * time.Minute) }
+	if _, _, ok := c.Get("k"); !ok {
+		t.Fatal("unclear still cached within the hour")
+	}
+	c.now = func() time.Time { return base.Add(61 * time.Minute) }
+	if _, _, ok := c.Get("k"); ok {
+		t.Fatal("unclear must expire after an hour")
+	}
+	if _, _, ok := c.Get("ok"); !ok {
+		t.Fatal("a plan keeps the 24 h TTL")
+	}
+}

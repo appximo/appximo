@@ -55,6 +55,10 @@ type Deps struct {
 	CacheScope string
 	// NoParser skips the deterministic parser (tests of the model path).
 	NoParser bool
+	// Trace appends who answered, the latency, the cost and — when the parser
+	// fell through — why, to the human TEXT of the reply (VOZ-TRAZABILIDAD-S1).
+	// Never to Speech. For whoever administers; off by default.
+	Trace bool
 }
 
 // Result is the reply, composed by the engine.
@@ -84,6 +88,12 @@ type Result struct {
 	// Source says who produced the plan: "parser" (no model, no cache),
 	// "cache" (a remembered plan), "model" (a paid call), or "" (no plan).
 	Source string `json:"source,omitempty"`
+	// Fallback is the parser's reason for NOT answering (its raw code, e.g.
+	// "unknown word: vendimos") whenever the question went past it — the
+	// datum that says what the parser should learn next. FallbackES is the
+	// same in the owner's words.
+	Fallback   string `json:"fallback,omitempty"`
+	FallbackES string `json:"fallback_es,omitempty"`
 	// Detail is the engine-side reason for the log (never the owner).
 	Detail string `json:"-"`
 }
@@ -103,10 +113,117 @@ func Answer(ctx context.Context, d Deps, question string) Result {
 	res := answer(ctx, d, question)
 	res.TotalMS = time.Since(start).Milliseconds()
 	res.CostUSD = res.Usage.CostUSD(d.ModelName)
+	if res.Fallback != "" {
+		res.FallbackES = fallbackES(res.Fallback)
+	}
 	if res.Speech == "" {
-		res.Speech = Speech(res.Text)
+		res.Speech = Speech(res.Text) // the voice never carries the trace
+	}
+	if d.Trace && res.Text != "" {
+		res.Text += "\n" + TraceLine(res)
 	}
 	return res
+}
+
+// TraceLine words who answered, in how long, at what cost — and why the
+// parser passed — for the administrator's eyes: "⚙︎ parser · 2 ms · US$ 0",
+// "⚙︎ modelo · 1,1 s · US$ 0,0029 · al modelo porque: palabra fuera del
+// schema «vendimos»".
+func TraceLine(r Result) string {
+	who := map[string]string{"parser": "parser", "cache": "caché", "model": "modelo"}[r.Source]
+	if who == "" {
+		who = "sin plan"
+	}
+	lat := fmt.Sprintf("%d ms", r.TotalMS)
+	if r.TotalMS >= 1000 {
+		lat = strings.Replace(fmt.Sprintf("%.1f s", float64(r.TotalMS)/1000), ".", ",", 1)
+	}
+	cost := "US$ 0"
+	if r.CostUSD > 0 {
+		cost = strings.Replace(fmt.Sprintf("US$ %.4f", r.CostUSD), ".", ",", 1)
+	}
+	line := fmt.Sprintf("<i>⚙︎ %s · %s · %s", who, lat, cost)
+	if r.FallbackES != "" && r.Source != "parser" {
+		// The same wording for a model answer and its cached repeat: what the
+		// PARSER could not do is the datum, wherever the plan came from.
+		line += " · el parser pasó: " + esc(r.FallbackES)
+	}
+	return line + "</i>"
+}
+
+// fallbackES puts the parser's reason code in the owner's words.
+func fallbackES(code string) string {
+	switch {
+	case strings.HasPrefix(code, "unknown word: "):
+		return "palabra fuera del schema «" + strings.TrimPrefix(code, "unknown word: ") + "»"
+	case code == "no resource named":
+		return "no nombra ningún recurso del schema"
+	case strings.HasPrefix(code, "two resources: "):
+		return "nombra dos recursos (" + strings.TrimPrefix(code, "two resources: ") + ")"
+	case strings.HasPrefix(code, "two operations: "):
+		return "dos operaciones (" + strings.TrimPrefix(code, "two operations: ") + ")"
+	case code == "two periods":
+		return "dos períodos"
+	case code == "two names":
+		return "dos nombres propios"
+	case strings.HasPrefix(code, "name could match "):
+		return "el nombre podría ir en " + strings.ReplaceAll(strings.TrimPrefix(code, "name could match "), " or ", " o en ")
+	case code == "name with no place to match":
+		return "un nombre propio sin dónde casarlo"
+	case strings.HasPrefix(code, "two values for "):
+		return "dos valores para " + strings.TrimPrefix(code, "two values for ")
+	case strings.HasPrefix(code, "value "):
+		return "un valor de otro recurso (" + strings.TrimPrefix(code, "value ") + ")"
+	case code == "no amount field", strings.HasPrefix(code, "two amount fields"):
+		return "no sé qué monto sumar"
+	case strings.HasPrefix(code, "invalid: "):
+		return "plan inválido: " + strings.TrimPrefix(code, "invalid: ")
+	case code == "empty":
+		return "pregunta vacía"
+	}
+	return code
+}
+
+// Redact replaces, in the question text, every proper name the plan carries
+// as a `match` with [nombre] — the history keeps the SHAPE the parser needs
+// to learn from, not the person (HistoryText=redacted).
+func Redact(question string, p *Plan) string {
+	if p == nil {
+		return question
+	}
+	out := question
+	for _, f := range p.Filters {
+		if f.Match == "" {
+			continue
+		}
+		out = replaceFold(out, f.Match, "[nombre]")
+	}
+	return out
+}
+
+// replaceFold replaces needle in s ignoring case and accents, keeping the
+// rest of s intact.
+func replaceFold(s, needle, repl string) string {
+	ns := normalize(needle)
+	if ns == "" {
+		return s
+	}
+	words := strings.Fields(s)
+	nw := strings.Fields(ns)
+	for i := 0; i+len(nw) <= len(words); i++ {
+		ok := true
+		for k := range nw {
+			if normalize(words[i+k]) != nw[k] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			words = append(append(append([]string{}, words[:i]...), repl), words[i+len(nw):]...)
+			i += 0
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 func answer(ctx context.Context, d Deps, question string) Result {
@@ -145,7 +262,9 @@ func answer(ctx context.Context, d Deps, question string) Result {
 	base := Result{}
 	if source == "" {
 		if d.Model == nil {
-			return modelOffResult(d, parseReason)
+			r := modelOffResult(d, parseReason)
+			r.Fallback = parseReason
+			return r
 		}
 		mstart := time.Now()
 		var err error
@@ -153,6 +272,7 @@ func answer(ctx context.Context, d Deps, question string) Result {
 		base = Result{Usage: tr.Usage, ModelMS: time.Since(mstart).Milliseconds(), Corrected: tr.Corrected, Source: "model"}
 		if err != nil {
 			base.Kind = "unavailable"
+			base.Fallback = parseReason
 			base.Detail = err.Error()
 			base.Headline = "El modelo no respondió"
 			base.Text = "⚠️ No pude pensar la pregunta ahora (el modelo no respondió a tiempo). Los comandos fijos siguen funcionando: <b>resumen</b>, <b>estado</b>, <b>ayuda</b>."
@@ -166,6 +286,7 @@ func answer(ctx context.Context, d Deps, question string) Result {
 	base.Source = source
 	if parseReason != "" {
 		base.Detail = "parser: " + parseReason
+		base.Fallback = parseReason
 	}
 	switch p.Kind {
 	case "write":
@@ -186,13 +307,13 @@ func answer(ctx context.Context, d Deps, question string) Result {
 	// Proper names → what exists.
 	resolved, nameRes, ok := resolveNames(ctx, d, p)
 	if !ok {
-		nameRes.Usage, nameRes.ModelMS, nameRes.Corrected, nameRes.Plan, nameRes.Source = base.Usage, base.ModelMS, base.Corrected, &p, source
+		nameRes.Usage, nameRes.ModelMS, nameRes.Corrected, nameRes.Plan, nameRes.Source, nameRes.Fallback = base.Usage, base.ModelMS, base.Corrected, &p, source, base.Fallback
 		return nameRes
 	}
 	said := nameRes.Understood // "Entendí «Gomes» como Ana Gómez."
 
 	out := execute(ctx, d, resolved)
-	out.Usage, out.ModelMS, out.Corrected, out.Plan, out.Source = base.Usage, base.ModelMS, base.Corrected, &p, source
+	out.Usage, out.ModelMS, out.Corrected, out.Plan, out.Source, out.Fallback = base.Usage, base.ModelMS, base.Corrected, &p, source, base.Fallback
 	if base.Detail != "" && out.Detail == "" {
 		out.Detail = base.Detail
 	}
@@ -228,6 +349,11 @@ func reasonHint(r string) string {
 // stop reply, and ok=false when it stopped.
 func resolveNames(ctx context.Context, d Deps, p Plan) (Plan, Result, bool) {
 	res := d.Vocab.Resource(p.Resource)
+	// Work on a COPY of the filters: the caller keeps the unresolved plan (the
+	// `match` as said) for the cache, the reply's `plan` and the history's
+	// redaction — mutating the shared backing array turned a cached name into
+	// a cached id (found by the history redaction test).
+	p.Filters = append([]Filter(nil), p.Filters...)
 	var said []string
 	for i, f := range p.Filters {
 		if f.Match == "" {
@@ -505,6 +631,10 @@ func modelOffResult(d Deps, parseReason string) Result {
 		r.Kind = "capped"
 		r.Headline = "Techo diario del modelo alcanzado"
 		r.Text = "🧾 Hoy ya se gastó el techo diario del modelo, así que esa pregunta no la puedo pensar hasta mañana. Las preguntas simples (contar, listar, sumar un recurso por su nombre, con estado y período) siguen respondiendo, y los comandos fijos también: <b>resumen</b>, <b>estado</b>, <b>ayuda</b>."
+	case "user_capped":
+		r.Kind = "capped"
+		r.Headline = "Tu cupo diario del modelo se agotó"
+		r.Text = "🧾 Ya usaste tu cupo diario del modelo, así que esa pregunta no la puedo pensar hasta mañana. Las preguntas simples siguen respondiendo, y los comandos fijos también: <b>resumen</b>, <b>estado</b>, <b>ayuda</b>."
 	case "minute":
 		r.Kind = "capped"
 		r.Headline = "Demasiadas preguntas al modelo este minuto"

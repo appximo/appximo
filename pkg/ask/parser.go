@@ -56,7 +56,7 @@ var (
 		"que", "me", "mi", "mis", "nos", "nuestro", "nuestra", "nuestros", "nuestras", "tengo", "tenemos", "tenes", "tienes", "tiene",
 		"hay", "existen", "existe", "estan", "esta", "son", "es", "actualmente", "ahora", "ya", "todas", "todos", "toda", "todo",
 		"por", "favor", "decime", "dime", "digame", "quiero", "quisiera", "necesito", "saber", "ver", "podes", "puedes", "podrias",
-		"registrados", "registradas", "cargados", "cargadas", "hechas", "hechos", "actuales", "actual", "con", "estado", "tipo",
+		"cargados", "cargadas", "hechas", "hechos", "actuales", "actual", "con", "estado", "tipo", "en", "total",
 		"para", "sobre", "cual", "cuales", "hubo", "hubieron", "llegaron", "entraron", "vinieron", "quedan", "queda", "hoy")
 	countWords = set("cuantos", "cuantas", "cuanto", "cuanta", "numero", "cantidad", "conta", "contame", "cuenta", "cuentame", "total")
 	listWords  = set("lista", "listame", "listado", "mostrame", "muestrame", "mostra", "muestra", "dame", "traeme", "pasame", "cuales", "que", "ver")
@@ -77,8 +77,14 @@ var periodPhrases = []struct {
 	{"ultimos 7 dias", "last_7_days"}, {"ultimos siete dias", "last_7_days"},
 	{"ultimos 30 dias", "last_30_days"}, {"ultimos treinta dias", "last_30_days"},
 	{"esta semana", "this_week"}, {"este mes", "this_month"}, {"este ano", "this_year"}, {"este año", "this_year"},
+	{"del dia de hoy", "today"}, {"del dia", "today"}, {"de la semana", "this_week"}, {"del mes", "this_month"}, {"del ano", "this_year"}, {"del año", "this_year"},
 	{"de hoy", "today"}, {"hoy", "today"}, {"de ayer", "yesterday"}, {"ayer", "yesterday"},
 }
+
+// periodOnly are words that mean nothing WITHOUT a period ("nuevos" = created
+// in the period; alone it is a business word the schema does not declare):
+// consumed only when a period phrase was found, else they stay leftover.
+var periodOnly = set("nuevos", "nuevas", "nuevo", "nueva", "recientes", "reciente", "creados", "creadas", "creado", "creada", "registrados", "registradas")
 
 func set(words ...string) map[string]bool {
 	m := make(map[string]bool, len(words))
@@ -340,9 +346,10 @@ func Parse(question string, v *Vocabulary) ParseResult {
 		filters = append(filters, Filter{Field: matchField, Op: "eq", Match: match})
 	}
 
-	// 8. every remaining token must be a stopword.
+	// 8. every remaining token must be a stopword (or a period-only word
+	// when a period was found: "nuevos hoy" = created today).
 	for _, t := range toks {
-		if t.used || stopwords[t.norm] {
+		if t.used || stopwords[t.norm] || (period != nil && periodOnly[t.norm]) {
 			continue
 		}
 		return ParseResult{Reason: "unknown word: " + t.raw}

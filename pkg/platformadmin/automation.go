@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/appximo/appximo/pkg/outbox"
@@ -312,5 +313,23 @@ func (s *Service) handleAsk(w http.ResponseWriter, r *http.Request) {
 			out[k] = v
 		}
 	}
+	// The three lists that matter (VOZ-TRAZABILIDAD-S1), per tenant, from the
+	// question history: ?tenant=<id>&days=<n> (days default = the retention).
+	if tenant := r.URL.Query().Get("tenant"); tenant != "" && s.askLists != nil {
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		lists, err := s.askLists(ctx, tenant, days)
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ask history unavailable: " + err.Error()})
+			return
+		}
+		for k, v := range lists {
+			out[k] = v
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// SetAskLists installs the reader of the per-tenant history lists.
+func (s *Service) SetAskLists(fn func(ctx context.Context, tenant string, days int) (map[string]any, error)) {
+	s.askLists = fn
 }

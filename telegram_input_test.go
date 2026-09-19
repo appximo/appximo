@@ -426,3 +426,55 @@ func msg(chatID int64, text string) *struct {
 }
 
 var _ = time.Second
+
+// VOZ-TRAZABILIDAD-S1: `gasto` → GET /api/ask/spend (+png) as the configured role.
+func TestReceiver_GastoSendsPictureAndText(t *testing.T) {
+	f := &fakeTG{}
+	srv := f.server(t)
+	inner := stubAskRouter(t, "acme", "owner", askReply{status: 200, body: map[string]any{"kind": "answer", "text": "x"}})
+	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/ask/spend" {
+			inner.ServeHTTP(w, r)
+			return
+		}
+		authz := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if _, err := auth.ValidateToken(authz, testJWTSecret); err != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Query().Get("format") == "png" {
+			w.Header().Set("Content-Type", "image/png")
+			w.Write(tinyPNG()) //nolint:errcheck
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"text": "🧾 <b>Gasto del modelo</b> US$ 0,003 hoy"}) //nolint:errcheck
+	})
+	rcv := newTestReceiver(t, srv, router)
+	rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "gasto")})
+	if ph := f.sentPhotos(); len(ph) != 1 || !strings.Contains(ph[0].caption, "Gasto del modelo") {
+		t.Fatalf("gasto must go as photo + caption; got %v / %v", ph, f.replies())
+	}
+	// The fixed commands are untouched.
+	rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "estado")})
+	if got := f.replies(); len(got) != 1 || !strings.Contains(got[0], "Estado") {
+		t.Fatalf("estado survives: %v", got)
+	}
+}
+
+func TestReceiver_GastoForbiddenRoleIsToldSo(t *testing.T) {
+	f := &fakeTG{}
+	srv := f.server(t)
+	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/ask/spend" {
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(map[string]any{"error": "forbidden"}) //nolint:errcheck
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	rcv := newTestReceiver(t, srv, router)
+	rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "gasto")})
+	if got := f.replies(); len(got) != 1 || !strings.Contains(got[0], "no puede ver el gasto") {
+		t.Fatalf("forbidden role: %v", got)
+	}
+}

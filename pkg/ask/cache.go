@@ -51,7 +51,11 @@ func (c *PlanCache) Get(key string) (Plan, string, bool) {
 	defer c.mu.Unlock()
 	e := c.entries[key]
 	now := c.now()
-	if e == nil || now.Sub(e.at) > c.ttl {
+	ttl := c.ttl
+	if e != nil && e.plan.Kind == "unclear" {
+		ttl = UnclearTTL
+	}
+	if e == nil || now.Sub(e.at) > ttl {
 		if e != nil {
 			delete(c.entries, key)
 		}
@@ -63,13 +67,17 @@ func (c *PlanCache) Get(key string) (Plan, string, bool) {
 	return e.plan, e.source, true
 }
 
-// Cacheable reports whether a plan is worth remembering: an executable read,
-// and also `unclear` — the model runs at temperature 0 over the same
-// vocabulary, so a question it did not understand today it will not
-// understand in an hour either; re-asking only re-bills (measured: half the
-// second-pass model calls were repeated "no entendí"). A vocabulary change
-// (a schema deploy) is a restart, which empties the cache. `write` never
-// reaches the model (the parser refuses it).
+// UnclearTTL bounds how long a "no entendí" is remembered (VOZ-TRAZABILIDAD-S1):
+// long enough that a loop re-asking the same nonsense does not re-bill every
+// second, short enough that a phrase the model could answer is not denied all
+// day because one call went wrong (temperature 0 is deterministic in intent,
+// not a guarantee of identical output from the API).
+const UnclearTTL = time.Hour
+
+// Cacheable reports whether a plan is worth remembering: an executable read
+// (24 h), and also `unclear` (UnclearTTL) — re-asking within the hour only
+// re-bills. A vocabulary change (a schema deploy) is a restart, which empties
+// the cache. `write` never reaches the model (the parser refuses it).
 func Cacheable(p Plan) bool {
 	switch p.Kind {
 	case "count", "list", "sum", "avg", "min", "max", "unclear":

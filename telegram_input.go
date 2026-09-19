@@ -171,6 +171,13 @@ func (rcv *telegramReceiver) handleUpdate(ctx context.Context, u telegram.Update
 		rcv.replyWithImage(sendCtx, rcv.summaryPNG(ctx), text)
 	case "estado":
 		rcv.reply(sendCtx, rcv.summary(ctx, "census"))
+	case "gasto":
+		// What the questions cost (VOZ-TRAZABILIDAD-S1): today, the month, the
+		// cap, who answered how many, the phrases that cost the most — as the
+		// same census card the digest uses, text beneath. Authorized by the
+		// engine for admin-grade roles only (GET /api/ask/spend).
+		text, png := rcv.spend(ctx)
+		rcv.replyWithImage(sendCtx, png, text)
 	case "ayuda", "start", "help":
 		rcv.reply(sendCtx, helpText)
 	default:
@@ -186,6 +193,7 @@ func (rcv *telegramReceiver) handleUpdate(ctx context.Context, u telegram.Update
 const helpText = "🤖 <b>Comandos</b>\n" +
 	"• <b>resumen</b> — qué pasó hoy (nuevos, actualizados, pendientes)\n" +
 	"• <b>estado</b> — cuántos hay de cada cosa ahora mismo\n" +
+	"• <b>gasto</b> — cuánto van costando las preguntas (hoy, el mes, el techo, quién las resolvió)\n" +
 	"• <b>ayuda</b> — esta lista\n" +
 	"• o <b>preguntá</b> con tus palabras: «cuántas órdenes hay hoy», «qué pedidos están sin pagar», «cuánto vendimos esta semana»\n\n" +
 	"Solo lectura: escribir datos por acá llega en una próxima etapa."
@@ -276,6 +284,32 @@ func (rcv *telegramReceiver) selfPost(ctx context.Context, path string, body []b
 	req.Header.Set("Content-Type", "application/json")
 	h.ServeHTTP(rec, req)
 	return rec
+}
+
+// spend fetches GET /api/ask/spend (text) and its ?format=png (picture). A
+// role the engine does not consider admin-grade gets a plain refusal; an
+// engine not yet up its own sentence.
+func (rcv *telegramReceiver) spend(ctx context.Context) (string, []byte) {
+	rec := rcv.selfCall(ctx, "/api/ask/spend")
+	if rec == nil {
+		return "⚠️ El motor todavía no está listo; probá en unos segundos.", nil
+	}
+	var rep struct {
+		Text string `json:"text"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &rep)
+	switch {
+	case rec.Code == http.StatusForbidden:
+		return "🔒 Tu rol no puede ver el gasto de la plataforma.", nil
+	case rec.Code != http.StatusOK || rep.Text == "":
+		zlog.Warn().Int("status", rec.Code).Msg("telegram gasto: engine did not answer 200")
+		return fmt.Sprintf("⚠️ No pude leer el gasto (el motor respondió %d).", rec.Code), nil
+	}
+	var png []byte
+	if prec := rcv.selfCall(ctx, "/api/ask/spend?format=png"); prec != nil && prec.Code == http.StatusOK && strings.HasPrefix(prec.Header().Get("Content-Type"), "image/png") {
+		png = prec.Body.Bytes()
+	}
+	return rep.Text, png
 }
 
 // summaryPNG fetches GET /api/summary?format=png the same way summary fetches

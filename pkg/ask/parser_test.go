@@ -91,8 +91,12 @@ var corpus = []struct {
 	{"cuántas órdenes y cuántos pagos hay", "model", true}, // two resources
 	{"cuántas órdenes hay hoy y ayer", "model", true},      // two periods
 	{"lista de clientes", "sure:list clientes", true},
-	{"cuántos clientes nuevos hay hoy", "model", true}, // "nuevos" is not a schema word
-	{"cuántas líneas hay", "model", true},              // no such resource here
+	{"cuántos clientes nuevos hay hoy", "sure:count clientes today", true}, // "nuevos" + a period = created in it (generic Spanish, no domain word)
+	{"cuántos clientes nuevos hay", "model", true},                         // "nuevos" alone means nothing the schema declares
+	{"órdenes del día", "sure:list ordenes today", true},
+	{"cuántas órdenes hay en total", "sure:count ordenes", true},
+	{"ventas del mes", "model", true},     // "ventas" is not a resource here
+	{"cuántas líneas hay", "model", true}, // no such resource here
 	{"órdenes entregadas de la semana pasada", "sure:list ordenes estado=entregada last_week", true},
 }
 

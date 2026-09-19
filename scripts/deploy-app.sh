@@ -62,6 +62,13 @@
 #   --role=ROLE           role of the probe token         [default: admin]
 #   --resource=NAME       resource for the read + write probe [default: first list route in /openapi.json]
 #   --keep=PATH           a file on the box whose md5 must be identical before and after
+#   --env-add=KEY[,KEY…]  add/replace these env keys in /etc/APP/APP.env on the box
+#                         (OPS-56); the VALUES come from the operator's own
+#                         environment (export KEY=… before running), travel over
+#                         ssh stdin — never on a command line, never in a log —
+#                         land 0600 after the pre-deploy copy of the env, and
+#                         are verified present at the end. A KEY not set here
+#                         aborts before touching anything.
 #   --tag=LABEL           label for the pre-deploy copies [default: the new version]
 #   --no-audit            skip the final fleet-audit
 #   --timeout=S           health timeout passed to deploy-update.sh [default 30]
@@ -73,7 +80,7 @@
 set -uo pipefail
 
 HOST=""; APP=""; BINARY=""; URL=""; CLI=""; WORKER=""; TENANT=""; THOST=""; RESOLVE=""; INSECURE=0
-ROLE="admin"; RESOURCE=""; KEEP=""; TAG=""; AUDIT=1; TIMEOUT=30
+ROLE="admin"; RESOURCE=""; KEEP=""; TAG=""; AUDIT=1; TIMEOUT=30; ENVADD=""
 for arg in "$@"; do
 	case "$arg" in
 		--host=*) HOST="${arg#*=}" ;;
@@ -89,6 +96,7 @@ for arg in "$@"; do
 		--role=*) ROLE="${arg#*=}" ;;
 		--resource=*) RESOURCE="${arg#*=}" ;;
 		--keep=*) KEEP="${arg#*=}" ;;
+		--env-add=*) ENVADD="${arg#*=}" ;;
 		--tag=*) TAG="${arg#*=}" ;;
 		--no-audit) AUDIT=0 ;;
 		--timeout=*) TIMEOUT="${arg#*=}" ;;
@@ -184,6 +192,27 @@ echo "  pre-deploy copies: /root/$APP-{bin,env,schema}.pre-$TAG"
 REMOTE
 then die "backup failed — nothing was touched"; fi
 ok "backup set written; pre-deploy copies kept"
+
+# 2b · env keys the new binary needs (OPS-56, VOZ-TRAZABILIDAD-S1). Values are
+# read from THIS shell's environment and piped to the box: no value ever
+# appears in a command line, a process list or a log — the same rule as the
+# model key. The pre-deploy env copy above is the rollback of this step.
+if [ -n "$ENVADD" ]; then
+  step "2b · env keys: $ENVADD"
+  payload=""
+  IFS=',' read -ra KEYS <<<"$ENVADD"
+  for k in "${KEYS[@]}"; do
+    k="${k// /}"; [ -n "$k" ] || continue
+    [[ "$k" =~ ^[A-Z][A-Z0-9_]*$ ]] || die "--env-add: $k is not an env key name"
+    v="${!k-}"
+    [ -n "$v" ] || die "--env-add: $k is not set in the operator's environment (export $k=… first) — nothing was touched"
+    payload+="$k=$v"$'\n'
+  done
+  if ! printf '%s' "$payload" | "${SSH[@]}" "set -e; f='$ENVF'; tmp=\$(mktemp); cat > \$tmp; while IFS= read -r line; do k=\${line%%=*}; grep -v \"^\$k=\" \"\$f\" > \"\$f.new\" || true; printf '%s\n' \"\$line\" >> \"\$f.new\"; cat \"\$f.new\" > \"\$f\"; rm -f \"\$f.new\"; done < \$tmp; rm -f \$tmp; chmod 600 \"\$f\"; for k in \$(printf '%s' '$ENVADD' | tr ',' ' '); do grep -q \"^\$k=\" \"\$f\" || { echo \"  \$k missing after write\"; exit 1; }; echo \"  ✓ \$k present in \$f (0600)\"; done"; then
+    die "env keys could not be written — restore /root/$APP-env.pre-$TAG if the file was touched"
+  fi
+  ok "env keys written and verified (values never printed)"
+fi
 KEEP0=""
 if [ -n "$KEEP" ]; then KEEP0="$("${SSH[@]}" "md5sum '$KEEP' 2>/dev/null | cut -d' ' -f1")"; [ -n "$KEEP0" ] || die "--keep $KEEP not found on the box"; ok "keep: $KEEP md5 $KEEP0"; fi
 

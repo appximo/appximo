@@ -133,6 +133,7 @@ type App struct {
 	// unset; a half-configuration is a boot error, not a silent no-op.
 	tgReceiver *telegramReceiver
 	askRuntime *codegen.AskRuntime // VOZ-SIN-IA-S1: the question path's wallet guard + plan cache (per app)
+	askHistory *askspend.History   // VOZ-TRAZABILIDAD-S1: the question log (async writer)
 
 	cpSvc controlplane.Service
 	cpSrv *http.Server
@@ -350,6 +351,10 @@ func New(cfg Config) (*App, error) {
 	// day, so a restart never forgets the morning's spend. The caps are read
 	// FAIL-FAST here — a cap that is silently ignored is worse than none.
 	if err := askspend.EnsureTable(context.Background(), pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("appximo: %w", err)
+	}
+	if err := askspend.EnsureHistoryTable(context.Background(), pool); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("appximo: %w", err)
 	}
@@ -596,6 +601,15 @@ func New(cfg Config) (*App, error) {
 	app.askRuntime = &codegen.AskRuntime{
 		Ledger: askspend.New(askCfg, pool, summary.Location(), alerter, s.Name),
 		Cache:  askCache,
+	}
+	// The question history (VOZ-TRAZABILIDAD-S1): one row per question,
+	// written off the answer path by its own goroutine, pruned by retention.
+	app.askHistory = askspend.NewHistory(askCfg, pool)
+	app.askRuntime.Ledger.SetHistory(app.askHistory)
+	if askCfg.HistoryDays > 0 {
+		log.Printf("ask: question history ON — %d days, text %s (APPXIMO_ASK_HISTORY_DAYS / _TEXT); trace in replies %s (APPXIMO_ASK_TRACE); per-user daily cap US$ %.2f (0 = off)", askCfg.HistoryDays, askCfg.HistoryText, map[bool]string{true: "ON", false: "off"}[askCfg.Trace], askCfg.UserDailyUSD)
+	} else {
+		log.Printf("ask: question history OFF (APPXIMO_ASK_HISTORY_DAYS=0)")
 	}
 	if regErr := app.metrics.Register(askspend.NewCollector(app.askRuntime.Ledger, askCache.Stats)); regErr != nil {
 		log.Printf("WARNING: ask spend gauges not registered on /metrics: %v", regErr)
@@ -1004,6 +1018,27 @@ func New(cfg Config) (*App, error) {
 	app.platformAdmin.SetTenantDB(app.tdb)
 	// What the questions cost (VOZ-SIN-IA-S1): GET /admin/ask adds the live
 	// state — today's rows in memory, the plan cache counters, the caps.
+	app.platformAdmin.SetAskLists(func(ctx context.Context, tenant string, days int) (map[string]any, error) {
+		h := app.askHistory
+		share, err := h.ShareFor(ctx, tenant, days)
+		if err != nil {
+			return nil, err
+		}
+		top, err := h.TopCost(ctx, tenant, days, 20)
+		if err != nil {
+			return nil, err
+		}
+		rep, err := h.TopRepeated(ctx, tenant, days, 20)
+		if err != nil {
+			return nil, err
+		}
+		fb, err := h.ModelFallbacks(ctx, tenant, days, 50)
+		if err != nil {
+			return nil, err
+		}
+		w, d := h.Stats()
+		return map[string]any{"tenant": tenant, "share": share, "top_cost": top, "top_repeated": rep, "model_fallbacks": fb, "history": map[string]any{"written_since_boot": w, "dropped_since_boot": d, "days": app.askRuntime.Ledger.Config().HistoryDays, "text": app.askRuntime.Ledger.Config().HistoryText}}, nil
+	})
 	app.platformAdmin.SetAskStats(func(ctx context.Context) map[string]any {
 		rt := app.askRuntime
 		h, m, sz := rt.Cache.Stats()
@@ -1015,7 +1050,7 @@ func New(cfg Config) (*App, error) {
 		return map[string]any{
 			"live_today": rt.Ledger.Today(),
 			"plan_cache": map[string]any{"hits": h, "misses": m, "size": sz, "hit_rate": hitRate},
-			"caps":       map[string]any{"daily_usd": cfg.DailyUSD, "per_minute": cfg.PerMinute, "alert_pct": cfg.AlertPct},
+			"caps":       map[string]any{"daily_usd": cfg.DailyUSD, "per_minute": cfg.PerMinute, "alert_pct": cfg.AlertPct, "user_daily_usd": cfg.UserDailyUSD, "trace": cfg.Trace, "history_days": cfg.HistoryDays, "history_text": cfg.HistoryText},
 		}
 	})
 	// Files manager (UI-F5-S1): the Studio files view manages a tenant's files
@@ -1338,6 +1373,9 @@ func (a *App) startBackground(ctx context.Context) {
 	}
 	if a.tgReceiver != nil {
 		go a.tgReceiver.run(ctx)
+	}
+	if a.askHistory != nil {
+		go a.askHistory.Run(ctx)
 	}
 	if a.obsStore != nil {
 		go flushObsSnapshots(ctx, a.obsStore, a.rings, a.hist, a.sloEngine)

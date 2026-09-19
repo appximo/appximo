@@ -467,7 +467,7 @@ func TestAsk_DailyCapDegradesAlertsAndSurvivesRestart(t *testing.T) {
 		t.Fatalf("persisted row: usd=%v capped=%v err=%v", usd, capped, err)
 	}
 	fresh := askspend.New(cfg, pool, time.UTC, nil, "Óptica")
-	if v := fresh.Allow(context.Background(), tenantID); v.ModelOK || v.Reason != "capped" {
+	if v := fresh.Allow(context.Background(), tenantID, ""); v.ModelOK || v.Reason != "capped" {
 		t.Fatalf("a restarted ledger must remember the cap: %+v", v)
 	}
 	_ = rt
@@ -485,5 +485,160 @@ func TestAsk_NoKey_ParserStillAnswers(t *testing.T) {
 	got = dpDo(t, rest, "POST", "/api/ask", super, map[string]any{"q": "cuánto vendimos esta semana"}, http.StatusServiceUnavailable)
 	if got["error"] != "ask_disabled" {
 		t.Fatalf("no key, model question → 503 ask_disabled: %v", got)
+	}
+}
+
+// ── VOZ-TRAZABILIDAD-S1: trace switch, history + redaction, per-user cap, the spend view ──
+
+func setupAskTrace(t *testing.T, fm *fakeAnthropic, cfg askspend.Config, al observability.Alerter) (*httptest.Server, *pgxpool.Pool, *codegen.AskRuntime, *askspend.History, func(role, uid string) string, func()) {
+	t.Helper()
+	rest, pool, rt, tok, done := setupAskRuntime(t, fm, cfg, al)
+	if err := askspend.EnsureHistoryTable(context.Background(), pool); err != nil {
+		done()
+		t.Fatalf("ensure history: %v", err)
+	}
+	h := askspend.NewHistory(cfg, pool)
+	rt.Ledger.SetHistory(h)
+	hctx, hcancel := context.WithCancel(context.Background())
+	go h.Run(hctx)
+	return rest, pool, rt, h, tok, func() { hcancel(); time.Sleep(50 * time.Millisecond); done() }
+}
+
+func waitHistory(t *testing.T, pool *pgxpool.Pool, want int) {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		var n int
+		if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM public.ask_history`).Scan(&n); err == nil && n >= want {
+			return
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	t.Fatalf("history never reached %d rows", want)
+}
+
+func TestAsk_TraceSwitchHistoryAndRedaction(t *testing.T) {
+	fm := &fakeAnthropic{replies: []string{`{"kind":"count","resource":"citas","filters":[{"field":"optometra_id","op":"eq","match":"Ana Gomes"}]}`}}
+	cfg := askspend.Defaults
+	cfg.Trace = true
+	rest, pool, _, h, tok, done := setupAskTrace(t, fm, cfg, nil)
+	defer done()
+	super := tok("super_admin", superID)
+	seedAsk(t, rest, super)
+
+	// Parser answer: the trace says parser, zero cost; the speech does not.
+	got := dpDo(t, rest, "POST", "/api/ask", super, map[string]any{"q": "cuántas citas hay"}, http.StatusOK)
+	if got["trace"] != true || !strings.Contains(got["text"].(string), "⚙︎ parser") || strings.Contains(got["speech"].(string), "⚙") {
+		t.Fatalf("parser trace: %v", got)
+	}
+	// Model answer with a proper name: the trace says why; the history keeps
+	// the shape with the name redacted.
+	got = dpDo(t, rest, "POST", "/api/ask", super, map[string]any{"q": "how many citas with doctor Ana Gomes"}, http.StatusOK)
+	if got["source"] != "model" || got["fallback"] != "no resource named" && !strings.HasPrefix(got["fallback"].(string), "unknown word") {
+		t.Fatalf("model trace: %v", got)
+	}
+	if !strings.Contains(got["text"].(string), "el parser pasó:") {
+		t.Fatalf("the trace must say why: %v", got["text"])
+	}
+	waitHistory(t, pool, 2)
+	var q, fb, src string
+	var cost float64
+	if err := pool.QueryRow(context.Background(), `SELECT question, fallback, source, cost_usd FROM public.ask_history WHERE source='model' ORDER BY at DESC LIMIT 1`).Scan(&q, &fb, &src, &cost); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(q, "Gomes") || !strings.Contains(q, "[nombre]") || fb == "" || cost <= 0 {
+		t.Fatalf("history row must be redacted and carry the reason and the cost: q=%q fb=%q cost=%v", q, fb, cost)
+	}
+	var ip int
+	_ = pool.QueryRow(context.Background(), `SELECT count(*) FROM information_schema.columns WHERE table_name='ask_history' AND column_name LIKE '%ip%'`).Scan(&ip)
+	if ip != 0 {
+		t.Fatal("no IP column, ever (A-53)")
+	}
+	// The three lists.
+	if fbs, err := h.ModelFallbacks(context.Background(), tenantID, 30, 5); err != nil || len(fbs) != 1 || fbs[0].Fallback == "" {
+		t.Fatalf("fallback list: %v %v", fbs, err)
+	}
+	share, _ := h.ShareFor(context.Background(), tenantID, 30)
+	if share.Questions != 2 || share.Parser != 1 || share.Model != 1 || share.ParserPct != 50 {
+		t.Fatalf("share: %+v", share)
+	}
+}
+
+func TestAsk_TraceOffSaysNothing(t *testing.T) {
+	rest, _, _, _, tok, done := setupAskTrace(t, nil, askspend.Defaults, nil)
+	defer done()
+	super := tok("super_admin", superID)
+	seedAsk(t, rest, super)
+	got := dpDo(t, rest, "POST", "/api/ask", super, map[string]any{"q": "cuántas citas hay"}, http.StatusOK)
+	if got["trace"] != false || strings.Contains(got["text"].(string), "⚙") {
+		t.Fatalf("trace off: %v", got)
+	}
+	// …but the machine fields are always there.
+	if got["source"] != "parser" || got["cost_usd"] != float64(0) {
+		t.Fatalf("machine fields: %v", got)
+	}
+}
+
+func TestAsk_PerUserCapDegradesOnlyThatUser(t *testing.T) {
+	fm := &fakeAnthropic{replies: []string{`{"kind":"count","resource":"citas"}`}}
+	al := &recAlerter{}
+	// The fake model bills ≈ $0.0014 per call: a $0.002 user cap is crossed by the
+	// SECOND call of a user, never by the first.
+	cfg := askspend.Config{PerMinute: 100, DailyUSD: 1, AlertPct: 80, UserDailyUSD: 0.002, HistoryDays: 30, HistoryText: "redacted"}
+	rest, _, _, _, tok, done := setupAskTrace(t, fm, cfg, al)
+	defer done()
+	super := tok("super_admin", superID)
+	seedAsk(t, rest, super)
+	other := tok("super_admin", "99999999-9999-4999-8999-999999999999")
+	// User 1 spends its cap on two model questions…
+	for i, q := range []string{"how many citas overall", "how many citas overall, again"} {
+		got := dpDo(t, rest, "POST", "/api/ask", super, map[string]any{"q": q}, http.StatusOK)
+		if got["source"] != "model" {
+			t.Fatalf("call %d: %v", i, got)
+		}
+	}
+	got := dpDo(t, rest, "POST", "/api/ask", super, map[string]any{"q": "how many citas overall, third"}, http.StatusOK)
+	if got["kind"] != "capped" || !strings.Contains(got["text"].(string), "tu cupo diario") {
+		t.Fatalf("user capped: %v", got)
+	}
+	// …still answers by parser…
+	got = dpDo(t, rest, "POST", "/api/ask", super, map[string]any{"q": "cuántas citas hay"}, http.StatusOK)
+	if got["kind"] != "answer" || got["source"] != "parser" {
+		t.Fatalf("capped user parser: %v", got)
+	}
+	// …while another user of the same tenant goes on to the model.
+	got = dpDo(t, rest, "POST", "/api/ask", other, map[string]any{"q": "how many citas overall, other user"}, http.StatusOK)
+	if got["source"] != "model" {
+		t.Fatalf("other user must not be capped: %v", got)
+	}
+	al.mu.Lock()
+	defer al.mu.Unlock()
+	if len(al.sent) != 1 || al.sent[0].Kind != "ask_user_capped" || al.sent[0].Fields["user"] != superID {
+		t.Fatalf("the admin is told once: %+v", al.sent)
+	}
+}
+
+func TestAsk_SpendViewIsForAdminGradeRoles(t *testing.T) {
+	rest, _, _, _, tok, done := setupAskTrace(t, nil, askspend.Defaults, nil)
+	defer done()
+	super := tok("super_admin", superID)
+	seedAsk(t, rest, super)
+	dpDo(t, rest, "POST", "/api/ask", super, map[string]any{"q": "cuántas citas hay"}, http.StatusOK)
+	got := dpDo(t, rest, "GET", "/api/ask/spend", super, nil, http.StatusOK)
+	today, _ := got["today"].(map[string]any)
+	if today == nil || today["questions"] != float64(1) || today["parser"] != float64(1) || !strings.Contains(got["text"].(string), "Gasto del modelo") {
+		t.Fatalf("spend view: %v", got)
+	}
+	// The row-scoped owner (listed resources, not wildcard) may not see it.
+	dpDo(t, rest, "GET", "/api/ask/spend", tok("owner", askU1), nil, http.StatusForbidden)
+	// The picture.
+	req, _ := http.NewRequest("GET", rest.URL+"/api/ask/spend?format=png", nil)
+	req.Header.Set("Authorization", "Bearer "+super)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "image/png") {
+		t.Fatalf("png: %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
 }

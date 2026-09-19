@@ -171,6 +171,11 @@ func telegramText(a Alert, appName, panelURL string) string {
 		fmt.Fprintf(&b, "Hoy se gastaron <b>US$ %s</b> (techo US$ %s, %s llamadas). Las preguntas que necesitan el modelo quedan apagadas hasta mañana; el parser, la caché de planes y los comandos fijos siguen respondiendo.\n", f("usd"), f("cap"), f("model_calls"))
 		b.WriteString("<b>Qué hacer:</b> si es uso legítimo, subí <code>APPXIMO_ASK_DAILY_USD</code> y reiniciá; si no, revisá quién tiene el token (/admin/ask lista el día por inquilino).\n")
 		panelPath = "/admin/ask"
+	case a.Kind == "ask_user_capped":
+		fmt.Fprintf(&b, "🟡 <b>AVISO · Un usuario agotó su cupo del modelo · %s</b>\n", app)
+		fmt.Fprintf(&b, "El usuario <code>%s</code> llegó a su techo diario de preguntas al modelo (US$ %s de %s, %s llamadas). Solo ese usuario queda en parser/caché/comandos fijos hasta mañana; los demás siguen.\n", f("user"), f("usd"), f("cap"), f("model_calls"))
+		b.WriteString("<b>Qué hacer:</b> nada si es uso normal. Si es una persona sola preguntando mucho, subí <code>APPXIMO_ASK_DAILY_USD_PER_USER</code>; /admin/ask?tenant=… muestra sus frases.\n")
+		panelPath = "/admin/ask"
 	case a.Kind == "workflow_overdue":
 		fmt.Fprintf(&b, "🟡 <b>AVISO · Workflow vencido · %s</b>\n", app)
 		fmt.Fprintf(&b, "Un workflow programado lleva %s vencido — ningún scheduler está disparando.\n", dur("overdue_s"))

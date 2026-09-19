@@ -136,12 +136,19 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 		}
 		rt := AskRuntimeFromCtx(req.Context())
 		verdict := askspend.Verdict{ModelOK: true}
+		// The asking identity, for the per-user cap and the history: the JWT
+		// subject (or the external client id) — an id, never a name.
+		userID := evalCtx.UserID
+		if userID == "" {
+			userID = evalCtx.ExternalClientID
+		}
 		if rt != nil {
 			if rt.Cache != nil {
 				deps.Cache, deps.CacheScope = rt.Cache, tc.ID+"|"+evalCtx.Role
 			}
 			if rt.Ledger != nil {
-				verdict = rt.Ledger.Allow(ctx, tc.ID)
+				verdict = rt.Ledger.Allow(ctx, tc.ID, userID)
+				deps.Trace = rt.Ledger.Config().Trace
 			}
 		}
 		switch {
@@ -164,7 +171,29 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 					calls = 2
 				}
 			}
-			day = rt.Ledger.Record(ctx, tc.ID, res.Source, calls, res.CostUSD)
+			day = rt.Ledger.Record(ctx, tc.ID, userID, res.Source, calls, res.CostUSD)
+			// The question history (VOZ-TRAZABILIDAD-S1): queued, never on the
+			// answer path. The text follows the retention policy: redacted (the
+			// proper names the plan identified → [nombre]), full, or none.
+			if h := rt.Ledger.History(); h != nil && h.Enabled() {
+				q := ""
+				switch rt.Ledger.Config().HistoryText {
+				case "full":
+					q = in.Q
+				case "redacted":
+					q = ask.Redact(in.Q, res.Plan)
+				}
+				resource := ""
+				if res.Plan != nil {
+					resource = res.Plan.Resource
+				}
+				h.Record(askspend.Entry{
+					At: time.Now(), Tenant: tc.ID, Role: evalCtx.Role, UserID: userID, Question: q,
+					Source: res.Source, Kind: res.Kind, Resource: resource, CostUSD: res.CostUSD,
+					LatencyMS: res.TotalMS, ModelMS: res.ModelMS, Plan: res.Plan, Fallback: res.Fallback,
+					CacheHit: res.Source == "cache", Corrected: res.Corrected, ModelCalls: calls,
+				})
+			}
 		}
 
 		ev := zlog.Info()
@@ -182,10 +211,16 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 			"understood": res.Understood, "plan": res.Plan, "groups": res.Groups,
 			"usage": res.Usage, "cost_usd": res.CostUSD, "model": modelName, "source": res.Source,
 			"model_ms": res.ModelMS, "total_ms": res.TotalMS, "corrected": res.Corrected,
+			"fallback": res.Fallback, "fallback_es": res.FallbackES, "trace": deps.Trace,
 		}
 		if rt != nil && rt.Ledger != nil {
 			cfg := rt.Ledger.Config()
-			out["spend"] = map[string]any{"day_usd": day.USD, "day_questions": day.Questions, "day_model_calls": day.ModelCalls, "daily_cap_usd": cfg.DailyUSD, "per_minute": cfg.PerMinute}
+			sp := map[string]any{"day_usd": day.USD, "day_questions": day.Questions, "day_model_calls": day.ModelCalls, "daily_cap_usd": cfg.DailyUSD, "per_minute": cfg.PerMinute}
+			if cfg.UserDailyUSD > 0 {
+				sp["user_daily_cap_usd"] = cfg.UserDailyUSD
+				sp["user_day_usd"] = verdict.User.USD
+			}
+			out["spend"] = sp
 		}
 		status := http.StatusOK
 		if res.Kind == "disabled" && res.Source == "" {
@@ -211,6 +246,67 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 		serverTiming(w, req)
 		w.WriteHeader(status)
 		json.NewEncoder(w).Encode(out) //nolint:errcheck
+		markSpan(req, "serialize")
+	})
+
+	registerAskSpendRoute(r, s, policy)
+}
+
+// askSpendSentinel is a resource name no schema can declare (resource names
+// match ^[a-z][a-z0-9_]*$): policy.Allows(role, askSpendSentinel, "read") is
+// true only for a wildcard-resource, admin-grade role — the same inherited
+// test the tenant observability routes use. It invents no new check.
+const askSpendSentinel = "__platform.ask_spend__"
+
+// registerAskSpendRoute mounts GET /api/ask/spend (VOZ-TRAZABILIDAD-S1): what
+// the questions cost for THIS tenant — today, the month, the caps, who
+// answered how many, the phrases that cost the most — as text (Telegram HTML,
+// the `gasto` command) and, with ?format=png, as the digest's own census
+// card (no new renderer). Admin-grade roles only: a row-scoped or listed
+// role is 403 — the spend of a platform is the administrator's business, not
+// a shop clerk's. The platform-wide view stays on GET /admin/ask.
+func registerAskSpendRoute(r chi.Router, s *schema.APISchema, policy *rbac.Policy) {
+	r.Get("/api/"+rbac.AskRoute+"/spend", func(w http.ResponseWriter, req *http.Request) {
+		tc := tenant.MustFromCtx(req.Context())
+		evalCtx := rbac.EvalContextFromRequest(req)
+		if evalCtx.Role == "" || evalCtx.Role == rbac.PublicRoleName || !policy.Allows(evalCtx.Role, askSpendSentinel, "read") {
+			writeJSONErr(w, http.StatusForbidden, "forbidden: the spend view is for an admin-grade role (wildcard resources)")
+			return
+		}
+		rt := AskRuntimeFromCtx(req.Context())
+		if rt == nil || rt.Ledger == nil {
+			writeJSONErr(w, http.StatusServiceUnavailable, "the spend ledger is not installed on this app")
+			return
+		}
+		appName := os.Getenv("APPXIMO_ALERT_APP_NAME")
+		if appName == "" {
+			appName = s.Name
+		}
+		ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+		defer cancel()
+		dig := askspend.BuildDigest(ctx, rt.Ledger, tc.ID, appName)
+		if h, hm, _ := rt.Cache.Stats(); h+hm > 0 {
+			dig.CacheHits, dig.CacheMisses = h, hm
+		}
+		markSpan(req, "query")
+		if req.URL.Query().Get("format") == "png" {
+			png, err := summary.Render(dig.Report())
+			if err != nil {
+				writeJSONErr(w, http.StatusInternalServerError, "spend image could not be rendered — the text still works")
+				return
+			}
+			w.Header().Set("Content-Type", "image/png")
+			w.Header().Set("Cache-Control", "no-store")
+			serverTiming(w, req)
+			w.WriteHeader(http.StatusOK)
+			w.Write(png) //nolint:errcheck
+			markSpan(req, "render")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		serverTiming(w, req)
+		json.NewEncoder(w).Encode(dig) //nolint:errcheck
 		markSpan(req, "serialize")
 	})
 }

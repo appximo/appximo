@@ -45,15 +45,41 @@ type Config struct {
 	// AlertPct is the share of DailyUSD at which ONE alert per tenant per
 	// day goes out ("80 % del techo, van US$ 0,40"). Default 80; 0 disables.
 	AlertPct int
+	// UserDailyUSD caps the model spend per USER (the JWT subject) per day
+	// (VOZ-TRAZABILIDAD-S1). It COMPOSES with DailyUSD: whichever is reached
+	// first wins; at the user cap only that user degrades to parser/cache/
+	// fixed commands, the rest of the tenant goes on. Default 0 = off — a
+	// single-owner app must not meet a second, silent ceiling; an operator
+	// with several people asking turns it on.
+	UserDailyUSD float64
+	// Trace adds to the human TEXT of every reply who answered (parser /
+	// cache / model), how long it took, what it cost, and — when the parser
+	// fell through — why. Never to `speech` (a voice that reads "tres
+	// centavos" every time wears out in two days). Default off: it is for
+	// whoever administers, not for a shop owner.
+	Trace bool
+	// HistoryDays is the retention of public.ask_history (one row per
+	// question). Default 30; 0 disables the history entirely.
+	HistoryDays int
+	// HistoryText decides what of the question TEXT the history keeps:
+	// "redacted" (default — the proper names the engine identified are
+	// replaced by [nombre]: the shape the parser needs to learn from, without
+	// the person), "full", or "none" (the plan only). A-53 discipline: no IP
+	// is ever stored, and personal data is opt-in, not default.
+	HistoryText string
 }
 
 // Defaults are what an unset environment means.
-var Defaults = Config{PerMinute: 6, DailyUSD: 0.50, AlertPct: 80}
+var Defaults = Config{PerMinute: 6, DailyUSD: 0.50, AlertPct: 80, UserDailyUSD: 0, Trace: false, HistoryDays: 30, HistoryText: "redacted"}
 
 const (
-	envPerMinute = "APPXIMO_ASK_PER_MINUTE"
-	envDailyUSD  = "APPXIMO_ASK_DAILY_USD"
-	envAlertPct  = "APPXIMO_ASK_ALERT_PCT"
+	envPerMinute    = "APPXIMO_ASK_PER_MINUTE"
+	envDailyUSD     = "APPXIMO_ASK_DAILY_USD"
+	envAlertPct     = "APPXIMO_ASK_ALERT_PCT"
+	envUserDailyUSD = "APPXIMO_ASK_DAILY_USD_PER_USER"
+	envTrace        = "APPXIMO_ASK_TRACE"
+	envHistoryDays  = "APPXIMO_ASK_HISTORY_DAYS"
+	envHistoryText  = "APPXIMO_ASK_HISTORY_TEXT"
 )
 
 // ConfigFromEnv reads the knobs, FAIL-FAST: a value that is not a number, a
@@ -83,6 +109,38 @@ func ConfigFromEnv() (Config, error) {
 		}
 		c.AlertPct = n
 	}
+	if v := strings.TrimSpace(os.Getenv(envUserDailyUSD)); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || f < 0 {
+			return c, fmt.Errorf("appximo: %s=%q must be a number of US dollars ≥ 0 (the daily model spend cap per USER; 0 = off, the default)", envUserDailyUSD, v)
+		}
+		c.UserDailyUSD = f
+	}
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv(envTrace))); v != "" {
+		switch v {
+		case "on", "true", "1", "yes":
+			c.Trace = true
+		case "off", "false", "0", "no":
+			c.Trace = false
+		default:
+			return c, fmt.Errorf("appximo: %s=%q must be on or off (adds who answered, latency and cost to every reply's text; default off)", envTrace, v)
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv(envHistoryDays)); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 || n > 3650 {
+			return c, fmt.Errorf("appximo: %s=%q must be an integer 0..3650 (days the question history is kept; 0 disables; default %d)", envHistoryDays, v, Defaults.HistoryDays)
+		}
+		c.HistoryDays = n
+	}
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv(envHistoryText))); v != "" {
+		switch v {
+		case "redacted", "full", "none":
+			c.HistoryText = v
+		default:
+			return c, fmt.Errorf("appximo: %s=%q must be redacted, full or none (what of the question text the history keeps; default redacted)", envHistoryText, v)
+		}
+	}
 	return c, nil
 }
 
@@ -111,8 +169,10 @@ type Ledger struct {
 
 	mu      sync.Mutex
 	days    map[string]*Day          // tenant → today's row (dropped when the day changes)
+	users   map[string]*Day          // tenant|user → today's row (the per-user cap)
 	minutes map[string]*minuteWindow // tenant → model calls this minute
 	loaded  map[string]bool
+	hist    *History // nil = no history
 }
 
 type minuteWindow struct {
@@ -126,8 +186,14 @@ func New(cfg Config, pool *pgxpool.Pool, loc *time.Location, alerter observabili
 		loc = time.Local
 	}
 	return &Ledger{cfg: cfg, pool: pool, loc: loc, alerter: alerter, appName: appName, now: time.Now,
-		days: map[string]*Day{}, minutes: map[string]*minuteWindow{}, loaded: map[string]bool{}}
+		days: map[string]*Day{}, users: map[string]*Day{}, minutes: map[string]*minuteWindow{}, loaded: map[string]bool{}}
 }
+
+// SetHistory attaches the question history (nil = none).
+func (l *Ledger) SetHistory(h *History) { l.hist = h }
+
+// History returns the attached history, if any.
+func (l *Ledger) History() *History { return l.hist }
 
 // Config returns the effective knobs.
 func (l *Ledger) Config() Config { return l.cfg }
@@ -147,6 +213,17 @@ CREATE TABLE IF NOT EXISTS public.ask_spend (
     capped      BOOLEAN          NOT NULL DEFAULT false,
     updated_at  TIMESTAMPTZ      NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, day)
+);
+CREATE TABLE IF NOT EXISTS public.ask_spend_user (
+    tenant_id   TEXT             NOT NULL,
+    user_id     TEXT             NOT NULL,
+    day         DATE             NOT NULL,
+    questions   INT              NOT NULL DEFAULT 0,
+    model_calls INT              NOT NULL DEFAULT 0,
+    usd         DOUBLE PRECISION NOT NULL DEFAULT 0,
+    capped      BOOLEAN          NOT NULL DEFAULT false,
+    updated_at  TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, user_id, day)
 );`)
 	if err != nil {
 		return fmt.Errorf("askspend: ensure table: %w", err)
@@ -176,12 +253,35 @@ func (l *Ledger) row(ctx context.Context, tenant string) *Day {
 	return d
 }
 
+// userRow returns today's row for (tenant, user), loading it once per day.
+// Caller holds l.mu.
+func (l *Ledger) userRow(ctx context.Context, tenant, user string) *Day {
+	day := l.today()
+	key := tenant + "|" + user
+	if d := l.users[key]; d != nil && d.Day == day {
+		return d
+	}
+	d := &Day{Tenant: tenant, Day: day}
+	if l.pool != nil {
+		err := l.pool.QueryRow(ctx, `SELECT questions, model_calls, usd, capped FROM public.ask_spend_user WHERE tenant_id=$1 AND user_id=$2 AND day=$3`, tenant, user, day).
+			Scan(&d.Questions, &d.ModelCalls, &d.USD, &d.Capped)
+		if err != nil && !strings.Contains(err.Error(), "no rows") {
+			zlog.Warn().Err(err).Str("tenant", tenant).Msg("askspend: could not load the user's row — counting from zero")
+		}
+	}
+	l.users[key] = d
+	return d
+}
+
 // Verdict is what Allow says about calling the model for one more question.
 type Verdict struct {
 	ModelOK bool
-	// Reason is "" | "capped" (daily cap reached) | "minute" (per-minute cap).
+	// Reason is "" | "capped" (the tenant's daily cap) | "user_capped" (the
+	// user's daily cap) | "minute" (the per-minute cap).
 	Reason string
 	Day    Day
+	// User is the asking user's row today (zero when no per-user cap).
+	User Day
 }
 
 // Allow decides, BEFORE a question is answered, whether the model may be
@@ -189,7 +289,7 @@ type Verdict struct {
 // cache are free and always allowed; the caller degrades when ModelOK is
 // false. A "minute" verdict is a 429 for the caller (retry in seconds); a
 // "capped" verdict lasts until the day changes.
-func (l *Ledger) Allow(ctx context.Context, tenant string) Verdict {
+func (l *Ledger) Allow(ctx context.Context, tenant, user string) Verdict {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	d := l.row(ctx, tenant)
@@ -197,6 +297,16 @@ func (l *Ledger) Allow(ctx context.Context, tenant string) Verdict {
 	if l.cfg.DailyUSD > 0 && d.USD >= l.cfg.DailyUSD {
 		v.ModelOK, v.Reason = false, "capped"
 		return v
+	}
+	// The per-user cap composes: whichever is reached first wins, and only
+	// this user degrades.
+	if l.cfg.UserDailyUSD > 0 && user != "" {
+		u := l.userRow(ctx, tenant, user)
+		v.User = *u
+		if u.USD >= l.cfg.UserDailyUSD {
+			v.ModelOK, v.Reason = false, "user_capped"
+			return v
+		}
 	}
 	now := l.now()
 	w := l.minutes[tenant]
@@ -212,10 +322,19 @@ func (l *Ledger) Allow(ctx context.Context, tenant string) Verdict {
 // Record accounts one answered question: its source (parser | cache | model)
 // and, for a model question, the calls it made and their cost. It updates
 // the row, writes it through, and fires the 80 % / cap alerts once per day.
-func (l *Ledger) Record(ctx context.Context, tenant, source string, modelCalls int, usd float64) Day {
+func (l *Ledger) Record(ctx context.Context, tenant, user, source string, modelCalls int, usd float64) Day {
 	l.mu.Lock()
 	d := l.row(ctx, tenant)
 	d.Questions++
+	var urow *Day
+	if l.cfg.UserDailyUSD > 0 && user != "" {
+		urow = l.userRow(ctx, tenant, user)
+		urow.Questions++
+		if modelCalls > 0 {
+			urow.ModelCalls += modelCalls
+			urow.USD += usd
+		}
+	}
 	switch source {
 	case "parser":
 		d.Parser++
@@ -245,10 +364,25 @@ func (l *Ledger) Record(ctx context.Context, tenant, source string, modelCalls i
 			alerts = append(alerts, l.alert("ask_spend_capped", observability.LevelCritical, tenant, d, pct))
 		}
 	}
+	var usnap *Day
+	if urow != nil {
+		if !urow.Capped && urow.USD >= l.cfg.UserDailyUSD {
+			urow.Capped = true
+			a := observability.Alert{TenantID: tenant, Level: observability.LevelWarning, Kind: "ask_user_capped",
+				Message: fmt.Sprintf("user %s reached the per-user daily model spend cap (US$ %.3f of %.3f, %d model calls) — that user is on parser/cache/fixed commands until tomorrow; the tenant goes on", user, urow.USD, l.cfg.UserDailyUSD, urow.ModelCalls),
+				Fields:  map[string]string{"user": user, "usd": fmt.Sprintf("%.3f", urow.USD), "cap": fmt.Sprintf("%.3f", l.cfg.UserDailyUSD), "model_calls": strconv.Itoa(urow.ModelCalls), "day": urow.Day}}
+			alerts = append(alerts, a)
+		}
+		c := *urow
+		usnap = &c
+	}
 	snap := *d
 	l.mu.Unlock()
 
 	l.persist(ctx, snap)
+	if usnap != nil {
+		l.persistUser(ctx, user, *usnap)
+	}
 	for _, a := range alerts {
 		if l.alerter != nil {
 			_ = l.alerter.Send(context.Background(), a)
@@ -289,6 +423,21 @@ func (l *Ledger) persist(ctx context.Context, d Day) {
 		d.Tenant, d.Day, d.Questions, d.ModelCalls, d.USD, d.Parser, d.Cache, d.Alerted, d.Capped)
 	if err != nil {
 		zlog.Warn().Err(err).Str("tenant", d.Tenant).Msg("askspend: could not persist the day's spend (kept in memory)")
+	}
+}
+
+func (l *Ledger) persistUser(ctx context.Context, user string, d Day) {
+	if l.pool == nil {
+		return
+	}
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	_, err := l.pool.Exec(wctx, `INSERT INTO public.ask_spend_user (tenant_id, user_id, day, questions, model_calls, usd, capped, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+		ON CONFLICT (tenant_id, user_id, day) DO UPDATE SET questions=EXCLUDED.questions, model_calls=EXCLUDED.model_calls, usd=EXCLUDED.usd, capped=EXCLUDED.capped, updated_at=now()`,
+		d.Tenant, user, d.Day, d.Questions, d.ModelCalls, d.USD, d.Capped)
+	if err != nil {
+		zlog.Warn().Err(err).Str("tenant", d.Tenant).Msg("askspend: could not persist the user's spend (kept in memory)")
 	}
 }
 
