@@ -999,8 +999,57 @@ engine could give it:
   engine thinks the chat shows Telegram's «escribiendo…» indicator, re-sent
   every 4 s, so the owner is never looking at nothing.
 
-**Enable it** — add the model key to the app's env (`/etc/<app>/<app>.env`,
-0600, never in a repo, a log or a report) and restart:
+**Most questions never reach the model (VOZ-SIN-IA-S1, ADR-035).** Before
+the model, two free layers answer:
+
+- **The deterministic parser** reads the question against the schema alone —
+  a counting/listing/summing verb, ONE resource by its schema name (singular
+  or plural), a declared enum/state value («pendiente de pago» ≡
+  `pendiente_pago`, «canceladas» ≡ `cancelada`), a period phrase, a proper
+  name after «de/para/con», «por <campo>» for a breakdown — and answers only
+  when it is SURE: every word accounted for, one resource, one operation, one
+  place for the name. One leftover word («vendimos», «vigentes», «nuevos») and
+  the question goes to the model. It never guesses to save a call. A write
+  verb («borrá», «cancelá») is refused without any call. **Measured on the
+  corpus of real questions: 33 of 49 (67 %) answered with no model, in
+  milliseconds**, with the same answers the model gave.
+- **The plan cache** remembers the PLAN a question translated to (per
+  tenant and role, normalized text, 24 h, 2 000 entries) — never the data:
+  the number is recomputed on every question, and a cached «hoy» plan asked
+  tomorrow counts tomorrow (a period is a token the engine resolves at run
+  time). Hit rate on `/metrics` and `/admin/ask`.
+
+**The wallet guard — caps the owner is told about.** Every model call is
+billed, so the engine keeps a ledger per tenant and day (`public.ask_spend`,
+survives a restart) and applies two caps, read fail-fast at boot:
+
+| knob | default | what it does |
+|---|---|---|
+| `APPXIMO_ASK_PER_MINUTE` | `6` | MODEL calls per tenant per minute — a human by voice at full speed; parser/cache answers are not counted. Over it: «demasiadas preguntas al modelo este minuto», retry in seconds. |
+| `APPXIMO_ASK_DAILY_USD` | `0.50` | MODEL spend per tenant per day (≈ 150 model questions). At the cap **the model is off until tomorrow** in the declared timezone; the parser, the cache and the fixed commands keep answering. `0` disables. |
+| `APPXIMO_ASK_ALERT_PCT` | `80` | ONE alert per tenant per day at that share of the cap, through the same alerter as every other alert (Telegram in Spanish with «Qué hacer»; Slack) — and one more when the cap is reached. `0` disables. |
+
+A non-number, a negative, a 0 per-minute or a percent outside 0..100
+**refuses to boot** naming the variable. **Worst case per day with the
+defaults: the cap plus one question, ≈ US$ 0.50** (before: 30 calls a
+minute all day ≈ US$ 1 300).
+
+**Where to see what it costs** — never in the provider's console:
+
+- `GET /admin/ask` (platform token or `X-Admin-Key`): per tenant, today /
+  this month / the last 30 days — questions, model calls, dollars, how many
+  the parser and the cache answered, whether the tenant is capped — plus the
+  caps in force and the plan cache's hit rate.
+- `/metrics`: `appximo_ask_spend_usd{tenant,window="day"|"month"}`,
+  `appximo_ask_questions{tenant,source="parser"|"cache"|"model"}`,
+  `appximo_ask_daily_cap_usd`, `appximo_ask_plan_cache{what}`.
+- every reply carries `source` (`parser` | `cache` | `model`) and a `spend`
+  block (`day_usd`, `day_model_calls`, `daily_cap_usd`, `per_minute`).
+
+**Enable the model** — add the key to the app's env (`/etc/<app>/<app>.env`,
+0600, never in a repo, a log or a report) and restart. Without it the parser
+still answers every shape it is sure of; only a question that needs the model
+gets «no activadas»:
 
 ```
 ANTHROPIC_API_KEY=sk-ant-…              # enables POST /api/ask and the bot's question branch
@@ -1008,7 +1057,9 @@ APPXIMO_SUMMARY_TIMEZONE=America/Bogota # the owner's "hoy" / "esta semana" (a U
 # optional:
 APPXIMO_ASK_MODEL=claude-haiku-4-5      # the cheap model is the default; any Anthropic model id
 APPXIMO_ASK_TIMEOUT=8s                  # per model call
-APPXIMO_ASK_PER_MINUTE=30               # per tenant — a question is a paid call, the limit is named in the 429
+APPXIMO_ASK_PER_MINUTE=6                # MODEL calls per tenant per minute (parser/cache answers are free and uncounted)
+APPXIMO_ASK_DAILY_USD=0.50              # MODEL spend per tenant per day; at the cap the model is off, the rest keeps answering
+APPXIMO_ASK_ALERT_PCT=80                # one Telegram/Slack alert per tenant per day at this share of the cap
 APPXIMO_ASK=off                         # disable the question path even with a key
 ```
 
@@ -1311,7 +1362,8 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `APPXIMO_EMAIL_TOPIC`, `SMTP_*` | no | — | Email delivery by the worker (mode `auto` delivers `email.send` when `SMTP_HOST` is set; mode `email` is the single-purpose variant). |
 | `APPXIMO_WORKER_MODE` + `APPXIMO_WORKER_{BATCH,MAX_ATTEMPTS,POLL,SCHEMA_REFRESH,ROLE,RESOURCE}`, `APPXIMO_ENGINE_URL`, `APPXIMO_TENANT_DOMAIN` | no | `auto` / 50 / 5 / 5s / 1m / `service_worker` / `filejobs` / `http://127.0.0.1:<port>` / (domain minus first label) | `appximo-worker`'s env (§8b). STRICT: an invalid value or a misspelled `APPXIMO_WORKER_*` refuses to boot naming every offender; unset values are reported in one "defaults in effect" boot line. |
 | `ANTHROPIC_API_KEY` | no | — | Enables the **question path** (§4.6e): `POST /api/ask` and the bot's free-text branch — a language model translates the question into a validated read plan. The engine reads it from its environment only; never written, printed or backed up. Without it the path answers `503 ask_disabled` and the bot says so; the fixed commands never depend on it. `APPXIMO_ASK=off` disables the path even with a key. |
-| `APPXIMO_ASK_MODEL` / `APPXIMO_ASK_TIMEOUT` / `APPXIMO_ASK_PER_MINUTE` | no | `claude-haiku-4-5` / `8s` / `30` | The question path's model (any Anthropic model id; the cheap one is the default and measured at ≈ US$ 0.003/question), the bound per model call, and the per-tenant questions-per-minute cap (a question is a paid call; over the cap is a named 429 with Retry-After). |
+| `APPXIMO_ASK_MODEL` / `APPXIMO_ASK_TIMEOUT` | no | `claude-haiku-4-5` / `8s` | The question path's model (any Anthropic model id; the cheap one is the default and measured at ≈ US$ 0.003 per MODEL question) and the bound per model call. |
+| `APPXIMO_ASK_PER_MINUTE` / `APPXIMO_ASK_DAILY_USD` / `APPXIMO_ASK_ALERT_PCT` | no | `6` / `0.50` / `80` | The wallet guard (§4.6e, ADR-035): model calls per tenant per minute, model spend per tenant per day (at the cap the model is off until tomorrow — the parser, the plan cache and the fixed commands keep answering), and the share of the cap that fires ONE alert per tenant per day. Fail-fast: a bad value refuses to boot. Worst case per day = the cap + one question. |
 | `APPXIMO_SUMMARY_TIMEZONE` | no | the process's local zone | The IANA zone «hoy» / «esta semana» / the digest's day are computed in (`America/Bogota`). A production box runs UTC, so an owner in Bogotá asking at 8 pm was answered about tomorrow. An invalid name refuses to boot. Set it on every app with an owner in one place. |
 | `APPXIMO_TELEGRAM_BOT_TOKEN` + `APPXIMO_TELEGRAM_CHAT_ID` | no | — | The **Telegram alert destination** (§4.6c) — every alert (SLO burn, first-occurrence errors, backup failed/stale, disk low, stuck outbox, overdue workflows) reaches that chat, in Spanish, phone-first, with what-to-do. Both or neither: half a pair, or a malformed value, **refuses to boot** naming the variable; a revoked token is detected out-of-band at boot (read-only `getMe`+`getChat`) and screams in the journal. `backup.sh` posts its own failure here too. |
 | `APPXIMO_ALERT_APP_NAME` | no | the schema `name` | The app name every alert message carries (a fleet of apps alerting to ONE chat needs to say who is talking). |

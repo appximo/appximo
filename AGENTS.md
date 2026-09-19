@@ -2119,11 +2119,24 @@ not even a word the model receives); the reply is a template over the
 engine's JSON — number first, then «what was understood» in small print.
 Read-only by grammar: a write intent is `write_refused`. Reserved segment
 (a resource may not be named `ask`); Bearer required — anonymous AND the
-`$public` role are 403 (a question spends a model call). No key → `503
-ask_disabled`; model timeout (`APPXIMO_ASK_TIMEOUT`, 8 s) → `unavailable`,
+`$public` role are 403 (a question spends a model call). Model timeout (`APPXIMO_ASK_TIMEOUT`, 8 s) → `unavailable`,
 and the bot degrades to the three fixed commands, which never touch the
-model. Per-tenant cap `APPXIMO_ASK_PER_MINUTE` (30). Measured live: p50
-≈ 1 s, ≈ US$ 0.003/question. The Telegram receiver sends any non-command
+model. **The model is the LAST resort (VOZ-SIN-IA-S1, ADR-035):** first the
+deterministic parser (`pkg/ask/parser.go` — one resource by schema name,
+one operation, declared enum values, period phrases, a name after a
+preposition, EVERY word accounted for, else not sure; a write verb refused
+without a call; 33/49 = 67 % of the real corpus, pinned by test), then the
+plan cache (per tenant+role, normalized question, 24 h/2 000 entries, plans
+not data — a cached «hoy» is tomorrow's today), then the model. The wallet
+guard (`pkg/askspend`, `public.ask_spend`): `APPXIMO_ASK_PER_MINUTE` 6 model
+calls, `APPXIMO_ASK_DAILY_USD` 0.50 per tenant per day (at the cap the model
+is off, the rest keeps answering — `kind: capped`), ONE alert per tenant per
+day at `APPXIMO_ASK_ALERT_PCT` 80 % and at the cap through the alerter;
+fail-fast on a bad value; `GET /admin/ask` + `appximo_ask_*` gauges show the
+spend. No key → `503 ask_disabled` only for a question the parser cannot
+settle. Measured: before 49/49 model calls, US$ 0.147 per corpus pass; after
+16 calls (US$ 0.053) first pass, and only the never-seen questions the
+second; p50 from 0.9 s to 4 ms. The Telegram receiver sends any non-command
 word here (with «escribiendo…» while it thinks); a grouped answer also comes
 as the digest's census picture. Operator + the Siri shortcut (Dictate Text →
 POST → Speak `speech`): docs/PRODUCTION.md §4.6e; owner manual §3d;

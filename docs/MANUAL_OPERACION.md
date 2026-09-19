@@ -403,10 +403,28 @@ lista de recursos, campos y estados de su app, y la pregunta.
 suyas, y un recurso que no puede leer no aparece ni en la lista de lo que
 puede preguntar.
 
-**Cuánto cuesta.** Cada pregunta es una llamada al modelo: medido, alrededor
-de **US$ 0,003 por pregunta** (tres décimas de centavo) y un segundo de
-espera. Diez preguntas al día son menos de un dólar al mes. Cada respuesta
-trae su costo por si quiere mirarlo, y hay un tope de 30 preguntas por minuto.
+**La mayoría de las preguntas no cuestan nada.** Antes de llamar al modelo,
+el motor intenta entender la pregunta solo, con las palabras de su schema:
+«cuántas órdenes hay hoy», «órdenes pendiente de pago», «cuántos productos
+activos», «pagos por método», «las órdenes de Ana Gómez», «cuánto suman las
+órdenes de esta semana». Si está seguro, responde al instante y gratis (dos
+de cada tres preguntas reales, medido). Si le queda una palabra que no está en
+su schema («vendimos», «vigentes»), **no adivina**: pasa la pregunta al
+modelo. Y una pregunta repetida (aunque la escriba distinto) reutiliza la
+traducción anterior sin llamar a nadie — el número se vuelve a contar
+siempre, así que «hoy» mañana es mañana.
+
+**Cuánto cuesta y hasta dónde.** Solo las preguntas que llegan al modelo se
+cobran: unas tres décimas de centavo cada una (US$ 0,003). Hay un techo:
+**6 preguntas al modelo por minuto** y **US$ 0,50 por día** por inquilino.
+Al 80 % del techo diario le llega UNA alerta por Telegram con cuánto va
+gastado; al llegar al techo, otra, y **el modelo se apaga hasta mañana** — las
+preguntas simples, la caché y `resumen`/`estado`/`ayuda` siguen. Lo peor que
+puede pasar en un día, aunque algo se dispare, es gastar el techo. Los topes
+se cambian en el env (`APPXIMO_ASK_DAILY_USD`, `APPXIMO_ASK_PER_MINUTE`); un
+valor mal escrito no arranca y lo dice. Cuánto lleva gastado hoy y este mes
+lo ve en `/admin/ask` (o en `/metrics`), nunca tiene que abrir la consola del
+proveedor.
 
 **Cómo se activa** — en `/etc/<app>/<app>.env` (además de lo de §3c):
 

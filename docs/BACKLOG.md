@@ -40,7 +40,7 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 **`DEC-*` decisions that only Miguel can take** (the old "Requires a decision
 from Miguel" table, given stable IDs).
 
-**Last reviewed: 2026-09-19 (VOZ-PREGUNTAS-S1).** Review history + all DONE
+**Last reviewed: 2026-09-19 (VOZ-SIN-IA-S1).** Review history + all DONE
 session sections: [BACKLOG_ARCHIVO.md](BACKLOG_ARCHIVO.md).
 
 ## OPEN
@@ -1480,18 +1480,17 @@ tarball of scripts/), and the smoke runs fleet-audit once.
   "sold") (medium; grammar + Studio); (d) follow-ups with a one-question memory (medium,
   and it opens the door to ambiguous answers). Each one provoked before it is built.
 
-### VOZ-8 — The prompt cache does not engage on a small schema: the vocabulary (~2 400 tokens) is under Haiku 4.5's cacheable minimum
+### VOZ-9 — Measure the parser's real share on Miguel's usage (a week of `/admin/ask`), not only on the corpus
 
-- **Origin:** VOZ-PREGUNTAS-S1 (2026-09-19). aigen sends the system prompt with
-  `cache_control`; none of the 23 live answers carried `cache_read_tokens` — the
-  tiendita's 14-resource vocabulary is shorter than the model's minimum. Real cost
-  ≈ US$ 0.003/question instead of ≈ 0.0005 with the cache; a wider schema (conjunto,
-  20 resources) crosses it.
-- **Impact:** money, little: ten questions a day ≈ US$ 0.90/month without the cache; a
-  hundred a day is US$ 9 that could be US$ 1.5.
-- **Ready:** measure the real threshold against the API (`usage.cache_read_tokens` vs
-  vocabulary length), decide between padding the prompt to the minimum (cheap, ugly)
-  and leaving it (marginal at the expected volume), and record the decision.
+- **Origin:** VOZ-SIN-IA-S1 (2026-09-19). The deterministic parser (ADR-035) answers 33
+  of the 49 lab-corpus questions without a model. Real usage shows up in `/admin/ask`
+  (parser / cache / model per day) and `appximo_ask_questions{source}`; the journal
+  deliberately keeps no question text.
+- **Impact:** if the real share is much lower the saving is a lab number; if higher,
+  VOZ-7 loses urgency.
+- **Ready:** a week after the deploy, `curl /admin/ask` on both 58 apps → the month row;
+  under 50 % parser share, a small session adds the missing shapes from the questions
+  Miguel remembers asking (or an opt-in text log — his decision).
 
 ### VOZ-4 — Writes by voice WITH confirmation ("agendá cita a las 2 con Juan — ¿sí/no?")
 

@@ -1,6 +1,6 @@
 {
   "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo).",
-  "actualizado": "2026-09-19 (VOZ-PREGUNTAS-S1: VOZ-3 hecho; VOZ-6/7/8 y OPS-56 abiertos)",
+  "actualizado": "2026-09-19 (VOZ-SIN-IA-S1: VOZ-8 cerrado con razón; VOZ-9 abierto)",
   "publicacion": {
     "estado": "pausada_deliberada",
     "desde": "2026-08-29",
@@ -1457,22 +1457,6 @@
       "estado": "abierto"
     },
     {
-      "id": "VOZ-8",
-      "titulo": "La caché de prompt no engancha en un schema chico: el vocabulario (~2.400 tokens) queda por debajo del mínimo de Haiku 4.5",
-      "frente": "automatizacion",
-      "que_es": "aigen manda el prompt de sistema con cache_control; en las 23 preguntas vivas ninguna respuesta trajo cache_read_tokens — el vocabulario de la tiendita (14 recursos) es más corto que el mínimo cacheable del modelo. Costo real ≈ US$ 0,003 por pregunta en vez de ≈ 0,0005 con caché. Un schema más ancho (conjunto, 20 recursos) sí lo cruza.",
-      "por_que_importa": "Es dinero, poco: diez preguntas al día ≈ US$ 0,90/mes sin caché. Pero a cien preguntas al día ya son US$ 9 que podrían ser US$ 1,5.",
-      "que_lo_destraba": "Una sesión chica: medir el umbral real con la API (ask + usage.cache_read_tokens en función del largo del vocabulario), y decidir si vale rellenar el prompt hasta el mínimo (barato, feo) o dejarlo (el costo es marginal para el uso esperado). Registrar la decisión.",
-      "costo": "chico",
-      "dano": "bajo",
-      "prioridad": "P3",
-      "decide": "agente",
-      "depende_de": [],
-      "bloquea": [],
-      "origen": "VOZ-PREGUNTAS-S1 (2026-09-19)",
-      "estado": "abierto"
-    },
-    {
       "id": "OPS-56",
       "titulo": "deploy-app.sh no lleva las variables de entorno NUEVAS que un binario necesita (ANTHROPIC_API_KEY, APPXIMO_SUMMARY_TIMEZONE se agregaron a mano)",
       "frente": "flota",
@@ -1486,6 +1470,24 @@
       "depende_de": [],
       "bloquea": [],
       "origen": "VOZ-PREGUNTAS-S1 (2026-09-19)",
+      "estado": "abierto"
+    },
+    {
+      "id": "VOZ-9",
+      "titulo": "Medir la porción real de preguntas que resuelve el parser sobre el uso de Miguel (una semana de /admin/ask), no solo sobre el corpus",
+      "frente": "automatizacion",
+      "que_es": "El parser determinístico (ADR-035) resuelve 33 de 49 preguntas del corpus de laboratorio sin modelo. El uso real de Miguel se ve en /admin/ask (parser/cache/model por día) y en appximo_ask_questions{source}; el journal no guarda el texto de la pregunta (a propósito). Falta leer una semana de uso y decidir si el parser necesita más formas (o si el 67 % del corpus era optimista).",
+      "por_que_importa": "Si en uso real el parser resuelve mucho menos, el ahorro es de laboratorio; si resuelve más, VOZ-7 pierde urgencia.",
+      "que_lo_destraba": "Una semana después del deploy: `curl /admin/ask` en las dos apps del 58 → la fila del mes; si la porción del parser está bajo 50 %, una sesión chica que agregue las formas que faltan a partir de las preguntas que Miguel recuerde haber hecho (o de un log opt-in del texto, decisión suya).",
+      "costo": "chico",
+      "dano": "bajo",
+      "prioridad": "P3",
+      "decide": "agente",
+      "depende_de": [
+        "VOZ-6"
+      ],
+      "bloquea": [],
+      "origen": "VOZ-SIN-IA-S1 (2026-09-19)",
       "estado": "abierto"
     }
   ]

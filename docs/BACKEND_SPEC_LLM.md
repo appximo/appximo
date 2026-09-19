@@ -280,9 +280,19 @@ The reply is composed by the engine: `kind`, `headline` (number first),
 `text` (Telegram HTML), `speech` (plain), `number`, `understood`, `plan`,
 `groups` (+ `png` for a grouped answer, the digest's renderer), `usage`,
 `cost_usd` (≈ $0.003 live), `model_ms`, `total_ms`. `write` intents are
-`write_refused`; no key → `503 ask_disabled`; model timeout → `kind:
-unavailable` (the caller degrades to the fixed commands). Per-tenant limit
-`APPXIMO_ASK_PER_MINUTE` (30). A custom Go handler that wants the same
+`write_refused`; model timeout → `kind: unavailable` (the caller degrades to
+the fixed commands). **Since VOZ-SIN-IA-S1 (ADR-035) the model is the LAST
+resort:** a deterministic parser over the schema answers when it is sure
+(one resource by schema name, one operation, declared enum values, period
+phrases, a name after a preposition — every word accounted for; 67 % of
+real questions, in ms, `source: "parser"`), a per-tenant+role plan cache
+answers a repeated question (`source: "cache"`, the data recomputed), and a
+spend ledger caps MODEL calls (`APPXIMO_ASK_PER_MINUTE` 6, `APPXIMO_ASK_DAILY_USD`
+0.50, alert at `APPXIMO_ASK_ALERT_PCT` 80 through the alerter; fail-fast).
+At the cap `kind: capped` for model-only questions while parser/cache keep
+answering; no key → `503 ask_disabled` ONLY for a question the parser cannot
+settle. Spend: `GET /admin/ask`, `appximo_ask_*` gauges, and a `spend` block
+in every reply. A custom Go handler that wants the same
 translation calls the endpoint as its role; there is no `Ctx` seam for the
 model on purpose — the vocabulary/validation/RBAC discipline lives in one
 place. Operator + Siri: docs/PRODUCTION.md §4.6e.

@@ -6,6 +6,17 @@ not show this file unless asked.
 
 ## CLOSED (decided, with the reasoning written down)
 
+### VOZ-8 — CLOSED (VOZ-SIN-IA-S1, 2026-09-19): the prompt cache stays un-engaged on a small schema, on purpose
+
+The vocabulary prompt (~2 400 tokens) is under Haiku 4.5's cacheable minimum, so no
+`cache_read_tokens` ever appeared. Padding it to the minimum would make every model
+call carry more input to save a fraction of a call that — with the deterministic
+parser taking the common shapes (33/49 real questions) and the plan cache the
+repeats — now happens a few times a day. The saving is in not calling, not in
+calling cheaper (ADR-035 §4). **Reconsider** if a tenant's model share
+(`appximo_ask_questions{source="model"}` vs the rest) stays above half its questions
+for a month.
+
 | ID | Item | Decision & where it is justified |
 |---|---|---|
 | **RBAC-C1** | Join / subquery row conditions | **No.** Unbounded per-row cost inside the embed LATERAL, and an unauditable compiled policy. Denormalize the ownership column — [ADR-022](adr/ADR-022-declarative-surface-boundaries.md) Decision 1b. Reconsider if a case needs ownership through a relation AND the denormalized column is genuinely unmaintainable. |
@@ -417,6 +428,20 @@ refreshed).
 
 ---
 
+
+## DONE in VOZ-SIN-IA-S1 (2026-09-19) — the common question costs nothing: a schema-derived parser first, a plan cache second, the model last, behind a daily cap the owner is told about (ADR-035)
+
+| Item | What shipped | Verified by |
+|---|---|---|
+| **The cap, first** | `pkg/askspend`: ledger per tenant and day in `public.ask_spend` (survives a restart), `APPXIMO_ASK_PER_MINUTE` 6 MODEL calls (was 30), `APPXIMO_ASK_DAILY_USD` 0.50, `APPXIMO_ASK_ALERT_PCT` 80 — fail-fast on a bad value. At the cap the model is off until tomorrow; parser, cache and fixed commands keep answering (`kind: capped`). ONE warning + ONE cap alert per tenant per day through the alerter (Telegram ES + Slack renderings). `GET /admin/ask`, `appximo_ask_*` gauges, a `spend` block in every reply. | `spend_test.go`; Postgres: cap crossed → warning+capped alerts, second model question `capped`, parser and cache still answer, a NEW ledger remembers the cap; live on the lab: 86 % warning, cap, `/admin/ask` capped=true, `/api/summary` 200 |
+| **The parser** | `pkg/ask/parser.go`, generic from the schema: one resource by schema name (sg/pl, `_` as space), one operation (count/list/sum/avg/group by, bare noun phrase = list), declared enum values whole and plural-tolerant (multi-word first: «pendiente de pago»), period phrases, «por <campo>», a name after a preposition placed on the single name-bearing relation (else the own name field, else not sure), sum/avg on the obvious amount. SURE = every word accounted for, else the model; write verbs refused with no call; same validation, same name matcher, same executor + RBAC. | `parser_test.go` corpus of 49 real questions: **33/49 (67 %) without a model**, coverage pinned ≥ 55 %; restricted role, ambiguous name place, all plans validate; Postgres: parser count = DB, owner gets ITS rows, hidden resource → model → unclear |
+| **The plan cache** | per tenant+role, normalized question, 2 000 entries / 24 h LRU; plans only (cached before names resolve; `unclear` cached too — temperature 0), never data; a cached «hoy» runs against the new day. Hit rate on `/metrics` and `/admin/ask`. | unit: fresh data on a hit, scope by role, unclear cached, relative period moves with the day; Postgres: cache hit under the cap counts the new row |
+| **Measured, same corpus** | before (81840db): 49/49 model calls, US$ 0.147, p50 904 ms · after pass 1: 16 calls, US$ 0.053, p50 44 ms · pass 2 (repeat): 0 calls, US$ 0, p50 8 ms. 48/49 identical kind+number; the one difference: «promedio de las órdenes» — the model said unclear, the parser averages the obvious amount (`total_centavos`, said in the small print). | `evidencia/VOZ-SIN-IA-S1/measure-*.json`, `compare-before-after.json` |
+| **VOZ-8 CLOSED** | the prompt cache is not worth padding: the saving is in not calling. | ADR-035 §4 |
+
+Gates: unit green · full DB lane green · lint 0 · gofmt/vet 0 · binary-diff gate (see the session report) · browser 4 schemas × desktop/390×844 36/36 · ABBA by rule (no CRUD path touched).
+
+---
 
 ## DONE in VOZ-PREGUNTAS-S1 (2026-09-19) — questions in plain language: a model translates, the engine validates, executes as the asking role and answers with its own numbers (VOZ-3 / ADR-033 built)
 
