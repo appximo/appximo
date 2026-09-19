@@ -208,7 +208,10 @@ if [ -n "$ENVADD" ]; then
     [ -n "$v" ] || die "--env-add: $k is not set in the operator's environment (export $k=… first) — nothing was touched"
     payload+="$k=$v"$'\n'
   done
-  if ! printf '%s' "$payload" | "${SSH[@]}" "set -e; f='$ENVF'; tmp=\$(mktemp); cat > \$tmp; while IFS= read -r line; do k=\${line%%=*}; grep -v \"^\$k=\" \"\$f\" > \"\$f.new\" || true; printf '%s\n' \"\$line\" >> \"\$f.new\"; cat \"\$f.new\" > \"\$f\"; rm -f \"\$f.new\"; done < \$tmp; rm -f \$tmp; chmod 600 \"\$f\"; for k in \$(printf '%s' '$ENVADD' | tr ',' ' '); do grep -q \"^\$k=\" \"\$f\" || { echo \"  \$k missing after write\"; exit 1; }; echo \"  ✓ \$k present in \$f (0600)\"; done"; then
+  # The remote script is one single-quoted bash -c argument: no value is in it
+  # (values arrive on stdin); $ENVF and $ENVADD are plain names.
+  remote='f="$1"; keys="$2"; tmp=$(mktemp); cat >"$tmp"; while IFS= read -r line; do [ -n "$line" ] || continue; k=${line%%=*}; grep -v "^$k=" "$f" > "$f.new" || true; printf "%s\n" "$line" >> "$f.new"; cat "$f.new" > "$f"; rm -f "$f.new"; done <"$tmp"; rm -f "$tmp"; chmod 600 "$f"; for k in $(printf "%s" "$keys" | tr "," " "); do grep -q "^$k=" "$f" || { echo "  $k missing after write"; exit 1; }; echo "  ok: $k present in $f (0600)"; done'
+  if ! printf '%s' "$payload" | "${SSH[@]}" "bash -c '$remote' _ '$R_ENVF' '$ENVADD'"; then
     die "env keys could not be written — restore /root/$APP-env.pre-$TAG if the file was touched"
   fi
   ok "env keys written and verified (values never printed)"
