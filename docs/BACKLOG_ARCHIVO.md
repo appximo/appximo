@@ -429,6 +429,19 @@ refreshed).
 ---
 
 
+## DONE in VOZ-TRAZABILIDAD-S1 (2026-09-19) — knowing where the money goes: who answered each question and why, a bounded history that keeps the shape not the person, `gasto` on the census card, a per-user cap (ADR-036)
+
+| Item | What shipped | Verified by |
+|---|---|---|
+| **Trace in every reply** | JSON always: `source`, `cost_usd`, `fallback` (parser reason code), `fallback_es`. `APPXIMO_ASK_TRACE=on` (default off) ends the TEXT with `⚙︎ parser · 2 ms · US$ 0` / `⚙︎ modelo · 1,4 s · US$ 0,0030 · el parser pasó: no nombra ningún recurso del schema`; never in `speech`. | unit (on/off, speech clean, why); Postgres; live F1–F4 |
+| **The history** | `public.ask_history`, async writer (buffered channel, drops + logs when full), retention `APPXIMO_ASK_HISTORY_DAYS` 30 pruned hourly + at boot, no IP, text `redacted` (names → `[nombre]`) / `full` / `none`; `GET /admin/ask?tenant=` → `share`, `top_cost`, `top_repeated`, `model_fallbacks`. | Postgres (redacted row, reason, cost, no IP column, the lists); live: 45-day rows pruned at boot, «las órdenes de [nombre]», 0 name leaks over 115 rows; 100 questions ON p50 2 ms vs OFF 3 ms, 0 dropped |
+| **`gasto`** | fourth Telegram command; `GET /api/ask/spend[?format=png]`, the digest's census card, admin-grade roles only (sentinel + `policy.Allows`), 403 otherwise; `resumen`/`estado`/`ayuda` untouched. | receiver tests (photo + caption; forbidden); Postgres (200 admin / 403 owner / png); live: numbers match `/admin/ask`, 145 KB png, cliente 403 |
+| **Per-user cap** | `APPXIMO_ASK_DAILY_USD_PER_USER` (0 = off) composes with the tenant cap; only that user degrades («ya usaste tu cupo diario»); one alert per user per day; persisted (`ask_spend_user`). | unit; Postgres (user A capped on its 2nd call, user B goes on, one alert); live: dueno2 capped at $0.026, dueno goes on, cap remembered after a restart |
+| **OPS-56 DONE** | `deploy-app.sh --env-add=KEY[,KEY…]`: values from the operator's environment over ssh stdin, 0600, verified present, never on a command line. | used for `APPXIMO_ASK_TRACE=on` on both 58 apps (see the session report) |
+| **Unclear TTL 24 h → 1 h**; filters copied before name resolution (a cached name had become a cached id); generic period words («del día», «de la semana», «del mes», «nuevos» + period). | | unit + corpus |
+
+---
+
 ## DONE in VOZ-SIN-IA-S1 (2026-09-19) — the common question costs nothing: a schema-derived parser first, a plan cache second, the model last, behind a daily cap the owner is told about (ADR-035)
 
 | Item | What shipped | Verified by |

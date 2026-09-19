@@ -292,7 +292,17 @@ spend ledger caps MODEL calls (`APPXIMO_ASK_PER_MINUTE` 6, `APPXIMO_ASK_DAILY_US
 At the cap `kind: capped` for model-only questions while parser/cache keep
 answering; no key → `503 ask_disabled` ONLY for a question the parser cannot
 settle. Spend: `GET /admin/ask`, `appximo_ask_*` gauges, and a `spend` block
-in every reply. A custom Go handler that wants the same
+in every reply. **Traceability (VOZ-TRAZABILIDAD-S1):** every reply carries
+`source`, `cost_usd`, `fallback` (the parser's reason code, e.g. `unknown
+word: vendimos`) and `fallback_es`; with `APPXIMO_ASK_TRACE=on` the TEXT
+(never `speech`) ends with a `⚙︎` line saying who/how long/how much/why.
+`public.ask_history` logs every question off the answer path (retention
+`APPXIMO_ASK_HISTORY_DAYS`, text `redacted|full|none` — proper names →
+`[nombre]` by default, no IP ever); `GET /admin/ask?tenant=…` adds
+`share`, `top_cost`, `top_repeated`, `model_fallbacks`. `GET /api/ask/spend
+[?format=png]` is the tenant's spend digest for ADMIN-GRADE roles only
+(wildcard resources; the bot's `gasto`). `APPXIMO_ASK_DAILY_USD_PER_USER`
+composes a per-user cap (`kind: capped`, only that user). A custom Go handler that wants the same
 translation calls the endpoint as its role; there is no `Ctx` seam for the
 model on purpose — the vocabulary/validation/RBAC discipline lives in one
 place. Operator + Siri: docs/PRODUCTION.md §4.6e.

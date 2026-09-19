@@ -40,7 +40,7 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 **`DEC-*` decisions that only Miguel can take** (the old "Requires a decision
 from Miguel" table, given stable IDs).
 
-**Last reviewed: 2026-09-19 (VOZ-SIN-IA-S1).** Review history + all DONE
+**Last reviewed: 2026-09-19 (VOZ-TRAZABILIDAD-S1).** Review history + all DONE
 session sections: [BACKLOG_ARCHIVO.md](BACKLOG_ARCHIVO.md).
 
 ## OPEN
@@ -1493,18 +1493,30 @@ tarball of scripts/), and the smoke runs fleet-audit once.
   "sold") (medium; grammar + Studio); (d) follow-ups with a one-question memory (medium,
   and it opens the door to ambiguous answers). Each one provoked before it is built.
 
-### VOZ-9 — Measure the parser's real share on Miguel's usage (a week of `/admin/ask`), not only on the corpus
+### VOZ-9 — Measure the parser's real share on Miguel's usage — the history computes it now; a week of data is missing
 
-- **Origin:** VOZ-SIN-IA-S1 (2026-09-19). The deterministic parser (ADR-035) answers 33
-  of the 49 lab-corpus questions without a model. Real usage shows up in `/admin/ask`
-  (parser / cache / model per day) and `appximo_ask_questions{source}`; the journal
-  deliberately keeps no question text.
-- **Impact:** if the real share is much lower the saving is a lab number; if higher,
-  VOZ-7 loses urgency.
-- **Ready:** a week after the deploy, `curl /admin/ask` on both 58 apps → the month row;
-  under 50 % parser share, a small session adds the missing shapes from the questions
-  Miguel remembers asking (or an opt-in text log — his decision).
+- **Origin:** VOZ-SIN-IA-S1 (2026-09-19); fed by VOZ-TRAZABILIDAD-S1. The real share
+  lives in `public.ask_history` (`GET /admin/ask?tenant=…` → `share.parser_pct`) and in
+  `gasto`. First real reading (Miguel's 4 questions since the VOZ-SIN-IA deploy, the
+  58's journal): 1 parser / 3 model = 25 %, reasons «no resource named» ×2 and «two
+  periods» ×1 — far too small a sample; the 67 % is the lab corpus.
+- **Impact:** if the real share is much lower the saving is a lab number.
+- **Ready:** a week after the VOZ-TRAZABILIDAD deploy: `share` (30 days) and
+  `model_fallbacks` with their reasons; under 50 % parser, a small session adds the
+  GENERIC shapes that are missing — never an app's synonyms («pedidos» for `ordenes`
+  is VOZ-7c, Miguel's call).
 
+### VOZ-10 — The redacted history cannot hide a name the engine did not identify
+
+- **Origin:** VOZ-TRAZABILIDAD-S1 (2026-09-19); the limit is written in ADR-036 §2.
+  `APPXIMO_ASK_HISTORY_TEXT=redacted` replaces by `[nombre]` the proper names the
+  plan carries as `match`; a question with no plan (unclear), or a name the plan did
+  not capture, is stored as typed. Today's escape is `none`.
+- **Impact:** a tenant with a strict personal-data rule loses the whole text for a few
+  phrases, and the word «redacted» carries a written exception an auditor will read.
+- **Ready:** decide whether a generic, model-free proper-name detector (capitalized
+  words after «de/del/para/con», the parser's own heuristic) applied BEFORE storing
+  even without a plan is worth it; measure false positives on the corpus.
 ### VOZ-4 — Writes by voice WITH confirmation ("agendá cita a las 2 con Juan — ¿sí/no?")
 
 - **Origin:** A-70 step 3; ordered after VOZ-3 in VOZ-VISUAL-S1 (A-73).
@@ -1557,21 +1569,6 @@ Structured fields for every item: [backlog/items.json](backlog/items.json).
   explicit rollback (`--rollback-to=<tag>`), restores `/root/<app>-schema.pre-<tag>`
   together with the binary (and refuses the automatic 4b rollback when the boot
   error names an unknown schema key, saying which file to restore).
-
-### OPS-56 — deploy-app.sh carries no NEW env keys a binary needs (ANTHROPIC_API_KEY and APPXIMO_SUMMARY_TIMEZONE were added by hand)
-
-- **Origin:** VOZ-PREGUNTAS-S1 (2026-09-19). The deploy needed two new keys in both apps'
-  `/etc/<app>/<app>.env` on the 58; they were added over ssh through a pipe before the
-  deploy (copies `/root/<app>-env.pre-ask`). `deploy-app.sh` keeps the previous env but
-  has no way to DECLARE a new key (value from the operator's environment — never on a
-  command line, never in a log).
-- **Impact:** a manual step nobody remembers is a step that gets skipped: the next deploy
-  to another box starts without the key and the bot answers «no activadas» until
-  someone looks.
-- **Ready:** `--env-add=KEY[,KEY…]` taking the value from the operator's environment,
-  writing it into the box's env (0600) with a prior copy, verified present at the end;
-  `fleet-audit.sh` flags a missing `ANTHROPIC_API_KEY` when
-  `APPXIMO_TELEGRAM_SUMMARY_TENANT` is set.
 
 ### OPS-57 — The gate's `admission-shed-burst` probe flips by scheduling, not by binary
 

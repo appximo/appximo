@@ -1,6 +1,6 @@
 {
   "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo).",
-  "actualizado": "2026-09-19 (VOZ-SIN-IA-S1: VOZ-8 cerrado con razón; VOZ-9 abierto)",
+  "actualizado": "2026-09-19 (VOZ-TRAZABILIDAD-S1: OPS-56 hecho; VOZ-9 alimentado por el historial; VOZ-10 abierto)",
   "publicacion": {
     "estado": "pausada_deliberada",
     "desde": "2026-08-29",
@@ -1457,28 +1457,12 @@
       "estado": "abierto"
     },
     {
-      "id": "OPS-56",
-      "titulo": "deploy-app.sh no lleva las variables de entorno NUEVAS que un binario necesita (ANTHROPIC_API_KEY, APPXIMO_SUMMARY_TIMEZONE se agregaron a mano)",
-      "frente": "flota",
-      "que_es": "El deploy de VOZ-PREGUNTAS-S1 necesitó dos llaves nuevas en /etc/<app>/<app>.env de las dos apps del 58; se agregaron por ssh con una tubería antes del deploy (copias /root/<app>-env.pre-ask). deploy-app.sh copia el env previo pero no tiene una forma de DECLARAR llaves nuevas (con valor desde el entorno del operador, nunca en la línea de comando ni en un log).",
-      "por_que_importa": "Un paso a mano que nadie recuerda es un paso que se salta: el próximo deploy a otra caja arranca sin la clave y el bot contesta «no activadas» hasta que alguien mira.",
-      "que_lo_destraba": "Una sesión chica de flota: `--env-add=KEY[,KEY…]` que toma el valor del entorno del operador, lo escribe en el env de la caja (0600) con copia previa, y lo verifica presente al final (fleet-audit puede marcar la ausencia de ANTHROPIC_API_KEY cuando APPXIMO_TELEGRAM_SUMMARY_TENANT está puesto).",
-      "costo": "chico",
-      "dano": "medio",
-      "prioridad": "P2",
-      "decide": "agente",
-      "depende_de": [],
-      "bloquea": [],
-      "origen": "VOZ-PREGUNTAS-S1 (2026-09-19)",
-      "estado": "abierto"
-    },
-    {
       "id": "VOZ-9",
-      "titulo": "Medir la porción real de preguntas que resuelve el parser sobre el uso de Miguel (una semana de /admin/ask), no solo sobre el corpus",
+      "titulo": "Medir la porción real de preguntas que resuelve el parser sobre el uso de Miguel — el historial ya la calcula; falta una semana de datos",
       "frente": "automatizacion",
-      "que_es": "El parser determinístico (ADR-035) resuelve 33 de 49 preguntas del corpus de laboratorio sin modelo. El uso real de Miguel se ve en /admin/ask (parser/cache/model por día) y en appximo_ask_questions{source}; el journal no guarda el texto de la pregunta (a propósito). Falta leer una semana de uso y decidir si el parser necesita más formas (o si el 67 % del corpus era optimista).",
+      "que_es": "Desde VOZ-TRAZABILIDAD-S1 la porción REAL sale de public.ask_history (`GET /admin/ask?tenant=…` → share.parser_pct) y de `gasto`. Primera lectura real (4 preguntas de Miguel desde el deploy de VOZ-SIN-IA, journal del 58): 1 parser / 3 modelo = 25 %, razones «no nombra ningún recurso» ×2 y «dos períodos» ×1 — muestra demasiado chica para concluir; el 67 % es del corpus de laboratorio.",
       "por_que_importa": "Si en uso real el parser resuelve mucho menos, el ahorro es de laboratorio; si resuelve más, VOZ-7 pierde urgencia.",
-      "que_lo_destraba": "Una semana después del deploy: `curl /admin/ask` en las dos apps del 58 → la fila del mes; si la porción del parser está bajo 50 %, una sesión chica que agregue las formas que faltan a partir de las preguntas que Miguel recuerde haber hecho (o de un log opt-in del texto, decisión suya).",
+      "que_lo_destraba": "Una semana después del deploy de VOZ-TRAZABILIDAD-S1: `curl /admin/ask?tenant=tiendita` → share (30 días) y model_fallbacks con sus razones; si el parser está bajo 50 %, una sesión chica que agregue las formas genéricas que falten (nunca sinónimos de una app — «pedidos» por `ordenes` es VOZ-7c, decisión de Miguel).",
       "costo": "chico",
       "dano": "bajo",
       "prioridad": "P3",
@@ -1520,6 +1504,22 @@
       "depende_de": [],
       "bloquea": [],
       "origen": "VOZ-SIN-IA-S1 (2026-09-19), hallazgo lateral",
+      "estado": "abierto"
+    },
+    {
+      "id": "VOZ-10",
+      "titulo": "El historial redactado no puede tapar un nombre que el motor no identificó (una pregunta que quedó en «no entendí» se guarda como se dijo)",
+      "frente": "automatizacion",
+      "que_es": "Con APPXIMO_ASK_HISTORY_TEXT=redacted el motor reemplaza por [nombre] los nombres propios que el plan trae como `match`. Una pregunta sin plan (unclear) o con el nombre en un lugar que el plan no capturó se guarda tal cual: puede llevar el nombre de un cliente. Hoy el escape es `none` (solo el plan).",
+      "por_que_importa": "Un inquilino con regla estricta de datos personales pierde el texto entero (`none`) por unas pocas frases; y la promesa «redactado» tiene una excepción escrita que un auditor va a leer.",
+      "que_lo_destraba": "Decidir si vale un reconocedor genérico de nombres propios sin modelo (mayúsculas en medio de la frase tras «de/del/para/con», el mismo heurístico del parser) aplicado ANTES de guardar aunque no haya plan; medir falsos positivos sobre el corpus. Decide el agente; costo chico.",
+      "costo": "chico",
+      "dano": "bajo",
+      "prioridad": "P3",
+      "decide": "agente",
+      "depende_de": [],
+      "bloquea": [],
+      "origen": "VOZ-TRAZABILIDAD-S1 (2026-09-19), límite escrito en ADR-036 §2",
       "estado": "abierto"
     }
   ]

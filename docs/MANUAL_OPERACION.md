@@ -426,6 +426,32 @@ valor mal escrito no arranca y lo dice. Cuánto lleva gastado hoy y este mes
 lo ve en `/admin/ask` (o en `/metrics`), nunca tiene que abrir la consola del
 proveedor.
 
+**Saber en qué se gasta** (para quien administra, no para el dueño de la
+tienda; todo apagado o discreto por defecto):
+
+- **`gasto`** — un cuarto comando del bot: cuánto va hoy y este mes, cuánto
+  falta para el techo, cuántas preguntas resolvió el parser, la caché y el
+  modelo, y las frases que más cuestan. Llega como imagen con el texto
+  debajo, igual que `resumen`. Solo lo ve un rol administrador (el que tiene
+  todos los recursos); un rol acotado recibe «tu rol no puede ver el gasto».
+- **La traza en cada respuesta** — con `APPXIMO_ASK_TRACE=on`, cada
+  respuesta termina con una línea chica: `⚙︎ parser · 2 ms · US$ 0`, o
+  `⚙︎ modelo · 1,1 s · US$ 0,0029 · el parser pasó: palabra fuera del
+  schema «vendimos»`. Esa última parte es la que sirve: dice qué palabra
+  no está en su schema. **Siri nunca la lee**: el costo se ve, no se escucha.
+- **El historial** — el motor guarda cada pregunta (quién la resolvió,
+  cuánto costó, cuánto tardó, el plan, por qué cayó al modelo) durante
+  `APPXIMO_ASK_HISTORY_DAYS` días (30) y lo poda solo. Nunca guarda la IP.
+  **Los nombres propios que la pregunta traía se guardan como `[nombre]`**
+  («las órdenes de [nombre]») — queda la forma de la pregunta, no la
+  persona; si prefiere no guardar texto, `APPXIMO_ASK_HISTORY_TEXT=none`.
+  Las listas útiles están en `/admin/ask?tenant=<inquilino>`: las más
+  caras, las más repetidas, las que caen al modelo y por qué.
+- **Techo por usuario** — `APPXIMO_ASK_DAILY_USD_PER_USER` (apagado por
+  defecto): si varias personas preguntan en la misma app, una sola no puede
+  gastarse el día de todas; la que llega a su cupo sigue con las preguntas
+  simples y los comandos, las demás normal, y a usted le llega un aviso.
+
 **Cómo se activa** — en `/etc/<app>/<app>.env` (además de lo de §3c):
 
 ```

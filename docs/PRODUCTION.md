@@ -1046,6 +1046,54 @@ minute all day ≈ US$ 1 300).
 - every reply carries `source` (`parser` | `cache` | `model`) and a `spend`
   block (`day_usd`, `day_model_calls`, `daily_cap_usd`, `per_minute`).
 
+**Knowing where the money goes (VOZ-TRAZABILIDAD-S1).** Four things, all
+for whoever administers, off by default where they would bother a shop owner:
+
+- **The trace in every reply** — `APPXIMO_ASK_TRACE=on`: the reply's TEXT
+  ends with `⚙︎ parser · 2 ms · US$ 0`, `⚙︎ caché · 3 ms · US$ 0`, or
+  `⚙︎ modelo · 1,1 s · US$ 0,0029 · el parser pasó: palabra fuera del
+  schema «vendimos»`. **Never in `speech`**: a voice that reads "tres
+  centavos" after every answer wears out in two days — the cost is for the
+  eyes on the phone, not the ears. The JSON always carries `source`,
+  `cost_usd`, `fallback` (the parser's reason code) and `fallback_es`
+  (the same in words), switch or not.
+- **The question history** — `public.ask_history`, one row per question:
+  when, tenant, role, user id (the JWT subject — an id, never a name), the
+  question (see below), who answered, kind, resource, cost, latency, the
+  plan, the parser's reason, cache hit. Written OFF the answer path (a
+  buffered channel and one writer; a full buffer drops rows and says so —
+  the answer is never delayed). **Retention `APPXIMO_ASK_HISTORY_DAYS`**
+  (30; `0` disables), pruned hourly and at boot. **No IP, ever (A-53).**
+  **The text follows `APPXIMO_ASK_HISTORY_TEXT`:** `redacted` (default —
+  the proper names the plan identified become `[nombre]`: «las órdenes de
+  [nombre]» keeps the SHAPE the parser needs to learn from without the
+  person), `full`, or `none` (the plan only). Same discipline as request
+  bodies: personal data is opt-in, not default. A name the engine could not
+  identify (a question that went unclear) stays as typed under `redacted`;
+  a tenant that cannot accept that sets `none`.
+- **The three lists that matter** — `GET /admin/ask?tenant=<id>&days=<n>`
+  adds `top_cost` (the phrases that cost the most), `top_repeated`,
+  `model_fallbacks` (the phrases that went to the model, each with the
+  parser's reason — what the parser should learn next) and `share` (the
+  REAL parser / cache / model split — VOZ-9's number lives here, not in
+  the lab corpus).
+- **`gasto` on Telegram** — a fourth command beside `resumen`, `estado`,
+  `ayuda`: today and this month, how far the cap is, who answered how
+  many, the phrases that cost the most — as the digest's own census card
+  (picture + text). Served by `GET /api/ask/spend[?format=png]`, **for
+  admin-grade roles only** (a wildcard-resource role, the same inherited
+  test as the tenant observability routes): a listed or row-scoped role is
+  403 — the spend of a platform is the administrator's business, not a
+  clerk's. The bot answers with the configured role, so `gasto` works where
+  that role is admin-grade (the 58's `dueno`/`owner`) and says «tu rol no
+  puede ver el gasto» elsewhere.
+- **A cap per user** — `APPXIMO_ASK_DAILY_USD_PER_USER` (default `0` =
+  off): composes with the tenant cap, whichever is reached first wins; at
+  the user cap only THAT user degrades to parser/cache/fixed commands («ya
+  usaste tu cupo diario del modelo»), the rest of the tenant goes on, and
+  the administrator gets one alert per user per day. Off by default
+  because a single-owner app must not meet a second, silent ceiling.
+
 **Enable the model** — add the key to the app's env (`/etc/<app>/<app>.env`,
 0600, never in a repo, a log or a report) and restart. Without it the parser
 still answers every shape it is sure of; only a question that needs the model
@@ -1060,6 +1108,10 @@ APPXIMO_ASK_TIMEOUT=8s                  # per model call
 APPXIMO_ASK_PER_MINUTE=6                # MODEL calls per tenant per minute (parser/cache answers are free and uncounted)
 APPXIMO_ASK_DAILY_USD=0.50              # MODEL spend per tenant per day; at the cap the model is off, the rest keeps answering
 APPXIMO_ASK_ALERT_PCT=80                # one Telegram/Slack alert per tenant per day at this share of the cap
+APPXIMO_ASK_DAILY_USD_PER_USER=0        # per-user daily cap (0 = off); composes with the tenant cap
+APPXIMO_ASK_TRACE=off                   # on: who answered / latency / cost / why in every reply's TEXT (never the voice)
+APPXIMO_ASK_HISTORY_DAYS=30             # question history retention (0 = off); pruned hourly
+APPXIMO_ASK_HISTORY_TEXT=redacted       # redacted | full | none — what of the question text the history keeps
 APPXIMO_ASK=off                         # disable the question path even with a key
 ```
 
@@ -1363,6 +1415,7 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `APPXIMO_WORKER_MODE` + `APPXIMO_WORKER_{BATCH,MAX_ATTEMPTS,POLL,SCHEMA_REFRESH,ROLE,RESOURCE}`, `APPXIMO_ENGINE_URL`, `APPXIMO_TENANT_DOMAIN` | no | `auto` / 50 / 5 / 5s / 1m / `service_worker` / `filejobs` / `http://127.0.0.1:<port>` / (domain minus first label) | `appximo-worker`'s env (§8b). STRICT: an invalid value or a misspelled `APPXIMO_WORKER_*` refuses to boot naming every offender; unset values are reported in one "defaults in effect" boot line. |
 | `ANTHROPIC_API_KEY` | no | — | Enables the **question path** (§4.6e): `POST /api/ask` and the bot's free-text branch — a language model translates the question into a validated read plan. The engine reads it from its environment only; never written, printed or backed up. Without it the path answers `503 ask_disabled` and the bot says so; the fixed commands never depend on it. `APPXIMO_ASK=off` disables the path even with a key. |
 | `APPXIMO_ASK_MODEL` / `APPXIMO_ASK_TIMEOUT` | no | `claude-haiku-4-5` / `8s` | The question path's model (any Anthropic model id; the cheap one is the default and measured at ≈ US$ 0.003 per MODEL question) and the bound per model call. |
+| `APPXIMO_ASK_TRACE` / `APPXIMO_ASK_HISTORY_DAYS` / `APPXIMO_ASK_HISTORY_TEXT` / `APPXIMO_ASK_DAILY_USD_PER_USER` | no | `off` / `30` / `redacted` / `0` | Where the money goes (§4.6e, VOZ-TRAZABILIDAD-S1): the ⚙︎ trace line in every reply's text (never the voice), the question history's retention and what of the text it keeps (proper names → `[nombre]` by default; no IP ever), and the per-user daily cap that composes with the tenant's. Fail-fast on a bad value. `gasto` on Telegram and `GET /api/ask/spend` read them. |
 | `APPXIMO_ASK_PER_MINUTE` / `APPXIMO_ASK_DAILY_USD` / `APPXIMO_ASK_ALERT_PCT` | no | `6` / `0.50` / `80` | The wallet guard (§4.6e, ADR-035): model calls per tenant per minute, model spend per tenant per day (at the cap the model is off until tomorrow — the parser, the plan cache and the fixed commands keep answering), and the share of the cap that fires ONE alert per tenant per day. Fail-fast: a bad value refuses to boot. Worst case per day = the cap + one question. |
 | `APPXIMO_SUMMARY_TIMEZONE` | no | the process's local zone | The IANA zone «hoy» / «esta semana» / the digest's day are computed in (`America/Bogota`). A production box runs UTC, so an owner in Bogotá asking at 8 pm was answered about tomorrow. An invalid name refuses to boot. Set it on every app with an owner in one place. |
 | `APPXIMO_TELEGRAM_BOT_TOKEN` + `APPXIMO_TELEGRAM_CHAT_ID` | no | — | The **Telegram alert destination** (§4.6c) — every alert (SLO burn, first-occurrence errors, backup failed/stale, disk low, stuck outbox, overdue workflows) reaches that chat, in Spanish, phone-first, with what-to-do. Both or neither: half a pair, or a malformed value, **refuses to boot** naming the variable; a revoked token is detected out-of-band at boot (read-only `getMe`+`getChat`) and screams in the journal. `backup.sh` posts its own failure here too. |

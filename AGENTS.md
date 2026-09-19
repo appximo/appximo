@@ -2136,7 +2136,17 @@ fail-fast on a bad value; `GET /admin/ask` + `appximo_ask_*` gauges show the
 spend. No key → `503 ask_disabled` only for a question the parser cannot
 settle. Measured: before 49/49 model calls, US$ 0.147 per corpus pass; after
 16 calls (US$ 0.053) first pass, and only the never-seen questions the
-second; p50 from 0.9 s to 4 ms. The Telegram receiver sends any non-command
+second; p50 from 0.9 s to 4 ms. **Traceability (VOZ-TRAZABILIDAD-S1):**
+every reply carries `source`/`cost_usd`/`fallback`/`fallback_es`;
+`APPXIMO_ASK_TRACE=on` adds a `⚙︎ who · latency · cost · why` line to the
+TEXT (never `speech`); `public.ask_history` logs every question off the
+answer path (`APPXIMO_ASK_HISTORY_DAYS` 30, `_TEXT` redacted|full|none —
+names → `[nombre]`, no IP) and `GET /admin/ask?tenant=` lists top_cost /
+top_repeated / model_fallbacks / the real share; `gasto` on Telegram =
+`GET /api/ask/spend[?format=png]` (admin-grade roles only, the census card);
+`APPXIMO_ASK_DAILY_USD_PER_USER` composes a per-user cap (only that user
+degrades; the admin is alerted). `deploy-app.sh --env-add=KEY,…` carries
+new env keys from the operator's environment (OPS-56). The Telegram receiver sends any non-command
 word here (with «escribiendo…» while it thinks); a grouped answer also comes
 as the digest's census picture. Operator + the Siri shortcut (Dictate Text →
 POST → Speak `speech`): docs/PRODUCTION.md §4.6e; owner manual §3d;
