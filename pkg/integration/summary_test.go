@@ -373,7 +373,9 @@ func TestSummary_PNGDoor(t *testing.T) {
 			t.Errorf("%s: the level travels as a header", path)
 		}
 	}
-	// Accept: image/png is the other door.
+	// The Accept header is deliberately NOT a door: the response cache keys by
+	// URL, so two representations on one URL served each other's bytes (seen
+	// live). ?format=png is the only way to the image; the default stays JSON.
 	req, _ := http.NewRequest(http.MethodGet, rest.URL+"/api/summary", nil)
 	req.Header.Set("Authorization", "Bearer "+super)
 	req.Header.Set("Accept", "image/png")
@@ -383,8 +385,8 @@ func TestSummary_PNGDoor(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.Header.Get("Content-Type") != "image/png" {
-		t.Errorf("Accept: image/png must render the image, got %s", resp.Header.Get("Content-Type"))
+	if resp.Header.Get("Content-Type") != "application/json" {
+		t.Errorf("Accept must not switch the representation (cache safety); got %s", resp.Header.Get("Content-Type"))
 	}
 }
 

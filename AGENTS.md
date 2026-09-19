@@ -2041,7 +2041,9 @@ creados, nadie los movió", amber); **en curso** — every other non-terminal
 state, a neutral count in the schema's own words, never "pendiente"; terminal
 states are never counted. Empty day → "Sin movimiento hoy" (green). Returns
 `{"text","has_motion","level":"red|amber|green","headline","attention_total",...}`;
-`text` is Telegram-HTML. **`?format=png` (or `Accept: image/png`) answers the
+`text` is Telegram-HTML. **`?format=png` (the only door — a separate URL, so
+the URL-keyed response cache never serves one representation for the other;
+an `Accept: image/png` door was removed after a cached JSON answered it live) answers the
 SAME digest as an IMAGE** rendered on the server (`pkg/summary/render.go`: pure
 Go, `golang.org/x/image` + the Go fonts, no browser, deterministic — same
 Report → same bytes; +860 KB on the binary, measured in ADR-032): a traffic

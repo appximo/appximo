@@ -774,7 +774,8 @@ returns the "estado" view (how many of each thing there are right now). It is
 a reserved route (a schema resource may not be named `summary`).
 
 **The digest as a PICTURE (VOZ-VISUAL-S1).** `GET /api/summary?format=png`
-(or `Accept: image/png`) answers the same digest rendered on the server as a
+(the only door — a separate URL keeps the JSON and the image apart in the
+response cache) answers the same digest rendered on the server as a
 PNG — 800 px wide (2× a phone), a traffic light and a headline you read in
 three seconds, one big row per resource that waits, today's motion, the rest
 folded — so a twenty-resource app is still one glance. Rendered in pure Go

@@ -59,7 +59,7 @@ encode at `BestSpeed` dominates). Live, end to end through the endpoint
 (counts + compose + render + encode) on the dev box while the full test lane
 ran beside it: 50–210 ms wall. The digest's 5 s budget is 25–100× away.
 **Off the hot path:** the image is produced only when a caller asks
-(`?format=png` / `Accept: image/png`) — the Telegram receiver and the
+(`?format=png` — the Telegram receiver and the
 scheduled consumer — never on a CRUD request; the plain-text call is
 byte-identical to before except for the new vocabulary (binary-diff gate:
 171 SAME on every CRUD case, 4 DIFF all on `/api/summary`).
@@ -146,7 +146,10 @@ the engine says what it knows (structure) and never what it doesn't
 
 - `/api/summary` JSON gains `level` (`red|amber|green`), `headline`,
   `attention_total`; `text` changes vocabulary. `?format=png` and
-  `Accept: image/png` answer the image with `X-Summary-Level`. The census
+  answers the image with `X-Summary-Level` (an `Accept: image/png` door was
+  removed the next day: it shared the URL with the JSON and the URL-keyed
+  response cache served a cached JSON to it — two representations, two URLs).
+  The census
   view (`estado`) honors the same filter and order.
 - Every schema keeps validating (both keys optional). The `spec` grammar
   teaches both; the meta-schema accepts both; `explain` reads both back.

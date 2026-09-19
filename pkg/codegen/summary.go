@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -27,8 +26,9 @@ import (
 // Telegram receiver returns for "resumen" and the cron workflow sends each
 // morning.
 //
-// Since VOZ-VISUAL-S1 it also answers as an IMAGE — `?format=png` (or
-// `Accept: image/png`) — rendered on the server from the SAME counts
+// Since VOZ-VISUAL-S1 it also answers as an IMAGE — `?format=png` (the ONLY
+// door: a separate URL, so the response cache keeps the two representations
+// apart) — rendered on the server from the SAME counts
 // (pkg/summary/render.go), so the picture can never say something the text
 // does not. The schema's top-level `summary.resources` block chooses which
 // resources enter and in what order (absent ⇒ every readable resource,
@@ -89,7 +89,11 @@ func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, p
 
 		q := req.URL.Query()
 		census := q.Get("view") == "census"
-		wantPNG := q.Get("format") == "png" || strings.HasPrefix(req.Header.Get("Accept"), "image/png")
+		// ONLY ?format=png selects the image. An Accept-header door shared the
+		// URL with the JSON and the response cache keys by URL: a cached JSON
+		// answered an image request (and could have done the reverse) — seen
+		// live on the 58. Two representations, two URLs, two cache entries.
+		wantPNG := q.Get("format") == "png"
 		// ?mode=scheduled (VOZ-DELTA-S1): the morning run. The digest is
 		// compared against the baseline like any other call, but this one also
 		// APPLIES the send policy (summary.notify / quiet_days) and records its
