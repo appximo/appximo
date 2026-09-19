@@ -1489,6 +1489,38 @@
       "bloquea": [],
       "origen": "VOZ-SIN-IA-S1 (2026-09-19)",
       "estado": "abierto"
+    },
+    {
+      "id": "OPS-57",
+      "titulo": "La sonda admission-shed-burst del gate de diff cambia de veredicto por planificación, no por el binario",
+      "frente": "medicion",
+      "que_es": "El gate dispara 64 requests con 32 en paralelo contra cada binario con APPXIMO_MAX_INFLIGHT=1 y espera algún 429. Que dos requests se solapen depende del scheduler: en VOZ-SIN-IA-S1 dio base=yes/new=no dos veces en caja quieta, y aislada (seis rondas alternadas, mismo DB) los DOS binarios despiden a veces y a veces sirven las 64. Ya había flipeado en VOZ-DELTA y VOZ-PREGUNTAS con caja cargada.",
+      "por_que_importa": "Un DIFF que hay que explicar cada sesión y que no dice nada del binario desgasta el gate: un día se ignora uno real.",
+      "que_lo_destraba": "Sesión chica de medición: hacer la sonda determinística — mantener UNA request lenta en vuelo (un endpoint que duerma, o un ?search= pesado) y disparar la ráfaga mientras; con cap 1 el 429 es seguro en un binario con admisión y imposible en uno sin. Evidencia: evidencia/VOZ-SIN-IA-S1/gate-admission-probe-isolated.log.",
+      "costo": "chico",
+      "dano": "bajo",
+      "prioridad": "P3",
+      "decide": "agente",
+      "depende_de": [],
+      "bloquea": [],
+      "origen": "VOZ-SIN-IA-S1 (2026-09-19)",
+      "estado": "abierto"
+    },
+    {
+      "id": "ENG-62",
+      "titulo": "Dos motores arrancando el mismo segundo sobre una base FRESCA compartida: el bootstrap del control plane no está serializado (tuple concurrently updated)",
+      "frente": "motor",
+      "que_es": "Al bootear el binario base y el nuevo a la vez contra la misma base de laboratorio, uno murió con «bootstrap control plane: ERROR: tuple concurrently updated (SQLSTATE XX000)»: los dos corrieron el DDL idempotente del control plane al mismo tiempo y Postgres rechazó una de las actualizaciones concurrentes del catálogo. Un solo motor por base (el caso de producción) no lo ve; una unidad de systemd reiniciaría al caído.",
+      "por_que_importa": "Es un arranque que puede morir sin culpa del operador cuando dos procesos comparten base (blue/green a mano, un fleet run mal configurado con la misma DATABASE_URL); hoy solo lo protege el Restart= de la unidad.",
+      "que_lo_destraba": "Sesión chica de motor: envolver el bootstrap en pg_advisory_xact_lock (la misma técnica del scheduler de workflows) o reintentar una vez ante XX000; test que arranca dos App.New en paralelo sobre una base vacía.",
+      "costo": "chico",
+      "dano": "bajo",
+      "prioridad": "P3",
+      "decide": "agente",
+      "depende_de": [],
+      "bloquea": [],
+      "origen": "VOZ-SIN-IA-S1 (2026-09-19), hallazgo lateral",
+      "estado": "abierto"
     }
   ]
 }

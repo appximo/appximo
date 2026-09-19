@@ -1342,6 +1342,19 @@ would close it better, and is Miguel's call.
   tracing integration test (a resolver that panics on a declared trigger
   field) persisted as a 500 with the site.
 
+### ENG-62 — Two engines booting the same second on one FRESH shared database: the control-plane bootstrap is not serialized
+
+- **Origin:** VOZ-SIN-IA-S1 (2026-09-19), side finding. Booting the base and the new binary
+  together against the same lab database, one died with `bootstrap control plane: ERROR:
+  tuple concurrently updated (SQLSTATE XX000)` — both ran the idempotent control-plane DDL at
+  once. One engine per database (production) never sees it; a systemd unit would restart
+  the loser.
+- **Impact:** a boot that can die through no operator fault whenever two processes share a
+  database (a hand blue/green, a misconfigured `fleet run` with one DATABASE_URL).
+- **Ready:** wrap the bootstrap in `pg_advisory_xact_lock` (the workflow scheduler's own
+  technique) or retry once on XX000; a test that starts two `App.New` in parallel on an
+  empty database.
+
 ### OPS-46 — The stock `serve` binds every interface; on the 58 vetapp's `:8091` and control `:9098` listen on `*` and the firewall is the only line
 
 - **Origin:** DEPLOY-FLOTA-S1 (2026-08-31), the pre-provocation port review
@@ -1559,6 +1572,19 @@ Structured fields for every item: [backlog/items.json](backlog/items.json).
   writing it into the box's env (0600) with a prior copy, verified present at the end;
   `fleet-audit.sh` flags a missing `ANTHROPIC_API_KEY` when
   `APPXIMO_TELEGRAM_SUMMARY_TENANT` is set.
+
+### OPS-57 — The gate's `admission-shed-burst` probe flips by scheduling, not by binary
+
+- **Origin:** VOZ-SIN-IA-S1 (2026-09-19). 64 requests, 32 in parallel, `APPXIMO_MAX_INFLIGHT=1`,
+  expecting some 429: whether two requests overlap is the scheduler's business. It read
+  base=yes/new=no twice on a quiet box; isolated (six alternating rounds, same DB) BOTH
+  binaries shed sometimes and serve all 64 other times
+  (`evidencia/VOZ-SIN-IA-S1/gate-admission-probe-isolated.log`). It had flipped under load in
+  VOZ-DELTA and VOZ-PREGUNTAS too.
+- **Impact:** a DIFF explained away every session erodes the gate; one day a real one is.
+- **Ready:** make it deterministic — hold ONE slow request in flight (a sleeping endpoint or
+  a heavy `?search=`) and fire the burst meanwhile; at cap 1 the 429 is certain with
+  admission control and impossible without.
 
 ### AUTO-9 — The voice plan: five steps, with what the research already settled
 
