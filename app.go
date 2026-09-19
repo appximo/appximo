@@ -656,6 +656,13 @@ func New(cfg Config) (*App, error) {
 	for roleName := range s.RBAC.Roles {
 		declaredRoles[roleName] = true
 	}
+	// The declared "today" for the digest and the questions
+	// (APPXIMO_SUMMARY_TIMEZONE, VOZ-PREGUNTAS-S1): an invalid zone refuses to
+	// boot — a silently wrong day is the failure this guards.
+	if tzErr := summary.CheckTimezone(); tzErr != nil {
+		pool.Close()
+		return nil, tzErr
+	}
 	tgRcv, tgErr := newTelegramReceiver(cfg, declaredRoles, func() http.Handler {
 		if m := app.currentRouter.Load(); m != nil {
 			return m

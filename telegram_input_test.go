@@ -3,6 +3,7 @@ package appximo
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"image"
 	"image/png"
@@ -35,6 +36,13 @@ type fakeTG struct {
 	// rejectPhoto makes sendPhoto answer this HTTP status with ok:false
 	// (400 = refused for good, 500/429 = retryable).
 	rejectPhoto int
+	typing      int // sendChatAction calls
+}
+
+func (f *fakeTG) typingCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.typing
 }
 
 type fakePhoto struct {
@@ -89,6 +97,11 @@ func (f *fakeTG) server(t *testing.T) *httptest.Server {
 			f.photos = append(f.photos, fakePhoto{caption: r.FormValue("caption"), size: size, chat: chat})
 			f.mu.Unlock()
 			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": 2}}) //nolint:errcheck
+		case strings.HasSuffix(r.URL.Path, "/sendChatAction"):
+			f.mu.Lock()
+			f.typing++
+			f.mu.Unlock()
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": true}) //nolint:errcheck
 		case strings.HasSuffix(r.URL.Path, "/deleteWebhook"):
 			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": true}) //nolint:errcheck
 		default:
@@ -239,15 +252,94 @@ func TestReceiver_EstadoCensus(t *testing.T) {
 	}
 }
 
-func TestReceiver_UnknownCommandShowsHelp(t *testing.T) {
+// VOZ-PREGUNTAS-S1: a word that is not a fixed command is a QUESTION. When the
+// engine has no model key, /api/ask answers 503 ask_disabled and the bot says
+// so + the help — the fixed commands are untouched.
+func TestReceiver_UnknownWordIsAQuestion_DisabledShowsHelp(t *testing.T) {
 	f := &fakeTG{}
 	srv := f.server(t)
-	rcv := newTestReceiver(t, srv, stubSummaryRouter(t, "acme", "owner"))
+	rcv := newTestReceiver(t, srv, stubAskRouter(t, "acme", "owner", askReply{status: 503, body: map[string]any{"kind": "disabled", "text": "Las preguntas libres no están activadas (falta ANTHROPIC_API_KEY)."}}))
 	rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "hazme un cafe")})
 	got := f.replies()
-	if len(got) != 1 || !strings.Contains(got[0], "Comandos") {
-		t.Fatalf("unknown command must reply with help; got %v", got)
+	if len(got) != 1 || !strings.Contains(got[0], "Comandos") || !strings.Contains(got[0], "ANTHROPIC_API_KEY") {
+		t.Fatalf("disabled question path must reply with the reason + help; got %v", got)
 	}
+}
+
+func TestReceiver_QuestionAnsweredAsTheConfiguredRole(t *testing.T) {
+	f := &fakeTG{}
+	srv := f.server(t)
+	rcv := newTestReceiver(t, srv, stubAskRouter(t, "acme", "owner", askReply{status: 200, body: map[string]any{"kind": "answer", "text": "<b>7</b> citas hoy"}}))
+	rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "cuántas citas tengo hoy")})
+	got := f.replies()
+	if len(got) != 1 || got[0] != "<b>7</b> citas hoy" {
+		t.Fatalf("question must relay the engine's text; got %v", got)
+	}
+	if f.typingCount() == 0 {
+		t.Fatalf("the typing indicator must be sent while the engine thinks")
+	}
+}
+
+func TestReceiver_QuestionWithImageSendsPhoto(t *testing.T) {
+	f := &fakeTG{}
+	srv := f.server(t)
+	png := base64.StdEncoding.EncodeToString(tinyPNG())
+	rcv := newTestReceiver(t, srv, stubAskRouter(t, "acme", "owner", askReply{status: 200, body: map[string]any{"kind": "answer", "text": "<b>3</b> citas por estado", "png": png}}))
+	rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "citas por estado")})
+	if ph := f.sentPhotos(); len(ph) != 1 || ph[0].caption != "<b>3</b> citas por estado" {
+		t.Fatalf("a grouped answer must go as photo + caption; got %v", ph)
+	}
+}
+
+func TestReceiver_QuestionModelDownDegradesToFixedCommands(t *testing.T) {
+	f := &fakeTG{}
+	srv := f.server(t)
+	rcv := newTestReceiver(t, srv, stubAskRouter(t, "acme", "owner", askReply{status: 200, body: map[string]any{"kind": "unavailable", "text": "⚠️ No pude pensar la pregunta ahora. Los comandos fijos siguen: resumen, estado, ayuda."}}))
+	rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "cuántas citas hay")})
+	got := f.replies()
+	if len(got) != 1 || !strings.Contains(got[0], "resumen") {
+		t.Fatalf("model down must degrade, not break; got %v", got)
+	}
+	// And the fixed commands still work against the same router.
+	rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "estado")})
+	if got := f.replies(); len(got) != 2 || !strings.Contains(got[1], "Estado") {
+		t.Fatalf("fixed commands must survive; got %v", got)
+	}
+}
+
+type askReply struct {
+	status int
+	body   map[string]any
+}
+
+// stubAskRouter is stubSummaryRouter plus a scripted POST /api/ask that demands
+// the same (tenant, role) token and echoes the question it received.
+func stubAskRouter(t *testing.T, wantTenant, wantRole string, reply askReply) http.Handler {
+	summaryH := stubSummaryRouter(t, wantTenant, wantRole)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/ask" {
+			summaryH.ServeHTTP(w, r)
+			return
+		}
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		authz := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		claims, err := auth.ValidateToken(authz, testJWTSecret)
+		if err != nil || claims.Role != wantRole || claims.TenantID != wantTenant {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		var in struct {
+			Q string `json:"q"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Q == "" {
+			t.Errorf("the question must travel as {q}: %v", err)
+		}
+		w.WriteHeader(reply.status)
+		json.NewEncoder(w).Encode(reply.body) //nolint:errcheck
+	})
 }
 
 func TestReceiver_UnauthorizedChatIgnored(t *testing.T) {

@@ -144,13 +144,22 @@ const TransactionRoute = "transaction"
 // many). A schema resource may not be named "summary" (reserved at load).
 const SummaryRoute = "summary"
 
+// AskRoute is the reserved single segment of the natural-language read
+// question endpoint (VOZ-PREGUNTAS-S1, ADR-033): POST /api/ask. Like
+// SummaryRoute it is NOT a resource — the handler evaluates read on the ONE
+// resource the validated plan names (and on the relation target a proper
+// name resolves through), with that role's row condition and field allowlist,
+// through the same query builders REST uses — so the middleware passes it
+// through. A schema resource may not be named "ask" (reserved at load).
+const AskRoute = "ask"
+
 // resourceFromPath extracts the resource name from paths like /api/guides or
 // /api/guides/{id}. Returns "" for non-/api paths AND for the reserved
 // /api/transaction batch endpoint (which does its own per-operation RBAC), so the
 // middleware enforces nothing there and the handler authorizes each op itself.
 func resourceFromPath(path string) string {
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	if len(parts) >= 2 && parts[0] == "api" && parts[1] != "" && parts[1] != TransactionRoute && parts[1] != SummaryRoute {
+	if len(parts) >= 2 && parts[0] == "api" && parts[1] != "" && parts[1] != TransactionRoute && parts[1] != SummaryRoute && parts[1] != AskRoute {
 		return parts[1]
 	}
 	return ""

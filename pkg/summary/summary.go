@@ -159,6 +159,9 @@ type Facts struct {
 	// Total carries the census view's row count (the `estado` command).
 	Total    int64
 	HasTotal bool
+	// TotalText, when set, is what the census row PRINTS instead of Total
+	// (a grouped question answer reuses the census card for a money sum).
+	TotalText string
 	// The delta (VOZ-DELTA-S1, ADR-034): HasPrev = a baseline snapshot exists;
 	// Prev = that day's attention by state (empty map = the resource had no
 	// attention then); PrevTotal its total. NewToday = attention rows CREATED
@@ -294,6 +297,9 @@ type Report struct {
 	Headline       string `json:"headline"`
 	AttentionTotal int64  `json:"attention_total"`
 	Census         bool   `json:"-"`
+	// Subtitle overrides the card's second line ("Resumen del día" / "Estado
+	// ahora") — a grouped question answer reuses the census card with its own.
+	Subtitle string `json:"-"`
 	// The delta (VOZ-DELTA-S1): Baseline is the day compared against ("" on the
 	// first digest ever); Changed says whether anything WORTH A MESSAGE changed
 	// since it (level, any attention count, rows that arrived today); the

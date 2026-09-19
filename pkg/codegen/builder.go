@@ -1263,6 +1263,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 	}
 	registerTransactionRoute(r, s, tdb, policy, inv, hookEval)
 	registerSummaryRoute(r, s, tdb, policy)
+	registerAskRoute(r, s, tdb, policy)
 
 	return r
 }

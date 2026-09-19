@@ -80,10 +80,11 @@ func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, p
 			return
 		}
 
-		// The report's day is the engine's local day. A tenant timezone is a
-		// future refinement (the cron workflow already declares its own zone);
-		// the digest labels the day it was computed.
-		now := time.Now()
+		// The report's day is the day in the DECLARED timezone
+		// (APPXIMO_SUMMARY_TIMEZONE; VOZ-PREGUNTAS-S1) — before, the engine's
+		// local day, which on a UTC box was tomorrow for a Bogotá owner after
+		// 7 pm. The digest labels the day it was computed.
+		now := summary.Now() // the declared zone (APPXIMO_SUMMARY_TIMEZONE), else local
 		startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		startISO := startOfDay.UTC().Format(time.RFC3339)
 

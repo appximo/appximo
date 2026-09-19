@@ -104,6 +104,10 @@ boot() { # $1=side $2=binary $3=port $4=ctrl
   # overlaps (each curl completes before the next), so a cap of 1 changes NO
   # sequential case — and it makes the concurrency shed probe below
   # deterministic on the new binary. The base binary ignores the variable.
+  # The gate never talks to a model: an inherited ANTHROPIC_API_KEY would make
+  # /api/ask spend money and answer non-deterministically (VOZ-PREGUNTAS-S1
+  # caught exactly that) — both engines boot with the question path disabled.
+  ANTHROPIC_API_KEY= ANTHROPIC_BASE_URL= \
   DATABASE_URL="$(db_url_for "$dbname")" JWT_SECRET="$JWT_SECRET_GATE" ADMIN_KEY="$ADMIN_KEY_GATE" \
     APPXIMO_CONTROL_PORT="$ctrl" APPXIMO_ENV="" APPXIMO_MAX_INFLIGHT="${BDG_MAX_INFLIGHT:-1}" \
     "$bin" serve --schema "$SCHEMA" --port "$port" >"$WORK/$side.log" 2>&1 &

@@ -135,6 +135,16 @@ func (c *Client) SendMessageTo(ctx context.Context, chatID any, html string) err
 	}, nil)
 }
 
+// SendChatAction shows "typing…" in the chat for ~5 s (Telegram's own
+// indicator, no message): the receiver sends it while a question is being
+// thought about, so the owner never stares at nothing (VOZ-PREGUNTAS-S1).
+func (c *Client) SendChatAction(ctx context.Context, chatID any, action string) error {
+	if action == "" {
+		action = "typing"
+	}
+	return c.call(ctx, "sendChatAction", map[string]any{"chat_id": chatID, "action": action}, nil)
+}
+
 // GetMe / GetChat are the read-only liveness checks (no message sent).
 func (c *Client) GetMe(ctx context.Context) (username string, err error) {
 	var out struct {

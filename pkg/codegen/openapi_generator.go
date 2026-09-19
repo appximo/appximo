@@ -99,6 +99,7 @@ func buildOAPaths(s *schema.APISchema) map[string]any {
 	// surface, independent of the schema, so they are always documented.
 	addOAAuthPaths(paths)
 	addOATransactionPath(paths)
+	addOADigestPaths(paths)
 	// File store routes exist whenever no schema resource is literally named "files".
 	if _, taken := s.Resources["files"]; !taken {
 		addOAFilePaths(paths)
@@ -280,6 +281,55 @@ func addOATransactionPath(paths map[string]any) {
 			"409": map[string]any{"description": "A unique collision or a foreign-key conflict in one operation", "content": oaJSONContent(oaSchemaRef("TransactionErrorResponse"))},
 			"413": oaRespRef("Error413"),
 			"422": map[string]any{"description": "Validation failed on one operation — `fields` carries every failing field of that op", "content": oaJSONContent(oaSchemaRef("TransactionErrorResponse"))},
+		},
+	}}
+}
+
+// addOADigestPaths documents the two reserved OWNER-LANGUAGE read routes
+// (VOZ-PREGUNTAS-S1): GET /api/summary (the daily digest, VOZ-ESCALON1-S1)
+// and POST /api/ask (a natural-language read question, ADR-033). Both are
+// engine-global, both authorize per resource with the caller's role. Shapes
+// are documented inline; there is no resource behind either.
+func addOADigestPaths(paths map[string]any) {
+	paths["/api/summary"] = map[string]any{"get": map[string]any{
+		"x-appximo-digest": true,
+		"operationId":      "getSummary",
+		"summary":          "The owner-language daily digest — what happened today per resource the role may read (text + level; ?format=png renders it as an image)",
+		"description": "Composed deterministically from the schema (no language model): rows created/updated today and the state-machine counts in three tiers (esperan acción / sin avanzar / en curso), compared against yesterday's snapshot. " +
+			"RBAC-scoped per resource (row condition + field allowlist). `?view=census` = totals per resource; `?format=png` = the same digest as a PNG; `?mode=scheduled` applies the schema's summary.notify policy and answers should_send. " +
+			"Reserved segment: a resource may not be named `summary`.",
+		"tags": []string{"summary"},
+		"parameters": []any{
+			map[string]any{"name": "view", "in": "query", "schema": map[string]any{"type": "string", "enum": []string{"census"}}},
+			map[string]any{"name": "format", "in": "query", "schema": map[string]any{"type": "string", "enum": []string{"png"}}},
+			map[string]any{"name": "mode", "in": "query", "schema": map[string]any{"type": "string", "enum": []string{"scheduled"}}},
+		},
+		"responses": map[string]any{
+			"200": map[string]any{"description": "The digest: text (Telegram HTML), has_motion, level (red|amber|green), headline, attention_total, baseline, changed, change_reasons, should_send (scheduled mode) — or image/png with ?format=png"},
+			"401": oaRespRef("Error401"),
+			"403": map[string]any{"description": "Anonymous caller (no rbac.public) — the digest requires an identity"},
+		},
+	}}
+	paths["/api/ask"] = map[string]any{"post": map[string]any{
+		"x-appximo-ask": true,
+		"operationId":   "askQuestion",
+		"summary":       "Ask a READ question in plain language (\"cuántas órdenes hay hoy\", \"qué pedidos están sin pagar\") — answered with the engine's own numbers",
+		"description": "A language model translates the question into a closed read PLAN (resource, filters, a period token, count/list/sum/avg/min/max, group_by) over the schema's vocabulary for the caller's role — never SQL, never a number. " +
+			"The engine validates every name against the schema and refuses what does not exist (one correction round, then kind=unclear), resolves proper names against the rows that exist (one match → used and echoed; several → kind=ambiguous asking which; none → kind=not_found, never a zero), " +
+			"executes the plan through the same query builders as GET /api/{resource} (row condition + field allowlist of the role), and composes the reply as a template. Read-only: a write intent is kind=write_refused. " +
+			"Costs one model call per question (usage + cost_usd in the reply); rate-limited per tenant (APPXIMO_ASK_PER_MINUTE, default 30). Requires ANTHROPIC_API_KEY on the engine, else 503 ask_disabled. Reserved segment: a resource may not be named `ask`.",
+		"tags": []string{"ask"},
+		"requestBody": map[string]any{"required": true, "content": map[string]any{"application/json": map[string]any{"schema": map[string]any{
+			"type": "object", "required": []string{"q"},
+			"properties": map[string]any{"q": map[string]any{"type": "string", "maxLength": 500, "description": "The question, as dictated or typed"}},
+		}}}},
+		"responses": map[string]any{
+			"200": map[string]any{"description": "kind (answer|unclear|ambiguous|not_found|write_refused|forbidden|unavailable), text (Telegram HTML), speech (plain, for a voice assistant), headline (the number first), number, understood, plan, groups, png (base64, grouped answers), usage, cost_usd, model_ms, total_ms"},
+			"400": map[string]any{"description": "Missing/empty q, or longer than 500 characters"},
+			"401": oaRespRef("Error401"),
+			"403": map[string]any{"description": "Anonymous caller"},
+			"429": map[string]any{"description": "Per-tenant question limit for this minute (Retry-After)"},
+			"503": map[string]any{"description": "ask_disabled — no ANTHROPIC_API_KEY on the engine (the fixed commands keep working)"},
 		},
 	}}
 }

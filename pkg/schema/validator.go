@@ -112,6 +112,10 @@ var (
 	// a resource so named would have its collection route shadowed, so it is
 	// rejected at load (the plural "summaries" is unaffected).
 	reservedSummaryResource = "summary"
+	// reservedAskResource is the natural-language read question endpoint
+	// (VOZ-PREGUNTAS-S1, ADR-033): POST /api/ask translates an owner's question
+	// into a validated read plan. Not a table; reserved like the two above.
+	reservedAskResource = "ask"
 
 	validFieldTypes = map[string]bool{
 		"string":  true,
@@ -153,6 +157,11 @@ func Validate(s *APISchema) []ValidationError {
 			errs = append(errs, ValidationError{
 				Field:   resPrefix,
 				Message: fmt.Sprintf("invalid resource name %q: reserved for the daily-digest endpoint (GET /api/summary)", resName),
+			})
+		} else if resName == reservedAskResource {
+			errs = append(errs, ValidationError{
+				Field:   resPrefix,
+				Message: fmt.Sprintf("invalid resource name %q: reserved for the natural-language question endpoint (POST /api/ask)", resName),
 			})
 		}
 

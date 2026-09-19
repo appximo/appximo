@@ -32,7 +32,8 @@ const GrammarCore = `REQUIRED top-level keys: "$schema", "version", "name", "res
 
 NAMING: resource names AND field names match ^[a-z][a-z0-9_]*$ (lowercase, start
 with a letter, underscore for multi-word: order_items). Hyphens are NOT allowed
-in names. Do NOT name a resource "transaction" or start one with "auth_" (reserved).
+in names. Do NOT name a resource "transaction", "summary" or "ask" (reserved cross-resource
+endpoints) or start one with "auth_" (reserved).
 Every resource has an implicit "id" UUID primary key — do NOT declare "id".
 
 FIELD TYPES (exact set — nothing else; "number" is INVALID):

@@ -216,8 +216,10 @@ func levelColors(level string) (fg, bg color.RGBA) {
 		return redFg, redBg
 	case LevelAmber:
 		return amberFg, amberBg
-	default:
+	case LevelGreen:
 		return greenFg, greenBg
+	default: // "" — a neutral card (a question answer has no traffic light)
+		return inkColor, lineColor
 	}
 }
 
@@ -260,6 +262,9 @@ func RenderImage(r Report) (*image.RGBA, error) {
 	sub := "Resumen del día"
 	if r.Census {
 		sub = "Estado ahora"
+	}
+	if r.Subtitle != "" {
+		sub = r.Subtitle
 	}
 	if r.Day != "" {
 		sub += " · " + r.Day
@@ -514,6 +519,9 @@ func renderCensus(c *canvas, r Report) {
 		}
 		c.y += 50
 		num := fmt.Sprintf("%d", f.Total)
+		if f.TotalText != "" {
+			num = f.TotalText
+		}
 		numW := measure(fs.name, num)
 		c.text(fs.name, renderWidth-renderPad-numW, c.y, inkColor, num)
 		c.text(fs.body, renderPad, c.y, inkColor, fit(fs.body, f.Resource, contentW-numW-24))

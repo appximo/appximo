@@ -18,7 +18,9 @@ package appximo
 // answered. Everything runs off the request hot path in its own goroutine.
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -157,7 +159,7 @@ func (rcv *telegramReceiver) handleUpdate(ctx context.Context, u telegram.Update
 	}
 
 	cmd := parseCommand(u.Message.Text)
-	sendCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	sendCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
 	defer cancel()
 
 	switch cmd {
@@ -172,15 +174,109 @@ func (rcv *telegramReceiver) handleUpdate(ctx context.Context, u telegram.Update
 	case "ayuda", "start", "help":
 		rcv.reply(sendCtx, helpText)
 	default:
-		rcv.reply(sendCtx, fmt.Sprintf("No entendí <code>%s</code>.\n\n%s", htmlEscapeMsg(firstWord(u.Message.Text)), helpText))
+		// Anything that is not a fixed command is a QUESTION (VOZ-PREGUNTAS-S1,
+		// ADR-033): the engine's /api/ask translates it into a validated read
+		// plan and answers with its own numbers. When questions are not
+		// enabled on this app (no model key) the endpoint says so and the
+		// help follows — the three fixed commands are never broken by this.
+		rcv.question(ctx, sendCtx, u.Message.Text)
 	}
 }
 
 const helpText = "🤖 <b>Comandos</b>\n" +
 	"• <b>resumen</b> — qué pasó hoy (nuevos, actualizados, pendientes)\n" +
 	"• <b>estado</b> — cuántos hay de cada cosa ahora mismo\n" +
-	"• <b>ayuda</b> — esta lista\n\n" +
+	"• <b>ayuda</b> — esta lista\n" +
+	"• o <b>preguntá</b> con tus palabras: «cuántas órdenes hay hoy», «qué pedidos están sin pagar», «cuánto vendimos esta semana»\n\n" +
 	"Solo lectura: escribir datos por acá llega en una próxima etapa."
+
+// question sends the free text to POST /api/ask as the configured role and
+// relays the engine's reply. While the engine thinks (a model call, 2–4 s
+// expected, bounded at ~20 s) the chat shows Telegram's "typing…" indicator,
+// re-sent every 4 s, so the owner is never looking at nothing. A model
+// failure degrades to the fixed commands (the endpoint's own text says so);
+// an engine not yet up, or a disabled question path, is said in words.
+func (rcv *telegramReceiver) question(ctx, sendCtx context.Context, text string) {
+	// First "typing…" synchronously (the owner sees it before the model is
+	// even called), then kept alive every 4 s until the answer is in.
+	actx, acancel := context.WithTimeout(ctx, 5*time.Second)
+	_ = rcv.client.SendChatAction(actx, rcv.authChatID, "typing")
+	acancel()
+	typingCtx, stopTyping := context.WithCancel(ctx)
+	defer stopTyping()
+	go rcv.typing(typingCtx)
+
+	body, _ := json.Marshal(map[string]string{"q": text})
+	rec := rcv.selfPost(ctx, "/api/ask", body)
+	stopTyping()
+	if rec == nil {
+		rcv.reply(sendCtx, "⚠️ El motor todavía no está listo; probá en unos segundos.")
+		return
+	}
+	var rep struct {
+		Kind string `json:"kind"`
+		Text string `json:"text"`
+		PNG  string `json:"png"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &rep)
+	switch {
+	case rec.Code == http.StatusServiceUnavailable && rep.Kind == "disabled":
+		rcv.reply(sendCtx, "ℹ️ "+htmlEscapeMsg(rep.Text)+"\n\n"+helpText)
+	case rec.Code == http.StatusTooManyRequests:
+		rcv.reply(sendCtx, "⏳ Demasiadas preguntas en este minuto. Esperá un momento y volvé a preguntar.")
+	case rec.Code != http.StatusOK || rep.Text == "":
+		zlog.Warn().Int("status", rec.Code).Msg("telegram question: engine did not answer 200")
+		rcv.reply(sendCtx, fmt.Sprintf("⚠️ No pude responder la pregunta (el motor respondió %d). Los comandos fijos siguen: resumen, estado, ayuda.", rec.Code))
+	default:
+		if rep.PNG != "" {
+			if png, err := base64.StdEncoding.DecodeString(rep.PNG); err == nil {
+				rcv.replyWithImage(sendCtx, png, rep.Text)
+				return
+			}
+		}
+		rcv.reply(sendCtx, rep.Text)
+	}
+}
+
+// typing keeps the "typing…" indicator alive until ctx is cancelled.
+func (rcv *telegramReceiver) typing(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(4 * time.Second):
+		}
+		actx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		_ = rcv.client.SendChatAction(actx, rcv.authChatID, "typing")
+		cancel()
+	}
+}
+
+// selfPost is selfCall for a JSON POST (the question door).
+func (rcv *telegramReceiver) selfPost(ctx context.Context, path string, body []byte) *httptest.ResponseRecorder {
+	h := rcv.getRouter()
+	if h == nil {
+		return nil
+	}
+	rec := httptest.NewRecorder()
+	tok, err := auth.GenerateTokenWithTTL(auth.Claims{
+		UserID:   "telegram:summary",
+		Role:     rcv.role,
+		TenantID: rcv.tenant,
+	}, rcv.jwtSecret, 60*time.Second)
+	if err != nil {
+		zlog.Error().Err(err).Msg("telegram question: mint token")
+		rec.WriteHeader(http.StatusInternalServerError)
+		return rec
+	}
+	rctx := context.WithValue(ctx, chi.RouteCtxKey, chi.NewRouteContext())
+	req := httptest.NewRequest(http.MethodPost, "http://placeholder"+path, bytes.NewReader(body)).WithContext(rctx)
+	req.Host = rcv.tenant + rcv.hostSuffix
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rec, req)
+	return rec
+}
 
 // summaryPNG fetches GET /api/summary?format=png the same way summary fetches
 // the text. nil on any failure — the caller then sends text only (the image
