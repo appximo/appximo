@@ -16,6 +16,10 @@ import (
 type AskRuntime struct {
 	Ledger *askspend.Ledger
 	Cache  *ask.PlanCache
+	// Pending holds the voice writes waiting for their confirmation
+	// (VOZ-ESCRITURAS-S1), one per (tenant, role, user), 5 minutes. nil =
+	// writes disabled for this app.
+	Pending *ask.PendingStore
 }
 
 type askRuntimeKey struct{}

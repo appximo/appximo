@@ -599,8 +599,9 @@ func New(cfg Config) (*App, error) {
 	// spend; at the cap only the model is off.
 	askCache := ask.NewPlanCache(2000, 24*time.Hour)
 	app.askRuntime = &codegen.AskRuntime{
-		Ledger: askspend.New(askCfg, pool, summary.Location(), alerter, s.Name),
-		Cache:  askCache,
+		Ledger:  askspend.New(askCfg, pool, summary.Location(), alerter, s.Name),
+		Cache:   askCache,
+		Pending: ask.NewPendingStore(),
 	}
 	// The question history (VOZ-TRAZABILIDAD-S1): one row per question,
 	// written off the answer path by its own goroutine, pruned by retention.

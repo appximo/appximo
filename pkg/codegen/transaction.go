@@ -122,7 +122,7 @@ type preparedOp struct {
 // Postgres transaction — all-or-nothing. It is a NEW path: the per-resource
 // generated handlers are untouched (the single-op create/update/delete gate is
 // preserved byte-for-byte).
-func registerTransactionRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, policy *rbac.Policy, inv CacheInvalidator, hookEval func(ctx context.Context, hook *schema.HookConfig, body map[string]any) (map[string]any, int, string)) {
+func registerTransactionRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, policy *rbac.Policy, inv CacheInvalidator, hookEval func(ctx context.Context, hook *schema.HookConfig, body map[string]any) (map[string]any, int, string)) *txWriter {
 	refs := make(map[string]*txResource, len(s.Resources))
 	for name, res := range s.Resources {
 		rc := res
@@ -219,6 +219,7 @@ func registerTransactionRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantD
 		w.WriteHeader(http.StatusOK)
 		pkghandlers.WriteJSON(w, map[string]any{"results": results}) //nolint:errcheck
 	})
+	return &txWriter{refs: refs, policy: policy, tdb: tdb, inv: inv, hookEval: hookEval}
 }
 
 // prepareTxOp authorizes and validates one operation and builds its SQL, returning a

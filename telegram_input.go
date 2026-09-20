@@ -145,6 +145,17 @@ func (rcv *telegramReceiver) run(ctx context.Context) {
 
 // handleUpdate is the access control + command dispatch for one update.
 func (rcv *telegramReceiver) handleUpdate(ctx context.Context, u telegram.Update) {
+	if cq := u.CallbackQuery; cq != nil {
+		// A button press (VOZ-ESCRITURAS-S1): the Sí / No / a pick of a write
+		// waiting for confirmation. Same access control as a message: only the
+		// authorized chat; anything else is acknowledged silently and dropped.
+		if cq.Message == nil || cq.Message.Chat == nil || cq.Message.Chat.ID != rcv.authChatID {
+			zlog.Warn().Str("data", cq.Data).Msg("telegram: ignored a button press from an UNAUTHORIZED chat")
+			return
+		}
+		rcv.buttonPressed(ctx, cq.ID, cq.Message.MessageID, cq.Data)
+		return
+	}
 	if u.Message == nil || u.Message.Chat == nil {
 		return
 	}
@@ -195,8 +206,8 @@ const helpText = "🤖 <b>Comandos</b>\n" +
 	"• <b>estado</b> — cuántos hay de cada cosa ahora mismo\n" +
 	"• <b>gasto</b> — cuánto van costando las preguntas (hoy, el mes, el techo, quién las resolvió)\n" +
 	"• <b>ayuda</b> — esta lista\n" +
-	"• o <b>preguntá</b> con tus palabras: «cuántas órdenes hay hoy», «qué pedidos están sin pagar», «cuánto vendimos esta semana»\n\n" +
-	"Solo lectura: escribir datos por acá llega en una próxima etapa."
+	"• o <b>preguntá</b> con tus palabras: «cuántas órdenes hay hoy», «qué pedidos están sin pagar», «cuánto vendimos esta semana»\n" +
+	"• o <b>pedime que anote o cambie algo</b>: «anotá llamar a Fabián para mañana», «marcá como hecha la tarea de Fabián» — te muestro exactamente qué voy a escribir y espero tu <b>sí</b>. Nunca borro."
 
 // question sends the free text to POST /api/ask as the configured role and
 // relays the engine's reply. While the engine thinks (a model call, 2–4 s
@@ -221,12 +232,28 @@ func (rcv *telegramReceiver) question(ctx, sendCtx context.Context, text string)
 		rcv.reply(sendCtx, "⚠️ El motor todavía no está listo; probá en unos segundos.")
 		return
 	}
-	var rep struct {
-		Kind string `json:"kind"`
-		Text string `json:"text"`
-		PNG  string `json:"png"`
-	}
+	rcv.relay(sendCtx, rec)
+}
+
+// askReply is what the receiver reads from a POST /api/ask answer.
+type askReply struct {
+	Kind      string `json:"kind"`
+	Text      string `json:"text"`
+	PNG       string `json:"png"`
+	PendingID string `json:"pending_id"`
+	Stage     string `json:"stage"`
+	Options   int    `json:"-"`
+}
+
+// relay delivers the engine's answer to the chat. A write waiting for the
+// owner (VOZ-ESCRITURAS-S1) arrives with buttons: Sí / No for a confirmation
+// (and for the offer to create a missing name), numbered picks when the
+// engine asks "¿cuál?"; the owner may equally type the answer.
+func (rcv *telegramReceiver) relay(sendCtx context.Context, rec *httptest.ResponseRecorder) {
+	var rep askReply
+	var raw map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &rep)
+	_ = json.Unmarshal(rec.Body.Bytes(), &raw)
 	switch {
 	case rec.Code == http.StatusServiceUnavailable && rep.Kind == "disabled":
 		rcv.reply(sendCtx, "ℹ️ "+htmlEscapeMsg(rep.Text)+"\n\n"+helpText)
@@ -235,6 +262,18 @@ func (rcv *telegramReceiver) question(ctx, sendCtx context.Context, text string)
 	case rec.Code != http.StatusOK || rep.Text == "":
 		zlog.Warn().Int("status", rec.Code).Msg("telegram question: engine did not answer 200")
 		rcv.reply(sendCtx, fmt.Sprintf("⚠️ No pude responder la pregunta (el motor respondió %d). Los comandos fijos siguen: resumen, estado, ayuda.", rec.Code))
+	case rep.PendingID != "" && (rep.Stage == "confirm" || rep.Stage == "create_ref" || rep.Stage == "which"):
+		var buttons []telegram.Button
+		if rep.Stage == "which" {
+			n := pendingOptionCount(raw)
+			for i := 1; i <= n && i <= 5; i++ {
+				buttons = append(buttons, telegram.Button{Text: strconv.Itoa(i), Data: fmt.Sprintf("ask:p:%s:%d", rep.PendingID, i)})
+			}
+			buttons = append(buttons, telegram.Button{Text: "✖ Ninguno", Data: "ask:n:" + rep.PendingID})
+		} else {
+			buttons = []telegram.Button{{Text: "✅ Sí", Data: "ask:y:" + rep.PendingID}, {Text: "✖ No", Data: "ask:n:" + rep.PendingID}}
+		}
+		rcv.replyWithButtons(sendCtx, rep.Text, buttons)
 	default:
 		if rep.PNG != "" {
 			if png, err := base64.StdEncoding.DecodeString(rep.PNG); err == nil {
@@ -243,6 +282,62 @@ func (rcv *telegramReceiver) question(ctx, sendCtx context.Context, text string)
 			}
 		}
 		rcv.reply(sendCtx, rep.Text)
+	}
+}
+
+// pendingOptionCount reads how many options the pending offers.
+func pendingOptionCount(raw map[string]any) int {
+	if p, ok := raw["pending"].(map[string]any); ok {
+		if opts, ok := p["options"].([]any); ok {
+			return len(opts)
+		}
+	}
+	return 0
+}
+
+// buttonPressed resolves a pending through the same door a typed answer
+// takes (POST /api/ask with pending_id + answer): the engine owns the yes,
+// the expiry and the identity check; the receiver only carries the press.
+// The keyboard is removed from the message so a second press is impossible.
+func (rcv *telegramReceiver) buttonPressed(ctx context.Context, callbackID string, messageID int64, data string) {
+	sendCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
+	defer cancel()
+	parts := strings.Split(data, ":")
+	if len(parts) < 3 || parts[0] != "ask" {
+		_ = rcv.client.AnswerCallback(sendCtx, callbackID, "")
+		return
+	}
+	answer := ""
+	switch parts[1] {
+	case "y":
+		answer = "sí"
+	case "n":
+		answer = "no"
+	case "p":
+		if len(parts) == 4 {
+			answer = parts[3]
+		}
+	}
+	_ = rcv.client.AnswerCallback(sendCtx, callbackID, "")
+	_ = rcv.client.RemoveButtons(sendCtx, rcv.authChatID, messageID)
+	if answer == "" {
+		return
+	}
+	body, _ := json.Marshal(map[string]string{"pending_id": parts[2], "answer": answer})
+	rec := rcv.selfPost(ctx, "/api/ask", body)
+	if rec == nil {
+		rcv.reply(sendCtx, "⚠️ El motor todavía no está listo; probá en unos segundos.")
+		return
+	}
+	rcv.relay(sendCtx, rec)
+}
+
+// replyWithButtons sends text with one row of inline buttons; on failure the
+// text goes alone (the owner can still type sí / no).
+func (rcv *telegramReceiver) replyWithButtons(ctx context.Context, text string, buttons []telegram.Button) {
+	if _, err := rcv.client.SendMessageWithButtons(ctx, rcv.authChatID, text, buttons); err != nil {
+		zlog.Warn().Err(err).Msg("telegram: buttons refused — sending the text alone")
+		rcv.reply(ctx, text)
 	}
 }
 

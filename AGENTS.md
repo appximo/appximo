@@ -2103,6 +2103,39 @@ sends the same digest (with the image) each morning — the canonical
 Operator + Siri setup: docs/PRODUCTION.md §4.6d. A twenty-resource example
 that declares both blocks: [examples/model-lab/conjunto.json](examples/model-lab/conjunto.json).
 
+**Questions and WRITES by voice (`POST /api/ask`, ADR-033/035/036/037).** A
+sentence in the owner's words becomes a closed PLAN (pkg/ask): reads
+(`count|list|sum|avg|min|max` + filters/`match`/period) answered by the
+deterministic parser when the schema alone settles the shape, else the plan
+cache, else the model (Haiku, capped per minute/day/user; `source`,
+`cost_usd`, `fallback` and the `⚙︎` trace in every reply; a redacted
+history). Since VOZ-ESCRITURAS-S1 the plan also has `create` (`data`) and
+`update` (`where` + `data`) — **never delete**, deterministically refused —
+and NOTHING is written without the owner's confirmation: the reply is a
+`pending` (`kind: confirm|ask_field|ambiguous|not_found`, `pending_id`,
+`stage`, `expires_in`, 5 min, one per tenant|role|user) whose TEXT lists
+every value with matched names shown as the row they resolved to; the yes is
+an exact closed list (`sí`/`dale`/`ok`/`confirmo`…, an ambiguous «sí pero…»
+cancels), `no` cancels, `{"pending_id","answer"}` is the button/Siri door
+(the id must be the same identity's), Telegram gets inline Sí/No and
+numbered-pick buttons. Names in relation fields are `{"match": …}` resolved
+BEFORE the confirmation through the same matcher as the questions (one →
+shown; several → a numbered pick; none → an offer to create the target,
+which confirms too); a REQUIRED field the owner did not say is ASKED, never
+invented; time values are tokens (`tomorrow`, `next_friday 15:00`…) the
+engine resolves in the app's zone; a value equal to the field's default is
+dropped. The confirmed write runs through the batch transaction's own cores
+(`prepareTxOp`/`execPreparedOp` via `txWriter`, pkg/codegen/askwrite.go):
+RBAC, validators, hooks, the state-machine guard and the outbox event
+exactly as an API write — a refusal is said in words, never a success face.
+The parser settles ONE write shape itself («marcá como hecha la tarea de
+Fabián» — a state transition of one row, US$ 0, ~15 ms); a create is the
+model's (US$ 0.0023 mean, p50 0.8 s). `APPXIMO_ASK_WRITES=off` makes every
+voice channel read-only. The demo role of the demos reads only — its
+vocabulary has no write form. Example: [examples/model-lab/agenda-voz.json](examples/model-lab/agenda-voz.json)
+(tareas/personas + a workflow that notifies through the digest on an
+urgent create). Operator + Siri: docs/PRODUCTION.md §4.6f.
+
 ## Questions in plain language (VOZ-PREGUNTAS-S1, ADR-033)
 
 `POST /api/ask {"q": "cuántas órdenes hay hoy"}` — the second rung of the

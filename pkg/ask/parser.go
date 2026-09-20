@@ -57,14 +57,21 @@ var (
 		"hay", "existen", "existe", "estan", "esta", "son", "es", "actualmente", "ahora", "ya", "todas", "todos", "toda", "todo",
 		"por", "favor", "decime", "dime", "digame", "quiero", "quisiera", "necesito", "saber", "ver", "podes", "puedes", "podrias",
 		"cargados", "cargadas", "hechas", "hechos", "actuales", "actual", "con", "estado", "tipo", "en", "total",
-		"para", "sobre", "cual", "cuales", "hubo", "hubieron", "llegaron", "entraron", "vinieron", "quedan", "queda", "hoy")
+		"para", "sobre", "cual", "cuales", "hubo", "hubieron", "llegaron", "entraron", "vinieron", "quedan", "queda", "hoy",
+		"alguna", "alguno", "algunas", "algunos", "algun")
 	countWords = set("cuantos", "cuantas", "cuanto", "cuanta", "numero", "cantidad", "conta", "contame", "cuenta", "cuentame", "total")
 	listWords  = set("lista", "listame", "listado", "mostrame", "muestrame", "mostra", "muestra", "dame", "traeme", "pasame", "cuales", "que", "ver")
 	sumWords   = set("suma", "suman", "sumatoria", "sumame", "sumar")
 	avgWords   = set("promedio", "media")
-	writeVerbs = set("borra", "borrar", "elimina", "eliminar", "cancela", "cancelar", "crea", "crear", "agenda", "agendar", "cambia", "cambiar",
-		"modifica", "modificar", "edita", "editar", "actualiza", "actualizar", "manda", "mandar", "envia", "enviar", "marca", "marcar",
-		"pone", "pon", "poner", "agrega", "agregar", "registra", "registrar", "anota", "anotar", "programa", "programar", "sube", "subir", "baja", "bajar")
+	// deleteVerbs are refused deterministically on every channel: the voice
+	// never deletes, sends or moves files (VOZ-ESCRITURAS-S1 keeps this).
+	deleteVerbs = set("borra", "borrar", "borralo", "borrala", "elimina", "eliminar", "eliminalo", "eliminala", "quita", "quitar", "manda", "mandar", "envia", "enviar", "sube", "subir", "baja", "bajar")
+	// writeVerbs are refused when the vocabulary is read-only; on a writable
+	// one they go to the model, which may plan a create/update (confirmed
+	// before executing).
+	writeVerbs = set("cancela", "cancelar", "crea", "crear", "agenda", "agendar", "cambia", "cambiar",
+		"modifica", "modificar", "edita", "editar", "actualiza", "actualizar", "marca", "marcar", "marcá",
+		"pone", "pon", "poner", "agrega", "agregar", "registra", "registrar", "anota", "anotar", "programa", "programar", "anotame", "agregame", "cambiame", "ponele", "pasa", "pasar", "pasala", "pasalo")
 	prepositions = set("de", "del", "para", "con", "a")
 )
 
@@ -120,9 +127,24 @@ func Parse(question string, v *Vocabulary) ParseResult {
 	if len(toks) == 0 {
 		return ParseResult{Reason: "empty"}
 	}
-	// A write verb anywhere → refused deterministically.
+	// A delete/send verb anywhere → refused deterministically. A write verb
+	// → refused too on a read-only vocabulary; on a writable one the parser
+	// steps aside (not sure) and the model plans the create/update.
 	for _, t := range toks {
+		if deleteVerbs[t.norm] {
+			return ParseResult{Plan: Plan{Kind: "write", Reason: "verbo de escritura: " + t.raw}, Sure: true}
+		}
 		if writeVerbs[t.norm] {
+			if v != nil && v.Writable() {
+				// The ONE write shape the parser settles itself (VOZ-ESCRITURAS-S1):
+				// a state transition of one row — "marcá como hecha la tarea de
+				// Fabián", "cancelá el pedido 1003", "pasá a pagada la orden de
+				// Marta". Anything else (a create with free text) is the model's.
+				if pr := parseTransition(question, v); pr.Sure {
+					return pr
+				}
+				return ParseResult{Reason: "write verb: " + t.norm}
+			}
 			return ParseResult{Plan: Plan{Kind: "write", Reason: "verbo de escritura: " + t.raw}, Sure: true}
 		}
 	}
@@ -476,4 +498,156 @@ outer:
 		return true
 	}
 	return false
+}
+
+// transitionVerbs introduce a state change; the state itself follows
+// ("como hecha", "a pagada", "en cancelada") or is the verb's own stem
+// ("cancelá" → cancelada, "confirmá" → confirmada).
+var transitionVerbs = set("marca", "marcá", "marcar", "marcame", "marcala", "marcalo", "pasa", "pasá", "pasar", "pasala", "pasalo", "pone", "poné", "poner", "ponele", "ponela", "ponelo",
+	"cambia", "cambiá", "cambiar", "cambiale", "deja", "dejá", "dejar", "dejala", "dejalo", "actualiza", "actualizá", "actualizar", "da", "dá", "dar", "dale")
+var transitionLinkers = set("como", "a", "en", "por", "estado", "el", "la", "lo", "le", "ya", "esta", "está")
+
+// parseTransition settles "<verb> [como|a|en] <state> <resource> [de <name>]"
+// and "<state-verb> <resource> [de <name>]" into an update of the resource's
+// state field on the row the name (or an enum value) identifies. SURE only
+// when every word is consumed, one resource, one target state, at most one
+// name; the confirmation still gates the write.
+func parseTransition(question string, v *Vocabulary) ParseResult {
+	toks := tokenize(question)
+	// the resource, exactly one, updatable
+	var res *Resource
+	for _, name := range v.ResourceNames() {
+		r := v.Resource(name)
+		for _, form := range nameForms(name) {
+			if consumePhrase(toks, form) {
+				if res != nil && res != r {
+					return ParseResult{Reason: "two resources: " + res.Name + ", " + r.Name}
+				}
+				res = r
+			}
+		}
+	}
+	if res == nil {
+		return ParseResult{Reason: "no resource named"}
+	}
+	if !res.CanUpdate {
+		return ParseResult{Reason: "role may not update " + res.Name}
+	}
+	sf := res.StateField()
+	if sf == nil {
+		return ParseResult{Reason: res.Name + " has no state field"}
+	}
+	// the target state: an explicit value, else the verb's stem
+	target := ""
+	for _, val := range sf.Enum {
+		form := strings.ReplaceAll(normalize(val), "_", " ")
+		for _, fm := range []string{form, form + "s", strings.ReplaceAll(form, " ", " de ")} {
+			if consumePhrase(toks, fm) {
+				if target != "" && target != val {
+					return ParseResult{Reason: "two values for " + sf.Name}
+				}
+				target = val
+				break
+			}
+		}
+	}
+	verbSeen := false
+	for i := range toks {
+		t := &toks[i]
+		if t.used {
+			continue
+		}
+		if transitionVerbs[t.norm] {
+			verbSeen, t.used = true, true
+			continue
+		}
+		if !writeVerbs[t.norm] {
+			continue
+		}
+		// a state-named verb ("cancelá" → cancelada, "confirmá" → confirmada):
+		// its first five letters are a prefix of exactly one state
+		stem := t.norm
+		if len(stem) > 5 {
+			stem = stem[:5]
+		}
+		if len(stem) < 4 {
+			return ParseResult{Reason: "write verb: " + t.norm}
+		}
+		var hits []string
+		for _, val := range sf.Enum {
+			if strings.HasPrefix(normalize(val), stem) {
+				hits = append(hits, val)
+			}
+		}
+		if len(hits) != 1 || (target != "" && target != hits[0]) {
+			return ParseResult{Reason: "write verb: " + t.norm}
+		}
+		target, verbSeen, t.used = hits[0], true, true
+	}
+	if !verbSeen || target == "" {
+		return ParseResult{Reason: "no transition"}
+	}
+	// other enum values of the resource narrow the row ("la orden pendiente de Marta")
+	var where []Filter
+	seen := map[string]bool{}
+	for _, f := range res.Fields {
+		if len(f.Enum) == 0 || f == sf {
+			continue
+		}
+		for _, val := range f.Enum {
+			form := strings.ReplaceAll(normalize(val), "_", " ")
+			if consumePhrase(toks, form) || consumePhrase(toks, form+"s") {
+				if seen[f.Name] {
+					return ParseResult{Reason: "two values for " + f.Name}
+				}
+				seen[f.Name] = true
+				where = append(where, Filter{Field: f.Name, Op: "eq", Value: val})
+			}
+		}
+	}
+	// the name after a preposition
+	match, matchField := "", ""
+	for i := 0; i < len(toks); i++ {
+		if toks[i].used || !prepositions[toks[i].norm] {
+			continue
+		}
+		j := i + 1
+		var parts []string
+		for j < len(toks) && !toks[j].used && !stopwords[toks[j].norm] && !transitionLinkers[toks[j].norm] {
+			parts = append(parts, toks[j].raw)
+			j++
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		if match != "" {
+			return ParseResult{Reason: "two names"}
+		}
+		mf, reason := nameField(v, res)
+		if mf == "" {
+			return ParseResult{Reason: reason}
+		}
+		match, matchField = strings.Join(parts, " "), mf
+		toks[i].used = true
+		for k := i + 1; k < j; k++ {
+			toks[k].used = true
+		}
+	}
+	if match != "" {
+		where = append(where, Filter{Field: matchField, Op: "eq", Match: match})
+	}
+	if len(where) == 0 {
+		return ParseResult{Reason: "transition without a row"}
+	}
+	for _, t := range toks {
+		if t.used || stopwords[t.norm] || transitionLinkers[t.norm] {
+			continue
+		}
+		return ParseResult{Reason: "unknown word: " + t.raw}
+	}
+	p := Plan{Kind: "update", Resource: res.Name, Where: where, Data: map[string]any{sf.Name: target}}
+	if err := p.Validate(v); err != nil {
+		return ParseResult{Reason: "invalid: " + err.Error()}
+	}
+	return ParseResult{Plan: p, Sure: true}
 }

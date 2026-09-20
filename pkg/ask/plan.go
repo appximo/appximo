@@ -49,6 +49,20 @@ type Plan struct {
 	Limit int `json:"limit,omitempty"`
 	// Reason accompanies unclear/write: what the model could not map.
 	Reason string `json:"reason,omitempty"`
+
+	// ── writes (VOZ-ESCRITURAS-S1, ADR-037) ──
+	// Data carries the values of a create, or the changes of an update: a
+	// literal of the field's type (an enum member verbatim, a number, a
+	// boolean, text SAID by the owner), a time TOKEN the engine resolves
+	// ("today", "tomorrow", "next_monday", "tomorrow 15:00", or an ISO date),
+	// or — for a relation field — an object {"match": "<name as said>"} that
+	// the engine resolves against the rows that exist. Never an id, never a
+	// governed field, never null.
+	Data map[string]any `json:"data,omitempty"`
+	// Where identifies the row(s) an update applies to (the read filter
+	// grammar, `match` allowed). Exactly ONE row must match at confirmation
+	// time; several → the owner is asked which; none → said.
+	Where []Filter `json:"where,omitempty"`
 }
 
 // Filter is one predicate. Exactly one of Value / Match is set: Value is a
@@ -73,7 +87,7 @@ type Period struct {
 // The closed sets. Anything outside them is a validation error the model gets
 // back once, then "no entendí".
 var (
-	Kinds      = []string{"count", "list", "sum", "avg", "min", "max", "unclear", "write"}
+	Kinds      = []string{"count", "list", "sum", "avg", "min", "max", "unclear", "write", "create", "update"}
 	Ops        = []string{"eq", "gt", "gte", "lt", "lte", "partial", "start", "is_null"}
 	Ranges     = []string{"today", "yesterday", "this_week", "last_week", "this_month", "last_month", "last_7_days", "last_30_days", "this_year"}
 	numericOps = map[string]bool{"eq": true, "gt": true, "gte": true, "lt": true, "lte": true, "is_null": true}
@@ -119,6 +133,9 @@ func ParsePlan(text string) (Plan, error) {
 	return p, nil
 }
 
+// IsWrite reports whether the plan creates or updates.
+func (p Plan) IsWrite() bool { return p.Kind == "create" || p.Kind == "update" }
+
 // IsAggregate reports whether the kind runs through the aggregate endpoint.
 func (p Plan) IsAggregate() bool {
 	switch p.Kind {
@@ -141,6 +158,9 @@ func (p Plan) Validate(v *Vocabulary) error {
 	if p.Kind == "unclear" || p.Kind == "write" {
 		return nil
 	}
+	if p.IsWrite() {
+		return p.validateWrite(v)
+	}
 	if p.Resource == "" {
 		return fmt.Errorf("resource is required; the resources you may ask about are: %s", strings.Join(v.ResourceNames(), ", "))
 	}
@@ -148,44 +168,8 @@ func (p Plan) Validate(v *Vocabulary) error {
 	if res == nil {
 		return fmt.Errorf("resource %q does not exist (or you may not read it); the resources you may ask about are: %s", p.Resource, strings.Join(v.ResourceNames(), ", "))
 	}
-	for i, f := range p.Filters {
-		if f.Field == "" {
-			return fmt.Errorf("filters[%d]: field is required (fields of %s: %s)", i, p.Resource, res.FieldList())
-		}
-		fd := res.Field(f.Field)
-		if fd == nil {
-			return fmt.Errorf("filters[%d]: %s has no field %q; it has: %s", i, p.Resource, f.Field, res.FieldList())
-		}
-		if !contains(Ops, f.Op) {
-			return fmt.Errorf("filters[%d]: op %q is not one of %s", i, f.Op, strings.Join(Ops, "|"))
-		}
-		if f.Match != "" && f.Value != nil {
-			return fmt.Errorf("filters[%d]: use either value or match, not both", i)
-		}
-		if f.Op == "is_null" {
-			if f.Match != "" {
-				return fmt.Errorf("filters[%d]: is_null takes no match", i)
-			}
-			continue
-		}
-		if f.Match != "" {
-			if f.Op != "eq" {
-				return fmt.Errorf("filters[%d]: match only works with op eq", i)
-			}
-			if fd.Relation == "" && !fd.IsText() {
-				return fmt.Errorf("filters[%d]: match is for a relation field or a text field; %s.%s is %s — use value", i, p.Resource, f.Field, fd.Type)
-			}
-			if fd.Relation != "" && v.Resource(fd.Relation) == nil {
-				return fmt.Errorf("filters[%d]: %s.%s points at %s, which you may not read", i, p.Resource, f.Field, fd.Relation)
-			}
-			continue
-		}
-		if f.Value == nil {
-			return fmt.Errorf("filters[%d]: value is required for op %s on %s.%s", i, f.Op, p.Resource, f.Field)
-		}
-		if err := checkFilterValue(fd, f); err != nil {
-			return fmt.Errorf("filters[%d]: %v", i, err)
-		}
+	if err := validateFilters(v, res, p.Resource, p.Filters, "filters"); err != nil {
+		return err
 	}
 	if p.Period != nil {
 		if !contains(Ranges, p.Period.Range) {
@@ -238,6 +222,51 @@ func (p Plan) Validate(v *Vocabulary) error {
 	}
 	if p.Limit < 0 || p.Limit > MaxListLimit {
 		return fmt.Errorf("limit must be between 1 and %d", MaxListLimit)
+	}
+	return nil
+}
+
+// validateFilters checks one filter list (a read's filters or an update's
+// where) against the resource: field exists, op fits, value/match coherent.
+func validateFilters(v *Vocabulary, res *Resource, resource string, filters []Filter, label string) error {
+	for i, f := range filters {
+		if f.Field == "" {
+			return fmt.Errorf(label+"[%d]: field is required (fields of %s: %s)", i, resource, res.FieldList())
+		}
+		fd := res.Field(f.Field)
+		if fd == nil {
+			return fmt.Errorf(label+"[%d]: %s has no field %q; it has: %s", i, resource, f.Field, res.FieldList())
+		}
+		if !contains(Ops, f.Op) {
+			return fmt.Errorf(label+"[%d]: op %q is not one of %s", i, f.Op, strings.Join(Ops, "|"))
+		}
+		if f.Match != "" && f.Value != nil {
+			return fmt.Errorf(label+"[%d]: use either value or match, not both", i)
+		}
+		if f.Op == "is_null" {
+			if f.Match != "" {
+				return fmt.Errorf(label+"[%d]: is_null takes no match", i)
+			}
+			continue
+		}
+		if f.Match != "" {
+			if f.Op != "eq" {
+				return fmt.Errorf(label+"[%d]: match only works with op eq", i)
+			}
+			if fd.Relation == "" && !fd.IsText() {
+				return fmt.Errorf(label+"[%d]: match is for a relation field or a text field; %s.%s is %s — use value", i, resource, f.Field, fd.Type)
+			}
+			if fd.Relation != "" && v.Resource(fd.Relation) == nil {
+				return fmt.Errorf(label+"[%d]: %s.%s points at %s, which you may not read", i, resource, f.Field, fd.Relation)
+			}
+			continue
+		}
+		if f.Value == nil {
+			return fmt.Errorf(label+"[%d]: value is required for op %s on %s.%s", i, f.Op, resource, f.Field)
+		}
+		if err := checkFilterValue(fd, f); err != nil {
+			return fmt.Errorf(label+"[%d]: %v", i, err)
+		}
 	}
 	return nil
 }

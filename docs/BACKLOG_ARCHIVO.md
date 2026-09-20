@@ -429,6 +429,20 @@ refreshed).
 ---
 
 
+## DONE in VOZ-ESCRITURAS-S1 (2026-09-20) — writing by voice: create and update, never delete; nothing executes without an exact yes to exactly what will be written; every write through the engine's own cores (VOZ-4 / ADR-037 built)
+
+| Item | What shipped | Verified by |
+|---|---|---|
+| **Grammar** | `create` (`data`) and `update` (`where` + `data`) in the ADR-033 plan; validated against the role's vocabulary (writable resources, field types, relation fields as `{match}`, time tokens, no id/auto/null/empty, initial states, one row); delete/send verbs refused deterministically; the prompt teaches the forms ONLY to roles that may write. | unit (16 grammar refusals), Postgres, live |
+| **Confirmation** | one pending per tenant\|role\|user, 5 min, in memory; exact yes list, `no` cancels, anything else cancels + is processed; `{"pending_id","answer"}` door bound to the same identity; Telegram inline Sí/No + numbered picks, keyboard removed once resolved; a subject-less token can read, not write. | unit (ambiguous yes never executes; identity; expiry), receiver test, Postgres (replay = nothing), live P1/P9/P13/P14/P15 |
+| **Execution** | `txWriter` (pkg/codegen/askwrite.go) = the batch transaction's `prepareTxOp`/`execPreparedOp`: RBAC, validators, hooks, state-machine guard, outbox event, cache invalidation; a refusal in words + «No escribí nada». | Postgres (create emits `tareas.created`; update emits; guard 422 said; demo role refused; other identity's id = nothing), live cycle on the 105 (create → workflow → digest to Telegram → ask → transition → written) |
+| **Names before writing** | same matcher as the questions; one → shown; several → pick (also for an update's `where`); none → offer to create the target (its own yes), «(nuevo)» in the task's confirmation; never a literal in a relation. | unit, live P3/P4 |
+| **Missing required → asked** | one field at a time, typed hints, deterministic coercion (enum, money, time words, names), bounded; a value equal to the default dropped from a create. | unit, live P2/P12 |
+| **Parser write shape** | a state transition of one row settled without the model («marcá como hecha la tarea de Fabián», «cancelá…»): US$ 0, 13–18 ms live; a create costs one model call: US$ 0.0023 mean, p50 789 ms (5 live). | unit (11 cases), cost.json |
+| **Example + docs** | `examples/model-lab/agenda-voz.json` (tareas/personas, state machine, events, `avisar_creacion` workflow → digest, morning reminder, roles dueno/asistente/demo); ADR-037; PRODUCTION §4.6f; manual §3e; backend-spec; AGENTS; `.env.example` (`APPXIMO_ASK_WRITES`). | `appximo validate`; the integration test loads the example |
+
+---
+
 ## DONE in VOZ-TRAZABILIDAD-S1 (2026-09-19) — knowing where the money goes: who answered each question and why, a bounded history that keeps the shape not the person, `gasto` on the census card, a per-user cap (ADR-036)
 
 | Item | What shipped | Verified by |

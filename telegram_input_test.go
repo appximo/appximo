@@ -37,6 +37,10 @@ type fakeTG struct {
 	// (400 = refused for good, 500/429 = retryable).
 	rejectPhoto int
 	typing      int // sendChatAction calls
+	// VOZ-ESCRITURAS-S1: inline keyboards sent, callbacks answered, keyboards removed.
+	buttons  [][]telegram.Button
+	answered int
+	removed  int
 }
 
 func (f *fakeTG) typingCount() int {
@@ -65,12 +69,18 @@ func (f *fakeTG) server(t *testing.T) *httptest.Server {
 			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": res}) //nolint:errcheck
 		case strings.HasSuffix(r.URL.Path, "/sendMessage"):
 			var body struct {
-				ChatID json.Number `json:"chat_id"`
-				Text   string      `json:"text"`
+				ChatID      json.Number `json:"chat_id"`
+				Text        string      `json:"text"`
+				ReplyMarkup *struct {
+					Keyboard [][]telegram.Button `json:"inline_keyboard"`
+				} `json:"reply_markup"`
 			}
 			json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
 			f.mu.Lock()
 			f.sent = append(f.sent, body.Text)
+			if body.ReplyMarkup != nil && len(body.ReplyMarkup.Keyboard) == 1 {
+				f.buttons = append(f.buttons, body.ReplyMarkup.Keyboard[0])
+			}
 			n, _ := body.ChatID.Int64()
 			f.sendChat = append(f.sendChat, n)
 			f.mu.Unlock()
@@ -100,6 +110,16 @@ func (f *fakeTG) server(t *testing.T) *httptest.Server {
 		case strings.HasSuffix(r.URL.Path, "/sendChatAction"):
 			f.mu.Lock()
 			f.typing++
+			f.mu.Unlock()
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": true}) //nolint:errcheck
+		case strings.HasSuffix(r.URL.Path, "/answerCallbackQuery"):
+			f.mu.Lock()
+			f.answered++
+			f.mu.Unlock()
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": true}) //nolint:errcheck
+		case strings.HasSuffix(r.URL.Path, "/editMessageReplyMarkup"):
+			f.mu.Lock()
+			f.removed++
 			f.mu.Unlock()
 			json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": true}) //nolint:errcheck
 		case strings.HasSuffix(r.URL.Path, "/deleteWebhook"):
@@ -258,7 +278,7 @@ func TestReceiver_EstadoCensus(t *testing.T) {
 func TestReceiver_UnknownWordIsAQuestion_DisabledShowsHelp(t *testing.T) {
 	f := &fakeTG{}
 	srv := f.server(t)
-	rcv := newTestReceiver(t, srv, stubAskRouter(t, "acme", "owner", askReply{status: 503, body: map[string]any{"kind": "disabled", "text": "Las preguntas libres no están activadas (falta ANTHROPIC_API_KEY)."}}))
+	rcv := newTestReceiver(t, srv, stubAskRouter(t, "acme", "owner", stubReply{status: 503, body: map[string]any{"kind": "disabled", "text": "Las preguntas libres no están activadas (falta ANTHROPIC_API_KEY)."}}))
 	rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "hazme un cafe")})
 	got := f.replies()
 	if len(got) != 1 || !strings.Contains(got[0], "Comandos") || !strings.Contains(got[0], "ANTHROPIC_API_KEY") {
@@ -269,7 +289,7 @@ func TestReceiver_UnknownWordIsAQuestion_DisabledShowsHelp(t *testing.T) {
 func TestReceiver_QuestionAnsweredAsTheConfiguredRole(t *testing.T) {
 	f := &fakeTG{}
 	srv := f.server(t)
-	rcv := newTestReceiver(t, srv, stubAskRouter(t, "acme", "owner", askReply{status: 200, body: map[string]any{"kind": "answer", "text": "<b>7</b> citas hoy"}}))
+	rcv := newTestReceiver(t, srv, stubAskRouter(t, "acme", "owner", stubReply{status: 200, body: map[string]any{"kind": "answer", "text": "<b>7</b> citas hoy"}}))
 	rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "cuántas citas tengo hoy")})
 	got := f.replies()
 	if len(got) != 1 || got[0] != "<b>7</b> citas hoy" {
@@ -284,7 +304,7 @@ func TestReceiver_QuestionWithImageSendsPhoto(t *testing.T) {
 	f := &fakeTG{}
 	srv := f.server(t)
 	png := base64.StdEncoding.EncodeToString(tinyPNG())
-	rcv := newTestReceiver(t, srv, stubAskRouter(t, "acme", "owner", askReply{status: 200, body: map[string]any{"kind": "answer", "text": "<b>3</b> citas por estado", "png": png}}))
+	rcv := newTestReceiver(t, srv, stubAskRouter(t, "acme", "owner", stubReply{status: 200, body: map[string]any{"kind": "answer", "text": "<b>3</b> citas por estado", "png": png}}))
 	rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "citas por estado")})
 	if ph := f.sentPhotos(); len(ph) != 1 || ph[0].caption != "<b>3</b> citas por estado" {
 		t.Fatalf("a grouped answer must go as photo + caption; got %v", ph)
@@ -294,7 +314,7 @@ func TestReceiver_QuestionWithImageSendsPhoto(t *testing.T) {
 func TestReceiver_QuestionModelDownDegradesToFixedCommands(t *testing.T) {
 	f := &fakeTG{}
 	srv := f.server(t)
-	rcv := newTestReceiver(t, srv, stubAskRouter(t, "acme", "owner", askReply{status: 200, body: map[string]any{"kind": "unavailable", "text": "⚠️ No pude pensar la pregunta ahora. Los comandos fijos siguen: resumen, estado, ayuda."}}))
+	rcv := newTestReceiver(t, srv, stubAskRouter(t, "acme", "owner", stubReply{status: 200, body: map[string]any{"kind": "unavailable", "text": "⚠️ No pude pensar la pregunta ahora. Los comandos fijos siguen: resumen, estado, ayuda."}}))
 	rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "cuántas citas hay")})
 	got := f.replies()
 	if len(got) != 1 || !strings.Contains(got[0], "resumen") {
@@ -307,14 +327,14 @@ func TestReceiver_QuestionModelDownDegradesToFixedCommands(t *testing.T) {
 	}
 }
 
-type askReply struct {
+type stubReply struct {
 	status int
 	body   map[string]any
 }
 
 // stubAskRouter is stubSummaryRouter plus a scripted POST /api/ask that demands
 // the same (tenant, role) token and echoes the question it received.
-func stubAskRouter(t *testing.T, wantTenant, wantRole string, reply askReply) http.Handler {
+func stubAskRouter(t *testing.T, wantTenant, wantRole string, reply stubReply) http.Handler {
 	summaryH := stubSummaryRouter(t, wantTenant, wantRole)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/ask" {
@@ -332,14 +352,75 @@ func stubAskRouter(t *testing.T, wantTenant, wantRole string, reply askReply) ht
 			return
 		}
 		var in struct {
-			Q string `json:"q"`
+			Q         string `json:"q"`
+			PendingID string `json:"pending_id"`
+			Answer    string `json:"answer"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Q == "" {
-			t.Errorf("the question must travel as {q}: %v", err)
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || (in.Q == "" && in.PendingID == "") {
+			t.Errorf("the question must travel as {q} (or {pending_id, answer}): %v", err)
+		}
+		if in.PendingID != "" {
+			// A button press: answer with the scripted "resolved" reply.
+			body := map[string]any{"kind": "written", "text": "✅ Listo: creé tarea <b>Llamar a Fabián</b> (" + in.PendingID + "/" + in.Answer + ")"}
+			if in.Answer == "no" {
+				body = map[string]any{"kind": "cancelled", "text": "👌 Cancelado. No escribí nada."}
+			}
+			w.WriteHeader(200)
+			json.NewEncoder(w).Encode(body) //nolint:errcheck
+			return
 		}
 		w.WriteHeader(reply.status)
 		json.NewEncoder(w).Encode(reply.body) //nolint:errcheck
 	})
+}
+
+// VOZ-ESCRITURAS-S1: a write waiting for confirmation arrives with Sí / No
+// buttons; a press travels to the engine's confirm door as {pending_id,
+// answer}, the keyboard is removed, and the engine's verdict is relayed.
+func TestReceiver_WriteConfirmationButtons(t *testing.T) {
+	f := &fakeTG{}
+	srv := f.server(t)
+	rcv := newTestReceiver(t, srv, stubAskRouter(t, "acme", "owner", stubReply{status: 200, body: map[string]any{
+		"kind": "confirm", "stage": "confirm", "pending_id": "abc123", "text": "📝 Voy a crear tarea…\n¿Confirmás? (sí / no)"}}))
+	rcv.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "anotá llamar a Fabián mañana")})
+	if got := f.replies(); len(got) != 1 || !strings.Contains(got[0], "¿Confirmás?") {
+		t.Fatalf("the confirmation text must be relayed; got %v", got)
+	}
+	if len(f.buttons) != 1 || len(f.buttons[0]) != 2 || f.buttons[0][0].Data != "ask:y:abc123" || f.buttons[0][1].Data != "ask:n:abc123" {
+		t.Fatalf("Sí / No buttons expected; got %v", f.buttons)
+	}
+	// The press.
+	cq := telegram.Update{}
+	cq.CallbackQuery = &struct {
+		ID   string `json:"id"`
+		From *struct {
+			ID       int64  `json:"id"`
+			Username string `json:"username"`
+		} `json:"from"`
+		Message *telegram.Message `json:"message"`
+		Data    string            `json:"data"`
+	}{ID: "cb1", Message: msg(8851136988, "…"), Data: "ask:y:abc123"}
+	rcv.handleUpdate(context.Background(), cq)
+	got := f.replies()
+	if len(got) != 2 || !strings.Contains(got[1], "abc123/sí") {
+		t.Fatalf("the press must reach the confirm door with the id and a plain sí; got %v", got)
+	}
+	if f.answered != 1 || f.removed != 1 {
+		t.Fatalf("the callback is answered and the keyboard removed (answered=%d removed=%d)", f.answered, f.removed)
+	}
+	// A press from a stranger's chat is dropped.
+	cq.CallbackQuery.Message = msg(4242, "…")
+	rcv.handleUpdate(context.Background(), cq)
+	if len(f.replies()) != 2 {
+		t.Fatalf("an unauthorized press must not reach the engine")
+	}
+	// A pick ("which") carries numbered buttons.
+	rcv2 := newTestReceiver(t, srv, stubAskRouter(t, "acme", "owner", stubReply{status: 200, body: map[string]any{
+		"kind": "ambiguous", "stage": "which", "pending_id": "p2", "text": "¿Cuál?", "pending": map[string]any{"options": []any{1, 2, 3}}}}))
+	rcv2.handleUpdate(context.Background(), telegram.Update{Message: msg(8851136988, "marcá como hecha la tarea de Fabián")})
+	if kb := f.buttons[len(f.buttons)-1]; len(kb) != 4 || kb[0].Data != "ask:p:p2:1" || kb[2].Data != "ask:p:p2:3" || kb[3].Data != "ask:n:p2" {
+		t.Fatalf("numbered picks + none expected; got %v", kb)
+	}
 }
 
 func TestReceiver_UnauthorizedChatIgnored(t *testing.T) {
@@ -397,28 +478,8 @@ func TestReceiver_FailFastConfig(t *testing.T) {
 	}
 }
 
-func msg(chatID int64, text string) *struct {
-	MessageID int64 `json:"message_id"`
-	From      *struct {
-		ID       int64  `json:"id"`
-		Username string `json:"username"`
-	} `json:"from"`
-	Chat *struct {
-		ID int64 `json:"id"`
-	} `json:"chat"`
-	Text string `json:"text"`
-} {
-	m := &struct {
-		MessageID int64 `json:"message_id"`
-		From      *struct {
-			ID       int64  `json:"id"`
-			Username string `json:"username"`
-		} `json:"from"`
-		Chat *struct {
-			ID int64 `json:"id"`
-		} `json:"chat"`
-		Text string `json:"text"`
-	}{Text: text}
+func msg(chatID int64, text string) *telegram.Message {
+	m := &telegram.Message{Text: text}
 	m.Chat = &struct {
 		ID int64 `json:"id"`
 	}{ID: chatID}
@@ -431,7 +492,7 @@ var _ = time.Second
 func TestReceiver_GastoSendsPictureAndText(t *testing.T) {
 	f := &fakeTG{}
 	srv := f.server(t)
-	inner := stubAskRouter(t, "acme", "owner", askReply{status: 200, body: map[string]any{"kind": "answer", "text": "x"}})
+	inner := stubAskRouter(t, "acme", "owner", stubReply{status: 200, body: map[string]any{"kind": "answer", "text": "x"}})
 	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/ask/spend" {
 			inner.ServeHTTP(w, r)

@@ -1,0 +1,204 @@
+{
+  "$schema": "https://appximo.com/schema/v1",
+  "version": "1",
+  "name": "agenda-voz",
+  "resources": {
+    "personas": {
+      "fields": {
+        "nombre": {
+          "type": "string",
+          "required": true,
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "telefono": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "notas": {
+          "type": "text"
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      }
+    },
+    "tareas": {
+      "fields": {
+        "titulo": {
+          "type": "string",
+          "required": true,
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "persona_id": {
+          "type": "uuid",
+          "relation": "personas",
+          "on_delete": "set_null"
+        },
+        "prioridad": {
+          "type": "string",
+          "enum": [
+            "normal",
+            "urgente"
+          ],
+          "default": "normal"
+        },
+        "vence_en": {
+          "type": "time"
+        },
+        "notas": {
+          "type": "text"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "pendiente",
+            "hecha",
+            "cancelada"
+          ],
+          "default": "pendiente",
+          "state_machine": {
+            "initial": "pendiente",
+            "pending": [
+              "pendiente"
+            ],
+            "transitions": {
+              "pendiente": [
+                "hecha",
+                "cancelada"
+              ],
+              "hecha": [],
+              "cancelada": []
+            }
+          }
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        },
+        "actualizado_en": {
+          "type": "time",
+          "auto": "update"
+        }
+      },
+      "relations": {
+        "persona": {
+          "type": "belongs_to",
+          "target": "personas",
+          "fk": "persona_id"
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "estado"
+          ]
+        },
+        {
+          "fields": [
+            "vence_en"
+          ]
+        }
+      ],
+      "events": [
+        "create",
+        "update"
+      ]
+    }
+  },
+  "summary": {
+    "resources": [
+      "tareas",
+      "personas"
+    ]
+  },
+  "rbac": {
+    "roles": {
+      "dueno": {
+        "resources": "*",
+        "actions": [
+          "*"
+        ]
+      },
+      "asistente": {
+        "permissions": {
+          "tareas": {
+            "actions": [
+              "read",
+              "create",
+              "update"
+            ]
+          },
+          "personas": {
+            "actions": [
+              "read",
+              "create"
+            ]
+          }
+        }
+      },
+      "demo": {
+        "permissions": {
+          "tareas": {
+            "actions": [
+              "read"
+            ]
+          },
+          "personas": {
+            "actions": [
+              "read"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "workflows": {
+    "avisar_creacion": {
+      "trigger": {
+        "type": "event",
+        "event": "create",
+        "resource": "tareas"
+      },
+      "steps": [
+        {
+          "name": "solo_urgentes",
+          "type": "condition",
+          "config": {
+            "expr": "record.prioridad == 'urgente'"
+          }
+        },
+        {
+          "name": "avisar",
+          "type": "enqueue",
+          "config": {
+            "topic": "summary.telegram",
+            "data": {}
+          }
+        }
+      ],
+      "role": "asistente"
+    },
+    "recordatorio_matinal": {
+      "trigger": {
+        "type": "cron",
+        "cron": "0 7 * * *",
+        "timezone": "America/Bogota"
+      },
+      "steps": [
+        {
+          "name": "recordar",
+          "type": "enqueue",
+          "config": {
+            "topic": "summary.telegram",
+            "data": {}
+          }
+        }
+      ],
+      "overlap": "skip",
+      "role": "asistente"
+    }
+  }
+}

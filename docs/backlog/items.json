@@ -1,6 +1,6 @@
 {
   "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo).",
-  "actualizado": "2026-09-19 (VOZ-TRAZABILIDAD-S1: OPS-56 hecho; VOZ-9 alimentado por el historial; VOZ-10 abierto)",
+  "actualizado": "2026-09-20 (VOZ-ESCRITURAS-S1: VOZ-4 hecho → archivo; VOZ-11 abierto)",
   "publicacion": {
     "estado": "pausada_deliberada",
     "desde": "2026-08-29",
@@ -1367,36 +1367,17 @@
       "estado": "abierto"
     },
     {
-      "id": "VOZ-4",
-      "titulo": "Escrituras por voz CON confirmación («agendá cita a las 2 con Juan — ¿sí/no?»)",
-      "frente": "automatizacion",
-      "que_es": "El escalón donde el bot cambia datos: un protocolo de confirmación (qué se lee de vuelta, cómo un «sí» queda atado exactamente a la escritura que confirma, tiempos de espera), la misma resolución de nombres de VOZ-3, y las puertas de escritura del motor sin tocar (validación, RBAC y máquinas de estado aplican porque la escritura entra por la API).",
-      "por_que_importa": "Sin esto la voz solo lee; con esto mal hecho, una cita se agenda dos veces o a la persona equivocada.",
-      "que_lo_destraba": "Primero un ADR con el protocolo de confirmación — es decisión de producto de Miguel —, después una sesión con Miguel validando la experiencia en el celular. VOZ-3 (las preguntas de lectura) ya está construido (VOZ-PREGUNTAS-S1): la resolución de nombres de pkg/ask se reutiliza tal cual.",
-      "costo": "grande",
-      "dano": "medio",
-      "prioridad": "P2",
-      "decide": "miguel",
-      "depende_de": [],
-      "bloquea": [
-        "VOZ-5"
-      ],
-      "origen": "A-70 escalón 3 · ordenado en VOZ-VISUAL-S1 (A-73)",
-      "estado": "abierto"
-    },
-    {
       "id": "VOZ-5",
       "titulo": "Reglas reactivas declaradas por voz («cuando una orden quede pagada, avisame»)",
       "frente": "automatizacion",
       "que_es": "Que el dueño declare por voz un workflow que el validador acepte. CORRECCIÓN registrada: el brief de VOZ-VISUAL-S1 decía que workflows v1 «es solo cron y no reacciona a cambios en los datos»; verificado en el código, SÍ reacciona — los triggers por evento son consumidores del outbox (pkg/workflows/consumer.go EventConsumer, probado en workflows_test.go, ADR-031 §1). Lo que falta es la AUTORÍA, no el motor: la gramática para agentes no enseña workflows (AUTO-10), Studio no tiene panel (AUTO-11), y nadie puede declarar uno por voz.",
       "por_que_importa": "Sin esto cada «avisame cuando…» es un JSON que edita el desarrollador.",
-      "que_lo_destraba": "AUTO-10 y AUTO-11 primero (la declaración tiene que ser enseñable y visible), después un frente de voz que produzca una entrada de workflows válida. Depende de VOZ-4.",
+      "que_lo_destraba": "AUTO-10 y AUTO-11 primero (la declaración tiene que ser enseñable y visible), después un frente de voz que produzca una entrada de workflows válida. VOZ-4 (escrituras con confirmación) ya está hecho (VOZ-ESCRITURAS-S1, ADR-037): la confirmación y el matcher se reusan.",
       "costo": "grande",
       "dano": "bajo",
       "prioridad": "P3",
       "decide": "agente",
       "depende_de": [
-        "VOZ-4",
         "AUTO-10",
         "AUTO-11"
       ],
@@ -1424,7 +1405,7 @@
       "id": "VOZ-6",
       "titulo": "Miguel dicta diez preguntas reales al bot desde el celular — la única verificación que un agente no puede correr",
       "frente": "automatizacion",
-      "que_es": "El bot de la tiendita ya responde preguntas (VOZ-PREGUNTAS-S1): cualquier palabra que no sea resumen/estado/ayuda va a POST /api/ask. Un agente no puede generar un mensaje de usuario de Telegram, así que la pata de ENTRADA real —el dictado en español con sus nombres destrozados— la prueba solo Miguel. Las 23 preguntas de laboratorio y las 7 en vivo por HTTPS pasaron; falta la voz de verdad.",
+      "que_es": "El bot de la tiendita ya responde preguntas (VOZ-PREGUNTAS-S1): cualquier palabra que no sea resumen/estado/ayuda va a POST /api/ask. Un agente no puede generar un mensaje de usuario de Telegram, así que la pata de ENTRADA real —el dictado en español con sus nombres destrozados— la prueba solo Miguel. Las 23 preguntas de laboratorio y las 7 en vivo por HTTPS pasaron; falta la voz de verdad. Desde VOZ-ESCRITURAS-S1 las diez deberían incluir tres órdenes («anotá…», «marcá como hecha…») y su sí.",
       "por_que_importa": "Sin esta prueba la sesión afirma 'funciona por voz' con dictado simulado; el criterio de listo de ADR-033 §Verification exige el dictado real.",
       "que_lo_destraba": "Miguel: diez preguntas dictadas al bot (@appximodev_bot, tiendita) — «cuántas órdenes hay hoy», «qué pedidos están sin pagar», «las órdenes de <cliente mal dicho>», «órdenes por estado», «cuánto vendimos esta semana», más las que se le ocurran como dueño — y anotar cuáles respondió bien, cuáles dijo «no entendí» y cuáles respondió MAL (ese es el número que decide si se ofrece a un cliente).",
       "costo": "chico",
@@ -1432,9 +1413,7 @@
       "prioridad": "P1",
       "decide": "miguel",
       "depende_de": [],
-      "bloquea": [
-        "VOZ-4"
-      ],
+      "bloquea": [],
       "origen": "VOZ-PREGUNTAS-S1 (2026-09-19)",
       "estado": "abierto"
     },
@@ -1520,6 +1499,22 @@
       "depende_de": [],
       "bloquea": [],
       "origen": "VOZ-TRAZABILIDAD-S1 (2026-09-19), límite escrito en ADR-036 §2",
+      "estado": "abierto"
+    },
+    {
+      "id": "VOZ-11",
+      "titulo": "Las confirmaciones pendientes viven en memoria del proceso: un reinicio o una flota multi-PROCESO las olvida",
+      "frente": "automatizacion",
+      "que_es": "Una escritura por voz espera su «sí» en ask.PendingStore (memoria, una por inquilino|rol|usuario, 5 min). Un reinicio elegante o un `fleet run` (un proceso por app, N réplicas detrás del proxy) la pierde: el dueño dice «sí» y escucha «no hay ninguna escritura pendiente».",
+      "por_que_importa": "Dirección segura (nada sin confirmar se escribe jamás), pero un minuto confuso durante un deploy; la flota de hoy es un proceso por app, así que no muerde.",
+      "que_lo_destraba": "Una tabla public.ask_pending (inquilino, rol, usuario, id, plan JSON, vence) leída/escrita por el pool del ledger — solo cuando exista un deploy multi-réplica de una app. Barato; no antes de necesitarlo.",
+      "costo": "chico",
+      "dano": "bajo",
+      "prioridad": "P3",
+      "decide": "agente",
+      "depende_de": [],
+      "bloquea": [],
+      "origen": "VOZ-ESCRITURAS-S1 (2026-09-20), ADR-037 §What is deliberately not built",
       "estado": "abierto"
     }
   ]

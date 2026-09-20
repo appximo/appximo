@@ -481,6 +481,79 @@ período («¿vendimos más que el mes pasado?»), rankings («el producto más
 vendido»), porcentajes, y preguntas encadenadas («¿y ayer?» — cada pregunta
 va sola). Para esas responde «No entendí» — y le dice qué sí puede.
 
+### 3e. «Anotá llamar a Fabián para mañana» — escribir por voz, confirmando
+
+Desde VOZ-ESCRITURAS-S1 el bot (y el atajo de Siri) también **anota y
+cambia** cosas. **Nunca borra.** Y **no escribe nada hasta que usted lee
+exactamente qué va a escribir y dice que sí**:
+
+```
+usted: Anotá llamar a Fabián para arreglar el techo, urgente, para mañana
+bot:   📝 Voy a crear tarea:
+       • persona: Fabián Gómez
+       • prioridad: urgente
+       • titulo: llamar a Fabián para arreglar el techo
+       • vence en: mañana (dom 20 sep)
+       ¿Confirmás? (sí / no)         [✅ Sí] [✖ No]
+usted: sí
+bot:   ✅ Listo: creé tarea llamar a Fabián para arreglar el techo.
+
+usted: marcá como hecha la tarea de Fabián
+bot:   ✏️ Voy a cambiar tarea «llamar a Fabián…»:
+       • estado: pendiente → hecha
+       ¿Confirmás? (sí / no)
+usted: dale
+bot:   ✅ Listo.
+```
+
+**Las reglas, en el orden en que lo protegen:**
+
+- **El sí es un sí.** `sí`, `dale`, `ok`, `confirmo`, `listo`, `de
+  acuerdo`. «Sí pero mejor el viernes» o «creo que sí» **no** ejecuta: el
+  bot cancela lo pendiente, se lo dice en una línea, y lee la frase como un
+  pedido nuevo. `no` cancela. Una confirmación espera **5 minutos**; un
+  pedido nuevo reemplaza al anterior y lo dice; una pregunta en el medio lo
+  cancela y se responde.
+- **Pasa por el mismo camino que la app.** Mismos permisos, mismas
+  validaciones, misma máquina de estados, mismos eventos que si lo cargara
+  por pantalla. Un rol que no puede crear recibe «por acá solo leo»; un
+  cambio que el estado no permite («la tarea ya está hecha») se rechaza
+  ANTES de preguntarle; lo que la app rechazaría vuelve como «No pude … No
+  escribí nada». El rol `demo` de una vitrina no escribe por voz.
+- **Los nombres se buscan antes, y se muestran.** «Fabi» con Fabián Gómez
+  y Fabiana Torres en la tabla es una elección numerada («¿Cuál? 1. … 2.
+  …»); un nombre que no existe es una oferta: «No encuentro ninguna persona
+  "Rocío Paz". sí para crearla» — se crea la persona (con su propio sí) y
+  después la tarea, que ya muestra «Rocío Paz (nuevo)». Un nombre dictado
+  nunca queda como texto suelto donde va una persona.
+- **Lo que no dijo se pregunta, no se inventa.** «anotá una tarea para
+  Marta» → «Para crear tarea me falta titulo. ¿Qué pongo?». Una prioridad
+  que no dijo no se rellena.
+- **Las fechas las calcula el motor** en su zona: «mañana», «pasado
+  mañana», «el viernes», «el viernes a las 3», «la semana que viene», «fin
+  de mes». La confirmación muestra el día.
+- **Cuánto cuesta.** Anotar algo nuevo necesita el modelo: **≈ US$ 0,0023 y
+  ≈ 1 segundo**. Cambiar un estado («marcá como hecha…», «cancelá…») lo
+  resuelve el motor solo: **US$ 0, al instante**. Decir «sí» no cuesta
+  nada. Aplican los mismos topes y el mismo `gasto` de §3d; el historial
+  guarda solo la forma de lo que escribió, nunca el texto.
+
+**En Telegram** la confirmación trae botones **✅ Sí / ✖ No** (y `1 2 3`
+cuando hay que elegir); apretar uno es lo mismo que escribirlo, y los
+botones desaparecen para que no se apriete dos veces. **En Siri:** después
+de *Leer texto en voz alta*, agregue **Pedir entrada** («¿Confirmás?») y
+mande la respuesta al mismo `/api/ask` como `q` — el motor sabe que es su
+confirmación. El token del atajo tiene que llevar usuario (`--user-id`,
+§3d); un token sin usuario lee pero no escribe, y se lo dice.
+
+**Para apagarlo:** `APPXIMO_ASK_WRITES=off` en `/etc/<app>/<app>.env` y
+`systemctl restart <app>` — el bot vuelve a solo leer.
+
+**Lo que no hace (a propósito):** borrar (aunque lo pida un administrador),
+vaciar un campo, cambiar varias filas de una («cancelá todas…»), cargar
+archivos. Si el motor se reinicia, una confirmación que estaba esperando se
+olvida: lo que no confirmó no pasó.
+
 ## 4. Qué hacer cuando pasa algo
 
 Recetas cortas, en el orden en que suele hacer falta. Todas empiezan igual: **mire antes de tocar** (30 segundos):

@@ -26,6 +26,16 @@ type Field struct {
 	// Money marks an int64 in a currency's minor unit, by the name convention
 	// the engine documents (price_cents, total_centavos).
 	Money bool
+	// Required / HasDefault / Auto (VOZ-ESCRITURAS-S1): what a create must
+	// carry, what the engine fills, what the client may never write.
+	Required   bool
+	HasDefault bool
+	Default    any // the declared default (create-only), when HasDefault
+	Auto       bool
+	// Initial lists the state machine's initial states (a create may only be
+	// born there); Transitions maps state → reachable states.
+	Initial     []string
+	Transitions map[string][]string
 }
 
 func (f *Field) IsNumeric() bool {
@@ -51,6 +61,10 @@ type Resource struct {
 	// Listed is true when the schema's summary.resources names it (the owner's
 	// own ranking — the first thing kept when the vocabulary must be trimmed).
 	Listed bool
+	// CanCreate / CanUpdate (VOZ-ESCRITURAS-S1): what the asking role may
+	// write on this resource. The model is told, so it never plans a write
+	// the role cannot make; the executor re-checks regardless.
+	CanCreate, CanUpdate bool
 }
 
 func (r *Resource) Field(name string) *Field { return r.byName[name] }
@@ -170,18 +184,34 @@ var (
 // schema + the role's RBAC evaluation, so a role never even receives the word
 // for a resource it cannot see.
 type Vocabulary struct {
-	AppName   string
-	resources map[string]*Resource
-	order     []string
+	AppName    string
+	resources  map[string]*Resource
+	order      []string
+	writeCheck WriteCheck
+}
+
+// BuildWithWrites is Build plus the role's write abilities per resource.
+func BuildWithWrites(s *schema.APISchema, appName string, check ReadCheck, wcheck WriteCheck) *Vocabulary {
+	v := &Vocabulary{AppName: appName, resources: map[string]*Resource{}, writeCheck: wcheck}
+	fill(v, s, check)
+	return v
 }
 
 // ReadCheck answers, for one resource, whether the role may read it and which
 // fields it may see (nil = all). The handler binds it to rbac.Policy.Evaluate.
 type ReadCheck func(resource string) (allowed bool, fields []string)
 
+// WriteCheck answers whether the role may create / update a resource.
+type WriteCheck func(resource string) (create, update bool)
+
 // Build derives the vocabulary from the schema for one role.
 func Build(s *schema.APISchema, appName string, check ReadCheck) *Vocabulary {
 	v := &Vocabulary{AppName: appName, resources: map[string]*Resource{}}
+	fill(v, s, check)
+	return v
+}
+
+func fill(v *Vocabulary, s *schema.APISchema, check ReadCheck) {
 	if v.AppName == "" {
 		v.AppName = s.Name
 	}
@@ -199,10 +229,12 @@ func Build(s *schema.APISchema, appName string, check ReadCheck) *Vocabulary {
 		res := s.Resources[name]
 		r := BuildResource(name, &res, allowedFields)
 		r.Listed = listed[name]
+		if v.writeCheck != nil {
+			r.CanCreate, r.CanUpdate = v.writeCheck(name)
+		}
 		v.resources[name] = r
 		v.order = append(v.order, name)
 	}
-	return v
 }
 
 // BuildResource projects one schema resource onto the askable shape, keeping
@@ -221,7 +253,7 @@ func BuildResource(name string, res *schema.ResourceSchema, allowed []string) *R
 			continue
 		}
 		fd := res.Fields[fname]
-		f := &Field{Name: fname, Type: fd.Type, Enum: fd.Enum, Relation: fd.Relation}
+		f := &Field{Name: fname, Type: fd.Type, Enum: fd.Enum, Relation: fd.Relation, Required: fd.Required, HasDefault: fd.Default != nil, Default: fd.Default, Auto: fd.Auto.Enabled()}
 		if fd.Auto.Enabled() && fd.Type == "time" {
 			if fd.Auto.RefreshesOnUpdate(fname) {
 				f.IsUpdated = true
@@ -238,6 +270,8 @@ func BuildResource(name string, res *schema.ResourceSchema, allowed []string) *R
 				}
 			}
 			sort.Strings(f.Terminal)
+			f.Initial = append(f.Initial, sm.Initial...)
+			f.Transitions = sm.Transitions
 			if sm.PendingDeclared() {
 				f.Pending = append(f.Pending, sm.Pending...)
 			}
@@ -340,10 +374,25 @@ func (r *Resource) renderLine() string {
 				p.WriteString("; final states: " + strings.Join(f.Terminal, "|"))
 			}
 		}
+		if f.Required && !f.HasDefault && !f.Auto {
+			p.WriteString("; REQUIRED")
+		}
+		if f.Auto {
+			p.WriteString("; engine-owned")
+		}
 		p.WriteString(")")
 		parts = append(parts, p.String())
 	}
-	return "- " + r.Name + ": " + strings.Join(parts, " ") + "\n"
+	can := ""
+	switch {
+	case r.CanCreate && r.CanUpdate:
+		can = " [may create+update]"
+	case r.CanCreate:
+		can = " [may create]"
+	case r.CanUpdate:
+		can = " [may update]"
+	}
+	return "- " + r.Name + ":" + can + " " + strings.Join(parts, " ") + "\n"
 }
 
 // MoneyField is the amount a row is best summarized by: a money field named

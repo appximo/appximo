@@ -62,9 +62,16 @@ import (
 // plan cache answers a repeated question, and the spend ledger (pkg/askspend,
 // installed per app through AskRuntime) caps model calls per minute and the
 // model spend per day — at the cap the model is off, the rest keeps answering.
-func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, policy *rbac.Policy) {
+func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, policy *rbac.Policy, tw *txWriter) {
 	model, modelName := askModelFromEnv()
 	timeout := askTimeoutFromEnv()
+	// Voice WRITES (VOZ-ESCRITURAS-S1): create + update through the
+	// transaction cores, every one confirmed by the owner first. Off by
+	// APPXIMO_ASK_WRITES=off; without a writer (bare BuildRouter callers)
+	// the channel reads only.
+	if !askWritesEnabled() {
+		tw = nil
+	}
 
 	var vocabMu sync.Mutex
 	vocabs := map[string]*ask.Vocabulary{} // per role: the RBAC is boot-static
@@ -76,12 +83,35 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 		if v, ok := vocabs[key]; ok {
 			return v
 		}
-		v := ask.Build(s, appName, func(resource string) (bool, []string) {
+		readCheck := func(resource string) (bool, []string) {
 			ev := policy.Evaluate(evalCtx, resource, "read")
 			return ev.Allowed, ev.AllowedFields
-		})
+		}
+		var v *ask.Vocabulary
+		if tw != nil {
+			v = ask.BuildWithWrites(s, appName, readCheck, func(resource string) (bool, bool) {
+				return policy.Evaluate(evalCtx, resource, "create").Allowed, policy.Evaluate(evalCtx, resource, "update").Allowed
+			})
+		} else {
+			v = ask.Build(s, appName, readCheck)
+		}
 		vocabs[key] = v
 		return v
+	}
+
+	// bindWrites gives deps the writer + the pending store for THIS caller:
+	// the pending key is tenant|role|user — a pending is never visible to
+	// another identity, and a role change between the plan and the
+	// confirmation re-evaluates from scratch.
+	bindWrites := func(deps *ask.Deps, rt *AskRuntime, tc *tenant.TenantCtx, evalCtx rbac.EvalContext, userID string) {
+		if tw == nil || rt == nil || rt.Pending == nil {
+			return
+		}
+		deps.Write = &askWriter{tw: tw, tc: tc, evalCtx: evalCtx}
+		deps.Pending = rt.Pending
+		if userID != "" {
+			deps.PendingKey = tc.ID + "|" + evalCtx.Role + "|" + userID
+		}
 	}
 
 	r.Post("/api/"+rbac.AskRoute, func(w http.ResponseWriter, req *http.Request) {
@@ -103,11 +133,16 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 			return
 		}
 		var in struct {
-			Q string `json:"q"`
+			Q         string `json:"q"`
+			PendingID string `json:"pending_id"`
+			Answer    string `json:"answer"`
 		}
-		if err := json.Unmarshal(body, &in); err != nil || strings.TrimSpace(in.Q) == "" {
-			writeJSONErr(w, http.StatusBadRequest, `body must be {"q": "<the question>"}`)
+		if err := json.Unmarshal(body, &in); err != nil || (strings.TrimSpace(in.Q) == "" && in.PendingID == "") {
+			writeJSONErr(w, http.StatusBadRequest, `body must be {"q": "<the question>"} (or {"pending_id": "...", "answer": "sí"|"no"} to resolve a pending write)`)
 			return
+		}
+		if in.PendingID != "" && in.Q == "" {
+			in.Q = in.Answer
 		}
 		if len([]rune(in.Q)) > 500 {
 			writeJSONErr(w, http.StatusBadRequest, "the question is longer than 500 characters")
@@ -151,6 +186,7 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 				deps.Trace = rt.Ledger.Config().Trace
 			}
 		}
+		bindWrites(&deps, rt, tc, evalCtx, userID)
 		switch {
 		case model == nil:
 			deps.ModelOff = "disabled"
@@ -159,7 +195,16 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 		default:
 			deps.Model = &boundedModel{inner: model, timeout: timeout}
 		}
-		res := ask.Answer(ctx, deps, in.Q)
+		var res ask.Result
+		if in.PendingID != "" {
+			// The id door: a confirmation (or a pick / a value) for a
+			// specific pending — the Telegram buttons and a Siri shortcut
+			// that kept the id. The id alone is never enough: it must be
+			// this identity's.
+			res = ask.Confirm(ctx, deps, in.PendingID, in.Answer)
+		} else {
+			res = ask.Answer(ctx, deps, in.Q)
+		}
 		markSpan(req, "query")
 
 		var day askspend.Day
@@ -232,6 +277,20 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 		}
 		if res.Number != nil {
 			out["number"] = *res.Number
+		}
+		if res.Pending != nil {
+			// The write waiting for the owner: its id (the confirm door), what
+			// stage it is in, and when it expires. The values themselves are
+			// in the text the owner reads — that text IS the contract.
+			out["pending_id"] = res.Pending.ID
+			out["stage"] = res.Pending.Stage
+			out["expires_in"] = int(time.Until(res.Pending.Expires).Seconds())
+		}
+		if len(res.Written) > 0 {
+			out["written"] = res.Written
+		}
+		if res.Kind == "written" || res.Kind == "confirm" || res.Kind == "ask_field" {
+			markSpan(req, "write")
 		}
 		// A grouped answer ALSO comes as a picture, through the digest's own
 		// renderer (the same card, same fonts, same palette) — never a new

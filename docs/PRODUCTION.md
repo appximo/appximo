@@ -1195,6 +1195,92 @@ rankings («el producto más vendido»), no percentages, no follow-ups («¿y
 ayer?» — each question stands alone), and «vendimos» means whatever the
 model maps it to in the schema's states — the small print says which.
 
+### 4.6f «Anotá llamar a Fabián para mañana» — WRITING by voice, with confirmation (VOZ-ESCRITURAS-S1, ADR-037)
+
+The same door (`POST /api/ask`, the bot, the Siri shortcut) now also
+**creates and changes** rows. Never deletes. And **nothing is written until
+the owner reads exactly what will be written and says yes**:
+
+```
+you:  Anotá llamar a Fabián para arreglar el techo, urgente, para mañana
+bot:  📝 Voy a crear tarea:
+      • persona: Fabián Gómez
+      • prioridad: urgente
+      • titulo: llamar a Fabián para arreglar el techo
+      • vence en: mañana (dom 20 sep)
+      ¿Confirmás? (sí / no)          [✅ Sí] [✖ No]
+you:  sí
+bot:  ✅ Listo: creé tarea llamar a Fabián para arreglar el techo (pendiente, 19 Sep).
+…
+you:  marcá como hecha la tarea de Fabián
+bot:  ✏️ Voy a cambiar tarea «llamar a Fabián… (pendiente, 19 Sep)»:
+      • estado: pendiente → hecha
+      ¿Confirmás? (sí / no)
+you:  dale
+bot:  ✅ Listo: tarea … : estado → hecha.
+```
+
+What holds, in order of what it protects:
+
+- **The yes is exact.** `sí`, `dale`, `ok`, `confirmo`, `listo`, `de
+  acuerdo`, `hacelo`… «sí pero mejor el viernes» or «creo que sí» is NOT a
+  yes: the write is cancelled (the bot says so in one line) and the sentence
+  is read as a new order. `no` / `cancelar` cancels. A confirmation waits
+  **5 minutes**, one per person; a new order replaces the previous one and
+  says so; a question asked meanwhile cancels it and is answered.
+- **It goes through the engine's own write path.** The same RBAC, the same
+  validators, the same state machines, the same outbox events as
+  `POST /api/<resource>`. A role that may not create gets «solo leo»; a
+  transition the schema forbids («la tarea ya está hecha») is refused BEFORE
+  the confirmation, with the schema's words; whatever the API would reject
+  (a 409, a 422) comes back as «No pude … No escribí nada». The `demo` role
+  of a showcase app cannot write by voice — the RBAC is the boundary, as in
+  the `/app`.
+- **Names are matched first, and shown.** «Fabi» with Fabián Gómez AND
+  Fabiana Torres in the table is a numbered pick («¿Cuál? 1. … 2. …»); a
+  name nobody has is an offer: «No encuentro ninguna persona "Rocío Paz".
+  sí para crearla» — the person is created (its own yes), then the task's
+  confirmation shows «Rocío Paz (nuevo)». A dictated name is never stored as
+  text in a relation.
+- **What you did not say is asked, not invented.** «anotá una tarea para
+  Marta» → «Para crear tarea me falta titulo. ¿Qué pongo?» — one field at a
+  time; the answer is the value. A priority you did not say is not filled.
+- **Time is resolved by the engine** in the app's zone: «mañana», «pasado
+  mañana», «el viernes», «el viernes a las 3», «la semana que viene», «fin
+  de mes», or a date you literally said. The confirmation shows the date.
+- **Cost.** A create needs the model: **≈ US$ 0.0023, ≈ 0.8 s** (Haiku,
+  one call). A state change («marcá como hecha…», «cancelá…») is settled
+  by the parser: **US$ 0, ≈ 15 ms**. The confirmation itself costs nothing.
+  The same caps, trace (`⚙︎`) and history apply (§4.6e); the history keeps
+  only the shape of a write (`[create tareas: titulo, vence_en]`), never
+  its text.
+
+**Telegram** shows **✅ Sí / ✖ No** buttons under the confirmation (and
+`1 2 3` buttons for a pick); pressing one answers exactly like typing it, and
+the buttons disappear so it cannot be pressed twice. **Siri / a shortcut:**
+the reply JSON carries `pending_id`, `stage` (`confirm`, `ask_field`,
+`which`, `create_ref`) and `expires_in`. The simplest shortcut: after
+*Speak Text* of `speech`, **Ask for Input** («¿Confirmás?») and POST the
+answer as `{"q": "<answer>"}` to the same URL — the pending is per identity,
+so the plain door resolves it. A shortcut that kept the id may post
+`{"pending_id": "…", "answer": "sí"}` instead. The token a shortcut carries
+must have an identity (`--user-id`, §4.6e): a token without one can read
+but is told it cannot write.
+
+**Off switch:** `APPXIMO_ASK_WRITES=off` in the app's env makes every voice
+channel read-only again (a write order answers «por acá solo leo»).
+
+**What it will not do (by design):** delete anything (`borrá` is refused on
+every channel, even for an admin); empty a field; change several rows at
+once («cancelá todas…»); write files, json or ids; a per-transition
+permission («only the owner may mark paid» — the `update` grant governs,
+as on the API). A restart forgets pending confirmations (a write that was
+not confirmed did not happen).
+
+Example schema with the whole cycle — tasks with people, a state machine,
+events, a workflow that sends the digest when an URGENT task is created, and
+a morning reminder: `examples/model-lab/agenda-voz.json`.
+
 ### 4.7 Recommended cadence by kind of app
 
 | the app | cadence | why |

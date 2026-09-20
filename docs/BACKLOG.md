@@ -1474,7 +1474,8 @@ tarball of scripts/), and the smoke runs fleet-audit once.
   hoy», «qué pedidos están sin pagar», «las órdenes de <a client, said badly>», «órdenes
   por estado», «cuánto vendimos esta semana», plus whatever an owner asks — with a note
   of how many were right, how many «no entendí», and how many WRONG (the number that
-  decides whether this is offered to a customer). Blocks VOZ-4.
+  decides whether this is offered to a customer). Since VOZ-ESCRITURAS-S1 the same ten
+  should include three orders («anotá…», «marcá como hecha…») and their yes.
 
 ### VOZ-7 — The questions the v1 grammar cannot express: cross-resource, period comparisons, rankings, percentages, follow-ups
 
@@ -1517,15 +1518,17 @@ tarball of scripts/), and the smoke runs fleet-audit once.
 - **Ready:** decide whether a generic, model-free proper-name detector (capitalized
   words after «de/del/para/con», the parser's own heuristic) applied BEFORE storing
   even without a plan is worth it; measure false positives on the corpus.
-### VOZ-4 — Writes by voice WITH confirmation ("agendá cita a las 2 con Juan — ¿sí/no?")
+### VOZ-11 — Pending confirmations live in process memory: a restart or a multi-PROCESS fleet forgets them
 
-- **Origin:** A-70 step 3; ordered after VOZ-3 in VOZ-VISUAL-S1 (A-73).
-- **Impact:** the step where the bot changes data; needs the confirmation protocol
-  (what is read back, how a "sí" is bound to exactly the write it confirms, timeouts),
-  the same name-resolution as VOZ-3, and the engine's write doors unchanged (validation,
-  RBAC, state machines all apply because the write goes through the API).
-- **Ready:** a design note (ADR) written first — the confirmation is a product decision
-  Miguel takes; then a session with Miguel validating the experience on a phone.
+- **Origin:** VOZ-ESCRITURAS-S1 (2026-09-20), ADR-037 §What is not built. A voice write
+  waits for its yes in `ask.PendingStore` (in memory, one per tenant|role|user, 5 min).
+  A graceful restart or a `fleet run` (one process per app, N replicas behind a proxy)
+  loses it: the owner says «sí» and hears «no hay ninguna escritura pendiente».
+- **Impact:** safe direction (nothing unconfirmed is ever written) but a confusing
+  minute during a deploy; today's fleet is single-process per app so it does not bite.
+- **Ready:** a `public.ask_pending` table (tenant, role, user, id, plan JSON, expires)
+  read/written through the ledger's pool — only when a multi-replica deploy of one app
+  exists. Cheap; not before it is needed.
 
 ### VOZ-5 — Reactive rules declared by voice ("cuando una orden quede pagada, avisame")
 
@@ -1589,8 +1592,9 @@ Operating an app by voice, in five deliberate steps: **(1) close the
 worker/outbox traps — DONE (AUTOMATIZACION-S1)** → (2) read-only by voice —
 **the digest is DONE (VOZ-ESCALON1-S1) and reads at a glance as a picture with
 a declared filter and an honest vocabulary (VOZ-VISUAL-S1, ADR-032); read
-QUESTIONS are VOZ-3 (ADR-033, designed, not built)** → (3) writes with
-confirmation (VOZ-4) → **(4) declarative rules — DONE: the workflows executor
+QUESTIONS are VOZ-3 (ADR-033, built)** → **(3) writes with confirmation — DONE
+(VOZ-ESCRITURAS-S1, ADR-037: create + update, never delete, an exact yes, the
+engine's own write cores)** → **(4) declarative rules — DONE: the workflows executor
 exists (ADR-031), event AND cron triggers; declaring them by voice is VOZ-5** →
 (5) a visual layer. The settled foundations
 (`expr-lang/expr`, `pg_try_advisory_lock`, the schema as source of truth) are

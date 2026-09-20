@@ -1261,9 +1261,9 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		}
 		return hookRes.Data, 0, ""
 	}
-	registerTransactionRoute(r, s, tdb, policy, inv, hookEval)
+	tw := registerTransactionRoute(r, s, tdb, policy, inv, hookEval)
 	registerSummaryRoute(r, s, tdb, policy)
-	registerAskRoute(r, s, tdb, policy)
+	registerAskRoute(r, s, tdb, policy, tw)
 
 	return r
 }

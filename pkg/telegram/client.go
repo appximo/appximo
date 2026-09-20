@@ -135,6 +135,50 @@ func (c *Client) SendMessageTo(ctx context.Context, chatID any, html string) err
 	}, nil)
 }
 
+// Button is one inline-keyboard button; Data is what the press sends back
+// as a callback_query (≤ 64 bytes, Telegram's cap).
+type Button struct {
+	Text string `json:"text"`
+	Data string `json:"callback_data"`
+}
+
+// SendMessageWithButtons posts one HTML message with ONE row of inline
+// buttons (VOZ-ESCRITURAS-S1: the Sí / No of a write confirmation). Returns
+// the message id so the keyboard can be removed once the pending resolves.
+func (c *Client) SendMessageWithButtons(ctx context.Context, chatID any, html string, buttons []Button) (int64, error) {
+	var out struct {
+		Result struct {
+			MessageID int64 `json:"message_id"`
+		} `json:"result"`
+	}
+	err := c.call(ctx, "sendMessage", map[string]any{
+		"chat_id":                  chatID,
+		"text":                     html,
+		"parse_mode":               "HTML",
+		"disable_web_page_preview": true,
+		"reply_markup":             map[string]any{"inline_keyboard": [][]Button{buttons}},
+	}, &out)
+	return out.Result.MessageID, err
+}
+
+// AnswerCallback acknowledges a button press (stops the client's spinner);
+// text, when set, is shown as a small toast.
+func (c *Client) AnswerCallback(ctx context.Context, callbackID, text string) error {
+	payload := map[string]any{"callback_query_id": callbackID}
+	if text != "" {
+		payload["text"] = text
+	}
+	return c.call(ctx, "answerCallbackQuery", payload, nil)
+}
+
+// RemoveButtons strips the inline keyboard from a message (the pending was
+// resolved: a second press must not be possible from the old message).
+func (c *Client) RemoveButtons(ctx context.Context, chatID any, messageID int64) error {
+	return c.call(ctx, "editMessageReplyMarkup", map[string]any{
+		"chat_id": chatID, "message_id": messageID, "reply_markup": map[string]any{"inline_keyboard": [][]Button{}},
+	}, nil)
+}
+
 // SendChatAction shows "typing…" in the chat for ~5 s (Telegram's own
 // indicator, no message): the receiver sends it while a question is being
 // thought about, so the owner never stares at nothing (VOZ-PREGUNTAS-S1).
@@ -164,18 +208,32 @@ func (c *Client) GetChat(ctx context.Context) error {
 
 // Update is one inbound update (only the fields the receiver needs).
 type Update struct {
-	UpdateID int64 `json:"update_id"`
-	Message  *struct {
-		MessageID int64 `json:"message_id"`
-		From      *struct {
+	UpdateID int64    `json:"update_id"`
+	Message  *Message `json:"message"`
+	// CallbackQuery is a button press (VOZ-ESCRITURAS-S1): who pressed, in
+	// which chat/message, and the button's data.
+	CallbackQuery *struct {
+		ID   string `json:"id"`
+		From *struct {
 			ID       int64  `json:"id"`
 			Username string `json:"username"`
 		} `json:"from"`
-		Chat *struct {
-			ID int64 `json:"id"`
-		} `json:"chat"`
-		Text string `json:"text"`
-	} `json:"message"`
+		Message *Message `json:"message"`
+		Data    string   `json:"data"`
+	} `json:"callback_query"`
+}
+
+// Message is the part of a Telegram message the receiver reads.
+type Message struct {
+	MessageID int64 `json:"message_id"`
+	From      *struct {
+		ID       int64  `json:"id"`
+		Username string `json:"username"`
+	} `json:"from"`
+	Chat *struct {
+		ID int64 `json:"id"`
+	} `json:"chat"`
+	Text string `json:"text"`
 }
 
 // GetUpdates long-polls for updates after offset. timeout is the server-side
@@ -185,7 +243,7 @@ func (c *Client) GetUpdates(ctx context.Context, offset int64, timeout int) ([]U
 		OK     bool     `json:"ok"`
 		Result []Update `json:"result"`
 	}
-	payload := map[string]any{"timeout": timeout, "allowed_updates": []string{"message"}}
+	payload := map[string]any{"timeout": timeout, "allowed_updates": []string{"message", "callback_query"}}
 	if offset > 0 {
 		payload["offset"] = offset
 	}
@@ -202,7 +260,7 @@ func (c *Client) SetWebhook(ctx context.Context, url, secret string, drop bool) 
 	return c.call(ctx, "setWebhook", map[string]any{
 		"url":                  url,
 		"secret_token":         secret,
-		"allowed_updates":      []string{"message"},
+		"allowed_updates":      []string{"message", "callback_query"},
 		"drop_pending_updates": drop,
 	}, nil)
 }

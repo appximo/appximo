@@ -307,6 +307,35 @@ translation calls the endpoint as its role; there is no `Ctx` seam for the
 model on purpose — the vocabulary/validation/RBAC discipline lives in one
 place. Operator + Siri: docs/PRODUCTION.md §4.6e.
 
+**Writes by voice (VOZ-ESCRITURAS-S1, ADR-037).** The plan also has
+`create` (`data`) and `update` (`where` + `data`); **no delete** (delete /
+send verbs are refused deterministically). NOTHING executes without the
+owner's confirmation: a write answers `kind: confirm` (or `ask_field` — a
+REQUIRED field the owner did not say is ASKED, never invented; `ambiguous` —
+a numbered pick when a dictated name matches several rows; `not_found` with
+an offer to create the relation's target) plus `pending_id`, `stage`,
+`expires_in` (5 min, one pending per tenant|role|user). The text IS the
+contract: every value, matched names shown as the row they resolved to
+(relation fields take `{"match": "<as said>"}` and are resolved through the
+same matcher as the questions BEFORE the confirmation; never a literal). The
+yes is an exact closed list (`sí`/`dale`/`ok`/`confirmo`…); an ambiguous
+«sí pero…» cancels; `no` cancels; `POST /api/ask {"pending_id","answer"}` is
+the button/shortcut door and the id must belong to the same identity (a
+token without a subject can read, not write). A confirmed write runs
+through the batch transaction's cores (`txWriter` → `prepareTxOp` /
+`execPreparedOp`): RBAC, validators, before hooks, the state-machine guard,
+the outbox event, the cache invalidation — a refusal comes back in words
+with «No escribí nada», never a success face. Time values are tokens
+(`tomorrow`, `next_friday 15:00`, `end_of_month`, ISO) the engine resolves
+in the app's zone; a value equal to the field's default is dropped from a
+create. The parser settles ONE write shape without the model (a state
+transition of one row: «marcá como hecha la tarea de Fabián», US$ 0); a
+create costs one model call (≈ US$ 0.0023). Telegram: inline Sí/No and pick
+buttons (`callback_query`), keyboard removed once resolved.
+`APPXIMO_ASK_WRITES=off` makes the channel read-only. A custom handler
+never needs a seam here either: it reads the same `/api/ask` as its role.
+Example: examples/model-lab/agenda-voz.json.
+
 ### 2c. Reading from OUTSIDE the binary — `?fields=`: ask for the columns you will use
 
 **The problem it solves is not bandwidth, it is disk.** A `json`/`jsonb`/`text`

@@ -40,12 +40,32 @@ RULES — each one is checked by the engine, which rejects anything outside the 
 
 `
 
+// systemWrites is appended ONLY when the asking role may write something
+// (VOZ-ESCRITURAS-S1): the create/update forms, and the rules that keep the
+// model from inventing a value.
+const systemWrites = `WRITES — the vocabulary marks the resources this role [may create] / [may update]. For those, two more forms exist. The engine ALWAYS shows the owner exactly what will be written and asks for a confirmation before writing; you only translate.
+{"kind": "create", "resource": "<a [may create] resource>", "data": {"<field>": <value>, …}}
+{"kind": "update", "resource": "<a [may update] resource>", "where": [ <filters that identify ONE row — a name via match, a state, a code> ], "data": {"<field>": <new value>, …}}
+Rules for data:
+W1. Put in data ONLY the fields the owner SAID. Never fill a field the owner did not mention — not a state, not a default, not a REQUIRED one: leave it out and STILL emit the create; the engine asks the owner for what is missing ("anotá una tarea para Marta" → {"kind":"create","resource":"tareas","data":{"persona_id":{"match":"Marta"}}} even though titulo is REQUIRED). A missing required field is never a reason to answer write or unclear. Never write id or an engine-owned field. Never write null or an empty string.
+W2. A value is a literal of the field's type: an enum/state member verbatim (map "urgente" to the closest declared value), a number (money in cents), true/false, or the TEXT the owner said for a text field (keep their words; do not rephrase, do not translate).
+W3. A relation field takes {"match": "<the person/thing's name exactly as said>"} — never a literal, never an id. If the owner names a person for a field that points at a resource of people, that is a match.
+W4. A time field takes a token: "now", "today", "tomorrow", "day_after_tomorrow", "next_week", "next_monday"…"next_sunday", "end_of_month", optionally followed by " HH:MM" ("tomorrow 15:00"), or a YYYY-MM-DD the owner literally said. Never compute a date. "para mañana" → "tomorrow"; "el viernes" → "next_friday"; "hoy a las 3 de la tarde" → "today 15:00".
+W5. An update's where identifies the row the owner means ("la tarea de Fabián" → where persona_id match Fabián; "el pedido 1003" → the code field eq). Do not add filters the owner did not imply. "marcá como hecha" / "ya está lista" / "cancelá la tarea de X" → update with the state field set to the matching declared state (cancelling IS a state change when a cancelled state exists).
+W6. DELETE / borrar / eliminar / quitar / mandar / enviar / avisar / recordar → still {"kind":"write","reason":"…"}: the engine does not delete or send by voice.
+W7. A create of a resource the role may not create, or a field that does not exist → unclear (never a different resource).
+
+`
+
 // SystemPrompt renders the full system prompt for a vocabulary.
 func SystemPrompt(v *Vocabulary) (string, []string) {
 	vocab, trimmed := v.Render()
 	var b strings.Builder
 	b.WriteString(systemHead)
-	fmt.Fprintf(&b, "VOCABULARY of the app %q — resources the asking role may read, with their readable fields (type; enum values; waiting/final states; relation targets):\n%s", v.AppName, vocab)
+	if v.Writable() {
+		b.WriteString(systemWrites)
+	}
+	fmt.Fprintf(&b, "VOCABULARY of the app %q — resources the asking role may read, with their readable fields (type; enum values; waiting/final states; relation targets; REQUIRED = must be given on create):\n%s", v.AppName, vocab)
 	return b.String(), trimmed
 }
 
@@ -135,6 +155,9 @@ func weekdayES(d time.Weekday) string {
 func sameQuestion(first, corrected Plan) bool {
 	if corrected.Kind == "unclear" || corrected.Kind == "write" {
 		return true
+	}
+	if corrected.IsWrite() && !first.IsWrite() {
+		return false // a read that "corrects" into a write is a different question
 	}
 	if first.Resource == "" || first.Resource == corrected.Resource {
 		return true

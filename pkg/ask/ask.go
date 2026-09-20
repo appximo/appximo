@@ -59,6 +59,15 @@ type Deps struct {
 	// fell through — why, to the human TEXT of the reply (VOZ-TRAZABILIDAD-S1).
 	// Never to Speech. For whoever administers; off by default.
 	Trace bool
+
+	// ── writes (VOZ-ESCRITURAS-S1) ──
+	// Write executes a CONFIRMED create/update through the engine; nil = the
+	// channel only reads (a write plan is refused in words). Pending holds
+	// the writes waiting for confirmation; PendingKey is the asking identity
+	// (tenant|user) — one pending per key, never shared.
+	Write      Writer
+	Pending    *PendingStore
+	PendingKey string
 }
 
 // Result is the reply, composed by the engine.
@@ -96,6 +105,11 @@ type Result struct {
 	FallbackES string `json:"fallback_es,omitempty"`
 	// Detail is the engine-side reason for the log (never the owner).
 	Detail string `json:"-"`
+	// Pending is the write waiting for the owner (kinds confirm | ask_field
+	// | ambiguous | not_found with a pending id); Written the rows a
+	// confirmed write produced (kind written).
+	Pending *Pending  `json:"pending,omitempty"`
+	Written []Written `json:"written,omitempty"`
 }
 
 // Group is one row of a grouped answer.
@@ -130,7 +144,7 @@ func Answer(ctx context.Context, d Deps, question string) Result {
 // "⚙︎ modelo · 1,1 s · US$ 0,0029 · al modelo porque: palabra fuera del
 // schema «vendimos»".
 func TraceLine(r Result) string {
-	who := map[string]string{"parser": "parser", "cache": "caché", "model": "modelo"}[r.Source]
+	who := map[string]string{"parser": "parser", "cache": "caché", "model": "modelo", "confirm": "confirmación (sin modelo)"}[r.Source]
 	if who == "" {
 		who = "sin plan"
 	}
@@ -176,6 +190,8 @@ func fallbackES(code string) string {
 		return "un valor de otro recurso (" + strings.TrimPrefix(code, "value ") + ")"
 	case code == "no amount field", strings.HasPrefix(code, "two amount fields"):
 		return "no sé qué monto sumar"
+	case strings.HasPrefix(code, "write verb: "):
+		return "verbo de escritura «" + strings.TrimPrefix(code, "write verb: ") + "» (lo planea el modelo)"
 	case strings.HasPrefix(code, "invalid: "):
 		return "plan inválido: " + strings.TrimPrefix(code, "invalid: ")
 	case code == "empty":
@@ -190,6 +206,11 @@ func fallbackES(code string) string {
 func Redact(question string, p *Plan) string {
 	if p == nil {
 		return question
+	}
+	if p.IsWrite() {
+		// A write's text IS the data (a title, a note, a name): the history
+		// keeps only the shape — kind, resource, the fields touched.
+		return "[" + p.Kind + " " + p.Resource + ": " + strings.Join(sortedKeys(p.Data), ", ") + "]"
 	}
 	out := question
 	for _, f := range p.Filters {
@@ -235,6 +256,35 @@ func answer(ctx context.Context, d Deps, question string) Result {
 		return Result{Kind: "forbidden", Headline: "Nada que consultar",
 			Text: "Tu rol no puede leer ningún recurso, así que no hay nada que preguntar."}
 	}
+
+	// 0. A write waiting for this owner: the message is first read as its
+	// answer (yes / no / a value / a pick). Anything that is not one cancels
+	// the pending — an ambiguous yes never executes — and the message is
+	// then processed as a new question, saying so.
+	cancelledNote := ""
+	if d.Pending != nil && d.PendingKey != "" {
+		if pend := d.Pending.Get(d.PendingKey); pend != nil {
+			r, handled := continuePending(ctx, d, pend, question)
+			if handled {
+				r.Source = "confirm"
+				return r
+			}
+			cancelledNote = "<i>Cancelé la escritura que estaba pendiente. No escribí nada.</i>\n"
+		}
+		// A bare yes/no with nothing pending never reaches the model.
+		if IsYes(question) || IsNo(question) {
+			return Result{Kind: "invalid", Headline: "Nada pendiente", Source: "parser",
+				Text: "No hay ninguna escritura pendiente que confirmar o cancelar."}
+		}
+	}
+	out := answerQuestion(ctx, d, question)
+	if cancelledNote != "" {
+		out.Text = cancelledNote + out.Text
+	}
+	return out
+}
+
+func answerQuestion(ctx context.Context, d Deps, question string) Result {
 
 	// 1. The deterministic parser — no model, no cache, microseconds. It
 	// answers only when SURE (parser.go); otherwise it says why, for the log.
@@ -291,10 +341,25 @@ func answer(ctx context.Context, d Deps, question string) Result {
 	switch p.Kind {
 	case "write":
 		base.Kind = "write_refused"
-		base.Headline = "Por acá solo leo"
-		base.Text = "🔒 Por acá solo <b>leo</b>. Crear, cambiar, cancelar o borrar datos llega en una próxima etapa, con confirmación. " + askable(d.Vocab)
 		base.Detail = "write intent: " + p.Reason
+		if d.Write != nil && d.Vocab.Writable() {
+			base.Headline = "Eso no lo hago por voz"
+			base.Text = "🔒 Por acá puedo <b>crear</b> y <b>cambiar</b> datos (siempre confirmando antes), pero no borrar, enviar ni otras acciones. " + writable(d.Vocab)
+		} else {
+			base.Headline = "Por acá solo leo"
+			base.Text = "🔒 Por acá solo <b>leo</b>. " + askable(d.Vocab)
+		}
 		return base
+	case "create", "update":
+		r := prepareWrite(ctx, d, p, question)
+		r.Usage, r.ModelMS, r.Corrected, r.Source, r.Fallback = base.Usage, base.ModelMS, base.Corrected, source, base.Fallback
+		if r.Plan == nil {
+			r.Plan = &p
+		}
+		if base.Detail != "" && r.Detail == "" {
+			r.Detail = base.Detail
+		}
+		return r
 	case "unclear":
 		base.Kind = "unclear"
 		base.Headline = "No entendí"
@@ -321,6 +386,19 @@ func answer(ctx context.Context, d Deps, question string) Result {
 		out.Text = said + "\n" + out.Text
 	}
 	return out
+}
+
+// writable words what the role CAN write, for the refusals.
+func writable(v *Vocabulary) string {
+	c, u := v.CreatableNames(), v.UpdatableNames()
+	var parts []string
+	if len(c) > 0 {
+		parts = append(parts, "crear: "+strings.Join(firstN(c, 8), ", "))
+	}
+	if len(u) > 0 {
+		parts = append(parts, "cambiar: "+strings.Join(firstN(u, 8), ", "))
+	}
+	return "Puedo " + strings.Join(parts, "; ") + "."
 }
 
 // askable words what the role CAN ask, for the non-answers.
