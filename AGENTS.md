@@ -1771,6 +1771,13 @@ Facts agents most often get wrong:
 - **JWT**: HS256 only, `exp` required, `role` claim must match a schema
   role. Mint dev tokens with
   `appximo token --secret "$JWT_SECRET" --tenant acme --role admin`.
+  **Long-lived and scoped (TOKEN-SCOPE, 2026-09-20):** `--ttl 365d` (days
+  or a Go duration; still an `exp`), `--paths /api/ask,/api/summary` (exact
+  paths, or prefixes ending in `/*`; refused elsewhere with a 401 naming the
+  scope — the `paths` claim, checked after the claims cache), and an id
+  (`jti`, random or `--id`) that `APPXIMO_JWT_REVOKED` refuses at boot
+  without rotating the secret. The recipe for a phone shortcut's token is
+  in docs/PRODUCTION.md §4.6e.
   Add `--schema <file>` and the command **refuses a role the schema does not
   declare**, listing the declared ones (ENG-27) — an undeclared role is denied
   everything with the SAME `403 forbidden` a permitted-but-denied role gets

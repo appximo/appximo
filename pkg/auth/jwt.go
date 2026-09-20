@@ -1,7 +1,13 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -13,7 +19,122 @@ type Claims struct {
 	Role             string `json:"role"`
 	ExternalClientID string `json:"external_client_id,omitempty"`
 	TenantID         string `json:"tenant_id"`
+	// Paths (TOKEN-SCOPE, 2026-09-20) restricts the token to these request
+	// paths: an exact path ("/api/ask") or a prefix ending in "/*"
+	// ("/api/files/*"). Empty = every path the role may reach (the historical
+	// behavior). A scoped token presented elsewhere is a 401 naming its scope
+	// — a Siri shortcut's long-lived token can only ask and read the digest,
+	// never touch /api/<resource> even though its role could.
+	Paths []string `json:"paths,omitempty"`
 	jwt.RegisteredClaims
+}
+
+// PathAllowed reports whether the token may be used on path (true when the
+// token carries no scope).
+func (c *Claims) PathAllowed(path string) bool {
+	if len(c.Paths) == 0 {
+		return true
+	}
+	for _, p := range c.Paths {
+		if strings.HasSuffix(p, "/*") {
+			if strings.HasPrefix(path, strings.TrimSuffix(p, "*")) {
+				return true
+			}
+			continue
+		}
+		if path == p {
+			return true
+		}
+	}
+	return false
+}
+
+// ParseTTL reads a token lifetime: a Go duration ("24h", "90m") or whole days
+// ("365d"). Zero or negative is an error — every token must expire.
+func ParseTTL(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if strings.HasSuffix(s, "d") {
+		n, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
+		if err != nil || n <= 0 {
+			return 0, fmt.Errorf("ttl %q: use a whole number of days (365d) or a Go duration (24h)", s)
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("ttl %q: use a Go duration (24h, 90m) or whole days (365d); it must be positive", s)
+	}
+	return d, nil
+}
+
+// ── revocation without rotating the secret (TOKEN-SCOPE) ──────────────────
+//
+// A token minted with an id (`jti`) can be revoked by listing that id in
+// APPXIMO_JWT_REVOKED (comma-separated) and restarting: the middleware checks
+// the id on every request (one map lookup, only for tokens that carry an id)
+// and answers 401 "token revoked". Every other token stays valid — no secret
+// rotation, no session store. The set is process-wide: ids are random, so
+// two apps in one process cannot collide on one.
+
+var (
+	revokedMu  sync.RWMutex
+	revokedIDs = map[string]bool{}
+)
+
+// SetRevokedTokenIDs replaces the revocation set.
+func SetRevokedTokenIDs(ids []string) {
+	m := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if id = strings.TrimSpace(id); id != "" {
+			m[id] = true
+		}
+	}
+	revokedMu.Lock()
+	revokedIDs = m
+	revokedMu.Unlock()
+}
+
+// IsRevoked reports whether a token id is on the revocation list.
+func IsRevoked(id string) bool {
+	if id == "" {
+		return false
+	}
+	revokedMu.RLock()
+	defer revokedMu.RUnlock()
+	return revokedIDs[id]
+}
+
+// RevokedFromEnv loads APPXIMO_JWT_REVOKED at boot. Fail-fast on a malformed
+// value (an entry with spaces inside, or a stray separator): a revocation
+// that silently does not apply is worse than none.
+func RevokedFromEnv() (int, error) {
+	raw := strings.TrimSpace(os.Getenv("APPXIMO_JWT_REVOKED"))
+	if raw == "" {
+		SetRevokedTokenIDs(nil)
+		return 0, nil
+	}
+	var ids []string
+	for _, part := range strings.Split(raw, ",") {
+		id := strings.TrimSpace(part)
+		if id == "" {
+			return 0, fmt.Errorf("appximo: APPXIMO_JWT_REVOKED has an empty entry (stray comma) — list token ids separated by commas")
+		}
+		if strings.ContainsAny(id, " \t\"'") {
+			return 0, fmt.Errorf("appximo: APPXIMO_JWT_REVOKED entry %q is not a token id (no spaces or quotes)", id)
+		}
+		ids = append(ids, id)
+	}
+	SetRevokedTokenIDs(ids)
+	return len(ids), nil
+}
+
+// NewTokenID mints a random token id (16 hex chars) for `jti`.
+func NewTokenID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // GenerateToken signs a HS256 JWT that expires in 24h.

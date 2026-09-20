@@ -166,6 +166,15 @@ func jwtMiddleware(secret string, isPublic PublicMatcher, isStatic func(path str
 			}
 			setCachedClaims(secret, tokenStr, claims)
 		}
+		// A revoked id (APPXIMO_JWT_REVOKED) and a path outside the token's
+		// scope are refused HERE, after the cache: the cache remembers that the
+		// signature was valid, not that the token may be used (TOKEN-SCOPE).
+		if IsRevoked(claims.ID) {
+			return nil, "token revoked (its id is listed in APPXIMO_JWT_REVOKED)"
+		}
+		if !claims.PathAllowed(r.URL.Path) {
+			return nil, fmt.Sprintf("token is scoped to %s and cannot be used on %s", strings.Join(claims.Paths, ", "), r.URL.Path)
+		}
 		// Reject tokens whose TenantID does not match the request tenant.
 		// TenantMiddleware must run before JWTMiddleware for this check to fire.
 		// The message names BOTH sides and where each came from (ENG-11). The bare

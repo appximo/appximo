@@ -706,6 +706,15 @@ func New(cfg Config) (*App, error) {
 	// The declared "today" for the digest and the questions
 	// (APPXIMO_SUMMARY_TIMEZONE, VOZ-PREGUNTAS-S1): an invalid zone refuses to
 	// boot — a silently wrong day is the failure this guards.
+	// Revoked token ids (TOKEN-SCOPE): a long-lived or path-scoped token can
+	// be revoked by id without rotating JWT_SECRET; a malformed list refuses
+	// to boot (a revocation that silently does not apply is worse than none).
+	if n, rerr := auth.RevokedFromEnv(); rerr != nil {
+		pool.Close()
+		return nil, rerr
+	} else if n > 0 {
+		log.Printf("auth: %d revoked token id(s) loaded from APPXIMO_JWT_REVOKED", n)
+	}
 	if tzErr := summary.CheckTimezone(); tzErr != nil {
 		pool.Close()
 		return nil, tzErr

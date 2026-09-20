@@ -1161,6 +1161,33 @@ misheard name comes back as «Entendí X como Y» or as a question, never as a
 wrong count. (Do NOT build the Shortcut for the user — these are the exact
 three actions they wire; mint the token for them.)
 
+**The token a phone shortcut should carry (TOKEN-SCOPE, 2026-09-20).** A
+dev token expires in 24 h — a shortcut breaks every morning. Mint one on the
+box, with the app's own secret, that lives long AND can do little:
+
+```bash
+set -a; . /etc/<app>/<app>.env; set +a
+appximo token --secret "$JWT_SECRET" --tenant <t> --role <r> --user-id <auth user id> \
+  --ttl 365d --paths /api/ask,/api/summary
+```
+
+- `--ttl 365d` (days, or a Go duration) — the token still carries `exp`;
+  there is no immortal token.
+- `--paths /api/ask,/api/summary` — the token is REFUSED on any other path
+  with a 401 naming its scope, even though its role could reach
+  `/api/<resource>`: a phone that is lost can ask and read the digest,
+  never list customers or write a row. An entry ending in `/*` is a
+  prefix; the exact form is safer (`/api/ask/spend` is NOT in `/api/ask`).
+- **Revocable without rotating `JWT_SECRET`:** every minted token carries an
+  id (`jti`, printed on stderr, or `--id`). To revoke one, add its id to
+  `APPXIMO_JWT_REVOKED` (comma-separated) in the app's env and restart:
+  that token is 401 «token revoked» on the next request, every other token
+  keeps working. A malformed list refuses to boot.
+
+The two checks cost one nil test and one map lookup per request, after
+the claims cache. The receiver's own self-call tokens (60 s, no scope) are
+untouched.
+
 **What it cannot do (v1, by design):** one resource per question (no joins —
 «citas de pacientes de Bogotá» is «No entendí» unless the relation resolves
 to a name), no comparisons across periods («más que el mes pasado»), no
@@ -1418,6 +1445,7 @@ per-field docs are in [config.go](../config.go) and the README config table.
 | `APPXIMO_ASK_TRACE` / `APPXIMO_ASK_HISTORY_DAYS` / `APPXIMO_ASK_HISTORY_TEXT` / `APPXIMO_ASK_DAILY_USD_PER_USER` | no | `off` / `30` / `redacted` / `0` | Where the money goes (§4.6e, VOZ-TRAZABILIDAD-S1): the ⚙︎ trace line in every reply's text (never the voice), the question history's retention and what of the text it keeps (proper names → `[nombre]` by default; no IP ever), and the per-user daily cap that composes with the tenant's. Fail-fast on a bad value. `gasto` on Telegram and `GET /api/ask/spend` read them. |
 | `APPXIMO_ASK_PER_MINUTE` / `APPXIMO_ASK_DAILY_USD` / `APPXIMO_ASK_ALERT_PCT` | no | `6` / `0.50` / `80` | The wallet guard (§4.6e, ADR-035): model calls per tenant per minute, model spend per tenant per day (at the cap the model is off until tomorrow — the parser, the plan cache and the fixed commands keep answering), and the share of the cap that fires ONE alert per tenant per day. Fail-fast: a bad value refuses to boot. Worst case per day = the cap + one question. |
 | `APPXIMO_SUMMARY_TIMEZONE` | no | the process's local zone | The IANA zone «hoy» / «esta semana» / the digest's day are computed in (`America/Bogota`). A production box runs UTC, so an owner in Bogotá asking at 8 pm was answered about tomorrow. An invalid name refuses to boot. Set it on every app with an owner in one place. |
+| `APPXIMO_JWT_REVOKED` | no | — | Comma-separated token ids (`jti`) to refuse with 401 «token revoked» — revocation without rotating `JWT_SECRET` (§4.6e TOKEN-SCOPE). Mint long-lived or path-scoped tokens with `appximo token --ttl 365d --paths /api/ask,/api/summary`; a malformed list refuses to boot. |
 | `APPXIMO_TELEGRAM_BOT_TOKEN` + `APPXIMO_TELEGRAM_CHAT_ID` | no | — | The **Telegram alert destination** (§4.6c) — every alert (SLO burn, first-occurrence errors, backup failed/stale, disk low, stuck outbox, overdue workflows) reaches that chat, in Spanish, phone-first, with what-to-do. Both or neither: half a pair, or a malformed value, **refuses to boot** naming the variable; a revoked token is detected out-of-band at boot (read-only `getMe`+`getChat`) and screams in the journal. `backup.sh` posts its own failure here too. |
 | `APPXIMO_ALERT_APP_NAME` | no | the schema `name` | The app name every alert message carries (a fleet of apps alerting to ONE chat needs to say who is talking). |
 | `APPXIMO_ALERT_PANEL_URL` | no | — | Public origin (`https://app.example.com`) — when set, alerts carry a "Ver el panel" deep link (`/admin#/observability`, `/admin#/resources`, `/admin/outbox` by kind). |

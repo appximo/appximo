@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/appximo/appximo"
 	"github.com/appximo/appximo/pkg/auth"
@@ -114,12 +115,50 @@ your schema.`,
 					"Pass --tenant <id> to scope it to one tenant, which is almost certainly what you want.")
 		}
 
+		ttlStr, _ := cmd.Flags().GetString("ttl")
+		pathsStr, _ := cmd.Flags().GetString("paths")
+		id, _ := cmd.Flags().GetString("id")
+		ttl, err := auth.ParseTTL(ttlStr)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+			os.Exit(1)
+		}
+		var paths []string
+		for _, p := range strings.Split(pathsStr, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				if !strings.HasPrefix(p, "/") {
+					fmt.Fprintf(os.Stderr, "Error: --paths entry %q must start with / (an exact path, or a prefix ending in /*)\n", p)
+					os.Exit(1)
+				}
+				paths = append(paths, p)
+			}
+		}
+		if id == "" {
+			id = auth.NewTokenID()
+		}
+		// TOKEN-SCOPE (2026-09-20): a token that lives longer than a day, or
+		// that is scoped to paths, carries an id so it can be REVOKED without
+		// rotating JWT_SECRET (APPXIMO_JWT_REVOKED). The mint prints the id
+		// and the recipe on stderr; stdout stays the bare token.
+		if ttl > 24*time.Hour {
+			fmt.Fprintf(os.Stderr,
+				"note: this token lives %s. It carries id %s — to revoke it without rotating the secret, add the id to\n"+
+					"      APPXIMO_JWT_REVOKED (comma-separated) in the app's env and restart; every other token keeps working.\n", ttlStr, id)
+		}
+		if len(paths) > 0 {
+			fmt.Fprintf(os.Stderr, "note: scoped to %s — on any other path the engine answers 401 naming the scope.\n", strings.Join(paths, ", "))
+		} else if ttl > 24*time.Hour {
+			fmt.Fprintln(os.Stderr, "note: no --paths — this long-lived token reaches EVERY route its role may; for a phone shortcut prefer --paths /api/ask,/api/summary.")
+		}
+
 		claims := auth.Claims{
 			UserID:   userID,
 			Role:     role,
 			TenantID: tenantID,
+			Paths:    paths,
 		}
-		token, err := auth.GenerateToken(claims, secret)
+		claims.RegisteredClaims.ID = id
+		token, err := auth.GenerateTokenWithTTL(claims, secret, ttl)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Error:", err)
 			os.Exit(1)
@@ -134,6 +173,9 @@ func init() {
 	tokenCmd.Flags().String("secret", "", "HMAC secret used to sign (required)")
 	tokenCmd.Flags().String("user-id", "", "user ID to embed in the token")
 	tokenCmd.Flags().String("schema", "", "schema file to validate --role against (refuses an undeclared role)")
+	tokenCmd.Flags().String("ttl", "24h", "lifetime: a Go duration (24h, 90m) or whole days (365d)")
+	tokenCmd.Flags().String("paths", "", "comma-separated path scope: exact paths (/api/ask) and/or prefixes ending in /* — the token is refused elsewhere")
+	tokenCmd.Flags().String("id", "", "token id (jti) for revocation via APPXIMO_JWT_REVOKED; random when omitted")
 	tokenCmd.MarkFlagRequired("secret")
 	rootCmd.AddCommand(tokenCmd)
 }
