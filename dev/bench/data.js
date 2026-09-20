@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789879150391,
+  "lastUpdate": 1789935018581,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -6480,6 +6480,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "30147165 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "c36a7af5addab87382c203c9ef7b82730c572242",
+          "message": "feat(ask): the owner's words are declared in the schema (`aliases`), the write PLAN is cached and re-prepared, and a sentence that is not a question is never billed (VOZ-AHORRO-S2, ADR-038)\n\nThe first days of real use showed three leaks on the `gasto` card, none a\nmissing capability: the same write order dictated three times cost three\nmodel calls; «Si pero mejor el viernes» bought a «no entendí»; and the\nparser settled 40 % of real questions against 67 % of the lab corpus because\nthe owner's words are not the schema's («pedidos» is not `ordenes`, and an\nEnglish schema spoken in Spanish fails on every word).\n\nPart A — `aliases` (pkg/schema/aliases.go, pkg/ask): a resource declares\n`\"aliases\": [\"pedidos\", \"ventas\"]`; an enum field declares\n`\"aliases\": {\"pendiente_pago\": [\"sin pagar\"]}`. Validated at load with the\nSAME forms the parser matches (schema.NameForms/ValueForms — one source):\nalias_is_resource_name, alias_ambiguous, alias_is_value, alias_duplicate,\nalias_unknown_value, alias_needs_enum. A value alias may repeat across\nresources (scoped by the named resource). The parser uses them for reads\nand for the transition write; the model's vocabulary lists them; the reply\nspeaks the schema's word. No domain word is wired: if the schema does not\ndeclare it, the parser does not know it. Generic Spanish the real history\nasked for: «los últimos N», «llamado / que se llama», «del cliente Ana Gómez»\n(two resources are one question when the second is the first's relation\ntarget and introduces a name), a Capitalized run that is not the first word,\na code with digits («ORD-1003», exact beats near), gender agreement, a value\nthat exists in one place naming its resource. Studio preserves the block\n(extras + field def, round-trip test; rebuilt assets committed); `explain`\nreads it back; `spec` teaches it; meta-schema + strict keys. Measured on the\n58's real questions (evidence in the internal repo): parser 50 % → 75 %.\n\nPart B — the write plan cache: Cacheable includes create/update (+ the\nmodel's `write` refusal for an hour); write plans are keyed per\ntenant|role|vocabulary-fingerprint|USER (Deps.CacheScopeWrite); a hit\nre-runs the whole preparation against the database of the moment (names,\nrow, time tokens, required fields, state pre-check) into a FRESH pending —\nthe result is never cached. Three repetitions of the real order: US$ 0.012\n→ US$ 0.004.\n\nPart C — preDiscard: a stray answer to a confirmation, a greeting, a help\nrequest, a bare proper name are settled by the parser at zero cost ONLY\nwhen the sentence carries nothing the grammar could execute (no operation\nword, schema word, period or write verb); anything executable keeps the\nmodel reachable. askspend splits useful vs wasted spend (Share.useful_usd/\nwasted_usd, phrases marked «✗ no sirvió» on the card). The cache key carries\nVocabulary.Fingerprint(), so a synonym declared after a cached «no entendí»\ncures it; the one-hour TTL is re-examined and kept (ADR-038 §3).\n\nPart D — `display`: the reply as plain text WITH the ⚙︎ trace for a screen\nthat is not Telegram (a Siri \"Show Result\"); `speech` never carries it.\n\nDocs: ADR-038 (ADR-037 §7 and the «sí pero…» decision retracted there),\nSCHEMA_REFERENCE §2.6/§4.11, AGENTS, backend-spec, PRODUCTION §4.6e/f,\nMANUAL §3d/3e; examples/model-lab/agenda-voz.json and the spec example\ndeclare aliases; the gate corpus gains seven ask cases (its schema stays\nalias-free: the base binary rejects the key at load). Backlog: VOZ-9 done\n(archived), VOZ-7 (c) built, VOZ-12/VOZ-13 opened.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-20T19:50:58Z",
+          "tree_id": "c0e1d3b8d8d3c360e7b7bcbd039bcf67c9bb3f9e",
+          "url": "https://github.com/appximo/appximo/commit/c36a7af5addab87382c203c9ef7b82730c572242"
+        },
+        "date": 1789935016937,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6384,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "376886 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6384,
+            "unit": "ns/op",
+            "extra": "376886 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "376886 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "376886 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 68.23,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36724996 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 68.23,
+            "unit": "ns/op",
+            "extra": "36724996 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36724996 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36724996 times\n4 procs"
           }
         ]
       }
