@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789935018581,
+  "lastUpdate": 1789940750188,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -6552,6 +6552,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36724996 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "64326f03d49578b3365b16cd602fa8b2c0bafaab",
+          "message": "feat(aigen,cli,docs): what was built now exists for users — the generator declares the operational blocks (workflows, events, aliases, summary, pending) by SIGNAL of the description and never by default; every doc says which version has what; `drill ask|voice|spend`; `up` names the worker (CAPACIDADES-VISIBLES-S1, AUTO-10)\n\nGenerator (AUTO-10, pkg/aigen GrammarCore — the single source of `appximo spec`\nand `ai-generate`): a new section \"OPERATIONAL BLOCKS — what the engine runs\nwithout any code, and when to declare it\" teaches `events`, `workflows` (cron +\nevent triggers, the closed step set, `summary.telegram`, `role` always),\n`aliases` (singular, 1–3 words, no collisions), `summary` and `pending`, each\nWITH its signal in the description (a reminder ⇒ a cron workflow; \"avisame\ncuando…\" ⇒ events + an event workflow; an app that is spoken to ⇒ aliases; a\nlifecycle ⇒ pending; a plain catalogue ⇒ none) plus an engine-validated worked\nexample (spec_test.go validates it; the duplicated EVENTS/ALIASES paragraphs of\nspecAdvanced now point at the core). Measured before/after with the same three\ndescriptions: a personal tasks app went from one bare resource to personas +\ntareas, two workflows (07:00 Bogotá reminder + an event workflow on urgent),\naliases, events, pending and summary; an appointments app got the reminder only;\nan inventory got nothing. The generated tasks schema, untouched, was deployed and\ndriven end to end by voice: parser answers at US$ 0, a voice-created urgent task\nfired the event workflow → summary.telegram → the phone, the alias transition,\nthe digest, the cron scheduled.\n\nWhich version has what: the last PUBLISHED release, v0.1.13 (2026-08-28), ships\nno worker and none of the automation/voice front (workflows executor,\n/api/summary, /api/ask, aliases, spend cap, Telegram bot, drill); tags\nv0.1.14–16 exist without a release and predate it too. One note in each place\nthat implied otherwise: the `spec` header, BACKEND/FRONTEND_SPEC headers,\nAGENTS.md, GUIDE §9, ESTADO_DEL_MOTOR, the site status line, MASTER_PROMPT,\nDEC-2 (addendum). The two-prompt path loses at the worker: MASTER_PROMPT now\ndeclares the blocks by signal (step 2), runs the worker (step 3) and checks the\nparser + /admin/workflows; `appximo up` prints the exact worker command when\nthe schema declares workflows (`upResult.Workflows`, also in --json). Starting\nit from `up` is AUTO-12 (opened). FRONTEND_SPEC §4.12 documents /api/summary\nand /api/ask as a UI contract. examples/model-lab/agenda-voz.json is the\ncanonical example, linked from SCHEMA_REFERENCE §1.4, ESTADO, MANUAL, SCHEMA_SPEC.\n\nCLI: `appximo drill ask` (one question with its accounting: source, cost, why\nthe parser passed), `drill voice` (the voice channel end to end on an ephemeral\ntenant it creates and deletes: count, delete verb refused, stray \"sí pero…\", a\ntransition confirmed by id, the spend card), `drill spend` (the card, the same\nnumbers as Telegram's `gasto`). ESTADO_DEL_MOTOR gains six rows for the voice\nfront (Telegram digest, questions, writes, aliases, spend, drills); MANUAL\n§6.7–6.9. Backlog: AUTO-10 DONE (archived), AUTO-12 opened, VOZ-5 re-pointed.\n\nGates: make test green; full lane green (one testcontainers reaper flake in\npkg/migration, package re-run green); lint 0; gate 198/199 SAME on a quiet box\n— the one DIFF is order-only (`ask-last-n-parser`: notes has no creation\ntimestamp, ids are random per scratch DB; noted in corpus.jsonl); browser\n38/38 at desktop + 390×844. No data-path change; the 58 was not redeployed.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-20T21:45:20Z",
+          "tree_id": "627f21463ad66fb42fec63a2644458a0a6c330aa",
+          "url": "https://github.com/appximo/appximo/commit/64326f03d49578b3365b16cd602fa8b2c0bafaab"
+        },
+        "date": 1789940749130,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6070,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "392235 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6070,
+            "unit": "ns/op",
+            "extra": "392235 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "392235 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "392235 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 67.4,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "34659475 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 67.4,
+            "unit": "ns/op",
+            "extra": "34659475 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "34659475 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "34659475 times\n4 procs"
           }
         ]
       }
