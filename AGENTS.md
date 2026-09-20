@@ -20,6 +20,24 @@ and tables are created/extended idempotently when a tenant registers.
 almost always "add a resource or field to the schema JSON".** Code
 changes are for engine behavior, not application surface.
 
+**Which version has what (CAPACIDADES-VISIBLES-S1, read on GitHub 2026-09-20):**
+this file describes `main`. The last PUBLISHED release is v0.1.13 (2026-08-28)
+and carries the whole engine but NOT the automation/voice front — no workflows
+executor, no `appximo-worker` asset, no `/api/summary`, no `/api/ask`, no
+`aliases`, no spend cap, no Telegram bot, no `appximo drill`. Tags
+v0.1.14–v0.1.16 exist without a published release (DEC-2: publication paused
+on purpose) and predate all of it. Never document those as "in the release";
+say "on `main`" and point at `go build ./cmd/appximo ./cmd/appximo-worker`.
+The canonical example of an app that declares the whole front — `aliases`,
+`events`, `pending`, an event workflow and a cron one that enqueues
+`summary.telegram`, `summary` — is `examples/model-lab/agenda-voz.json`; the
+generator (`ai-generate` / `spec`, `pkg/aigen` GrammarCore "OPERATIONAL
+BLOCKS") declares those blocks BY SIGNAL of the description (a reminder ⇒ cron
+workflow, "avisame cuando" ⇒ events + event workflow, an app that is spoken
+to ⇒ aliases, a lifecycle ⇒ pending) and never by default — proven with three
+apps (tasks: everything; appointments: the reminder only; inventory: nothing).
+`appximo drill ask|voice|spend` repeat the voice channel on any installed box.
+
 ## Commands
 
 ```bash

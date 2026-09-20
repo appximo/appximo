@@ -154,6 +154,8 @@ Identifier rule relevant at this level: resource and field names both match the 
 
 `workflows` declares trigger→steps pipelines that **execute in `appximo-worker`** (the async subsystem — never on the engine's request path): an `event` trigger consumes the resource's transactional outbox events; a `cron` trigger fires on a leader-elected scheduler (`pg_try_advisory_lock` — no extra infrastructure). Steps run **sequentially** through the engine HTTP API with a scoped service JWT, so every write inherits validation and RBAC. The block is fully semantically validated at load (`pkg/schema/workflows_validate.go`): every cron spec and every expression COMPILES, an event trigger's resource must declare that event in `events`, and an `enqueue` of a topic that triggers a workflow is rejected as a declared infinite loop — DECLARED == EXECUTABLE.
 
+The canonical example that declares the whole automation/voice front together — `aliases`, `events`, `pending`, an event workflow, a cron workflow enqueuing `summary.telegram`, and `summary` — is [examples/model-lab/agenda-voz.json](../examples/model-lab/agenda-voz.json) (`appximo explain --lang es examples/model-lab/agenda-voz.json` reads it back in prose).
+
 ```json
 "workflows": {
   "al_crear_orden": {

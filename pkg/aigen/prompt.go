@@ -136,6 +136,131 @@ any other value, so "the system must not let steps be skipped" would not hold:
     are reported as "sin avanzar" (created, not moved), the rest as neutral
     counts. Declare it whenever the description says who must act on what.
 
+OPERATIONAL BLOCKS — WHAT THE ENGINE RUNS WITHOUT ANY CODE, AND WHEN TO DECLARE IT
+(CAPACIDADES-VISIBLES-S1). Five optional blocks turn a data model into an app
+that REMINDS, REACTS, is SPOKEN TO and REPORTS. Declare each one when the
+description implies it — and NOT otherwise: every block is real machinery
+(rows in an outbox, a scheduler, a vocabulary), and a catalogue does not need
+a reminder. Read the description for these signals:
+
+  signal in the description                      → declare
+  "recuérdame / cada mañana / todos los días /
+   resumen diario / a las 7"                     → a CRON workflow that enqueues "summary.telegram"
+  "avisame cuando / notificar cuando / al crear
+   una urgente / cuando quede pagada"            → "events" on that resource + an EVENT workflow
+  "por Telegram / por voz / le pregunto al bot /
+   Siri / hablo en español", OR the schema names
+   are in English and the owner speaks Spanish   → "aliases" (resources AND states)
+  several resources and one or two the owner
+   reads every morning                           → "summary": { "resources": [...] } in reading order
+  any lifecycle with steps someone must act on   → "pending" on its state machine (see STATE MACHINES)
+  none of the above (a plain catalogue, a
+   read-mostly inventory, a lookup table)        → NONE of these blocks. Do not add a workflow
+                                                   "just in case"; an omitted block costs nothing.
+
+1. "events" (per resource, sibling of "fields") — the resource emits a
+   transactional outbox event on each listed write: "events": ["create","update"].
+   Values are EXACTLY create | update | delete. Declare it ONLY on a resource a
+   workflow (or an external consumer) reacts to — an event nobody consumes is a
+   row that waits forever, and the engine alerts on it. An EVENT workflow on a
+   resource that does not declare that event is a LOAD ERROR.
+
+2. "workflows" (top-level, sibling of "resources") — pipelines executed by the
+   worker, never on the request path. Shape (all keys strict):
+   "workflows": {
+     "recordatorio_matinal": {
+       "trigger": { "type": "cron", "cron": "0 7 * * *", "timezone": "America/Bogota" },
+       "steps": [ { "name": "recordar", "type": "enqueue", "config": { "topic": "summary.telegram", "data": {} } } ],
+       "overlap": "skip", "role": "<a declared role>" },
+     "avisar_urgente": {
+       "trigger": { "type": "event", "event": "create", "resource": "tareas" },
+       "steps": [ { "name": "solo_urgentes", "type": "condition", "config": { "expr": "record.prioridad == 'urgente'" } },
+                  { "name": "avisar", "type": "enqueue", "config": { "topic": "summary.telegram", "data": {} } } ],
+       "role": "<a declared role>" } }
+   - trigger "cron": 5-field spec (minute hour dom month dow) or "@daily" /
+     "@every 1h"; "timezone" is an IANA zone (default UTC — declare the owner's
+     zone for a morning reminder). trigger "event": "event" is create|update|
+     delete and "resource" MUST declare it in its "events".
+   - steps run in order; types and their ONLY config keys: "condition" {expr}
+     (expr-lang over event/record/tenant/now; false STOPS the run), "update"
+     {resource, id, data}, "create" {resource, data}, "webhook" {url,
+     hmac_secret_env, data} (HTTPS only), "enqueue" {topic, data}. In data/id a
+     string starting with "=" is an expression (e.g. "=record.id").
+   - "summary.telegram" is the ONE topic the shipped worker consumes out of the
+     box: it sends the owner's daily digest (picture + text) to the app's
+     Telegram chat. So "recuérdame cada mañana lo que vence hoy" is a cron
+     workflow that enqueues it — no code. "avisame cuando anote algo urgente"
+     is an event workflow with a condition step that enqueues the same topic.
+     Any other topic needs a consumer the app's backend registers.
+   - ALWAYS set "role" to a declared role that may READ the resources the
+     steps touch (and write, for update/create steps) — without it the worker's
+     default service role gets 403 and the run fails. Use the owner/admin role.
+   - "overlap": "skip" (default) | "allow". Name workflows in snake_case, in the
+     owner's language. An enqueue of a topic that triggers a workflow is a load
+     error (a declared infinite loop).
+
+3. "aliases" — how PEOPLE say a resource or a state, so the voice channel
+   (POST /api/ask, the Telegram bot, a Siri shortcut) answers at ZERO cost in
+   the owner's words. Two places:
+   - resource level (sibling of "fields"): "aliases": ["pedidos", "ventas"]
+   - enum field level: "aliases": { "pendiente_pago": ["sin pagar", "impaga"], "pagada": ["cobrada"] }
+   Rules: write the SINGULAR form (plural and gender derive: "cobrada" also
+   matches «cobradas»/«cobrados»); 1–3 real everyday words per thing, the
+   ones a Spanish speaker would actually SAY ("mascotas" for pets, "citas" or
+   "turnos" for appointments, "dueños" for owners, "cobrada" for paid) — never
+   the schema name itself or its plural, never a word that is already another
+   resource or another state (each alias must mean exactly ONE thing in the
+   whole schema; the validator rejects collisions naming both sides). A value
+   alias MAY repeat across resources ("sin pagar" on orders and on invoices).
+   The engine wires NO domain word: if the schema does not declare «pedidos»,
+   the bot does not know «pedidos». Declare them whenever the app will be
+   spoken to, and ALWAYS when the resource names are in a language other than
+   the owner's.
+
+4. "summary" (top-level) — see the top-level keys above: the resources the
+   daily digest reports, in reading order. Declare it when the app has more
+   than three resources and the description says what the owner tracks;
+   omit it for a one-resource app (the default reports everything, attention
+   first). "notify"/"quiet_days" only when the description asks.
+
+5. "pending" (inside state_machine) — see STATE MACHINES: declare the states
+   in which a row WAITS for someone whenever there is a lifecycle. It is what
+   the digest puts on top and what the voice channel counts as "esperan
+   acción".
+
+OPERATIONAL EXAMPLE (valid — a personal task app that reminds and reacts; copy
+the SHAPE, not the words):
+{
+  "$schema": "https://appximo.com/schema/v1", "version": "1", "name": "agenda",
+  "resources": {
+    "personas": { "aliases": ["contactos", "gente"],
+      "fields": { "nombre": { "type": "string", "required": true, "minLength": 1 }, "telefono": { "type": "string" } } },
+    "tareas": { "aliases": ["cosas", "recordatorios"], "events": ["create", "update"],
+      "fields": {
+        "titulo":     { "type": "string", "required": true, "minLength": 1, "maxLength": 200 },
+        "persona_id": { "type": "uuid", "relation": "personas", "on_delete": "set_null" },
+        "prioridad":  { "type": "string", "enum": ["normal", "urgente"], "default": "normal" },
+        "vence_en":   { "type": "time" },
+        "estado":     { "type": "string", "enum": ["pendiente", "hecha", "cancelada"], "default": "pendiente",
+                        "aliases": { "pendiente": ["por hacer"], "hecha": ["lista", "terminada"], "cancelada": ["anulada"] },
+                        "state_machine": { "initial": "pendiente", "pending": ["pendiente"],
+                                           "transitions": { "pendiente": ["hecha", "cancelada"], "hecha": [], "cancelada": [] } } },
+        "creado_en":  { "type": "time", "auto": "create" }
+      } }
+  },
+  "workflows": {
+    "recordatorio_matinal": { "trigger": { "type": "cron", "cron": "0 7 * * *", "timezone": "America/Bogota" },
+      "steps": [ { "name": "recordar", "type": "enqueue", "config": { "topic": "summary.telegram", "data": {} } } ],
+      "overlap": "skip", "role": "dueno" },
+    "avisar_urgente": { "trigger": { "type": "event", "event": "create", "resource": "tareas" },
+      "steps": [ { "name": "solo_urgentes", "type": "condition", "config": { "expr": "record.prioridad == 'urgente'" } },
+                 { "name": "avisar", "type": "enqueue", "config": { "topic": "summary.telegram", "data": {} } } ],
+      "role": "dueno" }
+  },
+  "summary": { "resources": ["tareas", "personas"] },
+  "rbac": { "roles": { "dueno": { "resources": "*", "actions": ["*"] } } }
+}
+
 RBAC (optional). Actions are exactly: read, create, update, delete, or "*".
 A role is EITHER role-global OR per-resource — never both keys.
   Role-global form:
@@ -250,7 +375,11 @@ OUTPUT RULES (critical):
 
 Model the user's app faithfully: pick sensible resources, fields with appropriate
 types and validations, relations between them, and at least an "admin" role.
-Output ONLY the JSON.`
+Then read the description once more for the OPERATIONAL BLOCKS signals — a
+reminder means a cron workflow, "avisame cuando" means events + an event
+workflow, an app that is spoken to (or named in English for a Spanish owner)
+means aliases, a lifecycle means "pending" — and declare exactly those, none
+by default. Output ONLY the JSON.`
 
 // correctionPreamble prefaces the actionable validation errors fed back to the
 // model on a failed attempt. The errors themselves are the machine-readable

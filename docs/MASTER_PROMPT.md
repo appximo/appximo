@@ -76,6 +76,15 @@ MY IDEA: <describe the app in one or two sentences>
      published posts, a landing's data), declare it in the schema's
      `rbac.public` block (it's in the grammar) — do not invent an "anonymous"
      role and do not proxy around auth.
+   - Read MY IDEA once more for the OPERATIONAL BLOCKS the grammar teaches
+     (section "OPERATIONAL BLOCKS"): a reminder ("cada mañana", "recuérdame")
+     is a cron `workflows` entry that enqueues `summary.telegram`; "avisame
+     cuando…" is `events` on that resource plus an event workflow; an app I
+     will TALK to (Telegram, Siri, "hablo en español") — or whose resource
+     names are not in my language — needs `aliases` on resources AND states;
+     a lifecycle needs `pending`; several resources need `summary`. Declare
+     exactly what my idea implies and nothing "just in case": a plain
+     catalogue gets none of them. Every workflow carries `"role"`.
 3. **Boot everything with ONE command**:
    `appximo up --name <shortname> --schema schema.json --yes --json`
    - stdout is one JSON object: every URL, one-time admin credentials, a dev
@@ -89,6 +98,17 @@ MY IDEA: <describe the app in one or two sentences>
    - Re-running `up` after editing schema.json is safe: it migrates the
      tenant to the new schema (destructive drops stay gated and print the
      exact approval command).
+   - **If schema.json declares `workflows`, they execute in a SEPARATE
+     binary, `appximo-worker`, which `up` does NOT start.** Without it a
+     reminder is a dead promise (the engine says so at boot). Start it beside
+     the engine, with the `.env` `up` wrote:
+     `set -a; . ./.env; set +a; APPXIMO_ENGINE_URL=http://localhost:<port> APPXIMO_TENANT_DOMAIN=localhost APPXIMO_WORKER_MODE=auto appximo-worker`
+     (NO published release ships the worker or executes workflows — the
+     latest, v0.1.13, predates them; build both from `main`:
+     `go build ./cmd/appximo ./cmd/appximo-worker`). The morning digest reaches a phone only
+     with `APPXIMO_TELEGRAM_BOT_TOKEN` + `APPXIMO_TELEGRAM_CHAT_ID` in that env
+     (§4.6b of docs/PRODUCTION.md) — ask me for them ONLY if my idea asked for
+     a reminder; otherwise skip this row.
 4. **Prove it with real requests.** The tenant is addressed by Host header:
    use the printed `http://<name>.localhost:<port>` URLs, or add
    `-H 'Host: <name>.localhost'`. Filters need `curl -g`.
@@ -108,6 +128,14 @@ MY IDEA: <describe the app in one or two sentences>
       printed credentials at the `<name>.localhost` URL)
 - [ ] `appximo explain schema.json` reads back as MY IDEA — paste its output
       for me so I can confirm the rules are what I meant
+- [ ] If the schema declares `aliases`: `POST /api/ask {"q":"cuántos <an alias> hay"}`
+      (Bearer = the printed token, Host = the tenant) answers `"source":"parser"`
+      at `cost_usd: 0` — the voice channel understands MY words without a model.
+      No aliases? Say **N/A**.
+- [ ] If the schema declares `workflows`: `appximo validate` already compiled
+      them, and with the worker running `GET /admin/workflows` (X-Admin-Key)
+      lists each one with its `next_run` (a cron) or its trigger (an event).
+      No workflows? Say **N/A** — and do not add one to pass this row.
 
 Then STOP and show me: the URLs, the one-time credentials, one curl that
 already works, and the explain output. **Call out every place you extended

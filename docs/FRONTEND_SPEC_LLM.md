@@ -24,6 +24,17 @@ This is the third of five printable documents; keep them straight:
 | `appximo backoffice-spec` / BACKOFFICE_SPEC_LLM.md | a **generated admin CRUD UI** driven by /openapi.json | `appximo backoffice-spec` |
 | `appximo quickstart` / LIFECYCLE_SPEC_LLM.md | **operating** it (install → tenant → users → production) | `appximo quickstart` |
 
+> **Which version has what.** This document describes `main`. The last
+> PUBLISHED release is **v0.1.13 (2026-08-28)**: the full engine (schema → API,
+> RBAC, migrations, files, auth, `/admin`, `/app`, Studio, `up`/`new`/
+> `ai-generate`) — but NOT the automation and voice front: no workflows
+> executor, no `appximo-worker` among its assets, no `/api/summary`, no
+> `/api/ask` (questions and writes by voice), no `aliases`, no model spend
+> cap, no Telegram bot, no `appximo drill`. Tags v0.1.14–v0.1.16 exist without
+> a published release and predate all of it too. To use those today, build
+> `main` (`go build ./cmd/appximo ./cmd/appximo-worker`); nothing here
+> promises they are in a downloadable binary.
+
 Everything below is distilled from a shipped reference storefront (a real
 mobile-first shop + merchant back-office, SvelteKit, embedded in one binary,
 running in production) — not from theory. The runnable minimal example is
@@ -584,6 +595,41 @@ vX" or a connectivity probe. `/openapi.json`, `/docs`, `/graphiql` (dev),
 admin-gated; not for frontends.
 
 ---
+
+### 4.12 The owner-language endpoints — `/api/summary` and `/api/ask` (main; not in v0.1.13)
+
+Two reserved, read-mostly endpoints exist beside the CRUD, both RBAC-scoped
+by the caller's role exactly like a list read; a UI may offer them as a
+"¿Qué pasó hoy?" card and a "Preguntale" box without writing a query:
+
+- `GET /api/summary` → `{ "text", "speech", "headline", "level": "red|amber|green",
+  "attention_total", "baseline", "changed", ... }` — the day's digest in the
+  owner's words (created today, updated today, rows that WAIT in the states
+  the schema declares `pending`). `?format=png` returns the same digest as a
+  server-rendered PNG (`Content-Type: image/png`) — an `<img>` needs a signed
+  fetch, so use `fetch` with the Bearer and an object URL. `?view=census` is
+  the plain count of everything.
+- `POST /api/ask {"q": "<a sentence>"}` → `{ "kind", "headline", "text"
+  (Telegram HTML), "display" (plain text, WITH the ⚙︎ trace when the app has
+  `APPXIMO_ASK_TRACE=on`), "speech" (plain, NEVER the trace), "number",
+  "understood", "plan", "source": "parser|cache|model|confirm", "cost_usd",
+  "fallback_es", ... }`. `kind` is the screen state: `answer` (show `display`
+  or `text`), `unclear` / `not_found` / `ambiguous` (show the text — it names
+  what CAN be asked or the options), `write_refused`, `forbidden`,
+  `capped` (the daily model cap — the parser still answers simple shapes),
+  `disabled` (503 — no model key on the app, only for a question the parser
+  could not settle), `unavailable`. A WRITE order answers `kind: confirm`
+  (or `ask_field` / `ambiguous` / `not_found`) with `pending_id`, `stage`,
+  `expires_in`: show `text` (it lists exactly what will be written) and two
+  buttons that POST `{"pending_id": "...", "answer": "sí"|"no"}` (or a pick
+  number); the reply is `written` / `cancelled`. A pending expires in 5 min.
+  Anonymous and the `$public` role get 403 (a question can spend a model
+  call); the token must carry a user id for writes. `speech` is for a voice
+  assistant; render `display` on a screen. Words the user says that are not
+  the schema's are answered at zero cost only when the schema declares them
+  as `aliases` — a UI never needs to translate; it sends the sentence as typed.
+- `GET /api/ask/spend` (admin-grade roles only, else 403) → the tenant's model
+  spend card (`text`, `share_30d` with `useful_usd`/`wasted_usd`, `?format=png`).
 
 ## 5. Errors are a UI contract — map every status to a screen state
 

@@ -34,9 +34,18 @@ func TestSpecExamplesValidate(t *testing.T) {
 		t.Fatal("canonical example has no JSON object")
 	}
 	canonical := core[idx+brace:]
+	// The operational example (CAPACIDADES-VISIBLES-S1): the agenda that
+	// reminds, reacts, is spoken to and reports — the shape the generator is
+	// told to copy, so it must validate too.
+	oidx := strings.Index(core, "OPERATIONAL EXAMPLE")
+	if oidx < 0 {
+		t.Fatal("GrammarCore lost its operational example")
+	}
+	operational := firstJSONObject(core[oidx:])
 
 	for name, doc := range map[string]string{
 		"canonical (GrammarCore)":        canonical,
+		"operational (GrammarCore)":      operational,
 		"advanced (SpecExampleAdvanced)": SpecExampleAdvanced,
 	} {
 		rep := schema.ValidateReport([]byte(doc))
@@ -49,6 +58,31 @@ func TestSpecExamplesValidate(t *testing.T) {
 	}
 }
 
+// firstJSONObject returns the first balanced {…} object in s.
+func firstJSONObject(s string) string {
+	start := strings.IndexByte(s, '{')
+	if start < 0 {
+		return ""
+	}
+	depth := 0
+	inStr := false
+	for i := start; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"' && (i == 0 || s[i-1] != '\\'):
+			inStr = !inStr
+		case inStr:
+		case c == '{':
+			depth++
+		case c == '}':
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	return ""
+}
+
 // TestSpecCoversAdvancedGrammar keeps the printed spec honest about the blocks
 // the compact internal prompt omits — if a section is dropped, this names it.
 func TestSpecCoversAdvancedGrammar(t *testing.T) {
@@ -57,6 +91,8 @@ func TestSpecCoversAdvancedGrammar(t *testing.T) {
 		"state_machine", "permissions", "condition_actions", "foreign_keys",
 		"references", "on_update", "hooks", "hmac_secret_env", "events",
 		"renamed_from", "validate --json",
+		// CAPACIDADES-VISIBLES-S1: the operational blocks and their signals.
+		"workflows", "summary.telegram", "aliases", "OPERATIONAL BLOCKS", "pending",
 		// FILES-1: the per-field file attach policy must stay teachable.
 		"max_bytes", "file_policy",
 	} {

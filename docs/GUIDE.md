@@ -876,6 +876,16 @@ is tracked. If your project needs one of these today, factor that in *now*:
 - **Released: v0.1.13 (2026-08-28)** — binaries for linux/darwin (amd64/arm64)
   and windows (amd64) with `checksums.txt` and a Sigstore bundle on GitHub
   Releases; `appximo upgrade` updates an installed binary in place.
+- **What v0.1.13 does NOT have (and `main` does, as of 2026-09-20):** the
+  automation and voice front — the `workflows` executor and the
+  `appximo-worker` binary among the release assets, the daily digest
+  (`/api/summary`), questions and writes by voice (`/api/ask`), `aliases`,
+  the model spend cap, the Telegram bot, `appximo drill`. Tags
+  v0.1.14–v0.1.16 exist on GitHub without a published release (CI break,
+  publication paused on purpose — DEC-2 in BACKLOG.md) and predate all of it
+  too. Build `main` (`go build ./cmd/appximo ./cmd/appximo-worker`) to use
+  them; [ESTADO_DEL_MOTOR.md](ESTADO_DEL_MOTOR.md) keeps the per-capability
+  version column.
 - **The Go module is fetchable** — `go get github.com/appximo/appximo@latest`
   resolves from the public proxy, so framework mode (§5) builds on any machine
   and in CI. The built `/admin` and `/editor` assets ship IN the module

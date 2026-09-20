@@ -757,6 +757,9 @@ appximo drill — los escenarios que puede repetir, y dónde se ve cada uno:
   chaos      uno de los diez experimentos de CAOS-S1, en esta caja
   restore    un simulacro de restauración cronometrado
   audit      qué FALTA en esta caja
+  ask        una pregunta por voz: quién la respondió y qué costó
+  voice      el canal de voz de punta a punta, en un tenant efímero
+  spend      la tarjeta de gasto del modelo de un tenant
   …
 ```
 
@@ -850,6 +853,43 @@ REHEARSAL VERIFIED — the newest set restores and matches its manifest. The rea
 ### 6.6 `drill audit` — qué falta en esta caja
 
 `fleet-audit.sh` con leyenda: ✓ protegido, ✗ falta (la línea dice qué hacer), ! aviso. En el laboratorio recién instalado marcó, correctamente: sin swap, sin timer de backup, sin set, sin `SLACK_WEBHOOK_URL`, sin `BACKUP_COPY_TO`. Sale `1` si hay al menos un ✗ — úselo como gate en un script.
+
+### 6.7 `drill ask` — una pregunta, y quién la respondió
+
+Manda UNA pregunta a `POST /api/ask` como el tenant y el rol dados — exactamente lo que hacen el bot de Telegram y un atajo de Siri — e imprime la respuesta con su contabilidad: `kind` (answer / unclear / confirm / write_refused…), `source` (**parser** = US$ 0 y milisegundos, **cache**, **model** ≈ US$ 0,003 y ~1 s) y, cuando fue al modelo, la razón exacta por la que el parser pasó («verbo de escritura», «no conozco la palabra …»). Una orden de escritura responde la confirmación y **no escribe nada** (el drill nunca contesta el «sí»). Con `--token` no hace falta `JWT_SECRET`.
+
+```
+$ appximo drill ask --app=vetapp --tenant=vetapp --role=dueno --lang=es "cuántas mascotas hay"
+• cuántas mascotas hay
+  kind=answer source=parser cost=US$ 0.0000 total=1 ms
+  12 mascotas
+  ⚙︎ parser · 1 ms · US$ 0
+  plan: {"kind":"count","resource":"pets"}
+```
+
+Si la palabra del dueño NO es la del schema y el drill dice `source=model … el parser pasó: no conozco …`, la respuesta es declarar el sinónimo en el schema (`aliases`, §3d) — no enseñarle al dueño la palabra del programador.
+
+### 6.8 `drill voice` — el canal de voz de punta a punta, en un tenant que crea y borra
+
+Registra un tenant EFÍMERO con el schema de la app (como `drill error`), siembra una fila y maneja `POST /api/ask` de principio a fin: un conteo con la palabra del schema o su alias (debe ser `parser`, US$ 0), un verbo de borrar (`write_refused`, sin llamar al modelo), un «sí pero…» suelto (`unclear`, US$ 0), una **transición de estado confirmada por id** — LA escritura que el parser resuelve solo — y la tarjeta de gasto. Cada paso imprime ✓/✗; al final borra el tenant (schema + filas de control, sin huérfanos; `--keep` para mirarlo en `/admin`). Un create por voz necesita el modelo y se salta sin `ANTHROPIC_API_KEY`.
+
+```
+$ appximo drill voice --app=vetapp --lang=es --yes
+• ephemeral tenant drille69db5 (schema: /etc/vetapp/schema.json, role: dueno)
+• seeded one personas (POST → 201)
+✓ question («cuántos contactos hay») kind=answer         source=parser   cost=US$ 0.0000  1 persona
+✓ delete verb («borrá…»)             kind=write_refused  source=parser   cost=US$ 0.0000  Eso no lo hago por voz
+✓ stray «sí pero…»                   kind=unclear        source=parser   cost=US$ 0.0000  Eso no fue un sí
+✓ spend card (GET /api/ask/spend → 200)
+✓ 4 verificaciones pasaron; el parser resolvió la pregunta: true
+✓ tenant drille69db5 deleted (schema + control-plane rows)
+```
+
+El ejemplo canónico de una app con todo el frente declarado — `aliases`, `events`, `pending`, un workflow por evento y uno cron que manda el resumen, `summary` — es [examples/model-lab/agenda-voz.json](../examples/model-lab/agenda-voz.json); `appximo explain --lang es` lo lee en prosa.
+
+### 6.9 `drill spend` — cuánto cuestan las preguntas de este tenant
+
+Lee `GET /api/ask/spend` como un rol admin e imprime la tarjeta: hoy, el mes, el techo y lo que falta, quién respondió cuántas (parser / caché / modelo), **gasto útil vs desperdiciado**, las frases que más cuestan y por qué fueron al modelo. Son los MISMOS números que el `gasto` de Telegram, `/admin/ask` y el centro de mando (una sola fuente, `pkg/askspend`); un rol acotado recibe 403 — el gasto de una plataforma es del administrador.
 
 ---
 

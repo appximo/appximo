@@ -429,6 +429,27 @@ refreshed).
 ---
 
 
+## DONE in CAPACIDADES-VISIBLES-S1 (2026-09-20) — what was built now EXISTS for users: the generator declares the operational blocks by signal of the description, the docs say which version has what, the panel shows automation and voice with real state
+
+| Item | What closed it | Where |
+|---|---|---|
+| **AUTO-10 DONE** | `pkg/aigen` GrammarCore gained "OPERATIONAL BLOCKS — what the engine runs without any code, and when to declare it" (workflows cron/event with the closed step set, `events`, `aliases`, `summary`, `pending`, each WITH its signal in the description and the "never by default" rule) + an engine-validated worked example; `appximo spec` and `ai-generate` share it (pinned by `spec_test.go`). Measured before/after with the same three descriptions: tasks app 1 resource and nothing → personas+tareas, 2 workflows (cron reminder + event on urgent), aliases, events, pending, summary; appointments → the reminder only; inventory → nothing (correct). The generated tasks schema, untouched, was deployed and driven end to end: parser answers at US$ 0, a voice-created urgent task fired the event workflow → `summary.telegram` → the phone (photo), the alias transition, the digest, the cron scheduled 07:00 Bogotá | `evidencia/CAPACIDADES-VISIBLES-S1/generador/`, `live-agenda.log`, docs/SCHEMA_SPEC_LLM.md |
+| **docs: which version has what** | one note in each place that implied a release carries the front — `appximo spec` header, BACKEND_SPEC/FRONTEND_SPEC headers, AGENTS.md, GUIDE §9, ESTADO_DEL_MOTOR, the site status line; DEC-2 addendum | this file's DEC-2 |
+| **drill ask / voice / spend** | the voice channel is repeatable on any installed box; ESTADO_DEL_MOTOR rows for Telegram/digest, questions, writes, aliases, spend; MANUAL §6.7–6.9 | `cmd/appximo/cmd_drill_voice.go` |
+| **NOT done, on purpose** | the ai-eval corpus case for workflows named in AUTO-10's "ready" was not added: the corpus is pinned at 40/stratum = 120 by test and its semantic score does not grade operational blocks; the three-app before/after measurement is the evidence instead. `appximo up` still does not START the worker — AUTO-12 (open) | — |
+
+The archived narrative of AUTO-10, as it stood:
+
+### AUTO-10 — The agent grammar (`spec` / ai-generate) does not teach workflows
+
+The executor exists and SCHEMA_REFERENCE §1.4 documents it, but
+`appximo spec` (pkg/aigen's GrammarCore) and the ai-generate loop never mention
+the block — an external agent generating schemas cannot declare pipelines it
+does not know exist. Deferred ON PURPOSE by AUTOMATIZACION-S1 (three parts
+closed well over five half-done). **Ready:** a workflows section in
+GrammarCore + one engine-validated worked example + an ai-eval corpus case; the
+validator is already the oracle (it compiles cron specs and expressions).
+
 ## DONE in VOZ-AHORRO-S2 (2026-09-20) — the three leaks the real use showed, closed: synonyms DECLARED in the schema (`aliases`, ADR-038), the write PLAN cached and re-prepared, a «no entendí» never billed for a sentence that was never a question
 
 | Item | What closed it | Where |

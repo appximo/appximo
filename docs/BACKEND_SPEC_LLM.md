@@ -29,6 +29,17 @@ Four companion documents; keep them straight:
 (`appximo specs` prints all five at once — one paste gives an agent the
 whole contract.)
 
+> **Which version has what.** This document describes `main`. The last
+> PUBLISHED release is **v0.1.13 (2026-08-28)**: the full engine (schema → API,
+> RBAC, migrations, files, auth, `/admin`, `/app`, Studio, `up`/`new`/
+> `ai-generate`) — but NOT the automation and voice front: no workflows
+> executor, no `appximo-worker` among its assets, no `/api/summary`, no
+> `/api/ask` (questions and writes by voice), no `aliases`, no model spend
+> cap, no Telegram bot, no `appximo drill`. Tags v0.1.14–v0.1.16 exist without
+> a published release and predate all of it too. To use those today, build
+> `main` (`go build ./cmd/appximo ./cmd/appximo-worker`); nothing here
+> promises they are in a downloadable binary.
+
 Everything below is audited against the engine source and demonstrated by a
 compiling, runnable example: **[examples/backend-guide/](../examples/backend-guide/)**
 (`schema.json` + `main.go`). Every code block here is faithful to that example.

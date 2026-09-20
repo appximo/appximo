@@ -1556,11 +1556,12 @@ tarball of scripts/), and the smoke runs fleet-audit once.
   outbox consumers (`pkg/workflows/consumer.go` `EventConsumer`, tested in
   `workflows_test.go`, ADR-031 §1); a resource that declares `events` fires its
   workflows on create/update/delete. What is missing is the AUTHORING, not the
-  engine: the grammar for agents does not teach `workflows` (AUTO-10), Studio has no
-  panel for them (AUTO-11), and nobody can declare one by voice.
+  engine: the grammar for agents TEACHES `workflows` since CAPACIDADES-VISIBLES-S1
+  (AUTO-10 done — the generator declares them by signal of the description), Studio
+  has no panel for them (AUTO-11), and nobody can declare one by voice.
 - **Impact:** without it every "avisame cuando…" is a JSON edit by the developer.
-- **Ready:** AUTO-10 and AUTO-11 first (the declaration must be teachable and
-  visible), then a voice front that produces a `workflows` entry the validator accepts.
+- **Ready:** AUTO-11 first (the declaration is teachable; it must be visible in
+  Studio), then a voice front that produces a `workflows` entry the validator accepts.
 
 ### AUTO — The automation front (consolidated 2026-09-17, CENTRO-MANDO-S2)
 
@@ -1623,16 +1624,6 @@ design the confirmations for it; the scheduler's DST policy is written (ADR-031
 §5). **Ready:** steps 2–3 and 5 are their own sessions with Miguel validating
 the experience — the base beneath them is done.
 
-### AUTO-10 — The agent grammar (`spec` / ai-generate) does not teach workflows
-
-The executor exists and SCHEMA_REFERENCE §1.4 documents it, but
-`appximo spec` (pkg/aigen's GrammarCore) and the ai-generate loop never mention
-the block — an external agent generating schemas cannot declare pipelines it
-does not know exist. Deferred ON PURPOSE by AUTOMATIZACION-S1 (three parts
-closed well over five half-done). **Ready:** a workflows section in
-GrammarCore + one engine-validated worked example + an ai-eval corpus case; the
-validator is already the oracle (it compiles cron specs and expressions).
-
 ### AUTO-11 — Studio has no visual workflows panel (Code view only)
 
 Workflows are authorable today as JSON (Studio's Code view validates live
@@ -1642,6 +1633,21 @@ declared Studio THE editor of the rules. **Ready:** an editor session
 (pkg/editorui): a Workflows panel faithful to `validateWorkflows` (the same
 pattern as the RBAC and relations panels), plus a runs view reading
 `GET /admin/workflows`.
+
+### AUTO-12 — `appximo up` does not start the worker: a schema with workflows leaves the promise PRINTED on the card, not running
+
+`up` compiles and serves the schema in-process, but `workflows` execute in
+`appximo-worker`, a separate binary `up` does not start. Since
+CAPACIDADES-VISIBLES-S1 the `up` card (and the `--json` result, field
+`workflows`) names the declared workflows and the exact worker command, and
+MASTER_PROMPT asks for it in step 3 — but it is still a second command a
+user may not run, and the generated tasks app comes out with a reminder
+declared. The failure is VISIBLE (the engine says so at boot, `/admin/workflows`
+shows no runs) but it is a dead promise until then. **Ready:** `up` starts the
+worker in the same process or as a supervised child when the schema declares
+workflows (`pkg/workflows` is a package; the executor already runs in-process
+in tests), and asks for the Telegram credentials in its question block ONLY when
+a workflow enqueues `summary.telegram`.
 
 ### DEC — Decisions that wait on Miguel (stable IDs since CENTRO-MANDO-S2)
 
@@ -1675,6 +1681,15 @@ urgency, and red CI must NOT be read as neglect.** The repair is written and
 parked: internal repo `nuevo_chat_web/prompts/PROMPT_REPARAR_PUBLICACION.md`,
 marked "when publication resumes", not before. Recorded as decision A-69 in
 the internal package.
+
+*Addendum (CAPACIDADES-VISIBLES-S1, 2026-09-20):* the pause now has a visible
+cost, written where it bites — everything the automation/voice front built
+since 2026-09-18 (workflows executor, the worker among the release assets,
+`/api/summary`, `/api/ask`, `aliases`, the spend cap, the Telegram bot,
+`appximo drill`) exists ONLY on `main`; the docs, `appximo spec`, GUIDE §9,
+ESTADO_DEL_MOTOR and the site now say so in one place each instead of
+implying a release carries it. Resuming publication is still Miguel's call
+(licensing), and nothing else was repaired (A-69 stands).
 
 ### DEC-3 — Publish the v0.1.10 security advisory (the text is ready; it never went out)
 

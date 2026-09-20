@@ -1303,22 +1303,6 @@
    "estado": "abierto"
   },
   {
-   "id": "AUTO-10",
-   "titulo": "La gramática para agentes (spec / ai-generate) no enseña workflows",
-   "frente": "docs",
-   "que_es": "El ejecutor de workflows existe (ADR-031) y SCHEMA_REFERENCE §1.4 lo documenta, pero `appximo spec` (GrammarCore de pkg/aigen) y el loop de ai-generate no enseñan el bloque: un agente externo que genera schemas no sabe que puede declarar pipelines.",
-   "por_que_importa": "La promesa del producto es que un agente construye la app desde la gramática; una capacidad que la gramática calla es invisible para esa vía.",
-   "que_lo_destraba": "Una sesión chica: sección workflows en GrammarCore + un ejemplo validado por el motor + caso en el corpus de ai-eval; el validador ya es el oráculo (compila cron y expresiones).",
-   "costo": "chico",
-   "dano": "medio",
-   "prioridad": "P2",
-   "decide": "agente",
-   "depende_de": [],
-   "bloquea": [],
-   "origen": "AUTOMATIZACION-S1 (alcance diferido a propósito: tres partes cerradas > cinco a medias)",
-   "estado": "abierto"
-  },
-  {
    "id": "AUTO-11",
    "titulo": "Studio no tiene panel visual de workflows (solo la vista Code)",
    "frente": "producto",
@@ -1370,15 +1354,14 @@
    "id": "VOZ-5",
    "titulo": "Reglas reactivas declaradas por voz («cuando una orden quede pagada, avisame»)",
    "frente": "automatizacion",
-   "que_es": "Que el dueño declare por voz un workflow que el validador acepte. CORRECCIÓN registrada: el brief de VOZ-VISUAL-S1 decía que workflows v1 «es solo cron y no reacciona a cambios en los datos»; verificado en el código, SÍ reacciona — los triggers por evento son consumidores del outbox (pkg/workflows/consumer.go EventConsumer, probado en workflows_test.go, ADR-031 §1). Lo que falta es la AUTORÍA, no el motor: la gramática para agentes no enseña workflows (AUTO-10), Studio no tiene panel (AUTO-11), y nadie puede declarar uno por voz.",
+   "que_es": "Que el dueño declare por voz un workflow que el validador acepte. CORRECCIÓN registrada: el brief de VOZ-VISUAL-S1 decía que workflows v1 «es solo cron y no reacciona a cambios en los datos»; verificado en el código, SÍ reacciona — los triggers por evento son consumidores del outbox (pkg/workflows/consumer.go EventConsumer, probado en workflows_test.go, ADR-031 §1). Lo que falta es la AUTORÍA, no el motor: la gramática para agentes YA los enseña por señal de la descripción (AUTO-10 hecho en CAPACIDADES-VISIBLES-S1), Studio no tiene panel (AUTO-11), y nadie puede declarar uno por voz.",
    "por_que_importa": "Sin esto cada «avisame cuando…» es un JSON que edita el desarrollador.",
-   "que_lo_destraba": "AUTO-10 y AUTO-11 primero (la declaración tiene que ser enseñable y visible), después un frente de voz que produzca una entrada de workflows válida. VOZ-4 (escrituras con confirmación) ya está hecho (VOZ-ESCRITURAS-S1, ADR-037): la confirmación y el matcher se reusan.",
+   "que_lo_destraba": "AUTO-11 primero (la declaración ya es enseñable; falta que sea visible en Studio), después un frente de voz que produzca una entrada de workflows válida. VOZ-4 (escrituras con confirmación) ya está hecho (VOZ-ESCRITURAS-S1, ADR-037): la confirmación y el matcher se reusan.",
    "costo": "grande",
    "dano": "bajo",
    "prioridad": "P3",
    "decide": "agente",
    "depende_de": [
-    "AUTO-10",
     "AUTO-11"
    ],
    "bloquea": [],
@@ -1531,6 +1514,22 @@
    "depende_de": [],
    "bloquea": [],
    "origen": "VOZ-AHORRO-S2 (2026-09-20), ADR-038 §Limits",
+   "estado": "abierto"
+  },
+  {
+   "id": "AUTO-12",
+   "titulo": "`appximo up` no arranca el worker: un schema con workflows queda con la promesa impresa en la tarjeta, no corriendo",
+   "frente": "automatizacion",
+   "que_es": "`up` compila y sirve el schema en proceso pero los `workflows` ejecutan en `appximo-worker`, un binario aparte que `up` no arranca. Desde CAPACIDADES-VISIBLES-S1 la tarjeta de `up` (y el JSON `--json`, campo `workflows`) nombra los workflows declarados y el comando exacto del worker, y MASTER_PROMPT lo pide en el paso 3; pero sigue siendo un segundo comando que el usuario puede no correr.",
+   "por_que_importa": "La app de tareas generada sale con un recordatorio declarado; si el worker no corre, el recordatorio es una promesa muerta — visible (el motor lo dice al arrancar, `/admin/workflows` no muestra corridas) pero muerta.",
+   "que_lo_destraba": "Que `up` arranque el worker en el mismo proceso o como hijo supervisado cuando el schema declara workflows (el ejecutor es un paquete, `pkg/workflows`; el worker ya corre in-process en los tests), con las credenciales de Telegram pedidas en el bloque de preguntas de `up` SOLO si hay un workflow que encola `summary.telegram`.",
+   "costo": "medio",
+   "dano": "medio",
+   "prioridad": "P3",
+   "decide": "agente",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "CAPACIDADES-VISIBLES-S1 (2026-09-20): el camino de los dos prompts pierde exactamente ahí",
    "estado": "abierto"
   }
  ]

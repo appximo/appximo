@@ -81,6 +81,10 @@ type upResult struct {
 	Tenant      upTenant          `json:"tenant"`
 	Smoke       *upSmoke          `json:"smoke,omitempty"`
 	ExampleCurl string            `json:"example_curl,omitempty"`
+	// Workflows lists the schema's declared workflows (CAPACIDADES-VISIBLES-S1):
+	// they EXECUTE in the separate appximo-worker binary, which `up` does not
+	// start — the card names the command so a reminder is never a dead promise.
+	Workflows []string `json:"workflows,omitempty"`
 }
 
 type upCredentials struct {
@@ -364,7 +368,7 @@ func runUp(opts upOptions) error {
 		res := upResult{
 			OK: true, Name: opts.Name, Host: opts.Name + ".localhost",
 			Port: opts.Port, ControlPort: controlPort,
-			Resources: resources, TokenRole: tokenRole,
+			Resources: resources, TokenRole: tokenRole, Workflows: sortedWorkflowNames(parsed),
 			Files:    map[string]string{"env": ".env (0600)", "schema": schemaPath},
 			Postgres: pg.card, Tenant: upTenant{ID: opts.Name},
 		}
@@ -1009,6 +1013,9 @@ func printCard(w io.Writer, res upResult, pg pgResolved, wroteStarter bool) {
 	if res.ExampleCurl != "" {
 		fmt.Fprintf(w, "\n  Try it from a second terminal:\n    %s\n", res.ExampleCurl)
 	}
+	if len(res.Workflows) > 0 {
+		fmt.Fprintf(w, "\n  Workflows declared (%s) run in the SEPARATE appximo-worker binary,\n  which this command does not start. Beside the engine, in a second terminal:\n    set -a; . ./.env; set +a; APPXIMO_ENGINE_URL=http://localhost:%d APPXIMO_TENANT_DOMAIN=%s APPXIMO_WORKER_MODE=auto appximo-worker\n  (a morning digest also needs APPXIMO_TELEGRAM_BOT_TOKEN + APPXIMO_TELEGRAM_CHAT_ID there — docs/PRODUCTION.md §4.6b)\n", strings.Join(res.Workflows, ", "), res.Port, tenantDomainOf(res.Host))
+	}
 	fmt.Fprintf(w, "\n  Wrote  ./.env (secrets, 0600)")
 	if wroteStarter {
 		fmt.Fprintf(w, "  ·  ./schema.json (the starter — make it YOURS, then\n         appximo migrate --tenant %s --schema schema.json)", res.Name)
@@ -1276,4 +1283,25 @@ func indent(s string) string {
 		lines[i] = "    " + lines[i]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// tenantDomainOf strips the tenant label from the app host ("agenda.localhost" →
+// "localhost"): the worker resolves each tenant's API as <tenant>.<domain>.
+func tenantDomainOf(host string) string {
+	if i := strings.IndexByte(host, '.'); i > 0 {
+		return host[i+1:]
+	}
+	return host
+}
+
+func sortedWorkflowNames(s *schema.APISchema) []string {
+	if s == nil || len(s.Workflows) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(s.Workflows))
+	for n := range s.Workflows {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }

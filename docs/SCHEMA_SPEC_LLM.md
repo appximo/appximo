@@ -13,6 +13,20 @@ The grammar both fronts use is one shared source (`pkg/aigen` `GrammarCore`,
 pinned by test) — your agent generates against exactly the rules the internal
 loop uses, and the same oracle judges both.
 
+**The grammar teaches the OPERATIONAL blocks too (`main`, CAPACIDADES-VISIBLES-S1):**
+`workflows` (cron + event triggers, the closed step set, `summary.telegram`),
+`events`, `aliases` (the owner's own words for resources and states),
+`summary` and `state_machine.pending` — WITH the criteria for when each one
+belongs (a reminder ⇒ a cron workflow; "avisame cuando…" ⇒ events + an event
+workflow; an app that is spoken to ⇒ aliases; a lifecycle ⇒ pending; a plain
+catalogue ⇒ none of them). Measured with three descriptions: a personal tasks
+app came out with two workflows, aliases, events, pending and summary; an
+appointments app with the reminder only; an inventory with none — the
+same three that produced one bare resource each before the section existed.
+The canonical example is [examples/model-lab/agenda-voz.json](../examples/model-lab/agenda-voz.json).
+Version note: the published v0.1.13 does not know those keys — see the header
+`appximo spec` prints.
+
 ## The flow (4 steps)
 
 ### 1. Get the grammar

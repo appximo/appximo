@@ -24,6 +24,13 @@ definition. This document is the complete distilled grammar; the engine's
 validator is STRICT (any key outside this grammar rejects the schema, nothing
 is silently ignored).
 
+Which version has what: this grammar is the engine's ` + "`main`" + `. The last PUBLISHED
+release, v0.1.13 (2026-08-28), does NOT execute ` + "`workflows`" + ` and knows no
+` + "`aliases`" + `, ` + "`summary`" + ` or ` + "`pending`" + ` (it rejects those keys) — the
+operational blocks below need an engine built from ` + "`main`" + `. The engine you
+target tells you: ` + "`appximo version`" + ` says ` + "`dev`" + ` or a commit for a main
+build, a tag for a release; ` + "`appximo validate`" + ` is the oracle either way.
+
 This is one of FIVE companion documents the CLI prints — together they cover a
 complete app, built and operated: this one (` + "`appximo spec`" + `) teaches the SCHEMA;
 ` + "`appximo backend-spec`" + ` teaches custom Go handlers, hooks, auth and
@@ -92,29 +99,15 @@ after_create, before_update, after_update — there are NO delete hooks):
     HTTPS-only. js: sandboxed, "data" is the record, set result.proceed=false
     + result.error to reject. wasm: "wasm_module" (+ optional "wasm_fn").
 
-EVENTS (per-resource opt-in transactional outbox emission):
-  "events": ["create", "update", "delete"]   // exactly these values
+EVENTS, WORKFLOWS, ALIASES, SUMMARY and PENDING — the operational blocks — are
+in the core grammar above (OPERATIONAL BLOCKS), with the signals that say WHEN
+to declare each one.
 
 RENAMES (safe evolution — the migration renames instead of drop+create):
   - field:    "telefono": { "type": "string", "renamed_from": "tel" }
   - resource: "clientes": { "renamed_from": "customers", "fields": {...} }
   - The old name must NOT still be declared. Only meaningful when evolving an
     EXISTING deployed schema; never emit it on a fresh design.
-
-ALIASES (how PEOPLE name things — for the voice/question channel, VOZ-AHORRO-S2):
-  - resource: "ordenes": { "aliases": ["pedidos", "ventas"], "fields": {...} }
-  - value (enum fields only): "estado": { "type": "string", "enum": ["pendiente_pago", "pagada"],
-                                          "aliases": { "pendiente_pago": ["sin pagar", "pendientes"] } }
-  - The engine wires NO domain word: a question like «cuántos pedidos hay» is
-    answered without a model call ONLY if the schema declares «pedidos»; the
-    model's vocabulary lists the aliases too. Declare the words the owner
-    actually uses (an English schema spoken in Spanish NEEDS them: "pets":
-    {"aliases": ["mascotas"]}). Rejected at load: an alias that is a declared
-    resource's own name/plural, the same alias on two resources, an alias
-    that is also a declared value, a value alias whose key is not in "enum",
-    a duplicate within a resource. A value alias MAY repeat across resources.
-    Short words only (≤ 4 words, ≤ 40 chars); the reply always uses the
-    schema's own word.
 
 RELATIONS extra key: "limit": <n> bounds embedded children per parent (default 50).
 
