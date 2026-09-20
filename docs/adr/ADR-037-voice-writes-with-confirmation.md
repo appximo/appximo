@@ -201,4 +201,8 @@ would 403 it (P6, verified on the 58 after the deploy).
 - «sí pero mejor el viernes» costs a model call as a new question (US$
   0.0023) and usually answers «no entendí»; a cheaper reading (cancel and
   stop) was refused because a sentence after a confirmation is often a new
-  order.
+  order. **Revised in ADR-038 (VOZ-AHORRO-S2) with real data:** the parser
+  now settles it at zero cost when the sentence carries nothing the grammar
+  could execute; a sentence that does carry an order is still re-planned.
+  Likewise §7's "write plans are NOT cached" is retracted there: the PLAN
+  is cached per tenant|role|user and re-prepared before every confirmation.

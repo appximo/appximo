@@ -85,9 +85,9 @@ var corpus = []struct {
 	{"promedio de las órdenes", "sure:avg ordenes total_centavos", true},
 	{"cuántas órdenes de Ana Gómez hay", "sure:count ordenes match=Ana Gómez", true},
 	{"cuántos cupones hay", "sure:count cupones", true},
-	{"Ana Gómez", "model", true},                           // a name alone: nothing to do with it
+	{"Ana Gómez", "discard", true},                         // a name alone: nothing to ask about it — discarded at zero cost (VOZ-AHORRO-S2)
 	{"qué facturas tiene Ana Gómez", "model", true},        // facturas has no relation to clientes — the model says so
-	{"qué puedo preguntar", "model", true},                 // help, not data
+	{"qué puedo preguntar", "discard", true},               // help, not data — answered at zero cost (VOZ-AHORRO-S2)
 	{"cuántas órdenes y cuántos pagos hay", "model", true}, // two resources
 	{"cuántas órdenes hay hoy y ayer", "model", true},      // two periods
 	{"lista de clientes", "sure:list clientes", true},
@@ -129,6 +129,8 @@ func TestParser_CorpusAndCoverage(t *testing.T) {
 		r := Parse(c.q, v)
 		got := "model"
 		switch {
+		case r.Sure && r.Discard != "":
+			got = "discard"
 		case r.Sure && r.Plan.Kind == "write":
 			got = "write"
 		case r.Sure:
@@ -137,12 +139,12 @@ func TestParser_CorpusAndCoverage(t *testing.T) {
 		if got != c.want {
 			t.Errorf("%q → %s (want %s) [%s]", c.q, got, c.want, r.Reason)
 		}
-		if r.Sure {
+		if r.Sure && r.Discard == "" {
 			sure++
 		}
 		if c.real {
 			real++
-			if r.Sure {
+			if r.Sure && r.Discard == "" {
 				sureReal++
 			}
 		}

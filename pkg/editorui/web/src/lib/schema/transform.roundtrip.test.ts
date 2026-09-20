@@ -266,3 +266,38 @@ describe('summary policy round-trip', () => {
 		expect(roundTrip(s2).summary).toEqual({ resources: ['a'], notify: 'changes', quiet_days: 0 });
 	});
 });
+
+// VOZ-AHORRO-S2 (ADR-038): `aliases` — how people name a resource (resource
+// level) and a state (inside the enum field) — survive import → export, like
+// summary: authored in the Code view, never dropped by the entity model.
+describe('aliases round-trip', () => {
+	it('preserves resource aliases and value aliases verbatim', () => {
+		const s: APISchema = {
+			$schema: 'https://appximo.com/schema/v1',
+			version: '1',
+			name: 'tienda',
+			resources: {
+				ordenes: {
+					aliases: ['pedidos', 'ventas'],
+					fields: {
+						estado: {
+							type: 'string',
+							enum: ['creada', 'pendiente_pago', 'pagada'],
+							aliases: { pendiente_pago: ['sin pagar', 'pendientes'], pagada: ['cobrada'] }
+						}
+					}
+				},
+				clientes: { fields: { nombre: { type: 'string' } } }
+			},
+			rbac: { roles: { admin: { resources: '*', actions: ['*'] } } }
+		};
+		const out = roundTrip(s);
+		expect(out.resources.ordenes.aliases).toEqual(['pedidos', 'ventas']);
+		expect(out.resources.ordenes.fields.estado.aliases).toEqual({
+			pendiente_pago: ['sin pagar', 'pendientes'],
+			pagada: ['cobrada']
+		});
+		expect('aliases' in out.resources.clientes).toBe(false);
+		expect(canonical(out)).toBe(canonical(s));
+	});
+});

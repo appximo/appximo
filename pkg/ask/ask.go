@@ -50,9 +50,15 @@ type Deps struct {
 	// solve gets the corresponding reply.
 	ModelOff string
 	// Cache is the plan cache (nil = none); CacheScope is the tenant+role
-	// prefix of its keys — a plan never crosses tenants or roles.
-	Cache      *PlanCache
-	CacheScope string
+	// (+ vocabulary fingerprint) prefix of its READ keys — a plan never
+	// crosses tenants or roles, nor a vocabulary change (VOZ-AHORRO-S2: a
+	// synonym declared after a «no entendí» cures it). CacheScopeWrite is
+	// the tenant+role+USER prefix of the WRITE keys: a write plan is an
+	// order, and an order is personal — one user's dictated sentence never
+	// seeds another user's pending. Empty = write plans are not cached.
+	Cache           *PlanCache
+	CacheScope      string
+	CacheScopeWrite string
 	// NoParser skips the deterministic parser (tests of the model path).
 	NoParser bool
 	// Trace appends who answered, the latency, the cost and — when the parser
@@ -80,6 +86,11 @@ type Result struct {
 	Text     string `json:"text"`
 	Speech   string `json:"speech"`
 	Headline string `json:"headline"`
+	// Display is Text as plain text — no HTML, line breaks kept, the ⚙︎ trace
+	// INCLUDED when it is on — for a screen that is not Telegram (a Siri
+	// "Show Result" card): the trace is read there, never heard (Speech
+	// never carries it).
+	Display string `json:"display"`
 	// Number is the engine's figure when the answer has one (count / sum…).
 	Number *float64 `json:"number,omitempty"`
 	// Understood is the plan in the owner's words ("citas · hoy · optometra: Ana Gómez").
@@ -136,6 +147,7 @@ func Answer(ctx context.Context, d Deps, question string) Result {
 	if d.Trace && res.Text != "" {
 		res.Text += "\n" + TraceLine(res)
 	}
+	res.Display = Plain(res.Text)
 	return res
 }
 
@@ -261,7 +273,7 @@ func answer(ctx context.Context, d Deps, question string) Result {
 	// answer (yes / no / a value / a pick). Anything that is not one cancels
 	// the pending — an ambiguous yes never executes — and the message is
 	// then processed as a new question, saying so.
-	cancelledNote := ""
+	cancelled := false
 	if d.Pending != nil && d.PendingKey != "" {
 		if pend := d.Pending.Get(d.PendingKey); pend != nil {
 			r, handled := continuePending(ctx, d, pend, question)
@@ -269,7 +281,7 @@ func answer(ctx context.Context, d Deps, question string) Result {
 				r.Source = "confirm"
 				return r
 			}
-			cancelledNote = "<i>Cancelé la escritura que estaba pendiente. No escribí nada.</i>\n"
+			cancelled = true
 		}
 		// A bare yes/no with nothing pending never reaches the model.
 		if IsYes(question) || IsNo(question) {
@@ -277,14 +289,14 @@ func answer(ctx context.Context, d Deps, question string) Result {
 				Text: "No hay ninguna escritura pendiente que confirmar o cancelar."}
 		}
 	}
-	out := answerQuestion(ctx, d, question)
-	if cancelledNote != "" {
-		out.Text = cancelledNote + out.Text
+	out := answerQuestion(ctx, d, question, cancelled)
+	if cancelled && out.Detail != "discard: stray_confirmation" {
+		out.Text = "<i>Cancelé la escritura que estaba pendiente. No escribí nada.</i>\n" + out.Text
 	}
 	return out
 }
 
-func answerQuestion(ctx context.Context, d Deps, question string) Result {
+func answerQuestion(ctx context.Context, d Deps, question string, cancelled bool) Result {
 
 	// 1. The deterministic parser — no model, no cache, microseconds. It
 	// answers only when SURE (parser.go); otherwise it says why, for the log.
@@ -294,18 +306,32 @@ func answerQuestion(ctx context.Context, d Deps, question string) Result {
 	parseReason := ""
 	if !d.NoParser {
 		if pr := Parse(question, d.Vocab); pr.Sure {
+			if pr.Discard != "" {
+				// Sure it is NOT a data question (Part C): answered here, at
+				// zero cost — never cached, never billed.
+				return discardResult(d, pr, question, cancelled)
+			}
 			p, source = pr.Plan, "parser"
 		} else {
 			parseReason = pr.Reason
 		}
 	}
 	// 2. The plan cache: the same question, tenant and role → the plan the
-	// model produced before; the data is recomputed below.
-	key := ""
+	// model produced before; the data is recomputed below. A WRITE plan is
+	// remembered under the user's own scope (VOZ-AHORRO-S2 Part B): the plan
+	// — never the result — and everything it needs (names, the row, the
+	// time tokens, the required fields) is re-prepared against the database
+	// of the moment before any confirmation is asked.
+	key, wkey := "", ""
 	if source == "" && d.Cache != nil {
 		key = Key(d.CacheScope, question)
 		if cp, _, ok := d.Cache.Get(key); ok {
 			p, source = cp, "cache"
+		} else if d.CacheScopeWrite != "" {
+			wkey = Key(d.CacheScopeWrite, question)
+			if cp, _, ok := d.Cache.Get(wkey); ok {
+				p, source = cp, "cache"
+			}
 		}
 	}
 	// 3. The model — only for what neither could solve, and only when allowed.
@@ -329,8 +355,15 @@ func answerQuestion(ctx context.Context, d Deps, question string) Result {
 			return base
 		}
 		p, source = tr.Plan, "model"
-		if d.Cache != nil && key != "" {
-			d.Cache.Put(key, p, "model")
+		if d.Cache != nil {
+			switch {
+			case p.IsWrite() || p.Kind == "write":
+				if wkey != "" {
+					d.Cache.Put(wkey, p, "model")
+				}
+			case key != "":
+				d.Cache.Put(key, p, "model")
+			}
 		}
 	}
 	base.Source = source
@@ -386,6 +419,49 @@ func answerQuestion(ctx context.Context, d Deps, question string) Result {
 		out.Text = said + "\n" + out.Text
 	}
 	return out
+}
+
+// discardResult words a sentence the parser is SURE is not a data question
+// (Part C): a stray answer to a confirmation, a greeting, a help request, a
+// bare name. Zero cost, source "parser", kind "help" for the two that ask
+// for guidance and "unclear" for the two that are non-answers.
+func discardResult(d Deps, pr ParseResult, question string, cancelled bool) Result {
+	r := Result{Source: "parser", Detail: "discard: " + pr.Discard, Plan: &pr.Plan}
+	guide := askable(d.Vocab)
+	if d.Write != nil && d.Vocab.Writable() {
+		guide += " " + writable(d.Vocab)
+	}
+	switch pr.Discard {
+	case "stray_confirmation":
+		r.Kind = "unclear"
+		r.Headline = "Eso no fue un sí"
+		if cancelled {
+			r.Text = "👌 Cancelé la escritura que estaba pendiente: «" + esc(firstWords(question, 3)) + "…» no es un <b>sí</b> claro, así que no escribí nada. Si querés cambiar algo, decime la orden completa con el cambio (por ejemplo «anotá … para el viernes»)."
+		} else {
+			r.Text = "🤔 Eso suena a la respuesta a una confirmación, pero no hay ninguna escritura pendiente (si había una, ya se canceló). Decime la orden completa otra vez."
+		}
+	case "greeting":
+		r.Kind = "help"
+		r.Headline = "¡Hola!"
+		r.Text = "👋 ¡Hola! Preguntame con tus palabras («cuántas órdenes hay hoy») o pedime que anote algo. " + guide
+	case "help":
+		r.Kind = "help"
+		r.Headline = "Qué puedo hacer"
+		r.Text = "ℹ️ " + guide + " También: <b>resumen</b>, <b>estado</b>, <b>ayuda</b>."
+	default: // bare_name
+		r.Kind = "unclear"
+		r.Headline = "¿Qué querés saber?"
+		r.Text = "🤔 «" + esc(question) + "» parece un nombre, pero no me dijiste qué querés saber. Probá «las órdenes de " + esc(question) + "» o «cuántas … tiene " + esc(question) + "». " + guide
+	}
+	return r
+}
+
+func firstWords(s string, n int) string {
+	f := strings.Fields(s)
+	if len(f) > n {
+		f = f[:n]
+	}
+	return strings.Join(f, " ")
 }
 
 // writable words what the role CAN write, for the refusals.

@@ -92,6 +92,19 @@ type ResourceSchema struct {
 	// governed fields are rejected on create at every door, exactly as they
 	// always were on update. See ImportConfig / GovernedFieldViolations.
 	Import *ImportConfig `json:"import,omitempty"`
+
+	// Aliases (VOZ-AHORRO-S2, ADR-038) are the words PEOPLE use for this
+	// resource that its schema name is not: «pedidos» and «ventas» for
+	// `ordenes`, «mascotas» for `pets`. Declared here, never wired in the
+	// engine: the voice parser (pkg/ask) recognizes them exactly like the
+	// schema name — singular/plural, accent-insensitive — for questions AND
+	// writes, and the model's vocabulary lists them. Validated at load
+	// (validateAliases): non-empty, unique across the WHOLE schema — an alias
+	// that could mean two resources, or a resource and a state, is a load
+	// error, because the parser would have to guess and it never guesses —
+	// and never a declared resource's own name or plural. The reply always
+	// uses the schema's word; an alias is understood, never spoken back.
+	Aliases []string `json:"aliases,omitempty"`
 }
 
 // validEmitActions is the closed set of write actions a resource may opt into
@@ -190,6 +203,16 @@ type FieldDef struct {
 	MaxLength *int     `json:"maxLength,omitempty"` // string/text: rune count <= MaxLength
 	Pattern   string   `json:"pattern,omitempty"`   // string/text: RE2 regex, len <= MaxPatternLength
 	Format    string   `json:"format,omitempty"`    // string/text: email | uuid | url | date
+
+	// Aliases (VOZ-AHORRO-S2, ADR-038) — enum fields only — map a DECLARED
+	// enum value to the words people say for it: {"pendiente_pago": ["sin
+	// pagar", "pendientes"]}. The voice parser consumes an alias exactly like
+	// the value itself («qué pedidos están sin pagar» → estado = pendiente_pago),
+	// for questions and for writes (a transition to «cobrada» → pagada). Each
+	// key must be a member of `enum` (alias_unknown_value at load); each alias
+	// is unique within the resource — never a declared value's own form, never
+	// another value's alias — and never a resource name or resource alias.
+	Aliases map[string][]string `json:"aliases,omitempty"`
 
 	// Accept (FILES-1) — file fields only — is the per-FIELD upload policy: the
 	// content types this field will attach. Entries are matched against the

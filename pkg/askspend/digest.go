@@ -96,11 +96,22 @@ func (d *Digest) compose() {
 	fmt.Fprintf(&b, "\n<b>Hoy: %d preguntas</b> · parser %d · caché %d · modelo %d (%d llamadas)\n", d.Today.Questions, d.Today.Parser, d.Today.Cache, model, d.Today.ModelCalls)
 	if d.Share.Questions > 0 {
 		fmt.Fprintf(&b, "<b>Últimos 30 días: %d</b> · parser %d (%.0f %%) · caché %d · modelo %d · %s\n", d.Share.Questions, d.Share.Parser, d.Share.ParserPct, d.Share.Cache, d.Share.Model, usd(d.Share.CostUSD))
+		// Useful vs wasted (VOZ-AHORRO-S2 Part C): what bought an answer and
+		// what bought a «no entendí» are not the same money.
+		if d.Share.CostUSD > 0 {
+			fmt.Fprintf(&b, "Gasto útil %s · desperdiciado %s (%d que no sirvieron)\n", usd(d.Share.UsefulUSD), usd(d.Share.WastedUSD), d.Share.Wasted)
+		}
 	}
 	if len(d.TopCost) > 0 {
 		b.WriteString("\n<b>Las que más cuestan</b>\n")
 		for _, p := range d.TopCost {
-			fmt.Fprintf(&b, "• %s — %s (%d)\n", esc(short(p.Question, 48)), usd(p.CostUSD), p.Count)
+			mark := ""
+			if p.Wasted {
+				mark = " ✗ no sirvió"
+			} else if p.WastedUSD > 0 {
+				mark = fmt.Sprintf(" · %s no sirvió", usd(p.WastedUSD))
+			}
+			fmt.Fprintf(&b, "• %s — %s (%d)%s\n", esc(short(p.Question, 48)), usd(p.CostUSD), p.Count, mark)
 		}
 	}
 	if len(d.Fallbacks) > 0 {
@@ -147,6 +158,10 @@ func (d *Digest) Report() summary.Report {
 	if d.Share.Questions > 0 {
 		row(fmt.Sprintf("30 días · parser %.0f %%", d.Share.ParserPct), "", int64(d.Share.Parser))
 		row("30 días · modelo", usd(d.Share.CostUSD), int64(d.Share.Model))
+		if d.Share.CostUSD > 0 {
+			row("30 días · útil", usd(d.Share.UsefulUSD), int64(d.Share.Model-d.Share.Wasted))
+			row("30 días · desperdiciado", usd(d.Share.WastedUSD), int64(d.Share.Wasted))
+		}
 	}
 	for i, p := range d.TopCost {
 		if i >= 4 {

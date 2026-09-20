@@ -85,12 +85,13 @@ func askSchema() *schema.APISchema {
 		Schema: "https://appximo.com/schema/v1", Version: "1", Name: "Óptica Ver Bien",
 		Resources: map[string]schema.ResourceSchema{
 			"optometras": {Fields: map[string]schema.FieldDef{"nombre": {Type: "string", Required: true}, "apellido": {Type: "string"}}},
-			"citas": {Fields: map[string]schema.FieldDef{
+			"citas": {Aliases: []string{"turnos"}, Fields: map[string]schema.FieldDef{
 				"motivo":       {Type: "string", Required: true},
 				"optometra_id": {Type: "uuid", Relation: "optometras"},
 				"user_id":      {Type: "uuid"},
 				"valor_cents":  {Type: "int64"},
 				"estado": {Type: "string", Enum: []string{"pendiente", "confirmada", "atendida", "cancelada"}, Default: "pendiente",
+					Aliases: map[string][]string{"pendiente": {"por atender"}},
 					StateMachine: &schema.StateMachine{Initial: []string{"pendiente"}, Pending: []string{"pendiente"},
 						Transitions: map[string][]string{"pendiente": {"confirmada", "cancelada"}, "confirmada": {"atendida", "cancelada"}, "atendida": {}, "cancelada": {}}}},
 				"creado_en": {Type: "time", Auto: schema.AutoCreate},
@@ -640,5 +641,60 @@ func TestAsk_SpendViewIsForAdminGradeRoles(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "image/png") {
 		t.Fatalf("png: %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+}
+
+// ── VOZ-AHORRO-S2: declared aliases answer from the database, without the model ──
+
+func TestAsk_AliasesAnswerFromTheDatabase(t *testing.T) {
+	fm := &fakeAnthropic{replies: []string{`{"kind":"unclear","reason":"should not be called"}`}}
+	rest, _, rt, tok, done := setupAskRuntime(t, fm, askspend.Defaults, nil)
+	defer done()
+	super := tok("super_admin", superID)
+	seedAsk(t, rest, super)
+
+	// «turnos» is the declared alias of citas; «por atender» of estado = pendiente.
+	got := dpDo(t, rest, "POST", "/api/ask", super, map[string]any{"q": "cuántos turnos hay"}, http.StatusOK)
+	if got["kind"] != "answer" || got["source"] != "parser" || got["number"] != float64(3) || got["cost_usd"] != float64(0) {
+		t.Fatalf("alias resource → parser count 3 from the DB: %v", got)
+	}
+	got = dpDo(t, rest, "POST", "/api/ask", super, map[string]any{"q": "turnos por atender"}, http.StatusOK)
+	if got["kind"] != "answer" || got["source"] != "parser" || got["number"] != float64(3) {
+		t.Fatalf("alias value → parser list filtered by estado = pendiente: %v", got)
+	}
+	// The reply speaks the schema's word, never the alias.
+	if text, _ := got["text"].(string); !strings.Contains(text, "citas") || !strings.Contains(text, "estado = pendiente") {
+		t.Fatalf("the reply uses the schema's own words: %v", got["text"])
+	}
+	// RBAC unchanged: the row-scoped owner gets ITS 2 through the alias.
+	got = dpDo(t, rest, "POST", "/api/ask", tok("owner", askU1), map[string]any{"q": "cuántos turnos hay"}, http.StatusOK)
+	if got["source"] != "parser" || got["number"] != float64(2) {
+		t.Fatalf("owner must get ITS 2 via the alias: %v", got)
+	}
+	// Part C: sentences that are not questions never reach the model.
+	for q, kind := range map[string]string{"sí pero mejor el viernes": "unclear", "qué puedo preguntar": "help", "hola, buenos días": "help"} {
+		got = dpDo(t, rest, "POST", "/api/ask", super, map[string]any{"q": q}, http.StatusOK)
+		if got["kind"] != kind || got["source"] != "parser" || got["cost_usd"] != float64(0) {
+			t.Fatalf("%q → %s at zero cost, got %v", q, kind, got)
+		}
+	}
+	// … while a rare legitimate question still does.
+	got = dpDo(t, rest, "POST", "/api/ask", super, map[string]any{"q": "cuántos empleados tenemos"}, http.StatusOK)
+	if got["source"] != "model" {
+		t.Fatalf("a rare question keeps the model reachable: %v", got)
+	}
+	fm.mu.Lock()
+	calls := fm.calls
+	fm.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("exactly one model call (the rare question), got %d", calls)
+	}
+	// `display` carries plain text; the JSON is what a Siri card shows.
+	if d, _ := got["display"].(string); d == "" || strings.Contains(d, "<b>") {
+		t.Fatalf("display: %q", d)
+	}
+	rows := rt.Ledger.Today()
+	if len(rows) != 1 || rows[0].ModelCalls != 1 {
+		t.Fatalf("ledger: %+v", rows)
 	}
 }

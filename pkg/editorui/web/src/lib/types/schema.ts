@@ -86,6 +86,10 @@ export interface FieldDef {
 	accept?: string | string[];
 	/** file fields only (FILES-1): max stored size in bytes, enforced at attach. */
 	max_bytes?: number;
+	/** enum fields only (VOZ-AHORRO-S2, ADR-038): declared value → the words
+	 * people say for it ({"pendiente_pago": ["sin pagar"]}); the voice parser
+	 * reads them. Preserved losslessly (authored in the Code view). */
+	aliases?: Record<string, string[]>;
 }
 
 /** Declarative relation (served via ?include=). Mirrors schema.RelationDef. */
@@ -156,6 +160,9 @@ export interface ResourceSchema {
 	events?: string[];
 	renamed_from?: string;
 	import?: ImportConfig;
+	/** The words people use for this resource («pedidos» for ordenes —
+	 * VOZ-AHORRO-S2, ADR-038); validated unique by the engine at load. */
+	aliases?: string[];
 }
 
 /** Row-level predicate. Mirrors schema.Condition. */

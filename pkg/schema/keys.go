@@ -64,7 +64,7 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 	for resName, rawRes := range object("resources", top["resources"]) {
 		resPath := "resources." + resName
 		res := object(resPath, rawRes)
-		addUnknown(resPath, res, "fields", "hooks", "indexes", "events", "relations", "renamed_from", "foreign_keys", "import")
+		addUnknown(resPath, res, "fields", "hooks", "indexes", "events", "relations", "renamed_from", "foreign_keys", "import", "aliases")
 
 		// import: the governed-field create grant (WRITE-ASYMMETRY-S1). Strict-key
 		// so a typo ("role" instead of "roles") is rejected, not a silently dead
@@ -105,7 +105,7 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 			fld := object(fieldPath, rawField)
 			addUnknown(fieldPath, fld,
 				"type", "required", "unique", "auto", "enum", "relation", "on_delete", "on_update", "references", "renamed_from", "default",
-				"min", "max", "minLength", "maxLength", "pattern", "format", "state_machine", "accept", "max_bytes")
+				"min", "max", "minLength", "maxLength", "pattern", "format", "state_machine", "accept", "max_bytes", "aliases")
 			// state_machine has a fixed key set; `transitions` keys are user state
 			// names (free-form), so only the top-level keys are strict-checked.
 			if sm := object(fieldPath+".state_machine", fld["state_machine"]); sm != nil {

@@ -429,6 +429,32 @@ refreshed).
 ---
 
 
+## DONE in VOZ-AHORRO-S2 (2026-09-20) — the three leaks the real use showed, closed: synonyms DECLARED in the schema (`aliases`, ADR-038), the write PLAN cached and re-prepared, a «no entendí» never billed for a sentence that was never a question
+
+| Item | What closed it | Where |
+|---|---|---|
+| **VOZ-9 DONE** | the parser's REAL share, measured on the 28 questions with text of the 58 (ask_history + the sessions' live logs): 50 % without aliases → 75 % with the two apps' `aliases` declared (tiendita 67→78 %, petfriendly 20→70 %); the journal-era reasons classified (settled: «no resource named», «usuarios/pendientes/últimos/Carlos», «clientes+ordenes»; not: «two periods», «vendimos» → VOZ-12) | `evidencia/VOZ-AHORRO-S2/parser-real/`, ADR-038 §1 |
+| **VOZ-7 (c) BUILT** | the declarable vocabulary block = `aliases` (resource list + per-value map on enum fields), validated unique at load with the SAME forms the parser matches; used for reads AND writes; the model's vocabulary lists them; Studio round-trips them; `explain` reads them back; `spec` teaches them | ADR-038 §1, docs/SCHEMA_REFERENCE.md §2.6/§4.11 |
+| **ADR-037 §7 retracted** | a WRITE plan is cached (per tenant|role|user + vocabulary fingerprint) and re-prepared against the database before every confirmation — names, row, time tokens, required fields; the result is never cached | ADR-038 §2 |
+| **ADR-037 «sí pero…» retracted** | a stray answer to a confirmation, a greeting, a help request, a bare name — settled by the parser at zero cost when the sentence carries nothing executable; the line and its residual risk written | ADR-038 §3 |
+| **gasto útil / desperdiciado** | `Share.useful_usd`/`wasted_usd`, the card and `/admin/ask` split what the model spend bought | ADR-038 §3 |
+
+The archived narrative of VOZ-9, as it stood:
+
+### VOZ-9 — Measure the parser's real share on Miguel's usage — the history computes it now; a week of data is missing
+
+- **Origin:** VOZ-SIN-IA-S1 (2026-09-19); fed by VOZ-TRAZABILIDAD-S1. The real share
+  lives in `public.ask_history` (`GET /admin/ask?tenant=…` → `share.parser_pct`) and in
+  `gasto`. First real reading (Miguel's 4 questions since the VOZ-SIN-IA deploy, the
+  58's journal): 1 parser / 3 model = 25 %, reasons «no resource named» ×2 and «two
+  periods» ×1 — far too small a sample; the 67 % is the lab corpus.
+- **Impact:** if the real share is much lower the saving is a lab number.
+- **Ready:** a week after the VOZ-TRAZABILIDAD deploy: `share` (30 days) and
+  `model_fallbacks` with their reasons; under 50 % parser, a small session adds the
+  GENERIC shapes that are missing — never an app's synonyms («pedidos» for `ordenes`
+  is VOZ-7c, Miguel's call).
+
+
 ## DONE in VOZ-ESCRITURAS-S1 (2026-09-20) — writing by voice: create and update, never delete; nothing executes without an exact yes to exactly what will be written; every write through the engine's own cores (VOZ-4 / ADR-037 built)
 
 | Item | What shipped | Verified by |

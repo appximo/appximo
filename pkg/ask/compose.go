@@ -287,6 +287,18 @@ func Speech(html string) string {
 	return strings.TrimSpace(strings.Join(lines, ". "))
 }
 
+// Plain renders Telegram HTML as plain text for a screen that is not
+// Telegram: tags out, entities back, line breaks and bullets kept.
+func Plain(html string) string {
+	s := tagRe.ReplaceAllString(html, "")
+	s = strings.NewReplacer("&lt;", "<", "&gt;", ">", "&amp;", "&").Replace(s)
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " ")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
 func esc(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
 }

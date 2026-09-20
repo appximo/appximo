@@ -1154,7 +1154,15 @@ yourself in two minutes — nothing here needs a developer):
      role>` · `Content-Type: application/json`
    - Request Body: JSON → one field `q` = *Dictated Text*.
 3. **Get Dictionary Value** `speech` from *Contents of URL* → **Speak Text**
-   (or `headline` for the shortest answer; `text` if you show it on screen).
+   (or `headline` for the shortest answer).
+4. *(optional, VOZ-AHORRO-S2)* **Get Dictionary Value** `display` from the
+   same *Contents of URL* → **Show Result**. `display` is the answer as
+   plain text — line breaks kept, no HTML — and, when the app runs with
+   `APPXIMO_ASK_TRACE=on`, it ENDS with the `⚙︎ parser · 2 ms · US$ 0`
+   line: the trace is READ on the screen, never heard (`speech` never
+   carries it; a voice that says «tres centavos» after every answer is
+   muted in two days). A long answer (a list of ten rows) fits: Show Result
+   is a scrollable card; `speech` stays the full text for the voice.
 
 Ask «cuántas órdenes hay hoy» and Siri reads the engine's number back. A
 misheard name comes back as «Entendí X como Y» or as a question, never as a
@@ -1187,6 +1195,22 @@ appximo token --secret "$JWT_SECRET" --tenant <t> --role <r> --user-id <auth use
 The two checks cost one nil test and one map lookup per request, after
 the claims cache. The receiver's own self-call tokens (60 s, no scope) are
 untouched.
+
+**Synonyms are declared, never wired (VOZ-AHORRO-S2, ADR-038).** The parser
+answers at zero cost only in the schema's words; an owner says «pedidos»
+for `ordenes` and «mascotas» for `pets`. Declare those words in the schema
+— `"ordenes": {"aliases": ["pedidos", "ventas"]}` and, per state,
+`"estado": {"aliases": {"pendiente_pago": ["sin pagar"]}}` — and the parser
+recognizes them like the schema name, for questions and for orders. They
+are validated unique at load (an alias on two resources, or one that is
+also a state, refuses to boot naming the fix). Measured on the 58's real
+questions: parser share 50 % → 75 % after the two apps declared theirs.
+`gasto` shows what the model spend BOUGHT: `Gasto útil … · desperdiciado …`
+(a paid «no entendí» is waste), and a sentence that is not a question
+(«sí pero mejor el viernes» after a confirmation, «hola», «qué puedo
+preguntar») is answered without the model. Declaring aliases is a schema
+change: `scp` + `validate` + `install` + restart, and a rollback restores
+the previous schema FIRST (OPS-55 — the previous binary rejects the key).
 
 **What it cannot do (v1, by design):** one resource per question (no joins —
 «citas de pacientes de Bogotá» is «No entendí» unless the relation resolves
@@ -1224,8 +1248,12 @@ What holds, in order of what it protects:
 
 - **The yes is exact.** `sí`, `dale`, `ok`, `confirmo`, `listo`, `de
   acuerdo`, `hacelo`… «sí pero mejor el viernes» or «creo que sí» is NOT a
-  yes: the write is cancelled (the bot says so in one line) and the sentence
-  is read as a new order. `no` / `cancelar` cancels. A confirmation waits
+  yes: the write is cancelled (the bot says so in one line and why) and,
+  when the sentence carries nothing the grammar could execute, it is
+  settled by the parser at zero cost (VOZ-AHORRO-S2 — it used to buy a
+  «no entendí» from the model); a sentence that carries an order («sí,
+  anotá … para el viernes») is read as a new order. `no` / `cancelar`
+  cancels. A confirmation waits
   **5 minutes**, one per person; a new order replaces the previous one and
   says so; a question asked meanwhile cancels it and is answered.
 - **It goes through the engine's own write path.** The same RBAC, the same
@@ -1249,8 +1277,14 @@ What holds, in order of what it protects:
   mañana», «el viernes», «el viernes a las 3», «la semana que viene», «fin
   de mes», or a date you literally said. The confirmation shows the date.
 - **Cost.** A create needs the model: **≈ US$ 0.0023, ≈ 0.8 s** (Haiku,
-  one call). A state change («marcá como hecha…», «cancelá…») is settled
-  by the parser: **US$ 0, ≈ 15 ms**. The confirmation itself costs nothing.
+  one call) — **once per sentence per user**: the PLAN (never the result)
+  is cached per tenant|role|user (VOZ-AHORRO-S2), and the same order said
+  again is re-prepared against the database of the moment — names matched
+  again, the row looked up again, «mañana» resolved on the day it runs, the
+  required fields checked again — before a fresh confirmation is asked; a
+  cached plan can never confirm stale data. A state change («marcá como
+  hecha…», «cancelá el pedido ORD-1003») is settled by the parser: **US$ 0,
+  ≈ 15 ms**. The confirmation itself costs nothing.
   The same caps, trace (`⚙︎`) and history apply (§4.6e); the history keeps
   only the shape of a write (`[create tareas: titulo, vence_en]`), never
   its text.

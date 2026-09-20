@@ -215,9 +215,17 @@ type Phrase struct {
 	Source   string  `json:"source,omitempty"`
 	Fallback string  `json:"fallback,omitempty"`
 	LastAt   string  `json:"last_at,omitempty"`
+	// WastedUSD is the part of CostUSD spent on replies that bought nothing
+	// («no entendí»); Wasted is true when ALL of it was.
+	WastedUSD float64 `json:"wasted_usd,omitempty"`
+	Wasted    bool    `json:"wasted,omitempty"`
 }
 
-// Share is the real split by source over a window.
+// Share is the real split by source over a window — and, for the money,
+// the split between USEFUL spend (a model call that produced a plan the
+// engine could run or confirm) and WASTED spend (a model call that bought a
+// «no entendí», a refusal, or nothing at all — VOZ-AHORRO-S2 Part C: the
+// card used to show both as one number).
 type Share struct {
 	Questions int     `json:"questions"`
 	Parser    int     `json:"parser"`
@@ -226,7 +234,21 @@ type Share struct {
 	Other     int     `json:"other"` // capped / disabled / unavailable — no plan
 	CostUSD   float64 `json:"cost_usd"`
 	ParserPct float64 `json:"parser_pct"`
+	// UsefulUSD / WastedUSD split CostUSD; Wasted counts the paid questions
+	// that bought nothing (kind unclear, write_refused, unavailable, invalid).
+	UsefulUSD float64 `json:"useful_usd"`
+	WastedUSD float64 `json:"wasted_usd"`
+	Wasted    int     `json:"wasted"`
 }
+
+// WastedKinds are the reply kinds a paid model call is wasted on: the owner
+// got no plan they could use. Everything else a model call produced
+// (an answer, a confirmation, a pick, a not-found — the plan was right, the
+// data was not there) counts as useful.
+var WastedKinds = map[string]bool{"unclear": true, "write_refused": true, "unavailable": true, "invalid": true, "help": true}
+
+// wastedSQL is WastedKinds as a SQL list (the history groups by it).
+const wastedSQL = `('unclear','write_refused','unavailable','invalid','help')`
 
 // TopCost lists the phrases that cost the most (model questions), last N days.
 func (h *History) TopCost(ctx context.Context, tenant string, days, n int) ([]Phrase, error) {
@@ -254,7 +276,8 @@ func (h *History) phrases(ctx context.Context, tenant string, days, n int, where
 	if days <= 0 {
 		days = h.cfg.HistoryDays
 	}
-	rows, err := h.pool.Query(ctx, `SELECT question, count(*), sum(cost_usd), max(source), max(fallback), to_char(max(at), 'YYYY-MM-DD HH24:MI')
+	rows, err := h.pool.Query(ctx, `SELECT question, count(*), sum(cost_usd), max(source), max(fallback), to_char(max(at), 'YYYY-MM-DD HH24:MI'),
+		coalesce(sum(cost_usd) FILTER (WHERE kind IN `+wastedSQL+`), 0)
 		FROM public.ask_history
 		WHERE tenant_id = $1 AND at >= now() - ($2::int * interval '1 day') AND `+where+`
 		GROUP BY question_hash, question ORDER BY `+order+` LIMIT $3`, tenant, days, n)
@@ -266,10 +289,11 @@ func (h *History) phrases(ctx context.Context, tenant string, days, n int, where
 	for rows.Next() {
 		var p Phrase
 		var c int64
-		if err := rows.Scan(&p.Question, &c, &p.CostUSD, &p.Source, &p.Fallback, &p.LastAt); err != nil {
+		if err := rows.Scan(&p.Question, &c, &p.CostUSD, &p.Source, &p.Fallback, &p.LastAt, &p.WastedUSD); err != nil {
 			return nil, err
 		}
 		p.Count = int(c)
+		p.Wasted = p.CostUSD > 0 && p.WastedUSD >= p.CostUSD
 		out = append(out, p)
 	}
 	return out, rows.Err()
@@ -284,7 +308,10 @@ func (h *History) ShareFor(ctx context.Context, tenant string, days int) (Share,
 	if days <= 0 {
 		days = h.cfg.HistoryDays
 	}
-	rows, err := h.pool.Query(ctx, `SELECT source, count(*), sum(cost_usd) FROM public.ask_history
+	rows, err := h.pool.Query(ctx, `SELECT source, count(*), sum(cost_usd),
+		coalesce(sum(cost_usd) FILTER (WHERE kind IN `+wastedSQL+`), 0),
+		count(*) FILTER (WHERE kind IN `+wastedSQL+` AND cost_usd > 0)
+		FROM public.ask_history
 		WHERE tenant_id = $1 AND at >= now() - ($2::int * interval '1 day') GROUP BY source`, tenant, days)
 	if err != nil {
 		return s, err
@@ -292,14 +319,16 @@ func (h *History) ShareFor(ctx context.Context, tenant string, days int) (Share,
 	defer rows.Close()
 	for rows.Next() {
 		var src string
-		var c int64
-		var usd float64
-		if err := rows.Scan(&src, &c, &usd); err != nil {
+		var c, wc int64
+		var usd, wusd float64
+		if err := rows.Scan(&src, &c, &usd, &wusd, &wc); err != nil {
 			return s, err
 		}
 		n := int(c)
 		s.Questions += n
 		s.CostUSD += usd
+		s.WastedUSD += wusd
+		s.Wasted += int(wc)
 		switch src {
 		case "parser":
 			s.Parser += n
@@ -314,5 +343,6 @@ func (h *History) ShareFor(ctx context.Context, tenant string, days int) (Share,
 	if s.Questions > 0 {
 		s.ParserPct = 100 * float64(s.Parser) / float64(s.Questions)
 	}
+	s.UsefulUSD = s.CostUSD - s.WastedUSD
 	return s, rows.Err()
 }

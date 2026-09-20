@@ -336,6 +336,23 @@ buttons (`callback_query`), keyboard removed once resolved.
 never needs a seam here either: it reads the same `/api/ask` as its role.
 Example: examples/model-lab/agenda-voz.json.
 
+**What it costs, and how to make it cost less (VOZ-AHORRO-S2, ADR-038).**
+The parser knows the schema's words and Spanish function words — nothing
+else. The words an OWNER uses («pedidos», «mascotas», «sin pagar») are
+declared in the schema as `aliases` (resource-level list; per-value map on
+an enum field — SCHEMA_REFERENCE §2.6/§4.11), validated unique at load, and
+the parser then settles them at zero cost for reads and writes (measured on
+real questions: 50 % → 75 % parser share). A repeated WRITE order is one
+model call: the plan (never the result) is cached per tenant|role|user and
+re-prepared against the database before every confirmation. A sentence that
+is not a question (a stray «sí pero…», a greeting, «qué puedo preguntar», a
+bare name) is answered by the parser, not billed — only when it carries
+nothing the grammar could execute. The reply also carries `display` (plain
+text WITH the ⚙︎ trace, for a screen that is not Telegram; `speech` never
+carries it), and `/admin/ask` / `gasto` split the spend into `useful_usd`
+and `wasted_usd`. The cache key carries the vocabulary's fingerprint: a
+synonym declared after a cached «no entendí» cures it on the next restart.
+
 ### 2c. Reading from OUTSIDE the binary — `?fields=`: ask for the columns you will use
 
 **The problem it solves is not bandwidth, it is disk.** A `json`/`jsonb`/`text`

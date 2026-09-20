@@ -104,7 +104,9 @@ Note the order: strict-key (step 3) runs **before** the required-field check (st
 **Strict keys at EVERY level.** `CheckUnknownKeys` (`pkg/schema/keys.go`) walks the entire document and rejects any key outside the documented set *for that level*, listing the valid keys in the error. This is deliberate: an unknown key is a typo, not an extension (e.g. `webhooks` instead of `hooks`, `refcolumns` instead of `ref_columns`), and a silently-dropped key would become quietly dead config. The levels it strict-checks (each "valid keys" list below is emitted in the exact argument order shown):
 
 - root: `$schema, version, name, resources, rbac, workflows, summary` (keys.go)
-- `summary`: `resources` (keys.go)
+- `summary`: `resources`, `notify`, `quiet_days` (keys.go)
+- resource: `fields, hooks, indexes, events, relations, renamed_from, foreign_keys, import, aliases` (keys.go)
+- field: the structural/validation keys of §3–§4 plus `aliases` (enum fields only; keys.go)
 - each resource: `fields, hooks, indexes, events, relations, renamed_from, foreign_keys` (keys.go)
 - each `foreign_keys[]` entry: `columns, target, ref_columns, on_delete, on_update` (keys.go)
 - each relation: `type, target, fk, through, target_fk, limit` (keys.go)
@@ -418,6 +420,16 @@ The declared exception is **importing** rows that must keep their original ident
 - **Contract:** `/openapi.json` publishes `x-appximo-import: {"fields": […]}` on the resource's component schema. The granted role list is deliberately **not** published (the spec is unauthenticated; role names are not) and the governed properties keep `readOnly: true` — the truth for every caller outside the grant.
 
 ---
+
+### 2.6 `aliases` — how PEOPLE name the resource (VOZ-AHORRO-S2, ADR-038)
+
+```json
+"ordenes": { "aliases": ["pedidos", "ventas", "compras"], "fields": { … } }
+```
+
+- **What it is.** The words the owner actually says for this resource when its schema name is not the word they use — «pedidos» for `ordenes`, «mascotas» for an English `pets`. The voice channel (`POST /api/ask`, the Telegram bot, a Siri shortcut) recognizes an alias exactly like the schema name: singular/plural, accent-insensitive, for questions («cuántos pedidos hay hoy» → the deterministic parser, US$ 0) and for writes («cancelá el pedido ORD-1003»). The model's vocabulary lists them too (`ordenes (also called: pedidos, ventas)`), so the rare question that still needs the model maps them from the schema, not from a guess. **The engine wires no domain word: if the schema does not declare it, the parser does not know it — and that is correct.** The reply always uses the schema's own word (`13 ordenes`), never the alias.
+- **Validated at load** (`validateAliases`, pkg/schema/aliases.go) — every alias must mean exactly ONE thing in the whole schema: `alias_is_resource_name` (it is a declared resource's own name, singular or plural), `alias_ambiguous` (the same alias on two resources — the parser would have to guess, and it never guesses), `alias_is_value` (it is also a declared enum value or a value alias — a word cannot mean a resource and a state at once), `alias_duplicate` (repeated in the resource after normalization), `alias_empty` / `alias_too_long` (≤ 40 chars, ≤ 4 words), `alias_empty_list` (dead config). The forms compared (`schema.NameForms`) are the SAME forms the parser matches, so "unique at load" and "recognized at runtime" are one predicate.
+- Studio preserves it on round-trip (authored in the Code view); `appximo explain` reads it back («la gente también le dice: "pedidos", "ventas"»); `appximo spec` teaches it to an external agent. Value aliases (how people say a STATE) are the field-level `aliases` of §4.11.
 
 ## 3. Fields and types
 
@@ -923,6 +935,19 @@ GraphQL surfaces the identical engine and field list under `errors[].extensions.
 On `POST /api/contacts` with body `{"name":"","email":"nope","age":200,"handle":"BadHandle"}` the response is `422 validation_failed` listing: `age` (`max` → "must be <= 130"), `email` (`format` → "must be a valid email"), `handle` (`pattern` → "must match pattern ^@[a-z0-9_]{1,15}$"), `name` (`minLength` → "must be at least 1 characters") — per-field rules are emitted over the body's **sorted** keys. The omitted `score`/`status`/`ref`/`added_at`/`verified` are filled from their defaults; `created_at` is engine-managed.
 
 ---
+
+### 4.11 Field-level `aliases` — how people say a VALUE (enum fields only; VOZ-AHORRO-S2)
+
+```json
+"estado": {
+  "type": "string", "enum": ["creada", "pendiente_pago", "pagada", "cancelada"],
+  "aliases": { "pendiente_pago": ["sin pagar", "pendientes", "por pagar"], "pagada": ["cobrada"] }
+}
+```
+
+- A map from a DECLARED enum value to the words people say for it. The voice parser consumes an alias exactly like the value («qué pedidos están sin pagar» → `estado = pendiente_pago`; «marcá como cobrada…» → a transition to `pagada`), including Spanish gender/number forms (`cobrada` also matches «cobrado», «cobrados»). The model's vocabulary shows them beside the value.
+- **Validated at load:** `alias_needs_enum` (the field has no enum), `alias_unknown_value` (a key that is not an enum member — the error lists the members), `alias_is_value` (the value's own form), `alias_duplicate` (a word that already means another value of the SAME resource, declared or aliased), `alias_is_resource_name` (a word that names a resource or a resource alias), `alias_empty_list`. **A value alias MAY repeat across resources** («sin pagar» on `ordenes` and on `facturas`): the parser scopes it by the resource the sentence names, and a sentence that names no resource is settled only when the value exists in exactly one place («cuántos perros hay» → `pets.species = dog`).
+- Not a validation rule: an alias never widens what a write may store — the enum is still the contract; the alias is only how the owner SAYS the value.
 
 ## 5. State machines
 

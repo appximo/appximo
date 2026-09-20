@@ -471,9 +471,32 @@ pasos:
    `Content-Type: application/json`, cuerpo JSON con un campo `q` = *Texto
    dictado*.
 3. **Obtener valor del diccionario** `speech` → **Leer texto en voz alta**
-   (o `headline` para la versión de una línea; `text` si prefiere verlo).
+   (o `headline` para la versión de una línea).
+4. *(opcional)* **Obtener valor del diccionario** `display` del mismo
+   *Contenido de URL* → **Mostrar resultado**. `display` es la respuesta en
+   texto plano (con sus renglones, sin HTML) y, si la app tiene
+   `APPXIMO_ASK_TRACE=on`, termina con la línea `⚙︎ parser · 2 ms · US$ 0`:
+   **la traza se ve en la pantalla y nunca se escucha** (`speech` no la
+   lleva; una voz que dice «tres centavos» después de cada respuesta se
+   apaga a los dos días). Una respuesta larga (una lista de diez) entra
+   bien: *Mostrar resultado* es una tarjeta que se desplaza.
 
 Diga «cuántas órdenes hay hoy» y Siri le lee el número que contó el motor.
+
+**Sus palabras, declaradas (VOZ-AHORRO-S2).** El motor responde gratis
+solo con las palabras del schema; usted dice «pedidos» y el schema dice
+`ordenes`, dice «mascotas» y el schema dice `pets`. Esas palabras se
+declaran en el schema como `aliases` — en el recurso
+(`"ordenes": {"aliases": ["pedidos", "ventas"]}`) y por estado
+(`"estado": {"aliases": {"pendiente_pago": ["sin pagar"]}}`) — y desde
+ahí el motor las entiende como si fueran el nombre, para preguntar y para
+anotar. Un alias que podría significar dos cosas no arranca: el motor le
+dice cuál sobra. Con las palabras de sus dos apps declaradas, la porción
+que responde el parser pasó del 50 % al 75 % sobre sus preguntas reales.
+`gasto` ahora separa el **gasto útil** del **desperdiciado** (lo que se
+pagó por un «no entendí»), y una frase que no es una pregunta — «sí pero
+mejor el viernes» después de una confirmación, «hola», «qué puedo
+preguntar» — se responde sin el modelo.
 
 **Lo que todavía no responde (a propósito):** preguntas que cruzan dos
 recursos («clientes de Medellín con órdenes»), comparaciones contra otro
@@ -533,9 +556,14 @@ bot:   ✅ Listo.
   mañana», «el viernes», «el viernes a las 3», «la semana que viene», «fin
   de mes». La confirmación muestra el día.
 - **Cuánto cuesta.** Anotar algo nuevo necesita el modelo: **≈ US$ 0,0023 y
-  ≈ 1 segundo**. Cambiar un estado («marcá como hecha…», «cancelá…») lo
+  ≈ 1 segundo, una sola vez por frase**: la misma orden repetida («anotá
+  pagar la luz para mañana», tres veces en un mes) se piensa una vez y se
+  vuelve a armar cada vez con los datos del momento — los nombres se
+  buscan de nuevo, «mañana» es el de ese día, se pregunta lo que falte —
+  antes de pedirle el sí (VOZ-AHORRO-S2; antes cobraba las tres). Cambiar
+  un estado («marcá como hecha…», «cancelá el pedido ORD-1003») lo
   resuelve el motor solo: **US$ 0, al instante**. Decir «sí» no cuesta
-  nada. Aplican los mismos topes y el mismo `gasto` de §3d; el historial
+  nada, y decir «sí pero…» tampoco: se cancela y se le dice por qué. Aplican los mismos topes y el mismo `gasto` de §3d; el historial
   guarda solo la forma de lo que escribió, nunca el texto.
 
 **En Telegram** la confirmación trae botones **✅ Sí / ✖ No** (y `1 2 3`

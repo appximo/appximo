@@ -1,9 +1,12 @@
 package ask
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/appximo/appximo/pkg/schema"
 )
@@ -36,6 +39,38 @@ type Field struct {
 	// born there); Transitions maps state → reachable states.
 	Initial     []string
 	Transitions map[string][]string
+	// Aliases (VOZ-AHORRO-S2, ADR-038) map a declared enum value to the words
+	// people say for it («sin pagar» → pendiente_pago). Declared in the
+	// schema, validated unique per resource at load; the parser consumes an
+	// alias exactly like the value.
+	Aliases map[string][]string
+}
+
+// valueForm is one way an enum value is said: the normalized phrase, the
+// declared value it means, and whether the phrase has several words (those
+// are consumed before resources, so «pendiente de pago» never reads «pago»
+// as the resource pagos).
+type valueForm struct {
+	form, val string
+	multi     bool
+	alias     bool
+}
+
+// valueForms lists every form of every declared value of f — the value's own
+// forms (schema.ValueForms) and its aliases' — in schema order.
+func (f *Field) valueForms() []valueForm {
+	var out []valueForm
+	for _, val := range f.Enum {
+		for _, form := range schema.ValueForms(val) {
+			out = append(out, valueForm{form: form, val: val, multi: strings.Contains(form, " ")})
+		}
+		for _, a := range f.Aliases[val] {
+			for _, form := range schema.ValueForms(a) {
+				out = append(out, valueForm{form: form, val: val, multi: strings.Contains(form, " "), alias: true})
+			}
+		}
+	}
+	return out
 }
 
 func (f *Field) IsNumeric() bool {
@@ -65,9 +100,28 @@ type Resource struct {
 	// write on this resource. The model is told, so it never plans a write
 	// the role cannot make; the executor re-checks regardless.
 	CanCreate, CanUpdate bool
+	// Aliases (VOZ-AHORRO-S2) are the words people use for this resource
+	// («pedidos», «ventas» for ordenes), declared in the schema and validated
+	// unique across it; the parser names the resource by them too.
+	Aliases []string
 }
 
 func (r *Resource) Field(name string) *Field { return r.byName[name] }
+
+// NameForms lists every form the resource is named by: its schema name
+// (singular/plural, underscores as spaces) and each declared alias's forms —
+// the SAME derivation the validator used to prove them unique.
+func (r *Resource) NameForms() []string {
+	forms := schema.NameForms(r.Name)
+	for _, a := range r.Aliases {
+		for _, f := range schema.NameForms(a) {
+			if !contains(forms, f) {
+				forms = append(forms, f)
+			}
+		}
+	}
+	return forms
+}
 
 // DefaultTimeField is the field a bare period applies to: the creation
 // timestamp when declared; else the only time field; else "".
@@ -188,6 +242,75 @@ type Vocabulary struct {
 	resources  map[string]*Resource
 	order      []string
 	writeCheck WriteCheck
+	// fp is the vocabulary's fingerprint (Fingerprint): every name the parser
+	// and the model may recognize, hashed — a plan cache scoped by it never
+	// serves a plan translated against a vocabulary that has since changed
+	// (a synonym declared after a «no entendí» must cure it, not sit behind
+	// a cached refusal).
+	fp string
+	// lexicon is every single word and every multi-word phrase the parser
+	// could consume as a schema word (resources, aliases, values, fields),
+	// built once for the pre-discard check (VOZ-AHORRO-S2 Part C).
+	lexOnce sync.Once
+	lexWord map[string]bool
+	lexMany []string
+}
+
+// Fingerprint identifies the vocabulary's content (resources, aliases, fields,
+// enum values and value aliases) — stable across processes for the same
+// schema and role, different for any change the parser or the model could
+// see.
+func (v *Vocabulary) Fingerprint() string { return v.fp }
+
+func (v *Vocabulary) fingerprint() string {
+	h := sha256.New()
+	for _, n := range v.order {
+		r := v.resources[n]
+		fmt.Fprintf(h, "R %s %s\n", n, strings.Join(r.Aliases, ","))
+		for _, f := range r.Fields {
+			fmt.Fprintf(h, "F %s %s %s %s\n", f.Name, f.Type, f.Relation, strings.Join(f.Enum, ","))
+			for _, val := range sortedKeys(f.Aliases) {
+				fmt.Fprintf(h, "A %s=%s\n", val, strings.Join(f.Aliases[val], ","))
+			}
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// lexicon builds the schema-word index once: every single-word form goes to
+// lexWord, every multi-word form to lexMany.
+func (v *Vocabulary) lexicon() (map[string]bool, []string) {
+	v.lexOnce.Do(func() {
+		v.lexWord = map[string]bool{}
+		for _, n := range v.order {
+			r := v.resources[n]
+			for _, f := range r.NameForms() {
+				v.addLex(f)
+			}
+			for _, f := range r.Fields {
+				for _, form := range schema.NameForms(f.Name) {
+					v.addLex(form)
+				}
+				for _, vf := range f.valueForms() {
+					v.addLex(vf.form)
+				}
+			}
+		}
+	})
+	return v.lexWord, v.lexMany
+}
+
+func (v *Vocabulary) addLex(form string) {
+	if form == "" {
+		return
+	}
+	if strings.Contains(form, " ") {
+		if !contains(v.lexMany, form) {
+			v.lexMany = append(v.lexMany, form)
+		}
+		return
+	}
+	v.lexWord[form] = true
 }
 
 // BuildWithWrites is Build plus the role's write abilities per resource.
@@ -229,12 +352,14 @@ func fill(v *Vocabulary, s *schema.APISchema, check ReadCheck) {
 		res := s.Resources[name]
 		r := BuildResource(name, &res, allowedFields)
 		r.Listed = listed[name]
+		r.Aliases = append([]string(nil), res.Aliases...)
 		if v.writeCheck != nil {
 			r.CanCreate, r.CanUpdate = v.writeCheck(name)
 		}
 		v.resources[name] = r
 		v.order = append(v.order, name)
 	}
+	v.fp = v.fingerprint()
 }
 
 // BuildResource projects one schema resource onto the askable shape, keeping
@@ -253,7 +378,7 @@ func BuildResource(name string, res *schema.ResourceSchema, allowed []string) *R
 			continue
 		}
 		fd := res.Fields[fname]
-		f := &Field{Name: fname, Type: fd.Type, Enum: fd.Enum, Relation: fd.Relation, Required: fd.Required, HasDefault: fd.Default != nil, Default: fd.Default, Auto: fd.Auto.Enabled()}
+		f := &Field{Name: fname, Type: fd.Type, Enum: fd.Enum, Relation: fd.Relation, Required: fd.Required, HasDefault: fd.Default != nil, Default: fd.Default, Auto: fd.Auto.Enabled(), Aliases: fd.Aliases}
 		if fd.Auto.Enabled() && fd.Type == "time" {
 			if fd.Auto.RefreshesOnUpdate(fname) {
 				f.IsUpdated = true
@@ -364,7 +489,17 @@ func (r *Resource) renderLine() string {
 			p.WriteString(", updated at")
 		}
 		if len(f.Enum) > 0 {
-			p.WriteString("; values: " + strings.Join(f.Enum, "|"))
+			vals := make([]string, 0, len(f.Enum))
+			for _, e := range f.Enum {
+				if al := f.Aliases[e]; len(al) > 0 {
+					// The owner's own words for the value, so the model maps
+					// «sin pagar» to pendiente_pago from the schema, not from a
+					// guess. Declared, never wired.
+					e += " (also: " + strings.Join(al, ", ") + ")"
+				}
+				vals = append(vals, e)
+			}
+			p.WriteString("; values: " + strings.Join(vals, "|"))
 		}
 		if f.HasMachine {
 			if len(f.Pending) > 0 {
@@ -392,7 +527,11 @@ func (r *Resource) renderLine() string {
 	case r.CanUpdate:
 		can = " [may update]"
 	}
-	return "- " + r.Name + ":" + can + " " + strings.Join(parts, " ") + "\n"
+	also := ""
+	if len(r.Aliases) > 0 {
+		also = " (also called: " + strings.Join(r.Aliases, ", ") + ")"
+	}
+	return "- " + r.Name + ":" + can + also + " " + strings.Join(parts, " ") + "\n"
 }
 
 // MoneyField is the amount a row is best summarized by: a money field named

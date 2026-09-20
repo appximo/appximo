@@ -218,22 +218,31 @@ func TestWrite_CreateResolvesTheNameThenConfirmsThenWrites(t *testing.T) {
 	if !strings.Contains(m.systems[0], "WRITES —") || !strings.Contains(m.systems[0], "[may create+update]") {
 		t.Errorf("system prompt lacks the write section / abilities")
 	}
-	// An ambiguous yes cancels — and the text is processed as a NEW question
-	// (here the scripted model re-plans the same create: a new pending, a new
-	// id, nothing written).
+	// An ambiguous yes cancels. VOZ-AHORRO-S2 (Part C): «sí pero mejor para
+	// el lunes» names nothing the grammar could execute, so the parser is
+	// SURE it is a stray answer to the confirmation — cancelled, said, and
+	// NOT sent to the model (ADR-037 paid a model call here; the real
+	// history showed it bought a «no entendí»).
 	firstID := r.Pending.ID
+	calls := m.calls
 	r2 := Answer(context.Background(), d, "sí pero mejor para el lunes")
 	if len(w.writes) != 0 {
 		t.Fatalf("an ambiguous yes must not write; got %v", w.writes)
 	}
-	if !strings.Contains(r2.Text, "Cancelé la escritura que estaba pendiente") {
-		t.Errorf("the cancellation must be said: %s", r2.Text)
+	if !strings.Contains(r2.Text, "Cancelé la escritura que estaba pendiente") || !strings.Contains(r2.Text, "no es un <b>sí</b>") {
+		t.Errorf("the cancellation must be said, with why: %s", r2.Text)
 	}
 	if st.ByID(firstID, d.PendingKey) != nil {
 		t.Fatalf("the first pending must be gone")
 	}
-	if r2.Kind != "confirm" || r2.Pending.ID == firstID {
-		t.Fatalf("the text was re-planned as a new pending: %s", r2.Kind)
+	if r2.Kind != "unclear" || r2.Source != "parser" || r2.CostUSD != 0 || m.calls != calls || r2.Pending != nil {
+		t.Fatalf("a stray confirmation is settled by the parser at zero cost: kind=%s source=%s cost=%v calls=%d→%d", r2.Kind, r2.Source, r2.CostUSD, calls, m.calls)
+	}
+	// A sentence that DOES carry an order after the cancelled yes is planned
+	// as a new question (the scripted model re-plans the same create).
+	r2 = Answer(context.Background(), d, "sí, anotá llamar a Fabián para arreglar el techo, urgente, para mañana")
+	if r2.Kind != "confirm" || r2.Pending == nil || r2.Pending.ID == firstID {
+		t.Fatalf("an order after a stray yes is re-planned as a new pending: %s %s", r2.Kind, r2.Text)
 	}
 	r = r2
 	// A plain yes executes through the writer.

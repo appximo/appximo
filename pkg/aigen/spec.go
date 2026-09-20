@@ -101,6 +101,21 @@ RENAMES (safe evolution — the migration renames instead of drop+create):
   - The old name must NOT still be declared. Only meaningful when evolving an
     EXISTING deployed schema; never emit it on a fresh design.
 
+ALIASES (how PEOPLE name things — for the voice/question channel, VOZ-AHORRO-S2):
+  - resource: "ordenes": { "aliases": ["pedidos", "ventas"], "fields": {...} }
+  - value (enum fields only): "estado": { "type": "string", "enum": ["pendiente_pago", "pagada"],
+                                          "aliases": { "pendiente_pago": ["sin pagar", "pendientes"] } }
+  - The engine wires NO domain word: a question like «cuántos pedidos hay» is
+    answered without a model call ONLY if the schema declares «pedidos»; the
+    model's vocabulary lists the aliases too. Declare the words the owner
+    actually uses (an English schema spoken in Spanish NEEDS them: "pets":
+    {"aliases": ["mascotas"]}). Rejected at load: an alias that is a declared
+    resource's own name/plural, the same alias on two resources, an alias
+    that is also a declared value, a value alias whose key is not in "enum",
+    a duplicate within a resource. A value alias MAY repeat across resources.
+    Short words only (≤ 4 words, ≤ 40 chars); the reply always uses the
+    schema's own word.
+
 RELATIONS extra key: "limit": <n> bounds embedded children per parent (default 50).
 
 ## Common mistakes (each of these REJECTS the schema)
@@ -154,12 +169,14 @@ const SpecExampleAdvanced = `{
       }
     },
     "citas": {
+      "aliases": ["turnos", "consultas"],
       "fields": {
         "paciente_id":  { "type": "uuid", "required": true, "relation": "pacientes", "on_delete": "cascade" },
         "optometra_id": { "type": "uuid" },
         "fecha":        { "type": "time", "required": true },
         "estado": {
           "type": "string", "enum": ["agendada", "atendida", "cancelada"], "default": "agendada",
+          "aliases": { "agendada": ["pendiente", "por atender"] },
           "state_machine": {
             "initial": "agendada",
             "transitions": { "agendada": ["atendida", "cancelada"], "atendida": [], "cancelada": [] },

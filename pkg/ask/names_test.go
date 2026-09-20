@@ -131,3 +131,18 @@ func labels(cs []Candidate) []string {
 	}
 	return out
 }
+
+// VOZ-AHORRO-S2: an exact CODE beside its near neighbours is the row, not a
+// question — ORD-1001 vs ORD-1011 / ORD-1010 score ~0.99 (found live); two
+// rows that sound the same still are.
+func TestDecide_ExactCodeBeatsNearCodes(t *testing.T) {
+	cands := []Candidate{{Label: "ORD-1001", Value: "a"}, {Label: "ORD-1011", Value: "b"}, {Label: "ORD-1010", Value: "c"}, {Label: "ORD-1012", Value: "d"}}
+	d := Decide(Match("ORD-1001", cands, nil))
+	if d.Kind != "one" || d.Chosen.Label != "ORD-1001" {
+		t.Fatalf("exact code must win: %+v", d)
+	}
+	same := []Candidate{{Label: "Ana Gómez", Value: "a"}, {Label: "Ana Gomes", Value: "b"}}
+	if d := Decide(Match("Ana Gomez", same, nil)); d.Kind != "several" {
+		t.Fatalf("two rows that sound the same stay a question: %+v", d)
+	}
+}

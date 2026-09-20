@@ -965,6 +965,41 @@ no longer a free label the client advances arbitrarily.
   The single-op update path without a state machine is unchanged (measured
   `no_change`). Example: [examples/model-lab/state-machine.json](examples/model-lab/state-machine.json).
 
+#### Aliases — how people name a resource or a state (`aliases`, VOZ-AHORRO-S2, ADR-038)
+
+```json
+"ordenes": {
+  "aliases": ["pedidos", "ventas"],
+  "fields": {
+    "estado": { "type": "string", "enum": ["creada", "pendiente_pago", "pagada"],
+                "aliases": { "pendiente_pago": ["sin pagar", "pendientes"], "pagada": ["cobrada"] } }
+  }
+}
+```
+
+The voice channel (`POST /api/ask`, the bot, a Siri shortcut) understands a
+question or an order ONLY in the schema's words plus Spanish function words.
+An owner says «pedidos», not `ordenes`; a Spanish owner of an English schema
+says «mascotas», not `pets`. `aliases` DECLARES those words: a resource-level
+list (how the resource is named) and, on an enum field, a map from a declared
+value to the words people say for it. The deterministic parser recognizes an
+alias exactly like the schema name (singular/plural, accents, gender), for
+reads AND writes, at zero cost; the model's vocabulary lists them for the
+rare question that still needs it. **The engine wires no domain word: if the
+schema does not declare it, the parser does not know it** (measured on the
+58's real questions: the parser's share went from 50 % to 75 % once the two
+apps declared the words the owner uses). Validated at load — an alias must
+mean exactly ONE thing in the whole schema: a declared resource's own
+name/plural (`alias_is_resource_name`), the same alias on two resources
+(`alias_ambiguous`), a word that is also a value (`alias_is_value`), a
+duplicate within a resource (`alias_duplicate`), a value key outside the enum
+(`alias_unknown_value`), a non-enum field (`alias_needs_enum`) — each a load
+error naming the fix, never a word the parser silently guesses about. A value
+alias may repeat across resources («sin pagar» on orders and on invoices).
+The reply always speaks the schema's word. Studio preserves the block (Code
+view); `appximo explain` reads it back. Full contract: docs/SCHEMA_REFERENCE.md
+§2.6 and §4.11.
+
 ### Relations
 
 ```json
@@ -2162,12 +2197,28 @@ Read-only by grammar: a write intent is `write_refused`. Reserved segment
 `$public` role are 403 (a question spends a model call). Model timeout (`APPXIMO_ASK_TIMEOUT`, 8 s) → `unavailable`,
 and the bot degrades to the three fixed commands, which never touch the
 model. **The model is the LAST resort (VOZ-SIN-IA-S1, ADR-035):** first the
-deterministic parser (`pkg/ask/parser.go` — one resource by schema name,
-one operation, declared enum values, period phrases, a name after a
-preposition, EVERY word accounted for, else not sure; a write verb refused
-without a call; 33/49 = 67 % of the real corpus, pinned by test), then the
-plan cache (per tenant+role, normalized question, 24 h/2 000 entries, plans
-not data — a cached «hoy» is tomorrow's today), then the model. The wallet
+deterministic parser (`pkg/ask/parser.go` — one resource by schema name OR
+declared alias, one operation, declared enum values or their aliases, period
+phrases, a name after a preposition / after «llamado» / after the relation's
+target («del cliente Ana Gómez») / a Capitalized run / a code with digits
+(«ORD-1003»), «los últimos N», EVERY word accounted for, else not sure; a
+write verb refused without a call; 33/49 = 67 % of the lab corpus, and on
+the 58's REAL questions 50 % → 75 % once the apps declared their `aliases` —
+VOZ-AHORRO-S2), then the plan cache (per tenant+role+vocabulary-fingerprint,
+normalized question, 24 h/2 000 entries, plans not data — a cached «hoy» is
+tomorrow's today; a WRITE plan is cached too, per tenant+role+USER, and is
+re-prepared against the database before every confirmation — names, the row,
+the time tokens, the required fields — so a repeated «anotá pagar la luz para
+mañana» costs one model call, not three, and never writes stale data), then
+the model. **And the parser is also sure of what is NOT a question** (Part C
+of VOZ-AHORRO-S2): a stray answer to a confirmation that no longer exists
+(«sí pero mejor el viernes»), a greeting, a help request, a bare proper name
+— discarded at zero cost ONLY when the sentence carries nothing the grammar
+could execute (no operation word, no schema word, no period, no write verb);
+anything executable keeps the model reachable, because discarding a
+legitimate question is worse than three cents. `gasto` and `/admin/ask`
+split the model spend into USEFUL (a plan the engine ran or confirmed) and
+WASTED (a paid «no entendí»). The wallet
 guard (`pkg/askspend`, `public.ask_spend`): `APPXIMO_ASK_PER_MINUTE` 6 model
 calls, `APPXIMO_ASK_DAILY_USD` 0.50 per tenant per day (at the cap the model
 is off, the rest keeps answering — `kind: capped`), ONE alert per tenant per

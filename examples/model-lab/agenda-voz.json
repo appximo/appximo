@@ -22,7 +22,11 @@
           "type": "time",
           "auto": "create"
         }
-      }
+      },
+      "aliases": [
+        "contactos",
+        "gente"
+      ]
     },
     "tareas": {
       "fields": {
@@ -72,6 +76,20 @@
               "hecha": [],
               "cancelada": []
             }
+          },
+          "aliases": {
+            "pendiente": [
+              "por hacer",
+              "abierta"
+            ],
+            "hecha": [
+              "lista",
+              "terminada",
+              "cerrada"
+            ],
+            "cancelada": [
+              "anulada"
+            ]
           }
         },
         "creado_en": {
@@ -105,6 +123,10 @@
       "events": [
         "create",
         "update"
+      ],
+      "aliases": [
+        "cosas",
+        "recordatorios"
       ]
     }
   },

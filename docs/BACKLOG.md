@@ -1490,22 +1490,11 @@ tarball of scripts/), and the smoke runs fleet-audit once.
   entendí» with what CAN be asked — honest, but short.
 - **Ready:** Miguel decides which are worth it: (a) rankings = list + sort on a numeric
   field (small; the engine has sort); (b) period comparison = two plans and a subtraction
-  by the engine (medium); (c) a declarable vocabulary block (which states count as
-  "sold") (medium; grammar + Studio); (d) follow-ups with a one-question memory (medium,
-  and it opens the door to ambiguous answers). Each one provoked before it is built.
-
-### VOZ-9 — Measure the parser's real share on Miguel's usage — the history computes it now; a week of data is missing
-
-- **Origin:** VOZ-SIN-IA-S1 (2026-09-19); fed by VOZ-TRAZABILIDAD-S1. The real share
-  lives in `public.ask_history` (`GET /admin/ask?tenant=…` → `share.parser_pct`) and in
-  `gasto`. First real reading (Miguel's 4 questions since the VOZ-SIN-IA deploy, the
-  58's journal): 1 parser / 3 model = 25 %, reasons «no resource named» ×2 and «two
-  periods» ×1 — far too small a sample; the 67 % is the lab corpus.
-- **Impact:** if the real share is much lower the saving is a lab number.
-- **Ready:** a week after the VOZ-TRAZABILIDAD deploy: `share` (30 days) and
-  `model_fallbacks` with their reasons; under 50 % parser, a small session adds the
-  GENERIC shapes that are missing — never an app's synonyms («pedidos» for `ordenes`
-  is VOZ-7c, Miguel's call).
+  by the engine (medium); (c) ~~a declarable vocabulary block~~ **BUILT in VOZ-AHORRO-S2
+  as `aliases` (ADR-038)** — resource and value synonyms, validated unique at load; what
+  an alias cannot name (a verb like «vendimos», a comparison) is VOZ-12; (d) follow-ups
+  with a one-question memory (medium, and it opens the door to ambiguous answers). Each
+  one provoked before it is built.
 
 ### VOZ-10 — The redacted history cannot hide a name the engine did not identify
 
@@ -1529,6 +1518,35 @@ tarball of scripts/), and the smoke runs fleet-audit once.
 - **Ready:** a `public.ask_pending` table (tenant, role, user, id, plan JSON, expires)
   read/written through the ledger's pool — only when a multi-replica deploy of one app
   exists. Cheap; not before it is needed.
+
+### VOZ-12 — What an alias cannot name still goes to the model: «vendimos», «vigentes», «la más cara», «¿y ayer?», a question in English on a Spanish app
+
+- **Origin:** VOZ-AHORRO-S2 (2026-09-20), ADR-038 §Limits. With the aliases declared the
+  parser settles 75 % of the 58's real questions (50 % before). What remains is verbs and
+  comparisons an alias cannot express: «cuánto vendimos esta semana» (a verb that implies
+  a state AND a sum), «tenemos cupones vigentes?» (a comparison with the present), «cuál
+  fue la orden más cara del mes» (a ranked max), «how many pets are vaccinated» (another
+  language), «hoy y ayer» (two periods). Each is a model call (≈ US$ 0.003) that answers
+  right or says an honest «no entendí».
+- **Impact:** the 25 % that still costs; in habitual use the plan cache absorbs repeats,
+  so the cost is the NEW phrases of those shapes — tens of cents a month, not dollars.
+- **Ready:** a product decision (VOZ-7): a declarable block of business VERBS («vendimos»
+  = sum of `total_centavos` over states [pagada, entregada, cerrada]) would be the natural
+  extension of `aliases` (same place, same validator) — medium: grammar + spec + Studio.
+  The alternative is to leave it to the model and the cache, which is what is measured
+  today. Miguel decides with one more week of `gasto` (waste is now shown apart).
+
+### VOZ-13 — `aliases` are authored only in Studio's Code view: the entity panel preserves them but does not edit them
+
+- **Origin:** VOZ-AHORRO-S2 (2026-09-20), ADR-038 §Limits. Studio round-trips the block
+  faithfully (resource-level in the entity's extras, value-level inside the field def),
+  like `summary`; there is no visual control, so an owner who wants to declare «pedidos»
+  edits JSON. `appximo explain` reads them back and the validator keeps them honest.
+- **Impact:** the promise is that the OWNER declares their words; today a developer does
+  it in JSON. Small, but it is the surface a non-programmer touches.
+- **Ready:** an «también le dicen» chip list in the entity panel and, in the enum editor,
+  a list per value; live validation mirroring `validateAliases` (the same uniqueness
+  rules). A small Studio session.
 
 ### VOZ-5 — Reactive rules declared by voice ("cuando una orden quede pagada, avisame")
 

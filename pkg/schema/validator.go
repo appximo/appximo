@@ -617,6 +617,7 @@ func Validate(s *APISchema) []ValidationError {
 	errs = append(errs, validateRBAC(s)...)
 	errs = append(errs, validateWorkflows(s)...)
 	errs = append(errs, validateSummary(s)...)
+	errs = append(errs, validateAliases(s)...)
 
 	// Deterministic order (SILENT-CORRUPTION-S1): most of the list is built by
 	// ranging over maps, and the raw slice reached clients unsorted — the

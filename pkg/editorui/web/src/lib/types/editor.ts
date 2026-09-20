@@ -61,6 +61,9 @@ export interface EntityExtras {
 	/** Governed-field create grant (WRITE-ASYMMETRY-S1) — authored in the
 	 *  entity inspector's Import section, preserved losslessly otherwise. */
 	import?: ImportConfig;
+	/** Resource aliases (VOZ-AHORRO-S2): how people name the resource —
+	 *  preserved losslessly (authored in the Code view). */
+	aliases?: string[];
 }
 
 /** One resource (table) = one ERD node. */

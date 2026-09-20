@@ -220,3 +220,76 @@ func TestAskWrite_UpdateHonorsTheStateMachineAndEmits(t *testing.T) {
 		t.Fatalf("nothing written: %s", b)
 	}
 }
+
+// ── VOZ-AHORRO-S2 Part B: the write PLAN is cached, never the result ──
+
+func TestAskWrite_PlanCachedNeverTheResult_AndStrayYesCostsNothing(t *testing.T) {
+	fm := &fakeAnthropic{replies: []string{
+		`{"kind":"create","resource":"tareas","data":{"titulo":"Pagar la luz","vence_en":"tomorrow"}}`,
+	}}
+	rest, pool, tok, done := setupAskWrites(t, fm)
+	defer done()
+	dueno := tok("dueno", askU1)
+	modelCalls := func() int {
+		fm.mu.Lock()
+		defer fm.mu.Unlock()
+		return fm.calls
+	}
+	// 1. The order, once: the model plans it, the owner confirms, the engine writes.
+	got := dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "anotá pagar la luz para mañana"}, http.StatusOK)
+	if got["kind"] != "confirm" || got["source"] != "model" || modelCalls() != 1 {
+		t.Fatalf("first order: %v (calls %d)", got, modelCalls())
+	}
+	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "sí"}, http.StatusOK)
+	if got["kind"] != "written" {
+		t.Fatalf("first write: %v", got)
+	}
+	// 2. The SAME order again: the plan comes from the cache (no model call),
+	// a FRESH confirmation is asked, and confirming writes a SECOND row — the
+	// result was never cached.
+	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "Anotá pagar la luz para mañana"}, http.StatusOK)
+	if got["kind"] != "confirm" || got["source"] != "cache" || got["cost_usd"] != float64(0) || modelCalls() != 1 {
+		t.Fatalf("second order must come from the plan cache: %v (calls %d)", got, modelCalls())
+	}
+	if !strings.Contains(got["text"].(string), "Voy a crear") {
+		t.Fatalf("a fresh confirmation: %v", got["text"])
+	}
+	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "dale"}, http.StatusOK)
+	if got["kind"] != "written" {
+		t.Fatalf("second write: %v", got)
+	}
+	if rows := dpList(t, rest, "/api/tareas", dueno); len(rows) != 2 {
+		t.Fatalf("two confirmed orders are two rows, got %d", len(rows))
+	}
+	if n := outboxCount(t, pool, "tareas.created"); n != 2 {
+		t.Fatalf("two events, got %d", n)
+	}
+	// 3. A third time, then a stray «sí pero…»: the pending is cancelled and
+	// the sentence is settled by the parser — no model call, nothing written.
+	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "anotá pagar la luz para mañana"}, http.StatusOK)
+	if got["kind"] != "confirm" || got["source"] != "cache" {
+		t.Fatalf("third order from the cache: %v", got)
+	}
+	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "Si pero mejor el viernes"}, http.StatusOK)
+	if got["kind"] != "unclear" || got["source"] != "parser" || got["cost_usd"] != float64(0) || modelCalls() != 1 {
+		t.Fatalf("stray yes: %v (calls %d)", got, modelCalls())
+	}
+	if text, _ := got["text"].(string); !strings.Contains(text, "Cancelé la escritura") || !strings.Contains(text, "no es un <b>sí</b>") {
+		t.Fatalf("the stray yes is explained: %v", got["text"])
+	}
+	if rows := dpList(t, rest, "/api/tareas", dueno); len(rows) != 2 {
+		t.Fatalf("the stray yes wrote nothing: %d rows", len(rows))
+	}
+	// 4. Another user of the same role does NOT inherit the write plan.
+	other := tok("dueno", askU2)
+	got = dpDo(t, rest, "POST", "/api/ask", other, map[string]any{"q": "anotá pagar la luz para mañana"}, http.StatusOK)
+	if got["source"] != "model" || modelCalls() != 2 {
+		t.Fatalf("another user's order is planned anew: %v (calls %d)", got, modelCalls())
+	}
+	dpDo(t, rest, "POST", "/api/ask", other, map[string]any{"q": "no"}, http.StatusOK)
+	// 5. The alias declared on the example: «cosas» names tareas.
+	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "cuántas cosas hay"}, http.StatusOK)
+	if got["kind"] != "answer" || got["source"] != "parser" || got["number"] != float64(2) {
+		t.Fatalf("alias «cosas» → parser count 2: %v", got)
+	}
+}

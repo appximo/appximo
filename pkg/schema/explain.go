@@ -46,6 +46,8 @@ type explainPhrases struct {
 	smPending       string // states list, verb agreement
 	smPendingNone   string
 	summaryLine     string // ordered resource list
+	resourceAlias   string // the words people use for the resource
+	valueAlias      string // value, its aliases
 	relHasMany      string
 	relBelongsTo    string
 	relManyToMany   string
@@ -103,6 +105,8 @@ var explainEN = explainPhrases{
 	smPending:       "%s %s waiting for someone to act (the daily digest puts them on top)",
 	smPendingNone:   "nothing in this lifecycle waits for anyone (declared)",
 	summaryLine:     "The daily digest (resumen) reports, in this order: %s.",
+	resourceAlias:   "people also call it: %s",
+	valueAlias:      "%s is also said %s",
 	relHasMany:      "each %s can have many %s (%q)",
 	relBelongsTo:    "each %s belongs to a %s (%q)",
 	relManyToMany:   "%s and %s are linked many-to-many (%q, via %s)",
@@ -169,6 +173,8 @@ var explainES = explainPhrases{
 	smPending:       "%s %s a la espera de que alguien actúe (el resumen diario los pone arriba)",
 	smPendingNone:   "nada en este ciclo espera a nadie (declarado)",
 	summaryLine:     "El resumen diario reporta, en este orden: %s.",
+	resourceAlias:   "la gente también le dice: %s",
+	valueAlias:      "a %s también se le dice %s",
 	relHasMany:      "cada %s puede tener muchos %s (%q)",
 	relBelongsTo:    "cada %s pertenece a un %s (%q)",
 	relManyToMany:   "%s y %s se relacionan muchos-a-muchos (%q, vía %s)",
@@ -237,6 +243,9 @@ func Explain(s *APISchema, lang string) string {
 		b.WriteString("■ " + fmt.Sprintf(p.resourceHeader, rn))
 		if r.RenamedFrom != "" {
 			b.WriteString(fmt.Sprintf(p.renamedFrom, r.RenamedFrom))
+		}
+		if len(r.Aliases) > 0 {
+			b.WriteString(" — " + fmt.Sprintf(p.resourceAlias, joinList(quoteAll(r.Aliases), esList)))
 		}
 		b.WriteString("\n")
 		explainFields(&b, r, p)
@@ -334,6 +343,11 @@ func explainFields(b *strings.Builder, r ResourceSchema, p explainPhrases) {
 		}
 		if len(f.Enum) > 0 {
 			parts = append(parts, fmt.Sprintf(p.fieldEnum, quoteJoin(f.Enum)))
+			for _, val := range f.Enum {
+				if al := f.Aliases[val]; len(al) > 0 {
+					parts = append(parts, fmt.Sprintf(p.valueAlias, "«"+val+"»", quoteJoin(al)))
+				}
+			}
 		}
 		if f.Relation != "" {
 			parts = append(parts, fmt.Sprintf(p.fieldRelation, f.Relation))

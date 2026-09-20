@@ -179,7 +179,15 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 		}
 		if rt != nil {
 			if rt.Cache != nil {
-				deps.Cache, deps.CacheScope = rt.Cache, tc.ID+"|"+evalCtx.Role
+				// Read plans: tenant + role + the vocabulary's fingerprint (a
+				// synonym declared after a «no entendí» must cure it, not sit
+				// behind a cached refusal). Write plans: the same, plus the
+				// USER — an order is personal (VOZ-AHORRO-S2).
+				scope := tc.ID + "|" + evalCtx.Role + "|" + deps.Vocab.Fingerprint()
+				deps.Cache, deps.CacheScope = rt.Cache, scope
+				if userID != "" {
+					deps.CacheScopeWrite = scope + "|" + userID
+				}
 			}
 			if rt.Ledger != nil {
 				verdict = rt.Ledger.Allow(ctx, tc.ID, userID)
@@ -252,7 +260,7 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 			Bool("corrected", res.Corrected).Str("detail", res.Detail).Msg("ask: question answered")
 
 		out := map[string]any{
-			"kind": res.Kind, "text": res.Text, "speech": res.Speech, "headline": res.Headline,
+			"kind": res.Kind, "text": res.Text, "speech": res.Speech, "headline": res.Headline, "display": res.Display,
 			"understood": res.Understood, "plan": res.Plan, "groups": res.Groups,
 			"usage": res.Usage, "cost_usd": res.CostUSD, "model": modelName, "source": res.Source,
 			"model_ms": res.ModelMS, "total_ms": res.TotalMS, "corrected": res.Corrected,

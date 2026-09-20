@@ -3,7 +3,11 @@ package ask
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
+
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // The deterministic parser (VOZ-SIN-IA-S1): most owner questions have a fixed
@@ -15,27 +19,43 @@ import (
 // THE GOLDEN RULE: the parser answers only when it is SURE. "Sure" means, and
 // is checked in code, all of the following:
 //
-//   1. exactly ONE resource of the role's vocabulary is named (by its schema
-//      name, singular/plural, underscores as spaces — never a synonym the
-//      schema does not carry);
+//   1. exactly ONE resource of the role's vocabulary is named — by its schema
+//      name (singular/plural, underscores as spaces) or by an ALIAS the schema
+//      declares for it (VOZ-AHORRO-S2: «pedidos» for ordenes, «mascotas» for
+//      pets — declared, never wired; a word the schema does not declare is a
+//      word the parser does not know);
 //   2. exactly ONE operation is recognized (count / list / sum / avg / group
 //      by), or none with a bare "the <resource> …" which reads as a list;
 //   3. EVERY word of the question is consumed by a recognized piece — a
 //      stopword, the operation, the resource, a declared enum/state value of
-//      that resource (matched whole, accent-insensitive, plural tolerated),
-//      a period phrase, a group-by field, or a proper name introduced by a
-//      preposition. ONE leftover word ("vendimos", "vigentes", "ignora") and
-//      the question goes to the model;
+//      that resource or one of ITS declared aliases (matched whole,
+//      accent-insensitive, plural tolerated), a period phrase, a group-by
+//      field, or a proper name introduced by a preposition (or by «llamado»,
+//      or by the resource a relation points at: «del cliente Ana Gómez»). ONE
+//      leftover word ("vendimos", "vigentes", "ignora") and the question goes
+//      to the model;
 //   4. each enum value maps to exactly one field of the resource;
 //   5. a proper name maps to exactly one place: the single relation of the
 //      resource whose target has a name-like label, else the resource's own
-//      name-like field; two candidates → the model;
+//      name-like field; two candidates → the model — unless the sentence
+//      NAMED the relation's target («las citas del paciente Ana»);
 //   6. a sum/average names a numeric field, or the resource has ONE obvious
 //      amount (MoneyField);
 //   7. the resulting plan passes the same validation as a model plan.
 //
 // Anything else is NOT SURE and falls through. The parser never guesses to
 // save a call: a wrong plan costs more than three tenths of a cent.
+//
+// The mirror rule (VOZ-AHORRO-S2 Part C): the parser may also be sure a
+// sentence is NOT a data question — a stray answer to a confirmation that no
+// longer exists («sí pero mejor el viernes»), a greeting, a request for help,
+// a bare proper name — and answer it at zero cost. That verdict is given ONLY
+// when the sentence contains NOTHING the grammar could execute: no operation
+// word, no schema word (resource, alias, value, field), no period, no write
+// verb. A sentence with any of those reaches the model even if the rest is
+// noise, because the model's own knowledge may still map it («cuántos
+// pedidos hay» on a schema that declares no alias for pedidos). Discarding a
+// legitimate question is worse than three cents.
 //
 // It is generic: nothing here belongs to one app. Every word it understands
 // beyond Spanish function words and the closed operation/period vocabulary
@@ -49,6 +69,10 @@ type ParseResult struct {
 	Sure bool
 	// Reason says why not (for the log; never for the owner).
 	Reason string
+	// Discard is set (with Sure and an `unclear` plan) when the parser is sure
+	// the sentence is NOT a data question: "stray_confirmation" | "greeting" |
+	// "help" | "bare_name". The reply is composed without the model.
+	Discard string
 }
 
 var (
@@ -58,11 +82,15 @@ var (
 		"por", "favor", "decime", "dime", "digame", "quiero", "quisiera", "necesito", "saber", "ver", "podes", "puedes", "podrias",
 		"cargados", "cargadas", "hechas", "hechos", "actuales", "actual", "con", "estado", "tipo", "en", "total",
 		"para", "sobre", "cual", "cuales", "hubo", "hubieron", "llegaron", "entraron", "vinieron", "quedan", "queda", "hoy",
-		"alguna", "alguno", "algunas", "algunos", "algun")
+		"alguna", "alguno", "algunas", "algunos", "algun", "se")
 	countWords = set("cuantos", "cuantas", "cuanto", "cuanta", "numero", "cantidad", "conta", "contame", "cuenta", "cuentame", "total")
 	listWords  = set("lista", "listame", "listado", "mostrame", "muestrame", "mostra", "muestra", "dame", "traeme", "pasame", "cuales", "que", "ver")
-	sumWords   = set("suma", "suman", "sumatoria", "sumame", "sumar")
-	avgWords   = set("promedio", "media")
+	// lastWords («los últimos 5 pedidos») list the most recent rows — the list
+	// already sorts by the creation timestamp, newest first; a number right
+	// after bounds it. Generic Spanish, no domain word.
+	lastWords = set("ultimos", "ultimas", "ultimo", "ultima")
+	sumWords  = set("suma", "suman", "sumatoria", "sumame", "sumar")
+	avgWords  = set("promedio", "media")
 	// deleteVerbs are refused deterministically on every channel: the voice
 	// never deletes, sends or moves files (VOZ-ESCRITURAS-S1 keeps this).
 	deleteVerbs = set("borra", "borrar", "borralo", "borrala", "elimina", "eliminar", "eliminalo", "eliminala", "quita", "quitar", "manda", "mandar", "envia", "enviar", "sube", "subir", "baja", "bajar")
@@ -72,7 +100,10 @@ var (
 	writeVerbs = set("cancela", "cancelar", "crea", "crear", "agenda", "agendar", "cambia", "cambiar",
 		"modifica", "modificar", "edita", "editar", "actualiza", "actualizar", "marca", "marcar", "marcá",
 		"pone", "pon", "poner", "agrega", "agregar", "registra", "registrar", "anota", "anotar", "programa", "programar", "anotame", "agregame", "cambiame", "ponele", "pasa", "pasar", "pasala", "pasalo")
-	prepositions = set("de", "del", "para", "con", "a")
+	// prepositions introduce a proper name («de Ana», «para Marta»); so do the
+	// participles of «llamar» («el cliente llamado Carlos», «que se llama
+	// Carlos» — «se» is a stopword).
+	prepositions = set("de", "del", "para", "con", "a", "llamado", "llamada", "llamados", "llamadas", "llama", "llame")
 )
 
 // period phrases, normalized, longest first.
@@ -127,6 +158,12 @@ func Parse(question string, v *Vocabulary) ParseResult {
 	if len(toks) == 0 {
 		return ParseResult{Reason: "empty"}
 	}
+	// 0. Sure it is NOT a data question (Part C): a stray confirmation, a
+	// greeting, a help request, a bare name — only when nothing in the
+	// sentence could be executed. Otherwise the rest of the parser decides.
+	if d := preDiscard(toks, v); d != "" {
+		return ParseResult{Plan: Plan{Kind: "unclear", Reason: discardReasonES(d)}, Sure: true, Discard: d, Reason: "discard: " + d}
+	}
 	// A delete/send verb anywhere → refused deterministically. A write verb
 	// → refused too on a read-only vocabulary; on a writable one the parser
 	// steps aside (not sure) and the model plans the create/update.
@@ -151,11 +188,7 @@ func Parse(question string, v *Vocabulary) ParseResult {
 
 	// 1. period phrases (multi-word first) — consume tokens.
 	var period *Period
-	norms := make([]string, len(toks))
-	for i, t := range toks {
-		norms[i] = t.norm
-	}
-	joined := " " + strings.Join(norms, " ") + " "
+	joined := joinedNorms(toks)
 	for _, pp := range periodPhrases {
 		if !strings.Contains(joined, " "+pp.phrase+" ") {
 			continue
@@ -169,54 +202,50 @@ func Parse(question string, v *Vocabulary) ParseResult {
 		period = &Period{Range: pp.token}
 	}
 
-	// 1b. MULTI-WORD enum values first, across every readable resource: an
-	// "orden pendiente de pago" must not read "pago" as the resource pagos.
-	// Each consumed value remembers its resource; it must be the one named.
-	type hinted struct {
-		res    *Resource
-		filter Filter
-	}
-	var hints []hinted
-	for _, name := range v.ResourceNames() {
-		r := v.Resource(name)
-		for _, f := range r.Fields {
-			for _, val := range f.Enum {
-				form := strings.ReplaceAll(normalize(val), "_", " ")
-				if !strings.Contains(form, " ") {
-					continue
-				}
-				for _, fm := range []string{form, form + "s", strings.ReplaceAll(form, " ", " de "), strings.ReplaceAll(form, " ", " de ") + "s"} {
-					if consumePhrase(toks, fm) {
-						hints = append(hints, hinted{res: r, filter: Filter{Field: f.Name, Op: "eq", Value: val}})
-						break
-					}
-				}
-			}
-		}
-	}
+	// 1b. MULTI-WORD values first, across every readable resource: an "orden
+	// pendiente de pago" must not read "pago" as the resource pagos. The same
+	// phrase may be a value of SEVERAL resources («sin pagar» as an alias on
+	// orders and on invoices), so each consumed phrase remembers every
+	// (resource, field, value) it could mean; the one of the resource the
+	// sentence names is kept after step 2.
+	groups := consumeMultiWordValues(toks, v)
 
-	// 2. the resource: exactly one, by schema name (singular/plural, _ as space).
-	var res *Resource
-	for _, name := range v.ResourceNames() {
-		r := v.Resource(name)
-		for _, form := range nameForms(name) {
-			if consumePhrase(toks, form) {
-				if res != nil && res != r {
-					return ParseResult{Reason: "two resources: " + res.Name + ", " + r.Name}
-				}
-				res = r
-			}
-		}
-	}
-	if res == nil {
-		return ParseResult{Reason: "no resource named"}
-	}
+	// 2. the resource: exactly one, by schema name or declared alias. Two
+	// resources are still one question when the second is the target of the
+	// first's relation and introduces a name («las órdenes del cliente Ana»).
+	res, labelField, labelPos, reason := findResource(toks, v)
 	var filters []Filter
 	seenField := map[string]bool{}
-	for _, h := range hints {
-		if h.res != res {
-			return ParseResult{Reason: "value " + fmt.Sprint(h.filter.Value) + " belongs to " + h.res.Name + ", not " + res.Name}
+	if reason == "no resource named" {
+		// A value that exists in exactly ONE place names its resource:
+		// «cuántos perros hay» → pets.species = dog (the alias «perro» is
+		// declared once). Two places («pendientes» on orders and on
+		// invoices) → not sure.
+		if r, f, ok := impliedResource(toks, v, groups); ok {
+			res, reason = r, ""
+			if f.Field != "" {
+				seenField[f.Field] = true
+				filters = append(filters, f)
+			}
 		}
+	}
+	if reason != "" {
+		return ParseResult{Reason: reason}
+	}
+	for _, g := range groups {
+		var mine []valueHint
+		for _, h := range g {
+			if h.res == res {
+				mine = append(mine, h)
+			}
+		}
+		switch {
+		case len(mine) == 0:
+			return ParseResult{Reason: "value " + fmt.Sprint(g[0].filter.Value) + " belongs to " + g[0].res.Name + ", not " + res.Name}
+		case len(mine) > 1:
+			return ParseResult{Reason: "value " + fmt.Sprint(mine[0].filter.Value) + " belongs to two fields"}
+		}
+		h := mine[0]
 		if seenField[h.filter.Field] {
 			return ParseResult{Reason: "two values for " + h.filter.Field}
 		}
@@ -226,6 +255,7 @@ func Parse(question string, v *Vocabulary) ParseResult {
 
 	// 3. the operation.
 	op := ""
+	limit := 0
 	setOp := func(o string) bool {
 		if op != "" && op != o {
 			return false
@@ -244,6 +274,16 @@ func Parse(question string, v *Vocabulary) ParseResult {
 			o = "count"
 		case listWords[t.norm]:
 			o = "list"
+		case lastWords[t.norm]:
+			// «los últimos 5 pedidos»: a list, newest first, bounded by the
+			// number that follows (1..MaxListLimit) when there is one.
+			o = "list"
+			if i+1 < len(toks) && !toks[i+1].used {
+				if n, err := strconv.Atoi(toks[i+1].norm); err == nil && n >= 1 && n <= MaxListLimit {
+					limit = n
+					toks[i+1].used = true
+				}
+			}
 		case sumWords[t.norm]:
 			o = "sum"
 		case avgWords[t.norm]:
@@ -282,31 +322,26 @@ func Parse(question string, v *Vocabulary) ParseResult {
 		}
 	}
 
-	// 5. single-word enum / state values of the resource's fields, whole,
-	// plural-tolerant (the multi-word ones were consumed in 1b).
+	// 5. single-word enum / state values of the resource's fields — declared
+	// values and their aliases — whole, plural-tolerant (the multi-word ones
+	// were consumed in 1b).
 	for _, f := range res.Fields {
 		if len(f.Enum) == 0 {
 			continue
 		}
-		for _, val := range f.Enum {
-			form := strings.ReplaceAll(normalize(val), "_", " ")
-			if form == "" || strings.Contains(form, " ") {
+		for _, vf := range f.valueForms() {
+			if vf.multi || !consumePhrase(toks, vf.form) {
 				continue
 			}
-			forms := []string{form, form + "s", form + "es"}
-			for _, fm := range forms {
-				if consumePhrase(toks, fm) {
-					if seenField[f.Name] {
-						return ParseResult{Reason: "two values for " + f.Name}
-					}
-					if fieldOfValue(res, val) == nil {
-						return ParseResult{Reason: "value " + val + " belongs to two fields"}
-					}
-					seenField[f.Name] = true
-					filters = append(filters, Filter{Field: f.Name, Op: "eq", Value: val})
-					break
-				}
+			if seenField[f.Name] {
+				return ParseResult{Reason: "two values for " + f.Name}
 			}
+			if !vf.alias && fieldOfValue(res, vf.val) == nil {
+				return ParseResult{Reason: "value " + vf.val + " belongs to two fields"}
+			}
+			seenField[f.Name] = true
+			filters = append(filters, Filter{Field: f.Name, Op: "eq", Value: vf.val})
+			break
 		}
 	}
 
@@ -334,20 +369,23 @@ func Parse(question string, v *Vocabulary) ParseResult {
 		}
 	}
 
-	// 7. a proper name after a preposition: the run of unconsumed, unknown
-	// tokens right after "de/del/para/con/a".
+	// 7. a proper name: the run of unconsumed, unknown tokens right after a
+	// preposition / «llamado» — or right after the relation's target the
+	// sentence named («del cliente Ana Gómez», settled in step 2).
 	match := ""
 	matchField := ""
+	if labelPos >= 0 {
+		parts := nameRun(toks, labelPos, nil)
+		if len(parts) == 0 {
+			return ParseResult{Reason: "two resources: " + res.Name + ", " + v.Resource(res.Field(labelField).Relation).Name}
+		}
+		match, matchField = strings.Join(parts, " "), labelField
+	}
 	for i := 0; i < len(toks); i++ {
 		if toks[i].used || !prepositions[toks[i].norm] {
 			continue
 		}
-		j := i + 1
-		var parts []string
-		for j < len(toks) && !toks[j].used && !stopwords[toks[j].norm] && !countWords[toks[j].norm] && !listWords[toks[j].norm] {
-			parts = append(parts, toks[j].raw)
-			j++
-		}
+		parts := nameRun(toks, i+1, nil)
 		if len(parts) == 0 {
 			continue
 		}
@@ -360,8 +398,34 @@ func Parse(question string, v *Vocabulary) ParseResult {
 		}
 		match, matchField = strings.Join(parts, " "), mf
 		toks[i].used = true
-		for k := i + 1; k < j; k++ {
-			toks[k].used = true
+	}
+	// 7b. a Capitalized run that is not the first word («cuántos pedidos
+	// tiene Juan Peres»): dictation capitalizes proper names; the first word
+	// is always capitalized, so it never counts.
+	if match == "" {
+		for i := 1; i < len(toks); i++ {
+			if toks[i].used || stopwords[toks[i].norm] || !startsUpper(toks[i].raw) {
+				continue
+			}
+			parts := nameRun(toks, i, nil)
+			if len(parts) == 0 {
+				continue
+			}
+			mf, reason := nameField(v, res)
+			if mf == "" {
+				return ParseResult{Reason: reason}
+			}
+			match, matchField = strings.Join(parts, " "), mf
+			break
+		}
+	}
+	// 7c. a CODE («el pedido ORD-1003», «la factura 4521»): a token with a
+	// digit, matched against the resource's own identifier field (numero,
+	// codigo, sku, placa, referencia) through the same matcher — exact
+	// codes score 1.0, a near miss is asked about.
+	if match == "" {
+		if code, field := codeToken(toks, res); code != "" {
+			match, matchField = code, field
 		}
 	}
 	if match != "" {
@@ -380,10 +444,13 @@ func Parse(question string, v *Vocabulary) ParseResult {
 		// "las órdenes de hoy", "órdenes pendientes": a bare noun phrase lists.
 		op = "list"
 	}
-	p := Plan{Kind: op, Resource: res.Name, Filters: filters, Period: period, GroupBy: groupBy}
+	p := Plan{Kind: op, Resource: res.Name, Filters: filters, Period: period, GroupBy: groupBy, Limit: limit}
 	if op == "list" && groupBy != "" {
 		// "cuáles … por estado" reads as a breakdown: count by the field.
 		p.Kind = "count"
+	}
+	if p.Kind != "list" {
+		p.Limit = 0
 	}
 	if op == "sum" || op == "avg" {
 		p.Field = field
@@ -394,32 +461,262 @@ func Parse(question string, v *Vocabulary) ParseResult {
 	return ParseResult{Plan: p, Sure: true}
 }
 
-// nameForms derives the forms a resource is named by: the schema name with
-// underscores as spaces, its singular by stripping a plural suffix, and the
-// last word alone for a multi-word name ("orden_lineas" → "lineas").
-func nameForms(name string) []string {
-	base := strings.ReplaceAll(normalize(name), "_", " ")
-	forms := []string{base}
-	add := func(s string) {
-		if s != "" && !contains(forms, s) {
-			forms = append(forms, s)
-		}
+// nameRun collects the raw tokens of a proper name starting at i: unconsumed,
+// not a stopword, not an operation word, not one of extra stops — and marks
+// them used. Returns nil when there is none.
+func nameRun(toks []token, i int, extraStop map[string]bool) []string {
+	var parts []string
+	j := i
+	for j < len(toks) && !toks[j].used && !stopwords[toks[j].norm] && !countWords[toks[j].norm] && !listWords[toks[j].norm] && !extraStop[toks[j].norm] {
+		parts = append(parts, toks[j].raw)
+		j++
 	}
-	add(singularES(base))
-	add(base + "s")
-	add(base + "es")
-	return forms
+	for k := i; k < j; k++ {
+		toks[k].used = true
+	}
+	return parts
 }
 
-func singularES(w string) string {
-	switch {
-	case strings.HasSuffix(w, "ones"), strings.HasSuffix(w, "enes"), strings.HasSuffix(w, "ores"), strings.HasSuffix(w, "ales"), strings.HasSuffix(w, "iles"), strings.HasSuffix(w, "ades"):
-		return strings.TrimSuffix(w, "es")
-	case strings.HasSuffix(w, "s") && !strings.HasSuffix(w, "ss") && len(w) > 3:
-		return strings.TrimSuffix(w, "s")
+func joinedNorms(toks []token) string {
+	norms := make([]string, len(toks))
+	for i, t := range toks {
+		norms[i] = t.norm
 	}
-	return w
+	return " " + strings.Join(norms, " ") + " "
 }
+
+// valueHint is one meaning of a consumed multi-word value phrase.
+type valueHint struct {
+	res    *Resource
+	filter Filter
+}
+
+// consumeMultiWordValues consumes every multi-word value phrase (declared
+// values and aliases, longest first) across every readable resource; each
+// consumed phrase yields the group of meanings it has.
+func consumeMultiWordValues(toks []token, v *Vocabulary) [][]valueHint {
+	phrases := map[string][]valueHint{}
+	var order []string
+	for _, name := range v.ResourceNames() {
+		r := v.Resource(name)
+		for _, f := range r.Fields {
+			for _, vf := range f.valueForms() {
+				if !vf.multi {
+					continue
+				}
+				if _, ok := phrases[vf.form]; !ok {
+					order = append(order, vf.form)
+				}
+				phrases[vf.form] = append(phrases[vf.form], valueHint{res: r, filter: Filter{Field: f.Name, Op: "eq", Value: vf.val}})
+			}
+		}
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		wi, wj := len(strings.Fields(order[i])), len(strings.Fields(order[j]))
+		if wi != wj {
+			return wi > wj
+		}
+		if len(order[i]) != len(order[j]) {
+			return len(order[i]) > len(order[j])
+		}
+		return order[i] < order[j]
+	})
+	var groups [][]valueHint
+	for _, form := range order {
+		if consumePhrase(toks, form) {
+			groups = append(groups, dedupeHints(phrases[form]))
+		}
+	}
+	return groups
+}
+
+// dedupeHints keeps one hint per (resource, field, value): the plural and the
+// «de» variant of one value are the same meaning.
+func dedupeHints(hs []valueHint) []valueHint {
+	seen := map[string]bool{}
+	var out []valueHint
+	for _, h := range hs {
+		k := h.res.Name + "\x00" + h.filter.Field + "\x00" + fmt.Sprint(h.filter.Value)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, h)
+	}
+	return out
+}
+
+// codeToken finds ONE unconsumed token that carries a digit («ORD-1003»,
+// «4521», «SKU-9») and the resource's identifier field it can be matched
+// against: the first secondary label (numero, codigo, sku, placa,
+// referencia…) — a name-like field is not a code. Marks the token used.
+func codeToken(toks []token, res *Resource) (string, string) {
+	field := ""
+	for _, f := range res.Fields {
+		if !f.IsText() || len(f.Enum) > 0 {
+			continue
+		}
+		if r := nameRank(f.Name); r >= len(primaryParts) && r < len(nameishParts) {
+			field = f.Name
+			break
+		}
+	}
+	if field == "" {
+		return "", ""
+	}
+	for i := range toks {
+		t := &toks[i]
+		if t.used || stopwords[t.norm] || !strings.ContainsAny(t.norm, "0123456789") {
+			continue
+		}
+		t.used = true
+		return t.raw, field
+	}
+	return "", ""
+}
+
+func startsUpper(raw string) bool {
+	for _, r := range raw {
+		return unicode.IsUpper(r)
+	}
+	return false
+}
+
+// impliedResource names the resource by a value that exists in exactly one
+// (resource, field, value) of the vocabulary: a multi-word group already
+// consumed in 1b with one meaning, or one single-word value form present in
+// the sentence. Returns the resource and the filter it implies.
+func impliedResource(toks []token, v *Vocabulary, groups [][]valueHint) (*Resource, Filter, bool) {
+	var hits []valueHint
+	for _, g := range groups {
+		hits = append(hits, g...)
+	}
+	if len(groups) == 0 {
+		for _, name := range v.ResourceNames() {
+			r := v.Resource(name)
+			for _, f := range r.Fields {
+				for _, vf := range f.valueForms() {
+					if vf.multi {
+						continue
+					}
+					if _, ok := findPhrase(toks, []string{vf.form}); ok {
+						hits = append(hits, valueHint{res: r, filter: Filter{Field: f.Name, Op: "eq", Value: vf.val}})
+					}
+				}
+			}
+		}
+		hits = dedupeHints(hits)
+	}
+	if len(hits) != 1 {
+		return nil, Filter{}, false
+	}
+	h := hits[0]
+	if len(groups) == 0 {
+		// consume the single-word form now (the multi-word one already was)
+		for _, vf := range h.res.Field(h.filter.Field).valueForms() {
+			if !vf.multi && vf.val == h.filter.Value && consumePhrase(toks, vf.form) {
+				break
+			}
+		}
+	}
+	return h.res, h.filter, true
+}
+
+// resourceMention is one place a resource was named.
+type resourceMention struct {
+	res        *Resource
+	start, end int // token range [start, end)
+}
+
+// findResource consumes every resource mention (schema names and aliases,
+// every form) and settles the ONE resource of the sentence. Two distinct
+// resources are one question only when one is the target of the other's
+// single relation and its mention is immediately followed by a name
+// («las órdenes del cliente Ana Gómez»): the relation's source is the
+// resource, the target's word introduces the name. Returns the resource, the
+// relation field + the token position the name starts at (labelPos = -1 when
+// none), or a reason.
+func findResource(toks []token, v *Vocabulary) (res *Resource, labelField string, labelPos int, reason string) {
+	var mentions []resourceMention
+	for _, name := range v.ResourceNames() {
+		r := v.Resource(name)
+		for _, form := range r.NameForms() {
+			words := strings.Fields(form)
+			if start, ok := findPhrase(toks, words); ok {
+				for k := range words {
+					toks[start+k].used = true
+				}
+				mentions = append(mentions, resourceMention{res: r, start: start, end: start + len(words)})
+			}
+		}
+	}
+	var distinct []*Resource
+	for _, m := range mentions {
+		dup := false
+		for _, d := range distinct {
+			if d == m.res {
+				dup = true
+			}
+		}
+		if !dup {
+			distinct = append(distinct, m.res)
+		}
+	}
+	switch len(distinct) {
+	case 0:
+		return nil, "", -1, "no resource named"
+	case 1:
+		return distinct[0], "", -1, ""
+	case 2:
+		a, b := distinct[0], distinct[1]
+		if f, pos := labelIntro(toks, v, a, b, mentions); f != "" {
+			return a, f, pos, ""
+		}
+		if f, pos := labelIntro(toks, v, b, a, mentions); f != "" {
+			return b, f, pos, ""
+		}
+		return nil, "", -1, "two resources: " + a.Name + ", " + b.Name
+	}
+	names := make([]string, 0, len(distinct))
+	for _, d := range distinct {
+		names = append(names, d.Name)
+	}
+	return nil, "", -1, "two resources: " + strings.Join(names, ", ")
+}
+
+// labelIntro reports whether tgt's mention introduces a name for src's single
+// relation to tgt («órdenes del CLIENTE Ana»): src has exactly one relation
+// field pointing at tgt, tgt has a name-like label, and the token right after
+// tgt's mention starts a name run.
+func labelIntro(toks []token, v *Vocabulary, src, tgt *Resource, mentions []resourceMention) (string, int) {
+	field := ""
+	for _, f := range src.Fields {
+		if f.Relation == tgt.Name {
+			if field != "" {
+				return "", -1 // two relations to the same target: not sure
+			}
+			field = f.Name
+		}
+	}
+	if field == "" {
+		return "", -1
+	}
+	if lf := tgt.LabelFields(); len(lf) == 0 || nameRank(lf[0]) >= len(primaryParts) {
+		return "", -1
+	}
+	for _, m := range mentions {
+		if m.res != tgt {
+			continue
+		}
+		j := m.end
+		if j < len(toks) && !toks[j].used && !stopwords[toks[j].norm] && !countWords[toks[j].norm] && !listWords[toks[j].norm] && !prepositions[toks[j].norm] {
+			return field, j
+		}
+	}
+	return "", -1
+}
+
+func singularES(w string) string { return schema.SingularES(w) }
 
 // fieldByForm finds a field by its normalized name (underscores as spaces),
 // singular or plural.
@@ -478,12 +775,10 @@ func nameField(v *Vocabulary, res *Resource) (string, string) {
 	}
 }
 
-// consumePhrase marks the first unconsumed occurrence of phrase (normalized
-// words) as used and reports whether it was found.
-func consumePhrase(toks []token, phrase string) bool {
-	words := strings.Fields(phrase)
+// findPhrase locates the first unconsumed occurrence of words in toks.
+func findPhrase(toks []token, words []string) (int, bool) {
 	if len(words) == 0 {
-		return false
+		return 0, false
 	}
 outer:
 	for i := 0; i+len(words) <= len(toks); i++ {
@@ -492,12 +787,139 @@ outer:
 				continue outer
 			}
 		}
-		for k := range words {
-			toks[i+k].used = true
+		return i, true
+	}
+	return 0, false
+}
+
+// consumePhrase marks the first unconsumed occurrence of phrase (normalized
+// words) as used and reports whether it was found.
+func consumePhrase(toks []token, phrase string) bool {
+	words := strings.Fields(phrase)
+	start, ok := findPhrase(toks, words)
+	if !ok {
+		return false
+	}
+	for k := range words {
+		toks[start+k].used = true
+	}
+	return true
+}
+
+// ── sure it is NOT a question (Part C) ────────────────────────────────────
+
+var (
+	// yesNoLead are the words a stray answer to a confirmation starts with.
+	yesNoLead = set("si", "sí", "no", "ok", "okey", "okay", "dale", "listo", "bueno", "vale", "claro", "mejor")
+	// greetingCore are the words that make a sentence a greeting or a thanks;
+	// greetingFill are the words allowed beside them.
+	greetingCore    = set("hola", "holi", "holis", "buenas", "buenos", "gracias", "chau", "chao", "adios", "saludos", "hey", "ey", "genial", "perfecto", "excelente", "bien", "joya", "barbaro", "buenisimo")
+	greetingPhrases = set("que tal", "como estas", "como esta", "como va", "como andas", "como anda", "todo bien", "que hay", "que mas", "que hubo")
+	greetingFill    = set("dias", "dia", "tardes", "tarde", "noches", "noche", "muchas", "mil", "que", "tal", "como", "estas", "esta", "va", "todo", "ok", "dale", "listo", "muy", "bueno", "buena", "y", "vos", "usted", "hasta", "luego", "nos", "vemos")
+	// helpPhrases are the exact (normalized) ways an owner asks what the bot
+	// can do; helpPrefixes catch the same intent with a tail.
+	helpPhrases  = set("ayuda", "help", "que puedo preguntar", "que puedo preguntarte", "que te puedo preguntar", "que puedo pedir", "que puedo pedirte", "que sabes hacer", "que sabes", "que podes hacer", "que puedes hacer", "que haces", "como funciona", "como funcionas", "como te uso", "que preguntas puedo hacer", "que preguntas respondes", "que me podes decir", "que me puedes decir", "que comandos hay", "cuales son los comandos", "instrucciones", "menu")
+	helpPrefixes = []string{"que puedo preguntar", "que te puedo preguntar", "que puedo pedir", "que sabes hacer", "que podes hacer", "que puedes hacer", "como funciona", "que preguntas puedo", "que comandos"}
+)
+
+// preDiscard returns the discard code when the sentence contains NOTHING the
+// grammar could execute AND matches a recognizable non-question shape. Any
+// operation word, schema word (resource, alias, value, field), period or
+// write verb means "let the parser and, if needed, the model decide".
+func preDiscard(toks []token, v *Vocabulary) string {
+	if v == nil {
+		return ""
+	}
+	if hasExecutableWord(toks, v) {
+		return ""
+	}
+	joined := strings.TrimSpace(joinedNorms(toks))
+	if helpPhrases[joined] {
+		return "help"
+	}
+	if greetingPhrases[joined] {
+		return "greeting"
+	}
+	for _, p := range helpPrefixes {
+		if strings.HasPrefix(joined, p) {
+			return "help"
 		}
-		return true
+	}
+	core := false
+	all := true
+	for _, t := range toks {
+		switch {
+		case greetingCore[t.norm]:
+			core = true
+		case greetingFill[t.norm] || stopwords[t.norm]:
+		default:
+			all = false
+		}
+	}
+	if core && all {
+		return "greeting"
+	}
+	if len(toks) >= 2 && yesNoLead[toks[0].norm] {
+		return "stray_confirmation"
+	}
+	if len(toks) >= 2 {
+		capitalized := true
+		for _, t := range toks {
+			r := []rune(t.raw)[0]
+			if !unicode.IsUpper(r) {
+				capitalized = false
+				break
+			}
+		}
+		if capitalized {
+			return "bare_name"
+		}
+	}
+	return ""
+}
+
+// hasExecutableWord reports whether any token or phrase of the sentence is
+// something the grammar could act on.
+func hasExecutableWord(toks []token, v *Vocabulary) bool {
+	words, phrases := v.lexicon()
+	joined := joinedNorms(toks)
+	for _, t := range toks {
+		n := t.norm
+		// «que», «cuáles» and «ver» list only beside a resource; alone they
+		// are the function words of «qué puedo preguntar» — not executable.
+		if countWords[n] || (listWords[n] && n != "que" && n != "cuales" && n != "ver") || lastWords[n] || sumWords[n] || avgWords[n] || deleteVerbs[n] || writeVerbs[n] || periodOnly[n] || words[n] {
+			return true
+		}
+		if n == "por" || n == "hoy" || n == "ayer" {
+			return true
+		}
+	}
+	for _, p := range phrases {
+		if strings.Contains(joined, " "+p+" ") {
+			return true
+		}
+	}
+	for _, pp := range periodPhrases {
+		if strings.Contains(joined, " "+pp.phrase+" ") {
+			return true
+		}
 	}
 	return false
+}
+
+// discardReasonES words the discard for the log/JSON reason field.
+func discardReasonES(code string) string {
+	switch code {
+	case "stray_confirmation":
+		return "parece la respuesta a una confirmación, no una pregunta"
+	case "greeting":
+		return "es un saludo"
+	case "help":
+		return "pide ayuda"
+	case "bare_name":
+		return "es solo un nombre, sin qué preguntar"
+	}
+	return code
 }
 
 // transitionVerbs introduce a state change; the state itself follows
@@ -511,24 +933,14 @@ var transitionLinkers = set("como", "a", "en", "por", "estado", "el", "la", "lo"
 // and "<state-verb> <resource> [de <name>]" into an update of the resource's
 // state field on the row the name (or an enum value) identifies. SURE only
 // when every word is consumed, one resource, one target state, at most one
-// name; the confirmation still gates the write.
+// name; the confirmation still gates the write. Resources and states are
+// recognized by their schema names AND their declared aliases.
 func parseTransition(question string, v *Vocabulary) ParseResult {
 	toks := tokenize(question)
 	// the resource, exactly one, updatable
-	var res *Resource
-	for _, name := range v.ResourceNames() {
-		r := v.Resource(name)
-		for _, form := range nameForms(name) {
-			if consumePhrase(toks, form) {
-				if res != nil && res != r {
-					return ParseResult{Reason: "two resources: " + res.Name + ", " + r.Name}
-				}
-				res = r
-			}
-		}
-	}
-	if res == nil {
-		return ParseResult{Reason: "no resource named"}
+	res, labelField, labelPos, reason := findResource(toks, v)
+	if reason != "" {
+		return ParseResult{Reason: reason}
 	}
 	if !res.CanUpdate {
 		return ParseResult{Reason: "role may not update " + res.Name}
@@ -537,18 +949,15 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 	if sf == nil {
 		return ParseResult{Reason: res.Name + " has no state field"}
 	}
-	// the target state: an explicit value, else the verb's stem
+	// the target state: an explicit value (or one of its aliases), else the
+	// verb's stem
 	target := ""
-	for _, val := range sf.Enum {
-		form := strings.ReplaceAll(normalize(val), "_", " ")
-		for _, fm := range []string{form, form + "s", strings.ReplaceAll(form, " ", " de ")} {
-			if consumePhrase(toks, fm) {
-				if target != "" && target != val {
-					return ParseResult{Reason: "two values for " + sf.Name}
-				}
-				target = val
-				break
+	for _, vf := range sf.valueForms() {
+		if consumePhrase(toks, vf.form) {
+			if target != "" && target != vf.val {
+				return ParseResult{Reason: "two values for " + sf.Name}
 			}
+			target = vf.val
 		}
 	}
 	verbSeen := false
@@ -594,29 +1003,32 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 		if len(f.Enum) == 0 || f == sf {
 			continue
 		}
-		for _, val := range f.Enum {
-			form := strings.ReplaceAll(normalize(val), "_", " ")
-			if consumePhrase(toks, form) || consumePhrase(toks, form+"s") {
-				if seen[f.Name] {
-					return ParseResult{Reason: "two values for " + f.Name}
-				}
-				seen[f.Name] = true
-				where = append(where, Filter{Field: f.Name, Op: "eq", Value: val})
+		for _, vf := range f.valueForms() {
+			if !consumePhrase(toks, vf.form) {
+				continue
 			}
+			if seen[f.Name] {
+				return ParseResult{Reason: "two values for " + f.Name}
+			}
+			seen[f.Name] = true
+			where = append(where, Filter{Field: f.Name, Op: "eq", Value: vf.val})
+			break
 		}
 	}
-	// the name after a preposition
+	// the name after a preposition (or after the relation's target the
+	// sentence named)
 	match, matchField := "", ""
+	if labelPos >= 0 {
+		parts := nameRun(toks, labelPos, transitionLinkers)
+		if len(parts) > 0 {
+			match, matchField = strings.Join(parts, " "), labelField
+		}
+	}
 	for i := 0; i < len(toks); i++ {
 		if toks[i].used || !prepositions[toks[i].norm] {
 			continue
 		}
-		j := i + 1
-		var parts []string
-		for j < len(toks) && !toks[j].used && !stopwords[toks[j].norm] && !transitionLinkers[toks[j].norm] {
-			parts = append(parts, toks[j].raw)
-			j++
-		}
+		parts := nameRun(toks, i+1, transitionLinkers)
 		if len(parts) == 0 {
 			continue
 		}
@@ -629,8 +1041,10 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 		}
 		match, matchField = strings.Join(parts, " "), mf
 		toks[i].used = true
-		for k := i + 1; k < j; k++ {
-			toks[k].used = true
+	}
+	if match == "" {
+		if code, field := codeToken(toks, res); code != "" {
+			match, matchField = code, field
 		}
 	}
 	if match != "" {

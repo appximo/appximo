@@ -8,8 +8,9 @@
 // ROUND-TRIP CONTRACT: modelToSchema(schemaToModel(x)) is semantically identical
 // to x (key order aside). Unmodeled resource-level keys ride along in
 // EntityModel.extras; rbac — BOTH rbac.roles and the anonymous rbac.public
-// block (ADR-026, UI-2) — and workflows and the `summary` block (VOZ-VISUAL-S1)
-// are preserved. Editor-only data
+// block (ADR-026, UI-2) — and workflows, the `summary` block (VOZ-VISUAL-S1)
+// and the `aliases` (resource-level in extras, field-level inside the field
+// def — VOZ-AHORRO-S2) are preserved. Editor-only data
 // (ids, canvas positions) is never emitted. `renamed_from` (resource + field) is
 // NOT stored raw: import lifts it into the model's `originalName` baseline and
 // export derives it back (originalName !== name ⇒ renamed_from=originalName), so
@@ -87,7 +88,8 @@ function resourceToEntity(name: string, res: ResourceSchema): EntityModel {
 			foreign_keys: res.foreign_keys,
 			hooks: res.hooks,
 			events: res.events,
-			import: res.import
+			import: res.import,
+			aliases: res.aliases
 		},
 		position: { x: 0, y: 0 }, // laid out by the store (dagre) on import
 		originalName: res.renamed_from ?? name
@@ -162,6 +164,10 @@ function entityToResource(ent: EntityModel): ResourceSchema {
 		if (x.import.fields && x.import.fields.length > 0) imp.fields = [...x.import.fields];
 		res.import = imp;
 	}
+	// Resource aliases (VOZ-AHORRO-S2): verbatim, in order — the engine
+	// validates them; an empty list is dead config the engine rejects, so it
+	// is not emitted.
+	if (x.aliases && x.aliases.length > 0) res.aliases = [...x.aliases];
 	// Table-level rename intent, derived from the baseline exactly like fields.
 	if (ent.originalName && ent.originalName !== ent.name) res.renamed_from = ent.originalName;
 	return res;

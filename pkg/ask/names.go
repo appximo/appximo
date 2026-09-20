@@ -5,9 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"golang.org/x/text/runes"
-	"golang.org/x/text/transform"
-	"golang.org/x/text/unicode/norm"
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // Proper names, as dictated: Spanish speech-to-text mangles them ("Gómez" →
@@ -32,31 +30,11 @@ const (
 	maxOptions  = 5
 )
 
-var accentStripper = transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
-
 // normalize lowercases, strips accents (keeps ñ as n — dictation writes both)
-// and punctuation, and collapses whitespace.
-func normalize(s string) string {
-	out, _, err := transform.String(accentStripper, strings.ToLower(s))
-	if err != nil {
-		out = strings.ToLower(s)
-	}
-	var b strings.Builder
-	space := true
-	for _, r := range out {
-		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			b.WriteRune(r)
-			space = false
-		default:
-			if !space {
-				b.WriteByte(' ')
-				space = true
-			}
-		}
-	}
-	return strings.TrimSpace(b.String())
-}
+// and punctuation, and collapses whitespace. ONE source, shared with the
+// schema validator (schema.NormalizeText): an alias the validator proved
+// unique is compared at runtime in exactly the form it was proved in.
+func normalize(s string) string { return schema.NormalizeText(s) }
 
 // phonetic folds Spanish homophones on a normalized string.
 func phonetic(s string) string {
@@ -124,10 +102,11 @@ func phonetic(s string) string {
 		if out == 'u' && i > 0 && (rs[i-1] == 'g' || rs[i-1] == 'q') && (next() == 'e' || next() == 'i') {
 			continue // gue/gui: silent u
 		}
-		// collapse doubles
+		// collapse doubles — letters only: a repeated DIGIT is information
+		// (ORD-1001 is not ORD-101; found live, VOZ-AHORRO-S2)
 		if b.Len() > 0 {
 			prev := []rune(b.String())
-			if prev[len(prev)-1] == out && out != ' ' {
+			if prev[len(prev)-1] == out && out != ' ' && !unicode.IsDigit(out) {
 				continue
 			}
 		}
@@ -294,8 +273,11 @@ func Decide(ranked []Candidate) Decision {
 		// A phonetically EXACT match ahead of every other is still "one":
 		// "Gomes" with Gómez and Gómez Hermanos SAS both present means Gómez
 		// (the owner would have said the long name); a second exact match
-		// (two rows that sound the same) stays a question.
-		if strong[0].Score >= 0.99 && strong[1].Score <= 0.985 {
+		// (two rows that sound the same) stays a question. The bar for the
+		// runner-up is "not exact" — a CODE like ORD-1001 sits beside
+		// ORD-1011 / ORD-1010 at 0.99 (found live, VOZ-AHORRO-S2), and an
+		// exact code is the row, not a question.
+		if strong[0].Score >= 0.999 && strong[1].Score < 0.999 {
 			return Decision{Kind: "one", Chosen: &strong[0]}
 		}
 		return Decision{Kind: "several", Options: capOptions(strong)}
