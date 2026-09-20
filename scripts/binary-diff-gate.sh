@@ -206,7 +206,9 @@ normalize_body() {
       gsub("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"; "<uuid>")
       | gsub("[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}[0-9:.+Z-]*"; "<time>")
     else . end)
-    | if (type == "object") and (.data | type == "array") then .data |= sort else . end' \
+    | if (type == "object") and (.data | type == "array") then .data |= sort else . end
+    | if (type == "object") and has("total_ms") then .total_ms = "<ms>" else . end
+    | if (type == "object") and has("model_ms") then .model_ms = "<ms>" else . end' \
     2>/dev/null || cat
 }
 normalize_headers() {
@@ -305,6 +307,11 @@ while IFS= read -r line; do
     if [ "$bb" != "$nb" ]; then
       printf '      base body: %s\n' "$(echo "$bb" | head -c 400)"
       printf '      new  body: %s\n' "$(echo "$nb" | head -c 400)"
+      # The first 400 bytes of two long bodies can be identical while the
+      # difference sits at the end (VOZ-ESCRITURAS-S1: a case whose only
+      # change was past the excerpt could not be explained from the log).
+      echo "      body diff (base < > new, first 40 lines):"
+      diff <(echo "$bb") <(echo "$nb") | head -40 | sed 's/^/        /' || true
     fi
     if [ "$bh" != "$nh" ]; then
       echo "      header diff:"
