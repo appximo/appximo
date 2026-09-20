@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789856848976,
+  "lastUpdate": 1789866045130,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -6336,6 +6336,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "67613468 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "d88bd5358e1f7cad355a7bfa5eec07f7981faadb",
+          "message": "feat(auth): long-lived, path-scoped, revocable tokens — `appximo token --ttl 365d --paths /api/ask,/api/summary`, a `paths` claim the middleware enforces, and APPXIMO_JWT_REVOKED to revoke by id without rotating the secret (TOKEN-SCOPE)\n\nA phone shortcut's dev token expired every 24 h. Now a token can live long\n(--ttl, days or a Go duration; still an exp — no immortal tokens) AND do\nlittle: the `paths` claim (exact paths, or prefixes ending in /*) is checked\nafter the claims cache and answers 401 naming the scope on any other path, so\na lost phone can ask and read the digest, never list customers or write a\nrow, even though its role could. Every minted token carries an id (jti,\nrandom or --id); APPXIMO_JWT_REVOKED lists ids to refuse with 401 «token\nrevoked» — loaded fail-fast at boot, every other token keeps working, no\nsecret rotation, no session store. Cost per request after the cache: 8 ns for\na plain token, 53 ns for a scoped one (BenchmarkScopeChecks), 0 allocs.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01RRbLimz1zY36sFxLz92aUy",
+          "timestamp": "2026-09-20T00:56:09Z",
+          "tree_id": "7c615399a0e15aec5f46b46436328babcbab4efa",
+          "url": "https://github.com/appximo/appximo/commit/d88bd5358e1f7cad355a7bfa5eec07f7981faadb"
+        },
+        "date": 1789866044086,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6975,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "293774 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6975,
+            "unit": "ns/op",
+            "extra": "293774 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "293774 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "293774 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 68.74,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36873898 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 68.74,
+            "unit": "ns/op",
+            "extra": "36873898 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36873898 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36873898 times\n4 procs"
           }
         ]
       }
