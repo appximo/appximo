@@ -103,6 +103,7 @@ class ApiError extends Error {
     super(body?.error ?? (status === 0 ? t('err.network') : `HTTP ${status}`));
     this.status = status;
     this.fields = body?.fields ?? [];
+    this.body = body ?? null;   // a 409 time_range_conflict carries the colliding rows (MOTOR-AGENDA-S1)
   }
 }
 
@@ -1424,6 +1425,7 @@ async function renderForm(row, opts = {}) {
   };
   if ($('#form-del')) $('#form-del').onclick = showConfirm;
   if (opts.confirmDelete && editing && res.canDelete) showConfirm();
+  wireRangeChecks(res, fields, editing ? row : null, readonly);
   const first = document.querySelector('#gform input:not([type=hidden]):not([type=file]):not(:disabled), #gform select:not(:disabled), #gform textarea:not(:disabled)');
   if (first && !opts.confirmDelete && window.matchMedia('(min-width: 901px)').matches) first.focus();
 
@@ -1440,6 +1442,12 @@ async function renderForm(row, opts = {}) {
       if (editing && v === '') { body[f.key] = null; continue; } // rule 3: explicit null clears
       if (v !== null) body[f.key] = v;
       else if (editing) body[f.key] = null;
+    }
+    // A range's end must follow its start (MOTOR-AGENDA-S1): named here before
+    // the request, exactly as the engine's 422 range_order would name it.
+    for (const r of res.ranges ?? []) {
+      const s = body[r.start] ?? row?.[r.start], e = body[r.end] ?? row?.[r.end];
+      if (s && e && new Date(e) <= new Date(s)) { paintField(r.end, t('form.rangeOrder')); bad = true; }
     }
     if (bad) { $('#form-banner').innerHTML = `<div class="banner err">${ICON.alert}<div>${t('form.fixFields')}</div></div>`; return; }
     if (editing) for (const k of Object.keys(body)) if (deepEq(body[k], row[k])) delete body[k];   // PATCH only what changed
@@ -1462,12 +1470,69 @@ async function renderForm(row, opts = {}) {
         const firstErr = document.querySelector('.f.field-err');
         if (firstErr) firstErr.scrollIntoView({ block: 'center', behavior: 'smooth' });
         $('#form-banner').innerHTML = painted ? `<div class="banner err">${ICON.alert}<div>${t('form.fixFields')}</div></div>` : `<div class="banner err">${ICON.alert}<div>${esc(e.message)}${e.fields.map((fe) => ` · ${esc(fe.field)}: ${esc(fe.message ?? fe.rule)}`).join('')}</div></div>`;
+      } else if (e.status === 409 && e.body?.error === 'time_range_conflict') {   // the range's 409 names the rows (MOTOR-AGENDA-S1)
+        $('#form-banner').innerHTML = `<div class="banner err">${ICON.alert}<div>${esc(conflictWords(res, e.body))}</div></div>`;
+        $('#form-banner').scrollIntoView({ block: 'nearest' });
       } else {                                                  // rule 4: 409 keeps the work
         $('#form-banner').innerHTML = `<div class="banner err">${ICON.alert}<div>${esc(e.message)}</div></div>`;
         $('#form-banner').scrollIntoView({ block: 'nearest' });
       }
     }
   };
+}
+
+// Time ranges in the form (MOTOR-AGENDA-S1): while the owner edits a range's
+// bounds (or its scope / its "blocks" flag), ask GET /api/{res}/conflicts and
+// SHOW what the window collides with — advise, never block: the save still
+// goes through and the engine's constraint answers the 409 that names the row.
+function wireRangeChecks(res, fields, row, readonly) {
+  if (readonly || !(res.ranges ?? []).length) return;
+  const form = $('#gform');
+  let timer = null;
+  const watched = new Set();
+  for (const r of res.ranges) { watched.add(r.start); watched.add(r.end); for (const c of r.scope) watched.add(c); if (r.when) watched.add(r.when.field); }
+  const byKey = Object.fromEntries(fields.map((f) => [f.key, f]));
+  const run = async () => {
+    const lines = [];
+    for (const r of res.ranges) {
+      if (!r.hasConflicts) continue;
+      let s, e;
+      try { s = byKey[r.start] ? readControl(byKey[r.start]) : row?.[r.start]; e = byKey[r.end] ? readControl(byKey[r.end]) : row?.[r.end]; } catch { continue; }
+      if (!s || !e) continue;
+      if (new Date(e) <= new Date(s)) { paintField(r.end, t('form.rangeOrder')); continue; }
+      const q = new URLSearchParams({ range: r.name, start: s, end: e });
+      if (row?.id) q.set('exclude_id', row.id);
+      for (const c of r.scope) { let v = null; try { v = byKey[c] ? readControl(byKey[c]) : row?.[c]; } catch { /* unreadable */ } if (v) q.set(c, v); }
+      if (r.when) { let v = null; try { v = byKey[r.when.field] ? readControl(byKey[r.when.field]) : row?.[r.when.field]; } catch { /* unreadable */ } if (v !== null && v !== undefined && v !== '') q.set(r.when.field, String(v)); }
+      let out;
+      try { out = await api(`/api/${res.name}/conflicts?${q}`); } catch { continue; }
+      if (out?.conflicts?.length) lines.push(conflictWords(res, out));
+    }
+    const el = $('#form-range'); if (!el) return;
+    el.innerHTML = lines.length ? `<div class="banner warn">${ICON.alert}<div>${lines.map(esc).join('<br>')}</div></div>` : '';
+  };
+  if (!$('#form-range')) $('#form-banner').insertAdjacentHTML('afterend', '<div id="form-range"></div>');
+  form.addEventListener('input', (ev) => {
+    const key = ev.target?.name;
+    if (!key || !watched.has(key)) return;
+    clearTimeout(timer); timer = setTimeout(run, 400);
+  });
+  run();
+}
+
+// conflictWords names the colliding rows of a /conflicts answer or a 409
+// body: «Ya hay: Reunión con Fabián (16:00–17:00)».
+function conflictWords(res, body) {
+  const r = (res.ranges ?? []).find((x) => x.name === body.range) ?? (res.ranges ?? [])[0];
+  const rows = body.conflicts ?? [];
+  if (!rows.length) return body.message ?? t('form.conflict');
+  const fmt = (v) => { const d = new Date(v); return isNaN(d) ? String(v ?? '') : d.toLocaleString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+  const names = rows.slice(0, 3).map((row) => {
+    const label = rowLabel(row, 'id', res) || res.title;
+    return r ? `${label} (${fmt(row[r.start])} – ${fmt(row[r.end])})` : label;
+  });
+  const more = rows.length > 3 ? ` +${rows.length - 3}` : '';
+  return `${t('form.conflict')}: ${names.join(', ')}${more}`;
 }
 
 // Form order (the contract lists properties alphabetically): the title field,
@@ -1480,6 +1545,8 @@ function formFields(res) {
     if (f.transitions) return 8;
     if (f.file) return 9;
     if (f.type === 'object' || f.json) return 10;
+    if (f.rangeRole === 'start') return 1.5;    // a range's start, then its end, side by side — even when required (MOTOR-AGENDA-S1)
+    if (f.rangeRole === 'end') return 1.6;
     if (f.required) return 1;
     if (f.relation) return 3;
     if (f.enum) return 4;
@@ -1573,7 +1640,13 @@ async function controlHTML(f, val, editing, readonly) {
         ${help(esc(policy))}
       </div>`;
     }
-    case 'checkbox': return `<label class="switch"><input id="${id}" type="checkbox" name="${f.key}"${val ? ' checked' : ''}${dis}><span class="track"></span><span class="lbl">${val ? t('bool.yes') : t('bool.no')}</span></label>`;
+    case 'checkbox': {
+      // A new row starts from the contract's `default` (a bool declared
+      // default:true used to render unchecked and be SENT as false — found by
+      // the agenda's `ocupa` in MOTOR-AGENDA-S1).
+      const on = !editing && (val === null || val === undefined) && f.default !== null && f.default !== undefined ? !!f.default : !!val;
+      return `<label class="switch"><input id="${id}" type="checkbox" name="${f.key}"${on ? ' checked' : ''}${dis}><span class="track"></span><span class="lbl">${on ? t('bool.yes') : t('bool.no')}</span></label>`;
+    }
     case 'json': {
       // APP-PODER-S1: a real JSON editor for x-appximo-json (text | jsonb) —
       // highlighted, validated as you type, formattable, foldable as a tree —

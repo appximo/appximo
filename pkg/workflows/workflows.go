@@ -80,11 +80,19 @@ type Step struct {
 type Workflow struct {
 	Name string
 
-	TriggerType string // "event" | "cron"
+	TriggerType string // "event" | "cron" | "time"
 	Topic       string // event: the outbox topic consumed
 	CronSpec    string // cron: the raw spec (for display)
 	Schedule    cron.Schedule
 	Location    *time.Location
+
+	// Time trigger (MOTOR-AGENDA-S1): per-row, relative to Resource.Field.
+	Resource string
+	Field    string
+	Offset   time.Duration // the declared before/after distance
+	Before   bool          // true = before the moment, false = after
+	Grace    time.Duration // how late a firing may still happen
+	When     *schema.WhenDef
 
 	OverlapAllow bool   // overlap: "allow" (default false = skip)
 	Role         string // "" = the worker's default service role
@@ -172,6 +180,31 @@ func Compile(s *schema.APISchema) ([]*Workflow, error) {
 					return nil, fmt.Errorf("workflow %q: timezone %q: %w", name, ws.Trigger.Timezone, err)
 				}
 				wf.Location = loc
+			}
+		case "time":
+			wf.Resource, wf.Field, wf.When = ws.Trigger.Resource, ws.Trigger.Field, ws.Trigger.When
+			src := ws.Trigger.Before
+			wf.Before = src != ""
+			if !wf.Before {
+				src = ws.Trigger.After
+			}
+			off, err := schema.ParseWorkflowDuration(src)
+			if err != nil {
+				return nil, fmt.Errorf("workflow %q: offset %q: %w", name, src, err)
+			}
+			wf.Offset = off
+			// Default grace: a "before" reminder is useful until the moment itself
+			// (never fires after it); an "after" follow-up keeps an hour.
+			wf.Grace = off
+			if !wf.Before {
+				wf.Grace = time.Hour
+			}
+			if ws.Trigger.Grace != "" {
+				g, err := schema.ParseWorkflowDuration(ws.Trigger.Grace)
+				if err != nil {
+					return nil, fmt.Errorf("workflow %q: grace %q: %w", name, ws.Trigger.Grace, err)
+				}
+				wf.Grace = g
 			}
 		default:
 			return nil, fmt.Errorf("workflow %q: unsupported trigger type %q", name, ws.Trigger.Type)

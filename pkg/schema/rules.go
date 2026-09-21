@@ -25,6 +25,9 @@ var validFormats = map[string]bool{
 	"uuid":  true,
 	"url":   true,
 	"date":  true,
+	// timezone (MOTOR-AGENDA-S1): an IANA zone name (America/Bogota) — the
+	// value a range's timezone_field holds; fixed offsets are refused.
+	FormatTimezone: true,
 }
 
 // emailRe is a pragmatic email shape check (local@domain.tld). Anchored and
@@ -52,6 +55,7 @@ type ResourceValidator struct {
 	rules    map[string][]ruleFn
 	defaults map[string]defaultSpec // field → default to fill on create (SCHEMA-CLOSE-V1)
 	states   map[string]*compiledSM // field → state-machine sets (G5); nil when none declared
+	ranges   ResourceSchema         // the declared ranges (MOTOR-AGENDA-S1); zero when none
 }
 
 // compiledSM is the precompiled state-machine of one field (G5): the set of states
@@ -76,6 +80,9 @@ type defaultSpec struct {
 // rejects every value for that field — never a silently dropped rule.
 func CompileRules(res *ResourceSchema) *ResourceValidator {
 	rv := &ResourceValidator{rules: make(map[string][]ruleFn)}
+	if len(res.Ranges) > 0 {
+		rv.ranges = ResourceSchema{Ranges: res.Ranges}
+	}
 
 	names := make([]string, 0, len(res.Fields))
 	for n := range res.Fields {
@@ -263,6 +270,11 @@ func (rv *ResourceValidator) ValidateWrite(body map[string]any, requireAll bool)
 	// the update-time transition check live elsewhere (ValidateInitialStates and the
 	// UPDATE SQL guard) so this one rule is correct on every path.
 	errs = append(errs, rv.checkKnownStates(body)...)
+	// Time ranges (MOTOR-AGENDA-S1): end must be after start whenever the body
+	// carries both bounds. Zero cost for a resource with no ranges.
+	if len(rv.ranges.Ranges) > 0 {
+		errs = append(errs, RangeOrderViolations(rv.ranges, body)...)
+	}
 	return errs
 }
 
@@ -434,6 +446,8 @@ func formatChecker(format string) (func(string) bool, string) {
 			_, err := uuid.Parse(s)
 			return err == nil
 		}, "must be a valid UUID"
+	case FormatTimezone:
+		return ValidateTimezoneName, "must be an IANA time zone name such as America/Bogota (never a fixed offset)"
 	case "url":
 		return func(s string) bool {
 			u, err := url.Parse(s)

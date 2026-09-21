@@ -21,6 +21,8 @@ type Collector struct {
 	wfRuns       *prometheus.Desc
 	wfFailed     *prometheus.Desc
 	wfOverdue    *prometheus.Desc
+	remFired     *prometheus.Desc
+	remFailed    *prometheus.Desc
 }
 
 // NewCollector wraps obs for registration on a Prometheus registry.
@@ -47,6 +49,10 @@ func NewCollector(obs *Observer) *Collector {
 			"Workflow runs that FAILED in the last 24 hours (error + per-step detail in public.workflow_runs)", nil, nil),
 		wfOverdue: prometheus.NewDesc("appximo_workflow_overdue_seconds",
 			"How far past due the most-overdue cron workflow schedule is (growing = no scheduler is firing)", nil, nil),
+		remFired: prometheus.NewDesc("appximo_workflow_reminders_fired_24h",
+			"Per-row reminders (time triggers) claimed and fired in the last 24 hours — one per (workflow, row, due instant)", nil, nil),
+		remFailed: prometheus.NewDesc("appximo_workflow_reminders_failed_24h",
+			"Reminder runs that FAILED in the last 24 hours (claim released; retried on the next sweep while inside grace)", nil, nil),
 	}
 }
 
@@ -58,6 +64,8 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.sentLastHour
 	ch <- c.oldestPend
 	ch <- c.oldestFail
+	ch <- c.remFired
+	ch <- c.remFailed
 	ch <- c.byTopic
 	ch <- c.wfRuns
 	ch <- c.wfFailed
@@ -82,4 +90,6 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.wfRuns, prometheus.GaugeValue, float64(s.WorkflowRuns24h))
 	ch <- prometheus.MustNewConstMetric(c.wfFailed, prometheus.GaugeValue, float64(s.WorkflowFailed24h))
 	ch <- prometheus.MustNewConstMetric(c.wfOverdue, prometheus.GaugeValue, s.WorkflowOverdueSeconds)
+	ch <- prometheus.MustNewConstMetric(c.remFired, prometheus.GaugeValue, float64(s.RemindersFired24h))
+	ch <- prometheus.MustNewConstMetric(c.remFailed, prometheus.GaugeValue, float64(s.RemindersFailed24h))
 }

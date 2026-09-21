@@ -1,6 +1,7 @@
 package ask
 
 import (
+	"strings"
 	"time"
 )
 
@@ -38,6 +39,23 @@ func Resolve(rng string, now time.Time) (Window, bool) {
 	case "this_year":
 		y := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
 		return Window{y, y.AddDate(1, 0, 0), "este año"}, true
+	// The future (MOTOR-AGENDA-S1): an agenda is asked about what comes.
+	case "tomorrow":
+		d := day.AddDate(0, 0, 1)
+		return Window{d, d.AddDate(0, 0, 1), "mañana (" + dateWords(d) + ")"}, true
+	case "day_after_tomorrow":
+		d := day.AddDate(0, 0, 2)
+		return Window{d, d.AddDate(0, 0, 1), "pasado mañana (" + dateWords(d) + ")"}, true
+	case "next_week":
+		return Window{monday.AddDate(0, 0, 7), monday.AddDate(0, 0, 14), "la semana que viene"}, true
+	}
+	if wd, ok := weekdayTokens[strings.TrimPrefix(rng, "next_")]; ok && strings.HasPrefix(rng, "next_") {
+		delta := (int(wd) - int(day.Weekday()) + 7) % 7
+		if delta == 0 {
+			delta = 7
+		}
+		d := day.AddDate(0, 0, delta)
+		return Window{d, d.AddDate(0, 0, 1), "el " + weekdayES(wd) + " (" + dateWords(d) + ")"}, true
 	}
 	return Window{}, false
 }

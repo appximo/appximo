@@ -17,6 +17,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"github.com/appximo/appximo/pkg/outbox"
 	"github.com/appximo/appximo/pkg/schema"
 )
 
@@ -48,6 +49,9 @@ func TestMain(m *testing.M) {
 	}
 	if err == nil {
 		err = EnsureTables(ctx, testPool)
+		if err == nil {
+			err = outbox.EnsureTable(ctx, testPool) // the reminder tests enqueue on it
+		}
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "workflows test setup:", err)
@@ -68,7 +72,7 @@ func requirePG(t *testing.T) *pgxpool.Pool {
 	if testPool == nil {
 		t.Fatal("shared pool not initialized")
 	}
-	for _, tbl := range []string{"workflow_runs", "workflow_cron"} {
+	for _, tbl := range []string{"workflow_runs", "workflow_cron", "workflow_reminders", "outbox"} {
 		if _, err := testPool.Exec(context.Background(), "TRUNCATE public."+tbl); err != nil {
 			t.Fatalf("truncate %s: %v", tbl, err)
 		}

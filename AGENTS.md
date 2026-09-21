@@ -1018,6 +1018,46 @@ The reply always speaks the schema's word. Studio preserves the block (Code
 view); `appximo explain` reads it back. Full contract: docs/SCHEMA_REFERENCE.md
 §2.6 and §4.11.
 
+#### Time ranges with no-overlap (`ranges`, MOTOR-AGENDA-S1, ADR-039)
+
+```json
+"eventos": {
+  "fields": { "titulo": {"type":"string","required":true},
+              "inicio": {"type":"time","required":true}, "fin": {"type":"time","required":true},
+              "dueno_id": {"type":"uuid"}, "ocupa": {"type":"bool","default":true} },
+  "ranges": { "horario": { "start": "inicio", "end": "fin", "default_duration": "1h",
+                           "no_overlap": { "scope": ["dueno_id"], "when": {"field":"ocupa","op":"eq","val":true} } } }
+}
+```
+
+A resource whose rows occupy a block of time (an appointment, a booking, a
+shift) names the block over two of its own `time` fields. NOT a column type —
+the JSON stays `inicio`/`fin`; in Postgres the block is `tstzrange(start,
+end, '[)')`, half-open, so 4–5 and 5–6 do not overlap. `no_overlap` is a REAL
+`EXCLUDE USING gist` constraint (`btree_gist`, installed by the engine at
+provisioning and by `install.sh`): race-safe — two simultaneous writes that
+overlap → one wins, the other gets **409 `time_range_conflict`** naming the
+row it collided with (`existing` bounds + `conflicts[]` as the role may read
+them) on REST, batch, GraphQL and `Ctx.Insert/Update` (`*RangeConflictError`).
+`scope` = the columns that must be EQUAL to collide (`[]` = one shared
+agenda); `when` (`eq|ne`, a literal) = which rows BLOCK (a tentative or
+cancelled row does not). The engine also adds `CHECK (start < end)` → 422
+`rule: "range_order"` on the end field, before SQL when both bounds travel.
+Reads: `?filter[horario][overlaps]=<start>/<end>` (ISO 8601 interval),
+`?filter[horario][contains]=<instant>`, GraphQL `TimeRangeFilter`, and the
+pre-check `GET /api/{res}/conflicts?range&start&end&<scope>&exclude_id` —
+advise before writing, never block; the constraint is the net. A rule added
+over rows that ALREADY overlap is refused naming the pairs (dry-run
+`[blocked]` concern; apply = partial, schema not persisted). `default_duration`
+is what a bare start lasts (voice «a las 10»); `timezone_field` names a
+string field with `format: "timezone"` (IANA, never an offset). Recurrences
+are v2 and materialize into rows. Voice: «qué tengo mañana» / «tengo algo a
+las 4» / «cuándo estoy libre el jueves» / «agendá reunión con Fabián mañana
+de 4 a 5» are the parser's (US$ 0); the confirmation shows the collision
+(«⚠️ Ya tenés …  ¿Igual lo agendo?») and a yes on an invertible rule saves the
+row as not blocking. Example: `examples/model-lab/agenda-choques.json`; full
+contract docs/SCHEMA_REFERENCE.md §2.7.
+
 ### Relations
 
 ```json
@@ -1467,9 +1507,23 @@ that execute in `appximo-worker` — never on the request path:
 ```
 
 - Triggers: `event` (create|update|delete — the resource MUST declare that
-  action in `events`, else load error) or `cron` (5-field / `@daily` /
-  `@every 1h`; IANA `timezone`, default UTC; DST policy in ADR-031). No `http`
-  trigger (a custom route's handler enqueues an event instead).
+  action in `events`, else load error), `cron` (5-field / `@daily` /
+  `@every 1h`; IANA `timezone`, default UTC; DST policy in ADR-031) or
+  **`time`** (MOTOR-AGENDA-S1, ADR-039: PER ROW, relative to the row's own
+  time field — `{"type":"time","resource":"eventos","field":"inicio",
+  "before":"15m","when":{"field":"estado","op":"ne","val":"cancelado"}}`;
+  `after` for a follow-up; optional `grace`, default = the offset for
+  `before` so a "15 min before" never arrives after the moment). The worker's
+  LEADER sweeps the rows entering the window each tick (through the engine
+  API as the workflow's role) and CLAIMS each (row, due instant) in
+  `public.workflow_reminders` in the SAME transaction as the run's `enqueue`
+  — a restart in the window neither loses nor duplicates; a moved row fires
+  once at its new time; a cancelled one never. The natural step: `enqueue`
+  `message.telegram` with `data.text` (an expr over `record`) — the shipped
+  worker sends that text to the app's chat. `/admin/workflows` renders
+  `time:eventos.inicio -15m`; gauges `appximo_workflow_reminders_fired_24h`
+  / `_failed_24h`. No `http` trigger (a custom route's handler enqueues an
+  event instead).
 - Steps run SEQUENTIALLY; the closed set: `condition` (expr-lang; false stops
   the run), `update`, `create` (via the engine API as the workflow's `role` —
   RBAC and validation intact), `webhook` (signed, SSRF-guarded, HTTPS-only),
@@ -2863,7 +2917,8 @@ is a JSON snapshot, not a stream).
   level `foreign_keys` block) — all in [Relations](#relations). What still does NOT
   exist: a FK referencing a column that is neither a PK nor `unique` (Postgres
   forbids it — rejected at load), and `MATCH PARTIAL`.
-- A `workflows` trigger of type `http`, step types beyond
+- A workflow that fires "N minutes before each row" is NOT a cron: it is the
+  `time` trigger (above). A `workflows` trigger of type `http`, step types beyond
   `condition|update|create|webhook|enqueue`, or a workflow step graph
   (`next`/branches — steps are strictly sequential; a false `condition` stops
   the run). The block itself EXECUTES since ADR-031 (in `appximo-worker`) — see

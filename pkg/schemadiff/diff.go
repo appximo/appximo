@@ -33,6 +33,8 @@ const (
 	OpDropUnique
 	OpAddCheck
 	OpDropCheck
+	OpAddExclusion
+	OpDropExclusion
 	OpAddIndex
 	OpDropIndex
 )
@@ -283,6 +285,37 @@ func (AddCheck) Risk() RiskClass        { return RiskBackfill } // existing data
 func (AddCheck) Reversible() bool       { return true }
 func (AddCheck) RequiresBackfill() bool { return false }
 func (o AddCheck) String() string       { return fmt.Sprintf("ADD CHECK %s %s", o.Table, o.Check.Expression) }
+
+// AddExclusion adds an EXCLUDE constraint (a declared no-overlap rule). It
+// scans existing rows under an ACCESS EXCLUSIVE lock and FAILS when two of
+// them already overlap — Postgres has no NOT VALID for exclusions — so the
+// runner applies it apart from the rest of the plan, after a pre-check that
+// names the colliding pairs (never a half-applied migration).
+type AddExclusion struct {
+	Table     string
+	Exclusion *Exclusion
+}
+
+func (AddExclusion) Kind() OpKind           { return OpAddExclusion }
+func (AddExclusion) Risk() RiskClass        { return RiskBackfill } // existing rows must not overlap
+func (AddExclusion) Reversible() bool       { return true }
+func (AddExclusion) RequiresBackfill() bool { return false }
+func (o AddExclusion) String() string       { return "ADD EXCLUSION " + o.Table + "." + o.Exclusion.Symbol }
+
+// DropExclusion drops an EXCLUDE constraint. Loses no row data — a safe drop,
+// kept as drift under the additive policy unless it is the drop half of a
+// changed rule (same table + range family, new symbol), which the runner pairs
+// with its add so the old rule never keeps blocking writes.
+type DropExclusion struct {
+	Table     string
+	Exclusion *Exclusion
+}
+
+func (DropExclusion) Kind() OpKind           { return OpDropExclusion }
+func (DropExclusion) Risk() RiskClass        { return RiskSafe }
+func (DropExclusion) Reversible() bool       { return true }
+func (DropExclusion) RequiresBackfill() bool { return false }
+func (o DropExclusion) String() string       { return "DROP EXCLUSION " + o.Table + "." + o.Exclusion.Symbol }
 
 type DropCheck struct {
 	Table string
@@ -582,6 +615,21 @@ func diffConstraints(b *planBuilder, dt, ct *Table) {
 		}
 	}
 
+	// Exclusion constraints — match on symbol (the symbol carries the rule's
+	// definition hash; see Table.Exclusions).
+	if ct != nil {
+		for _, k := range sortedKeysOf(ct.Exclusions) {
+			if _, ok := dt.Exclusions[k]; !ok {
+				b.dropExclusion = append(b.dropExclusion, DropExclusion{Table: table, Exclusion: ct.Exclusions[k]})
+			}
+		}
+	}
+	for _, k := range sortedKeysOf(dt.Exclusions) {
+		if ct == nil || ct.Exclusions[k] == nil {
+			b.addExclusion = append(b.addExclusion, AddExclusion{Table: table, Exclusion: dt.Exclusions[k]})
+		}
+	}
+
 	// Standalone indexes — match on (columns, unique, method, predicate). A change
 	// to any of those is a different index → drop old + add new.
 	curI := map[string]*Index{}
@@ -611,9 +659,11 @@ func diffConstraints(b *planBuilder, dt, ct *Table) {
 type planBuilder struct {
 	renameTable, renameColumn                   []Operation
 	dropFK, dropPK, dropUnique, dropCheck       []Operation
+	dropExclusion                               []Operation
 	dropIndex, dropColumn, dropTable            []Operation
 	createTable, addColumn, alterColumn         []Operation
 	addPK, addUnique, addCheck, addIndex, addFK []Operation
+	addExclusion                                []Operation
 }
 
 // plan concatenates the phases in dependency-respecting order: renames first (free
@@ -623,9 +673,9 @@ func (b *planBuilder) plan() *Plan {
 	var ops []Operation
 	for _, phase := range [][]Operation{
 		b.renameTable, b.renameColumn,
-		b.dropFK, b.dropPK, b.dropUnique, b.dropCheck, b.dropIndex, b.dropColumn, b.dropTable,
+		b.dropFK, b.dropPK, b.dropUnique, b.dropCheck, b.dropExclusion, b.dropIndex, b.dropColumn, b.dropTable,
 		b.createTable, b.addColumn, b.alterColumn,
-		b.addPK, b.addUnique, b.addCheck, b.addIndex, b.addFK,
+		b.addPK, b.addUnique, b.addCheck, b.addIndex, b.addFK, b.addExclusion,
 	} {
 		ops = append(ops, phase...)
 	}

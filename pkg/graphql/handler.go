@@ -356,6 +356,37 @@ func (e *validationError) Extensions() map[string]any {
 	return map[string]any{"fields": e.fields}
 }
 
+// rangeConflictError is the GraphQL rendering of a time-range conflict
+// (MOTOR-AGENDA-S1): message = the REST message, extensions = the REST body
+// minus "error" (range, existing, conflicts).
+type rangeConflictError struct{ body map[string]any }
+
+func (e *rangeConflictError) Error() string { return fmt.Sprint(e.body["message"]) }
+
+func (e *rangeConflictError) Extensions() map[string]any {
+	ext := map[string]any{"code": "time_range_conflict"}
+	for k, v := range e.body {
+		if k != "error" && k != "message" {
+			ext[k] = v
+		}
+	}
+	return ext
+}
+
+func evalCond(ev *rbac.EvalResult) *rbac.WhereCondition {
+	if ev == nil {
+		return nil
+	}
+	return ev.Condition
+}
+
+func evalAllowed(ev *rbac.EvalResult) []string {
+	if ev == nil {
+		return nil
+	}
+	return ev.AllowedFields
+}
+
 // safeDBErr maps a database-layer error to a client-safe GraphQL error so internal
 // details (schema/table/column names, raw SQL, SQLSTATE) are never serialized into
 // the GraphQL errors array. It is the GraphQL rendering of the ONE classifier
@@ -383,6 +414,12 @@ func safeDBErr(ctx context.Context, err error) error {
 		// the REST 409 so a RESTRICT delete / bad reference is never a masked
 		// "internal error".
 		return fmt.Errorf("%s", v.Message)
+	case pkghandlers.WriteErrRangeConflict:
+		// A declared no-overlap rule (MOTOR-AGENDA-S1): the message names the
+		// range, extensions carry the colliding rows — REST's 409 body.
+		return &rangeConflictError{body: pkghandlers.RangeConflictBody(*v.Conflict)}
+	case pkghandlers.WriteErrRangeOrder:
+		return &validationError{fields: []schema.FieldRuleError{{Field: v.Field, Rule: pkghandlers.RangeOrderRule, Message: pkghandlers.RangeOrderMessage}}}
 	case pkghandlers.WriteErrMissingTenant:
 		return fmt.Errorf("invalid tenant")
 	case pkghandlers.WriteErrBadInput:
@@ -514,6 +551,16 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 		Name: "NullFilter",
 		Fields: gql.InputObjectConfigFieldMap{
 			"is_null": isNullField,
+		},
+	})
+	// TimeRangeFilter (MOTOR-AGENDA-S1): a declared range filters by NAME —
+	// overlaps takes an ISO 8601 interval "<start>/<end>", contains an instant.
+	// Same builder as REST (?filter[<range>][overlaps]=), half-open on both sides.
+	timeRangeFilter := gql.NewInputObject(gql.InputObjectConfig{
+		Name: "TimeRangeFilter",
+		Fields: gql.InputObjectConfigFieldMap{
+			"overlaps": &gql.InputObjectFieldConfig{Type: gql.String, Description: "ISO 8601 interval <start>/<end> (RFC 3339 instants): rows whose [start, end) overlaps it"},
+			"contains": &gql.InputObjectFieldConfig{Type: gql.String, Description: "an RFC 3339 instant: rows whose [start, end) contains it"},
 		},
 	})
 	// total / total_pages are LAZY (SEC-AUDIT-V2 Hallazgo C): their resolvers run
@@ -670,6 +717,9 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 			if ft := filterInputFor(fd.Type, stringFilter, dateFilter, rangeFilter, nullFilter); ft != nil {
 				filterFields[fname] = &gql.InputObjectFieldConfig{Type: ft}
 			}
+		}
+		for _, rn := range res.RangeNames() {
+			filterFields[rn] = &gql.InputObjectFieldConfig{Type: timeRangeFilter}
 		}
 		if len(filterFields) > 0 {
 			filterTypes[name] = gql.NewInputObject(gql.InputObjectConfig{
@@ -1381,6 +1431,7 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 		// set (no res.Fields whitelist), mirroring REST.
 		result, err := codegen.RunInsert(p.Context, tdb, tbl, name, tc.ID, tc.PGSchema, body, emitCreate)
 		if err != nil {
+			err = codegen.DescribeRangeConflict(p.Context, tdb, tc.PGSchema, name, res, err, evalCond(evalResult), evalAllowed(evalResult)) // MOTOR-AGENDA-S1
 			// safeDBErr renders the shared classifier — the unique-collision
 			// conflict (G6) included, identically to the update resolver.
 			return nil, safeDBErr(p.Context, err)
@@ -1513,6 +1564,7 @@ func updateResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 			if err == codegen.ErrNoWritableUpdate {
 				return nil, fmt.Errorf("no writable fields in request")
 			}
+			err = codegen.DescribeRangeConflict(p.Context, tdb, tc.PGSchema, name, res, err, cond, evalAllowed(evalResult)) // MOTOR-AGENDA-S1
 			return nil, safeDBErr(p.Context, err)
 		}
 		if len(rows) == 0 {

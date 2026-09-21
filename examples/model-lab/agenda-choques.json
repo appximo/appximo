@@ -1,0 +1,67 @@
+{
+  "$schema": "https://appximo.com/schema/v1",
+  "version": "1",
+  "name": "agenda-choques",
+  "resources": {
+    "personas": {
+      "aliases": ["contactos", "gente"],
+      "fields": {
+        "nombre":   { "type": "string", "required": true, "minLength": 1, "maxLength": 120 },
+        "telefono": { "type": "string", "maxLength": 40 }
+      }
+    },
+    "eventos": {
+      "aliases": ["compromiso", "cita", "reunion", "bloque"],
+      "fields": {
+        "titulo":     { "type": "string", "required": true, "minLength": 1, "maxLength": 200 },
+        "persona_id": { "type": "uuid", "relation": "personas", "on_delete": "set_null" },
+        "inicio":     { "type": "time", "required": true },
+        "fin":        { "type": "time", "required": true },
+        "zona":       { "type": "string", "format": "timezone", "default": "America/Bogota" },
+        "ocupa":      { "type": "bool", "default": true },
+        "estado":     { "type": "string", "enum": ["programado", "hecho", "cancelado"], "default": "programado",
+                        "aliases": { "programado": ["agendado"], "hecho": ["listo", "terminado"], "cancelado": ["anulado"] },
+                        "state_machine": { "initial": "programado", "pending": ["programado"],
+                                           "transitions": { "programado": ["hecho", "cancelado"], "hecho": [], "cancelado": [] } } },
+        "notas":      { "type": "text" },
+        "creado_en":  { "type": "time", "auto": "create" },
+        "actualizado_en": { "type": "time", "auto": "update" }
+      },
+      "ranges": {
+        "horario": {
+          "start": "inicio", "end": "fin",
+          "timezone_field": "zona",
+          "default_duration": "1h",
+          "no_overlap": { "scope": [], "when": { "field": "ocupa", "op": "eq", "val": true } }
+        }
+      },
+      "relations": { "persona": { "type": "belongs_to", "target": "personas", "fk": "persona_id" } },
+      "indexes": [ { "fields": ["inicio"] }, { "fields": ["estado"] } ],
+      "events": ["create", "update"]
+    }
+  },
+  "summary": { "resources": ["eventos", "personas"] },
+  "rbac": {
+    "roles": {
+      "dueno": { "resources": "*", "actions": ["*"] },
+      "demo":  { "permissions": { "eventos": { "actions": ["read"] }, "personas": { "actions": ["read"] } } }
+    }
+  },
+  "workflows": {
+    "aviso_15_min": {
+      "trigger": { "type": "time", "resource": "eventos", "field": "inicio", "before": "15m",
+                   "when": { "field": "estado", "op": "ne", "val": "cancelado" } },
+      "steps": [
+        { "name": "avisar", "type": "enqueue",
+          "config": { "topic": "message.telegram", "data": { "text": "=\"⏰ En 15 min: \" + record.titulo" } } }
+      ],
+      "role": "dueno"
+    },
+    "recordatorio_matinal": {
+      "trigger": { "type": "cron", "cron": "0 7 * * *", "timezone": "America/Bogota" },
+      "steps": [ { "name": "recordar", "type": "enqueue", "config": { "topic": "summary.telegram", "data": {} } } ],
+      "overlap": "skip",
+      "role": "dueno"
+    }
+  }
+}

@@ -545,6 +545,7 @@ func Validate(s *APISchema) []ValidationError {
 		errs = append(errs, validateRelations(resPrefix, resName, res, s)...)
 		errs = append(errs, validateIndexes(resPrefix, resName, res)...)
 		errs = append(errs, validateForeignKeys(resPrefix, res, s)...)
+		errs = append(errs, validateRanges(resPrefix, resName, res)...)
 
 		for hookName, hook := range res.Hooks {
 			hookPrefix := resPrefix + ".hooks." + hookName
@@ -2020,7 +2021,7 @@ func validateFieldRules(fieldPrefix string, field FieldDef) []ValidationError {
 		} else if !validFormats[field.Format] {
 			errs = append(errs, ValidationError{
 				Field:   fieldPrefix + ".format",
-				Message: fmt.Sprintf("unknown format %q: must be one of email, uuid, url, date", field.Format),
+				Message: fmt.Sprintf("unknown format %q: must be one of email, uuid, url, date, timezone", field.Format),
 			})
 		}
 	}

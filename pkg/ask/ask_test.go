@@ -94,6 +94,17 @@ func (e *memExec) filter(resource string, params url.Values) []map[string]any {
 				op = parts[1]
 			}
 			v := fmt.Sprint(row[field])
+			if op == "overlaps" || op == "contains" {
+				// A declared range name (the fixtures name the bounds inicio/fin).
+				s, e := fmt.Sprint(row["inicio"]), fmt.Sprint(row["fin"])
+				if op == "overlaps" {
+					from, to, _ := strings.Cut(vs[0], "/")
+					ok = ok && s < to && e > from
+				} else {
+					ok = ok && s <= vs[0] && e > vs[0]
+				}
+				continue
+			}
 			switch op {
 			case "eq":
 				ok = ok && v == vs[0]
@@ -237,7 +248,7 @@ func TestPlan_ParseStrictAndValidate(t *testing.T) {
 		{"bad op", `{"kind":"count","resource":"citas","filters":[{"field":"estado","op":"in","value":"x"}]}`, `op "in" is not one of`},
 		{"time literal", `{"kind":"count","resource":"citas","filters":[{"field":"fecha","op":"gte","value":"2026-01-01"}]}`, `filtered with period`},
 		{"period ok", `{"kind":"count","resource":"citas","period":{"range":"today"}}`, ""},
-		{"period bad range", `{"kind":"count","resource":"citas","period":{"range":"tomorrow"}}`, `period.range "tomorrow"`},
+		{"period bad range", `{"kind":"count","resource":"citas","period":{"range":"nextyear"}}`, `period.range "nextyear"`},
 		{"period no time field", `{"kind":"count","resource":"secretos","period":{"range":"today"}}`, `does not exist`},
 		{"sum text", `{"kind":"sum","resource":"citas","field":"notas"}`, `cannot be applied`},
 		{"sum ok", `{"kind":"sum","resource":"citas","field":"valor_cents","period":{"range":"this_week"}}`, ""},
@@ -320,8 +331,15 @@ func TestPeriod_Windows(t *testing.T) {
 	if w.From.Format("2006-01-02") != "2026-08-01" || w.To.Format("2006-01-02") != "2026-09-01" {
 		t.Errorf("last_month: %v–%v", w.From, w.To)
 	}
-	if _, ok := Resolve("tomorrow", now); ok {
-		t.Errorf("tomorrow is not a range")
+	// The future (MOTOR-AGENDA-S1): tomorrow is a day, next_friday the coming one.
+	if w, ok := Resolve("tomorrow", now); !ok || w.From.Format("2006-01-02") != "2026-09-20" || w.To.Format("2006-01-02") != "2026-09-21" {
+		t.Errorf("tomorrow: %v–%v ok=%v", w.From, w.To, ok)
+	}
+	if w, ok := Resolve("next_friday", now); !ok || w.From.Format("2006-01-02") != "2026-09-25" {
+		t.Errorf("next_friday: %v ok=%v", w.From, ok)
+	}
+	if _, ok := Resolve("nextyear", now); ok {
+		t.Errorf("nextyear is not a range")
 	}
 }
 

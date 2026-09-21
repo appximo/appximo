@@ -102,6 +102,7 @@ func buildDesiredSchema(pgSchema string, s *schema.APISchema) *schemadiff.Schema
 	addCompositeForeignKeys(ds, s, names)
 	addRelationIndexes(ds, s, names)
 	addDeclaredIndexes(ds, s, names)
+	addRanges(ds, s, names)
 	return ds
 }
 

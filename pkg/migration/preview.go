@@ -164,6 +164,9 @@ func PreviewTenantMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema st
 	for _, c := range concernsOnExistingTables(plan) {
 		pv.Concerns = append(pv.Concerns, fmt.Sprintf("[%s] %s", c.Risk, c.Message))
 	}
+	// A no-overlap rule about to be added over rows that already overlap
+	// (MOTOR-AGENDA-S1): the dry-run names the pairs, the apply refuses it.
+	pv.Concerns = append(pv.Concerns, exclusionConcerns(ctx, pool, pgSchema, s, plan)...)
 
 	// Approval tokens that matched no destructive op.
 	for _, k := range approved {

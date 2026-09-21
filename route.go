@@ -702,6 +702,13 @@ func (a *App) writeHandlerError(w http.ResponseWriter, rc *requestCtx, rt Route,
 		writeErr(w, http.StatusConflict, fke.Message)
 		return
 	}
+	var rce *RangeConflictError
+	if errors.As(err, &rce) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(rce.body)
+		return
+	}
 	// Ctx.ServeFile's uniform miss (malformed/unknown/foreign file id): a
 	// handler that just `return ctx.ServeFile(id)` answers the same 404 the
 	// engine's own download routes do (FRONTEND-SPEC-S1).

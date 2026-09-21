@@ -21,7 +21,7 @@
 | **SaaS / productivity** (Notion/Trello/Linear) | 🟢 yes | Nesting, tags, assignees, threads model cleanly; **owner/workspace isolation** (per-resource RBAC, G2), dashboards (aggregation, G3), and **task-status workflows** (state machine, G5) all work. A non-id workspace **claim variable** is the only remaining scoping nicety. |
 | **E-commerce / marketplace** | 🟢 mostly yes | The catalog (variants, category tree, m2m) is excellent; **checkout is atomic** (order + lines + guarded stock decrement, G4) and the **order lifecycle is enforced** (pending→paid→shipped→delivered, no illegal jumps, G5). The only remaining gap is order **totals** as a computed field (G7). |
 | **Social / content** | 🟢 mostly yes | The graph (follows, threaded comments, posts) is excellent; **public-read + owner-write now works in ONE role** (per-resource RBAC + `condition_actions`, G2) and counts have aggregation (G3). The feed-join and polymorphic likes (G11) remain. |
-| **Booking / reservations** (Airbnb/Calendly) | 🟡 partial | Listings/bookings/embeds work, payments are atomic (G4), and the **reservation lifecycle is enforced** (pending→confirmed→cancelled, G5); but the **defining invariant — no double-booking** — is still unmeetable (no time-range/overlap exclusion, G8). |
+| **Booking / reservations** (Airbnb/Calendly) | 🟢 mostly yes | Listings/bookings/embeds work, payments are atomic (G4), the **reservation lifecycle is enforced** (pending→confirmed→cancelled, G5), and the **defining invariant — no double-booking — is now a schema block** (`ranges` + `no_overlap`, a race-safe EXCLUDE constraint, G8 closed in MOTOR-AGENDA-S1); per-slot reminders are a `time` workflow. Recurrences remain v2. |
 | **Messaging / chat** | 🟡 partial (improved) | Conversations/messages/participants/keyset streams work; **per-resource scoping landed (G2)** so each resource carries its own condition, but **membership-by-subquery** (messages of conversations I'm in) still needs the participant denormalized onto the row; per-conversation realtime remains (G3 covers unread counts). |
 | **Fintech / wallet** | 🟡 partial (close) | **Derived balance** (SUM, G3), **atomic transfer** (G4), **idempotency keys** (clean `409`, G6), and **append-only immutability** (a `posted` ledger entry is a terminal state — frozen, G5) all work now. The one remaining gap for a true ledger is **exact decimal money** (G10 — `float64` only). |
 
@@ -262,13 +262,18 @@ Order totals, account balances, like counts are plain columns the client sends.
 
 **Severity: degrades.** Affects ecommerce, social, saas, fintech.
 
-### 🟡 G8 — No time-range / interval type, no overlap/exclusion constraint
+### ✅ G8 — CLOSED (MOTOR-AGENDA-S1, ADR-039): `ranges` + `no_overlap`
 
-There is no range type and no exclusion constraint, so **double-booking is not
-preventable** (verified: two bookings, same listing+slot, identical overlapping
-dates → both `201`). "Find free slots in a window" needs client logic over plain
-`gte`/`lte` time bounds. **Severity: blocks** the defining invariant of booking;
-minor elsewhere.
+Was: no range type and no exclusion constraint, so double-booking was not
+preventable (verified: two overlapping bookings both `201`). Now: a resource
+declares a time range over two `time` fields (`"ranges": {"slot": {"start":
+"starts_at", "end": "ends_at", "no_overlap": {"scope": ["listing_id"]}}}`) and
+the engine enforces a real `EXCLUDE USING gist` constraint (half-open, 4–5 and
+5–6 do not collide; twenty concurrent inserts of one slot → one `201`,
+nineteen `409 time_range_conflict` naming the winner), `?filter[slot][overlaps]=`
+/ `[contains]=`, and `GET /api/{res}/conflicts` for "find free slots" (the
+voice answers «cuándo estoy libre el jueves» from it). The blocking invariant
+of the booking archetype is meetable with one schema block.
 
 ### 🟡 G9 — `uuid` and `bool` fields are not filterable in GraphQL (REST allows `uuid eq`)
 

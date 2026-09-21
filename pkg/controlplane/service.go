@@ -16,6 +16,12 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// ErrPartialApply marks a deploy the database did not fully take (ENG-13): the
+// tenant keeps its previous schema and the caller gets the exact list of what
+// was not applied — a 422, never a masked 500 (MOTOR-AGENDA-S1 found the
+// control plane answering "internal error" over a blocked no-overlap rule).
+var ErrPartialApply = errors.New("apply migration: PARTIAL")
+
 // Service is the control plane dependency injected into the HTTP handlers.
 // All methods are safe to mock in unit tests.
 type Service interface {
@@ -165,9 +171,9 @@ func (s *pgService) updateSchemaSourced(ctx context.Context, id string, apiSchem
 	// have. Reporting it as applied is the exact failure ENG-13 named.
 	if outcome.Partial() {
 		s.restoreSchema(ctx, id, previous, "the migration did not fully apply")
-		return nil, 0, fmt.Errorf("apply migration: PARTIAL — the database does not have everything this schema declares, "+
+		return nil, 0, fmt.Errorf("%w: the database does not have everything this schema declares, "+
 			"so it was NOT saved (the tenant keeps the previous one). Not applied: %s",
-			strings.Join(outcome.Unapplied, "; "))
+			ErrPartialApply, strings.Join(outcome.Unapplied, "; "))
 	}
 
 	// Version history (VERSION-S1): the history mirrors json_schema, and is appended

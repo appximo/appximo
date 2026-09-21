@@ -34,6 +34,11 @@ input NullFilter {
   is_null: Boolean
 }
 
+input TimeRangeFilter {
+  overlaps: String
+  contains: String
+}
+
 type PageMeta {
   page:        Int!
   per_page:    Int!
@@ -115,6 +120,9 @@ func GenerateGraphQL(s *schema.APISchema) string {
 				continue
 			}
 			sb.WriteString(fmt.Sprintf("  %s: %s\n", fname, ft))
+		}
+		for _, rn := range res.RangeNames() {
+			sb.WriteString(fmt.Sprintf("  %s: TimeRangeFilter\n", rn))
 		}
 		sb.WriteString("}\n\n")
 

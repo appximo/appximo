@@ -25,6 +25,9 @@ type Source struct {
 	byTenant map[string][]*Workflow
 	topics   worker.TopicSet
 	entries  []CronEntry
+	// timeEntries are the per-row relative triggers the leader sweeps
+	// (MOTOR-AGENDA-S1).
+	timeEntries []TimeEntry
 }
 
 // CronEntry is one (tenant, cron workflow) pair the scheduler drives.
@@ -77,6 +80,7 @@ func (s *Source) Refresh(ctx context.Context) error {
 	byTenant := map[string][]*Workflow{}
 	var topics worker.TopicSet
 	var entries []CronEntry
+	var timeEntries []TimeEntry
 	seenTopic := map[string]bool{}
 
 	for rows.Next() {
@@ -108,6 +112,8 @@ func (s *Source) Refresh(ctx context.Context) error {
 				}
 			case "cron":
 				entries = append(entries, CronEntry{Tenant: tenant, Workflow: wf})
+			case "time":
+				timeEntries = append(timeEntries, TimeEntry{Tenant: tenant, Workflow: wf})
 			}
 		}
 	}
@@ -119,6 +125,7 @@ func (s *Source) Refresh(ctx context.Context) error {
 	s.byTenant = byTenant
 	s.topics = topics
 	s.entries = entries
+	s.timeEntries = timeEntries
 	s.mu.Unlock()
 	return nil
 }

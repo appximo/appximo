@@ -1,6 +1,6 @@
 {
  "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo).",
- "actualizado": "2026-09-20",
+ "actualizado": "2026-09-21",
  "publicacion": {
   "estado": "pausada_deliberada",
   "desde": "2026-08-29",
@@ -1530,6 +1530,90 @@
    "depende_de": [],
    "bloquea": [],
    "origen": "CAPACIDADES-VISIBLES-S1 (2026-09-20): el camino de los dos prompts pierde exactamente ahí",
+   "estado": "abierto"
+  },
+  {
+   "id": "VOZ-14",
+   "titulo": "Asociar varias personas a un compromiso por voz (muchos-a-muchos): la voz escribe UNA fila por confirmación",
+   "frente": "automatizacion",
+   "que_es": "«reunión con Fabián y Marta» asocia hoy a UNA persona por un FK belongs_to; una relación many_to_many (tarea ↔ persona por una tabla intermedia) se lee (?include=) pero la voz no escribe la fila de la junción.",
+   "por_que_importa": "La app de agenda modela tarea ↔ persona como muchos-a-muchos; por voz solo se puede nombrar a una persona, la segunda queda en el título.",
+   "que_lo_destraba": "Un plan de escritura con una lista en un campo de relación m2m ({\"personas\": [{\"match\":\"Fabián\"},{\"match\":\"Marta\"}]}) que el txWriter convierte en la fila principal + N filas de junción en la misma transacción (/api/transaction ya lo hace); confirmación que lista a cada uno.",
+   "costo": "medio",
+   "dano": "medio",
+   "prioridad": "P3",
+   "decide": "agente",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "MOTOR-AGENDA-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "SCHEMA-10",
+   "titulo": "Studio no tiene panel para `ranges` ni para el trigger `time` (solo la vista Code los preserva)",
+   "frente": "producto",
+   "que_es": "El bloque ranges (inicio/fin, no_overlap, default_duration) y el trigger time de un workflow se autoran únicamente en la vista Code de Studio; el panel de entidad los preserva pero no los edita.",
+   "por_que_importa": "Es la misma clase que VOZ-13 (aliases) y AUTO-11 (workflows): lo que la voz y el worker ejecutan no tiene cara visual; un dueño no programador no puede declarar «que no se me crucen» sin JSON.",
+   "que_lo_destraba": "Una sección Rango en el panel de entidad (dropdown de dos campos time, scope, when, duración) y el trigger time en el panel de workflows cuando AUTO-11 exista.",
+   "costo": "medio",
+   "dano": "bajo",
+   "prioridad": "P3",
+   "decide": "agente",
+   "depende_de": [
+    "AUTO-11"
+   ],
+   "bloquea": [],
+   "origen": "MOTOR-AGENDA-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "AUTO-13",
+   "titulo": "/admin/workflows no muestra cuántos recordatorios vienen: el conteo de filas en la ventana próxima",
+   "frente": "automatizacion",
+   "que_es": "El panel muestra el trigger time y los disparados/fallidos de 24 h (gauges), pero no «cuántas filas van a disparar en la próxima hora» — el pendiente del recordatorio vive en las tablas del tenant, no en el libro.",
+   "por_que_importa": "Sin ese número, «no llegó el aviso» no se distingue de «no había nada por avisar» hasta que pasa la hora.",
+   "que_lo_destraba": "Que el barrido publique, por workflow, el conteo de candidatos de la próxima ventana (una consulta más por tick, o el conteo del último tick) en /admin/workflows y como gauge.",
+   "costo": "chico",
+   "dano": "bajo",
+   "prioridad": "P3",
+   "decide": "agente",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "MOTOR-AGENDA-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "OPS-58",
+   "titulo": "El gate de diff binario no puede declarar `ranges` ni `aliases`: su schema vive en la gramática del binario BASE",
+   "frente": "medicion",
+   "que_es": "El gate alimenta UN schema a las dos binarias; una llave que la base rechaza al cargar (aliases desde VOZ-AHORRO-S2, ranges desde MOTOR-AGENDA-S1) no puede entrar al corpus, así que las conductas nuevas se pinean con tests y laboratorio, no con el gate.",
+   "por_que_importa": "Cada sesión que agrega gramática deja al gate ciego a lo que más cambió; el gate sigue siendo la única prueba diferencial contra el binario anterior.",
+   "que_lo_destraba": "Un corpus con DOS schemas (base y nuevo) y casos marcados «solo nuevo» que se disparan contra la nueva y se comparan contra una expectativa escrita, no contra la base.",
+   "costo": "medio",
+   "dano": "medio",
+   "prioridad": "P3",
+   "decide": "agente",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "MOTOR-AGENDA-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "VOZ-15",
+   "titulo": "El parser lee «a las 4» como 16:00 por regla fija (1–6 = tarde): la franja del dueño no se declara",
+   "frente": "automatizacion",
+   "que_es": "Una hora dicha sin calificador entre 1 y 6 se lee como tarde, 7–12 como mañana; «de la mañana / de la tarde / pm» lo corrige; la confirmación siempre imprime la hora resuelta.",
+   "por_que_importa": "Un dueño que madruga («a las 5» = 05:00) pelea con la regla en cada cita; el schema no tiene dónde declarar su franja hábil.",
+   "que_lo_destraba": "Una llave declarable (p. ej. ranges.<n>.hours: [\"07:00\",\"20:00\"]) que resuelva la ambigüedad hacia la franja hábil, o VOZ-6 (dictado real) que diga si la regla molesta.",
+   "costo": "chico",
+   "dano": "bajo",
+   "prioridad": "P3",
+   "decide": "miguel",
+   "depende_de": [
+    "VOZ-6"
+   ],
+   "bloquea": [],
+   "origen": "MOTOR-AGENDA-S1",
    "estado": "abierto"
   }
  ]

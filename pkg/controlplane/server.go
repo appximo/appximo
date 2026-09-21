@@ -246,6 +246,12 @@ func handleUpdateSchema(svc Service) http.HandlerFunc {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 				return
 			}
+			if errors.Is(err, ErrPartialApply) {
+				// The migration engine's own words: what the database does not
+				// have (a blocked no-overlap rule names the colliding pairs).
+				writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+				return
+			}
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 			return
 		}

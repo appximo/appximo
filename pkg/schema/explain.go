@@ -55,6 +55,12 @@ type explainPhrases struct {
 	importLine      string // roles list, fields list
 	hooksLine       string
 	rbacHeader      string
+	// Time ranges (MOTOR-AGENDA-S1).
+	rangeLine       string // "%s to %s is the block «%s»"
+	rangeNoOverlap  string // ", two rows of the same %s never overlap"
+	rangeNoScope    string // ", two rows never overlap"
+	rangeWhen       string // " (only while %s %s %v)"
+	rangeDefault    string // "; a start alone lasts %s"
 	roleFull        string // role with * / *
 	roleLine        string // role, actions, resources
 	roleCondSelf    string // resource-less phrasing: rows whose <field> is the signed-in user
@@ -114,6 +120,11 @@ var explainEN = explainPhrases{
 	importLine:      "The role(s) %s may IMPORT records: on creation they may supply the engine-managed field(s) %s (for data migration / restores); everyone else, and every update, gets them set by the engine only.",
 	hooksLine:       "Has custom logic hooks on: %s.",
 	rbacHeader:      "Who can do what (roles)",
+	rangeLine:       "%s to %s is the time block «%s»",
+	rangeNoOverlap:  "; two rows with the same %s can never overlap (the database refuses the second, naming the first)",
+	rangeNoScope:    "; two rows can never overlap (the database refuses the second, naming the first)",
+	rangeWhen:       " — only rows where %s %s %v block",
+	rangeDefault:    "; a start given alone lasts %s",
 	roleFull:        "%s — full access: every action on every resource.",
 	roleLine:        "%s can %s on %s",
 	roleCondSelf:    "only rows whose %q is the signed-in user",
@@ -182,6 +193,11 @@ var explainES = explainPhrases{
 	importLine:      "El/los rol(es) %s pueden IMPORTAR registros: al crear pueden traer el/los campo(s) que maneja el motor %s (para migración de datos / restauraciones); todos los demás, y toda modificación, los reciben solo del motor.",
 	hooksLine:       "Tiene lógica custom (hooks) en: %s.",
 	rbacHeader:      "Quién puede hacer qué (roles)",
+	rangeLine:       "de %s a %s es el bloque de tiempo «%s»",
+	rangeNoOverlap:  "; dos filas con el mismo %s nunca se pisan (la base rechaza la segunda nombrando la primera)",
+	rangeNoScope:    "; dos filas nunca se pisan (la base rechaza la segunda nombrando la primera)",
+	rangeWhen:       " — solo bloquean las filas donde %s %s %v",
+	rangeDefault:    "; un inicio dicho solo dura %s",
 	roleFull:        "%s — acceso total: toda acción sobre todo recurso.",
 	roleLine:        "%s puede %s en %s",
 	roleCondSelf:    "solo las filas cuyo %q es el usuario que inició sesión",
@@ -251,6 +267,7 @@ func Explain(s *APISchema, lang string) string {
 		explainFields(&b, r, p)
 		explainStateMachines(&b, r, p, esList)
 		explainRelations(&b, rn, r, p)
+		explainRanges(&b, r, p)
 		if r.Import != nil {
 			b.WriteString("  " + fmt.Sprintf(p.importLine, joinList(quoteAll(r.Import.Roles), esList), joinList(quoteAll(r.ImportDeclaredFields()), esList)) + "\n")
 		}
@@ -631,4 +648,32 @@ func quoteAll(ss []string) []string {
 		out[i] = fmt.Sprintf("%q", s)
 	}
 	return out
+}
+
+// explainRanges words each declared time range (MOTOR-AGENDA-S1): the two
+// fields that form the block, whether blocks may overlap and in which scope,
+// the partial condition, the default duration.
+func explainRanges(b *strings.Builder, r ResourceSchema, p explainPhrases) {
+	for _, name := range r.RangeNames() {
+		rg := r.Ranges[name]
+		line := fmt.Sprintf(p.rangeLine, rg.Start, rg.End, name)
+		if no := rg.NoOverlap; no != nil {
+			if len(no.Scope) > 0 {
+				line += fmt.Sprintf(p.rangeNoOverlap, strings.Join(no.Scope, " + "))
+			} else {
+				line += p.rangeNoScope
+			}
+			if w := no.When; w != nil {
+				op := "="
+				if w.Op == "ne" {
+					op = "≠"
+				}
+				line += fmt.Sprintf(p.rangeWhen, w.Field, op, w.Val)
+			}
+		}
+		if rg.DefaultDuration != "" {
+			line += fmt.Sprintf(p.rangeDefault, rg.DefaultDuration)
+		}
+		b.WriteString("  ⏱ " + line + "\n")
+	}
 }

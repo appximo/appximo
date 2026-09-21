@@ -1196,6 +1196,7 @@ func New(cfg Config) (*App, error) {
 	}
 
 	app.eng = &engineRefs{
+		tdb:    app.tdb,
 		schema: s, validators: validators, policy: &rbacPolicy, users: authStore,
 		files:            app.files,
 		jwtSecret:        cfg.JWTSecret,

@@ -75,6 +75,12 @@ type txError struct {
 	resource string
 	op       string
 	fields   []schema.FieldRuleError
+	// cause is the raw database error behind a dbTxError verdict, kept so the
+	// route (which has the tenant DB) can describe a time-range conflict
+	// (MOTOR-AGENDA-S1) after the transaction rolled back. extra is merged
+	// into the batch error body (range, existing, conflicts).
+	cause error
+	extra map[string]any
 }
 
 func (e *txError) Error() string { return e.msg }
@@ -114,6 +120,10 @@ type preparedOp struct {
 	// ADR-028: the resource's `json` (TEXT) columns, promoted to native values
 	// in the returned row. nil for a resource without them — zero cost.
 	jsonCols []string
+
+	// cond is the role's row condition (MOTOR-AGENDA-S1): a conflicting row is
+	// named only as the role could read it.
+	cond *rbac.WhereCondition
 }
 
 // registerTransactionRoute mounts POST /api/transaction (G4): an atomic
@@ -203,6 +213,7 @@ func registerTransactionRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantD
 			return nil
 		})
 		if err != nil {
+			err = describeTxRangeConflict(req.Context(), tdb, tc.PGSchema, refs, prepared, err)
 			writeTxError(w, req, err)
 			return
 		}
@@ -305,6 +316,7 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 			emit:     ref.emitCreate,
 			allowed:  eval.AllowedFields,
 			jsonCols: ref.res.JSONTextColumns(),
+			cond:     eval.Condition,
 		}
 		if resourceHasFilePolicy(&ref.res) {
 			pop.filePolicyRes, pop.filePolicyVals = &ref.res, data
@@ -355,7 +367,7 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 			terr.op, terr.resource = op.Op, op.Resource
 			return nil, terr
 		}
-		pop := &preparedOp{kind: "update", sql: q, args: args, resource: op.Resource, emit: ref.emitUpdate, allowed: eval.AllowedFields, jsonCols: ref.res.JSONTextColumns()}
+		pop := &preparedOp{kind: "update", sql: q, args: args, resource: op.Resource, emit: ref.emitUpdate, allowed: eval.AllowedFields, jsonCols: ref.res.JSONTextColumns(), cond: eval.Condition}
 		if resourceHasFilePolicy(&ref.res) {
 			pop.filePolicyRes, pop.filePolicyVals = &ref.res, sets
 		}
@@ -534,6 +546,13 @@ func appendGuards(sql string, args []any, guards []txGuard, res *schema.Resource
 // fault, and a create/create asymmetry with the standalone POST.
 func dbTxError(err error) *txError {
 	switch v := pkghandlers.ClassifyWriteError(err); v.Kind {
+	case pkghandlers.WriteErrRangeConflict:
+		// Described later by the route/ask writer (they hold the tenant DB);
+		// rendered from the raw verdict when nothing describes it.
+		return rangeConflictTxError(v.Conflict, err)
+	case pkghandlers.WriteErrRangeOrder:
+		return &txError{status: http.StatusUnprocessableEntity, msg: "validation_failed", cause: err,
+			fields: []schema.FieldRuleError{{Field: v.Field, Rule: pkghandlers.RangeOrderRule, Message: pkghandlers.RangeOrderMessage}}}
 	case pkghandlers.WriteErrUnique:
 		return &txError{status: http.StatusConflict, msg: fmt.Sprintf("field %q: value already exists", v.Field)}
 	case pkghandlers.WriteErrUnknownColumn:
@@ -592,6 +611,9 @@ func writeTxError(w http.ResponseWriter, req *http.Request, err error) {
 	if len(te.fields) > 0 {
 		body["fields"] = te.fields
 	}
+	for k, v := range te.extra {
+		body[k] = v
+	}
 	if t := observability.SpanTrackerFromCtx(req.Context()); t != nil {
 		t.RecordError(te.msg)
 	}
@@ -643,4 +665,51 @@ func notFoundMsg(p *preparedOp) string {
 		return "not found, excluded by access policy, or a guard condition was not met"
 	}
 	return "not found or excluded by access policy"
+}
+
+// rangeConflictTxError renders a time-range conflict (MOTOR-AGENDA-S1) as the
+// batch's 409: the same body keys the single-op REST 409 carries.
+func rangeConflictTxError(c *pkghandlers.RangeConflict, cause error) *txError {
+	body := pkghandlers.RangeConflictBody(*c)
+	extra := map[string]any{}
+	for k, v := range body {
+		if k != "error" {
+			extra[k] = v
+		}
+	}
+	return &txError{status: http.StatusConflict, msg: "time_range_conflict", cause: cause, extra: extra}
+}
+
+// describeTxRangeConflict names the row a failed batch op collided with
+// (MOTOR-AGENDA-S1): after the rollback, with the tenant DB, scoped by the
+// op's own role condition/allowlist. Every other error passes through.
+func describeTxRangeConflict(ctx context.Context, tdb *db.TenantDB, pgSchema string, refs map[string]*txResource, prepared []preparedOp, err error) error {
+	te, ok := err.(*txError)
+	if !ok || te.cause == nil {
+		return err
+	}
+	var cond *rbac.WhereCondition
+	var allowed []string
+	if te.index >= 0 && te.index < len(prepared) {
+		p := prepared[te.index]
+		cond, allowed = p.cond, p.allowed
+		if te.resource == "" {
+			te.resource, te.op = p.resource, p.kind
+		}
+	}
+	ref := refs[te.resource]
+	if ref == nil || len(ref.res.Ranges) == 0 {
+		return err
+	}
+	described := DescribeRangeConflict(ctx, tdb, pgSchema, te.resource, &ref.res, te.cause, cond, allowed)
+	v := pkghandlers.ClassifyWriteError(described)
+	switch v.Kind {
+	case pkghandlers.WriteErrRangeConflict:
+		ne := rangeConflictTxError(v.Conflict, te.cause)
+		ne.index, ne.op, ne.resource = te.index, te.op, te.resource
+		return ne
+	case pkghandlers.WriteErrRangeOrder:
+		te.fields = []schema.FieldRuleError{{Field: v.Field, Rule: pkghandlers.RangeOrderRule, Message: pkghandlers.RangeOrderMessage}}
+	}
+	return te
 }

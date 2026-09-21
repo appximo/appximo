@@ -357,11 +357,31 @@ type ForeignKeyConflictError struct{ Message string }
 
 func (e *ForeignKeyConflictError) Error() string { return e.Message }
 
+// RangeConflictError is returned by Ctx.Insert/Update when a declared
+// no-overlap rule (MOTOR-AGENDA-S1) refused the write: Range names the rule,
+// Conflicts the row(s) it collided with as the role may read them. A handler
+// that returns it verbatim answers the generated path's exact 409 body
+// {"error":"time_range_conflict", range, existing, conflicts}.
+type RangeConflictError struct {
+	Range     string
+	Message   string
+	Existing  map[string]any
+	Conflicts []map[string]any
+	body      map[string]any
+}
+
+func (e *RangeConflictError) Error() string { return e.Message }
+
 // engineRefs is the read-only engine state shared by every requestCtx: the
 // loaded schema, the validators compiled once at boot, the RBAC policy, and
 // the per-tenant identity store (for Ctx.CreateUser). It is never mutated
 // after New returns.
 type engineRefs struct {
+	// tdb is the engine's tenant DB (pool) — used only on a write's ERROR path
+	// to describe a time-range conflict after the handler's tx aborted
+	// (MOTOR-AGENDA-S1); never for the handler's own statements (those run on
+	// the request tx).
+	tdb        *db.TenantDB
 	schema     *schema.APISchema
 	validators map[string]*schema.ResourceValidator
 	policy     *rbac.Policy
@@ -570,6 +590,16 @@ func classifyWriteErr(err error) error {
 			{Field: v.Field, Rule: "file_not_found", Message: pkghandlers.FileRefMessage}}}
 	case pkghandlers.WriteErrForeignKey:
 		return &ForeignKeyConflictError{Message: v.Message}
+	case pkghandlers.WriteErrRangeConflict:
+		body := pkghandlers.RangeConflictBody(*v.Conflict)
+		rce := &RangeConflictError{Range: v.Conflict.Range, Message: v.Message, Conflicts: v.Conflict.Conflicts, body: body}
+		if ex, ok := body["existing"].(map[string]any); ok {
+			rce.Existing = ex
+		}
+		return rce
+	case pkghandlers.WriteErrRangeOrder:
+		return &ValidationError{Fields: []schema.FieldRuleError{
+			{Field: v.Field, Rule: pkghandlers.RangeOrderRule, Message: pkghandlers.RangeOrderMessage}}}
 	}
 	return err
 }
@@ -734,6 +764,7 @@ func (c *requestCtx) Insert(resource string, data map[string]any) (map[string]an
 		// the unique 409, the unknown-column / bad-file-reference 422, the
 		// referential 409 — return them verbatim and the response is the
 		// generated POST's, byte for byte.
+		err = codegen.DescribeRangeConflict(c.ctx, c.eng.tdb, c.tc.PGSchema, resource, res, err, eval.Condition, eval.AllowedFields) // MOTOR-AGENDA-S1
 		return nil, classifyWriteErr(err)
 	}
 	return pkghandlers.FilterFields(row, eval.AllowedFields), nil
@@ -818,6 +849,7 @@ func (c *requestCtx) Update(resource, id string, data map[string]any) (map[strin
 	row, err := c.queryOne(q, args)
 	if err != nil {
 		// Same typed verdicts as Insert (ENG-42) — see classifyWriteErr.
+		err = codegen.DescribeRangeConflict(c.ctx, c.eng.tdb, c.tc.PGSchema, resource, res, err, eval.Condition, eval.AllowedFields) // MOTOR-AGENDA-S1
 		return nil, classifyWriteErr(err)
 	}
 	if row == nil {

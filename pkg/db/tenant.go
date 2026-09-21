@@ -796,3 +796,40 @@ func normalizeDBValue(v any) any {
 // Pool exposes the underlying pool for control-plane (public schema) reads and
 // writes that need no tenant search_path — e.g. the digest's snapshot table.
 func (tdb *TenantDB) Pool() *pgxpool.Pool { return tdb.pool }
+
+// exclusionExistingKeyRe captures the EXISTING key of a Postgres
+// exclusion_violation Detail (MOTOR-AGENDA-S1): "… conflicts with existing key
+// (dueno_id, tstzrange(inicio, fin, '[)'::text))=(<uuid>, ["a","b"))." → the
+// column list and the value list, parsed further by the handlers package.
+var exclusionExistingKeyRe = regexp.MustCompile(`conflicts with existing key \((.+)\)=\((.+)\)\.?$`)
+
+// ExclusionViolation reports whether err is a Postgres exclusion_violation
+// (SQLSTATE 23P01) raised by an ENGINE-generated no-overlap constraint (symbol
+// prefix excl_ — a consumer's own EXCLUDE stays unclassified, per the ADR-024
+// discipline of classifying only what the engine produced from client input).
+// It returns the constraint name and the existing key's (columns, values) text
+// from the Detail so the caller can name the row the write collided with.
+func ExclusionViolation(err error) (constraint, keyCols, keyVals string, ok bool) {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23P01" || !strings.HasPrefix(pgErr.ConstraintName, "excl_") {
+		return "", "", "", false
+	}
+	if m := exclusionExistingKeyRe.FindStringSubmatch(pgErr.Detail); len(m) == 3 {
+		return pgErr.ConstraintName, m[1], m[2], true
+	}
+	return pgErr.ConstraintName, "", "", true
+}
+
+// RangeOrderViolation reports whether err is a check_violation (SQLSTATE 23514)
+// on an engine-generated range-order CHECK (chk_<table>_<range>_order): a row
+// whose end is not after its start. Any other CHECK stays unclassified.
+func RangeOrderViolation(err error) (constraint string, ok bool) {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		return "", false
+	}
+	if strings.HasPrefix(pgErr.ConstraintName, "chk_") && strings.HasSuffix(pgErr.ConstraintName, "_order") {
+		return pgErr.ConstraintName, true
+	}
+	return "", false
+}

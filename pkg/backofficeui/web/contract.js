@@ -74,8 +74,23 @@ export async function loadContract(fetchJSON) {
       return f;
     });
 
+    // Time ranges (MOTOR-AGENDA-S1): x-appximo-ranges pairs two datetime
+    // properties (start..end) and says whether rows may overlap. The form
+    // keeps the pair together, checks the order, and asks /conflicts before
+    // saving — advise, never block; the engine's 409 is the net.
+    const ranges = Object.entries(read?.['x-appximo-ranges'] ?? {}).map(([rname, r]) => ({
+      name: rname, start: r.start, end: r.end,
+      noOverlap: !!r.no_overlap, scope: r.no_overlap?.scope ?? [], when: r.no_overlap?.when ?? null,
+      hasConflicts: typeof (paths[`/api/${name}/conflicts`] ?? {}).get === 'object',
+    }));
+    for (const r of ranges) {
+      const s = fields.find((f) => f.key === r.start), e = fields.find((f) => f.key === r.end);
+      if (s) { s.rangeName = r.name; s.rangeRole = 'start'; }
+      if (e) { e.rangeName = r.name; e.rangeRole = 'end'; }
+    }
+
     return {
-      name, fields,
+      name, fields, ranges,
       title: name[0].toUpperCase() + name.slice(1).replace(/_/g, ' '),
       canCreate: colMethods.includes('post'),
       canEdit: itemMethods.includes('patch'),

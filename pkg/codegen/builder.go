@@ -509,6 +509,11 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 		// aggregated → 403, no leak via aggregates), the same filters, the same
 		// tenant. Functions come from a fixed allowlist; field/group_by names are
 		// validated against the schema (no arbitrary SQL).
+		// GET /api/{resource}/conflicts (MOTOR-AGENDA-S1): the "would this
+		// collide?" pre-check of a declared time range; mounted only when the
+		// resource declares one — a range-free schema has no such route.
+		registerConflictsRoute(r, name, res, tdb)
+
 		r.Get("/api/"+name+"/aggregate", pkghandlers.CachedGet(func(w http.ResponseWriter, req *http.Request) {
 			tc := tenant.MustFromCtx(req.Context())
 			evalResult := rbac.EvalResultFromCtx(req.Context())
@@ -691,6 +696,10 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			// plain ExecRowsTenant, zero added overhead.
 			result, err := RunInsert(req.Context(), tdb, tbl, name, tc.ID, tc.PGSchema, body, emitCreate)
 			if err != nil {
+				// A declared time range's constraint refused the write
+				// (MOTOR-AGENDA-S1): name the colliding row before rendering.
+				// Error path only; no-op for a resource without ranges.
+				err = DescribeRangeConflict(req.Context(), tdb, tc.PGSchema, name, wres, err, rbacCond(evalResult), rbacAllowed(evalResult))
 				// Every write error flows through the ONE classifier
 				// (handlers.ClassifyWriteError, ENG-42): a unique collision is
 				// the same expected 409 it always was, an unknown column the
@@ -1086,6 +1095,7 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 						writeJSONErr(w, http.StatusUnprocessableEntity, "no writable fields in request")
 						return
 					}
+					err = DescribeRangeConflict(req.Context(), tdb, tc.PGSchema, name, wres, err, cond, rbacAllowed(evalResult)) // MOTOR-AGENDA-S1
 					// One classifier for every write error (ENG-42): the unique
 					// 409, unknown-column 422 and FK 409 all render from
 					// handlers.ClassifyWriteError via WriteDBError.

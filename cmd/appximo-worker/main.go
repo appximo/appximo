@@ -214,6 +214,10 @@ func buildAuto(ctx context.Context, dsn string, connect worker.Connector, client
 		Store:   store,
 		Log:     log,
 	}
+	// Per-row reminders (MOTOR-AGENDA-S1): the "time" trigger is swept by the
+	// same leader tick, so exactly one worker asks and claims.
+	sweeper := &workflows.Sweeper{Src: src, Exec: exec, Store: store}
+	scheduler.Sweep = sweeper.Sweep
 	go scheduler.Run(ctx)
 
 	router := consumers.NewRouter(log)
@@ -231,6 +235,9 @@ func buildAuto(ctx context.Context, dsn string, connect worker.Connector, client
 			log.Fatal().Err(terr).Msg("worker: APPXIMO_TELEGRAM_* set for the scheduled digest but invalid")
 		}
 		router.HandleOwner("summary.telegram", consumers.NewSummaryProcessor(clients.raw(tgSummaryRole), tgClient, tgSummaryTopic, log))
+		// message.telegram (MOTOR-AGENDA-S1): a workflow's `enqueue` with a
+		// `text` — what a per-row reminder says. Same bot, same chat.
+		router.HandleOwner("message.telegram", consumers.NewMessageProcessor(tgClient, consumers.MessageTopic, log))
 	} else if tgToken != "" || tgChat != "" || tgSummaryRole != "" {
 		log.Warn().Msg("worker: the scheduled Telegram digest needs APPXIMO_TELEGRAM_BOT_TOKEN + APPXIMO_TELEGRAM_CHAT_ID + APPXIMO_TELEGRAM_SUMMARY_ROLE together — it is DISABLED until all three are set (a cron workflow enqueuing summary.telegram would then stay pending and visible)")
 	}

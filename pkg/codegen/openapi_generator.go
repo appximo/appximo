@@ -134,6 +134,15 @@ func buildOAPaths(s *schema.APISchema) map[string]any {
 		paths["/api/"+name+"/aggregate"] = map[string]any{
 			"get": aggOp,
 		}
+		// The conflicts pre-check (MOTOR-AGENDA-S1) exists only for a resource
+		// that declares a time range; it is a read of the same scoped set.
+		if len(res.Ranges) > 0 {
+			cfOp := oaConflictsOp(name, title, &res)
+			if publicRead {
+				cfOp = markPublic(cfOp)
+			}
+			paths["/api/"+name+"/conflicts"] = map[string]any{"get": cfOp}
+		}
 		paths["/api/"+name+"/{id}"] = map[string]any{
 			"get":    getOp,
 			"put":    oaReplaceOp(name, title),
@@ -465,6 +474,20 @@ func oaListOp(name, title string, res *schema.ResourceSchema) map[string]any {
 // scope by the same filter grammar.
 func oaFilterParams(res *schema.ResourceSchema) []any {
 	var params []any
+	// Declared time ranges filter by NAME (MOTOR-AGENDA-S1).
+	for _, rn := range res.RangeNames() {
+		r := res.Ranges[rn]
+		params = append(params, oaQueryParamDesc(
+			"filter["+rn+"][overlaps]",
+			map[string]any{"type": "string", "example": "2026-09-22T16:00:00-05:00/2026-09-22T17:00:00-05:00"},
+			"Rows whose ["+r.Start+", "+r.End+") overlaps the ISO 8601 interval <start>/<end> (half-open on both sides: a row ending exactly when the window starts does not match)",
+		))
+		params = append(params, oaQueryParamDesc(
+			"filter["+rn+"][contains]",
+			map[string]any{"type": "string", "format": "date-time"},
+			"Rows whose ["+r.Start+", "+r.End+") contains the instant",
+		))
+	}
 	for _, fname := range sortedFieldKeys(res) {
 		fd := res.Fields[fname]
 		baseSchema := oaFieldType(fd)
@@ -973,6 +996,40 @@ func oaResourceSchema(res *schema.ResourceSchema, includeAuto bool) map[string]a
 	if res.Import != nil {
 		out["x-appximo-import"] = map[string]any{"fields": res.ImportDeclaredFields()}
 	}
+	// x-appximo-ranges (MOTOR-AGENDA-S1): the declared time ranges — which two
+	// properties form each, and the no-overlap rule (scope + when) when there
+	// is one — so a generic tool pairs the two datetime inputs, validates the
+	// order and asks /conflicts before writing.
+	if len(res.Ranges) > 0 {
+		out["x-appximo-ranges"] = oaRanges(res)
+	}
+	return out
+}
+
+func oaRanges(res *schema.ResourceSchema) map[string]any {
+	out := map[string]any{}
+	for _, name := range res.RangeNames() {
+		r := res.Ranges[name]
+		entry := map[string]any{"start": r.Start, "end": r.End}
+		if r.TimezoneField != "" {
+			entry["timezone_field"] = r.TimezoneField
+		}
+		if r.NoOverlap != nil {
+			rule := map[string]any{"scope": append([]string{}, r.NoOverlap.Scope...)}
+			if r.NoOverlap.Scope == nil {
+				rule["scope"] = []string{}
+			}
+			if w := r.NoOverlap.When; w != nil {
+				op := w.Op
+				if op == "" {
+					op = "eq"
+				}
+				rule["when"] = map[string]any{"field": w.Field, "op": op, "val": w.Val}
+			}
+			entry["no_overlap"] = rule
+		}
+		out[name] = entry
+	}
 	return out
 }
 
@@ -1234,4 +1291,62 @@ func sortedFieldKeys(res *schema.ResourceSchema) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// oaConflictsOp documents GET /api/{resource}/conflicts (MOTOR-AGENDA-S1): the
+// "would this window collide?" pre-check of a declared range — what a UI or a
+// voice flow asks BEFORE writing, so a collision is advised, not discovered
+// as a 409. The database constraint remains the race-safe net.
+func oaConflictsOp(name, title string, res *schema.ResourceSchema) map[string]any {
+	names := res.RangeNames()
+	params := []any{
+		oaQueryParamDesc("range", map[string]any{"type": "string", "enum": names}, "The declared range to check (optional when the resource declares exactly one: "+strings.Join(names, ", ")+")"),
+		oaQueryParamDesc("start", map[string]any{"type": "string", "format": "date-time"}, "Window start (RFC 3339)"),
+		oaQueryParamDesc("end", map[string]any{"type": "string", "format": "date-time"}, "Window end (RFC 3339), after start; the window is [start, end)"),
+		oaQueryParamDesc("exclude_id", map[string]any{"type": "string", "format": "uuid"}, "The row being rescheduled, left out of its own conflicts"),
+	}
+	seen := map[string]bool{}
+	for _, rn := range names {
+		r := res.Ranges[rn]
+		if r.NoOverlap == nil {
+			continue
+		}
+		for _, sc := range r.NoOverlap.Scope {
+			if seen[sc] {
+				continue
+			}
+			seen[sc] = true
+			params = append(params, oaQueryParamDesc(sc, oaFieldType(res.Fields[sc]), "Scope value of range "+rn+" (rows of another "+sc+" never collide)"))
+		}
+		if w := r.NoOverlap.When; w != nil && !seen[w.Field] {
+			seen[w.Field] = true
+			params = append(params, oaQueryParamDesc(w.Field, oaFieldType(res.Fields[w.Field]), "The row's own "+w.Field+" value: decides would_block (a row outside the rule's `when` never blocks)"))
+		}
+	}
+	return map[string]any{
+		"tags":        []string{title},
+		"summary":     "Check a time window for conflicts with " + name + " rows that block",
+		"description": "Answers the conflicts a write with this window would have under the resource's declared no-overlap rule, scoped exactly like a list read (row condition + field allowlist). Advise before writing; the database constraint is the race-safe net (a colliding write is a 409 time_range_conflict naming the row).",
+		"operationId": "conflicts" + title,
+		"parameters":  params,
+		"responses": map[string]any{
+			"200": map[string]any{
+				"description": "The blocking rows overlapping the window",
+				"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"range":       map[string]any{"type": "string"},
+						"start":       map[string]any{"type": "string", "format": "date-time"},
+						"end":         map[string]any{"type": "string", "format": "date-time"},
+						"enforced":    map[string]any{"type": "boolean", "description": "true when the range declares no_overlap (a collision is a 409 on write)"},
+						"would_block": map[string]any{"type": "boolean", "description": "true when a row with these values would itself block (under the rule's `when`)"},
+						"conflicts":   map[string]any{"type": "array", "items": map[string]any{"$ref": "#/components/schemas/" + title}},
+					},
+				}}},
+			},
+			"400": map[string]any{"$ref": "#/components/responses/Error400"},
+			"401": map[string]any{"$ref": "#/components/responses/Error401"},
+			"403": map[string]any{"$ref": "#/components/responses/Error403"},
+		},
+	}
 }

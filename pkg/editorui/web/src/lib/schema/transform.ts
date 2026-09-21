@@ -89,7 +89,8 @@ function resourceToEntity(name: string, res: ResourceSchema): EntityModel {
 			hooks: res.hooks,
 			events: res.events,
 			import: res.import,
-			aliases: res.aliases
+			aliases: res.aliases,
+			ranges: res.ranges
 		},
 		position: { x: 0, y: 0 }, // laid out by the store (dagre) on import
 		originalName: res.renamed_from ?? name
@@ -168,6 +169,8 @@ function entityToResource(ent: EntityModel): ResourceSchema {
 	// validates them; an empty list is dead config the engine rejects, so it
 	// is not emitted.
 	if (x.aliases && x.aliases.length > 0) res.aliases = [...x.aliases];
+	// Time ranges (MOTOR-AGENDA-S1): verbatim — the engine validates them.
+	if (x.ranges && Object.keys(x.ranges).length > 0) res.ranges = structuredClone(x.ranges);
 	// Table-level rename intent, derived from the baseline exactly like fields.
 	if (ent.originalName && ent.originalName !== ent.name) res.renamed_from = ent.originalName;
 	return res;

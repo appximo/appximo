@@ -20,7 +20,8 @@ import type {
 	ForeignKeyDef,
 	HookConfig,
 	ImportConfig,
-	RBACPolicy
+	RBACPolicy,
+	RangeDef
 } from './schema';
 
 export interface XY {
@@ -64,6 +65,8 @@ export interface EntityExtras {
 	/** Resource aliases (VOZ-AHORRO-S2): how people name the resource —
 	 *  preserved losslessly (authored in the Code view). */
 	aliases?: string[];
+	/** Time ranges (MOTOR-AGENDA-S1): preserved losslessly (Code view). */
+	ranges?: Record<string, RangeDef>;
 }
 
 /** One resource (table) = one ERD node. */

@@ -3,6 +3,7 @@ package schema
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -148,14 +149,16 @@ func validateWorkflows(s *APISchema) []ValidationError {
 			if wf.Trigger.Event != "" || wf.Trigger.Resource != "" {
 				add(p+".trigger", `a "cron" trigger takes no event/resource`, "trigger_key_conflict")
 			}
+		case "time":
+			validateTimeTrigger(s, p, wf.Trigger, add)
 		case "http":
 			add(p+".trigger.type",
-				`trigger type "http" is not part of workflows v1 (an HTTP-triggered pipeline is a custom route whose handler enqueues an outbox event; an "event" workflow consumes it) — supported: event, cron`,
-				"unsupported_trigger", func(e *ValidationError) { e.Expected = []string{"event", "cron"}; e.Got = "http" })
+				`trigger type "http" is not part of workflows v1 (an HTTP-triggered pipeline is a custom route whose handler enqueues an outbox event; an "event" workflow consumes it) — supported: event, cron, time`,
+				"unsupported_trigger", func(e *ValidationError) { e.Expected = []string{"event", "cron", "time"}; e.Got = "http" })
 		default:
 			add(p+".trigger.type",
-				fmt.Sprintf("invalid trigger type %q: must be \"event\" or \"cron\"", wf.Trigger.Type),
-				"invalid_trigger_type", func(e *ValidationError) { e.Expected = []string{"event", "cron"}; e.Got = wf.Trigger.Type })
+				fmt.Sprintf("invalid trigger type %q: must be \"event\", \"cron\" or \"time\"", wf.Trigger.Type),
+				"invalid_trigger_type", func(e *ValidationError) { e.Expected = []string{"event", "cron", "time"}; e.Got = wf.Trigger.Type })
 		}
 
 		// ── overlap / role ──
@@ -301,4 +304,94 @@ func validateWorkflows(s *APISchema) []ValidationError {
 		}
 	}
 	return errs
+}
+
+// validateTimeTrigger checks a per-row relative trigger (MOTOR-AGENDA-S1):
+// the resource and its time field exist, exactly one of before/after with a
+// valid duration, an optional grace, an optional `when` over a real field.
+func validateTimeTrigger(s *APISchema, p string, t WorkflowTrigger, add func(field, msg, rule string, extra ...func(*ValidationError))) {
+	res, resOK := s.Resources[t.Resource]
+	if t.Resource == "" {
+		add(p+".trigger.resource", `a "time" trigger needs the resource whose rows it follows`, "missing_resource")
+	} else if !resOK {
+		add(p+".trigger.resource", fmt.Sprintf("trigger resource %q is not a declared resource", t.Resource), "unknown_resource",
+			func(e *ValidationError) { e.Got = t.Resource })
+	}
+	if t.Field == "" {
+		add(p+".trigger.field", `a "time" trigger needs the time field the moment is relative to (e.g. "inicio")`, "missing_field")
+	} else if resOK {
+		fd, ok := res.Fields[t.Field]
+		switch {
+		case !ok:
+			add(p+".trigger.field", fmt.Sprintf("trigger field %q is not a field of %s", t.Field, t.Resource), "unknown_field",
+				func(e *ValidationError) { e.Got = t.Field })
+		case fd.Type != "time":
+			add(p+".trigger.field", fmt.Sprintf("trigger field %q is %q — a time trigger follows a \"time\" field", t.Field, fd.Type), "field_not_time",
+				func(e *ValidationError) { e.Got = fd.Type; e.Expected = []string{"time"} })
+		}
+	}
+	switch {
+	case t.Before == "" && t.After == "":
+		add(p+".trigger", `a "time" trigger needs "before" or "after" (a duration such as "15m", "2h", "1d")`, "missing_offset")
+	case t.Before != "" && t.After != "":
+		add(p+".trigger", `a "time" trigger takes "before" OR "after", not both`, "trigger_key_conflict")
+	default:
+		src, key := t.Before, "before"
+		if t.After != "" {
+			src, key = t.After, "after"
+		}
+		if _, err := ParseWorkflowDuration(src); err != nil {
+			add(p+".trigger."+key, fmt.Sprintf("invalid duration %q: %v (use 15m, 2h, 1h30m, 1d)", src, err), "invalid_duration",
+				func(e *ValidationError) { e.Got = src })
+		}
+	}
+	if t.Grace != "" {
+		if _, err := ParseWorkflowDuration(t.Grace); err != nil {
+			add(p+".trigger.grace", fmt.Sprintf("invalid grace %q: %v", t.Grace, err), "invalid_duration",
+				func(e *ValidationError) { e.Got = t.Grace })
+		}
+	}
+	if t.Event != "" || t.Cron != "" || t.Timezone != "" {
+		add(p+".trigger", `a "time" trigger takes no event/cron/timezone`, "trigger_key_conflict")
+	}
+	if w := t.When; w != nil && resOK {
+		if w.Field == "" {
+			add(p+".trigger.when.field", "when needs a field", "missing_when_field")
+		} else if fd, ok := res.Fields[w.Field]; !ok {
+			add(p+".trigger.when.field", fmt.Sprintf("when field %q is not a field of %s", w.Field, t.Resource), "unknown_when_field",
+				func(e *ValidationError) { e.Got = w.Field })
+		} else {
+			if w.Op != "" && !validWhenOps[w.Op] {
+				add(p+".trigger.when.op", fmt.Sprintf("when op %q must be eq or ne", w.Op), "invalid_when_op",
+					func(e *ValidationError) { e.Expected = []string{"eq", "ne"}; e.Got = w.Op })
+			}
+			if msg := whenValueMismatch(fd, w.Val); msg != "" {
+				add(p+".trigger.when.val", "when value "+msg, "invalid_when_value")
+			}
+		}
+	}
+}
+
+// ParseWorkflowDuration reads a trigger offset: a Go duration ("15m", "2h",
+// "1h30m") or a day count ("1d", "2d"). Must be positive.
+func ParseWorkflowDuration(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty duration")
+	}
+	if strings.HasSuffix(s, "d") {
+		n, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
+		if err != nil || n <= 0 {
+			return 0, fmt.Errorf("a day count is a positive integer followed by d")
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, err
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("must be positive")
+	}
+	return d, nil
 }

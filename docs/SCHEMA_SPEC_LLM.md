@@ -23,7 +23,7 @@ catalogue ⇒ none of them). Measured with three descriptions: a personal tasks
 app came out with two workflows, aliases, events, pending and summary; an
 appointments app with the reminder only; an inventory with none — the
 same three that produced one bare resource each before the section existed.
-The canonical example is [examples/model-lab/agenda-voz.json](../examples/model-lab/agenda-voz.json).
+The canonical example is [examples/model-lab/agenda-voz.json](../examples/model-lab/agenda-voz.json). The agenda with time ranges, a no-overlap rule and a per-row reminder (MOTOR-AGENDA-S1) is [examples/model-lab/agenda-choques.json](../examples/model-lab/agenda-choques.json).
 Version note: the published v0.1.13 does not know those keys — see the header
 `appximo spec` prints.
 

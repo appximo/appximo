@@ -212,7 +212,7 @@ func (e *Executor) runStep(ctx context.Context, tenant string, wf *Workflow, st 
 		}
 		data["workflow"] = wf.Name
 		data["tenant_id"] = tenant
-		if err := e.enqueue(ctx, tenant, st.Topic, data); err != nil {
+		if err := e.enqueueOn(ctx, tenant, st.Topic, data); err != nil {
 			res.Status = "failed"
 			return res, false, err
 		}

@@ -582,6 +582,55 @@ vaciar un campo, cambiar varias filas de una («cancelá todas…»), cargar
 archivos. Si el motor se reinicia, una confirmación que estaba esperando se
 olvida: lo que no confirmó no pasó.
 
+### 3f. «Agendame una reunión de 4 a 5» — la agenda por voz, con el choque avisado antes (MOTOR-AGENDA-S1)
+
+Si la app declara un **rango de tiempo** (un compromiso con `inicio` y `fin`
+que no se puede pisar con otro), el bot lo entiende sin modelo (US$ 0):
+
+```
+usted: qué tengo mañana
+bot:   📅 3 eventos:
+       mar 22 sep
+       • 16:00–17:00 reunión con Fabián
+       • 16:30–17:30 tentativo: café
+       • 17:00–18:00 gimnasio
+
+usted: agendá reunión de planificación mañana de 4 a 5
+bot:   ⚠️ Ya tenés «reunión con Fabián» de 16:00 a 17:00.
+       📝 Voy a crear evento:
+       • inicio: mañana (mar 22 sep) a las 16:00
+       • fin: mañana (mar 22 sep) a las 17:00
+       • ocupa: no (no bloquea el horario: ya había algo)
+       • titulo: planificación
+       ¿Igual lo agendo? (sí / no)
+usted: sí
+bot:   ✅ Listo: creé evento planificación.
+```
+
+- **El choque se dice ANTES de escribir.** Si usted confirma igual, el
+  compromiso se guarda como que **no ocupa** el horario (así no bloquea lo
+  que venga después) y la confirmación lo dice. Si la regla de la app no
+  permite esa lectura (por ejemplo «solo los cancelados no bloquean»), el
+  bot pide otra hora en vez de prometer algo que la base va a rechazar.
+- **La base es la red**: dos escrituras al mismo tiempo sobre el mismo hueco
+  → entra una sola; la otra recibe un rechazo que nombra con cuál chocó. No
+  hay ventana de carrera; esto lo garantiza PostgreSQL, no la app.
+- **Las horas**: «a las 4» es 16:00; «a las 10» es 10:00; «de la tarde» o
+  «pm» suma doce; «a las 10» sin fin dura lo que la app declaró por defecto
+  (una hora). La confirmación imprime siempre la hora resuelta — si el bot
+  leyó mal, usted lo ve antes de decir que sí.
+- **Preguntas que entiende**: «qué tengo mañana / el jueves / la semana que
+  viene», «tengo algo mañana a las 4», «cuándo estoy libre el jueves»,
+  «cuántos compromisos tengo mañana».
+- **El recordatorio**: si el schema declara «avisame 15 minutos antes de
+  cada compromiso», el worker manda un mensaje al chat del bot 15 minutos
+  antes de cada uno — una sola vez, aunque el worker se reinicie en ese
+  momento; si usted mueve el compromiso, el aviso se mueve; si lo cancela,
+  no llega. Se ve en `/admin` → Automatización (`time:eventos.inicio -15m`).
+
+Detalle técnico: docs/PRODUCTION.md §4.6g; ejemplo de schema
+`examples/model-lab/agenda-choques.json`.
+
 ## 4. Qué hacer cuando pasa algo
 
 Recetas cortas, en el orden en que suele hacer falta. Todas empiezan igual: **mire antes de tocar** (30 segundos):

@@ -184,6 +184,7 @@ func OrderPlan(p *Plan) (*Plan, error) {
 	var (
 		renameTable, renameColumn                                               []Operation
 		dropFK, dropPK, dropUnique, dropCheck, dropIndex, dropColumn, dropTable []Operation
+		dropExclusion, addExclusion                                             []Operation
 		createTable, addColumn, alterColumn                                     []Operation
 		addPK, addUnique, addCheck, addIndex, addFK                             []Operation
 	)
@@ -223,6 +224,10 @@ func OrderPlan(p *Plan) (*Plan, error) {
 			addIndex = append(addIndex, op)
 		case AddForeignKey:
 			addFK = append(addFK, op)
+		case AddExclusion:
+			addExclusion = append(addExclusion, op)
+		case DropExclusion:
+			dropExclusion = append(dropExclusion, op)
 		default:
 			return nil, fmt.Errorf("schemadiff: OrderPlan: unhandled operation %T", op)
 		}
@@ -241,9 +246,9 @@ func OrderPlan(p *Plan) (*Plan, error) {
 	var ops []Operation
 	for _, phase := range [][]Operation{
 		renameTable, renameColumn,
-		dropFK, dropPK, dropUnique, dropCheck, dropIndex, dropColumn, orderedDrops,
+		dropFK, dropPK, dropUnique, dropCheck, dropExclusion, dropIndex, dropColumn, orderedDrops,
 		orderedCreates, addColumn, alterColumn,
-		addPK, addUnique, addCheck, addIndex, addFK,
+		addPK, addUnique, addCheck, addIndex, addFK, addExclusion,
 	} {
 		ops = append(ops, phase...)
 	}

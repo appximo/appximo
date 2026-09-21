@@ -47,6 +47,10 @@ type Scheduler struct {
 	mu       sync.Mutex
 	inflight map[string]bool // "tenant\x00workflow" → a run is executing
 	wg       sync.WaitGroup
+
+	// Sweep, when set, runs the reminder pass on every leader tick
+	// (Sweeper.Sweep) — nil in tests that only exercise cron.
+	Sweep func(ctx context.Context)
 }
 
 // CronLister yields the current (tenant, cron workflow) pairs — implemented by
@@ -113,6 +117,12 @@ func (s *Scheduler) lead(ctx context.Context, lockConn *pgx.Conn) {
 func (s *Scheduler) tick(ctx context.Context) {
 	now := time.Now()
 	entries := s.Src.CronEntries()
+
+	// Per-row reminders (MOTOR-AGENDA-S1): the same leader sweeps them, so
+	// exactly one worker asks and claims. Cron rows are untouched by it.
+	if s.Sweep != nil {
+		s.Sweep(ctx)
+	}
 
 	// Reconcile: every declared (workflow, tenant) has a row; stale rows go.
 	keep := make(map[string]bool, len(entries))

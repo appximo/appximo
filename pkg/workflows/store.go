@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS public.workflow_cron (
 -- that CHANGES a cron re-arms the schedule instead of waiting for the old
 -- next_run to pass (up to a day for a daily cron — found by provocation).
 ALTER TABLE public.workflow_cron ADD COLUMN IF NOT EXISTS spec TEXT;
-`)
+`+ensureReminderTable)
 	if err != nil {
 		return fmt.Errorf("workflows: ensure tables: %w", err)
 	}

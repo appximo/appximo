@@ -179,7 +179,7 @@ The canonical example that declares the whole automation/voice front together �
 }
 ```
 
-- **Triggers**: `event` (`event` ∈ `create|update|delete` + `resource` — the resource MUST list that action in its `events` array, or the schema is rejected: a workflow that could never fire is a dead promise) and `cron` (5-field spec or `@daily`/`@every 1h`; optional IANA `timezone`, default UTC — the DST policy is written in ADR-031: spring-forward occurrences run once at the next valid instant, fall-back hours can never fire twice). Trigger `http` does NOT exist in v1 (a custom route's handler enqueues an event instead).
+- **Triggers**: `event` (`event` ∈ `create|update|delete` + `resource` — the resource MUST list that action in its `events` array, or the schema is rejected: a workflow that could never fire is a dead promise), `cron` (5-field spec or `@daily`/`@every 1h`; optional IANA `timezone`, default UTC — the DST policy is written in ADR-031: spring-forward occurrences run once at the next valid instant, fall-back hours can never fire twice) and **`time`** (MOTOR-AGENDA-S1, ADR-039 — fires ONCE PER ROW relative to that row's own time field: `{ "type": "time", "resource": "eventos", "field": "inicio", "before": "15m" }`, or `"after": "1h"`; exactly one of before/after, durations `15m`/`2h`/`1h30m`/`1d`; optional `"when": {"field","op": eq|ne,"val"}` names the rows that count — a cancelled row never fires; optional `"grace"` bounds how late a firing may still happen, default = the offset for `before` (a "15 minutes before" never arrives after the moment itself) and `1h` for `after`). The worker's LEADER sweeps the rows entering the window every tick (`GET /api/{resource}?filter[field][gt]=…&[lte]=…` as the workflow's role, so RBAC decides what it sees), evaluates `when`, and CLAIMS each `(tenant, workflow, row, due instant)` in `public.workflow_reminders` **in the same transaction as the run's `enqueue` steps** — a restart inside the window neither loses nor duplicates a reminder; a row whose time moves fires once at its new moment and never at the old one; a row rescheduled after its reminder fired gets a new one for the new time. The natural step is `enqueue` of **`message.telegram`** with `data: {"text": "=\"⏰ En 15 min: \" + record.titulo"}` — the shipped worker sends that text to the app's Telegram chat. Observability: `GET /admin/workflows` renders the trigger as `time:eventos.inicio -15m`; `/metrics` carries `appximo_workflow_reminders_fired_24h` and `appximo_workflow_reminders_failed_24h`. Trigger `http` does NOT exist in v1 (a custom route's handler enqueues an event instead).
 - **Steps** (sequential; the closed set): `condition` (`{expr}` — [expr-lang](https://expr-lang.org) expression; false stops the run, recorded), `update` (`{resource, id, data}` — PATCH via the engine API), `create` (`{resource, data}` — POST), `webhook` (`{url, hmac_secret_env, data}` — ONE signed POST through the same SSRF-guarded HTTPS-only dispatcher as hooks; run-level retries ride the outbox), `enqueue` (`{topic, data}` — emit an outbox event for another consumer). In `data` (and `id`), a string starting with `=` is an expression over the run environment (`event`, `record`, `tenant`, `now`); anything else is a literal.
 - **`overlap`**: `"skip"` (default — an occurrence due while the previous run of the same workflow still executes is recorded as `skipped_overlap`, never silently dropped) or `"allow"`.
 - **`role`**: the RBAC role the steps act as (must be declared; default: the worker's `APPXIMO_WORKER_ROLE`). A workflow can never touch data its role could not touch through the front door.
@@ -269,10 +269,12 @@ A resource object accepts exactly these keys (any other key rejects the schema, 
 | `renamed_from` | string | optional | §2.3 below |
 | `foreign_keys` | array of composite-FK defs | optional | §2.4 below |
 | `import` | object `{roles, fields?}` | optional | §2.5 below |
+| `aliases` | array of strings | optional | §2.6 below |
+| `ranges` | object (range name → range def) | optional | §2.7 below |
 
 Only `fields` carries the entity's data shape; the rest are optional and additive — a resource that omits them serves exactly as before with zero added overhead. An unknown key produces:
 
-> `unknown key "<key>" (valid keys: fields, hooks, indexes, events, relations, renamed_from, foreign_keys, import)`
+> `unknown key "<key>" (valid keys: fields, hooks, indexes, events, relations, renamed_from, foreign_keys, import, aliases, ranges)`
 
 ### 2.3 `renamed_from` (resource / table rename)
 
@@ -432,6 +434,34 @@ The declared exception is **importing** rows that must keep their original ident
 - **What it is.** The words the owner actually says for this resource when its schema name is not the word they use — «pedidos» for `ordenes`, «mascotas» for an English `pets`. The voice channel (`POST /api/ask`, the Telegram bot, a Siri shortcut) recognizes an alias exactly like the schema name: singular/plural, accent-insensitive, for questions («cuántos pedidos hay hoy» → the deterministic parser, US$ 0) and for writes («cancelá el pedido ORD-1003»). The model's vocabulary lists them too (`ordenes (also called: pedidos, ventas)`), so the rare question that still needs the model maps them from the schema, not from a guess. **The engine wires no domain word: if the schema does not declare it, the parser does not know it — and that is correct.** The reply always uses the schema's own word (`13 ordenes`), never the alias.
 - **Validated at load** (`validateAliases`, pkg/schema/aliases.go) — every alias must mean exactly ONE thing in the whole schema: `alias_is_resource_name` (it is a declared resource's own name, singular or plural), `alias_ambiguous` (the same alias on two resources — the parser would have to guess, and it never guesses), `alias_is_value` (it is also a declared enum value or a value alias — a word cannot mean a resource and a state at once), `alias_duplicate` (repeated in the resource after normalization), `alias_empty` / `alias_too_long` (≤ 40 chars, ≤ 4 words), `alias_empty_list` (dead config). The forms compared (`schema.NameForms`) are the SAME forms the parser matches, so "unique at load" and "recognized at runtime" are one predicate.
 - Studio preserves it on round-trip (authored in the Code view); `appximo explain` reads it back («la gente también le dice: "pedidos", "ventas"»); `appximo spec` teaches it to an external agent. Value aliases (how people say a STATE) are the field-level `aliases` of §4.11.
+
+### 2.7 `ranges` — time ranges with no-overlap (MOTOR-AGENDA-S1, ADR-039)
+
+```json
+"eventos": {
+  "fields": { "titulo": { "type": "string", "required": true },
+              "inicio": { "type": "time", "required": true }, "fin": { "type": "time", "required": true },
+              "dueno_id": { "type": "uuid" }, "ocupa": { "type": "bool", "default": true },
+              "zona": { "type": "string", "format": "timezone", "default": "America/Bogota" } },
+  "ranges": {
+    "horario": {
+      "start": "inicio", "end": "fin",
+      "default_duration": "1h", "timezone_field": "zona",
+      "no_overlap": { "scope": ["dueno_id"], "when": { "field": "ocupa", "op": "eq", "val": true } }
+    }
+  }
+}
+```
+
+- **What it is.** A NAMED block of time over two `time` fields of the resource — the moment a row starts and the moment it ends. The API JSON stays the two natural fields (`inicio`, `fin`): a range is not a column type (a `tstzrange` column would expose a Postgres literal and demand a compound widget on every door); it is a name the engine knows over the pair. In Postgres the block is `tstzrange(start, end, '[)')` — **half-open**, so 4–5 and 5–6 do NOT overlap.
+- **`start` / `end`** — existing fields of the same resource, both `type: "time"`, never `auto`, distinct (`unknown_range_field`, `range_field_not_time`, `range_field_auto`, `range_same_field`). A range name that is also a field name is a load error (`range_shadows_field` — the name is a FILTER name on the API). A row with a NULL bound is *unscheduled*: it takes part in no overlap check and matches no range filter (never an unbounded range).
+- **Order.** The engine adds a CHECK `start < end` (NULLs allowed) and names a violation on every write door as the S44 422 `{"field": "<end>", "rule": "range_order"}` — before any SQL when both bounds travel in the body, from the constraint otherwise (a PATCH of one bound).
+- **`no_overlap`** — two rows of the same **scope** may not overlap: a REAL PostgreSQL `EXCLUDE USING gist (<scope> WITH =, tstzrange(start,end,'[)') WITH &&) WHERE (…)` constraint (`btree_gist` for the `=` on the scope columns — installed by the engine at tenant provisioning, trusted since PG13, and by `install.sh` at setup). Correct under concurrency in a way an application check cannot be: two simultaneous writes that would overlap → one wins, the other gets a clean **409** `{"error": "time_range_conflict", "range": "horario", "existing": {start,end}, "conflicts": [<the colliding row(s), as the role may read them>]}` on REST create/update, the batch transaction, GraphQL (`extensions.code = time_range_conflict`) and `Ctx.Insert/Update` (`*appximo.RangeConflictError`) — never a 500, never a raw Postgres message. `scope` lists the columns that must be EQUAL to collide (`dueno_id` for a personal agenda, `sala_id` for a room; `[]` = every row shares one agenda; a NULL scope value never collides). `when` (`{"field","op": eq|ne,"val"}`, a literal of the field's type) names the rows that BLOCK — a tentative row (`ocupa = false`) or a cancelled one (`estado ≠ cancelado`) is outside the constraint. The constraint symbol embeds a hash of the rule, so a changed rule is replaced (old dropped + new added atomically) and an unchanged one diffs as unchanged.
+- **Migration over existing data.** The EXCLUDE has no `NOT VALID` form: adding a rule to a table whose rows ALREADY overlap is refused. The dry-run (`PUT /tenants/{id}/schema {"dry_run": true}`, `appximo migrate --dry-run`) lists the colliding pairs as a `[blocked] no_overlap "horario" on eventos: N existing row pair(s) already overlap — <idA> × <idB> …` concern; the apply lands every other change, reports the rule in `Unapplied` (`Partial()` = true → the control plane / `/admin` PUT answers 422 and the schema is NOT persisted over a database that does not enforce it), nothing half-applied. Fix the rows (move, cancel, mark as not blocking), re-apply, it converges.
+- **Reads.** A range filters by NAME: `?filter[horario][overlaps]=<start>/<end>` (an ISO 8601 interval of two RFC 3339 instants, half-open) and `?filter[horario][contains]=<instant>`; GraphQL `filter: { horario: { overlaps: "<start>/<end>" } }` (`TimeRangeFilter`). Unknown ops on a range are a named 400. `GET /api/{resource}/conflicts?range=horario&start=…&end=…&<scope>=…&<when-field>=…&exclude_id=…` is the pre-check ("would this collide?") a UI or the voice runs BEFORE writing — advise, never block; it answers `{range, start, end, enforced, would_block, conflicts[]}` scoped exactly like a list read (row condition + field allowlist). Published in `/openapi.json` (`x-appximo-ranges` on the component, the range filter parameters, the `/conflicts` path).
+- **`default_duration`** — what a start given alone lasts (`"1h"` default): the voice fills the end from it («a las 10» → 10:00–11:00) and says so. **`timezone_field`** — an optional string field with `"format": "timezone"` (an IANA name, never a fixed offset — the write refuses `UTC-5`) holding the zone the block was declared in; the instants stay `timestamptz`. Recurrences (v2) materialize into rows with start/end — nothing here closes that door.
+- **Voice.** The vocabulary marks the range (`[time range horario: inicio..fin, default duration 1h, no overlap]`); «qué tengo mañana» lists what is scheduled (overlaps), «tengo algo a las 4» what contains 16:00, «cuándo estoy libre el jueves» the gaps; «agendá reunión con Fabián mañana de 4 a 5» is settled by the deterministic parser (US$ 0) and the confirmation runs the conflict check: «⚠️ Ya tenés «reunión con Fabián» de 16:00 a 17:00. … ¿Igual lo agendo?» — a yes on an invertible rule (`eq` on a bool) writes the row as NOT blocking (`ocupa: no`) and says so; a rule that cannot be inverted asks for another time.
+- **Studio** preserves the block (Code view); `appximo explain` reads it back («de inicio a fin es el bloque de tiempo «horario»; dos filas nunca se pisan…»); the `/app` back-office pairs the two datetime inputs, checks the order and shows the collision while editing. Example: [examples/model-lab/agenda-choques.json](../examples/model-lab/agenda-choques.json).
 
 ## 3. Fields and types
 
@@ -853,6 +883,9 @@ The rules below are all **optional**. A field that declares none produces no loa
 - **Runtime:** no match → `must match pattern <pattern>`; non-string → `must be a string`.
 
 ### 4.6 `format`
+
+`timezone` (MOTOR-AGENDA-S1) validates an IANA zone name (`America/Bogota`); a fixed offset (`+05:00`, `UTC-5`) or a made-up name is a 422 `rule: "format"`. It is what a range's `timezone_field` requires (§2.7).
+
 
 - **Applies to ONLY:** `string`, `text`. Else load error `format only applies to string/text fields, not "<type>"`.
 - **Closed set (exactly these four — `validFormats`):** `email`, `uuid`, `url`, `date`. Any other value → load error `unknown format "<v>": must be one of email, uuid, url, date`.

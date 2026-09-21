@@ -68,7 +68,43 @@
         },
         "renamed_from": { "$ref": "#/$defs/ident" },
         "foreign_keys": { "type": "array", "items": { "$ref": "#/$defs/foreignKey" } },
-        "import": { "$ref": "#/$defs/import" }
+        "import": { "$ref": "#/$defs/import" },
+        "ranges": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+          "additionalProperties": { "$ref": "#/$defs/range" }
+        }
+      }
+    },
+
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "description": "A time range over two time fields of the resource (MOTOR-AGENDA-S1): tstzrange(start, end, '[)') — half-open, 4–5 and 5–6 do not overlap.",
+      "properties": {
+        "start": { "$ref": "#/$defs/ident" },
+        "end": { "$ref": "#/$defs/ident" },
+        "timezone_field": { "$ref": "#/$defs/ident" },
+        "default_duration": { "type": "string", "minLength": 2 },
+        "no_overlap": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Rows of the same scope may not overlap — a real Postgres EXCLUDE constraint (race-safe). `when` limits the rule to the rows that block.",
+          "properties": {
+            "scope": { "type": "array", "items": { "$ref": "#/$defs/ident" } },
+            "when": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["field", "val"],
+              "properties": {
+                "field": { "$ref": "#/$defs/ident" },
+                "op": { "enum": ["eq", "ne"] },
+                "val": {}
+              }
+            }
+          }
+        }
       }
     },
 
@@ -114,7 +150,7 @@
         "minLength": { "type": "integer", "minimum": 0 },
         "maxLength": { "type": "integer", "minimum": 0 },
         "pattern": { "type": "string", "maxLength": 200 },
-        "format": { "enum": ["email", "uuid", "url", "date"] },
+        "format": { "enum": ["email", "uuid", "url", "date", "timezone"] },
         "state_machine": { "$ref": "#/$defs/stateMachine" },
         "accept": {
           "oneOf": [
@@ -383,7 +419,17 @@
           "additionalProperties": false,
           "required": ["type"],
           "properties": {
-            "type": { "enum": ["event", "cron"] },
+            "type": { "enum": ["event", "cron", "time"] },
+            "field": { "$ref": "#/$defs/ident" },
+            "before": { "type": "string", "minLength": 2 },
+            "after": { "type": "string", "minLength": 2 },
+            "grace": { "type": "string", "minLength": 2 },
+            "when": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["field", "val"],
+              "properties": { "field": { "$ref": "#/$defs/ident" }, "op": { "enum": ["eq", "ne"] }, "val": {} }
+            },
             "event": { "enum": ["create", "update", "delete"] },
             "resource": { "type": "string" },
             "cron": { "type": "string" },

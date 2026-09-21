@@ -158,6 +158,9 @@ const DICT = {
     'form.deleted': 'Registro eliminado',
     'form.readonly': 'Su rol puede ver este registro, no editarlo.',
     'form.fixFields': 'Revise los campos marcados.',
+    'form.rangeOrder': 'Debe ser posterior al inicio.',
+    'form.conflict': 'Ya hay algo en ese horario',
+
     'file.choose': 'Elegir archivo',
     'file.change': 'Cambiar',
     'file.remove': 'Quitar',
@@ -329,6 +332,9 @@ const DICT = {
     'form.deleted': 'Record deleted',
     'form.readonly': 'Your role can view this record, not edit it.',
     'form.fixFields': 'Check the highlighted fields.',
+    'form.rangeOrder': 'Must be after the start.',
+    'form.conflict': 'Something is already scheduled then',
+
     'file.choose': 'Choose file',
     'file.change': 'Change',
     'file.remove': 'Remove',

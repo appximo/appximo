@@ -108,6 +108,12 @@ type ApplyOutcome struct {
 	// multi-tenant orchestrator uses to distinguish an "already up to date" tenant
 	// from one it actually migrated.
 	NoChange bool
+	// BlockedExclusions (MOTOR-AGENDA-S1) lists every declared no-overlap rule the
+	// database could not enforce because existing rows already overlap, worded
+	// with the colliding pairs. Each one is ALSO in Unapplied (the re-diff still
+	// sees the constraint missing), so Partial() is true — the schema is not
+	// persisted over a database that does not enforce what it declares.
+	BlockedExclusions []string
 }
 
 // Partial reports whether the apply left DECLARED changes unapplied — i.e. the
@@ -150,6 +156,12 @@ func applyMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s 
 		if err := files.EnsureMetaTable(ctx, pool, strings.TrimPrefix(pgSchema, "tenant_")); err != nil {
 			return nil, fmt.Errorf("ensure files table for %s: %w", pgSchema, err)
 		}
+	}
+	// A no-overlap rule (MOTOR-AGENDA-S1) needs btree_gist for the `=` on the
+	// scope columns inside a gist EXCLUDE; trusted in PG13+, idempotent, and
+	// skipped entirely for schemas without one.
+	if err := ensureRangeExtensions(ctx, pool, s); err != nil {
+		return nil, err
 	}
 	plan, blockedRenames, err := diffTenant(ctx, pool, pgSchema, s, includeOrphans)
 	if err != nil {
@@ -222,17 +234,34 @@ func applyMigration(ctx context.Context, pool *pgxpool.Pool, pgSchema string, s 
 	// (which fails atomically, as it must). FKs reference tables created by the
 	// non-FK plan, so they are applied AFTER it.
 	nonFK, fkAdds := splitForeignKeyOps(applyPlan)
+	// EXCLUDE constraints (a declared no-overlap rule) are applied apart too: they
+	// have no NOT VALID form and fail outright over rows that already overlap,
+	// so each runs in its own transaction after a pre-check that names the
+	// colliding pairs — the rest of the plan lands, the rule is reported.
+	nonFK, exclusions := splitExclusionOps(nonFK)
 
 	ex := &schemadiff.Executor{Pool: pool, Schema: pgSchema}
 	if err := ex.Apply(ctx, nonFK); err != nil {
 		return nil, fmt.Errorf("apply migration %s: %w", pgSchema, err)
 	}
 	outcome.UnvalidatedFKs = applyForeignKeys(ctx, ex, pgSchema, fkAdds)
+	outcome.BlockedExclusions = applyExclusions(ctx, pool, ex, pgSchema, s, exclusions)
 
 	// ENG-13: verify against the DATABASE, not against the executor's log. Anything
 	// declared that is still pending after the apply is a divergence — reported here
 	// so no caller can print ✓ over it.
 	outcome.Unapplied = verifyApplied(ctx, pool, pgSchema, s, includeOrphans)
+	// A blocked no-overlap rule is worded with its colliding pairs, not as the
+	// bare op the re-diff sees.
+	if len(outcome.BlockedExclusions) > 0 {
+		kept := outcome.BlockedExclusions
+		for _, u := range outcome.Unapplied {
+			if !strings.HasPrefix(u, "ADD EXCLUSION ") {
+				kept = append(kept, u)
+			}
+		}
+		outcome.Unapplied = kept
+	}
 	for _, u := range outcome.Unapplied {
 		log.Printf("migration[%s]: NOT APPLIED — the schema declares this and the database does NOT have it (declared ≠ applied): %s", pgSchema, u)
 	}
@@ -655,6 +684,13 @@ func partitionByPolicyApproved(plan *schemadiff.Plan, approved map[string]bool) 
 				continue
 			}
 		}
+		// The drop half of a CHANGED no-overlap rule (same range, new symbol) is
+		// kept so the superseded constraint never lingers beside the new one
+		// (applied atomically with its add — applyExclusions).
+		if dx, ok := op.(schemadiff.DropExclusion); ok && isExclusionReplacement(plan, dx) {
+			keep = append(keep, op)
+			continue
+		}
 		gated = append(gated, op)
 	}
 	return &schemadiff.Plan{Ops: keep}, gated, appliedKeys
@@ -729,6 +765,10 @@ func opTable(op schemadiff.Operation) string {
 		return o.Table
 	case schemadiff.DropIndex:
 		return o.Table
+	case schemadiff.AddExclusion:
+		return o.Table
+	case schemadiff.DropExclusion:
+		return o.Table
 	}
 	return ""
 }
@@ -739,7 +779,7 @@ func isDropOp(k schemadiff.OpKind) bool {
 	switch k {
 	case schemadiff.OpDropTable, schemadiff.OpDropColumn, schemadiff.OpDropIndex,
 		schemadiff.OpDropUnique, schemadiff.OpDropCheck, schemadiff.OpDropPrimaryKey,
-		schemadiff.OpDropForeignKey:
+		schemadiff.OpDropForeignKey, schemadiff.OpDropExclusion:
 		return true
 	}
 	return false

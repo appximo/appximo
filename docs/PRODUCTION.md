@@ -1315,6 +1315,32 @@ Example schema with the whole cycle — tasks with people, a state machine,
 events, a workflow that sends the digest when an URGENT task is created, and
 a morning reminder: `examples/model-lab/agenda-voz.json`.
 
+### 4.6g «Agendame una reunión de 4 a 5» — an AGENDA by voice, with the collision said before writing (MOTOR-AGENDA-S1, ADR-039)
+
+An app whose rows occupy a block of time declares it in the schema (no code):
+
+```json
+"eventos": { "fields": { "titulo": {…}, "inicio": {"type":"time","required":true}, "fin": {"type":"time","required":true},
+                         "ocupa": {"type":"bool","default":true}, "estado": {…} },
+  "ranges": { "horario": { "start": "inicio", "end": "fin", "default_duration": "1h",
+                           "no_overlap": { "scope": [], "when": { "field": "ocupa", "op": "eq", "val": true } } } },
+  "events": ["create", "update"] },
+"workflows": { "aviso_15_min": { "trigger": { "type": "time", "resource": "eventos", "field": "inicio", "before": "15m",
+                                              "when": { "field": "estado", "op": "ne", "val": "cancelado" } },
+  "steps": [ { "name": "avisar", "type": "enqueue", "config": { "topic": "message.telegram", "data": { "text": "=\"⏰ En 15 min: \" + record.titulo" } } } ],
+  "role": "dueno" } }
+```
+
+What the operator gets, verified live (`evidencia/MOTOR-AGENDA-S1/provocaciones/`):
+
+- **The database refuses a collision, naming the row** — `409 time_range_conflict` with the colliding row on REST, the batch, GraphQL and a custom handler; twenty simultaneous writes on one slot → one `201`, nineteen `409`. Adjacent blocks (4–5, 5–6) never collide; a row with `ocupa: false` never blocks. It needs the `btree_gist` extension: `install.sh` installs it at setup, the engine installs it at tenant provisioning (trusted extension, the database owner may), `fleet-audit` reports a schema that declares `no_overlap` without it.
+- **The bot says the collision BEFORE writing**: «agendá reunión de planificación mañana de 4 a 5» → «⚠️ Ya tenés «reunión con Fabián» de 16:00 a 17:00. … ocupa: no (no bloquea el horario: ya había algo) … ¿Igual lo agendo?» — the deterministic parser settles it (US$ 0); a `sí` writes the row as NOT blocking (`ocupa: false`) so it never blocks what comes next. «qué tengo mañana», «tengo algo mañana a las 4», «cuándo estoy libre el jueves» are the parser's too. A bare hour 1–6 is read as the afternoon («a las 4» = 16:00); the confirmation prints the hour, so a wrong reading is caught before anything is written.
+- **The reminder arrives once, on time, and follows the row**: the worker's leader (the same lock the cron uses) sweeps the rows entering the window every 30 s and claims each (row, instant) in `public.workflow_reminders` atomically with the outbox row; a worker restarted inside the window neither loses nor duplicates it; a moved row fires at its new time, a cancelled one never. The text goes out through `message.telegram` — the same bot and chat as the digest (needs `APPXIMO_TELEGRAM_BOT_TOKEN` + `_CHAT_ID` + `_SUMMARY_ROLE` on the worker, §4.6d). Watch it: `GET /admin/workflows` (trigger `time:eventos.inicio -15m`, last run), `appximo_workflow_reminders_fired_24h` / `_failed_24h` on `/metrics`.
+- **Adding the rule over data that already collides is refused, naming the pairs**: the dry-run (`PUT /tenants/{id}/schema {"dry_run": true}`, `appximo migrate --dry-run`) lists `[blocked] no_overlap "horario" on eventos: N existing row pair(s) already overlap — <a> × <b>`; the apply lands everything else and answers **422** with those words (the tenant keeps its previous schema; nothing half-applied). Fix the rows, re-apply, it converges.
+- **The `/app` panel** keeps the two datetime fields side by side, refuses an end before the start, and shows «Ya hay algo en ese horario: …» while you edit — advice, never a block; the 409 names the row if you save anyway.
+
+The generator declares all of it from the description («que no se me crucen», «avisame 15 minutos antes de cada compromiso»): `appximo ai-generate "Mi agenda personal…"` came out with `ranges` + `no_overlap`, the `time` workflow and the morning cron, valid first try (US$ 0,014). Example to start from: `examples/model-lab/agenda-choques.json`.
+
 ### 4.7 Recommended cadence by kind of app
 
 | the app | cadence | why |

@@ -782,6 +782,14 @@ setup_postgres() {
 	if [ "$($psql -c "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'")" != "1" ]; then
 		$psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_ROLE}" || die "could not create the ${DB_NAME} database"
 	fi
+	# btree_gist (MOTOR-AGENDA-S1): a schema's `no_overlap` rule is an EXCLUDE
+	# USING gist over (scope WITH =, tstzrange WITH &&), and the `=` on a
+	# uuid/text scope column needs this extension. Trusted since PG13 (the
+	# app role, as database owner, can install it too — the engine does so at
+	# tenant provisioning), but installed here as well so a locked-down box
+	# never learns about it from a failed deploy.
+	runuser -u postgres -- psql -tAX -d "${DB_NAME}" -c "CREATE EXTENSION IF NOT EXISTS btree_gist" >/dev/null 2>&1 \
+		|| warn "could not install btree_gist in ${DB_NAME} — a schema declaring ranges.no_overlap will install it at deploy (needs CREATE on the database)"
 	tune_postgres
 	ok "postgresql role + database ready (control plane is bootstrapped by the engine on boot)"
 }

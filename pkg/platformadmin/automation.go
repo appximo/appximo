@@ -146,9 +146,16 @@ func (s *Service) handleWorkflows(w http.ResponseWriter, r *http.Request) {
 			if wf.OverlapAllow {
 				v.Overlap = "allow"
 			}
-			if wf.TriggerType == "event" {
+			switch wf.TriggerType {
+			case "event":
 				v.Trigger = "event:" + wf.Topic
-			} else {
+			case "time":
+				dir := "-"
+				if !wf.Before {
+					dir = "+"
+				}
+				v.Trigger = "time:" + wf.Resource + "." + wf.Field + " " + dir + wf.Offset.String()
+			default:
 				v.Trigger = "cron:" + wf.CronSpec + " (" + wf.Location.String() + ")"
 			}
 			views = append(views, v)

@@ -105,6 +105,12 @@ type ResourceSchema struct {
 	// and never a declared resource's own name or plural. The reply always
 	// uses the schema's word; an alias is understood, never spoken back.
 	Aliases []string `json:"aliases,omitempty"`
+
+	// Ranges (MOTOR-AGENDA-S1, ADR-039) name a TIME RANGE over two of the
+	// resource's own time fields — {"horario": {"start": "inicio", "end":
+	// "fin", "no_overlap": {...}}} — with an optional no-overlap rule that the
+	// engine enforces as a real Postgres EXCLUDE constraint. See ranges.go.
+	Ranges map[string]RangeDef `json:"ranges,omitempty"`
 }
 
 // validEmitActions is the closed set of write actions a resource may opt into
@@ -754,7 +760,7 @@ type WorkflowSchema struct {
 
 // WorkflowTrigger describes what starts a workflow.
 type WorkflowTrigger struct {
-	Type string `json:"type"` // "event" | "cron"
+	Type string `json:"type"` // "event" | "cron" | "time"
 	// Event triggers: the emitted action ("create" | "update" | "delete") on
 	// Resource — which must declare that action in its `events` list, or the
 	// workflow could never fire (a load error, not a silent dead promise).
@@ -764,6 +770,22 @@ type WorkflowTrigger struct {
 	// evaluated in Timezone (IANA name; default UTC — see ADR-031 §DST).
 	Cron     string `json:"cron,omitempty"`
 	Timezone string `json:"timezone,omitempty"`
+	// Time triggers (MOTOR-AGENDA-S1, ADR-039): fire once PER ROW of Resource,
+	// relative to that row's own time Field — `before: "15m"` fires fifteen
+	// minutes before the row's inicio, `after: "1h"` an hour after it. Exactly
+	// one of before/after. The worker's leader sweeps the rows whose moment
+	// enters the window and claims each (tenant, workflow, row, due instant)
+	// ONCE in the same transaction as the run's enqueue — a restart in the
+	// window neither loses nor duplicates it; a row whose time moves gets its
+	// new moment (and never the old one); a row that stops matching `when`
+	// (cancelled) never fires. Grace bounds how late a firing may still
+	// happen (default: the offset for `before` — never after the moment
+	// itself — and 1h for `after`).
+	Field  string   `json:"field,omitempty"`
+	Before string   `json:"before,omitempty"`
+	After  string   `json:"after,omitempty"`
+	Grace  string   `json:"grace,omitempty"`
+	When   *WhenDef `json:"when,omitempty"`
 }
 
 // WorkflowStep is one sequential step. Types (ADR-031):

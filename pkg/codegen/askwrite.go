@@ -54,6 +54,13 @@ func (w *askWriter) Write(ctx context.Context, kind, resource, id string, data m
 	})
 	if err != nil {
 		if te, ok := err.(*txError); ok {
+			// A time-range conflict the constraint caught (MOTOR-AGENDA-S1) is
+			// named with the row it collided with — the voice says who.
+			if ref := w.tw.refs[resource]; ref != nil && te.cause != nil {
+				if d, ok := describeTxRangeConflict(ctx, w.tw.tdb, w.tc.PGSchema, w.tw.refs, []preparedOp{*p}, te).(*txError); ok {
+					te = d
+				}
+			}
 			return nil, toWriteError(te)
 		}
 		return nil, err
@@ -66,6 +73,9 @@ func (w *askWriter) Write(ctx context.Context, kind, resource, id string, data m
 
 func toWriteError(te *txError) *ask.WriteError {
 	we := &ask.WriteError{Status: te.status, Msg: te.msg}
+	if c, ok := te.extra["conflicts"].([]map[string]any); ok {
+		we.Conflicts = c
+	}
 	for _, f := range te.fields {
 		if f.Rule == "__unavailable__" {
 			return &ask.WriteError{Status: 503, Msg: "database unavailable"}

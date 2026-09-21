@@ -127,7 +127,7 @@ func introspectColumns(ctx context.Context, q Querier, schemaName string, s *Sch
 	return rows.Err()
 }
 
-// ── query 2: constraints (PK / FK / UNIQUE / CHECK) ──────────────────────────
+// ── query 2: constraints (PK / FK / UNIQUE / CHECK / EXCLUDE) ──────────────────────────
 
 const constraintsQuery = `
 SELECT con.conname                          AS name,
@@ -146,7 +146,7 @@ JOIN pg_class conrel ON conrel.oid = con.conrelid
 JOIN pg_namespace n ON n.oid = conrel.relnamespace
 LEFT JOIN pg_class confrel ON confrel.oid = con.confrelid
 WHERE n.nspname = $1
-  AND con.contype IN ('p', 'f', 'u', 'c')
+  AND con.contype IN ('p', 'f', 'u', 'c', 'x')
 ORDER BY conrel.relname, con.conname`
 
 func introspectConstraints(ctx context.Context, q Querier, schemaName string, s *Schema, attnum map[int64]map[int32]string) error {
@@ -218,6 +218,11 @@ func introspectConstraints(ctx context.Context, q Querier, schemaName string, s 
 			}
 		case "c":
 			tbl.Checks[name] = &Check{Symbol: name, Expression: normalizeCheck(def)}
+		case "x":
+			if tbl.Exclusions == nil {
+				tbl.Exclusions = make(map[string]*Exclusion)
+			}
+			tbl.Exclusions[name] = &Exclusion{Symbol: name, Definition: def}
 		}
 	}
 	return rows.Err()

@@ -47,6 +47,16 @@ const (
 	// WriteErrUnavailable: the database cannot serve this right now → 503 +
 	// Retry-After.
 	WriteErrUnavailable
+	// WriteErrRangeConflict: 23P01 exclusion_violation on an engine-generated
+	// no-overlap constraint (MOTOR-AGENDA-S1) → 409 {"error":
+	// "time_range_conflict", range, existing, conflicts[]} naming the row(s)
+	// the write collided with (Conflict carries them).
+	WriteErrRangeConflict
+	// WriteErrRangeOrder: 23514 check_violation on an engine-generated
+	// range-order CHECK → the S44 422 {rule:"range_order"} on the range's end
+	// field (Field carries the constraint symbol; the describer maps it to the
+	// field when the schema is at hand).
+	WriteErrRangeOrder
 )
 
 // WriteErrorVerdict is ClassifyWriteError's result: the kind plus the safe,
@@ -56,6 +66,9 @@ type WriteErrorVerdict struct {
 	Kind    WriteErrorKind
 	Field   string // WriteErrUnique / WriteErrUnknownColumn / WriteErrFileRef
 	Message string // WriteErrForeignKey's safe, human-readable message
+	// Conflict is set for WriteErrRangeConflict: the colliding row's key and,
+	// when a describer resolved it, the row(s) as the role may see them.
+	Conflict *RangeConflict
 }
 
 // ClassifyWriteError is the single classification of a write's database error
@@ -70,6 +83,21 @@ type WriteErrorVerdict struct {
 func ClassifyWriteError(err error) WriteErrorVerdict {
 	if err == nil {
 		return WriteErrorVerdict{}
+	}
+	// Time ranges (MOTOR-AGENDA-S1): a described conflict first, then the raw
+	// driver forms of the two engine-generated constraints.
+	if v, ok := classifyRangeErrors(err); ok {
+		return v
+	}
+	if constraint, keyCols, keyVals, ok := db.ExclusionViolation(err); ok {
+		c := RangeConflict{Constraint: constraint}
+		if scope, start, end, pok := parseExclusionKey(keyCols, keyVals); pok {
+			c.ExistingScope, c.ExistingStart, c.ExistingEnd = scope, start, end
+		}
+		return WriteErrorVerdict{Kind: WriteErrRangeConflict, Field: constraint, Message: RangeConflictMessage(c), Conflict: &c}
+	}
+	if constraint, ok := db.RangeOrderViolation(err); ok {
+		return WriteErrorVerdict{Kind: WriteErrRangeOrder, Field: rangeOrderField(constraint), Message: RangeOrderMessage}
 	}
 	if field, ok := db.UniqueViolationField(err); ok {
 		return WriteErrorVerdict{Kind: WriteErrUnique, Field: field}
@@ -154,6 +182,15 @@ func WriteDBError(w http.ResponseWriter, err error) {
 		// A RESTRICT delete of a still-referenced row, or a write referencing a
 		// non-existent row (MIG-F1-S1) — a clear, safe message, never a masked 500.
 		writeJSONError(w, http.StatusConflict, v.Message)
+	case WriteErrRangeConflict:
+		// A declared no-overlap rule (MOTOR-AGENDA-S1): 409 naming the range and
+		// the row(s) it collides with — the constraint is the race-safe net, the
+		// body is what a UI shows.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(RangeConflictBody(*v.Conflict)) //nolint:errcheck
+	case WriteErrRangeOrder:
+		writeFieldError(w, v.Field, RangeOrderRule, RangeOrderMessage)
 	case WriteErrMissingTenant:
 		writeJSONError(w, http.StatusBadRequest, "invalid tenant")
 	case WriteErrBadInput:

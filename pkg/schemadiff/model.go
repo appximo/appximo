@@ -43,17 +43,25 @@ type Table struct {
 	Uniques map[string]*UniqueConstraint // by constraint symbol
 	Checks  map[string]*Check            // by constraint symbol
 	Indexes map[string]*Index            // by index name (standalone indexes only)
+	// Exclusions are EXCLUDE constraints (MOTOR-AGENDA-S1): the no-overlap rule
+	// of a declared time range. Matched by SYMBOL only — the engine embeds a
+	// hash of the rule's definition in the symbol, so a changed rule is a new
+	// symbol (drop old + add new) and an unchanged one diffs as unchanged with
+	// no canonical-text comparison. The index behind one is not a standalone
+	// index (introspectIndexes skips contype 'x').
+	Exclusions map[string]*Exclusion // by constraint symbol
 }
 
 // NewTable returns an empty Table with initialized maps.
 func NewTable(name string) *Table {
 	return &Table{
-		Name:    name,
-		Columns: make(map[string]*Column),
-		FKs:     make(map[string]*ForeignKey),
-		Uniques: make(map[string]*UniqueConstraint),
-		Checks:  make(map[string]*Check),
-		Indexes: make(map[string]*Index),
+		Name:       name,
+		Columns:    make(map[string]*Column),
+		FKs:        make(map[string]*ForeignKey),
+		Uniques:    make(map[string]*UniqueConstraint),
+		Checks:     make(map[string]*Check),
+		Indexes:    make(map[string]*Index),
+		Exclusions: make(map[string]*Exclusion),
 	}
 }
 
@@ -254,6 +262,14 @@ type ForeignKey struct {
 type UniqueConstraint struct {
 	Symbol  string
 	Columns []string
+}
+
+// Exclusion is an EXCLUDE constraint. Definition is the body after ADD
+// CONSTRAINT <symbol> (desired: rendered by the engine; introspected: the
+// pg_get_constraintdef text) — informative, never compared (see Table).
+type Exclusion struct {
+	Symbol     string
+	Definition string
 }
 
 // Check is a CHECK constraint. Expression is the predicate text from

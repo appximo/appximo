@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/appximo/appximo/pkg/rbac"
 	"github.com/appximo/appximo/pkg/schema"
@@ -77,9 +78,13 @@ var operatorsForType = map[string]map[string]bool{
 }
 
 type filterClause struct {
-	field string
-	op    string // "eq", "partial", "gte", "lte", "gt", "lt", "after", "before", "is_null"
-	value string
+	// rangeStart/rangeEnd are set when field names a declared time RANGE
+	// (MOTOR-AGENDA-S1) instead of a column: op is then range_overlaps
+	// (value = start, value2 = end) or range_contains (value = the instant).
+	rangeStart, rangeEnd, value2 string
+	field                        string
+	op                           string // "eq", "partial", "gte", "lte", "gt", "lt", "after", "before", "is_null"
+	value                        string
 }
 
 // QueryBuilder holds a parsed, validated query ready to emit SQL.
@@ -284,6 +289,20 @@ func BuildQuery(
 		op := "eq"
 		if m[2] != "" {
 			op = m[2]
+		}
+
+		// A declared time RANGE filters by name (MOTOR-AGENDA-S1): ?filter[horario]
+		// [overlaps]=<start>/<end> (ISO 8601 interval) or [contains]=<instant>.
+		if rg, isRange := res.Ranges[field]; isRange {
+			if !roleAllows(rg.Start) || !roleAllows(rg.End) {
+				return nil, fmt.Errorf("%w: filter[%s]", ErrForbiddenField, field)
+			}
+			fc, err := parseRangeFilter(field, op, vals[0], rg)
+			if err != nil {
+				return nil, err
+			}
+			qb.filters = append(qb.filters, fc)
+			continue
 		}
 
 		fd, ok := res.Fields[field]
@@ -837,6 +856,20 @@ func (qb *QueryBuilder) appendConditions(parts []string, args []any, idx int) ([
 				parts = append(parts, f.field+" IS NOT NULL")
 			}
 			continue
+		case "range_overlaps":
+			// Half-open on both sides: a row ending exactly when the window starts
+			// does not overlap it. A row with a NULL bound is unscheduled — never
+			// an unbounded range.
+			parts = append(parts, fmt.Sprintf("(%s IS NOT NULL AND %s IS NOT NULL AND %s && tstzrange($%d::timestamptz, $%d::timestamptz, '[)'))",
+				f.rangeStart, f.rangeEnd, schema.RangeExprSQL(f.rangeStart, f.rangeEnd), idx, idx+1))
+			args = append(args, f.value, f.value2)
+			idx += 2
+			continue
+		case "range_contains":
+			parts = append(parts, fmt.Sprintf("(%s IS NOT NULL AND %s IS NOT NULL AND %s @> $%d::timestamptz)",
+				f.rangeStart, f.rangeEnd, schema.RangeExprSQL(f.rangeStart, f.rangeEnd), idx))
+			args = append(args, f.value)
+			continue
 		default:
 			parts = append(parts, fmt.Sprintf("%s %s $%d", f.field, filterToSQL(f.op), idx))
 			args = append(args, f.value)
@@ -929,7 +962,52 @@ func availableFieldNames(res *schema.ResourceSchema) string {
 		names = append(names, n)
 	}
 	sort.Strings(names)
-	return strings.Join(names, ", ")
+	out := strings.Join(names, ", ")
+	if rn := res.RangeNames(); len(rn) > 0 {
+		out += "; ranges: " + strings.Join(rn, ", ") + " (overlaps, contains)"
+	}
+	return out
+}
+
+// rangeOps is the closed operator set of a declared time range.
+var rangeOps = map[string]bool{"overlaps": true, "contains": true}
+
+// parseRangeFilter validates a filter on a range NAME: `overlaps` takes an ISO
+// 8601 interval `<start>/<end>` (two instants, start before end), `contains`
+// takes one instant. Instants are parsed in Go only to check the order; the
+// values are bound with ::timestamptz so Postgres's own grammar decides.
+func parseRangeFilter(name, op, val string, rg schema.RangeDef) (filterClause, error) {
+	if !rangeOps[op] {
+		return filterClause{}, fmt.Errorf("filter[%s][%s]: operator %q not allowed for a time range (allowed: contains, overlaps)", name, op, op)
+	}
+	if val == "" {
+		return filterClause{}, fmt.Errorf("filter[%s][%s]: empty value is not valid for a time range", name, op)
+	}
+	fc := filterClause{field: name, rangeStart: rg.Start, rangeEnd: rg.End}
+	switch op {
+	case "overlaps":
+		i := strings.Index(val, "/")
+		if i <= 0 || i == len(val)-1 {
+			return filterClause{}, fmt.Errorf("filter[%s][overlaps]: %q is not an interval — use <start>/<end> (RFC 3339 instants, ISO 8601 interval form)", name, val)
+		}
+		from, to := val[:i], val[i+1:]
+		if tf, ef := parseInstant(from); ef == nil {
+			if tt, et := parseInstant(to); et == nil && !tt.After(tf) {
+				return filterClause{}, fmt.Errorf("filter[%s][overlaps]: the interval's end %q is not after its start %q", name, to, from)
+			}
+		}
+		fc.op, fc.value, fc.value2 = "range_overlaps", from, to
+	case "contains":
+		fc.op, fc.value = "range_contains", val
+	}
+	return fc, nil
+}
+
+func parseInstant(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
 }
 
 // singleValue reports whether a parameter was SENT, separately from its value —

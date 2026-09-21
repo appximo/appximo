@@ -64,7 +64,7 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 	for resName, rawRes := range object("resources", top["resources"]) {
 		resPath := "resources." + resName
 		res := object(resPath, rawRes)
-		addUnknown(resPath, res, "fields", "hooks", "indexes", "events", "relations", "renamed_from", "foreign_keys", "import", "aliases")
+		addUnknown(resPath, res, "fields", "hooks", "indexes", "events", "relations", "renamed_from", "foreign_keys", "import", "aliases", "ranges")
 
 		// import: the governed-field create grant (WRITE-ASYMMETRY-S1). Strict-key
 		// so a typo ("role" instead of "roles") is rejected, not a silently dead
@@ -80,6 +80,20 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 			for i, rawFK := range fkArr {
 				fkPath := fmt.Sprintf("%s.foreign_keys[%d]", resPath, i)
 				addUnknown(fkPath, object(fkPath, rawFK), "columns", "target", "ref_columns", "on_delete", "on_update")
+			}
+		}
+
+		// ranges: {name: {start, end, no_overlap: {scope, when: {field, op, val}},
+		// timezone_field}} (MOTOR-AGENDA-S1). Strict-key at every level.
+		for rangeName, rawRange := range object(resPath+".ranges", res["ranges"]) {
+			rangePath := resPath + ".ranges." + rangeName
+			rg := object(rangePath, rawRange)
+			addUnknown(rangePath, rg, "start", "end", "no_overlap", "timezone_field", "default_duration")
+			if no := object(rangePath+".no_overlap", rg["no_overlap"]); no != nil {
+				addUnknown(rangePath+".no_overlap", no, "scope", "when")
+				if wh := object(rangePath+".no_overlap.when", no["when"]); wh != nil {
+					addUnknown(rangePath+".no_overlap.when", wh, "field", "op", "val")
+				}
 			}
 		}
 
@@ -186,7 +200,10 @@ func CheckUnknownKeys(raw json.RawMessage) []ValidationError {
 		wf := object(wfPath, rawWf)
 		addUnknown(wfPath, wf, "trigger", "steps", "overlap", "role")
 		if trig := object(wfPath+".trigger", wf["trigger"]); trig != nil {
-			addUnknown(wfPath+".trigger", trig, "type", "event", "resource", "cron", "timezone")
+			addUnknown(wfPath+".trigger", trig, "type", "event", "resource", "cron", "timezone", "field", "before", "after", "grace", "when")
+			if wh := object(wfPath+".trigger.when", trig["when"]); wh != nil {
+				addUnknown(wfPath+".trigger.when", wh, "field", "op", "val")
+			}
 		}
 		// Steps: name/type/config; config's per-type keys are checked by the
 		// semantic validator (ValidateWorkflows), which knows the step type.

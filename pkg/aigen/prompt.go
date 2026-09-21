@@ -52,7 +52,7 @@ FIELD KEYS (all optional unless noted):
   "enum": ["a","b"]  (string fields only),
   numeric fields: "min", "max"
   string/text fields: "minLength", "maxLength", "pattern" (RE2 regex),
-    "format": one of "email" | "uuid" | "url" | "date"
+    "format": one of "email" | "uuid" | "url" | "date" | "timezone" (an IANA zone name such as America/Bogota — for a range's timezone_field)
     On a REQUIRED string/text field ALWAYS declare "minLength": 1 (or more):
     "required" rejects only an absent key or null — the empty string "" is a
     present value, so an empty form field would create blank records with 201.
@@ -154,6 +154,11 @@ a reminder. Read the description for these signals:
   several resources and one or two the owner
    reads every morning                           → "summary": { "resources": [...] } in reading order
   any lifecycle with steps someone must act on   → "pending" on its state machine (see STATE MACHINES)
+  "agenda / citas / turnos / reservas / horario /
+   que no se me crucen / que no se pisen /
+   de 4 a 5"                                     → a "ranges" block on that resource (start..end, no_overlap) — see TIME RANGES
+  "avisame 15 minutos antes / recordame antes de
+   cada cita / una hora después de"              → "events" on the resource + a TIME workflow (before/after the row's own time field)
   none of the above (a plain catalogue, a
    read-mostly inventory, a lookup table)        → NONE of these blocks. Do not add a workflow
                                                    "just in case"; an omitted block costs nothing.
@@ -199,6 +204,43 @@ a reminder. Read the description for these signals:
      owner's language. An enqueue of a topic that triggers a workflow is a load
      error (a declared infinite loop).
 
+2b. TIME RANGES (MOTOR-AGENDA-S1, ADR-039) — a resource whose rows occupy a
+   block of time (an appointment, a booking, a shift, a rental) declares two
+   "time" fields and names the block, sibling of "fields":
+   "ranges": { "horario": { "start": "inicio", "end": "fin", "default_duration": "1h",
+                            "no_overlap": { "scope": ["dueno_id"], "when": { "field": "ocupa", "op": "eq", "val": true } } } }
+   - start/end: existing "time" fields (declare them required for an agenda).
+     The JSON stays the two natural fields; the engine stores the block as a
+     half-open tstzrange [start, end) — 4–5 and 5–6 do NOT overlap.
+   - "no_overlap": two rows of the same scope may not overlap — a REAL
+     PostgreSQL EXCLUDE constraint (race-safe: two simultaneous writes → one
+     wins, the other gets 409 time_range_conflict naming the row). "scope" =
+     the columns that must be EQUAL to collide (an owner id, a room id; []
+     = every row shares one agenda). "when" (eq|ne on a bool/enum field) =
+     which rows BLOCK: a tentative row (ocupa=false) or a cancelled one does
+     not. The API gains ?filter[horario][overlaps]=<start>/<end>,
+     ?filter[horario][contains]=<instant> and GET /api/{res}/conflicts (the
+     pre-check a UI or the voice runs before writing). Declare no_overlap
+     whenever the description says things must not collide; declare the
+     range alone when blocks may overlap but the agenda is still asked about.
+   - "default_duration": what a start given alone lasts (voice: «a las 10»).
+   - "timezone_field": an optional string field with "format": "timezone"
+     holding the IANA zone (default it to the owner's zone) — never offsets.
+   Signal: a personal agenda, appointments, room/court bookings, shifts.
+   Never on a catalogue, an order, a task with a single due date.
+
+2c. TIME TRIGGERS — a workflow that fires PER ROW relative to that row's own
+   time field: "trigger": { "type": "time", "resource": "eventos", "field": "inicio",
+   "before": "15m", "when": { "field": "estado", "op": "ne", "val": "cancelado" } }
+   ("after": "1h" for a follow-up; exactly one of before/after; optional
+   "grace"). The worker sweeps the rows entering the window and fires each
+   (row, instant) exactly once — a moved row fires at its new time, a
+   cancelled one (per "when") never. Steps: an enqueue of "message.telegram"
+   with data {"text": "=\"⏰ En 15 min: \" + record.titulo"} sends that text
+   to the app's Telegram chat (the shipped worker consumes it). Declare it
+   when the description asks to be warned BEFORE/AFTER each appointment;
+   "cada mañana" stays a cron.
+
 3. "aliases" — how PEOPLE say a resource or a state, so the voice channel
    (POST /api/ask, the Telegram bot, a Siri shortcut) answers at ZERO cost in
    the owner's words. Two places:
@@ -235,6 +277,20 @@ the SHAPE, not the words):
   "resources": {
     "personas": { "aliases": ["contactos", "gente"],
       "fields": { "nombre": { "type": "string", "required": true, "minLength": 1 }, "telefono": { "type": "string" } } },
+    "eventos": { "aliases": ["cita", "compromiso", "reunion"], "events": ["create", "update"],
+      "fields": {
+        "titulo":     { "type": "string", "required": true, "minLength": 1, "maxLength": 200 },
+        "persona_id": { "type": "uuid", "relation": "personas", "on_delete": "set_null" },
+        "inicio":     { "type": "time", "required": true },
+        "fin":        { "type": "time", "required": true },
+        "ocupa":      { "type": "bool", "default": true },
+        "estado":     { "type": "string", "enum": ["programado", "hecho", "cancelado"], "default": "programado",
+                        "state_machine": { "initial": "programado", "pending": ["programado"],
+                                           "transitions": { "programado": ["hecho", "cancelado"], "hecho": [], "cancelado": [] } } },
+        "creado_en":  { "type": "time", "auto": "create" }
+      },
+      "ranges": { "horario": { "start": "inicio", "end": "fin", "default_duration": "1h",
+                               "no_overlap": { "scope": [], "when": { "field": "ocupa", "op": "eq", "val": true } } } } },
     "tareas": { "aliases": ["cosas", "recordatorios"], "events": ["create", "update"],
       "fields": {
         "titulo":     { "type": "string", "required": true, "minLength": 1, "maxLength": 200 },
@@ -255,9 +311,13 @@ the SHAPE, not the words):
     "avisar_urgente": { "trigger": { "type": "event", "event": "create", "resource": "tareas" },
       "steps": [ { "name": "solo_urgentes", "type": "condition", "config": { "expr": "record.prioridad == 'urgente'" } },
                  { "name": "avisar", "type": "enqueue", "config": { "topic": "summary.telegram", "data": {} } } ],
+      "role": "dueno" },
+    "aviso_15_min": { "trigger": { "type": "time", "resource": "eventos", "field": "inicio", "before": "15m",
+                                   "when": { "field": "estado", "op": "ne", "val": "cancelado" } },
+      "steps": [ { "name": "avisar", "type": "enqueue", "config": { "topic": "message.telegram", "data": { "text": "=\"⏰ En 15 min: \" + record.titulo" } } } ],
       "role": "dueno" }
   },
-  "summary": { "resources": ["tareas", "personas"] },
+  "summary": { "resources": ["eventos", "tareas", "personas"] },
   "rbac": { "roles": { "dueno": { "resources": "*", "actions": ["*"] } } }
 }
 
@@ -378,8 +438,10 @@ types and validations, relations between them, and at least an "admin" role.
 Then read the description once more for the OPERATIONAL BLOCKS signals — a
 reminder means a cron workflow, "avisame cuando" means events + an event
 workflow, an app that is spoken to (or named in English for a Spanish owner)
-means aliases, a lifecycle means "pending" — and declare exactly those, none
-by default. Output ONLY the JSON.`
+means aliases, a lifecycle means "pending", an agenda / bookings / shifts /
+"que no se me crucen" means a "ranges" block with no_overlap, "avisame N
+minutos antes de cada cita" means a TIME workflow — and declare exactly
+those, none by default. Output ONLY the JSON.`
 
 // correctionPreamble prefaces the actionable validation errors fed back to the
 // model on a failed attempt. The errors themselves are the machine-readable

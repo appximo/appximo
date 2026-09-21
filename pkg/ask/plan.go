@@ -78,18 +78,26 @@ type Filter struct {
 
 // Period is a time window over one time field.
 type Period struct {
-	// Field is a `time` field of the resource; empty = the resource's creation
-	// timestamp (the auto:"create" field) when it has one.
+	// Field is a `time` field of the resource — or a declared time RANGE
+	// (MOTOR-AGENDA-S1: what is scheduled in the window); empty = the range
+	// when the resource declares one, else the creation timestamp.
 	Field string `json:"field,omitempty"`
 	Range string `json:"range"`
+	// At (MOTOR-AGENDA-S1) narrows the window to one instant of its first
+	// day, "HH:MM" — «tengo algo mañana a las 4» → the blocks containing
+	// tomorrow 16:00. Only meaningful over a range.
+	At string `json:"at,omitempty"`
 }
 
 // The closed sets. Anything outside them is a validation error the model gets
 // back once, then "no entendí".
 var (
-	Kinds      = []string{"count", "list", "sum", "avg", "min", "max", "unclear", "write", "create", "update"}
-	Ops        = []string{"eq", "gt", "gte", "lt", "lte", "partial", "start", "is_null"}
-	Ranges     = []string{"today", "yesterday", "this_week", "last_week", "this_month", "last_month", "last_7_days", "last_30_days", "this_year"}
+	Kinds = []string{"count", "list", "sum", "avg", "min", "max", "unclear", "write", "create", "update", "free"}
+	Ops   = []string{"eq", "gt", "gte", "lt", "lte", "partial", "start", "is_null"}
+	// Ranges: the past windows, plus the FUTURE days an agenda is asked about
+	// (MOTOR-AGENDA-S1): tomorrow, day_after_tomorrow, next_week, next_<weekday>.
+	Ranges = []string{"today", "yesterday", "this_week", "last_week", "this_month", "last_month", "last_7_days", "last_30_days", "this_year",
+		"tomorrow", "day_after_tomorrow", "next_week", "next_monday", "next_tuesday", "next_wednesday", "next_thursday", "next_friday", "next_saturday", "next_sunday"}
 	numericOps = map[string]bool{"eq": true, "gt": true, "gte": true, "lt": true, "lte": true, "is_null": true}
 	textOps    = map[string]bool{"eq": true, "partial": true, "start": true, "is_null": true}
 	flatOps    = map[string]bool{"eq": true, "is_null": true}
@@ -177,17 +185,37 @@ func (p Plan) Validate(v *Vocabulary) error {
 		}
 		field := p.Period.Field
 		if field == "" {
-			field = res.DefaultTimeField()
+			field, _ = res.PeriodTarget()
 			if field == "" {
 				return fmt.Errorf("%s has no time field, so it cannot be asked about a period; ask without one", p.Resource)
 			}
 		}
-		fd := res.Field(field)
-		if fd == nil {
-			return fmt.Errorf("period.field: %s has no field %q; its time fields are: %s", p.Resource, field, res.TimeFieldList())
+		if rg := res.RangeNamed(field); rg != nil {
+			if p.Period.At != "" && !clockRe.MatchString(p.Period.At) {
+				return fmt.Errorf("period.at must be HH:MM")
+			}
+		} else {
+			fd := res.Field(field)
+			if fd == nil {
+				return fmt.Errorf("period.field: %s has no field %q; its time fields are: %s", p.Resource, field, res.TimeFieldList())
+			}
+			if fd.Type != "time" {
+				return fmt.Errorf("period.field %q is %s, not time; %s's time fields are: %s", field, fd.Type, p.Resource, res.TimeFieldList())
+			}
+			if p.Period.At != "" {
+				return fmt.Errorf("period.at applies only to a time range (%s declares none on %q)", p.Resource, field)
+			}
 		}
-		if fd.Type != "time" {
-			return fmt.Errorf("period.field %q is %s, not time; %s's time fields are: %s", field, fd.Type, p.Resource, res.TimeFieldList())
+	}
+	if p.Kind == "free" {
+		if res.Range() == nil {
+			return fmt.Errorf("free asks for the gaps of an agenda; %s declares no time range", p.Resource)
+		}
+		if p.Period == nil {
+			return fmt.Errorf("free needs a period (the day or week to look at)")
+		}
+		if p.Field != "" || p.GroupBy != "" {
+			return fmt.Errorf("free takes no field/group_by")
 		}
 	}
 	switch p.Kind {
@@ -202,7 +230,7 @@ func (p Plan) Validate(v *Vocabulary) error {
 		if !fd.IsNumeric() && !((p.Kind == "min" || p.Kind == "max") && fd.Type == "time") {
 			return fmt.Errorf("%s cannot be applied to %s.%s (%s); numeric fields: %s", p.Kind, p.Resource, p.Field, fd.Type, res.NumericFieldList())
 		}
-	case "list":
+	case "list", "free":
 		if p.Field != "" || p.GroupBy != "" {
 			return fmt.Errorf("list takes no field/group_by (use count with group_by to count by a field)")
 		}

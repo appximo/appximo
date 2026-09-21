@@ -168,7 +168,7 @@ func TestWrite_TimeTokensResolveInTheAppsDay(t *testing.T) {
 			t.Errorf("%q: want %s, got %v (ok=%v)", tok, want, got.Format("2006-01-02 15:04"), ok)
 		}
 	}
-	for said, tok := range map[string]string{"mañana": "tomorrow", "el viernes a las 3": "next_friday 03:00", "para el viernes a las 15:30": "next_friday 15:30", "pasado mañana": "day_after_tomorrow", "hoy": "today", "2026-11-02": "2026-11-02", "cuando pueda": ""} {
+	for said, tok := range map[string]string{"mañana": "tomorrow", "el viernes a las 3": "next_friday 15:00", "para el viernes a las 15:30": "next_friday 15:30", "el viernes a las 3 de la mañana": "next_friday 03:00", "mañana de 4 a 5": "tomorrow 16:00", "a las 10": "today 10:00", "pasado mañana": "day_after_tomorrow", "hoy": "today", "2026-11-02": "2026-11-02", "cuando pueda": ""} {
 		if got := spanishTimeToken(said); got != tok {
 			t.Errorf("spanishTimeToken(%q) = %q, want %q", said, got, tok)
 		}

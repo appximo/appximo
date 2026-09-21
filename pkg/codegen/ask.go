@@ -166,6 +166,7 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 		deps := ask.Deps{
 			Vocab:     vocabFor(evalCtx, appName),
 			Exec:      exec,
+			Conflicts: exec, // MOTOR-AGENDA-S1: the agenda's collision check
 			Now:       summary.Now(),
 			ModelName: modelName,
 		}
@@ -497,4 +498,14 @@ func askTimeoutFromEnv() time.Duration {
 		}
 	}
 	return 8 * time.Second
+}
+
+// Conflicts implements ask.ConflictChecker: the SAME query GET
+// /api/{resource}/conflicts runs, scoped by the asking role's read policy.
+func (e *askExecutor) Conflicts(ctx context.Context, resource, rangeName, start, end string, scope map[string]string, excludeID string) ([]map[string]any, error) {
+	res, ev, err := e.surface(ctx, resource)
+	if err != nil {
+		return nil, err
+	}
+	return RangeConflicts(ctx, e.tdb, e.tc.PGSchema, resource, res, ConflictQuery{Range: rangeName, Start: start, End: end, Scope: scope, ExcludeID: excludeID}, ev.Condition, ev.AllowedFields)
 }

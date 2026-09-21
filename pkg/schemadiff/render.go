@@ -121,6 +121,12 @@ func renderOne(op Operation) ([]Statement, error) {
 			tx("ALTER TABLE " + ident(o.Table) + " ADD CONSTRAINT " + ident(o.Check.Symbol) + " CHECK " + o.Check.Expression + " NOT VALID"),
 			tx("ALTER TABLE " + ident(o.Table) + " VALIDATE CONSTRAINT " + ident(o.Check.Symbol)),
 		}, nil
+	case AddExclusion:
+		// No NOT VALID form exists for EXCLUDE: the scan runs under the ACCESS
+		// EXCLUSIVE lock, bounded by lock_timeout like every transactional batch.
+		return []Statement{tx("ALTER TABLE " + ident(o.Table) + " ADD CONSTRAINT " + ident(o.Exclusion.Symbol) + " " + o.Exclusion.Definition)}, nil
+	case DropExclusion:
+		return []Statement{tx("ALTER TABLE " + ident(o.Table) + " DROP CONSTRAINT " + ident(o.Exclusion.Symbol))}, nil
 	case DropCheck:
 		return []Statement{tx("ALTER TABLE " + ident(o.Table) + " DROP CONSTRAINT " + ident(o.Check.Symbol))}, nil
 	case AddIndex:

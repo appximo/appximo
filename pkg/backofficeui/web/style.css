@@ -500,6 +500,7 @@ tbody tr:hover td.rowact .btn, td.rowact .btn:focus-visible { opacity: 1; }
 .banner svg { margin-top: .15rem; }
 .banner.err { background: var(--app-danger-bg); color: var(--app-danger); border: 1px solid var(--app-danger-border); }
 .banner.info { background: var(--app-info-bg); color: var(--app-info); border: 1px solid var(--app-info-border); }
+.banner.warn { background: var(--app-warn-bg, color-mix(in srgb, #d97706 14%, transparent)); color: var(--app-warn, #b45309); border: 1px solid color-mix(in srgb, #d97706 35%, transparent); }
 .banner.info code { background: color-mix(in srgb, var(--app-info) 14%, transparent); }
 .banner .btn { margin-left: auto; min-height: 1.9rem; padding: .15rem .6rem; font-size: .82rem; }
 .fatal { min-height: 100dvh; display: grid; place-items: center; padding: 1.5rem; }

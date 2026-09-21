@@ -82,7 +82,9 @@ var (
 		"por", "favor", "decime", "dime", "digame", "quiero", "quisiera", "necesito", "saber", "ver", "podes", "puedes", "podrias",
 		"cargados", "cargadas", "hechas", "hechos", "actuales", "actual", "con", "estado", "tipo", "en", "total",
 		"para", "sobre", "cual", "cuales", "hubo", "hubieron", "llegaron", "entraron", "vinieron", "quedan", "queda", "hoy",
-		"alguna", "alguno", "algunas", "algunos", "algun", "se")
+		"alguna", "alguno", "algunas", "algunos", "algun", "se",
+		// agenda function words (MOTOR-AGENDA-S1): «tengo algo», «cuándo estoy libre», «estoy ocupado»
+		"algo", "cuando", "estoy", "estamos", "ocupado", "ocupada", "agendado", "agendada", "programado", "programada")
 	countWords = set("cuantos", "cuantas", "cuanto", "cuanta", "numero", "cantidad", "conta", "contame", "cuenta", "cuentame", "total")
 	listWords  = set("lista", "listame", "listado", "mostrame", "muestrame", "mostra", "muestra", "dame", "traeme", "pasame", "cuales", "que", "ver")
 	// lastWords («los últimos 5 pedidos») list the most recent rows — the list
@@ -117,7 +119,15 @@ var periodPhrases = []struct {
 	{"esta semana", "this_week"}, {"este mes", "this_month"}, {"este ano", "this_year"}, {"este año", "this_year"},
 	{"del dia de hoy", "today"}, {"del dia", "today"}, {"de la semana", "this_week"}, {"del mes", "this_month"}, {"del ano", "this_year"}, {"del año", "this_year"},
 	{"de hoy", "today"}, {"hoy", "today"}, {"de ayer", "yesterday"}, {"ayer", "yesterday"},
+	// The future (MOTOR-AGENDA-S1): what an agenda is asked about.
+	{"pasado manana", "day_after_tomorrow"}, {"de manana", "tomorrow"}, {"manana", "tomorrow"},
+	{"la semana que viene", "next_week"}, {"semana que viene", "next_week"}, {"la proxima semana", "next_week"}, {"proxima semana", "next_week"},
+	{"el lunes", "next_monday"}, {"el martes", "next_tuesday"}, {"el miercoles", "next_wednesday"}, {"el jueves", "next_thursday"}, {"el viernes", "next_friday"}, {"el sabado", "next_saturday"}, {"el domingo", "next_sunday"},
 }
+
+// freeWords ask for the gaps of an agenda («cuándo estoy libre», «qué huecos
+// tengo el jueves») — generic Spanish, no domain word.
+var freeWords = set("libre", "libres", "hueco", "huecos", "disponible", "disponibles", "desocupado", "desocupada")
 
 // periodOnly are words that mean nothing WITHOUT a period ("nuevos" = created
 // in the period; alone it is a business word the schema does not declare):
@@ -171,13 +181,18 @@ func Parse(question string, v *Vocabulary) ParseResult {
 		if deleteVerbs[t.norm] {
 			return ParseResult{Plan: Plan{Kind: "write", Reason: "verbo de escritura: " + t.raw}, Sure: true}
 		}
-		if writeVerbs[t.norm] {
+		if writeVerbs[t.norm] || scheduleVerbs[t.norm] {
 			if v != nil && v.Writable() {
 				// The ONE write shape the parser settles itself (VOZ-ESCRITURAS-S1):
 				// a state transition of one row — "marcá como hecha la tarea de
 				// Fabián", "cancelá el pedido 1003", "pasá a pagada la orden de
 				// Marta". Anything else (a create with free text) is the model's.
 				if pr := parseTransition(question, v); pr.Sure {
+					return pr
+				}
+				// The second write shape (MOTOR-AGENDA-S1): a block on the agenda
+				// — "agendá reunión con Fabián mañana de 4 a 5".
+				if pr := parseSchedule(question, v); pr.Sure {
 					return pr
 				}
 				return ParseResult{Reason: "write verb: " + t.norm}
@@ -200,6 +215,21 @@ func Parse(question string, v *Vocabulary) ParseResult {
 			return ParseResult{Reason: "two periods"}
 		}
 		period = &Period{Range: pp.token}
+	}
+
+	// 1a. a clock («a las 4») narrows a period to one instant on an agenda
+	// resource; «libre»/«huecos» ask for the gaps (MOTOR-AGENDA-S1).
+	at := ""
+	if period != nil {
+		if span, ok := consumeTimeSpan(toks); ok && span.end < 0 {
+			at = clockString(span.start)
+		}
+	}
+	free := false
+	for i := range toks {
+		if !toks[i].used && freeWords[toks[i].norm] {
+			toks[i].used, free = true, true
+		}
 	}
 
 	// 1b. MULTI-WORD values first, across every readable resource: an "orden
@@ -227,6 +257,10 @@ func Parse(question string, v *Vocabulary) ParseResult {
 				seenField[f.Field] = true
 				filters = append(filters, f)
 			}
+		} else if r := agendaResource(v); r != nil && (period != nil || free) {
+			// «qué tengo mañana», «cuándo estoy libre el jueves»: no resource
+			// word, a day — the ONE agenda resource is what is meant.
+			res, reason = r, ""
 		}
 	}
 	if reason != "" {
@@ -444,12 +478,24 @@ func Parse(question string, v *Vocabulary) ParseResult {
 		// "las órdenes de hoy", "órdenes pendientes": a bare noun phrase lists.
 		op = "list"
 	}
+	if at != "" || free {
+		if res.Range() == nil {
+			return ParseResult{Reason: "clock/free on a resource without a range"}
+		}
+		if period == nil {
+			return ParseResult{Reason: "free without a period"}
+		}
+		period.At = at
+	}
+	if free {
+		op = "free"
+	}
 	p := Plan{Kind: op, Resource: res.Name, Filters: filters, Period: period, GroupBy: groupBy, Limit: limit}
 	if op == "list" && groupBy != "" {
 		// "cuáles … por estado" reads as a breakdown: count by the field.
 		p.Kind = "count"
 	}
-	if p.Kind != "list" {
+	if p.Kind != "list" && p.Kind != "free" {
 		p.Limit = 0
 	}
 	if op == "sum" || op == "avg" {
@@ -883,6 +929,7 @@ func preDiscard(toks []token, v *Vocabulary) string {
 func hasExecutableWord(toks []token, v *Vocabulary) bool {
 	words, phrases := v.lexicon()
 	joined := joinedNorms(toks)
+	agenda := agendaResource(v) != nil
 	for _, t := range toks {
 		n := t.norm
 		// «que», «cuáles» and «ver» list only beside a resource; alone they
@@ -893,6 +940,12 @@ func hasExecutableWord(toks []token, v *Vocabulary) bool {
 		if n == "por" || n == "hoy" || n == "ayer" {
 			return true
 		}
+		// A day to come («mañana», «el lunes») or «libre» is a question only
+		// where there is an agenda to ask (MOTOR-AGENDA-S1); elsewhere «sí
+		// pero mejor el lunes» stays the stray answer it is.
+		if agenda && (n == "manana" || freeWords[n]) {
+			return true
+		}
 	}
 	for _, p := range phrases {
 		if strings.Contains(joined, " "+p+" ") {
@@ -900,9 +953,13 @@ func hasExecutableWord(toks []token, v *Vocabulary) bool {
 		}
 	}
 	for _, pp := range periodPhrases {
-		if strings.Contains(joined, " "+pp.phrase+" ") {
-			return true
+		if !strings.Contains(joined, " "+pp.phrase+" ") {
+			continue
 		}
+		if futureRange(pp.token) && !agenda {
+			continue
+		}
+		return true
 	}
 	return false
 }
@@ -1064,4 +1121,24 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 		return ParseResult{Reason: "invalid: " + err.Error()}
 	}
 	return ParseResult{Plan: p, Sure: true}
+}
+
+// agendaResource is the ONE readable resource that declares a time range,
+// nil when there is none or several (then a word must name it).
+func agendaResource(v *Vocabulary) *Resource {
+	var found *Resource
+	for _, name := range v.order {
+		if r := v.resources[name]; r.Range() != nil {
+			if found != nil {
+				return nil
+			}
+			found = r
+		}
+	}
+	return found
+}
+
+// futureRange reports whether a period token names a day to come.
+func futureRange(tok string) bool {
+	return tok == "tomorrow" || tok == "day_after_tomorrow" || tok == "next_week" || strings.HasPrefix(tok, "next_")
 }

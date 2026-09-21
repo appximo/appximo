@@ -181,6 +181,26 @@ door (ADR-028, MOTOR-TIPO-JSON-S1).** Both types hold a JSON VALUE:
 - Before ADR-028 (v0.1.9 and earlier) a `json` field accepted ONLY a string
   and returned it escaped; a client that parsed the string must stop parsing.
 
+### 2a-bis. Time ranges — an agenda, a booking, a shift, declared (MOTOR-AGENDA-S1, ADR-039)
+
+A resource whose rows occupy a block of time declares it over two of its own
+`time` fields — `"ranges": {"horario": {"start": "inicio", "end": "fin",
+"no_overlap": {"scope": ["dueno_id"], "when": {"field": "ocupa", "op": "eq",
+"val": true}}}}` — and the engine gives you, with no Go: a real `EXCLUDE`
+constraint (race-safe: two simultaneous writes on one slot → one `201`, one
+`409 time_range_conflict` naming the winner), `CHECK (start < end)` as a 422
+`range_order`, `?filter[horario][overlaps]=<start>/<end>` and `[contains]=<t>`,
+and `GET /api/{res}/conflicts?range&start&end&<scope>&exclude_id` — the
+pre-check a UI runs BEFORE writing (advise, never block). A handler that
+needs the same question calls `codegen.RangeConflicts` through the API
+(`ctx.Query` with the range filter) or lets `ctx.Insert/Update` answer the
+typed `*appximo.RangeConflictError` (§3.3). A per-row reminder («15 minutos
+antes de cada cita») is a `time` workflow trigger, not code: `{"type":
+"time", "resource": "eventos", "field": "inicio", "before": "15m"}` with an
+`enqueue` of `message.telegram` — swept by the worker's leader, claimed
+exactly once per (row, instant). Contract: docs/SCHEMA_REFERENCE.md §2.7 and
+§1.4; example `examples/model-lab/agenda-choques.json`.
+
 ### 2b. Writing from OUTSIDE the binary — loading data through the API
 
 An external process (a migration, an importer, a script) has three write
@@ -903,6 +923,7 @@ field) — no switch needed.
 > | `*appximo.UniqueViolationError` | that value is taken (`unique:true` or a unique index); `.Field` names the column | 409 `field "code": value already exists` |
 > | `*appximo.ForeignKeyConflictError` | a reference to a row that does not exist, or a change a RESTRICT FK refuses | 409, safe message |
 > | `*appximo.InvalidTransitionError` | the state machine refused the move | 422, same as PATCH |
+> | `*appximo.RangeConflictError` | a declared `no_overlap` time range refused the write (MOTOR-AGENDA-S1); `.Range`, `.Existing{start,end}`, `.Conflicts` = the colliding row(s) as the role may read them | 409 `{"error":"time_range_conflict", range, existing, conflicts[]}`, byte-identical to the generated POST |
 > | `appximo.ErrUpdateConflict` | the row changed concurrently (re-read and retry) | 409 |
 >
 > The two a form UI always needs: **409 unique** = "change that value";

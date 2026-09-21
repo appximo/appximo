@@ -74,6 +74,10 @@ type Deps struct {
 	Write      Writer
 	Pending    *PendingStore
 	PendingKey string
+	// Conflicts (MOTOR-AGENDA-S1) answers the collision check of a write on
+	// a range with a no-overlap rule, before the owner confirms; nil = no
+	// pre-check (the database constraint still decides at write time).
+	Conflicts ConflictChecker
 }
 
 // Result is the reply, composed by the engine.
@@ -628,15 +632,32 @@ func execute(ctx context.Context, d Deps, p Plan) Result {
 	params := url.Values{}
 	var understood []string
 	understood = append(understood, p.Resource)
+	var window Window
+	var agenda *Range
 	if p.Period != nil {
 		w, _ := Resolve(p.Period.Range, d.Now)
+		window = w
 		field := p.Period.Field
 		if field == "" {
-			field = res.DefaultTimeField()
+			field, _ = res.PeriodTarget()
 		}
-		params.Set("filter["+field+"][gte]", w.From.UTC().Format(time.RFC3339))
-		params.Set("filter["+field+"][lt]", w.To.UTC().Format(time.RFC3339))
-		understood = append(understood, w.Words)
+		if rg := res.RangeNamed(field); rg != nil {
+			// The agenda (MOTOR-AGENDA-S1): what is SCHEDULED in the window, or
+			// what contains one instant of its first day.
+			agenda = rg
+			if p.Period.At != "" {
+				at := clockOn(w.From, p.Period.At)
+				params.Set("filter["+rg.Name+"][contains]", at.UTC().Format(time.RFC3339))
+				understood = append(understood, w.Words+" a las "+p.Period.At)
+			} else {
+				params.Set("filter["+rg.Name+"][overlaps]", w.From.UTC().Format(time.RFC3339)+"/"+w.To.UTC().Format(time.RFC3339))
+				understood = append(understood, w.Words)
+			}
+		} else {
+			params.Set("filter["+field+"][gte]", w.From.UTC().Format(time.RFC3339))
+			params.Set("filter["+field+"][lt]", w.To.UTC().Format(time.RFC3339))
+			understood = append(understood, w.Words)
+		}
 	}
 	for _, f := range p.Filters {
 		fd := res.Field(f.Field)
@@ -674,17 +695,31 @@ func execute(ctx context.Context, d Deps, p Plan) Result {
 	if limit <= 0 {
 		limit = DefaultListLimit
 	}
+	if p.Kind == "free" {
+		limit = 100 // the whole window's blocks — the gaps need all of them
+	}
 	params.Set("per_page", strconv.Itoa(limit))
 	params.Set("count", "true")
 	cols := listColumns(res)
-	params.Set("fields", strings.Join(cols, ","))
-	if tf := res.DefaultTimeField(); tf != "" {
+	if rg := res.Range(); rg != nil {
+		// An agenda line needs both bounds, in start order.
+		cols = appendMissing(cols, rg.Start, rg.End)
+		params.Set("sort", rg.Start)
+		params.Set("order", "asc")
+	} else if tf := res.DefaultTimeField(); tf != "" {
 		params.Set("sort", tf)
 		params.Set("order", "desc")
 	}
+	params.Set("fields", strings.Join(cols, ","))
 	rows, total, err := d.Exec.List(ctx, p.Resource, params)
 	if err != nil {
 		return execFailure(err)
+	}
+	if p.Kind == "free" {
+		return composeFree(d, res, res.Range(), rows, window, strings.Join(understood, " · "))
+	}
+	if agenda != nil || (p.Period == nil && res.Range() != nil) {
+		return composeAgenda(d, p, res, res.Range(), rows, total, strings.Join(understood, " · "))
 	}
 	return composeList(d, p, res, rows, total, cols, strings.Join(understood, " · "))
 }
@@ -799,4 +834,24 @@ func modelOffResult(d Deps, parseReason string) Result {
 		r.Text = "Esa pregunta necesita el modelo y las preguntas al modelo no están activadas en esta app (falta la clave, ANTHROPIC_API_KEY). Las preguntas simples (contar, listar, sumar un recurso por su nombre, con estado y período) sí responden, y los comandos fijos también: <b>resumen</b>, <b>estado</b>, <b>ayuda</b>."
 	}
 	return r
+}
+
+// clockOn places an HH:MM clock on a day (the window's first day).
+func clockOn(day time.Time, clock string) time.Time {
+	m := clockRe.FindStringSubmatch(clock)
+	if m == nil {
+		return day
+	}
+	h, _ := strconv.Atoi(m[1])
+	mi, _ := strconv.Atoi(m[2])
+	return time.Date(day.Year(), day.Month(), day.Day(), h, mi, 0, 0, day.Location())
+}
+
+func appendMissing(cols []string, more ...string) []string {
+	for _, m := range more {
+		if !containsStr(cols, m) {
+			cols = append(cols, m)
+		}
+	}
+	return cols
 }

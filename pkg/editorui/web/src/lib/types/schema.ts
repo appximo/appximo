@@ -163,6 +163,19 @@ export interface ResourceSchema {
 	/** The words people use for this resource («pedidos» for ordenes —
 	 * VOZ-AHORRO-S2, ADR-038); validated unique by the engine at load. */
 	aliases?: string[];
+	/** Time ranges (MOTOR-AGENDA-S1, ADR-039): a named pair of time fields
+	 * with an optional no-overlap rule the engine enforces as an EXCLUDE
+	 * constraint. Preserved losslessly (authored in the Code view). */
+	ranges?: Record<string, RangeDef>;
+}
+
+/** One declared time range. Mirrors schema.RangeDef. */
+export interface RangeDef {
+	start: string;
+	end: string;
+	timezone_field?: string;
+	default_duration?: string;
+	no_overlap?: { scope?: string[]; when?: { field: string; op?: string; val: unknown } };
 }
 
 /** Row-level predicate. Mirrors schema.Condition. */

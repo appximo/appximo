@@ -49,6 +49,9 @@ type WriteError struct {
 	Status int
 	Msg    string
 	Fields []FieldError
+	// Conflicts (MOTOR-AGENDA-S1): the rows a refused write collided with under
+	// a declared no-overlap rule — the reply names them.
+	Conflicts []map[string]any
 }
 
 // FieldError is one failing field of a refused write.
@@ -318,7 +321,25 @@ func dateWords(t time.Time) string {
 func spanishTimeToken(s string) string {
 	raw := strings.ToLower(strings.TrimSpace(s))
 	clock := ""
-	if i := strings.Index(raw, " a las "); i >= 0 {
+	// «mañana de 4 a 5», «el viernes a las 4 de la tarde», «a las 10»: the
+	// clock phrase is read by the agenda parser (MOTOR-AGENDA-S1), which
+	// knows «a las 4» means 16:00; the day words are what remains.
+	if toks := tokenize(raw); len(toks) > 0 {
+		if span, ok := consumeTimeSpan(toks); ok {
+			clock = clockString(span.start)
+			var rest []string
+			for _, t := range toks {
+				if !t.used {
+					rest = append(rest, t.norm)
+				}
+			}
+			raw = strings.TrimSpace(strings.Join(rest, " "))
+			if raw == "" {
+				raw = "hoy"
+			}
+		}
+	}
+	if i := strings.Index(raw, " a las "); i >= 0 && clock == "" {
 		clock = strings.TrimSpace(raw[i+7:])
 		raw = strings.TrimSpace(raw[:i])
 		clock = strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(clock, "hs"), "h"))
@@ -602,6 +623,7 @@ func prepareWrite(ctx context.Context, d Deps, p Plan, question string) Result {
 			return r
 		}
 	}
+	fillRangeEnd(res, pend, d.Now.Location()) // MOTOR-AGENDA-S1: «a las 10» lasts the default
 	return finishPending(ctx, d, pend)
 }
 
@@ -864,6 +886,11 @@ func finishPending(ctx context.Context, d Deps, pend *Pending) Result {
 		}
 	}
 	pend.Stage = "confirm"
+	// The agenda (MOTOR-AGENDA-S1): before the owner confirms, the collision
+	// check — «Ya tenés X de 4 a 5. ¿Igual lo agendo?».
+	if r, done := checkConflicts(ctx, d, pend); done {
+		return r
+	}
 	replaced := d.Pending.Put(pend)
 	note := ""
 	if replaced != nil && replaced.ID != pend.ID && replaced.Stage == "confirm" {
@@ -926,6 +953,10 @@ func confirmationText(d Deps, pend *Pending) string {
 		}
 		line += "<b>" + esc(valueWords(f, v, pend.Labels[f.Name], d.Now.Location())) + "</b>"
 		b.WriteString(line + "\n")
+	}
+	if pend.Labels["__conflict"] != "" {
+		b.WriteString("\n¿Igual lo agendo? (<b>sí</b> / <b>no</b>)")
+		return b.String()
 	}
 	b.WriteString("\n¿Confirmás? (<b>sí</b> / <b>no</b>)")
 	return b.String()
@@ -1041,7 +1072,20 @@ func continuePending(ctx context.Context, d Deps, pend *Pending, text string) (R
 		if label != "" {
 			pend.Labels[f.Name] = label
 		}
+		// A re-said start of a range moves its end by the same span
+		// (MOTOR-AGENDA-S1); «de 4 a 5» in the answer sets both.
+		if rg := res.Range(); rg != nil && f.Name == rg.Start {
+			if endTok, ok := spanishTimeSpanEnd(text); ok {
+				if t, w, ok := ResolveTimeValue(endTok, d.Now); ok {
+					pend.Data[rg.End], pend.Labels[rg.End] = t.UTC().Format(time.RFC3339), w
+				}
+			} else {
+				delete(pend.Data, rg.End)
+				delete(pend.Labels, rg.End)
+			}
+		}
 		pend.Stage, pend.Field = "confirm", ""
+		fillRangeEnd(res, pend, d.Now.Location())
 		return finishPending(ctx, d, pend), true
 	case "which":
 		pick := pickOption(text, pend.Options)
@@ -1328,4 +1372,20 @@ func PendingOptions(p *Pending) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// spanishTimeSpanEnd reads the END of a span the owner typed as a follow-up
+// («mañana de 4 a 5» → the token for tomorrow 17:00); ok=false when no end
+// was said.
+func spanishTimeSpanEnd(s string) (string, bool) {
+	toks := tokenize(strings.ToLower(strings.TrimSpace(s)))
+	span, ok := consumeTimeSpan(toks)
+	if !ok || span.end < 0 {
+		return "", false
+	}
+	day := consumeDay(toks)
+	if day == "" {
+		day = "today"
+	}
+	return day + " " + clockString(span.end), true
 }

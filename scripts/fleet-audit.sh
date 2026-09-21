@@ -61,6 +61,20 @@ audit_app() {
 		meh "$sdir/restore.sh is NOT the engine's set-restore (an app-local variant?) — the documented drill uses --set (docs/PRODUCTION.md §4.3)"
 	fi
 
+	# 3b. time ranges with a no-overlap rule (MOTOR-AGENDA-S1) need btree_gist in
+	# the app's database: a schema that declares one deploys the constraint at
+	# tenant provisioning, and without the extension that deploy fails loudly.
+	local schemaf="/etc/$app/schema.json" dburl
+	dburl="$(envval "$envf" DATABASE_URL)"
+	if [ -f "$schemaf" ] && grep -q '"no_overlap"' "$schemaf" 2>/dev/null; then
+		local ext=""
+		if [ -n "$dburl" ] && command -v psql >/dev/null 2>&1; then
+			ext="$(psql -qAtX "$dburl" -c "SELECT extname FROM pg_extension WHERE extname='btree_gist'" 2>/dev/null || true)"
+		fi
+		if [ "$ext" = "btree_gist" ]; then ok "btree_gist installed (the schema declares a no_overlap rule)"
+		else bad "the schema declares ranges.no_overlap but btree_gist is NOT installed in the app's database — as postgres: CREATE EXTENSION btree_gist; (install.sh does it at setup)"; fi
+	fi
+
 	# 4. the backup timer
 	if systemctl is-active --quiet "$app-backup.timer" 2>/dev/null; then
 		ok "backup timer active (next: $(systemctl list-timers "$app-backup.timer" --no-pager 2>/dev/null | sed -n 2p | awk '{print $1, $2, $3}'))"

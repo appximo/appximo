@@ -128,3 +128,55 @@ func TestCompile_OverlapAndRole(t *testing.T) {
 		t.Fatalf("overlap/role compiled wrong: %+v", wf)
 	}
 }
+
+const timeWF = `{
+	"$schema": "s", "version": "1", "name": "t",
+	"resources": {"eventos": {"fields": {"titulo": {"type": "string"}, "inicio": {"type": "time"}, "estado": {"type": "string", "enum": ["ok", "cancelada"]}}}},
+	"rbac": {"roles": {"admin": {"resources": "*", "actions": ["*"]}}},
+	"workflows": {"aviso": {
+		"trigger": {"type": "time", "resource": "eventos", "field": "inicio", "before": "15m", "when": {"field": "estado", "op": "ne", "val": "cancelada"}},
+		"steps": [
+			{"name": "avisar", "type": "enqueue", "config": {"topic": "message.telegram", "data": {"text": "=\"En 15 min: \" + record.titulo"}}}
+		]}}}`
+
+// TestCompile_TimeWorkflow (MOTOR-AGENDA-S1): the per-row relative trigger
+// compiles with its offset, direction, default grace and condition, and the
+// due/window arithmetic is what the doc says.
+func TestCompile_TimeWorkflow(t *testing.T) {
+	wf := compileOne(t, timeWF)
+	if wf.TriggerType != "time" || wf.Resource != "eventos" || wf.Field != "inicio" || !wf.Before || wf.Offset != 15*time.Minute {
+		t.Fatalf("trigger compiled wrong: %+v", wf)
+	}
+	if wf.Grace != 15*time.Minute {
+		t.Fatalf("default grace for before = the offset, got %v", wf.Grace)
+	}
+	if wf.When == nil || wf.When.Field != "estado" || wf.When.Op != "ne" {
+		t.Fatalf("when not compiled: %+v", wf.When)
+	}
+	at := time.Date(2026, 9, 22, 16, 0, 0, 0, time.UTC)
+	if due := wf.DueAt(at); !due.Equal(at.Add(-15 * time.Minute)) {
+		t.Fatalf("due = %v", due)
+	}
+	now := time.Date(2026, 9, 22, 15, 50, 0, 0, time.UTC)
+	from, to := wf.reminderWindow(now)
+	// fireable when now-grace < due <= now  ⇔  15:35 < field-15m <= 15:50  ⇔  field ∈ (15:50, 16:05]
+	if !from.Equal(now) || !to.Equal(now.Add(15*time.Minute)) {
+		t.Fatalf("window = (%v, %v]", from, to)
+	}
+	text, err := wf.Steps[0].Data["text"].Eval(map[string]any{"record": map[string]any{"titulo": "reunión"}})
+	if err != nil || text != "En 15 min: reunión" {
+		t.Fatalf("text eval = %v, %v", text, err)
+	}
+}
+
+func TestCompile_TimeWorkflow_AfterAndGrace(t *testing.T) {
+	raw := `{"$schema":"s","version":"1","name":"t",
+	"resources":{"citas":{"fields":{"fin":{"type":"time"}}}},
+	"rbac":{"roles":{"admin":{"resources":"*","actions":["*"]}}},
+	"workflows":{"seguimiento":{"trigger":{"type":"time","resource":"citas","field":"fin","after":"1d","grace":"6h"},
+	"steps":[{"name":"x","type":"enqueue","config":{"topic":"message.telegram","data":{"text":"hola"}}}]}}}`
+	wf := compileOne(t, raw)
+	if wf.Before || wf.Offset != 24*time.Hour || wf.Grace != 6*time.Hour {
+		t.Fatalf("after/grace compiled wrong: %+v", wf)
+	}
+}

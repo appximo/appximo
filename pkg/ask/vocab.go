@@ -104,6 +104,10 @@ type Resource struct {
 	// («pedidos», «ventas» for ordenes), declared in the schema and validated
 	// unique across it; the parser names the resource by them too.
 	Aliases []string
+	// Ranges (MOTOR-AGENDA-S1) are the resource's declared time ranges — the
+	// agenda: a period asks what is scheduled then, a write fills both
+	// bounds, the confirmation checks the collision.
+	Ranges []Range
 }
 
 func (r *Resource) Field(name string) *Field { return r.byName[name] }
@@ -267,6 +271,9 @@ func (v *Vocabulary) fingerprint() string {
 	for _, n := range v.order {
 		r := v.resources[n]
 		fmt.Fprintf(h, "R %s %s\n", n, strings.Join(r.Aliases, ","))
+		for _, rg := range r.Ranges {
+			fmt.Fprintf(h, "G %s %s %s %v %s\n", rg.Name, rg.Start, rg.End, rg.NoOverlap, rg.Default)
+		}
 		for _, f := range r.Fields {
 			fmt.Fprintf(h, "F %s %s %s %s\n", f.Name, f.Type, f.Relation, strings.Join(f.Enum, ","))
 			for _, val := range sortedKeys(f.Aliases) {
@@ -407,6 +414,21 @@ func BuildResource(name string, res *schema.ResourceSchema, allowed []string) *R
 		r.Fields = append(r.Fields, f)
 		r.byName[fname] = f
 	}
+	for _, name := range res.RangeNames() {
+		rd := res.Ranges[name]
+		if r.byName[rd.Start] == nil || r.byName[rd.End] == nil {
+			continue // a bound the role may not read: no agenda for this role
+		}
+		rg := Range{Name: name, Start: rd.Start, End: rd.End, Default: rd.DefaultDurationValue()}
+		if no := rd.NoOverlap; no != nil {
+			rg.NoOverlap = true
+			rg.Scope = append(rg.Scope, no.Scope...)
+			if w := no.When; w != nil {
+				rg.WhenField, rg.WhenOp, rg.WhenVal = w.Field, w.Op, w.Val
+			}
+		}
+		r.Ranges = append(r.Ranges, rg)
+	}
 	return r
 }
 
@@ -530,6 +552,15 @@ func (r *Resource) renderLine() string {
 	also := ""
 	if len(r.Aliases) > 0 {
 		also = " (also called: " + strings.Join(r.Aliases, ", ") + ")"
+	}
+	for _, rg := range r.Ranges {
+		// The agenda: the model learns which two fields form the block, what
+		// a bare start lasts, and that a collision is checked by the engine.
+		line := fmt.Sprintf(" [time range %s: %s..%s, default duration %s", rg.Name, rg.Start, rg.End, rg.Default)
+		if rg.NoOverlap {
+			line += ", no overlap"
+		}
+		parts = append(parts, line+"]")
 	}
 	return "- " + r.Name + ":" + can + also + " " + strings.Join(parts, " ") + "\n"
 }

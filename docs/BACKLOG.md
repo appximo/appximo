@@ -1743,3 +1743,58 @@ stat div; the written recommendation is not to.
 
 Dead-ends at the Cloudflare proxy; the bare-engine demo was deliberately
 retired (petfriendly IS the engine demo). One deletion in Cloudflare.
+
+### VOZ-14 — Asociar varias personas a un compromiso por voz (many-to-many): the voice writes ONE row per confirmation
+
+«reunión con Fabián y Marta» associates ONE person today, through a
+`belongs_to` FK (`persona_id`); a `many_to_many` relation (tarea ↔ persona
+through a junction resource) READS fine (`?include=`, verified in
+MOTOR-AGENDA-S1) but the voice never writes the junction row — the second name
+stays in the title. **Ready:** a write plan that takes a LIST on an m2m relation
+field (`{"personas": [{"match":"Fabián"},{"match":"Marta"}]}`), which the
+txWriter turns into the main row + N junction rows in ONE transaction
+(`/api/transaction` already does), with a confirmation that lists each person.
+Origin: MOTOR-AGENDA-S1 Part E.1.
+
+### SCHEMA-10 — Studio has no panel for `ranges` nor for the `time` trigger (the Code view preserves them)
+
+The `ranges` block (start/end, `no_overlap`, `default_duration`,
+`timezone_field`) and a workflow's `time` trigger are authored only in Studio's
+Code view; the entity panel preserves them losslessly (round-trip pinned) but
+does not edit them. Same class as VOZ-13 (`aliases`) and AUTO-11 (workflows):
+what the voice and the worker execute has no visual face, so «que no se me
+crucen» needs JSON. **Ready:** a Range section in the entity inspector (two
+time-field dropdowns, scope, when, duration) and the `time` trigger in the
+workflows panel once AUTO-11 exists. Origin: MOTOR-AGENDA-S1 Part B.6.
+
+### AUTO-13 — `/admin/workflows` does not show how many reminders are coming
+
+The panel renders the `time` trigger (`time:eventos.inicio -15m`) and the
+24-hour fired/failed gauges, but not «how many rows will fire in the next
+hour» — the reminder's pending lives in the tenant's own rows, not in the
+ledger. Without it, «the reminder did not arrive» and «there was nothing to
+remind» look the same until the hour passes. **Ready:** the sweep publishes,
+per workflow, the candidate count of the next window (one more query per tick,
+or the last tick's count) in `/admin/workflows` and as a gauge. Origin:
+MOTOR-AGENDA-S1 Part C.5.
+
+### OPS-58 — The binary-diff gate cannot declare `ranges` nor `aliases`: its schema lives in the BASE binary's grammar
+
+The gate feeds ONE schema to both binaries; a key the base rejects at load
+(`aliases` since VOZ-AHORRO-S2, `ranges` since MOTOR-AGENDA-S1) cannot enter
+the corpus, so the new behaviors are pinned by unit/integration tests and the
+lab logs, not by the gate — which stays the only differential proof against
+the previous binary. **Ready:** a corpus with TWO schemas (base and new) and
+cases tagged «new only», fired at the new binary and compared against a
+written expectation instead of the base. Origin: MOTOR-AGENDA-S1 gates.
+
+### VOZ-15 — The parser reads «a las 4» as 16:00 by a fixed rule (1–6 = afternoon): the owner's working hours are not declarable
+
+A bare hour 1–6 is read as the afternoon, 7–12 as the morning; «de la mañana /
+de la tarde / pm» corrects it and the confirmation always prints the resolved
+hour, so a wrong reading is caught before writing. An early riser («a las 5» =
+05:00) fights the rule on every appointment and the schema has nowhere to
+declare their hours. **Ready:** a declarable key (e.g. `ranges.<n>.hours:
+["07:00","20:00"]`) that resolves the ambiguity toward the working hours — or
+VOZ-6 (real dictation) saying whether the rule bothers at all. Origin:
+MOTOR-AGENDA-S1 Part D.5. Decides: Miguel.

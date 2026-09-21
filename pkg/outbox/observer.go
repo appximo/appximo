@@ -84,8 +84,13 @@ type Stats struct {
 	// cron schedule is. A growing value means NO LEADER IS FIRING — the worker is
 	// down or none runs the scheduler — which is exactly the outbox's old silent
 	// failure, transplanted; here it alerts instead.
-	WorkflowRuns24h        int64   `json:"workflow_runs_24h"`
-	WorkflowFailed24h      int64   `json:"workflow_failed_24h"`
+	WorkflowRuns24h   int64 `json:"workflow_runs_24h"`
+	WorkflowFailed24h int64 `json:"workflow_failed_24h"`
+	// Per-row reminders (MOTOR-AGENDA-S1): claims fired in the last 24h and
+	// the reminder runs that failed in the same window (a failed run releases
+	// its claim and retries on the next sweep while inside grace).
+	RemindersFired24h      int64   `json:"reminders_fired_24h"`
+	RemindersFailed24h     int64   `json:"reminders_failed_24h"`
 	WorkflowOverdueSeconds float64 `json:"workflow_overdue_seconds"`
 }
 
@@ -253,6 +258,15 @@ func (o *Observer) Collect(ctx context.Context) (*Stats, error) {
 		}
 		if overdue != nil && *overdue > 0 {
 			s.WorkflowOverdueSeconds = *overdue
+		}
+		var hasRem bool
+		if err := o.pool.QueryRow(ctx, `SELECT to_regclass('public.workflow_reminders') IS NOT NULL`).Scan(&hasRem); err == nil && hasRem {
+			if err := o.pool.QueryRow(ctx, `
+				SELECT (SELECT count(*) FROM public.workflow_reminders WHERE fired_at > now() - interval '24 hours'),
+				       (SELECT count(*) FROM public.workflow_runs WHERE trigger LIKE 'time:%' AND status = 'failed' AND started_at > now() - interval '24 hours')`,
+			).Scan(&s.RemindersFired24h, &s.RemindersFailed24h); err != nil {
+				return nil, fmt.Errorf("outbox: observe reminders: %w", err)
+			}
 		}
 	}
 	return s, nil

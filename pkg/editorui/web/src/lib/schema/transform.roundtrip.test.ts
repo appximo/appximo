@@ -301,3 +301,45 @@ describe('aliases round-trip', () => {
 		expect(canonical(out)).toBe(canonical(s));
 	});
 });
+
+// MOTOR-AGENDA-S1 (ADR-039): `ranges` — a named pair of time fields with a
+// no-overlap rule — and a `time` workflow trigger survive import → export
+// verbatim (authored in the Code view; the engine validates them).
+describe('ranges round-trip', () => {
+	it('preserves the ranges block and a time trigger verbatim', () => {
+		const s: APISchema = {
+			$schema: 'https://appximo.com/schema/v1',
+			version: '1',
+			name: 'agenda',
+			resources: {
+				eventos: {
+					fields: {
+						titulo: { type: 'string', required: true },
+						inicio: { type: 'time', required: true },
+						fin: { type: 'time', required: true },
+						ocupa: { type: 'bool', default: true }
+					},
+					ranges: {
+						horario: {
+							start: 'inicio',
+							end: 'fin',
+							default_duration: '1h',
+							no_overlap: { scope: [], when: { field: 'ocupa', op: 'eq', val: true } }
+						}
+					}
+				}
+			},
+			workflows: {
+				aviso: {
+					trigger: { type: 'time', resource: 'eventos', field: 'inicio', before: '15m' },
+					steps: [{ name: 'avisar', type: 'enqueue', config: { topic: 'message.telegram', data: { text: '=record.titulo' } } }]
+				}
+			},
+			rbac: { roles: { admin: { resources: '*', actions: ['*'] } } }
+		};
+		const out = roundTrip(s);
+		expect(out.resources.eventos.ranges).toEqual(s.resources.eventos.ranges);
+		expect(out.workflows).toEqual(s.workflows);
+		expect(canonical(out)).toBe(canonical(s));
+	});
+});
