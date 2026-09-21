@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789940750188,
+  "lastUpdate": 1790033570565,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -6624,6 +6624,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "34659475 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "8bef63c0dcd99d6640351f6da6d867ec51e7209b",
+          "message": "feat(schema,migration,workflows,ask): what an agenda needs — time ranges with a REAL no-overlap constraint (EXCLUDE USING gist, 409 naming the row on every door, overlaps/contains filters, /conflicts pre-check, blocked-pairs migration), per-row relative reminders (`time` trigger swept by the leader, claimed exactly once in the enqueue's own transaction, message.telegram consumer), and the agenda by voice (parser settles «qué tengo mañana» and «agendá X de 4 a 5», the confirmation says the collision, a yes saves it as not blocking) — MOTOR-AGENDA-S1, ADR-039\n\nAlso: the control plane answered 500 to ANY partial apply — now 422 with the\nengine's words; a new /app row's checkbox starts from the declared default;\ngenerator signals for agendas; Studio round-trips `ranges` + the time trigger;\n`explain` reads them back; btree_gist in install.sh + fleet-audit; MODEL_LAB G8\nclosed; backlog VOZ-14, VOZ-15, SCHEMA-10, AUTO-13, OPS-58 opened.\n\nGates: unit + full lane 51/51, lint 0, vet 0, gofmt 0, Studio 12/12, binary\ngate 199/197 SAME + 2 known DIFFs (OPS-57, row order), browser 52/52 over five\nschemas × two viewports, frozen ABBA no_change.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01D9x58XVphMwXPxaXSQrZPa",
+          "timestamp": "2026-09-21T23:32:16Z",
+          "tree_id": "28e9d134421268bdc5ada2dc28e81447c05cde41",
+          "url": "https://github.com/appximo/appximo/commit/8bef63c0dcd99d6640351f6da6d867ec51e7209b"
+        },
+        "date": 1790033568108,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6574,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "336460 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6574,
+            "unit": "ns/op",
+            "extra": "336460 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "336460 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "336460 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 65.13,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36662660 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 65.13,
+            "unit": "ns/op",
+            "extra": "36662660 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36662660 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36662660 times\n4 procs"
           }
         ]
       }
