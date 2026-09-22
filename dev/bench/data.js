@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790033570565,
+  "lastUpdate": 1790041553253,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -6696,6 +6696,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36662660 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "85a99a5ea2f32da67c5c746780f0848502922710",
+          "message": "docs(manual,backlog,estado): what the first REAL app on the engine taught — where it lives, the off-box copy restored elsewhere, `events` only where consumed, its own bot, Siri with a scoped token (APP-AGENDA-S1)\n\nMANUAL §3g; ESTADO_DEL_MOTOR row; backlog OPS-59 (control plane on every\ninterface), OPS-60 (/dev/null is a regular file on the 58 since 09-20: no\nsecurity patches), OPS-61 (restore needs PG 18), OPS-62 (the agenda's\nTelegram bot), VOZ-16 (digest has no \"today's compromisos\"), VOZ-17 («tengo\nque…» writes nothing), VOZ-18 (weekly estimate mirror), ENG-63 (/app lists\nSummary as a resource), AUTO-14 (worker built without ldflags).\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01D9x58XVphMwXPxaXSQrZPa",
+          "timestamp": "2026-09-22T01:45:23Z",
+          "tree_id": "f2bfdd8df46554321f91a8fa855af0112b8e1b9b",
+          "url": "https://github.com/appximo/appximo/commit/85a99a5ea2f32da67c5c746780f0848502922710"
+        },
+        "date": 1790041552498,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 5563,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "419094 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 5563,
+            "unit": "ns/op",
+            "extra": "419094 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "419094 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "419094 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 59.33,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "39818571 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 59.33,
+            "unit": "ns/op",
+            "extra": "39818571 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "39818571 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "39818571 times\n4 procs"
           }
         ]
       }
