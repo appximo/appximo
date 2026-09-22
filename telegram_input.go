@@ -45,6 +45,7 @@ type telegramReceiver struct {
 	authChatID  int64  // the ONLY chat allowed to command
 	tenant      string // which tenant the digest covers
 	role        string // the RBAC role the digest is computed as
+	userID      string // the identity the channel acts AS (APPXIMO_TELEGRAM_SUMMARY_USER_ID; default "telegram:summary")
 	jwtSecret   string
 	hostSuffix  string
 	getRouter   func() http.Handler // the live data-plane router (survives hot-swap)
@@ -65,6 +66,15 @@ func newTelegramReceiver(cfg Config, declaredRoles map[string]bool, getRouter fu
 	token := strings.TrimSpace(os.Getenv("APPXIMO_TELEGRAM_BOT_TOKEN"))
 	chatID := strings.TrimSpace(os.Getenv("APPXIMO_TELEGRAM_CHAT_ID"))
 	role := strings.TrimSpace(os.Getenv("APPXIMO_TELEGRAM_SUMMARY_ROLE"))
+	// APPXIMO_TELEGRAM_SUMMARY_USER_ID (APP-AGENDA-S2): the user id the channel
+	// acts as. A personal app scopes its rows by `dueno_id = $user_id`: with the
+	// fixed "telegram:summary" identity the chat would read ZERO rows and write
+	// rows nobody owns. Set it to the owner's auth_users id and the chat IS the
+	// owner — same role, same rows, same attribution as their Siri token.
+	userID := strings.TrimSpace(os.Getenv("APPXIMO_TELEGRAM_SUMMARY_USER_ID"))
+	if userID == "" {
+		userID = "telegram:summary"
+	}
 
 	if token == "" || chatID == "" {
 		return nil, fmt.Errorf("appximo: APPXIMO_TELEGRAM_SUMMARY_TENANT is set (the Telegram command channel), so APPXIMO_TELEGRAM_BOT_TOKEN and APPXIMO_TELEGRAM_CHAT_ID must be set too — the bot that answers is the same one that alerts")
@@ -92,6 +102,7 @@ func newTelegramReceiver(cfg Config, declaredRoles map[string]bool, getRouter fu
 		authChatID:  authChatID,
 		tenant:      tenantID,
 		role:        role,
+		userID:      userID,
 		jwtSecret:   cfg.JWTSecret,
 		hostSuffix:  ".svc.internal",
 		getRouter:   getRouter,
@@ -109,7 +120,7 @@ func (rcv *telegramReceiver) run(ctx context.Context) {
 	_ = rcv.client.DeleteWebhook(dctx, false)
 	cancel()
 
-	zlog.Info().Str("tenant", rcv.tenant).Str("role", rcv.role).Int64("chat_id", rcv.authChatID).
+	zlog.Info().Str("tenant", rcv.tenant).Str("role", rcv.role).Str("user_id", rcv.userID).Int64("chat_id", rcv.authChatID).
 		Msg("telegram command channel listening (getUpdates) — resumen/estado/ayuda")
 
 	backoff := time.Second
@@ -363,7 +374,7 @@ func (rcv *telegramReceiver) selfPost(ctx context.Context, path string, body []b
 	}
 	rec := httptest.NewRecorder()
 	tok, err := auth.GenerateTokenWithTTL(auth.Claims{
-		UserID:   "telegram:summary",
+		UserID:   rcv.userID,
 		Role:     rcv.role,
 		TenantID: rcv.tenant,
 	}, rcv.jwtSecret, 60*time.Second)
@@ -461,7 +472,7 @@ func (rcv *telegramReceiver) selfCall(ctx context.Context, path string) *httptes
 	}
 	rec := httptest.NewRecorder()
 	tok, err := auth.GenerateTokenWithTTL(auth.Claims{
-		UserID:   "telegram:summary",
+		UserID:   rcv.userID,
 		Role:     rcv.role,
 		TenantID: rcv.tenant,
 	}, rcv.jwtSecret, 60*time.Second)

@@ -112,6 +112,10 @@ func main() {
 	tgToken := env.Opt("APPXIMO_TELEGRAM_BOT_TOKEN")
 	tgChat := env.Opt("APPXIMO_TELEGRAM_CHAT_ID")
 	tgSummaryRole := env.Opt("APPXIMO_TELEGRAM_SUMMARY_ROLE")
+	// The identity the digest is computed AS (APP-AGENDA-S2): a personal app
+	// scopes rows by the owner's id — the same key the engine's command
+	// channel reads, so the chat and the morning digest see the same rows.
+	tgSummaryUser := env.Opt("APPXIMO_TELEGRAM_SUMMARY_USER_ID")
 	tgSummaryTopic := env.Str("APPXIMO_TELEGRAM_SUMMARY_TOPIC", "summary.telegram")
 
 	needsEngine := mode == "auto" || mode == "writeback" || mode == "xlsx"
@@ -146,7 +150,7 @@ func main() {
 	var proc worker.Processor
 	switch mode {
 	case "auto":
-		proc = buildAuto(ctx, dsn, connect, clients, refresh, smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, emailTopic, tgToken, tgChat, tgSummaryRole, tgSummaryTopic, log)
+		proc = buildAuto(ctx, dsn, connect, clients, refresh, smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, emailTopic, tgToken, tgChat, tgSummaryRole, tgSummaryUser, tgSummaryTopic, log)
 	case "writeback":
 		log.Info().Str("engine_url", engineURL).Str("tenant_domain", tenantDomain).Str("role", role).
 			Msg("worker: write-back demo enabled (authenticated PATCH via engine API; owns *.created)")
@@ -185,7 +189,7 @@ func main() {
 // buildAuto assembles the shipped generic worker: the workflow executor (event
 // consumers + leader-elected cron scheduler) plus, when SMTP is configured, the
 // email consumer — everything topic-scoped through one Router.
-func buildAuto(ctx context.Context, dsn string, connect worker.Connector, clients *clientCache, refresh time.Duration, smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, emailTopic, tgToken, tgChat, tgSummaryRole, tgSummaryTopic string, log zerolog.Logger) worker.Processor {
+func buildAuto(ctx context.Context, dsn string, connect worker.Connector, clients *clientCache, refresh time.Duration, smtpHost, smtpPort, smtpUser, smtpPass, smtpFrom, emailTopic, tgToken, tgChat, tgSummaryRole, tgSummaryUser, tgSummaryTopic string, log zerolog.Logger) worker.Processor {
 	pool, err := db.NewPool(ctx, dsn)
 	if err != nil {
 		log.Fatal().Err(err).Msg("worker: open pool (workflows store + schema source)")
@@ -234,7 +238,7 @@ func buildAuto(ctx context.Context, dsn string, connect worker.Connector, client
 		if terr != nil {
 			log.Fatal().Err(terr).Msg("worker: APPXIMO_TELEGRAM_* set for the scheduled digest but invalid")
 		}
-		router.HandleOwner("summary.telegram", consumers.NewSummaryProcessor(clients.raw(tgSummaryRole), tgClient, tgSummaryTopic, log))
+		router.HandleOwner("summary.telegram", consumers.NewSummaryProcessor(clients.rawAs(tgSummaryRole, tgSummaryUser), tgClient, tgSummaryTopic, log))
 		// message.telegram (MOTOR-AGENDA-S1): a workflow's `enqueue` with a
 		// `text` — what a per-row reminder says. Same bot, same chat.
 		router.HandleOwner("message.telegram", consumers.NewMessageProcessor(tgClient, consumers.MessageTopic, log))
@@ -270,6 +274,18 @@ func (c *clientCache) raw(role string) *worker.EngineClient {
 		c.cache[role] = cl
 	}
 	return cl
+}
+
+// rawAs is raw acting AS userID (empty = the service identity). Not cached:
+// one consumer, one client.
+func (c *clientCache) rawAs(role, userID string) *worker.EngineClient {
+	if userID == "" {
+		return c.raw(role)
+	}
+	if role == "" {
+		role = c.defaultRole
+	}
+	return worker.NewEngineClientAs(c.engineURL, c.domain, c.secret, role, userID, worker.DefaultServiceTokenTTL)
 }
 
 func (c *clientCache) factory() workflows.ClientFactory {

@@ -168,6 +168,13 @@ func Parse(question string, v *Vocabulary) ParseResult {
 	if len(toks) == 0 {
 		return ParseResult{Reason: "empty"}
 	}
+	// 0a. An obligation in the first person — «tengo que comprar pintura»
+	// (APP-AGENDA-S2, VOZ-17): no write verb, yet the most common sentence an
+	// agenda hears. Settled before the discard rule (nothing in it is an
+	// "executable word") and before the write-verb walk.
+	if pr := parseObligation(question, v); pr.Sure {
+		return pr
+	}
 	// 0. Sure it is NOT a data question (Part C): a stray confirmation, a
 	// greeting, a help request, a bare name — only when nothing in the
 	// sentence could be executed. Otherwise the rest of the parser decides.

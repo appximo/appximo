@@ -6,6 +6,7 @@ import (
 	"image/png"
 	"os"
 	"testing"
+	"time"
 )
 
 // twenty builds the case that motivated VOZ-VISUAL-S1: an app with twenty
@@ -149,5 +150,42 @@ func BenchmarkRender_Twenty(b *testing.B) {
 		if _, err := Render(r); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// The picture carries today's agenda as its first strip (VOZ-16) and stays
+// deterministic and bounded.
+func TestRender_TodayAgendaStrip(t *testing.T) {
+	bog, _ := time.LoadLocation("America/Bogota")
+	day := time.Date(2026, 9, 22, 0, 0, 0, 0, bog)
+	var slots []Slot
+	for i := 0; i < 12; i++ {
+		slots = append(slots, Slot{Start: time.Date(2026, 9, 22, 12+i, 0, 0, 0, time.UTC), End: time.Date(2026, 9, 22, 13+i, 0, 0, 0, time.UTC), Title: "compromiso número " + string(rune('A'+i))})
+	}
+	facts := append([]Facts{{Resource: "compromisos", HasToday: true, DayStart: day, Today: slots}}, twenty()[:3]...)
+	with := Compose("Agenda", "t", "2026-09-22", Order(nil, facts), nil)
+	without := Compose("Agenda", "t", "2026-09-22", Order(nil, twenty()[:3]), nil)
+	a, err := Render(with)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := Render(with)
+	if !bytes.Equal(a, b) {
+		t.Fatal("deterministic")
+	}
+	c, _ := Render(without)
+	_, hWith := decode(t, a)
+	_, hWithout := decode(t, c)
+	if hWith <= hWithout || hWith-hWithout > 12*38+120 {
+		t.Fatalf("the strip must add bounded height: with=%d without=%d", hWith, hWithout)
+	}
+	// An agenda-only day is not painted as an empty day.
+	only := Compose("Agenda", "t", "2026-09-22", []Facts{{Resource: "compromisos", HasToday: true, DayStart: day, Today: slots[:2]}}, nil)
+	img, err := RenderImage(only)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if img.Bounds().Dy() < 300 {
+		t.Fatalf("too short: %d", img.Bounds().Dy())
 	}
 }

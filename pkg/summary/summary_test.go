@@ -3,6 +3,7 @@ package summary
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/appximo/appximo/pkg/schema"
 )
@@ -206,5 +207,75 @@ func TestComposeCensus(t *testing.T) {
 	}
 	if r := ComposeCensus("Tienda", "t", nil, nil); !strings.Contains(r.Text, "No hay datos todavía") {
 		t.Errorf("empty census: %s", r.Text)
+	}
+}
+
+// Today's agenda (VOZ-16): a range resource's rows that touch the day are the
+// first block of the digest, with their hour in the report's zone, and they
+// count as news for the send policy.
+func TestCompose_TodayAgendaBlock(t *testing.T) {
+	res := schema.ResourceSchema{Fields: map[string]schema.FieldDef{
+		"titulo": {Type: "string", Required: true},
+		"inicio": {Type: "time", Required: true},
+		"fin":    {Type: "time", Required: true},
+		"notas":  {Type: "text"},
+	}, Ranges: map[string]schema.RangeDef{"horario": {Start: "inicio", End: "fin"}}}
+	p := PlanFor("compromisos", &res)
+	if p.RangeName != "horario" || p.RangeStart != "inicio" || p.RangeEnd != "fin" || p.TitleField != "titulo" {
+		t.Fatalf("plan: %+v", p)
+	}
+	bog, _ := time.LoadLocation("America/Bogota")
+	day := time.Date(2026, 9, 22, 0, 0, 0, 0, bog)
+	f := Facts{Resource: "compromisos", HasToday: true, DayStart: day, Today: []Slot{
+		{Start: time.Date(2026, 9, 22, 15, 0, 0, 0, time.UTC), End: time.Date(2026, 9, 22, 16, 0, 0, 0, time.UTC), Title: "dentista"},
+		{Start: time.Date(2026, 9, 22, 20, 30, 0, 0, time.UTC), End: time.Date(2026, 9, 23, 6, 0, 0, 0, time.UTC), Title: ""},
+	}}
+	r := Compose("Agenda", "agenda", "2026-09-22", []Facts{f}, &Snapshot{Day: "2026-09-21", Level: LevelGreen})
+	for _, want := range []string{"📅 <b>Hoy en agenda</b> (2)", "• 10:00–11:00 dentista", "• 15:30–… (sin título)"} {
+		if !strings.Contains(r.Text, want) {
+			t.Fatalf("text lacks %q:\n%s", want, r.Text)
+		}
+	}
+	if strings.Contains(r.Text, "Sin movimiento hoy") {
+		t.Fatalf("a day with an agenda is not an empty day:\n%s", r.Text)
+	}
+	if !r.Changed || !r.HasMotion {
+		t.Fatalf("today's agenda is news: changed=%v motion=%v reasons=%v", r.Changed, r.HasMotion, r.ChangeReasons)
+	}
+	// A range resource with nothing today prints no block and stays quiet.
+	empty := Compose("Agenda", "agenda", "2026-09-22", []Facts{{Resource: "compromisos", HasToday: true, DayStart: day}}, &Snapshot{Day: "2026-09-21", Level: LevelGreen})
+	if strings.Contains(empty.Text, "Hoy en agenda") || empty.Changed {
+		t.Fatalf("free day must not be news:\n%s", empty.Text)
+	}
+	// Two range resources → each strip is named.
+	g := f
+	g.Resource = "turnos"
+	two := Compose("Agenda", "agenda", "2026-09-22", []Facts{f, g}, nil)
+	if !strings.Contains(two.Text, "Hoy · compromisos") || !strings.Contains(two.Text, "Hoy · turnos") {
+		t.Fatalf("two agendas are named:\n%s", two.Text)
+	}
+	// The cap.
+	var many []Slot
+	for i := 0; i < 14; i++ {
+		many = append(many, Slot{Start: time.Date(2026, 9, 22, 12+i/2, 0, 0, 0, time.UTC), End: time.Date(2026, 9, 22, 13+i/2, 0, 0, 0, time.UTC), Title: "x"})
+	}
+	capped := Compose("Agenda", "agenda", "2026-09-22", []Facts{{Resource: "c", HasToday: true, DayStart: day, Today: many}}, nil)
+	if !strings.Contains(capped.Text, "+4 más") {
+		t.Fatalf("cap:\n%s", capped.Text)
+	}
+}
+
+func TestTitleFieldOf(t *testing.T) {
+	res := schema.ResourceSchema{Fields: map[string]schema.FieldDef{
+		"texto":  {Type: "text", Required: true},
+		"lugar":  {Type: "string", Required: true},
+		"cuando": {Type: "time"},
+	}, Ranges: map[string]schema.RangeDef{"lapso": {Start: "cuando", End: "hasta"}}}
+	if got := PlanFor("registros", &res).TitleField; got != "texto" {
+		t.Fatalf("two required texts → the title-like name wins: %q", got)
+	}
+	res.Fields["lugar"] = schema.FieldDef{Type: "string"}
+	if got := PlanFor("registros", &res).TitleField; got != "texto" {
+		t.Fatalf("single required text: %q", got)
 	}
 }

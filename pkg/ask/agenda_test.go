@@ -291,3 +291,46 @@ func TestAgenda_TheAgendaIsTheBlockingRange(t *testing.T) {
 		t.Fatalf("two blocking ranges must not be guessed: %+v", pr.Plan)
 	}
 }
+
+// An obligation in the owner's words is a task, without the model (VOZ-17).
+func TestObligation_TengoQueIsACreateOfTheToDoResource(t *testing.T) {
+	s := agendaRangeSchema()
+	s.Resources["tareas"] = schema.ResourceSchema{
+		Fields: map[string]schema.FieldDef{
+			"titulo":   {Type: "string", Required: true},
+			"urgente":  {Type: "bool", Default: false},
+			"vence_en": {Type: "time"},
+			"estado": {Type: "string", Enum: []string{"pendiente", "hecha"}, Default: "pendiente",
+				StateMachine: &schema.StateMachine{Initial: []string{"pendiente"}, Transitions: map[string][]string{"pendiente": {"hecha"}, "hecha": {}}}},
+			"creado_en": {Type: "time", Auto: schema.AutoCreate},
+		},
+	}
+	v := BuildWithWrites(s, "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
+	pr := Parse("tengo que comprar pintura para el techo", v)
+	if !pr.Sure || pr.Plan.Kind != "create" || pr.Plan.Resource != "tareas" || pr.Plan.Data["titulo"] != "comprar pintura para el techo" {
+		t.Fatalf("tengo que → create tareas: %+v %s", pr.Plan, pr.Reason)
+	}
+	pr = Parse("acordate de llamar al banco mañana, urgente", v)
+	if !pr.Sure || pr.Plan.Data["titulo"] != "llamar al banco" || pr.Plan.Data["vence_en"] != "tomorrow" || pr.Plan.Data["urgente"] != true {
+		t.Fatalf("day and urgency leave the title: %+v %s", pr.Plan, pr.Reason)
+	}
+	pr = Parse("hay que renovar el seguro del auto", v)
+	if !pr.Sure || pr.Plan.Data["titulo"] != "renovar el seguro del auto" {
+		t.Fatalf("hay que: %+v %s", pr.Plan, pr.Reason)
+	}
+	// The agenda is not a task: naming the range resource steps aside.
+	if pr := Parse("tengo que agendar una cita mañana a las 4", v); pr.Sure && pr.Plan.Resource == "tareas" {
+		t.Fatalf("a sentence naming the agenda must not become a task: %+v", pr.Plan)
+	}
+	// Read-only vocabulary: the parser does not invent a write.
+	ro := BuildWithWrites(s, "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return false, false })
+	if pr := Parse("tengo que comprar pintura", ro); pr.Sure && pr.Plan.Kind == "create" {
+		t.Fatalf("read-only must not create: %+v", pr.Plan)
+	}
+	// Two to-do-like resources: nobody is guessed.
+	s.Resources["recordatorios"] = s.Resources["tareas"]
+	v2 := BuildWithWrites(s, "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
+	if pr := Parse("tengo que comprar pintura", v2); pr.Sure {
+		t.Fatalf("two to-do resources must not be guessed: %+v", pr.Plan)
+	}
+}

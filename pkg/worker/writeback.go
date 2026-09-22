@@ -31,6 +31,7 @@ type EngineClient struct {
 	baseURL      string // TCP target, e.g. http://localhost:8080 (the engine data plane)
 	tenantDomain string // Host = "{tenant}.{tenantDomain}", e.g. "localhost" → acme.localhost
 	jwtSecret    string // shared with the engine; signs the service JWT
+	userID       string // the identity minted into every token ("service:worker", or the owner — NewEngineClientAs)
 	role         string // scoped service role, e.g. "service_worker" (NEVER admin)
 	ttl          time.Duration
 	http         *http.Client
@@ -51,9 +52,22 @@ func NewEngineClient(baseURL, tenantDomain, jwtSecret, role string, ttl time.Dur
 		tenantDomain: tenantDomain,
 		jwtSecret:    jwtSecret,
 		role:         role,
+		userID:       "service:worker",
 		ttl:          ttl,
 		http:         &http.Client{Timeout: 10 * time.Second},
 	}
+}
+
+// NewEngineClientAs is NewEngineClient acting AS a given user id instead of
+// "service:worker" (APP-AGENDA-S2): the scheduled digest of a personal app —
+// rows scoped by `dueno_id = $user_id` — must be computed as the owner, or it
+// counts nothing. The role is still the scoped one; only the identity changes.
+func NewEngineClientAs(baseURL, tenantDomain, jwtSecret, role, userID string, ttl time.Duration) *EngineClient {
+	c := NewEngineClient(baseURL, tenantDomain, jwtSecret, role, ttl)
+	if userID = strings.TrimSpace(userID); userID != "" {
+		c.userID = userID
+	}
+	return c
 }
 
 // mintToken issues a fresh short-lived service JWT for tenant, in the EXACT
@@ -62,10 +76,10 @@ func NewEngineClient(baseURL, tenantDomain, jwtSecret, role string, ttl time.Dur
 // tenant_id = the event's tenant. A NEW token per call — never cached/reused.
 func (c *EngineClient) mintToken(tenant string) (string, error) {
 	return auth.GenerateTokenWithTTL(auth.Claims{
-		UserID:           "service:worker",
+		UserID:           c.userID,
 		Role:             c.role,
 		TenantID:         tenant,
-		RegisteredClaims: jwt.RegisteredClaims{Subject: "service:worker"},
+		RegisteredClaims: jwt.RegisteredClaims{Subject: c.userID},
 	}, c.jwtSecret, c.ttl)
 }
 

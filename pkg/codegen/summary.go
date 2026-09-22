@@ -160,6 +160,45 @@ func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, p
 					f.UpdatedToday, f.HasUpdated = n, true
 				}
 			}
+			// Today's agenda (VOZ-16): the rows of a range resource whose block
+			// touches the day — the SAME overlaps filter the API and the voice
+			// use, scoped by the role's condition and allowlist like every read.
+			if p.RangeName != "" {
+				f.HasToday, f.DayStart = true, startOfDay
+				params := url.Values{}
+				params.Set("filter["+p.RangeName+"][overlaps]", startISO+"/"+startOfDay.Add(24*time.Hour).UTC().Format(time.RFC3339))
+				params.Set("sort", p.RangeStart)
+				params.Set("order", "asc")
+				params.Set("per_page", "50")
+				fields := p.RangeStart + "," + p.RangeEnd
+				if p.TitleField != "" {
+					fields += "," + p.TitleField
+				}
+				params.Set("fields", fields)
+				if qb, err := query.BuildQuery(name, readSurface(req.Context(), tc.ID, name, &res), params, ev.Condition, ev.AllowedFields); err == nil {
+					selectQ, _, selectArgs, _ := qb.SQL()
+					if rows, qerr := tdb.QueryDirect(req.Context(), tc.PGSchema, name, selectQ, selectArgs...); qerr == nil {
+						recs, rerr := pkghandlers.RowsToMaps(rows)
+						rows.Close()
+						if rerr == nil {
+							for _, rec := range recs {
+								st, ok1 := asTime(rec[p.RangeStart])
+								en, ok2 := asTime(rec[p.RangeEnd])
+								if !ok1 || !ok2 {
+									continue
+								}
+								title := ""
+								if p.TitleField != "" {
+									if t, ok := rec[p.TitleField].(string); ok {
+										title = t
+									}
+								}
+								f.Today = append(f.Today, summary.Slot{Start: st, End: en, Title: title})
+							}
+						}
+					}
+				}
+			}
 			if p.StateField != "" {
 				countStates := func(states []string) (map[string]int64, int64, bool) {
 					out := map[string]int64{}
@@ -313,4 +352,25 @@ func toInt64(v any) int64 {
 	default:
 		return 0
 	}
+}
+
+// asTime reads a timestamptz as the driver hands it back (time.Time), or an
+// RFC 3339 string (a serialized row).
+func asTime(v any) (time.Time, bool) {
+	switch t := v.(type) {
+	case time.Time:
+		return t, true
+	case *time.Time:
+		if t != nil {
+			return *t, true
+		}
+	case string:
+		if ts, err := time.Parse(time.RFC3339Nano, t); err == nil {
+			return ts, true
+		}
+		if ts, err := time.Parse(time.RFC3339, t); err == nil {
+			return ts, true
+		}
+	}
+	return time.Time{}, false
 }

@@ -49,7 +49,9 @@ const (
 	renderMaxH   = 2400 // Telegram: width+height ≤ 10000, ratio ≤ 20; we stay far below
 	maxAttention = 5    // individual rows before folding "+N más"
 	maxMotion    = 6
-	maxFlow      = 4
+	// maxSlots bounds the agenda lines per resource (text and picture, VOZ-16).
+	maxSlots = 10
+	maxFlow  = 4
 )
 
 // Palette — high contrast for a sunlit screen. Never the only channel: every
@@ -299,6 +301,48 @@ func RenderImage(r Report) (*image.RGBA, error) {
 		return crop(img, c.y), nil
 	}
 
+	// ── Today's agenda (VOZ-16): the hour and the title of every block that
+	// touches the day, before anything else — what a morning digest of an
+	// agenda is FOR. One strip per range resource that has something today.
+	agendaN := 0
+	for _, f := range r.Facts {
+		if f.HasToday && len(f.Today) > 0 {
+			agendaN++
+		}
+	}
+	for _, f := range r.Facts {
+		if !f.HasToday || len(f.Today) == 0 {
+			continue
+		}
+		caption := "HOY EN AGENDA"
+		if agendaN > 1 {
+			caption = "HOY · " + strings.ToUpper(f.Resource)
+		}
+		c.y += 6
+		c.text(fs.caption, renderPad, c.y+20, mutedColor, fmt.Sprintf("%s (%d)", caption, len(f.Today)))
+		c.y += 34
+		timeW := 250
+		for i, sl := range f.Today {
+			if i == maxSlots {
+				c.y += 30
+				c.text(fs.small, renderPad, c.y, mutedColor, fmt.Sprintf("+%d más", len(f.Today)-maxSlots))
+				c.y += 6
+				break
+			}
+			line := SlotLine(sl, f.DayStart)
+			hours, title := line, ""
+			if sp := strings.IndexByte(line, ' '); sp > 0 {
+				hours, title = line[:sp], line[sp+1:]
+			}
+			c.y += 38
+			c.text(fs.name, renderPad, c.y, inkColor, fit(fs.name, hours, timeW-16))
+			c.text(fs.body, renderPad+timeW, c.y, inkColor, fit(fs.body, title, contentW-timeW))
+		}
+		c.y += 18
+		c.hline(c.y)
+		c.y += 10
+	}
+
 	// ── Attention bands: declared (red) then inferred (amber) ────────────
 	// Since VOZ-DELTA-S1 a band holds only what has NEWS or moved; rows that
 	// are exactly as yesterday are folded below in one small grey line —
@@ -407,7 +451,7 @@ func RenderImage(r Report) (*image.RGBA, error) {
 	}
 
 	// ── Empty day, with dignity ──────────────────────────────────────────
-	if len(declared)+len(inferred)+len(moved) == 0 {
+	if len(declared)+len(inferred)+len(moved)+agendaN == 0 {
 		c.y += 40
 		c.fillRoundRect(image.Rect(renderPad, c.y, renderWidth-renderPad, c.y+150), 20, bg)
 		c.fillCircle(renderWidth/2, c.y+50, 24, fg)

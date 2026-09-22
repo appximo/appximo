@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/appximo/appximo/pkg/schema"
 )
@@ -54,6 +55,14 @@ type Plan struct {
 	AttentionInferred bool
 	// Flow are the remaining non-terminal states (neutral counts), sorted.
 	Flow []string
+	// RangeName / RangeStart / RangeEnd (APP-AGENDA-S2, VOZ-16): the resource's
+	// first declared time range — what makes "today's rows" a question the
+	// digest can ask (the rows whose range touches the day). Empty = none.
+	RangeName, RangeStart, RangeEnd string
+	// TitleField is what a row is CALLED in the agenda line: the single
+	// required, default-less, non-auto text field, else a text field with a
+	// title-like name; empty = "(sin título)".
+	TitleField string
 }
 
 // PlanFor derives the per-resource plan from the schema. It never guesses from
@@ -90,7 +99,68 @@ func PlanFor(name string, res *schema.ResourceSchema) Plan {
 		p.Attention, p.AttentionInferred, p.Flow = stateTiers(fd.StateMachine)
 		break
 	}
+	if len(res.Ranges) > 0 {
+		rnames := make([]string, 0, len(res.Ranges))
+		for rn := range res.Ranges {
+			rnames = append(rnames, rn)
+		}
+		sort.Strings(rnames)
+		rg := res.Ranges[rnames[0]]
+		p.RangeName, p.RangeStart, p.RangeEnd = rnames[0], rg.Start, rg.End
+		p.TitleField = titleFieldOf(res, names)
+	}
 	return p
+}
+
+// titleFieldOf picks the field a row is called by: exactly one required,
+// default-less, non-auto, enum-less text field; else the first text field
+// with a title-like name; else "".
+func titleFieldOf(res *schema.ResourceSchema, sorted []string) string {
+	var req []string
+	for _, f := range sorted {
+		fd := res.Fields[f]
+		if fd.Required && fd.Default == nil && !fd.Auto.Enabled() && len(fd.Enum) == 0 && (fd.Type == "string" || fd.Type == "text") {
+			req = append(req, f)
+		}
+	}
+	if len(req) == 1 {
+		return req[0]
+	}
+	for _, want := range []string{"titulo", "title", "nombre", "name", "asunto", "subject", "texto", "descripcion", "description"} {
+		if fd, ok := res.Fields[want]; ok && (fd.Type == "string" || fd.Type == "text") {
+			return want
+		}
+	}
+	return ""
+}
+
+// Slot is one row of a range resource that touches the report's day — the
+// agenda line "10:00–11:00 dentista" (VOZ-16). Instants are UTC; the text
+// formats them in the report's zone.
+type Slot struct {
+	Start, End time.Time
+	Title      string
+}
+
+// SlotLine words a slot in the report's zone: "10:00–11:00 dentista"; a slot
+// that started before the day or ends after it shows the day's edge as "…".
+func SlotLine(sl Slot, dayStart time.Time) string {
+	loc := dayStart.Location()
+	st, en := sl.Start.In(loc), sl.End.In(loc)
+	dayEnd := dayStart.Add(24 * time.Hour)
+	a := st.Format("15:04")
+	if st.Before(dayStart) {
+		a = "…"
+	}
+	b := en.Format("15:04")
+	if !en.Before(dayEnd) {
+		b = "…"
+	}
+	title := strings.TrimSpace(sl.Title)
+	if title == "" {
+		title = "(sin título)"
+	}
+	return fmt.Sprintf("%s–%s %s", a, b, title)
 }
 
 // stateTiers splits a machine's NON-terminal states into (attention, flow).
@@ -172,6 +242,14 @@ type Facts struct {
 	PrevTotal   int64
 	NewToday    int64
 	HasNewToday bool
+	// Today (VOZ-16) lists the rows of a RANGE resource whose block touches
+	// the report's day, ordered by start — "hoy: 10:00 dentista, 15:00
+	// reunión". HasToday = the resource declares a range (an empty list then
+	// means a free day, not an unknown one). DayStart is the day's first
+	// instant in the report's zone (what the lines are formatted against).
+	Today    []Slot
+	HasToday bool
+	DayStart time.Time
 }
 
 // Delta is the attention change since the baseline (meaningful only with HasPrev).
@@ -416,6 +494,38 @@ func Compose(appName, tenant, day string, facts []Facts, base *Snapshot) Report 
 	fmt.Fprintf(&b, "📋 <b>Resumen de %s</b> · %s\n", app, esc(day))
 	fmt.Fprintf(&b, "%s <b>%s</b>\n", levelDot(r.Level), esc(r.Headline))
 
+	// Today's agenda (VOZ-16): the rows whose block touches the day, with
+	// their hour — the first thing an agenda's morning digest must say. It
+	// is news every day it is non-empty (the send policy counts it).
+	agendaResources := 0
+	for _, f := range facts {
+		if f.HasToday && len(f.Today) > 0 {
+			agendaResources++
+		}
+	}
+	for _, f := range facts {
+		if !f.HasToday || len(f.Today) == 0 {
+			continue
+		}
+		label := "Hoy en agenda"
+		if agendaResources > 1 {
+			label = "Hoy · " + f.Resource
+		}
+		fmt.Fprintf(&b, "\n📅 <b>%s</b> (%d)\n", esc(label), len(f.Today))
+		for i, sl := range f.Today {
+			if i == maxSlots {
+				fmt.Fprintf(&b, "  +%d más\n", len(f.Today)-maxSlots)
+				break
+			}
+			fmt.Fprintf(&b, "• %s\n", esc(SlotLine(sl, f.DayStart)))
+		}
+		r.HasMotion = true
+		if base != nil {
+			r.ChangeReasons = append(r.ChangeReasons, fmt.Sprintf("%s: %d hoy en agenda", f.Resource, len(f.Today)))
+			r.Changed = true
+		}
+	}
+
 	blocks := 0
 	var folded, stale []string
 	for _, f := range facts {
@@ -452,7 +562,7 @@ func Compose(appName, tenant, day string, facts []Facts, base *Snapshot) Report 
 		blocks++
 	}
 
-	if blocks == 0 && len(stale) == 0 {
+	if blocks == 0 && len(stale) == 0 && !r.HasMotion {
 		b.WriteString("\nSin movimiento hoy.\n")
 	}
 	if blocks > 0 || len(stale) > 0 {
