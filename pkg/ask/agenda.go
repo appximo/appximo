@@ -366,16 +366,11 @@ func parseSchedule(question string, v *Vocabulary) ParseResult {
 		}
 	}
 	if res == nil {
-		var cands []*Resource
-		for _, name := range v.order {
-			if r := v.resources[name]; r.CanCreate && r.Range() != nil {
-				cands = append(cands, r)
-			}
-		}
-		if len(cands) != 1 {
+		// The agenda among the creatable range resources (no_overlap first).
+		res = pickAgenda(v, func(r *Resource) bool { return r.CanCreate })
+		if res == nil {
 			return ParseResult{Reason: "schedule: no single agenda resource"}
 		}
-		res = cands[0]
 	}
 	rg := res.Range()
 	span, ok := consumeTimeSpan(toks)

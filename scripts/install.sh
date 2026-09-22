@@ -958,6 +958,14 @@ except Exception: print("")' "$1" 2>/dev/null
 	fi
 }
 
+# schema_source — the schema the install will END with: --schema when given
+# (the target path does not exist yet on a first install or a dry-run — the
+# worker decision used to read the missing target and say "declares no
+# workflows" for a schema that declares five), else the installed one.
+schema_source() {
+	if [ -n "$SCHEMA" ] && [ -f "$SCHEMA" ]; then printf '%s' "$SCHEMA"; else printf '%s' "$SCHEMA_FILE"; fi
+}
+
 # schema_declares_automation FILE — does the schema declare `events` on any
 # resource, or a `workflows` block? Either is a PROMISE of a consumer: the
 # worker is what honors it (AUTOMATIZACION-S1). python3 when present (a real
@@ -989,7 +997,7 @@ install_worker() {
 	case "$WORKER" in
 		no) info "worker not installed (--no-worker)"; return 0 ;;
 		auto)
-			if ! schema_declares_automation "$SCHEMA_FILE" && [ ! -f "$WORKER_BIN_PATH" ]; then
+			if ! schema_declares_automation "$(schema_source)" && [ ! -f "$WORKER_BIN_PATH" ]; then
 				info "worker not installed: the schema declares no events/workflows (add --worker to force)"
 				return 0
 			fi
@@ -1187,7 +1195,7 @@ OBS_DB_PATH=${VARLIB#"$PREFIX"}/obs/obs.db
 # remote:bucket/path ships each set off this box (BACKUP_PASSPHRASE_FILE to
 # include the encrypted secrets).
 APPXIMO_BACKUP_DIR=${BACKUP_DIR#"$PREFIX"}
-# appximo-worker (the <app>-worker.service unit shares this file): mode `auto`
+# appximo-worker (the <app>-worker.service unit shares this file): mode 'auto'
 # runs the schema's declared workflows + email delivery when SMTP_HOST is set,
 # and consumes NOTHING else (claims are topic-scoped — a topic with no consumer
 # stays pending and visible, never acknowledged). See docs/PRODUCTION.md §worker.
@@ -1475,7 +1483,7 @@ verify_installed() {
 		else
 			die "VERIFY FAILED: ${SERVICE_NAME}-worker is not active — journalctl -u ${SERVICE_NAME}-worker -n 40"
 		fi
-	elif schema_declares_automation "$SCHEMA_FILE" && [ "$WORKER" != "no" ]; then
+	elif schema_declares_automation "$(schema_source)" && [ "$WORKER" != "no" ]; then
 		warn "the schema declares events/workflows and NO worker is running: those events will sit pending in public.outbox (visible in GET /admin/outbox and the oldest-pending-age alert). Re-run with --worker-binary=/path/to/appximo-worker."
 	fi
 	ok "verified — installed == asked:${VERIFIED_LINES}"

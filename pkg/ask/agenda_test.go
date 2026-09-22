@@ -267,3 +267,27 @@ func TestAgenda_NonInvertibleRuleAsksForAnotherTime(t *testing.T) {
 		t.Errorf("re-checked once per time said, ran %d", fc.calls)
 	}
 }
+
+// TestAgenda_TheAgendaIsTheBlockingRange (APP-AGENDA-S1): with TWO range
+// resources — compromisos (no_overlap) and registros (a log that may overlap)
+// — «qué tengo mañana» and «agendá … de 4 a 5» still mean the agenda.
+func TestAgenda_TheAgendaIsTheBlockingRange(t *testing.T) {
+	s := agendaRangeSchema()
+	s.Resources["registros"] = schema.ResourceSchema{
+		Fields: map[string]schema.FieldDef{"texto": {Type: "text", Required: true}, "cuando": {Type: "time"}, "hasta": {Type: "time"}},
+		Ranges: map[string]schema.RangeDef{"lapso": {Start: "cuando", End: "hasta"}},
+	}
+	v := BuildWithWrites(s, "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
+	if pr := Parse("qué tengo mañana", v); !pr.Sure || pr.Plan.Resource != "eventos" {
+		t.Fatalf("with a log beside the agenda, the agenda is still implied: %+v %s", pr.Plan, pr.Reason)
+	}
+	if pr := Parse("agendá reunión mañana de 4 a 5", v); !pr.Sure || pr.Plan.Resource != "eventos" {
+		t.Fatalf("the schedule goes to the blocking range: %+v %s", pr.Plan, pr.Reason)
+	}
+	// Two blocking ranges → nobody is implied (a word must name it).
+	s.Resources["registros"].Ranges["lapso"] = schema.RangeDef{Start: "cuando", End: "hasta", NoOverlap: &schema.NoOverlapDef{}}
+	v2 := BuildWithWrites(s, "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
+	if pr := Parse("qué tengo mañana", v2); pr.Sure {
+		t.Fatalf("two blocking ranges must not be guessed: %+v", pr.Plan)
+	}
+}

@@ -1123,19 +1123,37 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 	return ParseResult{Plan: p, Sure: true}
 }
 
-// agendaResource is the ONE readable resource that declares a time range,
-// nil when there is none or several (then a word must name it).
+// agendaResource is THE agenda among the readable resources: the one whose
+// range declares no_overlap when exactly one does (an agenda blocks; a log
+// of what happened does not — APP-AGENDA-S1 found «qué tengo mañana» falling
+// to the model because a `registros` resource also declared a range), else
+// the only resource with a range; nil when none or still several (then a
+// word must name it).
 func agendaResource(v *Vocabulary) *Resource {
-	var found *Resource
+	return pickAgenda(v, func(*Resource) bool { return true })
+}
+
+// pickAgenda applies the preference over the resources that pass keep.
+func pickAgenda(v *Vocabulary, keep func(*Resource) bool) *Resource {
+	var blocking, any []*Resource
 	for _, name := range v.order {
-		if r := v.resources[name]; r.Range() != nil {
-			if found != nil {
-				return nil
-			}
-			found = r
+		r := v.resources[name]
+		rg := r.Range()
+		if rg == nil || !keep(r) {
+			continue
+		}
+		any = append(any, r)
+		if rg.NoOverlap {
+			blocking = append(blocking, r)
 		}
 	}
-	return found
+	if len(blocking) == 1 {
+		return blocking[0]
+	}
+	if len(any) == 1 {
+		return any[0]
+	}
+	return nil
 }
 
 // futureRange reports whether a period token names a day to come.
