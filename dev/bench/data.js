@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790041553253,
+  "lastUpdate": 1790050788866,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -6768,6 +6768,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "39818571 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "8c8df1a4664b3682898028121d56035410b39d36",
+          "message": "docs(agenda): today's agenda in the digest, the obligation phrases, the Telegram identity key; VOZ-16/VOZ-17/OPS-60/OPS-62 DONE, OPS-63 opened (APP-AGENDA-S2)\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01D9x58XVphMwXPxaXSQrZPa",
+          "timestamp": "2026-09-22T04:01:59Z",
+          "tree_id": "3f26983c55271a0933652b6b0bf25d415d0251c1",
+          "url": "https://github.com/appximo/appximo/commit/8c8df1a4664b3682898028121d56035410b39d36"
+        },
+        "date": 1790050788086,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6154,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "388238 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6154,
+            "unit": "ns/op",
+            "extra": "388238 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "388238 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "388238 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 70.55,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36764890 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 70.55,
+            "unit": "ns/op",
+            "extra": "36764890 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36764890 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36764890 times\n4 procs"
           }
         ]
       }
