@@ -274,6 +274,8 @@ en las palabras de su schema, sin llamarlos pendientes. Un estado final
 ```
 APPXIMO_TELEGRAM_SUMMARY_TENANT=<inquilino>   # de qué inquilino es el resumen (y ENCIENDE el canal)
 APPXIMO_TELEGRAM_SUMMARY_ROLE=<rol>           # el resumen se calcula COMO este rol (debe existir en el schema)
+APPXIMO_TELEGRAM_SUMMARY_USER_ID=<uuid>      # opcional: la IDENTIDAD con la que el canal y el parte actúan — en una app
+                                             #   personal (filas por dueno_id) ponga el id del dueño y el chat ES el dueño
 ```
 
 y `systemctl restart <app>`. El resumen **respeta el RBAC**: muestra exactamente
@@ -632,6 +634,16 @@ Detalle técnico: docs/PRODUCTION.md §4.6g; ejemplo de schema
 `examples/model-lab/agenda-choques.json`.
 
 ### 3g. La agenda del dueño — la primera app REAL sobre todo lo anterior (APP-AGENDA-S1)
+
+> **APP-AGENDA-S2 (2026-09-22):** el parte de las 7 abre con **«📅 Hoy en
+> agenda»** — cada compromiso del día con su hora — cuando el recurso declara
+> `ranges`; «**tengo que** comprar pintura», «**hay que** llamar al banco»,
+> «**acordate de** pagar la luz», «**recordame** renovar el seguro» anotan una
+> tarea sin el modelo (con confirmación, como todo lo que escribe); y el canal
+> de Telegram actúa **como el dueño** (`APPXIMO_TELEGRAM_SUMMARY_USER_ID`),
+> así que «anotá…» por el chat escribe a su nombre y «qué tengo hoy» ve sus
+> filas. El bot de las demos pasó a la agenda: la tiendita y petfriendly ya no
+> mandan partes ni contestan comandos — solo alertas de incidente.
 
 Una agenda personal (tareas, compromisos, registros, personas, áreas,
 etiquetas — nunca «evento») instalada como TERCERA app en una caja que ya

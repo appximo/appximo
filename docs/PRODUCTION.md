@@ -844,6 +844,10 @@ alert token/chat from §4.6c) and restart:
 ```
 APPXIMO_TELEGRAM_SUMMARY_TENANT=<tenant>   # which tenant the digest covers (also ENABLES the channel)
 APPXIMO_TELEGRAM_SUMMARY_ROLE=<role>       # the digest is computed AS this role (must be a declared role)
+APPXIMO_TELEGRAM_SUMMARY_USER_ID=<uuid>   # optional (APP-AGENDA-S2): the identity the channel and the scheduled digest act AS —
+                                          #   a personal app scopes rows by `dueno_id = $user_id`: set the owner's auth_users id
+                                          #   and the chat IS the owner (same role, same rows, same attribution as their Siri
+                                          #   token); unset = "telegram:summary" (fine for an unscoped role)
 ```
 
 The engine then long-polls Telegram (getUpdates) and answers, from the ONE
@@ -895,6 +899,15 @@ shape, pure schema on the workflow side:
   }
 }
 ```
+
+**Today's agenda in the digest (VOZ-16, APP-AGENDA-S2).** A resource that
+declares a `ranges` block (§2.7 of the schema reference) opens the digest with
+"📅 Hoy en agenda (N)" — the rows whose block touches the report's day, in the
+report's zone ("10:00–11:00 dentista"), ordered by start, at most 10 per
+resource, in the text AND the picture. It is computed as the digest's role and
+identity (row condition + allowlist), so a personal agenda needs
+`APPXIMO_TELEGRAM_SUMMARY_USER_ID`. A day with appointments is news for the
+`changes` policy; a free day prints nothing and stays quiet.
 
 Run `appximo-worker` in `auto` mode with the same Telegram env plus
 `APPXIMO_TELEGRAM_SUMMARY_ROLE` (and optionally

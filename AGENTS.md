@@ -2197,8 +2197,13 @@ change). Deploy the worker with `scripts/deploy-app.sh --worker-binary=PATH`
 (unit + env keys + active check) — the tenant's DEPLOYED schema must declare
 the `resumen_matinal` workflow (the worker reads `public.tenants.json_schema`).
 
-The engine can also RECEIVE it (`APPXIMO_TELEGRAM_SUMMARY_TENANT` +
-`_ROLE`): the alert bot answers `resumen`/`estado`/`ayuda` from the one
+A resource with a `ranges` block opens the digest with "📅 Hoy en agenda"
+(VOZ-16): its rows whose block touches the day, hour + title in the report's
+zone, role-scoped, capped at 10; a day with appointments is news for the
+`changes` policy. The engine can also RECEIVE it (`APPXIMO_TELEGRAM_SUMMARY_TENANT` +
+`_ROLE`, and optionally `_USER_ID` — the identity the channel and the
+scheduled digest act AS; a personal app scoped by `dueno_id = $user_id`
+needs the owner's id, else the chat reads zero rows): the alert bot answers `resumen`/`estado`/`ayuda` from the one
 authorized chat (getUpdates, off the hot path; any other chat is ignored +
 logged; half-config refuses to boot). `resumen` arrives as **picture + text**
 (`sendPhoto` with the text as caption; over 1024 chars the full text follows
@@ -2235,9 +2240,13 @@ dropped. The confirmed write runs through the batch transaction's own cores
 (`prepareTxOp`/`execPreparedOp` via `txWriter`, pkg/codegen/askwrite.go):
 RBAC, validators, hooks, the state-machine guard and the outbox event
 exactly as an API write — a refusal is said in words, never a success face.
-The parser settles ONE write shape itself («marcá como hecha la tarea de
-Fabián» — a state transition of one row, US$ 0, ~15 ms); a create is the
-model's (US$ 0.0023 mean, p50 0.8 s). `APPXIMO_ASK_WRITES=off` makes every
+The parser settles THREE write shapes itself («marcá como hecha la tarea de
+Fabián» — a state transition of one row, US$ 0, ~15 ms; «agendá X mañana de
+4 a 5» on the agenda; and, since APP-AGENDA-S2 / VOZ-17, an OBLIGATION —
+«tengo que / hay que / acordate de / recordame / me falta X» — as a create
+of the one to-do resource, title = X, «mañana» into its time field,
+«urgente» into its bool); any other create is the model's (US$ 0.0023
+mean, p50 0.8 s). `APPXIMO_ASK_WRITES=off` makes every
 voice channel read-only. The demo role of the demos reads only — its
 vocabulary has no write form. Example: [examples/model-lab/agenda-voz.json](examples/model-lab/agenda-voz.json)
 (tareas/personas + a workflow that notifies through the digest on an

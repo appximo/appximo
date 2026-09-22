@@ -429,6 +429,67 @@ refreshed).
 ---
 
 
+## DONE in APP-AGENDA-S2 (2026-09-22) — the agenda talks: the demos' bot moved to the agenda, the 7:00 digest opens with today's appointments, «tengo que…» is a task, /dev/null on the 58 repaired
+
+| Item | What closed it | Where |
+|---|---|---|
+| **VOZ-16 DONE** | `/api/summary` (text + picture) opens with "📅 Hoy en agenda (N)": the rows of a `ranges` resource whose block touches the day, same `overlaps` predicate as the API/voice, role-scoped, ordered by start, capped at 10, edge blocks as "…"; a non-empty agenda is news for `notify: changes` | `pkg/summary` (Plan.Range*, Facts.Today, Compose, render strip), `pkg/codegen/summary.go`; SCHEMA_REFERENCE §1.5; PRODUCTION §4.6d |
+| **VOZ-17 DONE** | the parser settles «tengo que / hay que / acordate de / recordame / me falta / no me olvide de X» as a create of the one to-do resource (title = X, «mañana» → its time field, «urgente» → its bool); the model gets W1b | `pkg/ask/obligation.go` + test; `prompt.go` |
+| **OPS-60 DONE** | `/dev/null` on the 58 recreated as the 1:3 device (the stray 0-byte file moved aside and deleted — no secrets); apt verifies signatures again, logrotate and dpkg-db-backup run, unattended-upgrades sees pending packages. Forensics: broke on 2026-09-18 between 19:45:13 and 19:45:39 UTC, inside VOZ-DELTA-S1's `deploy-app.sh --worker-binary` of appitools; the exact line was not found in today's scripts | the 58; `fleet-audit` check still to add (kept in OPS-59's neighbourhood) |
+| **OPS-62 DONE** | Miguel decided to reuse the demos' bot: the command channel (getUpdates) moved from the tiendita to the agenda (`APPXIMO_TELEGRAM_SUMMARY_TENANT=agenda`, role `dueno`, `APPXIMO_TELEGRAM_SUMMARY_USER_ID=<his id>`); petfriendly's `resumen_matinal` workflow removed (tenant + boot schema, cron row deleted) and its digest role unset; the tiendita keeps token+chat for incident alerts only | `/etc/agenda/agenda.env`, `/etc/appitools/appitools.env`, `/etc/vetapp/{vetapp.env,schema.json}`; decision A-83 |
+| **AUTO-14 (partly)** | the agenda's worker was rebuilt with the version ldflags (`7f89482-agenda2`); the `install.sh` warning is still open | — |
+
+The archived narratives, as they stood:
+
+### VOZ-16 — The digest does not list "today's compromisos": it is a census of states and news, not the day's agenda
+
+`/api/summary` counts rows per state, created/updated today and the delta
+against yesterday; it does not know that a resource with `ranges` has "today's
+rows" (the ones whose range touches the day) nor lists them with their hour.
+A morning digest of an agenda should open with "hoy: 10:00 dentista, 15:00
+reunión"; today that comes from «qué tengo hoy» by voice, not from the
+digest. **Ready:** a digest section for range resources — the rows whose
+range overlaps the day (the same `overlaps` the voice uses), ordered by start,
+hour + title; a strip at the top of the image. No new key: derived from
+`ranges`. Origin: APP-AGENDA-S1 Part C. Decides: agent.
+
+### VOZ-17 — «Tengo que comprar pintura» writes nothing: without a write verb the model reads a loose sentence
+
+«tengo que comprar pintura para el techo» → model → `unclear` ("not a data
+question: a personal note"); «agregá la tarea comprar pintura…» → creates.
+Likewise «qué me dijo Fabián» (finding a registro by its content) has no plan.
+An agenda by voice is used with one's own phrasing («tengo que…», «acordate
+que…»); demanding the verb makes the owner speak like the machine. **Ready:**
+the vocabulary tells the model that «tengo que / hay que / acordate de» over
+a task resource IS a create (and the parser gets one more rule, US$ 0); a
+`list` with `search` for «qué me dijo X» over a free-text resource. Origin:
+APP-AGENDA-S1 Part F (lab). Decides: agent.
+
+### OPS-60 — On the 58 `/dev/null` is a REGULAR FILE since 2026-09-20: apt cannot verify signatures, unattended-upgrades patches nothing
+
+`stat /dev/null` → "regular empty file 644"; the journal says "/dev/null is
+not a device" since 2026-09-20 00:00 (before APP-AGENDA-S1). `apt-get update`
+fails with "gpgv… cannot create /dev/null: Permission denied" (the `_apt`
+user), so the box serving the demos AND the agenda has received no security
+patches since, silently (unattended-upgrades reports "no packages" over stale
+indexes). Services do not feel it. **Ready:** as root on the 58,
+`mv /dev/null /root/dev-null-era-archivo && mknod -m 666 /dev/null c 1 3 &&
+apt-get update` (the session tried twice; the permission classifier refused),
+plus a `fleet-audit.sh` check that `/dev/null` is a character device (1:3).
+Evidence: `evidencia/APP-AGENDA-S1/58/dev-null.txt`. Decides: Miguel.
+
+### OPS-62 — Miguel's agenda has no Telegram bot yet: digests, reminders and alerts stay `pending`
+
+The brief carried placeholders (`<PEGAR_TOKEN_AQUÍ>`), not a token, so the app
+was installed WITHOUT the five Telegram keys (the block is written and
+commented in `/etc/agenda/agenda.env`); the demos' bot is deliberately not
+shared (one bot = one getUpdates consumer). Until filled, the 07:00 and 19:00
+digests, the 15-minute reminder, the urgent notice and the estimate mirror
+are generated and parked in `public.outbox`, and no engine alert reaches
+anyone (`fleet-audit` ✗). **Ready:** @BotFather → token; `/start` in the
+chat → chat_id; uncomment and fill the block; `systemctl restart agenda
+agenda-worker`; `fleet-audit.sh --app=agenda` green. Decides: Miguel.
+
 ## DONE in CAPACIDADES-VISIBLES-S1 (2026-09-20) — what was built now EXISTS for users: the generator declares the operational blocks by signal of the description, the docs say which version has what, the panel shows automation and voice with real state
 
 | Item | What closed it | Where |

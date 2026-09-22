@@ -212,6 +212,16 @@ What "waits for someone" means is declared per state machine with `pending` — 
 
 A schema's `resources` object maps each resource (entity) **name** to a resource definition. Each resource becomes one Postgres table (per tenant) plus its derived REST + GraphQL surface. This section covers resource **naming**, the resource-level **key set**, and the two resource-level structural blocks `renamed_from` and `foreign_keys`. Field-level keys, relations, indexes, events, hooks and RBAC are documented in their own sections (see §3 Fields, §4 Relations, §5 Indexes, §6 Events/Hooks, §7 RBAC).
 
+**Today's agenda (VOZ-16, APP-AGENDA-S2).** A listed resource with a `ranges`
+block (§2.7) contributes a "📅 Hoy en agenda" section at the top of the digest:
+its rows whose range touches the report's day (the same `overlaps` predicate as
+`?filter[<range>][overlaps]=`), ordered by start, "HH:MM–HH:MM <title>" in the
+report's zone (`APPXIMO_SUMMARY_TIMEZONE`), capped at 10 per resource, a block
+that crosses the day's edge shown as "…". The title is the resource's single
+required default-less text field, else a field named `titulo`/`title`/`nombre`/
+`name`/`asunto`/`texto`/`descripcion`. No key to declare; a non-empty agenda
+counts as news for `notify: changes`.
+
 ### 2.1 Resource naming
 
 Every resource name MUST match the regex:

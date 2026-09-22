@@ -1811,19 +1811,6 @@ control plane by default (an `APPXIMO_CONTROL_BIND` for the multi-host case)
 and `fleet-audit` flags ✗ a control plane not on loopback. Origin:
 APP-AGENDA-S1 Part A. Decides: agent.
 
-### OPS-60 — On the 58 `/dev/null` is a REGULAR FILE since 2026-09-20: apt cannot verify signatures, unattended-upgrades patches nothing
-
-`stat /dev/null` → "regular empty file 644"; the journal says "/dev/null is
-not a device" since 2026-09-20 00:00 (before APP-AGENDA-S1). `apt-get update`
-fails with "gpgv… cannot create /dev/null: Permission denied" (the `_apt`
-user), so the box serving the demos AND the agenda has received no security
-patches since, silently (unattended-upgrades reports "no packages" over stale
-indexes). Services do not feel it. **Ready:** as root on the 58,
-`mv /dev/null /root/dev-null-era-archivo && mknod -m 666 /dev/null c 1 3 &&
-apt-get update` (the session tried twice; the permission classifier refused),
-plus a `fleet-audit.sh` check that `/dev/null` is a character device (1:3).
-Evidence: `evidencia/APP-AGENDA-S1/58/dev-null.txt`. Decides: Miguel.
-
 ### OPS-61 — Restoring a set from the 58 needs PostgreSQL 18 on the destination: the 105's PostgreSQL 16 cannot read the dump
 
 `pg_restore` 16 → "unsupported version (1.16) in file header" over the dump
@@ -1833,42 +1820,6 @@ silently depends on the destination's major version. **Ready:** `backup.sh`
 writes the server version into the `.manifest`; `restore.sh` and the command
 center's `pg_version` check demand it; one line in docs/PRODUCTION.md §4.
 Origin: APP-AGENDA-S1 Part A. Decides: agent.
-
-### OPS-62 — Miguel's agenda has no Telegram bot yet: digests, reminders and alerts stay `pending`
-
-The brief carried placeholders (`<PEGAR_TOKEN_AQUÍ>`), not a token, so the app
-was installed WITHOUT the five Telegram keys (the block is written and
-commented in `/etc/agenda/agenda.env`); the demos' bot is deliberately not
-shared (one bot = one getUpdates consumer). Until filled, the 07:00 and 19:00
-digests, the 15-minute reminder, the urgent notice and the estimate mirror
-are generated and parked in `public.outbox`, and no engine alert reaches
-anyone (`fleet-audit` ✗). **Ready:** @BotFather → token; `/start` in the
-chat → chat_id; uncomment and fill the block; `systemctl restart agenda
-agenda-worker`; `fleet-audit.sh --app=agenda` green. Decides: Miguel.
-
-### VOZ-16 — The digest does not list "today's compromisos": it is a census of states and news, not the day's agenda
-
-`/api/summary` counts rows per state, created/updated today and the delta
-against yesterday; it does not know that a resource with `ranges` has "today's
-rows" (the ones whose range touches the day) nor lists them with their hour.
-A morning digest of an agenda should open with "hoy: 10:00 dentista, 15:00
-reunión"; today that comes from «qué tengo hoy» by voice, not from the
-digest. **Ready:** a digest section for range resources — the rows whose
-range overlaps the day (the same `overlaps` the voice uses), ordered by start,
-hour + title; a strip at the top of the image. No new key: derived from
-`ranges`. Origin: APP-AGENDA-S1 Part C. Decides: agent.
-
-### VOZ-17 — «Tengo que comprar pintura» writes nothing: without a write verb the model reads a loose sentence
-
-«tengo que comprar pintura para el techo» → model → `unclear` ("not a data
-question: a personal note"); «agregá la tarea comprar pintura…» → creates.
-Likewise «qué me dijo Fabián» (finding a registro by its content) has no plan.
-An agenda by voice is used with one's own phrasing («tengo que…», «acordate
-que…»); demanding the verb makes the owner speak like the machine. **Ready:**
-the vocabulary tells the model that «tengo que / hay que / acordate de» over
-a task resource IS a create (and the parser gets one more rule, US$ 0); a
-`list` with `search` for «qué me dijo X» over a free-text resource. Origin:
-APP-AGENDA-S1 Part F (lab). Decides: agent.
 
 ### VOZ-18 — The estimate-vs-real mirror is per task; there is no weekly aggregate («esta semana subestimaste 60 %»)
 
@@ -1902,3 +1853,15 @@ nobody can tell which worker each one runs nor whether a deploy changed it;
 **Ready:** the engine build recipe builds the worker with the same ldflags,
 and `install.sh` warns when the worker says `dev`. Origin: APP-AGENDA-S1
 Part A. Decides: agent.
+
+### OPS-63 — Nobody tells Telegram when an app is DOWN: the command center sees it (salud:false every 10 min) but does not notify
+
+The engine's alerter reports incidents of a LIVE app (stale/failed backup,
+disk, a 500, a stuck outbox, spend); an app that is down cannot report itself.
+The command center reads every app's health every 10 minutes and stores the
+reading, but has no Telegram destination. Miguel asked that the demos "only
+say something if they fall": today a fall of tiendita/petfriendly/agenda shows
+in the center's panel, not on the phone. **Ready:** a Telegram destination in
+the center (its own `APPXIMO_TELEGRAM_*`) and a rule in the health reader —
+on ok→false (and back) send ONE message per app, with two-reading hysteresis.
+Origin: APP-AGENDA-S2 Part 2. Decides: agent.
