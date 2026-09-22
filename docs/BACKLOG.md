@@ -1798,3 +1798,107 @@ declare their hours. **Ready:** a declarable key (e.g. `ranges.<n>.hours:
 ["07:00","20:00"]`) that resolves the ambiguity toward the working hours — or
 VOZ-6 (real dictation) saying whether the rule bothers at all. Origin:
 MOTOR-AGENDA-S1 Part D.5. Decides: Miguel.
+
+### OPS-59 — The stock binary's control plane listens on EVERY interface (`*:9092`); ufw is the only guard
+
+`appximo serve` opens the control plane (`X-Admin-Key`) on `:<port>` without
+binding loopback: on the 58 `agenda` and `vetapp` show `*:9092` / `*:9098`
+while the consumer binary of the tiendita binds `127.0.0.1:9099`. The written
+rule is "never expose the control plane"; today the firewall keeps it, not the
+engine — a box without ufw (or a chaos drill's `ufw disable`) leaves it on the
+Internet behind one admin key. **Ready:** `serve` binds `127.0.0.1` for the
+control plane by default (an `APPXIMO_CONTROL_BIND` for the multi-host case)
+and `fleet-audit` flags ✗ a control plane not on loopback. Origin:
+APP-AGENDA-S1 Part A. Decides: agent.
+
+### OPS-60 — On the 58 `/dev/null` is a REGULAR FILE since 2026-09-20: apt cannot verify signatures, unattended-upgrades patches nothing
+
+`stat /dev/null` → "regular empty file 644"; the journal says "/dev/null is
+not a device" since 2026-09-20 00:00 (before APP-AGENDA-S1). `apt-get update`
+fails with "gpgv… cannot create /dev/null: Permission denied" (the `_apt`
+user), so the box serving the demos AND the agenda has received no security
+patches since, silently (unattended-upgrades reports "no packages" over stale
+indexes). Services do not feel it. **Ready:** as root on the 58,
+`mv /dev/null /root/dev-null-era-archivo && mknod -m 666 /dev/null c 1 3 &&
+apt-get update` (the session tried twice; the permission classifier refused),
+plus a `fleet-audit.sh` check that `/dev/null` is a character device (1:3).
+Evidence: `evidencia/APP-AGENDA-S1/58/dev-null.txt`. Decides: Miguel.
+
+### OPS-61 — Restoring a set from the 58 needs PostgreSQL 18 on the destination: the 105's PostgreSQL 16 cannot read the dump
+
+`pg_restore` 16 → "unsupported version (1.16) in file header" over the dump
+the 58's PostgreSQL 18 writes; the off-box set was restored in a throwaway
+`postgres:18` container instead (25 tables = manifest). The "lost box" runbook
+silently depends on the destination's major version. **Ready:** `backup.sh`
+writes the server version into the `.manifest`; `restore.sh` and the command
+center's `pg_version` check demand it; one line in docs/PRODUCTION.md §4.
+Origin: APP-AGENDA-S1 Part A. Decides: agent.
+
+### OPS-62 — Miguel's agenda has no Telegram bot yet: digests, reminders and alerts stay `pending`
+
+The brief carried placeholders (`<PEGAR_TOKEN_AQUÍ>`), not a token, so the app
+was installed WITHOUT the five Telegram keys (the block is written and
+commented in `/etc/agenda/agenda.env`); the demos' bot is deliberately not
+shared (one bot = one getUpdates consumer). Until filled, the 07:00 and 19:00
+digests, the 15-minute reminder, the urgent notice and the estimate mirror
+are generated and parked in `public.outbox`, and no engine alert reaches
+anyone (`fleet-audit` ✗). **Ready:** @BotFather → token; `/start` in the
+chat → chat_id; uncomment and fill the block; `systemctl restart agenda
+agenda-worker`; `fleet-audit.sh --app=agenda` green. Decides: Miguel.
+
+### VOZ-16 — The digest does not list "today's compromisos": it is a census of states and news, not the day's agenda
+
+`/api/summary` counts rows per state, created/updated today and the delta
+against yesterday; it does not know that a resource with `ranges` has "today's
+rows" (the ones whose range touches the day) nor lists them with their hour.
+A morning digest of an agenda should open with "hoy: 10:00 dentista, 15:00
+reunión"; today that comes from «qué tengo hoy» by voice, not from the
+digest. **Ready:** a digest section for range resources — the rows whose
+range overlaps the day (the same `overlaps` the voice uses), ordered by start,
+hour + title; a strip at the top of the image. No new key: derived from
+`ranges`. Origin: APP-AGENDA-S1 Part C. Decides: agent.
+
+### VOZ-17 — «Tengo que comprar pintura» writes nothing: without a write verb the model reads a loose sentence
+
+«tengo que comprar pintura para el techo» → model → `unclear` ("not a data
+question: a personal note"); «agregá la tarea comprar pintura…» → creates.
+Likewise «qué me dijo Fabián» (finding a registro by its content) has no plan.
+An agenda by voice is used with one's own phrasing («tengo que…», «acordate
+que…»); demanding the verb makes the owner speak like the machine. **Ready:**
+the vocabulary tells the model that «tengo que / hay que / acordate de» over
+a task resource IS a create (and the parser gets one more rule, US$ 0); a
+`list` with `search` for «qué me dijo X» over a free-text resource. Origin:
+APP-AGENDA-S1 Part F (lab). Decides: agent.
+
+### VOZ-18 — The estimate-vs-real mirror is per task; there is no weekly aggregate («esta semana subestimaste 60 %»)
+
+`espejo_estimacion` sends one message when a task with an estimate closes. A
+period summary (sum of estimates vs reals, the bias) does not exist: the
+digest does not aggregate two numeric columns against each other. The value
+of the mirror is the sustained bias, not one case; after four weeks the
+per-task message becomes noise. **Ready:** first four weeks of Miguel's real
+estimates (decides whether the bias is constant); then a digest section or an
+`aggregate` with a `ratio` of two sums over the period. Origin: APP-AGENDA-S1
+Part C. Decides: Miguel.
+
+### ENG-63 — The `/app` lists "Summary" as if it were a resource (0 rows): it takes `/api/summary` from the OpenAPI for a table
+
+The generic panel derives its resources from `/openapi.json`; `/api/summary`
+and `/api/ask` are published there and `summary` shows in the sidebar as an
+empty resource (seen on the agenda: «SU · Summary · 0»). A phantom resource in
+the owner's menu breaks the promise "everything you see comes from the
+contract". **Ready:** tag the cross-resource endpoints in the OpenAPI
+(`x-appximo-endpoint: summary|ask`, like `x-appximo-virtual-resource` for
+files) and have `/app` omit them from the menu (or show them as actions, not
+tables). Origin: APP-AGENDA-S1 browser check. Decides: agent.
+
+### AUTO-14 — The installed worker reports `appximo-worker dev (unknown)`: a bare `go build ./cmd/appximo-worker` injects no version
+
+The engine was built with its version (`8bef63c-app`); the worker with a bare
+`go build` → `fleet-audit` and the boot line say `dev (unknown)`
+(`scripts/build-worker.sh` does pass the ldflags). On a box with three apps
+nobody can tell which worker each one runs nor whether a deploy changed it;
+`deploy-app --worker-binary` verifies a version and here there is none.
+**Ready:** the engine build recipe builds the worker with the same ldflags,
+and `install.sh` warns when the worker says `dev`. Origin: APP-AGENDA-S1
+Part A. Decides: agent.

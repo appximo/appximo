@@ -631,6 +631,62 @@ bot:   ✅ Listo: creé evento planificación.
 Detalle técnico: docs/PRODUCTION.md §4.6g; ejemplo de schema
 `examples/model-lab/agenda-choques.json`.
 
+### 3g. La agenda del dueño — la primera app REAL sobre todo lo anterior (APP-AGENDA-S1)
+
+Una agenda personal (tareas, compromisos, registros, personas, áreas,
+etiquetas — nunca «evento») instalada como TERCERA app en una caja que ya
+sirve dos demos, con su propia base, su propio worker y su propia copia
+fuera de la caja. Lo que ese caso enseña vale para cualquier app real:
+
+- **Dónde vive.** `install.sh --app=<nombre> --port=<libre> --control-port=<libre>
+  --harden --worker-binary=…` sobre la caja de las demos: unidad, usuario,
+  base, `/etc/<app>`, `/var/lib/<app>`, sitio Caddy y timer de backup
+  propios. El reset nocturno de una demo restaura SOLO la base de esa demo;
+  el deploy de una demo reinicia SOLO su unidad. Lo único compartido es
+  Caddy (el instalador migra el Caddyfile inline a `import sites/*.caddy`
+  preservando lo que había; verifique las otras apps desde afuera antes y
+  después) y PostgreSQL (un OOM de una app se lleva el de todas: swap
+  obligatorio). Cuando la app sea algo que no se puede perder ni una hora,
+  el escalón es un droplet propio con la misma receta.
+- **Antes de dormir: la copia fuera de la caja, probada.** `BACKUP_COPY_TO`
+  a otra caja por scp con una llave que SOLO puede subir
+  (`from="<ip>",restrict,command=<script que acepta únicamente scp -t <dir>>`
+  — ojo: scp manda `-d -t` cuando copia varios archivos, el comando forzado
+  debe admitirlo), `BACKUP_PASSPHRASE_FILE` para que los secretos viajen
+  cifrados, y DOS simulacros: `appximo drill restore --app=<app>` en la
+  caja, y el set copiado restaurado en OTRA máquina (un `postgres:18`
+  efímero alcanza — el cliente tiene que ser PostgreSQL 18 o más, un `pg_restore`
+  16 no lee el dump). Escriba el dominio de falla: dos cajas del mismo
+  proveedor en regiones distintas cubren el droplet muerto, no la cuenta.
+- **El schema declara solo los `events` que un workflow consume.** Un
+  `events: [create]` sin consumidor deja una fila `pending` en el outbox
+  para siempre y la alerta de outbox varado suena cada 15 minutos,
+  eternamente. (Los recordatorios por fila —trigger `time`— NO necesitan
+  `events`.)
+- **Qué funciona solo, y pocas veces:** el parte de las 7 y el de las 19
+  (lunes a viernes) por cron; «15 min antes» por fila; un aviso al anotar
+  algo urgente; el espejo estimado-vs-real al cerrar una tarea (un hook
+  rehúsa marcarla hecha sin decir cuánto tomó — por voz: «marcá como hecha
+  la tarea del techo, tomó 90 minutos»). Nada por hora.
+- **Su propio bot.** Un bot de Telegram = un consumidor de `getUpdates`: la
+  app real NO comparte el bot de las demos. `@BotFather` → token; `/start`
+  en el chat → `chat_id` en `getUpdates`; las cinco líneas
+  (`APPXIMO_TELEGRAM_BOT_TOKEN`, `_CHAT_ID`, `APPXIMO_ALERT_APP_NAME`,
+  `APPXIMO_TELEGRAM_SUMMARY_TENANT`, `_ROLE`) en `/etc/<app>/<app>.env` y
+  `systemctl restart <app> <app>-worker`. Hasta entonces los partes y avisos
+  quedan `pending` en `GET /admin/outbox` — nada se pierde, nada sale.
+- **Siri con un token acotado:** `appximo token --tenant <t> --role <rol del
+  dueño> --user-id <su id> --ttl 365d --paths /api/ask,/api/summary --id
+  <nombre>` — nunca admin; se revoca con `APPXIMO_JWT_REVOKED=<nombre>` sin
+  rotar el secreto. El atajo de §3d con la URL y el token de la app: un solo
+  atajo pregunta, anota, agenda y confirma (el «sí» es un `pending` de 5
+  minutos por usuario).
+- **Las provocaciones en un laboratorio, nunca en la base real:** el mismo
+  schema en un tenant de prueba con un usuario B (el choque es por dueño; B
+  no ve ni hereda las filas de A), el aviso 15 min con reinicio del worker
+  en la ventana (sale UNA vez), el parte encolado a mano como lo haría el
+  cron, y al final `tenant_<app>` con solo lo que el dueño configuró.
+
 ## 4. Qué hacer cuando pasa algo
 
 Recetas cortas, en el orden en que suele hacer falta. Todas empiezan igual: **mire antes de tocar** (30 segundos):
