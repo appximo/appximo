@@ -1144,13 +1144,16 @@ schema_perms() {
 # write_file PATH CONTENT — writes (or prints, in dry-run) then reports.
 write_file() {
 	local path="$1"; shift
+	# A dry-run WRITES NOTHING (APP-AGENDA-S1: it used to write every file for
+	# real and only SAY "[dry-run]" — a dry-run over an existing app rewrote its
+	# env/unit/site, and a dry-run of a new app left /etc/caddy/sites/<app>.caddy
+	# behind). MUST be an `if` (not `[ … ] && …`): a trailing `&&` that
+	# short-circuits returns 1, and under `set -e` this function is called as a
+	# plain statement, so a non-zero return aborts the whole install — a bug that
+	# only bites the REAL (non-dry-run) path (caught live in PROD-PATH-HARDEN-S1).
+	if [ "$DRY_RUN" = "yes" ]; then printf '  [dry-run] would write %s\n' "$path"; return 0; fi
 	mkdir -p "$(dirname "$path")"
 	printf '%s\n' "$1" > "$path" || die "could not write $path"
-	# MUST be an `if` (not `[ … ] && …`): a trailing `&&` that short-circuits
-	# returns 1, and under `set -e` this function is called as a plain statement,
-	# so a non-zero return aborts the whole install — a bug that only bites the
-	# REAL (non-dry-run) path (caught live in PROD-PATH-HARDEN-S1).
-	if [ "$DRY_RUN" = "yes" ]; then printf '  [dry-run] wrote %s\n' "$path"; fi
 }
 
 write_env_file() {
