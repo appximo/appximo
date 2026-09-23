@@ -297,10 +297,14 @@ func Speech(html string) string {
 		}
 		if b.Len() > 0 {
 			// a line that ends in ":" introduces the next («1 tarea: pagar la
-			// luz») — a space, not a full stop; any other line is a pause.
-			if strings.HasSuffix(b.String(), ":") {
+			// luz») — a space, not a full stop; a line that already ends a
+			// sentence gets no second stop; any other line is a pause.
+			switch prev := b.String(); {
+			case strings.HasSuffix(prev, ":"):
 				b.WriteString(" ")
-			} else {
+			case strings.HasSuffix(prev, ".") || strings.HasSuffix(prev, "?") || strings.HasSuffix(prev, "!"):
+				b.WriteString(" ")
+			default:
 				b.WriteString(". ")
 			}
 		}

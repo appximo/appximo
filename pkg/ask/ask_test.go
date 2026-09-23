@@ -366,6 +366,9 @@ func TestCompose_Formats(t *testing.T) {
 		t.Errorf("money/integer formats: %s %s %s", Money(123450000), Money(1234550), Integer(1234567))
 	}
 	// the middle dot is a comma for a voice (APP-AGENDA palabras); bullets go
+	if Speech("0 tareas\nNingún registro coincide.\n<i>tareas · antier</i>") != "0 tareas. Ningún registro coincide. tareas, antier" {
+		t.Errorf("speech double stop: %q", Speech("0 tareas\nNingún registro coincide.\n<i>tareas · antier</i>"))
+	}
 	if Speech("<b>3</b> pedidos:\n• P-001 · $ 120.000\n<i>pedidos · hoy</i>") != "3 pedidos: P-001, $ 120.000. pedidos, hoy" {
 		t.Errorf("speech: %q", Speech("<b>3</b> pedidos:\n• P-001 · $ 120.000\n<i>pedidos · hoy</i>"))
 	}
