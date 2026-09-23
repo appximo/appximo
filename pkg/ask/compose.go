@@ -276,15 +276,66 @@ func Number(v float64) string {
 
 var tagRe = regexp.MustCompile(`<[^>]+>`)
 
-// Speech strips HTML and bullets so a voice assistant reads the reply.
+// Speech renders a reply for a VOICE: tags out, entities back, bullets,
+// guillemets and pictographs gone (a voice assistant reads «✅» as "check mark
+// button" and «•» as "bullet"), the middle dot a comma, one pause per line.
 func Speech(html string) string {
 	s := tagRe.ReplaceAllString(html, "")
-	s = strings.NewReplacer("&lt;", "<", "&gt;", ">", "&amp;", "&", "• ", "", "…", "...").Replace(s)
+	s = strings.NewReplacer("&lt;", "<", "&gt;", ">", "&amp;", "&", "• ", "", "…", "...", "«", "", "»", "", " · ", ", ").Replace(s)
+	s = strings.Map(func(r rune) rune {
+		if isPictograph(r) {
+			return -1
+		}
+		return r
+	}, s)
 	lines := strings.Split(s, "\n")
-	for i := range lines {
-		lines[i] = strings.TrimSpace(lines[i])
+	var b strings.Builder
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			// a line that ends in ":" introduces the next («1 tarea: pagar la
+			// luz») — a space, not a full stop; any other line is a pause.
+			if strings.HasSuffix(b.String(), ":") {
+				b.WriteString(" ")
+			} else {
+				b.WriteString(". ")
+			}
+		}
+		b.WriteString(l)
 	}
-	return strings.TrimSpace(strings.Join(lines, ". "))
+	return strings.TrimSpace(b.String())
+}
+
+// isPictograph is true for the emoji / symbol blocks a reply decorates
+// itself with (traffic lights, check marks, the gear of the trace, the
+// variation selector that follows them) — never for letters, digits or
+// punctuation a sentence needs.
+func isPictograph(r rune) bool {
+	switch {
+	case r >= 0x1F000 && r <= 0x1FAFF: // emoji, pictographs, symbols
+		return true
+	case r >= 0x2600 && r <= 0x27BF: // misc symbols, dingbats (✅ ⚙ ☎ ✗)
+		return true
+	case r >= 0x2B00 && r <= 0x2BFF: // arrows / geometric (⬆ ⭐)
+		return true
+	case r == 0xFE0F || r == 0x200D: // variation selector, zero-width joiner
+		return true
+	case r == 0x2139 || r == 0x203C || r == 0x2049 || r == 0x2122 || r == 0x2194 || r == 0x21A9 || r == 0x231A || r == 0x231B: // ℹ ‼ ⁉ ™ ↔ ↩ ⌚ ⌛
+		return true
+	}
+	return false
+}
+
+// SpokenTrace is the trace line as a voice reads it — the same datum as
+// TraceLine (who answered, how long, what it cost) without the gear or the
+// middle dots: «Costo: parser, 5 ms, US$ 0».
+func SpokenTrace(r Result) string {
+	s := tagRe.ReplaceAllString(TraceLine(r), "")
+	s = strings.NewReplacer("⚙︎ ", "Costo: ", "⚙ ", "Costo: ", " · ", ", ", "&lt;", "<", "&gt;", ">", "&amp;", "&").Replace(s)
+	return strings.TrimSpace(s)
 }
 
 // Plain renders Telegram HTML as plain text for a screen that is not

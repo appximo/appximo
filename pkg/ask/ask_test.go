@@ -365,7 +365,8 @@ func TestCompose_Formats(t *testing.T) {
 	if Money(123450000) != "$ 1.234.500" || Money(1234550) != "$ 12.345,50" || Integer(1234567) != "1.234.567" {
 		t.Errorf("money/integer formats: %s %s %s", Money(123450000), Money(1234550), Integer(1234567))
 	}
-	if Speech("<b>3</b> pedidos:\n• P-001 · $ 120.000\n<i>pedidos · hoy</i>") != "3 pedidos:. P-001 · $ 120.000. pedidos · hoy" {
+	// the middle dot is a comma for a voice (APP-AGENDA palabras); bullets go
+	if Speech("<b>3</b> pedidos:\n• P-001 · $ 120.000\n<i>pedidos · hoy</i>") != "3 pedidos: P-001, $ 120.000. pedidos, hoy" {
 		t.Errorf("speech: %q", Speech("<b>3</b> pedidos:\n• P-001 · $ 120.000\n<i>pedidos · hoy</i>"))
 	}
 	if singular("ordenes") != "orden" || singular("citas") != "cita" || singular("pqrs") != "pqr" {

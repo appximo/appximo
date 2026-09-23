@@ -96,7 +96,7 @@ var (
 	Ops   = []string{"eq", "gt", "gte", "lt", "lte", "partial", "start", "is_null"}
 	// Ranges: the past windows, plus the FUTURE days an agenda is asked about
 	// (MOTOR-AGENDA-S1): tomorrow, day_after_tomorrow, next_week, next_<weekday>.
-	Ranges = []string{"today", "yesterday", "this_week", "last_week", "this_month", "last_month", "last_7_days", "last_30_days", "this_year",
+	Ranges = []string{"today", "yesterday", "day_before_yesterday", "this_week", "last_week", "this_month", "last_month", "last_7_days", "last_30_days", "this_year",
 		"tomorrow", "day_after_tomorrow", "next_week", "next_monday", "next_tuesday", "next_wednesday", "next_thursday", "next_friday", "next_saturday", "next_sunday"}
 	numericOps = map[string]bool{"eq": true, "gt": true, "gte": true, "lt": true, "lte": true, "is_null": true}
 	textOps    = map[string]bool{"eq": true, "partial": true, "start": true, "is_null": true}

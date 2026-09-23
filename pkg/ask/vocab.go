@@ -242,10 +242,13 @@ var (
 // schema + the role's RBAC evaluation, so a role never even receives the word
 // for a resource it cannot see.
 type Vocabulary struct {
-	AppName    string
-	resources  map[string]*Resource
-	order      []string
-	writeCheck WriteCheck
+	// listedOrder keeps summary.resources in the OWNER'S order (Listed on a
+	// Resource loses it) — what the help shows first.
+	listedOrder []string
+	AppName     string
+	resources   map[string]*Resource
+	order       []string
+	writeCheck  WriteCheck
 	// fp is the vocabulary's fingerprint (Fingerprint): every name the parser
 	// and the model may recognize, hashed — a plan cache scoped by it never
 	// serves a plan translated against a vocabulary that has since changed
@@ -349,6 +352,9 @@ func fill(v *Vocabulary, s *schema.APISchema, check ReadCheck) {
 	if s.Summary != nil {
 		for _, n := range s.Summary.Resources {
 			listed[n] = true
+			if allowed, _ := check(n); allowed {
+				v.listedOrder = append(v.listedOrder, n)
+			}
 		}
 	}
 	for _, name := range sortedKeys(s.Resources) {

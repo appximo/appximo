@@ -24,6 +24,8 @@ func Resolve(rng string, now time.Time) (Window, bool) {
 		return Window{day, day.AddDate(0, 0, 1), "hoy"}, true
 	case "yesterday":
 		return Window{day.AddDate(0, 0, -1), day, "ayer"}, true
+	case "day_before_yesterday":
+		return Window{day.AddDate(0, 0, -2), day.AddDate(0, 0, -1), "antier"}, true
 	case "this_week":
 		return Window{monday, monday.AddDate(0, 0, 7), "esta semana"}, true
 	case "last_week":

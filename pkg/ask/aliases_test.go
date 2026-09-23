@@ -387,7 +387,7 @@ func TestAliases_DisplayCarriesTheTraceSpeechDoesNot(t *testing.T) {
 	if r.Kind != "answer" || r.Source != "parser" {
 		t.Fatalf("%s %s %s", r.Kind, r.Source, r.Text)
 	}
-	if !strings.Contains(r.Display, "⚙︎ parser") || strings.Contains(r.Display, "<") {
+	if !strings.Contains(r.Display, "Costo: parser") || strings.Contains(r.Display, "<") || strings.Contains(r.Display, "⚙") {
 		t.Errorf("display must carry the trace as plain text: %q", r.Display)
 	}
 	if strings.Contains(r.Speech, "⚙︎") {

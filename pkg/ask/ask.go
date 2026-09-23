@@ -90,10 +90,11 @@ type Result struct {
 	Text     string `json:"text"`
 	Speech   string `json:"speech"`
 	Headline string `json:"headline"`
-	// Display is Text as plain text — no HTML, line breaks kept, the ⚙︎ trace
-	// INCLUDED when it is on — for a screen that is not Telegram (a Siri
-	// "Show Result" card): the trace is read there, never heard (Speech
-	// never carries it).
+	// Display is the reply as READ ALOUD: the Speech, plus — with tracing on —
+	// the cost line ("Costo: parser, 5 ms, US$ 0") as its last line, so a
+	// shortcut that speaks display hears the same content in both states and
+	// only that line changes. Speech never carries the trace; Text (Telegram
+	// HTML) carries it as the ⚙︎ line.
 	Display string `json:"display"`
 	// Number is the engine's figure when the answer has one (count / sum…).
 	Number *float64 `json:"number,omitempty"`
@@ -148,10 +149,17 @@ func Answer(ctx context.Context, d Deps, question string) Result {
 	if res.Speech == "" {
 		res.Speech = Speech(res.Text) // the voice never carries the trace
 	}
+	// Display is the reply as it is READ ALOUD, always: the spoken form and —
+	// only when tracing is on — the cost line after it, itself speakable. A
+	// shortcut that speaks display (and not speech, so the answer is never
+	// heard twice) hears the same content with the trace on or off; the ONE
+	// thing that changes is that last line (APP-AGENDA, decided with Miguel's
+	// own Siri shortcut). Screens (the Siri card, the drill) show the same.
+	res.Display = res.Speech
 	if d.Trace && res.Text != "" {
 		res.Text += "\n" + TraceLine(res)
+		res.Display = strings.TrimSpace(res.Display + "\n" + SpokenTrace(res))
 	}
-	res.Display = Plain(res.Text)
 	return res
 }
 
@@ -449,9 +457,14 @@ func discardResult(d Deps, pr ParseResult, question string, cancelled bool) Resu
 		r.Headline = "¡Hola!"
 		r.Text = "👋 ¡Hola! Preguntame con tus palabras («cuántas órdenes hay hoy») o pedime que anote algo. " + guide
 	case "help":
+		// EXAMPLES derived from the schema — resources, states, declared
+		// aliases, flags, ranges — split into what the parser settles for
+		// free and what the model must think (VOZ-19). Never a hand-written
+		// list, so it cannot go stale; the speech is composed apart, in short
+		// sentences with no symbols or prices, for a voice assistant.
 		r.Kind = "help"
 		r.Headline = "Qué puedo hacer"
-		r.Text = "ℹ️ " + guide + " También: <b>resumen</b>, <b>estado</b>, <b>ayuda</b>."
+		r.Text, r.Speech = HelpExamples(d.Vocab, d.Write != nil && d.Vocab.Writable())
 	default: // bare_name
 		r.Kind = "unclear"
 		r.Headline = "¿Qué querés saber?"
@@ -770,6 +783,14 @@ func describeFilter(fd *Field, f Filter) string {
 	}
 	if fd != nil && fd.Type == "time" && val == "now" {
 		val = "ahora"
+	}
+	if fd != nil && fd.Type == "bool" && f.Op == "eq" {
+		if b, ok := f.Value.(bool); ok {
+			if b {
+				return f.Field + ": sí"
+			}
+			return f.Field + ": no"
+		}
 	}
 	return f.Field + " " + op + " " + val
 }

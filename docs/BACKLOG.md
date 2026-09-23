@@ -1821,6 +1821,24 @@ writes the server version into the `.manifest`; `restore.sh` and the command
 center's `pg_version` check demand it; one line in docs/PRODUCTION.md §4.
 Origin: APP-AGENDA-S1 Part A. Decides: agent.
 
+### VOZ-20 — A proper name on a resource with TWO nameable relation targets falls to the model («tareas de Esposa»: area or persona?)
+
+The parser resolves a proper name against the target of ONE relation; with two
+(tareas → areas AND personas) it answers «name could match area_id or
+persona_id» and the question goes to the model — three of the agenda's real
+questions, two of them wasted. **Ready:** try the name through the existing
+matcher (names.go) against BOTH targets before giving up: one match → that
+one; both → «¿cuál?»; none → «no encuentro». A small session with the
+history's cases.
+
+### VOZ-21 — «Resumen» / «estado» said to /api/ask (not to the bot) fall to the model and are wasted
+
+The fixed commands live in the Telegram receiver; the same word through
+/api/ask (Siri, the panel) is not a question the parser settles: «Resumen»
+cost US$ 0,0036 with «no resource named» and was marked wasted. **Ready:** the
+parser discards «resumen»/«estado»/«gasto» at US$ 0 pointing at the endpoint —
+or /api/ask composes the digest itself (the same Report the bot uses).
+
 ### VOZ-18 — The estimate-vs-real mirror is per task; there is no weekly aggregate («esta semana subestimaste 60 %»)
 
 `espejo_estimacion` sends one message when a task with an estimate closes. A

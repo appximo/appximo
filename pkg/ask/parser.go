@@ -86,7 +86,7 @@ var (
 		// agenda function words (MOTOR-AGENDA-S1): «tengo algo», «cuándo estoy libre», «estoy ocupado»
 		"algo", "cuando", "estoy", "estamos", "ocupado", "ocupada", "agendado", "agendada", "programado", "programada")
 	countWords = set("cuantos", "cuantas", "cuanto", "cuanta", "numero", "cantidad", "conta", "contame", "cuenta", "cuentame", "total")
-	listWords  = set("lista", "listame", "listado", "mostrame", "muestrame", "mostra", "muestra", "dame", "traeme", "pasame", "cuales", "que", "ver")
+	listWords  = set("lista", "listar", "listame", "listado", "mostrame", "muestrame", "mostra", "mostrar", "muestra", "dame", "traeme", "pasame", "cuales", "que", "ver")
 	// lastWords («los últimos 5 pedidos») list the most recent rows — the list
 	// already sorts by the creation timestamp, newest first; a number right
 	// after bounds it. Generic Spanish, no domain word.
@@ -119,6 +119,7 @@ var periodPhrases = []struct {
 	{"esta semana", "this_week"}, {"este mes", "this_month"}, {"este ano", "this_year"}, {"este año", "this_year"},
 	{"del dia de hoy", "today"}, {"del dia", "today"}, {"de la semana", "this_week"}, {"del mes", "this_month"}, {"del ano", "this_year"}, {"del año", "this_year"},
 	{"de hoy", "today"}, {"hoy", "today"}, {"de ayer", "yesterday"}, {"ayer", "yesterday"},
+	{"de antier", "day_before_yesterday"}, {"antier", "day_before_yesterday"}, {"de anteayer", "day_before_yesterday"}, {"anteayer", "day_before_yesterday"},
 	// The future (MOTOR-AGENDA-S1): what an agenda is asked about.
 	{"pasado manana", "day_after_tomorrow"}, {"de manana", "tomorrow"}, {"manana", "tomorrow"},
 	{"la semana que viene", "next_week"}, {"semana que viene", "next_week"}, {"la proxima semana", "next_week"}, {"proxima semana", "next_week"},
@@ -382,6 +383,30 @@ func Parse(question string, v *Vocabulary) ParseResult {
 			}
 			seenField[f.Name] = true
 			filters = append(filters, Filter{Field: f.Name, Op: "eq", Value: vf.val})
+			break
+		}
+	}
+
+	// 5b. a BOOL field named by its own word («tareas urgentes» on a bool
+	// `urgente`): the field's name forms mean true; «no» / «sin» right before
+	// it means false. Nothing domain-specific lives here — the schema named
+	// the flag, and that name is the word (VOZ-18).
+	for _, f := range res.Fields {
+		if f.Type != "bool" || seenField[f.Name] {
+			continue
+		}
+		for i := range toks {
+			if toks[i].used || !boolNamed(f, toks[i].norm) {
+				continue
+			}
+			val := true
+			if i > 0 && !toks[i-1].used && (toks[i-1].norm == "no" || toks[i-1].norm == "sin") {
+				toks[i-1].used = true
+				val = false
+			}
+			toks[i].used = true
+			seenField[f.Name] = true
+			filters = append(filters, Filter{Field: f.Name, Op: "eq", Value: val})
 			break
 		}
 	}
@@ -944,7 +969,7 @@ func hasExecutableWord(toks []token, v *Vocabulary) bool {
 		if countWords[n] || (listWords[n] && n != "que" && n != "cuales" && n != "ver") || lastWords[n] || sumWords[n] || avgWords[n] || deleteVerbs[n] || writeVerbs[n] || periodOnly[n] || words[n] {
 			return true
 		}
-		if n == "por" || n == "hoy" || n == "ayer" {
+		if n == "por" || n == "hoy" || n == "ayer" || n == "antier" || n == "anteayer" {
 			return true
 		}
 		// A day to come («mañana», «el lunes») or «libre» is a question only
@@ -1166,4 +1191,16 @@ func pickAgenda(v *Vocabulary, keep func(*Resource) bool) *Resource {
 // futureRange reports whether a period token names a day to come.
 func futureRange(tok string) bool {
 	return tok == "tomorrow" || tok == "day_after_tomorrow" || tok == "next_week" || strings.HasPrefix(tok, "next_")
+}
+
+// boolNamed reports whether a single normalized token is one of the forms a
+// bool field is named by (its schema name, singular or plural, underscores as
+// spaces — a multi-word name never matches one token).
+func boolNamed(f *Field, norm string) bool {
+	for _, form := range schema.NameForms(f.Name) {
+		if !strings.Contains(form, " ") && form == norm {
+			return true
+		}
+	}
+	return false
 }

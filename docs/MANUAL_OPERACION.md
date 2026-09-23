@@ -266,7 +266,7 @@ en las palabras de su schema, sin llamarlos pendientes. Un estado final
 
 - **`resumen`** — qué pasó hoy (nuevos, actualizados, pendientes por recurso).
 - **`estado`** — cuántos hay de cada cosa ahora mismo.
-- **`ayuda`** — la lista. Cualquier palabra que no entienda devuelve la ayuda,
+- **`ayuda`** — EJEMPLOS de frases sacados del schema de la app (recursos, estados, sinónimos declarados, banderas): primero las que el parser resuelve al instante y gratis (cada una probada contra el schema antes de mostrarla), después las que piensa el modelo y cuestan unos centavos; termina con los comandos fijos. Nunca es una lista escrita a mano, así que no envejece; cuesta US$ 0 siempre. Cualquier palabra que no entienda devuelve la ayuda,
   nunca un error.
 
 **Cómo se activa** — en `/etc/<app>/<app>.env`, además del token/chat de §3b:

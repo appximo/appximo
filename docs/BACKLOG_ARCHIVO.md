@@ -490,6 +490,15 @@ anyone (`fleet-audit` ✗). **Ready:** @BotFather → token; `/start` in the
 chat → chat_id; uncomment and fill the block; `systemctl restart agenda
 agenda-worker`; `fleet-audit.sh --app=agenda` green. Decides: Miguel.
 
+## DONE in AGENDA-PALABRAS-S1 (2026-09-23) — the agenda in the owner's words: the questions that fell to the model without need, a help made of examples, a display that reads aloud
+
+| Item | What closed it | Where |
+|---|---|---|
+| **the owner's fallen words** | the 58's `/admin/ask` history (82 questions, parser 34 %, 15 wasted) read reason by reason: «urgentes» (a BOOL `urgente` — the parser had no bool handling; there is NO `prioridad` enum, so no alias was invented), «Listar» (not a list verb), «eventos» / «completas» (words the owner uses, declared as `aliases` on compromisos and on `hecha`), «antier» (no period token). Engine: a bool field by its own name («tareas urgentes» → `urgente = true`, «no»/«sin» → false, VOZ-18 in the code comment), «listar/mostrar», «antier/anteayer» = `day_before_yesterday`; schema: two aliases. Verified in a lab on the new binary and on the 58 after deploy: every one of those sentences answers `source=parser`, US$ 0 | `evidencia/AGENDA-PALABRAS-S1/`, `pkg/ask/help_test.go` |
+| **«ayuda» = examples from the schema** (VOZ-19) | `pkg/ask/help.go`: phrases derived from resources, declared state aliases, periods, flags, ranges, the obligation and a transition — split into what the parser settles for free (each example SELF-VERIFIED with `Parse` before it is shown; a transition the parser cannot settle on that schema is dropped, never promised) and what the model must think; a speech in short sentences, no symbol/price/digit; the Telegram `ayuda` routed through it; a parser discard, US$ 0 always | `pkg/ask/help.go` |
+| **`display` reads aloud in both trace states** | `display` = the spoken reply (tags, bullets, guillemets, pictographs out; middle dot a comma; a colon line joins its next) + ONLY with `APPXIMO_ASK_TRACE=on` one last speakable line `Costo: parser, 2 ms, US$ 0`; verified with the variable in both states: identical content, only that line differs. Nothing else consumed `display` for its line breaks (Telegram uses `text`; the drill prints it) | `pkg/ask/ask.go`, `compose.go` |
+| **NOT done, on purpose** | no `prioridad` enum (urgente/alta/media/baja) was added: the deployed field is a bool and the owner never said «alta/media/baja»; changing the data model is a migration for him to decide. Left open: VOZ-20 (a name across two relation targets), VOZ-21 («resumen» through /api/ask) | — |
+
 ## DONE in CAPACIDADES-VISIBLES-S1 (2026-09-20) — what was built now EXISTS for users: the generator declares the operational blocks by signal of the description, the docs say which version has what, the panel shows automation and voice with real state
 
 | Item | What closed it | Where |

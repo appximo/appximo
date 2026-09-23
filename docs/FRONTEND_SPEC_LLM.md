@@ -610,8 +610,10 @@ by the caller's role exactly like a list read; a UI may offer them as a
   fetch, so use `fetch` with the Bearer and an object URL. `?view=census` is
   the plain count of everything.
 - `POST /api/ask {"q": "<a sentence>"}` → `{ "kind", "headline", "text"
-  (Telegram HTML), "display" (plain text, WITH the ⚙︎ trace when the app has
-  `APPXIMO_ASK_TRACE=on`), "speech" (plain, NEVER the trace), "number",
+  (Telegram HTML), "display" (the reply as READ ALOUD — the same as
+  "speech" — plus, only when the app has `APPXIMO_ASK_TRACE=on`, one last
+  speakable line `Costo: parser, 5 ms, US$ 0`; speak either one, never both),
+  "speech" (plain, NEVER the trace), "number",
   "understood", "plan", "source": "parser|cache|model|confirm", "cost_usd",
   "fallback_es", ... }`. `kind` is the screen state: `answer` (show `display`
   or `text`), `unclear` / `not_found` / `ambiguous` (show the text — it names

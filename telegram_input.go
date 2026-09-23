@@ -201,7 +201,12 @@ func (rcv *telegramReceiver) handleUpdate(ctx context.Context, u telegram.Update
 		text, png := rcv.spend(ctx)
 		rcv.replyWithImage(sendCtx, png, text)
 	case "ayuda", "start", "help":
-		rcv.reply(sendCtx, helpText)
+		// The help is COMPOSED BY THE ENGINE from the tenant's schema (examples
+		// the parser settles for free vs the ones the model thinks, VOZ-19) —
+		// «ayuda» is a parser discard, so it costs US$ 0; the static list below
+		// remains the fallback when the engine is not up or the question path
+		// is disabled (question() falls back to it by itself).
+		rcv.question(ctx, sendCtx, "ayuda")
 	default:
 		// Anything that is not a fixed command is a QUESTION (VOZ-PREGUNTAS-S1,
 		// ADR-033): the engine's /api/ask translates it into a validated read

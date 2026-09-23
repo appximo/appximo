@@ -2311,7 +2311,24 @@ settle. Measured: before 49/49 model calls, US$ 0.147 per corpus pass; after
 second; p50 from 0.9 s to 4 ms. **Traceability (VOZ-TRAZABILIDAD-S1):**
 every reply carries `source`/`cost_usd`/`fallback`/`fallback_es`;
 `APPXIMO_ASK_TRACE=on` adds a `⚙︎ who · latency · cost · why` line to the
-TEXT (never `speech`); `public.ask_history` logs every question off the
+TEXT (never `speech`); **`display` is the reply as READ ALOUD** (APP-AGENDA
+palabras, 2026-09-23): the same as `speech` — tags, bullets, guillemets and
+pictographs out, one pause per line — plus, ONLY with the trace on, one last
+speakable line `Costo: parser, 5 ms, US$ 0`; a Siri shortcut that speaks
+`display` hears identical content in both states and only that line changes.
+The parser also settles a **bool field by its own name** («tareas urgentes»
+on a bool `urgente` → `urgente = true`; «no»/«sin» right before it → false —
+the schema named the flag, nothing domain-specific), «listar/mostrar» as list
+verbs and «antier/anteayer» as a period. **«ayuda» is composed from the
+schema** (`pkg/ask/help.go`, VOZ-19): EXAMPLE phrases — a count, the resource
+by its declared state alias, a period, its flags, «los últimos 3 …», a
+group-by, the agenda's «qué tengo mañana», «tengo que…» — split into what the
+parser settles for free (each one SELF-VERIFIED with `Parse` on that very
+schema before it is shown) and what the model must think (creates with
+details, any sentence with words the schema does not declare), with a speech
+of short sentences and no symbol, price or digit; the Telegram `ayuda` is
+routed through it (the static list stays as the fallback when the engine is
+down), and it is a parser discard — US$ 0 always; `public.ask_history` logs every question off the
 answer path (`APPXIMO_ASK_HISTORY_DAYS` 30, `_TEXT` redacted|full|none —
 names → `[nombre]`, no IP) and `GET /admin/ask?tenant=` lists top_cost /
 top_repeated / model_fallbacks / the real share; `gasto` on Telegram =
