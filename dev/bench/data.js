@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790050788866,
+  "lastUpdate": 1790200688774,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -6840,6 +6840,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36764890 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "5387243d3c7ef4a7fd241f08501e0054d8ac274b",
+          "message": "feat(ask): the agenda in the owner's words — a bool field by its own name, «listar», «antier», a help made of schema-derived examples with a speakable voice, and a `display` that reads aloud in both trace states (AGENDA-PALABRAS-S1)\n\nThe 58's real /admin/ask history (82 questions, parser 34 %, 15 wasted) read\nreason by reason. The sentences that fell to the model without need:\n\n- «Qué tareas urgentes tengo»: `urgente` is a BOOL in the deployed schema\n  (there is no `prioridad` enum) and the parser had no bool handling. Step\n  5b: a bool field is named by its own word (schema.NameForms, singular or\n  plural) → `urgente = true`; «no» / «sin» right before it → false. Nothing\n  domain-specific: the schema named the flag. The understood line says\n  «urgente: sí».\n- «Listar compromisos», «Listar áreas»: «listar» and «mostrar» join the list\n  verbs.\n- «Tareas antier»: «antier» / «anteayer» = `day_before_yesterday` (period\n  token, Resolve, Ranges).\n- «Eventos», «Tareas completas»: aliases the owner uses, declared in HIS\n  schema (compromisos → evento; hecha → completa) — the schema lives in the\n  internal repo; no synonym he never said was invented.\n\n«ayuda» (pkg/ask/help.go): EXAMPLE phrases composed from the schema —\nresources in the owner's summary order, the waiting state by its declared\nalias, periods, bool flags, «los últimos 3 …», a group-by, the agenda's «qué\ntengo mañana» / «cuándo estoy libre», «tengo que…», a transition — split into\nwhat the parser settles for FREE and what the model must think (creates with\ndetails, words the schema does not declare). Every free example is\nSELF-VERIFIED with Parse on that very schema before it is shown (a transition\non a resource with two relation targets is dropped, never promised). The\nspeech is composed apart: short sentences, one pause per example, no symbol,\nprice or digit. The Telegram `ayuda` is routed through it (the static list is\nthe fallback when the engine is down). Still a parser discard: US$ 0.\n\n`display` is now the reply as READ ALOUD: the Speech — tags, bullets,\nguillemets and pictographs out (a voice reads «✅» as \"check mark button\"), the\nmiddle dot a comma, a colon line joined to its next — plus, ONLY with\nAPPXIMO_ASK_TRACE=on, one last speakable line «Costo: parser, 2 ms, US$ 0».\nA shortcut that speaks display hears identical content in both states and\nonly that line changes (verified with two engines, off and on). Nothing\nconsumed display for its line breaks: Telegram uses text, the drill prints it.\n\nGates: pkg/ask + unit lane + full lane (51/51) green; lint 0; binary-diff\ngate on a quiet box 189/199 SAME — the 10 DIFFs are the /api/ask cases whose\ndisplay (10) and speech (8: pictographs and middle dots) changed by this very\ndesign, plus text on the help (the new examples) and on `ask-last-n-parser`\n(the known order-only case: notes has no creation timestamp, ids are random\nper scratch DB). Backlog: VOZ-20 (a name across two relation targets) and\nVOZ-21 («resumen» through /api/ask) opened; DONE entry archived.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-23T21:57:38Z",
+          "tree_id": "4dee14207e3a7e76f7a7110b72bdb6ab656233bf",
+          "url": "https://github.com/appximo/appximo/commit/5387243d3c7ef4a7fd241f08501e0054d8ac274b"
+        },
+        "date": 1790200688122,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6169,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "386779 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6169,
+            "unit": "ns/op",
+            "extra": "386779 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "386779 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "386779 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 70.07,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36771906 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 70.07,
+            "unit": "ns/op",
+            "extra": "36771906 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36771906 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36771906 times\n4 procs"
           }
         ]
       }
