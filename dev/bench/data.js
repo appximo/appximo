@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790200688774,
+  "lastUpdate": 1790200896341,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -6912,6 +6912,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36771906 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "80bd966f96606396275deb5386f1a0c18f56956b",
+          "message": "fix(ask): a spoken line that already ends a sentence gets no second stop («Ningún registro coincide..» read on the 58 after AGENDA-PALABRAS-S1)\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-23T22:01:02Z",
+          "tree_id": "d664551bc8ad2a6260063af130661b90244e2fe5",
+          "url": "https://github.com/appximo/appximo/commit/80bd966f96606396275deb5386f1a0c18f56956b"
+        },
+        "date": 1790200895089,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6158,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "375868 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6158,
+            "unit": "ns/op",
+            "extra": "375868 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "375868 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "375868 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 71.52,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36712825 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 71.52,
+            "unit": "ns/op",
+            "extra": "36712825 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36712825 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36712825 times\n4 procs"
           }
         ]
       }
