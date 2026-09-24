@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790281764662,
+  "lastUpdate": 1790281769597,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -7272,6 +7272,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "35773124 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "fa95404243ba963778a5a1bb624301374b4b5ce5",
+          "message": "fix(ask): the guide's spoken alternatives say their numbers in words (a spoken example never carries a raw digit)\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-24T20:27:57Z",
+          "tree_id": "bfc9a1b4e552c4d850a7a3d9de838f4fdf95ae20",
+          "url": "https://github.com/appximo/appximo/commit/fa95404243ba963778a5a1bb624301374b4b5ce5"
+        },
+        "date": 1790281765033,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6691,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "348468 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6691,
+            "unit": "ns/op",
+            "extra": "348468 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "348468 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "348468 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 70.08,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "32288650 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 70.08,
+            "unit": "ns/op",
+            "extra": "32288650 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "32288650 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "32288650 times\n4 procs"
           }
         ]
       }
