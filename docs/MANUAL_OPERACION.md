@@ -767,6 +767,16 @@ estado dicho ubica el recurso); un nombre en una tarea con área Y persona
 «Gomes» se entiende como Gómez y se dice; «Fabi» con Fabián y Fabiana
 pregunta cuál; «la semana que viene»; «antes del viernes» (vence el viernes).
 
+**Ojo con el nombre del atajo.** Si el atajo de Siri se llama «Anota» o
+«Registra», Siri se come esa palabra y al motor le llega la frase sin el
+verbo: «que estudio estuvo caído de siete a dos de la tarde». El motor lo
+tolera desde el 2026-09-24: una frase que empieza con «que», no nombra
+ningún recurso, no tiene palabra de pregunta y SÍ trae una hora se lee como
+«anotá que…» (un registro, con su confirmación). Igual, si el atajo se llama
+de otra forma («Agenda», «Mi agenda») la frase viaja entera y no hay
+adivinanza. El reloj también entiende lo que escribe el dictado: «siete
+A.M.», «2pm», «de siete a dos de la tarde», «el día de hoy».
+
 **La voz.** Lo que Siri lee (`display` con la traza, `speech` sin ella) está
 compuesto para escucharse: frases cortas, horas y fechas y cantidades en
 palabras («de las diez a las once de la mañana», «el martes veintinueve de

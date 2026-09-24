@@ -1435,6 +1435,17 @@ measured (`ask.SpeechMetrics` + every spoken reply of the provocations: zero
 digits, zero symbols). What Siri does with the punctuation is the shortcut's
 business: if it reads too fast, lower the Speak action's rate.
 
+**The dictation tail.** A Siri shortcut named after the verb («Anota»)
+swallows it, so «anotá que la plataforma estuvo caída de 7 a 2 de la tarde»
+arrives as «que la plataforma estuvo caída …». As a last resort, a sentence
+that starts with «que», names no resource, has no question or operation
+word and carries a clock span is read as the note («anotá que …»),
+confirmed like any write. Name the shortcut something other than the verb
+and the whole sentence travels. The clock reader takes what a dictation
+writes: «7 A.M.», «2pm», «de siete a dos de la tarde», «el día de hoy»; the
+end's half of the day is lent to the start («de 7 a 8 de la noche») unless
+the span would run backwards («de 7 a 2 de la tarde» = 07:00–14:00).
+
 **VOZ-15 stays as the written rule** («a las 4» = 16:00; 7–12 = morning): the
 sentence bank had 25 bare hours in 37 clocks, every one meaning what the rule
 reads; the confirmation now SAYS «a las cuatro de la tarde», so a misread is

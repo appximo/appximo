@@ -71,6 +71,28 @@ is unchanged**: the saving is the model call, never the control. Anything the
 form cannot settle stays the model's — never a «no entendí» where the model
 used to answer (the corpus pins it: zero regressions).
 
+#### 2b. The dictation tail: a verb-less «que …» with a clock span is the note
+
+Seen on the owner's real phone an hour after the deploy: he dictated «anotá
+que estudio estuvo caído de siete a dos de la tarde» three times and got
+«no entendí» three times (US$ 0.0106). The history showed WHY: the sentences
+arrived as «que estudio estuvo caído …» — a Siri shortcut named after the
+verb («Anota», «Registra») swallows it. So, as a LAST resort after every
+shape failed, a sentence that starts with «que», names no resource, carries
+no question or operation word and DOES carry a clock span is read as «anotá
+que …»: the note resource, confirmed like any write (`dictationTail`). A
+question that starts with «qué» never reaches it (the reads settle first, or
+name a resource, or carry a question word). The clock reader also learned
+what a dictation writes: «A.M.»/«P.M.» (one token or two), «7am»/«2pm»
+glued, number words in a span («de siete a dos»), «el día de hoy». And the
+span rule is written: the end's half of the day is lent to the start («de 7
+a 8 de la noche» = 19:00–20:00) unless that runs the span backwards — then
+the start keeps its own bare rule («de 7 a 2 de la tarde» = 07:00–14:00).
+Pinned on the three sentences verbatim; the bank stayed 149/151 with zero
+regressions. The cheaper fix on the phone side — a shortcut whose name is
+not the verb, so the whole sentence travels — is in the manual, but the
+engine tolerates the tail either way.
+
 ### 3. A correction on a pending write re-issues the confirmation; it never executes it
 
 «no, mejor el viernes», «mejor a las 5», «sí pero urgente», «que sea con
