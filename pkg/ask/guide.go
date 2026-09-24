@@ -454,38 +454,41 @@ func guideCreate(ctx context.Context, d Deps, r *Resource, detailed bool) []guid
 		return parts
 	}
 	// part 2: the other free ways to say it (verified), and what each datum is
-	var alt []string
-	if r == taskResource(v) {
-		for _, ph := range []string{"tengo que " + sample, "anotá " + sample + " mañana", "acordate de " + sample} {
-			if verifiedCreate(v, ph, r.Name) {
-				alt = append(alt, ph)
+	// the other free ways: the text as typed and the same phrase as a
+	// voice says it (numbers in words — a spoken example never carries a
+	// raw digit)
+	type way struct{ text, speech string }
+	var alt []way
+	add := func(ws ...way) {
+		for _, w := range ws {
+			if verifiedCreate(v, w.text, r.Name) {
+				alt = append(alt, w)
 			}
 		}
+	}
+	if r == taskResource(v) {
+		add(way{"tengo que " + sample, ""}, way{"anotá " + sample + " mañana", ""}, way{"acordate de " + sample, ""})
 	}
 	if isAgenda {
-		for _, ph := range []string{"agendá " + sample + " el jueves a las 10", "agendá " + sample + " mañana a las 3 por una hora"} {
-			if verifiedCreate(v, ph, r.Name) {
-				alt = append(alt, ph)
-			}
-		}
+		add(way{"agendá " + sample + " el jueves a las 10", "agendá " + sample + " el jueves a las diez"}, way{"agendá " + sample + " mañana a las 3 por una hora", "agendá " + sample + " mañana a las tres por una hora"})
 	}
 	if isNote {
-		for _, ph := range []string{"registrá que " + sample + " a las 3", "anotá que " + sample + " hoy de 2 a 4", "anotá que " + sample + " ayer de 9 a 10", "anotá que " + sample + " esta mañana"} {
-			if verifiedCreate(v, ph, r.Name) {
-				alt = append(alt, ph)
-			}
-		}
+		add(way{"registrá que " + sample + " a las 3", "registrá que " + sample + " a las tres"}, way{"anotá que " + sample + " hoy de 2 a 4", "anotá que " + sample + " hoy de dos a cuatro"}, way{"anotá que " + sample + " ayer de 9 a 10", "anotá que " + sample + " ayer de nueve a diez"}, way{"anotá que " + sample + " esta mañana", ""})
 	}
 	var b2 strings.Builder
 	var sp2 []string
 	if len(alt) > 0 {
 		b2.WriteString("<b>También entiendo, gratis:</b>\n")
 		for _, a := range alt {
-			fmt.Fprintf(&b2, "• «%s»\n", esc(a))
+			fmt.Fprintf(&b2, "• «%s»\n", esc(a.text))
 		}
 		sp2 = append(sp2, "También entiendo, sin costo:")
 		for _, a := range alt {
-			sp2 = append(sp2, sentence(a))
+			if a.speech != "" {
+				sp2 = append(sp2, sentence(a.speech))
+			} else {
+				sp2 = append(sp2, sentence(a.text))
+			}
 		}
 	}
 	b2.WriteString("<b>Los datos que puede llevar:</b>\n")
