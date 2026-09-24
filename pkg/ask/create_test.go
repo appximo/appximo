@@ -314,6 +314,11 @@ func TestProsody_SpokenReplies(t *testing.T) {
 	if got := ClockRangeWords(11, 0, 14, 0); got != "de las once de la mañana a las dos de la tarde" {
 		t.Errorf("ClockRangeWords across noon: %q", got)
 	}
+	// the digest read through /api/ask (VOZ-21): the hourglass, the ISO date,
+	// a signed delta and a trailing count are all said in words
+	if got := Speech("Resumen de Agenda, 2026-09-23. ⏳ 9 esperan acción, +5 desde ayer, pendiente: 9."); strings.ContainsRune(got, '⏳') || strings.Contains(got, "2026") || strings.Contains(got, "+") || !strings.Contains(got, "veintitrés de septiembre") || !strings.Contains(got, "nueve esperan acción, más cinco desde ayer, pendiente: nueve.") {
+		t.Errorf("digest speech: %q", got)
+	}
 	if got := SpokenNumbers("mañana (lun 21 sep) a las 16:00"); !strings.Contains(got, "lunes veintiuno de septiembre") || !strings.Contains(got, "las cuatro de la tarde") {
 		t.Errorf("SpokenNumbers date: %q", got)
 	}

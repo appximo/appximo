@@ -373,6 +373,8 @@ func isPictograph(r rune) bool {
 		return true
 	case r >= 0x2600 && r <= 0x27BF: // misc symbols, dingbats (✅ ⚙ ☎ ✗)
 		return true
+	case r >= 0x2300 && r <= 0x23FF: // misc technical (⏳ ⏰ ⌚ ⌛ — the digest's hourglass)
+		return true
 	case r >= 0x2B00 && r <= 0x2BFF: // arrows / geometric (⬆ ⭐)
 		return true
 	case r == 0xFE0F || r == 0x200D: // variation selector, zero-width joiner

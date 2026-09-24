@@ -161,8 +161,11 @@ var (
 	clockRangeRe = regexp.MustCompile(`(?:\bde\s+)?\b(\d{1,2}):(\d{2})\s*(?:[–-]|\sa\s)\s*(\d{1,2}):(\d{2})\b`)
 	clockOnlyRe  = regexp.MustCompile(`\b(\d{1,2}):(\d{2})\b`)
 	// the composers' own date shapes: «23 Sep», «23 Sep 16:23», «lun 21 sep», «dom 20 sep»
-	dateShortRe = regexp.MustCompile(`(?i)\b(?:(dom|lun|mar|mié|mie|jue|vie|sáb|sab)\s+)?(\d{1,2})\s+(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|jan|apr|aug|dec)\b`)
-	countRe     = regexp.MustCompile(`\b(\d{1,3})\s+([a-záéíóúñ]+)`)
+	dateShortRe     = regexp.MustCompile(`(?i)\b(?:(dom|lun|mar|mié|mie|jue|vie|sáb|sab)\s+)?(\d{1,2})\s+(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|jan|apr|aug|dec)\b`)
+	countRe         = regexp.MustCompile(`\b(\d{1,3})\s+([a-záéíóúñ]+)`)
+	spokenISODateRe = regexp.MustCompile(`\b(\d{4})-(\d{2})-(\d{2})\b`)
+	signedRe        = regexp.MustCompile(`(^|[\s,(])([+\-−])(\d{1,3})\b`)
+	colonNumRe      = regexp.MustCompile(`:\s(\d{1,3})\b(?:[.,;]|$)`)
 )
 
 var monthAbbrevES = map[string]int{"ene": 1, "jan": 1, "feb": 2, "mar": 3, "abr": 4, "apr": 4, "may": 5, "jun": 6, "jul": 7, "ago": 8, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dic": 12, "dec": 12}
@@ -191,6 +194,29 @@ func SpokenNumbers(s string) string {
 			out = wd + " " + out
 		}
 		return out
+	})
+	// an ISO date («2026-09-23», the digest's header) → the day in words
+	s = spokenISODateRe.ReplaceAllStringFunc(s, func(m string) string {
+		g := spokenISODateRe.FindStringSubmatch(m)
+		mo, day := atoi(g[2]), atoi(g[3])
+		if mo < 1 || mo > 12 || day < 1 || day > 31 {
+			return m
+		}
+		return NumberWords(day) + " de " + monthsLongES[time.Month(mo)]
+	})
+	// a signed delta («+5 desde ayer», «−2») → «más cinco», «menos dos»
+	s = signedRe.ReplaceAllStringFunc(s, func(m string) string {
+		g := signedRe.FindStringSubmatch(m)
+		word := "más"
+		if g[2] != "+" {
+			word = "menos"
+		}
+		return g[1] + word + " " + NumberWords(atoi(g[3]))
+	})
+	// a count after a colon at the end of a phrase («pendiente: 9.»)
+	s = colonNumRe.ReplaceAllStringFunc(s, func(m string) string {
+		g := colonNumRe.FindStringSubmatch(m)
+		return strings.Replace(m, g[1], NumberWords(atoi(g[1])), 1)
 	})
 	s = clockOnlyRe.ReplaceAllStringFunc(s, func(m string) string {
 		g := clockOnlyRe.FindStringSubmatch(m)
