@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790278019789,
+  "lastUpdate": 1790278087214,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -7128,6 +7128,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36688268 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "75e9849ee74634aa05d8a793ee64e010cea4943e",
+          "message": "docs(ask): the dictation tail — why a verb-less «que …» is the note, the span rule written, and name the Siri shortcut something other than the verb (AGENDA-ASISTENTE-S1 addendum)\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-24T19:27:26Z",
+          "tree_id": "bbd5392f88efcfca943cfac8dba780fc0c3e59f1",
+          "url": "https://github.com/appximo/appximo/commit/75e9849ee74634aa05d8a793ee64e010cea4943e"
+        },
+        "date": 1790278086152,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6082,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "385317 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6082,
+            "unit": "ns/op",
+            "extra": "385317 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "385317 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "385317 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 66.76,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36906852 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 66.76,
+            "unit": "ns/op",
+            "extra": "36906852 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36906852 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36906852 times\n4 procs"
           }
         ]
       }
