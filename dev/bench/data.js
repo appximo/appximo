@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790226862348,
+  "lastUpdate": 1790278019789,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -7056,6 +7056,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36814642 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "a540b36518b754fba8a4e87843834754b72c0c3b",
+          "message": "fix(ask): the dictation tail — a verb-less «que … de siete a dos de la tarde» is the note, and the clock reads «A.M.»/«P.M.», «7am», number words and «el día de hoy» (AGENDA-ASISTENTE-S1, seen on the owner's real phone)\n\nThe owner dictated «anotá que estudio estuvo caído de siete a dos de la\ntarde» three times and got «no entendí» three times (US$ 0.0106): a Siri\nshortcut named after the verb swallows it, so the engine received «que\nestudio estuvo caído …». Now, as a LAST resort after every shape failed, a\nsentence that starts with «que», names no resource, carries no question or\noperation word and DOES carry a clock span is read as «anotá que …» — the note\nresource, confirmed like any write (pkg/ask/parser.go dictationTail).\n\nThe clock reader (pkg/ask/agenda.go) also learned what a dictation writes:\n«A.M.»/«P.M.» as one token («a m») or two, «7am»/«2pm» glued, number words\nin a span («de siete a dos»), «el día de hoy»; and the end's half of the day\nis lent to the start («de 7 a 8 de la noche» = 19–20) unless that runs the\nspan backwards («de 7 a 2 de la tarde» = 07–14). Pinned on the owner's three\nsentences verbatim; the 151-sentence bank: 149/151, zero regressions.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-24T19:24:56Z",
+          "tree_id": "2dfb46b1c3a220cd4bd73c19ed555628a08f13b0",
+          "url": "https://github.com/appximo/appximo/commit/a540b36518b754fba8a4e87843834754b72c0c3b"
+        },
+        "date": 1790278018930,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6132,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "388694 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6132,
+            "unit": "ns/op",
+            "extra": "388694 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "388694 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "388694 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 70.44,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36688268 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 70.44,
+            "unit": "ns/op",
+            "extra": "36688268 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36688268 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36688268 times\n4 procs"
           }
         ]
       }
