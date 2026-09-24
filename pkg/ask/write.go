@@ -1010,7 +1010,7 @@ func spokenConfirmation(d Deps, pend *Pending) string {
 		if !ok {
 			continue
 		}
-		val := spokenValue(f, v, pend.Labels[f.Name], loc)
+		val := spokenValue(f, v, pend.Labels[f.Name], loc, d.Now)
 		fw := fieldWords(f)
 		if from, ok := pend.Labels["__from_"+f.Name]; ok && pend.Kind == "update" {
 			sp = append(sp, sentence(fw+": de "+spokenWord(from)+" a "+spokenWord(val)))
@@ -1028,18 +1028,31 @@ func spokenConfirmation(d Deps, pend *Pending) string {
 
 // spokenValue says one value for a voice: a time as day and clock words, a
 // bool as sí/no, a name as the row it resolved to.
-func spokenValue(f *Field, v any, label string, loc *time.Location) string {
+func spokenValue(f *Field, v any, label string, loc *time.Location, now time.Time) string {
 	if f.Type == "time" {
 		if s, ok := v.(string); ok {
 			if t, err := time.Parse(time.RFC3339, s); err == nil {
 				t = t.In(loc)
-				words := DateWordsLong(t)
-				if strings.HasPrefix(label, "hoy") {
+				// the day as a person says it, relative to NOW («hoy»,
+				// «ayer», «mañana»), else the long date — the same for the
+				// start and the end of a span, so a default end never reads
+				// as a full date beside a «hoy»
+				today := time.Date(now.In(loc).Year(), now.In(loc).Month(), now.In(loc).Day(), 0, 0, 0, 0, loc)
+				day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
+				var words string
+				switch int(day.Sub(today).Hours() / 24) {
+				case 0:
 					words = "hoy"
-				} else if strings.HasPrefix(label, "mañana") {
-					words = "mañana, " + words
-				} else if strings.HasPrefix(label, "pasado mañana") {
-					words = "pasado mañana, " + words
+				case -1:
+					words = "ayer"
+				case -2:
+					words = "antier"
+				case 1:
+					words = "mañana, " + DateWordsLong(t)
+				case 2:
+					words = "pasado mañana, " + DateWordsLong(t)
+				default:
+					words = DateWordsLong(t)
 				}
 				if t.Hour() != 0 || t.Minute() != 0 {
 					words += " a " + ClockWords(t.Hour(), t.Minute())

@@ -729,6 +729,11 @@ func fillRangeEnd(res *Resource, pend *Pending, loc *time.Location) {
 	if err != nil {
 		return
 	}
+	if lt := t.In(loc); lt.Hour() == 0 && lt.Minute() == 0 {
+		// a day with no clock («ayer», «toda la tarde»): no default hour to
+		// add one to — the note has a day, not a span
+		return
+	}
 	end := t.Add(rg.Default)
 	pend.Data[rg.End] = end.UTC().Format(time.RFC3339)
 	pend.Labels[rg.End] = end.In(loc).Format("15:04") + " (" + durationWords(rg.Default) + " por defecto)"
@@ -880,8 +885,21 @@ func composeAgenda(d Deps, p Plan, res *Resource, rg *Range, rows []map[string]a
 	out.Number = &n
 	var b strings.Builder
 	if total == 0 {
-		out.Headline = "Nada agendado"
-		fmt.Fprintf(&b, "📅 <b>Nada</b> agendado %s.", esc(understood))
+		when := strings.Trim(strings.TrimPrefix(understood, res.Name), " ·")
+		if rg.NoOverlap {
+			out.Headline = "Nada agendado"
+			fmt.Fprintf(&b, "📅 <b>Nada</b> agendado %s.", esc(understood))
+			out.Speech = "Nada agendado"
+		} else {
+			// a log, not an agenda: «no hay ningún registro hoy»
+			out.Headline = "Nada"
+			fmt.Fprintf(&b, "📝 No hay %s %s.", esc(numberPhrase(0, res.Name)), esc(when))
+			out.Speech = "No hay " + numberPhrase(0, res.Name)
+		}
+		if when != "" {
+			out.Speech += " " + strings.NewReplacer(" (", ", ", "(", "", ")", "").Replace(when)
+		}
+		out.Speech = SpokenNumbers(out.Speech + ".")
 		out.Text = b.String()
 		return out
 	}

@@ -481,3 +481,32 @@ func TestNote_HumanForms(t *testing.T) {
 		t.Errorf("day_before_yesterday: %v %v", tm, ok)
 	}
 }
+
+// A note's confirmation is READ as a person says it: the end of a span on
+// the same day says «hoy» like its start (never a full date beside a «hoy»),
+// «la una» never «la uno», a day with no clock gets no default hour, and an
+// empty log says «no hay ningún registro», not «nada agendado».
+func TestNote_ConfirmationSpeech(t *testing.T) {
+	e := miguelFixtures()
+	d, _ := miguelDeps(e)
+	r := Answer(context.Background(), d, "que hablé con el banco a las 3")
+	if r.Kind != "confirm" || !strings.Contains(r.Speech, "Cuando: hoy a las tres de la tarde") || !strings.Contains(r.Speech, "Hasta: hoy a las cuatro de la tarde") {
+		t.Fatalf("same-day end says hoy: %s | %s", r.Kind, r.Speech)
+	}
+	Answer(context.Background(), d, "no")
+	r = Answer(context.Background(), d, "anotá que ayer se fue el agua toda la tarde")
+	if r.Kind != "confirm" || !strings.Contains(r.Speech, "Cuando: ayer") || strings.Contains(r.Speech, "Hasta") || r.Pending.Data["hasta"] != nil {
+		t.Fatalf("a day without a clock has no default end: %s | %s | %v", r.Kind, r.Speech, r.Pending.Data)
+	}
+	Answer(context.Background(), d, "no")
+	if got := ClockWords(13, 0); got != "la una de la tarde" {
+		t.Errorf("ClockWords(13): %q", got)
+	}
+	if got := ClockWords(1, 0); got != "la una de la mañana" {
+		t.Errorf("ClockWords(1): %q", got)
+	}
+	r = Answer(context.Background(), d, "registros de ayer")
+	if r.Kind != "answer" || strings.Contains(r.Speech, "agendado") || !strings.Contains(r.Speech, "No hay ningún registro") {
+		t.Errorf("an empty log is not «nada agendado»: %s | %s", r.Kind, r.Speech)
+	}
+}

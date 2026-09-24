@@ -125,7 +125,11 @@ func ClockWords(h, m int) string {
 	default:
 		part = "de la noche"
 	}
-	base := art + " " + unitsES[hour12]
+	unit := unitsES[hour12]
+	if hour12 == 1 {
+		unit = "una" // «la una», never «la uno»
+	}
+	base := art + " " + unit
 	switch m {
 	case 0:
 		return base + " " + part
