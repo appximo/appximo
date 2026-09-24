@@ -316,7 +316,7 @@ func TestProsody_SpokenReplies(t *testing.T) {
 	}
 	// the digest read through /api/ask (VOZ-21): the hourglass, the ISO date,
 	// a signed delta and a trailing count are all said in words
-	if got := Speech("Resumen de Agenda, 2026-09-23. ⏳ 9 esperan acción, +5 desde ayer, pendiente: 9."); strings.ContainsRune(got, '⏳') || strings.Contains(got, "2026") || strings.Contains(got, "+") || !strings.Contains(got, "veintitrés de septiembre") || !strings.Contains(got, "nueve esperan acción, más cinco desde ayer, pendiente: nueve.") {
+	if got := Speech("Resumen de Agenda, 2026-09-23. ⏳ 9 esperan acción, +5 desde ayer, pendiente: 9.\nen curso: 2\n7 nuevos"); strings.ContainsRune(got, '⏳') || strings.Contains(got, "2026") || strings.Contains(got, "+") || !strings.Contains(got, "veintitrés de septiembre") || !strings.Contains(got, "nueve esperan acción, más cinco desde ayer, pendiente: nueve.") || !strings.Contains(got, "en curso: dos") || !strings.Contains(got, "siete nuevos") {
 		t.Errorf("digest speech: %q", got)
 	}
 	if got := SpokenNumbers("mañana (lun 21 sep) a las 16:00"); !strings.Contains(got, "lunes veintiuno de septiembre") || !strings.Contains(got, "las cuatro de la tarde") {

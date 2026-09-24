@@ -165,7 +165,7 @@ var (
 	countRe         = regexp.MustCompile(`\b(\d{1,3})\s+([a-záéíóúñ]+)`)
 	spokenISODateRe = regexp.MustCompile(`\b(\d{4})-(\d{2})-(\d{2})\b`)
 	signedRe        = regexp.MustCompile(`(^|[\s,(])([+\-−])(\d{1,3})\b`)
-	colonNumRe      = regexp.MustCompile(`:\s(\d{1,3})\b(?:[.,;]|$)`)
+	colonNumRe      = regexp.MustCompile(`(?m):\s(\d{1,3})\b(?:[.,;]|$)`)
 )
 
 var monthAbbrevES = map[string]int{"ene": 1, "jan": 1, "feb": 2, "mar": 3, "abr": 4, "apr": 4, "may": 5, "jun": 6, "jul": 7, "ago": 8, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dic": 12, "dec": 12}
