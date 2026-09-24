@@ -119,7 +119,7 @@ func TestWrite_ValidateRejectsWhatTheGrammarForbids(t *testing.T) {
 		{"role may not update", `{"kind":"update","resource":"personas","where":[{"field":"nombre","op":"eq","match":"Marta"}],"data":{"telefono":"1"}}`, "may not update personas"},
 		{"unknown field", `{"kind":"create","resource":"tareas","data":{"titulo":"x","color":"rojo"}}`, "has no field"},
 		{"no delete kind", `{"kind":"delete","resource":"tareas","where":[{"field":"estado","value":"hecha"}]}`, "is not one of"},
-		{"no data", `{"kind":"create","resource":"tareas"}`, "needs data"},
+		{"no data", `{"kind":"update","resource":"tareas","data":{},"where":[{"field":"titulo","op":"eq","match":"x"}]}`, "needs data"},
 		{"read keys on a write", `{"kind":"create","resource":"tareas","data":{"titulo":"x"},"limit":3}`, "takes only resource, data"},
 	}
 	for _, c := range cases {
@@ -197,6 +197,7 @@ func TestWrite_CreateResolvesTheNameThenConfirmsThenWrites(t *testing.T) {
 	m := &scripted{replies: []string{plan(Plan{Kind: "create", Resource: "tareas", Data: map[string]any{
 		"titulo": "Llamar a Fabián para arreglar el techo", "persona_id": map[string]any{"match": "Fabian"}, "prioridad": "urgente", "vence_en": "tomorrow"}})}}
 	d, w, st := writeDeps(m, agendaFixtures())
+	d.NoParser = true // the fixed form settles this sentence itself now (create_test.go); here the MODEL path is under test
 	r := Answer(context.Background(), d, "Anotá llamar a Fabián para arreglar el techo, urgente, para mañana")
 	if r.Kind != "confirm" || r.Pending == nil {
 		t.Fatalf("want confirm, got %s: %s", r.Kind, r.Text)
@@ -218,17 +219,25 @@ func TestWrite_CreateResolvesTheNameThenConfirmsThenWrites(t *testing.T) {
 	if !strings.Contains(m.systems[0], "WRITES —") || !strings.Contains(m.systems[0], "[may create+update]") {
 		t.Errorf("system prompt lacks the write section / abilities")
 	}
-	// An ambiguous yes cancels. VOZ-AHORRO-S2 (Part C): «sí pero mejor para
-	// el lunes» names nothing the grammar could execute, so the parser is
-	// SURE it is a stray answer to the confirmation — cancelled, said, and
-	// NOT sent to the model (ADR-037 paid a model call here; the real
-	// history showed it bought a «no entendí»).
+	d.NoParser = false // from here the parser is back: the follow-ups are its business
+	// A «sí pero…» that carries a datum the form recognizes is a CORRECTION
+	// (AGENDA-ASISTENTE-S1): the day moves, the confirmation is shown AGAIN,
+	// nothing is written, the model is not called, the pending is the same.
 	firstID := r.Pending.ID
 	calls := m.calls
 	r2 := Answer(context.Background(), d, "sí pero mejor para el lunes")
 	if len(w.writes) != 0 {
-		t.Fatalf("an ambiguous yes must not write; got %v", w.writes)
+		t.Fatalf("a «sí pero» must not write; got %v", w.writes)
 	}
+	if r2.Kind != "confirm" || r2.Source != "confirm" || r2.Pending == nil || r2.Pending.ID != firstID || m.calls != calls {
+		t.Fatalf("a correction re-issues the confirmation: kind=%s source=%s calls=%d→%d: %s", r2.Kind, r2.Source, calls, m.calls, r2.Text)
+	}
+	if !strings.Contains(r2.Text, "Cambié vence en") || !strings.Contains(r2.Text, "el lunes") || !strings.Contains(r2.Text, "Fabián Gómez") || !strings.Contains(r2.Text, "urgente") {
+		t.Errorf("the correction is said and the other values stay: %s", r2.Text)
+	}
+	// A «sí pero…» carrying NOTHING the form recognizes still cancels, said,
+	// at zero cost (VOZ-AHORRO-S2 Part C).
+	r2 = Answer(context.Background(), d, "sí pero no sé")
 	if !strings.Contains(r2.Text, "Cancelé la escritura que estaba pendiente") || !strings.Contains(r2.Text, "no es un <b>sí</b>") {
 		t.Errorf("the cancellation must be said, with why: %s", r2.Text)
 	}
@@ -504,7 +513,14 @@ func TestWrite_AmbiguousWhereNameIsAPickNotARetry(t *testing.T) {
 	e.rows["tareas"] = append(e.rows["tareas"], map[string]any{"id": "t2", "titulo": "Llamar a Fabián", "estado": "pendiente", "persona_id": fabianID})
 	m := &scripted{}
 	d, w, _ := writeDeps(m, e)
+	// «Fabián» IS Fabián Gómez even with a Fabiana around (an exact whole
+	// token is the row — AGENDA-ASISTENTE-S1); «Fabi» is a real question.
 	r := Answer(context.Background(), d, "marcá como hecha la tarea de Fabián")
+	if r.Kind != "confirm" || r.Pending == nil || r.Pending.RowID != "t2" {
+		t.Fatalf("an exact first name is the row, got %s: %s", r.Kind, r.Text)
+	}
+	Answer(context.Background(), d, "no")
+	r = Answer(context.Background(), d, "marcá como hecha la tarea de Fabi")
 	if r.Kind != "ambiguous" || r.Pending == nil || r.Pending.Stage != "which" || r.Pending.WhichFor != "where:persona_id" {
 		t.Fatalf("want a pick among the people, got %s: %s", r.Kind, r.Text)
 	}
@@ -517,7 +533,7 @@ func TestWrite_AmbiguousWhereNameIsAPickNotARetry(t *testing.T) {
 		t.Fatalf("write: %s %v", r.Kind, w.writes)
 	}
 	// The reply's plan keeps the name as said (never the id).
-	if r.Plan == nil || r.Plan.Where[0].Match != "Fabián" {
+	if r.Plan == nil || r.Plan.Where[0].Match != "Fabi" {
 		t.Fatalf("the plan must keep the name as said: %+v", r.Plan)
 	}
 }

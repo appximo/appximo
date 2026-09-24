@@ -699,6 +699,86 @@ fuera de la caja. Lo que ese caso enseña vale para cualquier app real:
   en la ventana (sale UNA vez), el parte encolado a mano como lo haría el
   cron, y al final `tenant_<app>` con solo lo que el dueño configuró.
 
+### 3h. «Cómo creo algo» — el asistente le enseña a usarlo (AGENDA-ASISTENTE-S1)
+
+El bot (y Siri) le enseña a hablarle, con SUS recursos, SUS campos y SUS
+filas — nada escrito a mano: si mañana declara un alias o un recurso, la
+guía cambia sola. Siempre **US$ 0** y siempre en partes cortas (seis
+ejemplos por página, en la pantalla y en la voz por igual; «más» sigue).
+
+```
+usted: ayuda
+bot:   Agenda tiene: compromisos, tareas, registros, personas, areas, etiquetas.
+       Podés preguntar («cuántas tareas hay»), crear («crear tarea: …»), cambiar («marcá como … la …») y pedir el resumen del día.
+       Para aprender: cómo creo algo · qué puedo preguntar · qué campos tiene una tarea · cómo filtro por fecha. Y más para seguir cualquiera.
+
+usted: cómo creo algo
+bot:   ✍️ Para crear una tarea decí: «crear tarea: [qué], [30 minutos], [urgente], [mañana / el viernes]».
+       Por ejemplo: «crear tarea: revisar el contrato, 30 minutos, urgente, el viernes» — la entiendo al instante, gratis.
+       Los datos van en cualquier orden, separados por comas o pausas; el que no digas, lo pregunto o lo dejo vacío.
+       Antes de escribir te muestro todo y espero tu sí.
+       Hay más (1 de 4). Decí más para seguir.          ← después: el compromiso, el registro, la persona
+```
+
+Cada ejemplo que la guía promete como gratis **se prueba en el motor antes de
+mostrarse** (y también dicho como lo dictaría Siri, sin los dos puntos); lo
+que el motor no resuelve no se promete. Los otros niveles: «qué puedo
+preguntar» (las formas de pregunta sobre su schema), «qué campos tiene una
+tarea» (cada campo en palabras, con sus valores y los alias que usted
+declaró), «cómo filtro por fecha» (períodos, rangos, combinaciones, «los
+últimos 3…»), y «cómo creo una tarea» / «cómo agendo un compromiso» para el
+detalle de uno (con «más»: las otras formas gratis — «tengo que…», «anotá …
+mañana», «acordate de…» — y qué dato puede llevar).
+
+**La forma fija para crear: `crear <cosa>: <qué>, <los datos en cualquier
+orden>`.** Un verbo (`crear`, `nueva`, `anotá`, `agregá`, `registrá`…) o la
+palabra de la cosa, después QUÉ es, después los datos como salgan, con o sin
+la palabra del campo, separados por comas, por «y» o por la pausa que deja el
+dictado. El motor reconoce cada dato por su FORMA, no por una palabra suya:
+la palabra de un campo («área casa»), un valor o alias declarado, una bandera
+por su nombre («urgente»), un día o una hora («el viernes», «mañana a las 3»,
+«de 12 a 1», «a las 4 pm», «a las cuatro de la tarde», «9 y media»), un
+número con unidad («30 minutos»), un nombre después de «con» / «para», o un
+nombre suelto que se prueba contra todo lo que podría ser. Lo que no es un
+dato es el título, tal como lo dijo. Tres primos: «anotá que <lo que pasó>»
+es un registro; «anotá <hacer algo>…» / «tengo que…» es una tarea; «reunión
+con Fabián mañana a las 3 por una hora» es un compromiso. **La confirmación
+sigue igual**: lo que se ahorra es la llamada al modelo, nunca el control.
+Lo que la forma no entiende sigue yendo al modelo, como antes.
+
+```
+usted: crear tarea: pagar el seguro del carro, 45 minutos, urgente, el lunes
+bot:   📝 Voy a crear tarea:
+       • duracion estimada min: 45   • titulo: pagar el seguro del carro   • urgente: sí   • vence en: el lunes (lun 28 sep)
+       ¿Confirmás? (sí / no)                                                        ← parser, US$ 0, 1 ms
+usted: no, mejor el viernes
+bot:   Cambié vence en.  📝 Voy a crear tarea: … • vence en: el viernes (vie 25 sep) … ¿Confirmás?   ← la corrección re-pregunta, nunca ejecuta
+usted: agendá almuerzo con Marta el jueves de 12 a 1
+bot:   📝 Voy a crear compromiso: • inicio: el jueves a las 12:00 • fin: 13:00 • persona: Marta Ruiz • titulo: almuerzo ¿Confirmás?
+usted: agendá otra reunión mañana a las 10 y media
+bot:   ⚠️ Ya tenés «P1 dentista» de 10:00 a 11:00. … ¿Igual lo agendo?
+```
+
+**Otras cosas que ahora entiende sin modelo:** «resumen», «estado» y «gasto»
+dichos a Siri (los mismos que el bot); «ya hice…», «terminé de…», «… está
+lista» (la tarea pasa a hecha); «poné en curso la declaración de renta» (el
+estado dicho ubica el recurso); un nombre en una tarea con área Y persona
+(«tareas de trabajo», «anotá llamar a Fabián») se prueba contra las dos;
+«Gomes» se entiende como Gómez y se dice; «Fabi» con Fabián y Fabiana
+pregunta cuál; «la semana que viene»; «antes del viernes» (vence el viernes).
+
+**La voz.** Lo que Siri lee (`display` con la traza, `speech` sin ella) está
+compuesto para escucharse: frases cortas, horas y fechas y cantidades en
+palabras («de las diez a las once de la mañana», «el martes veintinueve de
+septiembre», «dos tareas»), sin viñetas, comillas, símbolos ni dígitos; una
+lista lee como mucho cinco y dice «y N más; mirá el panel»; una elección se
+lee «Uno, Fabián Gómez. Dos, Fabiana Torres.». Si Siri lo lee demasiado
+rápido, baje la velocidad de la acción *Leer texto* del atajo: eso no es del
+motor. La regla de «a las 4» = de la tarde se mantiene (en el banco de frases
+ninguna hora suelta significaba otra cosa); la confirmación ahora DICE «a las
+cuatro de la tarde», así que si alguna vez se equivoca lo oye antes de
+confirmar y lo corrige con «mejor a las 4 de la mañana».
+
 ## 4. Qué hacer cuando pasa algo
 
 Recetas cortas, en el orden en que suele hacer falta. Todas empiezan igual: **mire antes de tocar** (30 segundos):

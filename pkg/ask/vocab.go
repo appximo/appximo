@@ -115,6 +115,13 @@ func (r *Resource) Field(name string) *Field { return r.byName[name] }
 // NameForms lists every form the resource is named by: its schema name
 // (singular/plural, underscores as spaces) and each declared alias's forms —
 // the SAME derivation the validator used to prove them unique.
+// OwnName reports whether norm is the resource's own name or plural (not a
+// declared alias): «compromiso» is the resource, «reunión» is what the owner
+// calls the thing — and that word is also its title.
+func (r *Resource) OwnName(norm string) bool {
+	return contains(schema.NameForms(r.Name), norm)
+}
+
 func (r *Resource) NameForms() []string {
 	forms := schema.NameForms(r.Name)
 	for _, a := range r.Aliases {
@@ -146,6 +153,39 @@ func (r *Resource) DefaultTimeField() string {
 	}
 	return ""
 }
+
+// DueTimeField is the time field a spoken day lands on when a row is
+// created («para mañana»): the ONE writable time field, or — with several —
+// the one whose name says it is a due date (vence, due, limite, plazo,
+// fecha; a vocabulary of names, not of any domain). nil when not sure.
+func (r *Resource) DueTimeField() *Field {
+	var writable []*Field
+	for _, f := range r.Fields {
+		if f.Type == "time" && !f.Auto {
+			writable = append(writable, f)
+		}
+	}
+	if len(writable) == 1 {
+		return writable[0]
+	}
+	var due []*Field
+	for _, f := range writable {
+		n := normalize(f.Name)
+		for _, part := range dueParts {
+			if strings.Contains(n, part) {
+				due = append(due, f)
+				break
+			}
+		}
+	}
+	if len(due) == 1 {
+		return due[0]
+	}
+	return nil
+}
+
+// dueParts are the name parts that say "this is when it is due".
+var dueParts = []string{"vence", "venc", "due", "limite", "plazo", "fecha", "deadline"}
 
 // StateField is the field carrying a state machine, "" when none.
 func (r *Resource) StateField() *Field {
@@ -308,6 +348,13 @@ func (v *Vocabulary) lexicon() (map[string]bool, []string) {
 		}
 	})
 	return v.lexWord, v.lexMany
+}
+
+// knownWord reports whether a single normalized word is a schema word
+// (a resource, field, value or alias form).
+func (v *Vocabulary) knownWord(n string) bool {
+	words, _ := v.lexicon()
+	return words[n]
 }
 
 func (v *Vocabulary) addLex(form string) {

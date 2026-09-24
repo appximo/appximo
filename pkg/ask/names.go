@@ -202,6 +202,31 @@ func similarity(query, value string) float64 {
 		if tok > best {
 			best = tok
 		}
+		// Every dictated token IS a whole token of the value («Fabián» in
+		// «Fabián Gómez», «Marta Ruiz» in «Marta Ruiz Pérez»): the exact row,
+		// ahead of a near-miss like «Fabiana Torres» (AGENDA-ASISTENTE-S1 —
+		// the corpus showed «tareas de Fabián» asking «¿cuál?» whenever a
+		// Fabiana existed). Decide() keeps "one" only when the runner-up is
+		// not exact too.
+		if len(qt) <= len(vt) {
+			exact := true
+			for _, q := range qt {
+				hit := false
+				for _, v := range vt {
+					if q == v {
+						hit = true
+						break
+					}
+				}
+				if !hit {
+					exact = false
+					break
+				}
+			}
+			if exact && best < 1 {
+				best = 1
+			}
+		}
 	}
 	return best
 }
@@ -212,6 +237,11 @@ type Candidate struct {
 	Label string // what to say back ("Ana Gómez")
 	Value string // the value to filter by: the id, or the field's own text
 	Score float64
+	// Field / Kind (VOZ-20): when a name was tried against several fields,
+	// the field this candidate belongs to and the kind word it is shown
+	// with («área», «persona»).
+	Field string `json:"field,omitempty"`
+	Kind  string `json:"kind,omitempty"`
 }
 
 // Match ranks candidates for a dictated name. Each candidate's Label and, when

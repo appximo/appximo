@@ -145,14 +145,28 @@ type timeSpan struct {
 func consumeTimeSpan(toks []token) (timeSpan, bool) {
 	ts := timeSpan{end: -1}
 	n := len(toks)
-	isHour := func(i int) bool { return i < n && !toks[i].used && hourRe.MatchString(toks[i].norm) }
+	// an hour is «4», «16», «4:30» — or a number word («cuatro», «una»)
+	isHour := func(i int) bool {
+		if i >= n || toks[i].used {
+			return false
+		}
+		if hourRe.MatchString(toks[i].norm) {
+			return true
+		}
+		_, ok := hourWord(toks[i].norm)
+		return ok
+	}
 	// The tokenizer splits «15:30» into «15» «30»: an hour followed by a
 	// two-digit minute token is read as one clock.
 	hourText := func(i int) (string, int) {
-		if i+1 < n && !toks[i+1].used && len(toks[i+1].norm) == 2 && toks[i+1].norm[0] >= '0' && toks[i+1].norm[0] <= '5' && toks[i+1].norm[1] >= '0' && toks[i+1].norm[1] <= '9' && !strings.Contains(toks[i].norm, ":") {
-			return toks[i].norm + ":" + toks[i+1].norm, 2
+		h := toks[i].norm
+		if hw, ok := hourWord(h); ok {
+			h = strconv.Itoa(hw)
 		}
-		return toks[i].norm, 1
+		if i+1 < n && !toks[i+1].used && len(toks[i+1].norm) == 2 && toks[i+1].norm[0] >= '0' && toks[i+1].norm[0] <= '5' && toks[i+1].norm[1] >= '0' && toks[i+1].norm[1] <= '9' && !strings.Contains(h, ":") && hourRe.MatchString(toks[i].norm) {
+			return h + ":" + toks[i+1].norm, 2
+		}
+		return h, 1
 	}
 	qualifierAt := func(i int) (string, int) { // returns qualifier and tokens consumed
 		if i < n && !toks[i].used {
@@ -293,7 +307,65 @@ func consumeTimeSpan(toks []token) (timeSpan, bool) {
 		}
 		return ts, true
 	}
+	// a bare clock: «16:00» (two tokens after the tokenizer), «4 pm», «4:30 pm»
+	for i := 0; i < n; i++ {
+		if toks[i].used || !hourRe.MatchString(toks[i].norm) {
+			continue
+		}
+		text, cnt := hourText(i)
+		k := i + cnt
+		hs := halfAt(k)
+		k += hs
+		q, qn := qualifierAt(k)
+		k += qn
+		if cnt == 1 && qn == 0 && hs == 0 {
+			continue // a bare number is not a clock («los últimos 3»)
+		}
+		if i > 0 && !toks[i-1].used && (toks[i-1].norm == "ultimos" || toks[i-1].norm == "ultimas") {
+			continue
+		}
+		st, ok := readClock(text, hs > 0, q)
+		if !ok {
+			continue
+		}
+		for x := i; x < k; x++ {
+			toks[x].used = true
+		}
+		ts.start = st
+		return ts, true
+	}
 	return ts, false
+}
+
+// hourWord reads an hour said as a word («cuatro», «una», «doce»).
+func hourWord(w string) (int, bool) {
+	switch w {
+	case "una", "uno":
+		return 1, true
+	case "dos":
+		return 2, true
+	case "tres":
+		return 3, true
+	case "cuatro":
+		return 4, true
+	case "cinco":
+		return 5, true
+	case "seis":
+		return 6, true
+	case "siete":
+		return 7, true
+	case "ocho":
+		return 8, true
+	case "nueve":
+		return 9, true
+	case "diez":
+		return 10, true
+	case "once":
+		return 11, true
+	case "doce":
+		return 12, true
+	}
+	return 0, false
 }
 
 func spanishNumber(w string) (int, bool) {
@@ -342,6 +414,12 @@ func parseSchedule(question string, v *Vocabulary) ParseResult {
 		return ParseResult{Reason: "no schedule verb"}
 	}
 	toks[verbIdx].used = true
+	// «anotá que …» / «registrá que …» is something that HAPPENED — a note,
+	// never a block on the agenda (AGENDA-ASISTENTE-S1: «anotá que la
+	// plataforma se cayó de 2 a 4» used to become a compromiso).
+	if verbIdx+1 < len(toks) && toks[verbIdx+1].norm == "que" {
+		return ParseResult{Reason: "schedule: a note (verb + que)"}
+	}
 	// The resource: named, else the only creatable resource with a range.
 	var res *Resource
 	namedBy := ""
@@ -356,8 +434,12 @@ func parseSchedule(question string, v *Vocabulary) ParseResult {
 			}
 			if v.namesResource(t.norm, r) {
 				res = r
-				toks[i].used = true
 				namedBy = t.raw
+				// the resource's own name is not part of the title; an
+				// alias («reunión», «cita») is what the block is called
+				if r.OwnName(t.norm) {
+					toks[i].used = true
+				}
 				break
 			}
 		}
@@ -381,30 +463,43 @@ func parseSchedule(question string, v *Vocabulary) ParseResult {
 	if day == "" {
 		day = "today"
 	}
-	// «con Fabián» / «para Marta»: the single relation field of the resource.
+	// «con Fabián» / «para Marta»: the relation the name belongs to — the one
+	// people-like relation, or every candidate (VOZ-20) for the engine to try.
 	data := map[string]any{}
-	var relField *Field
-	for _, f := range res.Fields {
-		if f.Relation != "" {
-			if relField != nil {
-				relField = nil // two relations: the model decides
-				break
-			}
-			relField = f
+	var refs []Ref
+	for i := 0; i+1 < len(toks); i++ {
+		if toks[i].used || (toks[i].norm != "con" && toks[i].norm != "para") || !startsUpper(toks[i+1].raw) {
+			continue
 		}
-	}
-	if relField != nil {
-		for i := 0; i+1 < len(toks); i++ {
-			if toks[i].used || (toks[i].norm != "con" && toks[i].norm != "para") || !startsUpper(toks[i+1].raw) {
-				continue
+		parts := nameRun(toks, i+1, nil)
+		if len(parts) == 0 {
+			continue
+		}
+		name := strings.Join(parts, " ")
+		mf, cands, _ := nameField(v, res)
+		relOnly := func(names []string) []string {
+			var out []string
+			for _, n := range names {
+				if f := res.Field(n); f != nil && f.Relation != "" {
+					out = append(out, n)
+				}
 			}
-			parts := nameRun(toks, i+1, nil)
-			if len(parts) > 0 {
-				toks[i].used = true
-				data[relField.Name] = map[string]any{"match": strings.Join(parts, " ")}
-				break
+			return out
+		}
+		switch {
+		case mf != "" && res.Field(mf).Relation != "":
+			toks[i].used = true
+			data[mf] = map[string]any{"match": name}
+		case len(relOnly(cands)) > 0:
+			toks[i].used = true
+			refs = append(refs, Ref{Match: name, Fields: relOnly(cands)})
+		default:
+			// no place for a name: the words stay in the title
+			for k := i + 1; k < i+1+len(parts); k++ {
+				toks[k].used = false
 			}
 		}
+		break
 	}
 	// The title: every word left that is not a stopword — kept as said. It
 	// goes to the resource's REQUIRED label field (exactly one), else the
@@ -436,7 +531,7 @@ func parseSchedule(question string, v *Vocabulary) ParseResult {
 		return ParseResult{Reason: "schedule: no title field"}
 	}
 	if len(title) == 0 && namedBy != "" {
-		// «agendá reunión de 4 a 5»: the word that named the resource is
+		// «agendá compromiso de 4 a 5»: the word that named the resource is
 		// also what the block is called.
 		title = []string{namedBy}
 	}
@@ -448,7 +543,7 @@ func parseSchedule(question string, v *Vocabulary) ParseResult {
 	if span.end >= 0 {
 		data[rg.End] = day + " " + clockString(span.end)
 	}
-	p := Plan{Kind: "create", Resource: res.Name, Data: data}
+	p := Plan{Kind: "create", Resource: res.Name, Data: data, Refs: refs}
 	if err := p.Validate(v); err != nil {
 		return ParseResult{Reason: "schedule invalid: " + err.Error()}
 	}
@@ -569,7 +664,7 @@ func checkConflicts(ctx context.Context, d Deps, pend *Pending) (Result, bool) {
 		d.Pending.Put(pend)
 		text := warn + "\n\n" + confirmationText(d, pend)
 		r := pendingResult(pend, "confirm", "Ya tenés algo a esa hora. ¿Igual lo agendo?", text)
-		r.Speech = Speech(text)
+		r.Speech = Speech(warn) + " " + spokenConfirmation(d, pend)
 		return r, true
 	}
 	// Not invertible: the agenda cannot take it. Ask for another time.
@@ -669,7 +764,42 @@ func composeAgenda(d Deps, p Plan, res *Resource, rg *Range, rows []map[string]a
 	}
 	fmt.Fprintf(&b, "\n<i>%s</i>", esc(understood))
 	out.Text = strings.TrimRight(b.String(), "\n")
+	// The VOICE: «Tenés dos compromisos mañana: de diez a once, dentista. De
+	// cuatro a cinco, almuerzo con Fabián.»
+	var items []string
+	for _, row := range rows {
+		st, ok1 := asTime(row[rg.Start])
+		en, ok2 := asTime(row[rg.End])
+		label := labelOf(row, firstN(labels, 2))
+		if label == "" {
+			label = fmt.Sprint(row["id"])
+		}
+		if ok1 && ok2 {
+			items = append(items, capFirst(ClockRangeWords(st.In(loc).Hour(), st.In(loc).Minute(), en.In(loc).Hour(), en.In(loc).Minute())+", "+label))
+		} else {
+			items = append(items, capFirst(label+", sin horario"))
+		}
+	}
+	when := strings.TrimSpace(strings.TrimPrefix(understood, res.Name))
+	when = strings.Trim(when, " ·")
+	when = strings.NewReplacer(" (", ", ", "(", "", ")", "").Replace(when) // «mañana (jue 24 sep)» → «mañana, jue 24 sep»
+	out.Speech = "Tenés " + numberPhrase(int(total), res.Name)
+	if when != "" {
+		out.Speech += " " + when
+	}
+	out.Speech += ": " + spokenList(items, int(total), "mirá el panel")
+	out.Speech = SpokenNumbers(out.Speech)
 	return out
+}
+
+// capFirst upper-cases the first letter (a spoken list item starts a sentence).
+func capFirst(s string) string {
+	r := []rune(s)
+	if len(r) == 0 {
+		return s
+	}
+	r[0] = []rune(strings.ToUpper(string(r[0])))[0]
+	return string(r)
 }
 
 // composeFree words the gaps of a window: the complement of the blocks that
@@ -714,6 +844,7 @@ func composeFree(d Deps, res *Resource, rg *Range, rows []map[string]any, w Wind
 		out.Headline = "Libre todo el día"
 		fmt.Fprintf(&b, "🟢 <b>Libre</b> %s: no tenés nada agendado.", esc(w.Words))
 		out.Text = b.String()
+		out.Speech = SpokenNumbers("Estás libre " + w.Words + ": no tenés nada agendado.")
 		return out
 	}
 	out.Headline = fmt.Sprintf("%d hueco(s) libre(s)", len(free))
@@ -724,5 +855,10 @@ func composeFree(d Deps, res *Resource, rg *Range, rows []map[string]any, w Wind
 	fmt.Fprintf(&b, "Ocupado: %d bloque(s).", len(busy))
 	fmt.Fprintf(&b, "\n\n<i>%s</i>", esc(understood))
 	out.Text = strings.TrimRight(b.String(), "\n")
+	var items []string
+	for _, f := range free {
+		items = append(items, "de "+ClockWords(f.s.In(loc).Hour(), f.s.In(loc).Minute())+" a "+ClockWords(f.e.In(loc).Hour(), f.e.In(loc).Minute()))
+	}
+	out.Speech = SpokenNumbers("Libre " + w.Words + ": " + spokenList(items, len(items), "") + " Ocupado: " + numberPhrase(len(busy), "bloques") + ".")
 	return out
 }

@@ -384,6 +384,31 @@ carries it), and `/admin/ask` / `gasto` split the spend into `useful_usd`
 and `wasted_usd`. The cache key carries the vocabulary's fingerprint: a
 synonym declared after a cached «no entendí» cures it on the next restart.
 
+**The assistant teaches how to use it (AGENDA-ASISTENTE-S1, ADR-040).** A
+LIVING GUIDE generated from the schema, by levels («ayuda» → the menu; «cómo
+creo algo» / «cómo creo una <res>» → structure + ONE full example with this
+app's real rows, read through the caller's RBAC; «qué puedo preguntar»; «qué
+campos tiene una <res>»; «cómo filtro por fecha»; «más» → the next part, a
+cursor per identity in `ask.GuideStore`), every free example SELF-VERIFIED
+with `Parse` on that schema before it is shown, free and paid apart with the
+price, delivered in parts of six items on both channels (`kind: guide`,
+`source: parser`, US$ 0). A FIXED FORM for creating settled by the parser —
+`crear <res>: <qué>, <data in any order>` (also the resource word first,
+«anotá que <what happened>» → the note resource, «tengo que…» → the to-do,
+«<agenda word> con <Name> mañana a las 3 por una hora» → the block); each
+datum recognized by FORM (field word, declared value/alias, bool by name, day
+/ clock incl. «4 pm», «cuatro de la tarde», «9 y media», number + unit, name
+after con/para, a bare name tried against every target — `Plan.Refs` /
+`Filter.Fields`, VOZ-20) — the confirmation unchanged. A CORRECTION on a
+pending confirm («no, mejor el viernes», «sí pero urgente») re-issues the
+confirmation (`kind: confirm` again, the text says what changed), never
+executes. `resumen`/`estado`/`gasto` through `/api/ask` are served in-process
+by the summary/census/spend handlers (VOZ-21). `speech`/`display` are COMPOSED
+(`ask.SpokenNumbers`, `ClockRangeWords`, `spokenList` cap 5, `SpeechMetrics`):
+no digit, symbol, bullet or pictograph ever reaches the voice. No domain word
+lives in the engine: everything above derives from the resources, fields,
+enums, aliases and ranges of the deployed schema.
+
 ### 2c. Reading from OUTSIDE the binary — `?fields=`: ask for the columns you will use
 
 **The problem it solves is not bandwidth, it is disk.** A `json`/`jsonb`/`text`

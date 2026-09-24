@@ -20,6 +20,9 @@ type AskRuntime struct {
 	// (VOZ-ESCRITURAS-S1), one per (tenant, role, user), 5 minutes. nil =
 	// writes disabled for this app.
 	Pending *ask.PendingStore
+	// Guide remembers where the living guide left off per identity
+	// (AGENDA-ASISTENTE-S1), so «más» continues it. nil = no continuation.
+	Guide *ask.GuideStore
 }
 
 type askRuntimeKey struct{}

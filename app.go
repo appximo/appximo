@@ -602,6 +602,7 @@ func New(cfg Config) (*App, error) {
 		Ledger:  askspend.New(askCfg, pool, summary.Location(), alerter, s.Name),
 		Cache:   askCache,
 		Pending: ask.NewPendingStore(),
+		Guide:   ask.NewGuideStore(),
 	}
 	// The question history (VOZ-TRAZABILIDAD-S1): one row per question,
 	// written off the answer path by its own goroutine, pruned by retention.

@@ -1,0 +1,194 @@
+# ADR-040 — An assistant that teaches how to use it: a living guide from the schema, a fixed form for creating, corrections on a pending write, names tried against every target, and replies that sound like a person
+
+**Status:** accepted (AGENDA-ASISTENTE-S1, 2026-09-24). Builds on ADR-033/035/037/038/039.
+**Drivers:** the agenda's real `/admin/ask` history after two days of daily use
+(119 questions: parser 50 %, model 33 %, 15 wasted, US$ 0.14) and a human
+sentence bank built from it (151 sentences: 31 verbatim from the history, 19
+from the owner's own cases and rows, 101 natural variants — `evidencia/
+AGENDA-ASISTENTE-S1/corpus/`) measured against the engine as deployed: **72.8 %
+of the intentions hit, 34 % settled by the parser, 64 % paid to the model,
+US$ 0.366 per pass, p50 906 ms.** Every creation went to the model; «cómo creo
+algo» bought a «no entendí»; a name on a resource with two relations bought
+a guess; «no, mejor el viernes» after a confirmation cancelled it and bought
+another «no entendí»; and the voice read `16:00`, bullets and emoji names.
+The thesis: an assistant that does not teach how to use it forces guessing,
+and guessing costs money. Teaching is cheaper than translating.
+
+## Decisions
+
+### 1. The guide is GENERATED from the schema, by levels, with a structure and one complete example each — and self-verified
+
+`ayuda` answers a menu: what the app has (its resources, in the owner's
+`summary.resources` order) and the four doors — ask, create, change, the
+digest — then the levels to ask for: «cómo creo algo», «qué puedo preguntar»,
+«qué campos tiene una tarea», «cómo filtro por fecha», and «más» to continue
+any of them (a cursor per identity, ten minutes, `ask.GuideStore`). Each
+level answers with a STRUCTURE and ONE full example that can be repeated as
+is — «Para crear una tarea decí: crear tarea: [qué], área [cuál], persona
+[cuál], [urgente], [mañana / el viernes]. Por ejemplo: crear tarea: revisar
+el contrato, área casa, persona Fabián Gómez, urgente, el viernes» — with the
+fields, states, aliases AND ROWS of this app (a real area, a real person,
+read through the caller's own RBAC), so the example works. Nothing is
+written by hand: a declared alias, field or resource changes the guide.
+
+**Self-verified**: an example promised as free is parsed on that very schema
+before it is shown; one the parser cannot settle is never promised (the
+transition example is kept only where the parser resolves the row). Free and
+paid are always apart, with the price in the text («≈ US$ 0,003») and in
+words in the speech («unos centavos»). A long level is delivered in parts
+of at most nine sentences, offering «más». Levels are recognized before the
+executable-word check, so «cómo creo una tarea» — which names a resource —
+is a guide request, not a create. No domain word lives in the engine.
+
+*Rejected:* a hand-written help text (lies in a month); a list of words
+instead of a full sentence (does not teach how to build one); everything at
+once (a wall a voice cannot read).
+
+### 2. The fixed form for creating: `crear <recurso>: <qué>, <datos en cualquier orden>`
+
+`crear tarea: arreglar las puertas del auto, área personal, urgente` — a
+verb (crear / nueva / anotá / agregá / registrá…) or the resource word
+itself, then WHAT it is, then the data in ANY order, with or without the
+field word («área personal» or a bare «personal»), separated by commas, «y»
+or the pause dictation leaves. Every datum is recognized by its FORM, never
+by a domain word: a field's own name, a declared value or alias, a bool by
+its name, a day or a clock, a number with its unit, a name after «con» /
+«para», a bare name tried against every target (§4). Whatever is not a datum
+is the title, kept as said. Three tolerant cousins settle the sentences the
+owner already says: «anotá que <lo que pasó>» is the note resource (the one
+that records a moment: creatable, no lifecycle, a range without no-overlap or
+a time that defaults to now); «anotá <infinitivo>…» is a to-do; «compromiso
+de 4 a 5 con Fabián hoy» / «reunión con Fabián mañana a las 3 por una hora»
+(the agenda word, a clock span, no question word) is a block.
+
+**Chosen over** keyword=value pairs («título: X, área: Y» — exhausting to
+dictate), a fixed positional order («crear tarea X Y Z» — has to be
+memorized and breaks when one datum is skipped) and the model for everything
+(the baseline). Criteria in order: easy to say aloud, easy to remember (one
+word: «crear tarea:»), tolerant to order and separators, hard to confuse with
+a question (the colon, the infinitive, the clock span). **The confirmation
+is unchanged**: the saving is the model call, never the control. Anything the
+form cannot settle stays the model's — never a «no entendí» where the model
+used to answer (the corpus pins it: zero regressions).
+
+### 3. A correction on a pending write re-issues the confirmation; it never executes it
+
+«no, mejor el viernes», «mejor a las 5», «sí pero urgente», «que sea con
+Marta»: when the words after the lead are exactly data the form recognizes
+(a day, a clock, a bool, a declared value, a name, a duration), they are
+applied to the pending — a clock keeps the day, a day keeps the clock, a range
+keeps its length — and the confirmation is shown AGAIN, saying what changed
+(«Cambié vence en.»). ADR-037 §2 stands: a «sí pero…» is never a yes. What
+changes is ADR-038 §3's «sí pero mejor el viernes → cancelled, explained»:
+that reading was right for a sentence carrying nothing executable; one that
+carries a datum is a correction, and cancelling it forced the owner to
+dictate the whole order again (measured: X01–X04 of the corpus all cancelled
+and three of them bought a model call). Words the form does not recognize
+keep the old behavior: cancel, say so, re-read.
+
+### 4. A name the sentence does not place is tried against every candidate target (VOZ-20)
+
+«las tareas de Esposa», «crear tarea: pagar el seguro, Casa», «marcá como
+hecha la tarea del techo»: on a resource with an area AND a person (and its
+own title), the parser used to give up («name could match area_id or
+persona_id») and the model was paid to guess. Now the parser says WHICH fields
+the name could belong to (`Filter.Fields` for a read, `Plan.Refs` for a
+write) and the engine tries each with the same matcher a placed name gets:
+relation targets first, the row's own title only when no target holds the
+name (a title that merely CONTAINS «Fabián» — «almuerzo con Fabián» — must
+never compete with the person). One place → used and said with its kind
+(«área: trabajo»); several → the owner picks, each option naming its kind
+(«1. área Casa 2. persona Casa»); none → said, naming every kind tried — or,
+on a write, a bare word that is nothing anywhere joins the title instead of
+refusing the write. And an exact whole token IS the row: «Fabián» is Fabián
+Gómez even with a Fabiana around; «Fabi» still asks.
+
+### 5. «Resumen» / «estado» / «gasto» said to the question door are served by it (VOZ-21)
+
+The fixed commands lived in the Telegram receiver; the same words through
+`/api/ask` (Siri, the panel) were «no resource named» and a wasted model
+call. They are now parser discards at US$ 0, served by the engine's OWN
+endpoints called in-process with the caller's identity (`GET /api/summary`,
+`?view=census`, `GET /api/ask/spend` — the same digest and the same card the
+bot sends, no second implementation; a role that may not see the spend is
+told so). «Resumen de tareas» — the summary OF one resource — is its
+breakdown by state, a parser read.
+
+### 6. «Ya hice…», «terminé de…», «… está lista» are the finished transition
+
+A first-person "done" phrase moves the named to-do to its FINISHED state:
+the terminal state of the machine that is not a cancellation (by the
+cancel/anular/rechazar/descartar stems — Spanish verbs, not a domain), when
+there is exactly one. The row is named like any transition (§4).
+
+### 7. Replies sound like a person — measured, since no one here can listen
+
+`speech` (and `display`, which is speech plus the cost line when tracing is
+on) is composed, not derived: short sentences with a full stop between items;
+never a bullet, a guillemet, a pictograph or a raw digit — clocks in words
+(«las cuatro de la tarde», «las nueve y media de la mañana»), dates in words
+(«el lunes veintiuno de septiembre»), counts in words («dos tareas»), a code
+(«ORD-1003») and a money amount kept; a list reads at most FIVE items, then
+«y N más; mirá el panel» (the screen keeps the page); a confirmation is read
+as sentences («Voy a crear una tarea. Título: … Persona: … Vence mañana, el
+lunes veintiuno de septiembre a las cuatro de la tarde. ¿Confirmás?»); a
+long guide in parts. **Verification:** the 105 has no speech synthesizer and
+the agent cannot listen; the criterion is declared and pinned by tests
+(`ask.SpeechMetrics`): ≤ 22 words per sentence, ≤ 14 on average, zero digits
+and zero symbols in every spoken reply of the corpus, ≤ 5 spoken items. What
+Siri itself does with the punctuation (pause length, intonation) is the
+shortcut's business: the Speak action honors full stops; if it reads too
+fast, the fix is the shortcut's «Rate» setting, not the engine.
+
+### 8. VOZ-15 stays as the written rule; the confirmation says the half of the day in words
+
+A bare hour 1–6 is the afternoon, 7–12 the morning. The corpus evidence: 25
+bare hours said in 37 clocks, every one meaning what the rule reads (a
+meeting «a las 4» at 16:00, «de 12 a 1» ending at 13:00, «a las 8» at 08:00); the owner's only real compromiso was dictated
+qualified («tipo 11 de la mañana»). A declarable working-hours key would add
+a knob to decide what nobody has been wrong about; the cheap protection is
+that the confirmation now SAYS «a las cuatro de la tarde» in words, so a
+wrong reading is heard before anything is written and corrected with «mejor
+a las 4 de la mañana» (§3). Reopen VOZ-15 only with a real misread.
+
+## What was measured (the bank, before → after)
+
+The same 151 sentences, the same seed rows, two engines on the 105 (the
+deployed `80bd966` and this session's binary), the real model behind both:
+
+| | deployed (`80bd966`) | this session | 
+|---|---|---|
+| intention hits | 110 / 151 (72.8 %) | **149 / 151 (98.7 %)** — the two misses are sentences the model calls unclear on both engines (T03b, Q15) |
+| settled by the parser | 51 (34 %) | **124 (82 %)** |
+| model calls per pass | 97 | **21** |
+| cost per pass | US$ 0.366 | **US$ 0.083** |
+| p50 latency | 906 ms | **10–28 ms** (the model's p50 unchanged, ≈ 1 s) |
+| regressions (right before, wrong now) | — | **zero** |
+| the 31 verbatim-history sentences | hits 21, model 17, US$ 0.061 | hits 29, model 7, US$ 0.025 |
+
+Projection from the owner's real rate (58 questions/day, US$ 0.070/day on
+the deployed engine): **US$ 2.09 → 0.86 per month**; and of the 21 model calls
+left in a pass, 7 are loose creates that the fixed form settles for free —
+following the guide's own form takes the month to ≈ US$ 0.57. The guide's
+effect measured directly: every example the guide shows (44 on the agenda,
+13 on the 20-resource conjunto, 11 on the English quickstart) fired back at
+the engine answers `source: parser`, US$ 0. Fifteen provocations (one per
+scenario of the brief, `evidencia/AGENDA-ASISTENTE-S1/provocations.log`)
+15/15; over their 80 spoken replies: zero digits, zero symbols, zero
+pictographs, at most 22 words in a sentence composed by the engine (28 in
+one the model wrote).
+
+## What is deliberately not built (registered)
+
+- A sentence with two intentions executes ONE: the first is planned, the
+  second is said back («decímelo aparte cuando confirmes») — a queue of
+  pendings would let a stray yes execute the wrong one (VOZ-23).
+- Relative times («en una hora», «dentro de dos días») stay the model's:
+  the token vocabulary is closed on purpose (ADR-037 §6) (VOZ-22).
+- A verb of beginning («arrancá con», «empezá») is not mapped to the
+  in-progress state: it names no state, and one sentence in the bank is not
+  evidence enough for a word list (VOZ-24).
+- Working hours are not declarable (§8, VOZ-15 closed); recurrences are v2
+  (ADR-039).
+- A synthesized listening test: no engine on the box, no agent ear; the
+  metric stands in, and the human check is VOZ-6.

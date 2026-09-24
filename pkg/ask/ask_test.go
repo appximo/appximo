@@ -366,10 +366,10 @@ func TestCompose_Formats(t *testing.T) {
 		t.Errorf("money/integer formats: %s %s %s", Money(123450000), Money(1234550), Integer(1234567))
 	}
 	// the middle dot is a comma for a voice (APP-AGENDA palabras); bullets go
-	if Speech("0 tareas\nNingún registro coincide.\n<i>tareas · antier</i>") != "0 tareas. Ningún registro coincide. tareas, antier" {
+	if Speech("0 tareas\nNingún registro coincide.\n<i>tareas · antier</i>") != "cero tareas. Ningún registro coincide. tareas, antier" {
 		t.Errorf("speech double stop: %q", Speech("0 tareas\nNingún registro coincide.\n<i>tareas · antier</i>"))
 	}
-	if Speech("<b>3</b> pedidos:\n• P-001 · $ 120.000\n<i>pedidos · hoy</i>") != "3 pedidos: P-001, $ 120.000. pedidos, hoy" {
+	if Speech("<b>3</b> pedidos:\n• P-001 · $ 120.000\n<i>pedidos · hoy</i>") != "tres pedidos: P-001, $ 120.000. pedidos, hoy" {
 		t.Errorf("speech: %q", Speech("<b>3</b> pedidos:\n• P-001 · $ 120.000\n<i>pedidos · hoy</i>"))
 	}
 	if singular("ordenes") != "orden" || singular("citas") != "cita" || singular("pqrs") != "pqr" {
@@ -432,7 +432,9 @@ func TestAnswer_CorrectionRoundFixesAField(t *testing.T) {
 		`{"kind":"count","resource":"citas","filters":[{"field":"optometra_id","op":"eq","match":"Mesa"}]}`,
 	}}
 	e := fixtures()
-	r := Answer(context.Background(), deps(m, e), "citas del doctor Mesa")
+	d := deps(m, e)
+	d.NoParser = true // the parser settles «citas del doctor Mesa» itself now (VOZ-20); this tests the MODEL's correction round
+	r := Answer(context.Background(), d, "citas del doctor Mesa")
 	if r.Kind != "answer" || *r.Number != 0 {
 		t.Fatalf("want answer 0 after correction, got %+v", r)
 	}
@@ -488,7 +490,9 @@ func TestAnswer_AmbiguousNameAsksWhich(t *testing.T) {
 func TestAnswer_NonexistentNameIsSaidNotZero(t *testing.T) {
 	m := &scripted{replies: []string{plan(Plan{Kind: "count", Resource: "citas", Filters: []Filter{{Field: "optometra_id", Match: "Wilfredo Pacheco"}}})}}
 	e := fixtures()
-	r := Answer(context.Background(), deps(m, e), "citas de Wilfredo Pacheco")
+	d := deps(m, e)
+	d.NoParser = true // the model's single-field plan; the parser's multi-field wording is tested apart
+	r := Answer(context.Background(), d, "citas de Wilfredo Pacheco")
 	if r.Kind != "not_found" || r.Number != nil {
 		t.Fatalf("want not_found without a number, got %+v", r)
 	}
@@ -726,11 +730,11 @@ func TestAnswer_TraceLineOnlyWhenOnAndNeverInSpeech(t *testing.T) {
 	m2 := &scripted{replies: []string{plan(Plan{Kind: "count", Resource: "citas"})}}
 	d2 := deps(m2, e)
 	d2.Trace = true
-	r := Answer(context.Background(), d2, "cuántas citas vencidas hay")
-	if r.Source != "model" || r.Fallback != "unknown word: vencidas" || r.FallbackES != "palabra fuera del schema «vencidas»" {
+	r := Answer(context.Background(), d2, "cuántas citas raras hay") // «vencidas» is the parser's since AGENDA-ASISTENTE-S1
+	if r.Source != "model" || r.Fallback != "unknown word: raras" || r.FallbackES != "palabra fuera del schema «raras»" {
 		t.Fatalf("fallback: %+v", r)
 	}
-	if !strings.Contains(r.Text, "⚙︎ modelo") || !strings.Contains(r.Text, "el parser pasó: palabra fuera del schema «vencidas»") {
+	if !strings.Contains(r.Text, "⚙︎ modelo") || !strings.Contains(r.Text, "el parser pasó: palabra fuera del schema «raras»") {
 		t.Fatalf("trace must say why: %q", r.Text)
 	}
 	// The cache says so too, at zero cost.

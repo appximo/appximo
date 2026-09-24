@@ -15,8 +15,9 @@ import "strings"
 // system prompt now saying what an obligation is.
 var obligationPhrases = []string{
 	"que no se me olvide", "no me olvides de", "no te olvides de", "no me olvide de", "no me deje olvidar",
-	"tengo pendiente", "tenemos que", "acordate de", "acordame de", "tengo que", "hay que",
-	"recordame", "recuerdame", "me falta",
+	"tengo pendiente", "tenemos que", "acordate de", "acordame de", "tengo que", "tengo q", "hay que",
+	"no se me olvide de", "no se me olvide", "que no se me olvide de",
+	"recordame", "recuerdame", "me falta", "recordarme",
 }
 
 // taskResource is the ONE resource an obligation lands on: creatable, without a
@@ -88,81 +89,24 @@ func parseObligation(question string, v *Vocabulary) ParseResult {
 	if res == nil {
 		return ParseResult{Reason: "obligation: no single to-do resource"}
 	}
-	if !consumePhrase(toks, phrase) {
-		return ParseResult{Reason: "obligation: phrase not consumed"}
-	}
 	// A resource named in the sentence must be the to-do one («tengo que
-	// agendar una cita» is the agenda's business, not a task).
-	for _, t := range toks {
-		if t.used {
-			continue
-		}
+	// agendar una cita» is the agenda's business, not a task) — a field
+	// word («área salud») is not a resource mention.
+	words := strings.Fields(question)
+	rest := strings.Join(words[len(strings.Fields(phrase)):], " ") // the phrase opens the sentence
+	for _, t := range tokenize(rest) {
 		for _, name := range v.order {
 			r := v.resources[name]
-			if r != res && v.namesResource(t.norm, r) {
+			if r != res && v.namesResource(t.norm, r) && fieldByWord(v, res, t.norm) == nil {
 				return ParseResult{Reason: "obligation: names another resource (" + name + ")"}
 			}
 		}
 	}
-	data := map[string]any{}
-	// «urgente» → the resource's bool field of that name, and out of the title.
-	var urgentField *Field
-	for _, f := range res.Fields {
-		if f.Type == "bool" && strings.Contains(normalize(f.Name), "urgent") {
-			urgentField = f
-			break
-		}
+	// The rest is the fixed form without its verb: the title, the data in
+	// any order (a day, «urgente», «área salud», «con Marta»…).
+	pr := buildCreate(v, res, tokenizeKeep(rest), "")
+	if !pr.Sure {
+		return ParseResult{Reason: "obligation: " + pr.Reason}
 	}
-	if urgentField != nil {
-		for i := range toks {
-			if !toks[i].used && (toks[i].norm == "urgente" || toks[i].norm == "urgentemente" || toks[i].norm == "urgentisimo") {
-				toks[i].used = true
-				data[urgentField.Name] = true
-			}
-		}
-	}
-	// A day («mañana», «el viernes», «pasado mañana») → the resource's single
-	// writable time field (its due date); with two, the model decides.
-	var timeField *Field
-	for _, f := range res.Fields {
-		if f.Type == "time" && !f.Auto {
-			if timeField != nil {
-				timeField = nil
-				break
-			}
-			timeField = f
-		}
-	}
-	if timeField != nil {
-		if day := consumeDay(toks); day != "" {
-			data[timeField.Name] = day
-		}
-	}
-	var title []string
-	for _, t := range toks {
-		if t.used {
-			continue
-		}
-		title = append(title, t.raw)
-	}
-	for len(title) > 0 && stopwords[normalize(title[0])] && normalize(title[0]) != "que" {
-		title = title[1:]
-	}
-	for len(title) > 0 {
-		last := normalize(title[len(title)-1])
-		if last == "por" || last == "favor" || last == "porfa" || last == "y" || last == "," {
-			title = title[:len(title)-1]
-			continue
-		}
-		break
-	}
-	if len(title) == 0 {
-		return ParseResult{Reason: "obligation: no title"}
-	}
-	data[titleField(res).Name] = strings.Join(title, " ")
-	p := Plan{Kind: "create", Resource: res.Name, Data: data}
-	if err := p.Validate(v); err != nil {
-		return ParseResult{Reason: "obligation invalid: " + err.Error()}
-	}
-	return ParseResult{Plan: p, Sure: true}
+	return pr
 }

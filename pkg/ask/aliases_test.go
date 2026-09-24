@@ -163,9 +163,10 @@ func TestAliases_TransitionByAlias(t *testing.T) {
 	}
 	pv := BuildWithWrites(petsSchema(true), "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
 	// appointments has TWO name relations (pet, owner): «la cita de Ana» is
-	// not sure (rule 5) — but naming the relation's target settles it.
-	if r := Parse("marcá como atendida la cita de Ana Gómez", pv); r.Sure {
-		t.Fatalf("two name relations: must not be sure, got %+v", r.Plan)
+	// SURE with both as candidates (VOZ-20) — the engine tries each target
+	// before confirming; naming the relation's target still settles it.
+	if r := Parse("marcá como atendida la cita de Ana Gómez", pv); !r.Sure || len(r.Plan.Where) != 1 || len(r.Plan.Where[0].Fields) != 2 || r.Plan.Where[0].Match != "Ana Gómez" {
+		t.Fatalf("two name relations: sure with both candidates, got %+v (%s)", r.Plan, r.Reason)
 	}
 	// a code identifies the row of a transition («cancelá el pedido ORD-1003»)
 	cv := BuildWithWrites(func() *schema.APISchema {
@@ -199,8 +200,8 @@ func TestAliases_PreDiscardIsNarrow(t *testing.T) {
 		"Hola! buenos días":        "greeting",
 		"muchas gracias":           "greeting",
 		"qué tal":                  "greeting",
-		"qué puedo preguntar":      "help",
-		"que puedo preguntarte?":   "help",
+		"qué puedo preguntar":      "guide:ask",
+		"que puedo preguntarte?":   "guide:ask",
 		"ayuda":                    "help",
 		"como funciona esto":       "help",
 		"Ana Gómez":                "bare_name",
@@ -240,7 +241,7 @@ func TestAliases_DiscardAnswersAtZeroCost(t *testing.T) {
 	m := &scripted{replies: []string{`{"kind":"unclear","reason":"x"}`}}
 	v := Build(tienditaWithAliases(), "", func(string) (bool, []string) { return true, nil })
 	d := Deps{Vocab: v, Model: m, Exec: fixtures(), Now: now, Cache: NewPlanCache(10, time.Hour), CacheScope: "t|dueno"}
-	for q, kind := range map[string]string{"Si pero mejor el viernes": "unclear", "hola": "help", "qué puedo preguntar": "help", "Ana Gómez": "unclear"} {
+	for q, kind := range map[string]string{"Si pero mejor el viernes": "unclear", "hola": "help", "qué puedo preguntar": "guide", "Ana Gómez": "unclear"} {
 		r := Answer(context.Background(), d, q)
 		if r.Kind != kind || r.Source != "parser" || r.CostUSD != 0 || m.calls != 0 {
 			t.Errorf("%q → kind=%s source=%s cost=%v calls=%d", q, r.Kind, r.Source, r.CostUSD, m.calls)
@@ -287,6 +288,7 @@ func TestAliases_FingerprintChangesWithTheVocabulary(t *testing.T) {
 func TestWriteCache_PlanIsCachedNeverTheResult(t *testing.T) {
 	m := &scripted{replies: []string{plan(Plan{Kind: "create", Resource: "tareas", Data: map[string]any{"titulo": "Pagar la luz", "vence_en": "tomorrow"}})}}
 	d, w, st := writeDeps(m, agendaFixtures())
+	d.NoParser = true // the parser settles «anotá pagar la luz para mañana» itself now; this tests the MODEL plan cache
 	d.Cache, d.CacheScope, d.CacheScopeWrite = NewPlanCache(10, time.Hour), "t|dueno|fp", "t|dueno|fp|u1"
 	r1 := Answer(context.Background(), d, "anotá pagar la luz para mañana")
 	if r1.Kind != "confirm" || r1.Source != "model" || m.calls != 1 {
@@ -328,6 +330,7 @@ func TestWriteCache_PlanIsCachedNeverTheResult(t *testing.T) {
 func TestWriteCache_RelativeDateIsResolvedOnTheDayItRuns(t *testing.T) {
 	m := &scripted{replies: []string{plan(Plan{Kind: "create", Resource: "tareas", Data: map[string]any{"titulo": "Pagar el gas", "vence_en": "tomorrow"}})}}
 	d, w, _ := writeDeps(m, agendaFixtures())
+	d.NoParser = true // the model's cached plan is what is under test
 	d.Cache, d.CacheScope, d.CacheScopeWrite = NewPlanCache(10, 24*time.Hour), "t|dueno|fp", "t|dueno|fp|u1"
 	r1 := Answer(context.Background(), d, "anotá pagar el gas para mañana")
 	if !strings.Contains(r1.Text, "mañana (dom 20 sep)") {
@@ -393,7 +396,7 @@ func TestAliases_DisplayCarriesTheTraceSpeechDoesNot(t *testing.T) {
 	if strings.Contains(r.Speech, "⚙︎") {
 		t.Errorf("speech must never carry the trace: %q", r.Speech)
 	}
-	if !strings.HasPrefix(r.Display, "1 orden") {
+	if !strings.HasPrefix(r.Display, "Hay una orden") {
 		t.Errorf("display starts with the number: %q", r.Display)
 	}
 }

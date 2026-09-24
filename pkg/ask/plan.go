@@ -63,6 +63,9 @@ type Plan struct {
 	// grammar, `match` allowed). Exactly ONE row must match at confirmation
 	// time; several → the owner is asked which; none → said.
 	Where []Filter `json:"where,omitempty"`
+	// Refs (VOZ-20) are the names of a write whose field the parser could
+	// not tell; resolved against every candidate target before confirming.
+	Refs []Ref `json:"refs,omitempty"`
 }
 
 // Filter is one predicate. Exactly one of Value / Match is set: Value is a
@@ -74,6 +77,24 @@ type Filter struct {
 	Op    string `json:"op,omitempty"` // eq (default) | gt | gte | lt | lte | partial | start | is_null
 	Value any    `json:"value,omitempty"`
 	Match string `json:"match,omitempty"`
+	// Fields (VOZ-20, AGENDA-ASISTENTE-S1): the fields a proper name MAY
+	// belong to when the sentence does not say («las tareas de Esposa» on a
+	// resource with an area AND a person): the engine tries each target and
+	// keeps the one where the name exists; both → it asks which; none → said.
+	// Set only by the parser; Field is then empty until resolved.
+	Fields []string `json:"fields,omitempty"`
+}
+
+// Ref (VOZ-20) is a proper name of a WRITE that may belong to several
+// relation fields («crear tarea: pagar el seguro, Casa» — an area or a
+// person?). Resolved before the confirmation like any other name; Soft marks
+// a bare word that, matching nothing, is kept in the title instead of
+// refusing the write.
+type Ref struct {
+	Match   string   `json:"match"`
+	Fields  []string `json:"fields"`
+	Soft    bool     `json:"soft,omitempty"`
+	InTitle bool     `json:"in_title,omitempty"` // the words already sit in the title text
 }
 
 // Period is a time window over one time field.
@@ -258,6 +279,26 @@ func (p Plan) Validate(v *Vocabulary) error {
 // where) against the resource: field exists, op fits, value/match coherent.
 func validateFilters(v *Vocabulary, res *Resource, resource string, filters []Filter, label string) error {
 	for i, f := range filters {
+		if len(f.Fields) > 0 {
+			// A name the parser could not place: every candidate must be a
+			// relation with a readable target or the resource's own text field.
+			if f.Match == "" || f.Value != nil || (f.Op != "" && f.Op != "eq") {
+				return fmt.Errorf(label+"[%d]: fields takes a match with op eq", i)
+			}
+			for _, name := range f.Fields {
+				fd := res.Field(name)
+				if fd == nil {
+					return fmt.Errorf(label+"[%d]: %s has no field %q", i, resource, name)
+				}
+				if fd.Relation != "" && v.Resource(fd.Relation) == nil {
+					return fmt.Errorf(label+"[%d]: %s.%s points at %s, which you may not read", i, resource, name, fd.Relation)
+				}
+				if fd.Relation == "" && !fd.IsText() {
+					return fmt.Errorf(label+"[%d]: %s.%s cannot hold a name", i, resource, name)
+				}
+			}
+			continue
+		}
 		if f.Field == "" {
 			return fmt.Errorf(label+"[%d]: field is required (fields of %s: %s)", i, resource, res.FieldList())
 		}

@@ -20,11 +20,14 @@ func miguelAgendaSchema() *schema.APISchema {
 			"tareas": {
 				Aliases: []string{"cosa", "quehacer"},
 				Fields: map[string]schema.FieldDef{
-					"titulo":     {Type: "string", Required: true},
-					"urgente":    {Type: "bool", Default: false},
-					"vence_en":   {Type: "time"},
-					"area_id":    {Type: "uuid", Relation: "areas"},
-					"persona_id": {Type: "uuid", Relation: "personas"},
+					"titulo":                {Type: "string", Required: true},
+					"urgente":               {Type: "bool", Default: false},
+					"vence_en":              {Type: "time"},
+					"cerrada_en":            {Type: "time"},
+					"duracion_estimada_min": {Type: "int"},
+					"tiempo_real_min":       {Type: "int"},
+					"area_id":               {Type: "uuid", Relation: "areas"},
+					"persona_id":            {Type: "uuid", Relation: "personas"},
 					"estado": {Type: "string", Enum: []string{"pendiente", "en_curso", "hecha", "cancelada"}, Default: "pendiente",
 						Aliases: map[string][]string{"pendiente": {"por hacer", "abierta"}, "hecha": {"lista", "terminada", "completada", "completa"}},
 						StateMachine: &schema.StateMachine{Initial: []string{"pendiente"}, Pending: []string{"pendiente"},
@@ -47,6 +50,19 @@ func miguelAgendaSchema() *schema.APISchema {
 				},
 				Ranges: map[string]schema.RangeDef{"horario": {Start: "inicio", End: "fin",
 					NoOverlap: &schema.NoOverlapDef{Scope: []string{"dueno_id"}, When: &schema.WhenDef{Field: "ocupa", Op: "eq", Val: true}}}},
+			},
+			"registros": {
+				Aliases: []string{"nota", "apunte"},
+				Fields: map[string]schema.FieldDef{
+					"texto":      {Type: "text", Required: true},
+					"cuando":     {Type: "time", Default: "now"},
+					"hasta":      {Type: "time"},
+					"persona_id": {Type: "uuid", Relation: "personas"},
+					"area_id":    {Type: "uuid", Relation: "areas"},
+					"dueno_id":   {Type: "uuid"},
+					"creado_en":  {Type: "time", Auto: schema.AutoCreate},
+				},
+				Ranges: map[string]schema.RangeDef{"lapso": {Start: "cuando", End: "hasta"}},
 			},
 			"areas":    {Aliases: []string{"ambito"}, Fields: map[string]schema.FieldDef{"nombre": {Type: "string", Required: true}}},
 			"personas": {Aliases: []string{"contacto"}, Fields: map[string]schema.FieldDef{"nombre": {Type: "string", Required: true}}},
@@ -121,11 +137,11 @@ func TestHelp_ExamplesComeFromTheSchema(t *testing.T) {
 			t.Fatalf("help text lacks %q:\n%s", want, text)
 		}
 	}
-	// tareas points at TWO relation targets (area, persona), so «marcá como
-	// hecha la tarea de [nombre]» cannot be settled by the parser here — the
-	// self-check must have dropped it rather than promise it as free.
-	if strings.Contains(text, "marcá como") {
-		t.Fatalf("help promises a transition the parser cannot settle on this schema:\n%s", text)
+	// tareas points at TWO relation targets (area, persona): since VOZ-20 the
+	// parser settles «marcá como hecha la tarea de [nombre]» anyway (the
+	// engine tries each target), so the self-check keeps it as free.
+	if !strings.Contains(text, "marcá como hecha la tarea de [nombre]") {
+		t.Fatalf("help lacks the transition the parser now settles:\n%s", text)
 	}
 	if strings.Contains(text, "Puedo contar, listar o sumar sobre") {
 		t.Fatalf("help still lists resources instead of examples:\n%s", text)
@@ -167,13 +183,13 @@ func TestHelp_CostsNothingAndKeepsItsSpeech(t *testing.T) {
 	d := Deps{Vocab: v, Exec: e, Now: now, Trace: true, Write: &memWriter{exec: e}, ModelOff: "disabled"}
 	for _, q := range []string{"ayuda", "qué puedo preguntar", "Ayuda"} {
 		r := Answer(context.Background(), d, q)
-		if r.Kind != "help" || r.Source != "parser" || r.CostUSD != 0 {
+		if (r.Kind != "help" && r.Kind != "guide") || r.Source != "parser" || r.CostUSD != 0 {
 			t.Fatalf("%q: kind=%s source=%s cost=%v", q, r.Kind, r.Source, r.CostUSD)
 		}
-		if strings.Contains(r.Speech, "US$") || strings.Contains(r.Speech, "⚙") || !strings.Contains(r.Speech, "sin costo") {
+		if strings.Contains(r.Speech, "US$") || strings.Contains(r.Speech, "⚙") || (r.Kind == "help" && !strings.Contains(r.Speech, "cómo creo algo")) {
 			t.Fatalf("%q: speech is not the composed one: %q", q, r.Speech)
 		}
-		if !strings.Contains(strings.ToLower(r.Display), "cuántas tareas hay") {
+		if r.Kind == "help" && !strings.Contains(strings.ToLower(r.Display), "cuántas tareas hay") {
 			t.Fatalf("%q: display lacks the examples: %q", q, r.Display)
 		}
 	}

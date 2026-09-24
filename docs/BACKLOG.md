@@ -1788,17 +1788,6 @@ the previous binary. **Ready:** a corpus with TWO schemas (base and new) and
 cases tagged «new only», fired at the new binary and compared against a
 written expectation instead of the base. Origin: MOTOR-AGENDA-S1 gates.
 
-### VOZ-15 — The parser reads «a las 4» as 16:00 by a fixed rule (1–6 = afternoon): the owner's working hours are not declarable
-
-A bare hour 1–6 is read as the afternoon, 7–12 as the morning; «de la mañana /
-de la tarde / pm» corrects it and the confirmation always prints the resolved
-hour, so a wrong reading is caught before writing. An early riser («a las 5» =
-05:00) fights the rule on every appointment and the schema has nowhere to
-declare their hours. **Ready:** a declarable key (e.g. `ranges.<n>.hours:
-["07:00","20:00"]`) that resolves the ambiguity toward the working hours — or
-VOZ-6 (real dictation) saying whether the rule bothers at all. Origin:
-MOTOR-AGENDA-S1 Part D.5. Decides: Miguel.
-
 ### OPS-59 — The stock binary's control plane listens on EVERY interface (`*:9092`); ufw is the only guard
 
 `appximo serve` opens the control plane (`X-Admin-Key`) on `:<port>` without
@@ -1821,23 +1810,41 @@ writes the server version into the `.manifest`; `restore.sh` and the command
 center's `pg_version` check demand it; one line in docs/PRODUCTION.md §4.
 Origin: APP-AGENDA-S1 Part A. Decides: agent.
 
-### VOZ-20 — A proper name on a resource with TWO nameable relation targets falls to the model («tareas de Esposa»: area or persona?)
+### VOZ-22 — Relative times («en una hora», «dentro de veinte minutos», «en dos días») are still the model's
 
-The parser resolves a proper name against the target of ONE relation; with two
-(tareas → areas AND personas) it answers «name could match area_id or
-persona_id» and the question goes to the model — three of the agenda's real
-questions, two of them wasted. **Ready:** try the name through the existing
-matcher (names.go) against BOTH targets before giving up: one match → that
-one; both → «¿cuál?»; none → «no encuentro». A small session with the
-history's cases.
+The time-token vocabulary is closed on purpose (ADR-037 §6): a day plus a
+clock. A time relative to NOW has no token; the parser lets it through and
+the model resolves it (or not). An owner with the phone in hand says
+«recordame en una hora» more than «a las cuatro»; today it costs US$ 0.003
+and sometimes a «no entendí». In the sentence bank (151) it appeared once
+(C05, resolved by the model). **Ready:** relative tokens (`in 1h`, `in 20m`,
+`in 2d`) resolved by the engine in the app's zone with a spoken form — only
+once the real history shows the phrase more than once a month. Origin:
+AGENDA-ASISTENTE-S1. Decides: agent.
 
-### VOZ-21 — «Resumen» / «estado» said to /api/ask (not to the bot) fall to the model and are wasted
+### VOZ-23 — Two intentions in one sentence execute ONE: the second is said back, not queued
 
-The fixed commands live in the Telegram receiver; the same word through
-/api/ask (Siri, the panel) is not a question the parser settles: «Resumen»
-cost US$ 0,0036 with «no resource named» and was marked wasted. **Ready:** the
-parser discards «resumen»/«estado»/«gasto» at US$ 0 pointing at the endpoint —
-or /api/ask composes the digest itself (the same Report the bot uses).
+«anotá comprar pintura y agendá reunión con Fabián mañana a las 4» plans the
+first and says «Lo segundo («agendá…») decímelo aparte cuando confirmes».
+There is no queue of pendings — a stray yes can never execute the wrong one
+(ADR-040) — but the owner dictates twice, and with Siri a long sentence is the
+normal case. **Ready:** a queue of ONE: after the yes (or the no) of the first,
+the engine offers the second as a fresh confirmation without the owner
+repeating it; never two live pendings at once. Origin: AGENDA-ASISTENTE-S1
+provocation 10. Decides: agent.
+
+### VOZ-24 — «Arrancá con X» / «empezá X» (to start = move to in-progress) go to the model, which sometimes answers that it cannot
+
+The parser settles a transition by the state value said («poné en curso…»)
+or by a verb whose stem is a state («cancelá»); a verb of beginning names no
+state. The model answered `write_refused` in two runs (U05 of the bank, and
+«poné en curso» before its fix): it reads «arrancá» as an action that is not
+about data. It is the natural phrase to start a task and the only colloquial
+transition of the bank still failing (1 of 151). **Ready:** with evidence
+from the real history (the owner saying it more than once): a generic map
+verb-of-beginning → the non-initial, non-terminal state whose name contains
+«curso»/«progreso»/«proceso», plus a line for the model (W1c) saying that
+starting is a transition. Origin: AGENDA-ASISTENTE-S1, bank U05. Decides: agent.
 
 ### VOZ-18 — The estimate-vs-real mirror is per task; there is no weekly aggregate («esta semana subestimaste 60 %»)
 

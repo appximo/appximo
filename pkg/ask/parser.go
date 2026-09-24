@@ -86,7 +86,12 @@ var (
 		// agenda function words (MOTOR-AGENDA-S1): «tengo algo», «cuándo estoy libre», «estoy ocupado»
 		"algo", "cuando", "estoy", "estamos", "ocupado", "ocupada", "agendado", "agendada", "programado", "programada")
 	countWords = set("cuantos", "cuantas", "cuanto", "cuanta", "numero", "cantidad", "conta", "contame", "cuenta", "cuentame", "total")
-	listWords  = set("lista", "listar", "listame", "listado", "mostrame", "muestrame", "mostra", "mostrar", "muestra", "dame", "traeme", "pasame", "cuales", "que", "ver")
+	// summaryWords beside a resource ask for its breakdown by state («resumen
+	// de tareas», «resumime los compromisos»); alone they are the day's digest.
+	summaryWords = set("resumen", "resumir", "resumime", "resumeme", "resume", "resumi")
+	// overdueWords name rows past their due date («tareas vencidas»).
+	overdueWords = set("vencida", "vencidas", "vencido", "vencidos", "atrasada", "atrasadas", "atrasado", "atrasados")
+	listWords    = set("lista", "listar", "listame", "listado", "mostrame", "muestrame", "mostra", "mostrar", "muestra", "dame", "traeme", "pasame", "cuales", "que", "ver")
 	// lastWords («los últimos 5 pedidos») list the most recent rows — the list
 	// already sorts by the creation timestamp, newest first; a number right
 	// after bounds it. Generic Spanish, no domain word.
@@ -126,9 +131,20 @@ var periodPhrases = []struct {
 	{"el lunes", "next_monday"}, {"el martes", "next_tuesday"}, {"el miercoles", "next_wednesday"}, {"el jueves", "next_thursday"}, {"el viernes", "next_friday"}, {"el sabado", "next_saturday"}, {"el domingo", "next_sunday"},
 }
 
+func init() {
+	// longest phrase first: «de la semana que viene» must win over «de la
+	// semana» (this_week) — the table is written by meaning, not by length
+	sort.SliceStable(periodPhrases, func(i, j int) bool {
+		return len(strings.Fields(periodPhrases[i].phrase)) > len(strings.Fields(periodPhrases[j].phrase))
+	})
+}
+
 // freeWords ask for the gaps of an agenda («cuándo estoy libre», «qué huecos
 // tengo el jueves») — generic Spanish, no domain word.
 var freeWords = set("libre", "libres", "hueco", "huecos", "disponible", "disponibles", "desocupado", "desocupada")
+
+// articles a proper name may start with when it is a row's title.
+var articles = set("el", "la", "los", "las")
 
 // periodOnly are words that mean nothing WITHOUT a period ("nuevos" = created
 // in the period; alone it is a business word the schema does not declare):
@@ -169,11 +185,27 @@ func Parse(question string, v *Vocabulary) ParseResult {
 	if len(toks) == 0 {
 		return ParseResult{Reason: "empty"}
 	}
+	// 00. Two intentions in one sentence («anotá X y agendá Y», «marcá como
+	// hecha … y anotá …»): the first is parsed, the second is carried on the
+	// plan and said back to be asked apart (AGENDA-ASISTENTE-S1).
+	if first, second := splitIntents(question); second != "" {
+		pr := Parse(first, v)
+		if pr.Sure && pr.Discard == "" && pr.Plan.IsWrite() {
+			pr.Plan.Reason = second
+			return pr
+		}
+	}
 	// 0a. An obligation in the first person — «tengo que comprar pintura»
 	// (APP-AGENDA-S2, VOZ-17): no write verb, yet the most common sentence an
 	// agenda hears. Settled before the discard rule (nothing in it is an
 	// "executable word") and before the write-verb walk.
 	if pr := parseObligation(question, v); pr.Sure {
+		return pr
+	}
+	// 0a'. Something DONE, in the first person — «ya hice la declaración»,
+	// «terminé de lavar el carro», «la tarea del carro está lista»: the
+	// transition to the finished state of the row named.
+	if pr := parseDone(question, v); pr.Sure {
 		return pr
 	}
 	// 0. Sure it is NOT a data question (Part C): a stray confirmation, a
@@ -203,9 +235,24 @@ func Parse(question string, v *Vocabulary) ParseResult {
 				if pr := parseSchedule(question, v); pr.Sure {
 					return pr
 				}
+				// The third (AGENDA-ASISTENTE-S1): the FIXED FORM and its
+				// tolerant cousins — «crear tarea: X, área Y, urgente»,
+				// «anotá que …», «anotá pagar la luz mañana».
+				if pr := parseCreate(question, v); pr.Sure {
+					return pr
+				}
 				return ParseResult{Reason: "write verb: " + t.norm}
 			}
 			return ParseResult{Plan: Plan{Kind: "write", Reason: "verbo de escritura: " + t.raw}, Sure: true}
+		}
+	}
+
+	// 0b. The resource word first with a colon or an infinitive («tarea:
+	// lavar el carro», «Tarea organizar suscripciones») is the fixed form
+	// without its verb (AGENDA-ASISTENTE-S1).
+	if v != nil && v.Writable() {
+		if pr := parseCreate(question, v); pr.Sure {
+			return pr
 		}
 	}
 
@@ -298,6 +345,12 @@ func Parse(question string, v *Vocabulary) ParseResult {
 	// 3. the operation.
 	op := ""
 	limit := 0
+	summaryAsked := false
+	for i := range toks {
+		if !toks[i].used && summaryWords[toks[i].norm] {
+			toks[i].used, summaryAsked = true, true
+		}
+	}
 	setOp := func(o string) bool {
 		if op != "" && op != o {
 			return false
@@ -411,6 +464,20 @@ func Parse(question string, v *Vocabulary) ParseResult {
 		}
 	}
 
+	// 5c. «vencidas» / «vencidos» — past their due date: the due time field
+	// before now (a Spanish word about time, not a domain word; only where a
+	// due field exists).
+	if f := res.DueTimeField(); f != nil && !seenField[f.Name] {
+		for i := range toks {
+			if !toks[i].used && overdueWords[toks[i].norm] {
+				toks[i].used = true
+				seenField[f.Name] = true
+				filters = append(filters, Filter{Field: f.Name, Op: "lt", Value: "now"})
+				break
+			}
+		}
+	}
+
 	// 6. the amount field for sum/avg: a numeric field named, else the one
 	// obvious amount.
 	field := ""
@@ -439,13 +506,14 @@ func Parse(question string, v *Vocabulary) ParseResult {
 	// preposition / «llamado» — or right after the relation's target the
 	// sentence named («del cliente Ana Gómez», settled in step 2).
 	match := ""
-	matchField := ""
+	var nameF Filter
 	if labelPos >= 0 {
 		parts := nameRun(toks, labelPos, nil)
 		if len(parts) == 0 {
 			return ParseResult{Reason: "two resources: " + res.Name + ", " + v.Resource(res.Field(labelField).Relation).Name}
 		}
-		match, matchField = strings.Join(parts, " "), labelField
+		match = strings.Join(parts, " ")
+		nameF = Filter{Field: labelField, Op: "eq", Match: match}
 	}
 	for i := 0; i < len(toks); i++ {
 		if toks[i].used || !prepositions[toks[i].norm] {
@@ -458,11 +526,12 @@ func Parse(question string, v *Vocabulary) ParseResult {
 		if match != "" {
 			return ParseResult{Reason: "two names"}
 		}
-		mf, reason := nameField(v, res)
-		if mf == "" {
+		match = strings.Join(parts, " ")
+		f, reason := nameFilter(v, res, match)
+		if reason != "" {
 			return ParseResult{Reason: reason}
 		}
-		match, matchField = strings.Join(parts, " "), mf
+		nameF = f
 		toks[i].used = true
 	}
 	// 7b. a Capitalized run that is not the first word («cuántos pedidos
@@ -477,11 +546,12 @@ func Parse(question string, v *Vocabulary) ParseResult {
 			if len(parts) == 0 {
 				continue
 			}
-			mf, reason := nameField(v, res)
-			if mf == "" {
+			match = strings.Join(parts, " ")
+			f, reason := nameFilter(v, res, match)
+			if reason != "" {
 				return ParseResult{Reason: reason}
 			}
-			match, matchField = strings.Join(parts, " "), mf
+			nameF = f
 			break
 		}
 	}
@@ -491,11 +561,34 @@ func Parse(question string, v *Vocabulary) ParseResult {
 	// codes score 1.0, a near miss is asked about.
 	if match == "" {
 		if code, field := codeToken(toks, res); code != "" {
-			match, matchField = code, field
+			match = code
+			nameF = Filter{Field: field, Op: "eq", Match: code}
+		}
+	}
+	// 7d. a bare unknown run right AFTER the resource word on a resource
+	// whose own label is a NAME («persona esposa», «área trabajo») — never
+	// a title («tareas vencidas» is an adjective, not a row). Nothing else
+	// in the sentence, one run, no operation word.
+	if match == "" && len(filters) == 0 && period == nil && op == "" {
+		if lf := res.LabelFields(); len(lf) > 0 && isNameField(lf[0]) {
+			for i := 1; i < len(toks); i++ {
+				if toks[i].used || stopwords[toks[i].norm] {
+					continue
+				}
+				if !toks[i-1].used || !v.namesResource(toks[i-1].norm, res) {
+					break
+				}
+				parts := nameRun(toks, i, nil)
+				if len(parts) > 0 && !looksInfinitive(normalize(parts[0])) {
+					match = strings.Join(parts, " ")
+					nameF = Filter{Field: lf[0], Op: "eq", Match: match}
+				}
+				break
+			}
 		}
 	}
 	if match != "" {
-		filters = append(filters, Filter{Field: matchField, Op: "eq", Match: match})
+		filters = append(filters, nameF)
 	}
 
 	// 8. every remaining token must be a stopword (or a period-only word
@@ -522,6 +615,20 @@ func Parse(question string, v *Vocabulary) ParseResult {
 	if free {
 		op = "free"
 	}
+	if summaryAsked {
+		// «resumen de tareas» = the count by state when the resource has
+		// one, else the plain count (VOZ-21's cousin: a summary OF one
+		// resource is a breakdown, the summary of the DAY is the digest).
+		if op != "" && op != "list" && op != "count" {
+			return ParseResult{Reason: "summary with " + op}
+		}
+		op = "count"
+		if groupBy == "" {
+			if sf := res.StateField(); sf != nil && sf.Groupable() {
+				groupBy = sf.Name
+			}
+		}
+	}
 	p := Plan{Kind: op, Resource: res.Name, Filters: filters, Period: period, GroupBy: groupBy, Limit: limit}
 	if op == "list" && groupBy != "" {
 		// "cuáles … por estado" reads as a breakdown: count by the field.
@@ -545,9 +652,40 @@ func Parse(question string, v *Vocabulary) ParseResult {
 func nameRun(toks []token, i int, extraStop map[string]bool) []string {
 	var parts []string
 	j := i
-	for j < len(toks) && !toks[j].used && !stopwords[toks[j].norm] && !countWords[toks[j].norm] && !listWords[toks[j].norm] && !extraStop[toks[j].norm] {
-		parts = append(parts, toks[j].raw)
+	// a leading article is part of how a row is named («la tarea de los
+	// ajustes de reto»): skipped, not a stop
+	for j < len(toks) && !toks[j].used && articles[toks[j].norm] {
 		j++
+	}
+	if j > i && (j >= len(toks) || toks[j].used || stopwords[toks[j].norm]) {
+		return nil
+	}
+	content := func(k int) bool {
+		return k < len(toks) && !toks[k].used && !stopwords[toks[k].norm] && !countWords[toks[k].norm] && !listWords[toks[k].norm] && !extraStop[toks[k].norm]
+	}
+	for j < len(toks) {
+		if content(j) {
+			parts = append(parts, toks[j].raw)
+			j++
+			continue
+		}
+		// an inner «de» («ajustes de reto», «derechos de grado», «pago de la
+		// luz») continues the name when a content word follows — never a
+		// time word, a schema word or a stop («de Fabián de mañana» ends)
+		if len(parts) > 0 && !toks[j].used && (toks[j].norm == "de" || toks[j].norm == "del") {
+			k := j + 1
+			for k < len(toks) && !toks[k].used && articles[toks[k].norm] {
+				k++
+			}
+			if content(k) && !isTimeWord(toks[k].norm) {
+				for x := j; x < k; x++ {
+					parts = append(parts, toks[x].raw)
+				}
+				j = k
+				continue
+			}
+		}
+		break
 	}
 	for k := i; k < j; k++ {
 		toks[k].used = true
@@ -824,8 +962,11 @@ func fieldOfValue(res *Resource, val string) *Field {
 }
 
 // nameField decides WHERE a proper name applies: the ONE relation of res whose
-// target has a name-like label field; else res's own name-like field.
-func nameField(v *Vocabulary, res *Resource) (string, string) {
+// target has a name-like label field; else res's own name-like field. With
+// SEVERAL places (VOZ-20: an area AND a person, plus the row's own title) it
+// returns them all as candidates and the engine tries each — the parser no
+// longer gives up on «las tareas de Esposa».
+func nameField(v *Vocabulary, res *Resource) (string, []string, string) {
 	var cands []string
 	for _, f := range res.Fields {
 		if f.Relation == "" {
@@ -840,17 +981,46 @@ func nameField(v *Vocabulary, res *Resource) (string, string) {
 		}
 	}
 	sort.Strings(cands)
+	own := ""
+	if lf := res.LabelFields(); len(lf) > 0 && nameRank(lf[0]) < len(primaryParts) {
+		own = lf[0]
+	}
 	switch len(cands) {
 	case 1:
-		return cands[0], ""
+		return cands[0], nil, ""
 	case 0:
-		if lf := res.LabelFields(); len(lf) > 0 && nameRank(lf[0]) < len(primaryParts) {
-			return lf[0], ""
+		if own != "" {
+			return own, nil, ""
 		}
-		return "", "name with no place to match"
+		return "", nil, "name with no place to match"
 	default:
-		return "", "name could match " + strings.Join(cands, " or ")
+		if own != "" {
+			cands = append(cands, own)
+		}
+		return "", cands, ""
 	}
+}
+
+// ownNameField is the resource's own name-like label field («titulo»,
+// «nombre»), "" when its label is not a name.
+func ownNameField(res *Resource) string {
+	if lf := res.LabelFields(); len(lf) > 0 && nameRank(lf[0]) < len(primaryParts) {
+		return lf[0]
+	}
+	return ""
+}
+
+// nameFilter builds the filter for a proper name: placed when the resource
+// has one place for it, a multi-field one when it has several.
+func nameFilter(v *Vocabulary, res *Resource, match string) (Filter, string) {
+	mf, cands, reason := nameField(v, res)
+	switch {
+	case mf != "":
+		return Filter{Field: mf, Op: "eq", Match: match}, ""
+	case len(cands) > 0:
+		return Filter{Op: "eq", Match: match, Fields: cands}, ""
+	}
+	return Filter{}, reason
 }
 
 // findPhrase locates the first unconsumed occurrence of words in toks.
@@ -896,8 +1066,12 @@ var (
 	greetingFill    = set("dias", "dia", "tardes", "tarde", "noches", "noche", "muchas", "mil", "que", "tal", "como", "estas", "esta", "va", "todo", "ok", "dale", "listo", "muy", "bueno", "buena", "y", "vos", "usted", "hasta", "luego", "nos", "vemos")
 	// helpPhrases are the exact (normalized) ways an owner asks what the bot
 	// can do; helpPrefixes catch the same intent with a tail.
-	helpPhrases  = set("ayuda", "help", "que puedo preguntar", "que puedo preguntarte", "que te puedo preguntar", "que puedo pedir", "que puedo pedirte", "que sabes hacer", "que sabes", "que podes hacer", "que puedes hacer", "que haces", "como funciona", "como funcionas", "como te uso", "que preguntas puedo hacer", "que preguntas respondes", "que me podes decir", "que me puedes decir", "que comandos hay", "cuales son los comandos", "instrucciones", "menu")
+	helpPhrases  = set("ayuda", "help", "que puedo hacer", "que puedo hacer aca", "que puedo hacer con vos", "que puedo hacer con esto", "que hago", "que puedo preguntar", "que puedo preguntarte", "que te puedo preguntar", "que puedo pedir", "que puedo pedirte", "que sabes hacer", "que sabes", "que podes hacer", "que puedes hacer", "que haces", "como funciona", "como funcionas", "como te uso", "que preguntas puedo hacer", "que preguntas respondes", "que me podes decir", "que me puedes decir", "que comandos hay", "cuales son los comandos", "instrucciones", "menu")
 	helpPrefixes = []string{"que puedo preguntar", "que te puedo preguntar", "que puedo pedir", "que sabes hacer", "que podes hacer", "que puedes hacer", "como funciona", "que preguntas puedo", "que comandos"}
+	// The fixed commands, as said to the question door (VOZ-21).
+	summaryPhrases = set("resumen", "el resumen", "resumen de hoy", "el resumen de hoy", "resumen del dia", "dame el resumen", "mandame el resumen", "que paso hoy", "que paso hoy?", "resumen de hoy por favor", "el parte", "parte del dia", "resumen del dia de hoy", "resumen de ayer", "que hay de nuevo", "novedades")
+	censusPhrases  = set("estado", "el estado", "estado general", "como esta todo", "como vamos", "como va todo", "cuantos hay de cada cosa", "censo", "estado de todo", "como estamos")
+	spendPhrases   = set("gasto", "el gasto", "cuanto gaste", "cuanto llevo gastado", "cuanto va el gasto", "cuanto cuesta esto", "gasto del modelo", "cuanto gastamos", "cuanto he gastado", "cuanto gasto", "que cuestan las preguntas", "gastos del modelo")
 )
 
 // preDiscard returns the discard code when the sentence contains NOTHING the
@@ -908,10 +1082,27 @@ func preDiscard(toks []token, v *Vocabulary) string {
 	if v == nil {
 		return ""
 	}
+	joined := strings.TrimSpace(joinedNorms(toks))
+	// The fixed commands said to this door (VOZ-21) and the living guide
+	// (Part B) are recognized BEFORE the executable-word check: «estado» is
+	// also a field, «cómo creo una tarea» names a resource.
+	switch {
+	case summaryPhrases[joined]:
+		return "summary"
+	case censusPhrases[joined]:
+		return "census"
+	case spendPhrases[joined]:
+		return "spend"
+	}
+	if topic, res := guideTopic(toks, v); topic != "" {
+		if res != "" {
+			return "guide:" + topic + ":" + res
+		}
+		return "guide:" + topic
+	}
 	if hasExecutableWord(toks, v) {
 		return ""
 	}
-	joined := strings.TrimSpace(joinedNorms(toks))
 	if helpPhrases[joined] {
 		return "help"
 	}
@@ -1005,6 +1196,8 @@ func discardReasonES(code string) string {
 		return "es un saludo"
 	case "help":
 		return "pide ayuda"
+	case "summary", "census", "spend":
+		return "pide un comando fijo (" + code + ")"
 	case "bare_name":
 		return "es solo un nombre, sin qué preguntar"
 	}
@@ -1028,6 +1221,13 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 	toks := tokenize(question)
 	// the resource, exactly one, updatable
 	res, labelField, labelPos, reason := findResource(toks, v)
+	if reason == "no resource named" {
+		// «poné en curso la declaración de renta»: the state value said
+		// belongs to exactly one resource's state field — that resource
+		if r := resourceByStateValue(toks, v); r != nil {
+			res, labelField, labelPos, reason = r, "", -1, ""
+		}
+	}
 	if reason != "" {
 		return ParseResult{Reason: reason}
 	}
@@ -1106,38 +1306,72 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 	}
 	// the name after a preposition (or after the relation's target the
 	// sentence named)
-	match, matchField := "", ""
+	match := ""
+	var nameF Filter
 	if labelPos >= 0 {
 		parts := nameRun(toks, labelPos, transitionLinkers)
 		if len(parts) > 0 {
-			match, matchField = strings.Join(parts, " "), labelField
+			match = strings.Join(parts, " ")
+			nameF = Filter{Field: labelField, Op: "eq", Match: match}
 		}
 	}
 	for i := 0; i < len(toks); i++ {
 		if toks[i].used || !prepositions[toks[i].norm] {
 			continue
 		}
-		parts := nameRun(toks, i+1, transitionLinkers)
+		// a content run right BEFORE the preposition is the same name («la
+		// declaración de renta», «los derechos de grado»): the run starts
+		// there and the inner «de» joins the rest
+		start := i + 1
+		k := i - 1
+		for k >= 0 && !toks[k].used && !stopwords[toks[k].norm] && !transitionLinkers[toks[k].norm] && !prepositions[toks[k].norm] {
+			k--
+		}
+		if k < i-1 {
+			start = k + 1
+		}
+		parts := nameRun(toks, start, transitionLinkers)
 		if len(parts) == 0 {
 			continue
 		}
 		if match != "" {
 			return ParseResult{Reason: "two names"}
 		}
-		mf, reason := nameField(v, res)
-		if mf == "" {
+		match = strings.Join(parts, " ")
+		f, reason := nameFilter(v, res, match)
+		if reason != "" {
 			return ParseResult{Reason: reason}
 		}
-		match, matchField = strings.Join(parts, " "), mf
+		nameF = f
 		toks[i].used = true
 	}
 	if match == "" {
 		if code, field := codeToken(toks, res); code != "" {
-			match, matchField = code, field
+			match = code
+			nameF = Filter{Field: field, Op: "eq", Match: code}
+		}
+	}
+	if match == "" {
+		// «poné en curso la declaración de renta»: no preposition, no
+		// resource word — the words left after the verb and the state ARE
+		// the row's name (articles skipped, linkers stop it)
+		for i := range toks {
+			if toks[i].used || stopwords[toks[i].norm] || transitionLinkers[toks[i].norm] {
+				continue
+			}
+			if parts := nameRun(toks, i, transitionLinkers); len(parts) > 0 {
+				match = strings.Join(parts, " ")
+				f, reason := nameFilter(v, res, match)
+				if reason != "" {
+					return ParseResult{Reason: reason}
+				}
+				nameF = f
+			}
+			break
 		}
 	}
 	if match != "" {
-		where = append(where, Filter{Field: matchField, Op: "eq", Match: match})
+		where = append(where, nameF)
 	}
 	if len(where) == 0 {
 		return ParseResult{Reason: "transition without a row"}
@@ -1153,6 +1387,30 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 		return ParseResult{Reason: "invalid: " + err.Error()}
 	}
 	return ParseResult{Plan: p, Sure: true}
+}
+
+// resourceByStateValue is the ONE updatable resource whose state field has a
+// value (or alias) said in the sentence; nil when none or several.
+func resourceByStateValue(toks []token, v *Vocabulary) *Resource {
+	joined := joinedNorms(toks)
+	var found *Resource
+	for _, name := range v.order {
+		r := v.resources[name]
+		sf := r.StateField()
+		if sf == nil || !r.CanUpdate {
+			continue
+		}
+		for _, vf := range sf.valueForms() {
+			if strings.Contains(joined, " "+vf.form+" ") {
+				if found != nil && found != r {
+					return nil
+				}
+				found = r
+				break
+			}
+		}
+	}
+	return found
 }
 
 // agendaResource is THE agenda among the readable resources: the one whose
@@ -1203,4 +1461,177 @@ func boolNamed(f *Field, norm string) bool {
 		}
 	}
 	return false
+}
+
+// looksInfinitive reports whether a normalized word is a Spanish infinitive
+// («pagar», «hacer», «ir»): what a to-do starts with. Not a stopword, ends in
+// -ar/-er/-ir, and «ir» itself.
+func looksInfinitive(w string) bool {
+	if stopwords[w] || w == "" {
+		return false
+	}
+	if w == "ir" {
+		return true
+	}
+	if len(w) < 4 {
+		return false
+	}
+	return strings.HasSuffix(w, "ar") || strings.HasSuffix(w, "er") || strings.HasSuffix(w, "ir")
+}
+
+// isNameField reports whether a label field holds a NAME (nombre, name,
+// apellido, razón social) rather than a title or a subject.
+func isNameField(field string) bool {
+	n := normalize(field)
+	for _, p := range []string{"nombre", "name", "apellido", "razon"} {
+		if strings.Contains(n, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// splitIntents cuts «… y <write verb> …» into the first sentence and the
+// rest, as said. Only a second WRITE verb splits: «llamé al latonero y no
+// contestó» is one note.
+func splitIntents(question string) (first, second string) {
+	words := strings.Fields(question)
+	for i := 1; i+1 < len(words); i++ {
+		if normalize(words[i]) != "y" {
+			continue
+		}
+		n := normalize(words[i+1])
+		if createVerbs[n] || scheduleVerbs[n] || transitionVerbs[n] || writeVerbs[n] {
+			// the first part must itself carry an order
+			hasVerb := false
+			for _, w := range words[:i] {
+				wn := normalize(w)
+				if createVerbs[wn] || scheduleVerbs[wn] || transitionVerbs[wn] || writeVerbs[wn] {
+					hasVerb = true
+				}
+			}
+			joined := " " + normalize(strings.Join(words[:i], " ")) + " "
+			for _, ph := range obligationPhrases {
+				if strings.Contains(joined, " "+ph+" ") {
+					hasVerb = true
+				}
+			}
+			if !hasVerb {
+				return question, ""
+			}
+			return strings.TrimSpace(strings.Join(words[:i], " ")), strings.TrimSpace(strings.Join(words[i+1:], " "))
+		}
+	}
+	return question, ""
+}
+
+// doneLeads open a sentence that says a to-do is finished.
+var doneLeads = []string{"ya hice", "ya termine", "termine de", "ya termine de", "termine", "ya pague", "ya lo hice", "ya la hice", "ya esta hecha", "ya esta hecho", "ya esta lista", "ya esta listo", "ya quedo", "listo con", "ya hicimos", "hice", "acabe de", "ya acabe de", "ya"}
+
+// doneTrailers close it («… está lista», «… ya está», «… quedó hecha»).
+var doneTrailers = []string{"esta lista", "esta listo", "ya esta", "quedo lista", "quedo listo", "esta hecha", "esta hecho", "ya quedo", "esta terminada", "esta terminado"}
+
+// parseDone settles «ya hice X» / «X está lista» as the transition of the
+// to-do row X to its finished state: the terminal state that is not a
+// cancellation (by the cancel/anular/rechazar stems — Spanish, not a
+// domain), when the machine has exactly one such state.
+func parseDone(question string, v *Vocabulary) ParseResult {
+	if v == nil || !v.Writable() {
+		return ParseResult{Reason: "done: read-only vocabulary"}
+	}
+	toks := tokenize(question)
+	joined := strings.TrimSpace(joinedNorms(toks))
+	lead, trailer := "", ""
+	for _, l := range doneLeads {
+		if strings.HasPrefix(joined+" ", l+" ") {
+			lead = l
+			break
+		}
+	}
+	for _, tr := range doneTrailers {
+		if strings.HasSuffix(" "+joined, " "+tr) {
+			trailer = tr
+			break
+		}
+	}
+	if lead == "" && trailer == "" {
+		return ParseResult{Reason: "no done phrase"}
+	}
+	if lead == "ya" && trailer == "" {
+		return ParseResult{Reason: "done: bare ya"}
+	}
+	res := taskResource(v)
+	if res == nil || !res.CanUpdate {
+		return ParseResult{Reason: "done: no single to-do resource"}
+	}
+	sf := res.StateField()
+	if sf == nil {
+		return ParseResult{Reason: "done: no state field"}
+	}
+	target := doneState(sf)
+	if target == "" {
+		return ParseResult{Reason: "done: no single finished state"}
+	}
+	if lead != "" && !consumePhrase(toks, lead) {
+		return ParseResult{Reason: "done: lead not consumed"}
+	}
+	if trailer != "" && !consumePhrase(toks, trailer) {
+		return ParseResult{Reason: "done: trailer not consumed"}
+	}
+	// the row: the resource word may be said («la tarea del carro»); the
+	// rest names it — tried against every place a name can be (VOZ-20)
+	for i := range toks {
+		if !toks[i].used && v.namesResource(toks[i].norm, res) {
+			toks[i].used = true
+		}
+	}
+	var parts []string
+	for _, t := range toks {
+		if t.used || stopwords[t.norm] || t.norm == "que" {
+			continue
+		}
+		parts = append(parts, t.raw)
+	}
+	if len(parts) == 0 {
+		return ParseResult{Reason: "done: no row named"}
+	}
+	name := strings.Join(parts, " ")
+	f, reason := nameFilter(v, res, name)
+	if reason != "" {
+		return ParseResult{Reason: reason}
+	}
+	p := Plan{Kind: "update", Resource: res.Name, Where: []Filter{f}, Data: map[string]any{sf.Name: target}}
+	if err := p.Validate(v); err != nil {
+		return ParseResult{Reason: "done invalid: " + err.Error()}
+	}
+	return ParseResult{Plan: p, Sure: true}
+}
+
+// doneState is the finished state of a machine: the terminal states minus
+// the cancellations; exactly one, else "".
+func doneState(sf *Field) string {
+	var done []string
+	for _, st := range sf.Terminal {
+		n := normalize(st)
+		cancel := false
+		for _, stem := range []string{"cancel", "anul", "rechaz", "descart", "abandon"} {
+			if strings.HasPrefix(n, stem) {
+				cancel = true
+			}
+		}
+		for _, a := range sf.Aliases[st] {
+			for _, stem := range []string{"cancel", "anul", "rechaz", "descart"} {
+				if strings.HasPrefix(normalize(a), stem) {
+					cancel = true
+				}
+			}
+		}
+		if !cancel {
+			done = append(done, st)
+		}
+	}
+	if len(done) == 1 {
+		return done[0]
+	}
+	return ""
 }

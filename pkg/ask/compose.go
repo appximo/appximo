@@ -62,6 +62,15 @@ func composeAggregate(d Deps, p Plan, res *Resource, rows []map[string]any, unde
 		}
 		fmt.Fprintf(&b, "\n<i>%s</i>", esc(understood))
 		out.Text = b.String()
+		var items []string
+		for _, g := range out.Groups {
+			items = append(items, strings.ReplaceAll(g.Label, "_", " ")+", "+g.Text)
+		}
+		if len(items) == 0 {
+			out.Speech = "No hay " + numberPhrase(0, res.Name) + " con eso."
+		} else {
+			out.Speech = SpokenNumbers(out.Headline + " por " + strings.ReplaceAll(p.GroupBy, "_", " ") + ": " + spokenList(items, len(items), "mirá el panel"))
+		}
 		return out
 	}
 	if len(rows) == 0 {
@@ -75,6 +84,11 @@ func composeAggregate(d Deps, p Plan, res *Resource, rows []map[string]any, unde
 		out.Number = &count
 		out.Headline = fmt.Sprintf("%s %s", Integer(count), phrase(res.Name, count))
 		out.Text = fmt.Sprintf("<b>%s</b> %s\n<i>%s</i>", Integer(count), esc(phrase(res.Name, count)), esc(understood))
+		if count == 0 {
+			out.Speech = "No hay " + numberPhrase(0, res.Name) + " con eso."
+		} else {
+			out.Speech = "Hay " + numberPhrase(int(count), res.Name) + "."
+		}
 		return out
 	}
 	v := row["agg_"+p.Kind+"_"+p.Field]
@@ -139,6 +153,35 @@ func composeList(d Deps, p Plan, res *Resource, rows []map[string]any, total int
 	}
 	fmt.Fprintf(&b, "\n<i>%s</i>", esc(understood))
 	out.Text = strings.TrimRight(b.String(), "\n")
+	// The VOICE (Part D): «Tenés dos tareas: pagar la luz, pendiente. Lavar
+	// el carro, hecha.» — at most five, then «y N más; mirá el panel».
+	var items []string
+	for _, row := range rows {
+		var parts []string
+		if l := labelOf(row, firstN(labelFields, 2)); l != "" {
+			parts = append(parts, l)
+		}
+		for _, c := range cols[1:] {
+			if containsStr(labelFields, c) || row[c] == nil {
+				continue
+			}
+			fd := res.Field(c)
+			if fd != nil && (fd.Type == "time" || fd.Relation != "") {
+				continue // the date and the ids are noise to the ear; the state and the flags stay
+			}
+			parts = append(parts, formatValue(fd, row[c], d.Now.Location()))
+		}
+		if len(parts) > 0 {
+			items = append(items, strings.Join(parts, ", "))
+		}
+	}
+	head := numberPhrase(int(total), res.Name)
+	if total == 0 {
+		out.Speech = "No hay " + numberPhrase(0, res.Name) + " con eso."
+	} else {
+		out.Speech = "Tenés " + head + ": " + spokenList(items, int(total), "mirá el panel")
+	}
+	out.Speech = SpokenNumbers(out.Speech)
 	return out
 }
 
@@ -279,21 +322,28 @@ var tagRe = regexp.MustCompile(`<[^>]+>`)
 // Speech renders a reply for a VOICE: tags out, entities back, bullets,
 // guillemets and pictographs gone (a voice assistant reads «✅» as "check mark
 // button" and «•» as "bullet"), the middle dot a comma, one pause per line.
+var numberedLineRe = regexp.MustCompile(`^(\d{1,2})\.\s+(.+)$`)
+
 func Speech(html string) string {
 	s := tagRe.ReplaceAllString(html, "")
-	s = strings.NewReplacer("&lt;", "<", "&gt;", ">", "&amp;", "&", "• ", "", "…", "...", "«", "", "»", "", " · ", ", ").Replace(s)
+	s = strings.NewReplacer("&lt;", "<", "&gt;", ">", "&amp;", "&", "• ", "", "…", "...", "«", "", "»", "", " · ", ", ", " (", ", ", "(", "", ")", "", " / ", " o ", " — ", ", ", "—", ",", "_", " ").Replace(s)
 	s = strings.Map(func(r rune) rune {
 		if isPictograph(r) {
 			return -1
 		}
 		return r
 	}, s)
+	s = SpokenNumbers(s) // clocks, dates and small counts in words (Part D)
 	lines := strings.Split(s, "\n")
 	var b strings.Builder
 	for _, l := range lines {
 		l = strings.TrimSpace(l)
 		if l == "" {
 			continue
+		}
+		// a numbered option («1. Fabián Gómez») is said as a word
+		if m := numberedLineRe.FindStringSubmatch(l); m != nil {
+			l = strings.ToUpper(NumberWords(atoi(m[1]))[:1]) + NumberWords(atoi(m[1]))[1:] + ", " + m[2]
 		}
 		if b.Len() > 0 {
 			// a line that ends in ":" introduces the next («1 tarea: pagar la

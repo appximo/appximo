@@ -104,6 +104,9 @@ type Pending struct {
 	Asked    int    `json:"asked"` // follow-up questions so far (bounded)
 	// Prior is the previous pending this one replaced (worded once).
 	Prior string `json:"-"`
+	// OpenRefs (VOZ-20) are the multi-field names still to resolve after a
+	// pick settles one of them.
+	OpenRefs []Ref `json:"-"`
 }
 
 // PendingStore holds the writes waiting for confirmation, in memory, one per
@@ -420,7 +423,9 @@ func (p Plan) validateWrite(v *Vocabulary) error {
 	if p.Kind == "update" && !res.CanUpdate {
 		return fmt.Errorf("the asking role may not update %s; the resources it may update are: %s", p.Resource, strings.Join(v.UpdatableNames(), ", "))
 	}
-	if len(p.Data) == 0 {
+	if len(p.Data) == 0 && len(p.Refs) == 0 && !(p.Kind == "create" && titleField(res) != nil) {
+		// A create that names only the resource («anotá una tarea») is
+		// allowed when the engine can ask for its title.
 		return fmt.Errorf("%s needs data: the fields the owner SAID, as {field: value}; fields of %s: %s", p.Kind, p.Resource, res.FieldList())
 	}
 	if p.Filters != nil || p.Period != nil || p.Field != "" || p.GroupBy != "" || p.Limit != 0 {
@@ -443,6 +448,17 @@ func (p Plan) validateWrite(v *Vocabulary) error {
 		}
 		if err := checkWriteValue(v, p.Resource, fd, val); err != nil {
 			return fmt.Errorf("data.%s: %v", k, err)
+		}
+	}
+	for i, rf := range p.Refs {
+		if strings.TrimSpace(rf.Match) == "" || len(rf.Fields) == 0 {
+			return fmt.Errorf("refs[%d]: a ref takes a match and the candidate fields", i)
+		}
+		for _, name := range rf.Fields {
+			fd := res.Field(name)
+			if fd == nil || fd.Relation == "" || v.Resource(fd.Relation) == nil {
+				return fmt.Errorf("refs[%d]: %q is not a relation of %s you may read", i, name, p.Resource)
+			}
 		}
 	}
 	if p.Kind == "create" {
@@ -618,13 +634,26 @@ func prepareWrite(ctx context.Context, d Deps, p Plan, question string) Result {
 			return r
 		}
 	}
+	// Names the parser could not place (VOZ-20): tried against every
+	// candidate target; a bare word that is nothing anywhere stays in the
+	// title rather than refusing the write.
+	if r, done := resolveRefs(ctx, d, pend, res, p.Refs); done {
+		return r
+	}
 	if p.Kind == "update" {
 		if r, done := resolveRow(ctx, d, pend); done {
 			return r
 		}
 	}
 	fillRangeEnd(res, pend, d.Now.Location()) // MOTOR-AGENDA-S1: «a las 10» lasts the default
-	return finishPending(ctx, d, pend)
+	r := finishPending(ctx, d, pend)
+	if p.Kind == "create" && p.Reason != "" && r.Pending != nil {
+		// Two intentions in one sentence: the first is what this pending
+		// holds; the second is said back so it is asked apart.
+		r.Text = "<i>Entendí lo primero. Lo segundo («" + esc(p.Reason) + "») decímelo aparte cuando confirmes.</i>\n" + r.Text
+		r.Speech = "Entendí lo primero. Lo segundo decímelo aparte cuando confirmes. " + r.Speech
+	}
+	return r
 }
 
 // resolveLiteral converts a plan literal to the value the engine will store
@@ -741,8 +770,41 @@ func resolveRow(ctx context.Context, d Deps, pend *Pending) (Result, bool) {
 	// says "repetí la pregunta" — the pick is a stage of the same pending);
 	// none → said.
 	pend.Where = append([]Filter(nil), pend.Lookup...)
+	// multi tries a name against several fields (relations first, the row's
+	// own title last); it answers (result, handled) — handled=false means
+	// the name was placed and the loop goes on.
+	multi := func(i int, f Filter, fields []string) (Result, bool, error) {
+		kind, field, chosen, opts, err := resolveMulti(ctx, d, res, f.Match, fields)
+		if err != nil {
+			return Result{}, false, err
+		}
+		switch kind {
+		case "one":
+			pend.Lookup[i] = Filter{Field: field, Op: "eq", Value: chosen.Value}
+			pend.Where[i] = pend.Lookup[i]
+			pend.Labels["__where_"+field] = chosen.Label
+			return Result{}, false, nil
+		case "several", "maybe":
+			pend.Stage, pend.WhichFor, pend.Options, pend.RefName = "which", "wheremulti", opts, f.Match
+			d.Pending.Put(pend)
+			return pendingResult(pend, "ambiguous", "¿Cuál?",
+				fmt.Sprintf("🤔 «%s» puede ser más de una cosa. ¿Cuál?\n%s\n\nRespondé con el número (o <b>no</b> para cancelar).", esc(f.Match), numberedKinds(opts))), true, nil
+		}
+		return Result{Kind: "not_found", Headline: "No encuentro «" + f.Match + "»",
+			Text: fmt.Sprintf("🤷 No encuentro «%s» como %s, así que no sé qué %s cambiar.", esc(f.Match), esc(kindsWords(d.Vocab, res, fields)), esc(singular(pend.Resource)))}, true, nil
+	}
 	for i, f := range pend.Where {
 		if f.Match == "" {
+			continue
+		}
+		if len(f.Fields) > 0 {
+			r, handled, err := multi(i, f, f.Fields)
+			if err != nil {
+				return execFailure(err), true
+			}
+			if handled {
+				return r, true
+			}
 			continue
 		}
 		fd := res.Field(f.Field)
@@ -771,6 +833,19 @@ func resolveRow(ctx context.Context, d Deps, pend *Pending) (Result, bool) {
 			return pendingResult(pend, "ambiguous", "¿Cuál?",
 				fmt.Sprintf("🤔 %s %s que se parecen a «%s». ¿Cuál?\n%s\n\nRespondé con el número o el nombre completo (o <b>no</b> para cancelar).", lead, esc(targetName), esc(f.Match), numbered(dec.Options))), true
 		default:
+			if own := ownNameField(res); fd.Relation != "" && own != "" && own != f.Field {
+				// the relation holds no such name: the row's OWN title may
+				// («cancelá la tarea sobre el agua» is «pagar la factura del
+				// agua», not a person) — tried before giving up
+				r, handled, err := multi(i, f, []string{f.Field, own})
+				if err != nil {
+					return execFailure(err), true
+				}
+				if handled {
+					return r, true
+				}
+				continue
+			}
 			return Result{Kind: "not_found", Headline: "No encuentro «" + f.Match + "»",
 				Text: fmt.Sprintf("🤷 No encuentro ningún %s que se llame «%s». Nada que cambiar.", esc(singular(targetName)), esc(f.Match))}, true
 		}
@@ -865,7 +940,7 @@ func checkTransition(d Deps, pend *Pending, row map[string]any) (Result, bool) {
 func finishPending(ctx context.Context, d Deps, pend *Pending) Result {
 	res := d.Vocab.Resource(pend.Resource)
 	if pend.Kind == "create" {
-		for _, f := range res.Fields {
+		for _, f := range confirmationOrder(res) {
 			if !f.Required || f.HasDefault || f.Auto {
 				continue
 			}
@@ -882,7 +957,9 @@ func finishPending(ctx context.Context, d Deps, pend *Pending) Result {
 			}
 			pend.Stage, pend.Field, pend.Asked = "field", f.Name, pend.Asked+1
 			d.Pending.Put(pend)
-			return pendingResult(pend, "ask_field", "¿"+fieldWords(f)+"?", askFieldText(pend, f))
+			r := pendingResult(pend, "ask_field", "¿"+fieldWords(f)+"?", askFieldText(pend, f))
+			r.Speech = askFieldSpeech(pend, f)
+			return r
 		}
 	}
 	pend.Stage = "confirm"
@@ -898,8 +975,95 @@ func finishPending(ctx context.Context, d Deps, pend *Pending) Result {
 	}
 	text := note + confirmationText(d, pend)
 	r := pendingResult(pend, "confirm", "¿Confirmás?", text)
-	r.Speech = Speech(confirmationText(d, pend))
+	r.Speech = spokenConfirmation(d, pend)
 	return r
+}
+
+// spokenConfirmation is the contract read aloud: «Voy a crear una tarea.
+// Título: llamar a Fabián. Persona: Fabián Gómez. Urgente: sí. Vence mañana,
+// lunes veintiuno de septiembre. ¿Confirmás?»
+func spokenConfirmation(d Deps, pend *Pending) string {
+	res := d.Vocab.Resource(pend.Resource)
+	loc := d.Now.Location()
+	var sp []string
+	if pend.Kind == "create" {
+		sp = append(sp, "Voy a crear "+singularWord(pend.Resource)+".")
+	} else {
+		// the row's label as a voice says it: «hacer la declaración de
+		// renta, pendiente, veintitrés de septiembre» — no parentheses
+		sp = append(sp, "Voy a cambiar "+singularWord(pend.Resource)+", "+strings.NewReplacer(" (", ", ", "(", "", ")", "").Replace(pend.RowLabel)+".")
+	}
+	for _, f := range confirmationOrder(res) {
+		v, ok := pend.Data[f.Name]
+		if !ok {
+			continue
+		}
+		val := spokenValue(f, v, pend.Labels[f.Name], loc)
+		fw := fieldWords(f)
+		if from, ok := pend.Labels["__from_"+f.Name]; ok && pend.Kind == "update" {
+			sp = append(sp, sentence(fw+": de "+spokenWord(from)+" a "+spokenWord(val)))
+			continue
+		}
+		sp = append(sp, sentence(fw+": "+spokenWord(val)))
+	}
+	if pend.Labels["__conflict"] != "" {
+		sp = append(sp, "¿Igual lo agendo?")
+	} else {
+		sp = append(sp, "¿Confirmás?")
+	}
+	return SpokenNumbers(strings.Join(sp, " "))
+}
+
+// spokenValue says one value for a voice: a time as day and clock words, a
+// bool as sí/no, a name as the row it resolved to.
+func spokenValue(f *Field, v any, label string, loc *time.Location) string {
+	if f.Type == "time" {
+		if s, ok := v.(string); ok {
+			if t, err := time.Parse(time.RFC3339, s); err == nil {
+				t = t.In(loc)
+				words := DateWordsLong(t)
+				if strings.HasPrefix(label, "hoy") {
+					words = "hoy"
+				} else if strings.HasPrefix(label, "mañana") {
+					words = "mañana, " + words
+				} else if strings.HasPrefix(label, "pasado mañana") {
+					words = "pasado mañana, " + words
+				}
+				if t.Hour() != 0 || t.Minute() != 0 {
+					words += " a " + ClockWords(t.Hour(), t.Minute())
+				}
+				return words
+			}
+		}
+	}
+	if b, ok := v.(bool); ok {
+		if b {
+			return "sí"
+		}
+		return "no"
+	}
+	if f.IsNumeric() && !f.Money {
+		// a small whole number is said in words («treinta»); money and
+		// large figures keep their digits (the text carries them)
+		switch n := v.(type) {
+		case float64:
+			if n == float64(int(n)) && n >= 0 && n <= 999 {
+				return NumberWords(int(n))
+			}
+		case int:
+			if n >= 0 && n <= 999 {
+				return NumberWords(n)
+			}
+		case int64:
+			if n >= 0 && n <= 999 {
+				return NumberWords(int(n))
+			}
+		}
+	}
+	if label != "" {
+		return label
+	}
+	return formatValue(f, v, loc)
 }
 
 func pendingResult(pend *Pending, kind, headline, text string) Result {
@@ -922,6 +1086,34 @@ func askFieldText(pend *Pending, f *Field) string {
 		return fmt.Sprintf("📝 Para crear %s me falta <b>%s</b>. ¿Sí o no?", esc(singular(pend.Resource)), esc(what))
 	}
 	return fmt.Sprintf("📝 Para crear %s me falta <b>%s</b>. ¿Qué pongo?", esc(singular(pend.Resource)), esc(what))
+}
+
+// askFieldSpeech is the same question for a voice: the examples said as a
+// person says them, never a clock in digits.
+func askFieldSpeech(pend *Pending, f *Field) string {
+	what := fieldWords(f)
+	lead := "Para crear " + singularWord(pend.Resource) + " me falta " + what + "."
+	switch {
+	case len(f.Enum) > 0:
+		return lead + " ¿Cuál? Puede ser " + joinSpoken(spokenWords(f.Enum)) + "."
+	case f.Relation != "":
+		return lead + " ¿Cuál " + singular(f.Relation) + "? Decime el nombre."
+	case f.Type == "time":
+		return lead + " ¿Cuándo? Por ejemplo hoy, mañana, el viernes, o el viernes a las tres de la tarde."
+	case f.IsNumeric():
+		return lead + " ¿Cuánto?"
+	case f.Type == "bool":
+		return lead + " ¿Sí o no?"
+	}
+	return lead + " ¿Qué pongo?"
+}
+
+func spokenWords(ws []string) []string {
+	out := make([]string, len(ws))
+	for i, w := range ws {
+		out[i] = spokenWord(w)
+	}
+	return out
 }
 
 func fieldWords(f *Field) string {
@@ -1045,6 +1237,11 @@ func continuePending(ctx context.Context, d Deps, pend *Pending, text string) (R
 		if IsYes(text) {
 			return executePending(ctx, d, pend), true
 		}
+		// «no, mejor el viernes» / «sí pero urgente»: a correction the form
+		// recognizes re-issues the confirmation (AGENDA-ASISTENTE-S1).
+		if r, ok := applyCorrection(ctx, d, pend, text); ok {
+			return r, true
+		}
 		d.Pending.Delete(pend)
 		return Result{}, false
 	case "field":
@@ -1097,6 +1294,31 @@ func continuePending(ctx context.Context, d Deps, pend *Pending, text string) (R
 		switch {
 		case pend.WhichFor == "row":
 			pend.RowID, pend.RowLabel = pick.ID, pick.Label
+		case pend.WhichFor == "ref" && pick.Field != "":
+			// VOZ-20: the picked option settles WHICH field the name was.
+			pend.Data[pick.Field] = pick.Value
+			pend.Labels[pick.Field] = pick.Label
+			pend.Stage, pend.WhichFor, pend.Options = "confirm", "", nil
+			if r, done := resolveRefs(ctx, d, pend, d.Vocab.Resource(pend.Resource), pend.OpenRefs); done {
+				return r, true
+			}
+			return finishPending(ctx, d, pend), true
+		case pend.WhichFor == "wheremulti" && pick.Field != "":
+			for i, f := range pend.Lookup {
+				if len(f.Fields) > 0 && f.Match != "" {
+					pend.Lookup[i] = Filter{Field: pick.Field, Op: "eq", Value: pick.Value}
+					pend.Labels["__where_"+pick.Field] = pick.Label
+					break
+				}
+			}
+			pend.Stage, pend.WhichFor, pend.Options = "confirm", "", nil
+			if r, done := resolveRow(ctx, d, pend); done {
+				if r.Pending == nil {
+					d.Pending.Delete(pend)
+				}
+				return r, true
+			}
+			return finishPending(ctx, d, pend), true
 		case strings.HasPrefix(pend.WhichFor, "where:"):
 			// The picked row settles one where-name; the row lookup runs
 			// again from the top (other names, then the ONE row).
@@ -1388,4 +1610,93 @@ func spanishTimeSpanEnd(s string) (string, bool) {
 		day = "today"
 	}
 	return day + " " + clockString(span.end), true
+}
+
+// resolveRefs (VOZ-20) settles the names a write carries without a field:
+// each is tried against every candidate target. One place → written there;
+// several → the owner picks (the option names its kind); none → a soft name
+// joins the title text, a hard one refuses the write naming what was tried.
+func resolveRefs(ctx context.Context, d Deps, pend *Pending, res *Resource, refs []Ref) (Result, bool) {
+	for i, rf := range refs {
+		kind, field, chosen, opts, err := resolveMulti(ctx, d, res, rf.Match, rf.Fields)
+		if err != nil {
+			return execFailure(err), true
+		}
+		switch kind {
+		case "one":
+			pend.Data[field] = chosen.Value
+			pend.Labels[field] = chosen.Label
+		case "several", "maybe":
+			pend.OpenRefs = append([]Ref(nil), refs[i+1:]...)
+			pend.Stage, pend.WhichFor, pend.Options, pend.RefName = "which", "ref", opts, rf.Match
+			d.Pending.Put(pend)
+			head := "🤔 «%s» puede ser más de una cosa. ¿Cuál?\n%s\n\nRespondé con el número (o <b>no</b> para cancelar)."
+			if kind == "maybe" {
+				head = "🤷 No encuentro «%s» tal cual. ¿Quisiste decir?\n%s\n\nRespondé con el número (o <b>no</b> para cancelar)."
+			}
+			return pendingResult(pend, "ambiguous", "¿Cuál?", fmt.Sprintf(head, esc(rf.Match), numberedKinds(opts))), true
+		default:
+			if len(rf.Fields) == 1 {
+				// One place for it: exactly what a placed name gets — the
+				// offer to create it, or «no encuentro».
+				pend.OpenRefs = append([]Ref(nil), refs[i+1:]...)
+				if r, done := resolveRef(ctx, d, pend, res.Field(rf.Fields[0]), rf.Match); done {
+					return r, true
+				}
+				continue
+			}
+			if !rf.Soft {
+				return Result{Kind: "not_found", Headline: "No encuentro «" + rf.Match + "»",
+					Text: fmt.Sprintf("🤷 No encuentro «%s» como %s. Cargalo primero o decímelo de otra forma.", esc(rf.Match), esc(kindsWords(d.Vocab, res, rf.Fields)))}, true
+			}
+			if !rf.InTitle {
+				if tf := titleField(res); tf != nil {
+					if cur, ok := pend.Data[tf.Name].(string); ok && cur != "" {
+						pend.Data[tf.Name] = cur + " " + rf.Match
+					} else {
+						pend.Data[tf.Name] = rf.Match
+					}
+				}
+			}
+		}
+	}
+	pend.OpenRefs = nil
+	return Result{}, false
+}
+
+// confirmationOrder is the order a confirmation is READ in: the title, the
+// relations, the times (a range's start before its end), then the rest.
+func confirmationOrder(res *Resource) []*Field {
+	var title, rels, times, rest []*Field
+	tf := titleField(res)
+	for _, f := range res.Fields {
+		switch {
+		case f == tf:
+			title = append(title, f)
+		case f.Relation != "":
+			rels = append(rels, f)
+		case f.Type == "time":
+			times = append(times, f)
+		default:
+			rest = append(rest, f)
+		}
+	}
+	if rg := res.Range(); rg != nil {
+		var ordered []*Field
+		if f := res.Field(rg.Start); f != nil {
+			ordered = append(ordered, f)
+		}
+		if f := res.Field(rg.End); f != nil {
+			ordered = append(ordered, f)
+		}
+		for _, f := range times {
+			if f.Name != rg.Start && f.Name != rg.End {
+				ordered = append(ordered, f)
+			}
+		}
+		times = ordered
+	}
+	out := append(title, rels...)
+	out = append(out, times...)
+	return append(out, rest...)
 }

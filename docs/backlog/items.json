@@ -1,6 +1,6 @@
 {
  "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo).",
- "actualizado": "2026-09-23",
+ "actualizado": "2026-09-24",
  "publicacion": {
   "estado": "pausada_deliberada",
   "desde": "2026-08-29",
@@ -1599,24 +1599,6 @@
    "estado": "abierto"
   },
   {
-   "id": "VOZ-15",
-   "titulo": "El parser lee «a las 4» como 16:00 por regla fija (1–6 = tarde): la franja del dueño no se declara",
-   "frente": "automatizacion",
-   "que_es": "Una hora dicha sin calificador entre 1 y 6 se lee como tarde, 7–12 como mañana; «de la mañana / de la tarde / pm» lo corrige; la confirmación siempre imprime la hora resuelta.",
-   "por_que_importa": "Un dueño que madruga («a las 5» = 05:00) pelea con la regla en cada cita; el schema no tiene dónde declarar su franja hábil.",
-   "que_lo_destraba": "Una llave declarable (p. ej. ranges.<n>.hours: [\"07:00\",\"20:00\"]) que resuelva la ambigüedad hacia la franja hábil, o VOZ-6 (dictado real) que diga si la regla molesta.",
-   "costo": "chico",
-   "dano": "bajo",
-   "prioridad": "P3",
-   "decide": "miguel",
-   "depende_de": [
-    "VOZ-6"
-   ],
-   "bloquea": [],
-   "origen": "MOTOR-AGENDA-S1",
-   "estado": "abierto"
-  },
-  {
    "id": "OPS-59",
    "titulo": "El plano de control del binario stock escucha en TODAS las interfaces (`*:9092`); ufw es la única guardia",
    "frente": "flota",
@@ -1713,35 +1695,51 @@
    "estado": "abierto"
   },
   {
-   "id": "VOZ-20",
-   "titulo": "Un nombre propio en un recurso con DOS relaciones a recursos nombrables cae al modelo («tareas de Esposa»: ¿área o persona?)",
+   "id": "VOZ-22",
+   "titulo": "Las horas relativas («en una hora», «dentro de veinte minutos», «en dos días») siguen siendo del modelo",
    "frente": "automatizacion",
-   "que_es": "El parser resuelve un nombre propio contra el recurso destino de UNA relación; cuando el recurso tiene dos (tareas → areas y personas) responde «name could match area_id or persona_id» y la pregunta va al modelo. En el historial real de la agenda: «persona esposa», «Tareas [nombre]», «tarea de tipo de trabajo…» (3 preguntas, 2 desperdiciadas).",
-   "por_que_importa": "Cada nombre propio del dueño en la agenda cuesta US$ 0,003 y a veces «no entendí», cuando el motor podría probar el nombre contra los dos destinos y quedarse con el único que casa.",
-   "que_lo_destraba": "Que el parser, ante dos destinos, resuelva el nombre con el matcher contra ambos ANTES de rendirse: uno casa → ese; los dos → «¿cuál?»; ninguno → no encuentro. El matcher ya existe (names.go); es una sesión chica con casos del historial.",
+   "que_es": "El vocabulario de tokens de tiempo es cerrado (ADR-037 §6): día + reloj. Una hora relativa al momento («en una hora») no tiene token; el parser la deja pasar y el modelo la resuelve (o no).",
+   "por_que_importa": "Un dueño con el teléfono en la mano dice «recordame en una hora» más que «a las cuatro»; hoy cuesta US$ 0,003 y a veces «no entendí». En el banco de frases (151) apareció una vez (C05, resuelta por el modelo).",
+   "que_lo_destraba": "Un token relativo (`in 1h`, `in 20m`, `in 2d`) resuelto por el motor en la zona de la app, con su forma hablada; solo si el historial real muestra la frase más de una vez al mes.",
    "costo": "chico",
    "dano": "bajo",
    "prioridad": "P3",
    "decide": "agente",
    "depende_de": [],
    "bloquea": [],
-   "origen": "AGENDA-PALABRAS-S1 (2026-09-23), historial /admin/ask de la agenda",
+   "origen": "AGENDA-ASISTENTE-S1 (2026-09-24), banco de frases",
    "estado": "abierto"
   },
   {
-   "id": "VOZ-21",
-   "titulo": "«Resumen» / «estado» dichos a /api/ask (no al bot) caen al modelo y se desperdician",
+   "id": "VOZ-23",
+   "titulo": "Dos intenciones en una frase ejecutan UNA: la segunda se repite en voz alta, no se encola",
    "frente": "automatizacion",
-   "que_es": "Los comandos fijos viven en el receptor de Telegram; la misma palabra por /api/ask (Siri, el panel) no es una pregunta que el parser resuelva: «Resumen» costó US$ 0,0036 con «no resource named» y se marcó desperdiciada.",
-   "por_que_importa": "El dueño dice «resumen» donde sea; que en un canal sea gratis y en otro cueste y falle es una asimetría que el historial ya mostró.",
-   "que_lo_destraba": "Que el parser descarte «resumen»/«estado»/«gasto» a US$ 0 con un texto que apunte al endpoint (GET /api/summary, la tarjeta) o, mejor, que /api/ask los sirva directamente componiendo el resumen (el mismo Report que el bot).",
+   "que_es": "«anotá comprar pintura y agendá reunión con Fabián mañana a las 4» planea la primera y dice «Lo segundo («agendá…») decímelo aparte cuando confirmes». No hay cola de pendientes: un «sí» suelto no puede ejecutar la equivocada.",
+   "por_que_importa": "Es el comportamiento seguro (ADR-040), pero obliga a dictar dos veces; con el dictado de Siri una frase larga es lo normal.",
+   "que_lo_destraba": "Una cola de UNA intención: tras el sí (o el no) de la primera, el motor ofrece la segunda como nueva confirmación, sin que el dueño la repita; nunca dos pendientes vivas a la vez.",
    "costo": "chico",
    "dano": "bajo",
    "prioridad": "P3",
    "decide": "agente",
    "depende_de": [],
    "bloquea": [],
-   "origen": "AGENDA-PALABRAS-S1 (2026-09-23), historial /admin/ask de la agenda",
+   "origen": "AGENDA-ASISTENTE-S1 (2026-09-24), provocación 10",
+   "estado": "abierto"
+  },
+  {
+   "id": "VOZ-24",
+   "titulo": "«Arrancá con X» / «empezá X» (empezar = pasar a en curso) van al modelo, que a veces contesta que no puede",
+   "frente": "automatizacion",
+   "que_es": "El parser resuelve una transición por el valor dicho («poné en curso…») o por un verbo cuyo tallo es un estado («cancelá»); un verbo de comienzo no nombra ningún estado. El modelo respondió `write_refused` en dos corridas (U05 del banco y «poné en curso» antes del arreglo): lee «arrancá» como una acción que no es de datos.",
+   "por_que_importa": "Es la frase natural para empezar una tarea; hoy es la única transición coloquial del banco que sigue fallando (1 de 151).",
+   "que_lo_destraba": "Con evidencia del historial real (que Miguel lo diga más de una vez): un mapa genérico verbo-de-comienzo → el estado no inicial y no terminal cuyo nombre contenga «curso»/«progreso»/«proceso»; y decirle al modelo (W1c) que empezar es una transición.",
+   "costo": "chico",
+   "dano": "bajo",
+   "prioridad": "P3",
+   "decide": "agente",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "AGENDA-ASISTENTE-S1 (2026-09-24), banco de frases U05",
    "estado": "abierto"
   }
  ]

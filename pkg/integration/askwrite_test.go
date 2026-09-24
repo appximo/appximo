@@ -90,7 +90,9 @@ func TestAskWrite_CreateConfirmsThenWritesThroughTheEngine(t *testing.T) {
 	dpDo(t, rest, "POST", "/api/personas", dueno, map[string]any{"nombre": "Marta Ruiz"}, http.StatusCreated)
 	fabID := fab["id"].(string)
 
-	got := dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "Anotá llamar a Fabián para arreglar el techo, urgente, para mañana"}, http.StatusOK)
+	// A VERBLESS sentence: the fixed form (AGENDA-ASISTENTE-S1) settles
+	// «anotá …» without the model; this test pins the MODEL's write path.
+	got := dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "Llamar a Fabián para arreglar el techo, urgente, para mañana"}, http.StatusOK)
 	if got["kind"] != "confirm" || got["pending_id"] == nil || got["stage"] != "confirm" {
 		t.Fatalf("want a confirmation, got %v", got)
 	}
@@ -235,8 +237,10 @@ func TestAskWrite_PlanCachedNeverTheResult_AndStrayYesCostsNothing(t *testing.T)
 		defer fm.mu.Unlock()
 		return fm.calls
 	}
-	// 1. The order, once: the model plans it, the owner confirms, the engine writes.
-	got := dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "anotá pagar la luz para mañana"}, http.StatusOK)
+	// 1. The order, once: the model plans it, the owner confirms, the engine
+	// writes. A VERBLESS order — «anotá …» is the fixed form's (parser, US$ 0)
+	// since AGENDA-ASISTENTE-S1; this test pins the MODEL's cached plan.
+	got := dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "pagar la luz para mañana"}, http.StatusOK)
 	if got["kind"] != "confirm" || got["source"] != "model" || modelCalls() != 1 {
 		t.Fatalf("first order: %v (calls %d)", got, modelCalls())
 	}
@@ -247,7 +251,7 @@ func TestAskWrite_PlanCachedNeverTheResult_AndStrayYesCostsNothing(t *testing.T)
 	// 2. The SAME order again: the plan comes from the cache (no model call),
 	// a FRESH confirmation is asked, and confirming writes a SECOND row — the
 	// result was never cached.
-	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "Anotá pagar la luz para mañana"}, http.StatusOK)
+	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "Pagar la luz para mañana"}, http.StatusOK)
 	if got["kind"] != "confirm" || got["source"] != "cache" || got["cost_usd"] != float64(0) || modelCalls() != 1 {
 		t.Fatalf("second order must come from the plan cache: %v (calls %d)", got, modelCalls())
 	}
@@ -264,13 +268,16 @@ func TestAskWrite_PlanCachedNeverTheResult_AndStrayYesCostsNothing(t *testing.T)
 	if n := outboxCount(t, pool, "tareas.created"); n != 2 {
 		t.Fatalf("two events, got %d", n)
 	}
-	// 3. A third time, then a stray «sí pero…»: the pending is cancelled and
-	// the sentence is settled by the parser — no model call, nothing written.
-	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "anotá pagar la luz para mañana"}, http.StatusOK)
+	// 3. A third time, then a stray «sí pero…» that carries NO datum: the
+	// pending is cancelled and the sentence is settled by the parser — no
+	// model call, nothing written. («Sí pero mejor el viernes» carries a day
+	// and is a CORRECTION since AGENDA-ASISTENTE-S1: it re-issues the
+	// confirmation instead — pinned in pkg/ask.)
+	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "pagar la luz para mañana"}, http.StatusOK)
 	if got["kind"] != "confirm" || got["source"] != "cache" {
 		t.Fatalf("third order from the cache: %v", got)
 	}
-	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "Si pero mejor el viernes"}, http.StatusOK)
+	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "Si pero no estoy seguro"}, http.StatusOK)
 	if got["kind"] != "unclear" || got["source"] != "parser" || got["cost_usd"] != float64(0) || modelCalls() != 1 {
 		t.Fatalf("stray yes: %v (calls %d)", got, modelCalls())
 	}
@@ -282,7 +289,7 @@ func TestAskWrite_PlanCachedNeverTheResult_AndStrayYesCostsNothing(t *testing.T)
 	}
 	// 4. Another user of the same role does NOT inherit the write plan.
 	other := tok("dueno", askU2)
-	got = dpDo(t, rest, "POST", "/api/ask", other, map[string]any{"q": "anotá pagar la luz para mañana"}, http.StatusOK)
+	got = dpDo(t, rest, "POST", "/api/ask", other, map[string]any{"q": "pagar la luz para mañana"}, http.StatusOK)
 	if got["source"] != "model" || modelCalls() != 2 {
 		t.Fatalf("another user's order is planned anew: %v (calls %d)", got, modelCalls())
 	}

@@ -5,8 +5,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
@@ -62,9 +64,10 @@ import (
 // plan cache answers a repeated question, and the spend ledger (pkg/askspend,
 // installed per app through AskRuntime) caps model calls per minute and the
 // model spend per day — at the cap the model is off, the rest keeps answering.
-func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, policy *rbac.Policy, tw *txWriter) {
+func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, policy *rbac.Policy, tw *txWriter, summaryHandler http.HandlerFunc) {
 	model, modelName := askModelFromEnv()
 	timeout := askTimeoutFromEnv()
+	spendHandler := registerAskSpendRoute(r, s, policy)
 	// Voice WRITES (VOZ-ESCRITURAS-S1): create + update through the
 	// transaction cores, every one confirmed by the owner first. Off by
 	// APPXIMO_ASK_WRITES=off; without a writer (bare BuildRouter callers)
@@ -196,6 +199,15 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 			}
 		}
 		bindWrites(&deps, rt, tc, evalCtx, userID)
+		if rt != nil && rt.Guide != nil && userID != "" {
+			deps.Guide, deps.GuideKey = rt.Guide, tc.ID+"|"+evalCtx.Role+"|"+userID
+		}
+		// VOZ-21: «resumen» / «estado» / «gasto» said to this door are served
+		// by the engine's own endpoints, called in-process with the caller's
+		// identity — the same digest and the same card the bot sends.
+		deps.Summary = func(ctx context.Context, what string) (ask.Result, error) {
+			return inProcessCommand(ctx, req, what, summaryHandler, spendHandler)
+		}
 		switch {
 		case model == nil:
 			deps.ModelOff = "disabled"
@@ -317,7 +329,60 @@ func registerAskRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, polic
 		markSpan(req, "serialize")
 	})
 
-	registerAskSpendRoute(r, s, policy)
+}
+
+// inProcessCommand runs GET /api/summary (the digest, or ?view=census) or
+// GET /api/ask/spend through their own handlers with the asking request's
+// identity, and words the JSON they return for the voice. No second
+// implementation of either: the reply is exactly what the bot gets.
+func inProcessCommand(ctx context.Context, req *http.Request, what string, summaryHandler, spendHandler http.HandlerFunc) (ask.Result, error) {
+	r2 := req.Clone(ctx)
+	r2.Method = http.MethodGet
+	r2.Body = http.NoBody
+	u := *req.URL
+	q := url.Values{}
+	var h http.HandlerFunc
+	switch what {
+	case "summary":
+		u.Path, h = "/api/summary", summaryHandler
+	case "census":
+		u.Path, h = "/api/summary", summaryHandler
+		q.Set("view", "census")
+	case "spend":
+		u.Path, h = "/api/"+rbac.AskRoute+"/spend", spendHandler
+	default:
+		return ask.Result{}, fmt.Errorf("unknown command %q", what)
+	}
+	if h == nil {
+		return ask.Result{}, fmt.Errorf("the %s endpoint is not mounted", what)
+	}
+	u.RawQuery = q.Encode()
+	r2.URL = &u
+	r2.RequestURI = u.RequestURI()
+	r2.Header = req.Header.Clone()
+	r2.Header.Set("Cache-Control", "no-cache")
+	rec := httptest.NewRecorder()
+	h(rec, r2)
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	text, _ := body["text"].(string)
+	switch {
+	case rec.Code == http.StatusForbidden && what == "spend":
+		return ask.Result{Kind: "forbidden", Headline: "El gasto lo ve quien administra",
+			Text: "🔒 El gasto del modelo lo ve un rol de administración; el tuyo no. Pedíselo a quien administra la app."}, nil
+	case rec.Code != http.StatusOK || text == "":
+		msg, _ := body["error"].(string)
+		if msg == "" {
+			msg = fmt.Sprintf("HTTP %d", rec.Code)
+		}
+		return ask.Result{}, fmt.Errorf("%s: %s", what, msg)
+	}
+	headline, _ := body["headline"].(string)
+	res := ask.Result{Kind: what, Headline: headline, Text: text, Speech: ask.Speech(text)}
+	if what == "spend" {
+		res.Headline = "Gasto del modelo"
+	}
+	return res, nil
 }
 
 // askSpendSentinel is a resource name no schema can declare (resource names
@@ -333,8 +398,8 @@ const askSpendSentinel = "__platform.ask_spend__"
 // card (no new renderer). Admin-grade roles only: a row-scoped or listed
 // role is 403 — the spend of a platform is the administrator's business, not
 // a shop clerk's. The platform-wide view stays on GET /admin/ask.
-func registerAskSpendRoute(r chi.Router, s *schema.APISchema, policy *rbac.Policy) {
-	r.Get("/api/"+rbac.AskRoute+"/spend", func(w http.ResponseWriter, req *http.Request) {
+func registerAskSpendRoute(r chi.Router, s *schema.APISchema, policy *rbac.Policy) http.HandlerFunc {
+	handler := func(w http.ResponseWriter, req *http.Request) {
 		tc := tenant.MustFromCtx(req.Context())
 		evalCtx := rbac.EvalContextFromRequest(req)
 		if evalCtx.Role == "" || evalCtx.Role == rbac.PublicRoleName || !policy.Allows(evalCtx.Role, askSpendSentinel, "read") {
@@ -376,7 +441,9 @@ func registerAskSpendRoute(r chi.Router, s *schema.APISchema, policy *rbac.Polic
 		serverTiming(w, req)
 		json.NewEncoder(w).Encode(dig) //nolint:errcheck
 		markSpan(req, "serialize")
-	})
+	}
+	r.Get("/api/"+rbac.AskRoute+"/spend", handler)
+	return handler
 }
 
 // groupsReport shapes a grouped answer as a census-style Report so the

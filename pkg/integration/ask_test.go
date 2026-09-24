@@ -672,7 +672,7 @@ func TestAsk_AliasesAnswerFromTheDatabase(t *testing.T) {
 		t.Fatalf("owner must get ITS 2 via the alias: %v", got)
 	}
 	// Part C: sentences that are not questions never reach the model.
-	for q, kind := range map[string]string{"sí pero mejor el viernes": "unclear", "qué puedo preguntar": "help", "hola, buenos días": "help"} {
+	for q, kind := range map[string]string{"sí pero mejor el viernes": "unclear", "qué puedo preguntar": "guide", "hola, buenos días": "help"} {
 		got = dpDo(t, rest, "POST", "/api/ask", super, map[string]any{"q": q}, http.StatusOK)
 		if got["kind"] != kind || got["source"] != "parser" || got["cost_usd"] != float64(0) {
 			t.Fatalf("%q → %s at zero cost, got %v", q, kind, got)

@@ -1354,6 +1354,92 @@ What the operator gets, verified live (`evidencia/MOTOR-AGENDA-S1/provocaciones/
 
 The generator declares all of it from the description («que no se me crucen», «avisame 15 minutos antes de cada compromiso»): `appximo ai-generate "Mi agenda personal…"` came out with `ranges` + `no_overlap`, the `time` workflow and the morning cron, valid first try (US$ 0,014). Example to start from: `examples/model-lab/agenda-choques.json`.
 
+### 4.6h «Cómo creo algo» — the assistant TEACHES how to use it: a living guide, a fixed form for creating, corrections on a pending write (AGENDA-ASISTENTE-S1, ADR-040)
+
+An assistant that does not teach how to use it forces guessing, and guessing
+costs money (the agenda's real history after two days: every creation went to
+the model, «cómo creo algo» bought a «no entendí»). Four things changed, all
+derived from the schema — the engine wires no domain word:
+
+**The living guide, by levels — US$ 0, always.** `ayuda` answers the menu
+(what the app has, the four doors: ask / create / change / the digest) and the
+levels to ask for; each level is generated from THIS app's schema and rows and
+delivered in parts of six items on the screen AND in the voice (the same six —
+«más» continues both from the same place):
+
+```
+you:  cómo creo algo
+bot:  ✍️ Para crear una tarea decí: «crear tarea: [qué], [30 minutos], [urgente], [mañana / el viernes]».
+      Por ejemplo: «crear tarea: revisar el contrato, 30 minutos, urgente, el viernes» — la entiendo al instante, gratis.
+      Los datos van en cualquier orden, separados por comas o pausas; el que no digas, lo pregunto o lo dejo vacío.
+      Antes de escribir te muestro todo y espero tu sí.
+      Hay más (1 de 4). Decí más para seguir.            ← compromiso, registro, persona; «cómo creo una tarea» for the detail
+you:  qué puedo preguntar          → the question shapes ON THIS SCHEMA, six per page («cuántas tareas hay», «tareas por hacer», «tareas de salud», …)
+you:  qué campos tiene una tarea   → every field in words with its form («area (una de tus areas: salud, casa…)», «estado (pendiente, en_curso…) — también entiendo por hacer, abierta…»)
+you:  cómo filtro por fecha        → periods, ranges, combinations, «los últimos 3…»
+```
+
+Every example promised as free is **parsed on that schema before it is
+shown** (the spoken variant too — a voice says a pause where the screen shows
+a colon); one the parser cannot settle is never promised. Free and paid are
+always apart, with the price. Measured on the agenda: 43 of 43 examples the
+guide shows answer `source: parser`, US$ 0.
+
+**The fixed form for creating — `crear <recurso>: <qué>, <datos en
+cualquier orden>`.** A verb (`crear`, `nueva`, `anotá`, `agregá`, `registrá`…)
+or the resource word itself, then WHAT it is, then the data in ANY order, with
+or without the field word, separated by commas, «y» or the pause dictation
+leaves. Every datum is recognized by its FORM: a field's own word, a declared
+value or alias, a bool by its name («urgente»), a day or a clock («el
+viernes», «mañana a las 3», «de 12 a 1», «a las 4 pm», «a las cuatro de la
+tarde», «9 y media»), a number with its unit («30 minutos»), a name after
+«con» / «para», a bare name tried against every target (VOZ-20, below). What
+is not a datum is the title, kept as said. Three cousins: «anotá que <lo que
+pasó>» is the note resource (creatable, no lifecycle, a range without
+no-overlap or a time defaulting to now); «anotá <infinitivo>…» / «tengo que…»
+is the to-do; «reunión con Fabián mañana a las 3 por una hora» (an agenda
+word, a clock, no question word) is a block. Chosen over `campo: valor` pairs
+(exhausting to dictate) and a positional order (memorized, breaks when one
+datum is skipped). **The confirmation is unchanged**: the saving is the model
+call, never the control. What the form cannot settle stays the model's.
+
+**A correction re-issues the confirmation.** «no, mejor el viernes», «mejor a
+las 5», «sí pero urgente», «que sea con Marta» after a confirmation: when the
+words after the lead are data the form recognizes, they are applied to the
+pending (a clock keeps the day, a day keeps the clock, a range keeps its
+length) and the confirmation is shown again saying what changed. A «sí pero…»
+is still never a yes.
+
+**Names tried against every target (VOZ-20).** «las tareas de Esposa», «crear
+tarea: pagar el seguro, Casa»: on a resource with an area AND a person the
+parser now says which fields the name could belong to and the engine tries
+each — relation targets first, the row's own title only when no target holds
+the name. One → used and said with its kind; several → a numbered pick naming
+each kind; none → said. An exact whole token IS the row («Fabián» with a
+Fabiana around; «Fabi» still asks).
+
+**`resumen` / `estado` / `gasto` through `/api/ask` (VOZ-21)** are served
+in-process by the engine's own endpoints (the same digest and card the bot
+sends), US$ 0. **«Ya hice…», «terminé de…», «… está lista»** move the named
+to-do to its finished state; **«poné en curso la declaración de renta»** finds
+the resource by the state value said.
+
+**The voice.** `speech` (and `display` = speech + the cost line when tracing)
+is composed, never derived: short sentences, clocks and dates and small counts
+in words («de las diez a las once de la mañana», «el martes veintinueve de
+septiembre», «dos tareas»), no bullet, guillemet, pictograph, underscore or
+raw digit; a list reads at most five items then «y N más; mirá el panel»; a
+numbered pick is read «Uno, Fabián Gómez. Dos, Fabiana Torres.»; a long guide
+in parts. The box has no synthesizer, so the criterion is declared and
+measured (`ask.SpeechMetrics` + every spoken reply of the provocations: zero
+digits, zero symbols). What Siri does with the punctuation is the shortcut's
+business: if it reads too fast, lower the Speak action's rate.
+
+**VOZ-15 stays as the written rule** («a las 4» = 16:00; 7–12 = morning): the
+sentence bank had 25 bare hours in 37 clocks, every one meaning what the rule
+reads; the confirmation now SAYS «a las cuatro de la tarde», so a misread is
+heard before anything is written and fixed with «mejor a las 4 de la mañana».
+
 ### 4.7 Recommended cadence by kind of app
 
 | the app | cadence | why |

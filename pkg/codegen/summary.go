@@ -41,7 +41,7 @@ import (
 // allowlist (a role that cannot read a resource never sees it in the digest; a
 // role scoped to its own rows counts only its own). So the digest can never leak
 // what a plain list would not.
-func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, policy *rbac.Policy) {
+func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, policy *rbac.Policy) http.HandlerFunc {
 	// The resources the digest asks about: the declared list (its order), else
 	// every resource (alphabetical; Order re-ranks by attention afterwards).
 	// A declared list also means FEWER queries — an app with twenty resources
@@ -63,7 +63,7 @@ func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, p
 		plans[name] = summary.PlanFor(name, &res)
 	}
 
-	r.Get("/api/summary", pkghandlers.CachedGet(func(w http.ResponseWriter, req *http.Request) {
+	handler := func(w http.ResponseWriter, req *http.Request) {
 		tc := tenant.MustFromCtx(req.Context())
 		evalCtx := rbac.EvalContextFromRequest(req)
 
@@ -321,7 +321,9 @@ func registerSummaryRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantDB, p
 		serverTiming(w, req)
 		json.NewEncoder(w).Encode(rep) //nolint:errcheck
 		markSpan(req, "serialize")
-	}))
+	}
+	r.Get("/api/summary", pkghandlers.CachedGet(handler))
+	return handler
 }
 
 // policyOf maps the schema's summary block onto the send policy with defaults.

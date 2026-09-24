@@ -170,15 +170,17 @@ func TestParser_RestrictedRoleVocabulary(t *testing.T) {
 
 func TestParser_AmbiguousNamePlaceFallsThrough(t *testing.T) {
 	// A resource with TWO relations whose targets carry a name: the parser
-	// cannot know which one "de Ana" means → the model.
+	// cannot know which one "de Ana" means — it is SURE anyway, naming both
+	// candidates for the engine to try (VOZ-20, AGENDA-ASISTENTE-S1); the
+	// model is no longer paid to guess.
 	s := opticaSchema()
 	v := Build(s, "", allRead)
 	r := Parse("citas de Ana Gomes", v)
-	if r.Sure {
-		t.Fatalf("citas has pacientes AND optometras with names — must fall through, got %+v", r.Plan)
+	if !r.Sure || len(r.Plan.Filters) != 1 || r.Plan.Filters[0].Match != "Ana Gomes" {
+		t.Fatalf("citas has pacientes AND optometras with names — sure with candidates, got %+v (%s)", r.Plan, r.Reason)
 	}
-	if !strings.Contains(r.Reason, "could match") {
-		t.Errorf("reason: %s", r.Reason)
+	if f := r.Plan.Filters[0]; f.Field != "" || len(f.Fields) != 2 || f.Fields[0] != "optometra_id" || f.Fields[1] != "paciente_id" {
+		t.Errorf("candidates: %+v", r.Plan.Filters[0])
 	}
 }
 

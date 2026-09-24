@@ -78,6 +78,16 @@ type Deps struct {
 	// a range with a no-overlap rule, before the owner confirms; nil = no
 	// pre-check (the database constraint still decides at write time).
 	Conflicts ConflictChecker
+
+	// ── the guide and the fixed commands (AGENDA-ASISTENTE-S1) ──
+	// Guide remembers where the living guide left off per identity
+	// (GuideKey), so «más» continues; nil = no continuation.
+	Guide    *GuideStore
+	GuideKey string
+	// Summary answers «resumen» / «estado» / «gasto» said to this door
+	// (VOZ-21): what is the digest, the census card or the spend card —
+	// composed by the engine's own endpoints. nil = the reply points at them.
+	Summary func(ctx context.Context, what string) (Result, error)
 }
 
 // Result is the reply, composed by the engine.
@@ -321,7 +331,7 @@ func answerQuestion(ctx context.Context, d Deps, question string, cancelled bool
 			if pr.Discard != "" {
 				// Sure it is NOT a data question (Part C): answered here, at
 				// zero cost — never cached, never billed.
-				return discardResult(d, pr, question, cancelled)
+				return discardResult(ctx, d, pr, question, cancelled)
 			}
 			p, source = pr.Plan, "parser"
 		} else {
@@ -437,11 +447,44 @@ func answerQuestion(ctx context.Context, d Deps, question string, cancelled bool
 // (Part C): a stray answer to a confirmation, a greeting, a help request, a
 // bare name. Zero cost, source "parser", kind "help" for the two that ask
 // for guidance and "unclear" for the two that are non-answers.
-func discardResult(d Deps, pr ParseResult, question string, cancelled bool) Result {
+func discardResult(ctx context.Context, d Deps, pr ParseResult, question string, cancelled bool) Result {
 	r := Result{Source: "parser", Detail: "discard: " + pr.Discard, Plan: &pr.Plan}
 	guide := askable(d.Vocab)
 	if d.Write != nil && d.Vocab.Writable() {
 		guide += " " + writable(d.Vocab)
+	}
+	if strings.HasPrefix(pr.Discard, "guide:") {
+		// The living guide (Part B): a level, or the next part of the last one.
+		parts := strings.SplitN(strings.TrimPrefix(pr.Discard, "guide:"), ":", 2)
+		res := ""
+		if len(parts) == 2 {
+			res = parts[1]
+		}
+		g := Guide(ctx, d, parts[0], res)
+		g.Detail, g.Plan = "discard: "+pr.Discard, &pr.Plan
+		return g
+	}
+	switch pr.Discard {
+	case "summary", "census", "spend":
+		// VOZ-21: the fixed commands said to this door are served by it.
+		if d.Summary != nil {
+			sr, err := d.Summary(ctx, pr.Discard)
+			if err == nil {
+				sr.Source, sr.Detail, sr.Plan = "parser", "discard: "+pr.Discard, &pr.Plan
+				if sr.Kind == "" {
+					sr.Kind = pr.Discard
+				}
+				return sr
+			}
+			r.Kind = "unavailable"
+			r.Headline = "No pude armarlo"
+			r.Text = "⚠️ No pude armar el " + pr.Discard + " ahora (" + esc(err.Error()) + ")."
+			return r
+		}
+		r.Kind = pr.Discard
+		r.Headline = "Eso lo da el resumen"
+		r.Text = "ℹ️ Eso lo responde el resumen del día: pedilo con <b>resumen</b> al bot, o GET /api/summary con tu token."
+		return r
 	}
 	switch pr.Discard {
 	case "stray_confirmation":
@@ -457,14 +500,13 @@ func discardResult(d Deps, pr ParseResult, question string, cancelled bool) Resu
 		r.Headline = "¡Hola!"
 		r.Text = "👋 ¡Hola! Preguntame con tus palabras («cuántas órdenes hay hoy») o pedime que anote algo. " + guide
 	case "help":
-		// EXAMPLES derived from the schema — resources, states, declared
-		// aliases, flags, ranges — split into what the parser settles for
-		// free and what the model must think (VOZ-19). Never a hand-written
-		// list, so it cannot go stale; the speech is composed apart, in short
-		// sentences with no symbols or prices, for a voice assistant.
-		r.Kind = "help"
-		r.Headline = "Qué puedo hacer"
-		r.Text, r.Speech = HelpExamples(d.Vocab, d.Write != nil && d.Vocab.Writable())
+		// The living guide's menu (AGENDA-ASISTENTE-S1, Part B): what the app
+		// has and the four doors, then the levels to ask for. Generated from
+		// the schema; the examples level (VOZ-19) lives under «qué puedo
+		// preguntar».
+		g := Guide(ctx, d, "menu", "")
+		g.Detail, g.Plan = r.Detail, r.Plan
+		return g
 	default: // bare_name
 		r.Kind = "unclear"
 		r.Headline = "¿Qué querés saber?"
@@ -528,6 +570,34 @@ func resolveNames(ctx context.Context, d Deps, p Plan) (Plan, Result, bool) {
 	var said []string
 	for i, f := range p.Filters {
 		if f.Match == "" {
+			continue
+		}
+		if len(f.Fields) > 0 {
+			// VOZ-20: a name the parser could not place — every candidate
+			// target is tried; the one where the name exists wins.
+			kind, field, chosen, opts, err := resolveMulti(ctx, d, res, f.Match, f.Fields)
+			if err != nil {
+				return p, execFailure(err), false
+			}
+			kinds := kindsWords(d.Vocab, res, f.Fields)
+			switch kind {
+			case "one":
+				p.Filters[i] = Filter{Field: field, Op: "eq", Value: chosen.Value}
+				if normalize(chosen.Label) != normalize(f.Match) {
+					said = append(said, fmt.Sprintf("Entendí «%s» como %s <b>%s</b>.", esc(f.Match), esc(chosen.Kind), esc(chosen.Label)))
+				} else {
+					said = append(said, fmt.Sprintf("%s: <b>%s</b>.", esc(chosen.Kind), esc(chosen.Label)))
+				}
+			case "several":
+				return p, Result{Kind: "ambiguous", Headline: "¿Cuál?",
+					Text: fmt.Sprintf("🤔 «%s» puede ser más de una cosa. ¿Cuál?\n%s\n\nRepetí la pregunta diciendo cuál (por ejemplo «%s»).", esc(f.Match), numberedKinds(opts), esc(exampleWithKind(p.Resource, opts[0])))}, false
+			case "maybe":
+				return p, Result{Kind: "not_found", Headline: "No encuentro «" + f.Match + "»",
+					Text: fmt.Sprintf("🤷 No encuentro «%s» como %s. ¿Quisiste decir?\n%s\n\nRepetí la pregunta con el nombre completo.", esc(f.Match), esc(kinds), numberedKinds(opts))}, false
+			default:
+				return p, Result{Kind: "not_found", Headline: "No encuentro «" + f.Match + "»",
+					Text: fmt.Sprintf("🤷 No encuentro «%s» como %s.", esc(f.Match), esc(kinds))}, false
+			}
 			continue
 		}
 		fd := res.Field(f.Field)
@@ -875,4 +945,13 @@ func appendMissing(cols []string, more ...string) []string {
 		}
 	}
 	return cols
+}
+
+// exampleWithKind words how to say a multi-field name unambiguously:
+// «tareas del área Casa».
+func exampleWithKind(resource string, c Candidate) string {
+	if c.Kind == "" {
+		return resource + " de " + c.Label
+	}
+	return resource + " de " + c.Kind + " " + c.Label
 }

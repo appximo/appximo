@@ -2252,6 +2252,43 @@ vocabulary has no write form. Example: [examples/model-lab/agenda-voz.json](exam
 (tareas/personas + a workflow that notifies through the digest on an
 urgent create). Operator + Siri: docs/PRODUCTION.md §4.6f.
 
+**The assistant teaches how to use it (AGENDA-ASISTENTE-S1, ADR-040).** A
+LIVING GUIDE generated from the schema, by levels — `ayuda` (the menu), «cómo
+creo algo» / «cómo creo una tarea» (structure + one full example with the
+app's real rows), «qué puedo preguntar», «qué campos tiene una tarea», «cómo
+filtro por fecha», «más» (a per-identity cursor, `ask.GuideStore`) — every
+free example SELF-VERIFIED by the parser before it is shown, free and paid
+apart with the price, six items per part on the screen AND the voice, US$ 0
+always (`pkg/ask/guide.go`). A FIXED FORM for creating, settled by the parser:
+`crear <recurso>: <qué>, <datos en cualquier orden>` (`pkg/ask/create.go` —
+a verb or the resource word, the title as said, each datum by its FORM:
+field word, declared value/alias, bool by name, day/clock incl. «4 pm» /
+«cuatro de la tarde» / «9 y media», number + unit, «con/para Name», a bare
+name tried against every target); «anotá que …» is the note resource, «tengo
+que …» the to-do (now through the same pipeline, so «área salud» rides
+along), a schedule verb + clock the agenda; the confirmation is unchanged. A
+CORRECTION on a pending confirm («no, mejor el viernes», «mejor a las 5», «sí
+pero urgente», `pkg/ask/correct.go`) re-issues the confirmation, never
+executes. VOZ-20: a name on a resource with two nameable relations is tried
+against every target (`Plan.Refs` / `Filter.Fields`, `resolve.go`; relations
+first, own title last; an exact whole token wins). VOZ-21: `resumen` /
+`estado` / `gasto` said to `/api/ask` are served in-process by the engine's
+own handlers (`codegen.inProcessCommand`). «Ya hice…» / «terminé de…» /
+«… está lista» = the finished transition; «poné en curso X» finds the
+resource by the state value. Period phrases match longest-first («de la
+semana que viene» beats «de la semana»); «antes del viernes» is the deadline,
+not the title; an alias that names the resource («reunión», «cita») stays
+as the title's first word. PROSODY (`pkg/ask/prosody.go`): `speech` /
+`display` composed, never derived — clocks/dates/small counts in words,
+shared-period ranges («de las diez a las once de la mañana»), lists capped
+at five + «y N más; mirá el panel», numbered picks as words, no
+digit/symbol/bullet/pictograph/underscore in any spoken reply (measured on
+every provocation reply; the box has no synthesizer, the criterion is the
+metric). VOZ-15 stays as the written rule with corpus evidence (25 bare hours,
+all afternoon-consistent); the confirmation says «de la tarde». The sentence
+bank (151 phrases, 31 verbatim from the real history) is the regression
+instrument: `evidencia/AGENDA-ASISTENTE-S1/corpus/`.
+
 ## Questions in plain language (VOZ-PREGUNTAS-S1, ADR-033)
 
 `POST /api/ask {"q": "cuántas órdenes hay hoy"}` — the second rung of the

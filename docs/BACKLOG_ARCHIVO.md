@@ -17,6 +17,20 @@ calling cheaper (ADR-035 §4). **Reconsider** if a tenant's model share
 (`appximo_ask_questions{source="model"}` vs the rest) stays above half its questions
 for a month.
 
+### VOZ-15 — CLOSED (AGENDA-ASISTENTE-S1, 2026-09-24): «a las 4» = 16:00 stays as the written rule; the confirmation says the half of the day in words
+
+A bare hour 1–6 is the afternoon, 7–12 the morning. The evidence gathered for
+the decision: the sentence bank (31 phrases verbatim from the owner's real
+history + his own cases + variants) carries 25 bare hours in 37 clocks and
+every one means what the rule reads («a las 4» = 16:00, «de 12 a 1» ends at
+13:00, «a las 8» = 08:00); the owner's only real compromiso was dictated
+qualified («tipo 11 de la mañana»). A declarable working-hours key would add
+a knob to decide what nobody has been wrong about. The cheap protection
+shipped instead: the spoken confirmation SAYS «a las cuatro de la tarde», so a
+misread is heard before anything is written and corrected with «mejor a las 4
+de la mañana» (a correction re-issues the confirmation, ADR-040 §3).
+**Reconsider** only with a real misread in the history (ADR-040 §8).
+
 | ID | Item | Decision & where it is justified |
 |---|---|---|
 | **RBAC-C1** | Join / subquery row conditions | **No.** Unbounded per-row cost inside the embed LATERAL, and an unauditable compiled policy. Denormalize the ownership column — [ADR-022](adr/ADR-022-declarative-surface-boundaries.md) Decision 1b. Reconsider if a case needs ownership through a relation AND the denormalized column is genuinely unmaintainable. |
@@ -489,6 +503,41 @@ are generated and parked in `public.outbox`, and no engine alert reaches
 anyone (`fleet-audit` ✗). **Ready:** @BotFather → token; `/start` in the
 chat → chat_id; uncomment and fill the block; `systemctl restart agenda
 agenda-worker`; `fleet-audit.sh --app=agenda` green. Decides: Miguel.
+
+## DONE in AGENDA-ASISTENTE-S1 (2026-09-24) — an assistant that teaches how to use it: a living guide from the schema, a fixed form for creating, corrections on a pending write, names across every target, replies that sound like a person (ADR-040)
+
+| Item | What closed it | Where |
+|---|---|---|
+| **the sentence bank + baseline** | 151 human sentences (31 verbatim from the agenda's real `/admin/ask` history, 19 from the owner's cases and rows, 101 natural variants), each with its expected intention; measured on the deployed engine `80bd966`: 72.8 % intention hits, parser 34 %, model 64 %, US$ 0.366/pass, p50 906 ms | `evidencia/AGENDA-ASISTENTE-S1/corpus/` (corpus.py, run.py, run-base.json) |
+| **the living guide** (VOZ-19 grown) | `pkg/ask/guide.go`: menu / «cómo creo algo» (+ per resource) / «qué puedo preguntar» / «qué campos tiene X» / «cómo filtro por fecha» / «más» — generated from the schema and the caller's rows, every free example self-verified by the parser (the spoken variant too), free/paid apart with the price, six items per part on BOTH channels; 44 of 44 examples the agenda's guide shows answer `parser`, US$ 0; correct on conjunto (20 resources) and the English quickstart | `guide.go`, `create_test.go` |
+| **the fixed form for creating** | `pkg/ask/create.go`: `crear <res>: <qué>, <datos en cualquier orden>` — verb or resource word, title as said, each datum by FORM (field word, value/alias, bool by name, day/clock incl. «4 pm»/«cuatro de la tarde»/«9 y media», number + unit, con/para Name, bare name tried against every target); «anotá que…» = the note resource, «tengo que…» through the same pipeline, an alias («reunión») stays as the title's first word, «antes del viernes» = the deadline; the confirmation unchanged | `create.go`, `obligation.go`, `agenda.go` |
+| **corrections on a pending write** | `pkg/ask/correct.go`: «no, mejor el viernes», «mejor a las 5», «sí pero urgente», «que sea con Marta» → applied to the pending (a clock keeps the day, a range its length) and the confirmation re-issued saying what changed — never executed (ADR-038 §3 amended by ADR-040 §3) | `correct.go` |
+| **VOZ-20 DONE** | a name the sentence does not place is tried against every candidate target (`Filter.Fields` / `Plan.Refs`, `resolve.go`): relations first, own title last; one → used and said with its kind; several → a numbered pick naming each kind; none → said; an exact whole token wins («Fabián» vs Fabiana) | `resolve.go`, `names.go`, `write.go` |
+| **VOZ-21 DONE** | `resumen` / `estado` / `gasto` said to `/api/ask` are parser discards served in-process by the engine's own summary/census/spend handlers with the caller's identity (`codegen.inProcessCommand`) — the same digest and card the bot sends, US$ 0 | `pkg/codegen/ask.go`, `summary.go` |
+| **prosody** | `pkg/ask/prosody.go` + composed `speech`/`display`: clocks, dates and small counts in words, shared-period ranges, lists capped at five + «y N más; mirá el panel», numbered picks as words, ask-field hints without digits, no bullet/guillemet/pictograph/underscore; measured on every spoken reply of the fifteen provocations (80 replies: 0 digits, 0 symbols, 0 emoji, ≤ 22 words per sentence) | `prosody.go`, `compose.go`, `write.go` |
+| **the parser's growth** (from the bank) | period phrases longest-first («de la semana que viene»), a transition names its resource by the state value said and its row without a preposition («poné en curso la declaración de renta»), «ya hice / terminé de / está lista» = the finished transition, inner «de» in a row's name («ajustes de reto»), leading articles, two intentions → first planned + second said back, a transition verb never becomes a create | `parser.go` |
+| **measured after** | corpus: 98.7 % hits (149/151), parser 82 %, model 21 calls, US$ 0.084/pass, p50 10 ms, ZERO regressions against the baseline; the real-history subset: hits 21→29 of 31, model 17→7, cost US$ 0.061→0.025; projection at the real 58 questions/day: US$ 2.09 → 0.86 per month (≈ 0.57 if the loose creates follow the form); fifteen provocations 15/15 | `corpus/run-new8.json`, `provocations.log`, `guide-effect-new.json` |
+| **NOT done, on purpose** | relative times (VOZ-22), a queue for the second intention (VOZ-23), verbs of beginning as a transition (VOZ-24); working hours stay undeclarable (VOZ-15 CLOSED above) | — |
+
+The archived narratives, as they stood:
+
+### VOZ-20 — A proper name on a resource with TWO nameable relation targets falls to the model («tareas de Esposa»: area or persona?)
+
+The parser resolves a proper name against the target of ONE relation; with two
+(tareas → areas AND personas) it answers «name could match area_id or
+persona_id» and the question goes to the model — three of the agenda's real
+questions, two of them wasted. **Ready:** try the name through the existing
+matcher (names.go) against BOTH targets before giving up: one match → that
+one; both → «¿cuál?»; none → «no encuentro». A small session with the
+history's cases.
+
+### VOZ-21 — «Resumen» / «estado» said to /api/ask (not to the bot) fall to the model and are wasted
+
+The fixed commands live in the Telegram receiver; the same word through
+/api/ask (Siri, the panel) is not a question the parser settles: «Resumen»
+cost US$ 0,0036 with «no resource named» and was marked wasted. **Ready:** the
+parser discards «resumen»/«estado»/«gasto» at US$ 0 pointing at the endpoint —
+or /api/ask composes the digest itself (the same Report the bot uses).
 
 ## DONE in AGENDA-PALABRAS-S1 (2026-09-23) — the agenda in the owner's words: the questions that fell to the model without need, a help made of examples, a display that reads aloud
 
