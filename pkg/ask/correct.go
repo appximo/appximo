@@ -142,8 +142,8 @@ func correctTime(pend *Pending, res *Resource, sg []ctok, now time.Time, loc *ti
 	for i, t := range sg {
 		tt[i] = token{raw: t.raw, norm: t.norm}
 	}
-	span, hasSpan := consumeTimeSpan(tt)
-	day := consumeDay(tt)
+	day, hint := consumeDayPart(tt)
+	span, hasSpan := consumeTimeSpanHint(tt, hint)
 	field := ""
 	endField := ""
 	if rg := res.Range(); rg != nil {

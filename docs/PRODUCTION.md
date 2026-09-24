@@ -1435,6 +1435,19 @@ measured (`ask.SpeechMetrics` + every spoken reply of the provocations: zero
 digits, zero symbols). What Siri does with the punctuation is the shortcut's
 business: if it reads too fast, lower the Speak action's rate.
 
+**A note (something that happened) is «anotá que» + what + when, in any
+order.** The clock reader takes what a person says: «de 7 a 2 de la tarde»,
+«desde las 9 hasta las 10 y media», «entre las 7 y las 2», «a las 3 y media
+por dos horas», «tipo 3» / «como a las 3» / «a eso de las 3», «7:30», «2pm»,
+«siete A.M.», number words; the day: «hoy», «ayer», «antier», «anoche»
+(yesterday, night), «esta mañana» / «en la tarde» / «toda la mañana» (the
+part lends its half of the day to a bare clock — «esta mañana de 6 a 7» is
+06:00, not the bare rule's 18:00), «el martes» (on a note, the PAST Tuesday:
+`last_<weekday>` tokens); a second clock later in the sentence is the end
+(«se cayó a las 7 y volvió a las 2»). «qué registré hoy» / «qué anoté ayer»
+read them back. What stays the model's: a duration with no clock («estuve
+dos horas en el banco», VOZ-22).
+
 **The dictation tail.** A Siri shortcut named after the verb («Anota»)
 swallows it, so «anotá que la plataforma estuvo caída de 7 a 2 de la tarde»
 arrives as «que la plataforma estuvo caída …». As a last resort, a sentence

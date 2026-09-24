@@ -221,7 +221,7 @@ func IsNo(text string) bool  { return noWords[normalize(text)] }
 // followed by " HH:MM"), plus an ISO date the owner literally said. The
 // engine does the arithmetic in the app's timezone; the model never writes a
 // date it computed.
-var TimeTokens = []string{"now", "today", "tomorrow", "day_after_tomorrow", "yesterday", "next_week", "next_monday", "next_tuesday", "next_wednesday", "next_thursday", "next_friday", "next_saturday", "next_sunday", "end_of_month"}
+var TimeTokens = []string{"now", "today", "tomorrow", "day_after_tomorrow", "yesterday", "day_before_yesterday", "next_week", "next_monday", "next_tuesday", "next_wednesday", "next_thursday", "next_friday", "next_saturday", "next_sunday", "last_monday", "last_tuesday", "last_wednesday", "last_thursday", "last_friday", "last_saturday", "last_sunday", "end_of_month"}
 
 var weekdayTokens = map[string]time.Weekday{"monday": time.Monday, "tuesday": time.Tuesday, "wednesday": time.Wednesday, "thursday": time.Thursday, "friday": time.Friday, "saturday": time.Saturday, "sunday": time.Sunday}
 
@@ -274,6 +274,8 @@ func ResolveTimeValue(tok string, now time.Time) (time.Time, string, bool) {
 		t, words = day.AddDate(0, 0, 2), "pasado mañana"
 	case "yesterday":
 		t, words = day.AddDate(0, 0, -1), "ayer"
+	case "day_before_yesterday":
+		t, words = day.AddDate(0, 0, -2), "antier"
 	case "next_week":
 		monday := day.AddDate(0, 0, -((int(day.Weekday()) + 6) % 7))
 		t, words = monday.AddDate(0, 0, 7), "la semana que viene"
@@ -281,6 +283,16 @@ func ResolveTimeValue(tok string, now time.Time) (time.Time, string, bool) {
 		first := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
 		t, words = first.AddDate(0, 1, -1), "fin de mes"
 	default:
+		if wd, ok := weekdayTokens[strings.TrimPrefix(base, "last_")]; ok && strings.HasPrefix(base, "last_") {
+			// The LAST occurrence, strictly before today («el martes» in a
+			// note about what happened): a log looks back.
+			delta := (int(day.Weekday()) - int(wd) + 7) % 7
+			if delta == 0 {
+				delta = 7
+			}
+			t, words = day.AddDate(0, 0, -delta), "el "+weekdayES(wd)+" pasado"
+			break
+		}
 		wd, ok := weekdayTokens[strings.TrimPrefix(base, "next_")]
 		if !ok || !strings.HasPrefix(base, "next_") {
 			return time.Time{}, "", false
@@ -1601,11 +1613,11 @@ func PendingOptions(p *Pending) []string {
 // was said.
 func spanishTimeSpanEnd(s string) (string, bool) {
 	toks := tokenize(strings.ToLower(strings.TrimSpace(s)))
-	span, ok := consumeTimeSpan(toks)
+	day, hint := consumeDayPart(toks)
+	span, ok := consumeTimeSpanHint(toks, hint)
 	if !ok || span.end < 0 {
 		return "", false
 	}
-	day := consumeDay(toks)
 	if day == "" {
 		day = "today"
 	}

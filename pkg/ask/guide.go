@@ -470,7 +470,7 @@ func guideCreate(ctx context.Context, d Deps, r *Resource, detailed bool) []guid
 		}
 	}
 	if isNote {
-		for _, ph := range []string{"registrá que " + sample + " a las 3", "anotá que " + sample + " hoy de 2 a 4"} {
+		for _, ph := range []string{"registrá que " + sample + " a las 3", "anotá que " + sample + " hoy de 2 a 4", "anotá que " + sample + " ayer de 9 a 10", "anotá que " + sample + " esta mañana"} {
 			if verifiedCreate(v, ph, r.Name) {
 				alt = append(alt, ph)
 			}

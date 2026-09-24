@@ -767,11 +767,41 @@ estado dicho ubica el recurso); un nombre en una tarea con área Y persona
 «Gomes» se entiende como Gómez y se dice; «Fabi» con Fabián y Fabiana
 pregunta cuál; «la semana que viene»; «antes del viernes» (vence el viernes).
 
+**Cómo se dice un registro (algo que pasó).** La forma es **«anotá que»
+(o «registrá que», «apuntá que») + qué pasó + cuándo**, en cualquier orden.
+Lo que no es hora ni día queda como texto del registro, tal como lo dijiste.
+Todas estas las entiende el motor solo, al instante y sin costo, y siempre
+te muestra la confirmación antes de escribir:
+
+```
+anotá que la plataforma estuvo caída de 7 a 2 de la tarde        → hoy 07:00–14:00
+registrá que fui al médico de 9 a 10                             → hoy 09:00–10:00
+anotá que hablé con el banco a las 3                             → hoy 15:00 (una hora por defecto)
+anotá que se cayó la luz a las 3 y media por dos horas           → hoy 15:30–17:30
+anotá que ayer hablé con el contador a las 5                     → ayer 17:00
+anotá que anoche se fue la luz a las 10                          → ayer 22:00
+anotá que esta mañana fui al gimnasio de 6 a 7                   → hoy 06:00–07:00 (la mañana manda)
+anotá que el martes hablé con Fabián a las 3                     → el martes PASADO 15:00 (un registro mira atrás), persona Fabián
+anotá que estudio estuvo caído toda la mañana                    → hoy, sin hora
+anotá que estuve en el banco desde las 9 hasta las 10 y media    → hoy 09:00–10:30
+anotá que el estudio estuvo caído entre las 7 y las 2 de la tarde → hoy 07:00–14:00
+anotá que se cayó la plataforma a las 7 y volvió a las 2         → hoy 07:00–14:00 (la segunda hora es el fin)
+anotá que llamé al banco tipo 3 / como a las 3 / a eso de las 3  → hoy 15:00
+anotá que hablé con el banco, área trabajo, a las 3              → con el área
+registrá: la plataforma estuvo caída de 7 a 2                    → los dos puntos valen por el «que»
+```
+
+Y para leerlos: «qué registré hoy», «qué anoté ayer», «registros de esta
+semana», «registros de trabajo», «registros con Fabián». Lo que todavía va
+al modelo: una duración sin hora («estuve dos horas en el banco» queda como
+texto, la hora es la de ahora) y frases muy enredadas.
+
 **Ojo con el nombre del atajo.** Si el atajo de Siri se llama «Anota» o
 «Registra», Siri se come esa palabra y al motor le llega la frase sin el
 verbo: «que estudio estuvo caído de siete a dos de la tarde». El motor lo
 tolera desde el 2026-09-24: una frase que empieza con «que», no nombra
-ningún recurso, no tiene palabra de pregunta y SÍ trae una hora se lee como
+ningún recurso, no tiene palabra de pregunta y trae una hora — o un verbo en
+pasado con un día («que ayer se fue el agua toda la tarde») — se lee como
 «anotá que…» (un registro, con su confirmación). Igual, si el atajo se llama
 de otra forma («Agenda», «Mi agenda») la frase viaja entera y no hay
 adivinanza. El reloj también entiende lo que escribe el dictado: «siete

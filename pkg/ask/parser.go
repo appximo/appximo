@@ -212,7 +212,7 @@ func dictationTail(question string, v *Vocabulary) ParseResult {
 	}
 	for _, t := range toks[1:] {
 		n := t.norm
-		if countWords[n] || listWords[n] || lastWords[n] || sumWords[n] || avgWords[n] || deleteVerbs[n] || writeVerbs[n] || createVerbs[n] || scheduleVerbs[n] || transitionVerbs[n] || freeWords[n] {
+		if countWords[n] || listWords[n] || lastWords[n] || deleteVerbs[n] || writeVerbs[n] || createVerbs[n] || scheduleVerbs[n] || transitionVerbs[n] || freeWords[n] {
 			return ParseResult{Reason: "tail: an operation word (" + n + ")"}
 		}
 		for _, name := range v.order {
@@ -221,8 +221,12 @@ func dictationTail(question string, v *Vocabulary) ParseResult {
 			}
 		}
 	}
+	// the shape of a log entry: a clock span, or something that HAPPENED (a
+	// past-tense verb) on a named day or part of a day
 	probe := tokenize(question)
-	if _, ok := consumeTimeSpan(probe); !ok {
+	day, hint := consumeDayPart(probe)
+	_, hasSpan := consumeTimeSpanHint(probe, hint)
+	if !hasSpan && !(day != "" && hasPreterite(toks)) {
 		return ParseResult{Reason: "tail: no clock span"}
 	}
 	pr := parseCreate("anotá "+question, v)
@@ -230,6 +234,32 @@ func dictationTail(question string, v *Vocabulary) ParseResult {
 		return ParseResult{Reason: "tail: " + pr.Reason}
 	}
 	return pr
+}
+
+// notedVerbs are the create verbs in the first person past («anoté»,
+// «registré»): what a person asks back («qué anoté ayer»).
+var notedVerbs = set("anote", "registre", "apunte", "guarde", "note")
+
+// preteriteForms are the common irregular past forms; regular ones end in
+// an accented «é» / «ó» («hablé», «terminó») — Spanish morphology, no
+// domain word.
+var preteriteForms = set("estuvo", "estuve", "estuvimos", "fue", "fui", "fuimos", "tuvo", "tuve", "tuvimos", "hubo", "hizo", "hice", "hicimos", "vino", "vine", "dijo", "dije", "pudo", "pude", "puso", "puse", "quiso", "quise", "supo", "supe", "anduvo", "anduve", "trajo", "traje", "dio", "di", "vio", "vi")
+
+// hasPreterite reports a past-tense verb in the sentence.
+func hasPreterite(toks []token) bool {
+	for _, t := range toks {
+		if preteriteForms[t.norm] {
+			return true
+		}
+		r := strings.ToLower(t.raw)
+		if len([]rune(r)) >= 4 && (strings.HasSuffix(r, "ó") || strings.HasSuffix(r, "é")) && r != "qué" {
+			return true
+		}
+		if strings.HasSuffix(t.norm, "aron") || strings.HasSuffix(t.norm, "ieron") {
+			return true
+		}
+	}
+	return false
 }
 
 func parseInner(question string, v *Vocabulary) ParseResult {
@@ -915,6 +945,19 @@ func findResource(toks []token, v *Vocabulary) (res *Resource, labelField string
 					toks[start+k].used = true
 				}
 				mentions = append(mentions, resourceMention{res: r, start: start, end: start + len(words)})
+			}
+		}
+	}
+	if len(mentions) == 0 {
+		// «qué anoté ayer», «qué registré hoy»: the note verb in the first
+		// person past names the note resource (the verbs are the engine's)
+		if nr := noteResource(v); nr != nil {
+			for i, t := range toks {
+				if !t.used && notedVerbs[t.norm] {
+					toks[i].used = true
+					mentions = append(mentions, resourceMention{res: nr, start: i, end: i + 1})
+					break
+				}
 			}
 		}
 	}

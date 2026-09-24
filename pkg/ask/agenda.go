@@ -92,7 +92,10 @@ var gluedRe = regexp.MustCompile(`^(\d{1,2})(am|pm)$`)
 // readClock turns an hour said in Spanish into minutes since midnight:
 // "4" → 16:00, "10" → 10:00, "4 y media"/"4:30" → 16:30, "16" → 16:00;
 // qualifier: "" | "am" | "pm" (de la tarde/noche). ok=false on nonsense.
-func readClock(h string, half bool, qualifier string) (int, bool) {
+// readClock reads «H», «H:MM» or «H» + extra minutes («y media» 30, «y
+// cuarto» 15, «menos cuarto» −15 → the previous hour at 45) under a half-of-
+// the-day qualifier ("am", "pm" or "" = the bare rule).
+func readClock(h string, extra int, qualifier string) (int, bool) {
 	m := hourRe.FindStringSubmatch(strings.TrimSpace(h))
 	if m == nil {
 		return 0, false
@@ -102,8 +105,15 @@ func readClock(h string, half bool, qualifier string) (int, bool) {
 	if m[2] != "" {
 		minute, _ = strconv.Atoi(m[2])
 	}
-	if half {
-		minute = 30
+	switch {
+	case extra > 0 && m[2] == "":
+		minute = extra
+	case extra < 0 && m[2] == "":
+		if hour == 0 {
+			hour = 24
+		}
+		hour--
+		minute = 60 + extra
 	}
 	if hour > 23 || minute > 59 {
 		return 0, false
@@ -132,10 +142,28 @@ func clockString(minutes int) string {
 var scheduleVerbs = set("agenda", "agendar", "agendame", "agendá", "anota", "anotar", "anotame", "anotá", "programa", "programar", "programame", "programá", "reserva", "reservar", "reservame", "reservá", "pone", "poneme", "pon", "agrega", "agregame", "crea", "creame")
 
 // dayPhrases map a day said in Spanish to a write time token (day part).
-var dayPhrases = []struct{ phrase, token string }{
-	{"pasado manana", "day_after_tomorrow"}, {"el dia de hoy", "today"}, {"dia de hoy", "today"}, {"manana", "tomorrow"}, {"hoy", "today"},
-	{"el lunes", "next_monday"}, {"el martes", "next_tuesday"}, {"el miercoles", "next_wednesday"}, {"el jueves", "next_thursday"}, {"el viernes", "next_friday"}, {"el sabado", "next_saturday"}, {"el domingo", "next_sunday"},
-	{"lunes", "next_monday"}, {"martes", "next_tuesday"}, {"miercoles", "next_wednesday"}, {"jueves", "next_thursday"}, {"viernes", "next_friday"}, {"sabado", "next_saturday"}, {"domingo", "next_sunday"},
+// dayPhrases are the days a person names (today, tomorrow, yesterday, a
+// weekday) and the PARTS of a day («esta mañana», «en la tarde», «toda la
+// mañana», «anoche») — a part sets the day AND lends its half («am»/«pm») to
+// a clock said without one («esta mañana de 6 a 7» is 06:00–07:00, never
+// the afternoon of the bare rule). «de la tarde» right after an hour is the
+// clock's own qualifier and is not here. Longest phrase first (init sort),
+// so «esta mañana» is read before «mañana» would make it tomorrow.
+var dayPhrases = []struct{ phrase, token, hint string }{
+	{"pasado manana", "day_after_tomorrow", ""}, {"el dia de hoy", "today", ""}, {"dia de hoy", "today", ""}, {"manana", "tomorrow", ""}, {"hoy", "today", ""},
+	{"ayer", "yesterday", ""}, {"antier", "day_before_yesterday", ""}, {"anteayer", "day_before_yesterday", ""}, {"anoche", "yesterday", "pm"},
+	{"esta manana", "today", "am"}, {"esta tarde", "today", "pm"}, {"esta noche", "today", "pm"}, {"hoy temprano", "today", "am"},
+	{"hoy en la manana", "today", "am"}, {"hoy por la manana", "today", "am"}, {"hoy en la tarde", "today", "pm"}, {"hoy por la tarde", "today", "pm"}, {"hoy en la noche", "today", "pm"}, {"hoy por la noche", "today", "pm"},
+	{"ayer en la manana", "yesterday", "am"}, {"ayer por la manana", "yesterday", "am"}, {"ayer en la tarde", "yesterday", "pm"}, {"ayer por la tarde", "yesterday", "pm"}, {"ayer en la noche", "yesterday", "pm"}, {"ayer por la noche", "yesterday", "pm"},
+	{"en la manana", "today", "am"}, {"por la manana", "today", "am"}, {"toda la manana", "today", "am"}, {"en la tarde", "today", "pm"}, {"por la tarde", "today", "pm"}, {"toda la tarde", "today", "pm"}, {"en la noche", "today", "pm"}, {"por la noche", "today", "pm"}, {"toda la noche", "today", "pm"},
+	{"el lunes", "next_monday", ""}, {"el martes", "next_tuesday", ""}, {"el miercoles", "next_wednesday", ""}, {"el jueves", "next_thursday", ""}, {"el viernes", "next_friday", ""}, {"el sabado", "next_saturday", ""}, {"el domingo", "next_sunday", ""},
+	{"lunes", "next_monday", ""}, {"martes", "next_tuesday", ""}, {"miercoles", "next_wednesday", ""}, {"jueves", "next_thursday", ""}, {"viernes", "next_friday", ""}, {"sabado", "next_saturday", ""}, {"domingo", "next_sunday", ""},
+}
+
+func init() {
+	sort.SliceStable(dayPhrases, func(i, j int) bool {
+		return len(strings.Fields(dayPhrases[i].phrase)) > len(strings.Fields(dayPhrases[j].phrase))
+	})
 }
 
 // timeSpan is a parsed «de 4 a 5» / «a las 10 [por dos horas]».
@@ -146,10 +174,14 @@ type timeSpan struct {
 // consumeTimeSpan finds and consumes the clock phrase of the sentence. It
 // recognizes, in order: «de H[:MM] a H[:MM]», «desde las H hasta las H»,
 // «a las H[:MM] [y media] [de la tarde|de la mañana|am|pm] [por N hora(s)|por media hora|hasta las H]».
-func consumeTimeSpan(toks []token) (timeSpan, bool) {
+func consumeTimeSpan(toks []token) (timeSpan, bool) { return consumeTimeSpanHint(toks, "") }
+
+// consumeTimeSpanHint reads the clock(s) of a sentence; hint is the half of
+// the day a part phrase lent («esta mañana») for a clock said without one.
+func consumeTimeSpanHint(toks []token, hint string) (timeSpan, bool) {
 	ts := timeSpan{end: -1}
 	n := len(toks)
-	// an hour is «4», «16», «4:30» — or a number word («cuatro», «una»)
+	// an hour is «4», «16», «4:30», «7am» — or a number word («cuatro», «una»)
 	isHour := func(i int) bool {
 		if i >= n || toks[i].used {
 			return false
@@ -189,10 +221,8 @@ func consumeTimeSpan(toks []token) (timeSpan, bool) {
 			switch toks[i].norm {
 			case "am", "pm":
 				return toks[i].norm, 1
-			}
 			// «A.M.» / «P.M.» as a dictation writes them: one token whose
 			// dots became a space («a m»), or two tokens («a», «m»)
-			switch toks[i].norm {
 			case "a m", "a.m", "am.":
 				return "am", 1
 			case "p m", "p.m", "pm.":
@@ -215,105 +245,144 @@ func consumeTimeSpan(toks []token) (timeSpan, bool) {
 		}
 		return "", 0
 	}
-	halfAt := func(i int) int { // «y media», «y cuarto» → tokens consumed (only «y media» changes minutes)
-		if i+1 < n && toks[i].norm == "y" && toks[i+1].norm == "media" {
-			return 2
+	// «y media» 30, «y cuarto» 15, «menos cuarto» −15 → (minutes, tokens)
+	minutesAt := func(i int) (int, int) {
+		if i+1 < n && !toks[i].used && !toks[i+1].used {
+			switch toks[i].norm + " " + toks[i+1].norm {
+			case "y media":
+				return 30, 2
+			case "y cuarto":
+				return 15, 2
+			case "menos cuarto":
+				return -15, 2
+			}
 		}
-		return 0
+		return 0, 0
 	}
-	// «de H a H» / «desde las H hasta las H»
-	for i := 0; i+2 < n; i++ {
-		if toks[i].used || (toks[i].norm != "de" && toks[i].norm != "desde") {
-			continue
+	art := func(j int) int { // «las 3», «la una»
+		if j < n && !toks[j].used && (toks[j].norm == "las" || toks[j].norm == "la") {
+			return j + 1
 		}
-		j := i + 1
-		if toks[j].norm == "las" || toks[j].norm == "la" {
-			j++
-		}
+		return j
+	}
+	// readAt reads one clock whose hour token is at j: minutes of the day,
+	// the index after it, and the qualifier it carried (own or glued; "" =
+	// none, the caller decides between the hint and the bare rule).
+	type clock struct {
+		text string
+		mins int
+		q    string
+		end  int
+	}
+	scan := func(j int) (clock, bool) {
 		if !isHour(j) {
-			continue
+			return clock{}, false
 		}
-		jText, jn := hourText(j)
+		text, jn := hourText(j)
 		k := j + jn
-		hs := halfAt(k)
-		k += hs
-		q1, qn := qualifierAt(k)
+		mins, mn := minutesAt(k)
+		k += mn
+		q, qn := qualifierAt(k)
 		k += qn
-		if k >= n || (toks[k].norm != "a" && toks[k].norm != "hasta") {
+		if q == "" {
+			q = gluedQual(j)
+		}
+		return clock{text: text, mins: mins, q: q, end: k}, true
+	}
+	readClockOf := func(c clock, def string) (int, bool) {
+		q := c.q
+		if q == "" {
+			q = def
+		}
+		return readClock(c.text, c.mins, q)
+	}
+	mark := func(a, b int) {
+		for x := a; x < b; x++ {
+			toks[x].used = true
+		}
+	}
+	// 1. «de H a H» / «desde las H hasta las H» / «entre las H y las H»
+	for i := 0; i+2 < n; i++ {
+		if toks[i].used || (toks[i].norm != "de" && toks[i].norm != "desde" && toks[i].norm != "entre") {
 			continue
 		}
-		l := k + 1
-		if l < n && (toks[l].norm == "las" || toks[l].norm == "la") {
-			l++
-		}
-		if !isHour(l) {
+		c1, ok := scan(art(i + 1))
+		if !ok {
 			continue
 		}
-		lText, ln := hourText(l)
-		m := l + ln
-		he := halfAt(m)
-		m += he
-		q2, qn2 := qualifierAt(m)
-		m += qn2
-		if q1 == "" {
-			q1 = gluedQual(j)
+		k := c1.end
+		if k >= n || toks[k].used {
+			continue
 		}
-		if q2 == "" {
-			q2 = gluedQual(l)
+		if toks[i].norm == "entre" {
+			if toks[k].norm != "y" {
+				continue
+			}
+		} else if toks[k].norm != "a" && toks[k].norm != "hasta" {
+			continue
 		}
-		// The end's half of the day is lent to the start («de 7 a 8 de la
-		// noche» is 19:00–20:00) UNLESS that runs the span backwards — then
-		// the start keeps its own bare rule («de 7 a 2 de la tarde» is
-		// 07:00–14:00: the 2 is the afternoon, the 7 stays a morning).
-		en, ok2 := readClock(lText, he > 0, q2)
-		st, ok1 := readClock(jText, hs > 0, q1)
+		c2, ok := scan(art(k + 1))
+		if !ok {
+			continue
+		}
+		en, ok2 := readClockOf(c2, hint)
+		st, ok1 := readClockOf(c1, hint)
 		if !ok1 || !ok2 {
 			continue
 		}
-		if q1 == "" && q2 != "" {
-			if stLent, ok := readClock(jText, hs > 0, q2); ok && stLent < en {
-				st = stLent
+		// The end's half of the day is lent to the start («de 7 a 8 de la
+		// noche» is 19:00–20:00) UNLESS that runs the span backwards — then
+		// the start keeps its own rule («de 7 a 2 de la tarde» is 07:00–14:00).
+		if c1.q == "" && c2.q != "" {
+			if lent, ok := readClock(c1.text, c1.mins, c2.q); ok && lent < en {
+				st = lent
 			}
 		}
 		if en <= st { // «de 11 a 1» → the 1 is the afternoon
-			if en2, ok := readClock(lText, he > 0, "pm"); ok && en2 > st {
+			if en2, ok := readClock(c2.text, c2.mins, "pm"); ok && en2 > st {
 				en = en2
 			}
 		}
 		if en <= st {
-			return ts, false
+			continue
 		}
-		for x := i; x < m; x++ {
-			toks[x].used = true
-		}
+		mark(i, c2.end)
 		ts.start, ts.end = st, en
 		return ts, true
 	}
-	// «a las H …»
+	// 2. «a las H …», and the approximations a person says: «tipo 3»,
+	// «como a las 3», «a eso de las 3», «como las 3»
 	for i := 0; i+1 < n; i++ {
-		if toks[i].used || toks[i].norm != "a" {
+		if toks[i].used {
 			continue
 		}
-		j := i + 1
-		if toks[j].norm == "las" || toks[j].norm == "la" {
-			j++
-		}
-		if !isHour(j) {
+		var start int
+		switch toks[i].norm {
+		case "a":
+			start = i + 1
+			if i+3 < n && toks[i+1].norm == "eso" && toks[i+2].norm == "de" {
+				start = i + 3
+			}
+		case "tipo":
+			start = i + 1
+		case "como":
+			start = i + 1
+			if i+2 < n && toks[i+1].norm == "a" {
+				start = i + 2
+			}
+		default:
 			continue
 		}
-		jText, jn := hourText(j)
-		k := j + jn
-		hs := halfAt(k)
-		k += hs
-		q, qn := qualifierAt(k)
-		k += qn
-		st, ok := readClock(jText, hs > 0, q)
+		c, ok := scan(art(start))
 		if !ok {
-			return ts, false
+			continue
 		}
-		for x := i; x < k; x++ {
-			toks[x].used = true
+		st, ok := readClockOf(c, hint)
+		if !ok {
+			continue
 		}
+		k := c.end
+		mark(i, k)
 		ts.start = st
 		// «por N hora(s)» / «por media hora» / «hasta las H»
 		if k+1 < n && toks[k].norm == "por" {
@@ -328,54 +397,50 @@ func consumeTimeSpan(toks []token) (timeSpan, bool) {
 				}
 			}
 		} else if k+1 < n && toks[k].norm == "hasta" {
-			l := k + 1
-			if l < n && (toks[l].norm == "las" || toks[l].norm == "la") {
-				l++
-			}
-			if isHour(l) {
-				lText, ln := hourText(l)
-				m := l + ln
-				he := halfAt(m)
-				m += he
-				q2, qn2 := qualifierAt(m)
-				m += qn2
-				if en, ok := readClock(lText, he > 0, q2); ok && en > st {
+			if c2, ok := scan(art(k + 1)); ok {
+				if en, ok := readClockOf(c2, hint); ok && en > st {
 					ts.end = en
-					for x := k; x < m; x++ {
-						toks[x].used = true
+					mark(k, c2.end)
+				}
+			}
+		}
+		if ts.end < 0 {
+			// a second clock later in the sentence is the END («se cayó a
+			// las 7 y volvió a las 2»; «llegué a las 9 y salí a las 5»)
+			for x := k; x+1 < n; x++ {
+				if toks[x].used || toks[x].norm != "a" {
+					continue
+				}
+				if c2, ok := scan(art(x + 1)); ok {
+					if en, ok := readClockOf(c2, hint); ok && en > st {
+						ts.end = en
+						mark(x, c2.end)
 					}
+					break
 				}
 			}
 		}
 		return ts, true
 	}
-	// a bare clock: «16:00» (two tokens after the tokenizer), «4 pm», «4:30 pm»
+	// 3. a bare clock: «16:00» (two tokens after the tokenizer), «4 pm»,
+	// «4:30 pm», «2pm»
 	for i := 0; i < n; i++ {
-		if toks[i].used || !hourRe.MatchString(toks[i].norm) {
+		if toks[i].used || (!hourRe.MatchString(toks[i].norm) && !gluedRe.MatchString(toks[i].norm)) {
 			continue
 		}
-		text, cnt := hourText(i)
-		k := i + cnt
-		hs := halfAt(k)
-		k += hs
-		q, qn := qualifierAt(k)
-		k += qn
-		if q == "" {
-			q = gluedQual(i)
-		}
-		if cnt == 1 && qn == 0 && hs == 0 && q == "" {
+		c, _ := scan(i)
+		cnt := c.end - i
+		if cnt == 1 && c.q == "" {
 			continue // a bare number is not a clock («los últimos 3»)
 		}
 		if i > 0 && !toks[i-1].used && (toks[i-1].norm == "ultimos" || toks[i-1].norm == "ultimas") {
 			continue
 		}
-		st, ok := readClock(text, hs > 0, q)
+		st, ok := readClockOf(c, hint)
 		if !ok {
 			continue
 		}
-		for x := i; x < k; x++ {
-			toks[x].used = true
-		}
+		mark(i, c.end)
 		ts.start = st
 		return ts, true
 	}
@@ -431,14 +496,52 @@ func spanishNumber(w string) (int, bool) {
 }
 
 // consumeDay consumes a day phrase («mañana», «el viernes», «pasado mañana»).
-func consumeDay(toks []token) string {
+// consumeDayPart consumes the day and, when a part of the day was named, the
+// half («am»/«pm») a clock without a qualifier should take. A part phrase
+// («en la tarde») alone sets the day to today.
+func consumeDayPart(toks []token) (day, hint string) {
 	joined := joinedNorms(toks)
+	dayFromPart := false
 	for _, dp := range dayPhrases {
-		if strings.Contains(joined, " "+dp.phrase+" ") && consumePhrase(toks, dp.phrase) {
-			return dp.token
+		if !strings.Contains(joined, " "+dp.phrase+" ") {
+			continue
 		}
+		words := strings.Fields(dp.phrase)
+		start, ok := findPhrase(toks, words)
+		if !ok {
+			continue
+		}
+		// «de la mañana» / «de la tarde» / «de la noche» after an hour is the
+		// CLOCK's qualifier («de 9 a 11 de la mañana»), never the day «mañana»
+		if len(words) == 1 && start >= 2 && toks[start-1].norm == "la" && toks[start-2].norm == "de" {
+			continue
+		}
+		for k := range words {
+			toks[start+k].used = true
+		}
+		// a part-only phrase («en la tarde», «toda la mañana») names no day:
+		// it implies today only when nothing else names one («ayer … toda
+		// la tarde» is yesterday)
+		partOnly := dp.hint != "" && !strings.HasPrefix(dp.phrase, "esta ") && !strings.HasPrefix(dp.phrase, "hoy") && !strings.HasPrefix(dp.phrase, "ayer") && dp.phrase != "anoche"
+		if partOnly {
+			if hint == "" {
+				hint = dp.hint
+			}
+			joined = joinedNorms(toks)
+			continue
+		}
+		if day == "" || dayFromPart {
+			day, dayFromPart = dp.token, false
+		}
+		if hint == "" {
+			hint = dp.hint
+		}
+		joined = joinedNorms(toks)
 	}
-	return ""
+	if day == "" && hint != "" {
+		day = "today"
+	}
+	return day, hint
 }
 
 // parseSchedule settles «agendá reunión con Fabián mañana de 4 a 5» without
@@ -500,11 +603,11 @@ func parseSchedule(question string, v *Vocabulary) ParseResult {
 		}
 	}
 	rg := res.Range()
-	span, ok := consumeTimeSpan(toks)
+	day, hint := consumeDayPart(toks)
+	span, ok := consumeTimeSpanHint(toks, hint)
 	if !ok {
 		return ParseResult{Reason: "schedule: no clock"}
 	}
-	day := consumeDay(toks)
 	if day == "" {
 		day = "today"
 	}

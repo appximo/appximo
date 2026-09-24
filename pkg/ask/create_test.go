@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The fixed form and its tolerant cousins (Part C) on Miguel's real schema
@@ -407,5 +408,76 @@ func TestDictationTail_VerblessLogEntryIsTheNote(t *testing.T) {
 	}
 	if pr := Parse("agendá dentista mañana a las 2pm", v); !pr.Sure || pr.Plan.Data["inicio"] != "tomorrow 14:00" {
 		t.Errorf("glued clock alone: %v (%s)", pr.Plan.Data, pr.Reason)
+	}
+}
+
+// The human forms of a note, from the registro bank of AGENDA-ASISTENTE-S1
+// (what an owner says about something that happened, with the verb and
+// without it): each one is the note resource, its clocks read as a person
+// means them, and the text keeps what happened and nothing else.
+func TestNote_HumanForms(t *testing.T) {
+	s := miguelAgendaSchema()
+	v := BuildWithWrites(s, "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
+	cases := []struct{ q, cuando, hasta, texto string }{
+		{"apuntá que hablé con el banco a las 3", "today 15:00", "", "hablé con el banco"},
+		{"anotá que se cayó la luz a las 3 y media por dos horas", "today 15:30", "today 17:30", "cayó la luz"},
+		{"anotá que estuve en el banco desde las 9 hasta las 10 y media", "today 09:00", "today 10:30", "estuve en el banco"},
+		{"anotá que trabajé en la declaración de renta de 8 a 11 de la mañana", "today 08:00", "today 11:00", "trabajé en la declaración de renta"},
+		{"registrá que la plataforma se cayó ayer de 7 a 2", "yesterday 07:00", "yesterday 14:00", "plataforma se cayó"},
+		{"anotá que anoche se fue la luz a las 10", "yesterday 22:00", "", "fue la luz"},
+		{"anotá que esta mañana fui al gimnasio de 6 a 7", "today 06:00", "today 07:00", "fui al gimnasio"},
+		{"anotá que el martes hablé con el contador a las 3", "last_tuesday 15:00", "", "hablé con el contador"},
+		{"anotá que estudio estuvo caído toda la mañana", "today", "", "estudio estuvo caído"},
+		{"anotá que el estudio estuvo caído entre las 7 y las 2 de la tarde", "today 07:00", "today 14:00", "estudio estuvo caído"},
+		{"anotá que hablé con el banco tipo 3", "today 15:00", "", "hablé con el banco"},
+		{"anotá que hablé con el banco como a las 3", "today 15:00", "", "hablé con el banco"},
+		{"anotá que hablé con el banco a eso de las 3", "today 15:00", "", "hablé con el banco"},
+		{"registrá: la plataforma estuvo caída de 7 a 2", "today 07:00", "today 14:00", "plataforma estuvo caída"},
+		{"nota: hablé con el banco a las 3", "today 15:00", "", "hablé con el banco"},
+		{"anotá que se cayó la plataforma a las 7 y volvió a las 2", "today 07:00", "today 14:00", "cayó la plataforma y volvió"},
+		{"anotá que estudio estuvo caído de 7:30 a 14:15", "today 07:30", "today 14:15", "estudio estuvo caído"},
+		{"anotá que estudio estuvo caído de siete y media a dos y cuarto", "today 07:30", "today 14:15", "estudio estuvo caído"},
+		{"anotá que estudio estuvo caído de 7 a 14", "today 07:00", "today 14:00", "estudio estuvo caído"},
+		{"anotá que en la tarde se cayó la plataforma", "today", "", "cayó la plataforma"},
+		{"que hablé con el banco a las 3", "today 15:00", "", "hablé con el banco"},
+		{"que se cayó la luz a las 3 y media por dos horas", "today 15:30", "today 17:30", "cayó la luz"},
+		{"que estuve en el banco desde las 9 hasta las 10 y media", "today 09:00", "today 10:30", "estuve en el banco"},
+		{"que estudio estuvo caído toda la mañana", "today", "", "estudio estuvo caído"},
+		{"que ayer se fue el agua toda la tarde", "yesterday", "", "fue el agua"},
+		{"que hoy me llamó el contador", "today", "", "llamó el contador"},
+		{"que se dañó la moto el lunes", "last_monday", "", "dañó la moto"},
+		{"que llamé al banco tipo 3", "today 15:00", "", "llamé al banco"},
+	}
+	for _, c := range cases {
+		pr := Parse(c.q, v)
+		if !pr.Sure || pr.Plan.Kind != "create" || pr.Plan.Resource != "registros" {
+			t.Errorf("%q: want the note, got sure=%v %s %s (%s)", c.q, pr.Sure, pr.Plan.Kind, pr.Plan.Resource, pr.Reason)
+			continue
+		}
+		got := func(k string) string { s, _ := pr.Plan.Data[k].(string); return s }
+		if got("cuando") != c.cuando || got("hasta") != c.hasta {
+			t.Errorf("%q: %q / %q, want %q / %q", c.q, got("cuando"), got("hasta"), c.cuando, c.hasta)
+		}
+		if got("texto") != c.texto {
+			t.Errorf("%q: texto %q, want %q", c.q, got("texto"), c.texto)
+		}
+	}
+	// what a person asks back
+	for q, period := range map[string]string{"qué registré hoy": "today", "qué anoté ayer": "yesterday", "registros de antier": "day_before_yesterday"} {
+		pr := Parse(q, v)
+		if !pr.Sure || pr.Plan.Kind != "list" || pr.Plan.Resource != "registros" || pr.Plan.Period == nil || pr.Plan.Period.Range != period {
+			t.Errorf("%q: %+v (%s)", q, pr.Plan, pr.Reason)
+		}
+	}
+	// the past tokens resolve
+	now := time.Date(2026, 9, 24, 10, 0, 0, 0, time.UTC) // a Thursday
+	if tm, _, ok := ResolveTimeValue("last_tuesday 15:00", now); !ok || tm.Weekday() != time.Tuesday || tm.After(now) || tm.Hour() != 15 {
+		t.Errorf("last_tuesday: %v %v", tm, ok)
+	}
+	if tm, _, ok := ResolveTimeValue("last_thursday", now); !ok || tm.Day() != 17 {
+		t.Errorf("last_thursday said on a Thursday is a week ago: %v %v", tm, ok)
+	}
+	if tm, _, ok := ResolveTimeValue("day_before_yesterday 08:00", now); !ok || tm.Day() != 22 || tm.Hour() != 8 {
+		t.Errorf("day_before_yesterday: %v %v", tm, ok)
 	}
 }

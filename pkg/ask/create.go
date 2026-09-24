@@ -50,6 +50,9 @@ type ctok struct {
 // tokenizeKeep is tokenize() with the separators kept as their own tokens.
 func tokenizeKeep(q string) []ctok {
 	q = strings.NewReplacer("¿", " ", "?", " ", "¡", " ", "!", " ", "«", " ", "»", " ", "\"", " ").Replace(q)
+	// «7:30» is a clock, not the colon of «tarea: …»: split into «7» «30»
+	// exactly as the question tokenizer does (the clock reader glues them)
+	q = clockGlueRe.ReplaceAllString(q, "$1 $2")
 	q = sepRe.ReplaceAllString(q, " $0 ")
 	var out []ctok
 	for _, r := range strings.Fields(q) {
@@ -68,6 +71,8 @@ func tokenizeKeep(q string) []ctok {
 	}
 	return out
 }
+
+var clockGlueRe = regexp.MustCompile(`(\d{1,2}):(\d{2})`)
 
 // parseCreate settles the fixed form and its tolerant variants.
 func parseCreate(question string, v *Vocabulary) ParseResult {
@@ -92,6 +97,11 @@ func parseCreate(question string, v *Vocabulary) ParseResult {
 	if createVerbs[toks[i].norm] || scheduleVerbs[toks[i].norm] {
 		verb = toks[i].norm
 		i++
+		if i < len(toks) && toks[i].norm == ":" && noteishVerbs[verb] {
+			// «registrá: la plataforma estuvo caída …» — the colon after a
+			// note verb is the «que»
+			toks = append(toks[:i], append([]ctok{{raw: "que", norm: "que"}}, toks[i+1:]...)...)
+		}
 	}
 	// the resource: named right after the verb (articles skipped), or first
 	// («tarea: …», «Tarea organizar suscripciones»).
@@ -239,6 +249,14 @@ func buildCreate(v *Vocabulary, res *Resource, rest []ctok, note string) ParseRe
 	if len(data) == 0 && len(refs) == 0 && titleF == nil {
 		return ParseResult{Reason: "create: nothing to write"}
 	}
+	if res == noteResource(v) {
+		// a note is about what HAPPENED: «el martes» is the past Tuesday
+		for k, val := range data {
+			if sv, ok := val.(string); ok && strings.HasPrefix(sv, "next_") {
+				data[k] = "last_" + strings.TrimPrefix(sv, "next_")
+			}
+		}
+	}
 	p := Plan{Kind: "create", Resource: res.Name, Data: data, Refs: refs, Reason: note}
 	if err := p.Validate(v); err != nil {
 		return ParseResult{Reason: "create invalid: " + err.Error()}
@@ -327,6 +345,10 @@ func segments(toks []ctok, v *Vocabulary, res *Resource) [][]ctok {
 			cur = append(cur, t) // «9 y media»: the clock goes on
 			continue
 		}
+		if t.norm == "y" && len(cur) > 0 && hasEntre(cur) {
+			cur = append(cur, t) // «entre las 7 y las 2»: one span
+			continue
+		}
 		if t.norm == "y" && len(cur) > 0 && i+1 < len(toks) {
 			// look ahead to the next separator
 			j := i + 1
@@ -342,6 +364,20 @@ func segments(toks []ctok, v *Vocabulary, res *Resource) [][]ctok {
 	}
 	flush()
 	return out
+}
+
+// hasEntre reports an «entre» in the run not yet closed by its «y».
+func hasEntre(run []ctok) bool {
+	open := false
+	for _, t := range run {
+		switch t.norm {
+		case "entre":
+			open = true
+		case "y":
+			open = false
+		}
+	}
+	return open
 }
 
 // isHourTok reports whether a token reads as an hour («9», «9:30», «nueve»).
@@ -646,8 +682,8 @@ func placeName(v *Vocabulary, res *Resource, name string, soft bool, data map[st
 // resource's time fields (a range's start/end, or its due field). Marks
 // what it consumed. Returns whether anything was read.
 func applyTime(tt []token, res *Resource, data map[string]any) bool {
-	span, hasSpan := consumeTimeSpan(tt)
-	day := consumeDay(tt)
+	day, hint := consumeDayPart(tt)
+	span, hasSpan := consumeTimeSpanHint(tt, hint)
 	if !hasSpan && day == "" {
 		return false
 	}
@@ -832,8 +868,9 @@ func isTimePhrase(seg []ctok, res *Resource) bool {
 	probe := map[string]any{}
 	if !applyTime(tt, res, probe) {
 		// applyTime needs a time field; a day is still a day
-		_, hasSpan := consumeTimeSpan(tt)
-		if consumeDay(tt) == "" && !hasSpan {
+		day, hint := consumeDayPart(tt)
+		_, hasSpan := consumeTimeSpanHint(tt, hint)
+		if day == "" && !hasSpan {
 			return false
 		}
 	}

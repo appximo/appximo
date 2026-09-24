@@ -88,6 +88,23 @@ glued, number words in a span («de siete a dos»), «el día de hoy». And the
 span rule is written: the end's half of the day is lent to the start («de 7
 a 8 de la noche» = 19:00–20:00) unless that runs the span backwards — then
 the start keeps its own bare rule («de 7 a 2 de la tarde» = 07:00–14:00).
+The owner then asked how a registro should be said at all, so a bank of
+sixty human forms of a note (verbed, verb-less, reads) was run on his
+schema and every generic gap was closed: past days («ayer», «antier»,
+«anoche» = yesterday night), parts of a day that lend their half to a bare
+clock («esta mañana de 6 a 7» is 06:00; «esta mañana» used to read as
+TOMORROW), a weekday on a note is the PAST one (`last_<weekday>` write
+tokens, `ResolveTimeValue`), «entre las 7 y las 2» (the «y» no longer splits
+the segment), the approximations «tipo 3» / «como a las 3» / «a eso de las
+3», «y cuarto» / «menos cuarto», «7:30» in the create tokenizer (it was a
+separator), a second clock later in the sentence as the end («se cayó a las
+7 y volvió a las 2»), a colon after a note verb («registrá: …»), and the
+first-person past of the note verbs naming the note resource on a read
+(«qué anoté ayer»). The tail also fires on a past-tense verb with a day
+(«que ayer se fue el agua toda la tarde»), not only on a clock span. All of
+it is pinned in `TestNote_HumanForms`; a duration with no clock («estuve dos
+horas») stays the model's (VOZ-22).
+
 Pinned on the three sentences verbatim; the bank stayed 149/151 with zero
 regressions. The cheaper fix on the phone side — a shortcut whose name is
 not the verb, so the whole sentence travels — is in the manual, but the
