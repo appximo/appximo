@@ -122,7 +122,7 @@ var periodPhrases = []struct {
 	{"ultimos 7 dias", "last_7_days"}, {"ultimos siete dias", "last_7_days"},
 	{"ultimos 30 dias", "last_30_days"}, {"ultimos treinta dias", "last_30_days"},
 	{"esta semana", "this_week"}, {"este mes", "this_month"}, {"este ano", "this_year"}, {"este año", "this_year"},
-	{"del dia de hoy", "today"}, {"del dia", "today"}, {"de la semana", "this_week"}, {"del mes", "this_month"}, {"del ano", "this_year"}, {"del año", "this_year"},
+	{"del dia de hoy", "today"}, {"el dia de hoy", "today"}, {"dia de hoy", "today"}, {"del dia", "today"}, {"de la semana", "this_week"}, {"del mes", "this_month"}, {"del ano", "this_year"}, {"del año", "this_year"},
 	{"de hoy", "today"}, {"hoy", "today"}, {"de ayer", "yesterday"}, {"ayer", "yesterday"},
 	{"de antier", "day_before_yesterday"}, {"antier", "day_before_yesterday"}, {"de anteayer", "day_before_yesterday"}, {"anteayer", "day_before_yesterday"},
 	// The future (MOTOR-AGENDA-S1): what an agenda is asked about.
@@ -180,7 +180,59 @@ func tokenize(q string) []token {
 }
 
 // Parse tries to turn the question into a plan without a model.
+// Parse settles a sentence when the schema alone decides its shape; else it
+// steps aside (not sure) and the model plans. One last resort after every
+// shape failed: the DICTATION TAIL (AGENDA-ASISTENTE-S1, seen on the owner's
+// real phone) — a Siri shortcut named after the verb («Anota», «Registra»)
+// swallows it, so «anotá que la plataforma estuvo caída de 7 a 2» arrives as
+// «que la plataforma estuvo caída de 7 a 2». A sentence that starts with
+// «que», names no resource, carries no question or operation word and DOES
+// carry a clock span is what a log entry sounds like without its verb: it is
+// read as «anotá que …» — the note resource, confirmed like any write.
 func Parse(question string, v *Vocabulary) ParseResult {
+	pr := parseInner(question, v)
+	if pr.Sure {
+		return pr
+	}
+	if tail := dictationTail(question, v); tail.Sure {
+		return tail
+	}
+	return pr
+}
+
+// dictationTail reads a verb-less «que …» sentence as the note («anotá que
+// …») when it has the shape of a log entry: see Parse.
+func dictationTail(question string, v *Vocabulary) ParseResult {
+	if v == nil || !v.Writable() || noteResource(v) == nil {
+		return ParseResult{Reason: "tail: no note resource"}
+	}
+	toks := tokenize(question)
+	if len(toks) < 3 || toks[0].norm != "que" {
+		return ParseResult{Reason: "tail: not a «que» sentence"}
+	}
+	for _, t := range toks[1:] {
+		n := t.norm
+		if countWords[n] || listWords[n] || lastWords[n] || sumWords[n] || avgWords[n] || deleteVerbs[n] || writeVerbs[n] || createVerbs[n] || scheduleVerbs[n] || transitionVerbs[n] || freeWords[n] {
+			return ParseResult{Reason: "tail: an operation word (" + n + ")"}
+		}
+		for _, name := range v.order {
+			if v.namesResource(n, v.resources[name]) {
+				return ParseResult{Reason: "tail: names a resource (" + name + ")"}
+			}
+		}
+	}
+	probe := tokenize(question)
+	if _, ok := consumeTimeSpan(probe); !ok {
+		return ParseResult{Reason: "tail: no clock span"}
+	}
+	pr := parseCreate("anotá "+question, v)
+	if !pr.Sure || pr.Plan.Resource != noteResource(v).Name {
+		return ParseResult{Reason: "tail: " + pr.Reason}
+	}
+	return pr
+}
+
+func parseInner(question string, v *Vocabulary) ParseResult {
 	toks := tokenize(question)
 	if len(toks) == 0 {
 		return ParseResult{Reason: "empty"}

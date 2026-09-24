@@ -356,3 +356,56 @@ func TestProsody_SpokenReplies(t *testing.T) {
 		}
 	}
 }
+
+// The owner's real phone (2026-09-24): a Siri shortcut named after the verb
+// swallows it, so «anotá que …» arrives as «que …». The three sentences he
+// dictated, verbatim from the agenda's history, are a note each — and the
+// clock forms they carry («de siete a dos de la tarde», «de siete A.M. a dos
+// P.M.», «el día de hoy») read as 07:00–14:00 today.
+func TestDictationTail_VerblessLogEntryIsTheNote(t *testing.T) {
+	s := miguelAgendaSchema()
+	v := BuildWithWrites(s, "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
+	for _, q := range []string{
+		"que estudio estuvo caído hoy de siete a dos de la tarde",
+		"que la plataforma estuvo caída de siete a dos de la tarde",
+		"que estudio estuvo caído de siete A.M. a dos P.M. el día de hoy",
+		"que la plataforma estuvo caída de 7am a 2pm hoy",
+	} {
+		pr := Parse(q, v)
+		if !pr.Sure || pr.Plan.Kind != "create" || pr.Plan.Resource != "registros" {
+			t.Fatalf("%q: want the note, got sure=%v %s %s (%s)", q, pr.Sure, pr.Plan.Kind, pr.Plan.Resource, pr.Reason)
+		}
+		if pr.Plan.Data["cuando"] != "today 07:00" || pr.Plan.Data["hasta"] != "today 14:00" {
+			t.Errorf("%q: span %v / %v, want today 07:00 / today 14:00", q, pr.Plan.Data["cuando"], pr.Plan.Data["hasta"])
+		}
+		if tx, _ := pr.Plan.Data["texto"].(string); !strings.Contains(tx, "estuvo ca") || strings.Contains(tx, "siete") || strings.Contains(tx, "7am") || strings.Contains(tx, "tarde") {
+			t.Errorf("%q: the text keeps what happened and not the clock: %q", q, tx)
+		}
+	}
+	// what the tail rule must NOT touch: a question that starts with «qué»
+	for _, q := range []string{"qué tengo mañana", "qué tareas hay", "qué puedo preguntar", "qué tal las ventas de ayer", "que compromisos hay de 4 a 5"} {
+		pr := Parse(q, v)
+		if pr.Sure && pr.Plan.Kind == "create" {
+			t.Errorf("%q must never become a note: %+v", q, pr.Plan)
+		}
+	}
+	// the clock forms on the agenda itself
+	for q, want := range map[string][2]string{
+		"agendá reunión hoy de 7 a 2 de la tarde":     {"today 07:00", "today 14:00"},
+		"agendá reunión hoy de 4 a 5 de la tarde":     {"today 16:00", "today 17:00"},
+		"agendá reunión hoy de 12 a 1":                {"today 12:00", "today 13:00"},
+		"agendá reunión hoy de 1 a 3 de la mañana":    {"today 01:00", "today 03:00"},
+		"agendá reunión hoy de 9 a 11 de la mañana":   {"today 09:00", "today 11:00"},
+		"agendá reunión hoy de siete A.M. a dos P.M.": {"today 07:00", "today 14:00"},
+		"agendá reunión mañana de 7am a 2pm":          {"tomorrow 07:00", "tomorrow 14:00"},
+		"agendá reunión el día de hoy de 10 a 11":     {"today 10:00", "today 11:00"},
+	} {
+		pr := Parse(q, v)
+		if !pr.Sure || pr.Plan.Data["inicio"] != want[0] || pr.Plan.Data["fin"] != want[1] {
+			t.Errorf("%q: %v / %v, want %v (%s)", q, pr.Plan.Data["inicio"], pr.Plan.Data["fin"], want, pr.Reason)
+		}
+	}
+	if pr := Parse("agendá dentista mañana a las 2pm", v); !pr.Sure || pr.Plan.Data["inicio"] != "tomorrow 14:00" {
+		t.Errorf("glued clock alone: %v (%s)", pr.Plan.Data, pr.Reason)
+	}
+}

@@ -85,6 +85,10 @@ type ConflictChecker interface {
 
 var hourRe = regexp.MustCompile(`^(\d{1,2})(?::(\d{2}))?$`)
 
+// gluedRe is an hour with its half of the day glued («7am», «2pm») — what a
+// dictation writes for «siete de la mañana».
+var gluedRe = regexp.MustCompile(`^(\d{1,2})(am|pm)$`)
+
 // readClock turns an hour said in Spanish into minutes since midnight:
 // "4" → 16:00, "10" → 10:00, "4 y media"/"4:30" → 16:30, "16" → 16:00;
 // qualifier: "" | "am" | "pm" (de la tarde/noche). ok=false on nonsense.
@@ -129,7 +133,7 @@ var scheduleVerbs = set("agenda", "agendar", "agendame", "agendá", "anota", "an
 
 // dayPhrases map a day said in Spanish to a write time token (day part).
 var dayPhrases = []struct{ phrase, token string }{
-	{"pasado manana", "day_after_tomorrow"}, {"manana", "tomorrow"}, {"hoy", "today"},
+	{"pasado manana", "day_after_tomorrow"}, {"el dia de hoy", "today"}, {"dia de hoy", "today"}, {"manana", "tomorrow"}, {"hoy", "today"},
 	{"el lunes", "next_monday"}, {"el martes", "next_tuesday"}, {"el miercoles", "next_wednesday"}, {"el jueves", "next_thursday"}, {"el viernes", "next_friday"}, {"el sabado", "next_saturday"}, {"el domingo", "next_sunday"},
 	{"lunes", "next_monday"}, {"martes", "next_tuesday"}, {"miercoles", "next_wednesday"}, {"jueves", "next_thursday"}, {"viernes", "next_friday"}, {"sabado", "next_saturday"}, {"domingo", "next_sunday"},
 }
@@ -150,11 +154,20 @@ func consumeTimeSpan(toks []token) (timeSpan, bool) {
 		if i >= n || toks[i].used {
 			return false
 		}
-		if hourRe.MatchString(toks[i].norm) {
+		if hourRe.MatchString(toks[i].norm) || gluedRe.MatchString(toks[i].norm) {
 			return true
 		}
 		_, ok := hourWord(toks[i].norm)
 		return ok
+	}
+	// gluedQual is the qualifier an hour carries in its own token («2pm»).
+	gluedQual := func(i int) string {
+		if i < n {
+			if m := gluedRe.FindStringSubmatch(toks[i].norm); m != nil {
+				return m[2]
+			}
+		}
+		return ""
 	}
 	// The tokenizer splits «15:30» into «15» «30»: an hour followed by a
 	// two-digit minute token is read as one clock.
@@ -162,6 +175,9 @@ func consumeTimeSpan(toks []token) (timeSpan, bool) {
 		h := toks[i].norm
 		if hw, ok := hourWord(h); ok {
 			h = strconv.Itoa(hw)
+		}
+		if m := gluedRe.FindStringSubmatch(h); m != nil {
+			h = m[1]
 		}
 		if i+1 < n && !toks[i+1].used && len(toks[i+1].norm) == 2 && toks[i+1].norm[0] >= '0' && toks[i+1].norm[0] <= '5' && toks[i+1].norm[1] >= '0' && toks[i+1].norm[1] <= '9' && !strings.Contains(h, ":") && hourRe.MatchString(toks[i].norm) {
 			return h + ":" + toks[i+1].norm, 2
@@ -173,6 +189,20 @@ func consumeTimeSpan(toks []token) (timeSpan, bool) {
 			switch toks[i].norm {
 			case "am", "pm":
 				return toks[i].norm, 1
+			}
+			// «A.M.» / «P.M.» as a dictation writes them: one token whose
+			// dots became a space («a m»), or two tokens («a», «m»)
+			switch toks[i].norm {
+			case "a m", "a.m", "am.":
+				return "am", 1
+			case "p m", "p.m", "pm.":
+				return "pm", 1
+			}
+			if i+1 < n && !toks[i+1].used && toks[i+1].norm == "m" && (toks[i].norm == "a" || toks[i].norm == "p") {
+				if toks[i].norm == "a" {
+					return "am", 2
+				}
+				return "pm", 2
 			}
 			if i+2 < n && toks[i].norm == "de" && toks[i+1].norm == "la" {
 				switch toks[i+2].norm {
@@ -226,12 +256,24 @@ func consumeTimeSpan(toks []token) (timeSpan, bool) {
 		q2, qn2 := qualifierAt(m)
 		m += qn2
 		if q1 == "" {
-			q1 = q2
+			q1 = gluedQual(j)
 		}
-		st, ok1 := readClock(jText, hs > 0, q1)
+		if q2 == "" {
+			q2 = gluedQual(l)
+		}
+		// The end's half of the day is lent to the start («de 7 a 8 de la
+		// noche» is 19:00–20:00) UNLESS that runs the span backwards — then
+		// the start keeps its own bare rule («de 7 a 2 de la tarde» is
+		// 07:00–14:00: the 2 is the afternoon, the 7 stays a morning).
 		en, ok2 := readClock(lText, he > 0, q2)
+		st, ok1 := readClock(jText, hs > 0, q1)
 		if !ok1 || !ok2 {
 			continue
+		}
+		if q1 == "" && q2 != "" {
+			if stLent, ok := readClock(jText, hs > 0, q2); ok && stLent < en {
+				st = stLent
+			}
 		}
 		if en <= st { // «de 11 a 1» → the 1 is the afternoon
 			if en2, ok := readClock(lText, he > 0, "pm"); ok && en2 > st {
@@ -318,7 +360,10 @@ func consumeTimeSpan(toks []token) (timeSpan, bool) {
 		k += hs
 		q, qn := qualifierAt(k)
 		k += qn
-		if cnt == 1 && qn == 0 && hs == 0 {
+		if q == "" {
+			q = gluedQual(i)
+		}
+		if cnt == 1 && qn == 0 && hs == 0 && q == "" {
 			continue // a bare number is not a clock («los últimos 3»)
 		}
 		if i > 0 && !toks[i-1].used && (toks[i-1].norm == "ultimos" || toks[i-1].norm == "ultimas") {
