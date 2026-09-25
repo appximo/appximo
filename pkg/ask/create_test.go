@@ -531,3 +531,32 @@ func TestNote_ConfirmationSpeech(t *testing.T) {
 		t.Errorf("an empty log is not «nada agendado»: %s | %s", r.Kind, r.Speech)
 	}
 }
+
+// «registros por área» groups by the relation and names each group with the
+// area's name; the interrogative «qué …» never becomes a note.
+func TestGroupByRelation_AndQueIsAQuestion(t *testing.T) {
+	s := miguelAgendaSchema()
+	v := BuildWithWrites(s, "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
+	for q, want := range map[string]string{"registros por área": "area_id", "cuántos registros hay por área": "area_id", "tareas por área": "area_id", "compromisos por persona": "persona_id"} {
+		pr := Parse(q, v)
+		if !pr.Sure || pr.Plan.Kind != "count" || pr.Plan.GroupBy != want {
+			t.Errorf("%q: %+v (%s)", q, pr.Plan, pr.Reason)
+		}
+	}
+	for _, q := range []string{"qué anoté hoy en trabajo", "qué registré ayer con Fabián", "qué campo tiene una tarea"} {
+		if pr := Parse(q, v); pr.Sure && pr.Plan.Kind == "create" {
+			t.Errorf("%q must never become a note: %+v", q, pr.Plan)
+		}
+	}
+	e := miguelFixtures()
+	d, _ := miguelDeps(e)
+	r := Answer(context.Background(), d, "tareas por área")
+	if r.Kind != "answer" || len(r.Groups) == 0 {
+		t.Fatalf("tareas por área: %s %s", r.Kind, r.Text)
+	}
+	for _, g := range r.Groups {
+		if len(g.Label) == 36 && strings.Count(g.Label, "-") == 4 {
+			t.Errorf("a group by a relation is labelled with the name, not the id: %q", g.Label)
+		}
+	}
+}

@@ -792,9 +792,26 @@ registra: la plataforma estuvo caída de 7 a 2                    → los dos pu
 ```
 
 Y para leerlos: «qué registré hoy», «qué anoté ayer», «registros de esta
-semana», «registros de trabajo», «registros con Fabián». Lo que todavía va
-al modelo: una duración sin hora («estuve dos horas en el banco» queda como
-texto, la hora es la de ahora) y frases muy enredadas.
+semana», «registros de trabajo», «registros con Fabián», «registros de la
+tarea declaración de renta», y agrupados: «registros por área», «tareas por
+área», «compromisos por persona» (el motor pone el nombre de cada área o
+persona, no su id). Lo que todavía va al modelo: una duración sin hora
+(«estuve dos horas en el banco» queda como texto, la hora es la de ahora) y
+frases muy enredadas.
+
+**Una bitácora se lleva con registros y se agrupa con lo que ya tiene el
+schema.** Un registro puede colgar de un **área** (el tema: trabajo, salud,
+universidad — se crea por voz: «crear área: universidad»), de una **persona**
+(«con Fabián»), de una **tarea** («tarea declaración de renta») o de un
+**compromiso** («compromiso reunión banco»); cada enganche se dice por su
+palabra o, si el nombre es inequívoco, suelto («…, salud, …»). Regla
+práctica: el ÁREA es el cajón por tema y sirve para leer la bitácora
+completa («registros de universidad»); la TAREA es algo que se termina y
+sirve para juntar los avances de una sola cosa; el COMPROMISO (el «evento»)
+es un bloque con hora en la agenda — un registro se le engancha para dejar
+constancia de qué pasó en él. No hay que elegir uno: un mismo registro puede
+llevar área y tarea a la vez (el hook del schema solo impide tarea y
+compromiso juntos).
 
 **Ojo con el nombre del atajo.** Si el atajo de Siri se llama «Anota» o
 «Registra», Siri se come esa palabra y al motor le llega la frase sin el

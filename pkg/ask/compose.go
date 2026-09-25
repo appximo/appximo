@@ -1,9 +1,11 @@
 package ask
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -31,11 +33,29 @@ func composeAggregate(d Deps, p Plan, res *Resource, rows []map[string]any, unde
 		return Number(v)
 	}
 	if p.GroupBy != "" {
+		// a group by a RELATION («por área») is labelled with the target
+		// row's name, never its id
+		names := map[string]string{}
+		if gf := res.Field(p.GroupBy); gf != nil && gf.Relation != "" && d.Exec != nil {
+			if target := d.Vocab.Resource(gf.Relation); target != nil {
+				labels := target.LabelFields()
+				if trows, _, err := d.Exec.List(context.Background(), target.Name, url.Values{"per_page": {"100"}, "fields": {"id," + strings.Join(labels, ",")}}); err == nil {
+					for _, tr := range trows {
+						if l := labelOf(tr, labels); l != "" {
+							names[fmt.Sprint(tr["id"])] = l
+						}
+					}
+				}
+			}
+		}
 		var total float64
 		for _, row := range rows {
 			label := fmt.Sprint(row[p.GroupBy])
+			if l, ok := names[label]; ok {
+				label = l
+			}
 			if row[p.GroupBy] == nil {
-				label = "(sin " + p.GroupBy + ")"
+				label = "(sin " + strings.ReplaceAll(strings.TrimSuffix(p.GroupBy, "_id"), "_", " ") + ")"
 			}
 			v := metric(row, p)
 			total += v

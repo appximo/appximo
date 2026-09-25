@@ -213,6 +213,9 @@ func dictationTail(question string, v *Vocabulary) ParseResult {
 	// the tail starts with «que» (the swallowed verb's complement) — or has
 	// no verb of order at all and tells what HAPPENED in the past («estudio
 	// estuvo caído de 7:30 a 2:15», dictated without the «que»)
+	if strings.ToLower(toks[0].raw) == "qué" {
+		return ParseResult{Reason: "tail: a question («qué …»)"}
+	}
 	leadingQue := toks[0].norm == "que"
 	if !leadingQue && !hasPreterite(toks) {
 		return ParseResult{Reason: "tail: not a «que» sentence nor a past-tense one"}
@@ -510,6 +513,29 @@ func parseInner(question string, v *Vocabulary) ParseResult {
 				return ParseResult{Reason: "two group_by"}
 			}
 			groupBy = f.Name
+			toks[i].used, toks[i+1].used = true, true
+			continue
+		}
+		// «por área» / «por persona»: the word names the target of ONE of
+		// the resource's relations — the group key is that relation's field
+		if next.used {
+			continue
+		}
+		var rel *Field
+		for _, f := range res.Fields {
+			if f.Relation != "" && v.namesResource(next.norm, v.Resource(f.Relation)) {
+				if rel != nil {
+					rel = nil
+					break
+				}
+				rel = f
+			}
+		}
+		if rel != nil {
+			if groupBy != "" {
+				return ParseResult{Reason: "two group_by"}
+			}
+			groupBy = rel.Name
 			toks[i].used, toks[i+1].used = true, true
 		}
 	}
@@ -941,6 +967,37 @@ type resourceMention struct {
 	start, end int // token range [start, end)
 }
 
+// groupTarget answers the resource that is being GROUPED when the other
+// one is named right after «por» and is the target of one of its relations
+// («registros por área» → registros); it frees the target's words so the
+// group-by step can read them. nil when the shape is not that.
+func groupTarget(toks []token, a, b *Resource, mentions []resourceMention) *Resource {
+	try := func(src, tgt *Resource) *Resource {
+		n := 0
+		for _, f := range src.Fields {
+			if f.Relation == tgt.Name {
+				n++
+			}
+		}
+		if n != 1 {
+			return nil
+		}
+		for _, m := range mentions {
+			if m.res == tgt && m.start > 0 && toks[m.start-1].norm == "por" {
+				for k := m.start; k < m.end; k++ {
+					toks[k].used = false
+				}
+				return src
+			}
+		}
+		return nil
+	}
+	if r := try(a, b); r != nil {
+		return r
+	}
+	return try(b, a)
+}
+
 // findResource consumes every resource mention (schema names and aliases,
 // every form) and settles the ONE resource of the sentence. Two distinct
 // resources are one question only when one is the target of the other's
@@ -1000,6 +1057,13 @@ func findResource(toks []token, v *Vocabulary) (res *Resource, labelField string
 		}
 		if f, pos := labelIntro(toks, v, b, a, mentions); f != "" {
 			return b, f, pos, ""
+		}
+		// «registros por área», «tareas por persona»: the second resource,
+		// right after «por», is the TARGET of the first's relation — a group
+		// key, not a second subject. Its words are handed back to the
+		// group-by step (4), which reads «por <relation target>».
+		if r := groupTarget(toks, a, b, mentions); r != nil {
+			return r, "", -1, ""
 		}
 		return nil, "", -1, "two resources: " + a.Name + ", " + b.Name
 	}
