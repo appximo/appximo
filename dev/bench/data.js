@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790350054316,
+  "lastUpdate": 1790350312034,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -7488,6 +7488,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "55141414 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "2ae1a49187c6dcdde0b493dab7be24e94e00e562",
+          "message": "fix(ask): a grouped answer is spoken as a person says it («Diez tareas por area: Personal, dos. Sin area, ocho.») and a resolved name reads back as «de trabajo» / «de Fabián Gómez», never «area elegido» (AGENDA-ASISTENTE-S1 addendum)\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-25T15:29:42Z",
+          "tree_id": "b63199b2ccc5c7f5e347199a9245faeb1d880e55",
+          "url": "https://github.com/appximo/appximo/commit/2ae1a49187c6dcdde0b493dab7be24e94e00e562"
+        },
+        "date": 1790350310511,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6222,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "372364 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6222,
+            "unit": "ns/op",
+            "extra": "372364 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "372364 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "372364 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 70.75,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36865824 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 70.75,
+            "unit": "ns/op",
+            "extra": "36865824 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36865824 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36865824 times\n4 procs"
           }
         ]
       }
