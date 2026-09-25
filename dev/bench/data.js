@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790365733710,
+  "lastUpdate": 1790366191911,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -7920,6 +7920,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36447999 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "be028d3ee0068459417a2769d39a4d5cd9cef4b9",
+          "message": "fix(ask): a timezone column is never a label — every registro read aloud on the 58 ended in «America/Bogota» (AGENDA-ASISTENTE-S1 addendum 5b)\n\nThe note's `zona` (a string with format timezone, the range's zone) counted\nas the resource's second label field, so the list and its speech appended\n«America/Bogota» to every line. The vocabulary now carries the declared\nformat and LabelFields skips a timezone column; pinned on a schema that\nmirrors the real one.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-25T19:55:00Z",
+          "tree_id": "ef6381a422d60b8013469c6e55389cb8079783c4",
+          "url": "https://github.com/appximo/appximo/commit/be028d3ee0068459417a2769d39a4d5cd9cef4b9"
+        },
+        "date": 1790366191076,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6553,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "379377 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6553,
+            "unit": "ns/op",
+            "extra": "379377 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "379377 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "379377 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 65.19,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36755070 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 65.19,
+            "unit": "ns/op",
+            "extra": "36755070 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36755070 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36755070 times\n4 procs"
           }
         ]
       }
