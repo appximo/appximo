@@ -59,5 +59,15 @@ func Resolve(rng string, now time.Time) (Window, bool) {
 		d := day.AddDate(0, 0, delta)
 		return Window{d, d.AddDate(0, 0, 1), "el " + weekdayES(wd) + " (" + dateWords(d) + ")"}, true
 	}
-	return Window{}, false
+	// The past occurrence, strictly before today — what «el martes» means
+	// on a log of what happened (a note, the creation stamp).
+	if wd, ok := weekdayTokens[strings.TrimPrefix(rng, "last_")]; ok && strings.HasPrefix(rng, "last_") {
+		delta := (int(day.Weekday()) - int(wd) + 7) % 7
+		if delta == 0 {
+			delta = 7
+		}
+		d := day.AddDate(0, 0, -delta)
+		return Window{d, d.AddDate(0, 0, 1), "el " + weekdayES(wd) + " pasado (" + dateWords(d) + ")"}, true
+	}
+	return resolveDateToken(rng, now)
 }

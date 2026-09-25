@@ -139,7 +139,8 @@ func clockString(minutes int) string {
 // ── the deterministic schedule parser ─────────────────────────────────────
 
 // scheduleVerbs start a create on the agenda resource.
-var scheduleVerbs = set("agenda", "agendar", "agendame", "agendá", "anota", "anotar", "anotame", "anotá", "programa", "programar", "programame", "programá", "reserva", "reservar", "reservame", "reservá", "pone", "poneme", "pon", "agrega", "agregame", "crea", "creame")
+var scheduleVerbs = set("agenda", "agendar", "agendame", "agendá", "anota", "anotar", "anotame", "anotá", "programa", "programar", "programame", "programá", "reserva", "reservar", "reservame", "reservá", "pone", "poneme", "pon", "agrega", "agregame", "crea", "creame",
+	"bloquea", "bloquear", "bloqueame", "aparta", "apartar", "apartame") // «bloqueá mañana de 2 a 4 para estudiar», «apartá el jueves de 10 a 12»
 
 // dayPhrases map a day said in Spanish to a write time token (day part).
 // dayPhrases are the days a person names (today, tomorrow, yesterday, a
@@ -157,6 +158,7 @@ var dayPhrases = []struct{ phrase, token, hint string }{
 	{"ayer en la manana", "yesterday", "am"}, {"ayer por la manana", "yesterday", "am"}, {"ayer en la tarde", "yesterday", "pm"}, {"ayer por la tarde", "yesterday", "pm"}, {"ayer en la noche", "yesterday", "pm"}, {"ayer por la noche", "yesterday", "pm"},
 	{"en la manana", "today", "am"}, {"por la manana", "today", "am"}, {"toda la manana", "today", "am"}, {"en la tarde", "today", "pm"}, {"por la tarde", "today", "pm"}, {"toda la tarde", "today", "pm"}, {"en la noche", "today", "pm"}, {"por la noche", "today", "pm"}, {"toda la noche", "today", "pm"},
 	{"el lunes", "next_monday", ""}, {"el martes", "next_tuesday", ""}, {"el miercoles", "next_wednesday", ""}, {"el jueves", "next_thursday", ""}, {"el viernes", "next_friday", ""}, {"el sabado", "next_saturday", ""}, {"el domingo", "next_sunday", ""},
+	{"el lunes pasado", "last_monday", ""}, {"el martes pasado", "last_tuesday", ""}, {"el miercoles pasado", "last_wednesday", ""}, {"el jueves pasado", "last_thursday", ""}, {"el viernes pasado", "last_friday", ""}, {"el sabado pasado", "last_saturday", ""}, {"el domingo pasado", "last_sunday", ""},
 	{"lunes", "next_monday", ""}, {"martes", "next_tuesday", ""}, {"miercoles", "next_wednesday", ""}, {"jueves", "next_thursday", ""}, {"viernes", "next_friday", ""}, {"sabado", "next_saturday", ""}, {"domingo", "next_sunday", ""},
 }
 
@@ -500,6 +502,10 @@ func spanishNumber(w string) (int, bool) {
 // half («am»/«pm») a clock without a qualifier should take. A part phrase
 // («en la tarde») alone sets the day to today.
 func consumeDayPart(toks []token) (day, hint string) {
+	// a date said as a person says it («el 23 de septiembre», «23/09»)
+	if tok, _ := scanDate(toks); tok != "" {
+		day = tok
+	}
 	joined := joinedNorms(toks)
 	dayFromPart := false
 	for _, dp := range dayPhrases {

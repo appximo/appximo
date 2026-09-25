@@ -718,7 +718,15 @@ func execute(ctx context.Context, d Deps, p Plan) Result {
 	var window Window
 	var agenda *Range
 	if p.Period != nil {
-		w, _ := Resolve(p.Period.Range, d.Now)
+		per := *p.Period
+		lookBack(res, &per) // a model plan said «next_tuesday» on a log: the past one
+		p.Period = &per
+		w, ok := Resolve(p.Period.Range, d.Now)
+		if !ok {
+			return Result{Kind: "unclear", Headline: "Esa fecha no existe",
+				Text:       "🤔 Esa fecha no existe (" + esc(tokenDateWords(p.Period.Range)) + "). Dímela con el año, o de otra forma.",
+				Understood: strings.Join(understood, " · ")}
+		}
 		window = w
 		field := p.Period.Field
 		if field == "" {

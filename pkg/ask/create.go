@@ -255,9 +255,22 @@ func buildCreate(v *Vocabulary, res *Resource, rest []ctok, note string) ParseRe
 	if res == noteResource(v) {
 		// a note is about what HAPPENED: «el martes» is the past Tuesday
 		for k, val := range data {
-			if sv, ok := val.(string); ok && strings.HasPrefix(sv, "next_") {
-				data[k] = "last_" + strings.TrimPrefix(sv, "next_")
+			sv, ok := val.(string)
+			if !ok {
+				continue
 			}
+			base, clock, _ := strings.Cut(sv, " ")
+			if strings.HasPrefix(base, "next_") && base != "next_week" {
+				base = "last_" + strings.TrimPrefix(base, "next_")
+			} else if strings.HasPrefix(base, "date:") && len(base) == len("date:MM-DD") {
+				base = "past_" + base // «el 30 de diciembre» with no year: the one that happened
+			} else {
+				continue
+			}
+			if clock != "" {
+				base += " " + clock
+			}
+			data[k] = base
 		}
 	}
 	p := Plan{Kind: "create", Resource: res.Name, Data: data, Refs: refs, Reason: note}
@@ -781,8 +794,13 @@ func titleWords(seg []ctok, v *Vocabulary, res *Resource, data map[string]any, r
 			}
 		}
 	}
-	// «con Name» / «para Name» (capitalized) out of the title
-	for i := 0; i+1 < len(tt); i++ {
+	// «con Name» / «para Name» (capitalized) out of the title — except on
+	// the NOTE: «me reuní con Camilo de 4 a 5» is the text of a log, and
+	// the person is a SOFT reference (linked when Camilo exists, the words
+	// kept either way). A hard one refused the owner's real note when Camilo
+	// was in no table (2026-09-25); the capitalized run below picks it up.
+	note := res == noteResource(v)
+	for i := 0; i+1 < len(tt) && !note; i++ {
 		if tt[i].used || (tt[i].norm != "con" && tt[i].norm != "para") || !startsUpper(tt[i+1].raw) {
 			continue
 		}
@@ -856,7 +874,10 @@ func titleWords(seg []ctok, v *Vocabulary, res *Resource, data map[string]any, r
 			words = append(words, t.raw)
 		}
 	}
-	for len(words) > 0 && (stopwords[normalize(words[0])] && normalize(words[0]) != "que") {
+	// a note keeps its text as said («se fue la luz», «me reuní con Camilo»
+	// — the pronoun and the article are the sentence); any other resource
+	// drops a leading function word («la tarea de …»)
+	for len(words) > 0 && !note && (stopwords[normalize(words[0])] && normalize(words[0]) != "que") {
 		words = words[1:]
 	}
 	for len(words) > 0 {

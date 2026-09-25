@@ -1757,6 +1757,22 @@
    "bloquea": [],
    "origen": "AGENDA-ASISTENTE-S1 addendum (2026-09-25), decisión A-85",
    "estado": "abierto"
+  },
+  {
+   "id": "VOZ-26",
+   "titulo": "Una fecha respondida a una repregunta no se lee en la dirección del recurso",
+   "frente": "automatizacion",
+   "que_es": "Desde A-86 una fecha dicha dentro de la frase mira atrás en una bitácora y adelante en la agenda (`lookBack`). La puerta de la REPREGUNTA («¿para cuándo?» → «el 23 de septiembre») la lee con `spanishTimeToken` como `date:MM-DD` (este año / la próxima ocurrencia) sin el recurso a mano: un campo de fecha obligatorio de una NOTA respondido así tomaría la fecha que viene, no la pasada.",
+   "por_que_importa": "Inalcanzable en la agenda real (el `cuando` del registro tiene default y nunca se pregunta); alcanzable en un schema cuya bitácora tenga un campo de fecha obligatorio: escribiría una fecha futura en un registro de lo que pasó.",
+   "que_lo_destraba": "Que `continuePending` aplique la regla de fecha de `lookBack` con el recurso del pendiente antes de guardar el token respondido; una prueba con una nota de fecha obligatoria.",
+   "costo": "chico",
+   "dano": "bajo",
+   "prioridad": "P3",
+   "decide": "agente",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "AGENDA-ASISTENTE-S1 addendum 5 (2026-09-25), decisión A-86",
+   "estado": "abierto"
   }
  ]
 }

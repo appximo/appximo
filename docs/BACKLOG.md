@@ -1858,6 +1858,20 @@ composition time — a conjugation dictionary in the composing layer, never
 duplicated strings — built only when a real owner asks. Origin:
 AGENDA-ASISTENTE-S1 addendum, decision A-85. Decides: Miguel.
 
+### VOZ-26 — A date answered to a follow-up question is not read in the resource's direction
+
+Since A-86 a date said inside a sentence looks back on a log and forward on
+an agenda (`lookBack`). The FOLLOW-UP door — the engine asks «¿para cuándo?»
+and the owner answers «el 23 de septiembre» — reads the date through
+`spanishTimeToken` as `date:MM-DD` (this year / the coming occurrence) with
+no resource in hand, so a required time field on a NOTE answered that way
+would take the coming date, not the past one. Unreachable in the real agenda
+(the note's `cuando` has a default and is never asked); reachable in a
+schema whose log has a required time field. **Ready:** `continuePending`
+applies `lookBack`'s date rule with the pending's resource before storing the
+answered token. Origin: AGENDA-ASISTENTE-S1 addendum 5 (2026-09-25), A-86.
+Decides: agent.
+
 ### VOZ-18 — The estimate-vs-real mirror is per task; there is no weekly aggregate («esta semana subestimaste 60 %»)
 
 `espejo_estimacion` sends one message when a task with an estimate closes. A

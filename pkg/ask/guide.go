@@ -701,6 +701,14 @@ func guideFilters(ctx context.Context, d Deps) []guidePart {
 		add("qué tengo el jueves de 10 a 11", "qué tengo el jueves de diez a once")
 		add("tengo algo mañana a las 4", "tengo algo mañana a las cuatro")
 	}
+	// a log looks back: a weekday is the past one, a date needs no year
+	if lg := pickAgenda(v, func(r *Resource) bool { return !r.Range().NoOverlap }); lg != nil {
+		lp, _ := resourceWords(lg)
+		add(lp+" del martes", "")
+		y := d.Now.AddDate(0, 0, -1)
+		add(fmt.Sprintf("%s del %d de %s", lp, y.Day(), monthsLongES[y.Month()]), lp+" del "+DateShortWords(y))
+		add(lp+" de "+monthsLongES[d.Now.Month()], "")
+	}
 	// combinations: a state + a period, a bool + a period, a name + a state
 	if sf := r.StateField(); sf != nil {
 		if w := stateWord(sf); w != "" {

@@ -121,7 +121,8 @@ var (
 	// Ranges: the past windows, plus the FUTURE days an agenda is asked about
 	// (MOTOR-AGENDA-S1): tomorrow, day_after_tomorrow, next_week, next_<weekday>.
 	Ranges = []string{"today", "yesterday", "day_before_yesterday", "this_week", "last_week", "this_month", "last_month", "last_7_days", "last_30_days", "this_year",
-		"tomorrow", "day_after_tomorrow", "next_week", "next_monday", "next_tuesday", "next_wednesday", "next_thursday", "next_friday", "next_saturday", "next_sunday"}
+		"tomorrow", "day_after_tomorrow", "next_week", "next_monday", "next_tuesday", "next_wednesday", "next_thursday", "next_friday", "next_saturday", "next_sunday",
+		"last_monday", "last_tuesday", "last_wednesday", "last_thursday", "last_friday", "last_saturday", "last_sunday"}
 	numericOps = map[string]bool{"eq": true, "gt": true, "gte": true, "lt": true, "lte": true, "is_null": true}
 	textOps    = map[string]bool{"eq": true, "partial": true, "start": true, "is_null": true}
 	flatOps    = map[string]bool{"eq": true, "is_null": true}
@@ -204,8 +205,8 @@ func (p Plan) Validate(v *Vocabulary) error {
 		return err
 	}
 	if p.Period != nil {
-		if !contains(Ranges, p.Period.Range) {
-			return fmt.Errorf("period.range %q is not one of %s", p.Period.Range, strings.Join(Ranges, "|"))
+		if !validRange(p.Period.Range) {
+			return fmt.Errorf("period.range %q is not one of %s, a date (date:MM-DD or date:YYYY-MM-DD) or a month (month:MM)", p.Period.Range, strings.Join(Ranges, "|"))
 		}
 		field := p.Period.Field
 		if field == "" {

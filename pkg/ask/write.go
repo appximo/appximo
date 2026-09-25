@@ -263,6 +263,16 @@ func ResolveTimeValue(tok string, now time.Time) (time.Time, string, bool) {
 	base, clock, _ := strings.Cut(tok, " ")
 	var t time.Time
 	var words string
+	dated := dateTokenRe.MatchString(base)
+	if dated {
+		// «el 23 de septiembre» (dates.go): this year, the past one for a
+		// note (past_date), or the year said
+		w, ok := resolveDateToken(base, now)
+		if !ok {
+			return time.Time{}, "", false
+		}
+		t, words = w.From, w.Words
+	}
 	switch base {
 	case "now":
 		return now, "ahora", true
@@ -293,6 +303,9 @@ func ResolveTimeValue(tok string, now time.Time) (time.Time, string, bool) {
 			t, words = day.AddDate(0, 0, -delta), "el "+weekdayES(wd)+" pasado"
 			break
 		}
+		if dated {
+			break
+		}
 		wd, ok := weekdayTokens[strings.TrimPrefix(base, "next_")]
 		if !ok || !strings.HasPrefix(base, "next_") {
 			return time.Time{}, "", false
@@ -316,9 +329,12 @@ func ResolveTimeValue(tok string, now time.Time) (time.Time, string, bool) {
 			return time.Time{}, "", false
 		}
 		t = t.Add(time.Duration(h)*time.Hour + time.Duration(mi)*time.Minute)
+		if dated {
+			return t, words + " a las " + t.Format("15:04"), true
+		}
 		return t, words + " (" + dateWords(t) + ") a las " + t.Format("15:04"), true
 	}
-	if base == "today" {
+	if base == "today" || dated {
 		return t, words, true
 	}
 	return t, words + " (" + dateWords(t) + ")", true
@@ -340,6 +356,7 @@ func spanishTimeToken(s string) string {
 	// clock phrase is read by the agenda parser (MOTOR-AGENDA-S1), which
 	// knows «a las 4» means 16:00; the day words are what remains.
 	if toks := tokenize(raw); len(toks) > 0 {
+		dateTok, _ := scanDate(toks) // «el 23 de septiembre a las 3», «23/09»
 		if span, ok := consumeTimeSpan(toks); ok {
 			clock = clockString(span.start)
 			var rest []string
@@ -352,6 +369,12 @@ func spanishTimeToken(s string) string {
 			if raw == "" {
 				raw = "hoy"
 			}
+		}
+		if dateTok != "" {
+			if clock != "" {
+				return dateTok + " " + clock
+			}
+			return dateTok
 		}
 	}
 	if i := strings.Index(raw, " a las "); i >= 0 && clock == "" {

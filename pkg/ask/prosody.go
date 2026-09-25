@@ -53,6 +53,18 @@ func NumberWords(n int) string {
 		}
 		return h + " " + NumberWords(n%100)
 	}
+	if n < 1000000 {
+		// «dos mil veinticinco», «mil novecientos noventa y nueve»: a year
+		// said in a reply («el 23 de septiembre de 2025»)
+		head := "mil"
+		if th := n / 1000; th > 1 {
+			head = NumberWords(th) + " mil"
+		}
+		if n%1000 == 0 {
+			return head
+		}
+		return head + " " + NumberWords(n%1000)
+	}
 	return Integer(float64(n))
 }
 
@@ -168,6 +180,7 @@ var (
 	dateShortRe     = regexp.MustCompile(`(?i)\b(?:(dom|lun|mar|mié|mie|jue|vie|sáb|sab)\s+)?(\d{1,2})\s+(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|jan|apr|aug|dec)\b`)
 	countRe         = regexp.MustCompile(`\b(\d{1,3})\s+([a-záéíóúñ]+)`)
 	spokenISODateRe = regexp.MustCompile(`\b(\d{4})-(\d{2})-(\d{2})\b`)
+	yearWordsRe     = regexp.MustCompile(`\b(?:19|20)\d{2}\b`)
 	signedRe        = regexp.MustCompile(`(^|[\s,(])([+\-−])(\d{1,3})\b`)
 	colonNumRe      = regexp.MustCompile(`(?m):\s(\d{1,3})\b(?:[.,;]|$)`)
 )
@@ -208,6 +221,8 @@ func SpokenNumbers(s string) string {
 		}
 		return NumberWords(day) + " de " + monthsLongES[time.Month(mo)]
 	})
+	// a year («de 2025») → «de dos mil veinticinco»
+	s = yearWordsRe.ReplaceAllStringFunc(s, func(m string) string { return NumberWords(atoi(m)) })
 	// a signed delta («+5 desde ayer», «−2») → «más cinco», «menos dos»
 	s = signedRe.ReplaceAllStringFunc(s, func(m string) string {
 		g := signedRe.FindStringSubmatch(m)

@@ -836,6 +836,29 @@ ninguna hora suelta significaba otra cosa); la confirmación ahora DICE «a las
 cuatro de la tarde», así que si alguna vez se equivoca lo oye antes de
 confirmar y lo corrige con «mejor a las 4 de la mañana».
 
+**Preguntar por un día (2026-09-25).** Un registro nunca es futuro, así que
+el motor mira hacia atrás cuando se le pregunta por un día: «registros del
+martes» o «qué hice el martes» es el martes PASADO (en la agenda,
+«compromisos del martes» sigue siendo el que viene; «del martes pasado» vale
+en las dos). Una fecha se dice como se dice: «registros del 23 de septiembre»,
+«del 23/09», «del veintitrés de septiembre» — sin año es el actual, y si esa
+fecha todavía no llegó, el año pasado («registros del 30 de diciembre» en
+septiembre es el diciembre que ya pasó); con año, ese («del 23 de septiembre
+de 2025»). Un mes solo también: «registros de septiembre», «cuántos registros
+hay en agosto», «qué hicimos en agosto». Una fecha imposible («31 de
+febrero») se responde como tal, gratis; la respuesta siempre nombra el día
+que leyó («el martes pasado, martes veintidós de septiembre»). Todo esto lo
+decide el parser, US$ 0; la guía («cómo filtro por fecha», «más») lo enseña.
+
+**Con alguien.** «Anota que me reuní con Camilo de 4 a 5» guarda el texto
+completo («me reuní con Camilo») y, si Camilo está en personas, lo enlaza; si
+no está, el registro se guarda igual, con su texto — antes el motor se
+plantaba («no encuentro Camilo como área, compromiso, persona o tarea») y el
+registro se perdía. Lo mismo sin el verbo, cuando el atajo se lo come: «me
+reuní con Camilo de cuatro a cinco». El texto de un registro queda tal como
+se dijo («se fue la luz», «me llamó el contador»), sin recortar el «se» o el
+«me» del principio.
+
 ## 4. Qué hacer cuando pasa algo
 
 Recetas cortas, en el orden en que suele hacer falta. Todas empiezan igual: **mire antes de tocar** (30 segundos):

@@ -90,9 +90,11 @@ func TestAskWrite_CreateConfirmsThenWritesThroughTheEngine(t *testing.T) {
 	dpDo(t, rest, "POST", "/api/personas", dueno, map[string]any{"nombre": "Marta Ruiz"}, http.StatusCreated)
 	fabID := fab["id"].(string)
 
-	// A VERBLESS sentence: the fixed form (AGENDA-ASISTENTE-S1) settles
-	// «anota …» without the model; this test pins the MODEL's write path.
-	got := dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "Llamar a Fabián para arreglar el techo, urgente, para mañana"}, http.StatusOK)
+	// A sentence the parser leaves alone: the fixed form (AGENDA-ASISTENTE-S1)
+	// settles «anota …», and since 68bb16c an infinitive at the head
+	// («Llamar a Fabián …») is a to-do said without its verb — so this test
+	// pins the MODEL's write path with a shape only the model plans.
+	got := dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "necesito que Fabián arregle el techo, urgente, para mañana"}, http.StatusOK)
 	if got["kind"] != "confirm" || got["pending_id"] == nil || got["stage"] != "confirm" {
 		t.Fatalf("want a confirmation, got %v", got)
 	}
@@ -240,7 +242,7 @@ func TestAskWrite_PlanCachedNeverTheResult_AndStrayYesCostsNothing(t *testing.T)
 	// 1. The order, once: the model plans it, the owner confirms, the engine
 	// writes. A VERBLESS order — «anota …» is the fixed form's (parser, US$ 0)
 	// since AGENDA-ASISTENTE-S1; this test pins the MODEL's cached plan.
-	got := dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "pagar la luz para mañana"}, http.StatusOK)
+	got := dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "necesito pagar la luz para mañana"}, http.StatusOK)
 	if got["kind"] != "confirm" || got["source"] != "model" || modelCalls() != 1 {
 		t.Fatalf("first order: %v (calls %d)", got, modelCalls())
 	}
@@ -251,7 +253,7 @@ func TestAskWrite_PlanCachedNeverTheResult_AndStrayYesCostsNothing(t *testing.T)
 	// 2. The SAME order again: the plan comes from the cache (no model call),
 	// a FRESH confirmation is asked, and confirming writes a SECOND row — the
 	// result was never cached.
-	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "Pagar la luz para mañana"}, http.StatusOK)
+	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "Necesito pagar la luz para mañana"}, http.StatusOK)
 	if got["kind"] != "confirm" || got["source"] != "cache" || got["cost_usd"] != float64(0) || modelCalls() != 1 {
 		t.Fatalf("second order must come from the plan cache: %v (calls %d)", got, modelCalls())
 	}
@@ -273,7 +275,7 @@ func TestAskWrite_PlanCachedNeverTheResult_AndStrayYesCostsNothing(t *testing.T)
 	// model call, nothing written. («Sí pero mejor el viernes» carries a day
 	// and is a CORRECTION since AGENDA-ASISTENTE-S1: it re-issues the
 	// confirmation instead — pinned in pkg/ask.)
-	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "pagar la luz para mañana"}, http.StatusOK)
+	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "necesito pagar la luz para mañana"}, http.StatusOK)
 	if got["kind"] != "confirm" || got["source"] != "cache" {
 		t.Fatalf("third order from the cache: %v", got)
 	}
@@ -289,7 +291,7 @@ func TestAskWrite_PlanCachedNeverTheResult_AndStrayYesCostsNothing(t *testing.T)
 	}
 	// 4. Another user of the same role does NOT inherit the write plan.
 	other := tok("dueno", askU2)
-	got = dpDo(t, rest, "POST", "/api/ask", other, map[string]any{"q": "pagar la luz para mañana"}, http.StatusOK)
+	got = dpDo(t, rest, "POST", "/api/ask", other, map[string]any{"q": "necesito pagar la luz para mañana"}, http.StatusOK)
 	if got["source"] != "model" || modelCalls() != 2 {
 		t.Fatalf("another user's order is planned anew: %v (calls %d)", got, modelCalls())
 	}

@@ -126,6 +126,43 @@ differ («acordate de» / «acuérdate de», «ponelo» / «ponlo», «hacelo» 
 nobody asked for; an owner who wants «usted» is the moment for it (VOZ-25).
 Decision A-85.
 
+#### 2d. A log looks back; a note «con Nombre» is text with a soft link
+
+The owner's next real questions (2026-09-25): «registros del martes» was
+read as a proper name («martes» tried against every relation → «¿cuál?»),
+«qué anoté el martes» as the COMING Tuesday, and «registros del 23 de
+septiembre» as a name too. A log records what happened, so it has no coming
+Tuesday: on a resource whose period target LOOKS BACK — a time range that
+does not block (`no_overlap` absent) or the creation stamp — a weekday is the
+past one (`last_<weekday>`, strictly before today), a date with no year is
+the one that already happened (`past_date:MM-DD`: this year, else the
+previous; February 29 → the last leap year), a month with no year the same
+(`past_month:MM`, the month in progress counts). The agenda keeps looking
+forward (`next_<weekday>`; `date:MM-DD` is the NEXT occurrence, today
+included — «agenda X el 3 de enero» said in September is the coming
+January); an explicit year is always taken as said. `lookBack` (dates.go) applies the rule to the parser's
+plan and to the model's (execute), so both doors agree; the reply names the
+day it read («el martes pasado (mar 22 sep)», «el miércoles 23 de septiembre
+de 2025»), and the year is spoken in words. No domain word decides it — the
+schema's shape does. A date is read as a person says it («el 23 de
+septiembre», «23/09», «veintitrés de septiembre», «treinta y uno de
+diciembre», «primero de octubre»), and an impossible one («31 de febrero»)
+is named at zero cost instead of becoming a name. The same reader serves the
+writes («anota que el 23 de septiembre trabajé…» → the note's past date; «para
+el 30 de septiembre» → a task's deadline this year). «Qué hice / qué pasó /
+qué hicimos» ask the log like «qué anoté».
+
+The same day: «anota que me reuní con Camilo de 4 a 5» died on «No encuentro
+«Camilo» como área, compromiso, persona o tarea» — the person was a HARD
+reference tried against four targets. On the note, «con Nombre» is the TEXT
+of the log and a SOFT reference (`Soft` + `InTitle`): linked when the person
+exists, the note written either way with its full text. And a note's text is
+kept as said — «se fue la luz», «me llamó el contador» — the leading pronoun
+or article is the sentence, not a function word to drop (the other resources
+keep dropping «la»/«el» before a title). The dictation tail now counts a
+first-person past in «-í» («me reuní», «salí», «escribí») as the past tense
+it is, so the verb Siri swallows no longer sends the sentence to the model.
+
 ### 3. A correction on a pending write re-issues the confirmation; it never executes it
 
 «no, mejor el viernes», «mejor a las 5», «sí pero urgente», «que sea con

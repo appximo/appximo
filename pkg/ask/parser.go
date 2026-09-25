@@ -129,6 +129,11 @@ var periodPhrases = []struct {
 	{"pasado manana", "day_after_tomorrow"}, {"de manana", "tomorrow"}, {"manana", "tomorrow"},
 	{"la semana que viene", "next_week"}, {"semana que viene", "next_week"}, {"la proxima semana", "next_week"}, {"proxima semana", "next_week"},
 	{"el lunes", "next_monday"}, {"el martes", "next_tuesday"}, {"el miercoles", "next_wednesday"}, {"el jueves", "next_thursday"}, {"el viernes", "next_friday"}, {"el sabado", "next_saturday"}, {"el domingo", "next_sunday"},
+	// «del martes» = «el martes»; «el martes pasado» / «del martes pasado» look back; «el martes que viene» / «el próximo martes» look forward, said so.
+	{"del lunes", "next_monday"}, {"del martes", "next_tuesday"}, {"del miercoles", "next_wednesday"}, {"del jueves", "next_thursday"}, {"del viernes", "next_friday"}, {"del sabado", "next_saturday"}, {"del domingo", "next_sunday"},
+	{"el lunes pasado", "last_monday"}, {"del lunes pasado", "last_monday"}, {"lunes pasado", "last_monday"}, {"el martes pasado", "last_tuesday"}, {"del martes pasado", "last_tuesday"}, {"martes pasado", "last_tuesday"}, {"el miercoles pasado", "last_wednesday"}, {"del miercoles pasado", "last_wednesday"}, {"miercoles pasado", "last_wednesday"}, {"el jueves pasado", "last_thursday"}, {"del jueves pasado", "last_thursday"}, {"jueves pasado", "last_thursday"}, {"el viernes pasado", "last_friday"}, {"del viernes pasado", "last_friday"}, {"viernes pasado", "last_friday"}, {"el sabado pasado", "last_saturday"}, {"del sabado pasado", "last_saturday"}, {"sabado pasado", "last_saturday"}, {"el domingo pasado", "last_sunday"}, {"del domingo pasado", "last_sunday"}, {"domingo pasado", "last_sunday"},
+	{"del lunes que viene", "next_monday"}, {"del lunes proximo", "next_monday"}, {"del martes que viene", "next_tuesday"}, {"del martes proximo", "next_tuesday"}, {"del miercoles que viene", "next_wednesday"}, {"del miercoles proximo", "next_wednesday"}, {"del jueves que viene", "next_thursday"}, {"del jueves proximo", "next_thursday"}, {"del viernes que viene", "next_friday"}, {"del viernes proximo", "next_friday"}, {"del sabado que viene", "next_saturday"}, {"del sabado proximo", "next_saturday"}, {"del domingo que viene", "next_sunday"}, {"del domingo proximo", "next_sunday"},
+	{"el lunes que viene", "next_monday"}, {"el proximo lunes", "next_monday"}, {"del proximo lunes", "next_monday"}, {"el lunes proximo", "next_monday"}, {"el martes que viene", "next_tuesday"}, {"el proximo martes", "next_tuesday"}, {"del proximo martes", "next_tuesday"}, {"el martes proximo", "next_tuesday"}, {"el miercoles que viene", "next_wednesday"}, {"el proximo miercoles", "next_wednesday"}, {"del proximo miercoles", "next_wednesday"}, {"el miercoles proximo", "next_wednesday"}, {"el jueves que viene", "next_thursday"}, {"el proximo jueves", "next_thursday"}, {"del proximo jueves", "next_thursday"}, {"el jueves proximo", "next_thursday"}, {"el viernes que viene", "next_friday"}, {"el proximo viernes", "next_friday"}, {"del proximo viernes", "next_friday"}, {"el viernes proximo", "next_friday"}, {"el sabado que viene", "next_saturday"}, {"el proximo sabado", "next_saturday"}, {"del proximo sabado", "next_saturday"}, {"el sabado proximo", "next_saturday"}, {"el domingo que viene", "next_sunday"}, {"el proximo domingo", "next_sunday"}, {"del proximo domingo", "next_sunday"}, {"el domingo proximo", "next_sunday"},
 }
 
 func init() {
@@ -231,7 +236,11 @@ func dictationTail(question string, v *Vocabulary) ParseResult {
 	probe := tokenize(question)
 	day, hint := consumeDayPart(probe)
 	span, hasSpan := consumeTimeSpanHint(probe, hint)
-	if !leadingQue && !infinitiveLead && !hasPreterite(toks) && !(hasSpan && span.end >= 0 && day != "") {
+	// a verb-less span on a day to come («bloqueá mañana de 2 a 4 para
+	// estudiar») is an order for the agenda, never a note: a log has no
+	// tomorrow (the corpus caught it as a confirmed registro)
+	futureDay := day == "tomorrow" || day == "day_after_tomorrow" || day == "next_week"
+	if !leadingQue && !infinitiveLead && !hasPreterite(toks) && !(hasSpan && span.end >= 0 && day != "" && !futureDay) {
 		return ParseResult{Reason: "tail: not a «que» sentence nor a past-tense one"}
 	}
 	nr := noteResource(v)
@@ -279,12 +288,16 @@ func dictationTail(question string, v *Vocabulary) ParseResult {
 }
 
 // notedVerbs are the create verbs in the first person past («anoté»,
+// «qué hice el martes», «qué pasó el 23 de septiembre» — a log is asked by what happened),
 // «registré»): what a person asks back («qué anoté ayer»).
-var notedVerbs = set("anote", "registre", "apunte", "guarde", "note")
+var notedVerbs = set("anote", "registre", "apunte", "guarde", "note", "hice", "hicimos", "paso")
 
 // preteriteForms are the common irregular past forms; regular ones end in
 // an accented «é» / «ó» («hablé», «terminó») — Spanish morphology, no
 // domain word.
+// preteriteNotVerbs are the common words in «-í» that are not a past tense.
+var preteriteNotVerbs = map[string]bool{"aquí": true, "allí": true, "ahí": true, "así": true}
+
 var preteriteForms = set("estuvo", "estuve", "estuvimos", "fue", "fui", "fuimos", "tuvo", "tuve", "tuvimos", "hubo", "hizo", "hice", "hicimos", "vino", "vine", "dijo", "dije", "pudo", "pude", "puso", "puse", "quiso", "quise", "supo", "supe", "anduvo", "anduve", "trajo", "traje", "dio", "di", "vio", "vi")
 
 // hasPreterite reports a past-tense verb in the sentence.
@@ -295,6 +308,13 @@ func hasPreterite(toks []token) bool {
 		}
 		r := strings.ToLower(t.raw)
 		if len([]rune(r)) >= 4 && (strings.HasSuffix(r, "ó") || strings.HasSuffix(r, "é")) && r != "qué" {
+			return true
+		}
+		// «reuní», «salí», «escribí»: the first person of an -er/-ir verb
+		// ends in «-í» — the owner's own «me reuní con Camilo de 4 a 5»
+		// (2026-09-25) fell to the model for want of it. The adverbs that
+		// end the same way are not verbs.
+		if len([]rune(r)) >= 4 && strings.HasSuffix(r, "í") && !preteriteNotVerbs[r] {
 			return true
 		}
 		if strings.HasSuffix(t.norm, "aron") || strings.HasSuffix(t.norm, "ieron") {
@@ -380,8 +400,20 @@ func parseInner(question string, v *Vocabulary) ParseResult {
 		}
 	}
 
-	// 1. period phrases (multi-word first) — consume tokens.
+	// 1. period phrases (multi-word first) — consume tokens. A date («del 23
+	// de septiembre», «23/09») or a month said alone («de septiembre») is a
+	// period too (dates.go); a weekday («el martes», «del martes») is read
+	// forward here and turned back once the resource is known (lookBack: a
+	// log has no coming Tuesday).
 	var period *Period
+	// the date/month first: «del mes de agosto» is the month, not «del mes»
+	if tok, bad := scanDate(toks); bad != "" {
+		return ParseResult{Plan: Plan{Kind: "unclear", Reason: "«" + bad + "» no es una fecha"}, Sure: true}
+	} else if tok != "" {
+		period = &Period{Range: tok}
+	} else if tok, ok := scanMonth(toks, v); ok {
+		period = &Period{Range: tok}
+	}
 	joined := joinedNorms(toks)
 	for _, pp := range periodPhrases {
 		if !strings.Contains(joined, " "+pp.phrase+" ") {
@@ -776,6 +808,7 @@ func parseInner(question string, v *Vocabulary) ParseResult {
 			}
 		}
 	}
+	lookBack(res, period)
 	p := Plan{Kind: op, Resource: res.Name, Filters: filters, Period: period, GroupBy: groupBy, Limit: limit}
 	if op == "list" && groupBy != "" {
 		// "cuáles … por estado" reads as a breakdown: count by the field.
@@ -1380,6 +1413,15 @@ func hasExecutableWord(toks []token, v *Vocabulary) bool {
 		if futureRange(pp.token) && !agenda {
 			continue
 		}
+		return true
+	}
+	// a date or a month said alone is a period («qué hice el 23 de septiembre»)
+	probe := make([]token, len(toks))
+	copy(probe, toks)
+	if tok, bad := scanDate(probe); tok != "" || bad != "" {
+		return true
+	}
+	if _, ok := scanMonth(probe, v); ok {
 		return true
 	}
 	return false

@@ -2287,7 +2287,19 @@ every provocation reply; the box has no synthesizer, the criterion is the
 metric). VOZ-15 stays as the written rule with corpus evidence (25 bare hours,
 all afternoon-consistent); the confirmation says «de la tarde». The sentence
 bank (151 phrases, 31 verbatim from the real history) is the regression
-instrument: `evidencia/AGENDA-ASISTENTE-S1/corpus/`.
+instrument: `evidencia/AGENDA-ASISTENTE-S1/corpus/`. **A log looks back
+(2026-09-25, `pkg/ask/dates.go`):** on a resource whose period target records
+what happened (a range without `no_overlap`, or the creation stamp) a weekday
+is the PAST one («registros del martes», «qué hice el martes» →
+`last_tuesday`), a date needs no year («del 23 de septiembre», «23/09»,
+«veintitrés de septiembre» → `past_date:09-23`: this year, else the one that
+already happened; with a year, `date:2025-09-23`) and a month alone is a
+period («de septiembre» → `past_month:09`); the agenda keeps looking forward
+(`next_*`, `date:MM-DD`); an impossible date («31 de febrero») is named at
+US$ 0; `lookBack` applies the rule to the parser's AND the model's plan. On
+the NOTE, «con Nombre» is text plus a SOFT link (written either way), the
+text is kept as said («se fue la luz»), and a first-person past in «-í»
+(«me reuní») counts for the dictation tail.
 
 ## Questions in plain language (VOZ-PREGUNTAS-S1, ADR-033)
 
