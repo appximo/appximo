@@ -179,6 +179,23 @@ link, and an unknown name deserves the answer, not a title. «El día de
 mañana» / «el día de ayer» joined the day phrases on both sides (the read
 period and the write token); before, «el día de» stayed in the title.
 
+#### 2f. A noun is a title too, after the SINGULAR word of a work item
+
+«Tarea razón social para óptimo día mañana urgente» (the owner, the same
+night) fell to the model — and his credit was out — because the resource-first
+create demanded a colon or an INFINITIVE after the resource word («tarea
+lavar el carro»). A noun phrase is a title as well, so the singular word now
+opens a create when the next word is none of the ones that make a sentence a
+QUESTION: a stopword or preposition («tarea de Fabián»), an operation word, a
+time word, a clock, or anything the schema knows («tarea pendiente», «tarea
+urgente»). It applies only to a WORK ITEM — a resource with a lifecycle or a
+time of its own (`isWorkItem`: a state machine, or a non-auto `time` field) —
+never to a catalogue of names: the phrase bank caught «persona esposa»
+turning into a new person, and «área empresa» with it. Referencing a row by
+name and creating a work item by dictating its title are different acts, and
+the schema already says which resource is which. Bank: 137/151 hits, parser
+131 (was 130), nothing lost.
+
 ### 3. A correction on a pending write re-issues the confirmation; it never executes it
 
 «no, mejor el viernes», «mejor a las 5», «sí pero urgente», «que sea con

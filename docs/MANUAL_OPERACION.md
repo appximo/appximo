@@ -861,6 +861,16 @@ suelto: «crear tarea: revisar, con Marta» dicho como dato aparte sigue
 preguntando si Marta no existe — ahí el nombre es un enlace declarado, no
 texto.
 
+**Cuando el título no es una acción, empieza con la palabra del recurso.**
+«Tarea razón social mañana urgente» crea la tarea «razón social» para mañana
+marcada urgente; antes el motor exigía un verbo después de «tarea» («tarea
+llamar al contador») y un título que es un sustantivo se iba al modelo (y si
+el crédito está agotado, no se creaba nada). Vale para lo que tiene fecha o
+estado propio: tarea, compromiso, registro. NO vale para un catálogo de
+nombres: «persona esposa» y «área empresa» siguen siendo preguntas por esa
+fila, no órdenes de crearla. Y una pregunta sigue siendo pregunta: «tarea
+pendiente», «tarea urgente», «tareas de Fabián», «tareas de hoy».
+
 **Con alguien.** «Anota que me reuní con Camilo de 4 a 5» guarda el texto
 completo («me reuní con Camilo») y, si Camilo está en personas, lo enlaza; si
 no está, el registro se guarda igual, con su texto — antes el motor se

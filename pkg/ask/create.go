@@ -135,6 +135,19 @@ func parseCreate(question string, v *Vocabulary) ParseResult {
 			if !ok && res.Range() != nil && res == agendaResource(v) && isSingularForm(res, toks[j].norm) && verblessSchedule(toks[i:]) {
 				ok = true
 			}
+			// «tarea razón social mañana urgente»: the SINGULAR word names
+			// the thing being created, so a title that is not an action is
+			// still a title — what the owner dictated when the title is a
+			// noun (2026-09-25). Guarded by the same words that make a
+			// sentence a QUESTION: a stopword or preposition («tarea de
+			// Fabián»), an operation word, a time word, a clock, or anything
+			// the schema knows («tarea pendiente») keeps its old reading.
+			if !ok && i < len(toks) && res.CanCreate && titleField(res) != nil && isSingularForm(res, toks[j].norm) && isWorkItem(res) {
+				n := toks[i].norm
+				if !stopwords[n] && !prepositions[n] && !isOpWord(n) && !isTimeWord(n) && !v.knownWord(n) && !hourRe.MatchString(n) && !gluedRe.MatchString(n) {
+					ok = true
+				}
+			}
 			if !ok {
 				return ParseResult{Reason: "create: resource first without a colon"}
 			}
@@ -902,6 +915,23 @@ func titleWords(seg []ctok, v *Vocabulary, res *Resource, data map[string]any, r
 
 // isOpWord reports whether a word is an operation of the read grammar (list,
 // count, sum…) — never the start of a to-do («listar compromisos»).
+// isWorkItem reports whether the resource is something the owner CREATES by
+// dictating its title — it has a lifecycle or a time of its own (a task, an
+// appointment, a log entry) — as opposed to a catalogue of names (people,
+// areas, tags), where «persona esposa» means THAT person, not a new one. A
+// creation stamp does not count: every row has one.
+func isWorkItem(res *Resource) bool {
+	for _, f := range res.Fields {
+		if f.HasMachine {
+			return true
+		}
+		if f.Type == "time" && !f.Auto {
+			return true
+		}
+	}
+	return false
+}
+
 func isOpWord(n string) bool {
 	return listWords[n] || countWords[n] || sumWords[n] || avgWords[n] || lastWords[n] || summaryWords[n]
 }

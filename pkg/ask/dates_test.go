@@ -310,3 +310,38 @@ func TestName_InNoTableKeepsTheWordsAndWritesAnyway(t *testing.T) {
 		t.Fatalf("cancel: %s", c.Kind)
 	}
 }
+
+// The singular resource word names the thing being created, even when the
+// title is NOT an action (addendum 5c, 2026-09-25): the owner dictated
+// «tarea razón social para óptimo día mañana urgente» and it fell to the
+// model (which was out of credit) because the create path demanded an
+// infinitive after the resource word. A noun is a title too. The words that
+// make a sentence a QUESTION keep their old reading.
+func TestCreate_ANounTitleAfterTheSingularResourceWord(t *testing.T) {
+	v := miguelVocab()
+	for q, want := range map[string]map[string]any{
+		"tarea razón social mañana urgente":                {"titulo": "razón social", "vence_en": "tomorrow", "urgente": true},
+		"tarea razón social para el día de mañana urgente": {"titulo": "razón social", "vence_en": "tomorrow", "urgente": true},
+		"tarea razón social":                               {"titulo": "razón social"},
+		"compromiso razón social mañana a las 4":           {"titulo": "razón social", "inicio": "tomorrow 16:00"},
+	} {
+		pr := Parse(q, v)
+		if !pr.Sure || pr.Plan.Kind != "create" {
+			t.Errorf("%q: sure=%v kind=%s (%s)", q, pr.Sure, pr.Plan.Kind, pr.Reason)
+			continue
+		}
+		for k, val := range want {
+			if pr.Plan.Data[k] != val {
+				t.Errorf("%q: %s = %v, want %v", q, k, pr.Plan.Data[k], val)
+			}
+		}
+	}
+	// a QUESTION stays a question: a stopword or preposition, an operation
+	// word, a time word, a clock or a word the schema knows
+	for _, q := range []string{"tareas de Norberto", "tarea de Fabián", "tarea pendiente", "tarea urgente", "tareas urgentes",
+		"tareas de hoy", "tareas del martes", "tareas", "cuántas tareas hay", "los últimos 3 compromisos", "qué tengo mañana"} {
+		if pr := Parse(q, v); !pr.Sure || pr.Plan.IsWrite() {
+			t.Errorf("%q became a write: %+v (%s)", q, pr.Plan, pr.Reason)
+		}
+	}
+}

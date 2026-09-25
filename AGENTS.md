@@ -2305,7 +2305,12 @@ it took (`Ref.Words`) — a known person is the link with the title unchanged,
 an unknown one puts «con Norberto» back into the title and the row is
 written; a name said as its own datum segment («crear tarea: revisar, con
 Marta») stays hard. «El día de mañana» / «el día de ayer» are day phrases on
-both sides.
+both sides. **A noun is a title too:** the SINGULAR resource word opens a
+create («tarea razón social mañana urgente») when the next word is not a
+stopword/preposition/operation/time word/clock or a word the schema knows
+(«tarea pendiente» stays a question) — only on a WORK ITEM (`isWorkItem`: a
+state machine or a non-auto time field), never on a catalogue of names
+(«persona esposa», «área empresa» are reads).
 
 ## Questions in plain language (VOZ-PREGUNTAS-S1, ADR-033)
 
