@@ -573,3 +573,42 @@ func TestGroupByRelation_AndQueIsAQuestion(t *testing.T) {
 		t.Errorf("grouped speech: %q", r.Speech)
 	}
 }
+
+// The owner's real sentences of 2026-09-25 11:45: the guide answers the
+// infinitive «cómo crear una tarea»; an infinitive with a clitic is a title
+// («tarea decirle a mi esposa …»); a sentence that opens with an infinitive
+// is a to-do said without its verb («pedir video de Máximo Brasil»).
+func TestInfinitiveLead_AndGuideInfinitive(t *testing.T) {
+	s := miguelAgendaSchema()
+	v := BuildWithWrites(s, "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
+	if topic, res := guideTopic(tokenize("Cómo crear una tarea"), v); topic != "create" || res != "tareas" {
+		t.Errorf("«cómo crear una tarea» → guide create tareas, got %q %q", topic, res)
+	}
+	for q, title := range map[string]string{
+		"tarea decirle a mi esposa que me mande el video cuando llegamos de Brasil": "decirle a mi esposa que me mande el video cuando llegamos de Brasil",
+		"pedir video de Máximo Brasil":                                              "pedir video de Máximo Brasil",
+		"pagar la luz mañana":                                                       "pagar la luz",
+		"llamar al contador urgente":                                                "llamar al contador",
+	} {
+		pr := Parse(q, v)
+		if !pr.Sure || pr.Plan.Kind != "create" || pr.Plan.Resource != "tareas" {
+			t.Errorf("%q: want a to-do, got sure=%v %s %s (%s)", q, pr.Sure, pr.Plan.Kind, pr.Plan.Resource, pr.Reason)
+			continue
+		}
+		if got, _ := pr.Plan.Data["titulo"].(string); got != title {
+			t.Errorf("%q: titulo %q, want %q", q, got, title)
+		}
+	}
+	if pr := Parse("pagar la luz mañana", v); pr.Plan.Data["vence_en"] != "tomorrow" {
+		t.Errorf("the day rides along: %v", pr.Plan.Data)
+	}
+	if pr := Parse("llamar al contador urgente", v); pr.Plan.Data["urgente"] != true {
+		t.Errorf("the flag rides along: %v", pr.Plan.Data)
+	}
+	// reads and orders stay what they are
+	for _, q := range []string{"ver tareas de hoy", "listar compromisos", "cuántas tareas hay", "borrar las tareas viejas", "marca como hecha la tarea del techo"} {
+		if pr := Parse(q, v); pr.Sure && pr.Plan.Kind == "create" {
+			t.Errorf("%q must not become a to-do: %+v", q, pr.Plan)
+		}
+	}
+}

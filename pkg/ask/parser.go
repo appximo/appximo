@@ -203,11 +203,11 @@ func Parse(question string, v *Vocabulary) ParseResult {
 // dictationTail reads a verb-less «que …» sentence as the note («anotá que
 // …») when it has the shape of a log entry: see Parse.
 func dictationTail(question string, v *Vocabulary) ParseResult {
-	if v == nil || !v.Writable() || noteResource(v) == nil {
-		return ParseResult{Reason: "tail: no note resource"}
+	if v == nil || !v.Writable() || (noteResource(v) == nil && taskResource(v) == nil) {
+		return ParseResult{Reason: "tail: no note or to-do resource"}
 	}
 	toks := tokenize(question)
-	if len(toks) < 3 {
+	if len(toks) < 2 {
 		return ParseResult{Reason: "tail: too short"}
 	}
 	// the tail starts with «que» (the swallowed verb's complement) — or has
@@ -217,6 +217,9 @@ func dictationTail(question string, v *Vocabulary) ParseResult {
 		return ParseResult{Reason: "tail: a question («qué …»)"}
 	}
 	leadingQue := toks[0].norm == "que"
+	// «pedir video de Máximo», «pagar la luz mañana»: a sentence that opens
+	// with an infinitive is a to-do said without its verb of order
+	infinitiveLead := looksInfinitive(toks[0].norm) && !listWords[toks[0].norm] && !countWords[toks[0].norm] && !deleteVerbs[toks[0].norm] && !writeVerbs[toks[0].norm] && taskResource(v) != nil
 	body := toks
 	if leadingQue {
 		body = toks[1:]
@@ -228,17 +231,18 @@ func dictationTail(question string, v *Vocabulary) ParseResult {
 	probe := tokenize(question)
 	day, hint := consumeDayPart(probe)
 	span, hasSpan := consumeTimeSpanHint(probe, hint)
-	if !leadingQue && !hasPreterite(toks) && !(hasSpan && span.end >= 0 && day != "") {
+	if !leadingQue && !infinitiveLead && !hasPreterite(toks) && !(hasSpan && span.end >= 0 && day != "") {
 		return ParseResult{Reason: "tail: not a «que» sentence nor a past-tense one"}
 	}
 	nr := noteResource(v)
+	tr := taskResource(v)
 	for _, t := range body {
 		n := t.norm
 		if countWords[n] || listWords[n] || lastWords[n] || deleteVerbs[n] || writeVerbs[n] || createVerbs[n] || scheduleVerbs[n] || transitionVerbs[n] || freeWords[n] {
 			return ParseResult{Reason: "tail: an operation word (" + n + ")"}
 		}
-		if fieldByWord(v, nr, n) != nil {
-			continue // «área trabajo», «persona Marta»: a datum of the note, not a subject
+		if (nr != nil && fieldByWord(v, nr, n) != nil) || (tr != nil && fieldByWord(v, tr, n) != nil) {
+			continue // «área trabajo», «persona Marta»: a datum, not a subject
 		}
 		for _, name := range v.order {
 			if v.namesResource(n, v.resources[name]) {
@@ -248,6 +252,18 @@ func dictationTail(question string, v *Vocabulary) ParseResult {
 	}
 	// the shape of a log entry: a clock span, or something that HAPPENED (a
 	// past-tense verb) on a named day or part of a day
+	if infinitiveLead {
+		// the to-do: «anota pedir video de Máximo» — the infinitive is the
+		// title, a day or «urgente» ride along like in any create
+		pr := parseCreate("anota "+question, v)
+		if !pr.Sure || pr.Plan.Resource != tr.Name {
+			return ParseResult{Reason: "tail: " + pr.Reason}
+		}
+		return pr
+	}
+	if nr == nil {
+		return ParseResult{Reason: "tail: no note resource"}
+	}
 	if !hasSpan && !(day != "" && hasPreterite(toks)) {
 		return ParseResult{Reason: "tail: no clock span"}
 	}
@@ -256,7 +272,7 @@ func dictationTail(question string, v *Vocabulary) ParseResult {
 		lead = "anota que "
 	}
 	pr := parseCreate(lead+question, v)
-	if !pr.Sure || pr.Plan.Resource != noteResource(v).Name {
+	if !pr.Sure || pr.Plan.Resource != nr.Name {
 		return ParseResult{Reason: "tail: " + pr.Reason}
 	}
 	return pr
@@ -1654,6 +1670,15 @@ func looksInfinitive(w string) bool {
 	}
 	if w == "ir" {
 		return true
+	}
+	// an infinitive with a clitic («decirle», «mandarme», «decírselo»)
+	for _, cl := range []string{"selo", "sela", "selos", "selas", "melo", "mela", "telo", "tela", "me", "te", "se", "le", "lo", "la", "nos", "les", "los", "las"} {
+		if strings.HasSuffix(w, cl) && len(w) > len(cl)+3 {
+			base := strings.TrimSuffix(w, cl)
+			if strings.HasSuffix(base, "ar") || strings.HasSuffix(base, "er") || strings.HasSuffix(base, "ir") {
+				return true
+			}
+		}
 	}
 	if len(w) < 4 {
 		return false
