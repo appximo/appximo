@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790376939828,
+  "lastUpdate": 1790378054028,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -8064,6 +8064,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36733964 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "4c69af89f72b5399baa92dfa5f1a8ba5c9482122",
+          "message": "feat(ask): a noun is a title too — «tarea razón social mañana urgente» creates the task, on a work item and never on a catalogue of names (AGENDA-ASISTENTE-S1 addendum 5c)\n\nThe owner dictated «tarea razón social para óptimo día mañana urgente» and it\nfell to the model — with his credit out, nothing was created — because the\nresource-first create demanded a colon or an INFINITIVE after the resource\nword («tarea lavar el carro»). A noun phrase is a title as well: the SINGULAR\nword now opens a create when the next word is none of the ones that make a\nsentence a question (a stopword or preposition, an operation word, a time\nword, a clock, or anything the schema knows — «tarea pendiente», «tarea\nurgente», «tareas de Fabián» keep their reading).\n\nIt applies only to a WORK ITEM — a resource with a lifecycle or a time of its\nown (isWorkItem: a state machine, or a non-auto time field). The phrase bank\ncaught the first attempt turning «persona esposa» into a NEW person, and\n«área empresa» with it: referencing a catalogue row by name and creating a\nwork item by dictating its title are different acts, and the schema already\nsays which resource is which.\n\nBank: 137/151 hits, parser-settled 131 (was 130), nothing lost, the 14 misses\nall the model without credit. Full lane green; gate 200 cases, 197 same, 3\ndiff (the random pending_id + expires_in, the row order over random ids, and\nthe timing-flaky admission probe).\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-25T23:12:58Z",
+          "tree_id": "6554902ae18f3e1a62d8e40e02a634ac9000cf3e",
+          "url": "https://github.com/appximo/appximo/commit/4c69af89f72b5399baa92dfa5f1a8ba5c9482122"
+        },
+        "date": 1790378052936,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6086,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "389887 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6086,
+            "unit": "ns/op",
+            "extra": "389887 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "389887 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "389887 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 66.67,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36935986 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 66.67,
+            "unit": "ns/op",
+            "extra": "36935986 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36935986 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36935986 times\n4 procs"
           }
         ]
       }
