@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790354341759,
+  "lastUpdate": 1790354609438,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -7704,6 +7704,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36263840 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "47c852e1deb2b5b9956c3ddfe8a2e326611ad68c",
+          "message": "fix(ask): a verb-less dictation with a full time span on a named day is a note even when the accent of the past tense was dropped («trabaje en el flujo… el lunes de ocho a ocho de la tarde»)\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-25T16:42:10Z",
+          "tree_id": "621588e7248b243312bb51eccc08ed90d0f7f67f",
+          "url": "https://github.com/appximo/appximo/commit/47c852e1deb2b5b9956c3ddfe8a2e326611ad68c"
+        },
+        "date": 1790354607307,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 4816,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "491097 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 4816,
+            "unit": "ns/op",
+            "extra": "491097 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "491097 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "491097 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 51.54,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "47523771 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 51.54,
+            "unit": "ns/op",
+            "extra": "47523771 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "47523771 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "47523771 times\n4 procs"
           }
         ]
       }
