@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790355029717,
+  "lastUpdate": 1790365733710,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -7848,6 +7848,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36710371 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "a71a8e0d4bf468a0f9b605626a2e283b6e679d49",
+          "message": "feat(ask): a log looks back — «registros del martes» is the past Tuesday, a date needs no year («del 23 de septiembre», «23/09»), a month alone is a period; on a note «con Camilo» is text with a soft link and the text stays as said (AGENDA-ASISTENTE-S1 addendum 5, decision A-86)\n\nThe owner's real questions on the 58 (2026-09-25): «registros del martes»\nwas read as a proper name («¿cuál?»), «qué anoté el martes» as the COMING\nTuesday (empty), and a date was not a period at all. A log records what\nhappened, so on a resource whose period target looks back — a time range\nwithout no_overlap, or the creation stamp — a weekday is the past one\n(last_<weekday>), a date with no year is the one that already happened\n(past_date:MM-DD; February 29 → the last leap year), a month alone the most\nrecent one (past_month:MM). The agenda keeps looking forward (next_*,\ndate:MM-DD = the coming occurrence); an explicit year is taken as said.\nlookBack (pkg/ask/dates.go) applies the rule to the parser's plan AND the\nmodel's, the reply names the day it read, and a year is spoken in words.\nDates as a person says them («el 23 de septiembre [de 2025]», «23/09»,\n«veintitrés de septiembre», «treinta y uno de diciembre», «primero de\noctubre», «del mes de agosto»); an impossible one («31 de febrero») is named\nat US$ 0 instead of becoming a name. «qué hice / qué pasó / qué hicimos» ask\nthe log; the guide teaches the forms; the follow-up value reader and the\nwrites take a date too («anota que el 23 de septiembre trabajé…», «para el\n30 de septiembre»). No domain word decides any of it — the schema's shape does.\n\n«Anota que me reuní con Camilo de 4 a 5» died on «No encuentro «Camilo» como\nárea, compromiso, persona o tarea»: on the note, «con Nombre» is now the\ntext of the log plus a SOFT reference (linked when the person exists,\nwritten either way), the note text is kept verbatim («se fue la luz», «me\nllamó el contador» — the leading pronoun/article was being dropped), and a\nfirst-person past in «-í» («me reuní», «salí») counts for the dictation tail\n(the verb Siri swallows no longer sends the sentence to the model).\n\nThe corpus caught «bloqueá mañana de 2 a 4 para estudiar» CONFIRMED as a\nregistro for tomorrow (a regression of 47c852e nobody had measured): a\nverb-less span on a day to come is never a note, and «bloquear»/«apartar»\nare schedule verbs → the right compromiso, at US$ 0. Bank: parser-settled\n130/130 (was 126), nothing lost. Two integration tests pinned to the MODEL\npath used phrases the parser settles since 68bb16c («Llamar a Fabián…»,\n«pagar la luz para mañana»); they now use phrases only the model plans.\nGate: 200 cases, 197 same, 3 diff explained in the session report (a random\npending_id, a random row order, the timing-flaky admission probe). VOZ-26\nopened (a follow-up date answer is not read in the resource's direction).\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-25T19:47:28Z",
+          "tree_id": "99f5e830e54bd1a3dbb0f81ca0bddf7aadec6a58",
+          "url": "https://github.com/appximo/appximo/commit/a71a8e0d4bf468a0f9b605626a2e283b6e679d49"
+        },
+        "date": 1790365732478,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6272,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "362250 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6272,
+            "unit": "ns/op",
+            "extra": "362250 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "362250 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "362250 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 71.21,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36447999 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 71.21,
+            "unit": "ns/op",
+            "extra": "36447999 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36447999 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36447999 times\n4 procs"
           }
         ]
       }
