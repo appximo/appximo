@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/appximo/appximo/pkg/schema"
 )
 
 // A log looks back (AGENDA-ASISTENTE-S1 addendum, 2026-09-25): on the
@@ -229,5 +231,36 @@ func TestTail_NeverANoteForTomorrow(t *testing.T) {
 		if pr := Parse(q, v); pr.Sure && pr.Plan.Resource == "registros" {
 			t.Errorf("%q read as a note: %v", q, pr.Plan.Data)
 		}
+	}
+}
+
+// A timezone column is the range's zone, never a label: on the 58 every
+// registro read aloud ended in «America/Bogota» because `zona` (a string
+// with format timezone) was the note's second label field.
+func TestLabelFields_SkipATimezoneColumn(t *testing.T) {
+	s := &schema.APISchema{
+		Schema: "https://appximo.com/schema/v1", Version: "1", Name: "Agenda",
+		Resources: map[string]schema.ResourceSchema{
+			"registros": {
+				Fields: map[string]schema.FieldDef{
+					"texto":  {Type: "text", Required: true},
+					"zona":   {Type: "string", Format: "timezone", Default: "America/Bogota"},
+					"cuando": {Type: "time", Default: "now"},
+					"hasta":  {Type: "time"},
+				},
+				Ranges: map[string]schema.RangeDef{"lapso": {Start: "cuando", End: "hasta"}},
+			},
+		},
+	}
+	v := BuildWithWrites(s, "Agenda", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
+	r := v.Resource("registros")
+	if lf := r.LabelFields(); len(lf) != 1 || lf[0] != "texto" {
+		t.Fatalf("label fields: %v", lf)
+	}
+	e := &memExec{rows: map[string][]map[string]any{"registros": {{"id": "r1", "texto": "trabajé en el flujo de seguros", "zona": "America/Bogota", "cuando": "2026-09-19T13:00:00Z", "hasta": "2026-09-19T14:00:00Z"}}}}
+	d := Deps{Vocab: v, Exec: e, Now: now, Write: &memWriter{exec: e}, Pending: NewPendingStore(), PendingKey: "t|dueno|u1", Guide: NewGuideStore(), GuideKey: "t|dueno|u1", ModelOff: "disabled"}
+	out := Answer(context.Background(), d, "registros")
+	if out.Kind != "answer" || strings.Contains(out.Text, "America/Bogota") || strings.Contains(out.Speech, "America") || !strings.Contains(out.Speech, "trabajé en el flujo de seguros") {
+		t.Fatalf("zone read out: %s | %s | %s", out.Kind, out.Text, out.Speech)
 	}
 }

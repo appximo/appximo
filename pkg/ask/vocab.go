@@ -22,6 +22,9 @@ type Field struct {
 	// (the digest's attention states); Terminal the states with no way out.
 	Pending, Terminal []string
 	HasMachine        bool
+	// Format is the declared string format («timezone», «email», …): a
+	// timezone column is the range's zone, never a value a reply reads out.
+	Format string
 	// IsCreated marks the resource's creation timestamp (auto:"create").
 	IsCreated bool
 	// IsUpdated marks the modification timestamp (auto:"update").
@@ -234,7 +237,9 @@ func (r *Resource) GroupableFieldList() string {
 func (r *Resource) LabelFields() []string {
 	var primary, secondary, plain []string
 	for _, f := range r.Fields {
-		if !f.IsText() || len(f.Enum) > 0 {
+		// a timezone column («zona», format timezone) is the range's zone,
+		// never a label: the 58 read «trabajé en el flujo America/Bogota»
+		if !f.IsText() || len(f.Enum) > 0 || f.Format == "timezone" {
 			continue
 		}
 		switch {
@@ -438,7 +443,7 @@ func BuildResource(name string, res *schema.ResourceSchema, allowed []string) *R
 			continue
 		}
 		fd := res.Fields[fname]
-		f := &Field{Name: fname, Type: fd.Type, Enum: fd.Enum, Relation: fd.Relation, Required: fd.Required, HasDefault: fd.Default != nil, Default: fd.Default, Auto: fd.Auto.Enabled(), Aliases: fd.Aliases}
+		f := &Field{Name: fname, Type: fd.Type, Format: fd.Format, Enum: fd.Enum, Relation: fd.Relation, Required: fd.Required, HasDefault: fd.Default != nil, Default: fd.Default, Auto: fd.Auto.Enabled(), Aliases: fd.Aliases}
 		if fd.Auto.Enabled() && fd.Type == "time" {
 			if fd.Auto.RefreshesOnUpdate(fname) {
 				f.IsUpdated = true
