@@ -224,10 +224,14 @@ func dictationTail(question string, v *Vocabulary) ParseResult {
 	if leadingQue {
 		body = toks[1:]
 	}
+	nr := noteResource(v)
 	for _, t := range body {
 		n := t.norm
 		if countWords[n] || listWords[n] || lastWords[n] || deleteVerbs[n] || writeVerbs[n] || createVerbs[n] || scheduleVerbs[n] || transitionVerbs[n] || freeWords[n] {
 			return ParseResult{Reason: "tail: an operation word (" + n + ")"}
+		}
+		if fieldByWord(v, nr, n) != nil {
+			continue // «área trabajo», «persona Marta»: a datum of the note, not a subject
 		}
 		for _, name := range v.order {
 			if v.namesResource(n, v.resources[name]) {

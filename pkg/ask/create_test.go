@@ -450,6 +450,11 @@ func TestNote_HumanForms(t *testing.T) {
 		// dictated with no «que» at all (the owner's real morning): a past
 		// tense and a clock span are a log entry
 		{"estudio estuvo caído de 7:30 a 2:15", "today 07:30", "today 14:15", "estudio estuvo caído"},
+		// the owner's real sentences of 2026-09-25 11:35: the area said at the
+		// end names a FIELD of the note, never a second subject
+		{"trabajé en el flujo de seguros el lunes de ocho a ocho de la tarde área trabajo", "last_monday 08:00", "last_monday 20:00", "trabajé en el flujo de seguros"},
+		{"que trabajé en el flujo de seguros el lunes de ocho A.M. a ocho P.M. área trabajo", "last_monday 08:00", "last_monday 20:00", "trabajé en el flujo de seguros"},
+		{"trabajé en el flujo de seguros el lunes de ocho de la mañana a ocho de la noche área trabajo", "last_monday 08:00", "last_monday 20:00", "trabajé en el flujo de seguros"},
 		{"hablé con el banco a las 3", "today 15:00", "", "hablé con el banco"},
 	}
 	for _, c := range cases {
