@@ -724,11 +724,11 @@ func resolveRef(ctx context.Context, d Deps, pend *Pending, fd *Field, name stri
 		pend.Stage, pend.WhichFor, pend.Options, pend.RefName = "which", fd.Name, dec.Options, name
 		d.Pending.Put(pend)
 		return pendingResult(pend, "ambiguous", "¿Cuál?",
-			fmt.Sprintf("🤔 Hay varios %s que se parecen a «%s». ¿Cuál?\n%s\n\nRespondé con el número o el nombre completo (o <b>no</b> para cancelar).", esc(fd.Relation), esc(name), numbered(dec.Options))), true
+			fmt.Sprintf("🤔 Hay varios %s que se parecen a «%s». ¿Cuál?\n%s\n\nResponde con el número o el nombre completo (o <b>no</b> para cancelar).", esc(fd.Relation), esc(name), numbered(dec.Options))), true
 	default:
 		hint := ""
 		if len(dec.Options) > 0 {
-			hint = "\n¿Quisiste decir?\n" + numbered(dec.Options) + "\n\nRespondé con el número"
+			hint = "\n¿Quisiste decir?\n" + numbered(dec.Options) + "\n\nResponde con el número"
 		}
 		canCreate := target.CanCreate && creatableByName(target)
 		if canCreate {
@@ -800,7 +800,7 @@ func resolveRow(ctx context.Context, d Deps, pend *Pending) (Result, bool) {
 			pend.Stage, pend.WhichFor, pend.Options, pend.RefName = "which", "wheremulti", opts, f.Match
 			d.Pending.Put(pend)
 			return pendingResult(pend, "ambiguous", "¿Cuál?",
-				fmt.Sprintf("🤔 «%s» puede ser más de una cosa. ¿Cuál?\n%s\n\nRespondé con el número (o <b>no</b> para cancelar).", esc(f.Match), numberedKinds(opts))), true, nil
+				fmt.Sprintf("🤔 «%s» puede ser más de una cosa. ¿Cuál?\n%s\n\nResponde con el número (o <b>no</b> para cancelar).", esc(f.Match), numberedKinds(opts))), true, nil
 		}
 		return Result{Kind: "not_found", Headline: "No encuentro «" + f.Match + "»",
 			Text: fmt.Sprintf("🤷 No encuentro «%s» como %s, así que no sé qué %s cambiar.", esc(f.Match), esc(kindsWords(d.Vocab, res, fields)), esc(singular(pend.Resource)))}, true, nil
@@ -843,7 +843,7 @@ func resolveRow(ctx context.Context, d Deps, pend *Pending) (Result, bool) {
 				lead = "No encuentro exactamente «" + esc(f.Match) + "»; hay"
 			}
 			return pendingResult(pend, "ambiguous", "¿Cuál?",
-				fmt.Sprintf("🤔 %s %s que se parecen a «%s». ¿Cuál?\n%s\n\nRespondé con el número o el nombre completo (o <b>no</b> para cancelar).", lead, esc(targetName), esc(f.Match), numbered(dec.Options))), true
+				fmt.Sprintf("🤔 %s %s que se parecen a «%s». ¿Cuál?\n%s\n\nResponde con el número o el nombre completo (o <b>no</b> para cancelar).", lead, esc(targetName), esc(f.Match), numbered(dec.Options))), true
 		default:
 			if own := ownNameField(res); fd.Relation != "" && own != "" && own != f.Field {
 				// the relation holds no such name: the row's OWN title may
@@ -908,7 +908,7 @@ func resolveRow(ctx context.Context, d Deps, pend *Pending) (Result, bool) {
 			pend.Options = opts[:5]
 		}
 		return pendingResult(pend, "ambiguous", "¿Cuál?",
-			fmt.Sprintf("🤔 Hay varios %s que cumplen eso. ¿Cuál cambio?\n%s%s\n\nRespondé con el número (o <b>no</b> para cancelar).", esc(pend.Resource), numbered(pend.Options), more)), true
+			fmt.Sprintf("🤔 Hay varios %s que cumplen eso. ¿Cuál cambio?\n%s%s\n\nResponde con el número (o <b>no</b> para cancelar).", esc(pend.Resource), numbered(pend.Options), more)), true
 	}
 }
 
@@ -1655,9 +1655,9 @@ func resolveRefs(ctx context.Context, d Deps, pend *Pending, res *Resource, refs
 			pend.OpenRefs = append([]Ref(nil), refs[i+1:]...)
 			pend.Stage, pend.WhichFor, pend.Options, pend.RefName = "which", "ref", opts, rf.Match
 			d.Pending.Put(pend)
-			head := "🤔 «%s» puede ser más de una cosa. ¿Cuál?\n%s\n\nRespondé con el número (o <b>no</b> para cancelar)."
+			head := "🤔 «%s» puede ser más de una cosa. ¿Cuál?\n%s\n\nResponde con el número (o <b>no</b> para cancelar)."
 			if kind == "maybe" {
-				head = "🤷 No encuentro «%s» tal cual. ¿Quisiste decir?\n%s\n\nRespondé con el número (o <b>no</b> para cancelar)."
+				head = "🤷 No encuentro «%s» tal cual. ¿Quisiste decir?\n%s\n\nResponde con el número (o <b>no</b> para cancelar)."
 			}
 			return pendingResult(pend, "ambiguous", "¿Cuál?", fmt.Sprintf(head, esc(rf.Match), numberedKinds(opts))), true
 		default:

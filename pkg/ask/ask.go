@@ -590,10 +590,10 @@ func resolveNames(ctx context.Context, d Deps, p Plan) (Plan, Result, bool) {
 				}
 			case "several":
 				return p, Result{Kind: "ambiguous", Headline: "¿Cuál?",
-					Text: fmt.Sprintf("🤔 «%s» puede ser más de una cosa. ¿Cuál?\n%s\n\nRepetí la pregunta diciendo cuál (por ejemplo «%s»).", esc(f.Match), numberedKinds(opts), esc(exampleWithKind(p.Resource, opts[0])))}, false
+					Text: fmt.Sprintf("🤔 «%s» puede ser más de una cosa. ¿Cuál?\n%s\n\nRepite la pregunta diciendo cuál (por ejemplo «%s»).", esc(f.Match), numberedKinds(opts), esc(exampleWithKind(p.Resource, opts[0])))}, false
 			case "maybe":
 				return p, Result{Kind: "not_found", Headline: "No encuentro «" + f.Match + "»",
-					Text: fmt.Sprintf("🤷 No encuentro «%s» como %s. ¿Quisiste decir?\n%s\n\nRepetí la pregunta con el nombre completo.", esc(f.Match), esc(kinds), numberedKinds(opts))}, false
+					Text: fmt.Sprintf("🤷 No encuentro «%s» como %s. ¿Quisiste decir?\n%s\n\nRepite la pregunta con el nombre completo.", esc(f.Match), esc(kinds), numberedKinds(opts))}, false
 			default:
 				return p, Result{Kind: "not_found", Headline: "No encuentro «" + f.Match + "»",
 					Text: fmt.Sprintf("🤷 No encuentro «%s» como %s.", esc(f.Match), esc(kinds))}, false
@@ -626,10 +626,10 @@ func resolveNames(ctx context.Context, d Deps, p Plan) (Plan, Result, bool) {
 			}
 		case "several":
 			return p, Result{Kind: "ambiguous", Headline: "¿Cuál?",
-				Text: fmt.Sprintf("🤔 Hay varios %s que se parecen a «%s». ¿Cuál?\n%s\n\nRepetí la pregunta con el nombre completo.", esc(targetName), esc(f.Match), options(dec.Options))}, false
+				Text: fmt.Sprintf("🤔 Hay varios %s que se parecen a «%s». ¿Cuál?\n%s\n\nRepite la pregunta con el nombre completo.", esc(targetName), esc(f.Match), options(dec.Options))}, false
 		case "maybe":
 			return p, Result{Kind: "not_found", Headline: "No encuentro «" + f.Match + "»",
-				Text: fmt.Sprintf("🤷 No encuentro ningún %s que se llame «%s». ¿Quisiste decir?\n%s\n\nRepetí la pregunta con ese nombre.", esc(singular(targetName)), esc(f.Match), options(dec.Options))}, false
+				Text: fmt.Sprintf("🤷 No encuentro ningún %s que se llame «%s». ¿Quisiste decir?\n%s\n\nRepite la pregunta con ese nombre.", esc(singular(targetName)), esc(f.Match), options(dec.Options))}, false
 		default:
 			return p, Result{Kind: "not_found", Headline: "No encuentro «" + f.Match + "»",
 				Text: fmt.Sprintf("🤷 No encuentro ningún %s que se llame «%s». Revisa el nombre y vuelve a preguntar.", esc(singular(targetName)), esc(f.Match))}, false
