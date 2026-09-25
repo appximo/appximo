@@ -83,6 +83,9 @@ type Filter struct {
 	// keeps the one where the name exists; both → it asks which; none → said.
 	// Set only by the parser; Field is then empty until resolved.
 	Fields []string `json:"fields,omitempty"`
+	// Label is the row a resolved name matched («Fabián Gómez», «trabajo»),
+	// for the understood text — never sent to the engine.
+	Label string `json:"-"`
 }
 
 // Ref (VOZ-20) is a proper name of a WRITE that may belong to several

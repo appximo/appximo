@@ -559,4 +559,9 @@ func TestGroupByRelation_AndQueIsAQuestion(t *testing.T) {
 			t.Errorf("a group by a relation is labelled with the name, not the id: %q", g.Label)
 		}
 	}
+	// the voice: «Nueve tareas por area: Trabajo, tres. …» — the target's
+	// word, names, counts in words, no id, no parenthesis, no digit
+	if strings.Contains(r.Speech, " id") || strings.Contains(r.Speech, "(") || strings.ContainsAny(r.Speech, "0123456789") || !strings.Contains(r.Speech, " por area: ") {
+		t.Errorf("grouped speech: %q", r.Speech)
+	}
 }

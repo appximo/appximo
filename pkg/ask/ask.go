@@ -582,7 +582,7 @@ func resolveNames(ctx context.Context, d Deps, p Plan) (Plan, Result, bool) {
 			kinds := kindsWords(d.Vocab, res, f.Fields)
 			switch kind {
 			case "one":
-				p.Filters[i] = Filter{Field: field, Op: "eq", Value: chosen.Value}
+				p.Filters[i] = Filter{Field: field, Op: "eq", Value: chosen.Value, Label: chosen.Label}
 				if normalize(chosen.Label) != normalize(f.Match) {
 					said = append(said, fmt.Sprintf("Entendí «%s» como %s <b>%s</b>.", esc(f.Match), esc(chosen.Kind), esc(chosen.Label)))
 				} else {
@@ -615,9 +615,9 @@ func resolveNames(ctx context.Context, d Deps, p Plan) (Plan, Result, bool) {
 		switch dec.Kind {
 		case "one":
 			if fd.Relation != "" {
-				p.Filters[i] = Filter{Field: f.Field, Op: "eq", Value: dec.Chosen.Value}
+				p.Filters[i] = Filter{Field: f.Field, Op: "eq", Value: dec.Chosen.Value, Label: dec.Chosen.Label}
 			} else {
-				p.Filters[i] = Filter{Field: f.Field, Op: "eq", Value: dec.Chosen.Value}
+				p.Filters[i] = Filter{Field: f.Field, Op: "eq", Value: dec.Chosen.Value, Label: dec.Chosen.Label}
 			}
 			if normalize(dec.Chosen.Label) != normalize(f.Match) {
 				said = append(said, fmt.Sprintf("Entendí «%s» como <b>%s</b>.", esc(f.Match), esc(dec.Chosen.Label)))
@@ -849,6 +849,9 @@ func describeFilter(fd *Field, f Filter) string {
 		}
 	}
 	if fd != nil && fd.Relation != "" && f.Op == "eq" {
+		if f.Label != "" {
+			return "de " + f.Label // «registros · de trabajo», «compromisos · de Fabián Gómez»
+		}
 		return singular(fd.Relation) + " elegido"
 	}
 	if fd != nil && fd.Type == "time" && val == "now" {

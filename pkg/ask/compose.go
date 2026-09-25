@@ -84,12 +84,21 @@ func composeAggregate(d Deps, p Plan, res *Resource, rows []map[string]any, unde
 		out.Text = b.String()
 		var items []string
 		for _, g := range out.Groups {
-			items = append(items, strings.ReplaceAll(g.Label, "_", " ")+", "+g.Text)
+			label := strings.NewReplacer("_", " ", "(", "", ")", "").Replace(g.Label)
+			text := g.Text
+			if p.Kind == "count" {
+				text = NumberWords(int(g.Value)) // «personal, dos» — never a digit in the voice
+			}
+			items = append(items, capFirst(label+", "+text))
 		}
 		if len(items) == 0 {
 			out.Speech = "No hay " + numberPhrase(0, res.Name) + " con eso."
 		} else {
-			out.Speech = SpokenNumbers(out.Headline + " por " + strings.ReplaceAll(p.GroupBy, "_", " ") + ": " + spokenList(items, len(items), "mira el panel"))
+			head := out.Headline
+			if p.Kind == "count" {
+				head = capFirst(numberPhrase(int(total), res.Name)) // «un compromiso», «diez tareas»
+			}
+			out.Speech = SpokenNumbers(head + " por " + spokenGroupKey(res, p.GroupBy) + ": " + spokenList(items, len(items), "mira el panel"))
 		}
 		return out
 	}
@@ -203,6 +212,15 @@ func composeList(d Deps, p Plan, res *Resource, rows []map[string]any, total int
 	}
 	out.Speech = SpokenNumbers(out.Speech)
 	return out
+}
+
+// spokenGroupKey is the group field as a voice names it: a relation by its
+// target's singular («área», «persona»), any other field by its own words.
+func spokenGroupKey(res *Resource, field string) string {
+	if f := res.Field(field); f != nil && f.Relation != "" {
+		return singular(f.Relation)
+	}
+	return strings.ReplaceAll(field, "_", " ")
 }
 
 func formatValue(fd *Field, v any, loc *time.Location) string {
