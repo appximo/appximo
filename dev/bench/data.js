@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790281769597,
+  "lastUpdate": 1790345642434,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -7344,6 +7344,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "32288650 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "a74524a2fbce62d122a94b64348ec45b00efd78e",
+          "message": "feat(ask): the assistant speaks «tú», never «vos» — and understands both (AGENDA-ASISTENTE-S1 addendum, decision A-85)\n\n«¿Por qué anotá y no anota? Yo no soy argentino.» The product's voice had\nbeen written in Rioplatense voseo since VOZ-ESCRITURAS-S1 without anyone\ndeciding it; the real owner is Colombian. Every reply of the voice channel\n— guide, help, confirmations, warnings, Telegram alerts, the model's prompt\n— now speaks neutral «tú» («anota que…», «di más para seguir», «mira el\npanel», «¿confirmas?», «ya tienes…»); the recognizer keeps BOTH registers\n(an accented vos form normalizes to the tú form; the forms that really\ndiffer — «acordate de»/«acuérdate de», «ponelo»/«ponlo», «hacelo»/«hazlo»,\n«decime»/«dime» — are listed in both). The docs and the owner's manual move\nto «tú». No register knob (VOZ-25 records the «usted» case).\n\nAlso, from the owner's morning history: the dictation tail fires on a\npast-tense sentence with no leading «que» («estudio estuvo caído de 7:30 a\n2:15»); the guide knows the singular «qué campo tiene una tarea»; and a\nPLURAL resource word or alias («compromisos de 4 a 5», «eventos de 4 a 5»)\nasks instead of opening a verbless create — only the singular creates.\nThe parser half of the 151-sentence bank is intact (124/124); the model\nhalf could not be measured today: the owner's Anthropic credit ran out at\n08:45 («credit balance is too low» → `kind: unavailable`, US$ 0, the parser\nkeeps answering).\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-25T14:12:23Z",
+          "tree_id": "f4f427031a23badddc49bc8dc88811e3b5f28903",
+          "url": "https://github.com/appximo/appximo/commit/a74524a2fbce62d122a94b64348ec45b00efd78e"
+        },
+        "date": 1790345640940,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6282,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "370152 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6282,
+            "unit": "ns/op",
+            "extra": "370152 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "370152 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "370152 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 68.78,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36755767 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 68.78,
+            "unit": "ns/op",
+            "extra": "36755767 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36755767 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36755767 times\n4 procs"
           }
         ]
       }
