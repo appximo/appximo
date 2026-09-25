@@ -98,6 +98,10 @@ type Ref struct {
 	Fields  []string `json:"fields"`
 	Soft    bool     `json:"soft,omitempty"`
 	InTitle bool     `json:"in_title,omitempty"` // the words already sit in the title text
+	// Words is what the ref TOOK OUT of the title («con Norberto»), so a
+	// soft ref that resolves to nothing can put the owner's own words back
+	// instead of losing them (or leaving a bare «Norberto»). In memory only.
+	Words string `json:"-"`
 }
 
 // Period is a time window over one time field.

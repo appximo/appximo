@@ -850,6 +850,17 @@ febrero») se responde como tal, gratis; la respuesta siempre nombra el día
 que leyó («el martes pasado, martes veintidós de septiembre»). Todo esto lo
 decide el parser, US$ 0; la guía («cómo filtro por fecha», «más») lo enseña.
 
+**Un nombre que no está cargado ya no bloquea (2026-09-25).** «Anota hablar
+con Norberto el día de mañana área personal» crea la tarea «hablar con
+Norberto» para mañana en el área personal aunque Norberto no exista en
+personas: el nombre vuelve al título y la tarea se guarda. Si la persona SÍ
+existe, se enlaza como antes (el título queda «hablar» y la persona al lado).
+Y «el día de mañana» / «el día de ayer» son un día, no palabras del título
+(antes quedaba «hablar el día de» como título). La excepción es un dato
+suelto: «crear tarea: revisar, con Marta» dicho como dato aparte sigue
+preguntando si Marta no existe — ahí el nombre es un enlace declarado, no
+texto.
+
 **Con alguien.** «Anota que me reuní con Camilo de 4 a 5» guarda el texto
 completo («me reuní con Camilo») y, si Camilo está en personas, lo enlaza; si
 no está, el registro se guarda igual, con su texto — antes el motor se

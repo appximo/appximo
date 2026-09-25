@@ -163,6 +163,22 @@ keep dropping «la»/«el» before a title). The dictation tail now counts a
 first-person past in «-í» («me reuní», «salí», «escribí») as the past tense
 it is, so the verb Siri swallows no longer sends the sentence to the model.
 
+#### 2e. A name that is in no table never kills the write
+
+The owner dictated «anota hablar con Norberto el día de mañana área personal»
+and got «No encuentro «Norberto» como área o persona»: on a resource with
+TWO nameable relations (areas, personas) a hard reference that matches
+nothing refuses the whole create, so a task about a person he had never
+loaded was impossible to dictate. A name INSIDE the title is the owner's own
+text, so «con Nombre» there is now a SOFT reference that REMEMBERS the words
+it took (`Ref.Words`): a known person still becomes the link with the title
+unchanged («almuerzo» + Marta), an unknown one puts «con Norberto» back into
+the title and the task is written. A name said as its own datum segment
+(«crear tarea: revisar, con Marta») stays HARD — there it is a declared
+link, and an unknown name deserves the answer, not a title. «El día de
+mañana» / «el día de ayer» joined the day phrases on both sides (the read
+period and the write token); before, «el día de» stayed in the title.
+
 ### 3. A correction on a pending write re-issues the confirmation; it never executes it
 
 «no, mejor el viernes», «mejor a las 5», «sí pero urgente», «que sea con

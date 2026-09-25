@@ -1699,10 +1699,14 @@ func resolveRefs(ctx context.Context, d Deps, pend *Pending, res *Resource, refs
 			}
 			if !rf.InTitle {
 				if tf := titleField(res); tf != nil {
+					said := rf.Words // «con Norberto», not a bare «Norberto»
+					if said == "" {
+						said = rf.Match
+					}
 					if cur, ok := pend.Data[tf.Name].(string); ok && cur != "" {
-						pend.Data[tf.Name] = cur + " " + rf.Match
+						pend.Data[tf.Name] = cur + " " + said
 					} else {
-						pend.Data[tf.Name] = rf.Match
+						pend.Data[tf.Name] = said
 					}
 				}
 			}

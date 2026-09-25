@@ -122,7 +122,9 @@ var periodPhrases = []struct {
 	{"ultimos 7 dias", "last_7_days"}, {"ultimos siete dias", "last_7_days"},
 	{"ultimos 30 dias", "last_30_days"}, {"ultimos treinta dias", "last_30_days"},
 	{"esta semana", "this_week"}, {"este mes", "this_month"}, {"este ano", "this_year"}, {"este año", "this_year"},
-	{"del dia de hoy", "today"}, {"el dia de hoy", "today"}, {"dia de hoy", "today"}, {"del dia", "today"}, {"de la semana", "this_week"}, {"del mes", "this_month"}, {"del ano", "this_year"}, {"del año", "this_year"},
+	{"del dia de hoy", "today"}, {"el dia de hoy", "today"}, {"dia de hoy", "today"},
+	{"el dia de manana", "tomorrow"}, {"del dia de manana", "tomorrow"}, {"dia de manana", "tomorrow"},
+	{"el dia de ayer", "yesterday"}, {"del dia de ayer", "yesterday"}, {"dia de ayer", "yesterday"}, {"del dia", "today"}, {"de la semana", "this_week"}, {"del mes", "this_month"}, {"del ano", "this_year"}, {"del año", "this_year"},
 	{"de hoy", "today"}, {"hoy", "today"}, {"de ayer", "yesterday"}, {"ayer", "yesterday"},
 	{"de antier", "day_before_yesterday"}, {"antier", "day_before_yesterday"}, {"de anteayer", "day_before_yesterday"}, {"anteayer", "day_before_yesterday"},
 	// The future (MOTOR-AGENDA-S1): what an agenda is asked about.

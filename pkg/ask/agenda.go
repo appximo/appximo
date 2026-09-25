@@ -151,7 +151,8 @@ var scheduleVerbs = set("agenda", "agendar", "agendame", "agendá", "anota", "an
 // clock's own qualifier and is not here. Longest phrase first (init sort),
 // so «esta mañana» is read before «mañana» would make it tomorrow.
 var dayPhrases = []struct{ phrase, token, hint string }{
-	{"pasado manana", "day_after_tomorrow", ""}, {"el dia de hoy", "today", ""}, {"dia de hoy", "today", ""}, {"manana", "tomorrow", ""}, {"hoy", "today", ""},
+	{"pasado manana", "day_after_tomorrow", ""}, {"el dia de hoy", "today", ""}, {"dia de hoy", "today", ""},
+	{"el dia de manana", "tomorrow", ""}, {"dia de manana", "tomorrow", ""}, {"el dia de ayer", "yesterday", ""}, {"dia de ayer", "yesterday", ""}, {"manana", "tomorrow", ""}, {"hoy", "today", ""},
 	{"ayer", "yesterday", ""}, {"antier", "day_before_yesterday", ""}, {"anteayer", "day_before_yesterday", ""}, {"anoche", "yesterday", "pm"},
 	{"esta manana", "today", "am"}, {"esta tarde", "today", "pm"}, {"esta noche", "today", "pm"}, {"hoy temprano", "today", "am"},
 	{"hoy en la manana", "today", "am"}, {"hoy por la manana", "today", "am"}, {"hoy en la tarde", "today", "pm"}, {"hoy por la tarde", "today", "pm"}, {"hoy en la noche", "today", "pm"}, {"hoy por la noche", "today", "pm"},

@@ -523,6 +523,9 @@ func classifySegment(seg []ctok, v *Vocabulary, res *Resource, data map[string]a
 				probe[kk] = val
 			}
 			if len(restSeg) == 0 || classifySegment(restSeg, v, res, probe, &pr, false) {
+				// a SEGMENT that is just «con Marta» is a declared link: an
+				// unknown name is answered, not folded into the title (the
+				// title loop below is where the owner's own words live)
 				if placeName(v, res, name, false, data, refs) {
 					for kk, val := range probe {
 						if _, taken := data[kk]; !taken {
@@ -688,6 +691,12 @@ func setField(v *Vocabulary, res *Resource, f *Field, rest []ctok, data map[stri
 // placeName puts a name on the relation it belongs to, or on every candidate
 // (VOZ-20). soft marks a bare word that may turn out to be title text.
 func placeName(v *Vocabulary, res *Resource, name string, soft bool, data map[string]any, refs *[]Ref) bool {
+	return placeNameWords(v, res, name, "", soft, data, refs)
+}
+
+// placeNameWords is placeName remembering the words it consumed from the
+// title, so a SOFT name that matches no row restores them verbatim.
+func placeNameWords(v *Vocabulary, res *Resource, name, words string, soft bool, data map[string]any, refs *[]Ref) bool {
 	mf, cands, _ := nameField(v, res)
 	var rel []string
 	for _, c := range cands {
@@ -703,7 +712,7 @@ func placeName(v *Vocabulary, res *Resource, name string, soft bool, data map[st
 		data[mf] = map[string]any{"match": name}
 		return true
 	case len(rel) > 0:
-		*refs = append(*refs, Ref{Match: name, Fields: rel, Soft: soft})
+		*refs = append(*refs, Ref{Match: name, Fields: rel, Soft: soft, Words: words})
 		return true
 	}
 	return false
@@ -810,7 +819,7 @@ func titleWords(seg []ctok, v *Vocabulary, res *Resource, data map[string]any, r
 			parts = append(parts, tt[j].raw)
 			j++
 		}
-		if len(parts) > 0 && placeName(v, res, strings.Join(parts, " "), false, data, refs) {
+		if len(parts) > 0 && placeNameWords(v, res, strings.Join(parts, " "), tt[i].raw+" "+strings.Join(parts, " "), true, data, refs) {
 			tt[i].used = true
 			for k := i + 1; k < j; k++ {
 				tt[k].used = true

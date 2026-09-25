@@ -264,3 +264,49 @@ func TestLabelFields_SkipATimezoneColumn(t *testing.T) {
 		t.Fatalf("zone read out: %s | %s | %s", out.Kind, out.Text, out.Speech)
 	}
 }
+
+// A name that is in no table must never kill the write (addendum 5c,
+// 2026-09-25): the owner dictated «anota hablar con Norberto el día de
+// mañana área personal» and got «No encuentro «Norberto» como área o
+// persona» — the task died because a person he had never loaded was read as
+// a required link, and «el día de» was left inside the title. Now «con
+// Nombre» is a SOFT reference that remembers the words it took, so an
+// unknown name goes back into the title and the task is written; a known
+// name still becomes the link, with the title unchanged.
+func TestName_InNoTableKeepsTheWordsAndWritesAnyway(t *testing.T) {
+	v := miguelVocab()
+	pr := Parse("anota hablar con Norberto el día de mañana área personal", v)
+	if !pr.Sure || pr.Plan.Kind != "create" || pr.Plan.Resource != "tareas" ||
+		pr.Plan.Data["titulo"] != "hablar" || pr.Plan.Data["vence_en"] != "tomorrow" {
+		t.Fatalf("plan: %+v (%s)", pr.Plan, pr.Reason)
+	}
+	if len(pr.Plan.Refs) != 1 || !pr.Plan.Refs[0].Soft || pr.Plan.Refs[0].Match != "Norberto" || pr.Plan.Refs[0].Words != "con Norberto" {
+		t.Fatalf("ref: %+v", pr.Plan.Refs)
+	}
+	// «el día de mañana» / «el día de ayer» are a day, not title words
+	for q, want := range map[string]string{"tareas del día de mañana": "tomorrow", "registros del día de ayer": "yesterday", "qué tengo el día de mañana": "tomorrow"} {
+		pr := Parse(q, v)
+		if !pr.Sure || pr.Plan.Period == nil || pr.Plan.Period.Range != want {
+			t.Errorf("%q: %+v (%s)", q, pr.Plan.Period, pr.Reason)
+		}
+	}
+	e := miguelFixtures()
+	e.rows["areas"] = append(e.rows["areas"], map[string]any{"id": "a4", "nombre": "personal"})
+	d, _ := miguelDeps(e)
+	r := Answer(context.Background(), d, "anota hablar con Norberto el día de mañana área personal")
+	if r.Kind != "confirm" || r.Source != "parser" || !strings.Contains(r.Text, "titulo: <b>hablar con Norberto</b>") ||
+		!strings.Contains(r.Text, "area: <b>personal</b>") || !strings.Contains(r.Text, "mañana") {
+		t.Fatalf("unknown name: %s %s\n%s", r.Kind, r.Source, r.Text)
+	}
+	if w := Answer(context.Background(), d, "sí"); w.Kind != "written" || !strings.Contains(w.Text, "hablar con Norberto") {
+		t.Fatalf("write: %s %s", w.Kind, w.Text)
+	}
+	// a KNOWN person is still the link, and the title keeps its old shape
+	r = Answer(context.Background(), d, "anota hablar con Fabián mañana")
+	if r.Kind != "confirm" || !strings.Contains(r.Text, "persona: <b>Fabián Gómez</b>") || !strings.Contains(r.Text, "titulo: <b>hablar</b>") {
+		t.Fatalf("known person: %s\n%s", r.Kind, r.Text)
+	}
+	if c := Answer(context.Background(), d, "no"); c.Kind != "cancelled" {
+		t.Fatalf("cancel: %s", c.Kind)
+	}
+}

@@ -2299,7 +2299,13 @@ period («de septiembre» → `past_month:09`); the agenda keeps looking forward
 US$ 0; `lookBack` applies the rule to the parser's AND the model's plan. On
 the NOTE, «con Nombre» is text plus a SOFT link (written either way), the
 text is kept as said («se fue la luz»), and a first-person past in «-í»
-(«me reuní») counts for the dictation tail.
+(«me reuní») counts for the dictation tail. **A name in no table never kills
+a write:** «con Nombre» INSIDE a title is a soft ref that remembers the words
+it took (`Ref.Words`) — a known person is the link with the title unchanged,
+an unknown one puts «con Norberto» back into the title and the row is
+written; a name said as its own datum segment («crear tarea: revisar, con
+Marta») stays hard. «El día de mañana» / «el día de ayer» are day phrases on
+both sides.
 
 ## Questions in plain language (VOZ-PREGUNTAS-S1, ADR-033)
 
