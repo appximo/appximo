@@ -217,12 +217,19 @@ func dictationTail(question string, v *Vocabulary) ParseResult {
 		return ParseResult{Reason: "tail: a question («qué …»)"}
 	}
 	leadingQue := toks[0].norm == "que"
-	if !leadingQue && !hasPreterite(toks) {
-		return ParseResult{Reason: "tail: not a «que» sentence nor a past-tense one"}
-	}
 	body := toks
 	if leadingQue {
 		body = toks[1:]
+	}
+	// the shape of a log entry with no verb of order: «que …», a past tense
+	// («trabajé»), or — when a dictation dropped the accent («trabaje») — a
+	// full time span on a named day; the guards below still refuse any
+	// question or operation word and any resource named as a subject
+	probe := tokenize(question)
+	day, hint := consumeDayPart(probe)
+	span, hasSpan := consumeTimeSpanHint(probe, hint)
+	if !leadingQue && !hasPreterite(toks) && !(hasSpan && span.end >= 0 && day != "") {
+		return ParseResult{Reason: "tail: not a «que» sentence nor a past-tense one"}
 	}
 	nr := noteResource(v)
 	for _, t := range body {
@@ -241,9 +248,6 @@ func dictationTail(question string, v *Vocabulary) ParseResult {
 	}
 	// the shape of a log entry: a clock span, or something that HAPPENED (a
 	// past-tense verb) on a named day or part of a day
-	probe := tokenize(question)
-	day, hint := consumeDayPart(probe)
-	_, hasSpan := consumeTimeSpanHint(probe, hint)
 	if !hasSpan && !(day != "" && hasPreterite(toks)) {
 		return ParseResult{Reason: "tail: no clock span"}
 	}

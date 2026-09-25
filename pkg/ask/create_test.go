@@ -455,6 +455,9 @@ func TestNote_HumanForms(t *testing.T) {
 		{"trabajé en el flujo de seguros el lunes de ocho a ocho de la tarde área trabajo", "last_monday 08:00", "last_monday 20:00", "trabajé en el flujo de seguros"},
 		{"que trabajé en el flujo de seguros el lunes de ocho A.M. a ocho P.M. área trabajo", "last_monday 08:00", "last_monday 20:00", "trabajé en el flujo de seguros"},
 		{"trabajé en el flujo de seguros el lunes de ocho de la mañana a ocho de la noche área trabajo", "last_monday 08:00", "last_monday 20:00", "trabajé en el flujo de seguros"},
+		// the dictation dropped the accent («trabaje»): a full span on a named day is still a log entry
+		{"trabaje en el flujo de seguros el lunes de ocho de la mañana a ocho de la tarde área trabajo", "last_monday 08:00", "last_monday 20:00", "trabaje en el flujo de seguros"},
+		{"anota que trabaje en el flujo de seguros el lunes de 8 a 4 de la tarde, área trabajo", "last_monday 08:00", "last_monday 16:00", "trabaje en el flujo de seguros"},
 		{"hablé con el banco a las 3", "today 15:00", "", "hablé con el banco"},
 	}
 	for _, c := range cases {
