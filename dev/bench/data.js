@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790345642434,
+  "lastUpdate": 1790350054316,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -7416,6 +7416,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36755767 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "4dd3574c29dc351f9f127130531085abfff23f00",
+          "message": "feat(ask): «registros por área» — a group by a relation, labelled with the target's name; the interrogative «qué …» never starts a dictation tail (AGENDA-ASISTENTE-S1 addendum)\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-25T15:26:19Z",
+          "tree_id": "6fc9fca31fba323cd5a225b2a5b7c3d89e0a64cb",
+          "url": "https://github.com/appximo/appximo/commit/4dd3574c29dc351f9f127130531085abfff23f00"
+        },
+        "date": 1790350052489,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 4319,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "565627 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 4319,
+            "unit": "ns/op",
+            "extra": "565627 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "565627 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "565627 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 42.73,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "55141414 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 42.73,
+            "unit": "ns/op",
+            "extra": "55141414 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "55141414 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "55141414 times\n4 procs"
           }
         ]
       }
