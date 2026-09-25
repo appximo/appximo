@@ -105,7 +105,7 @@ var (
 	// one they go to the model, which may plan a create/update (confirmed
 	// before executing).
 	writeVerbs = set("cancela", "cancelar", "crea", "crear", "agenda", "agendar", "cambia", "cambiar",
-		"modifica", "modificar", "edita", "editar", "actualiza", "actualizar", "marca", "marcar", "marcá",
+		"modifica", "modificar", "edita", "editar", "actualiza", "actualizar", "marca", "marcar", "marca",
 		"pone", "pon", "poner", "agrega", "agregar", "registra", "registrar", "anota", "anotar", "programa", "programar", "anotame", "agregame", "cambiame", "ponele", "pasa", "pasar", "pasala", "pasalo")
 	// prepositions introduce a proper name («de Ana», «para Marta»); so do the
 	// participles of «llamar» («el cliente llamado Carlos», «que se llama
@@ -207,10 +207,21 @@ func dictationTail(question string, v *Vocabulary) ParseResult {
 		return ParseResult{Reason: "tail: no note resource"}
 	}
 	toks := tokenize(question)
-	if len(toks) < 3 || toks[0].norm != "que" {
-		return ParseResult{Reason: "tail: not a «que» sentence"}
+	if len(toks) < 3 {
+		return ParseResult{Reason: "tail: too short"}
 	}
-	for _, t := range toks[1:] {
+	// the tail starts with «que» (the swallowed verb's complement) — or has
+	// no verb of order at all and tells what HAPPENED in the past («estudio
+	// estuvo caído de 7:30 a 2:15», dictated without the «que»)
+	leadingQue := toks[0].norm == "que"
+	if !leadingQue && !hasPreterite(toks) {
+		return ParseResult{Reason: "tail: not a «que» sentence nor a past-tense one"}
+	}
+	body := toks
+	if leadingQue {
+		body = toks[1:]
+	}
+	for _, t := range body {
 		n := t.norm
 		if countWords[n] || listWords[n] || lastWords[n] || deleteVerbs[n] || writeVerbs[n] || createVerbs[n] || scheduleVerbs[n] || transitionVerbs[n] || freeWords[n] {
 			return ParseResult{Reason: "tail: an operation word (" + n + ")"}
@@ -229,7 +240,11 @@ func dictationTail(question string, v *Vocabulary) ParseResult {
 	if !hasSpan && !(day != "" && hasPreterite(toks)) {
 		return ParseResult{Reason: "tail: no clock span"}
 	}
-	pr := parseCreate("anotá "+question, v)
+	lead := "anota "
+	if !leadingQue {
+		lead = "anota que "
+	}
+	pr := parseCreate(lead+question, v)
 	if !pr.Sure || pr.Plan.Resource != noteResource(v).Name {
 		return ParseResult{Reason: "tail: " + pr.Reason}
 	}
@@ -1161,7 +1176,7 @@ var (
 	greetingFill    = set("dias", "dia", "tardes", "tarde", "noches", "noche", "muchas", "mil", "que", "tal", "como", "estas", "esta", "va", "todo", "ok", "dale", "listo", "muy", "bueno", "buena", "y", "vos", "usted", "hasta", "luego", "nos", "vemos")
 	// helpPhrases are the exact (normalized) ways an owner asks what the bot
 	// can do; helpPrefixes catch the same intent with a tail.
-	helpPhrases  = set("ayuda", "help", "que puedo hacer", "que puedo hacer aca", "que puedo hacer con vos", "que puedo hacer con esto", "que hago", "que puedo preguntar", "que puedo preguntarte", "que te puedo preguntar", "que puedo pedir", "que puedo pedirte", "que sabes hacer", "que sabes", "que podes hacer", "que puedes hacer", "que haces", "como funciona", "como funcionas", "como te uso", "que preguntas puedo hacer", "que preguntas respondes", "que me podes decir", "que me puedes decir", "que comandos hay", "cuales son los comandos", "instrucciones", "menu")
+	helpPhrases  = set("ayuda", "help", "que puedo hacer", "que puedo hacer aca", "que puedo hacer con vos", "que puedo hacer contigo", "que puedo hacer con esto", "que hago", "que puedo preguntar", "que puedo preguntarte", "que te puedo preguntar", "que puedo pedir", "que puedo pedirte", "que sabes hacer", "que sabes", "que podes hacer", "que puedes hacer", "que haces", "como funciona", "como funcionas", "como te uso", "que preguntas puedo hacer", "que preguntas respondes", "que me podes decir", "que me puedes decir", "que comandos hay", "cuales son los comandos", "instrucciones", "menu")
 	helpPrefixes = []string{"que puedo preguntar", "que te puedo preguntar", "que puedo pedir", "que sabes hacer", "que podes hacer", "que puedes hacer", "como funciona", "que preguntas puedo", "que comandos"}
 	// The fixed commands, as said to the question door (VOZ-21).
 	summaryPhrases = set("resumen", "el resumen", "resumen de hoy", "el resumen de hoy", "resumen del dia", "dame el resumen", "mandame el resumen", "que paso hoy", "que paso hoy?", "resumen de hoy por favor", "el parte", "parte del dia", "resumen del dia de hoy", "resumen de ayer", "que hay de nuevo", "novedades")
@@ -1302,8 +1317,8 @@ func discardReasonES(code string) string {
 // transitionVerbs introduce a state change; the state itself follows
 // ("como hecha", "a pagada", "en cancelada") or is the verb's own stem
 // ("cancelá" → cancelada, "confirmá" → confirmada).
-var transitionVerbs = set("marca", "marcá", "marcar", "marcame", "marcala", "marcalo", "pasa", "pasá", "pasar", "pasala", "pasalo", "pone", "poné", "poner", "ponele", "ponela", "ponelo",
-	"cambia", "cambiá", "cambiar", "cambiale", "deja", "dejá", "dejar", "dejala", "dejalo", "actualiza", "actualizá", "actualizar", "da", "dá", "dar", "dale")
+var transitionVerbs = set("marca", "marcá", "marcar", "marcame", "marcala", "marcalo", "pasa", "pasá", "pasar", "pasala", "pasalo", "pone", "poné", "poner", "pon", "ponele", "ponela", "ponelo", "ponle", "ponla", "ponlo",
+	"cambia", "cambia", "cambiar", "cambiale", "deja", "deja", "dejar", "dejala", "dejalo", "actualiza", "actualiza", "actualizar", "da", "dá", "dar", "dale")
 var transitionLinkers = set("como", "a", "en", "por", "estado", "el", "la", "lo", "le", "ya", "esta", "está")
 
 // parseTransition settles "<verb> [como|a|en] <state> <resource> [de <name>]"

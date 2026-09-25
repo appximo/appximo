@@ -15,7 +15,7 @@ import "strings"
 // system prompt now saying what an obligation is.
 var obligationPhrases = []string{
 	"que no se me olvide", "no me olvides de", "no te olvides de", "no me olvide de", "no me deje olvidar",
-	"tengo pendiente", "tenemos que", "acordate de", "acordame de", "tengo que", "tengo q", "hay que",
+	"tengo pendiente", "tenemos que", "acordate de", "acordame de", "acuerdate de", "acuerdame de", "recuerdame de", "tengo que", "tengo q", "hay que",
 	"no se me olvide de", "no se me olvide", "que no se me olvide de",
 	"recordame", "recuerdame", "me falta", "recordarme",
 }

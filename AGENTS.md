@@ -33,7 +33,7 @@ The canonical example of an app that declares the whole front — `aliases`,
 `summary.telegram`, `summary` — is `examples/model-lab/agenda-voz.json`; the
 generator (`ai-generate` / `spec`, `pkg/aigen` GrammarCore "OPERATIONAL
 BLOCKS") declares those blocks BY SIGNAL of the description (a reminder ⇒ cron
-workflow, "avisame cuando" ⇒ events + event workflow, an app that is spoken
+workflow, "avísame cuando" ⇒ events + event workflow, an app that is spoken
 to ⇒ aliases, a lifecycle ⇒ pending) and never by default — proven with three
 apps (tasks: everything; appointments: the reminder only; inventory: nothing).
 `appximo drill ask|voice|spend` repeat the voice channel on any installed box.
@@ -1052,9 +1052,9 @@ over rows that ALREADY overlap is refused naming the pairs (dry-run
 is what a bare start lasts (voice «a las 10»); `timezone_field` names a
 string field with `format: "timezone"` (IANA, never an offset). Recurrences
 are v2 and materialize into rows. Voice: «qué tengo mañana» / «tengo algo a
-las 4» / «cuándo estoy libre el jueves» / «agendá reunión con Fabián mañana
+las 4» / «cuándo estoy libre el jueves» / «agenda reunión con Fabián mañana
 de 4 a 5» are the parser's (US$ 0); the confirmation shows the collision
-(«⚠️ Ya tenés …  ¿Igual lo agendo?») and a yes on an invertible rule saves the
+(«⚠️ Ya tienes …  ¿Igual lo agendo?») and a yes on an invertible rule saves the
 row as not blocking. Example: `examples/model-lab/agenda-choques.json`; full
 contract docs/SCHEMA_REFERENCE.md §2.7.
 
@@ -2240,10 +2240,10 @@ dropped. The confirmed write runs through the batch transaction's own cores
 (`prepareTxOp`/`execPreparedOp` via `txWriter`, pkg/codegen/askwrite.go):
 RBAC, validators, hooks, the state-machine guard and the outbox event
 exactly as an API write — a refusal is said in words, never a success face.
-The parser settles THREE write shapes itself («marcá como hecha la tarea de
-Fabián» — a state transition of one row, US$ 0, ~15 ms; «agendá X mañana de
+The parser settles THREE write shapes itself («marca como hecha la tarea de
+Fabián» — a state transition of one row, US$ 0, ~15 ms; «agenda X mañana de
 4 a 5» on the agenda; and, since APP-AGENDA-S2 / VOZ-17, an OBLIGATION —
-«tengo que / hay que / acordate de / recordame / me falta X» — as a create
+«tengo que / hay que / acuérdate de / recordame / me falta X» — as a create
 of the one to-do resource, title = X, «mañana» into its time field,
 «urgente» into its bool); any other create is the model's (US$ 0.0023
 mean, p50 0.8 s). `APPXIMO_ASK_WRITES=off` makes every
@@ -2264,7 +2264,7 @@ always (`pkg/ask/guide.go`). A FIXED FORM for creating, settled by the parser:
 a verb or the resource word, the title as said, each datum by its FORM:
 field word, declared value/alias, bool by name, day/clock incl. «4 pm» /
 «cuatro de la tarde» / «9 y media», number + unit, «con/para Name», a bare
-name tried against every target); «anotá que …» is the note resource, «tengo
+name tried against every target); «anota que …» is the note resource, «tengo
 que …» the to-do (now through the same pipeline, so «área salud» rides
 along), a schedule verb + clock the agenda; the confirmation is unchanged. A
 CORRECTION on a pending confirm («no, mejor el viernes», «mejor a las 5», «sí
@@ -2274,14 +2274,14 @@ against every target (`Plan.Refs` / `Filter.Fields`, `resolve.go`; relations
 first, own title last; an exact whole token wins). VOZ-21: `resumen` /
 `estado` / `gasto` said to `/api/ask` are served in-process by the engine's
 own handlers (`codegen.inProcessCommand`). «Ya hice…» / «terminé de…» /
-«… está lista» = the finished transition; «poné en curso X» finds the
+«… está lista» = the finished transition; «pon en curso X» finds the
 resource by the state value. Period phrases match longest-first («de la
 semana que viene» beats «de la semana»); «antes del viernes» is the deadline,
 not the title; an alias that names the resource («reunión», «cita») stays
 as the title's first word. PROSODY (`pkg/ask/prosody.go`): `speech` /
 `display` composed, never derived — clocks/dates/small counts in words,
 shared-period ranges («de las diez a las once de la mañana»), lists capped
-at five + «y N más; mirá el panel», numbered picks as words, no
+at five + «y N más; mira el panel», numbered picks as words, no
 digit/symbol/bullet/pictograph/underscore in any spoken reply (measured on
 every provocation reply; the box has no synthesizer, the criterion is the
 metric). VOZ-15 stays as the written rule with corpus evidence (25 bare hours,
@@ -2326,7 +2326,7 @@ VOZ-AHORRO-S2), then the plan cache (per tenant+role+vocabulary-fingerprint,
 normalized question, 24 h/2 000 entries, plans not data — a cached «hoy» is
 tomorrow's today; a WRITE plan is cached too, per tenant+role+USER, and is
 re-prepared against the database before every confirmation — names, the row,
-the time tokens, the required fields — so a repeated «anotá pagar la luz para
+the time tokens, the required fields — so a repeated «anota pagar la luz para
 mañana» costs one model call, not three, and never writes stale data), then
 the model. **And the parser is also sure of what is NOT a question** (Part C
 of VOZ-AHORRO-S2): a stray answer to a confirmation that no longer exists

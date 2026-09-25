@@ -491,14 +491,14 @@ func discardResult(ctx context.Context, d Deps, pr ParseResult, question string,
 		r.Kind = "unclear"
 		r.Headline = "Eso no fue un sí"
 		if cancelled {
-			r.Text = "👌 Cancelé la escritura que estaba pendiente: «" + esc(firstWords(question, 3)) + "…» no es un <b>sí</b> claro, así que no escribí nada. Si querés cambiar algo, decime la orden completa con el cambio (por ejemplo «anotá … para el viernes»)."
+			r.Text = "👌 Cancelé la escritura que estaba pendiente: «" + esc(firstWords(question, 3)) + "…» no es un <b>sí</b> claro, así que no escribí nada. Si quieres cambiar algo, dime la orden completa con el cambio (por ejemplo «anota … para el viernes»)."
 		} else {
-			r.Text = "🤔 Eso suena a la respuesta a una confirmación, pero no hay ninguna escritura pendiente (si había una, ya se canceló). Decime la orden completa otra vez."
+			r.Text = "🤔 Eso suena a la respuesta a una confirmación, pero no hay ninguna escritura pendiente (si había una, ya se canceló). Dime la orden completa otra vez."
 		}
 	case "greeting":
 		r.Kind = "help"
 		r.Headline = "¡Hola!"
-		r.Text = "👋 ¡Hola! Preguntame con tus palabras («cuántas órdenes hay hoy») o pedime que anote algo. " + guide
+		r.Text = "👋 ¡Hola! Pregúntame con tus palabras («cuántas órdenes hay hoy») o pídeme que anote algo. " + guide
 	case "help":
 		// The living guide's menu (AGENDA-ASISTENTE-S1, Part B): what the app
 		// has and the four doors, then the levels to ask for. Generated from
@@ -509,8 +509,8 @@ func discardResult(ctx context.Context, d Deps, pr ParseResult, question string,
 		return g
 	default: // bare_name
 		r.Kind = "unclear"
-		r.Headline = "¿Qué querés saber?"
-		r.Text = "🤔 «" + esc(question) + "» parece un nombre, pero no me dijiste qué querés saber. Probá «las órdenes de " + esc(question) + "» o «cuántas … tiene " + esc(question) + "». " + guide
+		r.Headline = "¿Qué quieres saber?"
+		r.Text = "🤔 «" + esc(question) + "» parece un nombre, pero no me dijiste qué quieres saber. Prueba «las órdenes de " + esc(question) + "» o «cuántas … tiene " + esc(question) + "». " + guide
 	}
 	return r
 }
@@ -632,7 +632,7 @@ func resolveNames(ctx context.Context, d Deps, p Plan) (Plan, Result, bool) {
 				Text: fmt.Sprintf("🤷 No encuentro ningún %s que se llame «%s». ¿Quisiste decir?\n%s\n\nRepetí la pregunta con ese nombre.", esc(singular(targetName)), esc(f.Match), options(dec.Options))}, false
 		default:
 			return p, Result{Kind: "not_found", Headline: "No encuentro «" + f.Match + "»",
-				Text: fmt.Sprintf("🤷 No encuentro ningún %s que se llame «%s». Revisá el nombre y volvé a preguntar.", esc(singular(targetName)), esc(f.Match))}, false
+				Text: fmt.Sprintf("🤷 No encuentro ningún %s que se llame «%s». Revisa el nombre y vuelve a preguntar.", esc(singular(targetName)), esc(f.Match))}, false
 		}
 	}
 	return p, Result{Understood: strings.Join(said, " ")}, true
@@ -816,11 +816,11 @@ func execFailure(err error) Result {
 				Text: "🔒 Tu rol no puede ver uno de los datos que pide esa pregunta."}
 		case 400:
 			return Result{Kind: "unclear", Headline: "No entendí", Detail: ee.Msg,
-				Text: "🤔 <b>No entendí</b> la pregunta lo bastante bien como para consultarla. Probá con otras palabras."}
+				Text: "🤔 <b>No entendí</b> la pregunta lo bastante bien como para consultarla. Prueba con otras palabras."}
 		}
 	}
 	return Result{Kind: "unavailable", Headline: "No pude consultar", Detail: err.Error(),
-		Text: "⚠️ No pude consultar la base ahora. Probá en unos segundos."}
+		Text: "⚠️ No pude consultar la base ahora. Prueba en unos segundos."}
 }
 
 func literal(v any) string {
@@ -918,7 +918,7 @@ func modelOffResult(d Deps, parseReason string) Result {
 	case "minute":
 		r.Kind = "capped"
 		r.Headline = "Demasiadas preguntas al modelo este minuto"
-		r.Text = "⏳ Demasiadas preguntas al modelo en este minuto. Esperá un momento y volvé a preguntar; las preguntas simples siguen respondiendo al instante."
+		r.Text = "⏳ Demasiadas preguntas al modelo en este minuto. Espera un momento y vuelve a preguntar; las preguntas simples siguen respondiendo al instante."
 	default:
 		r.Kind = "disabled"
 		r.Headline = "Preguntas al modelo no activadas"

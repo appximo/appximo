@@ -138,9 +138,9 @@ func TestHelp_ExamplesComeFromTheSchema(t *testing.T) {
 		}
 	}
 	// tareas points at TWO relation targets (area, persona): since VOZ-20 the
-	// parser settles «marcá como hecha la tarea de [nombre]» anyway (the
+	// parser settles «marca como hecha la tarea de [nombre]» anyway (the
 	// engine tries each target), so the self-check keeps it as free.
-	if !strings.Contains(text, "marcá como hecha la tarea de [nombre]") {
+	if !strings.Contains(text, "marca como hecha la tarea de [nombre]") {
 		t.Fatalf("help lacks the transition the parser now settles:\n%s", text)
 	}
 	if strings.Contains(text, "Puedo contar, listar o sumar sobre") {

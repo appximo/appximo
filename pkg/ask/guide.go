@@ -85,9 +85,9 @@ type guidePart struct {
 
 var guideCreateLeads = []string{"como creo", "como se crea", "como cargo", "como anoto", "como agendo", "como registro", "como agrego", "como se anota", "como se agenda", "como se registra", "como hago para crear", "como hago para anotar", "como hago para agendar", "que digo para crear", "como te digo que crees", "como te pido que crees", "como creo", "como puedo crear", "como puedo anotar", "como hago una", "como hago un", "ensename a crear", "enseñame a crear"}
 var guideAskLeads = []string{"que puedo preguntar", "que puedo preguntarte", "que te puedo preguntar", "como pregunto", "que preguntas", "que se puede preguntar", "que me podes responder", "que me puedes responder", "que puedo consultar", "como consulto", "que puedo pedir", "que puedo pedirte", "que preguntas puedo", "ensename a preguntar", "enseñame a preguntar", "como se pregunta"}
-var guideFieldsLeads = []string{"que campos tiene", "que campos tienen", "que tiene un", "que tiene una", "que datos tiene", "que datos lleva", "que lleva un", "que lleva una", "campos de", "que campos", "que puedo poner en", "que se le puede poner a", "que datos tiene un", "que datos tiene una", "que puedo ponerle a", "que le puedo poner a"}
+var guideFieldsLeads = []string{"que campos tiene", "que campos tienen", "que campo tiene", "que campo lleva", "que campos lleva", "que campos hay en", "que informacion tiene", "que info tiene", "que tiene un", "que tiene una", "que datos tiene", "que datos lleva", "que lleva un", "que lleva una", "campos de", "que campos", "que campo", "que puedo poner en", "que se le puede poner a", "que datos tiene un", "que datos tiene una", "que puedo ponerle a", "que le puedo poner a"}
 var guideFilterLeads = []string{"como filtro", "como busco", "que filtros", "como pregunto por fecha", "como pido por fecha", "como busco por", "como filtro por", "que periodos", "como se filtra", "como filtrar", "como buscar", "que fechas entendes", "que fechas entiendes", "como pregunto por periodo", "por periodo", "como combino", "como pregunto por"}
-var guideMoreWords = set("mas", "segui", "seguí", "continua", "continuá", "y que mas", "otro", "otra", "siguiente", "seguir", "mas ejemplos", "dame mas", "y despues", "que mas", "continuar", "sigue", "dale segui", "dale", "seguime")
+var guideMoreWords = set("mas", "segui", "sigue", "continua", "continuá", "y que mas", "otro", "otra", "siguiente", "seguir", "mas ejemplos", "dame mas", "y despues", "que mas", "continuar", "sigue", "dale segui", "dale", "seguime")
 
 // guideTopic recognizes a guide request. Returns the topic ("" when none)
 // and the resource named, if any.
@@ -162,8 +162,8 @@ func Guide(ctx context.Context, d Deps, topic, res string) Result {
 		r.Kind = "help"
 	}
 	if part+1 < len(parts) {
-		r.Text += fmt.Sprintf("\n\n<i>Hay más (%d de %d). Decí <b>más</b> para seguir.</i>", part+1, len(parts))
-		r.Speech = strings.TrimSpace(r.Speech) + " Hay más. Decí más para seguir."
+		r.Text += fmt.Sprintf("\n\n<i>Hay más (%d de %d). Di <b>más</b> para seguir.</i>", part+1, len(parts))
+		r.Speech = strings.TrimSpace(r.Speech) + " Hay más. Di más para seguir."
 		d.Guide.put(d.GuideKey, topic, res, part+1)
 	} else {
 		d.Guide.put(d.GuideKey, topic, res, -1)
@@ -179,7 +179,7 @@ func guideHeadline(topic, res string) string {
 		}
 		return "Cómo crear algo"
 	case "ask":
-		return "Qué podés preguntar"
+		return "Qué puedes preguntar"
 	case "fields":
 		if res != "" {
 			return "Qué tiene " + singular(res)
@@ -216,7 +216,7 @@ func renderGuide(ctx context.Context, d Deps, topic, res string) []guidePart {
 		}
 		if len(parts) > 0 {
 			parts[len(parts)-1].text += "\n\nPara el detalle de uno: «cómo creo " + singularWord(creatableOrder(v)[0]) + "»."
-			parts[len(parts)-1].speech += " Para el detalle de uno decí: cómo creo " + singularWord(creatableOrder(v)[0]) + "."
+			parts[len(parts)-1].speech += " Para el detalle de uno di: cómo creo " + singularWord(creatableOrder(v)[0]) + "."
 		}
 		return parts
 	case "ask":
@@ -391,11 +391,11 @@ func guideCreate(ctx context.Context, d Deps, r *Resource, detailed bool) []guid
 	opener := "crear " + sing + ": "
 	spokenOpener := "crear " + sing
 	if isAgenda {
-		opener, spokenOpener = "agendá ", "agendá"
-		structure = append(structure, "agendá [qué]")
+		opener, spokenOpener = "agenda ", "agenda"
+		structure = append(structure, "agenda [qué]")
 	} else if isNote {
-		opener, spokenOpener = "anotá que ", "anotá que"
-		structure = append(structure, "anotá que [qué pasó]")
+		opener, spokenOpener = "anota que ", "anota que"
+		structure = append(structure, "anota que [qué pasó]")
 	} else {
 		structure = append(structure, "crear "+sing+": [qué]")
 	}
@@ -430,7 +430,7 @@ func guideCreate(ctx context.Context, d Deps, r *Resource, detailed bool) []guid
 	}
 	free := verifiedCreate(v, phrase, r.Name) && verifiedCreate(v, spokenPhrase, r.Name)
 	var b strings.Builder
-	fmt.Fprintf(&b, "✍️ <b>Para crear %s</b> decí: «%s».\n", esc(art), esc(strings.Join(structure, sep)))
+	fmt.Fprintf(&b, "✍️ <b>Para crear %s</b> di: «%s».\n", esc(art), esc(strings.Join(structure, sep)))
 	fmt.Fprintf(&b, "Por ejemplo: «<b>%s</b>»", esc(phrase))
 	if free {
 		b.WriteString(" — la entiendo al instante, gratis.")
@@ -439,7 +439,7 @@ func guideCreate(ctx context.Context, d Deps, r *Resource, detailed bool) []guid
 	}
 	b.WriteString("\nLos datos van en cualquier orden, separados por comas o pausas; el que no digas, lo pregunto o lo dejo vacío. Antes de escribir te muestro todo y espero tu <b>sí</b>.")
 	sp := []string{
-		sentence("Para crear " + art + " decí " + spokenOpener + " y después los datos: " + joinSpoken(spokenData)),
+		sentence("Para crear " + art + " di " + spokenOpener + " y después los datos: " + joinSpoken(spokenData)),
 		"En cualquier orden, separados por pausas.",
 		sentence("Por ejemplo: " + strings.Join(speechEx, ", ")),
 	}
@@ -467,13 +467,13 @@ func guideCreate(ctx context.Context, d Deps, r *Resource, detailed bool) []guid
 		}
 	}
 	if r == taskResource(v) {
-		add(way{"tengo que " + sample, ""}, way{"anotá " + sample + " mañana", ""}, way{"acordate de " + sample, ""})
+		add(way{"tengo que " + sample, ""}, way{"anota " + sample + " mañana", ""}, way{"acuérdate de " + sample, ""})
 	}
 	if isAgenda {
-		add(way{"agendá " + sample + " el jueves a las 10", "agendá " + sample + " el jueves a las diez"}, way{"agendá " + sample + " mañana a las 3 por una hora", "agendá " + sample + " mañana a las tres por una hora"})
+		add(way{"agenda " + sample + " el jueves a las 10", "agenda " + sample + " el jueves a las diez"}, way{"agenda " + sample + " mañana a las 3 por una hora", "agenda " + sample + " mañana a las tres por una hora"})
 	}
 	if isNote {
-		add(way{"registrá que " + sample + " a las 3", "registrá que " + sample + " a las tres"}, way{"anotá que " + sample + " hoy de 2 a 4", "anotá que " + sample + " hoy de dos a cuatro"}, way{"anotá que " + sample + " ayer de 9 a 10", "anotá que " + sample + " ayer de nueve a diez"}, way{"anotá que " + sample + " esta mañana", ""})
+		add(way{"registra que " + sample + " a las 3", "registra que " + sample + " a las tres"}, way{"anota que " + sample + " hoy de 2 a 4", "anota que " + sample + " hoy de dos a cuatro"}, way{"anota que " + sample + " ayer de 9 a 10", "anota que " + sample + " ayer de nueve a diez"}, way{"anota que " + sample + " esta mañana", ""})
 	}
 	var b2 strings.Builder
 	var sp2 []string
@@ -502,7 +502,7 @@ func guideCreate(ctx context.Context, d Deps, r *Resource, detailed bool) []guid
 		sp2 = append(sp2, sentence(timeName+", por ejemplo "+timeSpeech))
 	}
 	if sf := r.StateField(); sf != nil {
-		fmt.Fprintf(&b2, "El estado no se dice al crear: nace en «%s» y lo cambiás después («marcá como %s …»).", esc(strings.Join(sf.Initial, " / ")), esc(transitionWord(sf)))
+		fmt.Fprintf(&b2, "El estado no se dice al crear: nace en «%s» y lo cambiás después («marca como %s …»).", esc(strings.Join(sf.Initial, " / ")), esc(transitionWord(sf)))
 		sp2 = append(sp2, "El estado no se dice al crear: nace en "+spokenWord(strings.Join(sf.Initial, " o "))+" y lo cambiás después.")
 	}
 	parts = append(parts, guidePart{text: strings.TrimSpace(b2.String()), speech: strings.Join(sp2, " ")})
@@ -597,11 +597,11 @@ func guideAsk(ctx context.Context, d Deps) []guidePart {
 		items[i] = guideItem{text: "• «" + esc(free[i]) + "»", speech: sentence(freeSp[i])}
 	}
 	return pageParts(
-		"❓ <b>Preguntá con la palabra de la cosa y, si querés, un estado, un nombre o un período.</b>\n<b>Al instante y gratis:</b>",
-		"Preguntá con la palabra de la cosa y, si querés, un estado, un nombre o un período. Estas las respondo al instante y sin costo:",
+		"❓ <b>Pregunta con la palabra de la cosa y, si quieres, un estado, un nombre o un período.</b>\n<b>Al instante y gratis:</b>",
+		"Pregunta con la palabra de la cosa y, si quieres, un estado, un nombre o un período. Estas las respondo al instante y sin costo:",
 		items,
 		"<b>Con el modelo</b> (≈ US$ 0,003): cualquier frase con palabras que la app no conoce; un texto libre («qué me dijo …») no es un dato y no se responde.\nPara combinar condiciones o filtrar por fecha: «cómo filtro por fecha».",
-		"Una frase con palabras que la app no conoce la piensa el modelo y cuesta unos centavos. Para filtrar por fecha decí: cómo filtro por fecha.",
+		"Una frase con palabras que la app no conoce la piensa el modelo y cuesta unos centavos. Para filtrar por fecha di: cómo filtro por fecha.",
 		6)
 }
 
@@ -638,7 +638,7 @@ func guideFields(ctx context.Context, d Deps, r *Resource) []guidePart {
 		case f.Type == "bool":
 			desc = fw + " (sí o no)"
 		case f.Type == "time":
-			desc = fw + " (una fecha, con hora si querés)"
+			desc = fw + " (una fecha, con hora si quieres)"
 		case f.IsNumeric():
 			desc = fw + " (un número)"
 		default:
@@ -667,7 +667,7 @@ func guideFields(ctx context.Context, d Deps, r *Resource) []guidePart {
 		sentence(strings.ToUpper(art[:1])+art[1:]+" tiene estos datos"),
 		items,
 		fmt.Sprintf("Para crearla: «cómo creo %s».", esc(art)),
-		"Para crearla decí: cómo creo "+art+".",
+		"Para crearla di: cómo creo "+art+".",
 		6)
 }
 
@@ -772,16 +772,16 @@ func guideMenu(ctx context.Context, d Deps) []guidePart {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "ℹ️ <b>%s</b> tiene: %s.\n", esc(app), esc(strings.Join(things, ", ")))
-	b.WriteString("Podés <b>preguntar</b> («" + esc(q+" "+exPlural+" hay") + "»)")
+	b.WriteString("Puedes <b>preguntar</b> («" + esc(q+" "+exPlural+" hay") + "»)")
 	if v.Writable() && len(creatableOrder(v)) > 0 {
-		b.WriteString(", <b>crear</b> («crear " + esc(singular(creatableOrder(v)[0])) + ": …»), <b>cambiar</b> («marcá como … la …»)")
+		b.WriteString(", <b>crear</b> («crear " + esc(singular(creatableOrder(v)[0])) + ": …»), <b>cambiar</b> («marca como … la …»)")
 	}
 	b.WriteString(" y pedir el <b>resumen</b> del día.\n")
 	b.WriteString("Para aprender: <b>cómo creo algo</b> · <b>qué puedo preguntar</b> · <b>qué campos tiene " + esc(singularWord(ex)) + "</b> · <b>cómo filtro por fecha</b>. Y <b>más</b> para seguir cualquiera.")
 	sp := []string{
 		sentence(app + " tiene: " + spokenWord(strings.Join(things, ", "))),
-		"Podés preguntar, por ejemplo " + q + " " + exPlural + " hay. Crear, cambiar y pedir el resumen del día.",
-		"Para aprender decí: cómo creo algo. Qué puedo preguntar. Qué campos tiene " + singularWord(ex) + ". O cómo filtro por fecha.",
+		"Puedes preguntar, por ejemplo " + q + " " + exPlural + " hay. Crear, cambiar y pedir el resumen del día.",
+		"Para aprender di: cómo creo algo. Qué puedo preguntar. Qué campos tiene " + singularWord(ex) + ". O cómo filtro por fecha.",
 		"Y más, para seguir cualquiera.",
 	}
 	return []guidePart{{text: b.String(), speech: strings.Join(sp, " ")}}

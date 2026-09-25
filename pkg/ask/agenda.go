@@ -807,7 +807,7 @@ func checkConflicts(ctx context.Context, d Deps, pend *Pending) (Result, bool) {
 		}
 		names = append(names, fmt.Sprintf("«%s» %s", esc(label), esc(spanWords(row[rg.Start], row[rg.End], loc))))
 	}
-	warn := "⚠️ Ya tenés " + strings.Join(names, ", ") + "."
+	warn := "⚠️ Ya tienes " + strings.Join(names, ", ") + "."
 	pend.Labels["__conflict"] = warn
 	// What a yes does: flip an invertible rule (ocupa: no) or ask for another time.
 	if flipVal, can := rg.nonBlockingValue(); can {
@@ -816,7 +816,7 @@ func checkConflicts(ctx context.Context, d Deps, pend *Pending) (Result, bool) {
 		pend.Stage = "confirm"
 		d.Pending.Put(pend)
 		text := warn + "\n\n" + confirmationText(d, pend)
-		r := pendingResult(pend, "confirm", "Ya tenés algo a esa hora. ¿Igual lo agendo?", text)
+		r := pendingResult(pend, "confirm", "Ya tienes algo a esa hora. ¿Igual lo agendo?", text)
 		r.Speech = Speech(warn) + " " + spokenConfirmation(d, pend)
 		return r, true
 	}
@@ -825,7 +825,7 @@ func checkConflicts(ctx context.Context, d Deps, pend *Pending) (Result, bool) {
 	delete(pend.Data, rg.End)
 	d.Pending.Put(pend)
 	text := warn + " La agenda no permite encimar. ¿A qué hora lo paso? (hoy a las 3, mañana de 4 a 5… o <b>no</b> para cancelar)"
-	return pendingResult(pend, "conflict", "Ya tenés algo a esa hora", text), true
+	return pendingResult(pend, "conflict", "Ya tienes algo a esa hora", text), true
 }
 
 // nonBlockingValue is the value that takes a row OUT of the rule: only an
@@ -949,11 +949,11 @@ func composeAgenda(d Deps, p Plan, res *Resource, rg *Range, rows []map[string]a
 	when := strings.TrimSpace(strings.TrimPrefix(understood, res.Name))
 	when = strings.Trim(when, " ·")
 	when = strings.NewReplacer(" (", ", ", "(", "", ")", "").Replace(when) // «mañana (jue 24 sep)» → «mañana, jue 24 sep»
-	out.Speech = "Tenés " + numberPhrase(int(total), res.Name)
+	out.Speech = "Tienes " + numberPhrase(int(total), res.Name)
 	if when != "" {
 		out.Speech += " " + when
 	}
-	out.Speech += ": " + spokenList(items, int(total), "mirá el panel")
+	out.Speech += ": " + spokenList(items, int(total), "mira el panel")
 	out.Speech = SpokenNumbers(out.Speech)
 	return out
 }
@@ -1008,9 +1008,9 @@ func composeFree(d Deps, res *Resource, rg *Range, rows []map[string]any, w Wind
 	var b strings.Builder
 	if len(busy) == 0 {
 		out.Headline = "Libre todo el día"
-		fmt.Fprintf(&b, "🟢 <b>Libre</b> %s: no tenés nada agendado.", esc(w.Words))
+		fmt.Fprintf(&b, "🟢 <b>Libre</b> %s: no tienes nada agendado.", esc(w.Words))
 		out.Text = b.String()
-		out.Speech = SpokenNumbers("Estás libre " + w.Words + ": no tenés nada agendado.")
+		out.Speech = SpokenNumbers("Estás libre " + w.Words + ": no tienes nada agendado.")
 		return out
 	}
 	out.Headline = fmt.Sprintf("%d hueco(s) libre(s)", len(free))

@@ -240,7 +240,7 @@ var drillVoiceCmd = &cobra.Command{
 		wrote := false
 		if sm := stateFieldOf(t.schema, res); sm != "" {
 			if to := firstTransitionTarget(t.schema, res, sm); to != "" {
-				q := "marcá como " + strings.ReplaceAll(to, "_", " ") + " " + singularWord(word)
+				q := "marca como " + strings.ReplaceAll(to, "_", " ") + " " + singularWord(word)
 				r, _ = drillAsk(t.url, eph, token, map[string]any{"q": q})
 				check("transition («"+q+"»)", []string{"confirm", "ambiguous", "answer", "forbidden"}, r)
 				if pid, _ := r["pending_id"].(string); pid != "" && r["stage"] == "confirm" {
@@ -417,7 +417,7 @@ func init() {
 		"es": {
 			title:  "una pregunta, y quién la respondió",
 			what:   "manda UNA pregunta a POST /api/ask como el tenant + rol dados — exactamente lo que hacen el bot de Telegram y un atajo de Siri — e imprime la respuesta con su contabilidad.",
-			expect: "source=parser (US$ 0, milisegundos) para una pregunta en las palabras del schema o sus alias declarados; source=cache si se repite; source=model (≈ US$ 0,003, ~1 s) para el resto, con «el parser pasó: …» nombrando la palabra que no conoció; un verbo de borrar es write_refused; una orden de escritura responde una confirmación (kind=confirm) y no escribe nada.",
+			expect: "source=parser (US$ 0, milisegundos) para una pregunta en las palabras del schema o sus alias declarados; source=cache si se repite; source=model (≈ US$ 0,003, ~1 s) para el resto, con «el parser pasó: …» nombrando la palabra que no conoció; un verbo de borrar es write_refused; una orden de escritura responde una confirmación (kind=confirm) y no escribí nada.",
 			where: "la propia respuesta (display = el texto con la traza ⚙︎ si APPXIMO_ASK_TRACE=on).\n" +
 				"                       GET /admin/ask?tenant=<t>  (clave de plataforma): share, top_cost, model_fallbacks con la razón del parser.\n" +
 				"                       Telegram: `gasto`  ·  /metrics: appximo_ask_questions{source}",

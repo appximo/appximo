@@ -69,7 +69,7 @@ func composeAggregate(d Deps, p Plan, res *Resource, rows []map[string]any, unde
 		if len(items) == 0 {
 			out.Speech = "No hay " + numberPhrase(0, res.Name) + " con eso."
 		} else {
-			out.Speech = SpokenNumbers(out.Headline + " por " + strings.ReplaceAll(p.GroupBy, "_", " ") + ": " + spokenList(items, len(items), "mirá el panel"))
+			out.Speech = SpokenNumbers(out.Headline + " por " + strings.ReplaceAll(p.GroupBy, "_", " ") + ": " + spokenList(items, len(items), "mira el panel"))
 		}
 		return out
 	}
@@ -179,7 +179,7 @@ func composeList(d Deps, p Plan, res *Resource, rows []map[string]any, total int
 	if total == 0 {
 		out.Speech = "No hay " + numberPhrase(0, res.Name) + " con eso."
 	} else {
-		out.Speech = "Tenés " + head + ": " + spokenList(items, int(total), "mirá el panel")
+		out.Speech = "Tienes " + head + ": " + spokenList(items, int(total), "mira el panel")
 	}
 	out.Speech = SpokenNumbers(out.Speech)
 	return out

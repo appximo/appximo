@@ -10,7 +10,7 @@ import (
 // The fixed form and its tolerant cousins (Part C) on Miguel's real schema
 // (miguelAgendaSchema, help_test.go): any order, with or without the field
 // word, comma or «y», the title as said; a name tried against both targets
-// (VOZ-20); a to-do from an infinitive; a note from «anotá que».
+// (VOZ-20); a to-do from an infinitive; a note from «anota que».
 func TestCreate_FixedFormInAnyOrder(t *testing.T) {
 	v := miguelVocab()
 	cases := []struct {
@@ -28,12 +28,12 @@ func TestCreate_FixedFormInAnyOrder(t *testing.T) {
 		{"crear tarea: revisar el contrato, persona Marta, mañana", "tareas", "revisar el contrato", map[string]any{"vence_en": "tomorrow"}, 0, false},
 		{"tarea: lavar el carro el sábado", "tareas", "lavar el carro", map[string]any{"vence_en": "next_saturday"}, 0, false},
 		{"Tarea organizar suscripciones", "tareas", "organizar suscripciones", nil, 0, false},
-		{"anotá pagar la luz mañana", "tareas", "pagar la luz", map[string]any{"vence_en": "tomorrow"}, 0, false},
-		{"anotá llamar a Fabián urgente para mañana", "tareas", "llamar a Fabián", map[string]any{"urgente": true, "vence_en": "tomorrow"}, 1, true},
-		{"anotá una tarea para Marta", "tareas", "", nil, 1, false},
+		{"anota pagar la luz mañana", "tareas", "pagar la luz", map[string]any{"vence_en": "tomorrow"}, 0, false},
+		{"anota llamar a Fabián urgente para mañana", "tareas", "llamar a Fabián", map[string]any{"urgente": true, "vence_en": "tomorrow"}, 1, true},
+		{"anota una tarea para Marta", "tareas", "", nil, 1, false},
 		{"crear compromiso: almuerzo con Marta, el jueves de 12 a 1", "compromisos", "almuerzo", map[string]any{"inicio": "next_thursday 12:00", "fin": "next_thursday 13:00"}, 0, false},
 		{"crear compromiso: el jueves de 12 a 1, almuerzo, con Marta", "compromisos", "almuerzo", map[string]any{"inicio": "next_thursday 12:00", "fin": "next_thursday 13:00"}, 0, false},
-		{"anotá pagar la luz mañana, 30 minutos", "tareas", "pagar la luz", map[string]any{"vence_en": "tomorrow", "duracion_estimada_min": float64(30)}, 0, false},
+		{"anota pagar la luz mañana, 30 minutos", "tareas", "pagar la luz", map[string]any{"vence_en": "tomorrow", "duracion_estimada_min": float64(30)}, 0, false},
 	}
 	for _, c := range cases {
 		r := Parse(c.q, v)
@@ -66,8 +66,8 @@ func TestCreate_FixedFormInAnyOrder(t *testing.T) {
 			t.Errorf("%q must not be a create: %+v", q, r.Plan)
 		}
 	}
-	// «anotá que …» is the note, never the agenda — even with a clock
-	r := Parse("anotá que la plataforma se cayó hoy de 2 a 4 de la tarde", v)
+	// «anota que …» is the note, never the agenda — even with a clock
+	r := Parse("anota que la plataforma se cayó hoy de 2 a 4 de la tarde", v)
 	if !r.Sure || r.Plan.Resource != "registros" || r.Plan.Data["cuando"] != "today 14:00" || r.Plan.Data["hasta"] != "today 16:00" {
 		t.Fatalf("a note with a lapse: %+v (%s)", r.Plan, r.Reason)
 	}
@@ -79,8 +79,8 @@ func TestCreate_FixedFormInAnyOrder(t *testing.T) {
 		}
 	}
 	// two intentions: the first is taken, the second is said back
-	r = Parse("anotá comprar pintura y agendá reunión con Fabián mañana a las 4", v)
-	if !r.Sure || r.Plan.Resource != "tareas" || r.Plan.Data["titulo"] != "comprar pintura" || !strings.Contains(r.Plan.Reason, "agendá") {
+	r = Parse("anota comprar pintura y agenda reunión con Fabián mañana a las 4", v)
+	if !r.Sure || r.Plan.Resource != "tareas" || r.Plan.Data["titulo"] != "comprar pintura" || !strings.Contains(r.Plan.Reason, "agenda") {
 		t.Fatalf("two intentions: %+v (%s)", r.Plan, r.Reason)
 	}
 }
@@ -115,7 +115,7 @@ func TestCreate_NamesTriedAgainstEveryTarget(t *testing.T) {
 		t.Fatalf("a bare area name is the area: %+v", r.Pending.Data)
 	}
 	Answer(context.Background(), d, "no")
-	r = Answer(context.Background(), d, "anotá llamar a Fabián para mañana")
+	r = Answer(context.Background(), d, "anota llamar a Fabián para mañana")
 	if r.Kind != "confirm" || r.Pending.Data["persona_id"] != "p1" || !strings.Contains(r.Text, "Fabián Gómez") || !strings.Contains(r.Text, "llamar a Fabián") {
 		t.Fatalf("a name inside the title fills the relation and stays in the title: %s %+v", r.Kind, r.Pending)
 	}
@@ -139,7 +139,7 @@ func TestCreate_NamesTriedAgainstEveryTarget(t *testing.T) {
 		t.Fatalf("tareas de Zutano: %s %s", r.Kind, r.Text)
 	}
 	// a transition names the row by its own title
-	r = Answer(context.Background(), d, "marcá como hecha la tarea del techo")
+	r = Answer(context.Background(), d, "marca como hecha la tarea del techo")
 	if r.Kind != "confirm" || r.Pending == nil || r.Pending.RowID != "t1" {
 		t.Fatalf("la tarea del techo: %s %s", r.Kind, r.Text)
 	}
@@ -154,7 +154,7 @@ func TestCreate_NamesTriedAgainstEveryTarget(t *testing.T) {
 func TestCorrection_ReissuesTheConfirmation(t *testing.T) {
 	e := miguelFixtures()
 	d, w := miguelDeps(e)
-	r := Answer(context.Background(), d, "anotá regar las plantas para pasado mañana")
+	r := Answer(context.Background(), d, "anota regar las plantas para pasado mañana")
 	if r.Kind != "confirm" || r.Pending.Data["vence_en"] == nil {
 		t.Fatalf("setup: %s %s", r.Kind, r.Text)
 	}
@@ -175,7 +175,7 @@ func TestCorrection_ReissuesTheConfirmation(t *testing.T) {
 		t.Fatalf("an unrelated question cancels and is answered: %s %s", r.Kind, r.Text)
 	}
 	// the agenda: «mejor a las 5» keeps the day, moves the hour, keeps the length
-	r = Answer(context.Background(), d, "agendá reunión con Fabián mañana de 4 a 5")
+	r = Answer(context.Background(), d, "agenda reunión con Fabián mañana de 4 a 5")
 	if r.Kind != "confirm" || r.Pending.Data["persona_id"] != "p1" {
 		t.Fatalf("setup agenda: %s %s", r.Kind, r.Text)
 	}
@@ -232,7 +232,7 @@ func TestGuideAndCommands_AtZeroCost(t *testing.T) {
 		t.Fatalf("guide speech metrics %+v: %q", m, r.Speech)
 	}
 	r2 := Answer(context.Background(), d, "más")
-	if r2.Kind != "guide" || r2.Text == r.Text || !strings.Contains(r2.Text, "agendá") {
+	if r2.Kind != "guide" || r2.Text == r.Text || !strings.Contains(r2.Text, "agenda") {
 		t.Fatalf("«más» continues with the next resource: %s %s", r2.Kind, r2.Text)
 	}
 	r3 := Answer(context.Background(), d, "cómo creo una tarea")
@@ -336,13 +336,13 @@ func TestProsody_SpokenReplies(t *testing.T) {
 		t.Fatalf("%s %s", r.Kind, r.Text)
 	}
 	m := SpeechMetrics(r.Speech)
-	if !strings.HasPrefix(r.Speech, "Tenés once tareas:") || !strings.Contains(r.Speech, "Y seis más; mirá el panel") || m.Digits > 0 || m.Symbols > 0 || m.MaxWordsSentence > 24 {
+	if !strings.HasPrefix(r.Speech, "Tienes once tareas:") || !strings.Contains(r.Speech, "Y seis más; mira el panel") || m.Digits > 0 || m.Symbols > 0 || m.MaxWordsSentence > 24 {
 		t.Fatalf("spoken list: %+v %q", m, r.Speech)
 	}
 	if strings.Count(r.Text, "• ") != 10 {
 		t.Errorf("the screen keeps the page: %d bullets", strings.Count(r.Text, "• "))
 	}
-	r = Answer(context.Background(), d, "agendá reunión con Fabián mañana a las 4")
+	r = Answer(context.Background(), d, "agenda reunión con Fabián mañana a las 4")
 	if r.Kind != "confirm" || !strings.HasPrefix(r.Speech, "Voy a crear un compromiso. Titulo: reunión. ") || !strings.Contains(r.Speech, "Inicio: mañana") || !strings.Contains(r.Speech, "a las cuatro de la tarde") || strings.Contains(r.Speech, "16:00") || strings.Contains(r.Speech, "•") {
 		t.Fatalf("spoken confirmation: %s %q", r.Kind, r.Speech)
 	}
@@ -359,7 +359,7 @@ func TestProsody_SpokenReplies(t *testing.T) {
 }
 
 // The owner's real phone (2026-09-24): a Siri shortcut named after the verb
-// swallows it, so «anotá que …» arrives as «que …». The three sentences he
+// swallows it, so «anota que …» arrives as «que …». The three sentences he
 // dictated, verbatim from the agenda's history, are a note each — and the
 // clock forms they carry («de siete a dos de la tarde», «de siete A.M. a dos
 // P.M.», «el día de hoy») read as 07:00–14:00 today.
@@ -392,21 +392,21 @@ func TestDictationTail_VerblessLogEntryIsTheNote(t *testing.T) {
 	}
 	// the clock forms on the agenda itself
 	for q, want := range map[string][2]string{
-		"agendá reunión hoy de 7 a 2 de la tarde":     {"today 07:00", "today 14:00"},
-		"agendá reunión hoy de 4 a 5 de la tarde":     {"today 16:00", "today 17:00"},
-		"agendá reunión hoy de 12 a 1":                {"today 12:00", "today 13:00"},
-		"agendá reunión hoy de 1 a 3 de la mañana":    {"today 01:00", "today 03:00"},
-		"agendá reunión hoy de 9 a 11 de la mañana":   {"today 09:00", "today 11:00"},
-		"agendá reunión hoy de siete A.M. a dos P.M.": {"today 07:00", "today 14:00"},
-		"agendá reunión mañana de 7am a 2pm":          {"tomorrow 07:00", "tomorrow 14:00"},
-		"agendá reunión el día de hoy de 10 a 11":     {"today 10:00", "today 11:00"},
+		"agenda reunión hoy de 7 a 2 de la tarde":     {"today 07:00", "today 14:00"},
+		"agenda reunión hoy de 4 a 5 de la tarde":     {"today 16:00", "today 17:00"},
+		"agenda reunión hoy de 12 a 1":                {"today 12:00", "today 13:00"},
+		"agenda reunión hoy de 1 a 3 de la mañana":    {"today 01:00", "today 03:00"},
+		"agenda reunión hoy de 9 a 11 de la mañana":   {"today 09:00", "today 11:00"},
+		"agenda reunión hoy de siete A.M. a dos P.M.": {"today 07:00", "today 14:00"},
+		"agenda reunión mañana de 7am a 2pm":          {"tomorrow 07:00", "tomorrow 14:00"},
+		"agenda reunión el día de hoy de 10 a 11":     {"today 10:00", "today 11:00"},
 	} {
 		pr := Parse(q, v)
 		if !pr.Sure || pr.Plan.Data["inicio"] != want[0] || pr.Plan.Data["fin"] != want[1] {
 			t.Errorf("%q: %v / %v, want %v (%s)", q, pr.Plan.Data["inicio"], pr.Plan.Data["fin"], want, pr.Reason)
 		}
 	}
-	if pr := Parse("agendá dentista mañana a las 2pm", v); !pr.Sure || pr.Plan.Data["inicio"] != "tomorrow 14:00" {
+	if pr := Parse("agenda dentista mañana a las 2pm", v); !pr.Sure || pr.Plan.Data["inicio"] != "tomorrow 14:00" {
 		t.Errorf("glued clock alone: %v (%s)", pr.Plan.Data, pr.Reason)
 	}
 }
@@ -419,26 +419,26 @@ func TestNote_HumanForms(t *testing.T) {
 	s := miguelAgendaSchema()
 	v := BuildWithWrites(s, "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
 	cases := []struct{ q, cuando, hasta, texto string }{
-		{"apuntá que hablé con el banco a las 3", "today 15:00", "", "hablé con el banco"},
-		{"anotá que se cayó la luz a las 3 y media por dos horas", "today 15:30", "today 17:30", "cayó la luz"},
-		{"anotá que estuve en el banco desde las 9 hasta las 10 y media", "today 09:00", "today 10:30", "estuve en el banco"},
-		{"anotá que trabajé en la declaración de renta de 8 a 11 de la mañana", "today 08:00", "today 11:00", "trabajé en la declaración de renta"},
-		{"registrá que la plataforma se cayó ayer de 7 a 2", "yesterday 07:00", "yesterday 14:00", "plataforma se cayó"},
-		{"anotá que anoche se fue la luz a las 10", "yesterday 22:00", "", "fue la luz"},
-		{"anotá que esta mañana fui al gimnasio de 6 a 7", "today 06:00", "today 07:00", "fui al gimnasio"},
-		{"anotá que el martes hablé con el contador a las 3", "last_tuesday 15:00", "", "hablé con el contador"},
-		{"anotá que estudio estuvo caído toda la mañana", "today", "", "estudio estuvo caído"},
-		{"anotá que el estudio estuvo caído entre las 7 y las 2 de la tarde", "today 07:00", "today 14:00", "estudio estuvo caído"},
-		{"anotá que hablé con el banco tipo 3", "today 15:00", "", "hablé con el banco"},
-		{"anotá que hablé con el banco como a las 3", "today 15:00", "", "hablé con el banco"},
-		{"anotá que hablé con el banco a eso de las 3", "today 15:00", "", "hablé con el banco"},
-		{"registrá: la plataforma estuvo caída de 7 a 2", "today 07:00", "today 14:00", "plataforma estuvo caída"},
+		{"apunta que hablé con el banco a las 3", "today 15:00", "", "hablé con el banco"},
+		{"anota que se cayó la luz a las 3 y media por dos horas", "today 15:30", "today 17:30", "cayó la luz"},
+		{"anota que estuve en el banco desde las 9 hasta las 10 y media", "today 09:00", "today 10:30", "estuve en el banco"},
+		{"anota que trabajé en la declaración de renta de 8 a 11 de la mañana", "today 08:00", "today 11:00", "trabajé en la declaración de renta"},
+		{"registra que la plataforma se cayó ayer de 7 a 2", "yesterday 07:00", "yesterday 14:00", "plataforma se cayó"},
+		{"anota que anoche se fue la luz a las 10", "yesterday 22:00", "", "fue la luz"},
+		{"anota que esta mañana fui al gimnasio de 6 a 7", "today 06:00", "today 07:00", "fui al gimnasio"},
+		{"anota que el martes hablé con el contador a las 3", "last_tuesday 15:00", "", "hablé con el contador"},
+		{"anota que estudio estuvo caído toda la mañana", "today", "", "estudio estuvo caído"},
+		{"anota que el estudio estuvo caído entre las 7 y las 2 de la tarde", "today 07:00", "today 14:00", "estudio estuvo caído"},
+		{"anota que hablé con el banco tipo 3", "today 15:00", "", "hablé con el banco"},
+		{"anota que hablé con el banco como a las 3", "today 15:00", "", "hablé con el banco"},
+		{"anota que hablé con el banco a eso de las 3", "today 15:00", "", "hablé con el banco"},
+		{"registra: la plataforma estuvo caída de 7 a 2", "today 07:00", "today 14:00", "plataforma estuvo caída"},
 		{"nota: hablé con el banco a las 3", "today 15:00", "", "hablé con el banco"},
-		{"anotá que se cayó la plataforma a las 7 y volvió a las 2", "today 07:00", "today 14:00", "cayó la plataforma y volvió"},
-		{"anotá que estudio estuvo caído de 7:30 a 14:15", "today 07:30", "today 14:15", "estudio estuvo caído"},
-		{"anotá que estudio estuvo caído de siete y media a dos y cuarto", "today 07:30", "today 14:15", "estudio estuvo caído"},
-		{"anotá que estudio estuvo caído de 7 a 14", "today 07:00", "today 14:00", "estudio estuvo caído"},
-		{"anotá que en la tarde se cayó la plataforma", "today", "", "cayó la plataforma"},
+		{"anota que se cayó la plataforma a las 7 y volvió a las 2", "today 07:00", "today 14:00", "cayó la plataforma y volvió"},
+		{"anota que estudio estuvo caído de 7:30 a 14:15", "today 07:30", "today 14:15", "estudio estuvo caído"},
+		{"anota que estudio estuvo caído de siete y media a dos y cuarto", "today 07:30", "today 14:15", "estudio estuvo caído"},
+		{"anota que estudio estuvo caído de 7 a 14", "today 07:00", "today 14:00", "estudio estuvo caído"},
+		{"anota que en la tarde se cayó la plataforma", "today", "", "cayó la plataforma"},
 		{"que hablé con el banco a las 3", "today 15:00", "", "hablé con el banco"},
 		{"que se cayó la luz a las 3 y media por dos horas", "today 15:30", "today 17:30", "cayó la luz"},
 		{"que estuve en el banco desde las 9 hasta las 10 y media", "today 09:00", "today 10:30", "estuve en el banco"},
@@ -447,6 +447,10 @@ func TestNote_HumanForms(t *testing.T) {
 		{"que hoy me llamó el contador", "today", "", "llamó el contador"},
 		{"que se dañó la moto el lunes", "last_monday", "", "dañó la moto"},
 		{"que llamé al banco tipo 3", "today 15:00", "", "llamé al banco"},
+		// dictated with no «que» at all (the owner's real morning): a past
+		// tense and a clock span are a log entry
+		{"estudio estuvo caído de 7:30 a 2:15", "today 07:30", "today 14:15", "estudio estuvo caído"},
+		{"hablé con el banco a las 3", "today 15:00", "", "hablé con el banco"},
 	}
 	for _, c := range cases {
 		pr := Parse(c.q, v)
@@ -461,6 +465,23 @@ func TestNote_HumanForms(t *testing.T) {
 		if got("texto") != c.texto {
 			t.Errorf("%q: texto %q, want %q", c.q, got("texto"), c.texto)
 		}
+	}
+	// a question is never a note: «cuántas horas trabajé de 7 a 2» counts,
+	// «tareas de ayer» reads, «qué tengo mañana» reads the agenda
+	for _, q := range []string{"cuántas horas trabajé de 7 a 2", "tareas de ayer", "qué tengo mañana", "compromisos de 4 a 5", "eventos de 4 a 5", "citas de mañana a las 3"} {
+		if pr := Parse(q, v); pr.Sure && pr.Plan.Kind == "create" {
+			t.Errorf("%q must never become a note: %+v", q, pr.Plan)
+		}
+	}
+	// … while the singular word (or an alias) still creates
+	for _, q := range []string{"compromiso de 4 a 5 con Fabián hoy", "evento de 4 a 5", "cita mañana a las 3"} {
+		if pr := Parse(q, v); !pr.Sure || pr.Plan.Kind != "create" || pr.Plan.Resource != "compromisos" {
+			t.Errorf("%q: want a create on the agenda, got %+v (%s)", q, pr.Plan, pr.Reason)
+		}
+	}
+	// the singular fields question is the guide too
+	if topic, _ := guideTopic(tokenize("qué campo tiene una tarea"), v); topic != "fields" {
+		t.Errorf("«qué campo tiene una tarea» → guide fields, got %q", topic)
 	}
 	// what a person asks back
 	for q, period := range map[string]string{"qué registré hoy": "today", "qué anoté ayer": "yesterday", "registros de antier": "day_before_yesterday"} {
@@ -494,7 +515,7 @@ func TestNote_ConfirmationSpeech(t *testing.T) {
 		t.Fatalf("same-day end says hoy: %s | %s", r.Kind, r.Speech)
 	}
 	Answer(context.Background(), d, "no")
-	r = Answer(context.Background(), d, "anotá que ayer se fue el agua toda la tarde")
+	r = Answer(context.Background(), d, "anota que ayer se fue el agua toda la tarde")
 	if r.Kind != "confirm" || !strings.Contains(r.Speech, "Cuando: ayer") || strings.Contains(r.Speech, "Hasta") || r.Pending.Data["hasta"] != nil {
 		t.Fatalf("a day without a clock has no default end: %s | %s | %v", r.Kind, r.Speech, r.Pending.Data)
 	}

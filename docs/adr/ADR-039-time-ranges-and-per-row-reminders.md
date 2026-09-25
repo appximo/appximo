@@ -139,13 +139,13 @@ shipped consumer sends that text through the same bot client as the digest.
 - The deterministic parser settles the reads («qué tengo mañana», «tengo algo
   mañana a las 4», «cuándo estoy libre el jueves» — the resource implied by
   the one agenda resource when none is named) and a SECOND write shape beside
-  the state transition: «agendá reunión con Fabián mañana de 4 a 5» → a create
+  the state transition: «agenda reunión con Fabián mañana de 4 a 5» → a create
   with both bounds as tokens and the person matched, US$ 0. A bare hour 1–6 is
   the afternoon («a las 4» = 16:00), 7–12 the morning; «de la tarde / pm» adds
   twelve; the confirmation always prints the resolved hour. «a las 10» alone
   lasts the range's `default_duration` and the confirmation says so.
 - The confirmation runs the same conflict query the API exposes and SAYS the
-  collision: «⚠️ Ya tenés «reunión con Fabián» de 16:00 a 17:00. … ¿Igual lo
+  collision: «⚠️ Ya tienes «reunión con Fabián» de 16:00 a 17:00. … ¿Igual lo
   agendo?». **A yes on an invertible rule (`eq` on a bool) writes the row as
   NOT blocking** (`ocupa: no`, shown in the confirmation) so it never blocks
   what comes next — the reading the investigation suggested, kept because

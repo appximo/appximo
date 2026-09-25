@@ -602,8 +602,8 @@ func prepareWrite(ctx context.Context, d Deps, p Plan, question string) Result {
 	if d.PendingKey == "" {
 		// A write needs to know WHO confirms it: a token without a subject
 		// (a bare `appximo token` with no --user) can read, not write.
-		return Result{Kind: "write_refused", Headline: "Tu token no dice quién sos", Detail: "no identity for the pending key",
-			Text: "🔒 Para escribir necesito saber <b>quién</b> confirma, y este token no trae identidad (sin usuario). Iniciá sesión, o mintiéndolo pasá <code>--user-id</code>."}
+		return Result{Kind: "write_refused", Headline: "Tu token no dice quién eres", Detail: "no identity for the pending key",
+			Text: "🔒 Para escribir necesito saber <b>quién</b> confirma, y este token no trae identidad (sin usuario). Inicia sesión, o mintiéndolo pasa <code>--user-id</code>."}
 	}
 	res := d.Vocab.Resource(p.Resource)
 	pend := &Pending{
@@ -628,7 +628,7 @@ func prepareWrite(ctx context.Context, d Deps, p Plan, question string) Result {
 		v, label, err := resolveLiteral(fd, val, d.Now)
 		if err != nil {
 			return Result{Kind: "unclear", Headline: "No entendí", Detail: "write value: " + err.Error(),
-				Text: "🤔 <b>No entendí</b> uno de los valores (" + esc(k) + "). Probá con otras palabras."}
+				Text: "🤔 <b>No entendí</b> uno de los valores (" + esc(k) + "). Prueba con otras palabras."}
 		}
 		pend.Data[k] = v
 		if label != "" {
@@ -662,8 +662,8 @@ func prepareWrite(ctx context.Context, d Deps, p Plan, question string) Result {
 	if p.Kind == "create" && p.Reason != "" && r.Pending != nil {
 		// Two intentions in one sentence: the first is what this pending
 		// holds; the second is said back so it is asked apart.
-		r.Text = "<i>Entendí lo primero. Lo segundo («" + esc(p.Reason) + "») decímelo aparte cuando confirmes.</i>\n" + r.Text
-		r.Speech = "Entendí lo primero. Lo segundo decímelo aparte cuando confirmes. " + r.Speech
+		r.Text = "<i>Entendí lo primero. Lo segundo («" + esc(p.Reason) + "») dímelo aparte cuando confirmes.</i>\n" + r.Text
+		r.Speech = "Entendí lo primero. Lo segundo dímelo aparte cuando confirmes. " + r.Speech
 	}
 	return r
 }
@@ -753,7 +753,7 @@ func resolveRef(ctx context.Context, d Deps, pend *Pending, fd *Field, name stri
 				fmt.Sprintf("🤷 No encuentro ningún %s que se llame «%s».%s (o <b>no</b> para cancelar).", esc(singular(fd.Relation)), esc(name), hint)), true
 		}
 		return Result{Kind: "not_found", Headline: "No encuentro «" + name + "»",
-			Text: fmt.Sprintf("🤷 No encuentro ningún %s que se llame «%s», y por voz no puedo crearlo. Cargalo primero y volvé a decirme.", esc(singular(fd.Relation)), esc(name))}, true
+			Text: fmt.Sprintf("🤷 No encuentro ningún %s que se llame «%s», y por voz no puedo crearlo. Cárgalo primero y vuelve a decirme.", esc(singular(fd.Relation)), esc(name))}, true
 	}
 }
 
@@ -961,11 +961,11 @@ func finishPending(ctx context.Context, d Deps, pend *Pending) Result {
 			}
 			if f.Relation == "" && (f.Type == "uuid" || f.Type == "json" || f.Type == "jsonb" || f.Type == "file") {
 				return Result{Kind: "write_refused", Headline: "No puedo crear eso por voz",
-					Text: fmt.Sprintf("🔒 Para crear %s hace falta <b>%s</b>, que no se puede dictar. Cargalo desde la app.", esc(singular(pend.Resource)), esc(f.Name))}
+					Text: fmt.Sprintf("🔒 Para crear %s hace falta <b>%s</b>, que no se puede dictar. Cárgalo desde la app.", esc(singular(pend.Resource)), esc(f.Name))}
 			}
 			if pend.Asked >= 4 {
 				return Result{Kind: "unclear", Headline: "Demasiadas preguntas",
-					Text: "🤔 Me faltan demasiados datos para crear eso por voz. Decímelo completo en una sola frase."}
+					Text: "🤔 Me faltan demasiados datos para crear eso por voz. Dímelo completo en una sola frase."}
 			}
 			pend.Stage, pend.Field, pend.Asked = "field", f.Name, pend.Asked+1
 			d.Pending.Put(pend)
@@ -986,7 +986,7 @@ func finishPending(ctx context.Context, d Deps, pend *Pending) Result {
 		note = "<i>(Cancelé lo anterior, que seguía sin confirmar.)</i>\n"
 	}
 	text := note + confirmationText(d, pend)
-	r := pendingResult(pend, "confirm", "¿Confirmás?", text)
+	r := pendingResult(pend, "confirm", "¿Confirmas?", text)
 	r.Speech = spokenConfirmation(d, pend)
 	return r
 }
@@ -1021,7 +1021,7 @@ func spokenConfirmation(d Deps, pend *Pending) string {
 	if pend.Labels["__conflict"] != "" {
 		sp = append(sp, "¿Igual lo agendo?")
 	} else {
-		sp = append(sp, "¿Confirmás?")
+		sp = append(sp, "¿Confirmas?")
 	}
 	return SpokenNumbers(strings.Join(sp, " "))
 }
@@ -1102,7 +1102,7 @@ func askFieldText(pend *Pending, f *Field) string {
 	case len(f.Enum) > 0:
 		return fmt.Sprintf("📝 Para crear %s me falta <b>%s</b>. ¿Cuál? (%s)", esc(singular(pend.Resource)), esc(what), esc(strings.Join(f.Enum, " / ")))
 	case f.Relation != "":
-		return fmt.Sprintf("📝 Para crear %s me falta <b>%s</b>. ¿Cuál %s? Decime el nombre.", esc(singular(pend.Resource)), esc(what), esc(singular(f.Relation)))
+		return fmt.Sprintf("📝 Para crear %s me falta <b>%s</b>. ¿Cuál %s? Dime el nombre.", esc(singular(pend.Resource)), esc(what), esc(singular(f.Relation)))
 	case f.Type == "time":
 		return fmt.Sprintf("📝 Para crear %s me falta <b>%s</b>. ¿Cuándo? (hoy, mañana, el viernes, el viernes a las 15…)", esc(singular(pend.Resource)), esc(what))
 	case f.IsNumeric():
@@ -1122,7 +1122,7 @@ func askFieldSpeech(pend *Pending, f *Field) string {
 	case len(f.Enum) > 0:
 		return lead + " ¿Cuál? Puede ser " + joinSpoken(spokenWords(f.Enum)) + "."
 	case f.Relation != "":
-		return lead + " ¿Cuál " + singular(f.Relation) + "? Decime el nombre."
+		return lead + " ¿Cuál " + singular(f.Relation) + "? Dime el nombre."
 	case f.Type == "time":
 		return lead + " ¿Cuándo? Por ejemplo hoy, mañana, el viernes, o el viernes a las tres de la tarde."
 	case f.IsNumeric():
@@ -1175,7 +1175,7 @@ func confirmationText(d Deps, pend *Pending) string {
 		b.WriteString("\n¿Igual lo agendo? (<b>sí</b> / <b>no</b>)")
 		return b.String()
 	}
-	b.WriteString("\n¿Confirmás? (<b>sí</b> / <b>no</b>)")
+	b.WriteString("\n¿Confirmas? (<b>sí</b> / <b>no</b>)")
 	return b.String()
 }
 
@@ -1284,7 +1284,7 @@ func continuePending(ctx context.Context, d Deps, pend *Pending, text string) (R
 			if pend.Asked >= 4 {
 				d.Pending.Delete(pend)
 				return Result{Kind: "cancelled", Headline: "Cancelado",
-					Text: "🤔 No logré entender ese dato. Cancelé la escritura; decímelo completo en una sola frase."}, true
+					Text: "🤔 No logré entender ese dato. Cancelé la escritura; dímelo completo en una sola frase."}, true
 			}
 			pend.Asked++
 			d.Pending.Put(pend)
@@ -1530,7 +1530,7 @@ func executePending(ctx context.Context, d Deps, pend *Pending) Result {
 	d.Pending.Delete(pend)
 	if time.Now().After(pend.Expires) {
 		return Result{Kind: "expired", Headline: "Venció", Plan: &pend.Plan,
-			Text: "⌛ Esa confirmación venció (5 minutos). Volvé a decirme qué querés escribir."}
+			Text: "⌛ Esa confirmación venció (5 minutos). Vuelve a decirme qué quieres escribir."}
 	}
 	res := d.Vocab.Resource(pend.Resource)
 	row, err := d.Write.Write(ctx, pend.Kind, pend.Resource, pend.RowID, pend.Data)
@@ -1564,7 +1564,7 @@ func writeFailure(err error, what string) Result {
 	if errors.As(err, &we) {
 		switch we.Status {
 		case 403:
-			return Result{Kind: "forbidden", Headline: "No tenés permiso", Detail: we.Msg,
+			return Result{Kind: "forbidden", Headline: "No tienes permiso", Detail: we.Msg,
 				Text: "🔒 Tu rol no puede " + esc(what) + ". No escribí nada."}
 		case 409:
 			return Result{Kind: "conflict", Headline: "Choca con algo que existe", Detail: we.Msg,
@@ -1586,7 +1586,7 @@ func writeFailure(err error, what string) Result {
 		}
 	}
 	return Result{Kind: "unavailable", Headline: "No pude escribir", Detail: err.Error(),
-		Text: "⚠️ No pude escribir en la base ahora. No escribí nada; probá en unos segundos."}
+		Text: "⚠️ No pude escribir en la base ahora. No escribí nada; prueba en unos segundos."}
 }
 
 // Confirm answers a pending by id (the HTTP door POST /api/ask/confirm and
@@ -1672,7 +1672,7 @@ func resolveRefs(ctx context.Context, d Deps, pend *Pending, res *Resource, refs
 			}
 			if !rf.Soft {
 				return Result{Kind: "not_found", Headline: "No encuentro «" + rf.Match + "»",
-					Text: fmt.Sprintf("🤷 No encuentro «%s» como %s. Cargalo primero o decímelo de otra forma.", esc(rf.Match), esc(kindsWords(d.Vocab, res, rf.Fields)))}, true
+					Text: fmt.Sprintf("🤷 No encuentro «%s» como %s. Cárgalo primero o dímelo de otra forma.", esc(rf.Match), esc(kindsWords(d.Vocab, res, rf.Fields)))}, true
 			}
 			if !rf.InTitle {
 				if tf := titleField(res); tf != nil {

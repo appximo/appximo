@@ -157,18 +157,18 @@ func TestAgenda_ExecutesOverTheRangeAndWordsAnAgenda(t *testing.T) {
 	}
 }
 
-// TestAgenda_ParserSchedulesWithoutTheModel: «agendá reunión con Fabián
+// TestAgenda_ParserSchedulesWithoutTheModel: «agenda reunión con Fabián
 // mañana de 4 a 5» → a create with both bounds as tokens and the person
 // matched, US$ 0.
 func TestAgenda_ParserSchedulesWithoutTheModel(t *testing.T) {
 	v := BuildWithWrites(agendaRangeSchema(), "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
 	cases := map[string]map[string]any{
-		"agendá reunión con Fabián mañana de 4 a 5":                      {"titulo": "reunión", "persona_id": "match:Fabián", "inicio": "tomorrow 16:00", "fin": "tomorrow 17:00"},
-		"anotá dentista el jueves a las 9":                               {"titulo": "dentista", "inicio": "next_thursday 09:00"},
+		"agenda reunión con Fabián mañana de 4 a 5":                      {"titulo": "reunión", "persona_id": "match:Fabián", "inicio": "tomorrow 16:00", "fin": "tomorrow 17:00"},
+		"anota dentista el jueves a las 9":                               {"titulo": "dentista", "inicio": "next_thursday 09:00"},
 		"agendame gimnasio mañana a las 6 por dos horas":                 {"titulo": "gimnasio", "inicio": "tomorrow 18:00", "fin": "tomorrow 20:00"},
 		"programá llamada con Marta hoy a las 3 de la tarde hasta las 4": {"titulo": "llamada", "persona_id": "match:Marta", "inicio": "today 15:00", "fin": "today 16:00"},
-		"agendá revisión del auto el lunes de 8 a 9 de la mañana":        {"titulo": "revisión del auto", "inicio": "next_monday 08:00", "fin": "next_monday 09:00"},
-		"agendá reunión de 11 a 1":                                       {"titulo": "reunión", "inicio": "today 11:00", "fin": "today 13:00"},
+		"agenda revisión del auto el lunes de 8 a 9 de la mañana":        {"titulo": "revisión del auto", "inicio": "next_monday 08:00", "fin": "next_monday 09:00"},
+		"agenda reunión de 11 a 1":                                       {"titulo": "reunión", "inicio": "today 11:00", "fin": "today 13:00"},
 	}
 	for q, want := range cases {
 		pr := Parse(q, v)
@@ -190,7 +190,7 @@ func TestAgenda_ParserSchedulesWithoutTheModel(t *testing.T) {
 		}
 	}
 	// Not settled: no clock, a state transition verb, two names.
-	for _, q := range []string{"agendá reunión con Fabián", "agendá algo cuando puedas", "marcá como hecha la reunión"} {
+	for _, q := range []string{"agenda reunión con Fabián", "agenda algo cuando puedas", "marca como hecha la reunión"} {
 		if pr := parseSchedule(q, v); pr.Sure {
 			t.Errorf("%q must not be settled by the schedule parser: %+v", q, pr.Plan)
 		}
@@ -198,18 +198,18 @@ func TestAgenda_ParserSchedulesWithoutTheModel(t *testing.T) {
 }
 
 // TestAgenda_ConfirmationShowsTheConflictAndAYesFlipsOcupa is what Miguel
-// asked for: «agendá reunión de 4 a 5» with something already at 4:30 →
+// asked for: «agenda reunión de 4 a 5» with something already at 4:30 →
 // the confirmation names it; «sí» writes the row as NOT blocking.
 func TestAgenda_ConfirmationShowsTheConflictAndAYesFlipsOcupa(t *testing.T) {
 	d, w, fc := agendaDeps(&scripted{})
-	r := Answer(context.Background(), d, "agendá dentista mañana de 4 y media a 5 y media")
+	r := Answer(context.Background(), d, "agenda dentista mañana de 4 y media a 5 y media")
 	if r.Kind != "confirm" || r.Pending == nil {
 		t.Fatalf("want confirm, got %s (%s): %s", r.Kind, r.Source, r.Text)
 	}
 	if fc.calls != 1 {
 		t.Fatalf("the conflict check must run once before confirming, ran %d", fc.calls)
 	}
-	for _, want := range []string{"Ya tenés", "reunión con Fabián", "de 16:00 a 17:00", "¿Igual lo agendo?", "no bloquea el horario"} {
+	for _, want := range []string{"Ya tienes", "reunión con Fabián", "de 16:00 a 17:00", "¿Igual lo agendo?", "no bloquea el horario"} {
 		if !strings.Contains(r.Text, want) {
 			t.Errorf("confirmation lacks %q:\n%s", want, r.Text)
 		}
@@ -229,8 +229,8 @@ func TestAgenda_ConfirmationShowsTheConflictAndAYesFlipsOcupa(t *testing.T) {
 	}
 	// A slot with nothing: no warning, plain confirmation, the default
 	// duration filled and said.
-	r = Answer(context.Background(), d, "agendá almuerzo mañana a las 12")
-	if r.Kind != "confirm" || strings.Contains(r.Text, "Ya tenés") || !strings.Contains(r.Text, "¿Confirmás?") {
+	r = Answer(context.Background(), d, "agenda almuerzo mañana a las 12")
+	if r.Kind != "confirm" || strings.Contains(r.Text, "Ya tienes") || !strings.Contains(r.Text, "¿Confirmas?") {
 		t.Fatalf("free slot must confirm plainly:\n%s", r.Text)
 	}
 	if !strings.Contains(r.Text, "13:00") || !strings.Contains(r.Text, "por defecto") {
@@ -255,12 +255,12 @@ func TestAgenda_NonInvertibleRuleAsksForAnotherTime(t *testing.T) {
 	v := BuildWithWrites(s, "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
 	w := &memWriter{exec: e}
 	d := Deps{Vocab: v, Model: &scripted{}, Exec: e, Now: now, Write: w, Pending: NewPendingStore(), PendingKey: "t|dueno|u1", Conflicts: fc}
-	r := Answer(context.Background(), d, "agendá dentista mañana de 4 a 5")
+	r := Answer(context.Background(), d, "agenda dentista mañana de 4 a 5")
 	if r.Kind != "conflict" || !strings.Contains(r.Text, "no permite encimar") {
 		t.Fatalf("a non-invertible rule asks for another time: %s: %s", r.Kind, r.Text)
 	}
 	r = Answer(context.Background(), d, "mañana de 7 a 8 de la noche")
-	if r.Kind != "confirm" || strings.Contains(r.Text, "Ya tenés") || !strings.Contains(r.Text, "19:00") || !strings.Contains(r.Text, "20:00") {
+	if r.Kind != "confirm" || strings.Contains(r.Text, "Ya tienes") || !strings.Contains(r.Text, "19:00") || !strings.Contains(r.Text, "20:00") {
 		t.Fatalf("the new time must confirm without a collision:\n%s", r.Text)
 	}
 	if fc.calls != 2 {
@@ -270,7 +270,7 @@ func TestAgenda_NonInvertibleRuleAsksForAnotherTime(t *testing.T) {
 
 // TestAgenda_TheAgendaIsTheBlockingRange (APP-AGENDA-S1): with TWO range
 // resources — compromisos (no_overlap) and registros (a log that may overlap)
-// — «qué tengo mañana» and «agendá … de 4 a 5» still mean the agenda.
+// — «qué tengo mañana» and «agenda … de 4 a 5» still mean the agenda.
 func TestAgenda_TheAgendaIsTheBlockingRange(t *testing.T) {
 	s := agendaRangeSchema()
 	s.Resources["registros"] = schema.ResourceSchema{
@@ -281,7 +281,7 @@ func TestAgenda_TheAgendaIsTheBlockingRange(t *testing.T) {
 	if pr := Parse("qué tengo mañana", v); !pr.Sure || pr.Plan.Resource != "eventos" {
 		t.Fatalf("with a log beside the agenda, the agenda is still implied: %+v %s", pr.Plan, pr.Reason)
 	}
-	if pr := Parse("agendá reunión mañana de 4 a 5", v); !pr.Sure || pr.Plan.Resource != "eventos" {
+	if pr := Parse("agenda reunión mañana de 4 a 5", v); !pr.Sure || pr.Plan.Resource != "eventos" {
 		t.Fatalf("the schedule goes to the blocking range: %+v %s", pr.Plan, pr.Reason)
 	}
 	// Two blocking ranges → nobody is implied (a word must name it).
@@ -310,7 +310,7 @@ func TestObligation_TengoQueIsACreateOfTheToDoResource(t *testing.T) {
 	if !pr.Sure || pr.Plan.Kind != "create" || pr.Plan.Resource != "tareas" || pr.Plan.Data["titulo"] != "comprar pintura para el techo" {
 		t.Fatalf("tengo que → create tareas: %+v %s", pr.Plan, pr.Reason)
 	}
-	pr = Parse("acordate de llamar al banco mañana, urgente", v)
+	pr = Parse("acuérdate de llamar al banco mañana, urgente", v)
 	if !pr.Sure || pr.Plan.Data["titulo"] != "llamar al banco" || pr.Plan.Data["vence_en"] != "tomorrow" || pr.Plan.Data["urgente"] != true {
 		t.Fatalf("day and urgency leave the title: %+v %s", pr.Plan, pr.Reason)
 	}

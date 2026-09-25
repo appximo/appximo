@@ -239,7 +239,7 @@ alerta de backup llega aunque el motor esté caído.
 
 ---
 
-### 3c. «Mandame el resumen de hoy» — pedirle al bot por Telegram
+### 3c. «Mándame el resumen de hoy» — pedirle al bot por Telegram
 
 El mismo bot que le manda alertas también **recibe** un puñado de comandos y le
 contesta con un resumen del día **en lenguaje de dueño**: qué se creó hoy, qué
@@ -506,27 +506,27 @@ período («¿vendimos más que el mes pasado?»), rankings («el producto más
 vendido»), porcentajes, y preguntas encadenadas («¿y ayer?» — cada pregunta
 va sola). Para esas responde «No entendí» — y le dice qué sí puede.
 
-### 3e. «Anotá llamar a Fabián para mañana» — escribir por voz, confirmando
+### 3e. «Anota llamar a Fabián para mañana» — escribir por voz, confirmando
 
 Desde VOZ-ESCRITURAS-S1 el bot (y el atajo de Siri) también **anota y
-cambia** cosas. **Nunca borra.** Y **no escribe nada hasta que usted lee
+cambia** cosas. **Nunca borra.** Y **no escribí nada hasta que usted lee
 exactamente qué va a escribir y dice que sí**:
 
 ```
-usted: Anotá llamar a Fabián para arreglar el techo, urgente, para mañana
+usted: Anota llamar a Fabián para arreglar el techo, urgente, para mañana
 bot:   📝 Voy a crear tarea:
        • persona: Fabián Gómez
        • prioridad: urgente
        • titulo: llamar a Fabián para arreglar el techo
        • vence en: mañana (dom 20 sep)
-       ¿Confirmás? (sí / no)         [✅ Sí] [✖ No]
+       ¿Confirmas? (sí / no)         [✅ Sí] [✖ No]
 usted: sí
 bot:   ✅ Listo: creé tarea llamar a Fabián para arreglar el techo.
 
-usted: marcá como hecha la tarea de Fabián
+usted: marca como hecha la tarea de Fabián
 bot:   ✏️ Voy a cambiar tarea «llamar a Fabián…»:
        • estado: pendiente → hecha
-       ¿Confirmás? (sí / no)
+       ¿Confirmas? (sí / no)
 usted: dale
 bot:   ✅ Listo.
 ```
@@ -551,19 +551,19 @@ bot:   ✅ Listo.
   "Rocío Paz". sí para crearla» — se crea la persona (con su propio sí) y
   después la tarea, que ya muestra «Rocío Paz (nuevo)». Un nombre dictado
   nunca queda como texto suelto donde va una persona.
-- **Lo que no dijo se pregunta, no se inventa.** «anotá una tarea para
+- **Lo que no dijo se pregunta, no se inventa.** «anota una tarea para
   Marta» → «Para crear tarea me falta titulo. ¿Qué pongo?». Una prioridad
   que no dijo no se rellena.
 - **Las fechas las calcula el motor** en su zona: «mañana», «pasado
   mañana», «el viernes», «el viernes a las 3», «la semana que viene», «fin
   de mes». La confirmación muestra el día.
 - **Cuánto cuesta.** Anotar algo nuevo necesita el modelo: **≈ US$ 0,0023 y
-  ≈ 1 segundo, una sola vez por frase**: la misma orden repetida («anotá
+  ≈ 1 segundo, una sola vez por frase**: la misma orden repetida («anota
   pagar la luz para mañana», tres veces en un mes) se piensa una vez y se
   vuelve a armar cada vez con los datos del momento — los nombres se
   buscan de nuevo, «mañana» es el de ese día, se pregunta lo que falte —
   antes de pedirle el sí (VOZ-AHORRO-S2; antes cobraba las tres). Cambiar
-  un estado («marcá como hecha…», «cancelá el pedido ORD-1003») lo
+  un estado («marca como hecha…», «cancela el pedido ORD-1003») lo
   resuelve el motor solo: **US$ 0, al instante**. Decir «sí» no cuesta
   nada, y decir «sí pero…» tampoco: se cancela y se le dice por qué. Aplican los mismos topes y el mismo `gasto` de §3d; el historial
   guarda solo la forma de lo que escribió, nunca el texto.
@@ -571,7 +571,7 @@ bot:   ✅ Listo.
 **En Telegram** la confirmación trae botones **✅ Sí / ✖ No** (y `1 2 3`
 cuando hay que elegir); apretar uno es lo mismo que escribirlo, y los
 botones desaparecen para que no se apriete dos veces. **En Siri:** después
-de *Leer texto en voz alta*, agregue **Pedir entrada** («¿Confirmás?») y
+de *Leer texto en voz alta*, agregue **Pedir entrada** («¿Confirmas?») y
 mande la respuesta al mismo `/api/ask` como `q` — el motor sabe que es su
 confirmación. El token del atajo tiene que llevar usuario (`--user-id`,
 §3d); un token sin usuario lee pero no escribe, y se lo dice.
@@ -580,7 +580,7 @@ confirmación. El token del atajo tiene que llevar usuario (`--user-id`,
 `systemctl restart <app>` — el bot vuelve a solo leer.
 
 **Lo que no hace (a propósito):** borrar (aunque lo pida un administrador),
-vaciar un campo, cambiar varias filas de una («cancelá todas…»), cargar
+vaciar un campo, cambiar varias filas de una («cancela todas…»), cargar
 archivos. Si el motor se reinicia, una confirmación que estaba esperando se
 olvida: lo que no confirmó no pasó.
 
@@ -597,8 +597,8 @@ bot:   📅 3 eventos:
        • 16:30–17:30 tentativo: café
        • 17:00–18:00 gimnasio
 
-usted: agendá reunión de planificación mañana de 4 a 5
-bot:   ⚠️ Ya tenés «reunión con Fabián» de 16:00 a 17:00.
+usted: agenda reunión de planificación mañana de 4 a 5
+bot:   ⚠️ Ya tienes «reunión con Fabián» de 16:00 a 17:00.
        📝 Voy a crear evento:
        • inicio: mañana (mar 22 sep) a las 16:00
        • fin: mañana (mar 22 sep) a las 17:00
@@ -624,7 +624,7 @@ bot:   ✅ Listo: creé evento planificación.
 - **Preguntas que entiende**: «qué tengo mañana / el jueves / la semana que
   viene», «tengo algo mañana a las 4», «cuándo estoy libre el jueves»,
   «cuántos compromisos tengo mañana».
-- **El recordatorio**: si el schema declara «avisame 15 minutos antes de
+- **El recordatorio**: si el schema declara «avísame 15 minutos antes de
   cada compromiso», el worker manda un mensaje al chat del bot 15 minutos
   antes de cada uno — una sola vez, aunque el worker se reinicie en ese
   momento; si usted mueve el compromiso, el aviso se mueve; si lo cancela,
@@ -638,10 +638,10 @@ Detalle técnico: docs/PRODUCTION.md §4.6g; ejemplo de schema
 > **APP-AGENDA-S2 (2026-09-22):** el parte de las 7 abre con **«📅 Hoy en
 > agenda»** — cada compromiso del día con su hora — cuando el recurso declara
 > `ranges`; «**tengo que** comprar pintura», «**hay que** llamar al banco»,
-> «**acordate de** pagar la luz», «**recordame** renovar el seguro» anotan una
+> «**acuérdate de** pagar la luz», «**recordame** renovar el seguro» anotan una
 > tarea sin el modelo (con confirmación, como todo lo que escribe); y el canal
 > de Telegram actúa **como el dueño** (`APPXIMO_TELEGRAM_SUMMARY_USER_ID`),
-> así que «anotá…» por el chat escribe a su nombre y «qué tengo hoy» ve sus
+> así que «anota…» por el chat escribe a su nombre y «qué tengo hoy» ve sus
 > filas. El bot de las demos pasó a la agenda: la tiendita y petfriendly ya no
 > mandan partes ni contestan comandos — solo alertas de incidente.
 
@@ -678,7 +678,7 @@ fuera de la caja. Lo que ese caso enseña vale para cualquier app real:
 - **Qué funciona solo, y pocas veces:** el parte de las 7 y el de las 19
   (lunes a viernes) por cron; «15 min antes» por fila; un aviso al anotar
   algo urgente; el espejo estimado-vs-real al cerrar una tarea (un hook
-  rehúsa marcarla hecha sin decir cuánto tomó — por voz: «marcá como hecha
+  rehúsa marcarla hecha sin decir cuánto tomó — por voz: «marca como hecha
   la tarea del techo, tomó 90 minutos»). Nada por hora.
 - **Su propio bot.** Un bot de Telegram = un consumidor de `getUpdates`: la
   app real NO comparte el bot de las demos. `@BotFather` → token; `/start`
@@ -709,15 +709,15 @@ ejemplos por página, en la pantalla y en la voz por igual; «más» sigue).
 ```
 usted: ayuda
 bot:   Agenda tiene: compromisos, tareas, registros, personas, areas, etiquetas.
-       Podés preguntar («cuántas tareas hay»), crear («crear tarea: …»), cambiar («marcá como … la …») y pedir el resumen del día.
+       Puedes preguntar («cuántas tareas hay»), crear («crear tarea: …»), cambiar («marca como … la …») y pedir el resumen del día.
        Para aprender: cómo creo algo · qué puedo preguntar · qué campos tiene una tarea · cómo filtro por fecha. Y más para seguir cualquiera.
 
 usted: cómo creo algo
-bot:   ✍️ Para crear una tarea decí: «crear tarea: [qué], [30 minutos], [urgente], [mañana / el viernes]».
+bot:   ✍️ Para crear una tarea di: «crear tarea: [qué], [30 minutos], [urgente], [mañana / el viernes]».
        Por ejemplo: «crear tarea: revisar el contrato, 30 minutos, urgente, el viernes» — la entiendo al instante, gratis.
        Los datos van en cualquier orden, separados por comas o pausas; el que no digas, lo pregunto o lo dejo vacío.
        Antes de escribir te muestro todo y espero tu sí.
-       Hay más (1 de 4). Decí más para seguir.          ← después: el compromiso, el registro, la persona
+       Hay más (1 de 4). Di más para seguir.          ← después: el compromiso, el registro, la persona
 ```
 
 Cada ejemplo que la guía promete como gratis **se prueba en el motor antes de
@@ -727,11 +727,11 @@ preguntar» (las formas de pregunta sobre su schema), «qué campos tiene una
 tarea» (cada campo en palabras, con sus valores y los alias que usted
 declaró), «cómo filtro por fecha» (períodos, rangos, combinaciones, «los
 últimos 3…»), y «cómo creo una tarea» / «cómo agendo un compromiso» para el
-detalle de uno (con «más»: las otras formas gratis — «tengo que…», «anotá …
-mañana», «acordate de…» — y qué dato puede llevar).
+detalle de uno (con «más»: las otras formas gratis — «tengo que…», «anota …
+mañana», «acuérdate de…» — y qué dato puede llevar).
 
 **La forma fija para crear: `crear <cosa>: <qué>, <los datos en cualquier
-orden>`.** Un verbo (`crear`, `nueva`, `anotá`, `agregá`, `registrá`…) o la
+orden>`.** Un verbo (`crear`, `nueva`, `anota`, `agrega`, `registra`…) o la
 palabra de la cosa, después QUÉ es, después los datos como salgan, con o sin
 la palabra del campo, separados por comas, por «y» o por la pausa que deja el
 dictado. El motor reconoce cada dato por su FORMA, no por una palabra suya:
@@ -740,8 +740,8 @@ por su nombre («urgente»), un día o una hora («el viernes», «mañana a las
 «de 12 a 1», «a las 4 pm», «a las cuatro de la tarde», «9 y media»), un
 número con unidad («30 minutos»), un nombre después de «con» / «para», o un
 nombre suelto que se prueba contra todo lo que podría ser. Lo que no es un
-dato es el título, tal como lo dijo. Tres primos: «anotá que <lo que pasó>»
-es un registro; «anotá <hacer algo>…» / «tengo que…» es una tarea; «reunión
+dato es el título, tal como lo dijo. Tres primos: «anota que <lo que pasó>»
+es un registro; «anota <hacer algo>…» / «tengo que…» es una tarea; «reunión
 con Fabián mañana a las 3 por una hora» es un compromiso. **La confirmación
 sigue igual**: lo que se ahorra es la llamada al modelo, nunca el control.
 Lo que la forma no entiende sigue yendo al modelo, como antes.
@@ -750,45 +750,45 @@ Lo que la forma no entiende sigue yendo al modelo, como antes.
 usted: crear tarea: pagar el seguro del carro, 45 minutos, urgente, el lunes
 bot:   📝 Voy a crear tarea:
        • duracion estimada min: 45   • titulo: pagar el seguro del carro   • urgente: sí   • vence en: el lunes (lun 28 sep)
-       ¿Confirmás? (sí / no)                                                        ← parser, US$ 0, 1 ms
+       ¿Confirmas? (sí / no)                                                        ← parser, US$ 0, 1 ms
 usted: no, mejor el viernes
-bot:   Cambié vence en.  📝 Voy a crear tarea: … • vence en: el viernes (vie 25 sep) … ¿Confirmás?   ← la corrección re-pregunta, nunca ejecuta
-usted: agendá almuerzo con Marta el jueves de 12 a 1
-bot:   📝 Voy a crear compromiso: • inicio: el jueves a las 12:00 • fin: 13:00 • persona: Marta Ruiz • titulo: almuerzo ¿Confirmás?
-usted: agendá otra reunión mañana a las 10 y media
-bot:   ⚠️ Ya tenés «P1 dentista» de 10:00 a 11:00. … ¿Igual lo agendo?
+bot:   Cambié vence en.  📝 Voy a crear tarea: … • vence en: el viernes (vie 25 sep) … ¿Confirmas?   ← la corrección re-pregunta, nunca ejecuta
+usted: agenda almuerzo con Marta el jueves de 12 a 1
+bot:   📝 Voy a crear compromiso: • inicio: el jueves a las 12:00 • fin: 13:00 • persona: Marta Ruiz • titulo: almuerzo ¿Confirmas?
+usted: agenda otra reunión mañana a las 10 y media
+bot:   ⚠️ Ya tienes «P1 dentista» de 10:00 a 11:00. … ¿Igual lo agendo?
 ```
 
 **Otras cosas que ahora entiende sin modelo:** «resumen», «estado» y «gasto»
 dichos a Siri (los mismos que el bot); «ya hice…», «terminé de…», «… está
-lista» (la tarea pasa a hecha); «poné en curso la declaración de renta» (el
+lista» (la tarea pasa a hecha); «pon en curso la declaración de renta» (el
 estado dicho ubica el recurso); un nombre en una tarea con área Y persona
-(«tareas de trabajo», «anotá llamar a Fabián») se prueba contra las dos;
+(«tareas de trabajo», «anota llamar a Fabián») se prueba contra las dos;
 «Gomes» se entiende como Gómez y se dice; «Fabi» con Fabián y Fabiana
 pregunta cuál; «la semana que viene»; «antes del viernes» (vence el viernes).
 
-**Cómo se dice un registro (algo que pasó).** La forma es **«anotá que»
-(o «registrá que», «apuntá que») + qué pasó + cuándo**, en cualquier orden.
+**Cómo se dice un registro (algo que pasó).** La forma es **«anota que»
+(o «registra que», «apunta que») + qué pasó + cuándo**, en cualquier orden.
 Lo que no es hora ni día queda como texto del registro, tal como lo dijiste.
 Todas estas las entiende el motor solo, al instante y sin costo, y siempre
 te muestra la confirmación antes de escribir:
 
 ```
-anotá que la plataforma estuvo caída de 7 a 2 de la tarde        → hoy 07:00–14:00
-registrá que fui al médico de 9 a 10                             → hoy 09:00–10:00
-anotá que hablé con el banco a las 3                             → hoy 15:00 (una hora por defecto)
-anotá que se cayó la luz a las 3 y media por dos horas           → hoy 15:30–17:30
-anotá que ayer hablé con el contador a las 5                     → ayer 17:00
-anotá que anoche se fue la luz a las 10                          → ayer 22:00
-anotá que esta mañana fui al gimnasio de 6 a 7                   → hoy 06:00–07:00 (la mañana manda)
-anotá que el martes hablé con Fabián a las 3                     → el martes PASADO 15:00 (un registro mira atrás), persona Fabián
-anotá que estudio estuvo caído toda la mañana                    → hoy, sin hora
-anotá que estuve en el banco desde las 9 hasta las 10 y media    → hoy 09:00–10:30
-anotá que el estudio estuvo caído entre las 7 y las 2 de la tarde → hoy 07:00–14:00
-anotá que se cayó la plataforma a las 7 y volvió a las 2         → hoy 07:00–14:00 (la segunda hora es el fin)
-anotá que llamé al banco tipo 3 / como a las 3 / a eso de las 3  → hoy 15:00
-anotá que hablé con el banco, área trabajo, a las 3              → con el área
-registrá: la plataforma estuvo caída de 7 a 2                    → los dos puntos valen por el «que»
+anota que la plataforma estuvo caída de 7 a 2 de la tarde        → hoy 07:00–14:00
+registra que fui al médico de 9 a 10                             → hoy 09:00–10:00
+anota que hablé con el banco a las 3                             → hoy 15:00 (una hora por defecto)
+anota que se cayó la luz a las 3 y media por dos horas           → hoy 15:30–17:30
+anota que ayer hablé con el contador a las 5                     → ayer 17:00
+anota que anoche se fue la luz a las 10                          → ayer 22:00
+anota que esta mañana fui al gimnasio de 6 a 7                   → hoy 06:00–07:00 (la mañana manda)
+anota que el martes hablé con Fabián a las 3                     → el martes PASADO 15:00 (un registro mira atrás), persona Fabián
+anota que estudio estuvo caído toda la mañana                    → hoy, sin hora
+anota que estuve en el banco desde las 9 hasta las 10 y media    → hoy 09:00–10:30
+anota que el estudio estuvo caído entre las 7 y las 2 de la tarde → hoy 07:00–14:00
+anota que se cayó la plataforma a las 7 y volvió a las 2         → hoy 07:00–14:00 (la segunda hora es el fin)
+anota que llamé al banco tipo 3 / como a las 3 / a eso de las 3  → hoy 15:00
+anota que hablé con el banco, área trabajo, a las 3              → con el área
+registra: la plataforma estuvo caída de 7 a 2                    → los dos puntos valen por el «que»
 ```
 
 Y para leerlos: «qué registré hoy», «qué anoté ayer», «registros de esta
@@ -802,7 +802,7 @@ verbo: «que estudio estuvo caído de siete a dos de la tarde». El motor lo
 tolera desde el 2026-09-24: una frase que empieza con «que», no nombra
 ningún recurso, no tiene palabra de pregunta y trae una hora — o un verbo en
 pasado con un día («que ayer se fue el agua toda la tarde») — se lee como
-«anotá que…» (un registro, con su confirmación). Igual, si el atajo se llama
+«anota que…» (un registro, con su confirmación). Igual, si el atajo se llama
 de otra forma («Agenda», «Mi agenda») la frase viaja entera y no hay
 adivinanza. El reloj también entiende lo que escribe el dictado: «siete
 A.M.», «2pm», «de siete a dos de la tarde», «el día de hoy».
@@ -811,7 +811,7 @@ A.M.», «2pm», «de siete a dos de la tarde», «el día de hoy».
 compuesto para escucharse: frases cortas, horas y fechas y cantidades en
 palabras («de las diez a las once de la mañana», «el martes veintinueve de
 septiembre», «dos tareas»), sin viñetas, comillas, símbolos ni dígitos; una
-lista lee como mucho cinco y dice «y N más; mirá el panel»; una elección se
+lista lee como mucho cinco y dice «y N más; mira el panel»; una elección se
 lee «Uno, Fabián Gómez. Dos, Fabiana Torres.». Si Siri lo lee demasiado
 rápido, baje la velocidad de la acción *Leer texto* del atajo: eso no es del
 motor. La regla de «a las 4» = de la tarde se mantiene (en el banco de frases
@@ -1093,7 +1093,7 @@ REHEARSAL VERIFIED — the newest set restores and matches its manifest. The rea
 
 ### 6.7 `drill ask` — una pregunta, y quién la respondió
 
-Manda UNA pregunta a `POST /api/ask` como el tenant y el rol dados — exactamente lo que hacen el bot de Telegram y un atajo de Siri — e imprime la respuesta con su contabilidad: `kind` (answer / unclear / confirm / write_refused…), `source` (**parser** = US$ 0 y milisegundos, **cache**, **model** ≈ US$ 0,003 y ~1 s) y, cuando fue al modelo, la razón exacta por la que el parser pasó («verbo de escritura», «no conozco la palabra …»). Una orden de escritura responde la confirmación y **no escribe nada** (el drill nunca contesta el «sí»). Con `--token` no hace falta `JWT_SECRET`.
+Manda UNA pregunta a `POST /api/ask` como el tenant y el rol dados — exactamente lo que hacen el bot de Telegram y un atajo de Siri — e imprime la respuesta con su contabilidad: `kind` (answer / unclear / confirm / write_refused…), `source` (**parser** = US$ 0 y milisegundos, **cache**, **model** ≈ US$ 0,003 y ~1 s) y, cuando fue al modelo, la razón exacta por la que el parser pasó («verbo de escritura», «no conozco la palabra …»). Una orden de escritura responde la confirmación y **no escribí nada** (el drill nunca contesta el «sí»). Con `--token` no hace falta `JWT_SECRET`.
 
 ```
 $ appximo drill ask --app=vetapp --tenant=vetapp --role=dueno --lang=es "cuántas mascotas hay"
@@ -1192,7 +1192,7 @@ Todo lo anterior existe en tres lugares distintos: la caja (scripts), el panel d
 **La regla de interfaz.** Toda acción, en todo estado, muestra una de tres cosas — nunca un texto suelto:
 
 1. **«Esto lo hago yo»** — un botón, con qué va a pasar y cuánto tarda. Antes de correr, la pantalla «Qué va a hacer» lista los pasos con el comando exacto.
-2. **«Esto lo hacés vos»** — el comando exacto para copiar, con las IPs y valores ya puestos, una línea que dice por qué no lo hace el panel, y un botón **Verificar** que comprueba (en el servidor, no en el navegador) antes de dejar avanzar.
+2. **«Esto lo haces tú»** — el comando exacto para copiar, con las IPs y valores ya puestos, una línea que dice por qué no lo hace el panel, y un botón **Verificar** que comprueba (en el servidor, no en el navegador) antes de dejar avanzar.
 3. **«Esto está bloqueado»** — por qué, y qué lo destraba.
 
 Y cuando algo falla: **qué falló, qué quedó a medias y cómo volver**, siempre los tres. El botón **Pedir ayuda** arma y copia un paquete con la app, la versión, lo que falló, la traza (la salida del script), el estado de la caja y lo ya intentado — sin secretos — para pegarlo en un chat sin explicar desde cero.

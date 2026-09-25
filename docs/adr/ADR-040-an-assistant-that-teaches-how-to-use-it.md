@@ -24,7 +24,7 @@ digest — then the levels to ask for: «cómo creo algo», «qué puedo pregunt
 «qué campos tiene una tarea», «cómo filtro por fecha», and «más» to continue
 any of them (a cursor per identity, ten minutes, `ask.GuideStore`). Each
 level answers with a STRUCTURE and ONE full example that can be repeated as
-is — «Para crear una tarea decí: crear tarea: [qué], área [cuál], persona
+is — «Para crear una tarea di: crear tarea: [qué], área [cuál], persona
 [cuál], [urgente], [mañana / el viernes]. Por ejemplo: crear tarea: revisar
 el contrato, área casa, persona Fabián Gómez, urgente, el viernes» — with the
 fields, states, aliases AND ROWS of this app (a real area, a real person,
@@ -47,7 +47,7 @@ once (a wall a voice cannot read).
 ### 2. The fixed form for creating: `crear <recurso>: <qué>, <datos en cualquier orden>`
 
 `crear tarea: arreglar las puertas del auto, área personal, urgente` — a
-verb (crear / nueva / anotá / agregá / registrá…) or the resource word
+verb (crear / nueva / anota / agrega / registra…) or the resource word
 itself, then WHAT it is, then the data in ANY order, with or without the
 field word («área personal» or a bare «personal»), separated by commas, «y»
 or the pause dictation leaves. Every datum is recognized by its FORM, never
@@ -55,9 +55,9 @@ by a domain word: a field's own name, a declared value or alias, a bool by
 its name, a day or a clock, a number with its unit, a name after «con» /
 «para», a bare name tried against every target (§4). Whatever is not a datum
 is the title, kept as said. Three tolerant cousins settle the sentences the
-owner already says: «anotá que <lo que pasó>» is the note resource (the one
+owner already says: «anota que <lo que pasó>» is the note resource (the one
 that records a moment: creatable, no lifecycle, a range without no-overlap or
-a time that defaults to now); «anotá <infinitivo>…» is a to-do; «compromiso
+a time that defaults to now); «anota <infinitivo>…» is a to-do; «compromiso
 de 4 a 5 con Fabián hoy» / «reunión con Fabián mañana a las 3 por una hora»
 (the agenda word, a clock span, no question word) is a block.
 
@@ -73,13 +73,13 @@ used to answer (the corpus pins it: zero regressions).
 
 #### 2b. The dictation tail: a verb-less «que …» with a clock span is the note
 
-Seen on the owner's real phone an hour after the deploy: he dictated «anotá
+Seen on the owner's real phone an hour after the deploy: he dictated «anota
 que estudio estuvo caído de siete a dos de la tarde» three times and got
 «no entendí» three times (US$ 0.0106). The history showed WHY: the sentences
 arrived as «que estudio estuvo caído …» — a Siri shortcut named after the
 verb («Anota», «Registra») swallows it. So, as a LAST resort after every
 shape failed, a sentence that starts with «que», names no resource, carries
-no question or operation word and DOES carry a clock span is read as «anotá
+no question or operation word and DOES carry a clock span is read as «anota
 que …»: the note resource, confirmed like any write (`dictationTail`). A
 question that starts with «qué» never reaches it (the reads settle first, or
 name a resource, or carry a question word). The clock reader also learned
@@ -98,7 +98,7 @@ tokens, `ResolveTimeValue`), «entre las 7 y las 2» (the «y» no longer splits
 the segment), the approximations «tipo 3» / «como a las 3» / «a eso de las
 3», «y cuarto» / «menos cuarto», «7:30» in the create tokenizer (it was a
 separator), a second clock later in the sentence as the end («se cayó a las
-7 y volvió a las 2»), a colon after a note verb («registrá: …»), and the
+7 y volvió a las 2»), a colon after a note verb («registra: …»), and the
 first-person past of the note verbs naming the note resource on a read
 («qué anoté ayer»). The tail also fires on a past-tense verb with a day
 («que ayer se fue el agua toda la tarde»), not only on a clock span. All of
@@ -109,6 +109,22 @@ Pinned on the three sentences verbatim; the bank stayed 149/151 with zero
 regressions. The cheaper fix on the phone side — a shortcut whose name is
 not the verb, so the whole sentence travels — is in the manual, but the
 engine tolerates the tail either way.
+
+#### 2c. The assistant speaks «tú», never «vos»; it understands both
+
+The owner asked «why anotá and not anota? I am not Argentinian». The
+product's voice had been written in Rioplatense voseo since
+VOZ-ESCRITURAS-S1 without anyone deciding it; the real owner is Colombian
+and every assistant he uses addresses him as «tú». So every reply — guide,
+confirmations, warnings, help, Telegram alerts, the model's prompt — now
+speaks neutral «tú» («anota que…», «di más para seguir», «mira el panel»,
+«¿confirmas?», «ya tienes…»), and the recognizer keeps BOTH registers: an
+accented vos form normalizes to the tú form, and the forms that really
+differ («acordate de» / «acuérdate de», «ponelo» / «ponlo», «hacelo» /
+«hazlo», «decime» / «dime») are listed in both variants. No knob
+(`tu|vos|usted`): it would double hundreds of strings for a preference
+nobody asked for; an owner who wants «usted» is the moment for it (VOZ-25).
+Decision A-85.
 
 ### 3. A correction on a pending write re-issues the confirmation; it never executes it
 
@@ -127,7 +143,7 @@ keep the old behavior: cancel, say so, re-read.
 
 ### 4. A name the sentence does not place is tried against every candidate target (VOZ-20)
 
-«las tareas de Esposa», «crear tarea: pagar el seguro, Casa», «marcá como
+«las tareas de Esposa», «crear tarea: pagar el seguro, Casa», «marca como
 hecha la tarea del techo»: on a resource with an area AND a person (and its
 own title), the parser used to give up («name could match area_id or
 persona_id») and the model was paid to guess. Now the parser says WHICH fields
@@ -168,9 +184,9 @@ never a bullet, a guillemet, a pictograph or a raw digit — clocks in words
 («las cuatro de la tarde», «las nueve y media de la mañana»), dates in words
 («el lunes veintiuno de septiembre»), counts in words («dos tareas»), a code
 («ORD-1003») and a money amount kept; a list reads at most FIVE items, then
-«y N más; mirá el panel» (the screen keeps the page); a confirmation is read
+«y N más; mira el panel» (the screen keeps the page); a confirmation is read
 as sentences («Voy a crear una tarea. Título: … Persona: … Vence mañana, el
-lunes veintiuno de septiembre a las cuatro de la tarde. ¿Confirmás?»); a
+lunes veintiuno de septiembre a las cuatro de la tarde. ¿Confirmas?»); a
 long guide in parts. **Verification:** the 105 has no speech synthesizer and
 the agent cannot listen; the criterion is declared and pinned by tests
 (`ask.SpeechMetrics`): ≤ 22 words per sentence, ≤ 14 on average, zero digits
@@ -220,7 +236,7 @@ one the model wrote).
 ## What is deliberately not built (registered)
 
 - A sentence with two intentions executes ONE: the first is planned, the
-  second is said back («decímelo aparte cuando confirmes») — a queue of
+  second is said back («dímelo aparte cuando confirmes») — a queue of
   pendings would let a stray yes execute the wrong one (VOZ-23).
 - Relative times («en una hora», «dentro de dos días») stay the model's:
   the token vocabulary is closed on purpose (ADR-037 §6) (VOZ-22).

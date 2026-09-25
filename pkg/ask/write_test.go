@@ -176,7 +176,7 @@ func TestWrite_TimeTokensResolveInTheAppsDay(t *testing.T) {
 }
 
 func TestWrite_YesIsExactAndAmbiguousYesNeverExecutes(t *testing.T) {
-	for _, y := range []string{"sí", "Si", "dale", "OK", "confirmo", "listo.", "de acuerdo", "hacelo"} {
+	for _, y := range []string{"sí", "Si", "dale", "OK", "confirmo", "listo.", "de acuerdo", "hazlo"} {
 		if !IsYes(y) {
 			t.Errorf("%q should be a yes", y)
 		}
@@ -186,7 +186,7 @@ func TestWrite_YesIsExactAndAmbiguousYesNeverExecutes(t *testing.T) {
 			t.Errorf("%q must NOT be a yes", n)
 		}
 	}
-	for _, n := range []string{"no", "No.", "cancelar", "cancelá", "olvidalo", "nada"} {
+	for _, n := range []string{"no", "No.", "cancelar", "cancela", "olvidalo", "nada"} {
 		if !IsNo(n) {
 			t.Errorf("%q should be a no", n)
 		}
@@ -198,11 +198,11 @@ func TestWrite_CreateResolvesTheNameThenConfirmsThenWrites(t *testing.T) {
 		"titulo": "Llamar a Fabián para arreglar el techo", "persona_id": map[string]any{"match": "Fabian"}, "prioridad": "urgente", "vence_en": "tomorrow"}})}}
 	d, w, st := writeDeps(m, agendaFixtures())
 	d.NoParser = true // the fixed form settles this sentence itself now (create_test.go); here the MODEL path is under test
-	r := Answer(context.Background(), d, "Anotá llamar a Fabián para arreglar el techo, urgente, para mañana")
+	r := Answer(context.Background(), d, "Anota llamar a Fabián para arreglar el techo, urgente, para mañana")
 	if r.Kind != "confirm" || r.Pending == nil {
 		t.Fatalf("want confirm, got %s: %s", r.Kind, r.Text)
 	}
-	for _, want := range []string{"Voy a crear", "Fabián Gómez", "urgente", "mañana (dom 20 sep)", "Llamar a Fabián para arreglar el techo", "¿Confirmás?"} {
+	for _, want := range []string{"Voy a crear", "Fabián Gómez", "urgente", "mañana (dom 20 sep)", "Llamar a Fabián para arreglar el techo", "¿Confirmas?"} {
 		if !strings.Contains(r.Text, want) {
 			t.Errorf("confirmation lacks %q:\n%s", want, r.Text)
 		}
@@ -249,7 +249,7 @@ func TestWrite_CreateResolvesTheNameThenConfirmsThenWrites(t *testing.T) {
 	}
 	// A sentence that DOES carry an order after the cancelled yes is planned
 	// as a new question (the scripted model re-plans the same create).
-	r2 = Answer(context.Background(), d, "sí, anotá llamar a Fabián para arreglar el techo, urgente, para mañana")
+	r2 = Answer(context.Background(), d, "sí, anota llamar a Fabián para arreglar el techo, urgente, para mañana")
 	if r2.Kind != "confirm" || r2.Pending == nil || r2.Pending.ID == firstID {
 		t.Fatalf("an order after a stray yes is re-planned as a new pending: %s %s", r2.Kind, r2.Text)
 	}
@@ -272,7 +272,7 @@ func TestWrite_CreateResolvesTheNameThenConfirmsThenWrites(t *testing.T) {
 		t.Errorf("outcome text: %s", r3.Text)
 	}
 	// Redaction keeps the shape only.
-	if got := Redact("Anotá llamar a Fabián…", r.Plan); got != "[create tareas: persona_id, prioridad, titulo, vence_en]" {
+	if got := Redact("Anota llamar a Fabián…", r.Plan); got != "[create tareas: persona_id, prioridad, titulo, vence_en]" {
 		t.Errorf("redact = %q", got)
 	}
 }
@@ -280,7 +280,7 @@ func TestWrite_CreateResolvesTheNameThenConfirmsThenWrites(t *testing.T) {
 func TestWrite_MissingRequiredIsAskedNotInvented(t *testing.T) {
 	m := &scripted{replies: []string{plan(Plan{Kind: "create", Resource: "gastos", Data: map[string]any{"concepto": "Gas"}})}}
 	d, w, _ := writeDeps(m, agendaFixtures())
-	r := Answer(context.Background(), d, "anotá un gasto de gas")
+	r := Answer(context.Background(), d, "anota un gasto de gas")
 	if r.Kind != "ask_field" || r.Pending.Field != "categoria_id" {
 		t.Fatalf("want a question for the first missing REQUIRED field (categoria_id), got %s / %q: %s", r.Kind, r.Pending.Field, r.Text)
 	}
@@ -308,7 +308,7 @@ func TestWrite_UpdateFindsTheOneRowAndPreChecksTheTransition(t *testing.T) {
 	m := &scripted{replies: []string{plan(Plan{Kind: "update", Resource: "tareas",
 		Where: []Filter{{Field: "persona_id", Op: "eq", Match: "Fabian"}}, Data: map[string]any{"estado": "hecha"}})}}
 	d, w, _ := writeDeps(m, e)
-	r := Answer(context.Background(), d, "marcá como hecha la tarea de Fabián")
+	r := Answer(context.Background(), d, "marca como hecha la tarea de Fabián")
 	if r.Kind != "confirm" || r.Pending.RowID != "t2" {
 		t.Fatalf("want confirm on t2, got %s (%v): %s", r.Kind, r.Pending, r.Text)
 	}
@@ -321,14 +321,14 @@ func TestWrite_UpdateFindsTheOneRowAndPreChecksTheTransition(t *testing.T) {
 	}
 	// Now it is hecha: the same order is refused BEFORE any confirmation.
 	m.calls = 0
-	r = Answer(context.Background(), d, "marcá como hecha la tarea de Fabián")
+	r = Answer(context.Background(), d, "marca como hecha la tarea de Fabián")
 	if r.Kind != "answer" || !strings.Contains(r.Text, "ya está en <b>hecha</b>") {
 		t.Fatalf("want 'ya está así', got %s: %s", r.Kind, r.Text)
 	}
 	// And a move out of a terminal state is refused with the machine's words.
 	m.replies = []string{plan(Plan{Kind: "update", Resource: "tareas", Where: []Filter{{Field: "persona_id", Op: "eq", Match: "Fabian"}}, Data: map[string]any{"estado": "cancelada"}})}
 	m.calls = 0
-	r = Answer(context.Background(), d, "cancelá la tarea de Fabián")
+	r = Answer(context.Background(), d, "cancela la tarea de Fabián")
 	if r.Kind != "forbidden" || !strings.Contains(r.Text, "estado final") {
 		t.Fatalf("want a forbidden transition, got %s: %s", r.Kind, r.Text)
 	}
@@ -345,7 +345,7 @@ func TestWrite_SeveralRowsAskWhichAndAPickResolves(t *testing.T) {
 	m := &scripted{replies: []string{plan(Plan{Kind: "update", Resource: "tareas",
 		Where: []Filter{{Field: "persona_id", Op: "eq", Match: "Fabian"}}, Data: map[string]any{"estado": "hecha"}})}}
 	d, w, _ := writeDeps(m, e)
-	r := Answer(context.Background(), d, "marcá como hecha la tarea de Fabián")
+	r := Answer(context.Background(), d, "marca como hecha la tarea de Fabián")
 	if r.Kind != "ambiguous" || r.Pending.Stage != "which" || len(r.Pending.Options) != 2 {
 		t.Fatalf("want a pick among 2, got %s: %s", r.Kind, r.Text)
 	}
@@ -366,7 +366,7 @@ func TestWrite_UnknownNameOffersToCreateAndBothConfirm(t *testing.T) {
 	m := &scripted{replies: []string{plan(Plan{Kind: "create", Resource: "tareas", Data: map[string]any{
 		"titulo": "Llamar a Rocío", "persona_id": map[string]any{"match": "Rocío"}}})}}
 	d, w, _ := writeDeps(m, agendaFixtures())
-	r := Answer(context.Background(), d, "anotá llamar a Rocío")
+	r := Answer(context.Background(), d, "anota llamar a Rocío")
 	if r.Kind != "not_found" || r.Pending == nil || r.Pending.Stage != "create_ref" {
 		t.Fatalf("want an offer to create, got %s: %s", r.Kind, r.Text)
 	}
@@ -390,13 +390,13 @@ func TestWrite_EngineRefusalIsSaidNeverASuccessFace(t *testing.T) {
 	m := &scripted{replies: []string{plan(Plan{Kind: "create", Resource: "tareas", Data: map[string]any{"titulo": "x"}})}}
 	d, w, _ := writeDeps(m, agendaFixtures())
 	w.refuse = &WriteError{Status: 422, Msg: "validation_failed", Fields: []FieldError{{Field: "titulo", Rule: "maxLength", Message: "is too long"}}}
-	Answer(context.Background(), d, "anotá x")
+	Answer(context.Background(), d, "anota x")
 	r := Answer(context.Background(), d, "sí")
 	if r.Kind != "rejected" || !strings.Contains(r.Text, "titulo: is too long") || !strings.Contains(r.Text, "No escribí nada") {
 		t.Fatalf("want the engine's refusal in words: %s: %s", r.Kind, r.Text)
 	}
 	w.refuse = &WriteError{Status: 403, Msg: "forbidden"}
-	Answer(context.Background(), d, "anotá x")
+	Answer(context.Background(), d, "anota x")
 	r = Answer(context.Background(), d, "sí")
 	if r.Kind != "forbidden" {
 		t.Fatalf("403 → forbidden: %s", r.Kind)
@@ -433,7 +433,7 @@ func TestWrite_NoWriterMeansReadOnlyInWords(t *testing.T) {
 	m := &scripted{replies: []string{plan(Plan{Kind: "create", Resource: "tareas", Data: map[string]any{"titulo": "x"}})}}
 	v := Build(agendaSchema(), "", func(string) (bool, []string) { return true, nil })
 	d := Deps{Vocab: v, Model: m, Exec: agendaFixtures(), Now: now}
-	r := Answer(context.Background(), d, "anotá x")
+	r := Answer(context.Background(), d, "anota x")
 	// Without write abilities the vocabulary refuses the plan at validation
 	// (the model gets a correction round, then unclear) — the prompt never
 	// offered the write forms.
@@ -462,18 +462,18 @@ func TestWrite_DeleteStaysRefused(t *testing.T) {
 func TestWrite_ParserSettlesAStateTransitionWithoutTheModel(t *testing.T) {
 	v := BuildWithWrites(agendaSchema(), "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
 	cases := map[string]string{
-		"marcá como hecha la tarea de Fabián":  `update tareas where=[persona_id≈Fabián] estado=hecha`,
-		"marca como hecha la tarea de Fabian":  `update tareas where=[persona_id≈Fabian] estado=hecha`,
-		"cancelá la tarea de Fabián":           `update tareas where=[persona_id≈Fabián] estado=cancelada`,
-		"pasá a hecha la tarea de Marta Ruiz":  `update tareas where=[persona_id≈Marta Ruiz] estado=hecha`,
-		"poné en cancelada la tarea de Fabián": `update tareas where=[persona_id≈Fabián] estado=cancelada`,
+		"marca como hecha la tarea de Fabián": `update tareas where=[persona_id≈Fabián] estado=hecha`,
+		"marca como hecha la tarea de Fabian": `update tareas where=[persona_id≈Fabian] estado=hecha`,
+		"cancela la tarea de Fabián":          `update tareas where=[persona_id≈Fabián] estado=cancelada`,
+		"pasa a hecha la tarea de Marta Ruiz": `update tareas where=[persona_id≈Marta Ruiz] estado=hecha`,
+		"pon en cancelada la tarea de Fabián": `update tareas where=[persona_id≈Fabián] estado=cancelada`,
 		// not settled: no row, two names, a create, free text, delete
-		"marcá como hecha la tarea":                               "",
-		"marcá como hecha la tarea de Fabián y de Marta":          "",
-		"anotá llamar a Fabián mañana":                            "",
-		"marcá como hecha la tarea urgente de Fabián para mañana": "",
+		"marca como hecha la tarea":                               "",
+		"marca como hecha la tarea de Fabián y de Marta":          "",
+		"anota llamar a Fabián mañana":                            "",
+		"marca como hecha la tarea urgente de Fabián para mañana": "",
 		"borrá la tarea de Fabián":                                "",
-		"cancelá todas las tareas":                                "",
+		"cancela todas las tareas":                                "",
 	}
 	for q, want := range cases {
 		pr := Parse(q, v)
@@ -497,7 +497,7 @@ func TestWrite_ParserSettlesAStateTransitionWithoutTheModel(t *testing.T) {
 	m := &scripted{}
 	d, w, _ := writeDeps(m, agendaFixtures())
 	d.Exec.(*memExec).rows["tareas"] = append(d.Exec.(*memExec).rows["tareas"], map[string]any{"id": "t9", "titulo": "Llamar a Fabián", "estado": "pendiente", "persona_id": fabianID})
-	r := Answer(context.Background(), d, "marcá como hecha la tarea de Fabián")
+	r := Answer(context.Background(), d, "marca como hecha la tarea de Fabián")
 	if r.Kind != "confirm" || r.Source != "parser" || m.calls != 0 {
 		t.Fatalf("parser-settled transition: %s %s calls=%d: %s", r.Kind, r.Source, m.calls, r.Text)
 	}
@@ -515,12 +515,12 @@ func TestWrite_AmbiguousWhereNameIsAPickNotARetry(t *testing.T) {
 	d, w, _ := writeDeps(m, e)
 	// «Fabián» IS Fabián Gómez even with a Fabiana around (an exact whole
 	// token is the row — AGENDA-ASISTENTE-S1); «Fabi» is a real question.
-	r := Answer(context.Background(), d, "marcá como hecha la tarea de Fabián")
+	r := Answer(context.Background(), d, "marca como hecha la tarea de Fabián")
 	if r.Kind != "confirm" || r.Pending == nil || r.Pending.RowID != "t2" {
 		t.Fatalf("an exact first name is the row, got %s: %s", r.Kind, r.Text)
 	}
 	Answer(context.Background(), d, "no")
-	r = Answer(context.Background(), d, "marcá como hecha la tarea de Fabi")
+	r = Answer(context.Background(), d, "marca como hecha la tarea de Fabi")
 	if r.Kind != "ambiguous" || r.Pending == nil || r.Pending.Stage != "which" || r.Pending.WhichFor != "where:persona_id" {
 		t.Fatalf("want a pick among the people, got %s: %s", r.Kind, r.Text)
 	}

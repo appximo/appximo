@@ -749,7 +749,7 @@ pick the bot → it prints a NEW token; update `APPXIMO_TELEGRAM_BOT_TOKEN` in
 every `/etc/<app>/<app>.env` that used it and restart each app. The old
 token dies the moment BotFather revokes it.
 
-### 4.6d "Mandame el resumen de hoy" — the Telegram command channel (VOZ-ESCALON1-S1)
+### 4.6d "Mándame el resumen de hoy" — the Telegram command channel (VOZ-ESCALON1-S1)
 
 The same bot that DELIVERS alerts also RECEIVES a small set of read-only
 commands and answers with an owner-language daily digest — the first rung of
@@ -1023,7 +1023,7 @@ the model, two free layers answer:
   when it is SURE: every word accounted for, one resource, one operation, one
   place for the name. One leftover word («vendimos», «vigentes», «nuevos») and
   the question goes to the model. It never guesses to save a call. A write
-  verb («borrá», «cancelá») is refused without any call. **Measured on the
+  verb («borrá», «cancela») is refused without any call. **Measured on the
   corpus of real questions: 33 of 49 (67 %) answered with no model, in
   milliseconds**, with the same answers the model gave.
 - **The plan cache** remembers the PLAN a question translated to (per
@@ -1152,7 +1152,7 @@ spends a model call, so it needs an identity); body `{"q": "<the question>"}`
   "model_ms": 1198, "total_ms": 1201, "corrected": false }
 ```
 
-A question that implies a write («cancelá la orden ORD-1003», «borrá los
+A question that implies a write («cancela la orden ORD-1003», «borrá los
 pedidos viejos») is `write_refused`: «Por acá solo leo …» — writes with
 confirmation are the next rung (VOZ-4) and are not anticipated here.
 
@@ -1232,27 +1232,27 @@ rankings («el producto más vendido»), no percentages, no follow-ups («¿y
 ayer?» — each question stands alone), and «vendimos» means whatever the
 model maps it to in the schema's states — the small print says which.
 
-### 4.6f «Anotá llamar a Fabián para mañana» — WRITING by voice, with confirmation (VOZ-ESCRITURAS-S1, ADR-037)
+### 4.6f «Anota llamar a Fabián para mañana» — WRITING by voice, with confirmation (VOZ-ESCRITURAS-S1, ADR-037)
 
 The same door (`POST /api/ask`, the bot, the Siri shortcut) now also
 **creates and changes** rows. Never deletes. And **nothing is written until
 the owner reads exactly what will be written and says yes**:
 
 ```
-you:  Anotá llamar a Fabián para arreglar el techo, urgente, para mañana
+you:  Anota llamar a Fabián para arreglar el techo, urgente, para mañana
 bot:  📝 Voy a crear tarea:
       • persona: Fabián Gómez
       • prioridad: urgente
       • titulo: llamar a Fabián para arreglar el techo
       • vence en: mañana (dom 20 sep)
-      ¿Confirmás? (sí / no)          [✅ Sí] [✖ No]
+      ¿Confirmas? (sí / no)          [✅ Sí] [✖ No]
 you:  sí
 bot:  ✅ Listo: creé tarea llamar a Fabián para arreglar el techo (pendiente, 19 Sep).
 …
-you:  marcá como hecha la tarea de Fabián
+you:  marca como hecha la tarea de Fabián
 bot:  ✏️ Voy a cambiar tarea «llamar a Fabián… (pendiente, 19 Sep)»:
       • estado: pendiente → hecha
-      ¿Confirmás? (sí / no)
+      ¿Confirmas? (sí / no)
 you:  dale
 bot:  ✅ Listo: tarea … : estado → hecha.
 ```
@@ -1260,12 +1260,12 @@ bot:  ✅ Listo: tarea … : estado → hecha.
 What holds, in order of what it protects:
 
 - **The yes is exact.** `sí`, `dale`, `ok`, `confirmo`, `listo`, `de
-  acuerdo`, `hacelo`… «sí pero mejor el viernes» or «creo que sí» is NOT a
+  acuerdo`, `hazlo`… «sí pero mejor el viernes» or «creo que sí» is NOT a
   yes: the write is cancelled (the bot says so in one line and why) and,
   when the sentence carries nothing the grammar could execute, it is
   settled by the parser at zero cost (VOZ-AHORRO-S2 — it used to buy a
   «no entendí» from the model); a sentence that carries an order («sí,
-  anotá … para el viernes») is read as a new order. `no` / `cancelar`
+  anota … para el viernes») is read as a new order. `no` / `cancelar`
   cancels. A confirmation waits
   **5 minutes**, one per person; a new order replaces the previous one and
   says so; a question asked meanwhile cancels it and is answered.
@@ -1283,7 +1283,7 @@ What holds, in order of what it protects:
   sí para crearla» — the person is created (its own yes), then the task's
   confirmation shows «Rocío Paz (nuevo)». A dictated name is never stored as
   text in a relation.
-- **What you did not say is asked, not invented.** «anotá una tarea para
+- **What you did not say is asked, not invented.** «anota una tarea para
   Marta» → «Para crear tarea me falta titulo. ¿Qué pongo?» — one field at a
   time; the answer is the value. A priority you did not say is not filled.
 - **Time is resolved by the engine** in the app's zone: «mañana», «pasado
@@ -1295,8 +1295,8 @@ What holds, in order of what it protects:
   again is re-prepared against the database of the moment — names matched
   again, the row looked up again, «mañana» resolved on the day it runs, the
   required fields checked again — before a fresh confirmation is asked; a
-  cached plan can never confirm stale data. A state change («marcá como
-  hecha…», «cancelá el pedido ORD-1003») is settled by the parser: **US$ 0,
+  cached plan can never confirm stale data. A state change («marca como
+  hecha…», «cancela el pedido ORD-1003») is settled by the parser: **US$ 0,
   ≈ 15 ms**. The confirmation itself costs nothing.
   The same caps, trace (`⚙︎`) and history apply (§4.6e); the history keeps
   only the shape of a write (`[create tareas: titulo, vence_en]`), never
@@ -1307,7 +1307,7 @@ What holds, in order of what it protects:
 the buttons disappear so it cannot be pressed twice. **Siri / a shortcut:**
 the reply JSON carries `pending_id`, `stage` (`confirm`, `ask_field`,
 `which`, `create_ref`) and `expires_in`. The simplest shortcut: after
-*Speak Text* of `speech`, **Ask for Input** («¿Confirmás?») and POST the
+*Speak Text* of `speech`, **Ask for Input** («¿Confirmas?») and POST the
 answer as `{"q": "<answer>"}` to the same URL — the pending is per identity,
 so the plain door resolves it. A shortcut that kept the id may post
 `{"pending_id": "…", "answer": "sí"}` instead. The token a shortcut carries
@@ -1319,7 +1319,7 @@ channel read-only again (a write order answers «por acá solo leo»).
 
 **What it will not do (by design):** delete anything (`borrá` is refused on
 every channel, even for an admin); empty a field; change several rows at
-once («cancelá todas…»); write files, json or ids; a per-transition
+once («cancela todas…»); write files, json or ids; a per-transition
 permission («only the owner may mark paid» — the `update` grant governs,
 as on the API). A restart forgets pending confirmations (a write that was
 not confirmed did not happen).
@@ -1347,12 +1347,12 @@ An app whose rows occupy a block of time declares it in the schema (no code):
 What the operator gets, verified live (`evidencia/MOTOR-AGENDA-S1/provocaciones/`):
 
 - **The database refuses a collision, naming the row** — `409 time_range_conflict` with the colliding row on REST, the batch, GraphQL and a custom handler; twenty simultaneous writes on one slot → one `201`, nineteen `409`. Adjacent blocks (4–5, 5–6) never collide; a row with `ocupa: false` never blocks. It needs the `btree_gist` extension: `install.sh` installs it at setup, the engine installs it at tenant provisioning (trusted extension, the database owner may), `fleet-audit` reports a schema that declares `no_overlap` without it.
-- **The bot says the collision BEFORE writing**: «agendá reunión de planificación mañana de 4 a 5» → «⚠️ Ya tenés «reunión con Fabián» de 16:00 a 17:00. … ocupa: no (no bloquea el horario: ya había algo) … ¿Igual lo agendo?» — the deterministic parser settles it (US$ 0); a `sí` writes the row as NOT blocking (`ocupa: false`) so it never blocks what comes next. «qué tengo mañana», «tengo algo mañana a las 4», «cuándo estoy libre el jueves» are the parser's too. A bare hour 1–6 is read as the afternoon («a las 4» = 16:00); the confirmation prints the hour, so a wrong reading is caught before anything is written.
+- **The bot says the collision BEFORE writing**: «agenda reunión de planificación mañana de 4 a 5» → «⚠️ Ya tienes «reunión con Fabián» de 16:00 a 17:00. … ocupa: no (no bloquea el horario: ya había algo) … ¿Igual lo agendo?» — the deterministic parser settles it (US$ 0); a `sí` writes the row as NOT blocking (`ocupa: false`) so it never blocks what comes next. «qué tengo mañana», «tengo algo mañana a las 4», «cuándo estoy libre el jueves» are the parser's too. A bare hour 1–6 is read as the afternoon («a las 4» = 16:00); the confirmation prints the hour, so a wrong reading is caught before anything is written.
 - **The reminder arrives once, on time, and follows the row**: the worker's leader (the same lock the cron uses) sweeps the rows entering the window every 30 s and claims each (row, instant) in `public.workflow_reminders` atomically with the outbox row; a worker restarted inside the window neither loses nor duplicates it; a moved row fires at its new time, a cancelled one never. The text goes out through `message.telegram` — the same bot and chat as the digest (needs `APPXIMO_TELEGRAM_BOT_TOKEN` + `_CHAT_ID` + `_SUMMARY_ROLE` on the worker, §4.6d). Watch it: `GET /admin/workflows` (trigger `time:eventos.inicio -15m`, last run), `appximo_workflow_reminders_fired_24h` / `_failed_24h` on `/metrics`.
 - **Adding the rule over data that already collides is refused, naming the pairs**: the dry-run (`PUT /tenants/{id}/schema {"dry_run": true}`, `appximo migrate --dry-run`) lists `[blocked] no_overlap "horario" on eventos: N existing row pair(s) already overlap — <a> × <b>`; the apply lands everything else and answers **422** with those words (the tenant keeps its previous schema; nothing half-applied). Fix the rows, re-apply, it converges.
 - **The `/app` panel** keeps the two datetime fields side by side, refuses an end before the start, and shows «Ya hay algo en ese horario: …» while you edit — advice, never a block; the 409 names the row if you save anyway.
 
-The generator declares all of it from the description («que no se me crucen», «avisame 15 minutos antes de cada compromiso»): `appximo ai-generate "Mi agenda personal…"` came out with `ranges` + `no_overlap`, the `time` workflow and the morning cron, valid first try (US$ 0,014). Example to start from: `examples/model-lab/agenda-choques.json`.
+The generator declares all of it from the description («que no se me crucen», «avísame 15 minutos antes de cada compromiso»): `appximo ai-generate "Mi agenda personal…"` came out with `ranges` + `no_overlap`, the `time` workflow and the morning cron, valid first try (US$ 0,014). Example to start from: `examples/model-lab/agenda-choques.json`.
 
 ### 4.6h «Cómo creo algo» — the assistant TEACHES how to use it: a living guide, a fixed form for creating, corrections on a pending write (AGENDA-ASISTENTE-S1, ADR-040)
 
@@ -1369,11 +1369,11 @@ delivered in parts of six items on the screen AND in the voice (the same six —
 
 ```
 you:  cómo creo algo
-bot:  ✍️ Para crear una tarea decí: «crear tarea: [qué], [30 minutos], [urgente], [mañana / el viernes]».
+bot:  ✍️ Para crear una tarea di: «crear tarea: [qué], [30 minutos], [urgente], [mañana / el viernes]».
       Por ejemplo: «crear tarea: revisar el contrato, 30 minutos, urgente, el viernes» — la entiendo al instante, gratis.
       Los datos van en cualquier orden, separados por comas o pausas; el que no digas, lo pregunto o lo dejo vacío.
       Antes de escribir te muestro todo y espero tu sí.
-      Hay más (1 de 4). Decí más para seguir.            ← compromiso, registro, persona; «cómo creo una tarea» for the detail
+      Hay más (1 de 4). Di más para seguir.            ← compromiso, registro, persona; «cómo creo una tarea» for the detail
 you:  qué puedo preguntar          → the question shapes ON THIS SCHEMA, six per page («cuántas tareas hay», «tareas por hacer», «tareas de salud», …)
 you:  qué campos tiene una tarea   → every field in words with its form («area (una de tus areas: salud, casa…)», «estado (pendiente, en_curso…) — también entiendo por hacer, abierta…»)
 you:  cómo filtro por fecha        → periods, ranges, combinations, «los últimos 3…»
@@ -1386,7 +1386,7 @@ always apart, with the price. Measured on the agenda: 43 of 43 examples the
 guide shows answer `source: parser`, US$ 0.
 
 **The fixed form for creating — `crear <recurso>: <qué>, <datos en
-cualquier orden>`.** A verb (`crear`, `nueva`, `anotá`, `agregá`, `registrá`…)
+cualquier orden>`.** A verb (`crear`, `nueva`, `anota`, `agrega`, `registra`…)
 or the resource word itself, then WHAT it is, then the data in ANY order, with
 or without the field word, separated by commas, «y» or the pause dictation
 leaves. Every datum is recognized by its FORM: a field's own word, a declared
@@ -1394,9 +1394,9 @@ value or alias, a bool by its name («urgente»), a day or a clock («el
 viernes», «mañana a las 3», «de 12 a 1», «a las 4 pm», «a las cuatro de la
 tarde», «9 y media»), a number with its unit («30 minutos»), a name after
 «con» / «para», a bare name tried against every target (VOZ-20, below). What
-is not a datum is the title, kept as said. Three cousins: «anotá que <lo que
+is not a datum is the title, kept as said. Three cousins: «anota que <lo que
 pasó>» is the note resource (creatable, no lifecycle, a range without
-no-overlap or a time defaulting to now); «anotá <infinitivo>…» / «tengo que…»
+no-overlap or a time defaulting to now); «anota <infinitivo>…» / «tengo que…»
 is the to-do; «reunión con Fabián mañana a las 3 por una hora» (an agenda
 word, a clock, no question word) is a block. Chosen over `campo: valor` pairs
 (exhausting to dictate) and a positional order (memorized, breaks when one
@@ -1421,21 +1421,21 @@ Fabiana around; «Fabi» still asks).
 **`resumen` / `estado` / `gasto` through `/api/ask` (VOZ-21)** are served
 in-process by the engine's own endpoints (the same digest and card the bot
 sends), US$ 0. **«Ya hice…», «terminé de…», «… está lista»** move the named
-to-do to its finished state; **«poné en curso la declaración de renta»** finds
+to-do to its finished state; **«pon en curso la declaración de renta»** finds
 the resource by the state value said.
 
 **The voice.** `speech` (and `display` = speech + the cost line when tracing)
 is composed, never derived: short sentences, clocks and dates and small counts
 in words («de las diez a las once de la mañana», «el martes veintinueve de
 septiembre», «dos tareas»), no bullet, guillemet, pictograph, underscore or
-raw digit; a list reads at most five items then «y N más; mirá el panel»; a
+raw digit; a list reads at most five items then «y N más; mira el panel»; a
 numbered pick is read «Uno, Fabián Gómez. Dos, Fabiana Torres.»; a long guide
 in parts. The box has no synthesizer, so the criterion is declared and
 measured (`ask.SpeechMetrics` + every spoken reply of the provocations: zero
 digits, zero symbols). What Siri does with the punctuation is the shortcut's
 business: if it reads too fast, lower the Speak action's rate.
 
-**A note (something that happened) is «anotá que» + what + when, in any
+**A note (something that happened) is «anota que» + what + when, in any
 order.** The clock reader takes what a person says: «de 7 a 2 de la tarde»,
 «desde las 9 hasta las 10 y media», «entre las 7 y las 2», «a las 3 y media
 por dos horas», «tipo 3» / «como a las 3» / «a eso de las 3», «7:30», «2pm»,
@@ -1449,10 +1449,10 @@ read them back. What stays the model's: a duration with no clock («estuve
 dos horas en el banco», VOZ-22).
 
 **The dictation tail.** A Siri shortcut named after the verb («Anota»)
-swallows it, so «anotá que la plataforma estuvo caída de 7 a 2 de la tarde»
+swallows it, so «anota que la plataforma estuvo caída de 7 a 2 de la tarde»
 arrives as «que la plataforma estuvo caída …». As a last resort, a sentence
 that starts with «que», names no resource, has no question or operation
-word and carries a clock span is read as the note («anotá que …»),
+word and carries a clock span is read as the note («anota que …»),
 confirmed like any write. Name the shortcut something other than the verb
 and the whole sentence travels. The clock reader takes what a dictation
 writes: «7 A.M.», «2pm», «de siete a dos de la tarde», «el día de hoy»; the

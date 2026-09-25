@@ -21,7 +21,7 @@ import (
 var correctionLeads = []string{
 	"no mejor", "si pero mejor", "sí pero mejor", "pero mejor", "si pero", "sí pero", "mejor", "que sea", "que quede",
 	"cambialo a", "cambiala a", "cambialo por", "cambiala por", "cambialo", "cambiala", "cambia a", "cambiá a", "cambia", "cambiá",
-	"ponelo", "ponela", "ponele", "hacelo", "mas bien", "más bien", "en realidad", "corrijo", "corrige", "no",
+	"ponelo", "ponela", "ponele", "ponlo", "ponla", "ponle", "hacelo", "hazlo", "mas bien", "más bien", "en realidad", "corrijo", "corrige", "no",
 }
 
 // applyCorrection reads text as a change to pend. Returns (result, true)

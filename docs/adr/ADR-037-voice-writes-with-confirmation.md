@@ -2,7 +2,7 @@
 
 **Status:** accepted (VOZ-ESCRITURAS-S1, 2026-09-20)
 **Drivers:** ADR-033 made the bot answer questions from the owner's own
-words; the natural next sentence an owner says is not a question — «anotá
+words; the natural next sentence an owner says is not a question — «anota
 llamar a Fabián para arreglar el techo, urgente, para mañana» — and the
 channel answered «por acá solo leo». The risk of the next step is different
 in kind from reading: a wrong count is corrected by the next question; a
@@ -53,7 +53,7 @@ Every write becomes a **pending** — one per (tenant, role, user), five
 minutes, in memory — and the reply is the contract: resource, every value,
 every matched name shown as the row it resolved to («persona: Fabián Gómez»,
 «vence en: mañana (dom 20 sep)»), the transition as «pendiente → hecha». Then
-«¿Confirmás? (sí / no)».
+«¿Confirmas? (sí / no)».
 
 - **The yes is exact.** A closed list of confirmation words after
   normalization (`sí`, `dale`, `ok`, `confirmo`, `listo`, `de acuerdo`…).
@@ -120,7 +120,7 @@ engine's own `?search=`, ADR-033 §3), so the confirmation names the ROW:
   the owner is told to load it first.
 
 The same applies to an update's `where`: an ambiguous name is a pick, not
-«repetí la pregunta» — a write must end in ONE row.
+«repite la pregunta» — a write must end in ONE row.
 
 ### 5. A required field the owner did not say is ASKED, never invented
 
@@ -153,7 +153,7 @@ date-only token is the start of that day.
 
 ### 7. The parser settles ONE write shape itself: a state transition of one row
 
-«marcá como hecha la tarea de Fabián», «cancelá el pedido de Marta», «pasá a
+«marca como hecha la tarea de Fabián», «cancela el pedido de Marta», «pasa a
 pagada la orden de Ana»: a transition verb (or a state-named verb whose first
 five letters are a prefix of exactly one declared state), one updatable
 resource with a state field, one target state, a row identified by a name or
@@ -188,7 +188,7 @@ would 403 it (P6, verified on the 58 after the deploy).
 - Delete by voice (§1). A per-transition RBAC («only the owner may mark
   paid») — the normal `update` grant governs, as on the API.
 - Writes of `json`/`jsonb`/`file`/`uuid` fields by voice; multi-row updates
-  («cancelá todas las tareas de Fabián»); a create of two resources in one
+  («cancela todas las tareas de Fabián»); a create of two resources in one
   sentence (the offer-to-create covers the one case that matters: the
   relation's target).
 - The pending store is in-process memory: a restart forgets a pending

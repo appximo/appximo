@@ -75,7 +75,7 @@ func HelpExamples(v *Vocabulary, canWrite bool) (text, speech string) {
 			sp = append(sp, sentence(l.speech))
 		}
 	}
-	sp = append(sp, "También podés decir resumen, estado, o ayuda.")
+	sp = append(sp, "También puedes decir resumen, estado, o ayuda.")
 	if canWrite {
 		sp = append(sp, "Antes de escribir te digo qué voy a anotar y espero tu sí. Nunca borro nada.")
 	}
@@ -178,15 +178,15 @@ func helpLines(v *Vocabulary, canWrite bool) (free, model []helpLine) {
 						art = "la"
 					}
 					sing := singularWordOf(task)
-					free = append(free, helpLine{text: "marcá como " + target + " " + art + " " + sing + " de [nombre]", speech: "marcá como " + target + " " + art + " " + sing + " de alguien", quoted: true})
+					free = append(free, helpLine{text: "marca como " + target + " " + art + " " + sing + " de [nombre]", speech: "marca como " + target + " " + art + " " + sing + " de alguien", quoted: true})
 				}
 			}
 			sing, art := singularWithArticle(task)
-			model = append(model, helpLine{text: "anotá " + art + " " + sing + " con detalles: «llamar a [nombre] el viernes, urgente»", speech: "anotá " + art + " " + sing + " con detalles, como llamar a alguien el viernes, urgente", quoted: false})
+			model = append(model, helpLine{text: "anota " + art + " " + sing + " con detalles: «llamar a [nombre] el viernes, urgente»", speech: "anota " + art + " " + sing + " con detalles, como llamar a alguien el viernes, urgente", quoted: false})
 		}
 		if agenda != nil && agenda != task {
 			sing, art := singularWithArticle(agenda)
-			model = append(model, helpLine{text: "agendá " + art + " " + sing + " con [nombre] mañana a las 3", speech: "agendá " + art + " " + sing + " con alguien mañana a las tres", quoted: true})
+			model = append(model, helpLine{text: "agenda " + art + " " + sing + " con [nombre] mañana a las 3", speech: "agenda " + art + " " + sing + " con alguien mañana a las tres", quoted: true})
 		}
 	}
 	model = append(model, helpLine{text: "cualquier pregunta con palabras que " + strings.TrimSpace(v.AppName) + " no conoce (la responde el modelo, si puede)", speech: "y cualquier pregunta con palabras que " + strings.TrimSpace(v.AppName) + " no conoce", quoted: false})

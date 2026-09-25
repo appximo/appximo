@@ -129,7 +129,10 @@ func parseCreate(question string, v *Vocabulary) ParseResult {
 			// agenda, a clock span with no question word («compromiso de 4 a
 			// 5 con Fabián hoy», «reunión con Fabián mañana a las 3»).
 			ok := i < len(toks) && (toks[i].norm == ":" || (looksInfinitive(toks[i].norm) && !isOpWord(toks[i].norm) && !isTimeWord(toks[i].norm) && !v.knownWord(toks[i].norm)))
-			if !ok && res.Range() != nil && res == agendaResource(v) && verblessSchedule(toks[i:]) {
+			// «compromiso de 4 a 5» creates; «compromisos de 4 a 5» (the
+			// plural) asks — only the singular word or an alias is a thing
+			// being created
+			if !ok && res.Range() != nil && res == agendaResource(v) && isSingularForm(res, toks[j].norm) && verblessSchedule(toks[i:]) {
 				ok = true
 			}
 			if !ok {
@@ -364,6 +367,21 @@ func segments(toks []ctok, v *Vocabulary, res *Resource) [][]ctok {
 	}
 	flush()
 	return out
+}
+
+// isSingularForm reports whether norm is the resource's singular name or a
+// declared alias as declared (in the singular): «compromiso» / «cita» /
+// «reunión» name ONE thing being created; «compromisos» / «citas» ask.
+func isSingularForm(res *Resource, norm string) bool {
+	if norm == normalize(singular(res.Name)) {
+		return true
+	}
+	for _, a := range res.Aliases {
+		if norm == normalize(a) {
+			return true
+		}
+	}
+	return false
 }
 
 // hasEntre reports an «entre» in the run not yet closed by its «y».

@@ -360,7 +360,7 @@ with «No escribí nada», never a success face. Time values are tokens
 (`tomorrow`, `next_friday 15:00`, `end_of_month`, ISO) the engine resolves
 in the app's zone; a value equal to the field's default is dropped from a
 create. The parser settles ONE write shape without the model (a state
-transition of one row: «marcá como hecha la tarea de Fabián», US$ 0); a
+transition of one row: «marca como hecha la tarea de Fabián», US$ 0); a
 create costs one model call (≈ US$ 0.0023). Telegram: inline Sí/No and pick
 buttons (`callback_query`), keyboard removed once resolved.
 `APPXIMO_ASK_WRITES=off` makes the channel read-only. A custom handler
@@ -394,7 +394,7 @@ with `Parse` on that schema before it is shown, free and paid apart with the
 price, delivered in parts of six items on both channels (`kind: guide`,
 `source: parser`, US$ 0). A FIXED FORM for creating settled by the parser —
 `crear <res>: <qué>, <data in any order>` (also the resource word first,
-«anotá que <what happened>» → the note resource, «tengo que…» → the to-do,
+«anota que <what happened>» → the note resource, «tengo que…» → the to-do,
 «<agenda word> con <Name> mañana a las 3 por una hora» → the block); each
 datum recognized by FORM (field word, declared value/alias, bool by name, day
 / clock incl. «4 pm», «cuatro de la tarde», «9 y media», number + unit, name

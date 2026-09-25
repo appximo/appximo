@@ -1846,6 +1846,18 @@ verb-of-beginning → the non-initial, non-terminal state whose name contains
 «curso»/«progreso»/«proceso», plus a line for the model (W1c) saying that
 starting is a transition. Origin: AGENDA-ASISTENTE-S1, bank U05. Decides: agent.
 
+### VOZ-25 — The assistant speaks «tú»; there is no way to ask for «usted» (or «vos») as the reply register
+
+Since A-85 every reply of the voice channel is neutral «tú» and the
+recognizer understands both «vos» and «tú». There is no register knob: an
+owner who wants to be addressed as «usted» (common in Bogotá) or «vos»
+cannot ask for it. The register is how the app treats its owner; today it is
+a fixed product decision. **Ready:** a declarable key (`summary`/`ask` block
+or `APPXIMO_ASK_TRATO=tu|usted|vos`) choosing the set of forms at
+composition time — a conjugation dictionary in the composing layer, never
+duplicated strings — built only when a real owner asks. Origin:
+AGENDA-ASISTENTE-S1 addendum, decision A-85. Decides: Miguel.
+
 ### VOZ-18 — The estimate-vs-real mirror is per task; there is no weekly aggregate («esta semana subestimaste 60 %»)
 
 `espejo_estimacion` sends one message when a task with an estimate closes. A

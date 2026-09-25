@@ -158,17 +158,17 @@ func TestAliases_TransitionByAlias(t *testing.T) {
 	// «cobrada» is an alias of pagada; «pedido» an alias of ordenes; the
 	// state field of ordenes needs a machine for parseTransition — the test
 	// schema declares none, so the parser must NOT be sure (no state field).
-	if r := Parse("marcá como cobrada el pedido de Ana", v); r.Sure {
+	if r := Parse("marca como cobrada el pedido de Ana", v); r.Sure {
 		t.Fatalf("ordenes has no state machine here: %+v", r.Plan)
 	}
 	pv := BuildWithWrites(petsSchema(true), "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
 	// appointments has TWO name relations (pet, owner): «la cita de Ana» is
 	// SURE with both as candidates (VOZ-20) — the engine tries each target
 	// before confirming; naming the relation's target still settles it.
-	if r := Parse("marcá como atendida la cita de Ana Gómez", pv); !r.Sure || len(r.Plan.Where) != 1 || len(r.Plan.Where[0].Fields) != 2 || r.Plan.Where[0].Match != "Ana Gómez" {
+	if r := Parse("marca como atendida la cita de Ana Gómez", pv); !r.Sure || len(r.Plan.Where) != 1 || len(r.Plan.Where[0].Fields) != 2 || r.Plan.Where[0].Match != "Ana Gómez" {
 		t.Fatalf("two name relations: sure with both candidates, got %+v (%s)", r.Plan, r.Reason)
 	}
-	// a code identifies the row of a transition («cancelá el pedido ORD-1003»)
+	// a code identifies the row of a transition («cancela el pedido ORD-1003»)
 	cv := BuildWithWrites(func() *schema.APISchema {
 		s := tienditaWithAliases()
 		o := s.Resources["ordenes"]
@@ -178,10 +178,10 @@ func TestAliases_TransitionByAlias(t *testing.T) {
 		s.Resources["ordenes"] = o
 		return s
 	}(), "", func(string) (bool, []string) { return true, nil }, func(string) (bool, bool) { return true, true })
-	if r := Parse("cancelá el pedido ORD-1003", cv); !r.Sure || r.Plan.Kind != "update" || r.Plan.Data["estado"] != "cancelada" || len(r.Plan.Where) != 1 || r.Plan.Where[0].Field != "numero" || r.Plan.Where[0].Match != "ORD-1003" {
+	if r := Parse("cancela el pedido ORD-1003", cv); !r.Sure || r.Plan.Kind != "update" || r.Plan.Data["estado"] != "cancelada" || len(r.Plan.Where) != 1 || r.Plan.Where[0].Field != "numero" || r.Plan.Where[0].Match != "ORD-1003" {
 		t.Fatalf("transition by code: sure=%v %+v (%s)", r.Sure, r.Plan, r.Reason)
 	}
-	r := Parse("marcá como atendida la cita de la mascota Firulais", pv)
+	r := Parse("marca como atendida la cita de la mascota Firulais", pv)
 	if !r.Sure || r.Plan.Kind != "update" || r.Plan.Resource != "appointments" || r.Plan.Data["status"] != "attended" {
 		t.Fatalf("transition by alias: sure=%v %+v (%s)", r.Sure, r.Plan, r.Reason)
 	}
@@ -288,9 +288,9 @@ func TestAliases_FingerprintChangesWithTheVocabulary(t *testing.T) {
 func TestWriteCache_PlanIsCachedNeverTheResult(t *testing.T) {
 	m := &scripted{replies: []string{plan(Plan{Kind: "create", Resource: "tareas", Data: map[string]any{"titulo": "Pagar la luz", "vence_en": "tomorrow"}})}}
 	d, w, st := writeDeps(m, agendaFixtures())
-	d.NoParser = true // the parser settles «anotá pagar la luz para mañana» itself now; this tests the MODEL plan cache
+	d.NoParser = true // the parser settles «anota pagar la luz para mañana» itself now; this tests the MODEL plan cache
 	d.Cache, d.CacheScope, d.CacheScopeWrite = NewPlanCache(10, time.Hour), "t|dueno|fp", "t|dueno|fp|u1"
-	r1 := Answer(context.Background(), d, "anotá pagar la luz para mañana")
+	r1 := Answer(context.Background(), d, "anota pagar la luz para mañana")
 	if r1.Kind != "confirm" || r1.Source != "model" || m.calls != 1 {
 		t.Fatalf("first: kind=%s source=%s calls=%d", r1.Kind, r1.Source, m.calls)
 	}
@@ -300,7 +300,7 @@ func TestWriteCache_PlanIsCachedNeverTheResult(t *testing.T) {
 	// A "no" cancels; the same sentence again is the CACHED plan — no model
 	// call — and a FRESH pending (new id), still nothing written.
 	Answer(context.Background(), d, "no")
-	r2 := Answer(context.Background(), d, "Anotá pagar la luz para mañana")
+	r2 := Answer(context.Background(), d, "Anota pagar la luz para mañana")
 	if r2.Kind != "confirm" || r2.Source != "cache" || m.calls != 1 || r2.CostUSD != 0 {
 		t.Fatalf("second: kind=%s source=%s calls=%d cost=%v", r2.Kind, r2.Source, m.calls, r2.CostUSD)
 	}
@@ -310,7 +310,7 @@ func TestWriteCache_PlanIsCachedNeverTheResult(t *testing.T) {
 	// Confirmed: written through the writer; a THIRD time creates ANOTHER
 	// task — the result was never cached.
 	Answer(context.Background(), d, "sí")
-	r3 := Answer(context.Background(), d, "anotá pagar la luz para mañana")
+	r3 := Answer(context.Background(), d, "anota pagar la luz para mañana")
 	Answer(context.Background(), d, "dale")
 	if len(w.writes) != 2 || r3.Source != "cache" || m.calls != 1 {
 		t.Fatalf("two confirmed writes from one model call: writes=%v calls=%d source=%s", w.writes, m.calls, r3.Source)
@@ -322,7 +322,7 @@ func TestWriteCache_PlanIsCachedNeverTheResult(t *testing.T) {
 	// model is asked again.
 	d2 := d
 	d2.PendingKey, d2.CacheScopeWrite = "t|dueno|u2", "t|dueno|fp|u2"
-	if r := Answer(context.Background(), d2, "anotá pagar la luz para mañana"); r.Source != "model" || m.calls != 2 {
+	if r := Answer(context.Background(), d2, "anota pagar la luz para mañana"); r.Source != "model" || m.calls != 2 {
 		t.Fatalf("another user must not inherit a write plan: source=%s calls=%d", r.Source, m.calls)
 	}
 }
@@ -332,7 +332,7 @@ func TestWriteCache_RelativeDateIsResolvedOnTheDayItRuns(t *testing.T) {
 	d, w, _ := writeDeps(m, agendaFixtures())
 	d.NoParser = true // the model's cached plan is what is under test
 	d.Cache, d.CacheScope, d.CacheScopeWrite = NewPlanCache(10, 24*time.Hour), "t|dueno|fp", "t|dueno|fp|u1"
-	r1 := Answer(context.Background(), d, "anotá pagar el gas para mañana")
+	r1 := Answer(context.Background(), d, "anota pagar el gas para mañana")
 	if !strings.Contains(r1.Text, "mañana (dom 20 sep)") {
 		t.Fatalf("today's tomorrow: %s", r1.Text)
 	}
@@ -340,7 +340,7 @@ func TestWriteCache_RelativeDateIsResolvedOnTheDayItRuns(t *testing.T) {
 	// The next day, the same sentence from the cache: «mañana» is THAT day's
 	// tomorrow, never the date computed the day before.
 	d.Now = now.AddDate(0, 0, 1)
-	r2 := Answer(context.Background(), d, "anotá pagar el gas para mañana")
+	r2 := Answer(context.Background(), d, "anota pagar el gas para mañana")
 	if r2.Source != "cache" || !strings.Contains(r2.Text, "mañana (lun 21 sep)") {
 		t.Fatalf("tomorrow's tomorrow: source=%s %s", r2.Source, r2.Text)
 	}

@@ -91,13 +91,13 @@ func TestAskWrite_CreateConfirmsThenWritesThroughTheEngine(t *testing.T) {
 	fabID := fab["id"].(string)
 
 	// A VERBLESS sentence: the fixed form (AGENDA-ASISTENTE-S1) settles
-	// «anotá …» without the model; this test pins the MODEL's write path.
+	// «anota …» without the model; this test pins the MODEL's write path.
 	got := dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "Llamar a Fabián para arreglar el techo, urgente, para mañana"}, http.StatusOK)
 	if got["kind"] != "confirm" || got["pending_id"] == nil || got["stage"] != "confirm" {
 		t.Fatalf("want a confirmation, got %v", got)
 	}
 	text := got["text"].(string)
-	for _, want := range []string{"Voy a crear", "Fabián Gómez", "urgente", "mañana", "¿Confirmás?"} {
+	for _, want := range []string{"Voy a crear", "Fabián Gómez", "urgente", "mañana", "¿Confirmas?"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("confirmation lacks %q: %s", want, text)
 		}
@@ -146,7 +146,7 @@ func TestAskWrite_ReadOnlyRoleIsRefusedByRBAC_NeverByWording(t *testing.T) {
 	rest, _, tok, done := setupAskWrites(t, fm)
 	defer done()
 	demo := tok("demo", askU2)
-	got := dpDo(t, rest, "POST", "/api/ask", demo, map[string]any{"q": "anotá llamar a Fabián mañana"}, http.StatusOK)
+	got := dpDo(t, rest, "POST", "/api/ask", demo, map[string]any{"q": "anota llamar a Fabián mañana"}, http.StatusOK)
 	if got["kind"] != "write_refused" || !strings.Contains(got["text"].(string), "solo <b>leo</b>") {
 		t.Fatalf("read-only role: %v", got)
 	}
@@ -180,7 +180,7 @@ func TestAskWrite_UpdateHonorsTheStateMachineAndEmits(t *testing.T) {
 		t.Fatalf("question before the update: %v", got)
 	}
 
-	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "marcá como hecha la tarea de Fabián"}, http.StatusOK)
+	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "marca como hecha la tarea de Fabián"}, http.StatusOK)
 	if got["kind"] != "confirm" || !strings.Contains(got["text"].(string), "pendiente → <b>hecha</b>") {
 		t.Fatalf("want a confirmation naming the transition, got %v", got)
 	}
@@ -198,7 +198,7 @@ func TestAskWrite_UpdateHonorsTheStateMachineAndEmits(t *testing.T) {
 	}
 	// hecha is terminal: the same order is refused BEFORE any confirmation.
 	fm.calls = 0
-	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "marcá como hecha la tarea de Fabián"}, http.StatusOK)
+	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "marca como hecha la tarea de Fabián"}, http.StatusOK)
 	if got["kind"] != "answer" || !strings.Contains(got["text"].(string), "ya está en <b>hecha</b>") {
 		t.Fatalf("want 'ya está así': %v", got)
 	}
@@ -206,7 +206,7 @@ func TestAskWrite_UpdateHonorsTheStateMachineAndEmits(t *testing.T) {
 	// under it is refused at execution with the 422 in words.
 	fm.replies = []string{`{"kind":"update","resource":"tareas","where":[{"field":"titulo","op":"partial","value":"agua"}],"data":{"estado":"cancelada"}}`}
 	fm.calls = 0
-	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "cancelá la tarea sobre el agua"}, http.StatusOK)
+	got = dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "cancela la tarea sobre el agua"}, http.StatusOK)
 	if got["kind"] != "confirm" {
 		t.Fatalf("want confirm: %v", got)
 	}
@@ -238,7 +238,7 @@ func TestAskWrite_PlanCachedNeverTheResult_AndStrayYesCostsNothing(t *testing.T)
 		return fm.calls
 	}
 	// 1. The order, once: the model plans it, the owner confirms, the engine
-	// writes. A VERBLESS order — «anotá …» is the fixed form's (parser, US$ 0)
+	// writes. A VERBLESS order — «anota …» is the fixed form's (parser, US$ 0)
 	// since AGENDA-ASISTENTE-S1; this test pins the MODEL's cached plan.
 	got := dpDo(t, rest, "POST", "/api/ask", dueno, map[string]any{"q": "pagar la luz para mañana"}, http.StatusOK)
 	if got["kind"] != "confirm" || got["source"] != "model" || modelCalls() != 1 {

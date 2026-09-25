@@ -112,14 +112,14 @@ func telegramText(a Alert, appName, panelURL string) string {
 	case a.Kind == KindNewError:
 		fmt.Fprintf(&b, "🆕 <b>Error nuevo · %s</b>\n", app)
 		fmt.Fprintf(&b, "Apareció un error que nunca se había visto en <code>%s</code>: %s.\n", esc(a.Route), esc(a.Message))
-		b.WriteString("<b>Qué hacer:</b> abrí el panel → Problemas; la traza tiene la sentencia, el usuario y el rol.\n")
+		b.WriteString("<b>Qué hacer:</b> abre el panel → Problemas; la traza tiene la sentencia, el usuario y el rol.\n")
 		if a.TraceID != "" {
 			fmt.Fprintf(&b, "Traza: <code>%s</code>\n", esc(a.TraceID))
 		}
 	case a.Kind == KindStorm:
 		fmt.Fprintf(&b, "🌩 <b>Tormenta de errores · %s</b>\n", app)
 		fmt.Fprintf(&b, "%d tipos de error NUEVOS en el último minuto — frené las alertas individuales para no inundarte (%s).\n", a.Count, esc(a.Message))
-		b.WriteString("<b>Qué hacer:</b> esto suele ser un deploy roto o la base caída; mirá el panel → Problemas, y si acabás de desplegar, revertí.\n")
+		b.WriteString("<b>Qué hacer:</b> esto suele ser un deploy roto o la base caída; mira el panel → Problemas, y si acabas de desplegar, revierte.\n")
 	case a.Kind == KindHost && a.Route == "disk":
 		fmt.Fprintf(&b, "%s <b>%s · Disco bajo · %s</b>\n", levelEmoji(a.Level), levelWordES(a.Level), app)
 		if a.Fields["free"] != "" {
@@ -164,17 +164,17 @@ func telegramText(a Alert, appName, panelURL string) string {
 	case a.Kind == "ask_spend_warning":
 		fmt.Fprintf(&b, "🟡 <b>AVISO · Gasto del modelo al %s %% · %s</b>\n", f("pct"), app)
 		fmt.Fprintf(&b, "Las preguntas al modelo llevan hoy <b>US$ %s</b> de un techo de US$ %s (%s llamadas, %s preguntas). Al llegar al techo el modelo se apaga hasta mañana; las preguntas simples y los comandos fijos siguen.\n", f("usd"), f("cap"), f("model_calls"), f("questions"))
-		b.WriteString("<b>Qué hacer:</b> nada urgente. Si es uso real, subí <code>APPXIMO_ASK_DAILY_USD</code>; si no reconocés el gasto, mirá /admin/ask (quién pregunta, cuánto, desde cuándo).\n")
+		b.WriteString("<b>Qué hacer:</b> nada urgente. Si es uso real, sube <code>APPXIMO_ASK_DAILY_USD</code>; si no reconoces el gasto, mira /admin/ask (quién pregunta, cuánto, desde cuándo).\n")
 		panelPath = "/admin/ask"
 	case a.Kind == "ask_spend_capped":
 		fmt.Fprintf(&b, "🔴 <b>Techo diario del modelo alcanzado · %s</b>\n", app)
 		fmt.Fprintf(&b, "Hoy se gastaron <b>US$ %s</b> (techo US$ %s, %s llamadas). Las preguntas que necesitan el modelo quedan apagadas hasta mañana; el parser, la caché de planes y los comandos fijos siguen respondiendo.\n", f("usd"), f("cap"), f("model_calls"))
-		b.WriteString("<b>Qué hacer:</b> si es uso legítimo, subí <code>APPXIMO_ASK_DAILY_USD</code> y reiniciá; si no, revisá quién tiene el token (/admin/ask lista el día por inquilino).\n")
+		b.WriteString("<b>Qué hacer:</b> si es uso legítimo, sube <code>APPXIMO_ASK_DAILY_USD</code> y reinicia; si no, revisa quién tiene el token (/admin/ask lista el día por inquilino).\n")
 		panelPath = "/admin/ask"
 	case a.Kind == "ask_user_capped":
 		fmt.Fprintf(&b, "🟡 <b>AVISO · Un usuario agotó su cupo del modelo · %s</b>\n", app)
 		fmt.Fprintf(&b, "El usuario <code>%s</code> llegó a su techo diario de preguntas al modelo (US$ %s de %s, %s llamadas). Solo ese usuario queda en parser/caché/comandos fijos hasta mañana; los demás siguen.\n", f("user"), f("usd"), f("cap"), f("model_calls"))
-		b.WriteString("<b>Qué hacer:</b> nada si es uso normal. Si es una persona sola preguntando mucho, subí <code>APPXIMO_ASK_DAILY_USD_PER_USER</code>; /admin/ask?tenant=… muestra sus frases.\n")
+		b.WriteString("<b>Qué hacer:</b> nada si es uso normal. Si es una persona sola preguntando mucho, sube <code>APPXIMO_ASK_DAILY_USD_PER_USER</code>; /admin/ask?tenant=… muestra sus frases.\n")
 		panelPath = "/admin/ask"
 	case a.Kind == "workflow_overdue":
 		fmt.Fprintf(&b, "🟡 <b>AVISO · Workflow vencido · %s</b>\n", app)
@@ -189,12 +189,12 @@ func telegramText(a Alert, appName, panelURL string) string {
 	case a.Kind == KindSLO || a.BurnRate > 0:
 		fmt.Fprintf(&b, "%s <b>%s · La app está sufriendo · %s</b>\n", levelEmoji(a.Level), levelWordES(a.Level), app)
 		fmt.Fprintf(&b, "Errores o lentitud por encima de lo prometido: quemando el presupuesto a %.1f× (p95 %.0f ms).\n", a.BurnRate, a.P95ms)
-		b.WriteString("<b>Qué hacer:</b> panel → Observabilidad dice si es la base, el disco o un error nuevo; si acabás de desplegar, revertí.\n")
+		b.WriteString("<b>Qué hacer:</b> panel → Observabilidad dice si es la base, el disco o un error nuevo; si acabas de desplegar, revierte.\n")
 	default:
 		// A kind this renderer doesn't know yet: still lead in Spanish.
 		fmt.Fprintf(&b, "%s <b>%s · %s</b>\n", levelEmoji(a.Level), levelWordES(a.Level), app)
 		fmt.Fprintf(&b, "Detalle técnico: %s\n", esc(a.Message))
-		b.WriteString("<b>Qué hacer:</b> mirá el journal del server y el panel /admin.\n")
+		b.WriteString("<b>Qué hacer:</b> mira el journal del server y el panel /admin.\n")
 	}
 
 	if a.TenantID != "" && !strings.EqualFold(a.TenantID, appName) {
