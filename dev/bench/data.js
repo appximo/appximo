@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790366191911,
+  "lastUpdate": 1790376939828,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -7992,6 +7992,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36755070 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "fc105eb39628ea913e2bc12026d8307f84929b1e",
+          "message": "fix(ask): a name that is in no table never kills the write — «anota hablar con Norberto el día de mañana área personal» creates the task (AGENDA-ASISTENTE-S1 addendum 5c)\n\nThe owner dictated it and got «No encuentro «Norberto» como área o persona»:\non a resource with TWO nameable relations (areas, personas) a name inside\nthe TITLE was a hard reference, so a task about a person he had never loaded\nwas impossible to dictate, and «el día de» stayed inside the title («hablar\nel día de»).\n\nA name inside the title is the owner's own text: «con Nombre» there is now a\nSOFT reference that REMEMBERS the words it took (Ref.Words, in memory only).\nA known person still becomes the link with the title unchanged («almuerzo» +\nMarta); an unknown one puts «con Norberto» back into the title and the row is\nwritten. A name said as its own datum segment («crear tarea: revisar, con\nMarta») stays HARD — there it is a declared link and an unknown name deserves\nthe answer, not a title. «El día de mañana» / «el día de ayer» joined the day\nphrases on both doors (the read period and the write token).\n\nBank unchanged: parser-settled 130/130. Full lane green; gate 200 cases, 198\nsame, 2 diff (the random pending_id + expires_in, and the row order over\nrandom ids — both documented in the corpus).\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-25T22:54:15Z",
+          "tree_id": "6d7d79a35742823198419917320f1aed8109b082",
+          "url": "https://github.com/appximo/appximo/commit/fc105eb39628ea913e2bc12026d8307f84929b1e"
+        },
+        "date": 1790376938102,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6455,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "375294 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6455,
+            "unit": "ns/op",
+            "extra": "375294 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "375294 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "375294 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 69.8,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36733964 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 69.8,
+            "unit": "ns/op",
+            "extra": "36733964 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36733964 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36733964 times\n4 procs"
           }
         ]
       }
