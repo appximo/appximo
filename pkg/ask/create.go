@@ -465,6 +465,100 @@ func fieldByWord(v *Vocabulary, res *Resource, word string) *Field {
 	return nil
 }
 
+// fieldByWords matches a field said by its OWN name words, one or more
+// tokens («tiempo real» → tiempo_real_min, «área» → area_id): the longest run
+// wins, and a field whose name ends in a unit segment may be said without it
+// because the unit rides the value («tiempo real 30 minutos»). Returns the
+// field and how many tokens it took.
+func fieldByWords(v *Vocabulary, res *Resource, toks []token, i int) (*Field, int) {
+	for n := 4; n >= 1; n-- {
+		if i+n > len(toks) {
+			continue
+		}
+		var parts []string
+		for k := i; k < i+n; k++ {
+			if toks[k].used {
+				parts = nil
+				break
+			}
+			parts = append(parts, toks[k].norm)
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		run := strings.Join(parts, " ")
+		if n == 1 {
+			if f := fieldByWord(v, res, run); f != nil {
+				return f, 1
+			}
+			continue
+		}
+		for _, f := range res.Fields {
+			if f.Auto {
+				continue
+			}
+			base := strings.ReplaceAll(normalize(f.Name), "_", " ")
+			forms := []string{base, singularES(base), strings.TrimSuffix(base, " id")}
+			if k := strings.LastIndex(base, " "); k > 0 {
+				forms = append(forms, base[:k]) // «tiempo real min» said as «tiempo real»
+			}
+			for _, form := range forms {
+				if form != "" && (run == form || run == form+"s") {
+					return f, n
+				}
+			}
+		}
+	}
+	return nil, 0
+}
+
+// durationFields are the numeric fields a bare «30 minutos» could mean —
+// several means the owner must say which one.
+func durationFields(res *Resource) []*Field {
+	var nums []*Field
+	for _, f := range res.Fields {
+		if f.IsNumeric() && !f.Auto && !f.Money {
+			nums = append(nums, f)
+		}
+	}
+	if len(nums) == 1 {
+		return nums
+	}
+	var hits []*Field
+	for _, f := range nums {
+		n := normalize(f.Name)
+		if strings.Contains(n, "min") || strings.Contains(n, "dur") || strings.Contains(n, "estim") {
+			hits = append(hits, f)
+		}
+	}
+	return hits
+}
+
+// numericRun reads «30 minutos» / «media hora» / «2 horas» for a numeric
+// field, in the unit the field's own name says (a name with «hora» takes
+// hours, anything else minutes). ok=false when the run is not a duration.
+func numericRun(f *Field, joined string) (float64, bool) {
+	m := unitRe.FindStringSubmatch(joined)
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		n = spanishSmall[m[1]]
+	}
+	minutes := n
+	if strings.HasPrefix(m[2], "h") {
+		minutes = n * 60
+		if m[1] == "media" {
+			minutes = 30
+		}
+	}
+	if strings.Contains(normalize(f.Name), "hora") && !strings.HasPrefix(m[2], "h") {
+		return float64(minutes) / 60, true
+	}
+	return float64(minutes), true
+}
+
 var unitRe = regexp.MustCompile(`^(\d+|media|una|un|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|quince|veinte|treinta|cuarenta|cincuenta|sesenta|noventa)\s+(minutos?|min|horas?|h)$`)
 
 var spanishSmall = map[string]int{"media": 0, "una": 1, "un": 1, "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5, "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10, "quince": 15, "veinte": 20, "treinta": 30, "cuarenta": 40, "cincuenta": 50, "sesenta": 60, "noventa": 90}

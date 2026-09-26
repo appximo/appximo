@@ -417,6 +417,15 @@ func answerQuestion(ctx context.Context, d Deps, question string, cancelled bool
 		return r
 	case "unclear":
 		base.Kind = "unclear"
+		// a CHOICE the owner must make, not a failure to understand: two
+		// fields of the resource could be the duration said («30 minutos»)
+		if msg, ok := cutPrefix(p.Reason, "field_choice: "); ok {
+			base.Headline = "¿Cuál?"
+			base.Text = "🤔 " + esc(msg)
+			base.Speech = Speech(msg)
+			base.Detail = ""
+			return base
+		}
 		base.Headline = "No entendí"
 		base.Detail = strings.TrimSpace(base.Detail + " | unclear: " + p.Reason + " | " + tr.FailReason)
 		base.Text = "🤔 <b>No entendí</b> la pregunta" + reasonHint(p.Reason) + ". " + askable(d.Vocab)
@@ -543,6 +552,14 @@ func askable(v *Vocabulary) string {
 		names = append(names[:12], "…")
 	}
 	return "Puedo contar, listar o sumar sobre: " + strings.Join(names, ", ") + "."
+}
+
+// cutPrefix is strings.CutPrefix, kept local for the one caller.
+func cutPrefix(s, prefix string) (string, bool) {
+	if strings.HasPrefix(s, prefix) {
+		return s[len(prefix):], true
+	}
+	return s, false
 }
 
 func reasonHint(r string) string {

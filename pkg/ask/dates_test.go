@@ -402,3 +402,63 @@ func TestClose_ATaskInTheOwnersWords(t *testing.T) {
 		t.Fatalf("the row did not close: %v", rows[0])
 	}
 }
+
+// Closing a task an app requires DATA for (2026-09-26): the owner's agenda
+// has a before_update hook that refuses «hecha» without the minutes it took,
+// and the sentence had no way to carry them — every extra word landed in the
+// row's NAME, so the row was not even found. A state-change sentence now
+// reads a field said by its OWN name words plus its value, and a bare
+// duration that several numeric fields could mean is asked back instead of
+// guessed. The spoken reply carries no digit and no arrow.
+func TestClose_WithTheDataTheAppRequires(t *testing.T) {
+	v := miguelVocab()
+	for q, want := range map[string]float64{
+		"cierra la tarea arreglar el techo, tiempo real 30 minutos":           30,
+		"cierra arreglar el techo tiempo real 30 minutos":                     30,
+		"ya hice arreglar el techo, tiempo real media hora":                   30,
+		"terminé de arreglar el techo, tiempo real una hora":                  60,
+		"marca como hecha la tarea arreglar el techo con tiempo real 2 horas": 120,
+		"pon en curso la tarea arreglar el techo, tiempo real 15 minutos":     15,
+	} {
+		pr := Parse(q, v)
+		if !pr.Sure || pr.Plan.Kind != "update" || toFloat(pr.Plan.Data["tiempo_real_min"]) != want {
+			t.Errorf("%q: %+v (%s)", q, pr.Plan.Data, pr.Reason)
+			continue
+		}
+		if len(pr.Plan.Where) != 1 || pr.Plan.Where[0].Match != "arreglar techo" {
+			t.Errorf("%q: the row is %+v", q, pr.Plan.Where)
+		}
+	}
+	// the estimate by its own words, and an area — the same reader
+	if pr := Parse("cierra la tarea arreglar el techo, duración estimada 45 minutos", v); !pr.Sure || toFloat(pr.Plan.Data["duracion_estimada_min"]) != 45 {
+		t.Errorf("estimate: %+v (%s)", pr.Plan.Data, pr.Reason)
+	}
+	if pr := Parse("cierra la tarea arreglar el techo, área casa", v); !pr.Sure || pr.Plan.Data["area_id"] == nil {
+		t.Errorf("area: %+v (%s)", pr.Plan.Data, pr.Reason)
+	}
+	// a bare duration with TWO numeric fields it could mean: asked, not guessed
+	pr := Parse("cierra la tarea arreglar el techo, 30 minutos", v)
+	if !pr.Sure || pr.Plan.Kind != "unclear" || !strings.Contains(pr.Plan.Reason, "field_choice: ") ||
+		!strings.Contains(pr.Plan.Reason, "tiempo real 30 minutos") || !strings.Contains(pr.Plan.Reason, "duracion estimada 30 minutos") {
+		t.Fatalf("ambiguous duration: %+v (%s)", pr.Plan, pr.Reason)
+	}
+	e := miguelFixtures()
+	d, _ := miguelDeps(e)
+	r := Answer(context.Background(), d, "cierra la tarea arreglar el techo, 30 minutos")
+	if r.Kind != "unclear" || r.CostUSD != 0 || strings.Contains(r.Text, "No entendí") || !strings.Contains(r.Text, "tiempo real 30 minutos") {
+		t.Fatalf("choice reply: %s\n%s", r.Kind, r.Text)
+	}
+	r = Answer(context.Background(), d, "cierra la tarea arreglar el techo, tiempo real media hora")
+	if r.Kind != "confirm" || !strings.Contains(r.Speech, "Tiempo real: treinta minutos") {
+		t.Fatalf("confirm: %s | %s", r.Kind, r.Speech)
+	}
+	w := Answer(context.Background(), d, "sí")
+	if w.Kind != "written" || toFloat(e.rows["tareas"][0]["tiempo_real_min"]) != 30 || e.rows["tareas"][0]["estado"] != "hecha" {
+		t.Fatalf("write: %s %v", w.Kind, e.rows["tareas"][0])
+	}
+	for _, s := range []string{w.Speech, r.Speech} {
+		if strings.ContainsAny(s, "0123456789→·•<>") {
+			t.Errorf("a digit or a symbol in speech: %q", s)
+		}
+	}
+}

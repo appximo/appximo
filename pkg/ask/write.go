@@ -1034,7 +1034,7 @@ func spokenConfirmation(d Deps, pend *Pending) string {
 			continue
 		}
 		val := spokenValue(f, v, pend.Labels[f.Name], loc, d.Now)
-		fw := fieldWords(f)
+		fw, val := spokenUnit(f, fieldWords(f), val)
 		if from, ok := pend.Labels["__from_"+f.Name]; ok && pend.Kind == "update" {
 			sp = append(sp, sentence(fw+": de "+spokenWord(from)+" a "+spokenWord(val)))
 			continue
@@ -1045,6 +1045,48 @@ func spokenConfirmation(d Deps, pend *Pending) string {
 		sp = append(sp, "¿Igual lo agendo?")
 	} else {
 		sp = append(sp, "¿Confirmas?")
+	}
+	return SpokenNumbers(strings.Join(sp, " "))
+}
+
+// spokenUnit moves a unit that lives in the FIELD's name onto the value, the
+// way a person says it: a field «tiempo_real_min» is «tiempo real» and its
+// value «treinta minutos» (2026-09-26). Only for a numeric field, and only
+// for the unit words a schema writes in a name.
+func spokenUnit(f *Field, words, val string) (string, string) {
+	if !f.IsNumeric() {
+		return words, val
+	}
+	for suffix, unit := range map[string]string{" min": "minutos", " mins": "minutos", " minutos": "minutos", " horas": "horas", " hrs": "horas", " dias": "días", " días": "días"} {
+		if strings.HasSuffix(words, suffix) {
+			return strings.TrimSuffix(words, suffix), val + " " + unit
+		}
+	}
+	return words, val
+}
+
+// spokenWritten says the DONE write for a voice — «Listo: tarea buscar
+// frutas. Estado: de pendiente a hecha. Tiempo real: treinta minutos.» The
+// screen text carries arrows and digits; a voice never does (2026-09-26).
+func spokenWritten(d Deps, pend *Pending, label string) string {
+	res := d.Vocab.Resource(pend.Resource)
+	loc := d.Now.Location()
+	said := strings.NewReplacer(" (", ", ", "(", "", ")", "").Replace(label)
+	if pend.Kind == "create" {
+		return SpokenNumbers(sentence("Listo: creé " + singularWord(pend.Resource) + ", " + said))
+	}
+	sp := []string{sentence("Listo: cambié " + singularWord(pend.Resource) + ", " + said)}
+	for _, f := range confirmationOrder(res) {
+		v, ok := pend.Data[f.Name]
+		if !ok {
+			continue
+		}
+		fw, val := spokenUnit(f, fieldWords(f), spokenValue(f, v, pend.Labels[f.Name], loc, d.Now))
+		if from, ok := pend.Labels["__from_"+f.Name]; ok {
+			sp = append(sp, sentence(fw+": de "+spokenWord(from)+" a "+spokenWord(val)))
+			continue
+		}
+		sp = append(sp, sentence(fw+": "+spokenWord(val)))
 	}
 	return SpokenNumbers(strings.Join(sp, " "))
 }
@@ -1576,7 +1618,7 @@ func executePending(ctx context.Context, d Deps, pend *Pending) Result {
 		}
 		text = fmt.Sprintf("✅ Listo: %s <b>%s</b>: %s.", esc(singular(pend.Resource)), esc(label), strings.Join(changes, ", "))
 	}
-	return Result{Kind: "written", Headline: "Listo", Text: text, Speech: Speech(text), Plan: &pend.Plan,
+	return Result{Kind: "written", Headline: "Listo", Text: text, Speech: spokenWritten(d, pend, label), Plan: &pend.Plan,
 		Written: []Written{{Kind: pend.Kind, Resource: pend.Resource, ID: id}}}
 }
 

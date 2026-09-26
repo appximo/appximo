@@ -1548,12 +1548,12 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 	}
 	// the name after a preposition (or after the relation's target the
 	// sentence named)
-	match := ""
+	match, matchPos := "", -1
 	var nameF Filter
 	if labelPos >= 0 {
 		parts := nameRun(toks, labelPos, transitionLinkers)
 		if len(parts) > 0 {
-			match = strings.Join(parts, " ")
+			match, matchPos = strings.Join(parts, " "), labelPos
 			nameF = Filter{Field: labelField, Op: "eq", Match: match}
 		}
 	}
@@ -1579,7 +1579,7 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 		if match != "" {
 			return ParseResult{Reason: "two names"}
 		}
-		match = strings.Join(parts, " ")
+		match, matchPos = strings.Join(parts, " "), start
 		f, reason := nameFilter(v, res, match)
 		if reason != "" {
 			return ParseResult{Reason: reason}
@@ -1593,24 +1593,38 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 			nameF = Filter{Field: field, Op: "eq", Match: code}
 		}
 	}
+	// DATA the sentence carries for the row («cierra la tarea buscar frutas,
+	// tiempo real 30 minutos»): the same reader the done path uses.
+	data := map[string]any{sf.Name: target}
+	if amb := rowData(v, res, toks, sf, data); amb != "" {
+		return ParseResult{Plan: Plan{Kind: "unclear", Reason: amb}, Sure: true}
+	}
+
 	// EVERY content word still unused belongs to the same row name — the
 	// rule «ya hice …» already used (2026-09-26): «marca como hecha la tarea
 	// arreglar el techo» lost «techo» to the article, and «cierra la tarea
 	// hablar con Norberto» lost «Norberto» to the preposition run, so the
 	// sentence was refused over a word that was part of the title.
 	var restParts []string
+	restPos := -1
 	for i := range toks {
 		if toks[i].used || stopwords[toks[i].norm] || transitionLinkers[toks[i].norm] {
 			continue
+		}
+		if restPos < 0 {
+			restPos = i
 		}
 		restParts = append(restParts, toks[i].raw)
 		toks[i].used = true
 	}
 	if len(restParts) > 0 {
 		rest := strings.Join(restParts, " ")
-		if match == "" {
+		switch {
+		case match == "":
 			match = rest
-		} else {
+		case matchPos >= 0 && restPos < matchPos:
+			match = rest + " " + match // the words came FIRST in the sentence
+		default:
 			match += " " + rest
 		}
 		f, reason := nameFilter(v, res, match)
@@ -1631,7 +1645,7 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 		}
 		return ParseResult{Reason: "unknown word: " + t.raw}
 	}
-	p := Plan{Kind: "update", Resource: res.Name, Where: where, Data: map[string]any{sf.Name: target}}
+	p := Plan{Kind: "update", Resource: res.Name, Where: where, Data: data}
 	if err := p.Validate(v); err != nil {
 		return ParseResult{Reason: "invalid: " + err.Error()}
 	}
@@ -1794,6 +1808,89 @@ var doneLeads = []string{"ya hice", "ya termine", "termine de", "ya termine de",
 // doneTrailers close it («… está lista», «… ya está», «… quedó hecha»).
 var doneTrailers = []string{"esta lista", "esta listo", "ya esta", "quedo lista", "quedo listo", "esta hecha", "esta hecho", "ya quedo", "esta terminada", "esta terminado"}
 
+// rowData reads the DATA a state-change sentence carries for the row
+// («cierra la tarea buscar frutas, tiempo real 30 minutos», 2026-09-26): a
+// field said by its OWN name words plus its value. An app may REQUIRE it to
+// close — the owner's agenda has a hook that refuses «hecha» without the
+// minutes — and before this those words landed in the row's NAME, so the row
+// was never found. Consumed tokens are marked used. A non-empty return is the
+// reply for a bare duration that several numeric fields could mean.
+func rowData(v *Vocabulary, res *Resource, toks []token, sf *Field, data map[string]any) string {
+	for i := 0; i < len(toks); i++ {
+		if toks[i].used {
+			continue
+		}
+		f, n := fieldByWords(v, res, toks, i)
+		if f == nil || f == sf || f.Auto {
+			continue
+		}
+		// the value: the words after the field, up to the next field word
+		end := i + n
+		for end < len(toks) && !toks[end].used {
+			if f2, _ := fieldByWords(v, res, toks, end); f2 != nil && f2 != f {
+				break
+			}
+			end++
+		}
+		if end == i+n {
+			continue
+		}
+		var valParts []string
+		for k := i + n; k < end; k++ {
+			valParts = append(valParts, toks[k].raw)
+		}
+		joined := strings.ToLower(strings.Join(valParts, " "))
+		set := false
+		if f.IsNumeric() {
+			if val, ok := numericRun(f, joined); ok {
+				data[f.Name], set = val, true
+			}
+		}
+		if !set {
+			seg := make([]ctok, 0, end-(i+n))
+			for k := i + n; k < end; k++ {
+				seg = append(seg, ctok{raw: toks[k].raw, norm: toks[k].norm})
+			}
+			var refs []Ref
+			probe := map[string]any{}
+			if setField(v, res, f, seg, probe, &refs) {
+				for k, val := range probe {
+					if _, taken := data[k]; !taken {
+						data[k] = val
+					}
+				}
+				set = true
+			}
+		}
+		if !set {
+			continue
+		}
+		for k := i; k < end; k++ {
+			toks[k].used = true
+		}
+		i = end - 1
+	}
+	// a bare duration («…, 30 minutos») with SEVERAL numeric fields it could
+	// mean is not guessed: the reply names the two ways to say it
+	if len(durationFields(res)) > 1 {
+		for i := 0; i+1 < len(toks); i++ {
+			if toks[i].used || toks[i+1].used {
+				continue
+			}
+			if !unitRe.MatchString(toks[i].norm + " " + toks[i+1].norm) {
+				continue
+			}
+			var forms []string
+			for _, f := range durationFields(res) {
+				words := strings.TrimSuffix(strings.ReplaceAll(f.Name, "_", " "), " min")
+				forms = append(forms, "«"+words+" "+toks[i].raw+" "+toks[i+1].raw+"»")
+			}
+			return "field_choice: No sé a cuál de los dos te refieres. Dime " + strings.Join(forms, " o ")
+		}
+	}
+	return ""
+}
+
 // parseDone settles «ya hice X» / «X está lista» as the transition of the
 // to-do row X to its finished state: the terminal state that is not a
 // cancellation (by the cancel/anular/rechazar stems — Spanish, not a
@@ -1864,6 +1961,12 @@ func parseDone(question string, v *Vocabulary) ParseResult {
 			toks[i].used = true
 		}
 	}
+	// the data the sentence carries («cierra la tarea X, tiempo real 30
+	// minutos»): read BEFORE the name, or those words would be part of it
+	data := map[string]any{sf.Name: target}
+	if amb := rowData(v, res, toks, sf, data); amb != "" {
+		return ParseResult{Plan: Plan{Kind: "unclear", Reason: amb}, Sure: true}
+	}
 	var parts []string
 	for _, t := range toks {
 		if t.used || stopwords[t.norm] || t.norm == "que" {
@@ -1879,7 +1982,7 @@ func parseDone(question string, v *Vocabulary) ParseResult {
 	if reason != "" {
 		return ParseResult{Reason: reason}
 	}
-	p := Plan{Kind: "update", Resource: res.Name, Where: []Filter{f}, Data: map[string]any{sf.Name: target}}
+	p := Plan{Kind: "update", Resource: res.Name, Where: []Filter{f}, Data: data}
 	if err := p.Validate(v); err != nil {
 		return ParseResult{Reason: "done invalid: " + err.Error()}
 	}

@@ -215,6 +215,28 @@ title. A state said without the resource word stays ambiguous on purpose
 («hecha» and «hecho» are two resources' states); the resource word settles it.
 Bank unchanged at 137/151, parser 131.
 
+#### 2h. A state change carries the data the app requires to accept it
+
+The owner's agenda declares a `before_update` hook that refuses «hecha»
+without `tiempo_real_min`, and there was NO way to say it: a state-change
+sentence read only the verb, the state and the row, so «cierra la tarea
+buscar frutas, 30 minutos» put «30 minutos» in the row's NAME and the row was
+not even found; the owner's follow-up «30 minutos» reached the model, which
+was out of credit. Now both state-change paths (`parseDone`, `parseTransition`)
+read the row's DATA through one shared reader (`rowData`): a field said by its
+OWN name words plus its value, with a multi-token field name matched by
+`fieldByWords` — a name whose last segment is a unit may be said without it
+because the unit rides the value («tiempo real 30 minutos» → `tiempo_real_min`
+30; «tiempo real media hora» → 30; «2 horas» → 120). A BARE duration that
+several numeric fields could mean is never guessed: the reply names the two
+ways to say it (`field_choice:`, rendered as a choice and not as «no
+entendí»). The value reader is the create path's own (`setField`), so «área
+casa» works in a close too. Prosody followed: a field whose name ends in a
+unit segment is spoken without it and the value carries the unit («Tiempo
+real: treinta minutos»), and the DONE reply is now composed for the ear
+(`spokenWritten`) instead of reading the screen text, which carried «→» and
+digits. Bank unchanged at 137/151, parser 131.
+
 ### 3. A correction on a pending write re-issues the confirmation; it never executes it
 
 «no, mejor el viernes», «mejor a las 5», «sí pero urgente», «que sea con
