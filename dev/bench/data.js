@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790446761644,
+  "lastUpdate": 1790458182353,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -8496,6 +8496,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "47657529 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "9c5fdee0ce1108776f1cd65396208cfe77f764bb",
+          "message": "fix(engine,deploy,ask): a boot schema the engine cannot replace is named with the one command that fixes it, and a refusal says what it was doing in Spanish\n\nA real box (2026-09-26): Studio's deploy path — POST /admin/engine/schema,\nwhich persists the boot schema and re-execs — answered a raw 500 «rename\n/etc/agenda/schema.json.tmp-…: operation not permitted» and left a\nself-restart marker behind. Cause: install.sh gives /etc/<app> the sticky bit\n(so the service can never unlink root's env file), and the schema had been\ncopied in AS ROOT by an older deploy, so the service user could no longer\nrename over it. Every app installed that way silently loses the one-click\ndeploy.\n\n- persistBootSchemaFile now checks it can replace the file BEFORE writing the\n  backup or the marker, and both the preflight and a late failure name the\n  file, the user the engine runs as and the exact fix (`chown <user> <path>`).\n  A persist that did not happen no longer leaves a marker gating a rollback.\n- scripts/deploy-app.sh repairs the ownership on every deploy, idempotently.\n- The voice channel's refusal read «No pude update tarea: …» — the engine's\n  own verb, in English, inside the owner's sentence (seen on his phone). It\n  now says «No pude cambiar la tarea: …» (crear / cambiar / borrar, with the\n  definite article).\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-26T21:28:22Z",
+          "tree_id": "9445ec05728d03dff236201f7271a3e03fa61a12",
+          "url": "https://github.com/appximo/appximo/commit/9c5fdee0ce1108776f1cd65396208cfe77f764bb"
+        },
+        "date": 1790458180852,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6249,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "378468 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6249,
+            "unit": "ns/op",
+            "extra": "378468 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "378468 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "378468 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 71.46,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36625330 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 71.46,
+            "unit": "ns/op",
+            "extra": "36625330 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36625330 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36625330 times\n4 procs"
           }
         ]
       }
