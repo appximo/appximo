@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790387619547,
+  "lastUpdate": 1790445622508,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -8280,6 +8280,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "35519529 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "7da588c0f1b6a293bf660898bdef361320bdb700",
+          "message": "feat(ask): a state change carries the data the app requires to accept it — «cierra la tarea buscar frutas, tiempo real 30 minutos» (AGENDA-ASISTENTE-S1 addendum 5f)\n\nThe owner's agenda declares a before_update hook that refuses «hecha» without\n`tiempo_real_min`, and there was no way to say it: a state-change sentence read\nonly the verb, the state and the row, so «cierra la tarea buscar frutas, 30\nminutos» put «30 minutos» in the row's NAME and the row was not even found —\nand his follow-up «30 minutos» reached the model, which is out of credit.\n\nBoth state-change paths (parseDone, parseTransition) now read the row's DATA\nthrough one shared reader (rowData): a field said by its OWN name words plus\nits value, with a multi-token field name matched by fieldByWords — a name whose\nlast segment is a unit may be said without it because the unit rides the value\n(«tiempo real 30 minutos» → tiempo_real_min 30, «tiempo real media hora» → 30,\n«con tiempo real 2 horas» → 120). The value reader is the create path's own\n(setField), so «área casa» works in a close too. A BARE duration that several\nnumeric fields could mean is never guessed: the reply names the two ways to say\nit, rendered as a choice instead of «no entendí».\n\nProsody followed: a field whose name ends in a unit segment is spoken without\nit and the value carries the unit («Tiempo real: treinta minutos»), and the\nDONE reply is composed for the ear (spokenWritten) instead of reading the\nscreen text, which carried «→» and digits. The row name now keeps the order\nthe sentence said it in.\n\nBank: 137/151 hits, parser-settled 131, unchanged. Full lane green; lint clean;\ngate 200 cases, 198 same, 2 diff (the random pending_id + expires_in and the\nrow order over random ids).\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-26T17:59:09Z",
+          "tree_id": "3b0c2cf2e535d0cf1ffbeb6d7d22e10105024de6",
+          "url": "https://github.com/appximo/appximo/commit/7da588c0f1b6a293bf660898bdef361320bdb700"
+        },
+        "date": 1790445621131,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 4966,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "470390 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 4966,
+            "unit": "ns/op",
+            "extra": "470390 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "470390 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "470390 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 49.48,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "47965886 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 49.48,
+            "unit": "ns/op",
+            "extra": "47965886 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "47965886 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "47965886 times\n4 procs"
           }
         ]
       }
