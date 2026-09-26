@@ -381,6 +381,12 @@ func parseInner(question string, v *Vocabulary) ParseResult {
 				if pr := parseSchedule(question, v); pr.Sure {
 					return pr
 				}
+				// The fourth (2026-09-26): a CHANGE of an existing row's
+				// ordinary fields — «cambia la tarea X para el viernes»,
+				// «ponle urgente a la tarea X».
+				if pr := parseUpdate(question, v); pr.Sure {
+					return pr
+				}
 				// The third (AGENDA-ASISTENTE-S1): the FIXED FORM and its
 				// tolerant cousins — «crear tarea: X, área Y, urgente»,
 				// «anotá que …», «anotá pagar la luz mañana».
@@ -397,6 +403,12 @@ func parseInner(question string, v *Vocabulary) ParseResult {
 	// lavar el carro», «Tarea organizar suscripciones») is the fixed form
 	// without its verb (AGENDA-ASISTENTE-S1).
 	if v != nil && v.Writable() {
+		// «la tarea X es urgente», «la cita del dentista queda el viernes»:
+		// a change said without a verb of command — before the create, which
+		// used to turn it into a NEW row with a nonsense title («hablar es»).
+		if pr := parseUpdate(question, v); pr.Sure {
+			return pr
+		}
 		if pr := parseCreate(question, v); pr.Sure {
 			return pr
 		}
@@ -1848,6 +1860,35 @@ var tookWords = set("tomo", "tardo", "duro", "demoro", "llevo", "gaste", "en")
 // was never found. Consumed tokens are marked used. A non-empty return is the
 // reply for a bare duration that several numeric fields could mean.
 func rowData(v *Vocabulary, res *Resource, toks []token, sf *Field, data map[string]any) string {
+	// a BOOL said by its own name is its own value («urgente» → true, «sin
+	// urgente» / «ya no urgente» → false) — the create path's rule, which a
+	// change sentence needs too («ponle urgente a la tarea X»)
+	for i := range toks {
+		if toks[i].used {
+			continue
+		}
+		for _, f := range res.Fields {
+			if f.Type != "bool" || f.Auto || f == sf || !boolNamed(f, toks[i].norm) {
+				continue
+			}
+			val := true
+			for k := i - 1; k >= 0 && k >= i-3; k-- {
+				n := toks[k].norm
+				if n == "no" || n == "sin" {
+					val, toks[k].used = false, true
+					break
+				}
+				if !copulaWords[n] && !stopwords[n] && n != "ya" {
+					break
+				}
+			}
+			if _, taken := data[f.Name]; !taken {
+				data[f.Name] = val
+				toks[i].used = true
+			}
+			break
+		}
+	}
 	for i := 0; i < len(toks); i++ {
 		if toks[i].used {
 			continue
@@ -1948,6 +1989,217 @@ func rowData(v *Vocabulary, res *Resource, toks []token, sf *Field, data map[str
 		}
 	}
 	return ""
+}
+
+// changeVerbs open a CHANGE of an existing row («cambia la tarea X para el
+// viernes», «ponle urgente a la tarea X»). Many are transition verbs too —
+// parseTransition runs first and only claims the sentence when a STATE was
+// said, so what is left here is a change of ordinary fields.
+var changeVerbs = set("cambia", "cambiá", "cambiar", "cambiale", "cámbiale", "cambiala", "cambialo", "cambiame",
+	"actualiza", "actualizá", "actualizar", "modifica", "modificá", "modificar", "edita", "editá", "editar",
+	"pon", "poné", "ponle", "pónle", "ponela", "ponelo", "ponla", "ponlo", "ponme",
+	"pasa", "pasá", "pasala", "pasalo", "pásala", "pásalo", "mueve", "mové", "mover", "muevela", "muévela", "muevelo", "muévelo")
+
+// copulaWords say the same thing without a verb of command: «la tarea X es
+// urgente», «la cita del dentista queda el viernes».
+// NOT «esta»: normalization drops the accent, so «está» and the demonstrative
+// «esta» («esta semana») are the same token, and a period phrase would open a
+// change (the phrase bank caught «tareas urgentes de esta semana» turning into
+// an update).
+var copulaWords = set("es", "queda", "quedo", "quedó", "sera", "será")
+
+// questionWords never open a change: a question is a question («cuál es la
+// tarea urgente de Fabián» must never become an update).
+var questionWords = set("que", "qué", "cual", "cuales", "cuanto", "cuanta", "cuantos", "cuantas", "como", "donde", "quien", "quienes", "cuando", "cuándo", "por que", "porque")
+
+// removeVerbs take a flag OFF by naming it («quítale lo urgente a la tarea
+// X»): the verb is the negation, so the bool it names is false.
+var removeVerbs = set("quita", "quitá", "quitale", "quítale", "quitar", "quitarle", "quitame", "saca", "sacá", "sacale", "sácale", "sacar", "borrale", "bórrale")
+
+// subjectResource picks the resource a change sentence is ABOUT and marks its
+// word used. When two are named and one of them is a FIELD word of the other
+// («cambia la tarea X, área casa»), the field word is the field — the rule the
+// obligation path already uses.
+func subjectResource(toks []token, v *Vocabulary) (*Resource, string) {
+	type hit struct {
+		res *Resource
+		at  int
+	}
+	var hits []hit
+	for i := range toks {
+		if toks[i].used {
+			continue
+		}
+		for _, name := range v.ResourceNames() {
+			r := v.Resource(name)
+			if r != nil && v.namesResource(toks[i].norm, r) {
+				hits = append(hits, hit{r, i})
+				break
+			}
+		}
+	}
+	var distinct []hit
+	for _, h := range hits {
+		dup := false
+		for _, d := range distinct {
+			if d.res == h.res {
+				dup = true
+			}
+		}
+		if !dup {
+			distinct = append(distinct, h)
+		}
+	}
+	switch len(distinct) {
+	case 0:
+		return nil, "update: no resource named"
+	case 1:
+		toks[distinct[0].at].used = true
+		return distinct[0].res, ""
+	case 2:
+		a, b := distinct[0], distinct[1]
+		aIsFieldOfB := fieldByWord(v, b.res, toks[a.at].norm) != nil
+		bIsFieldOfA := fieldByWord(v, a.res, toks[b.at].norm) != nil
+		switch {
+		case bIsFieldOfA && !aIsFieldOfB:
+			toks[a.at].used = true
+			return a.res, ""
+		case aIsFieldOfB && !bIsFieldOfA:
+			toks[b.at].used = true
+			return b.res, ""
+		}
+	}
+	return nil, "update: two resources named"
+}
+
+// parseUpdate settles a CHANGE of one row's ordinary fields: a change verb
+// (or a copula) + the row + the data, with no state value — that is
+// parseTransition's. The data is read by the SAME reader a state change uses
+// (rowData) plus the create path's day/clock rule, so «para el viernes»,
+// «área casa», «urgente», «persona Marta» and «tiempo real 30 minutos» all
+// work; the row is named by the words left, exactly like a transition; and
+// the write still waits for the owner's confirmation.
+func parseUpdate(question string, v *Vocabulary) ParseResult {
+	if v == nil || !v.Writable() {
+		return ParseResult{Reason: "update: read-only vocabulary"}
+	}
+	toks := tokenize(question)
+	if len(toks) == 0 {
+		return ParseResult{Reason: "update: empty"}
+	}
+	for i := range toks {
+		if questionWords[toks[i].norm] || isOpWord(toks[i].norm) {
+			return ParseResult{Reason: "update: a question word (" + toks[i].norm + ")"}
+		}
+	}
+	entry, removing, copula := -1, false, false
+	for i := range toks {
+		switch {
+		case changeVerbs[toks[i].norm] || removeVerbs[toks[i].norm]:
+			entry, removing = i, removeVerbs[toks[i].norm]
+		case copulaWords[toks[i].norm]:
+			entry, copula = i, true
+		default:
+			continue
+		}
+		break
+	}
+	if entry < 0 {
+		return ParseResult{Reason: "update: no change verb"}
+	}
+	res, reason := subjectResource(toks, v)
+	if reason != "" {
+		return ParseResult{Reason: reason}
+	}
+	if copula {
+		// «la tarea X es urgente» changes; «cuál es la tarea …» asks — the
+		// copula of a change comes AFTER the row it talks about
+		named := -1
+		for i := range toks {
+			if toks[i].used && v.namesResource(toks[i].norm, res) {
+				named = i
+				break
+			}
+		}
+		if named < 0 || entry < named {
+			return ParseResult{Reason: "update: the copula does not follow the row"}
+		}
+	}
+	labelField, labelPos := "", -1
+	if !res.CanUpdate {
+		return ParseResult{Reason: "role may not update " + res.Name}
+	}
+	sf := res.StateField()
+	if sf != nil {
+		// a state value said here is a transition, not a field change
+		for _, vf := range sf.valueForms() {
+			if strings.Contains(" "+joinedNorms(toks)+" ", " "+vf.form+" ") {
+				return ParseResult{Reason: "update: a state value (" + vf.form + ")"}
+			}
+		}
+	}
+	toks[entry].used = true
+	data := map[string]any{}
+	if amb := rowData(v, res, toks, sf, data); amb != "" {
+		return ParseResult{Plan: Plan{Kind: "unclear", Reason: amb}, Sure: true}
+	}
+	if removing {
+		// «quítale lo urgente»: the verb IS the negation
+		for k, val := range data {
+			if b, ok := val.(bool); ok && b {
+				data[k] = false
+			}
+		}
+	}
+	applyTime(toks, res, data)
+	if len(data) == 0 {
+		return ParseResult{Reason: "update: nothing to change"}
+	}
+	// the row: the name after the resource word, plus every content word left
+	match, matchPos := "", -1
+	if labelPos >= 0 {
+		if parts := nameRun(toks, labelPos, transitionLinkers); len(parts) > 0 {
+			match, matchPos = strings.Join(parts, " "), labelPos
+		}
+	}
+	var rest []string
+	restPos := -1
+	for i := range toks {
+		if toks[i].used || stopwords[toks[i].norm] || transitionLinkers[toks[i].norm] || copulaWords[toks[i].norm] {
+			continue
+		}
+		if restPos < 0 {
+			restPos = i
+		}
+		rest = append(rest, toks[i].raw)
+		toks[i].used = true
+	}
+	if len(rest) > 0 {
+		joined := strings.Join(rest, " ")
+		switch {
+		case match == "":
+			match = joined
+		case restPos < matchPos:
+			match = joined + " " + match
+		default:
+			match += " " + joined
+		}
+	}
+	if match == "" {
+		return ParseResult{Reason: "update: no row named"}
+	}
+	f, reason := nameFilter(v, res, match)
+	if reason != "" {
+		return ParseResult{Reason: reason}
+	}
+	if labelField != "" && labelPos >= 0 && matchPos == labelPos {
+		f.Field = labelField
+	}
+	p := Plan{Kind: "update", Resource: res.Name, Where: []Filter{f}, Data: data}
+	if err := p.Validate(v); err != nil {
+		return ParseResult{Reason: "update invalid: " + err.Error()}
+	}
+	return ParseResult{Plan: p, Sure: true}
 }
 
 // parseDone settles «ya hice X» / «X está lista» as the transition of the

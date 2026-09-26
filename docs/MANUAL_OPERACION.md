@@ -861,6 +861,22 @@ suelto: «crear tarea: revisar, con Marta» dicho como dato aparte sigue
 preguntando si Marta no existe — ahí el nombre es un enlace declarado, no
 texto.
 
+**Cambiar un dato de algo que ya existe (2026-09-26).** «Cambia la tarea
+hablar con Norberto para el viernes», «pasa la tarea X para mañana», «ponle
+urgente a la tarea X», «quítale lo urgente a la tarea X», «la tarea X es
+urgente», «cambia la tarea X, área casa», «cambia la tarea X, persona Marta»,
+«la cita del dentista queda el viernes a las 4». Un verbo de cambio (o el «es»
+después de nombrar la fila) + la fila + el dato; el estado NO se toca así (eso
+es cerrar, abajo). Todo con confirmación y gratis. Una pregunta nunca se
+convierte en cambio: «cuál es la tarea urgente de Fabián» sigue siendo una
+pregunta.
+
+**Si el nombre no calza, pregunta.** Si una palabra del nombre que dijiste no
+está en ninguna fila («comprar frutas» cuando la tuya es «buscar frutas»), el
+motor ya no elige la más parecida: responde «¿quisiste decir?» con las
+candidatas numeradas. Un nombre dicho de otra forma («Norverto», «Gomes»)
+sigue resolviéndose solo.
+
 **Cerrar una tarea (2026-09-26).** «Cierra la tarea hablar con Norberto»,
 «cierra hablar con Norberto», «completé hablar con Norberto», «ya finalicé
 hablar con Norberto», «ya hice hablar con Norberto», «terminé de hablar con

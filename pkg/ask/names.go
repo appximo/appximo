@@ -27,7 +27,14 @@ import (
 const (
 	strongMatch = 0.86 // ≥ → a candidate the engine will use (if alone)
 	weakMatch   = 0.72 // ≥ → worth a "¿quisiste decir…?"
-	maxOptions  = 5
+	// tokenPresent: below this, a word of the query is in NO word of the
+	// value. Measured on real rows: «frutas» against «cera»/«comprar»/
+	// «cosas» is 0.44–0.61 (absent), while a name said another way —
+	// «maicol»/«michael» 0.73, «gomes»/«gómez» 1.00, «rruiz»/«ruiz» 1.00 —
+	// stays above. Deliberately low: the bar only catches a word that is
+	// plainly not there.
+	tokenPresent = 0.70
+	maxOptions   = 5
 )
 
 // normalize lowercases, strips accents (keeps ñ as n — dictation writes both)
@@ -194,6 +201,33 @@ func similarity(query, value string) float64 {
 			sum += m
 		}
 		tok := sum / float64(len(qt))
+		// A word of the query that is in NO word of the value means the owner
+		// named something this row does not have: «comprar frutas» must not
+		// pick «comprar cera» just because both start with «comprar» (a real
+		// box, 2026-09-26 — the average of a hit and a miss was 0.91, over
+		// the bar). Such a candidate can still be OFFERED («¿quisiste
+		// decir?»), never chosen on its own.
+		missing := false
+		for _, q := range qt {
+			m := 0.0
+			for _, v := range vt {
+				if s := jaroWinkler(q, v); s > m {
+					m = s
+				}
+			}
+			if m < tokenPresent {
+				missing = true
+				break
+			}
+		}
+		if missing && len(qt) >= 2 {
+			if tok > strongMatch-0.01 {
+				tok = strongMatch - 0.01
+			}
+			if best > strongMatch-0.01 {
+				best = strongMatch - 0.01
+			}
+		}
 		// A one-token query matching one token of a multi-token value is a
 		// partial match: dampen slightly so a full-name query still wins.
 		if len(qt) < len(vt) {

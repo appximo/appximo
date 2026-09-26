@@ -500,3 +500,100 @@ func TestWriteFailure_SaysItInSpanish(t *testing.T) {
 		t.Fatalf("refusal: %s", r.Text)
 	}
 }
+
+// Changing a field of a row that exists (2026-09-26, «¿cómo le digo ahora
+// para que la actualice?»): a change verb (or a copula) + the row + the data,
+// with no state value — that is the transition's. Before this every one of
+// these fell to the model, and «la tarea X es urgente» was read as a NEW task
+// titled «hablar es».
+func TestUpdate_ChangingAFieldOfAnExistingRow(t *testing.T) {
+	v := miguelVocab()
+	cases := []struct {
+		q     string
+		res   string
+		field string
+		want  any
+		match string
+	}{
+		{"cambia la tarea arreglar el techo para el viernes", "tareas", "vence_en", "next_friday", "arreglar techo"},
+		{"pasa la tarea arreglar el techo para mañana", "tareas", "vence_en", "tomorrow", "arreglar techo"},
+		{"ponle urgente a la tarea arreglar el techo", "tareas", "urgente", true, "arreglar techo"},
+		{"quítale lo urgente a la tarea arreglar el techo", "tareas", "urgente", false, "arreglar techo"},
+		{"la tarea arreglar el techo ya no es urgente", "tareas", "urgente", false, "arreglar techo"},
+		{"la tarea arreglar el techo es urgente", "tareas", "urgente", true, "arreglar techo"},
+		{"actualiza la tarea arreglar el techo, tiempo real 30 minutos", "tareas", "tiempo_real_min", float64(30), "arreglar techo"},
+	}
+	for _, c := range cases {
+		pr := Parse(c.q, v)
+		if !pr.Sure || pr.Plan.Kind != "update" || pr.Plan.Resource != c.res {
+			t.Errorf("%q: sure=%v %s %s (%s)", c.q, pr.Sure, pr.Plan.Kind, pr.Plan.Resource, pr.Reason)
+			continue
+		}
+		if pr.Plan.Data[c.field] != c.want {
+			t.Errorf("%q: %s = %v, want %v", c.q, c.field, pr.Plan.Data[c.field], c.want)
+		}
+		if pr.Plan.Data["estado"] != nil {
+			t.Errorf("%q: a field change must not touch the state: %v", c.q, pr.Plan.Data)
+		}
+		if len(pr.Plan.Where) != 1 || pr.Plan.Where[0].Match != c.match {
+			t.Errorf("%q: the row is %+v", c.q, pr.Plan.Where)
+		}
+	}
+	// a field word that is ALSO a resource name («área casa») is the field
+	if pr := Parse("cambia la tarea arreglar el techo, área casa", v); !pr.Sure || pr.Plan.Kind != "update" || pr.Plan.Data["area_id"] == nil {
+		t.Errorf("area: %+v (%s)", pr.Plan, pr.Reason)
+	}
+	// a STATE said is still the transition's, and a create is still a create
+	if pr := Parse("cierra la tarea arreglar el techo", v); !pr.Sure || pr.Plan.Data["estado"] != "hecha" {
+		t.Errorf("close: %+v (%s)", pr.Plan.Data, pr.Reason)
+	}
+	for _, q := range []string{"tarea razón social mañana urgente", "anota comprar pan mañana", "crear tarea: revisar el contrato, urgente"} {
+		if pr := Parse(q, v); !pr.Sure || pr.Plan.Kind != "create" {
+			t.Errorf("%q stopped being a create: %s (%s)", q, pr.Plan.Kind, pr.Reason)
+		}
+	}
+	for _, q := range []string{"tareas urgentes", "tareas de hoy", "qué tengo mañana", "cuántas tareas hay por estado", "tareas de Fabián"} {
+		if pr := Parse(q, v); !pr.Sure || pr.Plan.IsWrite() {
+			t.Errorf("%q became a write: %+v (%s)", q, pr.Plan, pr.Reason)
+		}
+	}
+	// end to end: the confirmation, the write, and the row actually changed
+	e := miguelFixtures()
+	d, _ := miguelDeps(e)
+	r := Answer(context.Background(), d, "ponle urgente a la tarea hacer ajustes de reto")
+	if r.Kind != "confirm" || r.Source != "parser" || !strings.Contains(r.Text, "urgente") {
+		t.Fatalf("confirm: %s %s\n%s", r.Kind, r.Source, r.Text)
+	}
+	if w := Answer(context.Background(), d, "sí"); w.Kind != "written" {
+		t.Fatalf("write: %s %s", w.Kind, w.Text)
+	}
+	if e.rows["tareas"][1]["urgente"] != true || e.rows["tareas"][1]["estado"] != "pendiente" {
+		t.Fatalf("the row: %v", e.rows["tareas"][1])
+	}
+}
+
+// A word of the dictated name that is in NO word of the row is not a match
+// (2026-09-26): on the owner's box «comprar frutas» picked «comprar cera»
+// with 0.91 — the average of a hit and a miss — and the engine offered to
+// close the wrong task. Now it ASKS. A name said another way («Norverto»,
+// «Gomes», «Maicol») still resolves: the bar only catches a word that is
+// plainly absent.
+func TestMatch_AWordThatIsNotThereNeverPicksTheRow(t *testing.T) {
+	rows := []Candidate{{ID: "1", Label: "comprar cera"}, {ID: "2", Label: "comprar cosas de mercado"},
+		{ID: "3", Label: "buscar frutas para darle del cuerpo"}, {ID: "4", Label: "hablar con Norberto"}}
+	dec := Decide(Match("comprar frutas", rows, nil))
+	if dec.Kind != "maybe" || dec.Chosen != nil {
+		t.Fatalf("«comprar frutas» → %s %+v", dec.Kind, dec.Chosen)
+	}
+	for _, c := range []struct{ said, want string }{
+		{"buscar frutas", "buscar frutas para darle del cuerpo"},
+		{"comprar cosas", "comprar cosas de mercado"},
+		{"hablar con Norverto", "hablar con Norberto"},
+		{"comprar cera", "comprar cera"},
+	} {
+		dec := Decide(Match(c.said, rows, nil))
+		if dec.Kind != "one" || dec.Chosen.Label != c.want {
+			t.Errorf("%q → %s %v, want %q", c.said, dec.Kind, dec.Chosen, c.want)
+		}
+	}
+}

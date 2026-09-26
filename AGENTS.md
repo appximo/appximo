@@ -2285,7 +2285,14 @@ in the order said. **A state change carries DATA** (`rowData`, shared by both
 paths): a field said by its own name words plus its value, with a
 unit-suffixed name sayable without the unit («cierra la tarea X, tiempo real
 30 minutos» → `tiempo_real_min` 30 — what an app's `before_update` hook may
-REQUIRE to accept the new state); a duration said as what it TOOK («tomó 90 minutos», «duró
+REQUIRE to accept the new state); a CHANGE of ordinary fields is
+`parseUpdate` (a change verb / a remove verb / a copula AFTER the row, never a
+question word or an operation word; `subjectResource` reads a field word that
+is also a resource name — «área casa» — as the field): «cambia la tarea X para
+el viernes», «ponle urgente a la tarea X», «quítale lo urgente», «la tarea X
+es urgente». A dictated name whose WORD is in no word of the row never picks it
+(`tokenPresent`, measured): the engine asks instead of closing the wrong row.
+And a duration said as what it TOOK («tomó 90 minutos», «duró
 media hora», «en 20 minutos») goes to the numeric field whose name does NOT
 say «estim» when exactly one qualifies, and an otherwise bare duration that
 several fields could mean is asked back, never guessed; the value reader is the create path's own,
