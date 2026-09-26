@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790445669604,
+  "lastUpdate": 1790446761644,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -8424,6 +8424,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36681340 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "0e88c9e0d26c8c632f0090b6186751ab1f6570c4",
+          "message": "feat(ask): a duration said as what it TOOK is the real time, and two name runs around one preposition are one row name (AGENDA-ASISTENTE-S1 addendum 5f-bis)\n\nTwo gaps the owner's own phrasing and the phrase bank found on the previous\ncommit:\n\n«Marca como hecha la tarea hablar con Norberto con tiempo real 2 horas» was\nrefused as «two names»: the title's own preposition left «hablar» and\n«Norberto» on either side of a «con». Two runs separated by NOTHING BUT\nprepositions, neither of them a time word, are one row name in the order said;\ntwo names with anything else between them («de Fabián y de Marta», «de Fabián\npara mañana») stay a refusal, so a transition still never invents which row it\nmeans. The row data is also read BEFORE the name runs, or a field's own words\n(«con tiempo real 2 horas») are eaten by them.\n\n«Tomó 90 minutos» / «duró media hora» / «en 20 minutos» now land on the numeric\nfield that is NOT an estimate — the only signal is the schema's own word in the\nother field's name («estimada»), so an app with a single duration field is\nunaffected. The phrase bank had asked for exactly this (U01b) and had regressed\nto the choice question.\n\nBank: 137/151, parser 131. Full lane green; lint clean; gate 200 cases, 198\nsame, 2 diff (the random pending_id and the timing-flaky admission probe).\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-26T18:18:04Z",
+          "tree_id": "61b1f0a93b667c03fcbc15538e802f89f222d758",
+          "url": "https://github.com/appximo/appximo/commit/0e88c9e0d26c8c632f0090b6186751ab1f6570c4"
+        },
+        "date": 1790446760037,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 4814,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "481250 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 4814,
+            "unit": "ns/op",
+            "extra": "481250 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "481250 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "481250 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 51.31,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "47657529 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 51.31,
+            "unit": "ns/op",
+            "extra": "47657529 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "47657529 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "47657529 times\n4 procs"
           }
         ]
       }
