@@ -2274,8 +2274,13 @@ against every target (`Plan.Refs` / `Filter.Fields`, `resolve.go`; relations
 first, own title last; an exact whole token wins). VOZ-21: `resumen` /
 `estado` / `gasto` said to `/api/ask` are served in-process by the engine's
 own handlers (`codegen.inProcessCommand`). «Ya hice…» / «terminé de…» /
-«… está lista» = the finished transition; «pon en curso X» finds the
-resource by the state value. Period phrases match longest-first («de la
+«… está lista» / **«cierra X»** / «completé X» / «ya finalicé X» = the
+finished transition (`doneState`: the schema's single non-cancel terminal
+state) on the resource the sentence NAMES when it has a lifecycle («cierra el
+compromiso del dentista» → hecho), else the to-do; «pon en curso X» finds the
+resource by the state value, and in a transition EVERY leftover content word
+is folded into the row's name, so a title with articles or prepositions («la
+tarea arreglar el techo», «hablar con Norberto») is found instead of refused. Period phrases match longest-first («de la
 semana que viene» beats «de la semana»); «antes del viernes» is the deadline,
 not the title; an alias that names the resource («reunión», «cita») stays
 as the title's first word. PROSODY (`pkg/ask/prosody.go`): `speech` /
