@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790458596172,
+  "lastUpdate": 1790464956267,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -8640,6 +8640,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "31349984 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "9ed87db3bfeca29644baec60156593d244d77d40",
+          "message": "feat(ask): changing a field of an existing row by voice, and a name whose word is in no row never picks it (AGENDA-ASISTENTE-S1 addendum 5g)\n\n«¿Cómo le digo ahora para que la actualice?» — every natural way to change a\nfield of a row that exists fell to the model (out of credit), and «la tarea X\nes urgente» was read as a NEW task titled «hablar es».\n\nparseUpdate settles it: a change verb («cambia», «pasa», «actualiza», «ponle»),\na remove verb («quítale lo urgente» — the verb IS the negation) or a copula\nthat FOLLOWS the row («la tarea X es urgente»), plus the row and the data read\nby the same reader a state change uses (rowData) and the create path's\nday/clock rule. A state value said is still the transition's; a question word\nor an operation word refuses outright, so «cuál es la tarea urgente de Fabián»\nstays a question; and `subjectResource` reads a field word that is also a\nresource name («cambia la tarea X, área casa») as the field, the rule the\nobligation path already used. The copula set deliberately excludes «esta»:\nnormalization drops the accent, and the phrase bank caught «tareas urgentes de\nesta semana» turning into an update.\n\nThe live verification then showed the matcher offering to close the WRONG row:\n«comprar frutas» picked «comprar cera» with 0.91 — the average of a hit and a\nmiss. A query word that matches NO word of the row (below a measured 0.70 bar:\n«frutas»/«cera» is 0.61, while «maicol»/«michael» is 0.73 and «gomes»/«gómez»\n1.00) can now only be OFFERED, never chosen, so the engine asks «¿quisiste\ndecir?».\n\nBank: 137/151, parser 131, unchanged. Full lane green; lint clean; gate 200\ncases, 197 same, 3 diff (the random pending_id, the row order over random ids,\nthe timing-flaky admission probe).\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-26T23:21:17Z",
+          "tree_id": "efcd60eb2f6ffc43d97c82b19b4d6b7930217993",
+          "url": "https://github.com/appximo/appximo/commit/9ed87db3bfeca29644baec60156593d244d77d40"
+        },
+        "date": 1790464954602,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 5904,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "404133 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 5904,
+            "unit": "ns/op",
+            "extra": "404133 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "404133 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "404133 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 54.36,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "43189450 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 54.36,
+            "unit": "ns/op",
+            "extra": "43189450 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "43189450 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "43189450 times\n4 procs"
           }
         ]
       }
