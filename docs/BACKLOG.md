@@ -1872,6 +1872,32 @@ applies `lookBack`'s date rule with the pending's resource before storing the
 answered token. Origin: AGENDA-ASISTENTE-S1 addendum 5 (2026-09-25), A-86.
 Decides: agent.
 
+### VOZ-27 — The Telegram channel (digest + reminders) is ONE identity: with several users, everyone gets one person's
+
+The Telegram receiver and the scheduled digest act with a fixed identity
+(`APPXIMO_TELEGRAM_SUMMARY_TENANT/_ROLE/_USER_ID`). In a multi-user app each
+person has their own Siri token (measured: their own rows through /api/ask and
+/api/summary, 401 outside the scope), but the Telegram chat and the workflow
+reminders go out as that single identity. Every other door — REST lists and
+by-id reads, writes, aggregates, GraphQL, /api/ask, /api/summary — is already
+per-user (AGENDA-MULTIUSUARIO-S1 measured all of them with two real users).
+**Ready:** a chat→(user, role) map per tenant (a table, or a schema key) and a
+digest consumer that walks the subscribed users instead of one env identity;
+the per-row reminders already know the row's `dueno_id`. Origin:
+AGENDA-MULTIUSUARIO-S1 (2026-09-26). Decides: Miguel.
+
+### FILES-3 — The file store records no uploader, so files cannot be scoped per user
+
+`tenant_<id>.files` is id/sha256/size/content_type/original_name/created_at —
+no author column — and the virtual `files` resource accepts ACTIONS ONLY in
+RBAC (a row condition is rejected at load). In a multi-user app any role with
+`files: read` can download another user's file if it knows the id (a uuid, not
+enumerable, but a leak). **Ready:** an additive `uploaded_by` column written
+from the JWT subject on POST /api/files; a row condition on `files` limited to
+that column; enforced on GET/DELETE, the signed-URL mint and `Ctx.ServeFile`.
+What happens to pre-existing rows with no author is a decision to write down.
+Origin: AGENDA-MULTIUSUARIO-S1 (2026-09-26). Decides: agent.
+
 ### VOZ-18 — The estimate-vs-real mirror is per task; there is no weekly aggregate («esta semana subestimaste 60 %»)
 
 `espejo_estimacion` sends one message when a task with an estimate closes. A

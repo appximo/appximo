@@ -911,6 +911,53 @@ reuní con Camilo de cuatro a cinco». El texto de un registro queda tal como
 se dijo («se fue la luz», «me llamó el contador»), sin recortar el «se» o el
 «me» del principio.
 
+### 3i. Varias personas en la misma app (2026-09-26)
+
+La app ya separa por usuario: el rol `dueno` está atado a `dueno_id =
+$user_id`, así que **cada quien ve y cambia solo lo suyo**. Medido con dos
+usuarios reales sobre este mismo esquema y este mismo binario, puerta por
+puerta: listas (cada uno ve las suyas), leer/cambiar/borrar una fila ajena por
+su id (404, como si no existiera), crear una fila a nombre de otro (403
+«field "dueno_id" must match the authenticated principal»), agregados (cada
+uno cuenta lo suyo), GraphQL, `/api/summary` (el resumen de cada quien) y
+`/api/ask` («cuántas tareas hay» responde lo del que pregunta).
+
+**Dar de alta a alguien** (desde tu máquina o la caja, no hay registro
+público en esta app):
+
+```bash
+curl -s -X POST http://127.0.0.1:<puerto>/admin/tenants/agenda/users \
+  -H "X-Admin-Key: $ADMIN_KEY" -H 'Content-Type: application/json' \
+  -d '{"email":"persona@correo.com","password":"una-clave-larga","role":"dueno"}'
+```
+
+Esa persona entra a `https://agenda.<tu-dominio>/app` con ese correo y clave,
+y solo ve lo suyo. El panel es el mismo para todos; lo que cambia son las
+filas.
+
+**Su Siri**, un token propio de esa persona (largo y acotado a la voz):
+
+```bash
+appximo token --secret "$JWT_SECRET" --tenant agenda --role dueno \
+  --user-id <su-id-de-usuario> --ttl 365d --paths /api/ask,/api/summary \
+  --schema /etc/agenda/schema.json
+```
+
+Ese token responde en `/api/ask` y `/api/summary` y **401 en cualquier otra
+ruta**; lleva un id propio, así que se revoca solo ese (`APPXIMO_JWT_REVOKED`)
+sin tocar a los demás. El atajo de Siri es el mismo de §4.6e cambiando el
+token.
+
+**Lo que TODAVÍA es de una sola persona:** el canal de Telegram (el bot
+contesta a un chat y actúa con una identidad fija,
+`APPXIMO_TELEGRAM_SUMMARY_USER_ID`), así que el resumen de la mañana y los
+recordatorios de los workflows salen con esa identidad para todos. Con varias
+personas, cada una usa su Siri; el Telegram sigue siendo tuyo hasta que se
+construya el canal por usuario (VOZ-27 en el backlog). Y los archivos subidos
+no guardan quién los subió, así que un usuario con permiso de archivos podría
+leer el archivo de otro si conociera su id (FILES-3; tu agenda no usa
+archivos).
+
 ## 4. Qué hacer cuando pasa algo
 
 Recetas cortas, en el orden en que suele hacer falta. Todas empiezan igual: **mire antes de tocar** (30 segundos):
