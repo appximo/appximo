@@ -129,3 +129,35 @@ func TestLoadAndValidateSchema_ErrorsAreAggregated(t *testing.T) {
 		t.Fatalf("want aggregated invalid-schema error, got %v", err)
 	}
 }
+
+// A boot schema the engine cannot replace is named, with the ONE command that
+// fixes it, BEFORE anything is written — a real box (2026-09-26) had its
+// schema owned by root under install.sh's sticky-bit directory, and Studio's
+// deploy failed with a raw «rename …: operation not permitted» after leaving a
+// self-restart marker behind.
+func TestPersistBootSchema_UnreplaceableFileIsNamedWithTheFix(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "schema.json")
+	if err := os.WriteFile(path, []byte(`{"$schema":"https://appximo.com/schema/v1","version":"1","name":"a","resources":{"t":{"fields":{"x":{"type":"string"}}}},"rbac":{"roles":{"admin":{"resources":"*","actions":["*"]}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getuid() == 0 {
+		t.Skip("root can replace anything")
+	}
+	if err := os.Chmod(path, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{"$schema":"https://appximo.com/schema/v1","version":"1","name":"b","resources":{"t":{"fields":{"x":{"type":"string"}}}},"rbac":{"roles":{"admin":{"resources":"*","actions":["*"]}}}}`)
+	err := persistBootSchemaFile(path, raw)
+	if err == nil {
+		t.Fatal("a read-only schema was replaced")
+	}
+	for _, want := range []string{"cannot replace the boot schema", "chown"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q: %v", want, err)
+		}
+	}
+	if _, statErr := os.Stat(bootMarkerPath(path)); statErr == nil {
+		t.Error("a self-restart marker was left behind by a persist that did not happen")
+	}
+}

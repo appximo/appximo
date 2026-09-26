@@ -27,7 +27,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -85,6 +87,16 @@ func persistBootSchemaFile(path string, raw []byte) error {
 	if err != nil {
 		return fmt.Errorf("read current boot schema: %w", err)
 	}
+	// Can this process REPLACE the file at all? install.sh gives /etc/<app>
+	// the sticky bit, so only the file's owner may rename over it — and a box
+	// whose schema was copied in as root by an older deploy script cannot be
+	// deployed to from Studio. Checked BEFORE the backup and the marker are
+	// written: the failure used to arrive as a raw «rename …: operation not
+	// permitted» with a stale self-restart marker left behind (a real box,
+	// 2026-09-26).
+	if err := checkReplaceable(path); err != nil {
+		return err
+	}
 	if err := writeFileAtomic(bootBackupPath(path), cur); err != nil {
 		return fmt.Errorf("write boot schema backup: %w", err)
 	}
@@ -92,9 +104,44 @@ func persistBootSchemaFile(path string, raw []byte) error {
 		return fmt.Errorf("write self-restart marker: %w", err)
 	}
 	if err := writeFileAtomic(path, raw); err != nil {
-		return fmt.Errorf("persist boot schema: %w", err)
+		// never leave the marker gating a rollback for a persist that did not happen
+		os.Remove(bootMarkerPath(path)) //nolint:errcheck
+		return fmt.Errorf("persist boot schema: %w; %s", err, howToFixSchemaPerms(path))
 	}
 	return nil
+}
+
+// checkReplaceable reports, in the owner's terms, whether this process can
+// replace the boot schema in place: the directory must accept a new file and
+// the schema itself must be writable by us (the exact permission the atomic
+// temp+rename needs under a sticky-bit directory).
+func checkReplaceable(path string) error {
+	dir := filepath.Dir(path)
+	probe, err := os.CreateTemp(dir, ".appximo-perm-*")
+	if err != nil {
+		return fmt.Errorf("cannot write in %s: %w; %s", dir, err, howToFixSchemaPerms(path))
+	}
+	name := probe.Name()
+	probe.Close()   //nolint:errcheck
+	os.Remove(name) //nolint:errcheck
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		if os.IsPermission(err) {
+			return fmt.Errorf("cannot replace the boot schema %s: %s", path, howToFixSchemaPerms(path))
+		}
+		return fmt.Errorf("cannot replace the boot schema %s: %w", path, err)
+	}
+	return f.Close()
+}
+
+// howToFixSchemaPerms names the ONE command that fixes the usual cause: the
+// schema file belongs to root while the engine runs as the service user.
+func howToFixSchemaPerms(path string) string {
+	who := strconv.Itoa(os.Getuid())
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		who = u.Username
+	}
+	return fmt.Sprintf("this process runs as %q and cannot replace that file (install.sh gives /etc/<app> the sticky bit, so only the file's OWNER may replace it). Fix it once, as root: chown %s %s", who, who, path)
 }
 
 // writeFileAtomic writes data to path via a temp file + rename in the same

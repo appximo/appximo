@@ -1600,7 +1600,7 @@ func executePending(ctx context.Context, d Deps, pend *Pending) Result {
 	res := d.Vocab.Resource(pend.Resource)
 	row, err := d.Write.Write(ctx, pend.Kind, pend.Resource, pend.RowID, pend.Data)
 	if err != nil {
-		r := writeFailure(err, pend.Kind+" "+singular(pend.Resource))
+		r := writeFailure(err, writeVerbES(pend.Kind)+" "+theWord(singularWord(pend.Resource)))
 		r.Plan = &pend.Plan
 		return r
 	}
@@ -1620,6 +1620,32 @@ func executePending(ctx context.Context, d Deps, pend *Pending) Result {
 	}
 	return Result{Kind: "written", Headline: "Listo", Text: text, Speech: spokenWritten(d, pend, label), Plan: &pend.Plan,
 		Written: []Written{{Kind: pend.Kind, Resource: pend.Resource, ID: id}}}
+}
+
+// writeVerbES says what the write was doing, in Spanish: the reply used to
+// read «No pude update tarea» — the engine's own verb in the middle of the
+// owner's sentence (seen on his phone, 2026-09-26).
+func writeVerbES(kind string) string {
+	switch kind {
+	case "create":
+		return "crear"
+	case "delete":
+		return "borrar"
+	default:
+		return "cambiar"
+	}
+}
+
+// theWord turns «una tarea» into «la tarea» — a refusal talks about THE row
+// the owner just confirmed, not about one of them.
+func theWord(w string) string {
+	switch {
+	case strings.HasPrefix(w, "una "):
+		return "la " + strings.TrimPrefix(w, "una ")
+	case strings.HasPrefix(w, "un "):
+		return "el " + strings.TrimPrefix(w, "un ")
+	}
+	return w
 }
 
 // writeFailure words the engine's refusal — the same 403/409/422 the API

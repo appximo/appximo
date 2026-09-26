@@ -189,6 +189,15 @@ keep() { [ -e "$2" ] || cp -p "$1" "$2"; }   # the FIRST pre-deploy copy of a ta
 keep "$BIN" "/root/$APP-bin.pre-$TAG"; keep "$ENVF" "/root/$APP-env.pre-$TAG"; keep "$SCHEMA" "/root/$APP-schema.pre-$TAG"
 [ -n "$CLIB" ] && keep "$CLIB" "/root/$APP-cli.pre-$TAG"
 echo "  pre-deploy copies: /root/$APP-{bin,env,schema}.pre-$TAG"
+# The boot schema must belong to the SERVICE user, or the engine's own deploy
+# path (Studio «restart engine now» → persist boot schema) fails: install.sh
+# gives /etc/<app> the sticky bit, so only the file's OWNER may replace it. A
+# schema copied in as root by an older script silently broke that on a real box
+# (2026-09-26) — every deploy repairs it now, idempotently.
+SVC_USER="$(systemctl show -p User --value "$APP" 2>/dev/null)"; [ -n "$SVC_USER" ] || SVC_USER="$APP"
+if [ -f "$SCHEMA" ] && [ "$(stat -c %U "$SCHEMA")" != "$SVC_USER" ]; then
+  chown "$SVC_USER:$SVC_USER" "$SCHEMA" && echo "  repaired: $SCHEMA now belongs to $SVC_USER (Studio deploy can replace it)"
+fi
 REMOTE
 then die "backup failed — nothing was touched"; fi
 ok "backup set written; pre-deploy copies kept"

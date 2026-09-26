@@ -480,3 +480,23 @@ func TestClose_WithTheDataTheAppRequires(t *testing.T) {
 		}
 	}
 }
+
+// A refusal says what it was doing in Spanish: the owner's phone read «No
+// pude update tarea: …» — the engine's own verb, in English, inside his
+// sentence (2026-09-26).
+func TestWriteFailure_SaysItInSpanish(t *testing.T) {
+	for kind, want := range map[string]string{"create": "crear", "update": "cambiar", "delete": "borrar"} {
+		if got := writeVerbES(kind); got != want {
+			t.Errorf("%s → %q, want %q", kind, got, want)
+		}
+	}
+	for said, want := range map[string]string{"una tarea": "la tarea", "un compromiso": "el compromiso", "tareas": "tareas"} {
+		if got := theWord(said); got != want {
+			t.Errorf("%q → %q, want %q", said, got, want)
+		}
+	}
+	r := writeFailure(&WriteError{Status: 422, Msg: "para marcarla hecha dime cuánto tomó"}, writeVerbES("update")+" "+theWord(singularWord("tareas")))
+	if !strings.Contains(r.Text, "No pude cambiar la tarea") || strings.Contains(r.Text, "update") {
+		t.Fatalf("refusal: %s", r.Text)
+	}
+}
