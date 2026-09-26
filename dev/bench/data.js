@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790458182353,
+  "lastUpdate": 1790458596172,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -8568,6 +8568,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36625330 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "dc2fd029bf2694867c673ac527f227f394b516f9",
+          "message": "docs(manual,backlog): several people in one app — what is already per-user (measured with two real users), how to add one, their own Siri token, and the two doors that are not\n\nAGENDA-MULTIUSUARIO-S1. With two real users on the owner's own schema and the\nshipped binary, every HTTP door isolates: lists show only your rows, another\nuser's row by id is 404 on GET/PATCH/DELETE, a create attributed to someone\nelse is 403, aggregates count your own, GraphQL, /api/summary and /api/ask\nanswer yours, and a per-user long-lived token scoped to /api/ask,/api/summary\nworks and answers 401 anywhere else.\n\nThe audit found ONE hole and it is fixed in the app's schema: the junction\ntables (tarea_personas, tarea_etiquetas) had no owner column and no condition,\nso any user could read AND DELETE another user's links. They now carry\n`dueno_id` with the same row condition as everything else (both were empty, so\nno backfill), verified on a clean lab: A sees 1, B sees 0, B gets 404 by id.\n\nRegistered as open: VOZ-27 (the Telegram channel and the scheduled digest act\nas ONE identity, so with several users everyone gets one person's; each user's\nSiri already works) and FILES-3 (the file store records no uploader and the\nvirtual `files` resource takes actions only, so files cannot be scoped per\nuser). The backlog checker now knows the FILES family.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-26T21:36:03Z",
+          "tree_id": "088c22ca9ce10f5667eea2d393fb69ecc2a02572",
+          "url": "https://github.com/appximo/appximo/commit/dc2fd029bf2694867c673ac527f227f394b516f9"
+        },
+        "date": 1790458595046,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 8409,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "264606 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 8409,
+            "unit": "ns/op",
+            "extra": "264606 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "264606 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "264606 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 77.34,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "31349984 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 77.34,
+            "unit": "ns/op",
+            "extra": "31349984 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "31349984 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "31349984 times\n4 procs"
           }
         ]
       }
