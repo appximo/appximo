@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790378054028,
+  "lastUpdate": 1790387564993,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -8136,6 +8136,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36935986 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "05cea3748433736e2401de1693e7f5d01c6f78e3",
+          "message": "feat(ask): closing a row in the owner's words — «cierra la tarea hablar con Norberto», and a title that carries articles or prepositions is found instead of refused (AGENDA-ASISTENTE-S1 addendum 5e)\n\n«¿Cómo cierro una tarea?» had three incomplete answers.\n\nThe VERB: «cerrar» — the first word anyone reaches for — was not in the\ngrammar. It joins the finished phrases with «completar» and «finalizar»; the\nstate still comes from the schema (doneState: the single terminal state that\nis not a cancellation), never a wired «hecha».\n\nThe RESOURCE: a closing verb now acts on the resource the sentence NAMES when\nthat resource has a lifecycle («cierra el compromiso del dentista» → estado\nhecho), falling back to the single to-do resource («ya hice …»).\n\nThe ROW: in parseTransition every content word still unused is folded into the\nrow's name — the rule «ya hice …» already used. «Marca como hecha la tarea\narreglar el techo» lost «techo» to the article and «cierra la tarea hablar con\nNorberto» lost «Norberto» to the preposition run, so the sentence was refused\nover a word that was part of the title. «Pon en curso la tarea X», «pon en\nesperando la tarea X» and «cancela la tarea X» work the same way now. A state\nsaid without the resource word stays ambiguous on purpose («hecha» and\n«hecho» are two resources' states).\n\nBank: 137/151 hits, parser-settled 131, unchanged. Full lane green; gate 200\ncases, 198 same, 2 diff (the random pending_id + expires_in and the row order\nover random ids).\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-26T01:51:27Z",
+          "tree_id": "f31c20a175e3ff589f5c08f1161453a698f568ef",
+          "url": "https://github.com/appximo/appximo/commit/05cea3748433736e2401de1693e7f5d01c6f78e3"
+        },
+        "date": 1790387563515,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6260,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "372980 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6260,
+            "unit": "ns/op",
+            "extra": "372980 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "372980 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "372980 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 72.02,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36817173 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 72.02,
+            "unit": "ns/op",
+            "extra": "36817173 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36817173 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36817173 times\n4 procs"
           }
         ]
       }
