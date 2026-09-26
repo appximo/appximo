@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790445622508,
+  "lastUpdate": 1790445669604,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -8352,6 +8352,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "47965886 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "3c082572d199397a4af11f3ecb06ab739a9fe4ec",
+          "message": "docs(agents): a state change carries the data an app's hook requires (AGENDA-ASISTENTE-S1 addendum 5f)\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-26T18:00:31Z",
+          "tree_id": "1e5277b912232df9abaddd28fb5657393927c483",
+          "url": "https://github.com/appximo/appximo/commit/3c082572d199397a4af11f3ecb06ab739a9fe4ec"
+        },
+        "date": 1790445668111,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6344,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "377659 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6344,
+            "unit": "ns/op",
+            "extra": "377659 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "377659 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "377659 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 69.26,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36681340 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 69.26,
+            "unit": "ns/op",
+            "extra": "36681340 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36681340 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36681340 times\n4 procs"
           }
         ]
       }
