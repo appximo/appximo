@@ -227,9 +227,13 @@ read the row's DATA through one shared reader (`rowData`): a field said by its
 OWN name words plus its value, with a multi-token field name matched by
 `fieldByWords` — a name whose last segment is a unit may be said without it
 because the unit rides the value («tiempo real 30 minutos» → `tiempo_real_min`
-30; «tiempo real media hora» → 30; «2 horas» → 120). A BARE duration that
-several numeric fields could mean is never guessed: the reply names the two
-ways to say it (`field_choice:`, rendered as a choice and not as «no
+30; «tiempo real media hora» → 30; «2 horas» → 120). A duration said as what it TOOK («tomó 90 minutos»,
+«duró media hora», «en 20 minutos» — plain Spanish introducers, `tookWords`)
+goes to the numeric field that is NOT an estimate, and the only signal used is
+the schema's own word in the other field's name («estimada»), so an app with a
+single duration field is unaffected; the corpus had asked for exactly this
+(U01b). A BARE duration that several numeric fields could mean is never
+guessed: the reply names the two ways to say it (`field_choice:`, rendered as a choice and not as «no
 entendí»). The value reader is the create path's own (`setField`), so «área
 casa» works in a close too. Prosody followed: a field whose name ends in a
 unit segment is spoken without it and the value carries the unit («Tiempo

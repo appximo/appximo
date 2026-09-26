@@ -412,20 +412,27 @@ func TestClose_ATaskInTheOwnersWords(t *testing.T) {
 // guessed. The spoken reply carries no digit and no arrow.
 func TestClose_WithTheDataTheAppRequires(t *testing.T) {
 	v := miguelVocab()
-	for q, want := range map[string]float64{
+	for q, wantMin := range map[string]float64{
 		"cierra la tarea arreglar el techo, tiempo real 30 minutos":           30,
 		"cierra arreglar el techo tiempo real 30 minutos":                     30,
 		"ya hice arreglar el techo, tiempo real media hora":                   30,
 		"terminé de arreglar el techo, tiempo real una hora":                  60,
 		"marca como hecha la tarea arreglar el techo con tiempo real 2 horas": 120,
-		"pon en curso la tarea arreglar el techo, tiempo real 15 minutos":     15,
+		// the owner's own title carries a preposition too: «hablar con
+		// Norberto con tiempo real 2 horas» was refused as «two names»
+		"cierra la tarea hablar con Norberto con tiempo real 30 minutos":  30,
+		"pon en curso la tarea arreglar el techo, tiempo real 15 minutos": 15,
 	} {
 		pr := Parse(q, v)
-		if !pr.Sure || pr.Plan.Kind != "update" || toFloat(pr.Plan.Data["tiempo_real_min"]) != want {
+		if !pr.Sure || pr.Plan.Kind != "update" || toFloat(pr.Plan.Data["tiempo_real_min"]) != wantMin {
 			t.Errorf("%q: %+v (%s)", q, pr.Plan.Data, pr.Reason)
 			continue
 		}
-		if len(pr.Plan.Where) != 1 || pr.Plan.Where[0].Match != "arreglar techo" {
+		want := "arreglar techo"
+		if strings.Contains(q, "Norberto") {
+			want = "hablar Norberto"
+		}
+		if len(pr.Plan.Where) != 1 || pr.Plan.Where[0].Match != want {
 			t.Errorf("%q: the row is %+v", q, pr.Plan.Where)
 		}
 	}
@@ -435,6 +442,17 @@ func TestClose_WithTheDataTheAppRequires(t *testing.T) {
 	}
 	if pr := Parse("cierra la tarea arreglar el techo, área casa", v); !pr.Sure || pr.Plan.Data["area_id"] == nil {
 		t.Errorf("area: %+v (%s)", pr.Plan.Data, pr.Reason)
+	}
+	// how long it TOOK is the field that is not an estimate — the schema's own
+	// word («estimada») is the only signal, and the corpus asked for it
+	for q, want := range map[string]float64{
+		"marca como hecha la tarea arreglar el techo, tomó 90 minutos": 90,
+		"ya hice arreglar el techo, duró media hora":                   30,
+		"cierra la tarea arreglar el techo en 20 minutos":              20,
+	} {
+		if pr := Parse(q, v); !pr.Sure || toFloat(pr.Plan.Data["tiempo_real_min"]) != want || pr.Plan.Data["duracion_estimada_min"] != nil {
+			t.Errorf("%q: %+v (%s)", q, pr.Plan.Data, pr.Reason)
+		}
 	}
 	// a bare duration with TWO numeric fields it could mean: asked, not guessed
 	pr := Parse("cierra la tarea arreglar el techo, 30 minutos", v)

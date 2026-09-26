@@ -2285,8 +2285,10 @@ in the order said. **A state change carries DATA** (`rowData`, shared by both
 paths): a field said by its own name words plus its value, with a
 unit-suffixed name sayable without the unit («cierra la tarea X, tiempo real
 30 minutos» → `tiempo_real_min` 30 — what an app's `before_update` hook may
-REQUIRE to accept the new state); a bare duration several numeric fields could
-mean is asked back, never guessed; the value reader is the create path's own,
+REQUIRE to accept the new state); a duration said as what it TOOK («tomó 90 minutos», «duró
+media hora», «en 20 minutos») goes to the numeric field whose name does NOT
+say «estim» when exactly one qualifies, and an otherwise bare duration that
+several fields could mean is asked back, never guessed; the value reader is the create path's own,
 so «área casa» works in a close too. Period phrases match longest-first («de la
 semana que viene» beats «de la semana»); «antes del viernes» is the deadline,
 not the title; an alias that names the resource («reunión», «cita») stays

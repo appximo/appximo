@@ -883,9 +883,13 @@ real 30 minutos» (también «tiempo real media hora», «tiempo real una hora»
 «tiempo real 2 horas»). Un campo se nombra con SUS PROPIAS palabras y la
 unidad va en el valor («tiempo real» es el campo `tiempo_real_min`), y sirve
 con cualquier forma de cerrar y con cualquier otro dato: «ya hice buscar
-frutas, tiempo real 45 minutos», «cierra la tarea X, área casa». Si dices solo
-«30 minutos» y el recurso tiene DOS campos de minutos, el motor no adivina:
-pregunta cuál, nombrando las dos formas. Antes de esto no había manera de
+frutas, tiempo real 45 minutos», «cierra la tarea X, área casa». Más corto todavía: si dices cuánto
+TOMÓ o DURÓ, el motor sabe que es el tiempo real y no el estimado, porque el
+otro campo se llama «estimada» en tu esquema — «cierra la tarea hablar con
+Norberto, tomó 30 minutos», «ya hice hablar con Norberto, duró media hora»,
+«cierra la tarea hablar con Norberto en 20 minutos». Si dices solo
+«30 minutos», sin decir que lo tomó, el motor no adivina: pregunta cuál,
+nombrando las dos formas. Antes de esto no había manera de
 decirlo — cada palabra extra se iba al nombre de la tarea y ni la encontraba.
 
 **Cuando el título no es una acción, empieza con la palabra del recurso.**

@@ -1527,6 +1527,16 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 	if !verbSeen || target == "" {
 		return ParseResult{Reason: "no transition"}
 	}
+	// DATA the sentence carries for the row («cierra la tarea buscar frutas,
+	// tiempo real 30 minutos»): read BEFORE the row's name is looked for, or
+	// the name runs eat the field's own words — «con tiempo real 2 horas» was
+	// swallowed by the preposition run when the title also carried a «con»
+	// (the owner's «hablar con Norberto», verified live 2026-09-26).
+	data := map[string]any{sf.Name: target}
+	if amb := rowData(v, res, toks, sf, data); amb != "" {
+		return ParseResult{Plan: Plan{Kind: "unclear", Reason: amb}, Sure: true}
+	}
+
 	// other enum values of the resource narrow the row ("la orden pendiente de Marta")
 	var where []Filter
 	seen := map[string]bool{}
@@ -1548,12 +1558,12 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 	}
 	// the name after a preposition (or after the relation's target the
 	// sentence named)
-	match, matchPos := "", -1
+	match, matchPos, matchEnd := "", -1, -1
 	var nameF Filter
 	if labelPos >= 0 {
 		parts := nameRun(toks, labelPos, transitionLinkers)
 		if len(parts) > 0 {
-			match, matchPos = strings.Join(parts, " "), labelPos
+			match, matchPos, matchEnd = strings.Join(parts, " "), labelPos, labelPos+len(parts)-1
 			nameF = Filter{Field: labelField, Op: "eq", Match: match}
 		}
 	}
@@ -1576,10 +1586,35 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 		if len(parts) == 0 {
 			continue
 		}
+		// two runs are ONE name when they sit on either side of THIS
+		// preposition with nothing between them and neither is a time word:
+		// «hablar con Norberto» was refused as «two names» (2026-09-26). Two
+		// names with anything else between them («de Fabián y de Marta», «de
+		// Fabián para mañana») stay a refusal — a transition never invents
+		// which row it means.
+		run := strings.Join(parts, " ")
 		if match != "" {
-			return ParseResult{Reason: "two names"}
+			gap := true // only prepositions may sit between the two runs
+			for k := matchEnd + 1; k < start; k++ {
+				if !prepositions[toks[k].norm] {
+					gap = false
+					break
+				}
+			}
+			if !gap || isTimeWord(toks[start].norm) || isTimeWord(strings.Split(match, " ")[0]) {
+				return ParseResult{Reason: "two names"}
+			}
+			match += " " + run
+			matchEnd = start + len(parts) - 1
+			f, reason := nameFilter(v, res, match)
+			if reason != "" {
+				return ParseResult{Reason: reason}
+			}
+			nameF = f
+			toks[i].used = true
+			continue
 		}
-		match, matchPos = strings.Join(parts, " "), start
+		match, matchPos, matchEnd = run, start, start+len(parts)-1
 		f, reason := nameFilter(v, res, match)
 		if reason != "" {
 			return ParseResult{Reason: reason}
@@ -1593,13 +1628,6 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 			nameF = Filter{Field: field, Op: "eq", Match: code}
 		}
 	}
-	// DATA the sentence carries for the row («cierra la tarea buscar frutas,
-	// tiempo real 30 minutos»): the same reader the done path uses.
-	data := map[string]any{sf.Name: target}
-	if amb := rowData(v, res, toks, sf, data); amb != "" {
-		return ParseResult{Plan: Plan{Kind: "unclear", Reason: amb}, Sure: true}
-	}
-
 	// EVERY content word still unused belongs to the same row name — the
 	// rule «ya hice …» already used (2026-09-26): «marca como hecha la tarea
 	// arreglar el techo» lost «techo» to the article, and «cierra la tarea
@@ -1808,6 +1836,10 @@ var doneLeads = []string{"ya hice", "ya termine", "termine de", "ya termine de",
 // doneTrailers close it («… está lista», «… ya está», «… quedó hecha»).
 var doneTrailers = []string{"esta lista", "esta listo", "ya esta", "quedo lista", "quedo listo", "esta hecha", "esta hecho", "ya quedo", "esta terminada", "esta terminado"}
 
+// tookWords introduce how long something TOOK — plain Spanish, never a
+// domain word: «tomó 90 minutos», «duró media hora», «lo hice en 20 minutos».
+var tookWords = set("tomo", "tardo", "duro", "demoro", "llevo", "gaste", "en")
+
 // rowData reads the DATA a state-change sentence carries for the row
 // («cierra la tarea buscar frutas, tiempo real 30 minutos», 2026-09-26): a
 // field said by its OWN name words plus its value. An app may REQUIRE it to
@@ -1870,6 +1902,33 @@ func rowData(v *Vocabulary, res *Resource, toks []token, sf *Field, data map[str
 		}
 		i = end - 1
 	}
+	// «tomó 90 minutos», «duró media hora», «lo hice en 20 minutos»: a
+	// duration said as what it TOOK is the field that is not an ESTIMATE —
+	// the schema's own word («estimada») is the only signal used, so an app
+	// with one duration field is unaffected. Anything else stays a question.
+	if len(durationFields(res)) > 1 {
+		var real []*Field
+		for _, f := range durationFields(res) {
+			if !strings.Contains(normalize(f.Name), "estim") {
+				real = append(real, f)
+			}
+		}
+		if len(real) == 1 {
+			for i := 0; i+2 < len(toks); i++ {
+				if toks[i].used || !tookWords[toks[i].norm] || toks[i+1].used || toks[i+2].used {
+					continue
+				}
+				val, ok := numericRun(real[0], toks[i+1].norm+" "+toks[i+2].norm)
+				if !ok {
+					continue
+				}
+				data[real[0].Name] = val
+				toks[i].used, toks[i+1].used, toks[i+2].used = true, true, true
+				break
+			}
+		}
+	}
+
 	// a bare duration («…, 30 minutos») with SEVERAL numeric fields it could
 	// mean is not guessed: the reply names the two ways to say it
 	if len(durationFields(res)) > 1 {
