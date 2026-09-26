@@ -2280,7 +2280,14 @@ state) on the resource the sentence NAMES when it has a lifecycle («cierra el
 compromiso del dentista» → hecho), else the to-do; «pon en curso X» finds the
 resource by the state value, and in a transition EVERY leftover content word
 is folded into the row's name, so a title with articles or prepositions («la
-tarea arreglar el techo», «hablar con Norberto») is found instead of refused. Period phrases match longest-first («de la
+tarea arreglar el techo», «hablar con Norberto») is found instead of refused,
+in the order said. **A state change carries DATA** (`rowData`, shared by both
+paths): a field said by its own name words plus its value, with a
+unit-suffixed name sayable without the unit («cierra la tarea X, tiempo real
+30 minutos» → `tiempo_real_min` 30 — what an app's `before_update` hook may
+REQUIRE to accept the new state); a bare duration several numeric fields could
+mean is asked back, never guessed; the value reader is the create path's own,
+so «área casa» works in a close too. Period phrases match longest-first («de la
 semana que viene» beats «de la semana»); «antes del viernes» is the deadline,
 not the title; an alias that names the resource («reunión», «cita») stays
 as the title's first word. PROSODY (`pkg/ask/prosody.go`): `speech` /
