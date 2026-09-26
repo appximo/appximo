@@ -345,3 +345,60 @@ func TestCreate_ANounTitleAfterTheSingularResourceWord(t *testing.T) {
 		}
 	}
 }
+
+// Closing a to-do, in the words an owner uses (2026-09-26, «¿cómo cierro una
+// tarea?»): a CLOSING verb («cierra», «completé», «finalicé») moves the row
+// to the schema's single finished state, on the resource the sentence names
+// (an appointment closes as «hecho», a task as «hecha»); and a transition
+// verb with an explicit state finds the row by its TITLE, whatever articles
+// or prepositions it carries — «marca como hecha la tarea arreglar el techo»
+// used to lose «techo» to the article and «hablar con Norberto» lost
+// «Norberto» to the preposition, and the sentence was refused over a word
+// that was part of the title.
+func TestClose_ATaskInTheOwnersWords(t *testing.T) {
+	v := miguelVocab()
+	cases := []struct{ q, res, state, match string }{
+		{"cierra la tarea arreglar el techo", "tareas", "hecha", "arreglar techo"},
+		{"cierra arreglar el techo", "tareas", "hecha", "arreglar techo"},
+		{"cierro la tarea de Fabián", "tareas", "hecha", "Fabián"},
+		{"completé arreglar el techo", "tareas", "hecha", "arreglar techo"},
+		{"ya finalicé arreglar el techo", "tareas", "hecha", "arreglar techo"},
+		{"ya hice arreglar el techo", "tareas", "hecha", "arreglar techo"},
+		{"marca como hecha la tarea arreglar el techo", "tareas", "hecha", "arreglar techo"},
+		{"marca como hecha la tarea de Fabián", "tareas", "hecha", "Fabián"},
+		{"pon en curso la tarea arreglar el techo", "tareas", "en_curso", "arreglar techo"},
+		{"cancela la tarea arreglar el techo", "tareas", "cancelada", "arreglar techo"},
+	}
+	for _, c := range cases {
+		pr := Parse(c.q, v)
+		if !pr.Sure || pr.Plan.Kind != "update" || pr.Plan.Resource != c.res {
+			t.Errorf("%q: sure=%v %s %s (%s)", c.q, pr.Sure, pr.Plan.Kind, pr.Plan.Resource, pr.Reason)
+			continue
+		}
+		if pr.Plan.Data["estado"] != c.state {
+			t.Errorf("%q: estado = %v, want %s", c.q, pr.Plan.Data["estado"], c.state)
+		}
+		if len(pr.Plan.Where) != 1 || pr.Plan.Where[0].Match != c.match {
+			t.Errorf("%q: where %+v, want match %q", c.q, pr.Plan.Where, c.match)
+		}
+	}
+	// a read is still a read, and nothing here writes without the confirmation
+	for _, q := range []string{"tareas pendientes", "tareas de Fabián", "cuántas tareas hay por estado", "tareas hechas", "qué tengo mañana"} {
+		if pr := Parse(q, v); !pr.Sure || pr.Plan.IsWrite() {
+			t.Errorf("%q became a write: %+v (%s)", q, pr.Plan, pr.Reason)
+		}
+	}
+	e := miguelFixtures()
+	d, _ := miguelDeps(e)
+	r := Answer(context.Background(), d, "cierra la tarea arreglar el techo")
+	if r.Kind != "confirm" || r.Source != "parser" || r.CostUSD != 0 ||
+		!strings.Contains(r.Text, "«arreglar el techo (pendiente)»") || !strings.Contains(r.Text, "estado: pendiente → <b>hecha</b>") {
+		t.Fatalf("close: %s %s\n%s", r.Kind, r.Source, r.Text)
+	}
+	if w := Answer(context.Background(), d, "sí"); w.Kind != "written" {
+		t.Fatalf("write: %s %s", w.Kind, w.Text)
+	}
+	if rows := e.rows["tareas"]; rows[0]["estado"] != "hecha" {
+		t.Fatalf("the row did not close: %v", rows[0])
+	}
+}

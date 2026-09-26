@@ -861,6 +861,21 @@ suelto: «crear tarea: revisar, con Marta» dicho como dato aparte sigue
 preguntando si Marta no existe — ahí el nombre es un enlace declarado, no
 texto.
 
+**Cerrar una tarea (2026-09-26).** «Cierra la tarea hablar con Norberto»,
+«cierra hablar con Norberto», «completé hablar con Norberto», «ya finalicé
+hablar con Norberto», «ya hice hablar con Norberto», «terminé de hablar con
+Norberto», «hablar con Norberto ya está lista» — todas pasan la tarea al
+estado final que declara el schema (en la agenda, «hecha»), y siempre con
+confirmación que muestra la fila y el cambio («arreglar el techo (pendiente)
+→ hecha»). Con la palabra del recurso también se elige otro estado:
+«marca como hecha la tarea X», «pon en curso la tarea X», «pon en esperando
+la tarea X», «cancela la tarea X». El título puede llevar artículos y
+preposiciones: antes «marca como hecha la tarea arreglar el techo» perdía
+«techo» y «cierra la tarea hablar con Norberto» perdía «Norberto», y la frase
+se rechazaba por una palabra que era parte del título. Y un verbo de cerrar
+actúa sobre el recurso que la frase nombra: «cierra el compromiso del
+dentista» cierra la cita (su estado final es «hecho»), no busca una tarea.
+
 **Cuando el título no es una acción, empieza con la palabra del recurso.**
 «Tarea razón social mañana urgente» crea la tarea «razón social» para mañana
 marcada urgente; antes el motor exigía un verbo después de «tarea» («tarea

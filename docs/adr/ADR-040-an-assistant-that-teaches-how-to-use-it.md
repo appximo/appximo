@@ -196,6 +196,25 @@ name and creating a work item by dictating its title are different acts, and
 the schema already says which resource is which. Bank: 137/151 hits, parser
 131 (was 130), nothing lost.
 
+#### 2g. Closing a row: the owner's verb, and a title that carries articles
+
+«¿Cómo cierro una tarea?» (the owner, 2026-09-26) had three answers and all
+three were incomplete. **The verb:** «cerrar» — the first word anyone reaches
+for — was not in the grammar at all; it joined the finished phrases
+(`doneLeads`) with «completar» and «finalizar», and the STATE still comes from
+the schema (`doneState`: the single terminal state that is not a
+cancellation), never a wired «hecha». **The resource:** a closing verb now
+acts on the resource the sentence NAMES when that resource has a lifecycle
+(«cierra el compromiso del dentista» → `estado: hecho`), falling back to the
+single to-do resource («ya hice …»). **The row:** in `parseTransition` every
+content word still unused is folded into the row's name, the rule «ya hice …»
+already used — «marca como hecha la tarea arreglar el techo» lost «techo» to
+the article and «cierra la tarea hablar con Norberto» lost «Norberto» to the
+preposition run, so the sentence was refused over a word that was part of the
+title. A state said without the resource word stays ambiguous on purpose
+(«hecha» and «hecho» are two resources' states); the resource word settles it.
+Bank unchanged at 137/151, parser 131.
+
 ### 3. A correction on a pending write re-issues the confirmation; it never executes it
 
 «no, mejor el viernes», «mejor a las 5», «sí pero urgente», «que sea con

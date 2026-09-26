@@ -1593,24 +1593,31 @@ func parseTransition(question string, v *Vocabulary) ParseResult {
 			nameF = Filter{Field: field, Op: "eq", Match: code}
 		}
 	}
-	if match == "" {
-		// «poné en curso la declaración de renta»: no preposition, no
-		// resource word — the words left after the verb and the state ARE
-		// the row's name (articles skipped, linkers stop it)
-		for i := range toks {
-			if toks[i].used || stopwords[toks[i].norm] || transitionLinkers[toks[i].norm] {
-				continue
-			}
-			if parts := nameRun(toks, i, transitionLinkers); len(parts) > 0 {
-				match = strings.Join(parts, " ")
-				f, reason := nameFilter(v, res, match)
-				if reason != "" {
-					return ParseResult{Reason: reason}
-				}
-				nameF = f
-			}
-			break
+	// EVERY content word still unused belongs to the same row name — the
+	// rule «ya hice …» already used (2026-09-26): «marca como hecha la tarea
+	// arreglar el techo» lost «techo» to the article, and «cierra la tarea
+	// hablar con Norberto» lost «Norberto» to the preposition run, so the
+	// sentence was refused over a word that was part of the title.
+	var restParts []string
+	for i := range toks {
+		if toks[i].used || stopwords[toks[i].norm] || transitionLinkers[toks[i].norm] {
+			continue
 		}
+		restParts = append(restParts, toks[i].raw)
+		toks[i].used = true
+	}
+	if len(restParts) > 0 {
+		rest := strings.Join(restParts, " ")
+		if match == "" {
+			match = rest
+		} else {
+			match += " " + rest
+		}
+		f, reason := nameFilter(v, res, match)
+		if reason != "" {
+			return ParseResult{Reason: reason}
+		}
+		nameF = f
 	}
 	if match != "" {
 		where = append(where, nameF)
@@ -1777,7 +1784,12 @@ func splitIntents(question string) (first, second string) {
 }
 
 // doneLeads open a sentence that says a to-do is finished.
-var doneLeads = []string{"ya hice", "ya termine", "termine de", "ya termine de", "termine", "ya pague", "ya lo hice", "ya la hice", "ya esta hecha", "ya esta hecho", "ya esta lista", "ya esta listo", "ya quedo", "listo con", "ya hicimos", "hice", "acabe de", "ya acabe de", "ya"}
+var doneLeads = []string{"ya hice", "ya termine", "termine de", "ya termine de", "termine", "ya pague", "ya lo hice", "ya la hice", "ya esta hecha", "ya esta hecho", "ya esta lista", "ya esta listo", "ya quedo", "listo con", "ya hicimos", "hice", "acabe de", "ya acabe de",
+	// CLOSING it — the word an owner reaches for first («¿cómo cierro una
+	// tarea?», 2026-09-26). The STATE is the schema's single finished one
+	// (doneState), never a wired «hecha».
+	"cierra", "cierra la", "cierrame", "cierro", "cerra", "cerrar", "cerre", "cerramos", "dar por cerrada", "da por cerrada", "doy por cerrada", "completa", "complete", "ya complete", "completamos", "finalice", "ya finalice", "finaliza",
+	"ya"}
 
 // doneTrailers close it («… está lista», «… ya está», «… quedó hecha»).
 var doneTrailers = []string{"esta lista", "esta listo", "ya esta", "quedo lista", "quedo listo", "esta hecha", "esta hecho", "ya quedo", "esta terminada", "esta terminado"}
@@ -1811,7 +1823,23 @@ func parseDone(question string, v *Vocabulary) ParseResult {
 	if lead == "ya" && trailer == "" {
 		return ParseResult{Reason: "done: bare ya"}
 	}
+	// the resource: the one the sentence NAMES when it has a lifecycle
+	// («cierra el compromiso del dentista» closes the appointment), else the
+	// single to-do resource («ya hice arreglar el techo»)
 	res := taskResource(v)
+	for i := range toks {
+		if toks[i].used {
+			continue
+		}
+		for _, name := range v.ResourceNames() {
+			r := v.Resource(name)
+			if r == nil || r == res || r.StateField() == nil || !r.CanUpdate || !v.namesResource(toks[i].norm, r) {
+				continue
+			}
+			res = r
+			break
+		}
+	}
 	if res == nil || !res.CanUpdate {
 		return ParseResult{Reason: "done: no single to-do resource"}
 	}
