@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790464956267,
+  "lastUpdate": 1790482804134,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -8712,6 +8712,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "43189450 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "65a1ebda6a44a4a3c481ea8b5fbb8bba1c1d61ee",
+          "message": "test(ask): the phrase bank becomes a gate — 151 sentences judged against the parser with the model off, both ways\n\nThe owner's call (2026-09-27): «una corrida manual algún día no se corre». The\nbank that caught three regressions in three days now runs with every test run:\n`pkg/ask/testdata/corpus_es.json` (151 sentences, 31 verbatim from his\nhistory, his contacts swapped for the fixture's people) judged by\n`corpus_test.go` against `testdata/agenda.json` — the real agenda's shape, no\npersonal data — with NO key, NO network and NO database.\n\nIt gates both directions: a sentence the parser settles must keep settling it\nwith the same intention, and one it leaves to the model must keep leaving it\n(a widening re-baselines `settled` and says why in the commit). The judge is\nthe lab scorer reduced to what a parse can answer — kind, resource, data (the\nbank's «~contains», «match:name» including a VOZ-20 ref, and time tokens by\nprefix), row, filters, period, group_by, limit — plus the bank's `alt`\nreadings. 131 settled, 14 left to the model, 6 stateful (an answer to a\npending, which needs a pending).\n\nOn its first run it caught a real one: declaring state aliases in the owner's\nschema had REPLACED the ones his app already had, so «tareas completas» and\n«tareas terminadas» stopped working. The words are merged now, on his box too.\n\nDecisions recorded, nothing else built: VOZ-27 CLOSED — Telegram stays the\nOWNER's channel and each person uses their own Siri (reconsider when a second\nperson asks for their digest there); FILES-3 DEFERRED until an app with files\nexists, with the rule written in AGENTS.md and the backlog — a multi-user app\ndoes not enable `files`, because the store keeps no uploader; VOZ-28 opened for\nroutines, POSTPONED with what it would take.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-27T04:19:33Z",
+          "tree_id": "6941e2a1eebb160a147484adde4d4ae3c705b193",
+          "url": "https://github.com/appximo/appximo/commit/65a1ebda6a44a4a3c481ea8b5fbb8bba1c1d61ee"
+        },
+        "date": 1790482802728,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 5757,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "406116 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 5757,
+            "unit": "ns/op",
+            "extra": "406116 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "406116 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "406116 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 56.9,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "41939751 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 56.9,
+            "unit": "ns/op",
+            "extra": "41939751 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "41939751 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "41939751 times\n4 procs"
           }
         ]
       }
