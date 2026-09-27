@@ -1,0 +1,2524 @@
+{
+ "$comment": "The phrase bank: what the parser must keep settling, and how. Grown from the owner’s real history. Judged by corpus_test.go with the model OFF.",
+ "cases": [
+  {
+   "id": "T01",
+   "q": "anotá llamar a Fabián",
+   "scen": "crear_tarea",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~llamar"
+    }
+   }
+  },
+  {
+   "id": "T01b",
+   "q": "tengo que llamar a Fabián mañana",
+   "scen": "crear_tarea",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~llamar",
+     "vence_en": "tomorrow"
+    }
+   }
+  },
+  {
+   "id": "T01c",
+   "q": "crear tarea: llamar a Fabián, área casa, urgente",
+   "scen": "crear_tarea_forma",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~llamar a fabi",
+     "area_id": "match:casa",
+     "urgente": true
+    }
+   }
+  },
+  {
+   "id": "T01d",
+   "q": "llamar a Fabián urgente para mañana",
+   "scen": "crear_tarea_sin_verbo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~llamar",
+     "urgente": true,
+     "vence_en": "tomorrow"
+    }
+   }
+  },
+  {
+   "id": "T01e",
+   "q": "anota llamar a fabian gomes mañana",
+   "scen": "crear_tarea_mal_dictado",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~llamar",
+     "vence_en": "tomorrow"
+    }
+   }
+  },
+  {
+   "id": "T02",
+   "q": "acordate de pagar los derechos de grado",
+   "scen": "crear_tarea",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~derechos de grado"
+    }
+   }
+  },
+  {
+   "id": "T02b",
+   "q": "anotá pagar derechos de grado el viernes, área personal",
+   "scen": "crear_tarea",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~derechos de grado",
+     "vence_en": "next_friday",
+     "area_id": "match:personal"
+    }
+   }
+  },
+  {
+   "id": "T02c",
+   "q": "tengo q pagar derechos de grado",
+   "scen": "crear_tarea_mal_dictado",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~derechos de grado"
+    }
+   }
+  },
+  {
+   "id": "T02d",
+   "q": "Tarea esposa pagar derechos de grado",
+   "scen": "crear_tarea_sin_verbo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~derechos de grado"
+    },
+    "alt": [
+     {
+      "kind": "not_found"
+     },
+     {
+      "kind": "ambiguous"
+     }
+    ]
+   }
+  },
+  {
+   "id": "T03",
+   "q": "nueva tarea hacer los ajustes de reto para esta semana, urgente",
+   "scen": "crear_tarea",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~ajustes de reto",
+     "urgente": true
+    }
+   }
+  },
+  {
+   "id": "T03b",
+   "q": "tarea de tipo de trabajo y hacer los ajustes que se pidieron de reto para esta semana",
+   "scen": "crear_tarea_sin_verbo",
+   "settled": false,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~ajustes",
+     "area_id": "match:trabajo"
+    }
+   }
+  },
+  {
+   "id": "T03c",
+   "q": "crear tarea: hacer los ajustes de reto, área trabajo, 2 horas",
+   "scen": "crear_tarea_forma",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~ajustes de reto",
+     "area_id": "match:trabajo"
+    }
+   }
+  },
+  {
+   "id": "T04",
+   "q": "hay que hacer la declaración de renta",
+   "scen": "crear_tarea",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~declaraci"
+    }
+   }
+  },
+  {
+   "id": "T04b",
+   "q": "declaración de renta",
+   "scen": "frase_suelta",
+   "settled": false,
+   "stateful": false,
+   "expect": {
+    "kind": "unclear",
+    "alt": [
+     {
+      "kind": "create",
+      "resource": "tareas"
+     },
+     {
+      "kind": "list",
+      "resource": "tareas"
+     }
+    ]
+   }
+  },
+  {
+   "id": "T05",
+   "q": "anotá tarea comprar medicamentos para el bebé, área salud",
+   "scen": "crear_tarea",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~medicamentos",
+     "area_id": "match:salud"
+    }
+   }
+  },
+  {
+   "id": "T05b",
+   "q": "comprar medicamentos para el bebé, salud, urgente",
+   "scen": "crear_tarea_sin_verbo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~medicamentos",
+     "urgente": true
+    }
+   }
+  },
+  {
+   "id": "T06",
+   "q": "tarea: lavar el carro el sábado",
+   "scen": "crear_tarea_forma",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~lavar el carro",
+     "vence_en": "next_saturday"
+    }
+   }
+  },
+  {
+   "id": "T06b",
+   "q": "recordame lavar el carro",
+   "scen": "crear_tarea",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~lavar el carro"
+    }
+   }
+  },
+  {
+   "id": "T07",
+   "q": "recordame llamar al latonero Andrés",
+   "scen": "crear_tarea",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~latonero"
+    }
+   }
+  },
+  {
+   "id": "T07b",
+   "q": "anotá llamar al latonero, persona Andrés, área casa",
+   "scen": "crear_tarea_forma",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~latonero",
+     "persona_id": "match:Andrés",
+     "area_id": "match:casa"
+    }
+   }
+  },
+  {
+   "id": "T08",
+   "q": "anotá una tarea para Marta",
+   "scen": "crear_tarea_a_medias",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "ask_field",
+    "resource": "tareas"
+   }
+  },
+  {
+   "id": "T08b",
+   "q": "anotá una tarea",
+   "scen": "crear_tarea_a_medias",
+   "settled": false,
+   "stateful": false,
+   "expect": {
+    "kind": "ask_field",
+    "resource": "tareas",
+    "alt": [
+     {
+      "kind": "unclear"
+     },
+     {
+      "kind": "guide"
+     }
+    ]
+   }
+  },
+  {
+   "id": "T08c",
+   "q": "anotá",
+   "scen": "frase_a_medias",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "guide",
+    "alt": [
+     {
+      "kind": "unclear"
+     },
+     {
+      "kind": "ask_field"
+     },
+     {
+      "kind": "help"
+     }
+    ]
+   }
+  },
+  {
+   "id": "T09",
+   "q": "anotame que tengo que ir al médico el jueves, área salud",
+   "scen": "crear_tarea",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~m",
+     "vence_en": "next_thursday",
+     "area_id": "match:salud"
+    }
+   }
+  },
+  {
+   "id": "T10",
+   "q": "Tarea organizar suscripciones",
+   "scen": "crear_tarea_sin_verbo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~organizar suscripciones"
+    }
+   }
+  },
+  {
+   "id": "T10b",
+   "q": "Tarea hacer suscripciones organizar",
+   "scen": "crear_tarea_sin_verbo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~suscripciones"
+    }
+   }
+  },
+  {
+   "id": "T11",
+   "q": "no se me olvide comprar pintura",
+   "scen": "obligacion_voz17",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~comprar pintura"
+    }
+   }
+  },
+  {
+   "id": "T11b",
+   "q": "tengo que comprar pintura para el techo, urgente",
+   "scen": "obligacion_voz17",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~pintura",
+     "urgente": true
+    }
+   }
+  },
+  {
+   "id": "T11c",
+   "q": "hay que llamar al banco mañana",
+   "scen": "obligacion_voz17",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~llamar al banco",
+     "vence_en": "tomorrow"
+    }
+   }
+  },
+  {
+   "id": "T12",
+   "q": "crear tarea: revisar el contrato, persona Marta, mañana",
+   "scen": "crear_tarea_forma",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~revisar el contrato",
+     "persona_id": "match:Marta",
+     "vence_en": "tomorrow"
+    }
+   }
+  },
+  {
+   "id": "T12b",
+   "q": "crear tarea: mañana, urgente, revisar el contrato, área trabajo",
+   "scen": "crear_tarea_forma_otro_orden",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~revisar el contrato",
+     "urgente": true,
+     "vence_en": "tomorrow",
+     "area_id": "match:trabajo"
+    }
+   }
+  },
+  {
+   "id": "T12c",
+   "q": "crear tarea revisar el contrato y urgente y área trabajo",
+   "scen": "crear_tarea_forma_separadores",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~revisar el contrato",
+     "urgente": true,
+     "area_id": "match:trabajo"
+    }
+   }
+  },
+  {
+   "id": "T12d",
+   "q": "nueva tarea, revisar el contrato, trabajo, urgente",
+   "scen": "crear_tarea_forma_sin_clave",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~revisar el contrato",
+     "urgente": true
+    },
+    "alt": [
+     {
+      "kind": "create",
+      "resource": "tareas",
+      "data": {
+       "titulo": "~revisar el contrato"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "T13",
+   "q": "anotá pagar la luz mañana",
+   "scen": "crear_tarea",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~pagar la luz",
+     "vence_en": "tomorrow"
+    }
+   }
+  },
+  {
+   "id": "T13b",
+   "q": "anotá pagar la luz mañana, 30 minutos",
+   "scen": "crear_tarea_estimado",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~pagar la luz",
+     "vence_en": "tomorrow"
+    }
+   }
+  },
+  {
+   "id": "C01",
+   "q": "agendá reunión con Fabián mañana de 4 a 5",
+   "scen": "crear_compromiso_rango",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "titulo": "~reuni",
+     "persona_id": "match:Fabi",
+     "inicio": "tomorrow 16:00",
+     "fin": "tomorrow 17:00"
+    }
+   }
+  },
+  {
+   "id": "C01b",
+   "q": "compromiso de 4 a 5 con Fabián hoy",
+   "scen": "crear_compromiso_rango",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "persona_id": "match:Fabi",
+     "inicio": "today 16:00",
+     "fin": "today 17:00"
+    }
+   }
+  },
+  {
+   "id": "C01c",
+   "q": "crear compromiso: reunión con Fabián, mañana de 4 a 5",
+   "scen": "crear_compromiso_forma",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "titulo": "~reuni",
+     "persona_id": "match:Fabi",
+     "inicio": "tomorrow 16:00",
+     "fin": "tomorrow 17:00"
+    }
+   }
+  },
+  {
+   "id": "C01d",
+   "q": "reunión con Fabián mañana a las 3 por una hora",
+   "scen": "crear_compromiso_sin_verbo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "persona_id": "match:Fabi",
+     "inicio": "tomorrow 15:00",
+     "fin": "tomorrow 16:00"
+    }
+   }
+  },
+  {
+   "id": "C02",
+   "q": "agendame el dentista el jueves a las 10",
+   "scen": "crear_compromiso_hora",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "titulo": "~dentista",
+     "inicio": "next_thursday 10:00"
+    }
+   }
+  },
+  {
+   "id": "C02b",
+   "q": "poneme una cita con el dentista el viernes de 8 a 9 de la mañana",
+   "scen": "crear_compromiso_rango",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "titulo": "~dentista",
+     "inicio": "next_friday 08:00",
+     "fin": "next_friday 09:00"
+    }
+   }
+  },
+  {
+   "id": "C03",
+   "q": "agendá llamada con Fabián el lunes 16:00",
+   "scen": "crear_compromiso_hora_formato",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "persona_id": "match:Fabi",
+     "inicio": "next_monday 16:00"
+    }
+   }
+  },
+  {
+   "id": "C03b",
+   "q": "agendá reunión de trabajo mañana 4 pm",
+   "scen": "crear_compromiso_hora_formato",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "inicio": "tomorrow 16:00"
+    }
+   }
+  },
+  {
+   "id": "C03c",
+   "q": "agendá reunión con el banco mañana a las cuatro de la tarde",
+   "scen": "crear_compromiso_hora_formato",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "inicio": "tomorrow 16:00"
+    }
+   }
+  },
+  {
+   "id": "C03d",
+   "q": "agendá reunión con el banco mañana a las 4",
+   "scen": "crear_compromiso_hora_formato",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "inicio": "tomorrow 16:00"
+    }
+   }
+  },
+  {
+   "id": "C03e",
+   "q": "agendá reunión mañana a las 8",
+   "scen": "crear_compromiso_hora_formato",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "inicio": "tomorrow 08:00"
+    }
+   }
+  },
+  {
+   "id": "C03f",
+   "q": "agendá almuerzo con Marta el jueves a las 12",
+   "scen": "crear_compromiso_hora_formato",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "persona_id": "match:Marta",
+     "inicio": "next_thursday 12:00"
+    }
+   }
+  },
+  {
+   "id": "C03g",
+   "q": "agendá con Fabián el martes a las 9 y media",
+   "scen": "crear_compromiso_hora_formato",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "persona_id": "match:Fabi",
+     "inicio": "next_tuesday 09:30"
+    }
+   }
+  },
+  {
+   "id": "C03h",
+   "q": "agendá reunión mañana a las 6 y media de la tarde",
+   "scen": "crear_compromiso_hora_formato",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "inicio": "tomorrow 18:30"
+    }
+   }
+  },
+  {
+   "id": "C03i",
+   "q": "agendá reunión con Fabián mañana a las 5",
+   "scen": "crear_compromiso_voz15",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "persona_id": "match:Fabi",
+     "inicio": "tomorrow 17:00"
+    }
+   }
+  },
+  {
+   "id": "C03j",
+   "q": "agendame algo con Marta en una hora",
+   "scen": "crear_compromiso_relativo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "persona_id": "match:Marta"
+    },
+    "alt": [
+     {
+      "kind": "ask_field"
+     },
+     {
+      "kind": "unclear"
+     }
+    ]
+   }
+  },
+  {
+   "id": "C04",
+   "q": "bloqueá mañana de 2 a 4 para estudiar",
+   "scen": "crear_compromiso_rango",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "titulo": "~estudiar",
+     "inicio": "tomorrow 14:00",
+     "fin": "tomorrow 16:00"
+    }
+   }
+  },
+  {
+   "id": "C05",
+   "q": "crear compromiso: almuerzo con Marta, el jueves de 12 a 1",
+   "scen": "crear_compromiso_forma",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "titulo": "~almuerzo",
+     "persona_id": "match:Marta",
+     "inicio": "next_thursday 12:00",
+     "fin": "next_thursday 13:00"
+    }
+   }
+  },
+  {
+   "id": "C05b",
+   "q": "crear compromiso: el jueves de 12 a 1, almuerzo, con Marta",
+   "scen": "crear_compromiso_forma_otro_orden",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "titulo": "~almuerzo",
+     "persona_id": "match:Marta",
+     "inicio": "next_thursday 12:00",
+     "fin": "next_thursday 13:00"
+    }
+   }
+  },
+  {
+   "id": "C06",
+   "q": "agendá almuerzo con Marta Ruis el viernes a la 1",
+   "scen": "crear_compromiso_mal_dictado",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "persona_id": "match:Marta Ruiz",
+     "inicio": "next_friday 13:00"
+    }
+   }
+  },
+  {
+   "id": "C07",
+   "q": "agendá con Fabián",
+   "scen": "crear_compromiso_a_medias",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "ask_field",
+    "resource": "compromisos",
+    "alt": [
+     {
+      "kind": "create",
+      "resource": "compromisos"
+     }
+    ]
+   }
+  },
+  {
+   "id": "C08",
+   "q": "hablar temprano tipo 11 de la mañana con Tía Ana mañana",
+   "scen": "crear_compromiso_sin_verbo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "inicio": "tomorrow 11:00"
+    },
+    "alt": [
+     {
+      "kind": "not_found"
+     },
+     {
+      "kind": "ambiguous"
+     },
+     {
+      "kind": "create",
+      "resource": "tareas"
+     }
+    ]
+   }
+  },
+  {
+   "id": "C09",
+   "q": "agendá dentista mañana a las 10 y llamada con Fabián a las 3",
+   "scen": "dos_intenciones",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "compromisos",
+    "data": {
+     "inicio": "tomorrow 10:00"
+    },
+    "alt": [
+     {
+      "kind": "unclear"
+     },
+     {
+      "kind": "ask_field"
+     }
+    ]
+   }
+  },
+  {
+   "id": "R01",
+   "q": "anotá que hablé con Fabián del techo",
+   "scen": "registro",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "registros",
+    "data": {
+     "texto": "~techo",
+     "persona_id": "match:Fabi"
+    },
+    "alt": [
+     {
+      "kind": "create",
+      "resource": "registros",
+      "data": {
+       "texto": "~techo"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "R02",
+   "q": "registrá que se cayó la plataforma a las 3",
+   "scen": "registro_hora",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "registros",
+    "data": {
+     "texto": "~plataforma",
+     "cuando": "today 15:00"
+    },
+    "alt": [
+     {
+      "kind": "create",
+      "resource": "registros",
+      "data": {
+       "texto": "~plataforma"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "R02b",
+   "q": "la plataforma estuvo caída de 2 a 4",
+   "scen": "registro_sin_verbo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "registros",
+    "data": {
+     "texto": "~plataforma",
+     "cuando": "today 14:00",
+     "hasta": "today 16:00"
+    },
+    "alt": [
+     {
+      "kind": "create",
+      "resource": "registros",
+      "data": {
+       "texto": "~plataforma"
+      }
+     },
+     {
+      "kind": "unclear"
+     }
+    ]
+   }
+  },
+  {
+   "id": "R02c",
+   "q": "anotá que la plataforma se cayó hoy de 2 a 4 de la tarde",
+   "scen": "registro_rango",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "registros",
+    "data": {
+     "texto": "~plataforma",
+     "cuando": "today 14:00",
+     "hasta": "today 16:00"
+    },
+    "alt": [
+     {
+      "kind": "create",
+      "resource": "registros",
+      "data": {
+       "texto": "~plataforma"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "R03",
+   "q": "anotá que pagué la luz",
+   "scen": "registro",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "registros",
+    "data": {
+     "texto": "~pagu"
+    },
+    "alt": [
+     {
+      "kind": "create",
+      "resource": "tareas"
+     }
+    ]
+   }
+  },
+  {
+   "id": "R04",
+   "q": "crear registro: llamé al latonero y no contestó",
+   "scen": "registro_forma",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "registros",
+    "data": {
+     "texto": "~latonero"
+    }
+   }
+  },
+  {
+   "id": "R04b",
+   "q": "registro: la reunión con Marta terminó a las 5",
+   "scen": "registro_forma",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "registros",
+    "data": {
+     "texto": "~reuni"
+    },
+    "alt": [
+     {
+      "kind": "create",
+      "resource": "registros"
+     }
+    ]
+   }
+  },
+  {
+   "id": "R05",
+   "q": "registrá que hablé con el latonero Andrés, área casa",
+   "scen": "registro_forma",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "registros",
+    "data": {
+     "texto": "~latonero",
+     "area_id": "match:casa"
+    },
+    "alt": [
+     {
+      "kind": "create",
+      "resource": "registros",
+      "data": {
+       "texto": "~latonero"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q01",
+   "q": "Tareas pendientes",
+   "scen": "leer_estado",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "estado",
+      "value": "pendiente"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q02",
+   "q": "Tareas hechas",
+   "scen": "leer_estado",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "estado",
+      "value": "hecha"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q03",
+   "q": "Qué tareas urgentes tengo",
+   "scen": "leer_bandera",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "urgente",
+      "value": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q04",
+   "q": "tareas no urgentes",
+   "scen": "leer_bandera",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "urgente",
+      "value": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q05",
+   "q": "Listar compromisos",
+   "scen": "leer_lista",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "compromisos"
+   }
+  },
+  {
+   "id": "Q06",
+   "q": "Listar áreas",
+   "scen": "leer_lista",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "areas"
+   }
+  },
+  {
+   "id": "Q07",
+   "q": "Eventos",
+   "scen": "leer_alias",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "compromisos"
+   }
+  },
+  {
+   "id": "Q08",
+   "q": "Tareas completas",
+   "scen": "leer_alias_estado",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "estado",
+      "value": "hecha"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q09",
+   "q": "Tareas antier",
+   "scen": "leer_periodo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "period": "day_before_yesterday"
+   }
+  },
+  {
+   "id": "Q10",
+   "q": "Tareas hoy",
+   "scen": "leer_periodo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "period": "today"
+   }
+  },
+  {
+   "id": "Q11",
+   "q": "Tareas ayer",
+   "scen": "leer_periodo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "period": "yesterday"
+   }
+  },
+  {
+   "id": "Q12",
+   "q": "Por favor lista todas las tareas creadas en el sistema",
+   "scen": "leer_lista",
+   "settled": false,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas"
+   }
+  },
+  {
+   "id": "Q13",
+   "q": "Resumir tareas",
+   "scen": "leer_lista",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "alt": [
+     {
+      "kind": "count",
+      "resource": "tareas"
+     },
+     {
+      "kind": "summary"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q14",
+   "q": "Eventos listar",
+   "scen": "leer_alias",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "compromisos"
+   }
+  },
+  {
+   "id": "Q15",
+   "q": "favor tráeme los eventos o agendas de ayer de la última semana",
+   "scen": "leer_periodo",
+   "settled": false,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "compromisos",
+    "period": "last_week",
+    "alt": [
+     {
+      "kind": "list",
+      "resource": "compromisos",
+      "period": "yesterday"
+     },
+     {
+      "kind": "list",
+      "resource": "compromisos",
+      "period": "last_7_days"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q16",
+   "q": "persona esposa",
+   "scen": "leer_nombre_voz20",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "not_found",
+    "alt": [
+     {
+      "kind": "list",
+      "resource": "personas"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q17",
+   "q": "Tareas de Fabián",
+   "scen": "leer_nombre_voz20",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "persona_id",
+      "match": "Fabi"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q17b",
+   "q": "tareas de Fabián Gomes",
+   "scen": "leer_nombre_mal_dictado",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "persona_id",
+      "match": "Fabi"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q17c",
+   "q": "cuántas tareas tiene Fabián",
+   "scen": "leer_nombre_voz20",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "count",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "persona_id",
+      "match": "Fabi"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q18",
+   "q": "tarea de tipo de trabajo",
+   "scen": "leer_area_voz20",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "area_id",
+      "match": "trabajo"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q18b",
+   "q": "tareas de trabajo",
+   "scen": "leer_area_voz20",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "area_id",
+      "match": "trabajo"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q18c",
+   "q": "tareas del área casa",
+   "scen": "leer_area_voz20",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "area_id",
+      "match": "casa"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q18d",
+   "q": "qué tengo pendiente en salud",
+   "scen": "leer_area_estado",
+   "settled": false,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "area_id",
+      "match": "salud"
+     },
+     {
+      "field": "estado",
+      "value": "pendiente"
+     }
+    ],
+    "alt": [
+     {
+      "kind": "list",
+      "resource": "tareas",
+      "filters": [
+       {
+        "field": "area_id",
+        "match": "salud"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q19",
+   "q": "qué tengo mañana",
+   "scen": "leer_agenda",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "compromisos",
+    "period": "tomorrow"
+   }
+  },
+  {
+   "id": "Q19b",
+   "q": "cuándo estoy libre el jueves",
+   "scen": "leer_agenda_libre",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "free",
+    "resource": "compromisos",
+    "period": "next_thursday"
+   }
+  },
+  {
+   "id": "Q19c",
+   "q": "qué tengo el jueves a las 10",
+   "scen": "leer_agenda_hora",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "compromisos",
+    "period": "next_thursday",
+    "at": "10:00"
+   }
+  },
+  {
+   "id": "Q19d",
+   "q": "tengo algo el viernes de 2 a 3",
+   "scen": "leer_solapamiento",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "compromisos",
+    "period": "next_friday",
+    "alt": [
+     {
+      "kind": "list",
+      "resource": "compromisos",
+      "period": "next_friday",
+      "at": "14:00"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q19e",
+   "q": "qué compromisos tengo la semana que viene",
+   "scen": "leer_periodo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "compromisos",
+    "period": "next_week"
+   }
+  },
+  {
+   "id": "Q19f",
+   "q": "estoy ocupado mañana a las 4",
+   "scen": "leer_agenda_hora",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "compromisos",
+    "period": "tomorrow",
+    "at": "16:00"
+   }
+  },
+  {
+   "id": "Q20",
+   "q": "tareas de Fabián pendientes",
+   "scen": "leer_dos_filtros",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "persona_id",
+      "match": "Fabi"
+     },
+     {
+      "field": "estado",
+      "value": "pendiente"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q20b",
+   "q": "tareas urgentes de esta semana",
+   "scen": "leer_dos_filtros",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "urgente",
+      "value": true
+     }
+    ],
+    "period": "this_week"
+   }
+  },
+  {
+   "id": "Q20c",
+   "q": "tareas urgentes pendientes",
+   "scen": "leer_dos_filtros",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "urgente",
+      "value": true
+     },
+     {
+      "field": "estado",
+      "value": "pendiente"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q20d",
+   "q": "cuántas tareas hice esta semana",
+   "scen": "leer_dos_filtros",
+   "settled": false,
+   "stateful": false,
+   "expect": {
+    "kind": "count",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "estado",
+      "value": "hecha"
+     }
+    ],
+    "period": "this_week"
+   }
+  },
+  {
+   "id": "Q21",
+   "q": "tareas por área",
+   "scen": "leer_agrupado",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "count",
+    "resource": "tareas",
+    "group_by": "area_id",
+    "alt": [
+     {
+      "kind": "list",
+      "resource": "tareas",
+      "group_by": "area_id"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q21b",
+   "q": "cuántas tareas hay por estado",
+   "scen": "leer_agrupado",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "count",
+    "resource": "tareas",
+    "group_by": "estado"
+   }
+  },
+  {
+   "id": "Q22",
+   "q": "los últimos 3 registros",
+   "scen": "leer_ultimos",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "registros",
+    "limit": 3
+   }
+  },
+  {
+   "id": "Q22b",
+   "q": "qué registros hay de hoy",
+   "scen": "leer_periodo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "registros",
+    "period": "today"
+   }
+  },
+  {
+   "id": "Q23",
+   "q": "tareas vencidas",
+   "scen": "leer_fecha_relativa",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "vence_en",
+      "op": "lt",
+      "value": "now"
+     }
+    ],
+    "alt": [
+     {
+      "kind": "list",
+      "resource": "tareas",
+      "filters": [
+       {
+        "field": "vence_en",
+        "op": "lte",
+        "value": "now"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q23b",
+   "q": "tareas que vencen mañana",
+   "scen": "leer_fecha_campo",
+   "settled": false,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "period": "tomorrow",
+    "alt": [
+     {
+      "kind": "list",
+      "resource": "tareas",
+      "filters": [
+       {
+        "field": "vence_en"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q24",
+   "q": "qué me falta por hacer",
+   "scen": "leer_estado_coloquial",
+   "settled": false,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "estado",
+      "value": "pendiente"
+     }
+    ],
+    "alt": [
+     {
+      "kind": "list",
+      "resource": "tareas"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q25",
+   "q": "cuánto tiempo estimé esta semana",
+   "scen": "leer_suma",
+   "settled": false,
+   "stateful": false,
+   "expect": {
+    "kind": "sum",
+    "resource": "tareas",
+    "period": "this_week",
+    "alt": [
+     {
+      "kind": "sum",
+      "resource": "tareas"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q26",
+   "q": "cuántas tareas hay",
+   "scen": "leer_conteo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "count",
+    "resource": "tareas"
+   }
+  },
+  {
+   "id": "Q26b",
+   "q": "cuántas cosas tengo pendientes",
+   "scen": "leer_alias_conteo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "count",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "estado",
+      "value": "pendiente"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q27",
+   "q": "compromisos con Fabián",
+   "scen": "leer_nombre",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "compromisos",
+    "filters": [
+     {
+      "field": "persona_id",
+      "match": "Fabi"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q27b",
+   "q": "cuántos compromisos tengo con Fabian",
+   "scen": "leer_nombre_sin_tilde",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "count",
+    "resource": "compromisos",
+    "filters": [
+     {
+      "field": "persona_id",
+      "match": "Fabi"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q28",
+   "q": "Gastos",
+   "scen": "otra_app",
+   "settled": false,
+   "stateful": false,
+   "expect": {
+    "kind": "unclear"
+   }
+  },
+  {
+   "id": "Q28b",
+   "q": "Órdenes hoy",
+   "scen": "otra_app",
+   "settled": false,
+   "stateful": false,
+   "expect": {
+    "kind": "unclear"
+   }
+  },
+  {
+   "id": "Q29",
+   "q": "Resumen",
+   "scen": "comando_voz21",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "summary",
+    "alt": [
+     {
+      "kind": "help"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q29b",
+   "q": "Estado",
+   "scen": "comando_voz21",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "census",
+    "alt": [
+     {
+      "kind": "summary"
+     },
+     {
+      "kind": "help"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q29c",
+   "q": "resumen de hoy",
+   "scen": "comando_voz21",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "summary",
+    "alt": [
+     {
+      "kind": "help"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q30",
+   "q": "Agenda",
+   "scen": "frase_suelta",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "guide",
+    "alt": [
+     {
+      "kind": "help"
+     },
+     {
+      "kind": "list",
+      "resource": "compromisos"
+     },
+     {
+      "kind": "unclear"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q30b",
+   "q": "tareas",
+   "scen": "frase_suelta",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas"
+   }
+  },
+  {
+   "id": "Q30c",
+   "q": "urgentes",
+   "scen": "frase_suelta",
+   "settled": false,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "tareas",
+    "filters": [
+     {
+      "field": "urgente",
+      "value": true
+     }
+    ],
+    "alt": [
+     {
+      "kind": "unclear"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Q30d",
+   "q": "mañana",
+   "scen": "frase_suelta",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "compromisos",
+    "period": "tomorrow"
+   }
+  },
+  {
+   "id": "U01",
+   "q": "marcá como hecha la tarea del techo",
+   "scen": "transicion",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "update",
+    "resource": "tareas",
+    "data": {
+     "estado": "hecha"
+    },
+    "where_match": "techo"
+   }
+  },
+  {
+   "id": "U01b",
+   "q": "marcá como hecha la tarea del techo, tomó 90 minutos",
+   "scen": "transicion_con_dato",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "update",
+    "resource": "tareas",
+    "data": {
+     "estado": "hecha",
+     "tiempo_real_min": 90
+    },
+    "where_match": "techo",
+    "alt": [
+     {
+      "kind": "update",
+      "resource": "tareas",
+      "data": {
+       "estado": "hecha"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "U02",
+   "q": "cancelá la tarea de pagar derechos de grado",
+   "scen": "transicion",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "update",
+    "resource": "tareas",
+    "data": {
+     "estado": "cancelada"
+    },
+    "where_match": "derechos"
+   }
+  },
+  {
+   "id": "U03",
+   "q": "ya hice la declaración de renta",
+   "scen": "transicion_coloquial",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "update",
+    "resource": "tareas",
+    "data": {
+     "estado": "hecha"
+    },
+    "where_match": "declaraci"
+   }
+  },
+  {
+   "id": "U03b",
+   "q": "terminé de pagar los derechos de grado",
+   "scen": "transicion_coloquial",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "update",
+    "resource": "tareas",
+    "data": {
+     "estado": "hecha"
+    },
+    "where_match": "derechos"
+   }
+  },
+  {
+   "id": "U03c",
+   "q": "la tarea del seguro está lista",
+   "scen": "transicion_coloquial",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "update",
+    "resource": "tareas",
+    "data": {
+     "estado": "hecha"
+    },
+    "where_match": "seguro"
+   }
+  },
+  {
+   "id": "U04",
+   "q": "cancelá el compromiso con Fabián",
+   "scen": "transicion",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "update",
+    "resource": "compromisos",
+    "data": {
+     "estado": "cancelado"
+    },
+    "where_match": "Fabi"
+   }
+  },
+  {
+   "id": "U05",
+   "q": "arrancá con los ajustes de reto",
+   "scen": "transicion_coloquial",
+   "settled": false,
+   "stateful": false,
+   "expect": {
+    "kind": "update",
+    "resource": "tareas",
+    "data": {
+     "estado": "en_curso"
+    },
+    "where_match": "ajustes",
+    "alt": [
+     {
+      "kind": "unclear"
+     }
+    ]
+   }
+  },
+  {
+   "id": "U05b",
+   "q": "poné en curso la tarea de los ajustes de reto",
+   "scen": "transicion",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "update",
+    "resource": "tareas",
+    "data": {
+     "estado": "en_curso"
+    },
+    "where_match": "ajustes"
+   }
+  },
+  {
+   "id": "U06",
+   "q": "marcá como hecha la tarea de Fabián",
+   "scen": "transicion_nombre_voz20",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "update",
+    "resource": "tareas",
+    "data": {
+     "estado": "hecha"
+    },
+    "where_match": "Fabi",
+    "alt": [
+     {
+      "kind": "ambiguous"
+     }
+    ]
+   }
+  },
+  {
+   "id": "X01",
+   "q": "no, mejor el viernes",
+   "scen": "correccion_fecha",
+   "settled": false,
+   "stateful": true,
+   "expect": {
+    "kind": "confirm",
+    "resource": "tareas",
+    "text": [
+     "Cambié vence en",
+     "el viernes",
+     "Regar las plantas"
+    ],
+    "pre": [
+     "anotá regar las plantas para pasado mañana"
+    ]
+   }
+  },
+  {
+   "id": "X02",
+   "q": "mejor a las 5",
+   "scen": "correccion_hora",
+   "settled": false,
+   "stateful": true,
+   "expect": {
+    "kind": "confirm",
+    "resource": "compromisos",
+    "text": [
+     "Cambié inicio",
+     "17:00",
+     "Fabián Gómez"
+    ],
+    "pre": [
+     "agendá reunión con Fabián mañana a las 4"
+    ]
+   }
+  },
+  {
+   "id": "X03",
+   "q": "sí pero urgente",
+   "scen": "correccion_bandera",
+   "settled": false,
+   "stateful": true,
+   "expect": {
+    "kind": "confirm",
+    "resource": "tareas",
+    "text": [
+     "Cambié urgente",
+     "urgente: <b>sí",
+     "Pagar la luz"
+    ],
+    "pre": [
+     "anotá pagar la luz mañana"
+    ]
+   }
+  },
+  {
+   "id": "X04",
+   "q": "que sea el viernes",
+   "scen": "correccion_fecha",
+   "settled": false,
+   "stateful": true,
+   "expect": {
+    "kind": "confirm",
+    "resource": "compromisos",
+    "text": [
+     "Cambié inicio",
+     "el viernes",
+     "10:00"
+    ],
+    "pre": [
+     "agendá dentista el jueves a las 10"
+    ]
+   }
+  },
+  {
+   "id": "X05",
+   "q": "no",
+   "scen": "cancelar",
+   "settled": false,
+   "stateful": true,
+   "expect": {
+    "kind": "cancelled",
+    "pre": [
+     "anotá regar las plantas"
+    ]
+   }
+  },
+  {
+   "id": "X06",
+   "q": "sí",
+   "scen": "confirmar",
+   "settled": false,
+   "stateful": true,
+   "expect": {
+    "kind": "written",
+    "pre": [
+     "anotá regar las plantas del patio"
+    ]
+   }
+  },
+  {
+   "id": "D01",
+   "q": "anotá comprar pintura y agendá reunión con Fabián mañana a las 4",
+   "scen": "dos_intenciones",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "create",
+    "resource": "tareas",
+    "data": {
+     "titulo": "~pintura"
+    },
+    "alt": [
+     {
+      "kind": "unclear"
+     },
+     {
+      "kind": "create",
+      "resource": "compromisos"
+     }
+    ]
+   }
+  },
+  {
+   "id": "D02",
+   "q": "marcá como hecha la tarea del carro y anotá lavar la moto",
+   "scen": "dos_intenciones",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "update",
+    "resource": "tareas",
+    "data": {
+     "estado": "hecha"
+    },
+    "alt": [
+     {
+      "kind": "unclear"
+     },
+     {
+      "kind": "create",
+      "resource": "tareas"
+     }
+    ]
+   }
+  },
+  {
+   "id": "N01",
+   "q": "anotá llamar a Fabi mañana",
+   "scen": "nombre_ambiguo",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "ambiguous",
+    "resource": "tareas",
+    "alt": [
+     {
+      "kind": "create",
+      "resource": "tareas",
+      "data": {
+       "persona_id": "match:Fabi"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "N02",
+   "q": "compromisos con Fabián Gomes",
+   "scen": "nombre_mal_dictado",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "list",
+    "resource": "compromisos",
+    "filters": [
+     {
+      "field": "persona_id",
+      "match": "Fabi"
+     }
+    ]
+   }
+  },
+  {
+   "id": "N03",
+   "q": "anotá visitar a Lucía Elena el lunes",
+   "scen": "nombre_inexistente",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "not_found",
+    "resource": "tareas",
+    "alt": [
+     {
+      "kind": "create",
+      "resource": "tareas"
+     }
+    ]
+   }
+  },
+  {
+   "id": "H01",
+   "q": "ayuda",
+   "scen": "ayuda",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "help",
+    "alt": [
+     {
+      "kind": "guide"
+     }
+    ]
+   }
+  },
+  {
+   "id": "H02",
+   "q": "qué puedo preguntar",
+   "scen": "ayuda",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "guide",
+    "alt": [
+     {
+      "kind": "help"
+     }
+    ]
+   }
+  },
+  {
+   "id": "H03",
+   "q": "cómo creo algo",
+   "scen": "guia",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "guide",
+    "alt": [
+     {
+      "kind": "help"
+     }
+    ]
+   }
+  },
+  {
+   "id": "H03b",
+   "q": "cómo creo una tarea",
+   "scen": "guia",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "guide",
+    "alt": [
+     {
+      "kind": "help"
+     }
+    ]
+   }
+  },
+  {
+   "id": "H03c",
+   "q": "cómo agendo un compromiso",
+   "scen": "guia",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "guide",
+    "alt": [
+     {
+      "kind": "help"
+     }
+    ]
+   }
+  },
+  {
+   "id": "H04",
+   "q": "qué campos tiene una tarea",
+   "scen": "guia",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "guide",
+    "alt": [
+     {
+      "kind": "help"
+     }
+    ]
+   }
+  },
+  {
+   "id": "H05",
+   "q": "cómo filtro por fecha",
+   "scen": "guia",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "guide",
+    "alt": [
+     {
+      "kind": "help"
+     }
+    ]
+   }
+  },
+  {
+   "id": "H06",
+   "q": "más",
+   "scen": "guia_navegar",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "guide",
+    "alt": [
+     {
+      "kind": "help"
+     }
+    ],
+    "pre": [
+     "cómo creo algo"
+    ]
+   }
+  },
+  {
+   "id": "H07",
+   "q": "Crear",
+   "scen": "frase_suelta",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "guide",
+    "alt": [
+     {
+      "kind": "help"
+     },
+     {
+      "kind": "unclear"
+     },
+     {
+      "kind": "ask_field"
+     }
+    ]
+   }
+  },
+  {
+   "id": "H08",
+   "q": "qué puedo hacer",
+   "scen": "ayuda",
+   "settled": true,
+   "stateful": false,
+   "expect": {
+    "kind": "help",
+    "alt": [
+     {
+      "kind": "guide"
+     }
+    ]
+   }
+  }
+ ]
+}

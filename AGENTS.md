@@ -2308,7 +2308,15 @@ every provocation reply; the box has no synthesizer, the criterion is the
 metric). VOZ-15 stays as the written rule with corpus evidence (25 bare hours,
 all afternoon-consistent); the confirmation says «de la tarde». The sentence
 bank (151 phrases, 31 verbatim from the real history) is the regression
-instrument: `evidencia/AGENDA-ASISTENTE-S1/corpus/`. **A log looks back
+instrument, and since 2026-09-27 it is a GATE: `pkg/ask/testdata/corpus_es.json`
+(151 sentences, 31 verbatim from the owner's history, personal names swapped)
+judged by `pkg/ask/corpus_test.go` against `testdata/agenda.json` with the
+MODEL OFF — no key, no network, no database — in the ordinary lane, both ways:
+a sentence the parser settles must keep settling it WITH the same intention,
+and one it leaves to the model must keep leaving it (a widening is welcome but
+re-baselines `settled` in the file, with the reason in the commit). It caught
+three regressions in three days. The lab runner against a live engine stays in
+`evidencia/AGENDA-ASISTENTE-S1/corpus/` for the paid half. **A log looks back
 (2026-09-25, `pkg/ask/dates.go`):** on a resource whose period target records
 what happened (a range without `no_overlap`, or the creation stamp) a weekday
 is the PAST one («registros del martes», «qué hice el martes» →
@@ -2603,7 +2611,11 @@ and upload validation are IDENTICAL on both. Full doc + setups:
 
 All inherit the normal chain (tenant Host → JWT → RBAC), so a role needs the
 `files` resource in its policy — `"resources": ["files", …]`, `"*"`, or a
-per-resource `permissions` entry `"files": { "actions": ["read","create"] }`
+per-resource `permissions` entry `"files": { "actions": ["read","create"] }`.
+**A MULTI-USER app does not enable `files`** (decision 2026-09-27, FILES-3):
+the store keeps no uploader, so a role that may read files can read ANY file
+of the tenant by id — per-user isolation is not expressible until the store
+records an author
 (actions only — conditions/fields on the built-in store are rejected at load;
 FRONTEND-SPEC-S1 closed the asymmetry where only the role-global form could
 grant it). Local

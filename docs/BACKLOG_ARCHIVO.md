@@ -2635,3 +2635,16 @@ it spawned ENG-5/ENG-6/ENG-7 above and is the input FRONTEND_SPEC/FASE 3 needed.
 | DOC-S3 | **The permanent pattern** — AGENTS.md §The handoff-package rule makes updating the package (and the backlog) a session obligation, so the context cannot silently rot again | The rule sits next to the open-item rule it mirrors; `_COMO_MANTENER.md` maps change-type → file to touch |
 | DOC-S4 | **Stale state claims swept from ESTADO_Y_PLAN_MAESTRO** — the headline "⚠ HAY COLA DE PUSH" was false (`git ls-remote` shows remote `main` == local `HEAD` == `9e1b529`); the memory footprint conflated the 1M-rows-idle figure with the under-load one; the 4-phase strategic plan was missing entirely; the commerce resource count was wrong (12, not 13) | Each corrected figure re-measured or re-read from `docs/BENCHMARKS.md` / the live repo before editing |
 
+### VOZ-27 — CLOSED 2026-09-27 — The Telegram channel stays the OWNER's; each person uses their own Siri
+
+The Telegram receiver and the scheduled digest act with one identity
+(`APPXIMO_TELEGRAM_SUMMARY_TENANT/_ROLE/_USER_ID`), so in a multi-user app
+everyone would receive one person's digest. **Decision (Miguel): do not build
+the per-user channel.** Telegram is the owner's channel; a second person gets
+their own Siri — a long-lived token scoped to `/api/ask,/api/summary` with
+their own user id, measured answering only their own rows and 401 outside the
+scope (AGENDA-MULTIUSUARIO-S1). Every other door already isolates per user.
+**Reconsider when** a second person asks to receive their digest by Telegram,
+or an app is born for several owners with that expectation; the shape is a
+chat→(user, role) map per tenant and a digest consumer that walks the
+subscribed users instead of one env identity.

@@ -1,0 +1,896 @@
+{
+  "$schema": "https://appximo.com/schema/v1",
+  "version": "1",
+  "name": "agenda",
+  "resources": {
+    "areas": {
+      "aliases": [
+        "ambito"
+      ],
+      "fields": {
+        "nombre": {
+          "type": "string",
+          "required": true,
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "dueno_id": {
+          "type": "uuid"
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "dueno_id",
+            "nombre"
+          ],
+          "unique": true
+        }
+      ]
+    },
+    "etiquetas": {
+      "aliases": [
+        "tag"
+      ],
+      "fields": {
+        "nombre": {
+          "type": "string",
+          "required": true,
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "dueno_id": {
+          "type": "uuid"
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "dueno_id",
+            "nombre"
+          ],
+          "unique": true
+        }
+      ]
+    },
+    "personas": {
+      "aliases": [
+        "contacto",
+        "gente"
+      ],
+      "fields": {
+        "nombre": {
+          "type": "string",
+          "required": true,
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "telefono": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "notas": {
+          "type": "text"
+        },
+        "dueno_id": {
+          "type": "uuid"
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        },
+        "actualizado_en": {
+          "type": "time",
+          "auto": "update"
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "nombre"
+          ]
+        }
+      ]
+    },
+    "tareas": {
+      "aliases": [
+        "cosa",
+        "algo que hacer",
+        "quehacer"
+      ],
+      "fields": {
+        "titulo": {
+          "type": "string",
+          "required": true,
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "urgente": {
+          "type": "bool",
+          "default": false
+        },
+        "vence_en": {
+          "type": "time"
+        },
+        "duracion_estimada_min": {
+          "type": "int",
+          "min": 1,
+          "max": 100000
+        },
+        "tiempo_real_min": {
+          "type": "int",
+          "min": 1,
+          "max": 100000
+        },
+        "area_id": {
+          "type": "uuid",
+          "relation": "areas",
+          "on_delete": "set_null"
+        },
+        "persona_id": {
+          "type": "uuid",
+          "relation": "personas",
+          "on_delete": "set_null"
+        },
+        "notas": {
+          "type": "text"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "pendiente",
+            "en_curso",
+            "esperando",
+            "hecha",
+            "cancelada"
+          ],
+          "default": "pendiente",
+          "aliases": {
+            "hecha": [
+              "realizada",
+              "lista",
+              "terminada",
+              "completada",
+              "cumplida",
+              "cerrada",
+              "completa"
+            ],
+            "cancelada": [
+              "anulada",
+              "descartada"
+            ],
+            "en_curso": [
+              "en progreso",
+              "empezada",
+              "iniciada",
+              "arrancada"
+            ],
+            "pendiente": [
+              "por hacer",
+              "sin empezar",
+              "abierta"
+            ],
+            "esperando": [
+              "en espera",
+              "bloqueada"
+            ]
+          },
+          "state_machine": {
+            "initial": "pendiente",
+            "pending": [
+              "pendiente",
+              "en_curso",
+              "esperando"
+            ],
+            "transitions": {
+              "pendiente": [
+                "en_curso",
+                "esperando",
+                "hecha",
+                "cancelada"
+              ],
+              "en_curso": [
+                "esperando",
+                "hecha",
+                "cancelada",
+                "pendiente"
+              ],
+              "esperando": [
+                "en_curso",
+                "hecha",
+                "cancelada",
+                "pendiente"
+              ],
+              "hecha": [],
+              "cancelada": []
+            }
+          }
+        },
+        "dueno_id": {
+          "type": "uuid"
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        },
+        "actualizado_en": {
+          "type": "time",
+          "auto": "update"
+        },
+        "cerrada_en": {
+          "type": "time"
+        }
+      },
+      "relations": {
+        "area": {
+          "type": "belongs_to",
+          "target": "areas",
+          "fk": "area_id"
+        },
+        "personas": {
+          "type": "many_to_many",
+          "target": "personas",
+          "through": "tarea_personas",
+          "fk": "tarea_id",
+          "target_fk": "persona_id"
+        },
+        "etiquetas": {
+          "type": "many_to_many",
+          "target": "etiquetas",
+          "through": "tarea_etiquetas",
+          "fk": "tarea_id",
+          "target_fk": "etiqueta_id"
+        },
+        "compromisos": {
+          "type": "has_many",
+          "target": "compromisos",
+          "fk": "tarea_id"
+        },
+        "registros": {
+          "type": "has_many",
+          "target": "registros",
+          "fk": "tarea_id"
+        },
+        "persona": {
+          "type": "belongs_to",
+          "target": "personas",
+          "fk": "persona_id"
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "estado"
+          ]
+        },
+        {
+          "fields": [
+            "vence_en"
+          ]
+        },
+        {
+          "fields": [
+            "dueno_id",
+            "estado"
+          ]
+        }
+      ],
+      "events": [
+        "create",
+        "update"
+      ]
+    },
+    "tarea_personas": {
+      "fields": {
+        "tarea_id": {
+          "type": "uuid",
+          "relation": "tareas",
+          "required": true,
+          "on_delete": "cascade"
+        },
+        "persona_id": {
+          "type": "uuid",
+          "relation": "personas",
+          "required": true,
+          "on_delete": "cascade"
+        },
+        "dueno_id": {
+          "type": "uuid"
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "tarea_id",
+            "persona_id"
+          ],
+          "unique": true
+        }
+      ]
+    },
+    "tarea_etiquetas": {
+      "fields": {
+        "tarea_id": {
+          "type": "uuid",
+          "relation": "tareas",
+          "required": true,
+          "on_delete": "cascade"
+        },
+        "etiqueta_id": {
+          "type": "uuid",
+          "relation": "etiquetas",
+          "required": true,
+          "on_delete": "cascade"
+        },
+        "dueno_id": {
+          "type": "uuid"
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "tarea_id",
+            "etiqueta_id"
+          ],
+          "unique": true
+        }
+      ]
+    },
+    "compromisos": {
+      "aliases": [
+        "cita",
+        "reunion",
+        "bloque",
+        "evento"
+      ],
+      "fields": {
+        "titulo": {
+          "type": "string",
+          "required": true,
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "inicio": {
+          "type": "time",
+          "required": true
+        },
+        "fin": {
+          "type": "time",
+          "required": true
+        },
+        "zona": {
+          "type": "string",
+          "format": "timezone",
+          "default": "America/Bogota"
+        },
+        "ocupa": {
+          "type": "bool",
+          "default": true
+        },
+        "lugar": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "notas": {
+          "type": "text"
+        },
+        "tarea_id": {
+          "type": "uuid",
+          "relation": "tareas",
+          "on_delete": "set_null"
+        },
+        "persona_id": {
+          "type": "uuid",
+          "relation": "personas",
+          "on_delete": "set_null"
+        },
+        "area_id": {
+          "type": "uuid",
+          "relation": "areas",
+          "on_delete": "set_null"
+        },
+        "estado": {
+          "type": "string",
+          "enum": [
+            "programado",
+            "hecho",
+            "cancelado"
+          ],
+          "default": "programado",
+          "aliases": {
+            "programado": [
+              "agendado",
+              "vigente"
+            ],
+            "hecho": [
+              "cumplido",
+              "asistido",
+              "pasado"
+            ],
+            "cancelado": [
+              "anulado",
+              "suspendido"
+            ]
+          },
+          "state_machine": {
+            "initial": "programado",
+            "pending": [
+              "programado"
+            ],
+            "transitions": {
+              "programado": [
+                "hecho",
+                "cancelado"
+              ],
+              "hecho": [],
+              "cancelado": []
+            }
+          }
+        },
+        "dueno_id": {
+          "type": "uuid"
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        },
+        "actualizado_en": {
+          "type": "time",
+          "auto": "update"
+        }
+      },
+      "ranges": {
+        "horario": {
+          "start": "inicio",
+          "end": "fin",
+          "timezone_field": "zona",
+          "default_duration": "1h",
+          "no_overlap": {
+            "scope": [
+              "dueno_id"
+            ],
+            "when": {
+              "field": "ocupa",
+              "op": "eq",
+              "val": true
+            }
+          }
+        }
+      },
+      "relations": {
+        "tarea": {
+          "type": "belongs_to",
+          "target": "tareas",
+          "fk": "tarea_id"
+        },
+        "persona": {
+          "type": "belongs_to",
+          "target": "personas",
+          "fk": "persona_id"
+        },
+        "area": {
+          "type": "belongs_to",
+          "target": "areas",
+          "fk": "area_id"
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "inicio"
+          ]
+        },
+        {
+          "fields": [
+            "estado"
+          ]
+        }
+      ]
+    },
+    "registros": {
+      "aliases": [
+        "nota",
+        "apunte",
+        "anotacion"
+      ],
+      "fields": {
+        "texto": {
+          "type": "text",
+          "required": true,
+          "minLength": 1
+        },
+        "cuando": {
+          "type": "time",
+          "default": "now"
+        },
+        "hasta": {
+          "type": "time"
+        },
+        "zona": {
+          "type": "string",
+          "format": "timezone",
+          "default": "America/Bogota"
+        },
+        "area_id": {
+          "type": "uuid",
+          "relation": "areas",
+          "on_delete": "set_null"
+        },
+        "persona_id": {
+          "type": "uuid",
+          "relation": "personas",
+          "on_delete": "set_null"
+        },
+        "tarea_id": {
+          "type": "uuid",
+          "relation": "tareas",
+          "on_delete": "set_null"
+        },
+        "compromiso_id": {
+          "type": "uuid",
+          "relation": "compromisos",
+          "on_delete": "set_null"
+        },
+        "dueno_id": {
+          "type": "uuid"
+        },
+        "creado_en": {
+          "type": "time",
+          "auto": "create"
+        },
+        "actualizado_en": {
+          "type": "time",
+          "auto": "update"
+        }
+      },
+      "ranges": {
+        "lapso": {
+          "start": "cuando",
+          "end": "hasta",
+          "timezone_field": "zona",
+          "default_duration": "1h"
+        }
+      },
+      "relations": {
+        "area": {
+          "type": "belongs_to",
+          "target": "areas",
+          "fk": "area_id"
+        },
+        "persona": {
+          "type": "belongs_to",
+          "target": "personas",
+          "fk": "persona_id"
+        },
+        "tarea": {
+          "type": "belongs_to",
+          "target": "tareas",
+          "fk": "tarea_id"
+        },
+        "compromiso": {
+          "type": "belongs_to",
+          "target": "compromisos",
+          "fk": "compromiso_id"
+        }
+      },
+      "indexes": [
+        {
+          "fields": [
+            "cuando"
+          ]
+        },
+        {
+          "fields": [
+            "persona_id"
+          ]
+        }
+      ],
+      "hooks": {
+        "before_create": {
+          "type": "js",
+          "script": "if (data.tarea_id && data.compromiso_id) { result.proceed = false; result.error = 'un registro se une a una tarea O a un compromiso, no a los dos'; }"
+        },
+        "before_update": {
+          "type": "js",
+          "script": "if (data.tarea_id && data.compromiso_id) { result.proceed = false; result.error = 'un registro se une a una tarea O a un compromiso, no a los dos'; }"
+        }
+      }
+    }
+  },
+  "summary": {
+    "resources": [
+      "compromisos",
+      "tareas",
+      "registros",
+      "personas"
+    ],
+    "notify": "changes",
+    "quiet_days": 7
+  },
+  "rbac": {
+    "roles": {
+      "dueno": {
+        "permissions": {
+          "tareas": {
+            "actions": [
+              "read",
+              "create",
+              "update",
+              "delete"
+            ],
+            "conditions": {
+              "field": "dueno_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "compromisos": {
+            "actions": [
+              "read",
+              "create",
+              "update",
+              "delete"
+            ],
+            "conditions": {
+              "field": "dueno_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "registros": {
+            "actions": [
+              "read",
+              "create",
+              "update",
+              "delete"
+            ],
+            "conditions": {
+              "field": "dueno_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "personas": {
+            "actions": [
+              "read",
+              "create",
+              "update",
+              "delete"
+            ],
+            "conditions": {
+              "field": "dueno_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "areas": {
+            "actions": [
+              "read",
+              "create",
+              "update",
+              "delete"
+            ],
+            "conditions": {
+              "field": "dueno_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "etiquetas": {
+            "actions": [
+              "read",
+              "create",
+              "update",
+              "delete"
+            ],
+            "conditions": {
+              "field": "dueno_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "tarea_personas": {
+            "actions": [
+              "read",
+              "create",
+              "delete"
+            ],
+            "conditions": {
+              "field": "dueno_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "tarea_etiquetas": {
+            "actions": [
+              "read",
+              "create",
+              "delete"
+            ],
+            "conditions": {
+              "field": "dueno_id",
+              "op": "eq",
+              "val": "$user_id"
+            }
+          },
+          "files": {
+            "actions": [
+              "read",
+              "create"
+            ]
+          }
+        }
+      },
+      "sistema": {
+        "permissions": {
+          "tareas": {
+            "actions": [
+              "read",
+              "update"
+            ]
+          },
+          "compromisos": {
+            "actions": [
+              "read",
+              "update"
+            ]
+          },
+          "registros": {
+            "actions": [
+              "read"
+            ]
+          },
+          "personas": {
+            "actions": [
+              "read"
+            ]
+          },
+          "areas": {
+            "actions": [
+              "read"
+            ]
+          },
+          "etiquetas": {
+            "actions": [
+              "read"
+            ]
+          }
+        }
+      },
+      "admin": {
+        "resources": "*",
+        "actions": [
+          "*"
+        ]
+      }
+    }
+  },
+  "workflows": {
+    "aviso_15_min": {
+      "trigger": {
+        "type": "time",
+        "resource": "compromisos",
+        "field": "inicio",
+        "before": "15m",
+        "when": {
+          "field": "estado",
+          "op": "eq",
+          "val": "programado"
+        }
+      },
+      "steps": [
+        {
+          "name": "avisar",
+          "type": "enqueue",
+          "config": {
+            "topic": "message.telegram",
+            "data": {
+              "text": "=\"⏰ En 15 min: \" + record.titulo + (record.lugar != nil ? \" · \" + record.lugar : \"\")"
+            }
+          }
+        }
+      ],
+      "role": "sistema"
+    },
+    "avisar_urgente": {
+      "trigger": {
+        "type": "event",
+        "event": "create",
+        "resource": "tareas"
+      },
+      "steps": [
+        {
+          "name": "solo_urgentes",
+          "type": "condition",
+          "config": {
+            "expr": "record.urgente == true"
+          }
+        },
+        {
+          "name": "avisar",
+          "type": "enqueue",
+          "config": {
+            "topic": "message.telegram",
+            "data": {
+              "text": "=\"🔴 Urgente anotada: \" + record.titulo"
+            }
+          }
+        }
+      ],
+      "role": "sistema"
+    },
+    "espejo_estimacion": {
+      "trigger": {
+        "type": "event",
+        "event": "update",
+        "resource": "tareas"
+      },
+      "steps": [
+        {
+          "name": "solo_cerradas_con_datos",
+          "type": "condition",
+          "config": {
+            "expr": "record.estado == 'hecha' && record.duracion_estimada_min != nil && record.tiempo_real_min != nil"
+          }
+        },
+        {
+          "name": "espejo",
+          "type": "enqueue",
+          "config": {
+            "topic": "message.telegram",
+            "data": {
+              "text": "=\"⏱ «\" + record.titulo + \"»: estimaste \" + string(record.duracion_estimada_min) + \" min y te tomó \" + string(record.tiempo_real_min) + \" min\" + (record.tiempo_real_min > record.duracion_estimada_min ? \" (\" + string(int(100 * (record.tiempo_real_min - record.duracion_estimada_min) / record.duracion_estimada_min)) + \" % más de lo que creías)\" : \"\")"
+            }
+          }
+        }
+      ],
+      "role": "sistema"
+    },
+    "resumen_manana": {
+      "trigger": {
+        "type": "cron",
+        "cron": "0 7 * * *",
+        "timezone": "America/Bogota"
+      },
+      "steps": [
+        {
+          "name": "resumen",
+          "type": "enqueue",
+          "config": {
+            "topic": "summary.telegram",
+            "data": {}
+          }
+        }
+      ],
+      "overlap": "skip",
+      "role": "sistema"
+    },
+    "resumen_tarde": {
+      "trigger": {
+        "type": "cron",
+        "cron": "0 19 * * 1-5",
+        "timezone": "America/Bogota"
+      },
+      "steps": [
+        {
+          "name": "resumen",
+          "type": "enqueue",
+          "config": {
+            "topic": "summary.telegram",
+            "data": {}
+          }
+        }
+      ],
+      "overlap": "skip",
+      "role": "sistema"
+    }
+  }
+}

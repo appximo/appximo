@@ -1872,19 +1872,18 @@ applies `lookBack`'s date rule with the pending's resource before storing the
 answered token. Origin: AGENDA-ASISTENTE-S1 addendum 5 (2026-09-25), A-86.
 Decides: agent.
 
-### VOZ-27 — The Telegram channel (digest + reminders) is ONE identity: with several users, everyone gets one person's
+### VOZ-28 — Routines (an event that repeats) do not exist
 
-The Telegram receiver and the scheduled digest act with a fixed identity
-(`APPXIMO_TELEGRAM_SUMMARY_TENANT/_ROLE/_USER_ID`). In a multi-user app each
-person has their own Siri token (measured: their own rows through /api/ask and
-/api/summary, 401 outside the scope), but the Telegram chat and the workflow
-reminders go out as that single identity. Every other door — REST lists and
-by-id reads, writes, aggregates, GraphQL, /api/ask, /api/summary — is already
-per-user (AGENDA-MULTIUSUARIO-S1 measured all of them with two real users).
-**Ready:** a chat→(user, role) map per tenant (a table, or a schema key) and a
-digest consumer that walks the subscribed users instead of one env identity;
-the per-row reminders already know the row's `dueno_id`. Origin:
-AGENDA-MULTIUSUARIO-S1 (2026-09-26). Decides: Miguel.
+A compromiso occupies ONE block of time; there is no way to declare that it
+repeats (daily, Mon/Wed/Fri, every two weeks). ADR-039 wrote down that a
+recurrence MATERIALIZES into rows rather than living as a rule, but it was
+never built, and it is the first thing an owner with habits asks for (reading,
+the gym, the weekly meeting). **POSTPONED (Miguel, 2026-09-27)** — not built
+now. **Ready:** a `repeat` block on a resource with a range (rule + horizon),
+materialized by the worker with an anchor that lets ONE occurrence move or be
+cancelled, plus the written decision about what happens to already
+materialized rows when the rule changes. Origin: AGENDA-ASISTENTE-S1
+(2026-09-25), ADR-039 §Recurrences. Decides: Miguel.
 
 ### FILES-3 — The file store records no uploader, so files cannot be scoped per user
 
@@ -1896,7 +1895,11 @@ enumerable, but a leak). **Ready:** an additive `uploaded_by` column written
 from the JWT subject on POST /api/files; a row condition on `files` limited to
 that column; enforced on GET/DELETE, the signed-URL mint and `Ctx.ServeFile`.
 What happens to pre-existing rows with no author is a decision to write down.
-Origin: AGENDA-MULTIUSUARIO-S1 (2026-09-26). Decides: agent.
+**DEFERRED (Miguel, 2026-09-27) until an app with files exists — and until
+then the RULE IS WRITTEN: a multi-user app does not enable `files`.** No role
+of an app with several owners may list `files` in its RBAC, because the store
+keeps no author and a known id is enough to read someone else's file. Origin:
+AGENDA-MULTIUSUARIO-S1 (2026-09-26). Decides: agent.
 
 ### VOZ-18 — The estimate-vs-real mirror is per task; there is no weekly aggregate («esta semana subestimaste 60 %»)
 

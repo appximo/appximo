@@ -1,6 +1,6 @@
 {
  "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo).",
- "actualizado": "2026-09-26",
+ "actualizado": "2026-09-27",
  "publicacion": {
   "estado": "pausada_deliberada",
   "desde": "2026-08-29",
@@ -1775,28 +1775,12 @@
    "estado": "abierto"
   },
   {
-   "id": "VOZ-27",
-   "titulo": "El canal de Telegram (resumen y recordatorios) es de UNA identidad: con varios usuarios, todos reciben el de uno",
-   "frente": "automatizacion",
-   "que_es": "El receptor de Telegram y el resumen agendado actúan con una identidad fija (`APPXIMO_TELEGRAM_SUMMARY_TENANT/_ROLE/_USER_ID`). En una app con varios usuarios cada uno tiene su Siri (token propio, medido), pero el chat de Telegram y los recordatorios de workflows salen con esa única identidad.",
-   "por_que_importa": "La app ya aísla por usuario en todas las puertas HTTP; el canal de voz por Telegram es el único que no. Mientras sea de un dueño no molesta; con dos personas, una recibiría el resumen de la otra.",
-   "que_lo_destraba": "Un mapa chat→(usuario, rol) por tenant (una tabla o una llave del schema) y que el consumidor del resumen recorra los usuarios suscritos en vez de una identidad de env; los recordatorios por fila ya conocen el `dueno_id` de la fila.",
-   "costo": "medio",
-   "dano": "medio",
-   "prioridad": "P2",
-   "decide": "miguel",
-   "depende_de": [],
-   "bloquea": [],
-   "origen": "AGENDA-MULTIUSUARIO-S1 (2026-09-26): auditoría de separación por usuario con dos usuarios reales",
-   "estado": "abierto"
-  },
-  {
    "id": "FILES-3",
    "titulo": "El almacén de archivos no guarda quién subió cada archivo, así que no se puede aislar por usuario",
    "frente": "motor",
    "que_es": "La tabla `tenant_<id>.files` tiene id/sha256/size/content_type/original_name/created_at: no hay columna de autor. Y el RBAC del recurso virtual `files` acepta SOLO acciones (una condición de fila se rechaza al cargar). En una app multiusuario, cualquier rol con `files: read` puede descargar el archivo de otro si conoce su id (uuid, no enumerable, pero es una fuga).",
    "por_que_importa": "Con la separación por usuario ya cerrada en todas las demás puertas (medido), los archivos son el único recurso sin dueño. Una app de varias personas que suba fotos o documentos lo necesita.",
-   "que_lo_destraba": "Columna `uploaded_by` (aditiva, nullable) escrita con el sujeto del JWT en POST /api/files; permitir una condición de fila sobre `files` limitada a esa columna; aplicarla en GET/DELETE, en la firma de URL y en `Ctx.ServeFile`. Las filas viejas sin autor quedan visibles para quien ya podía verlas (decisión a escribir).",
+   "que_lo_destraba": "DIFERIDO (Miguel, 2026-09-27) hasta que exista una app multiusuario que suba archivos. HASTA ENTONCES, REGLA ESCRITA: ninguna app con varios usuarios habilita `files` — el rol de un usuario no debe declarar `files` en su RBAC, porque el almacén no guarda autor y un id conocido basta para leer el archivo de otro. Cuando se construya: columna `uploaded_by` aditiva escrita con el sujeto del JWT, condición de fila sobre `files` limitada a esa columna, aplicada en GET/DELETE, en la firma de URL y en Ctx.ServeFile.",
    "costo": "medio",
    "dano": "medio",
    "prioridad": "P2",
@@ -1804,6 +1788,22 @@
    "depende_de": [],
    "bloquea": [],
    "origen": "AGENDA-MULTIUSUARIO-S1 (2026-09-26)",
+   "estado": "abierto"
+  },
+  {
+   "id": "VOZ-28",
+   "titulo": "Las rutinas (un evento que se repite: «leer la biblia todos los días de 6 a 7») no existen",
+   "frente": "automatizacion",
+   "que_es": "Un compromiso ocupa UN bloque de tiempo. No hay forma de declarar que se repite (diario, lunes/miércoles/viernes, cada 15 días). ADR-039 dejó escrito que una recurrencia se materializa en filas, no en una regla viva, pero no se construyó.",
+   "por_que_importa": "Es lo primero que pide un dueño con hábitos (leer, gimnasio, la reunión semanal). Hoy se crean a mano una por una, o no se crean.",
+   "que_lo_destraba": "POSPUESTO (Miguel, 2026-09-27): no se construye ahora. Cuando se retome: un bloque `repeat` en el recurso con rango (regla + horizonte), materializado en filas por el worker con un ancla que permita mover o cancelar una sola ocurrencia, y la decisión escrita de qué pasa con las filas ya materializadas cuando cambia la regla.",
+   "costo": "grande",
+   "dano": "medio",
+   "prioridad": "P2",
+   "decide": "miguel",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "AGENDA-ASISTENTE-S1 (2026-09-25): el dueño preguntó por rutinas; ADR-039 §Recurrences",
    "estado": "abierto"
   }
  ]
