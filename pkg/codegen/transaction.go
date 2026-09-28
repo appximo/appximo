@@ -117,6 +117,16 @@ type preparedOp struct {
 	filePolicyRes  *schema.ResourceSchema
 	filePolicyVals map[string]any
 
+	// FILES-3: the file fields of the schema, the policy and the caller —
+	// a file a row references is attachable only by someone who can already
+	// reach it (the same rule the byte routes apply). nil when the schema
+	// declares no file field.
+	fileCols   []FileRefColumn
+	filePolicy *rbac.Policy
+	fileEval   rbac.EvalContext
+	fileRes    *schema.ResourceSchema
+	fileVals   map[string]any
+
 	// ADR-028: the resource's `json` (TEXT) columns, promoted to native values
 	// in the returned row. nil for a resource without them — zero cost.
 	jsonCols []string
@@ -239,6 +249,32 @@ func registerTransactionRoute(r chi.Router, s *schema.APISchema, tdb *db.TenantD
 // RBAC, G2), the compiled validator, EnforceCreateRBAC (create mass-assignment
 // block), CollectUpdate, the before_create/before_update hook — so a batch op is
 // authorized and validated identically to its standalone counterpart.
+// fileColsOfRefs lists the file fields across the batch's resources (the
+// reachability rule needs every column a file id can sit in, not just this
+// operation's).
+func fileColsOfRefs(refs map[string]*txResource) []FileRefColumn {
+	var out []FileRefColumn
+	names := make([]string, 0, len(refs))
+	for n := range refs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		res := refs[n].res
+		fields := make([]string, 0, len(res.Fields))
+		for f := range res.Fields {
+			fields = append(fields, f)
+		}
+		sort.Strings(fields)
+		for _, f := range fields {
+			if res.Fields[f].Type == "file" {
+				out = append(out, FileRefColumn{Resource: n, Column: f})
+			}
+		}
+	}
+	return out
+}
+
 func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, policy *rbac.Policy, evalCtx rbac.EvalContext,
 	hookEval func(ctx context.Context, hook *schema.HookConfig, body map[string]any) (map[string]any, int, string)) (*preparedOp, *txError) {
 
@@ -254,6 +290,7 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 	// Per-operation RBAC: deny-by-default. A role that may not perform this action on
 	// this resource fails the WHOLE transaction with 403 (its per-resource condition
 	// + field allowlist from G2 are carried in eval and applied below).
+	fileCols := fileColsOfRefs(refs)
 	eval := policy.Evaluate(evalCtx, op.Resource, action)
 	if !eval.Allowed {
 		// ENG-27: log whether the role exists at all — body stays "forbidden".
@@ -321,6 +358,9 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 		if resourceHasFilePolicy(&ref.res) {
 			pop.filePolicyRes, pop.filePolicyVals = &ref.res, data
 		}
+		if len(fileCols) > 0 {
+			pop.fileCols, pop.filePolicy, pop.fileEval, pop.fileRes, pop.fileVals = fileCols, policy, evalCtx, &ref.res, data
+		}
 		return pop, nil
 
 	case "update":
@@ -370,6 +410,9 @@ func prepareTxOp(ctx context.Context, op *txOp, refs map[string]*txResource, pol
 		pop := &preparedOp{kind: "update", sql: q, args: args, resource: op.Resource, emit: ref.emitUpdate, allowed: eval.AllowedFields, jsonCols: ref.res.JSONTextColumns(), cond: eval.Condition}
 		if resourceHasFilePolicy(&ref.res) {
 			pop.filePolicyRes, pop.filePolicyVals = &ref.res, sets
+		}
+		if len(fileCols) > 0 {
+			pop.fileCols, pop.filePolicy, pop.fileEval, pop.fileRes, pop.fileVals = fileCols, policy, evalCtx, &ref.res, sets
 		}
 		return pop, nil
 
@@ -421,6 +464,15 @@ func execPreparedOp(ctx context.Context, tx pgx.Tx, tenantID string, p *prepared
 
 	// FILES-1: per-field file attach policy, on the shared tx (same 422 shape
 	// as the single-op counterpart; a violation fails the WHOLE transaction).
+	if len(p.fileCols) > 0 && p.fileRes != nil {
+		rErrs, rErr := CheckFileAttachReachTx(ctx, tx, p.fileCols, p.filePolicy, p.fileEval, p.fileRes, p.fileVals)
+		if rErr != nil {
+			return nil, dbTxError(rErr)
+		}
+		if len(rErrs) > 0 {
+			return nil, &txError{status: http.StatusUnprocessableEntity, op: p.kind, resource: p.resource, msg: "validation_failed", fields: rErrs}
+		}
+	}
 	if p.filePolicyRes != nil {
 		fpErrs, fpErr := CheckFilePoliciesTx(ctx, tx, p.filePolicyRes, p.filePolicyVals)
 		if fpErr != nil {

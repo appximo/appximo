@@ -1,6 +1,6 @@
 {
  "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo).",
- "actualizado": "2026-09-27",
+ "actualizado": "2026-09-28",
  "publicacion": {
   "estado": "pausada_deliberada",
   "desde": "2026-08-29",
@@ -1772,22 +1772,6 @@
    "depende_de": [],
    "bloquea": [],
    "origen": "AGENDA-ASISTENTE-S1 addendum 5 (2026-09-25), decisión A-86",
-   "estado": "abierto"
-  },
-  {
-   "id": "FILES-3",
-   "titulo": "El almacén de archivos no guarda quién subió cada archivo, así que no se puede aislar por usuario",
-   "frente": "motor",
-   "que_es": "La tabla `tenant_<id>.files` tiene id/sha256/size/content_type/original_name/created_at: no hay columna de autor. Y el RBAC del recurso virtual `files` acepta SOLO acciones (una condición de fila se rechaza al cargar). En una app multiusuario, cualquier rol con `files: read` puede descargar el archivo de otro si conoce su id (uuid, no enumerable, pero es una fuga).",
-   "por_que_importa": "Con la separación por usuario ya cerrada en todas las demás puertas (medido), los archivos son el único recurso sin dueño. Una app de varias personas que suba fotos o documentos lo necesita.",
-   "que_lo_destraba": "DIFERIDO (Miguel, 2026-09-27) hasta que exista una app multiusuario que suba archivos. HASTA ENTONCES, REGLA ESCRITA: ninguna app con varios usuarios habilita `files` — el rol de un usuario no debe declarar `files` en su RBAC, porque el almacén no guarda autor y un id conocido basta para leer el archivo de otro. Cuando se construya: columna `uploaded_by` aditiva escrita con el sujeto del JWT, condición de fila sobre `files` limitada a esa columna, aplicada en GET/DELETE, en la firma de URL y en Ctx.ServeFile.",
-   "costo": "medio",
-   "dano": "medio",
-   "prioridad": "P2",
-   "decide": "agente",
-   "depende_de": [],
-   "bloquea": [],
-   "origen": "AGENDA-MULTIUSUARIO-S1 (2026-09-26)",
    "estado": "abierto"
   },
   {

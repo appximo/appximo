@@ -42,6 +42,9 @@ var ErrNotFound = errors.New("files: not found")
 type PutMeta struct {
 	ContentType  string
 	OriginalName string
+	// UploadedBy is the JWT subject of the caller (FILES-3): the one window
+	// the row-ownership rule cannot cover is a file no row references yet.
+	UploadedBy string
 }
 
 // Meta is the stored record of one file: its id (the tenant-scoped handle clients
@@ -52,6 +55,7 @@ type Meta struct {
 	Size         int64     `json:"size"`
 	ContentType  string    `json:"content_type"`
 	OriginalName string    `json:"original_name"`
+	UploadedBy   string    `json:"uploaded_by,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 

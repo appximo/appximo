@@ -2612,10 +2612,17 @@ and upload validation are IDENTICAL on both. Full doc + setups:
 All inherit the normal chain (tenant Host → JWT → RBAC), so a role needs the
 `files` resource in its policy — `"resources": ["files", …]`, `"*"`, or a
 per-resource `permissions` entry `"files": { "actions": ["read","create"] }`.
-**A MULTI-USER app does not enable `files`** (decision 2026-09-27, FILES-3):
-the store keeps no uploader, so a role that may read files can read ANY file
-of the tenant by id — per-user isolation is not expressible until the store
-records an author
+**A file follows the row that references it** (FILES-3, closed 2026-09-28,
+measured with two real users): a file at least one row references is reachable
+only through a row the caller may READ — the referencing resource's RBAC and
+row condition — and a file no row references yet belongs to its UPLOADER
+(`uploaded_by`, written from the JWT subject). Enforced identically on
+`GET /api/files/{id}`, the signed-URL mint, `DELETE`, and the ATTACH at every
+write door (REST, GraphQL, `/api/transaction`, `Ctx.Insert/Update`); a schema
+with no `file` field installs no check and pays nothing. What stays open by
+design: a signed URL an owner mints for their own file opens without a token,
+and a file with no uploader recorded AND no row referencing it (stored before
+this) keeps its old reachability
 (actions only — conditions/fields on the built-in store are rejected at load;
 FRONTEND-SPEC-S1 closed the asymmetry where only the role-global form could
 grant it). Local

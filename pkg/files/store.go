@@ -167,7 +167,7 @@ func (s *Store) Put(ctx context.Context, tenant string, r io.Reader, pm PutMeta)
 		}
 	}
 
-	m := Meta{SHA256: sum, Size: size, ContentType: storedCT, OriginalName: name}
+	m := Meta{SHA256: sum, Size: size, ContentType: storedCT, OriginalName: name, UploadedBy: pm.UploadedBy}
 	id, err := s.store.insert(ctx, tenant, m)
 	if err != nil {
 		// The blob may be left orphaned, which is harmless: it is content-addressed,
@@ -308,4 +308,11 @@ func (s *Store) lookup(ctx context.Context, tenant, id string) (Meta, string, er
 		return Meta{}, "", err
 	}
 	return m, blobKey(tenant, m.SHA256), nil
+}
+
+// UploadedBy answers who uploaded a file ("" when unknown: a row stored before
+// FILES-3, or an upload with no identity). The reachability rule uses it for
+// the ONE window row-ownership cannot cover — a file no row references yet.
+func (s *Store) UploadedBy(ctx context.Context, tenant, id string) (string, error) {
+	return s.store.uploader(ctx, tenant, id)
 }

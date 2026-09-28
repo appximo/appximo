@@ -2648,3 +2648,33 @@ scope (AGENDA-MULTIUSUARIO-S1). Every other door already isolates per user.
 or an app is born for several owners with that expectation; the shape is a
 chat→(user, role) map per tenant and a digest consumer that walks the
 subscribed users instead of one env identity.
+
+### FILES-3 — CLOSED 2026-09-28 — the row's owner covers its file (measured, then built)
+
+The question was precise: with a `file` field on a row that has an owner and a
+row condition, can a second user reach the file? **Measured with two real
+users: yes, by five doors** — `GET /api/files/{id}` served the bytes,
+`GET /api/files/{id}/url` minted a no-auth URL, `DELETE` authorized the same
+way, the id could be ATTACHED to a row of one's own (REST, GraphQL and the
+batch) and then read legitimately, and a file uploaded but not yet attached
+belonged to nobody. Every row-scoped door was already covered: lists, by-id
+reads, `?fields=`, filters, aggregates, GraphQL, `/api/ask`, `/api/summary` —
+and the id was never discoverable, so knowing it was the precondition.
+
+**Built (one implementation, `pkg/codegen/filereach.go`):** a file that at
+least one row REFERENCES is reachable only through a row the caller may read
+(the referencing resource's RBAC + row condition); a file no row references
+yet belongs to its UPLOADER (`uploaded_by`, an additive column written from
+the JWT subject). Enforced on the bytes, the signed-URL mint, the delete, and
+the ATTACH at every write door (REST create/update, GraphQL, `/api/transaction`,
+`Ctx.Insert/Update`). A schema that declares no `file` field installs nothing
+and pays nothing. Evidence, before and after, in the internal repo
+(`evidencia/AGENDA-ASISTENTE-S1/VEREDICTO-FILES-3.md`).
+
+**Deliberately out of scope:** the signed URL an owner mints for their OWN
+file opens without a token (that is what it is for), and a file with no
+uploader recorded and no row referencing it (stored before this change) keeps
+its old reachability — an upgrade does not change what existing rows mean.
+
+**Withdrawn with it:** the rule written on 2026-09-27 that a multi-user app
+must not enable `files`. It is no longer needed.

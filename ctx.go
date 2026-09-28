@@ -754,6 +754,14 @@ func (c *requestCtx) Insert(resource string, data map[string]any) (map[string]an
 	} else if len(fpErrs) > 0 {
 		return nil, &ValidationError{Fields: fpErrs}
 	}
+	// FILES-3: a file a row references is attachable only by a caller who can
+	// already reach it — the same rule the byte routes and every other write
+	// door apply (measured: a second user attached another's file and read it).
+	if rErrs, rErr := codegen.CheckFileAttachReachTx(c.ctx, c.tx, codegen.FileRefColumns(c.eng.schema), c.eng.policy, codegen.EvalContextFromCtx(c.ctx), res, data); rErr != nil {
+		return nil, rErr
+	} else if len(rErrs) > 0 {
+		return nil, &ValidationError{Fields: rErrs}
+	}
 
 	cols, ph, args := pkghandlers.BuildInsertArgs(data)
 	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *",
@@ -801,6 +809,14 @@ func (c *requestCtx) Update(resource, id string, data map[string]any) (map[strin
 		return nil, fpErr
 	} else if len(fpErrs) > 0 {
 		return nil, &ValidationError{Fields: fpErrs}
+	}
+	// FILES-3: a file a row references is attachable only by a caller who can
+	// already reach it — the same rule the byte routes and every other write
+	// door apply (measured: a second user attached another's file and read it).
+	if rErrs, rErr := codegen.CheckFileAttachReachTx(c.ctx, c.tx, codegen.FileRefColumns(c.eng.schema), c.eng.policy, codegen.EvalContextFromCtx(c.ctx), res, data); rErr != nil {
+		return nil, rErr
+	} else if len(rErrs) > 0 {
+		return nil, &ValidationError{Fields: rErrs}
 	}
 
 	keys := sortedKeys(data)

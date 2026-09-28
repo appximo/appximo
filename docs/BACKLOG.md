@@ -1885,22 +1885,6 @@ cancelled, plus the written decision about what happens to already
 materialized rows when the rule changes. Origin: AGENDA-ASISTENTE-S1
 (2026-09-25), ADR-039 §Recurrences. Decides: Miguel.
 
-### FILES-3 — The file store records no uploader, so files cannot be scoped per user
-
-`tenant_<id>.files` is id/sha256/size/content_type/original_name/created_at —
-no author column — and the virtual `files` resource accepts ACTIONS ONLY in
-RBAC (a row condition is rejected at load). In a multi-user app any role with
-`files: read` can download another user's file if it knows the id (a uuid, not
-enumerable, but a leak). **Ready:** an additive `uploaded_by` column written
-from the JWT subject on POST /api/files; a row condition on `files` limited to
-that column; enforced on GET/DELETE, the signed-URL mint and `Ctx.ServeFile`.
-What happens to pre-existing rows with no author is a decision to write down.
-**DEFERRED (Miguel, 2026-09-27) until an app with files exists — and until
-then the RULE IS WRITTEN: a multi-user app does not enable `files`.** No role
-of an app with several owners may list `files` in its RBAC, because the store
-keeps no author and a known id is enough to read someone else's file. Origin:
-AGENDA-MULTIUSUARIO-S1 (2026-09-26). Decides: agent.
-
 ### VOZ-18 — The estimate-vs-real mirror is per task; there is no weekly aggregate («esta semana subestimaste 60 %»)
 
 `espejo_estimacion` sends one message when a task with an estimate closes. A

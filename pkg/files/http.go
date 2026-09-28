@@ -132,9 +132,14 @@ func ProcessUpload(store *Store, maxBytes int64, tenantID string, w http.Respons
 			return
 		}
 
+		uploader := ""
+		if c := auth.ClaimsFromCtx(r.Context()); c != nil {
+			uploader = c.UserID
+		}
 		meta, perr := store.Put(r.Context(), tenantID, part, PutMeta{
 			ContentType:  part.Header.Get("Content-Type"),
 			OriginalName: part.FileName(),
+			UploadedBy:   uploader,
 		})
 		_ = part.Close()
 		if perr != nil {

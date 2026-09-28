@@ -39,6 +39,7 @@ type metaStore interface {
 	ensure(ctx context.Context, tenantID string) error
 	// insert stores m (its ID is assigned by the store) and returns the new id.
 	insert(ctx context.Context, tenantID string, m Meta) (string, error)
+	uploader(ctx context.Context, tenantID, id string) (string, error)
 	// get returns the metadata for id, or ErrNotFound.
 	get(ctx context.Context, tenantID, id string) (Meta, error)
 	// existsSHA reports whether any row for the tenant has this content hash.
@@ -82,6 +83,16 @@ func (s *memStore) insert(_ context.Context, tenant string, m Meta) (string, err
 	}
 	s.rows[tenant][m.ID] = m
 	return m.ID, nil
+}
+
+func (s *memStore) uploader(_ context.Context, tenant, id string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m, ok := s.rows[tenant][id]
+	if !ok {
+		return "", nil
+	}
+	return m.UploadedBy, nil
 }
 
 func (s *memStore) list(_ context.Context, tenant string, limit, offset int) ([]Meta, int, error) {
@@ -205,10 +216,12 @@ CREATE TABLE IF NOT EXISTS %s (
     size          BIGINT      NOT NULL,
     content_type  TEXT,
     original_name TEXT,
+    uploaded_by   UUID,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_files_sha256_%s ON %s (sha256);`,
-		tbl, tenant, tbl)
+CREATE INDEX IF NOT EXISTS idx_files_sha256_%s ON %s (sha256);
+ALTER TABLE %s ADD COLUMN IF NOT EXISTS uploaded_by UUID;`,
+		tbl, tenant, tbl, tbl)
 	if _, err := pool.Exec(ctx, ddl); err != nil {
 		return fmt.Errorf("files: ensure table: %w", err)
 	}
@@ -222,8 +235,8 @@ func (s *pgStore) insert(ctx context.Context, tenant string, m Meta) (string, er
 	}
 	var id string
 	q := fmt.Sprintf(
-		`INSERT INTO %s (sha256, size, content_type, original_name) VALUES ($1,$2,$3,$4) RETURNING id::text`, tbl)
-	if err := s.pool.QueryRow(ctx, q, m.SHA256, m.Size, nullable(m.ContentType), nullable(m.OriginalName)).Scan(&id); err != nil {
+		`INSERT INTO %s (sha256, size, content_type, original_name, uploaded_by) VALUES ($1,$2,$3,$4,$5) RETURNING id::text`, tbl)
+	if err := s.pool.QueryRow(ctx, q, m.SHA256, m.Size, nullable(m.ContentType), nullable(m.OriginalName), nullableUUID(m.UploadedBy)).Scan(&id); err != nil {
 		return "", fmt.Errorf("files: insert metadata: %w", err)
 	}
 	return id, nil
@@ -361,4 +374,32 @@ func isMissingTable(err error) bool {
 		return pgErr.Code == "42P01" || pgErr.Code == "3F000"
 	}
 	return false
+}
+
+// nullableUUID keeps a non-uuid (or empty) uploader out of the column: the
+// store never fails an upload over WHO uploaded it.
+func nullableUUID(s string) any {
+	if _, err := uuid.Parse(s); err != nil {
+		return nil
+	}
+	return s
+}
+
+// uploader answers who uploaded a file — "" when unknown (a legacy row, or an
+// upload made without an identity). FILES-3 uses it for the one window the
+// row-ownership rule cannot cover: a file no row references yet.
+func (s *pgStore) uploader(ctx context.Context, tenant, id string) (string, error) {
+	tbl, err := s.table(tenant)
+	if err != nil {
+		return "", err
+	}
+	var who *string
+	q := fmt.Sprintf(`SELECT uploaded_by::text FROM %s WHERE id = $1`, tbl)
+	if err := s.pool.QueryRow(ctx, q, id).Scan(&who); err != nil {
+		return "", err
+	}
+	if who == nil {
+		return "", nil
+	}
+	return *who, nil
 }

@@ -55,6 +55,14 @@ func policyFromSchema(s *schema.APISchema) *rbac.Policy {
 	return &p
 }
 
+// evalCtxOf is the request's identity for a policy evaluation.
+func evalCtxOf(req *http.Request) rbac.EvalContext {
+	if c := auth.ClaimsFromCtx(req.Context()); c != nil {
+		return rbac.EvalContext{Role: c.Role, UserID: c.UserID, ExternalClientID: c.ExternalClientID}
+	}
+	return rbac.EvalContext{}
+}
+
 // makeRelationRBAC binds the request's identity to policy.Evaluate so the include
 // compiler can decide, per relation target, whether the role may read it (else a
 // 403), its field allowlist (scopes the embedded json_build_object), and its
@@ -313,6 +321,8 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 	// at request time. Built once here (boot), so the per-request closure is just
 	// a bound Evaluate call. nil-safe: a schema with no relations never uses it.
 	policy := policyFromSchema(s)
+	// FILES-3: the file fields this schema declares (empty ⇒ no check runs)
+	fileCols := FileRefColumns(s)
 
 	for _, resName := range names {
 		name := resName
@@ -676,6 +686,15 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 			} else if len(fpErrs) > 0 {
 				markSpan(req, "validate")
 				writeValidationErrs(w, fpErrs)
+				return
+			}
+			// FILES-3: the file must be one this caller can already reach
+			if rErrs, rErr := CheckFileAttachReach(req.Context(), tdb, tc.PGSchema, fileCols, policy, evalCtxOf(req), wres, body); rErr != nil {
+				writeDBErr(w, req, rErr)
+				return
+			} else if len(rErrs) > 0 {
+				markSpan(req, "validate")
+				writeValidationErrs(w, rErrs)
 				return
 			}
 
@@ -1074,6 +1093,14 @@ func BuildRouter(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunne
 
 				// Per-field file attach policy (FILES-1) on the final SET values —
 				// same check, same 422 shape as create.
+				if rErrs, rErr := CheckFileAttachReach(req.Context(), tdb, tc.PGSchema, fileCols, policy, evalCtxOf(req), wres, sets); rErr != nil {
+					writeDBErr(w, req, rErr)
+					return
+				} else if len(rErrs) > 0 {
+					markSpan(req, "validate")
+					writeValidationErrs(w, rErrs)
+					return
+				}
 				if fpErrs, fpErr := CheckFilePoliciesTenant(req.Context(), tdb, tc.PGSchema, wres, sets); fpErr != nil {
 					writeDBErr(w, req, fpErr)
 					return

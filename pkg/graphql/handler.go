@@ -505,6 +505,8 @@ ReactDOM.render(
 // ── schema builder ────────────────────────────────────────────────────────────
 
 func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy, hub *events.Hub) gql.Schema {
+	// FILES-3: every column a file id can sit in (empty ⇒ no check runs).
+	fileCols := codegen.FileRefColumns(s)
 	// Shared scalar/enum/input types — created once per schema instance.
 	orderDir := gql.NewEnum(gql.EnumConfig{
 		Name: "OrderDirection",
@@ -851,7 +853,7 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 				Args: gql.FieldConfigArgument{
 					"input": &gql.ArgumentConfig{Type: gql.NewNonNull(inputTypes[name])},
 				},
-				Resolve: createResolver(name, &resCopy, rv, tdb, hr, policy, hub),
+				Resolve: createResolver(name, &resCopy, rv, tdb, hr, policy, hub, fileCols),
 			}
 		}
 		// updateX(id, input): partial update (PATCH semantics) — exists only when
@@ -864,7 +866,7 @@ func buildGQLSchema(s *schema.APISchema, tdb *db.TenantDB, hr *extensions.HookRu
 					"id":    &gql.ArgumentConfig{Type: gql.NewNonNull(gql.ID)},
 					"input": &gql.ArgumentConfig{Type: gql.NewNonNull(updateInputTypes[name])},
 				},
-				Resolve: updateResolver(name, &resCopy, rv, tdb, hr, policy, hub),
+				Resolve: updateResolver(name, &resCopy, rv, tdb, hr, policy, hub, fileCols),
 			}
 		}
 		mutationFields["delete"+title] = &gql.Field{
@@ -1330,7 +1332,7 @@ func getByIDResolver(name string, tdb *db.TenantDB, policy *rbac.Policy, s *sche
 	}
 }
 
-func createResolver(name string, res *schema.ResourceSchema, rv *schema.ResourceValidator, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy, hub *events.Hub) gql.FieldResolveFn {
+func createResolver(name string, res *schema.ResourceSchema, rv *schema.ResourceValidator, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy, hub *events.Hub, fileCols []codegen.FileRefColumn) gql.FieldResolveFn {
 	// Decided once at schema build (boot), like the REST create path — never per
 	// request (AGENTS: compile at schema load, not the hot path). emitCreate gates
 	// same-tx outbox emission; tbl is the quoted table identifier.
@@ -1417,6 +1419,13 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 
 		// Per-field file attach policy (FILES-1) — same check, same S44 fields
 		// as the REST create (a violation lands in errors[].extensions.fields).
+		// FILES-3: a file a row references is attachable only by a caller
+		// who can already reach it (the same rule the byte routes apply).
+		if rErrs, rErr := codegen.CheckFileAttachReach(p.Context, tdb, tc.PGSchema, fileCols, policy, codegen.EvalContextFromCtx(p.Context), res, body); rErr != nil {
+			return nil, safeDBErr(p.Context, rErr)
+		} else if len(rErrs) > 0 {
+			return nil, &validationError{fields: rErrs}
+		}
 		if fpErrs, fpErr := codegen.CheckFilePoliciesTenant(p.Context, tdb, tc.PGSchema, res, body); fpErr != nil {
 			return nil, safeDBErr(p.Context, fpErr)
 		} else if len(fpErrs) > 0 {
@@ -1467,7 +1476,7 @@ func createResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 // before/after_update hooks, SSE broadcast, and same-tx outbox emission when the
 // resource opts into events:["update"]. It reuses the engine's shared update core
 // (codegen.CollectUpdate + codegen.RunUpdate) so REST and GraphQL never diverge.
-func updateResolver(name string, res *schema.ResourceSchema, rv *schema.ResourceValidator, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy, hub *events.Hub) gql.FieldResolveFn {
+func updateResolver(name string, res *schema.ResourceSchema, rv *schema.ResourceValidator, tdb *db.TenantDB, hr *extensions.HookRunner, policy *rbac.Policy, hub *events.Hub, fileCols []codegen.FileRefColumn) gql.FieldResolveFn {
 	return func(p gql.ResolveParams) (any, error) {
 		tc := tenant.MustFromCtx(p.Context)
 		evalResult, err := checkRBAC(p.Context, policy, name, "update")
@@ -1548,6 +1557,13 @@ func updateResolver(name string, res *schema.ResourceSchema, rv *schema.Resource
 
 		// Per-field file attach policy (FILES-1) on the final SET values — same
 		// check, same S44 fields as the REST update.
+		// FILES-3: a file a row references is attachable only by a caller
+		// who can already reach it (the same rule the byte routes apply).
+		if rErrs, rErr := codegen.CheckFileAttachReach(p.Context, tdb, tc.PGSchema, fileCols, policy, codegen.EvalContextFromCtx(p.Context), res, sets); rErr != nil {
+			return nil, safeDBErr(p.Context, rErr)
+		} else if len(rErrs) > 0 {
+			return nil, &validationError{fields: rErrs}
+		}
 		if fpErrs, fpErr := codegen.CheckFilePoliciesTenant(p.Context, tdb, tc.PGSchema, res, sets); fpErr != nil {
 			return nil, safeDBErr(p.Context, fpErr)
 		} else if len(fpErrs) > 0 {

@@ -2002,10 +2002,63 @@ func (a *App) buildRouter(surf builtSurface) *chi.Mux {
 		} else if a.files != nil {
 			filesSecret := []byte(a.cfg.JWTSecret)
 			policy := surf.policy // capture THIS surface's policy (a hot-swap builds a new router with the new policy)
+			// FILES-3 (2026-09-28): a file a ROW references is reachable only
+			// through a row the caller may read. Measured before this: a second
+			// user with `files: ["read"]` downloaded a file attached to a row
+			// they could not see, and minted a no-auth URL for it. A schema with
+			// no `file` field installs no guard and pays nothing.
+			fileCols := codegen.FileRefColumns(surf.schema)
+			// the uploader lookup travels on the request context, so every
+			// write door asks the same question (FILES-3)
+			if len(fileCols) > 0 {
+				store := a.files
+				sub.Use(func(next http.Handler) http.Handler {
+					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						tc := tenant.FromCtx(r.Context())
+						if tc == nil {
+							next.ServeHTTP(w, r)
+							return
+						}
+						id := tc.ID
+						ctx := codegen.WithFileUploader(r.Context(), func(ctx context.Context, fileID string) (string, error) {
+							return store.UploadedBy(ctx, id, fileID)
+						})
+						next.ServeHTTP(w, r.WithContext(ctx))
+					})
+				})
+			}
+			guard := func(next http.HandlerFunc) http.HandlerFunc {
+				if len(fileCols) == 0 {
+					return next
+				}
+				return func(w http.ResponseWriter, r *http.Request) {
+					tc := tenant.FromCtx(r.Context())
+					if tc == nil {
+						http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+						return
+					}
+					ev := rbac.EvalContext{}
+					if c := auth.ClaimsFromCtx(r.Context()); c != nil {
+						ev = rbac.EvalContext{Role: c.Role, UserID: c.UserID, ExternalClientID: c.ExternalClientID}
+					}
+					ok, err := codegen.FileReachable(r.Context(), a.tdb, tc.PGSchema, fileCols, policy, ev, chi.URLParam(r, "id"))
+					if err != nil {
+						log.Printf("files: reachability check: %v", err)
+					}
+					if err != nil || !ok {
+						// the same uniform 404 an unknown id gets
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusNotFound)
+						_, _ = w.Write([]byte(`{"error":"not found"}`))
+						return
+					}
+					next(w, r)
+				}
+			}
 			sub.Post("/api/files", files.UploadHandler(a.files, a.filesMaxBytes))
-			sub.Get("/api/files/{id}", files.DownloadHandler(a.files))
-			sub.Get("/api/files/{id}/url", files.SignedURLHandler(a.files, filesSecret, a.filesTokenTTL))
-			sub.Delete("/api/files/{id}", files.DeleteHandler(a.files))
+			sub.Get("/api/files/{id}", guard(files.DownloadHandler(a.files)))
+			sub.Get("/api/files/{id}/url", guard(files.SignedURLHandler(a.files, filesSecret, a.filesTokenTTL)))
+			sub.Delete("/api/files/{id}", guard(files.DeleteHandler(a.files)))
 			// Signed-token downloads live OUTSIDE /api: the token IS the credential
 			// (JWT is skipped for this prefix — pkg/auth.skipJWT — and the RBAC
 			// middleware only guards /api/*), but the handler re-verifies signature,
