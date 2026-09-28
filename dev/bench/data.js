@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790482804134,
+  "lastUpdate": 1790563882641,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -8784,6 +8784,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "41939751 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "000daa5825885777e6fbdda3698dad55325e6bcb",
+          "message": "feat(files,codegen,graphql): a file follows the row that references it — FILES-3 closed with evidence, not with a supposition\n\nThe question was precise: with a `file` field on a row that has an owner and a\nrow condition, can a second user reach the file? MEASURED with two real users,\na real upload and a real attach — five doors were open.\n\nCovered already (and re-measured): lists, by-id reads, `?fields=`, filters,\naggregates, GraphQL, /api/ask and /api/summary all scope by the row's owner,\nand the file id never appeared in the other user's responses — knowing the id\nwas the precondition, not discovering it.\n\nOpen, and now closed: `GET /api/files/{id}` served the bytes to anyone with\n`files: [\"read\"]`, `GET /api/files/{id}/url` minted a no-auth URL for someone\nelse's file, `DELETE` authorized the same way, the id could be ATTACHED to a\nrow of one's own through REST, GraphQL and /api/transaction and then read\nlegitimately, and a file uploaded but not yet attached belonged to nobody.\n\nThe rule (one implementation, pkg/codegen/filereach.go): a file at least one\nrow REFERENCES is reachable only through a row the caller may read — the\nreferencing resource's RBAC and row condition, the same ones a list obeys; a\nfile no row references yet belongs to its UPLOADER (`uploaded_by`, an additive\ncolumn written from the JWT subject; a row with no uploader recorded keeps its\nold reachability, because an upgrade does not change what existing rows mean).\nEnforced on the bytes, the signed-URL mint, the delete, and the attach at\nevery write door including the library's Ctx.Insert/Update. The uploader\nlookup travels on the request context, so every door asks the same question. A\nschema with no `file` field installs nothing and pays nothing.\n\nAfter: 404 on the three file routes and 422 `file_not_found` on the four\nattach doors, with the owner keeping full access; the unattached file is the\nuploader's alone. Evidence, before and after, in the internal repo. The rule\nwritten on 2026-09-27 — a multi-user app must not enable `files` — is\nwithdrawn with the backlog item.\n\nAudited without building (answers in the internal repo): the engine has NO\ngeographic field type (eleven types, no PostGIS, no distance filter, no order\nby distance, no declarable spatial index — a bounding box over two float64 is\nwhat exists), and a read plan returns numbers and rows, never a file (six read\noperations, a `file` field never enters a list's columns, and «dame el\nadjunto…» is not settled by the parser).\n\nFull lane green (one testcontainers flake in pkg/migration, green alone and on\na rerun of the whole lane); lint clean; gate 200 cases, 198 same, 2 diff (the\nrandom pending_id and the row order over random ids).\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-28T02:50:52Z",
+          "tree_id": "35f67dab77246bcd9fa2acb0b889f8547c396afe",
+          "url": "https://github.com/appximo/appximo/commit/000daa5825885777e6fbdda3698dad55325e6bcb"
+        },
+        "date": 1790563881880,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6469,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "371736 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6469,
+            "unit": "ns/op",
+            "extra": "371736 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "371736 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "371736 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 72.59,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36831502 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 72.59,
+            "unit": "ns/op",
+            "extra": "36831502 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36831502 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36831502 times\n4 procs"
           }
         ]
       }
