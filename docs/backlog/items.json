@@ -1,6 +1,6 @@
 {
- "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo).",
- "actualizado": "2026-09-28",
+ "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|agenda|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo). Bloque `no_construir` (CENTRO-MANDO-TRASPASO-S1): lo que está DECIDIDO no construir ahora, con su por qué, hasta cuándo y la decisión que lo respalda — es la sección 5 del paquete de traspaso; se edita cuando una decisión de Miguel lo cambia.",
+ "actualizado": "2026-09-29",
  "publicacion": {
   "estado": "pausada_deliberada",
   "desde": "2026-08-29",
@@ -1776,19 +1776,169 @@
   },
   {
    "id": "VOZ-28",
-   "titulo": "Las rutinas (un evento que se repite: «leer la biblia todos los días de 6 a 7») no existen",
-   "frente": "automatizacion",
-   "que_es": "Un compromiso ocupa UN bloque de tiempo. No hay forma de declarar que se repite (diario, lunes/miércoles/viernes, cada 15 días). ADR-039 dejó escrito que una recurrencia se materializa en filas, no en una regla viva, pero no se construyó.",
-   "por_que_importa": "Es lo primero que pide un dueño con hábitos (leer, gimnasio, la reunión semanal). Hoy se crean a mano una por una, o no se crean.",
-   "que_lo_destraba": "POSPUESTO (Miguel, 2026-09-27): no se construye ahora. Cuando se retome: un bloque `repeat` en el recurso con rango (regla + horizonte), materializado en filas por el worker con un ancla que permita mover o cancelar una sola ocurrencia, y la decisión escrita de qué pasa con las filas ya materializadas cuando cambia la regla.",
+   "titulo": "Compromisos repetidos («la clase de los lunes»): las recurrencias no existen",
+   "frente": "agenda",
+   "que_es": "Un compromiso ocupa UN bloque de tiempo. No hay forma de declarar que se repite (cada lunes, cada 15 días, con excepciones). ADR-039 dejó escrito que una recurrencia se materializa en filas, no en una regla viva, pero no se construyó. Los HÁBITOS (AGENDA-3: días de la semana, sin bloquear la agenda, sin acumularse) NO son esto y no lo necesitan.",
+   "por_que_importa": "Es lo primero que pide un dueño con una clase, una reunión semanal, un pago mensual. Hoy se crean a mano una por una, o no se crean.",
+   "que_lo_destraba": "POSPUESTO (Miguel, 2026-09-27): no se construye ahora — es la pieza grande siguiente. Cuando se retome: un bloque `repeat` en el recurso con rango (regla + horizonte), materializado en filas por el worker con un ancla que permita mover o cancelar una sola ocurrencia, y la decisión escrita de qué pasa con las filas ya materializadas cuando cambia la regla.",
    "costo": "grande",
    "dano": "medio",
    "prioridad": "P2",
    "decide": "miguel",
    "depende_de": [],
    "bloquea": [],
-   "origen": "AGENDA-ASISTENTE-S1 (2026-09-25): el dueño preguntó por rutinas; ADR-039 §Recurrences",
+   "origen": "AGENDA-ASISTENTE-S1 (2026-09-25): el dueño preguntó por rutinas; re-alcanzado en CENTRO-MANDO-TRASPASO-S1 (2026-09-29) como compromisos repetidos; ADR-039 §Recurrences",
    "estado": "abierto"
+  },
+  {
+   "id": "AGENDA-1",
+   "titulo": "Listas con ítems (compras, lugares por visitar): recursos `lista` e `item`, sin motor nuevo",
+   "frente": "agenda",
+   "que_es": "Una lista con nombre y tipo y sus ítems, cada uno se tacha (bool `hecho`). Especificada con schema, RBAC por dueño en las dos tablas, cascada al borrar la lista, voz por la forma fija («crear lista: mercado», «crear ítem: leche, lista mercado», «tacha la leche») y su lugar en el parte (en curso, nunca «espera acción»).",
+   "por_que_importa": "Miguel la pidió: hoy una lista de compras se anota como nota o no se anota. Es la pieza más barata de las tres y prueba que la forma fija y los aliases alcanzan para un recurso nuevo sin tocar motor.",
+   "que_lo_destraba": "Que Miguel diga que va primera. Después: desplegar el schema en la agenda (Studio, dry-run → apply), verificar «crear lista/ítem» y el bool por voz con `drill ask` a US$ 0, seis frases nuevas en el banco. Especificación: repo interno agenda/ESPECIFICACION-LISTAS-ADJUNTOS-HABITOS.md §1.",
+   "costo": "medio",
+   "dano": "medio",
+   "prioridad": "P2",
+   "decide": "miguel",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "CENTRO-MANDO-TRASPASO-S1 (2026-09-29): decisiones de Miguel del 25–29/09",
+   "estado": "abierto"
+  },
+  {
+   "id": "AGENDA-2",
+   "titulo": "Adjuntos con ubicación: una foto o PDF pegado a una fila, comprimido en el navegador, sin EXIF/GPS, con la ubicación como campo declarado",
+   "frente": "agenda",
+   "que_es": "Un campo `file` (accept image/pdf, max 3 MB) en registros/tareas + `lugar`, `lat`, `lng` declarados. Decisiones de Miguel: la compresión ocurre en el navegador (canvas → JPEG ~300 KB), el metadato oculto — GPS incluido — se borra SIEMPRE y lo que se quiere guardar se declara a propósito, video fuera (enlace embebido), la referencia es el file_id (nunca una ruta) para poder mudar a almacenamiento de objetos después.",
+   "por_que_importa": "La foto del recibo, del lugar del que se habló, del menú: hoy no hay dónde ponerla. Desde FILES-3 el motor autoriza un archivo por la fila que lo referencia, así que el lado del servidor ya está.",
+   "que_lo_destraba": "Que Miguel la ordene. Después: el cliente de subida (input capture → createImageBitmap con orientación → canvas 1600 px → toBlob 0,8 → POST /api/files → PATCH la fila), el botón «usar mi ubicación» (decidir si es x-appximo-* genérico o pantalla propia), verificar con exiftool cero campos GPS en el blob guardado y las cinco puertas de FILES-3 con un segundo usuario. Especificación §2.",
+   "costo": "grande",
+   "dano": "medio",
+   "prioridad": "P2",
+   "decide": "miguel",
+   "depende_de": [],
+   "bloquea": [
+    "VOZ-29"
+   ],
+   "origen": "CENTRO-MANDO-TRASPASO-S1 (2026-09-29): decisiones de Miguel; VEREDICTO-FILES-3 y AUDITORIA-GEO (2026-09-28)",
+   "estado": "abierto"
+  },
+  {
+   "id": "AGENDA-3",
+   "titulo": "Hábitos: días de la semana, hora y aviso opcionales, con cuándo y dónde; no bloquean la agenda, no se acumulan; «5 de los últimos 7», cero avisos nuevos",
+   "frente": "agenda",
+   "que_es": "Dos recursos (`habitos` con días de la semana — recomendado: siete bools por nombre —, hora HH:MM, lugar, aviso, activo; `marcas` con habito_id + dia, único por día) y ninguna máquina de estados: un hábito sin marcar ese día simplemente no se marcó. Distinto de tarea (se arrastra) y de compromiso (ocupa y choca). Crear en una frase por la forma fija; «ya leí» crea la marca de hoy; la constancia es una ventana de 7 días con el agregado que ya existe; entra en los partes que ya existen, sin rojo.",
+   "por_que_importa": "Leer, la pastilla, el gimnasio: la evidencia de la investigación es que las intenciones de implementación (cuándo + dónde) tienen efecto medio-grande sobre el cumplimiento, y que una racha rota hace abandonar y un aviso que persigue se apaga en una semana — el diseño evita las tres trampas.",
+   "que_lo_destraba": "Que Miguel la ordene, y dos decisiones suyas: si «ya leí» escribe SIN el «sí» (recursos de marca rápida — es un cambio de ADR-037) y si el parte gana una sección genérica de hábitos en pkg/summary (cambio chico de motor por señal) o se resuelve con un workflow. Especificación §3.",
+   "costo": "medio",
+   "dano": "medio",
+   "prioridad": "P2",
+   "decide": "miguel",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "CENTRO-MANDO-TRASPASO-S1 (2026-09-29): decisiones de Miguel",
+   "estado": "abierto"
+  },
+  {
+   "id": "ENG-64",
+   "titulo": "No hay tipo de campo geográfico (ni distancia, ni «cerca de», ni orden por cercanía)",
+   "frente": "motor",
+   "que_es": "Los tipos son once y cerrados; un dato geográfico hoy son dos float64 (lat/lng) con filtros de rango (una caja) o un jsonb con gin (contención, no distancia). El motor ya usa gist por dentro (rangos de tiempo) pero no es declarable.",
+   "por_que_importa": "Una app de «lo que tengo cerca» no se puede escribir sin un servicio externo o aritmética en el cliente. Para la agenda alcanza con lat/lng + lugar en palabras (AGENDA-2), así que hoy no bloquea nada.",
+   "que_lo_destraba": "Una decisión de producto de Miguel con un caso real: tipo (`geo`/`point`) que baje a columna, operador de distancia en el constructor de consultas, orden por expresión, `method: gist` con opclass declarable, y PostGIS (extensión que no todo Postgres administrado trae) vs earthdistance/aritmética sobre dos float64 para radios chicos. Auditoría: evidencia/AGENDA-ASISTENTE-S1/AUDITORIA-GEO-Y-ARCHIVOS-EN-PREGUNTAS.md §1.",
+   "costo": "grande",
+   "dano": "bajo",
+   "prioridad": "P3",
+   "decide": "miguel",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "AUDITORIA-GEO (2026-09-28), registrado en CENTRO-MANDO-TRASPASO-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "VOZ-29",
+   "titulo": "El plan de lectura no devuelve archivos: «mostrame la foto del lugar» no existe",
+   "frente": "automatizacion",
+   "que_es": "La gramática de /api/ask tiene count|list|sum|avg|min|max (+free y las escrituras); un campo `file` aparece en el vocabulario pero nunca en las columnas que una lista pinta, y «el adjunto de la nota contrato» no lo resuelve el parser. El único «archivo» que una pregunta devuelve es la imagen del resumen, que el motor dibuja.",
+   "por_que_importa": "Cuando la agenda tenga fotos (AGENDA-2), pedirlas por voz será lo natural; sin esto, la foto solo se ve en el panel.",
+   "que_lo_destraba": "Después de AGENDA-2: una operación nueva en la gramática cerrada (`file`/`attachment` sobre recurso + fila + campo), la respuesta como URL firmada de GET /api/files/{id}/url (ya autorizada por la fila desde FILES-3) con su vencimiento dicho, Telegram por sendPhoto, y en voz decir «te lo mandé al panel» (una URL no se lee). Auditoría §2 del mismo archivo.",
+   "costo": "medio",
+   "dano": "bajo",
+   "prioridad": "P3",
+   "decide": "agente",
+   "depende_de": [
+    "AGENDA-2"
+   ],
+   "bloquea": [],
+   "origen": "AUDITORIA-GEO-Y-ARCHIVOS (2026-09-28), registrado en CENTRO-MANDO-TRASPASO-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "OPS-64",
+   "titulo": "El token del bot de Telegram quedó expuesto en un chat el 2026-09-18 y no consta que se haya rotado",
+   "frente": "flota",
+   "que_es": "Durante ALERTAS-TELEGRAM-S1 el token de @appximodev_bot apareció en el chat del brief (04 §SEGURIDAD DEL TOKEN tiene la receta). Ese bot hoy es el canal de comandos de la agenda de Miguel (actúa como él: lee y escribe sus filas) y el de alertas de las tres apps del 58 y del panel.",
+   "por_que_importa": "Quien tenga el token puede leer y mandar mensajes como el bot — incluidos los comandos de la agenda — sin tocar ninguna caja. Es el único secreto de producción con exposición conocida.",
+   "que_lo_destraba": "Miguel: @BotFather → /revoke sobre @appximodev_bot → el token nuevo en APPXIMO_TELEGRAM_BOT_TOKEN de agenda, appitools, vetapp y centro (deploy-app.sh --env-add o a mano) → restart de las cuatro unidades y sus workers → verificar en el journal «telegram alert destination verified». Receta: PRODUCTION.md §4.6c.",
+   "costo": "chico",
+   "dano": "alto",
+   "prioridad": "P1",
+   "decide": "miguel",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "ALERTAS-TELEGRAM-S1 (2026-09-18); registrado como item en CENTRO-MANDO-TRASPASO-S1 (2026-09-29) porque vivía solo en 04 y en el contrato",
+   "estado": "abierto"
+  }
+ ],
+ "no_construir": [
+  {
+   "que": "Reparar la cadena de publicación ni cortar releases",
+   "por_que": "La publicación está pausada a propósito mientras Miguel revisa el licenciamiento; el CI rojo (max64 solo en resources_linux.go) es un efecto conocido de esa pausa, no un pendiente urgente. Último release v0.1.13; todo el frente de voz/automatización/agenda existe solo en main y se documenta como «en main».",
+   "hasta": "que Miguel decida reanudar (DEC-2); entonces se corre nuevo_chat_web/prompts/PROMPT_REPARAR_PUBLICACION.md",
+   "decision": "A-69 / DEC-2"
+  },
+  {
+   "que": "Compromisos repetidos («la clase de los lunes») — las recurrencias",
+   "por_que": "Necesitan la maquinaria de repetición (regla + horizonte materializado en filas por el worker, ancla por ocurrencia, qué pasa con lo ya materializado al cambiar la regla). Es la pieza grande siguiente y Miguel la pospuso el 2026-09-27. Los HÁBITOS no son esto (días de la semana, sin bloquear la agenda) y no la desbloquean.",
+   "hasta": "que Miguel la retome",
+   "decision": "VOZ-28 (pospuesto)"
+  },
+  {
+   "que": "Un canal de Telegram por usuario",
+   "por_que": "Telegram queda como canal del dueño (un bot = un consumidor); cada otra persona usa su propio Siri con un token acotado por usuario. Reconsiderar cuando una segunda persona pida su parte por Telegram.",
+   "hasta": "que una segunda persona lo pida",
+   "decision": "VOZ-27 (cerrado 2026-09-27)"
+  },
+  {
+   "que": "Las tres piezas de la agenda (listas, adjuntos con ubicación, hábitos) hasta que Miguel diga cuál primero",
+   "por_que": "Regla de APP-AGENDA-S1 (A-82): una semana de uso real antes de tocar la agenda; nada de repeticiones, jerarquías, droplet propio ni pantallas a medida en 4–6 semanas. Las tres están ESPECIFICADAS con las decisiones de Miguel en agenda/ESPECIFICACION-LISTAS-ADJUNTOS-HABITOS.md (repo interno) para que la sesión que las construya no re-derive nada; construirlas sin orden es construir en vez de exponer.",
+   "hasta": "que Miguel elija el orden (AGENDA-1/2/3)",
+   "decision": "CENTRO-MANDO-TRASPASO-S1 / A-87"
+  },
+  {
+   "que": "Un tipo de campo geográfico",
+   "por_que": "No existe (once tipos cerrados). Dos float64 (lat/lng) con filtros de rango cubren una caja y un pin en un mapa; distancia, «cerca de» y orden por cercanía exigirían un tipo, un operador, orden por expresión, gist declarable y la decisión PostGIS vs aritmética. Es una capacidad ausente, no un agujero.",
+   "hasta": "que un caso real lo pida y Miguel decida (ENG-64)",
+   "decision": "AUDITORIA-GEO 2026-09-28"
+  },
+  {
+   "que": "Borrar por voz",
+   "por_que": "Una fila errada es un hecho sobre el que otros actúan; borrar no tiene confirmación que lo haga reversible. Cancelar existe solo como estado declarado.",
+   "hasta": "nunca",
+   "decision": "ADR-037 / A-78"
+  },
+  {
+   "que": "El frente «recibir un sistema que ya existe» (migración masiva)",
+   "por_que": "Se cierra por confianza: install.sh verifica instalado == pedido, el warning de identidad no pide renombrar, /api/transaction está publicado. Abrirlo es una decisión de producto.",
+   "hasta": "que Miguel decida (MIG-FRONT)",
+   "decision": "A-50"
+  },
+  {
+   "que": "Exclusión por defecto de campos pesados en las colecciones, y un editor de Go en el navegador",
+   "por_que": "La exclusión por defecto rompe el contrato de lectura (`?fields=` empujado al SELECT es la respuesta; SCHEMA-8 registra la alternativa declarada). El editor de Go en el navegador contradice el modelo de un binario + `backend-spec` para agentes.",
+   "hasta": "—",
+   "decision": "A-51 / A4"
   }
  ]
 }

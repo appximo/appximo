@@ -40,7 +40,7 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 **`DEC-*` decisions that only Miguel can take** (the old "Requires a decision
 from Miguel" table, given stable IDs).
 
-**Last reviewed: 2026-09-19 (VOZ-TRAZABILIDAD-S1).** Review history + all DONE
+**Last reviewed: 2026-09-29 (CENTRO-MANDO-TRASPASO-S1).** Review history + all DONE
 session sections: [BACKLOG_ARCHIVO.md](BACKLOG_ARCHIVO.md).
 
 ## OPEN
@@ -1872,7 +1872,7 @@ applies `lookBack`'s date rule with the pending's resource before storing the
 answered token. Origin: AGENDA-ASISTENTE-S1 addendum 5 (2026-09-25), A-86.
 Decides: agent.
 
-### VOZ-28 — Routines (an event that repeats) do not exist
+### VOZ-28 — Repeated appointments («la clase de los lunes»): recurrences do not exist (POSTPONED by Miguel 2026-09-27; habits are NOT this — AGENDA-3)
 
 A compromiso occupies ONE block of time; there is no way to declare that it
 repeats (daily, Mon/Wed/Fri, every two weeks). ADR-039 wrote down that a
@@ -1929,3 +1929,39 @@ in the center's panel, not on the phone. **Ready:** a Telegram destination in
 the center (its own `APPXIMO_TELEGRAM_*`) and a rule in the health reader —
 on ok→false (and back) send ONE message per app, with two-reading hysteresis.
 Origin: APP-AGENDA-S2 Part 2. Decides: agent.
+
+### AGENDA-1 — Lists with items (shopping, places to visit): `lista` + `item` resources, no new engine
+
+- **Origin:** CENTRO-MANDO-TRASPASO-S1 (2026-09-29) — Miguel asked for them on the agenda (his real app); decisions taken in conversation 2026-09-25 → 29.
+- **Impact:** a shopping list is today a note or nothing. Cheapest of the three pieces; proves the fixed form + aliases cover a new resource with zero engine work.
+- **Ready when:** Miguel orders it first. Then: schema deployed on the agenda (Studio dry-run → apply), «crear lista: mercado» / «crear ítem: leche, lista mercado» / the `hecho` bool by voice settled by the parser at US$ 0 (`drill ask`), six new sentences in the bank. The written spec (internal repo): `agenda/ESPECIFICACION-LISTAS-ADJUNTOS-HABITOS.md` §1. Decides: Miguel.
+
+### AGENDA-2 — Attachments with location: a photo/PDF on a row, compressed in the BROWSER, EXIF/GPS always stripped, the location a DECLARED field
+
+- **Origin:** CENTRO-MANDO-TRASPASO-S1 (2026-09-29) — Miguel's decisions: compression happens in the browser (less server load, smaller uploads); hidden metadata incl. GPS is deleted ALWAYS and the wanted location is captured on purpose as a declared field («lo implícito se borra, lo explícito se declara»); video is OUT (embedded link); the reference is the `file_id`, never a disk path, so object storage stays possible. Server side is done since FILES-3 (a file follows the row that references it).
+- **Impact:** the receipt, the place, the menu — nowhere to put them today.
+- **Ready when:** Miguel orders it. Then: the upload client (capture → `createImageBitmap` with orientation → canvas 1600 px → `toBlob` 0.8 → `POST /api/files` → `PATCH` the row), a «use my location» button (decide: generic `x-appximo-*` or an agenda-own screen — the generic `/app` must not guess by column name, C-DOCTRINA-2), `exiftool` shows zero GPS fields on the stored blob, the five FILES-3 doors re-verified with a second user, MinIO in the lab serves the same rows. Spec §2. Blocks VOZ-29. Decides: Miguel.
+
+### AGENDA-3 — Habits: weekdays, optional hour and reminder, with WHEN and WHERE; never block the agenda, never accumulate; «5 of the last 7», zero new alerts
+
+- **Origin:** CENTRO-MANDO-TRASPASO-S1 (2026-09-29) — Miguel's decisions; the distinction from tasks and appointments IS the design (a task drags, an appointment occupies and collides, a habit simply was not marked that day). Days of the week, not full recurrence (that is VOZ-28). Implementation intentions (when + where) are the one strong finding of the research; a broken streak makes people quit; a reminder that chases is turned off in a week.
+- **Impact:** reading, the pill, the gym — the first thing an owner with habits asks for.
+- **Ready when:** Miguel orders it, plus two calls of his: whether «ya leí» writes WITHOUT the «sí» (a "quick-mark" resource list — an amendment to ADR-037) and whether the digest gains a generic habits section in `pkg/summary` (small engine change, by signal: a resource with seven weekday bools + a has_many to a resource with a unique `dia`) or a workflow does it. Spec §3 (schema: `habitos` + `marcas`, unique `(habito_id, dia)`, the 7-day window from the existing aggregate). Decides: Miguel.
+
+### ENG-64 — There is no geographic field type (no distance, no «near», no order by proximity)
+
+- **Origin:** AUDITORIA-GEO-Y-ARCHIVOS-EN-PREGUNTAS (2026-09-28), registered in CENTRO-MANDO-TRASPASO-S1.
+- **Impact, honestly:** an absent capability, not a hole. Two `float64` (lat/lng) with range filters cover a bounding box and a map pin — enough for the agenda (AGENDA-2). «What is near me» needs an external service or client-side math.
+- **Ready when:** a real case and a product decision by Miguel: a `geo`/`point` type that lands on a real column, a distance operator in the query builder, ORDER BY an expression, declarable `method: gist` + opclass, and PostGIS (an extension not every managed Postgres ships) vs `earthdistance`/plain math over two floats for small radii. Decides: Miguel.
+
+### VOZ-29 — The read plan cannot return a file: «mostrame la foto del lugar» does not exist
+
+- **Origin:** same audit (2026-09-28) §2, registered in CENTRO-MANDO-TRASPASO-S1.
+- **Impact:** once the agenda has photos (AGENDA-2), asking for them by voice is the natural door; until then the photo lives only in the panel.
+- **Ready when:** after AGENDA-2: a new operation in the closed plan grammar (`file`/`attachment` over resource + row + field), the answer as the signed URL of `GET /api/files/{id}/url` (row-authorized since FILES-3) with its expiry said, Telegram via `sendPhoto`, and in voice «te lo mandé al panel» (a URL is never read aloud). Depends on AGENDA-2. Decides: agente.
+
+### OPS-64 — The Telegram bot token was exposed in a chat on 2026-09-18 and no rotation is on record
+
+- **Origin:** ALERTAS-TELEGRAM-S1 (2026-09-18) — the token of `@appximodev_bot` appeared in the session brief; the rotation recipe was written in the handoff (04 §SEGURIDAD DEL TOKEN) and never marked done. Registered as an item in CENTRO-MANDO-TRASPASO-S1 (2026-09-29) because it lived only in the handoff and the contract.
+- **Impact, honestly:** the bot is today the COMMAND channel of Miguel's real agenda (it acts as him: reads and writes his rows) and the alert channel of the three 58 apps and the panel. Whoever holds the token can read and send as the bot without touching any box. It is the only production secret with a known exposure.
+- **Ready when:** Miguel revokes it (@BotFather → /revoke) and the new token lands in `APPXIMO_TELEGRAM_BOT_TOKEN` of agenda, appitools, vetapp and centro (`deploy-app.sh --env-add` or by hand), the four units and their workers restart, and the journal prints `telegram alert destination verified`. Recipe: PRODUCTION.md §4.6c. Decides: Miguel.

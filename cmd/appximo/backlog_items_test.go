@@ -40,16 +40,22 @@ type backlogFile struct {
 		Estado string `json:"estado"`
 		Porque string `json:"porque"`
 	} `json:"publicacion"`
+	NoConstruir []struct {
+		Que      string `json:"que"`
+		PorQue   string `json:"por_que"`
+		Hasta    string `json:"hasta"`
+		Decision string `json:"decision"`
+	} `json:"no_construir"`
 	Items []backlogItem `json:"items"`
 }
 
 var (
-	backlogFrentes    = map[string]bool{"motor": true, "flota": true, "automatizacion": true, "comercial": true, "medicion": true, "producto": true, "docs": true}
+	backlogFrentes    = map[string]bool{"motor": true, "flota": true, "automatizacion": true, "agenda": true, "comercial": true, "medicion": true, "producto": true, "docs": true}
 	backlogCostos     = map[string]bool{"chico": true, "medio": true, "grande": true, "decision": true}
 	backlogDanos      = map[string]bool{"alto": true, "medio": true, "bajo": true}
 	backlogPrioridad  = map[string]bool{"P1": true, "P2": true, "P3": true}
 	backlogDecide     = map[string]bool{"miguel": true, "agente": true}
-	backlogItemHeadRe = regexp.MustCompile(`(?m)^### ((?:ENG|SCHEMA|RBAC|OPS|DOC|COMMERCE|SEC|MIG|AUTO|DEC|VOZ|FILES)-[0-9A-Za-z]+|MIG-FRONT) — `)
+	backlogItemHeadRe = regexp.MustCompile(`(?m)^### ((?:ENG|SCHEMA|RBAC|OPS|DOC|COMMERCE|SEC|MIG|AUTO|DEC|VOZ|FILES|AGENDA)-[0-9A-Za-z]+|MIG-FRONT) — `)
 )
 
 func TestBacklogItemsStayStructured(t *testing.T) {
@@ -68,6 +74,15 @@ func TestBacklogItemsStayStructured(t *testing.T) {
 	}
 	if f.Publicacion.Estado == "" || f.Publicacion.Porque == "" {
 		t.Error("items.json: the `publicacion` block must state the publication estado and its porque (the deliberate-pause record)")
+	}
+	// The `no_construir` block is section 5 of the generated handoff package
+	// (CENTRO-MANDO-TRASPASO-S1): every entry says WHAT is not built, WHY, and
+	// which decision backs it — a "don't build this" without its reason gets
+	// re-litigated by the next chat.
+	for i, n := range f.NoConstruir {
+		if strings.TrimSpace(n.Que) == "" || strings.TrimSpace(n.PorQue) == "" || strings.TrimSpace(n.Decision) == "" {
+			t.Errorf("no_construir[%d]: que, por_que and decision are required (got que=%q decision=%q)", i, n.Que, n.Decision)
+		}
 	}
 
 	// Every item carries every field the panel orders by, with closed vocabularies.
