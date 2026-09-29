@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790563882641,
+  "lastUpdate": 1790651146344,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -8856,6 +8856,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36831502 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "57be3cd019413510fdbdcf4bada1e7a7d33318b2",
+          "message": "docs(backlog,manual): the handoff package is generated from the command center — the agenda front, a `no_construir` block, the three agenda pieces specified, and the exposed bot token as a P1 of Miguel's\n\nCENTRO-MANDO-TRASPASO-S1 (panel + docs, no engine change). The register grows\nwhat the generated package reads: a `no_construir` block (what is decided NOT to\nbuild now, with its why, until when and the backing decision — validated by the\ntest), the `agenda` front, AGENDA-1/2/3 (lists, attachments with location,\nhabits — specified with Miguel's decisions in the internal repo, not built),\nENG-64 (no geographic type), VOZ-29 (the read plan returns no file), OPS-64 (the\nTelegram bot token exposed on 2026-09-18 with no rotation on record, P1, decides\nMiguel), and VOZ-28 re-scoped as repeated appointments (recurrences; habits are\nnot that). MANUAL §9 and ESTADO_DEL_MOTOR document the Traspaso screen: a\npaste-able text (cap 40 000 characters, argued) + a zip, built at request time\nfrom live sources over ssh, every byte swept for secrets. Tags NO (A-69).\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01GWWKvHcgKRuMoX1oJS5CH9",
+          "timestamp": "2026-09-29T03:05:13Z",
+          "tree_id": "6fcd530b4bb33a0fd895a497d5f6b1b57f744b30",
+          "url": "https://github.com/appximo/appximo/commit/57be3cd019413510fdbdcf4bada1e7a7d33318b2"
+        },
+        "date": 1790651145463,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6327,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "377053 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6327,
+            "unit": "ns/op",
+            "extra": "377053 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "377053 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "377053 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 69.76,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36888272 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 69.76,
+            "unit": "ns/op",
+            "extra": "36888272 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36888272 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36888272 times\n4 procs"
           }
         ]
       }
