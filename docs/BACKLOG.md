@@ -2047,6 +2047,12 @@ Origin: APP-AGENDA-S2 Part 2. Decides: agent.
 - **Impact:** a public repo pays no minutes; a private one on the Free plan gets 2,000 a month and then the workflows stop — a busier month leaves the project without CI when it is needed, with no visible warning.
 - **Ready when:** Miguel decides — the Windows gate on tags or weekly, the security nightly weekly, or paying for minutes; check Settings → Billing → Actions after the first private month.
 
+### OPS-72 — A FILES-3 test engine still runs on the 105 (≈ 8 days, `appximo-files3`, :8170/9170) and writes its audit log INSIDE the internal repo
+
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06), found when committing the internal repo.
+- **Impact:** PID 3272270 (`/tmp/as/appximo-files3 serve --schema /tmp/as/files-audit.json`), started by the FILES-3 audit (2026-09-28) and never stopped, holds `evidencia/AGENDA-ASISTENTE-S1/engine-audit.log` open (6.2 MB, +21 000 uncommitted lines): every handoff package reports the internal repo dirty, and it eats memory on a 105 that has none (OPS-66).
+- **Ready when:** with Miguel's ok (this session did not start it): `kill 3272270` (exact PID, never `pkill -f`), its scratch tenant/database removed if any, and `git -C /root/appximo-internal checkout -- evidencia/AGENDA-ASISTENTE-S1/engine-audit.log`.
+
 ### DESPACHO — A ride-dispatch prospect: the three pieces, specified to quote and NOT built (CIERRE-Y-TRASPASO-S1)
 
 Specified so the session that builds them — if DEC-13 signs — re-derives

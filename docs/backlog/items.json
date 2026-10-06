@@ -2148,6 +2148,22 @@
    "bloquea": [],
    "origen": "CIERRE-Y-TRASPASO-S1",
    "estado": "abierto"
+  },
+  {
+   "id": "OPS-72",
+   "titulo": "Un motor de prueba de FILES-3 sigue corriendo hace ≈ 8 días en el 105 (`appximo-files3`, :8170/9170) y escribe su auditoría DENTRO del repo interno",
+   "frente": "flota",
+   "costo": "chico",
+   "dano": "bajo",
+   "prioridad": "P3",
+   "decide": "miguel",
+   "que_es": "PID 3272270, `/tmp/as/appximo-files3 serve --schema /tmp/as/files-audit.json --port 8170 --control-port 9170`, arrancado por la auditoría de FILES-3 (28/09) y nunca parado; mantiene abierto `evidencia/AGENDA-ASISTENTE-S1/engine-audit.log` (6,2 MB, +21 000 líneas sin commitear) y deja el repo interno sucio en cada paquete de traspaso.",
+   "por_que_importa": "Ensucia la verificación del paquete (el pie dice «interno: sucio»), ocupa memoria en un 105 sin memoria (OPS-66) y es el tipo de resto que la regla de limpieza de sesiones prohíbe.",
+   "que_lo_destraba": "Con el visto bueno de Miguel (no lo arrancó esta sesión): `kill 3272270` (PID exacto, nunca pkill -f), borrar su tenant/base de prueba si tiene uno, `git -C /root/appximo-internal checkout -- evidencia/AGENDA-ASISTENTE-S1/engine-audit.log`.",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "CIERRE-Y-TRASPASO-S1",
+   "estado": "abierto"
   }
  ],
  "no_construir": [
