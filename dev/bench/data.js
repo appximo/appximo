@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791263149195,
+  "lastUpdate": 1791263202576,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -9072,6 +9072,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "36906666 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "2ae58fe51b7bfd950cfe6ff8e40b412b03a97bfe",
+          "message": "docs(backlog): OPS-72 — a FILES-3 test engine left running on the 105 writes its audit log inside the internal repo (CIERRE-Y-TRASPASO-S1)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BFx665rew7NNpK1KbHDKMV",
+          "timestamp": "2026-10-06T05:06:12Z",
+          "tree_id": "fa679edae656d96335292440a349b75787a2bb86",
+          "url": "https://github.com/appximo/appximo/commit/2ae58fe51b7bfd950cfe6ff8e40b412b03a97bfe"
+        },
+        "date": 1791263201352,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 4076,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "560313 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 4076,
+            "unit": "ns/op",
+            "extra": "560313 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "560313 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "560313 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 41.81,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "57483204 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 41.81,
+            "unit": "ns/op",
+            "extra": "57483204 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "57483204 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "57483204 times\n4 procs"
           }
         ]
       }
