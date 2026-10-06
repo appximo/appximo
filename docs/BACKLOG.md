@@ -40,7 +40,7 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 **`DEC-*` decisions that only Miguel can take** (the old "Requires a decision
 from Miguel" table, given stable IDs).
 
-**Last reviewed: 2026-09-29 (CENTRO-MANDO-TRASPASO-S1).** Review history + all DONE
+**Last reviewed: 2026-10-06 (CIERRE-Y-TRASPASO-S1).** Review history + all DONE
 session sections: [BACKLOG_ARCHIVO.md](BACKLOG_ARCHIVO.md).
 
 ## OPEN
@@ -1624,15 +1624,13 @@ design the confirmations for it; the scheduler's DST policy is written (ADR-031
 §5). **Ready:** steps 2–3 and 5 are their own sessions with Miguel validating
 the experience — the base beneath them is done.
 
-### AUTO-11 — Studio has no visual workflows panel (Code view only)
+### AUTO-11 — Studio has no visual workflows panel (Code view only): event/cron/time triggers, steps, role, overlap, and the runs
 
-Workflows are authorable today as JSON (Studio's Code view validates live
-through /editor/validate), but there is no graphical panel: no
-resource/event dropdowns, no step editor, no run history in Studio. A-70
-declared Studio THE editor of the rules. **Ready:** an editor session
-(pkg/editorui): a Workflows panel faithful to `validateWorkflows` (the same
-pattern as the RBAC and relations panels), plus a runs view reading
-`GET /admin/workflows`.
+- **Origin:** AUTOMATIZACION-S1; re-specified in CIERRE-Y-TRASPASO-S1 (2026-10-06).
+- **Impact:** A-70 declared Studio THE editor of the rules. Workflows are authored today as JSON in Studio's Code view (validated live through `/editor/validate`); without the panel, declarative authoring is for people who write JSON — and Miguel's real agenda already runs five hand-written workflows.
+- **What the panel edits — everything the executor runs:** the trigger — `event` (resource + create/update/delete; the validator requires the resource to declare that action in `events`, so the panel offers to add it), `cron` (5-field / `@daily` / `@every`, with its reading in words + an IANA zone, UTC by default, with ADR-031's DST note) and `time` (resource + a `time` field + `before`/`after` + `grace` + `when` with `eq|ne` and a literal); the ordered steps — `condition{expr}`, `update{resource,id,data}`, `create{resource,data}`, `webhook{url https, hmac_secret_env}`, `enqueue{topic,data}` — each value as a literal or an `=` expression; the `role` (declared roles) and `overlap` skip|allow.
+- **What it is NOT:** not a graph editor — steps are strictly sequential and a false condition stops the run (ADR-031); no new step types, no `http` trigger, no "run now" from Studio in v1.
+- **Ready when:** one to two editor sessions (`pkg/editorui`): (1) a panel faithful to the validator by the two routes the RBAC and relations panels already use — the structural rules mirrored live (the codes of `pkg/schema/workflows_validate.go`: `empty_steps`, `duplicate_step_name`, `missing_cron`, `missing_offset`, `field_not_time`, `trigger_key_conflict`, `missing_topic`, `missing_url`…) and the AUTHORITY in `POST /editor/validate`, which compiles in Go what the browser cannot (expr-lang expressions, cron specs, the declared enqueue loop); (2) a lossless round-trip pinned by a test; (3) a runs view with the platform token Deploy already holds: last run, runs/failed 24 h and `next_run` from `GET /admin/workflows` — which today serves only the LAST run per workflow, so a history of N runs with per-step detail (`public.workflow_runs`) needs a small new query parameter in platformadmin. Done when the agenda's five workflows are rebuilt from the panel without touching Code and the resulting JSON is equivalent to the hand-written one, `validate` clean, browser-verified on desktop and 390×844, assets rebuilt and committed (ADR-025). Decides: agente.
 
 ### AUTO-12 — `appximo up` does not start the worker: a schema with workflows leaves the promise PRINTED on the card, not running
 
@@ -1656,15 +1654,12 @@ the panel and the structured register can point at them; resolved rows moved to
 [BACKLOG_ARCHIVO.md](BACKLOG_ARCHIVO.md). MIG-FRONT (the migration front)
 keeps its own ID above; OPS-47 (alert destination) is DONE — ALERTAS-TELEGRAM-S1.
 
-### DEC-1 — An off-box destination for the 58's backups (the one catastrophic single copy)
+### DEC-1 — An off-box destination for the backups: tiendita, petfriendly and saabado live in ONE copy; only the agenda copies to the 105
 
-The ONLY ✗ `fleet-audit.sh` leaves on both apps of the 58: `BACKUP_COPY_TO`
-is unset, so every backup set dies with that disk (a lost droplet = the golden
-dump, the vetapp data and both apps' secrets, gone). Needs a destination
-Miguel owns (DO Space $5/mo via rclone, or scp to a box he controls) +
-`BACKUP_PASSPHRASE_FILE` so secrets travel encrypted. One line per env file;
-the next backup run proves it (`offbox=yes`). Flagged "this week" since
-DEPLOY-FLOTA-S1.
+- **Origin:** RESILIENCIA-S1 → DEPLOY-FLOTA-S1 → CIERRE-Y-TRASPASO-S1 (2026-10-06).
+- **Impact:** the 58 runs FOUR apps (saabado undocumented, OPS-65). Only the agenda ships its encrypted set off the box (to the 105); the other three keep their only backup on the 58's disk — a lost droplet takes the sets, the tiendita's golden dump, the data and the secrets. The cutover (DEC-11) moves the problem whole unless it is solved first. And the 105 is not real redundancy for everything: its root key reaches the whole fleet and agents work there as root.
+- **Decision (recommended):** a DigitalOcean Space as the primary destination (US$ 5/month, another failure domain; `backup.sh` already supports it via rclone and ships the secrets only encrypted) and the 105 as the agenda's second copy.
+- **Ready when:** Miguel creates the Space `appximo-respaldos` (nyc3, 30-day lifecycle) and a Spaces key limited to that bucket, keeps each passphrase in Bitwarden; exact steps `evidencia/CIERRE-Y-TRASPASO-S1/migracion/PROCEDIMIENTO-DE-CORTE.md` §5; every backup says `offbox=yes`.
 
 ### DEC-2 — Publication is PAUSED on purpose (licensing review); the broken CI is known, not abandoned
 
@@ -1690,6 +1685,13 @@ since 2026-09-18 (workflows executor, the worker among the release assets,
 ESTADO_DEL_MOTOR and the site now say so in one place each instead of
 implying a release carries it. Resuming publication is still Miguel's call
 (licensing), and nothing else was repaired (A-69 stands).
+
+*Addendum (CIERRE-Y-TRASPASO-S1, 2026-10-06):* publication stays paused. The
+public distribution of v0.1.13 is prepared (DEC-12) and `docker-publish.yml`
+no longer publishes from `main`: it pushed `neodevtrix/appximo:latest` +
+`:<sha>` on every green main commit — public images of unreleased code — and
+was dormant only because CI is red, so the parked CI repair would have
+resumed it. The license of the new code is DEC-10.
 
 ### DEC-3 — Publish the v0.1.10 security advisory (the text is ready; it never went out)
 
@@ -1744,6 +1746,33 @@ stat div; the written recommendation is not to.
 Dead-ends at the Cloudflare proxy; the bare-engine demo was deliberately
 retired (petfriendly IS the engine demo). One deletion in Cloudflare.
 
+### DEC-10 — The license of the code after v0.1.13 is Miguel's decision, with an IP lawyer before any new version is published
+
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06).
+- **Impact:** what was published under Apache 2.0 up to v0.1.13 is irrevocable. What was published *in fact* goes further: the repository was public with an Apache `LICENSE` until today, the tags v0.1.14–v0.1.16 sit in the Go module proxy (`proxy.golang.org` serves their source zips; `@latest` = v0.1.16, 2026-08-30), and all of `main` stays cloneable until the close runs (DEC-12). From the close on, the code is not published; under which license anything new would be published — if at all — is undecided.
+- **Ready when:** Miguel consults an intellectual-property lawyer BEFORE publishing any new version (the concrete question: the standing of v0.1.14–v0.1.16, public in the proxy and the history with an Apache `LICENSE`, and the right license for what comes next). No agent proposes or writes a license. Until then publication stays paused (DEC-2, A-69) and the public distribution is v0.1.13 only (DEC-12).
+
+### DEC-11 — The cutover from the 58 to the taller: when, app by app — the agenda changes URL, and its Siri shortcuts with it
+
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06).
+- **Impact:** the taller (s-2vcpu-4gb-amd, nyc2; its IP is in the internal repo) exists; the 58 serves FOUR apps (agenda, tiendita, petfriendly, saabado). Saves the 58 (≈ US$ 18/month). Done wrong: Miguel without his agenda, the shortcuts broken, and — with two consumers of the bot — every notice delivered twice.
+- **What is written:** the parallel-copy script and the cutover procedure, `evidencia/CIERRE-Y-TRASPASO-S1/migracion/PROCEDIMIENTO-DE-CORTE.md` (internal repo), not run: the 105 has no key on the taller (OPS-68). The cutover changes the A records of tiendita/petfriendly/saabado in Cloudflare (TTL 300 s) and the agenda's URL (sslip.io carries the IP in the name); the shortcuts are edited, the tokens do not change.
+- **Ready when:** OPS-68 → `migrar-58.sh --target=root@<IP del taller>` (verified parallel copy, the 58 untouched) → Miguel cuts app by app (petfriendly → tiendita → saabado → agenda) per §2 of the procedure, with DEC-1 solved first. His call: a stable name for the agenda (`agenda.appximo.com`) so the next move never breaks the shortcuts again. The 58 is stopped, not deleted: a snapshot and one stable week before destroying it.
+
+### DEC-12 — Run the close: publish the public distribution of v0.1.13, and only then make appximo/appximo private (one command after `gh auth login`)
+
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06).
+- **Impact:** until it runs, `main` — everything after v0.1.13: voice, workflows, the agenda — is cloneable by anyone. Closing WITHOUT the distribution breaks the technical site, the v0.1.13 download and the two-prompt path, which is in real use (saabado was installed through it on 2026-10-03).
+- **What is ready:** the distribution repo `appximo/appximo.github.io` (technical site, v0.1.13 docs, LICENSE, the v0.1.13 release with the 12 original assets + the 3 installer scripts) in `/root/appximo-dist` + `/root/appximo-dist-release/v0.1.13`: zero source code, secret sweep clean, the student path 25/25 against a local mirror; and the script that publishes it, verifies it from outside and ONLY THEN closes the engine repo. It did not run: the box has no GitHub token.
+- **Ready when:** Miguel runs `gh auth login` (account miguel09acosta) and `bash /root/appximo-internal/evidencia/CIERRE-Y-TRASPASO-S1/dist/publicar-y-cerrar.sh`. The script stops before step 10 if the deployed panel does not include `e743c74` (OPS-67). Lost: 0 stars, 0 watchers (there were 0). Afterwards AGENTS.md and the contract say "private".
+
+### DEC-13 — A ride-dispatch prospect: the stage-1 proposal is about to close, and its scope, values and conditions live only in the architect's conversation
+
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06) — the session brief names it as the first customer who would pay for Appximo; it was nowhere on the board and in no file (not on disk, not in the mail).
+- **Impact:** the first sale. If it cools down for lack of follow-up the project stays with no revenue and no named reference — exactly what the contract (§9) says blocks the business; and a proposal whose values exist only in a chat dies with the chat.
+- **What is already specified:** the three pieces a dispatch needs, specified to quote without re-deriving — geolocation (ENG-65), the driver web app (AUTO-15), the WhatsApp assistant (VOZ-30) — in the internal repo, `comercial/DESPACHO-CARRERAS.md`. A sketch of the dispatch schema (drivers / customers / rides with a race-safe state machine and per-role row scoping, incl. `$external_client_id` for WhatsApp customers) validates against the engine with zero errors and zero warnings (binary 8bef63c).
+- **Ready when:** Miguel (or the architect) pastes the stage-1 scope, values and conditions into `comercial/DESPACHO-CARRERAS.md` §2, the open questions of §9 are answered with the customer (above all: is it enough that the driver app is OPEN? — a PWA cannot track in the background), and Miguel decides to send/sign. With the signature, ENG-65 / AUTO-15 / VOZ-30 are ordered by what stage 1 includes: 6–11 agent sessions for the three at stage-1 level, plus Meta calendar days for WhatsApp that no session shortens. Decides: Miguel.
+
 ### VOZ-14 — Asociar varias personas a un compromiso por voz (many-to-many): the voice writes ONE row per confirmation
 
 «reunión con Fabián y Marta» associates ONE person today, through a
@@ -1756,16 +1785,23 @@ txWriter turns into the main row + N junction rows in ONE transaction
 (`/api/transaction` already does), with a confirmation that lists each person.
 Origin: MOTOR-AGENDA-S1 Part E.1.
 
-### SCHEMA-10 — Studio has no panel for `ranges` nor for the `time` trigger (the Code view preserves them)
+### SCHEMA-10 — Studio has no section for `ranges` in the entity panel (the Code view preserves them)
 
-The `ranges` block (start/end, `no_overlap`, `default_duration`,
-`timezone_field`) and a workflow's `time` trigger are authored only in Studio's
-Code view; the entity panel preserves them losslessly (round-trip pinned) but
-does not edit them. Same class as VOZ-13 (`aliases`) and AUTO-11 (workflows):
-what the voice and the worker execute has no visual face, so «que no se me
-crucen» needs JSON. **Ready:** a Range section in the entity inspector (two
-time-field dropdowns, scope, when, duration) and the `time` trigger in the
-workflows panel once AUTO-11 exists. Origin: MOTOR-AGENDA-S1 Part B.6.
+The `ranges` block (start/end over two `time` fields, `default_duration`,
+`timezone_field`, `no_overlap` with `scope` and `when`) is authored only in
+Studio's Code view; the entity panel preserves it losslessly (round-trip
+pinned) but does not edit it. Same class as VOZ-13 (`aliases`): what the agenda
+executes — «que no se me crucen» — has no visual face. The workflow `time`
+trigger moved to AUTO-11 (CIERRE-Y-TRASPASO-S1, 2026-10-06): a workflows panel
+that cannot edit one of its three triggers would not be faithful. **Ready:** an
+editor session — a Range section in the entity inspector (two `time`-field
+dropdowns, default duration, the zone field among the `string` fields with
+`format: timezone`, a multi-select `scope` and `when` eq|ne with a literal),
+mirroring the ranges validation rules, plus the dry-run warning when
+`no_overlap` is added over rows that already overlap (the migration refuses it
+naming the pairs; the Deploy modal already shows `[blocked]` concerns). Done
+when the agenda's `compromisos` range is rebuilt from the panel and comes out
+identical. Origin: MOTOR-AGENDA-S1 Part B.6; re-scoped in CIERRE-Y-TRASPASO-S1.
 
 ### AUTO-13 — `/admin/workflows` does not show how many reminders are coming
 
@@ -1918,6 +1954,12 @@ nobody can tell which worker each one runs nor whether a deploy changed it;
 and `install.sh` warns when the worker says `dev`. Origin: APP-AGENDA-S1
 Part A. Decides: agent.
 
+### AUTO-16 — There is no Web Push: a web app built on the engine cannot notify a phone whose app is closed
+
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06) — gap found while specifying the driver app (AUTO-15).
+- **Impact:** notices leave today through Telegram (`summary.telegram` / `message.telegram`) and through SSE while the page is open. There is no Web Push (VAPID) sender and nowhere to store a browser's subscription, so every web app on the engine can only notify a user who has it open or uses Telegram. The driver app needs it for an offer with the app closed; the agenda could use it for the 15-minute notice without Telegram. On iPhone, Web Push works only for a web app added to the home screen (iOS ≥ 16.4) — a step the user has to be taught.
+- **Ready when:** one session: VAPID keys by env, a per-user subscriptions resource (owner-scoped RBAC), a `message.push` consumer in the worker (RFC 8291 encryption + RFC 8292 VAPID with the Go standard library — `crypto/ecdh`, `crypto/hkdf`, AES-GCM — no new dependency), the service worker's push handler in the frontend-spec template, verified on Android and on an iPhone with the app installed. It can live first in the consumer's worker (`consumers.Router`) and move into the engine when a second app asks. Decides: agente.
+
 ### OPS-63 — Nobody tells Telegram when an app is DOWN: the command center sees it (salud:false every 10 min) but does not notify
 
 The engine's alerter reports incidents of a LIVE app (stale/failed backup,
@@ -1930,29 +1972,33 @@ the center (its own `APPXIMO_TELEGRAM_*`) and a rule in the health reader —
 on ok→false (and back) send ONE message per app, with two-reading hysteresis.
 Origin: APP-AGENDA-S2 Part 2. Decides: agent.
 
-### AGENDA-1 — Lists with items (shopping, places to visit): `lista` + `item` resources, no new engine
+### AGENDA-1 — Lists with items (shopping, places to visit): `listas` + `items` resources, no new engine — with one decision first: today «lista» means "task done"
 
-- **Origin:** CENTRO-MANDO-TRASPASO-S1 (2026-09-29) — Miguel asked for them on the agenda (his real app); decisions taken in conversation 2026-09-25 → 29.
-- **Impact:** a shopping list is today a note or nothing. Cheapest of the three pieces; proves the fixed form + aliases cover a new resource with zero engine work.
-- **Ready when:** Miguel orders it first. Then: schema deployed on the agenda (Studio dry-run → apply), «crear lista: mercado» / «crear ítem: leche, lista mercado» / the `hecho` bool by voice settled by the parser at US$ 0 (`drill ask`), six new sentences in the bank. The written spec (internal repo): `agenda/ESPECIFICACION-LISTAS-ADJUNTOS-HABITOS.md` §1. Decides: Miguel.
+- **Origin:** CENTRO-MANDO-TRASPASO-S1 (2026-09-29) — Miguel asked for them on the agenda (his real app); decisions taken in conversation 2026-09-25 → 29. Verified against the engine in CIERRE-Y-TRASPASO-S1 (2026-10-06).
+- **Verification (binary 8bef63c, the live agenda schema + the spec's resources, `appximo validate --json`):** AS WRITTEN THE SPEC DOES NOT LOAD — its aliases repeat the resources' own names (`alias_is_resource_name` ×4: «lista», «listas», «ítem», «items»), the enum value `cosas` of `listas.tipo` collides with the existing alias «cosa» of `tareas` (`alias_is_value`), and a resource named `listas` collides with the alias «lista» that MIGUEL gave the `hecha` state of `tareas` («está lista»). With no own-name aliases, `cosas` → `llevar`, and «lista» removed from `hecha`, it validates. Keeping Miguel's «lista», it cannot validate whatever the resource is called, as long as the voice should say «lista». Evidence: internal repo `evidencia/CIERRE-Y-TRASPASO-S1/agenda-verificacion.md`.
+- **Impact:** a shopping list is today a note or nothing. Cheapest of the three pieces; proves the fixed form covers a new resource with zero engine work — but only once «lista» stops meaning «hecha».
+- **Ready when:** Miguel orders it first AND decides what «lista» means in his agenda: (a) a list — «lista» leaves `tareas.estado.hecha`'s aliases (realizada, terminada, completada, cumplida, cerrada, completa stay), recommended; or (b) the done state — then the resource cannot be named or aliased «lista» and the voice loses «crear lista: mercado». Then: schema deployed (Studio dry-run → apply), «crear lista: mercado» / «crear ítem: leche, lista mercado» / the `hecho` bool by voice settled by the parser at US$ 0 (`drill ask`), six new sentences in the bank, and the WHOLE bank re-run (removing one of Miguel's aliases is exactly what the bank catches; measure «… está lista» too). Spec: `agenda/ESPECIFICACION-LISTAS-ADJUNTOS-HABITOS.md` §1 + the corrections file. Decides: Miguel.
 
-### AGENDA-2 — Attachments with location: a photo/PDF on a row, compressed in the BROWSER, EXIF/GPS always stripped, the location a DECLARED field
+### AGENDA-2 — Attachments with location: a photo/PDF on a row, re-encoded in the BROWSER (no EXIF/GPS), the location a DECLARED field
 
-- **Origin:** CENTRO-MANDO-TRASPASO-S1 (2026-09-29) — Miguel's decisions: compression happens in the browser (less server load, smaller uploads); hidden metadata incl. GPS is deleted ALWAYS and the wanted location is captured on purpose as a declared field («lo implícito se borra, lo explícito se declara»); video is OUT (embedded link); the reference is the `file_id`, never a disk path, so object storage stays possible. Server side is done since FILES-3 (a file follows the row that references it).
+- **Origin:** CENTRO-MANDO-TRASPASO-S1 (2026-09-29) — Miguel's decisions: compression happens in the browser (less server load, smaller uploads); hidden metadata incl. GPS is deleted ALWAYS and the wanted location is captured on purpose as a declared field («lo implícito se borra, lo explícito se declara»); video is OUT (embedded link); the reference is the `file_id`, never a disk path, so object storage stays possible. Server side is done since FILES-3 (a file follows the row that references it). Verified against the engine in CIERRE-Y-TRASPASO-S1 (2026-10-06).
+- **Verification:** the schema block (`foto` file accept image/pdf max 3 MB `set_null`, `enlace` url, `lugar`, `lat`/`lng` float64 with bounds) validates on the live schema. Two findings: (1) the embedded `/app` uploads the ORIGINAL file — `POST /api/files` with the `File` as picked, no re-encode, EXIF kept — so a 4–8 MB phone photo fails at attach (422 `file_policy`, max 3 MB) and a smaller one keeps its GPS: the browser re-encode is not optional, it IS the UI piece; (2) the `dueno` role has `files {read, create}` today — the spec said it already had `delete`; it does not.
 - **Impact:** the receipt, the place, the menu — nowhere to put them today.
-- **Ready when:** Miguel orders it. Then: the upload client (capture → `createImageBitmap` with orientation → canvas 1600 px → `toBlob` 0.8 → `POST /api/files` → `PATCH` the row), a «use my location» button (decide: generic `x-appximo-*` or an agenda-own screen — the generic `/app` must not guess by column name, C-DOCTRINA-2), `exiftool` shows zero GPS fields on the stored blob, the five FILES-3 doors re-verified with a second user, MinIO in the lab serves the same rows. Spec §2. Blocks VOZ-29. Decides: Miguel.
+- **Ready when:** Miguel orders it and decides WHERE the re-encode lives: (a) in the generic `/app`, by field TYPE — every `file` field that accepts `image` is re-encoded in the browser (`createImageBitmap` with `imageOrientation: 'from-image'` → canvas, long side 1600 px → `toBlob` JPEG 0.8): generic, never guessing by column name, useful to every app — recommended; or (b) an agenda-own screen. The «use my location» button stays open (a declared `x-appximo-*` or an own screen; C-DOCTRINA-2). Add `delete` to `dueno`'s `files` grant if photos are to be replaced or removed (otherwise a replacement leaves orphans: OPS-21). Then: `exiftool` shows zero GPS fields on the stored blob, the five FILES-3 doors re-verified with a second user, MinIO in the lab serves the same rows. Spec §2. Blocks VOZ-29. Decides: Miguel.
 
-### AGENDA-3 — Habits: weekdays, optional hour and reminder, with WHEN and WHERE; never block the agenda, never accumulate; «5 of the last 7», zero new alerts
+### AGENDA-3 — Habits: weekdays, optional hour, with WHEN and WHERE; never block the agenda, never accumulate; «5 of the last 7» — and a per-habit reminder has no trigger yet
 
-- **Origin:** CENTRO-MANDO-TRASPASO-S1 (2026-09-29) — Miguel's decisions; the distinction from tasks and appointments IS the design (a task drags, an appointment occupies and collides, a habit simply was not marked that day). Days of the week, not full recurrence (that is VOZ-28). Implementation intentions (when + where) are the one strong finding of the research; a broken streak makes people quit; a reminder that chases is turned off in a week.
+- **Origin:** CENTRO-MANDO-TRASPASO-S1 (2026-09-29) — Miguel's decisions; the distinction from tasks and appointments IS the design (a task drags, an appointment occupies and collides, a habit simply was not marked that day). Days of the week, not full recurrence (that is VOZ-28). Verified against the engine in CIERRE-Y-TRASPASO-S1 (2026-10-06).
+- **Verification (binary 8bef63c):** AS WRITTEN THE SPEC DOES NOT LOAD — own-name aliases (`alias_is_resource_name` ×4: «hábito», «habitos», «marca», «marcas») and «hecho» on `marcas` is a value of `compromisos.estado` (`alias_is_value`). With only «rutina» on `habitos`, no aliases on `marcas`, and the days as seven `bool` fields named with the FULL weekday (lunes…domingo, so the parser can resolve them by name), it validates. And the spec's per-habit reminder "with the same `time` trigger as appointments" cannot work: that trigger requires a field of type `time` (`field_not_time`) and `hora` is an `HH:MM` string with no date.
 - **Impact:** reading, the pill, the gym — the first thing an owner with habits asks for.
-- **Ready when:** Miguel orders it, plus two calls of his: whether «ya leí» writes WITHOUT the «sí» (a "quick-mark" resource list — an amendment to ADR-037) and whether the digest gains a generic habits section in `pkg/summary` (small engine change, by signal: a resource with seven weekday bools + a has_many to a resource with a unique `dia`) or a workflow does it. Spec §3 (schema: `habitos` + `marcas`, unique `(habito_id, dia)`, the 7-day window from the existing aggregate). Decides: Miguel.
+- **Ready when:** Miguel orders it, plus three calls of his (two already written + one new): whether «ya leí» writes WITHOUT the «sí» (an ADR-037 amendment); whether the digest gains a generic habits section in `pkg/summary` or a workflow does it; and — new — the reminder: (a) v1 without per-habit reminders, the digest only (consistent with "zero new alerts") — recommended; (b) a `proximo_aviso` `time` field that an `update` step of the same workflow moves to the next marked day (weekday arithmetic in expr-lang: unverified); or (c) a weekly trigger in the engine. Before deploying, measure with `drill ask` two unverified things: that «lunes miércoles y viernes» inside a create reads as three bools and not as a date, and that «hoy» on `marcas.dia` resolves to midnight in Bogotá (if it resolves to "now", the per-day unique index does not de-duplicate; the alternative is `dia` as a `string` with `format: date`). Spec §3 + the corrections file. Decides: Miguel.
 
 ### ENG-64 — There is no geographic field type (no distance, no «near», no order by proximity)
 
-- **Origin:** AUDITORIA-GEO-Y-ARCHIVOS-EN-PREGUNTAS (2026-09-28), registered in CENTRO-MANDO-TRASPASO-S1.
-- **Impact, honestly:** an absent capability, not a hole. Two `float64` (lat/lng) with range filters cover a bounding box and a map pin — enough for the agenda (AGENDA-2). «What is near me» needs an external service or client-side math.
-- **Ready when:** a real case and a product decision by Miguel: a `geo`/`point` type that lands on a real column, a distance operator in the query builder, ORDER BY an expression, declarable `method: gist` + opclass, and PostGIS (an extension not every managed Postgres ships) vs `earthdistance`/plain math over two floats for small radii. Decides: Miguel.
+- **Origin:** AUDITORIA-GEO-Y-ARCHIVOS-EN-PREGUNTAS (2026-09-28), registered in CENTRO-MANDO-TRASPASO-S1; the candidate real case added in CIERRE-Y-TRASPASO-S1 (2026-10-06).
+- **Impact, honestly:** an absent capability, not a hole. Two `float64` (lat/lng) with range filters cover a bounding box and a map pin — enough for the agenda (AGENDA-2) and for the ride-dispatch prospect's stage 1 (ENG-65 computes "nearest" in a consumer handler). «What is near me» declaratively — in `/app`, by voice, ORDER BY distance in the API — needs this. The dispatch (DEC-13) is the candidate real case if its stage 2 asks for that.
+- **Facts for the decision:** the engine already installs `btree_gist`, which ships in PostgreSQL's contrib; `cube` + `earthdistance` ship in the same contrib, so Earth arithmetic is available on every box `install.sh` builds (confirm with `CREATE EXTENSION earthdistance CASCADE`). PostGIS is a separate package `install.sh` does not install and not every managed Postgres offers.
+- **Ready when:** a real case and a product decision by Miguel: a `geo`/`point` type that lands on a real column, a distance operator in the query builder, ORDER BY an expression, declarable `method: gist` + opclass, and PostGIS vs `earthdistance` (recommended `earthdistance` if city-sized radii suffice: it is already in the contrib that gets installed). Two to three sessions with every engine gate. Decides: Miguel.
 
 ### VOZ-29 — The read plan cannot return a file: «mostrame la foto del lugar» does not exist
 
@@ -1965,3 +2011,74 @@ Origin: APP-AGENDA-S2 Part 2. Decides: agent.
 - **Origin:** ALERTAS-TELEGRAM-S1 (2026-09-18) — the token of `@appximodev_bot` appeared in the session brief; the rotation recipe was written in the handoff (04 §SEGURIDAD DEL TOKEN) and never marked done. Registered as an item in CENTRO-MANDO-TRASPASO-S1 (2026-09-29) because it lived only in the handoff and the contract.
 - **Impact, honestly:** the bot is today the COMMAND channel of Miguel's real agenda (it acts as him: reads and writes his rows) and the alert channel of the three 58 apps and the panel. Whoever holds the token can read and send as the bot without touching any box. It is the only production secret with a known exposure.
 - **Ready when:** Miguel revokes it (@BotFather → /revoke) and the new token lands in `APPXIMO_TELEGRAM_BOT_TOKEN` of agenda, appitools, vetapp and centro (`deploy-app.sh --env-add` or by hand), the four units and their workers restart, and the journal prints `telegram alert destination verified`. Recipe: PRODUCTION.md §4.6c. Decides: Miguel.
+### OPS-65 — saabado: a fourth app on the 58 that no document registers (restaurant SaaS, v0.1.13, installed 2026-10-03 through the student path, no off-box copy)
+
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06), found while inventorying the 58 for the migration.
+- **Impact:** `saabado.appximo.com` → the 58: `saabado.service` (:8093/9093), databases `saabado` + `saabado_dev`, a 21-resource / 8-role schema, a consumer binary on appximo v0.1.13, a nightly backup with NO off-box copy. Installed with the binary and scripts downloaded from the public repo (`/root/saabado-deploy` on the 58). Absent from the handoff package and the brief; whether the panel lists it could not be checked (the classifier blocked reading its inventory). Switching the 58 off without knowing kills it.
+- **Ready when:** Miguel says whose it is and what it is (one of the "two clients under construction"?); it is registered in the panel and in 05, enters the off-box backup (DEC-1) and the migration (it is already in `migrar-58.sh`).
+
+### OPS-66 — The 105 is out of memory: swap 99.6 %, ≈ 460–580 MB available, six `claude` processes (≈ 1 GB) — building the engine or the panel today can end in an OOM
+
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06), measured.
+- **Impact:** 1 vCPU / 1.9 GB, swap 2045/2047 MB, six Claude Code processes open (the oldest ≈ 18 days). Linking a 65 MB binary does not fit — this session could not build the panel. The 105 is the agents' workshop and the panel's build host: every build risks the OOM killer taking a live session or the dev Postgres, and OPS-67 cannot ship.
+- **Ready when:** Miguel closes the Claude Code sessions he does not use (`ps -eo pid,etime,rss,args --sort=-rss | grep claude`) or resizes the 105; `free -m` leaves ≥ 1.2 GB available.
+
+### OPS-67 — Deploy the panel e743c74 before closing the repo: until that version the pending board reads items.json from PUBLIC GitHub and goes EMPTY once the repo is private
+
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06).
+- **Impact:** centro-mando read the public GitHub API and raw.githubusercontent.com for items.json/BACKLOG.md (the pending board), main's head, the ADR list, how far each app is behind main, and the release behind the download button. `e743c74` (internal repo) reads them from the 105's working clone over ONE multiplexed ssh connection (the 105 rate-limits ssh) and the release from the distribution repo — committed, vet clean, its three scripts tested through the real path (user `centro` → 105). NOT deployed (OPS-66). Without it, the command center — the next architect's door — loses the pending items the minute DEC-12 runs.
+- **Ready when:** with memory (OPS-66): panel → Actions → «Actualizar el panel» (builds `cm-<internal>-<engine>` on the 105 and deploys with `deploy-app.sh`); the panel's `/health` says `cm-<sha ≥ e743c74>-…` — the close script checks it before step 10.
+
+### OPS-68 — The taller (droplet "taller") was not in the handoff package and has no key from the 105 or the panel
+
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06).
+- **Impact:** it exists in the DigitalOcean account (s-2vcpu-4gb-amd, nyc2, droplet "taller"), but the package said "the taller is the 105" and no document named it. ssh from the 105 and from the panel: `Permission denied (publickey)`. What runs inside: unknown. Blocks DEC-11 and leaves a paid box outside the inventory.
+- **Ready when:** Miguel, from his laptop, adds the 105's public key (and the panel's, if it should watch it) to the taller's `/root/.ssh/authorized_keys` (exact command: `evidencia/CIERRE-Y-TRASPASO-S1/migracion/PROCEDIMIENTO-DE-CORTE.md` §0); then an agent inventories it, registers it in the panel and fixes 05 / COMO_TRABAJAR.
+
+### OPS-69 — When the taller serves production: an agent that saturates it must not take the agenda down (bounded user.slice, production OOMScoreAdjust, an external monitor)
+
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06).
+- **Impact:** the taller becomes a workbench and a production box at once; on the 105, agents already leave the box without swap. A build or a suite that saturates it takes down the agenda Miguel uses every day.
+- **Ready when:** at the cutover (DEC-11): `systemctl set-property user.slice MemoryHigh=2G MemoryMax=2500M CPUWeight=50`, a drop-in `OOMScoreAdjust=-800` / `CPUWeight=1000` for the production units and postgresql (recipe: `evidencia/CIERRE-Y-TRASPASO-S1/migracion/PROCEDIMIENTO-DE-CORTE.md` §6), the rule in the contract §11, and an external monitor on the agenda's `/healthz` (OPS-63).
+
+### OPS-71 — With the repo private, Actions bills minutes: ≈ 1,920 billable in the last 30 days against 2,000 included (the Windows gate counts double)
+
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06), measured with the public API (280 runs in 30 days).
+- **Impact:** a public repo pays no minutes; a private one on the Free plan gets 2,000 a month and then the workflows stop — a busier month leaves the project without CI when it is needed, with no visible warning.
+- **Ready when:** Miguel decides — the Windows gate on tags or weekly, the security nightly weekly, or paying for minutes; check Settings → Billing → Actions after the first private month.
+
+### DESPACHO — A ride-dispatch prospect: the three pieces, specified to quote and NOT built (CIERRE-Y-TRASPASO-S1)
+
+Specified so the session that builds them — if DEC-13 signs — re-derives
+nothing. Nothing here is built (`no_construir`: "El despacho de carreras …
+antes de una firma"). The long form, with the schema sketch, the engine map,
+the per-piece estimates and the questions for the customer, is the internal
+repo's `comercial/DESPACHO-CARRERAS.md`. The honest headline: **the engine
+already covers stage 1** — what gets quoted is the app (schema + a consumer
+binary + a driver PWA), not engine work; the only engine items it can surface
+are optional (ENG-64 declarative geo, AUTO-16 Web Push, and VOZ-30 as a
+generic channel instead of consumer code).
+
+### ENG-65 — Dispatch (prospect) — geolocation: the driver's live position, origin and destination, distance and the nearest driver, with no new geographic type for stage 1
+
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06), specified to quote.
+- **What the engine already has:** the driver's LAST position as `lat`/`lng` `float64` on their own row (PATCH from the app; the `conductor` role reaches only its row, `user_id = $user_id`); the dispatcher's map fed by SSE (`/api/conductores/events` filters rows and fields per role at delivery); origin/destination as coordinates + text; the "nearest" assignment in a Go handler of the consumer binary (haversine in memory over the available drivers with a fresh position — a few hundred drivers is trivial), moving the ride to `ofrecida` with `Ctx.Update`, which enforces the state machine inside the UPDATE and answers 409 when another driver took it first.
+- **What is missing, and only if asked declaratively:** "near me" in `/app` or by voice, or ORDER BY distance in the API → ENG-64.
+- **Traps written down:** the offer expiry must be LAZY (`oferta_vence` + a guard on accept), not a loop — the worker's scheduler ticks every 30 s, far too coarse for a 20 s offer; the map needs Leaflet bundled in the assets (CSP has no CDN) and a tile provider with an account (tile.openstreetmap.org's usage policy does not allow sustained commercial traffic), allowed through `StaticMount.CSP`; route history is OUT of stage 1 (high-volume rows have no declarable retention: `Ctx` has no `Delete` and workflows do not delete).
+- **Ready when:** DEC-13 signs. Then one to two sessions (schema + assignment handler + lazy expiry, verified with two simulated drivers racing for one ride → one 200, one 409) and one more for the dispatcher's map. Spec: internal `comercial/DESPACHO-CARRERAS.md` §4. Depends on DEC-13. Decides: agente.
+
+### AUTO-15 — Dispatch (prospect) — the driver web app (PWA): take or reject a ride, states, and position while the app is open
+
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06), specified to quote.
+- **Shape:** an installable mobile SPA (frontend-spec: SvelteKit adapter-static embedded with `Config.Static`, same origin, no CORS) for each driver with their own tenant user (role `conductor`): login, available/busy/off, the offer arrives by SSE (fetch reader — EventSource cannot send Authorization) with sound and vibration, accept/reject through the race-safe transition, arrived / started / finished, and position by `watchPosition` + Screen Wake Lock with a "stale position" indicator.
+- **The real limit of the web, said before signing:** there is no background geolocation in a browser — on iPhone a PWA's JS is suspended when the user leaves it, and Android Chrome freezes the page with the screen off or in the background. If the dispatch expects to see the driver on the map while they use Waze or WhatsApp, a PWA does not do it; the alternative (a native wrapper with a background-location plugin) is a different quote, outside the one-binary model.
+- **Ready when:** DEC-13 signs and the customer answers "is the app open in the car holder enough?". Then two to three sessions: the app, manifest + service worker (installable), verified on real phones — Android (most of the fleet in Colombia, to confirm with the real fleet) and at least one iPhone — plus 390×844 in the browser. Notifying with the app CLOSED is Web Push (AUTO-16, +1–2 sessions; on iPhone only with the app added to the home screen, iOS ≥ 16.4). Spec §5. Depends on DEC-13. Decides: agente.
+
+### VOZ-30 — Dispatch (prospect) — the WhatsApp assistant: order a ride and receive the notices through WhatsApp Business (Cloud API), on the same pipeline as `/api/ask`
+
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06), specified to quote.
+- **The gap:** there is no WhatsApp channel — the worker ships `message.telegram` and nothing else.
+- **Shape:** a receiver in the consumer binary (`Route.Public` with GET for Meta's verification challenge and a signed POST — `X-Hub-Signature-256` checked over `Ctx.RawBody()` — with its own `Route.RateLimit`, because the public default of 5 rps per IP throttles Meta's bursts), de-duplicated by message id (Meta retries); the customer identified by phone number as `$external_client_id` in a short, scoped JWT (role `cliente`: creates and reads only ITS rides, and the engine forces that column on create); the main path WITHOUT the model — interactive buttons + the shared location = the ride created with coordinates; free text into the `/api/ask` pipeline with its exact «sí» confirmation; and the notices (driver assigned, arrived, finished) through a `message.whatsapp` consumer, inside the 24-hour window the customer's own order opens. All of it can live in consumer code (`consumers.Router`); promoting it to a generic engine channel (reusable by the agenda, for instance) is a separate step.
+- **External dependencies (Miguel or the customer get them):** a verified Meta Business account (company documents), a dedicated number (or coexistence with the WhatsApp Business app, if Meta offers it in Colombia at build time), the display name approved, templates for messages outside the window. Pricing: Meta's model in force since 2025-07-01 charges per delivered template by category and does not charge replies inside the 24-hour window; the Colombian rate is looked up when quoting. Free text spends model money — Miguel's Anthropic credit is exhausted since 2026-09-25.
+- **Ready when:** DEC-13 signs and the Meta assets exist. Then two to four agent sessions, verified with Meta's test number end to end (location → ride → driver accepts → "tu conductor llegó"). Spec §6. Depends on DEC-13. Decides: Miguel.
+

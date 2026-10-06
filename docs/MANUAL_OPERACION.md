@@ -1127,6 +1127,18 @@ Dos detalles que muerden: la verificación desde afuera manda `Host: <tenant>.<d
 
 Probado en el laboratorio degradado a propósito a la forma vieja (CAOS-S1) y aplicado quirúrgicamente a las dos apps de la caja de demos. Detalle: [PRODUCTION.md §4.5b](PRODUCTION.md).
 
+### 5.4 Mudar una app a otra caja sin apagar la vieja (CIERRE-Y-TRASPASO-S1)
+
+Es el simulacro de «caja perdida» de §4.6, hecho a propósito y con la vieja viva:
+
+1. **En la caja nueva, el mismo PostgreSQL mayor o uno más nuevo.** Los sets de una caja PG 18 no los lee un `pg_restore` 16. Si hace falta, PGDG antes del instalador.
+2. **`install.sh --app=<app>` con un dominio de prueba** (p. ej. `<app>.<ip-con-guiones>.sslip.io`), y después **`restore.sh --app=<app> --set=<set>`** con el set nocturno de la caja vieja. El restore conserva el `DATABASE_URL` de la caja nueva y trae `JWT_SECRET`, `ADMIN_KEY` y el schema de la vieja. Por eso los tokens ya emitidos (los atajos de Siri, por ejemplo) siguen valiendo.
+3. **La copia nace muda:** comente en su env el token de Telegram, Slack y `BACKUP_COPY_TO`. Un bot de Telegram admite **un solo** consumidor de `getUpdates`: con dos cajas, se roban los mensajes y cada aviso llega dos veces.
+4. **Verificación desde afuera**, con las dos copias andando: misma versión en `/health`, `/app` abre, los planos de control cerrados desde afuera.
+5. **El corte, app por app:** parar la app en la vieja → `backup.sh` final (el set consistente) → restaurarlo en la nueva → descomentar los canales → mover el DNS (o la URL, si el nombre lleva la IP) → verificar. La vieja se **para**, no se borra, durante una semana.
+
+El procedimiento concreto de la flota (el 58 → el taller, con su script) vive en el repo interno: `evidencia/CIERRE-Y-TRASPASO-S1/migracion/`.
+
 ---
 
 ## 6. Repetir cualquier escenario: `appximo drill`

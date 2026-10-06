@@ -25,13 +25,20 @@ jobs:
   publish:
     name: Build & push (amd64 + arm64)
     runs-on: ubuntu-latest
-    # Green CI + a push event (not a PR) + main or a version tag. For tag runs,
+    # Green CI + a push event (not a PR) + a VERSION TAG only. For tag runs,
     # workflow_run.head_branch carries the TAG name (e.g. "v1.2.0").
+    #
+    # CIERRE-Y-TRASPASO-S1 (2026-10-06): `main` no longer publishes. It used to push
+    # $IMAGE:latest + $IMAGE:<sha> on every green main commit — a PUBLIC binary of
+    # unreleased code, which kept happening even with the repository private. It
+    # was dormant only because CI has been red; the first fix to CI would have
+    # resumed it. Publishing is a decision taken by cutting a tag (Miguel, A-69),
+    # never a side effect of a push. To restore the old behaviour, add back
+    # `github.event.workflow_run.head_branch == 'main' ||` below.
     if: >
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
-      (github.event.workflow_run.head_branch == 'main' ||
-       startsWith(github.event.workflow_run.head_branch, 'v'))
+      startsWith(github.event.workflow_run.head_branch, 'v')
     steps:
       - uses: actions/checkout@v7
         with:

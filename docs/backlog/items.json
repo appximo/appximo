@@ -1,6 +1,6 @@
 {
  "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|agenda|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo). Bloque `no_construir` (CENTRO-MANDO-TRASPASO-S1): lo que está DECIDIDO no construir ahora, con su por qué, hasta cuándo y la decisión que lo respalda — es la sección 5 del paquete de traspaso; se edita cuando una decisión de Miguel lo cambia.",
- "actualizado": "2026-09-29",
+ "actualizado": "2026-10-06",
  "publicacion": {
   "estado": "pausada_deliberada",
   "desde": "2026-08-29",
@@ -10,25 +10,27 @@
    "v0.1.15",
    "v0.1.16"
   ],
-  "porque": "Miguel decidió no publicar más releases al público por ahora mientras revisa el licenciamiento. El CI está rojo desde 29f3ec0 (2026-08-29) por una causa conocida y trivial (max64 definido solo en resources_linux.go y usado desde resources_db.go, que compila en todo GOOS: el Windows gate no compila), así que la cadena de release salta los tags. Las dos cosas se cancelan: no hay urgencia. NO leer el CI rojo como abandono — es un estado deliberado con la reparación escrita.",
+  "porque": "Miguel decidió no publicar más releases al público por ahora mientras revisa el licenciamiento. El CI está rojo desde 29f3ec0 (2026-08-29) por una causa conocida y trivial (max64 definido solo en resources_linux.go y usado desde resources_db.go, que compila en todo GOOS: el Windows gate no compila), así que la cadena de release salta los tags. Las dos cosas se cancelan: no hay urgencia. NO leer el CI rojo como abandono — es un estado deliberado con la reparación escrita. Desde CIERRE-Y-TRASPASO-S1 (2026-10-06): la distribución pública de v0.1.13 está preparada para appximo/appximo.github.io y el repo del motor pasa a privado con el mismo comando (DEC-12); docker-publish ya no publica desde main; la licencia del código nuevo es DEC-10.",
   "reparacion": "repo interno: nuevo_chat_web/prompts/PROMPT_REPARAR_PUBLICACION.md — para cuando se decida publicar, no antes",
   "advisory": "El aviso de seguridad de v0.1.10 NUNCA se publicó (0 GHSA en el repo; el release v0.1.10 salió solo con el changelog automático). El texto listo está en el repo interno (RELEASE_NOTE_v0.1.10.md). El fix de autorización (ADR-027, commit 6429a00) SÍ está en v0.1.10 y en TODA versión posterior, v0.1.13 incluida — verificado por git el 2026-09-17. Quien corre ≥v0.1.10 tiene el fix; los sin avisar son v0.1.8/v0.1.9."
  },
  "items": [
   {
    "id": "DEC-1",
-   "titulo": "Destino off-box para los backups del 58",
+   "titulo": "Destino off-box para los backups: tiendita, petfriendly y saabado viven en UNA copia; solo la agenda copia al 105",
    "frente": "flota",
-   "que_es": "Las dos apps del 58 guardan su único backup en el mismo disco del 58: si muere el droplet, mueren los sets, el dump dorado, la data de vetapp y los secretos de las dos apps.",
-   "por_que_importa": "Es la única pérdida total posible que hoy cuesta minutos evitar; la promesa de recuperación (§4.2) se mide DESDE el set, y el set tiene una sola copia.",
-   "que_lo_destraba": "Miguel elige un destino que él controle (DO Space $5/mes con rclone, o scp a una caja suya) → BACKUP_COPY_TO= y BACKUP_PASSPHRASE_FILE= en los dos env del 58; el siguiente backup dice offbox=yes.",
+   "que_es": "En el 58 hay CUATRO apps (saabado sin documentar, OPS-65). Solo la agenda manda su set cifrado fuera de la caja (al 105). Las otras tres guardan su único backup en el disco del 58: si muere el droplet, mueren los sets, el dorado de la tiendita, los datos y los secretos. El corte al taller (DEC-11) muda el problema entero si no se resuelve antes.",
+   "por_que_importa": "Es la única pérdida total posible que hoy cuesta minutos evitar. Y el 105 no es redundancia real para todo: su llave root entra a toda la flota y ahí trabajan agentes con root, así que un error o un compromiso alcanza al original y a la copia.",
+   "que_lo_destraba": "Recomendación (CIERRE-Y-TRASPASO-S1): un DigitalOcean Space como destino principal (US$ 5/mes, otro dominio de falla; backup.sh ya lo soporta con rclone y solo saca los secretos cifrados) y el 105 como segunda copia de la agenda. Miguel crea el Space appximo-respaldos (nyc3, lifecycle de 30 días) y una Spaces key limitada a ese bucket, y guarda cada passphrase en Bitwarden. Pasos exactos: evidencia/CIERRE-Y-TRASPASO-S1/migracion/PROCEDIMIENTO-DE-CORTE.md §5. Listo cuando cada backup dice offbox=yes.",
    "costo": "chico",
    "dano": "alto",
    "prioridad": "P1",
    "decide": "miguel",
    "depende_de": [],
-   "bloquea": [],
-   "origen": "RESILIENCIA-S1 → DEPLOY-FLOTA-S1",
+   "bloquea": [
+    "DEC-11"
+   ],
+   "origen": "RESILIENCIA-S1 → DEPLOY-FLOTA-S1 → CIERRE-Y-TRASPASO-S1",
    "estado": "abierto"
   },
   {
@@ -1173,12 +1175,14 @@
    "frente": "producto",
    "que_es": "Miguel decidió no publicar más releases por ahora. El CI está rojo desde el 29-08 por una causa conocida y trivial (max64 solo-linux) y los tags v0.1.14/15/16 quedaron sin release — las dos cosas se CANCELAN: no hay urgencia y el rojo NO es abandono.",
    "por_que_importa": "Un evaluador que vea el CI rojo sin este contexto saca la conclusión equivocada; y toda la cadena (release, Docker, GHSA, benchmark citable) espera detrás de esta decisión.",
-   "que_lo_destraba": "Cuando Miguel decida publicar: el prompt de reparación listo en el repo interno (nuevo_chat_web/prompts/PROMPT_REPARAR_PUBLICACION.md) — arregla max64, verifica CI verde, tagea, verifica release+GHSA.",
+   "que_lo_destraba": "Cuando Miguel decida publicar: el prompt de reparación listo en el repo interno (nuevo_chat_web/prompts/PROMPT_REPARAR_PUBLICACION.md) — arregla max64, verifica CI verde, tagea, verifica release+GHSA. CIERRE-Y-TRASPASO-S1: la distribución pública de v0.1.13 está preparada (DEC-12) y docker-publish ya no publica desde main; la licencia del código nuevo es DEC-10.",
    "costo": "decision",
    "dano": "bajo",
    "prioridad": "P3",
    "decide": "miguel",
-   "depende_de": [],
+   "depende_de": [
+    "DEC-10"
+   ],
    "bloquea": [
     "OPS-18",
     "OPS-22",
@@ -1304,18 +1308,18 @@
   },
   {
    "id": "AUTO-11",
-   "titulo": "Studio no tiene panel visual de workflows (solo la vista Code)",
+   "titulo": "Studio no tiene panel visual de workflows (solo la vista Code): disparadores evento/cron/hora, pasos, rol, solapamiento y las corridas",
    "frente": "producto",
-   "que_es": "Los workflows se autoran hoy como JSON (vista Code de Studio, o el archivo) — validado en vivo por /editor/validate, pero sin panel gráfico: sin dropdown de recursos/eventos, sin editor de pasos, sin ver últimas corridas desde Studio.",
-   "por_que_importa": "A-70 declaró a Studio como EL editor de las reglas; mientras no exista el panel, la autoría declarativa queda para quien escribe JSON.",
-   "que_lo_destraba": "Una sesión de editor (pkg/editorui): panel Workflows fiel a validateWorkflows (como se hizo con RBAC/relaciones), + la vista de corridas leyendo GET /admin/workflows.",
-   "costo": "medio",
+   "que_es": "Los workflows se escriben hoy como JSON en la vista Code de Studio (validado en vivo por /editor/validate). El panel que falta edita TODO lo que el motor ejecuta: el disparador — event (recurso + create/update/delete; el validador exige que el recurso declare esa acción en `events`, así que el panel ofrece agregarla), cron (5 campos/@daily/@every con su lectura en palabras + zona IANA, UTC por defecto, con la nota de cambio de hora de ADR-031) y time (recurso + un campo time + before/after + grace + when con eq|ne y un literal) —; los pasos en orden (condition{expr}, update{resource,id,data}, create{resource,data}, webhook{url https, hmac_secret_env}, enqueue{topic,data}), cada valor como literal o como expresión «=»; el rol (los roles declarados) y overlap skip|allow. NO es un editor de grafos: los pasos son secuenciales y una condición falsa corta la corrida (ADR-031); no agrega tipos de paso ni el disparador http.",
+   "por_que_importa": "A-70 declaró a Studio EL editor de las reglas; mientras no exista el panel, la autoría declarativa queda para quien escribe JSON — y la agenda real de Miguel ya corre cinco workflows escritos a mano.",
+   "que_lo_destraba": "Una o dos sesiones de editor (pkg/editorui): (1) panel fiel al validador por las dos vías que ya usan RBAC y relaciones — las reglas estructurales espejadas en vivo (los códigos de pkg/schema/workflows_validate.go: empty_steps, duplicate_step_name, missing_cron, missing_offset, field_not_time, trigger_key_conflict, missing_topic, missing_url…) y la AUTORIDAD en POST /editor/validate, que compila en Go lo que el navegador no puede (expresiones expr-lang, cron, el bucle de enqueue declarado); (2) ida y vuelta sin pérdida fijada por test; (3) la vista de corridas con el token de plataforma que ya usa Deploy: última corrida, runs/failed 24 h y next_run desde GET /admin/workflows — que hoy sirve solo la ÚLTIMA corrida por workflow: el historial de N corridas con su detalle por paso (public.workflow_runs) necesita un parámetro nuevo, chico, en platformadmin. Listo cuando los cinco workflows de la agenda se rehacen desde el panel sin tocar Code y el JSON resultante es equivalente al escrito a mano, validate limpio, verificado en navegador en escritorio y 390×844, assets reconstruidos y comiteados (ADR-025). Absorbe el disparador time que antes estaba en SCHEMA-10.",
+   "costo": "grande",
    "dano": "medio",
    "prioridad": "P2",
    "decide": "agente",
    "depende_de": [],
    "bloquea": [],
-   "origen": "AUTOMATIZACION-S1",
+   "origen": "AUTOMATIZACION-S1; re-especificado en CIERRE-Y-TRASPASO-S1 (2026-10-06) (el brief lo llamó SCHEMA-10)",
    "estado": "abierto"
   },
   {
@@ -1550,20 +1554,18 @@
   },
   {
    "id": "SCHEMA-10",
-   "titulo": "Studio no tiene panel para `ranges` ni para el trigger `time` (solo la vista Code los preserva)",
+   "titulo": "Studio no tiene sección para `ranges` en el panel de entidad (la vista Code los preserva)",
    "frente": "producto",
-   "que_es": "El bloque ranges (inicio/fin, no_overlap, default_duration) y el trigger time de un workflow se autoran únicamente en la vista Code de Studio; el panel de entidad los preserva pero no los edita.",
-   "por_que_importa": "Es la misma clase que VOZ-13 (aliases) y AUTO-11 (workflows): lo que la voz y el worker ejecutan no tiene cara visual; un dueño no programador no puede declarar «que no se me crucen» sin JSON.",
-   "que_lo_destraba": "Una sección Rango en el panel de entidad (dropdown de dos campos time, scope, when, duración) y el trigger time en el panel de workflows cuando AUTO-11 exista.",
+   "que_es": "El bloque ranges (start/end sobre dos campos time, default_duration, timezone_field, no_overlap con scope y when) se autora solo en la vista Code; el panel de entidad lo preserva sin pérdida pero no lo edita. El disparador time de un workflow pasó a AUTO-11: un panel de workflows que no edite uno de sus tres disparadores no sería fiel.",
+   "por_que_importa": "Misma clase que VOZ-13 (aliases): lo que la agenda ejecuta —«que no se me crucen»— no tiene cara visual; un dueño no programador no puede declararlo sin JSON.",
+   "que_lo_destraba": "Una sesión de editor: sección Rango en el inspector de entidad (dos desplegables de campos time, duración por defecto, campo de zona entre los string con format timezone, scope multi-selección y when eq|ne con un literal), espejo de las reglas de validación de ranges, y el aviso del dry-run cuando el no_overlap se agrega sobre filas que ya se cruzan (la migración lo rechaza nombrando los pares; el modal de Deploy ya muestra los [blocked]). Listo cuando el rango de compromisos de la agenda se rehace desde el panel y sale idéntico.",
    "costo": "medio",
    "dano": "bajo",
    "prioridad": "P3",
    "decide": "agente",
-   "depende_de": [
-    "AUTO-11"
-   ],
+   "depende_de": [],
    "bloquea": [],
-   "origen": "MOTOR-AGENDA-S1",
+   "origen": "MOTOR-AGENDA-S1; re-alcanzado en CIERRE-Y-TRASPASO-S1 (2026-10-06): el disparador time pasó a AUTO-11",
    "estado": "abierto"
   },
   {
@@ -1792,27 +1794,27 @@
   },
   {
    "id": "AGENDA-1",
-   "titulo": "Listas con ítems (compras, lugares por visitar): recursos `lista` e `item`, sin motor nuevo",
+   "titulo": "Listas con ítems (compras, lugares por visitar): recursos `listas` e `items`, sin motor nuevo — con una decisión antes: hoy «lista» quiere decir «tarea hecha»",
    "frente": "agenda",
-   "que_es": "Una lista con nombre y tipo y sus ítems, cada uno se tacha (bool `hecho`). Especificada con schema, RBAC por dueño en las dos tablas, cascada al borrar la lista, voz por la forma fija («crear lista: mercado», «crear ítem: leche, lista mercado», «tacha la leche») y su lugar en el parte (en curso, nunca «espera acción»).",
-   "por_que_importa": "Miguel la pidió: hoy una lista de compras se anota como nota o no se anota. Es la pieza más barata de las tres y prueba que la forma fija y los aliases alcanzan para un recurso nuevo sin tocar motor.",
-   "que_lo_destraba": "Que Miguel diga que va primera. Después: desplegar el schema en la agenda (Studio, dry-run → apply), verificar «crear lista/ítem» y el bool por voz con `drill ask` a US$ 0, seis frases nuevas en el banco. Especificación: repo interno agenda/ESPECIFICACION-LISTAS-ADJUNTOS-HABITOS.md §1.",
+   "que_es": "Una lista con nombre y tipo y sus ítems, cada uno se tacha (bool `hecho`). Especificada con schema, RBAC por dueño en las dos tablas, cascada al borrar la lista, voz por la forma fija («crear lista: mercado», «crear ítem: leche, lista mercado», «tacha la leche») y su lugar en el parte (en curso, nunca «espera acción»). Verificada contra el motor el 2026-10-06 (binario 8bef63c, schema vivo + especificación): TAL COMO ESTÁ ESCRITA NO CARGA — los alias repiten el nombre del recurso (alias_is_resource_name ×4), el valor `cosas` de listas.tipo choca con el alias «cosa» de tareas (alias_is_value) y un recurso llamado `listas` choca con el alias «lista» que Miguel le puso al estado `hecha` de las tareas. Sin alias propios, con `cosas`→`llevar` y sin «lista» en `hecha`, valida.",
+   "por_que_importa": "Miguel la pidió: hoy una lista de compras se anota como nota o no se anota. Es la pieza más barata de las tres y prueba que la forma fija alcanza para un recurso nuevo sin tocar motor — pero solo si «lista» deja de significar «hecha».",
+   "que_lo_destraba": "Que Miguel diga que va primera Y decida qué significa «lista» en su agenda: (a) una lista — se quita «lista» de los alias de tareas.estado.hecha (los demás —realizada, terminada, completada, cumplida, cerrada, completa— quedan), o (b) el estado hecho — y entonces el recurso no se puede llamar ni aliasar «lista» y la voz pierde «crear lista: mercado». Recomendado (a). Después: desplegar el schema (Studio, dry-run → apply), verificar «crear lista/ítem» y el bool por voz con `drill ask` a US$ 0, seis frases nuevas en el banco y re-correr el banco entero (quitar un alias de Miguel es justo lo que el banco caza; medir también «… está lista»). Especificación: repo interno agenda/ESPECIFICACION-LISTAS-ADJUNTOS-HABITOS.md §1 con las correcciones de evidencia/CIERRE-Y-TRASPASO-S1/agenda-verificacion.md.",
    "costo": "medio",
    "dano": "medio",
    "prioridad": "P2",
    "decide": "miguel",
    "depende_de": [],
    "bloquea": [],
-   "origen": "CENTRO-MANDO-TRASPASO-S1 (2026-09-29): decisiones de Miguel del 25–29/09",
+   "origen": "CENTRO-MANDO-TRASPASO-S1 (2026-09-29): decisiones de Miguel del 25–29/09; verificada contra el motor en CIERRE-Y-TRASPASO-S1 (2026-10-06)",
    "estado": "abierto"
   },
   {
    "id": "AGENDA-2",
-   "titulo": "Adjuntos con ubicación: una foto o PDF pegado a una fila, comprimido en el navegador, sin EXIF/GPS, con la ubicación como campo declarado",
+   "titulo": "Adjuntos con ubicación: una foto o PDF pegado a una fila, re-codificado en el navegador (sin EXIF/GPS), con la ubicación como campo declarado",
    "frente": "agenda",
-   "que_es": "Un campo `file` (accept image/pdf, max 3 MB) en registros/tareas + `lugar`, `lat`, `lng` declarados. Decisiones de Miguel: la compresión ocurre en el navegador (canvas → JPEG ~300 KB), el metadato oculto — GPS incluido — se borra SIEMPRE y lo que se quiere guardar se declara a propósito, video fuera (enlace embebido), la referencia es el file_id (nunca una ruta) para poder mudar a almacenamiento de objetos después.",
-   "por_que_importa": "La foto del recibo, del lugar del que se habló, del menú: hoy no hay dónde ponerla. Desde FILES-3 el motor autoriza un archivo por la fila que lo referencia, así que el lado del servidor ya está.",
-   "que_lo_destraba": "Que Miguel la ordene. Después: el cliente de subida (input capture → createImageBitmap con orientación → canvas 1600 px → toBlob 0,8 → POST /api/files → PATCH la fila), el botón «usar mi ubicación» (decidir si es x-appximo-* genérico o pantalla propia), verificar con exiftool cero campos GPS en el blob guardado y las cinco puertas de FILES-3 con un segundo usuario. Especificación §2.",
+   "que_es": "Un campo `file` (accept image/pdf, max 3 MB) en registros/tareas + `lugar`, `lat`, `lng` declarados — el bloque del schema valida contra el motor (2026-10-06). Decisiones de Miguel: la compresión ocurre en el navegador (canvas → JPEG ~300 KB), el metadato oculto —GPS incluido— se borra SIEMPRE y lo que se quiere guardar se declara, video fuera (enlace), la referencia es el file_id. Hallazgo de la verificación: el /app embebido sube el archivo ORIGINAL (POST /api/files con el File tal cual, sin recomprimir y con su EXIF): una foto de teléfono de 4–8 MB falla al adjuntar (422 file_policy por el máximo de 3 MB) y una más chica guarda el GPS. El re-encode en el navegador no es opcional: es LA pieza de UI.",
+   "por_que_importa": "La foto del recibo, del lugar del que se habló, del menú: hoy no hay dónde ponerla. Desde FILES-3 el lado del servidor está (el archivo lo alcanza solo quien puede leer su fila); lo que falta es el cliente que cumple las decisiones de Miguel.",
+   "que_lo_destraba": "Que Miguel la ordene y decida DÓNDE vive el re-encode: (a) en el /app genérico, por TIPO de campo — todo campo file que acepte image se re-codifica en el navegador (createImageBitmap con imageOrientation from-image → canvas al lado mayor 1600 px → toBlob JPEG 0,8): genérico, sin adivinar por nombre de columna, y le sirve a toda app; o (b) una pantalla propia de la agenda. Recomendado (a). El botón «usar mi ubicación» sigue abierto (x-appximo-* declarado o pantalla propia; C-DOCTRINA-2). Y una corrección: el rol dueno tiene hoy files {read, create} — la especificación decía que ya tenía delete y no lo tiene; agregarlo si se quiere borrar o reemplazar una foto (si no, el reemplazo deja huérfanos: OPS-21). Verificar con exiftool cero campos GPS en el blob guardado, las cinco puertas de FILES-3 con un segundo usuario y MinIO en el lab. Especificación §2 + evidencia/CIERRE-Y-TRASPASO-S1/agenda-verificacion.md.",
    "costo": "grande",
    "dano": "medio",
    "prioridad": "P2",
@@ -1821,39 +1823,39 @@
    "bloquea": [
     "VOZ-29"
    ],
-   "origen": "CENTRO-MANDO-TRASPASO-S1 (2026-09-29): decisiones de Miguel; VEREDICTO-FILES-3 y AUDITORIA-GEO (2026-09-28)",
+   "origen": "CENTRO-MANDO-TRASPASO-S1 (2026-09-29): decisiones de Miguel; VEREDICTO-FILES-3 y AUDITORIA-GEO (2026-09-28); verificada contra el motor en CIERRE-Y-TRASPASO-S1 (2026-10-06)",
    "estado": "abierto"
   },
   {
    "id": "AGENDA-3",
-   "titulo": "Hábitos: días de la semana, hora y aviso opcionales, con cuándo y dónde; no bloquean la agenda, no se acumulan; «5 de los últimos 7», cero avisos nuevos",
+   "titulo": "Hábitos: días de la semana, hora opcional, con cuándo y dónde; no bloquean la agenda, no se acumulan; «5 de los últimos 7» — y el aviso por hábito todavía no tiene cómo dispararse",
    "frente": "agenda",
-   "que_es": "Dos recursos (`habitos` con días de la semana — recomendado: siete bools por nombre —, hora HH:MM, lugar, aviso, activo; `marcas` con habito_id + dia, único por día) y ninguna máquina de estados: un hábito sin marcar ese día simplemente no se marcó. Distinto de tarea (se arrastra) y de compromiso (ocupa y choca). Crear en una frase por la forma fija; «ya leí» crea la marca de hoy; la constancia es una ventana de 7 días con el agregado que ya existe; entra en los partes que ya existen, sin rojo.",
-   "por_que_importa": "Leer, la pastilla, el gimnasio: la evidencia de la investigación es que las intenciones de implementación (cuándo + dónde) tienen efecto medio-grande sobre el cumplimiento, y que una racha rota hace abandonar y un aviso que persigue se apaga en una semana — el diseño evita las tres trampas.",
-   "que_lo_destraba": "Que Miguel la ordene, y dos decisiones suyas: si «ya leí» escribe SIN el «sí» (recursos de marca rápida — es un cambio de ADR-037) y si el parte gana una sección genérica de hábitos en pkg/summary (cambio chico de motor por señal) o se resuelve con un workflow. Especificación §3.",
+   "que_es": "Dos recursos (`habitos` con los días de la semana, hora HH:MM, lugar, aviso, activo; `marcas` con habito_id + dia, único por día) y ninguna máquina de estados: un hábito sin marcar ese día simplemente no se marcó. Distinto de tarea (se arrastra) y de compromiso (ocupa y choca). Verificada contra el motor el 2026-10-06 (8bef63c): TAL COMO ESTÁ ESCRITA NO CARGA — los alias repiten el nombre del recurso (alias_is_resource_name ×4) y «hecho» (alias de marcas) es un valor de compromisos.estado (alias_is_value). Con alias solo «rutina», sin alias en marcas y los días como siete bool con el nombre COMPLETO del día (lunes…domingo, para que el parser los resuelva por nombre), valida. El aviso por hábito NO puede usar el disparador time como dice la especificación: ese disparador exige un campo de tipo time (field_not_time) y `hora` es un string sin fecha.",
+   "por_que_importa": "Leer, la pastilla, el gimnasio: las intenciones de implementación (cuándo + dónde) son el único hallazgo fuerte de la investigación, una racha rota hace abandonar y un aviso que persigue se apaga en una semana — el diseño evita las tres trampas.",
+   "que_lo_destraba": "Que Miguel la ordene y tome tres decisiones (dos ya escritas + una nueva): si «ya leí» escribe SIN el «sí» (enmienda de ADR-037), si el parte gana una sección genérica de hábitos en pkg/summary o la hace un workflow, y —nueva— el aviso: (a) v1 sin aviso por hábito, solo el parte (coherente con «cero avisos nuevos»), (b) un campo proximo_aviso de tipo time que un paso update del propio workflow corre al siguiente día marcado (aritmética de días en expr-lang: sin verificar), o (c) un disparador semanal en el motor. Recomendado (a). Antes de desplegar, medir con drill ask dos cosas no verificadas: que «lunes miércoles y viernes» dentro de un alta se lea como tres bools y no como una fecha, y que «hoy» en marcas.dia se resuelva a medianoche de Bogotá (si se resuelve a «ahora», el único por día no deduplica; alternativa: dia string con format date). Especificación §3 + evidencia/CIERRE-Y-TRASPASO-S1/agenda-verificacion.md.",
    "costo": "medio",
    "dano": "medio",
    "prioridad": "P2",
    "decide": "miguel",
    "depende_de": [],
    "bloquea": [],
-   "origen": "CENTRO-MANDO-TRASPASO-S1 (2026-09-29): decisiones de Miguel",
+   "origen": "CENTRO-MANDO-TRASPASO-S1 (2026-09-29): decisiones de Miguel; verificada contra el motor en CIERRE-Y-TRASPASO-S1 (2026-10-06)",
    "estado": "abierto"
   },
   {
    "id": "ENG-64",
    "titulo": "No hay tipo de campo geográfico (ni distancia, ni «cerca de», ni orden por cercanía)",
    "frente": "motor",
-   "que_es": "Los tipos son once y cerrados; un dato geográfico hoy son dos float64 (lat/lng) con filtros de rango (una caja) o un jsonb con gin (contención, no distancia). El motor ya usa gist por dentro (rangos de tiempo) pero no es declarable.",
-   "por_que_importa": "Una app de «lo que tengo cerca» no se puede escribir sin un servicio externo o aritmética en el cliente. Para la agenda alcanza con lat/lng + lugar en palabras (AGENDA-2), así que hoy no bloquea nada.",
-   "que_lo_destraba": "Una decisión de producto de Miguel con un caso real: tipo (`geo`/`point`) que baje a columna, operador de distancia en el constructor de consultas, orden por expresión, `method: gist` con opclass declarable, y PostGIS (extensión que no todo Postgres administrado trae) vs earthdistance/aritmética sobre dos float64 para radios chicos. Auditoría: evidencia/AGENDA-ASISTENTE-S1/AUDITORIA-GEO-Y-ARCHIVOS-EN-PREGUNTAS.md §1.",
+   "que_es": "Los tipos son once y cerrados; un dato geográfico hoy son dos float64 (lat/lng) con filtros de rango (una caja) o un jsonb con gin (contención, no distancia). El motor ya usa gist por dentro (rangos de tiempo) pero no es declarable. El motor ya instala btree_gist, que viene en el contrib de PostgreSQL; cube + earthdistance vienen en el mismo contrib, así que la aritmética de la Tierra está disponible en toda caja que arma install.sh (a confirmar con CREATE EXTENSION earthdistance CASCADE). PostGIS es otro paquete, que install.sh no instala y que no todo Postgres administrado trae.",
+   "por_que_importa": "Una app de «lo que tengo cerca» no se puede escribir declarativamente sin un servicio externo o aritmética en el cliente. Para la agenda alcanza con lat/lng + lugar en palabras (AGENDA-2); para el despacho de carreras (prospecto, DEC-13) la etapa 1 tampoco lo necesita: el más cercano se calcula en un handler del consumidor (ENG-65). El despacho es el candidato a «caso real» si su etapa 2 pide «cerca de» en el panel o por voz.",
+   "que_lo_destraba": "Una decisión de producto de Miguel con un caso real (el despacho, si firma y lo pide): tipo geo/point que baje a columna, operador de distancia en el constructor de consultas, orden por expresión, method: gist con opclass declarable, y PostGIS vs earthdistance (recomendado earthdistance si bastan radios de ciudad: ya está en el contrib que se instala). Dos o tres sesiones con todos los gates de motor. Auditoría: evidencia/AGENDA-ASISTENTE-S1/AUDITORIA-GEO-Y-ARCHIVOS-EN-PREGUNTAS.md §1.",
    "costo": "grande",
    "dano": "bajo",
    "prioridad": "P3",
    "decide": "miguel",
    "depende_de": [],
    "bloquea": [],
-   "origen": "AUDITORIA-GEO (2026-09-28), registrado en CENTRO-MANDO-TRASPASO-S1",
+   "origen": "AUDITORIA-GEO (2026-09-28), registrado en CENTRO-MANDO-TRASPASO-S1; el caso candidato agregado en CIERRE-Y-TRASPASO-S1 (2026-10-06)",
    "estado": "abierto"
   },
   {
@@ -1889,6 +1891,263 @@
    "bloquea": [],
    "origen": "ALERTAS-TELEGRAM-S1 (2026-09-18); registrado como item en CENTRO-MANDO-TRASPASO-S1 (2026-09-29) porque vivía solo en 04 y en el contrato",
    "estado": "abierto"
+  },
+  {
+   "id": "DEC-13",
+   "titulo": "Propuesta a un despacho de carreras (prospecto): la etapa 1 está por cerrarse y su alcance, valores y condiciones viven solo en la conversación del arquitecto",
+   "frente": "comercial",
+   "que_es": "El primer cliente que pagaría por Appximo: un despacho de carreras con una propuesta de etapa 1 armada con el arquitecto. Hasta el 2026-10-06 no estaba en el tablero ni en ningún archivo (ni el disco ni el correo la tienen). Lo que se puede cotizar sin rederivar quedó especificado por pieza — geolocalización (ENG-65), app web del conductor (AUTO-15), asistente de WhatsApp (VOZ-30) — en el repo interno comercial/DESPACHO-CARRERAS.md; un boceto del schema del despacho valida contra el motor sin errores ni warnings.",
+   "por_que_importa": "Es la primera venta. Si se enfría por falta de seguimiento, el proyecto sigue sin ingreso y sin una referencia con nombre — exactamente lo que el contrato §9 dice que bloquea el negocio. Y una propuesta cuyos valores solo existen en un chat se pierde con el chat.",
+   "que_lo_destraba": "Miguel (o el arquitecto) pega el alcance, los valores y las condiciones de la etapa 1 en comercial/DESPACHO-CARRERAS.md §2 del repo interno, responde las preguntas abiertas de §9 con el cliente (sobre todo: ¿basta con que la app del conductor esté abierta? — una PWA no rastrea en segundo plano) y decide enviar o firmar. Con la firma se ordenan ENG-65 / AUTO-15 / VOZ-30 según lo que la etapa 1 incluya: 6–11 sesiones de agente para las tres al nivel de etapa 1, más días de calendario de Meta para WhatsApp que ninguna sesión acorta.",
+   "costo": "decision",
+   "dano": "alto",
+   "prioridad": "P1",
+   "decide": "miguel",
+   "depende_de": [],
+   "bloquea": [
+    "ENG-65",
+    "AUTO-15",
+    "VOZ-30"
+   ],
+   "origen": "CIERRE-Y-TRASPASO-S1 (2026-10-06): el brief lo nombra como el primer cliente que pagaría; no estaba en ningún lado del tablero",
+   "estado": "abierto"
+  },
+  {
+   "id": "ENG-65",
+   "titulo": "Despacho (prospecto) — geolocalización: posición del conductor en vivo, origen y destino, distancia y el más cercano, sin tipo geográfico nuevo para la etapa 1",
+   "frente": "comercial",
+   "que_es": "Lo que el despacho necesita de ubicación, armado con lo que el motor YA tiene: la ÚLTIMA posición de cada conductor como lat/lng float64 en su propia fila (PATCH desde la app; el rol conductor solo alcanza su fila por user_id = $user_id), el mapa del despachador alimentado por SSE (/api/conductores/events filtra filas y campos por rol), origen y destino como coordenadas + texto, y la asignación al más cercano en un handler Go del binario consumidor (haversine en memoria sobre los conductores disponibles con posición fresca; la carrera pasa a «ofrecida» con Ctx.Update, que aplica la máquina de estados dentro del UPDATE y devuelve 409 si otro la tomó primero). Solo falta motor si se pide de forma declarativa: «cerca de» en el /app o por voz, u orden por distancia en la API → ENG-64.",
+   "por_que_importa": "Es el corazón del despacho: sin asignación al más cercano es una libreta compartida. Saber —medido con un boceto de schema que valida— que la etapa 1 no necesita un tipo geográfico es lo que permite cotizarla sin meter una sesión de motor de por medio.",
+   "que_lo_destraba": "La firma (DEC-13). Después, una o dos sesiones: schema (conductores / clientes / carreras con máquina de estados solicitada→ofrecida→aceptada→en_camino→en_curso→terminada|cancelada y pending en solicitada/ofrecida; el boceto está en el repo interno), handler de asignación con vencimiento PEREZOSO de la oferta (oferta_vence + guarda al aceptar; sin bucle propio: el tick del worker es de 30 s, demasiado grueso para una oferta de 20 s), y +1 sesión para el mapa del despachador (Leaflet empaquetado en los assets —CSP sin CDN— más un proveedor de teselas con cuenta: la política de uso de tile.openstreetmap.org no admite tráfico comercial sostenido; la CSP del montaje estático se amplía con StaticMount.CSP). Historial de recorridos: fuera de la etapa 1 (filas de alto volumen sin retención declarable; Ctx no tiene Delete y los workflows no borran). Especificación: repo interno comercial/DESPACHO-CARRERAS.md §4.",
+   "costo": "grande",
+   "dano": "medio",
+   "prioridad": "P2",
+   "decide": "agente",
+   "depende_de": [
+    "DEC-13"
+   ],
+   "bloquea": [],
+   "origen": "CIERRE-Y-TRASPASO-S1 (2026-10-06): especificado para cotizar sin rederivar",
+   "estado": "abierto"
+  },
+  {
+   "id": "AUTO-15",
+   "titulo": "Despacho (prospecto) — la app web del conductor (PWA): tomar o rechazar la carrera, estados y posición mientras la app está abierta",
+   "frente": "comercial",
+   "que_es": "Una SPA móvil instalable (frontend-spec: SvelteKit adapter-static embebido con Config.Static, mismo origen, sin CORS) para cada conductor con su usuario del tenant (rol conductor): login, disponible/ocupado/fuera, la oferta llega por SSE (lector fetch: EventSource no manda Authorization) con sonido y vibración, aceptar o rechazar con la transición protegida contra dos conductores a la vez (409), llegué / inicié / terminé, y la posición por watchPosition + Screen Wake Lock con un indicador de «posición vieja». Límite REAL de la web: no hay geolocalización en segundo plano — en iPhone el JS de una PWA se suspende al salir de ella y en Android Chrome la página se congela con la pantalla apagada o en segundo plano.",
+   "por_que_importa": "Es la mitad del producto que el cliente ve todos los días. Y el segundo plano es la expectativa que más fácil se rompe en una venta: si el despacho espera ver al conductor en el mapa mientras usa Waze o WhatsApp, una PWA no lo hace y hay que decirlo ANTES de firmar (la alternativa —un envoltorio nativo con plugin de ubicación en segundo plano— es otra cotización, fuera del modelo de un binario).",
+   "que_lo_destraba": "La firma (DEC-13) y la respuesta del cliente a «¿basta con la app abierta en el soporte del carro?». Después, dos o tres sesiones: la app, el manifest + service worker para instalarla, y la verificación en teléfonos reales —Android (la mayoría de la flota en Colombia, a confirmar con la flota real) y al menos un iPhone— además de 390×844 en navegador. Avisar con la app CERRADA es Web Push (AUTO-16, +1–2 sesiones; en iPhone solo con la app agregada a la pantalla de inicio, iOS ≥ 16.4). Especificación: comercial/DESPACHO-CARRERAS.md §5.",
+   "costo": "grande",
+   "dano": "medio",
+   "prioridad": "P2",
+   "decide": "agente",
+   "depende_de": [
+    "DEC-13"
+   ],
+   "bloquea": [],
+   "origen": "CIERRE-Y-TRASPASO-S1 (2026-10-06): especificado para cotizar sin rederivar",
+   "estado": "abierto"
+  },
+  {
+   "id": "VOZ-30",
+   "titulo": "Despacho (prospecto) — el asistente de WhatsApp: pedir la carrera y recibir los avisos por WhatsApp Business (Cloud API), sobre el mismo pipeline de /api/ask",
+   "frente": "comercial",
+   "que_es": "No existe un canal WhatsApp: el worker trae message.telegram y nada más. La forma: un receptor en el binario consumidor (Route.Public con GET para la verificación de Meta y POST firmado —X-Hub-Signature-256 verificado sobre Ctx.RawBody— con su propio Route.RateLimit, porque el default público de 5 rps por IP frena las ráfagas de Meta), deduplicado por id de mensaje; el cliente identificado por su teléfono como $external_client_id con un JWT corto y acotado (el rol cliente solo crea y lee SUS carreras, y el motor fuerza ese campo al crear); el camino principal SIN modelo —botones interactivos + la ubicación compartida = la carrera creada con coordenadas—; el texto libre al pipeline de /api/ask con su confirmación de «sí»; y los avisos (conductor asignado, llegó, terminó) por un consumidor message.whatsapp, dentro de la ventana de 24 h que abre el propio pedido. Todo puede vivir en el código del consumidor (consumers.Router); hacerlo canal genérico del motor —reusable, por ejemplo, por la agenda— es un paso aparte.",
+   "por_que_importa": "En Colombia el cliente pide el carro por WhatsApp; sin este canal el despacho sigue atendiendo el mismo chat a mano. Es también el canal con más dependencias externas: cuenta, verificación de la empresa y plantillas de Meta toman días de calendario que ninguna sesión acorta, y el texto libre gasta modelo (el crédito de Anthropic de Miguel está agotado desde el 2026-09-25).",
+   "que_lo_destraba": "La firma (DEC-13) y lo que solo consigue el cliente o Miguel: la cuenta de Meta Business verificada (documentos de la empresa), un número dedicado (o la convivencia con la app WhatsApp Business, si Meta la ofrece en Colombia al momento de construir), el nombre visible aprobado y las plantillas para escribir fuera de la ventana. Después, dos a cuatro sesiones de agente. Costo por mensaje: el modelo de Meta vigente desde 2025-07-01 cobra por plantilla entregada según su categoría y no cobra las respuestas dentro de la ventana de 24 h; la tarifa de Colombia se consulta al cotizar. Especificación: comercial/DESPACHO-CARRERAS.md §6.",
+   "costo": "grande",
+   "dano": "medio",
+   "prioridad": "P2",
+   "decide": "miguel",
+   "depende_de": [
+    "DEC-13"
+   ],
+   "bloquea": [],
+   "origen": "CIERRE-Y-TRASPASO-S1 (2026-10-06): especificado para cotizar sin rederivar",
+   "estado": "abierto"
+  },
+  {
+   "id": "AUTO-16",
+   "titulo": "No hay Web Push: una app web hecha con el motor no puede avisar a un teléfono con la app cerrada",
+   "frente": "automatizacion",
+   "que_es": "Los avisos salen hoy por Telegram (summary.telegram / message.telegram) y por SSE mientras la página está abierta. No hay emisor Web Push (VAPID) ni dónde guardar la suscripción de un navegador. Lo pide la app del conductor (AUTO-15: la oferta con la app cerrada) y le serviría a la agenda (el aviso de 15 minutos sin depender de Telegram).",
+   "por_que_importa": "Sin esto, toda app web del motor solo puede avisar si el usuario la tiene abierta o usa Telegram. En iPhone, además, Web Push solo funciona con la app agregada a la pantalla de inicio (iOS ≥ 16.4) — un paso que hay que enseñarle al usuario.",
+   "que_lo_destraba": "Una sesión: claves VAPID por env, un recurso de suscripciones por usuario (RBAC por dueño), un consumidor message.push en el worker (cifrado RFC 8291 + firma VAPID RFC 8292 con la biblioteca estándar de Go —crypto/ecdh, crypto/hkdf, AES-GCM—: sin dependencia nueva), el manejador push del service worker en la plantilla de frontend-spec, y la verificación en Android y en un iPhone con la app instalada. Puede vivir primero en el worker del consumidor (consumers.Router) y subir al motor cuando una segunda app lo pida.",
+   "costo": "medio",
+   "dano": "bajo",
+   "prioridad": "P3",
+   "decide": "agente",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "CIERRE-Y-TRASPASO-S1 (2026-10-06): hueco encontrado al especificar la app del conductor",
+   "estado": "abierto"
+  },
+  {
+   "id": "DEC-10",
+   "frente": "comercial",
+   "costo": "decision",
+   "dano": "alto",
+   "prioridad": "P2",
+   "decide": "miguel",
+   "titulo": "La licencia del código posterior a la v0.1.13: decisión de Miguel, con un abogado de propiedad intelectual antes de publicar cualquier versión",
+   "que_es": "Lo publicado bajo Apache 2.0 hasta la v0.1.13 es irrevocable. Lo publicado DE HECHO llega más lejos: el repo fue público con LICENSE Apache hasta hoy, los tags v0.1.14–v0.1.16 están en el proxy de módulos de Go (proxy.golang.org sirve sus zips de código; @latest = v0.1.16, 2026-08-30) y `main` entero es clonable hasta que corra el cierre (DEC-12). De ahí en adelante el código no se publica; con qué licencia se publicaría algo nuevo, si se publica, no está decidido.",
+   "por_que_importa": "Define el negocio (abierto, abierto con restricciones o propietario) y no tiene vuelta atrás una vez publicado. La pregunta concreta para el abogado: qué alcance tienen v0.1.14–v0.1.16, que quedaron públicas en el proxy de Go y en la historia con LICENSE Apache, y qué licencia conviene para lo nuevo.",
+   "que_lo_destraba": "Miguel consulta a un abogado de propiedad intelectual ANTES de publicar cualquier versión nueva. Ningún agente propone ni escribe una licencia. Mientras tanto, la publicación sigue pausada (DEC-2, A-69) y la distribución pública es solo v0.1.13 (DEC-12).",
+   "depende_de": [],
+   "bloquea": [
+    "DEC-2"
+   ],
+   "origen": "CIERRE-Y-TRASPASO-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "DEC-11",
+   "frente": "flota",
+   "costo": "medio",
+   "dano": "alto",
+   "prioridad": "P2",
+   "decide": "miguel",
+   "titulo": "El corte del 58 al taller: cuándo y app por app — la agenda cambia de URL y sus atajos de Siri con ella",
+   "que_es": "El taller (s-2vcpu-4gb-amd, nyc2; su IP está en el repo interno) existe; el 58 sirve CUATRO apps (agenda, tiendita, petfriendly y saabado). El script de copia en paralelo y el procedimiento de corte están escritos (evidencia/CIERRE-Y-TRASPASO-S1/migracion/) pero no corrieron: el 105 no tiene llave en el taller (OPS-68). El corte cambia los registros A de tiendita, petfriendly y saabado en Cloudflare (TTL 300 s) y la URL de la agenda (sslip.io lleva la IP en el nombre); los atajos de Siri se editan, los tokens no cambian.",
+   "por_que_importa": "Ahorra el 58 (≈ US$ 18/mes) y pone las apps en una caja con el doble de memoria. Mal hecho, deja a Miguel sin agenda y con los atajos rotos; con dos consumidores del bot, cada aviso llega dos veces.",
+   "que_lo_destraba": "OPS-68 (llave del 105 en el taller) → `migrar-58.sh --target=root@<IP del taller>` (copia en paralelo verificada, el 58 intacto) → Miguel decide el corte app por app (petfriendly → tiendita → saabado → agenda) según evidencia/CIERRE-Y-TRASPASO-S1/migracion/PROCEDIMIENTO-DE-CORTE.md §2, con DEC-1 resuelto antes. A decidir: darle a la agenda un nombre estable (agenda.appximo.com) para que la próxima mudanza no rompa los atajos. El 58 se para, no se borra: snapshot y una semana estable antes de destruirlo.",
+   "depende_de": [
+    "DEC-1",
+    "OPS-68"
+   ],
+   "bloquea": [
+    "OPS-69"
+   ],
+   "origen": "CIERRE-Y-TRASPASO-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "DEC-12",
+   "frente": "comercial",
+   "costo": "chico",
+   "dano": "alto",
+   "prioridad": "P1",
+   "decide": "miguel",
+   "titulo": "Correr el cierre: publicar la distribución pública de v0.1.13 y recién entonces pasar appximo/appximo a privado (un comando después de `gh auth login`)",
+   "que_es": "Está preparado y verificado localmente. El repo de distribución appximo/appximo.github.io (sitio técnico, docs v0.1.13, LICENSE, release v0.1.13 con los 12 assets originales + los 3 scripts del instalador) está en /root/appximo-dist y /root/appximo-dist-release/v0.1.13: cero código, barrido de secretos limpio, ensayo del estudiante 25/25 contra un espejo local. También el script que lo publica, lo verifica desde afuera y RECIÉN ENTONCES cierra el repo del motor. No corrió: la caja no tiene token de GitHub.",
+   "por_que_importa": "Hasta que corra, `main` (todo lo posterior a v0.1.13: voz, workflows, agenda) es clonable por cualquiera. Cerrar sin la distribución rompe la doc técnica, la descarga de v0.1.13 y el camino de los dos prompts, que está en uso real: saabado se instaló por ahí el 2026-10-03.",
+   "que_lo_destraba": "Miguel: `gh auth login` (cuenta miguel09acosta) y `bash /root/appximo-internal/evidencia/CIERRE-Y-TRASPASO-S1/dist/publicar-y-cerrar.sh`. El script se detiene antes del paso 10 si el panel desplegado no incluye e743c74 (OPS-67). Se pierden 0 estrellas y 0 watchers (había 0). Después: AGENTS.md y el contrato pasan a decir «privado».",
+   "depende_de": [
+    "OPS-67"
+   ],
+   "bloquea": [
+    "OPS-71"
+   ],
+   "origen": "CIERRE-Y-TRASPASO-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "OPS-65",
+   "frente": "flota",
+   "costo": "chico",
+   "dano": "alto",
+   "prioridad": "P1",
+   "decide": "miguel",
+   "titulo": "saabado: una cuarta app en el 58 que ningún documento registra (SaaS de restaurantes, v0.1.13, instalada el 2026-10-03 por el camino del estudiante, sin copia off-box)",
+   "que_es": "saabado.appximo.com apunta al 58: unidad saabado.service (:8093/9093), bases saabado y saabado_dev, schema de 21 recursos y 8 roles, binario de consumidor sobre appximo v0.1.13, backup nocturno SIN copia off-box. Se instaló con el binario y los scripts bajados del repo público (/root/saabado-deploy en el 58). No figura en el paquete ni en el brief; si está en el panel, no se pudo verificar (el clasificador bloqueó leer su inventario).",
+   "por_que_importa": "Apagar el 58 sin saberlo la mata. Un cliente en construcción sin registro no tiene quién responda por su respaldo ni por su despliegue.",
+   "que_lo_destraba": "Miguel dice de quién es y qué es (¿uno de los «dos clientes en construcción»?). Se registra en el panel y en 05, entra al respaldo off-box (DEC-1) y a la migración (ya está en migrar-58.sh).",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "CIERRE-Y-TRASPASO-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "OPS-66",
+   "frente": "flota",
+   "costo": "chico",
+   "dano": "medio",
+   "prioridad": "P1",
+   "decide": "miguel",
+   "titulo": "El 105 está sin memoria: swap al 99,6 %, ≈ 460–580 MB libres y seis sesiones `claude` (≈ 1 GB) — compilar el motor o el panel hoy puede terminar en OOM",
+   "que_es": "Medido el 2026-10-06: 1 vCPU / 1,9 GB, swap 2045/2047 MB, seis procesos de Claude Code abiertos (el más viejo de hace ≈ 18 días). El enlazado de un binario de 65 MB no entra: esta sesión no compiló el panel por eso.",
+   "por_que_importa": "El 105 es el taller de los agentes y el host de build del panel. Sin memoria, cada build arriesga que el OOM mate una sesión viva o el Postgres de dev, y el arreglo del panel (OPS-67) no se puede desplegar.",
+   "que_lo_destraba": "Miguel cierra las sesiones de Claude Code que no usa (`ps -eo pid,etime,rss,args --sort=-rss | grep claude`) o redimensiona el 105. Listo cuando `free -m` deja ≥ 1,2 GB disponibles.",
+   "depende_de": [],
+   "bloquea": [
+    "OPS-67"
+   ],
+   "origen": "CIERRE-Y-TRASPASO-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "OPS-67",
+   "frente": "flota",
+   "costo": "chico",
+   "dano": "alto",
+   "prioridad": "P1",
+   "decide": "agente",
+   "titulo": "Desplegar el panel e743c74 antes de cerrar el repo: hasta esa versión el tablero de pendientes lee items.json de GitHub público y queda VACÍO con el repo privado",
+   "que_es": "centro-mando leía de la API pública de GitHub y de raw.githubusercontent.com: items.json/BACKLOG.md (el tablero de pendientes), el commit de main, la lista de ADR, cuánto atrasa cada app y el release del botón de descarga. e743c74 (repo interno) los lee de la copia de trabajo del 105 por UNA conexión ssh multiplexada (el 105 limita ssh) y el release del repo de distribución. Está commiteado, con vet limpio y los tres scripts probados por el camino real (usuario centro → 105). NO está desplegado (OPS-66).",
+   "por_que_importa": "Sin esto, el centro de mando, que es la puerta del próximo arquitecto, pierde los pendientes el minuto en que corre DEC-12.",
+   "que_lo_destraba": "Con memoria (OPS-66): panel → Acciones → «Actualizar el panel» (construye cm-<interno>-<motor> en el 105 y despliega con deploy-app.sh). Listo cuando /health del panel dice cm-<sha ≥ e743c74>-…; el script de cierre lo verifica antes del paso 10.",
+   "depende_de": [
+    "OPS-66"
+   ],
+   "bloquea": [
+    "DEC-12"
+   ],
+   "origen": "CIERRE-Y-TRASPASO-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "OPS-68",
+   "frente": "flota",
+   "costo": "chico",
+   "dano": "medio",
+   "prioridad": "P1",
+   "decide": "miguel",
+   "titulo": "El taller (droplet «taller») no estaba en el paquete y no tiene llave ni del 105 ni del panel",
+   "que_es": "Existe en la cuenta de DigitalOcean (s-2vcpu-4gb-amd, nyc2, droplet «taller»), pero el paquete decía «el taller es el 105» y ningún documento lo nombraba. ssh desde el 105 y desde el panel: Permission denied (publickey). Qué corre adentro: desconocido.",
+   "por_que_importa": "Bloquea la migración (DEC-11) y deja una caja paga fuera del inventario.",
+   "que_lo_destraba": "Miguel, desde su laptop: agrega la llave pública del 105 (y la del panel, si quiere que lo vigile) a /root/.ssh/authorized_keys del taller (comando exacto en evidencia/CIERRE-Y-TRASPASO-S1/migracion/PROCEDIMIENTO-DE-CORTE.md §0). Después un agente lo inventaría, lo da de alta en el panel y corrige 05 y COMO_TRABAJAR.",
+   "depende_de": [],
+   "bloquea": [
+    "DEC-11"
+   ],
+   "origen": "CIERRE-Y-TRASPASO-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "OPS-69",
+   "frente": "flota",
+   "costo": "chico",
+   "dano": "alto",
+   "prioridad": "P2",
+   "decide": "agente",
+   "titulo": "Cuando el taller sirva producción: que un agente que lo sature no tire la agenda (user.slice acotado, OOMScoreAdjust de producción, monitor externo)",
+   "que_es": "El taller va a ser escritorio de trabajo y caja de producción a la vez. Hoy, en el 105, los agentes ya dejan la caja sin swap.",
+   "por_que_importa": "Si un build o una suite satura el taller, se cae la agenda que Miguel usa a diario.",
+   "que_lo_destraba": "En el corte (DEC-11): `systemctl set-property user.slice MemoryHigh=2G MemoryMax=2500M CPUWeight=50` y un drop-in OOMScoreAdjust=-800/CPUWeight=1000 para las unidades de producción y postgresql (receta en evidencia/CIERRE-Y-TRASPASO-S1/migracion/PROCEDIMIENTO-DE-CORTE.md §6), la regla en el contrato §11, y un monitor externo sobre /healthz de la agenda (OPS-63).",
+   "depende_de": [
+    "DEC-11"
+   ],
+   "bloquea": [],
+   "origen": "CIERRE-Y-TRASPASO-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "OPS-71",
+   "frente": "flota",
+   "costo": "decision",
+   "dano": "medio",
+   "prioridad": "P2",
+   "decide": "miguel",
+   "titulo": "Con el repo privado, Actions cobra minutos: ≈ 1.920 facturables en los últimos 30 días contra 2.000 incluidos (el gate de Windows cuenta doble)",
+   "que_es": "Medido con la API pública el 2026-10-06: 280 corridas en 30 días (CI de 30 min por corrida con Windows ×2, el nightly de seguridad, benchmark, pages). Un repo público no paga minutos; uno privado en plan Free tiene 2.000 por mes y después los workflows se frenan.",
+   "por_que_importa": "Un mes con más pushes deja sin CI justo cuando se necesita, sin aviso visible.",
+   "que_lo_destraba": "Miguel decide: gate de Windows solo en tags o semanal, nightly de seguridad semanal, o pagar minutos. Mirar Settings → Billing → Actions después del primer mes privado.",
+   "depende_de": [
+    "DEC-12"
+   ],
+   "bloquea": [],
+   "origen": "CIERRE-Y-TRASPASO-S1",
+   "estado": "abierto"
   }
  ],
  "no_construir": [
@@ -1912,14 +2171,14 @@
   },
   {
    "que": "Las tres piezas de la agenda (listas, adjuntos con ubicación, hábitos) hasta que Miguel diga cuál primero",
-   "por_que": "Regla de APP-AGENDA-S1 (A-82): una semana de uso real antes de tocar la agenda; nada de repeticiones, jerarquías, droplet propio ni pantallas a medida en 4–6 semanas. Las tres están ESPECIFICADAS con las decisiones de Miguel en agenda/ESPECIFICACION-LISTAS-ADJUNTOS-HABITOS.md (repo interno) para que la sesión que las construya no re-derive nada; construirlas sin orden es construir en vez de exponer.",
+   "por_que": "Regla de APP-AGENDA-S1 (A-82): una semana de uso real antes de tocar la agenda; nada de repeticiones, jerarquías, droplet propio ni pantallas a medida en 4–6 semanas. Las tres están ESPECIFICADAS con las decisiones de Miguel en agenda/ESPECIFICACION-LISTAS-ADJUNTOS-HABITOS.md (repo interno) para que la sesión que las construya no re-derive nada; construirlas sin orden es construir en vez de exponer. Verificadas contra el motor el 2026-10-06: las especificaciones de listas y hábitos no cargaban tal como estaban escritas (alias); las correcciones están en evidencia/CIERRE-Y-TRASPASO-S1/agenda-verificacion.md.",
    "hasta": "que Miguel elija el orden (AGENDA-1/2/3)",
    "decision": "CENTRO-MANDO-TRASPASO-S1 / A-87"
   },
   {
    "que": "Un tipo de campo geográfico",
-   "por_que": "No existe (once tipos cerrados). Dos float64 (lat/lng) con filtros de rango cubren una caja y un pin en un mapa; distancia, «cerca de» y orden por cercanía exigirían un tipo, un operador, orden por expresión, gist declarable y la decisión PostGIS vs aritmética. Es una capacidad ausente, no un agujero.",
-   "hasta": "que un caso real lo pida y Miguel decida (ENG-64)",
+   "por_que": "No existe (once tipos cerrados). Dos float64 (lat/lng) con filtros de rango cubren una caja y un pin en un mapa; distancia, «cerca de» y orden por cercanía exigirían un tipo, un operador, orden por expresión, gist declarable y la decisión PostGIS vs aritmética (earthdistance viene en el mismo contrib que el motor ya instala para btree_gist). Es una capacidad ausente, no un agujero. El despacho de carreras (prospecto) es el caso candidato, pero su etapa 1 NO lo necesita: el más cercano se calcula en un handler del consumidor (ENG-65).",
+   "hasta": "que un caso real lo pida declarativamente —el despacho, si firma y su etapa 2 pide «cerca de» en el panel o por voz— y Miguel decida (ENG-64)",
    "decision": "AUDITORIA-GEO 2026-09-28"
   },
   {
@@ -1939,6 +2198,12 @@
    "por_que": "La exclusión por defecto rompe el contrato de lectura (`?fields=` empujado al SELECT es la respuesta; SCHEMA-8 registra la alternativa declarada). El editor de Go en el navegador contradice el modelo de un binario + `backend-spec` para agentes.",
    "hasta": "—",
    "decision": "A-51 / A4"
+  },
+  {
+   "que": "El despacho de carreras (geolocalización, app web del conductor, asistente de WhatsApp) antes de una firma — y con él Web Push y el canal WhatsApp como piezas de motor",
+   "por_que": "Están ESPECIFICADAS para cotizar sin rederivar (repo interno comercial/DESPACHO-CARRERAS.md; ENG-65, AUTO-15, VOZ-30, AUTO-16): construirlas sin el alcance firmado es construir en vez de vender, y la etapa 1 real puede no pedir las tres. El motor ya alcanza para la etapa 1 (un boceto del schema valida sin errores ni warnings), así que no hay nada que adelantar del lado del motor.",
+   "hasta": "que el prospecto firme la etapa 1 (DEC-13) y Miguel ordene las piezas según lo firmado",
+   "decision": "CIERRE-Y-TRASPASO-S1 (2026-10-06): pedido de Miguel — especificar, no construir"
   }
  ]
 }

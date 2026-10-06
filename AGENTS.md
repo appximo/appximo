@@ -28,6 +28,13 @@ executor, no `appximo-worker` asset, no `/api/summary`, no `/api/ask`, no
 v0.1.14–v0.1.16 exist without a published release (DEC-2: publication paused
 on purpose) and predate all of it. Never document those as "in the release";
 say "on `main`" and point at `go build ./cmd/appximo ./cmd/appximo-worker`.
+**Code after v0.1.13 is not published (A-88, CIERRE-Y-TRASPASO-S1):** the
+PUBLIC distribution of v0.1.13 — the technical site, the v0.1.13 docs and
+binaries, no source code — is `appximo/appximo.github.io` (prepared in
+`/root/appximo-dist`; created by Miguel's close script, DEC-12), and this
+repository becomes private in the same command. `docker-publish.yml` publishes
+images only from tags, never from `main`. Do not re-open either when repairing
+CI, and never propose a license for the new code (DEC-10 is Miguel's, with a lawyer).
 The canonical example of an app that declares the whole front — `aliases`,
 `events`, `pending`, an event workflow and a cron one that enqueues
 `summary.telegram`, `summary` — is `examples/model-lab/agenda-voz.json`; the
