@@ -55,7 +55,7 @@ var (
 	backlogDanos      = map[string]bool{"alto": true, "medio": true, "bajo": true}
 	backlogPrioridad  = map[string]bool{"P1": true, "P2": true, "P3": true}
 	backlogDecide     = map[string]bool{"miguel": true, "agente": true}
-	backlogItemHeadRe = regexp.MustCompile(`(?m)^### ((?:ENG|SCHEMA|RBAC|OPS|DOC|COMMERCE|SEC|MIG|AUTO|DEC|VOZ|FILES|AGENDA)-[0-9A-Za-z]+|MIG-FRONT) — `)
+	backlogItemHeadRe = regexp.MustCompile(`(?m)^### ((?:ENG|SCHEMA|RBAC|OPS|DOC|COMMERCE|SEC|MIG|AUTO|DEC|VOZ|FILES|AGENDA|MARCA)-[0-9A-Za-z]+|MIG-FRONT) — `)
 )
 
 func TestBacklogItemsStayStructured(t *testing.T) {

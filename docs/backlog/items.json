@@ -1,6 +1,6 @@
 {
  "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|agenda|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo). Bloque `no_construir` (CENTRO-MANDO-TRASPASO-S1): lo que está DECIDIDO no construir ahora, con su por qué, hasta cuándo y la decisión que lo respalda — es la sección 5 del paquete de traspaso; se edita cuando una decisión de Miguel lo cambia.",
- "actualizado": "2026-10-06",
+ "actualizado": "2026-10-07",
  "publicacion": {
   "estado": "pausada_deliberada",
   "desde": "2026-08-29",
@@ -1894,11 +1894,11 @@
   },
   {
    "id": "DEC-13",
-   "titulo": "Propuesta a un despacho de carreras (prospecto): la etapa 1 está por cerrarse y su alcance, valores y condiciones viven solo en la conversación del arquitecto",
+   "titulo": "Propuesta a un despacho de carreras (prospecto): la etapa 1 está escrita y VENCE EL 30/10/2026; si se mandó y qué contestó, desconocido",
    "frente": "comercial",
-   "que_es": "El primer cliente que pagaría por Appximo: un despacho de carreras con una propuesta de etapa 1 armada con el arquitecto. Hasta el 2026-10-06 no estaba en el tablero ni en ningún archivo (ni el disco ni el correo la tienen). Lo que se puede cotizar sin rederivar quedó especificado por pieza — geolocalización (ENG-65), app web del conductor (AUTO-15), asistente de WhatsApp (VOZ-30) — en el repo interno comercial/DESPACHO-CARRERAS.md; un boceto del schema del despacho valida contra el motor sin errores ni warnings.",
+   "que_es": "La propuesta de la etapa 1 —del 30/09/2026, a nombre de Miguel como persona natural, con Appximo como tecnología— tiene vigencia de 30 días: vence el 30/10/2026. El alcance, los valores y las condiciones están escritos en el repo interno (comercial/DESPACHO-CARRERAS.md §2), separados por quién decidió qué: lo decidido por Miguel, el alcance que propuso el arquitecto a su pedido, y lo propuesto sin confirmación explícita. Si se mandó y qué contestó el prospecto: desconocido.",
    "por_que_importa": "Es la primera venta. Si se enfría por falta de seguimiento, el proyecto sigue sin ingreso y sin una referencia con nombre — exactamente lo que el contrato §9 dice que bloquea el negocio. Y una propuesta cuyos valores solo existen en un chat se pierde con el chat.",
-   "que_lo_destraba": "Miguel (o el arquitecto) pega el alcance, los valores y las condiciones de la etapa 1 en comercial/DESPACHO-CARRERAS.md §2 del repo interno, responde las preguntas abiertas de §9 con el cliente (sobre todo: ¿basta con que la app del conductor esté abierta? — una PWA no rastrea en segundo plano) y decide enviar o firmar. Con la firma se ordenan ENG-65 / AUTO-15 / VOZ-30 según lo que la etapa 1 incluya: 6–11 sesiones de agente para las tres al nivel de etapa 1, más días de calendario de Meta para WhatsApp que ninguna sesión acorta.",
+   "que_lo_destraba": "Miguel dice si se mandó y qué contestó, y confirma o corrige lo propuesto sin confirmación (mínimo de conductores, mensualidad desde la entrega, plazo de 4–5 semanas con la verificación de Meta como condición, canal único, cesión a una sociedad futura). Antes de firmar: qué recibe el cliente del motor posterior a v0.1.13 (DEC-10, con abogado). Con la firma, ENG-65/AUTO-15/VOZ-30 en el orden del alcance firmado (≈ 5–9½ sesiones sin la cercanía, §2.5 del documento).",
    "costo": "decision",
    "dano": "alto",
    "prioridad": "P1",
@@ -1909,7 +1909,7 @@
     "AUTO-15",
     "VOZ-30"
    ],
-   "origen": "CIERRE-Y-TRASPASO-S1 (2026-10-06): el brief lo nombra como el primer cliente que pagaría; no estaba en ningún lado del tablero",
+   "origen": "CIERRE-Y-TRASPASO-S1 → chat del arquitecto 2026-10-07 (PROTEGER-S1, PARTE 0)",
    "estado": "abierto"
   },
   {
@@ -2163,6 +2163,22 @@
    "depende_de": [],
    "bloquea": [],
    "origen": "CIERRE-Y-TRASPASO-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "MARCA-1",
+   "frente": "comercial",
+   "costo": "chico",
+   "dano": "alto",
+   "prioridad": "P1",
+   "decide": "miguel",
+   "titulo": "La marca APPXIMO no tiene solicitud en ninguna oficina: registrarla ante la SIC (clases 9 y 42), con búsqueda de antecedentes primero",
+   "que_es": "Decisión de Miguel (chat del 2026-10-07, A-92): solicitar el registro de APPXIMO ante la Superintendencia de Industria y Comercio, como persona natural, en las clases 9 y 42, después de buscar marcas idénticas o parecidas por sonido, escritura y concepto, y nombres de sociedades.",
+   "por_que_importa": "En palabras de Miguel: «con el código ya filtrado, es la protección más efectiva que me queda, y nunca la hice». El código hasta v0.1.16 está afuera para siempre; el nombre es lo que todavía se puede proteger.",
+   "que_lo_destraba": "PROTEGER-S1 PARTE C deja en el repo interno (comercial/MARCA-SIC.md) la búsqueda de antecedentes con su evidencia, los pasos y las tasas 2026 con su fuente, y un borrador presentable. Miguel presenta y paga; lo que sea criterio jurídico, con el abogado de DEC-10.",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "Chat del arquitecto 2026-10-07 → PROTEGER-S1",
    "estado": "abierto"
   }
  ],

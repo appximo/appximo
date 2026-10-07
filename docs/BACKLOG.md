@@ -40,7 +40,7 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 **`DEC-*` decisions that only Miguel can take** (the old "Requires a decision
 from Miguel" table, given stable IDs).
 
-**Last reviewed: 2026-10-06 (CIERRE-Y-TRASPASO-S1).** Review history + all DONE
+**Last reviewed: 2026-10-07 (PROTEGER-S1).** Review history + all DONE
 session sections: [BACKLOG_ARCHIVO.md](BACKLOG_ARCHIVO.md).
 
 ## OPEN
@@ -1766,12 +1766,17 @@ retired (petfriendly IS the engine demo). One deletion in Cloudflare.
 - **What is ready:** the distribution repo `appximo/appximo.github.io` (technical site, v0.1.13 docs, LICENSE, the v0.1.13 release with the 12 original assets + the 3 installer scripts) in `/root/appximo-dist` + `/root/appximo-dist-release/v0.1.13`: zero source code, secret sweep clean, the student path 25/25 against a local mirror; and the script that publishes it, verifies it from outside and ONLY THEN closes the engine repo. It did not run: the box has no GitHub token.
 - **Ready when:** Miguel runs `gh auth login` (account miguel09acosta) and `bash /root/appximo-internal/evidencia/CIERRE-Y-TRASPASO-S1/dist/publicar-y-cerrar.sh`. The script stops before step 10 if the deployed panel does not include `e743c74` (OPS-67). Lost: 0 stars, 0 watchers (there were 0). Afterwards AGENTS.md and the contract say "private".
 
-### DEC-13 — A ride-dispatch prospect: the stage-1 proposal is about to close, and its scope, values and conditions live only in the architect's conversation
+### DEC-13 — A ride-dispatch prospect: the stage-1 proposal is written and EXPIRES ON 2026-10-30; whether it was sent and what the prospect answered is unknown
 
-- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06) — the session brief names it as the first customer who would pay for Appximo; it was nowhere on the board and in no file (not on disk, not in the mail).
-- **Impact:** the first sale. If it cools down for lack of follow-up the project stays with no revenue and no named reference — exactly what the contract (§9) says blocks the business; and a proposal whose values exist only in a chat dies with the chat.
-- **What is already specified:** the three pieces a dispatch needs, specified to quote without re-deriving — geolocation (ENG-65), the driver web app (AUTO-15), the WhatsApp assistant (VOZ-30) — in the internal repo, `comercial/DESPACHO-CARRERAS.md`. A sketch of the dispatch schema (drivers / customers / rides with a race-safe state machine and per-role row scoping, incl. `$external_client_id` for WhatsApp customers) validates against the engine with zero errors and zero warnings (binary 8bef63c).
-- **Ready when:** Miguel (or the architect) pastes the stage-1 scope, values and conditions into `comercial/DESPACHO-CARRERAS.md` §2, the open questions of §9 are answered with the customer (above all: is it enough that the driver app is OPEN? — a PWA cannot track in the background), and Miguel decides to send/sign. With the signature, ENG-65 / AUTO-15 / VOZ-30 are ordered by what stage 1 includes: 6–11 agent sessions for the three at stage-1 level, plus Meta calendar days for WhatsApp that no session shortens. Decides: Miguel.
+- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06) → the architect's chat of 2026-10-07, written into the source by PROTEGER-S1 (PARTE 0).
+- **Impact:** the first sale. The stage-1 proposal is dated 2026-09-30, in Miguel's name as a natural person, with Appximo as the technology, valid for 30 days: **it expires on 2026-10-30**. Scope, values and conditions are written in the internal repo (`comercial/DESPACHO-CARRERAS.md` §2), separated by who decided what. Whether it was sent and what the prospect answered: **unknown** (Miguel knows).
+- **Ready when:** Miguel records whether it was sent and the answer, and confirms or corrects what the architect proposed without explicit confirmation (minimum drivers, monthly fee from delivery, 4–5 weeks with Meta's verification as a condition, single channel, assignable contract). Before signing: what the customer receives of the post-v0.1.13 engine (DEC-10, with a lawyer). With a signature: ENG-65 / AUTO-15 / VOZ-30 in the order of the signed scope — ≈ 5–9½ agent sessions without proximity (§2.5 of the document). Decides: Miguel.
+
+### MARCA-1 — The APPXIMO trademark has no application at any office: file it at the SIC (classes 9 and 42), after a prior-art search
+
+- **Origin:** Miguel's decision in the architect's chat of 2026-10-07 (A-92), written into the source by PROTEGER-S1.
+- **Impact:** in Miguel's words, «with the code already leaked, it is the most effective protection I have left, and I never did it». The code up to v0.1.16 is out for good; the name is what can still be protected.
+- **Ready when:** PROTEGER-S1 PARTE C leaves in the internal repo (`comercial/MARCA-SIC.md`) the prior-art search with its evidence, the 2026 steps and fees with their official source, and a draft Miguel can file. Miguel files and pays; anything that is legal judgement goes to the DEC-10 lawyer. Decides: Miguel.
 
 ### VOZ-14 — Asociar varias personas a un compromiso por voz (many-to-many): the voice writes ONE row per confirmation
 
