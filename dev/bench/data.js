@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791412326341,
+  "lastUpdate": 1791457946556,
   "repoUrl": "https://github.com/appximo/appximo",
   "entries": {
     "Benchmark": [
@@ -9216,6 +9216,78 @@ window.BENCHMARK_DATA = {
             "value": 0,
             "unit": "allocs/op",
             "extra": "47455803 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "committer": {
+            "email": "miguel09acosta@gmail.com",
+            "name": "Miguel Acosta",
+            "username": "miguel09acosta"
+          },
+          "distinct": true,
+          "id": "9d6321bfd97f6d1df1f19f3ba31cefe8f7d669fd",
+          "message": "docs(backlog): the .170's real surface, the exposed dev DB closed, and what the close actually protects (PROTEGER-S1)\n\n- OPS-51 rewritten: the .170 runs TEN consumer apps (not two) with a third\n  party's real tax data; OPS-73 retotr's backup is 5 weeks old, unscheduled,\n  one off-box copy (P1); OPS-74 a dev postgres (docker 5433) was open to the\n  whole internet, closed reversibly (the tax DB on 5432 and the control planes\n  were never exposed); OPS-75 an unknown RSA root key; SEC-6 saabado and the\n  public v0.1.13 predate FILES-3 (retotr has no file fields → low risk).\n- MARCA-1 research done (classes 9+42, no direct conflicts, fees, a draft);\n  DEC-13 unchanged. DEC-12 updated: the panel no longer reads public GitHub\n  (OPS-67 done), so the close only awaits `gh auth login`; it protects commits\n  after v0.1.16 (85018bd, 2026-08-30) — v0.1.13..v0.1.16 are in the Go proxy\n  for good, 0 forks, Software Heritage never archived it. OPS-64 the token\n  rotation script is ready on the boxes. OPS-66/OPS-67/OPS-72 done & removed.\n- the sync test accepts the MARCA prefix.\n\nNo engine code changed; by rule, git/infra/docs carry no engine gates.\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BFx665rew7NNpK1KbHDKMV",
+          "timestamp": "2026-10-08T11:11:49Z",
+          "tree_id": "09fc0f5d4ee5f74638e167780c36760cba5cc800",
+          "url": "https://github.com/appximo/appximo/commit/9d6321bfd97f6d1df1f19f3ba31cefe8f7d669fd"
+        },
+        "date": 1791457945487,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkJWTValidation",
+            "value": 6330,
+            "unit": "ns/op\t    3104 B/op\t      52 allocs/op",
+            "extra": "369853 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - ns/op",
+            "value": 6330,
+            "unit": "ns/op",
+            "extra": "369853 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - B/op",
+            "value": 3104,
+            "unit": "B/op",
+            "extra": "369853 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkJWTValidation - allocs/op",
+            "value": 52,
+            "unit": "allocs/op",
+            "extra": "369853 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck",
+            "value": 70.64,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36291483 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - ns/op",
+            "value": 70.64,
+            "unit": "ns/op",
+            "extra": "36291483 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36291483 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkRBACCheck - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36291483 times\n4 procs"
           }
         ]
       }
