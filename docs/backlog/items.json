@@ -1,6 +1,6 @@
 {
  "$comment": "La forma estructurada del registro de pendientes (CENTRO-MANDO-S2). docs/BACKLOG.md sigue siendo la narrativa con la evidencia; ESTE archivo es lo que una máquina (el centro de mando) puede ordenar sin ambigüedad, y se edita A MANO junto con el BACKLOG. cmd/appximo/backlog_items_test.go falla si un item OPEN del BACKLOG falta acá, si un item de acá no está en el BACKLOG, o si a un item le falta un campo. Campos: que_es (una línea en español llano), por_que_importa (qué pasa si no se hace), que_lo_destraba (comando, decisión o sesión), costo (chico=horas | medio=una sesión | grande=varias sesiones | decision=solo decidir), dano (alto|medio|bajo si NO se hace), prioridad (P1=daño alto y alcanzable | P2=vale la pena pronto | P3=puede esperar; cruzada daño×costo, nunca por fecha), decide (miguel|agente), depende_de/bloquea (ids), frente (motor|flota|automatizacion|agenda|comercial|medicion|producto|docs), estado (abierto; lo cerrado/hecho se va a docs/BACKLOG_ARCHIVO.md y sale de este archivo). Bloque `no_construir` (CENTRO-MANDO-TRASPASO-S1): lo que está DECIDIDO no construir ahora, con su por qué, hasta cuándo y la decisión que lo respalda — es la sección 5 del paquete de traspaso; se edita cuando una decisión de Miguel lo cambia.",
- "actualizado": "2026-10-07",
+ "actualizado": "2026-10-08",
  "publicacion": {
   "estado": "pausada_deliberada",
   "desde": "2026-08-29",
@@ -1137,11 +1137,11 @@
   },
   {
    "id": "OPS-51",
-   "titulo": "La caja de crisblogs ya es retotr-prod (operada, con Reto Tributario vivo) — falta el papel: documentarla y decidir qué pasa con el install viejo de crisblogs",
+   "titulo": "La .170 (retotr-prod) tiene DIEZ apps de consumidor, no dos — y datos reales de terceros (reto tributario) con respaldo flojo",
    "frente": "flota",
-   "que_es": "OBSERVADO 2026-09-17 en el panel: 147.182.163.170 figura como retotr-prod (activo, uso apps, con llave del panel) y sirve Reto Tributario (arriba, 200 público) junto al install viejo de crisblogs. El item original («droplet sin documentar, sin llave») quedó superado por los hechos — pero la caja sigue SIN documentar en el handoff (05_SERVIDORES) y sin companions (fleet-audit no corre ahí).",
-   "por_que_importa": "Una caja de producción real (Reto Tributario) operando fuera del papel del handoff y sin backup/audit verificables es exactamente la clase de hueco que el inventario existe para cerrar.",
-   "que_lo_destraba": "Miguel confirma el estado de esa caja (quién la instaló, con qué layout) → una sesión la pone al día: 05_SERVIDORES, companions (backup/restore/fleet-audit), y la decisión sobre el install viejo de crisblogs (OPS-27).",
+   "que_es": "Inventariada en solo-lectura por la llave del panel (2026-10-07): PostgreSQL 14 nativo en 127.0.0.1:5432 (no expuesto) con retotr (526 MB, 37 246 declarations) + vecingo, sebashr, traffick, sismo, wash, crisblogs, autotrader, appximo; además un PostgreSQL 16 en Docker publicado en 5433. Diez services de consumidor (retotr, autotrader, crisblogs, sebashr=atina, sismo, traffick, vecingo, wash, appximo) tras Caddy en *.appximo.com, cada uno con su data plane 809x y su control plane 90xx. retotr corre 1.8.0-motor-0116 (commit 135fc3d, anterior a FILES-3). Nada de esto estaba en el paquete.",
+   "por_que_importa": "La caja guarda datos reales de impuestos de una empresa que no es de Miguel, en su cuenta de DigitalOcean, con la llave de un tercero (ver OPS-76) y un respaldo de retotr de hace 5 semanas sin agenda (OPS-74). El panel decía «ajena sin llave» y después «layout sin documentar»; la realidad es diez apps y un control plane por app.",
+   "que_lo_destraba": "Miguel decide el papel de la caja: documentarla entera (apps, dueños de cada dominio, retención), separar lo de terceros (retotr) de las demos, y resolver OPS-74 (respaldo) y OPS-76 (llave ajena). PROTEGER-S1 dejó el inventario en evidencia/PROTEGER-S1/a170/.",
    "costo": "decision",
    "dano": "medio",
    "prioridad": "P2",
@@ -1882,7 +1882,7 @@
    "frente": "flota",
    "que_es": "Durante ALERTAS-TELEGRAM-S1 el token de @appximodev_bot apareció en el chat del brief (04 §SEGURIDAD DEL TOKEN tiene la receta). Ese bot hoy es el canal de comandos de la agenda de Miguel (actúa como él: lee y escribe sus filas) y el de alertas de las tres apps del 58 y del panel.",
    "por_que_importa": "Quien tenga el token puede leer y mandar mensajes como el bot — incluidos los comandos de la agenda — sin tocar ninguna caja. Es el único secreto de producción con exposición conocida.",
-   "que_lo_destraba": "Miguel: @BotFather → /revoke sobre @appximodev_bot → el token nuevo en APPXIMO_TELEGRAM_BOT_TOKEN de agenda, appitools, vetapp y centro (deploy-app.sh --env-add o a mano) → restart de las cuatro unidades y sus workers → verificar en el journal «telegram alert destination verified». Receta: PRODUCTION.md §4.6c.",
+   "que_lo_destraba": "El script está listo y copiado en el 58 y en el panel (/root/rotar-token-bot.sh, sha 86b57e3d): pide el token nuevo sin eco, lo verifica con getMe ANTES de escribir, respalda, reinicia y comprueba que el viejo da 401 — nunca imprime el token. ACCIÓN DE MIGUEL: /revoke en @BotFather, correr el script desde su terminal en cada caja (ssh -t root@162.243.64.58 bash /root/rotar-token-bot.sh; y en el panel), pegar el token nuevo donde no se ve. Nada más en el 58 se toca.",
    "costo": "chico",
    "dano": "alto",
    "prioridad": "P1",
@@ -2031,10 +2031,8 @@
    "titulo": "Correr el cierre: publicar la distribución pública de v0.1.13 y recién entonces pasar appximo/appximo a privado (un comando después de `gh auth login`)",
    "que_es": "Está preparado y verificado localmente. El repo de distribución appximo/appximo.github.io (sitio técnico, docs v0.1.13, LICENSE, release v0.1.13 con los 12 assets originales + los 3 scripts del instalador) está en /root/appximo-dist y /root/appximo-dist-release/v0.1.13: cero código, barrido de secretos limpio, ensayo del estudiante 25/25 contra un espejo local. También el script que lo publica, lo verifica desde afuera y RECIÉN ENTONCES cierra el repo del motor. No corrió: la caja no tiene token de GitHub.",
    "por_que_importa": "Hasta que corra, `main` (todo lo posterior a v0.1.13: voz, workflows, agenda) es clonable por cualquiera. Cerrar sin la distribución rompe la doc técnica, la descarga de v0.1.13 y el camino de los dos prompts, que está en uso real: saabado se instaló por ahí el 2026-10-03.",
-   "que_lo_destraba": "Miguel: `gh auth login` (cuenta miguel09acosta) y `bash /root/appximo-internal/evidencia/CIERRE-Y-TRASPASO-S1/dist/publicar-y-cerrar.sh`. El script se detiene antes del paso 10 si el panel desplegado no incluye e743c74 (OPS-67). Se pierden 0 estrellas y 0 watchers (había 0). Después: AGENTS.md y el contrato pasan a decir «privado».",
-   "depende_de": [
-    "OPS-67"
-   ],
+   "que_lo_destraba": "Miguel: `gh auth login` (device flow, cuenta miguel09acosta) en el 105 y `bash /root/appximo-internal/evidencia/CIERRE-Y-TRASPASO-S1/dist/publicar-y-cerrar.sh`. El panel ya corre cm-4b53bde-2a1bdfd y lee el repo del 105 (OPS-67 hecho en PROTEGER-S1), así que el script ya no se frena por eso. El código posterior a v0.1.16 (85018bd, 2026-08-30 17:17 UTC) es lo único que el cierre protege: v0.1.13–v0.1.16 están en el proxy de Go para siempre (0 forks, Software Heritage no lo archivó).",
+   "depende_de": [],
    "bloquea": [
     "OPS-71"
    ],
@@ -2054,44 +2052,6 @@
    "que_lo_destraba": "Miguel dice de quién es y qué es (¿uno de los «dos clientes en construcción»?). Se registra en el panel y en 05, entra al respaldo off-box (DEC-1) y a la migración (ya está en migrar-58.sh).",
    "depende_de": [],
    "bloquea": [],
-   "origen": "CIERRE-Y-TRASPASO-S1",
-   "estado": "abierto"
-  },
-  {
-   "id": "OPS-66",
-   "frente": "flota",
-   "costo": "chico",
-   "dano": "medio",
-   "prioridad": "P1",
-   "decide": "miguel",
-   "titulo": "El 105 está sin memoria: swap al 99,6 %, ≈ 460–580 MB libres y seis sesiones `claude` (≈ 1 GB) — compilar el motor o el panel hoy puede terminar en OOM",
-   "que_es": "Medido el 2026-10-06: 1 vCPU / 1,9 GB, swap 2045/2047 MB, seis procesos de Claude Code abiertos (el más viejo de hace ≈ 18 días). El enlazado de un binario de 65 MB no entra: esta sesión no compiló el panel por eso.",
-   "por_que_importa": "El 105 es el taller de los agentes y el host de build del panel. Sin memoria, cada build arriesga que el OOM mate una sesión viva o el Postgres de dev, y el arreglo del panel (OPS-67) no se puede desplegar.",
-   "que_lo_destraba": "Miguel cierra las sesiones de Claude Code que no usa (`ps -eo pid,etime,rss,args --sort=-rss | grep claude`) o redimensiona el 105. Listo cuando `free -m` deja ≥ 1,2 GB disponibles.",
-   "depende_de": [],
-   "bloquea": [
-    "OPS-67"
-   ],
-   "origen": "CIERRE-Y-TRASPASO-S1",
-   "estado": "abierto"
-  },
-  {
-   "id": "OPS-67",
-   "frente": "flota",
-   "costo": "chico",
-   "dano": "alto",
-   "prioridad": "P1",
-   "decide": "agente",
-   "titulo": "Desplegar el panel e743c74 antes de cerrar el repo: hasta esa versión el tablero de pendientes lee items.json de GitHub público y queda VACÍO con el repo privado",
-   "que_es": "centro-mando leía de la API pública de GitHub y de raw.githubusercontent.com: items.json/BACKLOG.md (el tablero de pendientes), el commit de main, la lista de ADR, cuánto atrasa cada app y el release del botón de descarga. e743c74 (repo interno) los lee de la copia de trabajo del 105 por UNA conexión ssh multiplexada (el 105 limita ssh) y el release del repo de distribución. Está commiteado, con vet limpio y los tres scripts probados por el camino real (usuario centro → 105). NO está desplegado (OPS-66).",
-   "por_que_importa": "Sin esto, el centro de mando, que es la puerta del próximo arquitecto, pierde los pendientes el minuto en que corre DEC-12.",
-   "que_lo_destraba": "Con memoria (OPS-66): panel → Acciones → «Actualizar el panel» (construye cm-<interno>-<motor> en el 105 y despliega con deploy-app.sh). Listo cuando /health del panel dice cm-<sha ≥ e743c74>-…; el script de cierre lo verifica antes del paso 10.",
-   "depende_de": [
-    "OPS-66"
-   ],
-   "bloquea": [
-    "DEC-12"
-   ],
    "origen": "CIERRE-Y-TRASPASO-S1",
    "estado": "abierto"
   },
@@ -2150,22 +2110,6 @@
    "estado": "abierto"
   },
   {
-   "id": "OPS-72",
-   "titulo": "Un motor de prueba de FILES-3 sigue corriendo hace ≈ 8 días en el 105 (`appximo-files3`, :8170/9170) y escribe su auditoría DENTRO del repo interno",
-   "frente": "flota",
-   "costo": "chico",
-   "dano": "bajo",
-   "prioridad": "P3",
-   "decide": "miguel",
-   "que_es": "PID 3272270, `/tmp/as/appximo-files3 serve --schema /tmp/as/files-audit.json --port 8170 --control-port 9170`, arrancado por la auditoría de FILES-3 (28/09) y nunca parado; mantiene abierto `evidencia/AGENDA-ASISTENTE-S1/engine-audit.log` (6,2 MB, +21 000 líneas sin commitear) y deja el repo interno sucio en cada paquete de traspaso.",
-   "por_que_importa": "Ensucia la verificación del paquete (el pie dice «interno: sucio»), ocupa memoria en un 105 sin memoria (OPS-66) y es el tipo de resto que la regla de limpieza de sesiones prohíbe.",
-   "que_lo_destraba": "Con el visto bueno de Miguel (no lo arrancó esta sesión): `kill 3272270` (PID exacto, nunca pkill -f), borrar su tenant/base de prueba si tiene uno, `git -C /root/appximo-internal checkout -- evidencia/AGENDA-ASISTENTE-S1/engine-audit.log`.",
-   "depende_de": [],
-   "bloquea": [],
-   "origen": "CIERRE-Y-TRASPASO-S1",
-   "estado": "abierto"
-  },
-  {
    "id": "MARCA-1",
    "frente": "comercial",
    "costo": "chico",
@@ -2179,6 +2123,70 @@
    "depende_de": [],
    "bloquea": [],
    "origen": "Chat del arquitecto 2026-10-07 → PROTEGER-S1",
+   "estado": "abierto"
+  },
+  {
+   "id": "OPS-73",
+   "frente": "flota",
+   "costo": "chico",
+   "dano": "alto",
+   "prioridad": "P1",
+   "decide": "miguel",
+   "titulo": "El respaldo de retotr (datos de impuestos de un tercero) es de hace 5 semanas, sin agenda y con una sola copia off-box",
+   "que_es": "En la .170, retotr tiene su último dump en /var/backups/retotr/retotr-20260901-032132.dump (Sep 1, 319 MB) y una copia en el 105 (/var/backups/offbox/retotr, misma fecha). NO hay backup timer de retotr (sí de traffick y sismo), BACKUP_COPY_TO está vacío, y la base crece (37 246 declarations, 20 473 escrituras desde el 2026-08-28). Verificado sin restaurar; pendiente pg_restore --list.",
+   "por_que_importa": "Es el dato de un tercero (reto tributario) bajo la cuenta de Miguel. La promesa de recuperación se mide DESDE el set, y el set es de hace 5 semanas y sin agenda: cualquier escritura desde el Sep 1 se pierde si muere el droplet. Más grave que DEC-1 porque no es dato propio.",
+   "que_lo_destraba": "Miguel decide dónde se restauran datos de contribuyentes para probar (no lo decide un agente) y pone el timer de respaldo (install.sh --backup-schedule o un <app>-backup.timer) + BACKUP_COPY_TO cifrado a un destino que él controle. PROTEGER-S1 dejó el item; el plan de restore es de Miguel.",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "PROTEGER-S1 PARTE A",
+   "estado": "abierto"
+  },
+  {
+   "id": "OPS-74",
+   "frente": "flota",
+   "costo": "chico",
+   "dano": "medio",
+   "prioridad": "P2",
+   "decide": "miguel",
+   "titulo": "La .170 tenía un PostgreSQL de desarrollo (docker, 5433) abierto a todo internet — cerrado reversible en PROTEGER-S1",
+   "que_es": "docker appximo-postgres (postgres:16) publicaba 0.0.0.0:5433 y ufw lo permitía desde Anywhere; respondía al protocolo postgres desde el 105. La base de impuestos (5432) y todos los control planes (90xx) estaban cerrados desde afuera. PROTEGER-S1 cerró el 5433 a lo externo (DOCKER-USER ctorigdstport + INPUT, unidad appximo-protect-5433.service que lo re-aplica al boot); el 127.0.0.1:5433 local sigue abierto, retotr y las apps intactas (200). before-state en /root/protect-5433/ de la caja.",
+   "por_que_importa": "Una base abierta a internet es un punto de entrada por fuerza bruta, aunque sea de desarrollo. El cierre es reversible pero el contenido del 5433 no se verificó (no se tocó dato ajeno): si tiene copias de dato real, es peor.",
+   "que_lo_destraba": "Miguel confirma el cierre, decide si el 5433 debe seguir existiendo (lo correcto es un túnel SSH, no 0.0.0.0) y, si lo quiere permanente, lo deja; revert documentado en la unidad. Verificar qué hay en esa base es decisión suya.",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "PROTEGER-S1 PARTE A",
+   "estado": "abierto"
+  },
+  {
+   "id": "OPS-75",
+   "frente": "flota",
+   "costo": "chico",
+   "dano": "medio",
+   "prioridad": "P2",
+   "decide": "miguel",
+   "titulo": "Una llave root RSA desconocida tiene acceso a la .170 (además de la del panel)",
+   "que_es": "En /root/.ssh/authorized_keys de la .170 hay dos llaves root: SHA256:6qNkyY… (ED25519, la del centro-mando, conocida) y SHA256:hqF9O2QWCZQOPBDDJ4kn42yu0xQ+WdU1cvgZb3s2IYw (RSA), sin comentario, probablemente del evaluador externo (crisblogs/OPS-27). PermitRootLogin yes, PasswordAuthentication no.",
+   "por_que_importa": "Quien tenga esa RSA es root en una caja con datos de un tercero bajo la cuenta de Miguel. Es la misma pregunta de OPS-27 (crisblogs) pero ahora con la caja llena de apps reales.",
+   "que_lo_destraba": "Miguel confirma de quién es la RSA; si es del evaluador y ya no hace falta, la quita (una línea en authorized_keys). Si la necesita, la deja documentada.",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "PROTEGER-S1 PARTE A",
+   "estado": "abierto"
+  },
+  {
+   "id": "SEC-6",
+   "frente": "motor",
+   "costo": "medio",
+   "dano": "medio",
+   "prioridad": "P2",
+   "decide": "agente",
+   "titulo": "saabado (58) y el binario público v0.1.13 son anteriores a FILES-3 — subir saabado; redactar el aviso sin detalle",
+   "que_es": "FILES-3 (un archivo solo lo alcanza quien puede leer la fila que lo referencia; el suelto es de su uploader) entró en main el 2026-09-28 (000daa5) y NO está en v0.1.13 (c655ce7, 2026-08-28, verificado por ancestría git). saabado corre v0.1.13 en el 58; el binario público que baja el camino de los dos prompts es v0.1.13. retotr (.170) también es anterior pero su schema NO tiene campos de archivo, así que el camino fila↔archivo no lo alcanza (riesgo bajo).",
+   "por_que_importa": "Un consumidor que suba archivos sobre v0.1.13 con varios usuarios puede exponer un archivo entre usuarios. saabado es el caso con usuarios reales; el binario público lo heredan todos los que lo bajen.",
+   "que_lo_destraba": "Sesión de motor: correr el escenario de las cinco puertas contra v0.1.13 en un contenedor con dato sintético (confirmar empíricamente lo que la ancestría ya dice), subir saabado a un motor con FILES-3 por deploy-app.sh, y —solo después de resolver lo propio— Miguel decide publicar un aviso sin detalle explotable. No se repara la cadena de publicación (A-69).",
+   "depende_de": [],
+   "bloquea": [],
+   "origen": "PROTEGER-S1 PARTE A/B",
    "estado": "abierto"
   }
  ],

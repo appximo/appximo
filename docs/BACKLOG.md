@@ -40,7 +40,7 @@ IDs are stable and never reused: `ENG-*` engine, `SCHEMA-*` schema grammar,
 **`DEC-*` decisions that only Miguel can take** (the old "Requires a decision
 from Miguel" table, given stable IDs).
 
-**Last reviewed: 2026-10-07 (PROTEGER-S1).** Review history + all DONE
+**Last reviewed: 2026-10-08 (PROTEGER-S1).** Review history + all DONE
 session sections: [BACKLOG_ARCHIVO.md](BACKLOG_ARCHIVO.md).
 
 ## OPEN
@@ -1019,6 +1019,12 @@ would close it better, and is Miguel's call.
 - **Impact:** High.
 - **Ready:** fixed per the privately-delivered description, with a regression
   test and a binary-diff-gate corpus row.
+
+### SEC-6 — saabado (the 58) and the public v0.1.13 binary predate FILES-3 — upgrade saabado; draft the no-detail advisory
+
+- **Origin:** PROTEGER-S1 PARTE A/B (2026-10-07).
+- **Impact:** FILES-3 (a file is reachable only through a row the caller may read; an unreferenced file belongs to its uploader) landed in main on 2026-09-28 (000daa5) and is NOT in v0.1.13 (c655ce7, 2026-08-28, by git ancestry). saabado runs v0.1.13 on the 58; the public two-prompt path downloads the v0.1.13 binary. retotr (.170) also predates it but its schema has NO file fields, so the row↔file path does not reach it (low risk).
+- **Ready when:** a motor session runs the five-door scenario against v0.1.13 in a container with synthetic data (confirming empirically what ancestry already shows), upgrades saabado to a FILES-3 engine via `deploy-app.sh`, and — only after fixing his own — Miguel decides whether to publish a no-detail advisory. Publication is not repaired (A-69).
 
 ### SCHEMA-8 — Omit a declared-heavy field from collections by default (`"list": "on_request"`) — PROPOSED, not built
 - **Origin:** MOTOR-FIELDS-S1 (ADR-029). The migration report's alternative to
@@ -2022,18 +2028,6 @@ Origin: APP-AGENDA-S2 Part 2. Decides: agent.
 - **Impact:** `saabado.appximo.com` → the 58: `saabado.service` (:8093/9093), databases `saabado` + `saabado_dev`, a 21-resource / 8-role schema, a consumer binary on appximo v0.1.13, a nightly backup with NO off-box copy. Installed with the binary and scripts downloaded from the public repo (`/root/saabado-deploy` on the 58). Absent from the handoff package and the brief; whether the panel lists it could not be checked (the classifier blocked reading its inventory). Switching the 58 off without knowing kills it.
 - **Ready when:** Miguel says whose it is and what it is (one of the "two clients under construction"?); it is registered in the panel and in 05, enters the off-box backup (DEC-1) and the migration (it is already in `migrar-58.sh`).
 
-### OPS-66 — The 105 is out of memory: swap 99.6 %, ≈ 460–580 MB available, six `claude` processes (≈ 1 GB) — building the engine or the panel today can end in an OOM
-
-- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06), measured.
-- **Impact:** 1 vCPU / 1.9 GB, swap 2045/2047 MB, six Claude Code processes open (the oldest ≈ 18 days). Linking a 65 MB binary does not fit — this session could not build the panel. The 105 is the agents' workshop and the panel's build host: every build risks the OOM killer taking a live session or the dev Postgres, and OPS-67 cannot ship.
-- **Ready when:** Miguel closes the Claude Code sessions he does not use (`ps -eo pid,etime,rss,args --sort=-rss | grep claude`) or resizes the 105; `free -m` leaves ≥ 1.2 GB available.
-
-### OPS-67 — Deploy the panel e743c74 before closing the repo: until that version the pending board reads items.json from PUBLIC GitHub and goes EMPTY once the repo is private
-
-- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06).
-- **Impact:** centro-mando read the public GitHub API and raw.githubusercontent.com for items.json/BACKLOG.md (the pending board), main's head, the ADR list, how far each app is behind main, and the release behind the download button. `e743c74` (internal repo) reads them from the 105's working clone over ONE multiplexed ssh connection (the 105 rate-limits ssh) and the release from the distribution repo — committed, vet clean, its three scripts tested through the real path (user `centro` → 105). NOT deployed (OPS-66). Without it, the command center — the next architect's door — loses the pending items the minute DEC-12 runs.
-- **Ready when:** with memory (OPS-66): panel → Actions → «Actualizar el panel» (builds `cm-<internal>-<engine>` on the 105 and deploys with `deploy-app.sh`); the panel's `/health` says `cm-<sha ≥ e743c74>-…` — the close script checks it before step 10.
-
 ### OPS-68 — The taller (droplet "taller") was not in the handoff package and has no key from the 105 or the panel
 
 - **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06).
@@ -2052,11 +2046,23 @@ Origin: APP-AGENDA-S2 Part 2. Decides: agent.
 - **Impact:** a public repo pays no minutes; a private one on the Free plan gets 2,000 a month and then the workflows stop — a busier month leaves the project without CI when it is needed, with no visible warning.
 - **Ready when:** Miguel decides — the Windows gate on tags or weekly, the security nightly weekly, or paying for minutes; check Settings → Billing → Actions after the first private month.
 
-### OPS-72 — A FILES-3 test engine still runs on the 105 (≈ 8 days, `appximo-files3`, :8170/9170) and writes its audit log INSIDE the internal repo
+### OPS-73 — retotr's backup (a third party's tax data) is 5 weeks old, unscheduled, with a single off-box copy
 
-- **Origin:** CIERRE-Y-TRASPASO-S1 (2026-10-06), found when committing the internal repo.
-- **Impact:** PID 3272270 (`/tmp/as/appximo-files3 serve --schema /tmp/as/files-audit.json`), started by the FILES-3 audit (2026-09-28) and never stopped, holds `evidencia/AGENDA-ASISTENTE-S1/engine-audit.log` open (6.2 MB, +21 000 uncommitted lines): every handoff package reports the internal repo dirty, and it eats memory on a 105 that has none (OPS-66).
-- **Ready when:** with Miguel's ok (this session did not start it): `kill 3272270` (exact PID, never `pkill -f`), its scratch tenant/database removed if any, and `git -C /root/appximo-internal checkout -- evidencia/AGENDA-ASISTENTE-S1/engine-audit.log`.
+- **Origin:** PROTEGER-S1 PARTE A (2026-10-07), read-only inventory of the .170.
+- **Impact:** retotr's latest dump is `retotr-20260901-032132.dump` (Sep 1, 319 MB) on the box and copied to the 105 (same date). There is NO retotr backup timer (traffick and sismo have one), `BACKUP_COPY_TO` is empty, and the DB grows (37,246 declarations, 20,473 writes since 2026-08-28). This is a THIRD PARTY's tax data under Miguel's account; the recovery promise is measured from the set, and the set is 5 weeks stale — worse than DEC-1 because it is not his own data.
+- **Ready when:** Miguel decides where contributor data may be restored to be tested (an agent does not decide that) and sets a backup timer (`--backup-schedule` / a `retotr-backup.timer`) + an encrypted `BACKUP_COPY_TO` to a destination he controls. The restore plan is Miguel's.
+
+### OPS-74 — the .170 had a DEV PostgreSQL (docker, 5433) open to the whole internet — closed reversibly in PROTEGER-S1
+
+- **Origin:** PROTEGER-S1 PARTE A (2026-10-07).
+- **Impact:** `appximo-postgres` (postgres:16) published `0.0.0.0:5433` and ufw allowed it from Anywhere; it answered the postgres protocol from the 105. The tax DB (5432) and every control plane (90xx) were already closed from outside. PROTEGER-S1 closed 5433 to the outside (a `DOCKER-USER` conntrack drop + an INPUT drop, re-applied on boot by `appximo-protect-5433.service`); local `127.0.0.1:5433` still works, retotr and the apps stayed up (200). The before-state is in `/root/protect-5433/` on the box.
+- **Ready when:** Miguel confirms the close, decides whether 5433 should exist at all (an SSH tunnel, not `0.0.0.0`), and keeps or reverts it (the revert is documented in the unit). Verifying what that DB holds is his call (no third-party data was read).
+
+### OPS-75 — an unknown RSA root key has access to the .170 (besides the panel's)
+
+- **Origin:** PROTEGER-S1 PARTE A (2026-10-07).
+- **Impact:** `/root/.ssh/authorized_keys` on the .170 has two root keys: `SHA256:6qNkyY…` (ED25519, the command center's, known) and `SHA256:hqF9O2QWCZQOPBDDJ4kn42yu0xQ+WdU1cvgZb3s2IYw` (RSA, no comment, probably the external evaluator's — crisblogs/OPS-27). `PermitRootLogin yes`, `PasswordAuthentication no`.
+- **Ready when:** Miguel confirms whose the RSA key is; if it is the evaluator's and no longer needed, he removes it (one line); if needed, it is documented.
 
 ### DESPACHO — A ride-dispatch prospect: the three pieces, specified to quote and NOT built (CIERRE-Y-TRASPASO-S1)
 
